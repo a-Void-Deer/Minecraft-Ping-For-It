@@ -135,7 +135,7 @@ public class ClientCore {
 		final var showNameLabels = Config.isNameLabelForced() || KEY_BINDING_NAME_LABELS.isDown();
 
 		m.pushPose();
-		m.translate(0f, 0f, -pingRepo.size());
+		m.translate(0f, 0f, -pingRepo.size() * 16f);
 
 		for (var ping : pingRepo) {
 			var screenPos = ping.getScreenPos();
@@ -144,7 +144,7 @@ public class ClientCore {
 				continue;
 			}
 
-			m.translate(0f, 0f, 1f);
+			m.translate(0f, 0f, 16f);
 
 			var pingSize = Config.getPingSize() / 100f;
 			var pingScale = getDistanceScale(ping.getDistance()) * pingSize * 0.4f;
