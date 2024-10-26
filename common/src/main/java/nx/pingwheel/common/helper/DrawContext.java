@@ -87,8 +87,7 @@ public class DrawContext {
 		matrixStack.pushPose();
 		matrixStack.mulPoseMatrix(matrices.last().pose());
 		matrixStack.translate(0f, 0f, -0.5f);
-		matrixStack.scale(1f, -1f, 1f);
-		matrixStack.scale(10f, 10f, 0.5f);
+		matrixStack.scale(16f, -16f, 16f);
 		RenderSystem.applyModelViewMatrix();
 
 		var immediate = Game.renderBuffers().bufferSource();
