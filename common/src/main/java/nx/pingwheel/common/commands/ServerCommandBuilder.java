@@ -26,7 +26,7 @@ public class ServerCommandBuilder {
 		var validModes = List.of(ChannelMode.values());
 		var validModeNames = validModes.stream().map(ChannelMode::toString).toList();
 
-		var cmdMode = LiteralArgumentBuilder.<CommandSourceStack>literal("default_channel")
+		var cmdDefaultChannel = LiteralArgumentBuilder.<CommandSourceStack>literal("default_channel")
 			.executes((context) -> {
 				var currentChannelMode = ServerConfigHandler.getConfig().getDefaultChannelMode();
 
@@ -77,6 +77,6 @@ public class ServerCommandBuilder {
 			.requires(source -> source.hasPermission(2))
 			.executes(helpCallback)
 			.then(cmdHelp)
-			.then(cmdMode);
+			.then(cmdDefaultChannel)
 	}
 }
