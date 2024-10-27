@@ -13,6 +13,7 @@ import nx.pingwheel.common.helper.ChannelMode;
 @EqualsAndHashCode
 public class ServerConfig implements IConfig {
 	ChannelMode defaultChannelMode = ChannelMode.AUTO;
+	boolean playerTrackingEnabled = true;
 	int msToRegenerate = 1000;
 	int rateLimit = 5;
 

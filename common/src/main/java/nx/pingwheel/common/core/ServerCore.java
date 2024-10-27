@@ -73,7 +73,13 @@ public class ServerCore {
 			updatePlayerChannel(player, channel);
 		}
 
-		var packetOut = PingLocationS2CPacket.fromClientPacket(packet, player.getUUID());
+		PingLocationS2CPacket packetOut;
+
+		if (!Config.isPlayerTrackingEnabled() && server.getPlayerList().getPlayer(packet.entity()) != null) {
+			packetOut = new PingLocationS2CPacket(packet.channel(), packet.pos(), null, packet.sequence(), packet.dimension(), player.getUUID());
+		} else {
+			packetOut = PingLocationS2CPacket.fromClientPacket(packet, player.getUUID());
+		}
 
 		for (ServerPlayer p : server.getPlayerList().getPlayers()) {
 			if (!channel.equals(playerChannels.getOrDefault(p.getUUID(), ""))) {
