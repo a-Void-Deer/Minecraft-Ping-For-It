@@ -74,14 +74,8 @@ public class Client {
 
 	@SubscribeEvent
 	public void onClientTick(TickEvent.ClientTickEvent event) {
-		if (event.phase.equals(TickEvent.Phase.END)) {
-			if (KEY_BINDING_PING.consumeClick()) {
-				ClientCore.pingLocation();
-			}
-
-			if (KEY_BINDING_SETTINGS.consumeClick()) {
-				Game.setScreen(new SettingsScreen());
-			}
+		if (event.phase.equals(TickEvent.Phase.START)) {
+			ClientCore.onTick();
 		}
 	}
 

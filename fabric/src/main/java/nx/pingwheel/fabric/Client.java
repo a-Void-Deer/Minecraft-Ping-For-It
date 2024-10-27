@@ -24,7 +24,6 @@ import nx.pingwheel.common.helper.LanguageUtils;
 import nx.pingwheel.common.networking.PingLocationS2CPacket;
 import nx.pingwheel.common.networking.UpdateChannelC2SPacket;
 import nx.pingwheel.common.resource.ResourceReloadListener;
-import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.fabric.event.GuiRenderCallback;
 import nx.pingwheel.fabric.event.WorldRenderCallback;
 
@@ -93,14 +92,6 @@ public class Client implements ClientModInitializer {
 		KeyBindingHelper.registerKeyBinding(KEY_BINDING_SETTINGS);
 		KeyBindingHelper.registerKeyBinding(KEY_BINDING_NAME_LABELS);
 
-		ClientTickEvents.END_CLIENT_TICK.register(client -> {
-			if (KEY_BINDING_PING.consumeClick()) {
-				ClientCore.pingLocation();
-			}
-
-			if (KEY_BINDING_SETTINGS.consumeClick()) {
-				Game.setScreen(new SettingsScreen());
-			}
-		});
+		ClientTickEvents.START_CLIENT_TICK.register(client -> ClientCore.onTick());
 	}
 }

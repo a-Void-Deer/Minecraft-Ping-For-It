@@ -16,6 +16,7 @@ import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.helper.*;
 import nx.pingwheel.common.networking.PingLocationC2SPacket;
 import nx.pingwheel.common.networking.PingLocationS2CPacket;
+import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.sound.DirectionalSoundInstance;
 
 import java.util.ArrayList;
@@ -38,12 +39,18 @@ public class ClientCore {
 	private static int lastPing = 0;
 	private static int pingSequence = 0;
 
-	public static void pingLocation() {
-		pingQueued = true;
-	}
-
 	public static void onDisconnect() {
 		pingRepo.clear();
+	}
+
+	public static void onTick() {
+		if (InputUtils.consumePingHotkey()) {
+			pingQueued = true;
+		}
+
+		if (KEY_BINDING_SETTINGS.consumeClick()) {
+			Game.setScreen(new SettingsScreen());
+		}
 	}
 
 	public static void onPingLocation(PingLocationS2CPacket packet) {
