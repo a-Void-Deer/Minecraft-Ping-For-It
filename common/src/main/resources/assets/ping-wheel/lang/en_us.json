@@ -44,5 +44,13 @@
 	"ping-wheel.command.player_tracking.get.description": "check if player tracking is currently enabled",
 	"ping-wheel.command.player_tracking.set.description": "enable or disable the tracking of players",
 	"ping-wheel.command.player_tracking.get.response": "Player tracking is currently: %s",
-	"ping-wheel.command.player_tracking.set.response": "Player tracking is now: %s"
+	"ping-wheel.command.player_tracking.set.response": "Player tracking is now: %s",
+	"ping-wheel.command.regen_time.get.description": "get the current time to regenerate ping usages",
+	"ping-wheel.command.regen_time.set.description": "set the time to regenerate ping usages",
+	"ping-wheel.command.regen_time.get.response": "Current time to regenerate: %s",
+	"ping-wheel.command.regen_time.set.response": "Set time to regenerate to %s",
+	"ping-wheel.command.rate_limit.get.description": "get the current rate limit for ping usages",
+	"ping-wheel.command.rate_limit.set.description": "set the rate limit for ping usages",
+	"ping-wheel.command.rate_limit.get.response": "Current rate limit: %s",
+	"ping-wheel.command.rate_limit.set.response": "Set rate limit to %s"
 }

@@ -2,6 +2,7 @@ package nx.pingwheel.common.commands;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.BoolArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
@@ -25,6 +26,8 @@ public class ServerCommandBuilder {
 	public static LiteralArgumentBuilder<CommandSourceStack> build(TriConsumer<CommandContext<CommandSourceStack>, Boolean, MutableComponent> responseHandler) {
 		var langDefaultChannel = LanguageUtils.command("default_channel");
 		var langPlayerTracking = LanguageUtils.command("player_tracking");
+		var langRegenTime = LanguageUtils.command("regen_time");
+		var langRateLimit = LanguageUtils.command("rate_limit");
 		var validModes = List.of(ChannelMode.values());
 		var validModeNames = validModes.stream().map(ChannelMode::toString).toList();
 
@@ -81,6 +84,46 @@ public class ServerCommandBuilder {
 					return 1;
 				}));
 
+		var cmdRegenTime = LiteralArgumentBuilder.<CommandSourceStack>literal("regen_time")
+			.executes((context) -> {
+				var regenTime = ServerConfigHandler.getConfig().getMsToRegenerate();
+
+				responseHandler.accept(context, true, langRegenTime.path("get.response")
+					.get(LanguageUtils.from(regenTime).withStyle(ChatFormatting.YELLOW)));
+				return 1;
+			})
+			.then(RequiredArgumentBuilder.<CommandSourceStack, Integer>argument("time", IntegerArgumentType.integer(0))
+				.executes((context) -> {
+					var regenTime = context.getArgument("time", Integer.class);
+
+					ServerConfigHandler.getConfig().setMsToRegenerate(regenTime);
+					ServerConfigHandler.save();
+
+					responseHandler.accept(context, true, langRegenTime.path("set.response")
+						.get(LanguageUtils.from(regenTime).withStyle(ChatFormatting.YELLOW)));
+					return 1;
+				}));
+
+		var cmdRateLimit = LiteralArgumentBuilder.<CommandSourceStack>literal("rate_limit")
+			.executes((context) -> {
+				var rateLimit = ServerConfigHandler.getConfig().getRateLimit();
+
+				responseHandler.accept(context, true, langRateLimit.path("get.response")
+					.get(LanguageUtils.from(rateLimit).withStyle(ChatFormatting.YELLOW)));
+				return 1;
+			})
+			.then(RequiredArgumentBuilder.<CommandSourceStack, Integer>argument("limit", IntegerArgumentType.integer(0))
+				.executes((context) -> {
+					var rateLimit = context.getArgument("limit", Integer.class);
+
+					ServerConfigHandler.getConfig().setRateLimit(rateLimit);
+					ServerConfigHandler.save();
+
+					responseHandler.accept(context, true, langRateLimit.path("set.response")
+						.get(LanguageUtils.from(rateLimit).withStyle(ChatFormatting.YELLOW)));
+					return 1;
+				}));
+
 		Command<CommandSourceStack> helpCallback = (context) -> {
 			responseHandler.accept(context, true, LanguageUtils.join(
 				Component.empty(),
@@ -91,7 +134,15 @@ public class ServerCommandBuilder {
 				Component.literal("/pingwheel:server player_tracking"),
 				LanguageUtils.wrapped(langPlayerTracking.path("get.description").get()).withStyle(ChatFormatting.GRAY),
 				Component.literal("/pingwheel:server player_tracking true|false"),
-				LanguageUtils.wrapped(langPlayerTracking.path("set.description").get()).withStyle(ChatFormatting.GRAY)
+				LanguageUtils.wrapped(langPlayerTracking.path("set.description").get()).withStyle(ChatFormatting.GRAY),
+				Component.literal("/pingwheel:server regen_time"),
+				LanguageUtils.wrapped(langRegenTime.path("get.description").get()).withStyle(ChatFormatting.GRAY),
+				Component.literal("/pingwheel:server regen_time <milliseconds>"),
+				LanguageUtils.wrapped(langRegenTime.path("set.description").get()).withStyle(ChatFormatting.GRAY),
+				Component.literal("/pingwheel:server rate_limit"),
+				LanguageUtils.wrapped(langRateLimit.path("get.description").get()).withStyle(ChatFormatting.GRAY),
+				Component.literal("/pingwheel:server rate_limit <limit>"),
+				LanguageUtils.wrapped(langRateLimit.path("set.description").get()).withStyle(ChatFormatting.GRAY)
 			));
 			return 1;
 		};
@@ -104,6 +155,8 @@ public class ServerCommandBuilder {
 			.executes(helpCallback)
 			.then(cmdHelp)
 			.then(cmdDefaultChannel)
-			.then(cmdPlayerTracking);
+			.then(cmdPlayerTracking)
+			.then(cmdRegenTime)
+			.then(cmdRateLimit);
 	}
 }
