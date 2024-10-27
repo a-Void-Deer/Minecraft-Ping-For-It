@@ -1,6 +1,7 @@
 package nx.pingwheel.common.commands;
 
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
@@ -23,6 +24,7 @@ public class ServerCommandBuilder {
 
 	public static LiteralArgumentBuilder<CommandSourceStack> build(TriConsumer<CommandContext<CommandSourceStack>, Boolean, MutableComponent> responseHandler) {
 		var langDefaultChannel = LanguageUtils.command("default_channel");
+		var langPlayerTracking = LanguageUtils.command("player_tracking");
 		var validModes = List.of(ChannelMode.values());
 		var validModeNames = validModes.stream().map(ChannelMode::toString).toList();
 
@@ -59,13 +61,37 @@ public class ServerCommandBuilder {
 					return 1;
 				}));
 
+		var cmdPlayerTracking = LiteralArgumentBuilder.<CommandSourceStack>literal("player_tracking")
+			.executes((context) -> {
+				var isPlayerTrackingEnabled = ServerConfigHandler.getConfig().isPlayerTrackingEnabled();
+
+				responseHandler.accept(context, true, langPlayerTracking.path("get.response")
+					.get(isPlayerTrackingEnabled));
+				return 1;
+			})
+			.then(RequiredArgumentBuilder.<CommandSourceStack, Boolean>argument("state", BoolArgumentType.bool())
+				.executes((context) -> {
+					var enablePlayerTracking = context.getArgument("state", Boolean.class);
+
+					ServerConfigHandler.getConfig().setPlayerTrackingEnabled(enablePlayerTracking);
+					ServerConfigHandler.save();
+
+					responseHandler.accept(context, true, langPlayerTracking.path("set.response")
+						.get(enablePlayerTracking));
+					return 1;
+				}));
+
 		Command<CommandSourceStack> helpCallback = (context) -> {
 			responseHandler.accept(context, true, LanguageUtils.join(
 				Component.empty(),
 				Component.literal("/pingwheel:server default_channel"),
 				LanguageUtils.wrapped(langDefaultChannel.path("get.description").get()).withStyle(ChatFormatting.GRAY),
 				Component.literal("/pingwheel:server default_channel <mode_name>"),
-				LanguageUtils.wrapped(langDefaultChannel.path("set.description").get()).withStyle(ChatFormatting.GRAY)
+				LanguageUtils.wrapped(langDefaultChannel.path("set.description").get()).withStyle(ChatFormatting.GRAY),
+				Component.literal("/pingwheel:server player_tracking"),
+				LanguageUtils.wrapped(langPlayerTracking.path("get.description").get()).withStyle(ChatFormatting.GRAY),
+				Component.literal("/pingwheel:server player_tracking true|false"),
+				LanguageUtils.wrapped(langPlayerTracking.path("set.description").get()).withStyle(ChatFormatting.GRAY)
 			));
 			return 1;
 		};
@@ -78,5 +104,6 @@ public class ServerCommandBuilder {
 			.executes(helpCallback)
 			.then(cmdHelp)
 			.then(cmdDefaultChannel)
+			.then(cmdPlayerTracking);
 	}
 }

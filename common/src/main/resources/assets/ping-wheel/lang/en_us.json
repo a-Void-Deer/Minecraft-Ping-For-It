@@ -40,5 +40,9 @@
 	"ping-wheel.command.default_channel.value.auto": "Auto",
 	"ping-wheel.command.default_channel.value.disabled": "Disabled",
 	"ping-wheel.command.default_channel.value.global": "Global",
-	"ping-wheel.command.default_channel.value.team_only": "Team Only"
+	"ping-wheel.command.default_channel.value.team_only": "Team Only",
+	"ping-wheel.command.player_tracking.get.description": "check if player tracking is currently enabled",
+	"ping-wheel.command.player_tracking.set.description": "enable or disable the tracking of players",
+	"ping-wheel.command.player_tracking.get.response": "Player tracking is currently: %s",
+	"ping-wheel.command.player_tracking.set.response": "Player tracking is now: %s"
 }
