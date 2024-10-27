@@ -66,7 +66,7 @@ public class ServerCommandBuilder {
 				var isPlayerTrackingEnabled = ServerConfigHandler.getConfig().isPlayerTrackingEnabled();
 
 				responseHandler.accept(context, true, langPlayerTracking.path("get.response")
-					.get(isPlayerTrackingEnabled));
+					.get(LanguageUtils.from(isPlayerTrackingEnabled).withStyle(ChatFormatting.YELLOW)));
 				return 1;
 			})
 			.then(RequiredArgumentBuilder.<CommandSourceStack, Boolean>argument("state", BoolArgumentType.bool())
@@ -77,7 +77,7 @@ public class ServerCommandBuilder {
 					ServerConfigHandler.save();
 
 					responseHandler.accept(context, true, langPlayerTracking.path("set.response")
-						.get(enablePlayerTracking));
+						.get(LanguageUtils.from(enablePlayerTracking).withStyle(ChatFormatting.YELLOW)));
 					return 1;
 				}));
 

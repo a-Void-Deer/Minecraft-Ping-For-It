@@ -64,4 +64,8 @@ public class LanguageUtils {
 			.append(Component.literal(MOD_PREFIX).withStyle(ChatFormatting.DARK_GRAY))
 			.append(component);
 	}
+
+	public static MutableComponent from(Object any) {
+		return Component.literal(String.format("%s", any));
+	}
 }
