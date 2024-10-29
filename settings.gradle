@@ -47,3 +47,4 @@ rootProject.name = "Ping-Wheel"
 include("common")
 include("fabric")
 include("forge")
+include("neoforge")
