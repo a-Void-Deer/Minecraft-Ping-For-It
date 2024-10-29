@@ -105,7 +105,7 @@ jobs:
 
       - name: "Set release info"
         run: |
-          LOADER_NAME=$(echo ${{ matrix.loader }} | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+          LOADER_NAME=$(echo ${{ matrix.loader }} | sed 's/[nf]/\U&/g')
           echo "RELEASE_NAME=v${{ env.MOD_VERSION }} for $LOADER_NAME ${{ env.MC_VERSION }}" >> $GITHUB_ENV
           echo "TAG_NAME=v${{ env.MOD_VERSION }}-${{ matrix.loader }}-${{ env.MC_VERSION }}" >> $GITHUB_ENV
 
