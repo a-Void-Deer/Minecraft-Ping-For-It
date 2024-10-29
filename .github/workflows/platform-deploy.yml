@@ -7,12 +7,12 @@ on:
         description: 'Loaders'
         required: true
         type: string
-        default: 'forge, fabric'
+        default: 'forge, neoforge, fabric'
       versions:
         description: 'Versions'
         required: true
         type: string
-        default: '1.18.2, 1.19.2, 1.19.3, 1.19.4, 1.20.1, 1.20.2, 1.20.4, 1.20.6, 1.21.1'
+        default: '1.18.2, 1.19.2, 1.19.3, 1.19.4, 1.20.1, 1.20.2, 1.20.4, 1.20.6, 1.21.1, 1.21.3'
 
 jobs:
   prepare:
@@ -144,8 +144,8 @@ jobs:
           # only needed for the 'fabric' loader, so we conditionally inject it
           dependencies: ${{ matrix.loader == 'fabric' && 'fabric-api(required){modrinth:P7dR8mSH}{curseforge:306612}#(ignore:github)' || '' }}
 
-          # forge releases are marked as beta for easier visual distinction
-          version-type: ${{ matrix.loader == 'forge' && 'beta' || '' }}
+          # (neo)forge releases are marked as beta for easier visual distinction
+          version-type: ${{ matrix.loader == 'fabric' && 'release' || 'beta' }}
 
           retry-attempts: 2
           retry-delay: 10000
