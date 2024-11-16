@@ -10,11 +10,12 @@
 
 <div align="center">
 
+<a href="#">![NeoForge](https://luken.cc/badges/neoforge)</a>
 <a href="#">![Forge](https://luken.cc/badges/forge)</a>
-<a href="#">![Fabric](https://luken.cc/badges/fabric)</a>
-<a href="#">![Environment](https://luken.cc/badges/environment)</a>  
+<a href="#">![Fabric](https://luken.cc/badges/fabric)</a>  
 <a href="https://www.curseforge.com/minecraft/mc-mods/ping-wheel">![Curseforge](https://luken.cc/badges/curseforge/734339)</a>
-<a href="https://modrinth.com/mod/ping-wheel">![Modrinth](https://luken.cc/badges/modrinth/QQXAdCzh)</a>
+<a href="https://modrinth.com/mod/ping-wheel">![Modrinth](https://luken.cc/badges/modrinth/QQXAdCzh)</a>  
+<a href="#">![Environment](https://luken.cc/badges/environment)</a>
 
 </div>
 
