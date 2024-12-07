@@ -1,9 +1,9 @@
 package nx.pingwheel.common.core;
 
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.math.Matrix4f;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -12,13 +12,13 @@ import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.scores.PlayerTeam;
-import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.helper.*;
 import nx.pingwheel.common.networking.PingLocationC2SPacket;
 import nx.pingwheel.common.networking.PingLocationS2CPacket;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.sound.DirectionalSoundInstance;
+import org.joml.Matrix4f;
 
 import java.util.ArrayList;
 import java.util.Objects;
@@ -130,12 +130,13 @@ public class ClientCore {
 		}
 	}
 
-	public static void onRenderGUI(PoseStack m, float tickDelta) {
+	public static void onRenderGUI(GuiGraphics gg, float tickDelta) {
 		if (Game.player == null || pingRepo.isEmpty()) {
 			return;
 		}
 
-		var ctx = new DrawContext(m);
+		var m = gg.pose();
+		var ctx = new DrawContext(gg);
 		var wnd = Game.getWindow();
 		var screenSize = new Vec2(wnd.getGuiScaledWidth(), wnd.getGuiScaledHeight());
 		var safeZoneTopLeft = new Vec2(Config.getSafeZoneLeft(), Config.getSafeZoneTop());
@@ -144,8 +145,8 @@ public class ClientCore {
 		final var showDirectionIndicator = Config.isDirectionIndicatorVisible();
 		final var showNameLabels = Config.isNameLabelForced() || KEY_BINDING_NAME_LABELS.isDown();
 
-		m.pushPose();
-		m.translate(0f, 0f, -pingRepo.size() * 16f);
+		m.pushMatrix();
+		//m.translate(0f, 0f, -pingRepo.size() * 16f);
 
 		for (var ping : pingRepo) {
 			var screenPos = ping.getScreenPos();
@@ -154,7 +155,7 @@ public class ClientCore {
 				continue;
 			}
 
-			m.translate(0f, 0f, 16f);
+			//m.translate(0f, 0f, 16f);
 
 			var pingSize = Config.getPingSize() / 100f;
 			var pingScale = getDistanceScale(ping.getDistance()) * pingSize * 0.4f;
@@ -172,33 +173,33 @@ public class ClientCore {
 			if (isOffScreen && showDirectionIndicator) {
 				var indicator = MathUtils.calculateAngleRectIntersection(pingAngle, safeZoneTopLeft, safeZoneBottomRight);
 
-				m.pushPose();
-				m.translate(indicator.x, indicator.y, 0f);
+				m.pushMatrix();
+				m.translate(indicator.x, indicator.y);
 
-				m.pushPose();
-				m.scale(pingScale, pingScale, 1f);
-				var indicatorOffsetX = Math.cos(pingAngle + Math.PI) * 12;
-				var indicatorOffsetY = Math.sin(pingAngle + Math.PI) * 12;
-				m.translate(indicatorOffsetX, indicatorOffsetY, 0);
+				m.pushMatrix();
+				m.scale(pingScale, pingScale);
+				var indicatorOffsetX = (float)Math.cos(pingAngle + Math.PI) * 12;
+				var indicatorOffsetY = (float)Math.sin(pingAngle + Math.PI) * 12;
+				m.translate(indicatorOffsetX, indicatorOffsetY);
 				ctx.renderPing(ping.getItemStack(), Config.isItemIconVisible());
-				m.popPose();
+				m.popMatrix();
 
-				m.pushPose();
+				m.pushMatrix();
 				MathUtils.rotateZ(m, pingAngle);
-				m.scale(pingSize, pingSize, 1f);
+				m.scale(pingSize, pingSize);
 
-				m.scale(0.25f, 0.25f, 1f);
-				m.translate(-5f, 0f, 0f);
+				m.scale(0.25f, 0.25f);
+				m.translate(-5f, 0f);
 				ctx.renderArrowIcon();
-				m.popPose();
+				m.popMatrix();
 
-				m.popPose();
+				m.popMatrix();
 			}
 
 			if (!behindCamera) {
-				m.pushPose();
-				m.translate(screenPos.x, screenPos.y, 0);
-				m.scale(pingScale, pingScale, 1f);
+				m.pushMatrix();
+				m.translate(screenPos.x, screenPos.y);
+				m.scale(pingScale, pingScale);
 
 				var text = LanguageUtils.UNIT_METERS.get("%,.1f".formatted(ping.getDistance()));
 				ctx.renderLabel(text, -1.5f, null);
@@ -211,11 +212,11 @@ public class ClientCore {
 					ctx.renderLabel(displayName, 1.75f, author);
 				}
 
-				m.popPose();
+				m.popMatrix();
 			}
 		}
 
-		m.popPose();
+		m.popMatrix();
 	}
 
 	private static void processPings(Matrix4f modelViewMatrix, Matrix4f projectionMatrix, float tickDelta, int time) {
