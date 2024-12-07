@@ -1,17 +1,13 @@
 package nx.pingwheel.common.helper;
 
-import com.mojang.blaze3d.platform.GlStateManager;
-import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.*;
-import net.minecraft.client.gui.GuiComponent;
+import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.multiplayer.PlayerInfo;
-import net.minecraft.client.renderer.block.model.ItemTransforms;
-import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.ARGB;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.FastColor;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec2;
 
@@ -20,18 +16,19 @@ import static nx.pingwheel.common.resource.ResourceReloadListener.hasCustomTextu
 
 public class DrawContext {
 
-	private static final int WHITE = FastColor.ARGB32.color(255, 255, 255, 255);
-	private static final int SHADOW_BLACK = FastColor.ARGB32.color(64, 0, 0, 0);
-	private static final int LIGHT_VALUE_MAX = 15728880;
+	private static final int WHITE = ARGB.color(255, 255, 255, 255);
+	private static final int SHADOW_BLACK = ARGB.color(64, 0, 0, 0);
 
+	private GuiGraphics guiGraphics;
 	private PoseStack matrices;
 
-	public DrawContext(PoseStack matrices) {
-		this.matrices = matrices;
+	public DrawContext(GuiGraphics guiGraphics) {
+		this.guiGraphics = guiGraphics;
+		this.matrices = guiGraphics.pose();
 	}
 
 	public void renderLabel(Component text, float yOffset, PlayerInfo player) {
-		var extraWidth = (player != null) ? 10f : 0f;
+		var extraWidth = (player != null) ? 10 : 0;
 		var textMetrics = new Vec2(
 			Game.font.width(text) + extraWidth,
 			Game.font.lineHeight
@@ -40,8 +37,8 @@ public class DrawContext {
 
 		matrices.pushPose();
 		matrices.translate(textOffset.x, textOffset.y, 0);
-		GuiComponent.fill(matrices, -2, -2, (int)textMetrics.x + 1, (int)textMetrics.y, SHADOW_BLACK);
-		Game.font.draw(matrices, text, extraWidth, 0f, WHITE);
+		guiGraphics.fill(-2, -2, (int) textMetrics.x + 1, (int) textMetrics.y, SHADOW_BLACK);
+		guiGraphics.drawString(Game.font, text, extraWidth, 0, WHITE, false);
 
 		if (player != null) {
 			matrices.translate(-0.5, -0.5, 0);
@@ -52,10 +49,10 @@ public class DrawContext {
 	}
 
 	public void renderPlayerHead(PlayerInfo player) {
-		RenderSystem.setShaderTexture(0, player.getSkinLocation());
+		var texture = player.getSkin().texture();
 		RenderSystem.enableBlend();
-		GuiComponent.blit(matrices, 0, 0, 0, 8, 8, 8, 8, 64, 64);
-		GuiComponent.blit(matrices, 0, 0, 0, 40, 8, 8, 8, 64, 64); // Overlay (hat)
+		guiGraphics.blit(RenderType::guiTextured, texture, 0, 0, 8, 8, 8, 8, 64, 64);
+		guiGraphics.blit(RenderType::guiTextured, texture, 0, 0, 40, 8, 8, 8, 64, 64); // Overlay (hat)
 		RenderSystem.disableBlend();
 	}
 
@@ -70,70 +67,26 @@ public class DrawContext {
 	}
 
 	public void renderGuiItemModel(ItemStack itemStack) {
-		var model = Game.getItemRenderer().getModel(itemStack, null, null, 0);
-
-		Game.getTextureManager()
-			.getTexture(TextureAtlas.LOCATION_BLOCKS)
-			.setFilter(false, false);
-
-		RenderSystem.setShaderTexture(0, TextureAtlas.LOCATION_BLOCKS);
-		RenderSystem.enableBlend();
-		RenderSystem.blendFunc(GlStateManager.SourceFactor.SRC_ALPHA, GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA);
-		RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
-
-		var matrixStack = RenderSystem.getModelViewStack();
-		matrixStack.pushPose();
-		matrixStack.mulPoseMatrix(matrices.last().pose());
-		matrixStack.translate(0f, 0f, -0.5f);
-		matrixStack.scale(16f, -16f, 16f);
-		RenderSystem.applyModelViewMatrix();
-
-		var immediate = Game.renderBuffers().bufferSource();
-		var bl = !model.usesBlockLight();
-		if (bl) {
-			Lighting.setupForFlatItems();
-		}
-
-		var matrixStackDummy = new PoseStack();
-		Game.getItemRenderer().render(
-			itemStack,
-			ItemTransforms.TransformType.GUI,
-			false,
-			matrixStackDummy,
-			immediate,
-			LIGHT_VALUE_MAX,
-			OverlayTexture.NO_OVERLAY,
-			model
-		);
-		immediate.endBatch();
-		RenderSystem.enableDepthTest();
-
-		if (bl) {
-			Lighting.setupFor3DItems();
-		}
-
-		matrixStack.popPose();
-		RenderSystem.applyModelViewMatrix();
+		guiGraphics.renderItem(itemStack, -8, -8, 0, -150);
 	}
 
 	public void renderDefaultPingIcon() {
 		matrices.pushPose();
-		MathUtils.rotateZ(matrices, (float)(Math.PI / 4f));
+		MathUtils.rotateZ(matrices, (float) (Math.PI / 4f));
 		matrices.translate(-2.5, -2.5, 0);
-		GuiComponent.fill(matrices, 0, 0, 5, 5, WHITE);
+		guiGraphics.fill(0, 0, 5, 5, WHITE);
 		matrices.popPose();
 	}
 
 	public void renderTexture(ResourceLocation texture, int size) {
 		final var offset = size / -2;
 
-		RenderSystem.setShaderTexture(0, texture);
 		RenderSystem.enableBlend();
-		GuiComponent.blit(
-			matrices,
+		guiGraphics.blit(
+			RenderType::guiTextured,
+			texture,
 			offset,
 			offset,
-			0,
 			0,
 			0,
 			size,
