@@ -62,6 +62,7 @@ jar {
                 "Implementation-Version": project.jar.archiveVersion,
                 "Implementation-Vendor" : mod_author,
                 "Built-On-Minecraft"    : minecraft_version,
+                "MixinConfigs"          : "${mod_id}.mixins.json"
         ])
     }
 }
@@ -89,11 +90,15 @@ def expandProps = [
         "forge_version"          : forge_version,
         "forge_loader_version"   : forge_loader_version,
         "forge_compatible_range" : forge_compatible_range,
+
+        "neoforge_version"          : neoforge_version,
+        "neoforge_loader_version"   : neoforge_loader_version,
+        "neoforge_compatible_range" : neoforge_compatible_range,
 ]
 
 processResources {
 
-    filesMatching(["pack.mcmeta", "fabric.mod.json", "META-INF/mods.toml", "*.mixins.json"]) {
+    filesMatching(["pack.mcmeta", "fabric.mod.json", "META-INF/mods.toml", "META-INF/neoforge.mods.toml", "*.mixins.json"]) {
         expand expandProps
     }
     inputs.properties(expandProps)
