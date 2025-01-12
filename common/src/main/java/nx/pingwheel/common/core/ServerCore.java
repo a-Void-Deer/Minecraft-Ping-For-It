@@ -2,6 +2,7 @@ package nx.pingwheel.common.core;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.players.PlayerList;
 import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.helper.ChannelMode;
@@ -74,14 +75,15 @@ public class ServerCore {
 		}
 
 		PingLocationS2CPacket packetOut;
+		var playerList = server.getPlayerList();
 
-		if (!Config.isPlayerTrackingEnabled() && server.getPlayerList().getPlayer(packet.entity()) != null) {
+		if (!Config.isPlayerTrackingEnabled() && targetEntityIsPlayer(packet, playerList)) {
 			packetOut = new PingLocationS2CPacket(packet.channel(), packet.pos(), null, packet.sequence(), packet.dimension(), player.getUUID());
 		} else {
 			packetOut = PingLocationS2CPacket.fromClientPacket(packet, player.getUUID());
 		}
 
-		for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+		for (ServerPlayer p : playerList.getPlayers()) {
 			if (!channel.equals(playerChannels.getOrDefault(p.getUUID(), ""))) {
 				continue;
 			}
@@ -92,6 +94,16 @@ public class ServerCore {
 
 			NetHandler.sendToClient(packetOut, p);
 		}
+	}
+
+	private static boolean targetEntityIsPlayer(PingLocationC2SPacket packet, PlayerList playerList) {
+		var playerUUID = packet.entity();
+
+		if (playerUUID == null) {
+			return false;
+		}
+
+		return playerList.getPlayer(playerUUID) != null;
 	}
 
 	private static void updatePlayerChannel(ServerPlayer player, String channel) {
