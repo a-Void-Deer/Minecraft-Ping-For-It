@@ -33,6 +33,12 @@ jobs:
           do
             for LOADER in $(echo $LOADERS | sed "s/,/ /g")
             do
+              MINOR=$(echo $VERSION | cut -d'.' -f2)
+
+              if [ "$LOADER" == "neoforge" ] && [ "$MINOR" -lt 21 ]; then
+                continue
+              fi
+
               MATRIX_JSON+="{\"version\": \"$VERSION\", \"loader\": \"$LOADER\"},"
             done
           done
