@@ -21,6 +21,7 @@ body:
     multiple: true
     options:
       - Fabric
+      - NeoForge
       - Forge
   validations:
     required: true
