@@ -1,5 +1,6 @@
 package nx.pingwheel.neoforge;
 
+import net.minecraft.resources.ResourceLocation;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.bus.api.IEventBus;
@@ -25,6 +26,8 @@ import static nx.pingwheel.common.Global.NetHandler;
 @OnlyIn(Dist.CLIENT)
 public class Client {
 
+	public static final ResourceLocation RELOAD_LISTENER_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "reload-listener");
+
 	public Client(IEventBus modBus) {
 		ConfigHandler = new ConfigHandler<>(ClientConfig.class, FMLPaths.CONFIGDIR.get().resolve(MOD_ID + ".json"));
 		ConfigHandler.load();
@@ -36,8 +39,8 @@ public class Client {
 		ModLoadingContext.get().registerExtensionPoint(IConfigScreenFactory.class, () -> (a, parent) -> new SettingsScreen(parent));
 	}
 
-	private void onRegisterReloadListeners(RegisterClientReloadListenersEvent event) {
-		event.registerReloadListener(new ResourceReloadListener());
+	private void onRegisterReloadListeners(AddClientReloadListenersEvent event) {
+		event.addListener(RELOAD_LISTENER_ID, new ResourceReloadListener());
 	}
 
 	private void onRegisterKeyBindings(RegisterKeyMappingsEvent event) {
