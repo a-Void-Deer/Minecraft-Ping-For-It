@@ -6,6 +6,7 @@ import lombok.Setter;
 import lombok.ToString;
 import nx.pingwheel.common.networking.UpdateChannelC2SPacket;
 
+import static nx.pingwheel.common.ClientGlobal.Game;
 import static nx.pingwheel.common.Global.NetHandler;
 
 @Getter
@@ -44,6 +45,8 @@ public class ClientConfig implements IConfig {
 	}
 
 	public void onUpdate() {
-		NetHandler.sendToServer(new UpdateChannelC2SPacket(channel));
+		if (Game != null) {
+			NetHandler.sendToServer(new UpdateChannelC2SPacket(channel));
+		}
 	}
 }

@@ -2,6 +2,7 @@ package nx.pingwheel.common.core;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Matrix4f;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
@@ -44,6 +45,8 @@ public class ClientCore {
 	}
 
 	public static void onTick() {
+		Game = Minecraft.getInstance();
+
 		if (InputUtils.consumePingHotkey()) {
 			pingQueued = true;
 		}

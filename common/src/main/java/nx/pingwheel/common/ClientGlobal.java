@@ -15,7 +15,7 @@ public class ClientGlobal {
 	private ClientGlobal() {}
 
 	public static ConfigHandler<ClientConfig> ConfigHandler = null;
-	public static final Minecraft Game = Minecraft.getInstance();
+	public static Minecraft Game = null;
 
 	public static final ResourceLocation PING_SOUND_ID = new ResourceLocation(MOD_ID, "ping");
 	public static final SoundEvent PING_SOUND_EVENT = new SoundEvent(PING_SOUND_ID);
