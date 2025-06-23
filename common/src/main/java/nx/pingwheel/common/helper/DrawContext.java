@@ -10,6 +10,7 @@ import net.minecraft.client.renderer.block.model.ItemTransforms;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FastColor;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec2;
@@ -62,7 +63,7 @@ public class DrawContext {
 		if (itemStack != null && drawItemIcon) {
 			renderGuiItemModel(itemStack);
 		} else if (hasCustomTexture()) {
-			renderCustomPingIcon();
+			renderTexture(PING_TEXTURE_ID, 12);
 		} else {
 			renderDefaultPingIcon();
 		}
@@ -115,27 +116,6 @@ public class DrawContext {
 		RenderSystem.applyModelViewMatrix();
 	}
 
-	public void renderCustomPingIcon() {
-		final var size = 12;
-		final var offset = size / -2;
-
-		RenderSystem.setShaderTexture(0, PING_TEXTURE_ID);
-		RenderSystem.enableBlend();
-		GuiComponent.blit(
-			matrices,
-			offset,
-			offset,
-			0,
-			0,
-			0,
-			size,
-			size,
-			size,
-			size
-		);
-		RenderSystem.disableBlend();
-	}
-
 	public void renderDefaultPingIcon() {
 		matrices.pushPose();
 		MathUtils.rotateZ(matrices, (float)(Math.PI / 4f));
@@ -144,11 +124,10 @@ public class DrawContext {
 		matrices.popPose();
 	}
 
-	public void renderArrowIcon() {
-		final var size = 10;
+	public void renderTexture(ResourceLocation texture, int size) {
 		final var offset = size / -2;
 
-		RenderSystem.setShaderTexture(0, ARROW_TEXTURE_ID);
+		RenderSystem.setShaderTexture(0, texture);
 		RenderSystem.enableBlend();
 		GuiComponent.blit(
 			matrices,
@@ -163,5 +142,9 @@ public class DrawContext {
 			size
 		);
 		RenderSystem.disableBlend();
+	}
+
+	public void renderArrowIcon() {
+		renderTexture(ARROW_TEXTURE_ID, 10);
 	}
 }
