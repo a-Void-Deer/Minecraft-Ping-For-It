@@ -20,6 +20,7 @@ public class ClientGlobal {
 	public static final ResourceLocation PING_SOUND_ID = new ResourceLocation(MOD_ID, "ping");
 	public static final SoundEvent PING_SOUND_EVENT = new SoundEvent(PING_SOUND_ID);
 	public static final ResourceLocation PING_TEXTURE_ID = new ResourceLocation(MOD_ID, "textures/ping.png");
+	public static final ResourceLocation ARROW_TEXTURE_ID = new ResourceLocation(MOD_ID, "textures/arrow.png");
 
 	private static final String SETTINGS_CATEGORY = "ping-wheel.name";
 	public static final KeyMapping KEY_BINDING_PING = new KeyMapping("ping-wheel.key.ping-location", InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_5, SETTINGS_CATEGORY);
