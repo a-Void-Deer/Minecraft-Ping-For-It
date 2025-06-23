@@ -189,9 +189,7 @@ public class ClientCore {
 
 				m.scale(0.25f, 0.25f, 1f);
 				m.translate(-5f, 0f, 0f);
-				ctx.renderArrow(true);
-				m.scale(0.9f, 0.9f, 1f);
-				ctx.renderArrow(false);
+				ctx.renderArrowIcon();
 				m.popPose();
 
 				m.popPose();

@@ -6,7 +6,6 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
 import net.minecraft.client.gui.GuiComponent;
 import net.minecraft.client.multiplayer.PlayerInfo;
-import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.block.model.ItemTransforms;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.renderer.texture.TextureAtlas;
@@ -14,10 +13,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.FastColor;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec2;
-import org.lwjgl.opengl.GL11;
 
-import static nx.pingwheel.common.ClientGlobal.Game;
-import static nx.pingwheel.common.ClientGlobal.PING_TEXTURE_ID;
+import static nx.pingwheel.common.ClientGlobal.*;
 import static nx.pingwheel.common.resource.ResourceReloadListener.hasCustomTexture;
 
 public class DrawContext {
@@ -147,27 +144,24 @@ public class DrawContext {
 		matrices.popPose();
 	}
 
-	public void renderArrow(boolean antialias) {
-		if (antialias) {
-			GL11.glEnable(GL11.GL_POLYGON_SMOOTH);
-		}
+	public void renderArrowIcon() {
+		final var size = 10;
+		final var offset = size / -2;
 
-		var bufferBuilder = Tesselator.getInstance().getBuilder();
+		RenderSystem.setShaderTexture(0, ARROW_TEXTURE_ID);
 		RenderSystem.enableBlend();
-		RenderSystem.disableTexture();
-		RenderSystem.defaultBlendFunc();
-		RenderSystem.setShader(GameRenderer::getPositionColorShader);
-		bufferBuilder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-
-		var mat = matrices.last().pose();
-		bufferBuilder.vertex(mat, 5f, 0f, 0f).color(1f, 1f, 1f, 1f).endVertex();
-		bufferBuilder.vertex(mat, -5f, -5f, 0f).color(1f, 1f, 1f, 1f).endVertex();
-		bufferBuilder.vertex(mat, -3f, 0f, 0f).color(1f, 1f, 1f, 1f).endVertex();
-		bufferBuilder.vertex(mat, -5f, 5f, 0f).color(1f, 1f, 1f, 1f).endVertex();
-		bufferBuilder.end();
-		BufferUploader.end(bufferBuilder);
-		RenderSystem.enableTexture();
+		GuiComponent.blit(
+			matrices,
+			offset,
+			offset,
+			0,
+			0,
+			0,
+			size,
+			size,
+			size,
+			size
+		);
 		RenderSystem.disableBlend();
-		GL11.glDisable(GL11.GL_POLYGON_SMOOTH);
 	}
 }
