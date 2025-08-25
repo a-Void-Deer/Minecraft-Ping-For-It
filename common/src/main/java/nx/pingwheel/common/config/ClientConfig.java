@@ -26,7 +26,7 @@ public class ClientConfig implements IConfig {
 	int pingSize = 100;
 	String channel = "";
 
-	// hidden from settings screen
+	// hidden from the settings screen
 	int removeRadius = 10;
 	int raycastDistance = 1024;
 	int safeZoneLeft = 5;
