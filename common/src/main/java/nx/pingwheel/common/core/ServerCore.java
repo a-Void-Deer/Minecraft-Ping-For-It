@@ -20,17 +20,17 @@ import static nx.pingwheel.common.Global.*;
 public class ServerCore {
 	private ServerCore() {}
 
-	private static final ServerConfig Config = ServerConfig.HANDLER.getConfig();
-	private static final HashMap<UUID, String> playerChannels = new HashMap<>();
-	private static final HashMap<UUID, RateLimiter> playerRates = new HashMap<>();
+	private static final ServerConfig SERVER_CONFIG = ServerConfig.HANDLER.getConfig();
+	private static final HashMap<UUID, String> PLAYER_CHANNELS = new HashMap<>();
+	private static final HashMap<UUID, RateLimiter> PLAYER_RATES = new HashMap<>();
 
 	public static void init() {
-		RateLimiter.setRates(Config.getMsToRegenerate(), Config.getRateLimit());
+		RateLimiter.setRates(SERVER_CONFIG.getMsToRegenerate(), SERVER_CONFIG.getRateLimit());
 	}
 
 	public static void onPlayerDisconnect(ServerPlayer player) {
-		playerChannels.remove(player.getUUID());
-		playerRates.remove(player.getUUID());
+		PLAYER_CHANNELS.remove(player.getUUID());
+		PLAYER_RATES.remove(player.getUUID());
 	}
 
 	public static void onChannelUpdate(ServerPlayer player, UpdateChannelC2SPacket packet) {
@@ -50,16 +50,16 @@ public class ServerCore {
 			return;
 		}
 
-		var rateLimiter = playerRates.get(player.getUUID());
+		var rateLimiter = PLAYER_RATES.get(player.getUUID());
 
 		if (rateLimiter == null) {
-			playerRates.put(player.getUUID(), new RateLimiter());
-		} else if (Config.getRateLimit() > 0 && rateLimiter.checkAndBlock()) {
+			PLAYER_RATES.put(player.getUUID(), new RateLimiter());
+		} else if (SERVER_CONFIG.getRateLimit() > 0 && rateLimiter.checkAndBlock()) {
 			return;
 		}
 		
 		var channel = packet.channel();
-		var defaultChannelMode = Config.getDefaultChannelMode();
+		var defaultChannelMode = SERVER_CONFIG.getDefaultChannelMode();
 
 		if (channel.isEmpty() && defaultChannelMode == ChannelMode.DISABLED) {
 			player.displayClientMessage(Component.literal("§8[Ping-Wheel] §eMust be in a channel to ping location\n§fUse §a/pingwheel channel§f to switch"), false);
@@ -71,21 +71,21 @@ public class ServerCore {
 			return;
 		}
 
-		if (!channel.equals(playerChannels.getOrDefault(player.getUUID(), ""))) {
+		if (!channel.equals(PLAYER_CHANNELS.getOrDefault(player.getUUID(), ""))) {
 			updatePlayerChannel(player, channel);
 		}
 
 		PingLocationS2CPacket packetOut;
 		var playerList = server.getPlayerList();
 
-		if (!Config.isPlayerTrackingEnabled() && targetEntityIsPlayer(packet, playerList)) {
+		if (!SERVER_CONFIG.isPlayerTrackingEnabled() && targetEntityIsPlayer(packet, playerList)) {
 			packetOut = new PingLocationS2CPacket(packet.channel(), packet.pos(), null, packet.sequence(), packet.dimension(), player.getUUID());
 		} else {
 			packetOut = PingLocationS2CPacket.fromClientPacket(packet, player.getUUID());
 		}
 
 		for (ServerPlayer p : playerList.getPlayers()) {
-			if (!channel.equals(playerChannels.getOrDefault(p.getUUID(), ""))) {
+			if (!channel.equals(PLAYER_CHANNELS.getOrDefault(p.getUUID(), ""))) {
 				continue;
 			}
 
@@ -109,10 +109,10 @@ public class ServerCore {
 
 	private static void updatePlayerChannel(ServerPlayer player, String channel) {
 		if (channel.isEmpty()) {
-			playerChannels.remove(player.getUUID());
+			PLAYER_CHANNELS.remove(player.getUUID());
 			LOGGER.info(() -> "Channel update: %s -> default".formatted(player.getGameProfile().getName()));
 		} else {
-			playerChannels.put(player.getUUID(), channel);
+			PLAYER_CHANNELS.put(player.getUUID(), channel);
 			LOGGER.info(() -> "Channel update: %s -> \"%s\"".formatted(player.getGameProfile().getName(), channel));
 		}
 	}
