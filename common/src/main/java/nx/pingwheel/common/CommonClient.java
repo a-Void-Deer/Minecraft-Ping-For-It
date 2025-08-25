@@ -2,13 +2,20 @@ package nx.pingwheel.common;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Matrix4f;
+import net.minecraft.client.Minecraft;
+import nx.pingwheel.common.core.GameContext;
+import nx.pingwheel.common.core.PingController;
+import nx.pingwheel.common.core.PingManager;
+import nx.pingwheel.common.core.PingReceiver;
+import nx.pingwheel.common.helper.InputUtils;
+import nx.pingwheel.common.render.PingRenderer;
 import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.core.ClientCore;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.platform.IPlatformContextService;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.screen.SettingsScreen;
 
 import static nx.pingwheel.common.ClientGlobal.*;
 
@@ -36,22 +43,32 @@ public class CommonClient {
 	}
 
 	public void onLeaveServer() {
-		ClientCore.onDisconnect();
+		PingManager.clearPings();
 	}
 
 	public void onTickStart() {
-		ClientCore.onTick();
+		Game = Minecraft.getInstance();
+		GameContext.updateDimension();
+
+		if (InputUtils.consumePingHotkey()) {
+			PingController.queuePingAction();
+		}
+
+		if (KEY_BINDING_SETTINGS.consumeClick()) {
+			Game.setScreen(new SettingsScreen());
+		}
 	}
 
 	public void onRenderWorld(Matrix4f modelViewMatrix, Matrix4f projectionMatrix, float tickDelta) {
-		ClientCore.onRenderWorld(modelViewMatrix, projectionMatrix, tickDelta);
+		PingManager.updatePings(modelViewMatrix, projectionMatrix, tickDelta);
+		PingController.pollPingAction(tickDelta);
 	}
 
 	public void onRenderGUI(PoseStack poseStack, float tickDelta) {
-		ClientCore.onRenderGUI(poseStack, tickDelta);
+		PingRenderer.onRenderGUI(poseStack, tickDelta);
 	}
 
 	public void onPingLocationPacket(PingLocationS2CPacket packet) {
-		ClientCore.onPingLocation(packet);
+		PingReceiver.acceptPingPacket(packet);
 	}
 }
