@@ -1,4 +1,4 @@
-package nx.pingwheel.common.networking;
+package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;

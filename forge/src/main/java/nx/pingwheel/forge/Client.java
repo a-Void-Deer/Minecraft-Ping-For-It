@@ -1,106 +1,64 @@
 package nx.pingwheel.forge;
 
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.client.ClientRegistry;
 import net.minecraftforge.client.ConfigGuiHandler;
-import net.minecraftforge.client.event.*;
+import net.minecraftforge.client.event.RegisterClientCommandsEvent;
+import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.fml.loading.FMLPaths;
-import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.config.ConfigHandler;
-import nx.pingwheel.common.core.ClientCore;
-import nx.pingwheel.common.helper.LanguageUtils;
+import net.minecraftforge.network.event.EventNetworkChannel;
+import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.commands.ClientCommandBuilder;
-import nx.pingwheel.common.networking.PingLocationS2CPacket;
-import nx.pingwheel.common.networking.UpdateChannelC2SPacket;
+import nx.pingwheel.common.helper.LanguageUtils;
+import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.resource.ResourceReloadListener;
 import nx.pingwheel.common.screen.SettingsScreen;
 
-import java.util.Objects;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
-import static nx.pingwheel.common.ClientGlobal.*;
-import static nx.pingwheel.common.Global.MOD_ID;
-import static nx.pingwheel.common.Global.NetHandler;
 import static nx.pingwheel.forge.Main.PING_LOCATION_CHANNEL_S2C;
 
 @OnlyIn(Dist.CLIENT)
 public class Client {
 
 	public Client() {
-		ConfigHandler = new ConfigHandler<>(ClientConfig.class, FMLPaths.CONFIGDIR.get().resolve(MOD_ID + ".json"));
-		ConfigHandler.load();
+		CommonClient.INSTANCE.onInit();
 
 		MinecraftForge.EVENT_BUS.register(this);
 
-		registerNetworkPackets();
-		registerReloadListener();
-		registerKeyBindings();
+		// packets
+		registerPacketHandler(PING_LOCATION_CHANNEL_S2C, PingLocationS2CPacket::readSafe, CommonClient.INSTANCE::onPingLocationPacket);
 
+		// resource reload
+		FMLJavaModLoadingContext
+			.get()
+			.getModEventBus()
+			.addListener((RegisterClientReloadListenersEvent event) -> event.registerReloadListener(new ResourceReloadListener()));
+
+		// config screen
 		ModLoadingContext.get().registerExtensionPoint(
 			ConfigGuiHandler.ConfigGuiFactory.class,
 			() -> new ConfigGuiHandler.ConfigGuiFactory((client, parent) -> new SettingsScreen(parent))
 		);
 	}
 
-	private void registerNetworkPackets() {
-		PING_LOCATION_CHANNEL_S2C.addListener((event) -> {
+	public static <T> void registerPacketHandler(EventNetworkChannel channel, Function<FriendlyByteBuf, T> packetReader, Consumer<T> packetHandler) {
+		channel.addListener((event) -> {
 			var ctx = event.getSource().get();
 			var payload = event.getPayload();
 
 			if (payload != null) {
-				var packet = PingLocationS2CPacket.readSafe(payload);
-				ctx.enqueueWork(() -> ClientCore.onPingLocation(packet));
+				var packet = packetReader.apply(payload);
+				ctx.enqueueWork(() -> packetHandler.accept(packet));
 			}
 
 			ctx.setPacketHandled(true);
 		});
-	}
-
-	private void registerReloadListener() {
-		var bus = FMLJavaModLoadingContext.get().getModEventBus();
-		bus.addListener((RegisterClientReloadListenersEvent event) -> event.registerReloadListener(new ResourceReloadListener()));
-	}
-
-	private void registerKeyBindings() {
-		ClientRegistry.registerKeyBinding(KEY_BINDING_PING);
-		ClientRegistry.registerKeyBinding(KEY_BINDING_SETTINGS);
-		ClientRegistry.registerKeyBinding(KEY_BINDING_NAME_LABELS);
-	}
-
-	@SubscribeEvent
-	public void onClientTick(TickEvent.ClientTickEvent event) {
-		if (event.phase.equals(TickEvent.Phase.START)) {
-			ClientCore.onTick();
-		}
-	}
-
-	@SubscribeEvent
-	public void onClientConnectedToServer(ClientPlayerNetworkEvent.LoggedInEvent event) {
-		NetHandler.sendToServer(new UpdateChannelC2SPacket(ConfigHandler.getConfig().getChannel()));
-	}
-
-	@SubscribeEvent
-	public void onClientDisconnectedFromServer(ClientPlayerNetworkEvent.LoggedOutEvent event) {
-		ClientCore.onDisconnect();
-	}
-
-	@SubscribeEvent
-	public void onRenderWorld(RenderLevelStageEvent event) {
-		if (event.getStage().equals(RenderLevelStageEvent.Stage.AFTER_WEATHER)) {
-			ClientCore.onRenderWorld(event.getPoseStack().last().pose(), event.getProjectionMatrix(), event.getPartialTick());
-		}
-	}
-
-	@SubscribeEvent
-	public void onPreGuiRender(RenderGameOverlayEvent.Pre event) {
-		if (Objects.equals(event.getType(), RenderGameOverlayEvent.ElementType.ALL)) {
-			ClientCore.onRenderGUI(event.getMatrixStack(), event.getPartialTicks());
-		}
 	}
 
 	@SubscribeEvent

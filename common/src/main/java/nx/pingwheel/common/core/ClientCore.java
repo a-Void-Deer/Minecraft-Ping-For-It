@@ -15,8 +15,9 @@ import net.minecraft.world.scores.PlayerTeam;
 import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.helper.*;
-import nx.pingwheel.common.networking.PingLocationC2SPacket;
-import nx.pingwheel.common.networking.PingLocationS2CPacket;
+import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.network.PingLocationC2SPacket;
+import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.sound.DirectionalSoundInstance;
 
@@ -26,7 +27,6 @@ import java.util.UUID;
 
 import static nx.pingwheel.common.ClientGlobal.*;
 import static nx.pingwheel.common.Global.LOGGER;
-import static nx.pingwheel.common.Global.NetHandler;
 import static nx.pingwheel.common.config.ClientConfig.*;
 
 public class ClientCore {
@@ -283,7 +283,7 @@ public class ClientCore {
 			uuid = ((EntityHitResult)hitResult).getEntity().getUUID();
 		}
 
-		NetHandler.sendToServer(new PingLocationC2SPacket(Config.getChannel(), hitResult.getLocation(), uuid, pingSequence, dimension));
+		IPlatformNetworkService.INSTANCE.sendToServer(new PingLocationC2SPacket(Config.getChannel(), hitResult.getLocation(), uuid, pingSequence, dimension));
 	}
 
 	private static void addOrReplacePing(Ping newPing) {

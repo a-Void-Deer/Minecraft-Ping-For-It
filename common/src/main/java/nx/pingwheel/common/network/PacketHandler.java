@@ -1,4 +1,4 @@
-package nx.pingwheel.common.networking;
+package nx.pingwheel.common.network;
 
 import lombok.SneakyThrows;
 import net.minecraft.network.FriendlyByteBuf;

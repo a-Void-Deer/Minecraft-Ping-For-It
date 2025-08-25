@@ -1,27 +1,23 @@
 package nx.pingwheel.forge;
 
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.RegisterCommandsEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.event.EventNetworkChannel;
+import nx.pingwheel.common.CommonServer;
 import nx.pingwheel.common.commands.ServerCommandBuilder;
-import nx.pingwheel.common.config.ConfigHandler;
-import nx.pingwheel.common.config.ServerConfig;
-import nx.pingwheel.common.core.ServerCore;
 import nx.pingwheel.common.helper.LanguageUtils;
-import nx.pingwheel.common.networking.NetworkHandler;
-import nx.pingwheel.common.networking.PingLocationC2SPacket;
-import nx.pingwheel.common.networking.PingLocationS2CPacket;
-import nx.pingwheel.common.networking.UpdateChannelC2SPacket;
+import nx.pingwheel.common.network.*;
+import org.apache.logging.log4j.util.TriConsumer;
 
-import static nx.pingwheel.common.Global.*;
+import java.util.function.Function;
+
 import static nx.pingwheel.forge.Main.FORGE_ID;
 
 @Mod(FORGE_ID)
@@ -52,50 +48,27 @@ public class Main {
 
 	@SuppressWarnings({"java:S1118", "the public constructor is required by forge"})
 	public Main() {
-		LOGGER.info("Init");
-
-		NetHandler = new NetworkHandler();
-
-		ServerConfigHandler = new ConfigHandler<>(ServerConfig.class, FMLPaths.CONFIGDIR.get().resolve(MOD_ID + ".server.json"));
-		ServerConfigHandler.load();
-
-		ModVersion = ModList.get().getModContainerById(FORGE_ID)
-			.map(container -> container.getModInfo().getVersion().toString())
-			.orElse("Unknown");
+		CommonServer.INSTANCE.onInit();
 
 		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> Client::new);
 
-		PING_LOCATION_CHANNEL_C2S.addListener((event) -> {
+		registerPacketHandler(PING_LOCATION_CHANNEL_C2S, PingLocationC2SPacket::readSafe, CommonServer.INSTANCE::onPingLocationPacket);
+		registerPacketHandler(UPDATE_CHANNEL_C2S, UpdateChannelC2SPacket::readSafe, CommonServer.INSTANCE::onChannelUpdatePacket);
+	}
+
+	public static <T> void registerPacketHandler(EventNetworkChannel channel, Function<FriendlyByteBuf, T> packetReader, TriConsumer<MinecraftServer, ServerPlayer, T> packetHandler) {
+		channel.addListener((event) -> {
 			var ctx = event.getSource().get();
 			var payload = event.getPayload();
 			var sender = ctx.getSender();
 
 			if (payload != null && sender != null) {
-				var packet = PingLocationC2SPacket.readSafe(payload);
-				ctx.enqueueWork(() -> ServerCore.onPingLocation(sender.getServer(), sender, packet));
+				var packet = packetReader.apply(payload);
+				ctx.enqueueWork(() -> packetHandler.accept(sender.getServer(), sender, packet));
 			}
 
 			ctx.setPacketHandled(true);
 		});
-
-		UPDATE_CHANNEL_C2S.addListener((event) -> {
-			var ctx = event.getSource().get();
-			var payload = event.getPayload();
-
-			if (payload != null) {
-				var packet = UpdateChannelC2SPacket.readSafe(payload);
-				ctx.enqueueWork(() -> ServerCore.onChannelUpdate(ctx.getSender(), packet));
-			}
-
-			ctx.setPacketHandled(true);
-		});
-
-		ServerCore.init();
-	}
-
-	@SubscribeEvent
-	public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-		ServerCore.onPlayerDisconnect((ServerPlayer)event.getPlayer());
 	}
 
 	@SubscribeEvent

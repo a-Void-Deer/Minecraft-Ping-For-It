@@ -4,35 +4,26 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.command.v1.ClientCommandManager;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.resource.IdentifiableResourceReloadListener;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.Registry;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.ProfilerFiller;
+import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.commands.ClientCommandBuilder;
-import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.config.ConfigHandler;
-import nx.pingwheel.common.core.ClientCore;
 import nx.pingwheel.common.helper.LanguageUtils;
-import nx.pingwheel.common.networking.PingLocationS2CPacket;
-import nx.pingwheel.common.networking.UpdateChannelC2SPacket;
+import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.resource.ResourceReloadListener;
-import nx.pingwheel.fabric.event.GuiRenderCallback;
-import nx.pingwheel.fabric.event.WorldRenderCallback;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
-import static nx.pingwheel.common.ClientGlobal.*;
+import static nx.pingwheel.common.ClientGlobal.PING_SOUND_EVENT;
+import static nx.pingwheel.common.ClientGlobal.PING_SOUND_ID;
 import static nx.pingwheel.common.Global.MOD_ID;
-import static nx.pingwheel.common.Global.NetHandler;
 
 @Environment(EnvType.CLIENT)
 public class Client implements ClientModInitializer {
@@ -41,38 +32,18 @@ public class Client implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
-		ConfigHandler = new ConfigHandler<>(ClientConfig.class, FabricLoader.getInstance().getConfigDir().resolve(MOD_ID + ".json"));
-		ConfigHandler.load();
+		CommonClient.INSTANCE.onInit();
 
 		Registry.register(Registry.SOUND_EVENT, PING_SOUND_ID, PING_SOUND_EVENT);
 
-		registerNetworkPackets();
-		registerReloadListener();
-		registerKeyBindings();
+		// packets
+		ClientPlayNetworking.registerGlobalReceiver(
+			PingLocationS2CPacket.PACKET_ID,
+			(a, b, packet, c)
+				-> CommonClient.INSTANCE.onPingLocationPacket(PingLocationS2CPacket.readSafe(packet))
+		);
 
-		// register client connection callback
-		ClientPlayConnectionEvents.JOIN.register((a, b, c) -> NetHandler.sendToServer(new UpdateChannelC2SPacket(ConfigHandler.getConfig().getChannel())));
-		ClientPlayConnectionEvents.DISCONNECT.register((a, b) -> ClientCore.onDisconnect());
-
-		// register rendering callbacks
-		GuiRenderCallback.START.register(ClientCore::onRenderGUI);
-		WorldRenderCallback.START.register(ClientCore::onRenderWorld);
-
-		// register commands
-		ClientCommandManager.DISPATCHER.register(ClientCommandBuilder.build((context, success, response) -> {
-			if (success) {
-				context.getSource().sendFeedback(LanguageUtils.withModPrefix(response));
-			} else {
-				context.getSource().sendError(LanguageUtils.withModPrefix(response));
-			}
-		}));
-	}
-
-	private void registerNetworkPackets() {
-		ClientPlayNetworking.registerGlobalReceiver(PingLocationS2CPacket.PACKET_ID, (a, b, packet, c) -> ClientCore.onPingLocation(PingLocationS2CPacket.readSafe(packet)));
-	}
-
-	private void registerReloadListener() {
+		// resource reload
 		ResourceManagerHelper.get(PackType.CLIENT_RESOURCES)
 			.registerReloadListener(new IdentifiableResourceReloadListener() {
 				@Override
@@ -85,13 +56,14 @@ public class Client implements ClientModInitializer {
 					return ResourceReloadListener.reloadTextures(helper, resourceManager, loadExecutor, applyExecutor);
 				}
 			});
-	}
 
-	private void registerKeyBindings() {
-		KeyBindingHelper.registerKeyBinding(KEY_BINDING_PING);
-		KeyBindingHelper.registerKeyBinding(KEY_BINDING_SETTINGS);
-		KeyBindingHelper.registerKeyBinding(KEY_BINDING_NAME_LABELS);
-
-		ClientTickEvents.START_CLIENT_TICK.register(client -> ClientCore.onTick());
+		// commands
+		ClientCommandManager.DISPATCHER.register(ClientCommandBuilder.build((context, success, response) -> {
+			if (success) {
+				context.getSource().sendFeedback(LanguageUtils.withModPrefix(response));
+			} else {
+				context.getSource().sendError(LanguageUtils.withModPrefix(response));
+			}
+		}));
 	}
 }

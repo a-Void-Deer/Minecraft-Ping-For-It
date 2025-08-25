@@ -7,9 +7,10 @@ import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.helper.ChannelMode;
 import nx.pingwheel.common.helper.RateLimiter;
-import nx.pingwheel.common.networking.PingLocationC2SPacket;
-import nx.pingwheel.common.networking.PingLocationS2CPacket;
-import nx.pingwheel.common.networking.UpdateChannelC2SPacket;
+import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.network.PingLocationC2SPacket;
+import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 
 import java.util.HashMap;
 import java.util.UUID;
@@ -35,7 +36,7 @@ public class ServerCore {
 	public static void onChannelUpdate(ServerPlayer player, UpdateChannelC2SPacket packet) {
 		if (packet.isCorrupt()) {
 			LOGGER.warn(() -> "invalid channel update from %s (%s)".formatted(player.getGameProfile().getName(), player.getUUID()));
-			player.displayClientMessage(Component.literal("§8[Ping-Wheel] §cChannel couldn't be updated\n§fMake sure your version matches the server's version: §d" + ModVersion), false);
+			player.displayClientMessage(Component.literal("§8[Ping-Wheel] §cChannel couldn't be updated\n§fMake sure your version matches the server's version: §d" + MOD_VERSION), false);
 			return;
 		}
 
@@ -45,7 +46,7 @@ public class ServerCore {
 	public static void onPingLocation(MinecraftServer server, ServerPlayer player, PingLocationC2SPacket packet) {
 		if (packet.isCorrupt()) {
 			LOGGER.warn(() -> "invalid ping location from %s (%s)".formatted(player.getGameProfile().getName(), player.getUUID()));
-			player.displayClientMessage(Component.literal("§8[Ping-Wheel] §cUnable to send ping\n§fMake sure your version matches the server's version: §d" + ModVersion), false);
+			player.displayClientMessage(Component.literal("§8[Ping-Wheel] §cUnable to send ping\n§fMake sure your version matches the server's version: §d" + MOD_VERSION), false);
 			return;
 		}
 
@@ -92,7 +93,7 @@ public class ServerCore {
 				continue;
 			}
 
-			NetHandler.sendToClient(packetOut, p);
+			IPlatformNetworkService.INSTANCE.sendToClient(packetOut, p);
 		}
 	}
 
