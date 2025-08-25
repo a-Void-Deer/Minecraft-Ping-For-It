@@ -4,12 +4,14 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import lombok.Getter;
 import lombok.SneakyThrows;
+import nx.pingwheel.common.platform.IPlatformContextService;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static nx.pingwheel.common.Global.LOGGER;
+import static nx.pingwheel.common.Global.MOD_ID;
 
 public class ConfigHandler <T extends IConfig> {
 
@@ -20,6 +22,10 @@ public class ConfigHandler <T extends IConfig> {
 	@Getter
 	private T config;
 	private int configHash;
+
+	public static <T extends IConfig> ConfigHandler<T> of(Class<T> configType, String configExtension) {
+		return new ConfigHandler<>(configType, IPlatformContextService.INSTANCE.resolveConfigDir(MOD_ID + configExtension));
+	}
 
 	@SneakyThrows
 	public ConfigHandler(Class<T> configType, Path configPath) {

@@ -5,9 +5,6 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 import nx.pingwheel.common.core.ServerCore;
-import nx.pingwheel.common.platform.IPlatformContextService;
-
-import static nx.pingwheel.common.Global.MOD_ID;
 
 @Getter
 @Setter
@@ -33,5 +30,5 @@ public class ServerConfig implements IConfig {
 		ServerCore.init();
 	}
 
-	public static final ConfigHandler<ServerConfig> HANDLER = new ConfigHandler<>(ServerConfig.class, IPlatformContextService.INSTANCE.resolveConfigDir(MOD_ID + ".server.json"));
+	public static final ConfigHandler<ServerConfig> HANDLER = ConfigHandler.of(ServerConfig.class, ".server.json");
 }
