@@ -16,7 +16,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec2;
 import nx.pingwheel.common.math.MathUtils;
 
-import static nx.pingwheel.common.ClientGlobal.*;
+import static nx.pingwheel.common.CommonClient.Game;
+import static nx.pingwheel.common.resource.ResourceConstants.ARROW_TEXTURE_ID;
+import static nx.pingwheel.common.resource.ResourceConstants.PING_TEXTURE_ID;
 import static nx.pingwheel.common.resource.ResourceReloadListener.hasCustomTexture;
 
 public class DrawContext {

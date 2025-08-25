@@ -10,7 +10,7 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.function.Predicate;
 
-import static nx.pingwheel.common.ClientGlobal.Game;
+import static nx.pingwheel.common.CommonClient.Game;
 
 public class Raycast {
 	private Raycast() {}

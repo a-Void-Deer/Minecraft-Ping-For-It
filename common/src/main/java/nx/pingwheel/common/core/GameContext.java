@@ -3,7 +3,7 @@ package nx.pingwheel.common.core;
 import lombok.Getter;
 import net.minecraft.client.multiplayer.ClientLevel;
 
-import static nx.pingwheel.common.ClientGlobal.Game;
+import static nx.pingwheel.common.CommonClient.Game;
 
 public class GameContext {
 	private GameContext() {}

@@ -17,11 +17,13 @@ import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.util.InputUtils;
 
-import static nx.pingwheel.common.ClientGlobal.*;
+import static nx.pingwheel.common.util.InputUtils.*;
 
 public class CommonClient {
 
 	public static final CommonClient INSTANCE = new CommonClient();
+	public static Minecraft Game = null;
+
 	private CommonClient() {}
 
 	public void onInit() {

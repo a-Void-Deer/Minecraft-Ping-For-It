@@ -5,10 +5,10 @@ import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
 
-import static nx.pingwheel.common.ClientGlobal.Game;
-import static nx.pingwheel.common.ClientGlobal.PING_SOUND_EVENT;
+import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.config.ClientConfig.MAX_PING_DISTANCE;
+import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
 
 public class PingReceiver {
 	private PingReceiver() {}

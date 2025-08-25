@@ -12,7 +12,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.UUID;
 
-import static nx.pingwheel.common.ClientGlobal.Game;
+import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 
 @Getter

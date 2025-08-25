@@ -7,7 +7,7 @@ import lombok.ToString;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 
-import static nx.pingwheel.common.ClientGlobal.Game;
+import static nx.pingwheel.common.CommonClient.Game;
 
 @Getter
 @Setter

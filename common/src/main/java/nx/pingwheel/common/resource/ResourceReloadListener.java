@@ -9,7 +9,7 @@ import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
-import static nx.pingwheel.common.ClientGlobal.PING_TEXTURE_ID;
+import static nx.pingwheel.common.resource.ResourceConstants.PING_TEXTURE_ID;
 
 public class ResourceReloadListener implements PreparableReloadListener {
 

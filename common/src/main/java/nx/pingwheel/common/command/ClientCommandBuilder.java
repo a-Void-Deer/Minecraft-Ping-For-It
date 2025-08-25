@@ -13,7 +13,7 @@ import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.screen.SettingsScreen;
 import org.apache.logging.log4j.util.TriConsumer;
 
-import static nx.pingwheel.common.ClientGlobal.Game;
+import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.MAX_CHANNEL_LENGTH;
 
 public class ClientCommandBuilder {

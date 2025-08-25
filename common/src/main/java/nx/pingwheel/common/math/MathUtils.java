@@ -6,7 +6,7 @@ import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.compat.Vector4f;
 
-import static nx.pingwheel.common.ClientGlobal.Game;
+import static nx.pingwheel.common.CommonClient.Game;
 
 public class MathUtils {
 	private MathUtils() {}

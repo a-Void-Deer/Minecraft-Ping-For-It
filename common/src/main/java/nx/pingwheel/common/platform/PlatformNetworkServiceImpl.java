@@ -7,7 +7,7 @@ import net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket;
 import net.minecraft.server.level.ServerPlayer;
 import nx.pingwheel.common.network.IPacket;
 
-import static nx.pingwheel.common.ClientGlobal.Game;
+import static nx.pingwheel.common.CommonClient.Game;
 
 public class PlatformNetworkServiceImpl implements IPlatformNetworkService {
 

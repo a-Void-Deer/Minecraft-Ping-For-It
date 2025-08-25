@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.Objects;
 import java.util.UUID;
 
-import static nx.pingwheel.common.ClientGlobal.Game;
+import static nx.pingwheel.common.CommonClient.Game;
 
 public class PingManager {
 	private PingManager() {}

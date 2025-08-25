@@ -21,9 +21,9 @@ import nx.pingwheel.common.resource.ResourceReloadListener;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
-import static nx.pingwheel.common.ClientGlobal.PING_SOUND_EVENT;
-import static nx.pingwheel.common.ClientGlobal.PING_SOUND_ID;
 import static nx.pingwheel.common.Global.MOD_ID;
+import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
+import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_ID;
 
 @Environment(EnvType.CLIENT)
 public class Client implements ClientModInitializer {

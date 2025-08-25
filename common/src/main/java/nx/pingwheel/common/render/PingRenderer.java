@@ -10,8 +10,8 @@ import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.math.MathUtils;
 import nx.pingwheel.common.resource.LanguageUtils;
 
-import static nx.pingwheel.common.ClientGlobal.Game;
-import static nx.pingwheel.common.ClientGlobal.KEY_BINDING_NAME_LABELS;
+import static nx.pingwheel.common.CommonClient.Game;
+import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_NAME_LABELS;
 
 public class PingRenderer {
 	private PingRenderer() {}
