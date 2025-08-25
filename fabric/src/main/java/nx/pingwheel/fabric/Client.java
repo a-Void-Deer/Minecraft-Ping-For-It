@@ -13,8 +13,8 @@ import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.ProfilerFiller;
 import nx.pingwheel.common.CommonClient;
-import nx.pingwheel.common.commands.ClientCommandBuilder;
-import nx.pingwheel.common.helper.LanguageUtils;
+import nx.pingwheel.common.command.ClientCommandBuilder;
+import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.resource.ResourceReloadListener;
 

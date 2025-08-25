@@ -7,7 +7,6 @@ import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.core.PingController;
 import nx.pingwheel.common.core.PingManager;
 import nx.pingwheel.common.core.PingReceiver;
-import nx.pingwheel.common.helper.InputUtils;
 import nx.pingwheel.common.render.PingRenderer;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
@@ -16,6 +15,7 @@ import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.platform.IPlatformContextService;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.screen.SettingsScreen;
+import nx.pingwheel.common.util.InputUtils;
 
 import static nx.pingwheel.common.ClientGlobal.*;
 

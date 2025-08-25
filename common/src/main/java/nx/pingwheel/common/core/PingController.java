@@ -4,7 +4,7 @@ import lombok.Getter;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.helper.Raycast;
+import nx.pingwheel.common.math.Raycast;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 

@@ -5,7 +5,6 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 import nx.pingwheel.common.core.ServerCore;
-import nx.pingwheel.common.helper.ChannelMode;
 import nx.pingwheel.common.platform.IPlatformContextService;
 
 import static nx.pingwheel.common.Global.MOD_ID;

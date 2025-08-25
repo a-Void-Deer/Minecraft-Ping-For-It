@@ -11,8 +11,8 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.event.EventNetworkChannel;
 import nx.pingwheel.common.CommonServer;
-import nx.pingwheel.common.commands.ServerCommandBuilder;
-import nx.pingwheel.common.helper.LanguageUtils;
+import nx.pingwheel.common.command.ServerCommandBuilder;
+import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.network.*;
 import org.apache.logging.log4j.util.TriConsumer;
 

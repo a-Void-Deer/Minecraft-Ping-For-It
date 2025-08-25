@@ -5,8 +5,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.item.ItemEntity;
 import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.helper.MathUtils;
-import nx.pingwheel.common.helper.Ping;
+import nx.pingwheel.common.math.MathUtils;
 
 import java.util.ArrayList;
 import java.util.Objects;
@@ -19,13 +18,13 @@ public class PingManager {
 
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
 
-	public static final ArrayList<Ping> PING_REPO = new ArrayList<>();
+	public static final ArrayList<PingData> PING_REPO = new ArrayList<>();
 
 	public static void clearPings() {
 		PING_REPO.clear();
 	}
 
-	public static void addOrReplacePing(Ping newPing) {
+	public static void addOrReplacePing(PingData newPing) {
 		int index = -1;
 
 		for (int i = 0; i < PING_REPO.size(); i++) {
@@ -52,7 +51,7 @@ public class PingManager {
 		var time = (int)Game.level.getGameTime();
 
 		var cameraPos = Game.player.getEyePosition(tickDelta);
-		Ping target = null;
+		PingData target = null;
 
 		for (var iter = PING_REPO.iterator(); iter.hasNext(); ) {
 			var ping = iter.next();

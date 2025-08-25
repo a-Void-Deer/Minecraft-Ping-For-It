@@ -1,4 +1,4 @@
-package nx.pingwheel.common.helper;
+package nx.pingwheel.common.math;
 
 import net.minecraft.world.phys.Vec2;
 

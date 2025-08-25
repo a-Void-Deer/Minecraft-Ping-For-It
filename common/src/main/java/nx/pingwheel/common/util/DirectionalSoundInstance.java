@@ -1,4 +1,4 @@
-package nx.pingwheel.common.sound;
+package nx.pingwheel.common.util;
 
 import net.minecraft.client.resources.sounds.AbstractTickableSoundInstance;
 import net.minecraft.sounds.SoundEvent;

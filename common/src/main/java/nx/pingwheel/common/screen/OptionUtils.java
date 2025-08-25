@@ -1,4 +1,4 @@
-package nx.pingwheel.common.helper;
+package nx.pingwheel.common.screen;
 
 import net.minecraft.client.CycleOption;
 import net.minecraft.client.Option;

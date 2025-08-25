@@ -7,9 +7,8 @@ import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.core.PingManager;
 import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.helper.DrawContext;
-import nx.pingwheel.common.helper.LanguageUtils;
-import nx.pingwheel.common.helper.MathUtils;
+import nx.pingwheel.common.math.MathUtils;
+import nx.pingwheel.common.resource.LanguageUtils;
 
 import static nx.pingwheel.common.ClientGlobal.Game;
 import static nx.pingwheel.common.ClientGlobal.KEY_BINDING_NAME_LABELS;

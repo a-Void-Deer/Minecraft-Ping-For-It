@@ -1,4 +1,4 @@
-package nx.pingwheel.common.helper;
+package nx.pingwheel.common.core;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -7,6 +7,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.math.ScreenPos;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.UUID;
@@ -15,9 +16,9 @@ import static nx.pingwheel.common.ClientGlobal.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 
 @Getter
-public class Ping {
+public class PingData {
 
-	private static final ClientConfig Config = ClientConfig.HANDLER.getConfig();
+	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
 
 	@Setter
 	private Vec3 pos;
@@ -39,7 +40,7 @@ public class Ping {
 	@Nullable
 	private ItemStack itemStack;
 
-	public Ping(Vec3 pos, @Nullable UUID uuid, PlayerInfo author, int sequence, int dimension, int spawnTime) {
+	public PingData(Vec3 pos, @Nullable UUID uuid, PlayerInfo author, int sequence, int dimension, int spawnTime) {
 		this.pos = pos;
 		this.uuid = uuid;
 		this.author = author;
@@ -49,11 +50,11 @@ public class Ping {
 	}
 
 	public boolean isExpired() {
-		return Config.getPingDuration() < MAX_PING_DURATION && this.age > Config.getPingDuration() * TPS;
+		return CLIENT_CONFIG.getPingDuration() < MAX_PING_DURATION && this.age > CLIENT_CONFIG.getPingDuration() * TPS;
 	}
 
 	public boolean isRemovable() {
-		return (Config.getCorrectionPeriod() >= MAX_CORRECTION_PERIOD || this.age > Config.getCorrectionPeriod() * TPS) && this.distanceToCenter() < Config.getRemoveRadius();
+		return (CLIENT_CONFIG.getCorrectionPeriod() >= MAX_CORRECTION_PERIOD || this.age > CLIENT_CONFIG.getCorrectionPeriod() * TPS) && this.distanceToCenter() < CLIENT_CONFIG.getRemoveRadius();
 	}
 
 	public float distanceToCenter() {
@@ -67,7 +68,7 @@ public class Ping {
 		return this.screenPos.distanceTo(center);
 	}
 
-	public boolean isCloserToCenter(@Nullable Ping b) {
+	public boolean isCloserToCenter(@Nullable PingData b) {
 		if (b == null) {
 			return true;
 		}

@@ -1,4 +1,4 @@
-package nx.pingwheel.common.helper;
+package nx.pingwheel.common.render;
 
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.platform.Lighting;
@@ -14,6 +14,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FastColor;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec2;
+import nx.pingwheel.common.math.MathUtils;
 
 import static nx.pingwheel.common.ClientGlobal.*;
 import static nx.pingwheel.common.resource.ResourceReloadListener.hasCustomTexture;

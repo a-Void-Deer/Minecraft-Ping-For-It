@@ -11,8 +11,7 @@ import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.util.FormattedCharSequence;
 import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.helper.LanguageUtils;
-import nx.pingwheel.common.helper.OptionUtils;
+import nx.pingwheel.common.resource.LanguageUtils;
 
 import java.util.Collections;
 import java.util.List;

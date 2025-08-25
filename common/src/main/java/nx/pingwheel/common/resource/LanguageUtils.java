@@ -1,4 +1,4 @@
-package nx.pingwheel.common.helper;
+package nx.pingwheel.common.resource;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.MutableComponent;

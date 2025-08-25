@@ -1,4 +1,4 @@
-package nx.pingwheel.common.commands;
+package nx.pingwheel.common.command;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.BoolArgumentType;
@@ -12,8 +12,8 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.MutableComponent;
 import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ServerConfig;
-import nx.pingwheel.common.helper.ChannelMode;
-import nx.pingwheel.common.helper.LanguageUtils;
+import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.resource.LanguageUtils;
 import org.apache.logging.log4j.util.TriConsumer;
 
 import java.util.List;

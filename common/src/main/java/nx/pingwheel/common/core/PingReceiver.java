@@ -2,9 +2,8 @@ package nx.pingwheel.common.core;
 
 import net.minecraft.sounds.SoundSource;
 import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.helper.Ping;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
-import nx.pingwheel.common.sound.DirectionalSoundInstance;
+import nx.pingwheel.common.util.DirectionalSoundInstance;
 
 import static nx.pingwheel.common.ClientGlobal.Game;
 import static nx.pingwheel.common.ClientGlobal.PING_SOUND_EVENT;
@@ -43,7 +42,7 @@ public class PingReceiver {
 		final var authorInfo = connection.getPlayerInfo(packet.author());
 
 		Game.execute(() -> {
-			PingManager.addOrReplacePing(new Ping(
+			PingManager.addOrReplacePing(new PingData(
 				packet.pos(),
 				packet.entity(),
 				authorInfo,
