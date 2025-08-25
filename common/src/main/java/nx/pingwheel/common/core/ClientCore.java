@@ -32,7 +32,7 @@ import static nx.pingwheel.common.config.ClientConfig.*;
 public class ClientCore {
 	private ClientCore() {}
 
-	private static final ClientConfig Config = ConfigHandler.getConfig();
+	private static final ClientConfig Config = ClientConfig.HANDLER.getConfig();
 	private static final ArrayList<Ping> pingRepo = new ArrayList<>();
 	private static boolean pingQueued = false;
 	private static ClientLevel lastWorld = null;

@@ -5,8 +5,6 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
-import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.config.ConfigHandler;
 import org.lwjgl.glfw.GLFW;
 
 import static nx.pingwheel.common.Global.MOD_ID;
@@ -14,7 +12,6 @@ import static nx.pingwheel.common.Global.MOD_ID;
 public class ClientGlobal {
 	private ClientGlobal() {}
 
-	public static ConfigHandler<ClientConfig> ConfigHandler = null;
 	public static Minecraft Game = null;
 
 	public static final ResourceLocation PING_SOUND_ID = new ResourceLocation(MOD_ID, "ping");

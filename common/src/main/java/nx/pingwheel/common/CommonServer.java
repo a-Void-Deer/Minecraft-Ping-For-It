@@ -2,26 +2,23 @@ package nx.pingwheel.common;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import nx.pingwheel.common.config.ConfigHandler;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.core.ServerCore;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
-import nx.pingwheel.common.platform.IPlatformContextService;
 import nx.pingwheel.common.platform.IPlatformServerEventService;
 
-import static nx.pingwheel.common.Global.*;
+import static nx.pingwheel.common.Global.LOGGER;
 
 public class CommonServer {
 
-	public static CommonServer INSTANCE = new CommonServer();
+	public static final CommonServer INSTANCE = new CommonServer();
 	private CommonServer() {}
 
 	public void onInit() {
 		LOGGER.info("Init");
 
-		ServerConfigHandler = new ConfigHandler<>(ServerConfig.class, IPlatformContextService.INSTANCE.resolveConfigDir(MOD_ID + ".server.json"));
-		ServerConfigHandler.load();
+		ServerConfig.HANDLER.load();
 
 		ServerCore.init();
 

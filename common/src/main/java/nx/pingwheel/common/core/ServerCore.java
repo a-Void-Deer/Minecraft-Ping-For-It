@@ -20,7 +20,7 @@ import static nx.pingwheel.common.Global.*;
 public class ServerCore {
 	private ServerCore() {}
 
-	private static final ServerConfig Config = ServerConfigHandler.getConfig();
+	private static final ServerConfig Config = ServerConfig.HANDLER.getConfig();
 	private static final HashMap<UUID, String> playerChannels = new HashMap<>();
 	private static final HashMap<UUID, RateLimiter> playerRates = new HashMap<>();
 

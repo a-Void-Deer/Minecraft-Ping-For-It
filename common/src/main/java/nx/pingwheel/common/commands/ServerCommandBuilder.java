@@ -11,6 +11,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.MutableComponent;
 import nx.pingwheel.common.compat.Component;
+import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.helper.ChannelMode;
 import nx.pingwheel.common.helper.LanguageUtils;
 import org.apache.logging.log4j.util.TriConsumer;
@@ -18,10 +19,10 @@ import org.apache.logging.log4j.util.TriConsumer;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import static nx.pingwheel.common.Global.ServerConfigHandler;
-
 public class ServerCommandBuilder {
 	private ServerCommandBuilder() {}
+
+	private static final ServerConfig Config = ServerConfig.HANDLER.getConfig();
 
 	public static LiteralArgumentBuilder<CommandSourceStack> build(TriConsumer<CommandContext<CommandSourceStack>, Boolean, MutableComponent> responseHandler) {
 		var langDefaultChannel = LanguageUtils.command("default_channel");
@@ -33,7 +34,7 @@ public class ServerCommandBuilder {
 
 		var cmdDefaultChannel = LiteralArgumentBuilder.<CommandSourceStack>literal("default_channel")
 			.executes((context) -> {
-				var currentChannelMode = ServerConfigHandler.getConfig().getDefaultChannelMode();
+				var currentChannelMode = Config.getDefaultChannelMode();
 
 				responseHandler.accept(context, true, langDefaultChannel.path("get.response")
 					.get(langDefaultChannel.path("value").path(currentChannelMode.toString()).get().withStyle(ChatFormatting.YELLOW)));
@@ -56,8 +57,8 @@ public class ServerCommandBuilder {
 						return 0;
 					}
 
-					ServerConfigHandler.getConfig().setDefaultChannelMode(newMode);
-					ServerConfigHandler.save();
+					Config.setDefaultChannelMode(newMode);
+					ServerConfig.HANDLER.save();
 
 					responseHandler.accept(context, true, langDefaultChannel.path("set.response")
 						.get(langDefaultChannel.path("value").path(newMode.toString()).get().withStyle(ChatFormatting.YELLOW)));
@@ -66,7 +67,7 @@ public class ServerCommandBuilder {
 
 		var cmdPlayerTracking = LiteralArgumentBuilder.<CommandSourceStack>literal("player_tracking")
 			.executes((context) -> {
-				var isPlayerTrackingEnabled = ServerConfigHandler.getConfig().isPlayerTrackingEnabled();
+				var isPlayerTrackingEnabled = Config.isPlayerTrackingEnabled();
 
 				responseHandler.accept(context, true, langPlayerTracking.path("get.response")
 					.get(LanguageUtils.from(isPlayerTrackingEnabled).withStyle(ChatFormatting.YELLOW)));
@@ -76,8 +77,8 @@ public class ServerCommandBuilder {
 				.executes((context) -> {
 					var enablePlayerTracking = context.getArgument("state", Boolean.class);
 
-					ServerConfigHandler.getConfig().setPlayerTrackingEnabled(enablePlayerTracking);
-					ServerConfigHandler.save();
+					Config.setPlayerTrackingEnabled(enablePlayerTracking);
+					ServerConfig.HANDLER.save();
 
 					responseHandler.accept(context, true, langPlayerTracking.path("set.response")
 						.get(LanguageUtils.from(enablePlayerTracking).withStyle(ChatFormatting.YELLOW)));
@@ -86,7 +87,7 @@ public class ServerCommandBuilder {
 
 		var cmdRegenTime = LiteralArgumentBuilder.<CommandSourceStack>literal("regen_time")
 			.executes((context) -> {
-				var regenTime = ServerConfigHandler.getConfig().getMsToRegenerate();
+				var regenTime = Config.getMsToRegenerate();
 
 				responseHandler.accept(context, true, langRegenTime.path("get.response")
 					.get(LanguageUtils.from(regenTime).withStyle(ChatFormatting.YELLOW)));
@@ -96,8 +97,8 @@ public class ServerCommandBuilder {
 				.executes((context) -> {
 					var regenTime = context.getArgument("time", Integer.class);
 
-					ServerConfigHandler.getConfig().setMsToRegenerate(regenTime);
-					ServerConfigHandler.save();
+					Config.setMsToRegenerate(regenTime);
+					ServerConfig.HANDLER.save();
 
 					responseHandler.accept(context, true, langRegenTime.path("set.response")
 						.get(LanguageUtils.from(regenTime).withStyle(ChatFormatting.YELLOW)));
@@ -106,7 +107,7 @@ public class ServerCommandBuilder {
 
 		var cmdRateLimit = LiteralArgumentBuilder.<CommandSourceStack>literal("rate_limit")
 			.executes((context) -> {
-				var rateLimit = ServerConfigHandler.getConfig().getRateLimit();
+				var rateLimit = Config.getRateLimit();
 
 				responseHandler.accept(context, true, langRateLimit.path("get.response")
 					.get(LanguageUtils.from(rateLimit).withStyle(ChatFormatting.YELLOW)));
@@ -116,8 +117,8 @@ public class ServerCommandBuilder {
 				.executes((context) -> {
 					var rateLimit = context.getArgument("limit", Integer.class);
 
-					ServerConfigHandler.getConfig().setRateLimit(rateLimit);
-					ServerConfigHandler.save();
+					Config.setRateLimit(rateLimit);
+					ServerConfig.HANDLER.save();
 
 					responseHandler.accept(context, true, langRateLimit.path("set.response")
 						.get(LanguageUtils.from(rateLimit).withStyle(ChatFormatting.YELLOW)));

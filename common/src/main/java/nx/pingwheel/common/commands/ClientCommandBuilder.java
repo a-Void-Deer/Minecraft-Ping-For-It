@@ -8,11 +8,11 @@ import com.mojang.brigadier.context.CommandContext;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.MutableComponent;
 import nx.pingwheel.common.compat.Component;
+import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.helper.LanguageUtils;
 import nx.pingwheel.common.screen.SettingsScreen;
 import org.apache.logging.log4j.util.TriConsumer;
 
-import static nx.pingwheel.common.ClientGlobal.ConfigHandler;
 import static nx.pingwheel.common.ClientGlobal.Game;
 import static nx.pingwheel.common.config.ClientConfig.MAX_CHANNEL_LENGTH;
 
@@ -25,7 +25,7 @@ public class ClientCommandBuilder {
 
 		var cmdChannel = LiteralArgumentBuilder.<S>literal("channel")
 			.executes((context) -> {
-				var currentChannel = ConfigHandler.getConfig().getChannel();
+				var currentChannel = ClientConfig.HANDLER.getConfig().getChannel();
 
 				if (currentChannel.isEmpty()) {
 					responseHandler.accept(context, true, langChannel.path("get.response.default").get());
@@ -45,8 +45,8 @@ public class ClientCommandBuilder {
 					return 0;
 				}
 
-				ConfigHandler.getConfig().setChannel(newChannel);
-				ConfigHandler.save();
+				ClientConfig.HANDLER.getConfig().setChannel(newChannel);
+				ClientConfig.HANDLER.save();
 
 				if (newChannel.isEmpty()) {
 					responseHandler.accept(context, true, langChannel.path("set.response.default").get());

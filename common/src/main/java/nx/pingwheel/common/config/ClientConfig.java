@@ -4,10 +4,12 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
-import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
+import nx.pingwheel.common.platform.IPlatformContextService;
+import nx.pingwheel.common.platform.IPlatformNetworkService;
 
 import static nx.pingwheel.common.ClientGlobal.Game;
+import static nx.pingwheel.common.Global.MOD_ID;
 
 @Getter
 @Setter
@@ -49,4 +51,6 @@ public class ClientConfig implements IConfig {
 			IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(channel));
 		}
 	}
+
+	public static final ConfigHandler<ClientConfig> HANDLER = new ConfigHandler<>(ClientConfig.class, IPlatformContextService.INSTANCE.resolveConfigDir(MOD_ID + ".json"));
 }

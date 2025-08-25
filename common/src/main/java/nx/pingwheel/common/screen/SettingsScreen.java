@@ -17,7 +17,6 @@ import nx.pingwheel.common.helper.OptionUtils;
 import java.util.Collections;
 import java.util.List;
 
-import static nx.pingwheel.common.ClientGlobal.ConfigHandler;
 import static nx.pingwheel.common.config.ClientConfig.*;
 
 public class SettingsScreen extends Screen {
@@ -30,7 +29,7 @@ public class SettingsScreen extends Screen {
 
 	public SettingsScreen() {
 		super(LanguageUtils.settings("title").get());
-		this.config = ConfigHandler.getConfig();
+		this.config = ClientConfig.HANDLER.getConfig();
 	}
 
 	public SettingsScreen(Screen parent) {
@@ -76,7 +75,7 @@ public class SettingsScreen extends Screen {
 
 	@Override
 	public void onClose() {
-		ConfigHandler.save();
+		ClientConfig.HANDLER.save();
 
 		if (parent != null && this.minecraft != null) {
 			this.minecraft.setScreen(parent);

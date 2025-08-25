@@ -11,14 +11,13 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.UUID;
 
-import static nx.pingwheel.common.ClientGlobal.ConfigHandler;
 import static nx.pingwheel.common.ClientGlobal.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 
 @Getter
 public class Ping {
 
-	private static final ClientConfig Config = ConfigHandler.getConfig();
+	private static final ClientConfig Config = ClientConfig.HANDLER.getConfig();
 
 	@Setter
 	private Vec3 pos;

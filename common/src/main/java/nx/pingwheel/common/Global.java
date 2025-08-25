@@ -1,7 +1,5 @@
 package nx.pingwheel.common;
 
-import nx.pingwheel.common.config.ConfigHandler;
-import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.platform.IPlatformContextService;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -12,8 +10,6 @@ public class Global {
 	private Global() {}
 
 	public static final String MOD_VERSION = IPlatformContextService.INSTANCE.getSelfModVersion();
-	public static ConfigHandler<ServerConfig> ServerConfigHandler = null;
-
 	public static final String MOD_ID = "ping-wheel";
 	public static final String MOD_PREFIX = "[Ping-Wheel] ";
 	public static final Logger LOGGER = LogManager.getLogger(MOD_ID,
