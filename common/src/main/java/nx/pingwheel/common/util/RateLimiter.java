@@ -13,15 +13,19 @@ public class RateLimiter {
 		RateLimiter.timeWindow = Duration.ofMillis(msToRegenerate * limit);
 	}
 
-	private Instant startTime;
+	private Instant startTime = null;
 
-	public RateLimiter() {
-		this.startTime = Instant.now().minus(timeWindow).plus(timeToRegenerate);
-	}
+	public RateLimiter() {}
 
-	public boolean checkAndBlock() {
+	public boolean checkExceeded() {
+		if (this.startTime == null) {
+			this.startTime = Instant.now().minus(timeWindow).plus(timeToRegenerate);
+
+			return false;
+		}
+
 		final var now = Instant.now();
-		var elapsed = Duration.between(startTime, now);
+		var elapsed = Duration.between(this.startTime, now);
 
 		if (elapsed.compareTo(timeWindow) > 0) {
 			elapsed = timeWindow;
@@ -33,7 +37,7 @@ public class RateLimiter {
 			return true;
 		}
 
-		startTime = now.minus(leftOver);
+		this.startTime = now.minus(leftOver);
 
 		return false;
 	}

@@ -50,16 +50,15 @@ public class ServerCore {
 			return;
 		}
 
-		var rateLimiter = PLAYER_RATES.get(player.getUUID());
+		PLAYER_RATES.putIfAbsent(player.getUUID(), new RateLimiter());
+		final var rateLimiter = PLAYER_RATES.get(player.getUUID());
 
-		if (rateLimiter == null) {
-			PLAYER_RATES.put(player.getUUID(), new RateLimiter());
-		} else if (SERVER_CONFIG.getRateLimit() > 0 && rateLimiter.checkAndBlock()) {
+		if (SERVER_CONFIG.getRateLimit() > 0 && rateLimiter.checkExceeded()) {
 			return;
 		}
 		
-		var channel = packet.channel();
-		var defaultChannelMode = SERVER_CONFIG.getDefaultChannelMode();
+		final var channel = packet.channel();
+		final var defaultChannelMode = SERVER_CONFIG.getDefaultChannelMode();
 
 		if (channel.isEmpty() && defaultChannelMode == ChannelMode.DISABLED) {
 			player.displayClientMessage(Component.literal("§8[Ping-Wheel] §eMust be in a channel to ping location\n§fUse §a/pingwheel channel§f to switch"), false);
@@ -76,7 +75,7 @@ public class ServerCore {
 		}
 
 		PingLocationS2CPacket packetOut;
-		var playerList = server.getPlayerList();
+		final var playerList = server.getPlayerList();
 
 		if (!SERVER_CONFIG.isPlayerTrackingEnabled() && targetEntityIsPlayer(packet, playerList)) {
 			packetOut = new PingLocationS2CPacket(packet.channel(), packet.pos(), null, packet.sequence(), packet.dimension(), player.getUUID());
@@ -98,7 +97,7 @@ public class ServerCore {
 	}
 
 	private static boolean targetEntityIsPlayer(PingLocationC2SPacket packet, PlayerList playerList) {
-		var playerUUID = packet.entity();
+		final var playerUUID = packet.entity();
 
 		if (playerUUID == null) {
 			return false;
