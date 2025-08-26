@@ -40,7 +40,7 @@ public class SettingsScreen extends Screen {
 
 	@Override
 	protected void init() {
-		this.list = new OptionsList(this.minecraft, this.width, this.height, 32, this.height - 32, 25);
+		this.list = new OptionsList(this.minecraft, this.width, this.height - 64, 32, 25);
 
 		final var pingVolumeOption = getPingVolumeOption();
 		final var pingDurationOption = getPingDurationOption();
