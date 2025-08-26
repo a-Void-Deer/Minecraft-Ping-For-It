@@ -33,8 +33,6 @@ public class SettingsScreen extends Screen {
 
 	@Override
 	public void tick() {
-		this.channelTextField.tick();
-
 		if (this.channelTextField.isFocused() && this.getFocused() != this.channelTextField) {
 			this.setFocused(this.channelTextField);
 		}
@@ -86,15 +84,18 @@ public class SettingsScreen extends Screen {
 	}
 
 	@Override
+	public void renderBackground(GuiGraphics ctx, int mouseX, int mouseY, float delta) {
+		this.renderDirtBackground(ctx);
+	}
+
+	@Override
 	public void render(GuiGraphics ctx, int mouseX, int mouseY, float delta) {
-		this.renderBackground(ctx);
+		super.render(ctx, mouseX, mouseY, delta);
 		this.list.render(ctx, mouseX, mouseY, delta);
 		ctx.drawCenteredString(this.font, this.title, this.width / 2, 20, 16777215);
 
 		ctx.drawString(this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, 10526880);
 		this.channelTextField.render(ctx, mouseX, mouseY, delta);
-
-		super.render(ctx, mouseX, mouseY, delta);
 
 		if (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused()) {
 			ctx.renderTooltip(this.font, this.font.split(LanguageUtils.settings("channel.tooltip").get(), 140), mouseX, mouseY);
