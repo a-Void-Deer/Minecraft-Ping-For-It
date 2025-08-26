@@ -8,7 +8,6 @@ import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import org.apache.logging.log4j.util.TriConsumer;
 
@@ -26,7 +25,6 @@ public class PlatformClientEventServiceImpl implements IPlatformClientEventServi
 		public void onClientTick(TickEvent.ClientTickEvent event) {
 			if (event.phase.equals(TickEvent.Phase.START)) {
 				callback.run();
-				CommonClient.INSTANCE.onTickStart();
 			}
 		}
 	}
