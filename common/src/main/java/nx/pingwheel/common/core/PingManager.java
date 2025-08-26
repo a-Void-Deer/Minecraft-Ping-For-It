@@ -1,15 +1,10 @@
 package nx.pingwheel.common.core;
 
 import com.mojang.math.Matrix4f;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.item.ItemEntity;
 import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.math.MathUtils;
 
 import java.util.ArrayList;
 import java.util.Objects;
-import java.util.UUID;
 
 import static nx.pingwheel.common.CommonClient.Game;
 
@@ -48,29 +43,14 @@ public class PingManager {
 			return;
 		}
 
-		var time = (int)Game.level.getGameTime();
-
-		var cameraPos = Game.player.getEyePosition(tickDelta);
+		final var time = (int)Game.level.getGameTime();
+		final var cameraPos = Game.player.getEyePosition(tickDelta);
 		PingData target = null;
 
 		for (var iter = PING_REPO.iterator(); iter.hasNext(); ) {
-			var ping = iter.next();
+			final var ping = iter.next();
 
-			if (ping.getUuid() != null) {
-				var ent = getEntity(ping.getUuid());
-
-				if (ent != null) {
-					if (ent.getType() == EntityType.ITEM && CLIENT_CONFIG.isItemIconVisible()) {
-						ping.setItemStack(((ItemEntity)ent).getItem().copy());
-					}
-
-					ping.setPos(ent.getPosition(tickDelta).add(0, ent.getBoundingBox().getYsize(), 0));
-				}
-			}
-
-			ping.setDistance(cameraPos.distanceTo(ping.getPos()));
-			ping.setScreenPos(MathUtils.worldToScreen(ping.getPos(), modelViewMatrix, projectionMatrix));
-			ping.setAge(time - ping.getSpawnTime());
+			ping.update(modelViewMatrix, projectionMatrix, tickDelta, cameraPos, time);
 
 			if (ping.isExpired()) {
 				iter.remove();
@@ -84,19 +64,5 @@ public class PingManager {
 		}
 
 		PING_REPO.sort((a, b) -> Double.compare(b.getDistance(), a.getDistance()));
-	}
-
-	private static Entity getEntity(UUID uuid) {
-		if (Game.level == null) {
-			return null;
-		}
-
-		for (var entity : Game.level.entitiesForRendering()) {
-			if (entity.getUUID().equals(uuid)) {
-				return entity;
-			}
-		}
-
-		return null;
 	}
 }

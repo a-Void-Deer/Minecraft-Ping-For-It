@@ -1,12 +1,16 @@
 package nx.pingwheel.common.core;
 
+import com.mojang.math.Matrix4f;
 import lombok.Getter;
 import lombok.Setter;
 import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.math.MathUtils;
 import nx.pingwheel.common.math.ScreenPos;
 import org.jetbrains.annotations.Nullable;
 
@@ -29,14 +33,11 @@ public class PingData {
 	private final int dimension;
 	private final int spawnTime;
 
-	@Setter
 	private int age;
-	@Setter
 	private double distance;
-	@Setter
+	private float scale;
 	@Nullable
 	private ScreenPos screenPos;
-	@Setter
 	@Nullable
 	private ItemStack itemStack;
 
@@ -47,6 +48,25 @@ public class PingData {
 		this.sequence = sequence;
 		this.dimension = dimension;
 		this.spawnTime = spawnTime;
+	}
+
+	public void update(Matrix4f modelViewMatrix, Matrix4f projectionMatrix, float tickDelta, Vec3 cameraPos, int gameTime) {
+		if (uuid != null) {
+			final var ent = GameContext.getEntity(uuid);
+
+			if (ent != null) {
+				if (ent.getType() == EntityType.ITEM && CLIENT_CONFIG.isItemIconVisible()) {
+					this.itemStack = ((ItemEntity)ent).getItem().copy();
+				}
+
+				this.pos = ent.getPosition(tickDelta).add(0, ent.getBoundingBox().getYsize(), 0);
+			}
+		}
+
+		this.distance = cameraPos.distanceTo(pos);
+		this.calculateScale();
+		this.screenPos = MathUtils.worldToScreen(pos, modelViewMatrix, projectionMatrix);
+		this.age = gameTime - spawnTime;
 	}
 
 	public boolean isExpired() {
@@ -62,8 +82,8 @@ public class PingData {
 			return 0f;
 		}
 
-		var wnd = Game.getWindow();
-		var center = new Vec2(wnd.getGuiScaledWidth() * 0.5f, wnd.getGuiScaledHeight() * 0.5f);
+		final var wnd = Game.getWindow();
+		final var center = new Vec2(wnd.getGuiScaledWidth() * 0.5f, wnd.getGuiScaledHeight() * 0.5f);
 
 		return this.screenPos.distanceTo(center);
 	}
@@ -74,5 +94,12 @@ public class PingData {
 		}
 
 		return this.distanceToCenter() < b.distanceToCenter();
+	}
+
+	private void calculateScale() {
+		final var scale = 2.0 / Math.pow(distance, 0.3);
+		final var pingSize = CLIENT_CONFIG.getPingSize() / 100f;
+
+		this.scale = (float)Math.max(1.0, scale) * 0.4f * pingSize;
 	}
 }

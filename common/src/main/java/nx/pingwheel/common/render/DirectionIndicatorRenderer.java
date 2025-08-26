@@ -26,7 +26,7 @@ public class DirectionIndicatorRenderer {
 		safeScreenCenter = new Vec2((safeZoneBottomRight.x - safeZoneTopLeft.x) * 0.5f, (safeZoneBottomRight.y - safeZoneTopLeft.y) * 0.5f);
 	}
 
-	public static void draw(DrawContext ctx, PingData ping, float pingSize, float pingScale) {
+	public static void draw(DrawContext ctx, PingData ping) {
 		final var screenPos = ping.getScreenPos();
 
 		if (screenPos == null) {
@@ -34,21 +34,25 @@ public class DirectionIndicatorRenderer {
 		}
 
 		final var behindCamera = screenPos.isBehindCamera();
-		var pingDirectionVec = new Vec2(screenPos.x - safeZoneTopLeft.x - safeScreenCenter.x, screenPos.y - safeZoneTopLeft.y - safeScreenCenter.y);
-
-		if (behindCamera) {
-			pingDirectionVec = pingDirectionVec.scale(-1);
-		}
-
-		final var pingAngle = (float)Math.atan2(pingDirectionVec.y, pingDirectionVec.x);
 		final var isOffScreen = behindCamera || !screenPos.isInBounds(Vec2.ZERO, screenSize);
 
 		if (!isOffScreen) {
 			return;
 		}
 
-		final var edgePosition = MathUtils.calculateAngleRectIntersection(pingAngle, safeZoneTopLeft, safeZoneBottomRight);
+		var pingDirectionVec = new Vec2(screenPos.x - safeZoneTopLeft.x - safeScreenCenter.x, screenPos.y - safeZoneTopLeft.y - safeScreenCenter.y);
+
+		if (behindCamera) {
+			pingDirectionVec = pingDirectionVec.scale(-1);
+		}
+
 		final var m = ctx.getMatrices();
+		final var pingScale = ping.getScale();
+		final var pingSize = CLIENT_CONFIG.getPingSize() / 100f;
+		final var pingAngle = (float)Math.atan2(pingDirectionVec.y, pingDirectionVec.x);
+		final var edgePosition = MathUtils.calculateAngleRectIntersection(pingAngle, safeZoneTopLeft, safeZoneBottomRight);
+		final var indicatorOffsetX = Math.cos(pingAngle + Math.PI) * 12;
+		final var indicatorOffsetY = Math.sin(pingAngle + Math.PI) * 12;
 
 		m.pushPose();
 		{
@@ -57,8 +61,6 @@ public class DirectionIndicatorRenderer {
 			m.pushPose();
 			{
 				m.scale(pingScale, pingScale, 1f);
-				final var indicatorOffsetX = Math.cos(pingAngle + Math.PI) * 12;
-				final var indicatorOffsetY = Math.sin(pingAngle + Math.PI) * 12;
 				m.translate(indicatorOffsetX, indicatorOffsetY, 0);
 				ctx.renderPing(ping.getItemStack(), CLIENT_CONFIG.isItemIconVisible());
 			}

@@ -44,24 +44,15 @@ public class OverlayRenderer {
 
 			m.translate(0f, 0f, 16f);
 
-			final var pingSize = CLIENT_CONFIG.getPingSize() / 100f;
-			final var pingScale = getDistanceScale(ping.getDistance()) * pingSize;
-
 			if (showDirectionIndicator) {
-				DirectionIndicatorRenderer.draw(ctx, ping, pingSize, pingScale);
+				DirectionIndicatorRenderer.draw(ctx, ping);
 			}
 
 			if (!behindCamera) {
-				PingLocationRenderer.draw(ctx, ping, pingScale);
+				PingLocationRenderer.draw(ctx, ping);
 			}
 		}
 
 		m.popPose();
-	}
-
-	private static float getDistanceScale(double distance) {
-		final var scale = 2.0 / Math.pow(distance, 0.3);
-
-		return (float)Math.max(1.0, scale) * 0.4f;
 	}
 }

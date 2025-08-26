@@ -13,7 +13,7 @@ public class PingLocationRenderer {
 
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
 
-	public static void draw(DrawContext ctx, PingData ping, float pingScale) {
+	public static void draw(DrawContext ctx, PingData ping) {
 		final var screenPos = ping.getScreenPos();
 
 		if (screenPos == null) {
@@ -21,6 +21,7 @@ public class PingLocationRenderer {
 		}
 
 		final var m = ctx.getMatrices();
+		final var pingScale = ping.getScale();
 
 		m.pushPose();
 		m.translate(screenPos.x, screenPos.y, 0);
