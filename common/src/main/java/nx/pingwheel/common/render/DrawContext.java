@@ -3,7 +3,8 @@ package nx.pingwheel.common.render;
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.*;
+import com.mojang.blaze3d.vertex.PoseStack;
+import lombok.Getter;
 import net.minecraft.client.gui.GuiComponent;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.renderer.block.model.ItemTransforms;
@@ -27,6 +28,7 @@ public class DrawContext {
 	private static final int SHADOW_BLACK = FastColor.ARGB32.color(64, 0, 0, 0);
 	private static final int LIGHT_VALUE_MAX = 15728880;
 
+	@Getter
 	private PoseStack matrices;
 
 	public DrawContext(PoseStack matrices) {

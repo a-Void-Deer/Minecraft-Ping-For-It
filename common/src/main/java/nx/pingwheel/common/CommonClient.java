@@ -7,7 +7,7 @@ import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.core.PingController;
 import nx.pingwheel.common.core.PingManager;
 import nx.pingwheel.common.core.PingReceiver;
-import nx.pingwheel.common.render.PingRenderer;
+import nx.pingwheel.common.render.OverlayRenderer;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
@@ -67,7 +67,7 @@ public class CommonClient {
 	}
 
 	public void onRenderGUI(PoseStack poseStack, float tickDelta) {
-		PingRenderer.onRenderGUI(poseStack, tickDelta);
+		OverlayRenderer.draw(poseStack, tickDelta);
 	}
 
 	public void onPingLocationPacket(PingLocationS2CPacket packet) {
