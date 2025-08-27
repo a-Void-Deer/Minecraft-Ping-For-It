@@ -13,19 +13,19 @@ public class PingManager {
 
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
 
-	public static final ArrayList<PingData> PING_REPO = new ArrayList<>();
+	public static final ArrayList<PingView> PING_REPO = new ArrayList<>();
 
 	public static void clearPings() {
 		PING_REPO.clear();
 	}
 
-	public static void addOrReplacePing(PingData newPing) {
+	public static void addOrReplacePing(PingView newPing) {
 		int index = -1;
 
 		for (int i = 0; i < PING_REPO.size(); i++) {
 			var entry = PING_REPO.get(i);
 
-			if (Objects.equals(entry.getAuthor(), newPing.getAuthor()) && entry.getSequence() == newPing.getSequence()) {
+			if (Objects.equals(entry.authorId, newPing.authorId) && entry.sequence == newPing.sequence) {
 				index = i;
 				break;
 			}
@@ -45,7 +45,7 @@ public class PingManager {
 
 		final var time = (int)Game.level.getGameTime();
 		final var cameraPos = Game.player.getEyePosition(tickDelta);
-		PingData target = null;
+		PingView target = null;
 
 		for (var iter = PING_REPO.iterator(); iter.hasNext(); ) {
 			final var ping = iter.next();

@@ -2,7 +2,7 @@ package nx.pingwheel.common.render;
 
 import net.minecraft.world.phys.Vec2;
 import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.core.PingData;
+import nx.pingwheel.common.core.PingView;
 import nx.pingwheel.common.math.MathUtils;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -26,7 +26,7 @@ public class DirectionIndicatorRenderer {
 		safeScreenCenter = new Vec2((safeZoneBottomRight.x - safeZoneTopLeft.x) * 0.5f, (safeZoneBottomRight.y - safeZoneTopLeft.y) * 0.5f);
 	}
 
-	public static void draw(DrawContext ctx, PingData ping) {
+	public static void draw(DrawContext ctx, PingView ping) {
 		final var screenPos = ping.getScreenPos();
 
 		if (screenPos == null) {

@@ -32,7 +32,7 @@ public class OverlayRenderer {
 		for (var ping : pingRepo) {
 			final var screenPos = ping.getScreenPos();
 
-			if (screenPos == null || ping.getDimension() != GameContext.getDimension()) {
+			if (screenPos == null || ping.dimension != GameContext.getDimension()) {
 				continue;
 			}
 

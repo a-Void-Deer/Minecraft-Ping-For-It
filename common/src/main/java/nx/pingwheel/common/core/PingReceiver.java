@@ -1,14 +1,11 @@
 package nx.pingwheel.common.core;
 
-import net.minecraft.sounds.SoundSource;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
-import nx.pingwheel.common.util.DirectionalSoundInstance;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.config.ClientConfig.MAX_PING_DISTANCE;
-import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
 
 public class PingReceiver {
 	private PingReceiver() {}
@@ -39,29 +36,11 @@ public class PingReceiver {
 			}
 		}
 
-		final var authorInfo = connection.getPlayerInfo(packet.author());
-
 		Game.execute(() -> {
-			PingManager.addOrReplacePing(new PingData(
-				packet.pos(),
-				packet.entity(),
-				authorInfo,
-				packet.sequence(),
-				packet.dimension(),
-				(int)Game.level.getGameTime()
-			));
+			final var newPing = PingView.from(packet);
 
-			if (packet.dimension() == GameContext.getDimension()) {
-				Game.getSoundManager().play(
-					new DirectionalSoundInstance(
-						PING_SOUND_EVENT,
-						SoundSource.MASTER,
-						CLIENT_CONFIG.getPingVolume() / 100f,
-						1f,
-						packet.pos()
-					)
-				);
-			}
+			PingManager.addOrReplacePing(newPing);
+			newPing.playSound();
 		});
 	}
 }

@@ -3,7 +3,7 @@ package nx.pingwheel.common.render;
 import net.minecraft.world.scores.PlayerTeam;
 import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.core.PingData;
+import nx.pingwheel.common.core.PingView;
 import nx.pingwheel.common.resource.LanguageUtils;
 
 import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_NAME_LABELS;
@@ -13,7 +13,7 @@ public class PingLocationRenderer {
 
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
 
-	public static void draw(DrawContext ctx, PingData ping) {
+	public static void draw(DrawContext ctx, PingView ping) {
 		final var screenPos = ping.getScreenPos();
 
 		if (screenPos == null) {
@@ -31,7 +31,7 @@ public class PingLocationRenderer {
 		ctx.renderLabel(distanceText, -1.5f, null);
 		ctx.renderPing(ping.getItemStack(), CLIENT_CONFIG.isItemIconVisible());
 
-		final var author = ping.getAuthor();
+		final var author = ping.getPlayerInfo();
 		final var showNameLabels = CLIENT_CONFIG.isNameLabelForced() || KEY_BINDING_NAME_LABELS.isDown();
 
 		if (showNameLabels && author != null) {
