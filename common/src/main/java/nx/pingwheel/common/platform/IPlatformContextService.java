@@ -14,4 +14,5 @@ public interface IPlatformContextService {
 	String getSelfModVersion();
 	Path resolveConfigDir(String path);
 	void registerKeyMapping(KeyMapping keyMapping);
+	boolean isModLoaded(String modId);
 }

@@ -28,4 +28,9 @@ public class PlatformContextServiceImpl implements IPlatformContextService {
 	public void registerKeyMapping(KeyMapping keyMapping) {
 		ClientRegistry.registerKeyBinding(keyMapping);
 	}
+
+	@Override
+	public boolean isModLoaded(String modId) {
+		return ModList.get().isLoaded(modId);
+	}
 }

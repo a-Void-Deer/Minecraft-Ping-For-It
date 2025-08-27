@@ -23,6 +23,7 @@ public class CommonClient {
 
 	public static final CommonClient INSTANCE = new CommonClient();
 	public static Minecraft Game = null;
+	public static boolean DistantHorizonsLoaded = false;
 
 	private CommonClient() {}
 
@@ -38,6 +39,8 @@ public class CommonClient {
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_PING);
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_NAME_LABELS);
+
+		DistantHorizonsLoaded = IPlatformContextService.INSTANCE.isModLoaded("distanthorizons");
 	}
 
 	public void onJoinServer() {

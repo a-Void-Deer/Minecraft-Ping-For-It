@@ -1,19 +1,73 @@
 package nx.pingwheel.common.math;
 
 
+import com.seibel.distanthorizons.api.DhApi;
+import com.seibel.distanthorizons.api.interfaces.data.IDhApiTerrainDataCache;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.EntityHitResult;
-import net.minecraft.world.phys.HitResult;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.*;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 import static nx.pingwheel.common.CommonClient.Game;
 
 public class Raycast {
 	private Raycast() {}
+
+	private static IDhApiTerrainDataCache terrainCache = null;
+	private static Instant lastCacheLoad = Instant.EPOCH;
+
+	public static void traceDistantAsync(Vec3 direction, float tickDelta, Consumer<BlockHitResult> callback) {
+		final var cameraEntity = Game.cameraEntity;
+
+		if (cameraEntity == null || cameraEntity.level == null) {
+			return;
+		}
+
+		final var rayStartVec = cameraEntity.getEyePosition(tickDelta);
+
+		final var ft = CompletableFuture.supplyAsync(() -> {
+			if (DhApi.Delayed.worldProxy == null) {
+				return null;
+			}
+
+			final var levelWrapper = DhApi.Delayed.worldProxy.getSinglePlayerLevel();
+
+			if (levelWrapper == null) {
+				return null;
+			}
+
+			if (terrainCache == null || Duration.between(lastCacheLoad, Instant.now()).getSeconds() > 10) {
+				terrainCache = DhApi.Delayed.terrainRepo.getSoftCache();
+				lastCacheLoad = Instant.now();
+			}
+
+			final var rayCastResult = DhApi.Delayed.terrainRepo.raycast(
+				levelWrapper,
+				rayStartVec.x, rayStartVec.y, rayStartVec.z,
+				(float)direction.x, (float)direction.y, (float)direction.z,
+				4096,
+				terrainCache
+			);
+
+			if (!rayCastResult.success || rayCastResult.payload == null) {
+				return null;
+			}
+
+			final var pos = new Vec3(rayCastResult.payload.pos.x, rayCastResult.payload.pos.y, rayCastResult.payload.pos.z);
+
+			return new BlockHitResult(pos, Direction.UP, new BlockPos((int)pos.x, (int)pos.y, (int)pos.z), true);
+		});
+
+		ft.thenAccept(result -> Optional.ofNullable(result).ifPresent(callback));
+	}
 
 	public static HitResult traceDirectional(Vec3 direction,
 											 float tickDelta,
