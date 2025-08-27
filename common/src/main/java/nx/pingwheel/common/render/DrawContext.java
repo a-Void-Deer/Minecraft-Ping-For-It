@@ -1,6 +1,6 @@
 package nx.pingwheel.common.render;
 
-import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.opengl.GlStateManager;
 import com.mojang.blaze3d.vertex.PoseStack;
 import lombok.Getter;
 import net.minecraft.client.gui.GuiGraphics;
@@ -55,10 +55,10 @@ public class DrawContext {
 
 	public void renderPlayerHead(PlayerInfo player) {
 		var texture = player.getSkin().texture();
-		RenderSystem.enableBlend();
+		GlStateManager._enableBlend();
 		guiGraphics.blit(RenderType::guiTextured, texture, 0, 0, 8, 8, 8, 8, 64, 64);
 		guiGraphics.blit(RenderType::guiTextured, texture, 0, 0, 40, 8, 8, 8, 64, 64); // Overlay (hat)
-		RenderSystem.disableBlend();
+		GlStateManager._disableBlend();
 	}
 
 	public void renderPing(ItemStack itemStack, boolean drawItemIcon) {
@@ -86,7 +86,7 @@ public class DrawContext {
 	public void renderTexture(ResourceLocation texture, int size) {
 		final var offset = size / -2;
 
-		RenderSystem.enableBlend();
+		GlStateManager._enableBlend();
 		guiGraphics.blit(
 			RenderType::guiTextured,
 			texture,
@@ -99,7 +99,7 @@ public class DrawContext {
 			size,
 			size
 		);
-		RenderSystem.disableBlend();
+		GlStateManager._disableBlend();
 	}
 
 	public void renderArrowIcon() {
