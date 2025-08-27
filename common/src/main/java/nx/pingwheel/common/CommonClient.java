@@ -6,7 +6,6 @@ import net.minecraft.client.Minecraft;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.core.PingController;
 import nx.pingwheel.common.core.PingManager;
-import nx.pingwheel.common.core.PingReceiver;
 import nx.pingwheel.common.render.OverlayRenderer;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
@@ -74,6 +73,6 @@ public class CommonClient {
 	}
 
 	public void onPingLocationPacket(PingLocationS2CPacket packet) {
-		PingReceiver.acceptPingPacket(packet);
+		PingManager.acceptPingPacket(packet);
 	}
 }
