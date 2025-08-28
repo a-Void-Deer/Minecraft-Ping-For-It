@@ -1,10 +1,11 @@
 package nx.pingwheel.neoforge;
 
+import net.minecraft.resources.ResourceLocation;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModLoadingContext;
+import net.neoforged.neoforge.client.event.AddClientReloadListenersEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
-import net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
 import nx.pingwheel.common.CommonClient;
@@ -13,7 +14,11 @@ import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
 import nx.pingwheel.common.screen.SettingsScreen;
 
+import static nx.pingwheel.common.Global.MOD_ID;
+
 public class NeoClient {
+
+	public static final ResourceLocation RELOAD_LISTENER_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "reload-listener");
 
 	public NeoClient(IEventBus modBus) {
 		CommonClient.INSTANCE.onInit();
@@ -23,7 +28,7 @@ public class NeoClient {
 		// packets are registered in Main class
 
 		// resource reload
-		modBus.addListener((RegisterClientReloadListenersEvent event) -> event.registerReloadListener(new ResourceReloadListener()));
+		modBus.addListener((AddClientReloadListenersEvent event) -> event.addListener(RELOAD_LISTENER_ID, new ResourceReloadListener()));
 
 		// config screen
 		ModLoadingContext
