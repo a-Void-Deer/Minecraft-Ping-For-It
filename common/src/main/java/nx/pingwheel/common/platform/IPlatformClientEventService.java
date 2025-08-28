@@ -1,11 +1,11 @@
 package nx.pingwheel.common.platform;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.math.Matrix4f;
-import org.apache.logging.log4j.util.TriConsumer;
+import nx.pingwheel.common.render.WorldRenderContext;
 
 import java.util.ServiceLoader;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 public interface IPlatformClientEventService {
 
@@ -16,6 +16,6 @@ public interface IPlatformClientEventService {
 	void registerTickStartEvent(Runnable callback);
 	void registerJoinServerEvent(Runnable callback);
 	void registerLeaveServerEvent(Runnable callback);
-	void registerRenderWorldEvent(TriConsumer<Matrix4f, Matrix4f, Float> callback);
+	void registerRenderWorldEvent(Consumer<WorldRenderContext> callback);
 	void registerRenderGUIEvent(BiConsumer<PoseStack, Float> callback);
 }

@@ -1,15 +1,15 @@
 package nx.pingwheel.fabric.platform;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.math.Matrix4f;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
+import nx.pingwheel.common.render.WorldRenderContext;
 import nx.pingwheel.fabric.event.GuiRenderCallback;
 import nx.pingwheel.fabric.event.WorldRenderCallback;
-import org.apache.logging.log4j.util.TriConsumer;
 
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 public class PlatformClientEventServiceImpl implements IPlatformClientEventService {
 
@@ -29,7 +29,7 @@ public class PlatformClientEventServiceImpl implements IPlatformClientEventServi
 	}
 
 	@Override
-	public void registerRenderWorldEvent(TriConsumer<Matrix4f, Matrix4f, Float> callback) {
+	public void registerRenderWorldEvent(Consumer<WorldRenderContext> callback) {
 		WorldRenderCallback.START.register(callback::accept);
 	}
 

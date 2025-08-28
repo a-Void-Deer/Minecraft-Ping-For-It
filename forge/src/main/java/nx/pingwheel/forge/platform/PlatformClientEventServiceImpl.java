@@ -1,7 +1,6 @@
 package nx.pingwheel.forge.platform;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.math.Matrix4f;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RenderGameOverlayEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
@@ -9,10 +8,11 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
-import org.apache.logging.log4j.util.TriConsumer;
+import nx.pingwheel.common.render.WorldRenderContext;
 
 import java.util.Objects;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 public class PlatformClientEventServiceImpl implements IPlatformClientEventService {
 
@@ -52,14 +52,14 @@ public class PlatformClientEventServiceImpl implements IPlatformClientEventServi
 	}
 
 	@Override
-	public void registerRenderWorldEvent(TriConsumer<Matrix4f, Matrix4f, Float> callback) {
+	public void registerRenderWorldEvent(Consumer<WorldRenderContext> callback) {
 		MinecraftForge.EVENT_BUS.register(new RenderWorldEventEventHandler(callback));
 	}
-	private record RenderWorldEventEventHandler(TriConsumer<Matrix4f, Matrix4f, Float> callback) {
+	private record RenderWorldEventEventHandler(Consumer<WorldRenderContext> callback) {
 		@SubscribeEvent
 		public void onRenderWorld(RenderLevelStageEvent event) {
 			if (event.getStage().equals(RenderLevelStageEvent.Stage.AFTER_WEATHER)) {
-				callback.accept(event.getPoseStack().last().pose(), event.getProjectionMatrix(), event.getPartialTick());
+				callback.accept(WorldRenderContext.of(event.getPoseStack().last().pose(), event.getProjectionMatrix(), event.getPartialTick(), event.getCamera()));
 			}
 		}
 	}

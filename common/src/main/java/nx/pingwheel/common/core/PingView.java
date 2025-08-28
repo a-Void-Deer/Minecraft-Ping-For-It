@@ -1,6 +1,5 @@
 package nx.pingwheel.common.core;
 
-import com.mojang.math.Matrix4f;
 import lombok.Getter;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.sounds.SoundSource;
@@ -13,6 +12,7 @@ import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.math.MathUtils;
 import nx.pingwheel.common.math.ScreenPos;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.render.WorldRenderContext;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
 import org.jetbrains.annotations.Nullable;
 
@@ -63,7 +63,7 @@ public class PingView extends PingData {
 		);
 	}
 
-	public void update(Matrix4f modelViewMatrix, Matrix4f projectionMatrix, float tickDelta, Vec3 cameraPos, int gameTime) {
+	public void update(WorldRenderContext ctx, int gameTime) {
 		if (this.spawnTime == 0) {
 			this.spawnTime = gameTime;
 		}
@@ -84,12 +84,12 @@ public class PingView extends PingData {
 					this.itemStack = ((ItemEntity)ent).getItem().copy();
 				}
 
-				this.pos = ent.getPosition(tickDelta).add(0, ent.getBoundingBox().getYsize(), 0);
+				this.pos = ent.getPosition(ctx.tickDelta).add(0, ent.getBoundingBox().getYsize(), 0);
 			}
 		}
 
-		this.screenPos = MathUtils.worldToScreen(pos, modelViewMatrix, projectionMatrix);
-		this.distance = cameraPos.distanceTo(pos);
+		this.screenPos = MathUtils.worldToScreen(pos, ctx.modelViewMatrix, ctx.projectionMatrix);
+		this.distance = ctx.camera.getPosition().distanceTo(pos);
 		this.calculateScale();
 	}
 

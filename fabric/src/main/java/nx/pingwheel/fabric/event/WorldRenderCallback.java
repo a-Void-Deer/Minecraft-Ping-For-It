@@ -1,16 +1,16 @@
 package nx.pingwheel.fabric.event;
 
-import com.mojang.math.Matrix4f;
 import net.fabricmc.fabric.api.event.Event;
 import net.fabricmc.fabric.api.event.EventFactory;
+import nx.pingwheel.common.render.WorldRenderContext;
 
 public interface WorldRenderCallback {
 
-	Event<WorldRenderCallback> START = EventFactory.createArrayBacked(WorldRenderCallback.class, (listeners) -> (modelViewMatrix, projectionMatrix, tickDelta) -> {
+	Event<WorldRenderCallback> START = EventFactory.createArrayBacked(WorldRenderCallback.class, (listeners) -> (worldRenderContext) -> {
 		for (WorldRenderCallback event : listeners) {
-			event.onRenderWorld(modelViewMatrix, projectionMatrix, tickDelta);
+			event.onRenderWorld(worldRenderContext);
 		}
 	});
 
-	void onRenderWorld(Matrix4f modelViewMatrix, Matrix4f projectionMatrix, float tickDelta);
+	void onRenderWorld(WorldRenderContext worldRenderContext);
 }

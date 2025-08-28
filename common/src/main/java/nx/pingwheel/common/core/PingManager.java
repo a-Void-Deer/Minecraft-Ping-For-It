@@ -1,8 +1,8 @@
 package nx.pingwheel.common.core;
 
-import com.mojang.math.Matrix4f;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.render.WorldRenderContext;
 
 import java.util.ArrayList;
 import java.util.Objects;
@@ -41,19 +41,18 @@ public class PingManager {
 		}
 	}
 
-	public static void updatePings(Matrix4f modelViewMatrix, Matrix4f projectionMatrix, float tickDelta) {
-		if (Game.player == null || Game.level == null || PING_REPO.isEmpty()) {
+	public static void updatePings(WorldRenderContext ctx) {
+		if (Game.level == null || PING_REPO.isEmpty()) {
 			return;
 		}
 
 		final var time = (int)Game.level.getGameTime();
-		final var cameraPos = Game.player.getEyePosition(tickDelta);
 		PingView target = null;
 
 		for (var iter = PING_REPO.iterator(); iter.hasNext(); ) {
 			final var ping = iter.next();
 
-			ping.update(modelViewMatrix, projectionMatrix, tickDelta, cameraPos, time);
+			ping.update(ctx, time);
 
 			if (ping.isExpired()) {
 				iter.remove();
