@@ -1,6 +1,6 @@
 package nx.pingwheel.common.platform;
 
-import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.gui.GuiGraphics;
 import nx.pingwheel.common.render.WorldRenderContext;
 
 import java.util.ServiceLoader;
@@ -17,5 +17,5 @@ public interface IPlatformClientEventService {
 	void registerJoinServerEvent(Runnable callback);
 	void registerLeaveServerEvent(Runnable callback);
 	void registerRenderWorldEvent(Consumer<WorldRenderContext> callback);
-	void registerRenderGUIEvent(BiConsumer<PoseStack, Float> callback);
+	void registerRenderGUIEvent(BiConsumer<GuiGraphics, Float> callback);
 }

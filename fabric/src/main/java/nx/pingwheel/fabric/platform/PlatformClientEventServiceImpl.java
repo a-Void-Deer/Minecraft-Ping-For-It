@@ -1,8 +1,8 @@
 package nx.pingwheel.fabric.platform;
 
-import com.mojang.blaze3d.vertex.PoseStack;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.minecraft.client.gui.GuiGraphics;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.render.WorldRenderContext;
 import nx.pingwheel.fabric.event.GuiRenderCallback;
@@ -34,7 +34,7 @@ public class PlatformClientEventServiceImpl implements IPlatformClientEventServi
 	}
 
 	@Override
-	public void registerRenderGUIEvent(BiConsumer<PoseStack, Float> callback) {
+	public void registerRenderGUIEvent(BiConsumer<GuiGraphics, Float> callback) {
 		GuiRenderCallback.START.register(callback::accept);
 	}
 }
