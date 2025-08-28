@@ -118,7 +118,8 @@ jobs:
       - name: "Move output to build directory"
         run: |
           mkdir -p ./build/libs
-          mv ./${{ matrix.loader }}/build/libs/${{ env.ARCHIVE_NAME }}-${{ env.MOD_VERSION }}.jar ./build/libs/${{ env.ARCHIVE_NAME }}-${{ env.MOD_VERSION }}-${{ matrix.loader }}-${{ env.MC_VERSION }}.jar
+          JAR_NAME="${{ env.ARCHIVE_NAME }}-${{ env.MOD_VERSION }}-${{ matrix.loader }}-${{ env.MC_VERSION }}"
+          mv "./${{ matrix.loader }}/build/libs/${JAR_NAME}.jar" "./build/libs/${JAR_NAME}.jar"
 
       - name: "Create version tag"
         run: |
