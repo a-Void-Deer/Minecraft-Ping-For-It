@@ -35,3 +35,7 @@ loom {
         }
     }
 }
+
+tasks.named("remapJar") {
+    archiveClassifier = "${project.name}-${minecraft_version}"
+}

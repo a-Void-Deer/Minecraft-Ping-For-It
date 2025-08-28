@@ -59,3 +59,7 @@ sourceSets.each {
     it.output.resourcesDir = dir
     it.java.destinationDirectory = dir
 }
+
+jar {
+    archiveClassifier = "${project.name}-${minecraft_version}"
+}
