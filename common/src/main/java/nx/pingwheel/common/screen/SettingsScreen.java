@@ -5,16 +5,11 @@ import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
-import net.minecraft.client.gui.components.TooltipAccessor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
-import net.minecraft.util.FormattedCharSequence;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.resource.LanguageUtils;
-
-import java.util.Collections;
-import java.util.List;
 
 import static nx.pingwheel.common.config.ClientConfig.*;
 
@@ -39,6 +34,10 @@ public class SettingsScreen extends Screen {
 	@Override
 	public void tick() {
 		this.channelTextField.tick();
+
+		if (this.channelTextField.isFocused() && this.getFocused() != this.channelTextField) {
+			this.setFocused(this.channelTextField);
+		}
 	}
 
 	@Override
@@ -69,7 +68,10 @@ public class SettingsScreen extends Screen {
 
 		this.addWidget(this.list);
 
-		this.addRenderableWidget(new Button(this.width / 2 - 100, this.height - 27, 200, 20, CommonComponents.GUI_DONE, (button) -> onClose()));
+		this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, (button) -> onClose())
+			.pos(this.width / 2 - 100, this.height - 27)
+			.size(200, 20)
+			.build());
 	}
 
 	@Override
@@ -89,28 +91,14 @@ public class SettingsScreen extends Screen {
 		this.list.render(matrices, mouseX, mouseY, delta);
 		drawCenteredString(matrices, this.font, this.title, this.width / 2, 20, 16777215);
 
-		drawString(matrices, this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.y - 12, 10526880);
+		drawString(matrices, this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, 10526880);
 		this.channelTextField.render(matrices, mouseX, mouseY, delta);
 
 		super.render(matrices, mouseX, mouseY, delta);
 
-		var tooltipLines = getHoveredButtonTooltip(this.list, mouseX, mouseY);
-
-		if (tooltipLines.isEmpty() && (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused())) {
-			tooltipLines = this.font.split(LanguageUtils.settings("channel.tooltip").get(), 140);
+		if (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused()) {
+			this.renderTooltip(matrices, this.font.split(LanguageUtils.settings("channel.tooltip").get(), 140), mouseX, mouseY);
 		}
-
-		this.renderTooltip(matrices, tooltipLines, mouseX, mouseY);
-	}
-
-	private static List<FormattedCharSequence> getHoveredButtonTooltip(OptionsList buttonList, int mouseX, int mouseY) {
-		final var orderableTooltip = (TooltipAccessor)buttonList.getMouseOver(mouseX, mouseY).orElse(null);
-
-		if (orderableTooltip != null) {
-			return orderableTooltip.getTooltip();
-		}
-
-		return Collections.emptyList();
 	}
 
 	private OptionInstance<Integer> getPingVolumeOption() {
