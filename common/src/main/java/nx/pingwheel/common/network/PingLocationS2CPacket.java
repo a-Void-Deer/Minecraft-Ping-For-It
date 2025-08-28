@@ -12,7 +12,7 @@ import static nx.pingwheel.common.config.ClientConfig.MAX_CHANNEL_LENGTH;
 
 public record PingLocationS2CPacket(String channel, Vec3 pos, UUID entity, int sequence, int dimension, UUID author) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = new ResourceLocation(MOD_ID + "-s2c", "ping-location");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID + "-s2c", "ping-location");
 	public static final Type<PingLocationS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public PingLocationS2CPacket() {
