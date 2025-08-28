@@ -5,6 +5,8 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
+import net.minecraft.client.gui.screens.inventory.tooltip.DefaultTooltipPositioner;
 import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
@@ -98,7 +100,13 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.channelTextField.render(ctx, mouseX, mouseY, delta);
 
 		if (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused()) {
-			ctx.renderTooltip(this.font, this.font.split(LanguageUtils.settings("channel.tooltip").get(), 140), mouseX, mouseY);
+			final var clientTooltipComponentList = this.font
+				.split(LanguageUtils.settings("channel.tooltip").get(), 140)
+				.stream()
+				.map(ClientTooltipComponent::create)
+				.toList();
+
+			ctx.renderTooltip(this.font, clientTooltipComponentList, mouseX, mouseY, DefaultTooltipPositioner.INSTANCE, null);
 		}
 	}
 

@@ -15,12 +15,8 @@ public abstract class GuiMixin {
 	@Inject(method = "render", at = @At(value = "HEAD"))
 	public void render(GuiGraphics guiGraphics, DeltaTracker deltaTracker, CallbackInfo callbackInfo) {
 		final var matrixStack = guiGraphics.pose();
-		matrixStack.pushPose();
-
-		/** the hotbar is rendered at Z -90 {@link Gui#renderItemHotbar(GuiGraphics, DeltaTracker)} */
-		matrixStack.translate(0, 0, -90);
+		matrixStack.pushMatrix();
 		CommonClient.INSTANCE.onRenderGUI(guiGraphics, deltaTracker.getGameTimeDeltaPartialTick(true));
-
-		matrixStack.popPose();
+		matrixStack.popMatrix();
 	}
 }

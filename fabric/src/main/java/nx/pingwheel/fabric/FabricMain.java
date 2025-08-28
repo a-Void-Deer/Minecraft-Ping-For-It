@@ -30,12 +30,12 @@ public class FabricMain implements ModInitializer {
 		ServerPlayNetworking.registerGlobalReceiver(
 			PingLocationC2SPacket.PACKET_TYPE,
 			(packet, context)
-				-> CommonServer.INSTANCE.onPingLocationPacket(context.player().server, context.player(), packet)
+				-> CommonServer.INSTANCE.onPingLocationPacket(context.server(), context.player(), packet)
 		);
 		ServerPlayNetworking.registerGlobalReceiver(
 			UpdateChannelC2SPacket.PACKET_TYPE,
 			(packet, context)
-				-> CommonServer.INSTANCE.onChannelUpdatePacket(context.player().server, context.player(), packet)
+				-> CommonServer.INSTANCE.onChannelUpdatePacket(context.server(), context.player(), packet)
 		);
 
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {

@@ -23,9 +23,9 @@ public class PingLocationRenderer {
 		final var m = ctx.getMatrices();
 		final var pingScale = ping.getScale();
 
-		m.pushPose();
-		m.translate(screenPos.x, screenPos.y, 0);
-		m.scale(pingScale, pingScale, 1f);
+		m.pushMatrix();
+		m.translate(screenPos.x, screenPos.y);
+		m.scale(pingScale, pingScale);
 
 		final var distanceText = LanguageUtils.UNIT_METERS.get("%,.1f".formatted(ping.getDistance()));
 		ctx.renderLabel(distanceText, -1.5f, null);
@@ -39,6 +39,6 @@ public class PingLocationRenderer {
 			ctx.renderLabel(displayName, 1.75f, author);
 		}
 
-		m.popPose();
+		m.popMatrix();
 	}
 }
