@@ -1,18 +1,10 @@
 package nx.pingwheel.forge.platform;
 
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
-import net.minecraftforge.client.event.RenderGuiOverlayEvent;
-import net.minecraftforge.client.event.RenderLevelStageEvent;
-import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
-import nx.pingwheel.common.render.WorldRenderContext;
-
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 public class PlatformClientEventServiceImpl implements IPlatformClientEventService {
 
@@ -48,32 +40,6 @@ public class PlatformClientEventServiceImpl implements IPlatformClientEventServi
 		@SubscribeEvent
 		public void onClientDisconnectedFromServer(ClientPlayerNetworkEvent.LoggingOut event) {
 			callback.run();
-		}
-	}
-
-	@Override
-	public void registerRenderWorldEvent(Consumer<WorldRenderContext> callback) {
-		MinecraftForge.EVENT_BUS.register(new RenderWorldEventEventHandler(callback));
-	}
-	private record RenderWorldEventEventHandler(Consumer<WorldRenderContext> callback) {
-		@SubscribeEvent
-		public void onRenderWorld(RenderLevelStageEvent event) {
-			if (event.getStage().equals(RenderLevelStageEvent.Stage.AFTER_WEATHER)) {
-				callback.accept(WorldRenderContext.of(event.getPoseStack().last().pose(), event.getProjectionMatrix(), event.getPartialTick(), event.getCamera()));
-			}
-		}
-	}
-
-	@Override
-	public void registerRenderGUIEvent(BiConsumer<GuiGraphics, Float> callback) {
-		MinecraftForge.EVENT_BUS.register(new RenderGUIEventEventHandler(callback));
-	}
-	private record RenderGUIEventEventHandler(BiConsumer<GuiGraphics, Float> callback) {
-		@SubscribeEvent
-		public void onPreGuiRender(RenderGuiOverlayEvent.Pre event) {
-			if (event.getOverlay() == VanillaGuiOverlay.VIGNETTE.type()) {
-				callback.accept(event.getGuiGraphics(), event.getPartialTick());
-			}
 		}
 	}
 }

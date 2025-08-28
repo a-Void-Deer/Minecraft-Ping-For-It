@@ -3,6 +3,7 @@ package nx.pingwheel.common.network;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.UUID;
 
@@ -12,6 +13,7 @@ import static nx.pingwheel.common.config.ClientConfig.MAX_CHANNEL_LENGTH;
 public record PingLocationC2SPacket(String channel, Vec3 pos, UUID entity, int sequence, int dimension) implements IPacket {
 
 	public static final ResourceLocation PACKET_ID = new ResourceLocation(MOD_ID + "-c2s", "ping-location");
+	public static final Type<PingLocationC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public PingLocationC2SPacket() {
 		this(null, null, null, 0, 0);
@@ -52,5 +54,10 @@ public record PingLocationC2SPacket(String channel, Vec3 pos, UUID entity, int s
 
 	public static PingLocationC2SPacket readSafe(FriendlyByteBuf buf) {
 		return PacketHandler.readSafe(buf, PingLocationC2SPacket.class);
+	}
+
+	@Override
+	public @NotNull Type<PingLocationC2SPacket> type() {
+		return PACKET_TYPE;
 	}
 }

@@ -16,6 +16,7 @@ import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.resource.LanguageUtils;
+import nx.pingwheel.forge.platform.PlatformNetworkServiceImpl;
 import org.apache.logging.log4j.util.TriConsumer;
 
 import java.util.function.Function;
@@ -38,6 +39,9 @@ public class ForgeMain {
 
 		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> ForgeClient::new);
 
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PING_LOCATION_CHANNEL_C2S.getName(), PING_LOCATION_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PING_LOCATION_CHANNEL_S2C.getName(), PING_LOCATION_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(UPDATE_CHANNEL_C2S.getName(), UPDATE_CHANNEL_C2S);
 		registerPacketHandler(PING_LOCATION_CHANNEL_C2S, PingLocationC2SPacket::readSafe, CommonServer.INSTANCE::onPingLocationPacket);
 		registerPacketHandler(UPDATE_CHANNEL_C2S, UpdateChannelC2SPacket::readSafe, CommonServer.INSTANCE::onChannelUpdatePacket);
 	}

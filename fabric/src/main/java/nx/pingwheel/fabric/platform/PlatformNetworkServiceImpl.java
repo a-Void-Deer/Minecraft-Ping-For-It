@@ -1,11 +1,10 @@
-package nx.pingwheel.common.platform;
+package nx.pingwheel.fabric.platform;
 
-import io.netty.buffer.Unpooled;
-import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.server.level.ServerPlayer;
 import nx.pingwheel.common.network.IPacket;
+import nx.pingwheel.common.platform.IPlatformNetworkService;
 
 import static nx.pingwheel.common.CommonClient.Game;
 
@@ -19,19 +18,11 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService {
 			return;
 		}
 
-		var buf = new FriendlyByteBuf(Unpooled.buffer());
-		buf.writeResourceLocation(packet.getId());
-		packet.write(buf);
-
-		connection.send(new ServerboundCustomPayloadPacket(buf));
+		connection.send(new ServerboundCustomPayloadPacket(packet));
 	}
 
 	@Override
 	public void sendToClient(IPacket packet, ServerPlayer player) {
-		var buf = new FriendlyByteBuf(Unpooled.buffer());
-		buf.writeResourceLocation(packet.getId());
-		packet.write(buf);
-
-		player.connection.send(new ClientboundCustomPayloadPacket(buf));
+		player.connection.send(new ClientboundCustomPayloadPacket(packet));
 	}
 }

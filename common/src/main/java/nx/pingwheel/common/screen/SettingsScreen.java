@@ -5,6 +5,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
+import net.minecraft.client.gui.screens.OptionsSubScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
@@ -13,7 +14,7 @@ import nx.pingwheel.common.resource.LanguageUtils;
 
 import static nx.pingwheel.common.config.ClientConfig.*;
 
-public class SettingsScreen extends Screen {
+public class SettingsScreen extends OptionsSubScreen {
 
 	private final ClientConfig config;
 
@@ -22,7 +23,7 @@ public class SettingsScreen extends Screen {
 	private EditBox channelTextField;
 
 	public SettingsScreen() {
-		super(LanguageUtils.settings("title").get());
+		super(null, null, LanguageUtils.settings("title").get());
 		this.config = ClientConfig.HANDLER.getConfig();
 	}
 
@@ -40,7 +41,7 @@ public class SettingsScreen extends Screen {
 
 	@Override
 	protected void init() {
-		this.list = new OptionsList(this.minecraft, this.width, this.height - 64, 32, 25);
+		this.list = new OptionsList(this.minecraft, this.width, this.height, this);
 
 		final var pingVolumeOption = getPingVolumeOption();
 		final var pingDurationOption = getPingDurationOption();
@@ -66,10 +67,7 @@ public class SettingsScreen extends Screen {
 
 		this.addWidget(this.list);
 
-		this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, (button) -> onClose())
-			.pos(this.width / 2 - 100, this.height - 27)
-			.size(200, 20)
-			.build());
+		super.init();
 	}
 
 	@Override
@@ -84,16 +82,11 @@ public class SettingsScreen extends Screen {
 	}
 
 	@Override
-	public void renderBackground(GuiGraphics ctx, int mouseX, int mouseY, float delta) {
-		this.renderDirtBackground(ctx);
-	}
-
-	@Override
 	public void render(GuiGraphics ctx, int mouseX, int mouseY, float delta) {
 		super.render(ctx, mouseX, mouseY, delta);
 		this.list.render(ctx, mouseX, mouseY, delta);
-		ctx.drawCenteredString(this.font, this.title, this.width / 2, 20, 16777215);
 
+		this.channelTextField.setPosition(width / 2 - 100, 160);
 		ctx.drawString(this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, 10526880);
 		this.channelTextField.render(ctx, mouseX, mouseY, delta);
 

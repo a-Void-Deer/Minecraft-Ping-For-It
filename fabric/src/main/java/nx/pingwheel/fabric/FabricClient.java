@@ -39,9 +39,9 @@ public class FabricClient implements ClientModInitializer {
 
 		// packets
 		ClientPlayNetworking.registerGlobalReceiver(
-			PingLocationS2CPacket.PACKET_ID,
-			(a, b, packet, c)
-				-> CommonClient.INSTANCE.onPingLocationPacket(PingLocationS2CPacket.readSafe(packet))
+			PingLocationS2CPacket.PACKET_TYPE,
+			(packet, context)
+				-> CommonClient.INSTANCE.onPingLocationPacket(packet)
 		);
 
 		// resource reload
