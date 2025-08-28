@@ -140,6 +140,6 @@ public class PingView extends PingData {
 		final var scale = 2.0 / Math.pow(distance, 0.3);
 		final var pingSize = CLIENT_CONFIG.getPingSize() / 100f;
 
-		this.scale = (float) Math.max(1.0, scale) * 0.4f * pingSize;
+		this.scale = (float)Math.max(1.0, scale) * 0.5f * pingSize;
 	}
 }
