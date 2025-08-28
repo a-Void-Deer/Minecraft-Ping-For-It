@@ -1,15 +1,15 @@
 package nx.pingwheel.common.screen;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import net.minecraft.client.Option;
+import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.TooltipAccessor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
-import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.resource.LanguageUtils;
 
@@ -113,7 +113,7 @@ public class SettingsScreen extends Screen {
 		return Collections.emptyList();
 	}
 
-	private Option getPingVolumeOption() {
+	private OptionInstance<Integer> getPingVolumeOption() {
 		final var text = LanguageUtils.settings("pingVolume");
 
 		return OptionUtils.ofInt(
@@ -131,7 +131,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getPingDurationOption() {
+	private OptionInstance<Integer> getPingDurationOption() {
 		final var text = LanguageUtils.settings("pingDuration");
 
 		return OptionUtils.ofInt(
@@ -149,7 +149,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getPingDistanceOption() {
+	private OptionInstance<Integer> getPingDistanceOption() {
 		final var text = LanguageUtils.settings("pingDistance");
 
 		return OptionUtils.ofInt(
@@ -169,7 +169,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getCorrectionPeriodOption() {
+	private OptionInstance<Float> getCorrectionPeriodOption() {
 		final var text = LanguageUtils.settings("correctionPeriod");
 
 		return OptionUtils.ofFloat(
@@ -187,7 +187,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getItemIconsVisibleOption() {
+	private OptionInstance<Boolean> getItemIconsVisibleOption() {
 		return OptionUtils.ofBool(
 			LanguageUtils.settings("itemIconVisible").key(),
 			config::isItemIconVisible,
@@ -195,7 +195,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getDirectionIndicatorVisibleOption() {
+	private OptionInstance<Boolean> getDirectionIndicatorVisibleOption() {
 		return OptionUtils.ofBool(
 			LanguageUtils.settings("directionIndicatorVisible").key(),
 			config::isDirectionIndicatorVisible,
@@ -203,7 +203,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getNameLabelForcedOption() {
+	private OptionInstance<Boolean> getNameLabelForcedOption() {
 		return OptionUtils.ofBool(
 			LanguageUtils.settings("nameLabelForced").key(),
 			config::isNameLabelForced,
@@ -211,7 +211,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getPingSizeOption() {
+	private OptionInstance<Integer> getPingSizeOption() {
 		final var text = LanguageUtils.settings("pingSize");
 
 		return OptionUtils.ofInt(

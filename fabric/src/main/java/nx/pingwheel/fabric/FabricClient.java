@@ -3,7 +3,7 @@ package nx.pingwheel.fabric;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.fabricmc.fabric.api.client.command.v1.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.resource.IdentifiableResourceReloadListener;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
@@ -58,12 +58,14 @@ public class FabricClient implements ClientModInitializer {
 			});
 
 		// commands
-		ClientCommandManager.DISPATCHER.register(ClientCommandBuilder.build((context, success, response) -> {
-			if (success) {
-				context.getSource().sendFeedback(LanguageUtils.withModPrefix(response));
-			} else {
-				context.getSource().sendError(LanguageUtils.withModPrefix(response));
-			}
-		}));
+		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
+			dispatcher.register(ClientCommandBuilder.build((context, success, response) -> {
+				if (success) {
+					context.getSource().sendFeedback(LanguageUtils.withModPrefix(response));
+				} else {
+					context.getSource().sendError(LanguageUtils.withModPrefix(response));
+				}
+			}));
+		});
 	}
 }

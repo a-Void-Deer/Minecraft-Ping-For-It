@@ -1,7 +1,7 @@
 package nx.pingwheel.common.render;
 
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.scores.PlayerTeam;
-import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.PingView;
 import nx.pingwheel.common.resource.LanguageUtils;
