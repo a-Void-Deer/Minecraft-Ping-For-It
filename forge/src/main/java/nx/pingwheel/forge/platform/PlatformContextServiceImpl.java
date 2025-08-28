@@ -8,7 +8,7 @@ import nx.pingwheel.common.platform.IPlatformContextService;
 
 import java.nio.file.Path;
 
-import static nx.pingwheel.forge.Main.FORGE_ID;
+import static nx.pingwheel.forge.ForgeMain.FORGE_ID;
 
 public class PlatformContextServiceImpl implements IPlatformContextService {
 

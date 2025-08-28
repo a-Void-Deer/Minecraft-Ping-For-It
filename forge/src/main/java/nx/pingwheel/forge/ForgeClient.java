@@ -1,8 +1,6 @@
 package nx.pingwheel.forge;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.ConfigGuiHandler;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
@@ -13,20 +11,19 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.event.EventNetworkChannel;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.command.ClientCommandBuilder;
-import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
 import nx.pingwheel.common.screen.SettingsScreen;
 
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import static nx.pingwheel.forge.Main.PING_LOCATION_CHANNEL_S2C;
+import static nx.pingwheel.forge.ForgeMain.PING_LOCATION_CHANNEL_S2C;
 
-@OnlyIn(Dist.CLIENT)
-public class Client {
+public class ForgeClient {
 
-	public Client() {
+	public ForgeClient() {
 		CommonClient.INSTANCE.onInit();
 
 		MinecraftForge.EVENT_BUS.register(this);

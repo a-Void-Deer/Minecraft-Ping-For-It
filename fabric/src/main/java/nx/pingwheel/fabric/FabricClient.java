@@ -14,8 +14,8 @@ import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.ProfilerFiller;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.command.ClientCommandBuilder;
-import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
 
 import java.util.concurrent.CompletableFuture;
@@ -26,7 +26,7 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
 import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_ID;
 
 @Environment(EnvType.CLIENT)
-public class Client implements ClientModInitializer {
+public class FabricClient implements ClientModInitializer {
 
 	public static final ResourceLocation RELOAD_LISTENER_ID = new ResourceLocation(MOD_ID, "reload-listener");
 

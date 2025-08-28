@@ -12,17 +12,19 @@ import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.event.EventNetworkChannel;
 import nx.pingwheel.common.CommonServer;
 import nx.pingwheel.common.command.ServerCommandBuilder;
+import nx.pingwheel.common.network.PingLocationC2SPacket;
+import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.resource.LanguageUtils;
-import nx.pingwheel.common.network.*;
 import org.apache.logging.log4j.util.TriConsumer;
 
 import java.util.function.Function;
 
-import static nx.pingwheel.forge.Main.FORGE_ID;
+import static nx.pingwheel.forge.ForgeMain.FORGE_ID;
 
 @Mod(FORGE_ID)
 @Mod.EventBusSubscriber(bus = Mod.EventBusSubscriber.Bus.FORGE)
-public class Main {
+public class ForgeMain {
 
 	public static final String FORGE_ID = "pingwheel";
 
@@ -47,10 +49,10 @@ public class Main {
 	);
 
 	@SuppressWarnings({"java:S1118", "the public constructor is required by forge"})
-	public Main() {
+	public ForgeMain() {
 		CommonServer.INSTANCE.onInit();
 
-		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> Client::new);
+		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> ForgeClient::new);
 
 		registerPacketHandler(PING_LOCATION_CHANNEL_C2S, PingLocationC2SPacket::readSafe, CommonServer.INSTANCE::onPingLocationPacket);
 		registerPacketHandler(UPDATE_CHANNEL_C2S, UpdateChannelC2SPacket::readSafe, CommonServer.INSTANCE::onChannelUpdatePacket);

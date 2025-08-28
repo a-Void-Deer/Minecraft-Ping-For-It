@@ -5,11 +5,11 @@ import net.fabricmc.fabric.api.command.v1.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import nx.pingwheel.common.CommonServer;
 import nx.pingwheel.common.command.ServerCommandBuilder;
-import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
+import nx.pingwheel.common.resource.LanguageUtils;
 
-public class Main implements ModInitializer {
+public class FabricMain implements ModInitializer {
 
 	@Override
 	public void onInitialize() {

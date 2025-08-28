@@ -20,10 +20,10 @@
 	"environment": "*",
 	"entrypoints": {
 		"client": [
-			"nx.pingwheel.fabric.Client"
+			"nx.pingwheel.fabric.FabricClient"
 		],
 		"main": [
-			"nx.pingwheel.fabric.Main"
+			"nx.pingwheel.fabric.FabricMain"
 		],
 		"modmenu": [
 			"nx.pingwheel.fabric.integration.ModMenuIntegration"
