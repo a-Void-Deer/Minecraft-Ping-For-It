@@ -1,7 +1,7 @@
 package nx.pingwheel.forge;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.client.ConfigGuiHandler;
+import net.minecraftforge.client.ConfigScreenHandler;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.common.MinecraftForge;
@@ -39,8 +39,8 @@ public class ForgeClient {
 
 		// config screen
 		ModLoadingContext.get().registerExtensionPoint(
-			ConfigGuiHandler.ConfigGuiFactory.class,
-			() -> new ConfigGuiHandler.ConfigGuiFactory((client, parent) -> new SettingsScreen(parent))
+			ConfigScreenHandler.ConfigScreenFactory.class,
+			() -> new ConfigScreenHandler.ConfigScreenFactory((client, parent) -> new SettingsScreen(parent))
 		);
 	}
 
