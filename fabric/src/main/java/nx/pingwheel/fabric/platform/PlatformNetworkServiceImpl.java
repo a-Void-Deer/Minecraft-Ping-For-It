@@ -1,35 +1,36 @@
-package nx.pingwheel.common.platform;
+package nx.pingwheel.fabric.platform;
 
 import io.netty.buffer.Unpooled;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket;
-import net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket;
 import net.minecraft.server.level.ServerPlayer;
 import nx.pingwheel.common.network.IPacket;
-
-import static nx.pingwheel.common.CommonClient.Game;
+import nx.pingwheel.common.platform.IPlatformNetworkService;
 
 public class PlatformNetworkServiceImpl implements IPlatformNetworkService {
 
 	@Override
 	public void sendToServer(IPacket packet) {
-		var connection = Game.getConnection();
-
-		if (connection == null) {
+		if (!ClientPlayNetworking.canSend(packet.getId())) {
 			return;
 		}
 
 		var buf = new FriendlyByteBuf(Unpooled.buffer());
 		packet.write(buf);
 
-		connection.send(new ServerboundCustomPayloadPacket(packet.getId(), buf));
+		ClientPlayNetworking.send(packet.getId(), buf);
 	}
 
 	@Override
 	public void sendToClient(IPacket packet, ServerPlayer player) {
+		if (!ServerPlayNetworking.canSend(player, packet.getId())) {
+			return;
+		}
+
 		var buf = new FriendlyByteBuf(Unpooled.buffer());
 		packet.write(buf);
 
-		player.connection.send(new ClientboundCustomPayloadPacket(packet.getId(), buf));
+		ServerPlayNetworking.send(player, packet.getId(), buf);
 	}
 }
