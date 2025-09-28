@@ -13,6 +13,8 @@ import static nx.pingwheel.forge.ForgeMain.FORGE_ID;
 
 public class PlatformContextServiceImpl implements IPlatformContextService {
 
+	public static FMLJavaModLoadingContext context;
+
 	@Override
 	public String getSelfModVersion() {
 		return ModList.get().getModContainerById(FORGE_ID)
@@ -27,10 +29,7 @@ public class PlatformContextServiceImpl implements IPlatformContextService {
 
 	@Override
 	public void registerKeyMapping(KeyMapping keyMapping) {
-		FMLJavaModLoadingContext
-			.get()
-			.getModEventBus()
-			.addListener((RegisterKeyMappingsEvent event) -> event.register(keyMapping));
+		context.getModEventBus().addListener((RegisterKeyMappingsEvent event) -> event.register(keyMapping));
 	}
 
 	@Override
