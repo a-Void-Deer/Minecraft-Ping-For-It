@@ -8,7 +8,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.network.event.EventNetworkChannel;
+import net.minecraftforge.network.EventNetworkChannel;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.command.ClientCommandBuilder;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
@@ -46,7 +46,7 @@ public class ForgeClient {
 
 	public static <T> void registerPacketHandler(EventNetworkChannel channel, Function<FriendlyByteBuf, T> packetReader, Consumer<T> packetHandler) {
 		channel.addListener((event) -> {
-			var ctx = event.getSource().get();
+			var ctx = event.getSource();
 			var payload = event.getPayload();
 
 			if (payload != null) {

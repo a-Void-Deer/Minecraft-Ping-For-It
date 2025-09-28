@@ -53,7 +53,7 @@ public class DrawContext {
 	}
 
 	public void renderPlayerHead(PlayerInfo player) {
-		var texture = player.getSkinLocation();
+		var texture = player.getSkin().texture();
 		RenderSystem.enableBlend();
 		guiGraphics.blit(texture, 0, 0, 0, 8, 8, 8, 8, 64, 64);
 		guiGraphics.blit(texture, 0, 0, 0, 40, 8, 8, 8, 64, 64); // Overlay (hat)
