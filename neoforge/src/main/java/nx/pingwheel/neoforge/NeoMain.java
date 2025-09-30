@@ -39,7 +39,7 @@ public class NeoMain {
 		modBus.addListener(this::onRegisterPackets);
 		NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
 
-		if (FMLEnvironment.dist.isClient()) {
+		if (FMLEnvironment.getDist().isClient()) {
 			new NeoClient(modBus);
 		}
 	}
@@ -52,11 +52,11 @@ public class NeoMain {
 		});
 
 		registrar.playToServer(PingLocationC2SPacket.PACKET_TYPE, PING_LOCATION_C2S_CODEC, (payload, context) -> {
-			context.enqueueWork(() -> CommonServer.INSTANCE.onPingLocationPacket(context.player().getServer(), (ServerPlayer)context.player(), payload));
+			context.enqueueWork(() -> CommonServer.INSTANCE.onPingLocationPacket(context.player().level().getServer(), (ServerPlayer)context.player(), payload));
 		});
 
 		registrar.playToServer(UpdateChannelC2SPacket.PACKET_TYPE, UPDATE_CHANNEL_C2S_CODEC, (payload, context) -> {
-			context.enqueueWork(() -> CommonServer.INSTANCE.onChannelUpdatePacket(context.player().getServer(), (ServerPlayer)context.player(), payload));
+			context.enqueueWork(() -> CommonServer.INSTANCE.onChannelUpdatePacket(context.player().level().getServer(), (ServerPlayer)context.player(), payload));
 		});
 	}
 
