@@ -35,7 +35,7 @@ public class PingLocationRenderer {
 		final var showNameLabels = CLIENT_CONFIG.isNameLabelForced() || KEY_BINDING_NAME_LABELS.isDown();
 
 		if (showNameLabels && author != null) {
-			final var displayName = PlayerTeam.formatNameForTeam(author.getTeam(), Component.literal(author.getProfile().getName()));
+			final var displayName = PlayerTeam.formatNameForTeam(author.getTeam(), Component.literal(author.getProfile().name()));
 			ctx.renderLabel(displayName, 1.75f, author);
 		}
 

@@ -11,8 +11,8 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_TEXTURE_ID;
 public class ResourceReloadListener implements PreparableReloadListener {
 
 	@Override
-	public CompletableFuture<Void> reload(PreparationBarrier helper, ResourceManager resourceManager, Executor loadExecutor, Executor applyExecutor) {
-		return reloadTextures(helper, resourceManager, loadExecutor, applyExecutor);
+	public CompletableFuture<Void> reload(SharedState sharedState, Executor loadExecutor, PreparationBarrier helper, Executor applyExecutor) {
+		return reloadTextures(helper, sharedState.resourceManager(), loadExecutor, applyExecutor);
 	}
 
 	private static int numCustomTextures;

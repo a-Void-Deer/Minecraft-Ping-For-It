@@ -5,21 +5,16 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.resource.IdentifiableResourceReloadListener;
-import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
+import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.PackType;
-import net.minecraft.server.packs.resources.ResourceManager;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.command.ClientCommandBuilder;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
-
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 
 import static nx.pingwheel.common.Global.MOD_ID;
 import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
@@ -44,18 +39,7 @@ public class FabricClient implements ClientModInitializer {
 		);
 
 		// resource reload
-		ResourceManagerHelper.get(PackType.CLIENT_RESOURCES)
-			.registerReloadListener(new IdentifiableResourceReloadListener() {
-				@Override
-				public ResourceLocation getFabricId() {
-					return RELOAD_LISTENER_ID;
-				}
-
-				@Override
-				public CompletableFuture<Void> reload(PreparationBarrier helper, ResourceManager resourceManager, Executor loadExecutor, Executor applyExecutor) {
-					return ResourceReloadListener.reloadTextures(helper, resourceManager, loadExecutor, applyExecutor);
-				}
-			});
+		ResourceLoader.get(PackType.CLIENT_RESOURCES).registerReloader(RELOAD_LISTENER_ID, new ResourceReloadListener());
 
 		// commands
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {

@@ -25,7 +25,7 @@ public class Raycast {
 	private static Instant lastCacheLoad = Instant.EPOCH;
 
 	public static void traceDistantAsync(Vec3 direction, float tickDelta, Consumer<BlockHitResult> callback) {
-		final var cameraEntity = Game.cameraEntity;
+		final var cameraEntity = Game.getCameraEntity();
 
 		if (cameraEntity == null || cameraEntity.level() == null) {
 			return;
@@ -73,7 +73,7 @@ public class Raycast {
 											 float tickDelta,
 											 double maxDistance,
 											 boolean hitFluids) {
-		var cameraEntity = Game.cameraEntity;
+		var cameraEntity = Game.getCameraEntity();
 
 		if (cameraEntity == null || cameraEntity.level() == null) {
 			return null;

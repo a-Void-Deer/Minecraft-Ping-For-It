@@ -54,7 +54,7 @@ public class DrawContext {
 	}
 
 	public void renderPlayerHead(PlayerInfo player) {
-		var texture = player.getSkin().texture();
+		var texture = player.getSkin().body().texturePath();
 		GlStateManager._enableBlend();
 		guiGraphics.blit(RenderPipelines.GUI_TEXTURED, texture, 0, 0, 8, 8, 8, 8, 64, 64);
 		guiGraphics.blit(RenderPipelines.GUI_TEXTURED, texture, 0, 0, 40, 8, 8, 8, 64, 64); // Overlay (hat)

@@ -4,18 +4,19 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
-import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.config.ChannelMode;
-import nx.pingwheel.common.util.RateLimiter;
-import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
+import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.util.RateLimiter;
 
 import java.util.HashMap;
 import java.util.UUID;
 
-import static nx.pingwheel.common.Global.*;
+import static nx.pingwheel.common.Global.LOGGER;
+import static nx.pingwheel.common.Global.MOD_VERSION;
 
 public class ServerCore {
 	private ServerCore() {}
@@ -35,7 +36,7 @@ public class ServerCore {
 
 	public static void onChannelUpdate(ServerPlayer player, UpdateChannelC2SPacket packet) {
 		if (packet.isCorrupt()) {
-			LOGGER.warn(() -> "invalid channel update from %s (%s)".formatted(player.getGameProfile().getName(), player.getUUID()));
+			LOGGER.warn(() -> "invalid channel update from %s (%s)".formatted(player.getGameProfile().name(), player.getUUID()));
 			player.displayClientMessage(Component.literal("§8[Ping-Wheel] §cChannel couldn't be updated\n§fMake sure your version matches the server's version: §d" + MOD_VERSION), false);
 			return;
 		}
@@ -45,7 +46,7 @@ public class ServerCore {
 
 	public static void onPingLocation(MinecraftServer server, ServerPlayer player, PingLocationC2SPacket packet) {
 		if (packet.isCorrupt()) {
-			LOGGER.warn(() -> "invalid ping location from %s (%s)".formatted(player.getGameProfile().getName(), player.getUUID()));
+			LOGGER.warn(() -> "invalid ping location from %s (%s)".formatted(player.getGameProfile().name(), player.getUUID()));
 			player.displayClientMessage(Component.literal("§8[Ping-Wheel] §cUnable to send ping\n§fMake sure your version matches the server's version: §d" + MOD_VERSION), false);
 			return;
 		}
@@ -109,10 +110,10 @@ public class ServerCore {
 	private static void updatePlayerChannel(ServerPlayer player, String channel) {
 		if (channel.isEmpty()) {
 			PLAYER_CHANNELS.remove(player.getUUID());
-			LOGGER.info(() -> "Channel update: %s -> default".formatted(player.getGameProfile().getName()));
+			LOGGER.info(() -> "Channel update: %s -> default".formatted(player.getGameProfile().name()));
 		} else {
 			PLAYER_CHANNELS.put(player.getUUID(), channel);
-			LOGGER.info(() -> "Channel update: %s -> \"%s\"".formatted(player.getGameProfile().getName(), channel));
+			LOGGER.info(() -> "Channel update: %s -> \"%s\"".formatted(player.getGameProfile().name(), channel));
 		}
 	}
 }
