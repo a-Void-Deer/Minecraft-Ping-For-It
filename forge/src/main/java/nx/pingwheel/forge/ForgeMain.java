@@ -59,7 +59,7 @@ public class ForgeMain {
 
 			if (payload != null && sender != null) {
 				var packet = packetReader.apply(payload);
-				ctx.enqueueWork(() -> packetHandler.accept(sender.getServer(), sender, packet));
+				ctx.enqueueWork(() -> packetHandler.accept(sender.level().getServer(), sender, packet));
 			}
 
 			ctx.setPacketHandled(true);
