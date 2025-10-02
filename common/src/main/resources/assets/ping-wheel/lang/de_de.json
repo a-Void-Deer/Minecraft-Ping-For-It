@@ -22,7 +22,7 @@
 	"ping-wheel.unit.percent": "%s%%",
 
 	"ping-wheel.settings.title": "Ping Wheel Einstellungen",
-	"ping-wheel.name": "Ping Wheel",
+	"key.category.ping-wheel.name": "Ping Wheel",
 
 	"ping-wheel.command.config.description": "Konfigurationsoberfläche öffnen",
 	"ping-wheel.command.channel.get.description": "Aktuellen Kanal abrufen",

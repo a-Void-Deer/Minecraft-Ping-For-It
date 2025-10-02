@@ -22,7 +22,7 @@
 	"ping-wheel.unit.percent": "%s%%",
 
 	"ping-wheel.settings.title": "Ping Wheel Settings",
-	"ping-wheel.name": "Ping Wheel",
+	"key.category.ping-wheel.name": "Ping Wheel",
 
 	"ping-wheel.command.config.description": "open configuration interface",
 	"ping-wheel.command.channel.get.description": "get your current channel",

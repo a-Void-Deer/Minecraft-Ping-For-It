@@ -22,7 +22,7 @@
 	"ping-wheel.unit.percent": "%s%%",
 
 	"ping-wheel.settings.title": "Ping Wheel Ayarları",
-	"ping-wheel.name": "Ping Wheel",
+	"key.category.ping-wheel.name": "Ping Wheel",
 
 	"ping-wheel.command.config.description": "ayar arayüzünü aç",
 	"ping-wheel.command.channel.get.description": "aktif kanalını al",

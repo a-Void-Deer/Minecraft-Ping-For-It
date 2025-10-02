@@ -22,7 +22,7 @@
 	"ping-wheel.unit.percent": "%s%%",
 
 	"ping-wheel.settings.title": "Ping Wheel 设置",
-	"ping-wheel.name": "Ping Wheel",
+	"key.category.ping-wheel.name": "Ping Wheel",
 
 	"ping-wheel.command.config.description": "打开配置界面",
 	"ping-wheel.command.channel.get.description": "获取当前频道",
