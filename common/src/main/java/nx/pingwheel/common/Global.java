@@ -10,7 +10,7 @@ public class Global {
 	private Global() {}
 
 	public static final String MOD_VERSION = IPlatformContextService.INSTANCE.getSelfModVersion();
-	public static final String MOD_ID = "ping-wheel";
+	public static final String MOD_ID = "pingwheel";
 	public static final String MOD_PREFIX = "[Ping-Wheel] ";
 	public static final Logger LOGGER = LogManager.getLogger(MOD_ID,
 		new FormattedMessageFactory() {
