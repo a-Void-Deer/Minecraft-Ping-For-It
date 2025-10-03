@@ -10,7 +10,7 @@ import static nx.pingwheel.common.Global.MOD_PREFIX;
 public class LanguageUtils {
 	private LanguageUtils() {}
 
-	public static final MutableComponent SYMBOL_INFINITE = Component.translatable(MOD_ID + ".symbol.infinite");
+	public static final MutableComponent SYMBOL_INFINITE = Component.translatable(MOD_ID + ".value.infinite");
 	public static final MutableComponent VALUE_HIDDEN = Component.translatable(MOD_ID + ".value.hidden");
 	public static final MutableComponent NEWLINE = Component.literal("\n");
 	public static final LanguageWrapper UNIT_SECONDS = new LanguageWrapper(MOD_ID + ".unit.seconds");

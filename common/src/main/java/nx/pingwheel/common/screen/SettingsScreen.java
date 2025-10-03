@@ -114,7 +114,7 @@ public class SettingsScreen extends Screen {
 	}
 
 	private Option getPingVolumeOption() {
-		final var text = LanguageUtils.settings("pingVolume");
+		final var text = LanguageUtils.settings("ping_volume");
 
 		return OptionUtils.ofInt(
 			text.key(),
@@ -132,7 +132,7 @@ public class SettingsScreen extends Screen {
 	}
 
 	private Option getPingDurationOption() {
-		final var text = LanguageUtils.settings("pingDuration");
+		final var text = LanguageUtils.settings("ping_duration");
 
 		return OptionUtils.ofInt(
 			text.key(),
@@ -150,7 +150,7 @@ public class SettingsScreen extends Screen {
 	}
 
 	private Option getPingDistanceOption() {
-		final var text = LanguageUtils.settings("pingDistance");
+		final var text = LanguageUtils.settings("ping_distance");
 
 		return OptionUtils.ofInt(
 			text.key(),
@@ -170,7 +170,7 @@ public class SettingsScreen extends Screen {
 	}
 
 	private Option getCorrectionPeriodOption() {
-		final var text = LanguageUtils.settings("correctionPeriod");
+		final var text = LanguageUtils.settings("correction_period");
 
 		return OptionUtils.ofFloat(
 			text.key(),
@@ -189,7 +189,7 @@ public class SettingsScreen extends Screen {
 
 	private Option getItemIconsVisibleOption() {
 		return OptionUtils.ofBool(
-			LanguageUtils.settings("itemIconVisible").key(),
+			LanguageUtils.settings("item_icon_visible").key(),
 			config::isItemIconVisible,
 			config::setItemIconVisible
 		);
@@ -197,7 +197,7 @@ public class SettingsScreen extends Screen {
 
 	private Option getDirectionIndicatorVisibleOption() {
 		return OptionUtils.ofBool(
-			LanguageUtils.settings("directionIndicatorVisible").key(),
+			LanguageUtils.settings("direction_indicator_visible").key(),
 			config::isDirectionIndicatorVisible,
 			config::setDirectionIndicatorVisible
 		);
@@ -205,14 +205,14 @@ public class SettingsScreen extends Screen {
 
 	private Option getNameLabelForcedOption() {
 		return OptionUtils.ofBool(
-			LanguageUtils.settings("nameLabelForced").key(),
+			LanguageUtils.settings("name_label_forced").key(),
 			config::isNameLabelForced,
 			config::setNameLabelForced
 		);
 	}
 
 	private Option getPingSizeOption() {
-		final var text = LanguageUtils.settings("pingSize");
+		final var text = LanguageUtils.settings("ping_size");
 
 		return OptionUtils.ofInt(
 			text.key(),
