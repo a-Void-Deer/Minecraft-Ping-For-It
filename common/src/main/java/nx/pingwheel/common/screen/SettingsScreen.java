@@ -117,7 +117,7 @@ public class SettingsScreen extends Screen {
 		final var text = LanguageUtils.settings("ping_volume");
 
 		return OptionUtils.ofInt(
-			text.key(),
+			text.getKey(),
 			0, 100, 1,
 			(value) -> {
 				if (value == 0) {
@@ -135,11 +135,11 @@ public class SettingsScreen extends Screen {
 		final var text = LanguageUtils.settings("ping_duration");
 
 		return OptionUtils.ofInt(
-			text.key(),
+			text.getKey(),
 			1, MAX_PING_DURATION, 1,
 			(value) -> {
 				if (value >= MAX_PING_DURATION) {
-					return text.get(LanguageUtils.SYMBOL_INFINITE);
+					return text.get(LanguageUtils.VALUE_INFINITE);
 				}
 
 				return text.get(LanguageUtils.UNIT_SECONDS.get(value));
@@ -153,13 +153,13 @@ public class SettingsScreen extends Screen {
 		final var text = LanguageUtils.settings("ping_distance");
 
 		return OptionUtils.ofInt(
-			text.key(),
+			text.getKey(),
 			0, MAX_PING_DISTANCE, 16,
 			(value) -> {
 				if (value == 0) {
 					return text.get(LanguageUtils.VALUE_HIDDEN);
 				} else if (value >= MAX_PING_DISTANCE) {
-					return text.get(LanguageUtils.SYMBOL_INFINITE);
+					return text.get(LanguageUtils.VALUE_INFINITE);
 				}
 
 				return text.get(LanguageUtils.UNIT_METERS.get(value));
@@ -173,11 +173,11 @@ public class SettingsScreen extends Screen {
 		final var text = LanguageUtils.settings("correction_period");
 
 		return OptionUtils.ofFloat(
-			text.key(),
+			text.getKey(),
 			0.1f, MAX_CORRECTION_PERIOD, 0.1f,
 			(value) -> {
 				if (value >= MAX_CORRECTION_PERIOD) {
-					return text.get(LanguageUtils.SYMBOL_INFINITE);
+					return text.get(LanguageUtils.VALUE_INFINITE);
 				}
 
 				return text.get(LanguageUtils.UNIT_SECONDS.get("%.1f".formatted(value)));
@@ -189,7 +189,7 @@ public class SettingsScreen extends Screen {
 
 	private Option getItemIconsVisibleOption() {
 		return OptionUtils.ofBool(
-			LanguageUtils.settings("item_icon_visible").key(),
+			LanguageUtils.settings("item_icon_visible").getKey(),
 			config::isItemIconVisible,
 			config::setItemIconVisible
 		);
@@ -197,7 +197,7 @@ public class SettingsScreen extends Screen {
 
 	private Option getDirectionIndicatorVisibleOption() {
 		return OptionUtils.ofBool(
-			LanguageUtils.settings("direction_indicator_visible").key(),
+			LanguageUtils.settings("direction_indicator_visible").getKey(),
 			config::isDirectionIndicatorVisible,
 			config::setDirectionIndicatorVisible
 		);
@@ -205,7 +205,7 @@ public class SettingsScreen extends Screen {
 
 	private Option getNameLabelForcedOption() {
 		return OptionUtils.ofBool(
-			LanguageUtils.settings("name_label_forced").key(),
+			LanguageUtils.settings("name_label_forced").getKey(),
 			config::isNameLabelForced,
 			config::setNameLabelForced
 		);
@@ -215,7 +215,7 @@ public class SettingsScreen extends Screen {
 		final var text = LanguageUtils.settings("ping_size");
 
 		return OptionUtils.ofInt(
-			text.key(),
+			text.getKey(),
 			40, 300, 10,
 			(value) -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
 			config::getPingSize,

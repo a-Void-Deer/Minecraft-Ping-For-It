@@ -11,8 +11,8 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.MutableComponent;
 import nx.pingwheel.common.compat.Component;
-import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.resource.LanguageUtils;
 import org.apache.logging.log4j.util.TriConsumer;
 
@@ -36,8 +36,8 @@ public class ServerCommandBuilder {
 			.executes((context) -> {
 				var currentChannelMode = Config.getDefaultChannelMode();
 
-				responseHandler.accept(context, true, langDefaultChannel.path("get.response")
-					.get(langDefaultChannel.path("value").path(currentChannelMode.toString()).get().withStyle(ChatFormatting.YELLOW)));
+				responseHandler.accept(context, true, langDefaultChannel.path("get", "response")
+					.get(langDefaultChannel.path("value", currentChannelMode.toString()).get().withStyle(ChatFormatting.YELLOW)));
 				return 1;
 			})
 			.then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("mode_name", StringArgumentType.string())
@@ -52,7 +52,7 @@ public class ServerCommandBuilder {
 					var newMode = validModes.stream().filter(e -> e.name().equalsIgnoreCase(newModeStr)).findFirst().orElse(null);
 
 					if (newMode == null) {
-						responseHandler.accept(context, false, langDefaultChannel.path("set.reject")
+						responseHandler.accept(context, false, langDefaultChannel.path("set", "reject")
 							.get(String.join(" | ", validModeNames)));
 						return 0;
 					}
@@ -60,8 +60,8 @@ public class ServerCommandBuilder {
 					Config.setDefaultChannelMode(newMode);
 					ServerConfig.HANDLER.save();
 
-					responseHandler.accept(context, true, langDefaultChannel.path("set.response")
-						.get(langDefaultChannel.path("value").path(newMode.toString()).get().withStyle(ChatFormatting.YELLOW)));
+					responseHandler.accept(context, true, langDefaultChannel.path("set", "response")
+						.get(langDefaultChannel.path("value", newMode.toString()).get().withStyle(ChatFormatting.YELLOW)));
 					return 1;
 				}));
 
@@ -69,7 +69,7 @@ public class ServerCommandBuilder {
 			.executes((context) -> {
 				var isPlayerTrackingEnabled = Config.isPlayerTrackingEnabled();
 
-				responseHandler.accept(context, true, langPlayerTracking.path("get.response")
+				responseHandler.accept(context, true, langPlayerTracking.path("get", "response")
 					.get(LanguageUtils.from(isPlayerTrackingEnabled).withStyle(ChatFormatting.YELLOW)));
 				return 1;
 			})
@@ -80,7 +80,7 @@ public class ServerCommandBuilder {
 					Config.setPlayerTrackingEnabled(enablePlayerTracking);
 					ServerConfig.HANDLER.save();
 
-					responseHandler.accept(context, true, langPlayerTracking.path("set.response")
+					responseHandler.accept(context, true, langPlayerTracking.path("set", "response")
 						.get(LanguageUtils.from(enablePlayerTracking).withStyle(ChatFormatting.YELLOW)));
 					return 1;
 				}));
@@ -89,7 +89,7 @@ public class ServerCommandBuilder {
 			.executes((context) -> {
 				var regenTime = Config.getMsToRegenerate();
 
-				responseHandler.accept(context, true, langRegenTime.path("get.response")
+				responseHandler.accept(context, true, langRegenTime.path("get", "response")
 					.get(LanguageUtils.from(regenTime).withStyle(ChatFormatting.YELLOW)));
 				return 1;
 			})
@@ -100,7 +100,7 @@ public class ServerCommandBuilder {
 					Config.setMsToRegenerate(regenTime);
 					ServerConfig.HANDLER.save();
 
-					responseHandler.accept(context, true, langRegenTime.path("set.response")
+					responseHandler.accept(context, true, langRegenTime.path("set", "response")
 						.get(LanguageUtils.from(regenTime).withStyle(ChatFormatting.YELLOW)));
 					return 1;
 				}));
@@ -109,7 +109,7 @@ public class ServerCommandBuilder {
 			.executes((context) -> {
 				var rateLimit = Config.getRateLimit();
 
-				responseHandler.accept(context, true, langRateLimit.path("get.response")
+				responseHandler.accept(context, true, langRateLimit.path("get", "response")
 					.get(LanguageUtils.from(rateLimit).withStyle(ChatFormatting.YELLOW)));
 				return 1;
 			})
@@ -120,7 +120,7 @@ public class ServerCommandBuilder {
 					Config.setRateLimit(rateLimit);
 					ServerConfig.HANDLER.save();
 
-					responseHandler.accept(context, true, langRateLimit.path("set.response")
+					responseHandler.accept(context, true, langRateLimit.path("set", "response")
 						.get(LanguageUtils.from(rateLimit).withStyle(ChatFormatting.YELLOW)));
 					return 1;
 				}));
@@ -129,21 +129,21 @@ public class ServerCommandBuilder {
 			responseHandler.accept(context, true, LanguageUtils.join(
 				Component.empty(),
 				Component.literal("/pingwheel:server default_channel"),
-				LanguageUtils.wrapped(langDefaultChannel.path("get.description").get()).withStyle(ChatFormatting.GRAY),
+				langDefaultChannel.path("get", "description").wrapped().withStyle(ChatFormatting.GRAY),
 				Component.literal("/pingwheel:server default_channel <mode_name>"),
-				LanguageUtils.wrapped(langDefaultChannel.path("set.description").get()).withStyle(ChatFormatting.GRAY),
+				langDefaultChannel.path("set", "description").wrapped().withStyle(ChatFormatting.GRAY),
 				Component.literal("/pingwheel:server player_tracking"),
-				LanguageUtils.wrapped(langPlayerTracking.path("get.description").get()).withStyle(ChatFormatting.GRAY),
+				langPlayerTracking.path("get", "description").wrapped().withStyle(ChatFormatting.GRAY),
 				Component.literal("/pingwheel:server player_tracking true|false"),
-				LanguageUtils.wrapped(langPlayerTracking.path("set.description").get()).withStyle(ChatFormatting.GRAY),
+				langPlayerTracking.path("set", "description").wrapped().withStyle(ChatFormatting.GRAY),
 				Component.literal("/pingwheel:server regen_time"),
-				LanguageUtils.wrapped(langRegenTime.path("get.description").get()).withStyle(ChatFormatting.GRAY),
+				langRegenTime.path("get", "description").wrapped().withStyle(ChatFormatting.GRAY),
 				Component.literal("/pingwheel:server regen_time <milliseconds>"),
-				LanguageUtils.wrapped(langRegenTime.path("set.description").get()).withStyle(ChatFormatting.GRAY),
+				langRegenTime.path("set", "description").wrapped().withStyle(ChatFormatting.GRAY),
 				Component.literal("/pingwheel:server rate_limit"),
-				LanguageUtils.wrapped(langRateLimit.path("get.description").get()).withStyle(ChatFormatting.GRAY),
+				langRateLimit.path("get", "description").wrapped().withStyle(ChatFormatting.GRAY),
 				Component.literal("/pingwheel:server rate_limit <limit>"),
-				LanguageUtils.wrapped(langRateLimit.path("set.description").get()).withStyle(ChatFormatting.GRAY)
+				langRateLimit.path("set", "description").wrapped().withStyle(ChatFormatting.GRAY)
 			));
 			return 1;
 		};

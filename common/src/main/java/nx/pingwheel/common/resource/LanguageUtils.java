@@ -1,5 +1,6 @@
 package nx.pingwheel.common.resource;
 
+import lombok.Getter;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.MutableComponent;
 import nx.pingwheel.common.compat.Component;
@@ -8,33 +9,53 @@ import static nx.pingwheel.common.Global.MOD_ID;
 import static nx.pingwheel.common.Global.MOD_PREFIX;
 
 public class LanguageUtils {
-	private LanguageUtils() {}
 
-	public static final MutableComponent SYMBOL_INFINITE = Component.translatable(MOD_ID + ".value.infinite");
-	public static final MutableComponent VALUE_HIDDEN = Component.translatable(MOD_ID + ".value.hidden");
+	public static final MutableComponent VALUE_INFINITE = LanguageUtils.of("value", "infinite").get();
+	public static final MutableComponent VALUE_HIDDEN = LanguageUtils.of("value", "hidden").get();
 	public static final MutableComponent NEWLINE = Component.literal("\n");
-	public static final LanguageWrapper UNIT_SECONDS = new LanguageWrapper(MOD_ID + ".unit.seconds");
-	public static final LanguageWrapper UNIT_METERS = new LanguageWrapper(MOD_ID + ".unit.meters");
-	public static final LanguageWrapper UNIT_PERCENT = new LanguageWrapper(MOD_ID + ".unit.percent");
+	public static final LanguageUtils UNIT_SECONDS = LanguageUtils.of("unit", "seconds");
+	public static final LanguageUtils UNIT_METERS = LanguageUtils.of("unit", "meters");
+	public static final LanguageUtils UNIT_PERCENT = LanguageUtils.of("unit", "seconds");
 
-	public static LanguageWrapper settings(String key) {
-		return new LanguageWrapper(MOD_ID + ".settings." + key);
+	public static LanguageUtils settings(String key) {
+		return LanguageUtils.of("settings", key);
 	}
 
-	public static LanguageWrapper command(String key) {
-		return new LanguageWrapper(MOD_ID + ".command." + key);
+	public static LanguageUtils command(String key) {
+		return LanguageUtils.of("command", key);
 	}
 
-	public record LanguageWrapper(String key) {
-
-		public LanguageWrapper path(String key) {
-			return new LanguageWrapper(this.key + "." + key);
-		}
-
-		public MutableComponent get(Object... args) {
-			return Component.translatable(this.key, args);
-		}
+	public static String keyOf(String category, String... path) {
+		return LanguageUtils.of(category, path).getKey();
 	}
+
+	@Getter
+	private String key;
+
+	public static LanguageUtils of(String category, String... path) {
+		return new LanguageUtils(String.join(".", category, MOD_ID, String.join(".", path)));
+	}
+
+	private LanguageUtils(String key) {
+		this.key = key;
+	}
+
+	public LanguageUtils path(String... path) {
+		return new LanguageUtils(String.join(".", this.key, String.join(".", path)));
+	}
+
+	public MutableComponent get(Object... args) {
+		return Component.translatable(this.key, args);
+	}
+
+	public MutableComponent wrapped() {
+		return Component.empty()
+			.append(Component.literal("("))
+			.append(this.get())
+			.append(Component.literal(")"));
+	}
+
+	/* Component modifiers */
 
 	public static MutableComponent join(MutableComponent... components) {
 		var output = Component.empty();
@@ -50,13 +71,6 @@ public class LanguageUtils {
 		}
 
 		return output;
-	}
-
-	public static MutableComponent wrapped(MutableComponent component) {
-		return Component.empty()
-			.append(Component.literal("("))
-			.append(component)
-			.append(Component.literal(")"));
 	}
 
 	public static MutableComponent withModPrefix(MutableComponent component) {

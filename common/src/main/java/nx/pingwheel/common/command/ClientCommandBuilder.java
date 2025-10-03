@@ -28,9 +28,9 @@ public class ClientCommandBuilder {
 				var currentChannel = ClientConfig.HANDLER.getConfig().getChannel();
 
 				if (currentChannel.isEmpty()) {
-					responseHandler.accept(context, true, langChannel.path("get.response.default").get());
+					responseHandler.accept(context, true, langChannel.path("get", "response", "default").get());
 				} else {
-					responseHandler.accept(context, true, langChannel.path("get.response")
+					responseHandler.accept(context, true, langChannel.path("get", "response")
 						.get(Component.literal(currentChannel).withStyle(ChatFormatting.YELLOW))
 					);
 				}
@@ -41,7 +41,7 @@ public class ClientCommandBuilder {
 				var newChannel = context.getArgument("channel_name", String.class);
 
 				if (newChannel.length() > MAX_CHANNEL_LENGTH) {
-					responseHandler.accept(context, false, langChannel.path("set.reject").get(MAX_CHANNEL_LENGTH));
+					responseHandler.accept(context, false, langChannel.path("set", "reject").get(MAX_CHANNEL_LENGTH));
 					return 0;
 				}
 
@@ -49,9 +49,9 @@ public class ClientCommandBuilder {
 				ClientConfig.HANDLER.save();
 
 				if (newChannel.isEmpty()) {
-					responseHandler.accept(context, true, langChannel.path("set.response.default").get());
+					responseHandler.accept(context, true, langChannel.path("set", "response", "default").get());
 				} else {
-					responseHandler.accept(context, true, langChannel.path("set.response")
+					responseHandler.accept(context, true, langChannel.path("set", "response")
 						.get(Component.literal(newChannel).withStyle(ChatFormatting.YELLOW))
 					);
 				}
@@ -69,11 +69,11 @@ public class ClientCommandBuilder {
 			responseHandler.accept(context, true, LanguageUtils.join(
 				Component.empty(),
 				Component.literal("/pingwheel config"),
-				LanguageUtils.wrapped(langConfig.path("description").get()).withStyle(ChatFormatting.GRAY),
+				langConfig.path("description").wrapped().withStyle(ChatFormatting.GRAY),
 				Component.literal("/pingwheel channel"),
-				LanguageUtils.wrapped(langChannel.path("get.description").get()).withStyle(ChatFormatting.GRAY),
+				langChannel.path("get", "description").wrapped().withStyle(ChatFormatting.GRAY),
 				Component.literal("/pingwheel channel <channel_name>"),
-				LanguageUtils.wrapped(langChannel.path("set.description").get()).withStyle(ChatFormatting.GRAY)
+				langChannel.path("set", "description").wrapped().withStyle(ChatFormatting.GRAY)
 			));
 			return 1;
 		};
