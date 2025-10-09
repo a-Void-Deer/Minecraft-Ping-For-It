@@ -2,6 +2,7 @@ package nx.pingwheel.common;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
+import nx.pingwheel.common.compat.LegacyMigrationHandler;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.core.PingController;
@@ -39,6 +40,8 @@ public class CommonClient {
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_NAME_LABELS);
 
+		LegacyMigrationHandler.migrateKeyMappings();
+
 		DistantHorizonsLoaded = IPlatformContextService.INSTANCE.isModLoaded("distanthorizons");
 	}
 
@@ -53,6 +56,8 @@ public class CommonClient {
 	public void onTickStart() {
 		Game = Minecraft.getInstance();
 		GameContext.updateDimension();
+
+		LegacyMigrationHandler.saveGameOptionsIfNeeded();
 
 		if (InputUtils.consumePingHotkey()) {
 			PingController.queuePingAction();

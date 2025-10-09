@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import lombok.Getter;
 import lombok.SneakyThrows;
+import nx.pingwheel.common.compat.LegacyMigrationHandler;
 import nx.pingwheel.common.platform.IPlatformContextService;
 
 import java.io.IOException;
@@ -24,6 +25,8 @@ public class ConfigHandler <T extends IConfig> {
 	private int configHash;
 
 	public static <T extends IConfig> ConfigHandler<T> of(Class<T> configType, String configExtension) {
+		LegacyMigrationHandler.migrateConfig(configExtension);
+
 		return new ConfigHandler<>(configType, IPlatformContextService.INSTANCE.resolveConfigDir(MOD_ID + configExtension));
 	}
 
