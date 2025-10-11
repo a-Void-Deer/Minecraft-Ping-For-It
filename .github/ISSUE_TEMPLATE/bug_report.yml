@@ -8,6 +8,8 @@ body:
     label: Preflight Checklist
     description: Please ensure you've completed all of the following.
     options:
+      - label: After testing with only Ping Wheel installed, the issue still remains. Otherwise, [report an incompatibility](https://github.com/LukenSkyne/Minecraft-Ping-Wheel/issues/new?template=incompatibility_report.yml) instead.
+        required: true
       - label: I am using the [latest version](https://github.com/LukenSkyne/Minecraft-Ping-Wheel/releases) of Ping Wheel for the corresponding mod loader.
         required: true
       - label: The server I am playing on has Ping Wheel installed.
