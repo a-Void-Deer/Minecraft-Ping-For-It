@@ -96,7 +96,7 @@ public class PingManager {
 			final var newPing = PingView.from(packet);
 
 			PingManager.addOrReplacePing(newPing);
-			newPing.playSound();
+			newPing.playSoundInDimension();
 		});
 	}
 }

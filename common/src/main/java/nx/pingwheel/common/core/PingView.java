@@ -93,7 +93,7 @@ public class PingView extends PingData {
 		this.calculateScale();
 	}
 
-	public void playSound() {
+	public void playSoundInDimension() {
 		if (this.dimension != GameContext.getDimension()) {
 			return;
 		}
