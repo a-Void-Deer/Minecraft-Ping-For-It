@@ -79,7 +79,7 @@ body:
       Specify the mod(pack) name and provide one of the following:
       - A link to the CurseForge or Modrinth page
       - A CurseForge pack file as a `.zip` (see [here](https://support.curseforge.com/en/support/solutions/articles/9000198501-exporting-and-importing-modpacks))
-      - A Modrinth `.mrpack` file (see [here](https://support.modrinth.com/en/articles/8802250-modpacks-on-modrinth))
+      - A Modrinth `.mrpack` file contained in a `.zip` file (see [here](https://support.modrinth.com/en/articles/8802250-modpacks-on-modrinth))
 
       If your modpack contains unpublished mods, please remove them first, as we cannot help with debugging otherwise.
   validations:
