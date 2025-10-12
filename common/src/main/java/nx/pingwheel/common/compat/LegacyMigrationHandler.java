@@ -53,18 +53,18 @@ public class LegacyMigrationHandler {
 			var lines = Files.readAllLines(optionsPath);
 
 			for (String line : lines) {
-				if (!line.startsWith("key_ping-wheel.key")) continue;
+				if (!line.contains("ping-wheel")) continue;
 
 				var keyString = line.split(":")[1];
 				var keyKey = InputConstants.getKey(keyString);
 
-				if (line.startsWith("key_ping-wheel.key.ping-location")) {
+				if (line.contains("ping-location")) {
 					KEY_BINDING_PING.setKey(keyKey);
 					LOGGER.info("Migrated KEY_BINDING_PING: %s".formatted(keyKey));
-				} else if (line.startsWith("key_ping-wheel.key.open-settings")) {
+				} else if (line.contains("open-settings")) {
 					KEY_BINDING_SETTINGS.setKey(keyKey);
 					LOGGER.info("Migrated KEY_BINDING_SETTINGS: %s".formatted(keyKey));
-				} else if (line.startsWith("key_ping-wheel.key.name-labels")) {
+				} else if (line.contains("name-labels")) {
 					KEY_BINDING_NAME_LABELS.setKey(keyKey);
 					LOGGER.info("Migrated KEY_BINDING_NAME_LABELS: %s".formatted(keyKey));
 				}
