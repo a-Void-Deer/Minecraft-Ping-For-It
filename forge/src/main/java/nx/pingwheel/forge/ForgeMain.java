@@ -21,13 +21,11 @@ import org.apache.logging.log4j.util.TriConsumer;
 
 import java.util.function.Function;
 
-import static nx.pingwheel.forge.ForgeMain.FORGE_ID;
+import static nx.pingwheel.common.Global.MOD_ID;
 
-@Mod(FORGE_ID)
+@Mod(MOD_ID)
 @Mod.EventBusSubscriber(bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class ForgeMain {
-
-	public static final String FORGE_ID = "pingwheel";
 
 	private static final String PROTOCOL_VERSION = "1";
 	public static final EventNetworkChannel PING_LOCATION_CHANNEL_C2S = NetworkRegistry.newEventChannel(
