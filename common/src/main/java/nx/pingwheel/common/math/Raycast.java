@@ -72,7 +72,7 @@ public class Raycast {
 	public static HitResult traceDirectional(Vec3 direction,
 											 float tickDelta,
 											 double maxDistance,
-											 boolean hitFluids) {
+											 boolean hitTranslucent) {
 		var cameraEntity = Game.cameraEntity;
 
 		if (cameraEntity == null || cameraEntity.level == null) {
@@ -90,8 +90,8 @@ public class Raycast {
 			new ClipContext(
 				rayStartVec,
 				rayEndVec,
-				ClipContext.Block.OUTLINE,
-				hitFluids ? ClipContext.Fluid.ANY : ClipContext.Fluid.NONE,
+				hitTranslucent ? ClipContext.Block.OUTLINE : ClipContext.Block.VISUAL,
+				hitTranslucent ? ClipContext.Fluid.ANY : ClipContext.Fluid.NONE,
 				cameraEntity)
 		);
 
