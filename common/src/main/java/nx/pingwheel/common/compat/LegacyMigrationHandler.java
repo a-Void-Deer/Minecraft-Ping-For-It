@@ -1,12 +1,18 @@
 package nx.pingwheel.common.compat;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.packs.resources.ResourceManager;
 import nx.pingwheel.common.platform.IPlatformContextService;
+import nx.pingwheel.common.resource.LanguageUtils;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
+import java.util.UUID;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.Global.LOGGER;
@@ -19,6 +25,7 @@ import static nx.pingwheel.common.util.InputUtils.*;
 public class LegacyMigrationHandler {
 
 	private static boolean gameOptionsSaveNeeded = false;
+	private static boolean notifyDeprecatedResourcePack = false;
 
 	public static void migrateConfig(String configExtension) {
 		var legacyConfigPath = IPlatformContextService.INSTANCE.resolveConfigDir("ping-wheel" + configExtension);
@@ -69,10 +76,36 @@ public class LegacyMigrationHandler {
 		}
 	}
 
-	public static void saveGameOptionsIfNeeded() {
-		if (!gameOptionsSaveNeeded || Game == null) return;
+	public static void onTick() {
+		if (Game == null) return;
 
-		Game.options.save();
-		gameOptionsSaveNeeded = false;
+		if (gameOptionsSaveNeeded) {
+			Game.options.save();
+			gameOptionsSaveNeeded = false;
+		}
+
+		if (notifyDeprecatedResourcePack && Game.player != null) {
+			var msg = Component.literal("a resource pack is using the old mod-id, please update ");
+			msg.append(Component.literal("\"assets/ping-wheel\"").withStyle(ChatFormatting.GRAY));
+			msg.append(" to ");
+			msg.append(Component.literal("\"assets/pingwheel\"").withStyle(ChatFormatting.GRAY));
+
+			Game.player.sendMessage(LanguageUtils.withModPrefix(msg), UUID.randomUUID());
+			notifyDeprecatedResourcePack = false;
+		}
+	}
+
+	public static void checkResources(ResourceManager resourceManager) {
+		var legacyTextures = List.of(
+			new ResourceLocation("ping-wheel", "ping"),
+			new ResourceLocation("ping-wheel", "textures/ping.png"),
+			new ResourceLocation("ping-wheel", "textures/arrow.png")
+		);
+
+		notifyDeprecatedResourcePack = false;
+
+		for (var resource : legacyTextures) {
+			notifyDeprecatedResourcePack |= resourceManager.hasResource(resource);
+		}
 	}
 }

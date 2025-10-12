@@ -57,7 +57,7 @@ public class CommonClient {
 		Game = Minecraft.getInstance();
 		GameContext.updateDimension();
 
-		LegacyMigrationHandler.saveGameOptionsIfNeeded();
+		LegacyMigrationHandler.onTick();
 
 		if (InputUtils.consumePingHotkey()) {
 			PingController.queuePingAction();
