@@ -6,12 +6,11 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.UUID;
 
-import static nx.pingwheel.common.Global.MOD_ID;
 import static nx.pingwheel.common.config.ClientConfig.MAX_CHANNEL_LENGTH;
 
 public record PingLocationS2CPacket(String channel, Vec3 pos, UUID entity, int sequence, int dimension, UUID author) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = new ResourceLocation(MOD_ID + "-s2c", "ping-location");
+	public static final ResourceLocation PACKET_ID = new ResourceLocation("ping-wheel-s2c", "ping-location");
 
 	public PingLocationS2CPacket() {
 		this(null, null, null, 0, 0, null);
