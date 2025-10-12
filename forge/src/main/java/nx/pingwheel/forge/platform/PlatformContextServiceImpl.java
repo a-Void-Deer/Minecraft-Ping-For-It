@@ -20,6 +20,11 @@ public class PlatformContextServiceImpl implements IPlatformContextService {
 	}
 
 	@Override
+	public Path resolveGameDir(String path) {
+		return FMLPaths.GAMEDIR.get().resolve(path);
+	}
+
+	@Override
 	public Path resolveConfigDir(String path) {
 		return FMLPaths.CONFIGDIR.get().resolve(path);
 	}

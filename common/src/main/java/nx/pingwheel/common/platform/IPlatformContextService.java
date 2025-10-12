@@ -12,6 +12,7 @@ public interface IPlatformContextService {
 		.orElseThrow(() -> new IllegalStateException("No IPlatformContextService implementation found!"));
 
 	String getSelfModVersion();
+	Path resolveGameDir(String path);
 	Path resolveConfigDir(String path);
 	void registerKeyMapping(KeyMapping keyMapping);
 	boolean isModLoaded(String modId);

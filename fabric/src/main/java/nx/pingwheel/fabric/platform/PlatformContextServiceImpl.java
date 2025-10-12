@@ -19,6 +19,11 @@ public class PlatformContextServiceImpl implements IPlatformContextService {
 	}
 
 	@Override
+	public Path resolveGameDir(String path) {
+		return FabricLoader.getInstance().getGameDir().resolve(path);
+	}
+
+	@Override
 	public Path resolveConfigDir(String path) {
 		return FabricLoader.getInstance().getConfigDir().resolve(path);
 	}
