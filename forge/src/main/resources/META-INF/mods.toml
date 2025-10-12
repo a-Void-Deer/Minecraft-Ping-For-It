@@ -4,7 +4,7 @@ license = "${license}"
 issueTrackerURL = "${link_issues}"
 
 [[mods]]
-modId = "${strict_id}"
+modId = "${mod_id}"
 version = "${version}"
 displayName = "${mod_name}"
 displayURL = "${link_src}"
@@ -13,14 +13,14 @@ authors = "${mod_author}, ${contributors}"
 description = '''${description}'''
 displayTest = "IGNORE_SERVER_VERSION"
 
-[[dependencies.${strict_id}]]
+[[dependencies.${mod_id}]]
 modId = "forge"
 mandatory = true
 versionRange = "[${forge_loader_version},)"
 ordering = "NONE"
 side = "BOTH"
 
-[[dependencies.${strict_id}]]
+[[dependencies.${mod_id}]]
 modId = "minecraft"
 mandatory = true
 versionRange = "${forge_compatible_range}"

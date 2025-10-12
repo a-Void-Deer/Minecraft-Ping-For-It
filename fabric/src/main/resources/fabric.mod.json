@@ -30,7 +30,7 @@
 		]
 	},
 	"mixins": [
-		"ping-wheel.mixins.json"
+		"pingwheel.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=${fabric_loader_version}",
