@@ -17,7 +17,7 @@ public class DirectionalSoundInstance extends AbstractTickableSoundInstance {
 									float volume,
 									float pitch,
 									Vec3 pos) {
-		super(sound, category, RandomSource.create(0));
+		super(sound, category, RandomSource.create());
 
 		this.volume = volume;
 		this.pitch = pitch;
