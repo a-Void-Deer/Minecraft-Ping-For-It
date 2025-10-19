@@ -61,6 +61,7 @@ public class ClientConfig implements IConfig {
 		}
 	}
 
+	@Override
 	public void validate() {
 		if (channel.length() > MAX_CHANNEL_LENGTH) {
 			channel = channel.substring(0, MAX_CHANNEL_LENGTH);
@@ -75,6 +76,7 @@ public class ClientConfig implements IConfig {
 		}
 	}
 
+	@Override
 	public void onUpdate() {
 		if (Game != null) {
 			IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(getChannel()));

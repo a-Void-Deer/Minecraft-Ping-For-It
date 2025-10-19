@@ -16,6 +16,7 @@ public class ServerConfig implements IConfig {
 	int msToRegenerate = 1000;
 	int rateLimit = 5;
 
+	@Override
 	public void validate() {
 		if (msToRegenerate < 0) {
 			msToRegenerate = 1000;
@@ -26,6 +27,7 @@ public class ServerConfig implements IConfig {
 		}
 	}
 
+	@Override
 	public void onUpdate() {
 		ServerCore.init();
 	}
