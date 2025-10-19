@@ -37,7 +37,7 @@ public class ServerCommandBuilder {
 				var currentChannelMode = Config.getDefaultChannelMode();
 
 				responseHandler.accept(context, true, langDefaultChannel.path("get", "response")
-					.get(langDefaultChannel.path("value", currentChannelMode.toString()).get().withStyle(ChatFormatting.YELLOW)));
+					.get(LanguageUtils.of("value", currentChannelMode.toString()).get().withStyle(ChatFormatting.YELLOW)));
 				return 1;
 			})
 			.then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("mode_name", StringArgumentType.string())
@@ -61,7 +61,7 @@ public class ServerCommandBuilder {
 					ServerConfig.HANDLER.save();
 
 					responseHandler.accept(context, true, langDefaultChannel.path("set", "response")
-						.get(langDefaultChannel.path("value", newMode.toString()).get().withStyle(ChatFormatting.YELLOW)));
+						.get(LanguageUtils.of("value", newMode.toString()).get().withStyle(ChatFormatting.YELLOW)));
 					return 1;
 				}));
 
