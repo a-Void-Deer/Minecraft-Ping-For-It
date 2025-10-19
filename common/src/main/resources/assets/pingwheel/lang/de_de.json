@@ -17,6 +17,10 @@
 	"settings.pingwheel.channel": "Ping-Kanal",
 	"settings.pingwheel.channel.tooltip": "Du sendest und empfängst Pings nur von Spielern auf demselben Kanal",
 
+	"value.pingwheel.auto": "Auto",
+	"value.pingwheel.disabled": "Deaktiviert",
+	"value.pingwheel.global": "Global",
+	"value.pingwheel.team_only": "Nur Team",
 	"value.pingwheel.hidden": "Versteckt",
 	"value.pingwheel.infinite": "∞",
 	"unit.pingwheel.seconds": "%ss",
@@ -35,9 +39,5 @@
 	"command.pingwheel.default_channel.set.description": "Standardkanalmodus einstellen",
 	"command.pingwheel.default_channel.get.response": "Aktueller Standardkanalmodus: %s",
 	"command.pingwheel.default_channel.set.response": "Standardkanalmodus auf %s gesetzt",
-	"command.pingwheel.default_channel.set.reject": "Unbekannter Modus, gültige Optionen sind: %s",
-	"command.pingwheel.default_channel.value.auto": "Auto",
-	"command.pingwheel.default_channel.value.disabled": "Deaktiviert",
-	"command.pingwheel.default_channel.value.global": "Global",
-	"command.pingwheel.default_channel.value.team_only": "Nur Team"
+	"command.pingwheel.default_channel.set.reject": "Unbekannter Modus, gültige Optionen sind: %s"
 }

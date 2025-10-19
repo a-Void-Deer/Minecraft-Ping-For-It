@@ -17,6 +17,10 @@
 	"settings.pingwheel.channel": "标记频道",
 	"settings.pingwheel.channel.tooltip": "您只能与相同频道的玩家发送和接收标记。",
 
+	"value.pingwheel.auto": "自动",
+	"value.pingwheel.disabled": "关闭",
+	"value.pingwheel.global": "全局",
+	"value.pingwheel.team_only": "仅队伍",
 	"value.pingwheel.hidden": "隐藏",
 	"value.pingwheel.infinite": "∞",
 	"unit.pingwheel.seconds": "%ss",
@@ -35,9 +39,5 @@
 	"command.pingwheel.default_channel.set.description": "设置默认频道",
 	"command.pingwheel.default_channel.get.response": "当前默认频道: %s",
 	"command.pingwheel.default_channel.set.response": "将默认频道设置为 %s",
-	"command.pingwheel.default_channel.set.reject": "未知模式，有效选项包括: %s",
-	"command.pingwheel.default_channel.value.auto": "自动",
-	"command.pingwheel.default_channel.value.disabled": "关闭",
-	"command.pingwheel.default_channel.value.global": "全局",
-	"command.pingwheel.default_channel.value.team_only": "仅队伍"
+	"command.pingwheel.default_channel.set.reject": "未知模式，有效选项包括: %s"
 }

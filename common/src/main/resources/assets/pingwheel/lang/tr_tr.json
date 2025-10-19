@@ -17,6 +17,10 @@
 	"settings.pingwheel.channel": "Ping Kanalı",
 	"settings.pingwheel.channel.tooltip": "Sadece aynı kanaldaki oyuncularla Ping paylaşırsınız",
 
+	"value.pingwheel.auto": "Otomatik",
+	"value.pingwheel.disabled": "Kapalı",
+	"value.pingwheel.global": "Global",
+	"value.pingwheel.team_only": "Sadece Takım",
 	"value.pingwheel.hidden": "Gizli",
 	"value.pingwheel.infinite": "∞",
 	"unit.pingwheel.seconds": "%ss",
@@ -35,9 +39,5 @@
 	"command.pingwheel.default_channel.set.description": "varsayılan kanal modunu ayarla",
 	"command.pingwheel.default_channel.get.response": "Şu anki varsayılan kanal modu: %s",
 	"command.pingwheel.default_channel.set.response": "%s, artık varsayılan kanal modu",
-	"command.pingwheel.default_channel.set.reject": "Bilinmeyen mod, geçerli ayarlar: %s",
-	"command.pingwheel.default_channel.value.auto": "Otomatik",
-	"command.pingwheel.default_channel.value.disabled": "Kapalı",
-	"command.pingwheel.default_channel.value.global": "Global",
-	"command.pingwheel.default_channel.value.team_only": "Sadece Takım"
+	"command.pingwheel.default_channel.set.reject": "Bilinmeyen mod, geçerli ayarlar: %s"
 }
