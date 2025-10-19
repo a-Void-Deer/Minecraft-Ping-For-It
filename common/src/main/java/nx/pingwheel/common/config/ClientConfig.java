@@ -4,8 +4,12 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
+
+import java.util.HashMap;
+import java.util.Map;
 
 import static nx.pingwheel.common.CommonClient.Game;
 
@@ -23,6 +27,7 @@ public class ClientConfig implements IConfig {
 	boolean nameLabelForced = false;
 	int pingSize = 100;
 	String channel = "";
+	Map<String, String> serverChannels = new HashMap<>();
 
 	// hidden from the settings screen
 	int removeRadius = 10;
@@ -38,15 +43,41 @@ public class ClientConfig implements IConfig {
 	public static final float MAX_CORRECTION_PERIOD = 5f;
 	public static final int MAX_CHANNEL_LENGTH = 128;
 
+	public String getChannel() {
+		final var ip = GameContext.getCurrentServerIp();
+
+		if (ip.isPresent()) return serverChannels.getOrDefault(ip.get(), "");
+
+		return channel;
+	}
+
+	public void setChannel(String newChannel) {
+		final var ip = GameContext.getCurrentServerIp();
+
+		if (ip.isPresent()) {
+			serverChannels.put(ip.get(), newChannel);
+		} else {
+			channel = newChannel;
+		}
+	}
+
 	public void validate() {
 		if (channel.length() > MAX_CHANNEL_LENGTH) {
 			channel = channel.substring(0, MAX_CHANNEL_LENGTH);
+		}
+
+		for (Map.Entry<String, String> entry : serverChannels.entrySet()) {
+			final var channel = entry.getValue();
+
+			if (channel.length() > MAX_CHANNEL_LENGTH) {
+				entry.setValue(channel.substring(0, MAX_CHANNEL_LENGTH));
+			}
 		}
 	}
 
 	public void onUpdate() {
 		if (Game != null) {
-			IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(channel));
+			IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(getChannel()));
 		}
 	}
 

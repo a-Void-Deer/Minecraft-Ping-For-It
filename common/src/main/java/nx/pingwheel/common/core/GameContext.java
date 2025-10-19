@@ -4,6 +4,7 @@ import lombok.Getter;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.Entity;
 
+import java.util.Optional;
 import java.util.UUID;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -36,5 +37,14 @@ public class GameContext {
 		}
 
 		return null;
+	}
+
+	public static Optional<String> getCurrentServerIp() {
+		if (Game == null) return Optional.empty();
+
+		var currenServer = Game.getCurrentServer();
+		if (currenServer == null) return Optional.empty();
+
+		return Optional.of(currenServer.ip);
 	}
 }
