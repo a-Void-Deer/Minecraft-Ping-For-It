@@ -4,13 +4,13 @@ import lombok.Getter;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.math.Raycast;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 
 import java.util.UUID;
 
-import static nx.pingwheel.common.CommonClient.DistantHorizonsLoaded;
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.MAX_CORRECTION_PERIOD;
 import static nx.pingwheel.common.config.ClientConfig.TPS;
@@ -64,7 +64,7 @@ public class PingController {
 			cameraEntity.isCrouching());
 
 		if (hitResult == null || hitResult.getType() == HitResult.Type.MISS) {
-			if (DistantHorizonsLoaded) {
+			if (ModContext.HasDistantHorizons) {
 				Raycast.traceDistantAsync(cameraDirection, tickDelta, (distantHitResult) -> {
 					IPlatformNetworkService.INSTANCE.sendToServer(new PingLocationC2SPacket(CLIENT_CONFIG.getChannel(), distantHitResult.getLocation(), null, pingSequence, GameContext.getDimension()));
 				});

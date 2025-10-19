@@ -4,6 +4,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.core.ServerCore;
+import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformServerEventService;
@@ -20,6 +21,7 @@ public class CommonServer {
 
 		ServerConfig.HANDLER.load();
 
+		ModContext.indexMods();
 		ServerCore.init();
 
 		IPlatformServerEventService.INSTANCE.registerPlayerLogoutEvent(this::onPlayerDisconnect);
