@@ -6,6 +6,7 @@ import net.minecraft.server.players.PlayerList;
 import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.integration.TeamContextHandler;
 import nx.pingwheel.common.util.RateLimiter;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
@@ -65,7 +66,7 @@ public class ServerCore {
 			return;
 		}
 
-		if (channel.isEmpty() && defaultChannelMode == ChannelMode.TEAM_ONLY && player.getTeam() == null) {
+		if (channel.isEmpty() && defaultChannelMode == ChannelMode.TEAM_ONLY && !TeamContextHandler.hasTeam(player)) {
 			player.displayClientMessage(Component.literal("§8[Ping-Wheel] §eMust be in a team or channel to ping location\n§fUse §a/pingwheel channel§f to switch"), false);
 			return;
 		}
@@ -88,7 +89,7 @@ public class ServerCore {
 				continue;
 			}
 
-			if (defaultChannelMode != ChannelMode.GLOBAL && player.getTeam() != p.getTeam()) {
+			if (defaultChannelMode != ChannelMode.GLOBAL && !TeamContextHandler.inSameContext(player, p)) {
 				continue;
 			}
 
