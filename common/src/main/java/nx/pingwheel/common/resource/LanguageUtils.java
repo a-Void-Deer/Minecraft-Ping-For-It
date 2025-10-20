@@ -15,7 +15,7 @@ public class LanguageUtils {
 	public static final MutableComponent NEWLINE = Component.literal("\n");
 	public static final LanguageUtils UNIT_SECONDS = LanguageUtils.of("unit", "seconds");
 	public static final LanguageUtils UNIT_METERS = LanguageUtils.of("unit", "meters");
-	public static final LanguageUtils UNIT_PERCENT = LanguageUtils.of("unit", "seconds");
+	public static final LanguageUtils UNIT_PERCENT = LanguageUtils.of("unit", "percent");
 
 	public static LanguageUtils settings(String key) {
 		return LanguageUtils.of("settings", key);
