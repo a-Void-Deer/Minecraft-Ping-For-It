@@ -90,7 +90,7 @@ public class ServerCore {
 				continue;
 			}
 
-			if (defaultChannelMode != ChannelMode.GLOBAL && !TeamContextHandler.inSameContext(player, p)) {
+			if (channel.isEmpty() && defaultChannelMode != ChannelMode.GLOBAL && !TeamContextHandler.inSameContext(player, p)) {
 				continue;
 			}
 
