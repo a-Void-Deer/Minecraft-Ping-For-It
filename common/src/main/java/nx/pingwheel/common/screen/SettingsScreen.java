@@ -21,6 +21,9 @@ import static nx.pingwheel.common.config.ClientConfig.*;
 
 public class SettingsScreen extends Screen {
 
+	private static final int WHITE = 0xFFFFFF;
+	private static final int GRAY = 0xA0A0A0;
+
 	private final ClientConfig config;
 
 	private Screen parent;
@@ -83,9 +86,9 @@ public class SettingsScreen extends Screen {
 	public void render(PoseStack matrices, int mouseX, int mouseY, float delta) {
 		this.renderBackground(matrices);
 		this.list.render(matrices, mouseX, mouseY, delta);
-		drawCenteredString(matrices, this.font, this.title, this.width / 2, 20, 16777215);
+		drawCenteredString(matrices, this.font, this.title, this.width / 2, 20, WHITE);
 
-		drawString(matrices, this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.y - 12, 10526880);
+		drawString(matrices, this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.y - 12, GRAY);
 		this.channelTextField.render(matrices, mouseX, mouseY, delta);
 
 		super.render(matrices, mouseX, mouseY, delta);
