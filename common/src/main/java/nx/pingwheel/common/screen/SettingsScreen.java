@@ -61,7 +61,8 @@ public class SettingsScreen extends Screen {
 		final var pingSizeOption = getPingSizeOption();
 		this.list.addSmall(nameLabelForcedOption, pingSizeOption);
 
-		this.channelTextField = new EditBox(this.font, this.width / 2 - 100, 160, 200, 20, Component.empty());
+		final var yOffset = 50 + 25 * this.list.children().size();
+		this.channelTextField = new EditBox(this.font, this.width / 2 - 100, yOffset, 200, 20, Component.empty());
 		this.channelTextField.setMaxLength(MAX_CHANNEL_LENGTH);
 		this.channelTextField.setValue(config.getChannel());
 		this.channelTextField.setResponder(config::setChannel);
