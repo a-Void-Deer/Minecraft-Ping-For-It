@@ -25,7 +25,7 @@ import static nx.pingwheel.common.resource.ResourceReloadListener.hasCustomTextu
 public class DrawContext {
 
 	private static final int SHADOW_BLACK = FastColor.ARGB32.color(64, 0, 0, 0);
-	private static final int LIGHT_VALUE_MAX = 15728880;
+	private static final int LIGHT_VALUE_MAX = 0xF000F0;
 
 	@Getter
 	private PoseStack matrices;
