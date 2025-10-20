@@ -46,21 +46,13 @@ public class SettingsScreen extends Screen {
 	protected void init() {
 		this.list = new OptionsList(this.minecraft, this.width, this.height, 32, this.height - 32, 25);
 
-		final var pingVolumeOption = getPingVolumeOption();
-		final var pingDurationOption = getPingDurationOption();
-		this.list.addSmall(pingVolumeOption, pingDurationOption);
+		this.list.addSmall(getPingVolumeOption(), getPingDurationOption());
 
-		final var pingDistanceOption = getPingDistanceOption();
-		final var correctionPeriodOption = getCorrectionPeriodOption();
-		this.list.addSmall(pingDistanceOption, correctionPeriodOption);
+		this.list.addSmall(getPingDistanceOption(), getCorrectionPeriodOption());
 
-		final var itemIconsVisibleOption = getItemIconsVisibleOption();
-		final var directionIndicatorVisibleOption = getDirectionIndicatorVisibleOption();
-		this.list.addSmall(itemIconsVisibleOption, directionIndicatorVisibleOption);
+		this.list.addSmall(getItemIconsVisibleOption(), getDirectionIndicatorVisibleOption());
 
-		final var nameLabelForcedOption = getNameLabelForcedOption();
-		final var pingSizeOption = getPingSizeOption();
-		this.list.addSmall(nameLabelForcedOption, pingSizeOption);
+		this.list.addSmall(getNameLabelForcedOption(), getPingSizeOption());
 
 		this.list.addSmall(getTeamColorModeOption(), null);
 
