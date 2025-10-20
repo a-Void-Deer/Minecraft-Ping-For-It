@@ -44,7 +44,8 @@ dependencies {
     annotationProcessor "org.projectlombok:lombok:1.18.32"
 
     // Distant Horizons
-    compileOnly "maven.modrinth:DistantHorizonsApi:4.0.0"
+    // https://modrinth.com/mod/distanthorizonsapi
+    compileOnly "maven.modrinth:DistantHorizonsApi:${distanthorizons_api_version}"
 }
 
 // Declare capabilities on the outgoing configurations.
