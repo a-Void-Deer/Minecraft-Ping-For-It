@@ -4,19 +4,20 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import nx.pingwheel.common.compat.Component;
-import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.integration.TeamContextHandler;
-import nx.pingwheel.common.util.RateLimiter;
-import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
+import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.util.RateLimiter;
 
 import java.util.HashMap;
 import java.util.UUID;
 
-import static nx.pingwheel.common.Global.*;
+import static nx.pingwheel.common.Global.LOGGER;
+import static nx.pingwheel.common.Global.MOD_VERSION;
 
 public class ServerCore {
 	private ServerCore() {}
