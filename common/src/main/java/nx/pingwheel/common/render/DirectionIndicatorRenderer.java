@@ -2,6 +2,7 @@ package nx.pingwheel.common.render;
 
 import net.minecraft.world.phys.Vec2;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.config.TeamColorMode;
 import nx.pingwheel.common.core.PingView;
 import nx.pingwheel.common.math.MathUtils;
 
@@ -11,6 +12,7 @@ public class DirectionIndicatorRenderer {
 	private DirectionIndicatorRenderer() {}
 
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
+	private static final int WHITE = 0xFFFFFFFF;
 
 	private static Vec2 screenSize;
 	private static Vec2 safeZoneTopLeft;
@@ -58,11 +60,14 @@ public class DirectionIndicatorRenderer {
 		{
 			m.translate(edgePosition.x, edgePosition.y, 0f);
 
+			final var useTeamColor = CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.FULL || CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.PING_ONLY;
+			final var pingColor = useTeamColor ? ping.getTeamColor() : WHITE;
+
 			m.pushPose();
 			{
 				m.scale(pingScale, pingScale, 1f);
 				m.translate(indicatorOffsetX, indicatorOffsetY, 0);
-				ctx.renderPing(ping.getItemStack(), CLIENT_CONFIG.isItemIconVisible());
+				ctx.renderPing(ping.getItemStack(), CLIENT_CONFIG.isItemIconVisible(), pingColor);
 			}
 			m.popPose();
 
@@ -73,7 +78,7 @@ public class DirectionIndicatorRenderer {
 
 				m.scale(0.25f, 0.25f, 1f);
 				m.translate(-5f, 0f, 0f);
-				ctx.renderArrowIcon();
+				ctx.renderArrowIcon(pingColor);
 			}
 			m.popPose();
 		}

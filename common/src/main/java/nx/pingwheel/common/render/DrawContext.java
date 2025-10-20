@@ -24,7 +24,6 @@ import static nx.pingwheel.common.resource.ResourceReloadListener.hasCustomTextu
 
 public class DrawContext {
 
-	private static final int WHITE = FastColor.ARGB32.color(255, 255, 255, 255);
 	private static final int SHADOW_BLACK = FastColor.ARGB32.color(64, 0, 0, 0);
 	private static final int LIGHT_VALUE_MAX = 15728880;
 
@@ -35,7 +34,7 @@ public class DrawContext {
 		this.matrices = matrices;
 	}
 
-	public void renderLabel(Component text, float yOffset, PlayerInfo player) {
+	public void renderLabel(Component text, float yOffset, PlayerInfo player, int color) {
 		var extraWidth = (player != null) ? 10f : 0f;
 		var textMetrics = new Vec2(
 			Game.font.width(text) + extraWidth,
@@ -46,7 +45,7 @@ public class DrawContext {
 		matrices.pushPose();
 		matrices.translate(textOffset.x, textOffset.y, 0);
 		GuiComponent.fill(matrices, -2, -2, (int)textMetrics.x + 1, (int)textMetrics.y, SHADOW_BLACK);
-		Game.font.draw(matrices, text, extraWidth, 0f, WHITE);
+		Game.font.draw(matrices, text, extraWidth, 0f, color);
 
 		if (player != null) {
 			matrices.translate(-0.5, -0.5, 0);
@@ -64,13 +63,13 @@ public class DrawContext {
 		RenderSystem.disableBlend();
 	}
 
-	public void renderPing(ItemStack itemStack, boolean drawItemIcon) {
+	public void renderPing(ItemStack itemStack, boolean drawItemIcon, int color) {
 		if (itemStack != null && drawItemIcon) {
 			renderGuiItemModel(itemStack);
 		} else if (hasCustomTexture()) {
-			renderTexture(PING_TEXTURE_ID, 12);
+			renderTexture(PING_TEXTURE_ID, 12, color);
 		} else {
-			renderDefaultPingIcon();
+			renderDefaultPingIcon(color);
 		}
 	}
 
@@ -121,18 +120,23 @@ public class DrawContext {
 		RenderSystem.applyModelViewMatrix();
 	}
 
-	public void renderDefaultPingIcon() {
+	public void renderDefaultPingIcon(int color) {
 		matrices.pushPose();
 		MathUtils.rotateZ(matrices, (float)(Math.PI / 4f));
 		matrices.translate(-2.5, -2.5, 0);
-		GuiComponent.fill(matrices, 0, 0, 5, 5, WHITE);
+		GuiComponent.fill(matrices, 0, 0, 5, 5, color);
 		matrices.popPose();
 	}
 
-	public void renderTexture(ResourceLocation texture, int size) {
+	public void renderTexture(ResourceLocation texture, int size, int color) {
 		final var offset = size / -2;
+		final float a = FastColor.ARGB32.alpha(color) / 255f;
+		final float r = FastColor.ARGB32.red(color) / 255f;
+		final float g = FastColor.ARGB32.green(color) / 255f;
+		final float b = FastColor.ARGB32.blue(color) / 255f;
 
 		RenderSystem.setShaderTexture(0, texture);
+		RenderSystem.setShaderColor(r, g, b, a);
 		RenderSystem.enableBlend();
 		GuiComponent.blit(
 			matrices,
@@ -149,7 +153,7 @@ public class DrawContext {
 		RenderSystem.disableBlend();
 	}
 
-	public void renderArrowIcon() {
-		renderTexture(ARROW_TEXTURE_ID, 10);
+	public void renderArrowIcon(int color) {
+		renderTexture(ARROW_TEXTURE_ID, 10, color);
 	}
 }

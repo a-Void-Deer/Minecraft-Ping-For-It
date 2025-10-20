@@ -11,6 +11,7 @@ import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.util.FormattedCharSequence;
 import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.config.TeamColorMode;
 import nx.pingwheel.common.resource.LanguageUtils;
 
 import java.util.Collections;
@@ -60,6 +61,8 @@ public class SettingsScreen extends Screen {
 		final var nameLabelForcedOption = getNameLabelForcedOption();
 		final var pingSizeOption = getPingSizeOption();
 		this.list.addSmall(nameLabelForcedOption, pingSizeOption);
+
+		this.list.addSmall(getTeamColorModeOption(), null);
 
 		final var yOffset = 50 + 25 * this.list.children().size();
 		this.channelTextField = new EditBox(this.font, this.width / 2 - 100, yOffset, 200, 20, Component.empty());
@@ -221,6 +224,16 @@ public class SettingsScreen extends Screen {
 			(value) -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
 			config::getPingSize,
 			config::setPingSize
+		);
+	}
+
+	private Option getTeamColorModeOption() {
+		return OptionUtils.ofEnum(
+			LanguageUtils.settings("team_color_mode").getKey(),
+			TeamColorMode.class,
+			(mode) -> LanguageUtils.of("value", mode.toString()).get(),
+			config::getTeamColorMode,
+			config::setTeamColorMode
 		);
 	}
 }

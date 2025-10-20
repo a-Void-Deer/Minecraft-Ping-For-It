@@ -14,9 +14,13 @@
 	"settings.pingwheel.direction_indicator_visible": "Direction Indicator",
 	"settings.pingwheel.name_label_forced": "Always Show Names",
 	"settings.pingwheel.ping_size": "Ping Size: %s",
+	"settings.pingwheel.team_color_mode": "Team Color",
 	"settings.pingwheel.channel": "Ping Channel",
 	"settings.pingwheel.channel.tooltip": "You only send and receive Pings to and from players on the same channel",
 
+	"value.pingwheel.full": "Full",
+	"value.pingwheel.ping_only": "Ping Only",
+	"value.pingwheel.labels_only": "Labels Only",
 	"value.pingwheel.auto": "Auto",
 	"value.pingwheel.disabled": "Disabled",
 	"value.pingwheel.global": "Global",

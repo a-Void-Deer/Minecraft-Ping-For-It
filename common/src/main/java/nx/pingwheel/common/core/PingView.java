@@ -25,6 +25,7 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
 public class PingView extends PingData {
 
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
+	private static final int WHITE = 0xFFFFFFFF;
 
 	private int spawnTime;
 	private int age;
@@ -134,6 +135,16 @@ public class PingView extends PingData {
 		}
 
 		return this.distanceToCenter() < b.distanceToCenter();
+	}
+
+	public int getTeamColor() {
+		if (this.playerInfo == null || this.playerInfo.getTeam() == null) return WHITE;
+		if (this.playerInfo == null) return WHITE;
+
+		final var teamColor = this.playerInfo.getTeam().getColor().getColor();
+		if (teamColor == null) return WHITE;
+
+		return (255 << 24) | teamColor;
 	}
 
 	private void calculateScale() {

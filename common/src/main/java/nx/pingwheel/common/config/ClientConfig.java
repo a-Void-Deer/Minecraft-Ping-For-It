@@ -26,6 +26,7 @@ public class ClientConfig implements IConfig {
 	boolean directionIndicatorVisible = true;
 	boolean nameLabelForced = false;
 	int pingSize = 100;
+	TeamColorMode teamColorMode = TeamColorMode.FULL;
 	String channel = "";
 	Map<String, String> serverChannels = new HashMap<>();
 

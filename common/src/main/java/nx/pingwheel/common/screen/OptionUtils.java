@@ -37,4 +37,14 @@ public class OptionUtils {
 			(gameOptions, option, value) -> setter.accept(value)
 		);
 	}
+
+	public static <E extends Enum<E>> Option ofEnum(String key, Class<E> enumClass, Function<E, Component> formatter, Supplier<E> getter, Consumer<E> setter) {
+		return CycleOption.create(
+			key,
+			enumClass.getEnumConstants(),
+			formatter,
+			gameOptions -> getter.get(),
+			(gameOptions, option, newValue) -> setter.accept(newValue)
+		);
+	}
 }
