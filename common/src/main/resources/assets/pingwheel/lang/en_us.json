@@ -17,7 +17,9 @@
 	"settings.pingwheel.team_color_mode": "Team Color",
 	"settings.pingwheel.channel": "Ping Channel",
 	"settings.pingwheel.channel.tooltip": "You only send and receive Pings to and from players on the same channel",
+	"settings.pingwheel.channel.placeholder": "Synced to %s",
 
+	"value.pingwheel.vanilla_team": "Vanilla Team",
 	"value.pingwheel.full": "Full",
 	"value.pingwheel.ping_only": "Ping Only",
 	"value.pingwheel.labels_only": "Labels Only",

@@ -1,6 +1,7 @@
 package nx.pingwheel.common.screen;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Option;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -8,15 +9,19 @@ import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.TooltipAccessor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.FormattedCharSequence;
 import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.TeamColorMode;
+import nx.pingwheel.common.integration.TeamContext;
+import nx.pingwheel.common.integration.TeamContextHandler;
 import nx.pingwheel.common.resource.LanguageUtils;
 
 import java.util.Collections;
 import java.util.List;
 
+import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 
 public class SettingsScreen extends Screen {
@@ -91,6 +96,10 @@ public class SettingsScreen extends Screen {
 		drawString(matrices, this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.y - 12, GRAY);
 		this.channelTextField.render(matrices, mouseX, mouseY, delta);
 
+		if (this.channelTextField.getValue().isEmpty()) {
+			drawString(matrices, this.font, getChannelPlaceholder(), this.width / 2 - 100 + 4, this.channelTextField.y + 6, WHITE);
+		}
+
 		super.render(matrices, mouseX, mouseY, delta);
 
 		var tooltipLines = getHoveredButtonTooltip(this.list, mouseX, mouseY);
@@ -110,6 +119,26 @@ public class SettingsScreen extends Screen {
 		}
 
 		return Collections.emptyList();
+	}
+
+	private MutableComponent getChannelPlaceholder() {
+		if (Game.player == null) {
+			return Component.empty();
+		}
+
+		final var teamContext = TeamContextHandler.getSelfContext();
+		MutableComponent placeholder;
+
+		if (teamContext == TeamContext.NONE) {
+			placeholder = LanguageUtils.of("value", "global").get();
+		} else {
+			placeholder = LanguageUtils.settings("channel").path("placeholder")
+				.get(LanguageUtils.of("value", teamContext.toString()).get());
+		}
+
+		return placeholder
+			.withStyle(ChatFormatting.ITALIC)
+			.withStyle(ChatFormatting.DARK_GRAY);
 	}
 
 	private Option getPingVolumeOption() {
