@@ -3,10 +3,8 @@ package nx.pingwheel.common.resource;
 import net.minecraft.server.packs.resources.PreparableReloadListener;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.ProfilerFiller;
-import nx.pingwheel.common.Global;
 import nx.pingwheel.common.compat.LegacyMigrationHandler;
 
-import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
@@ -30,11 +28,7 @@ public class ResourceReloadListener implements PreparableReloadListener {
 			.supplyAsync(() -> {
 				LegacyMigrationHandler.checkResources(resourceManager);
 
-				try {
-					numCustomTextures = resourceManager.getResources(PING_TEXTURE_ID).size();
-				} catch (IOException e) {
-					Global.LOGGER.error("failed to gather resources: " + e.getMessage());
-				}
+				numCustomTextures = resourceManager.getResourceStack(PING_TEXTURE_ID).size();
 
 				return true;
 			}, loadExecutor)

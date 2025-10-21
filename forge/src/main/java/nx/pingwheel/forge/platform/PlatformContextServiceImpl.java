@@ -1,8 +1,9 @@
 package nx.pingwheel.forge.platform;
 
 import net.minecraft.client.KeyMapping;
-import net.minecraftforge.client.ClientRegistry;
+import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.fml.loading.FMLPaths;
 import nx.pingwheel.common.platform.IPlatformContextService;
 
@@ -31,7 +32,10 @@ public class PlatformContextServiceImpl implements IPlatformContextService {
 
 	@Override
 	public void registerKeyMapping(KeyMapping keyMapping) {
-		ClientRegistry.registerKeyBinding(keyMapping);
+		FMLJavaModLoadingContext
+			.get()
+			.getModEventBus()
+			.addListener((RegisterKeyMappingsEvent event) -> event.register(keyMapping));
 	}
 
 	@Override

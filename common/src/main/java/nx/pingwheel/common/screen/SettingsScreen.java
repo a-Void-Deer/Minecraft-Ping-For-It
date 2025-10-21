@@ -3,16 +3,16 @@ package nx.pingwheel.common.screen;
 import com.google.common.collect.ImmutableList;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.Option;
+import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.TooltipAccessor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.FormattedCharSequence;
-import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.TeamColorMode;
@@ -144,7 +144,7 @@ public class SettingsScreen extends Screen {
 			.withStyle(ChatFormatting.DARK_GRAY);
 	}
 
-	private Option getPingVolumeOption() {
+	private OptionInstance<Integer> getPingVolumeOption() {
 		final var text = LanguageUtils.settings("ping_volume");
 
 		return OptionUtils.ofInt(
@@ -162,7 +162,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getPingDurationOption() {
+	private OptionInstance<Integer> getPingDurationOption() {
 		final var text = LanguageUtils.settings("ping_duration");
 
 		return OptionUtils.ofInt(
@@ -180,7 +180,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getPingDistanceOption() {
+	private OptionInstance<Integer> getPingDistanceOption() {
 		final var text = LanguageUtils.settings("ping_distance");
 
 		return OptionUtils.ofInt(
@@ -200,7 +200,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getCorrectionPeriodOption() {
+	private OptionInstance<Float> getCorrectionPeriodOption() {
 		final var text = LanguageUtils.settings("correction_period");
 
 		return OptionUtils.ofFloat(
@@ -218,7 +218,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getItemIconsVisibleOption() {
+	private OptionInstance<Boolean> getItemIconsVisibleOption() {
 		return OptionUtils.ofBool(
 			LanguageUtils.settings("item_icon_visible").getKey(),
 			config::isItemIconVisible,
@@ -226,7 +226,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getDirectionIndicatorVisibleOption() {
+	private OptionInstance<Boolean> getDirectionIndicatorVisibleOption() {
 		return OptionUtils.ofBool(
 			LanguageUtils.settings("direction_indicator_visible").getKey(),
 			config::isDirectionIndicatorVisible,
@@ -234,7 +234,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getPlayerInfoModeOption() {
+	private OptionInstance<PlayerInfoMode> getPlayerInfoModeOption() {
 		return OptionUtils.ofEnum(
 			LanguageUtils.settings("player_info_mode").getKey(),
 			PlayerInfoMode.class,
@@ -257,7 +257,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getTeamColorModeOption() {
+	private OptionInstance<TeamColorMode> getTeamColorModeOption() {
 		return OptionUtils.ofEnum(
 			LanguageUtils.settings("team_color_mode").getKey(),
 			TeamColorMode.class,
@@ -268,7 +268,7 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getPingSizeOption() {
+	private OptionInstance<Integer> getPingSizeOption() {
 		final var text = LanguageUtils.settings("ping_size");
 
 		return OptionUtils.ofInt(
