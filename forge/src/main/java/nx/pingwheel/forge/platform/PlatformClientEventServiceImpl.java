@@ -2,15 +2,15 @@ package nx.pingwheel.forge.platform;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
-import net.minecraftforge.client.event.RenderGameOverlayEvent;
+import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
+import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.render.WorldRenderContext;
 
-import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -35,7 +35,7 @@ public class PlatformClientEventServiceImpl implements IPlatformClientEventServi
 	}
 	private record JoinServerEventHandler(Runnable callback) {
 		@SubscribeEvent
-		public void onClientConnectedToServer(ClientPlayerNetworkEvent.LoggedInEvent event) {
+		public void onClientConnectedToServer(ClientPlayerNetworkEvent.LoggingIn event) {
 			callback.run();
 		}
 	}
@@ -46,7 +46,7 @@ public class PlatformClientEventServiceImpl implements IPlatformClientEventServi
 	}
 	private record LeaveServerEventHandler(Runnable callback) {
 		@SubscribeEvent
-		public void onClientDisconnectedFromServer(ClientPlayerNetworkEvent.LoggedOutEvent event) {
+		public void onClientDisconnectedFromServer(ClientPlayerNetworkEvent.LoggingOut event) {
 			callback.run();
 		}
 	}
@@ -70,9 +70,9 @@ public class PlatformClientEventServiceImpl implements IPlatformClientEventServi
 	}
 	private record RenderGUIEventEventHandler(BiConsumer<PoseStack, Float> callback) {
 		@SubscribeEvent
-		public void onPreGuiRender(RenderGameOverlayEvent.Pre event) {
-			if (Objects.equals(event.getType(), RenderGameOverlayEvent.ElementType.ALL)) {
-				callback.accept(event.getMatrixStack(), event.getPartialTicks());
+		public void onPreGuiRender(RenderGuiOverlayEvent.Pre event) {
+			if (event.getOverlay() == VanillaGuiOverlay.VIGNETTE.type()) {
+				callback.accept(event.getPoseStack(), event.getPartialTick());
 			}
 		}
 	}

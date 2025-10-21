@@ -2,6 +2,7 @@ package nx.pingwheel.common.compat;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.ResourceManager;
 import nx.pingwheel.common.platform.IPlatformContextService;
@@ -11,7 +12,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
-import java.util.UUID;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.Global.LOGGER;
@@ -87,7 +87,7 @@ public class LegacyMigrationHandler {
 			msg.append(" to ");
 			msg.append(Component.literal("\"assets/pingwheel\"").withStyle(ChatFormatting.GRAY));
 
-			Game.player.sendMessage(LanguageUtils.withModPrefix(msg), UUID.randomUUID());
+			Game.player.sendSystemMessage(LanguageUtils.withModPrefix(msg));
 			notifyDeprecatedResourcePack = false;
 		}
 	}
@@ -102,7 +102,7 @@ public class LegacyMigrationHandler {
 		notifyDeprecatedResourcePack = false;
 
 		for (var resource : legacyTextures) {
-			notifyDeprecatedResourcePack |= resourceManager.hasResource(resource);
+			notifyDeprecatedResourcePack |= !resourceManager.getResourceStack(resource).isEmpty();
 		}
 	}
 }

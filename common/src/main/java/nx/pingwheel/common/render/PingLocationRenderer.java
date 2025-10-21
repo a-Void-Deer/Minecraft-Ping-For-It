@@ -1,8 +1,8 @@
 package nx.pingwheel.common.render;
 
 import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.scores.PlayerTeam;
-import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.TeamColorMode;
