@@ -1,9 +1,9 @@
 package nx.pingwheel.common.core;
 
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
-import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.integration.TeamContextHandler;
