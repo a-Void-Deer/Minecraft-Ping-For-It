@@ -20,6 +20,7 @@
 	"settings.pingwheel.channel.placeholder": "Synced to %s",
 
 	"value.pingwheel.vanilla_team": "Vanilla Team",
+	"value.pingwheel.ftb_teams": "FTB Teams",
 	"value.pingwheel.voice_chat": "Voice Chat",
 	"value.pingwheel.full": "Full",
 	"value.pingwheel.ping_only": "Ping Only",

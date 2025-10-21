@@ -26,6 +26,17 @@ repositories {
         }
         filter { includeGroupAndSubgroups("org.spongepowered") }
     }
+    exclusiveContent {
+        forRepository {
+            maven {
+                name "Cursemaven"
+                url "https://cursemaven.com"
+            }
+        }
+        filter {
+            includeGroup "curse.maven"
+        }
+    }
     maven {
         name = "BlameJared"
         url = "https://maven.blamejared.com"
@@ -54,6 +65,10 @@ dependencies {
     // Simple Voice Chat
     // https://modrepo.de/minecraft/voicechat/api/getting_started
     compileOnly "de.maxhenkel.voicechat:voicechat-api:${voicechat_api_version}"
+
+    // FTB Teams
+    // https://www.curseforge.com/minecraft/mc-mods/ftb-teams-forge
+    compileOnly "curse.maven:ftbteams-404468:${ftbteams_version}"
 }
 
 // Declare capabilities on the outgoing configurations.
