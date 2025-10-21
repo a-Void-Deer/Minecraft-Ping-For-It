@@ -34,6 +34,10 @@ repositories {
         name = "Modrinth"
         url = "https://api.modrinth.com/maven"
     }
+    maven {
+        name = "Simple Voice Chat"
+        url = "https://maven.maxhenkel.de/repository/public"
+    }
 }
 
 dependencies {
@@ -46,6 +50,10 @@ dependencies {
     // Distant Horizons
     // https://modrinth.com/mod/distanthorizonsapi
     compileOnly "maven.modrinth:DistantHorizonsApi:${distanthorizons_api_version}"
+
+    // Simple Voice Chat
+    // https://modrepo.de/minecraft/voicechat/api/getting_started
+    compileOnly "de.maxhenkel.voicechat:voicechat-api:${voicechat_api_version}"
 }
 
 // Declare capabilities on the outgoing configurations.
