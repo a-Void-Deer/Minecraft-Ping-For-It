@@ -1,11 +1,10 @@
 package nx.pingwheel.common.screen;
 
-import net.minecraft.client.CycleOption;
-import net.minecraft.client.Option;
-import net.minecraft.client.ProgressOption;
-import net.minecraft.client.gui.components.CycleButton;
+import com.mojang.serialization.Codec;
+import net.minecraft.client.OptionInstance;
 import net.minecraft.network.chat.Component;
 
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -13,39 +12,54 @@ import java.util.function.Supplier;
 public class OptionUtils {
 	private OptionUtils() {}
 
-	public static Option ofInt(String key, int min, int max, int step, Function<Integer, Component> formatter, Supplier<Integer> getter, Consumer<Integer> setter) {
-		return new ProgressOption(
-			key, min, max, step,
-			(gameOptions) -> (double)getter.get(),
-			(gameOptions, value) -> setter.accept(value.intValue()),
-			(gameOptions, option) -> formatter.apply(getter.get())
-		);
-	}
-
-	public static Option ofFloat(String key, float min, float max, float step, Function<Float, Component> formatter, Supplier<Float> getter, Consumer<Float> setter) {
-		return new ProgressOption(
-			key, min, max, step,
-			(gameOptions) -> (double)getter.get(),
-			(gameOptions, value) -> setter.accept(value.floatValue()),
-			(gameOptions, option) -> formatter.apply(getter.get())
-		);
-	}
-
-	public static Option ofBool(String key, Supplier<Boolean> getter, Consumer<Boolean> setter) {
-		return CycleOption.createOnOff(
+	public static OptionInstance<Integer> ofInt(String key, int min, int max, int step, Function<Integer, Component> formatter, Supplier<Integer> getter, Consumer<Integer> setter) {
+		return new OptionInstance<>(
 			key,
-			(gameOptions) -> getter.get(),
-			(gameOptions, option, value) -> setter.accept(value)
+			OptionInstance.noTooltip(),
+			(optionText, value) -> formatter.apply(getter.get()),
+			(new OptionInstance.IntRange(min / step, max / step))
+				.xmap((value) -> value * step, (value) -> value / step),
+			Codec.intRange(min, max),
+			getter.get(),
+			setter
 		);
 	}
 
-	public static <E extends Enum<E>> Option ofEnum(String key, Class<E> enumClass, Function<E, Component> formatter, CycleButton.TooltipSupplier<E> tooltipSupplier, Supplier<E> getter, Consumer<E> setter) {
-		return CycleOption.create(
+	public static OptionInstance<Float> ofFloat(String key, float min, float max, float step, Function<Float, Component> formatter, Supplier<Float> getter, Consumer<Float> setter) {
+		var iMin = (int) (min / step);
+		var iMax = (int) (max / step);
+
+		return new OptionInstance<>(
 			key,
-			enumClass.getEnumConstants(),
-			formatter,
-			gameOptions -> getter.get(),
-			(gameOptions, option, newValue) -> setter.accept(newValue)
-		).setTooltip((mc) -> tooltipSupplier);
+			OptionInstance.noTooltip(),
+			(optionText, value) -> formatter.apply(getter.get()),
+			(new OptionInstance.IntRange(iMin, iMax))
+				.xmap((value) -> value * step, (value) -> (int) (value / step)),
+			Codec.floatRange(iMin, iMax),
+			getter.get(),
+			setter
+		);
+	}
+
+	public static OptionInstance<Boolean> ofBool(String key, Supplier<Boolean> getter, Consumer<Boolean> setter) {
+		return OptionInstance.createBoolean(
+			key,
+			getter.get(),
+			setter
+		);
+	}
+
+	public static <E extends Enum<E>> OptionInstance<E> ofEnum(String key, Class<E> enumClass, Function<E, Component> formatter, OptionInstance.TooltipSupplier<E> tooltipSupplier, Supplier<E> getter, Consumer<E> setter) {
+		return new OptionInstance<>(
+			key,
+			(mc) -> tooltipSupplier,
+			(optionText, value) -> formatter.apply(value),
+			new OptionInstance.Enum<>(List.of(enumClass.getEnumConstants()), Codec.STRING.xmap(
+				name -> Enum.valueOf(enumClass, name),
+				Enum::name
+			)),
+			getter.get(),
+			setter
+		);
 	}
 }
