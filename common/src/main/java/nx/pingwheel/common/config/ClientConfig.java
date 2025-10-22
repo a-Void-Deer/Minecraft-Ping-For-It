@@ -24,7 +24,7 @@ public class ClientConfig implements IConfig {
 	float correctionPeriod = 1f;
 	boolean itemIconVisible = true;
 	boolean directionIndicatorVisible = true;
-	boolean nameLabelForced = false;
+	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
 	TeamColorMode teamColorMode = TeamColorMode.FULL;
 	int pingSize = 100;
 	String channel = "";

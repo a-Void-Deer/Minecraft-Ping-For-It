@@ -4,6 +4,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.world.scores.PlayerTeam;
 import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.TeamColorMode;
 import nx.pingwheel.common.core.PingView;
 import nx.pingwheel.common.resource.LanguageUtils;
@@ -40,9 +41,10 @@ public class PingLocationRenderer {
 		ctx.renderPing(ping.getItemStack(), CLIENT_CONFIG.isItemIconVisible(), pingColor);
 
 		final var author = ping.getPlayerInfo();
-		final var showNameLabels = CLIENT_CONFIG.isNameLabelForced() || Game.options.keyPlayerList.isDown();
+		final var isPlayerListHeld = CLIENT_CONFIG.getPlayerInfoMode() == PlayerInfoMode.HOLD && Game.options.keyPlayerList.isDown();
+		final var showVerbosePlayerInfo = CLIENT_CONFIG.getPlayerInfoMode() == PlayerInfoMode.ALWAYS || isPlayerListHeld;
 
-		if (showNameLabels && author != null) {
+		if (showVerbosePlayerInfo && author != null) {
 			var displayName = PlayerTeam.formatNameForTeam(author.getTeam(), Component.literal(author.getProfile().getName()));
 			if (!labelUseTeamColor) displayName = displayName.withStyle(ChatFormatting.RESET);
 

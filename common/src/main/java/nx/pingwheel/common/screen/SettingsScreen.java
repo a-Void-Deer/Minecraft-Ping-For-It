@@ -14,6 +14,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.FormattedCharSequence;
 import nx.pingwheel.common.compat.Component;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.TeamColorMode;
 import nx.pingwheel.common.integration.TeamContext;
 import nx.pingwheel.common.integration.TeamContextHandler;
@@ -61,7 +62,7 @@ public class SettingsScreen extends Screen {
 
 		this.list.addSmall(getItemIconsVisibleOption(), getDirectionIndicatorVisibleOption());
 
-		this.list.addSmall(getNameLabelForcedOption(), getTeamColorModeOption());
+		this.list.addSmall(getPlayerInfoModeOption(), getTeamColorModeOption());
 
 		this.list.addSmall(getPingSizeOption(), null);
 
@@ -232,11 +233,26 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
-	private Option getNameLabelForcedOption() {
-		return OptionUtils.ofBool(
-			LanguageUtils.settings("name_label_forced").getKey(),
-			config::isNameLabelForced,
-			config::setNameLabelForced
+	private Option getPlayerInfoModeOption() {
+		return OptionUtils.ofEnum(
+			LanguageUtils.settings("player_info_mode").getKey(),
+			PlayerInfoMode.class,
+			(mode) -> LanguageUtils.of("value", mode.toString()).get(),
+			(mode) -> {
+				if (mode != PlayerInfoMode.HOLD) return ImmutableList.of();
+
+				final var kayPlayerListTitle = Component.translatable(Game.options.keyPlayerList.getName());
+				final var kayPlayerListName = Game.options.keyPlayerList.getTranslatedKeyMessage();
+
+				return this.font.split(
+					LanguageUtils.settings("player_info_mode")
+						.path("hold", "tooltip")
+						.get(kayPlayerListTitle, kayPlayerListName),
+					140
+				);
+			},
+			config::getPlayerInfoMode,
+			config::setPlayerInfoMode
 		);
 	}
 
