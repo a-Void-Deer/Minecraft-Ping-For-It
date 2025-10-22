@@ -1,6 +1,6 @@
 package nx.pingwheel.common.render;
 
-import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.gui.GuiGraphics;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.core.PingManager;
 import nx.pingwheel.common.config.ClientConfig;
@@ -12,14 +12,15 @@ public class OverlayRenderer {
 
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
 
-	public static void draw(PoseStack m, float tickDelta) {
+	public static void draw(GuiGraphics guiGraphics, float tickDelta) {
 		final var pingRepo = PingManager.PING_REPO;
 
 		if (Game.player == null || pingRepo.isEmpty()) {
 			return;
 		}
 
-		final var ctx = new DrawContext(m);
+		final var m = guiGraphics.pose();
+		final var ctx = new DrawContext(guiGraphics);
 		final var showDirectionIndicator = CLIENT_CONFIG.isDirectionIndicatorVisible();
 
 		if (showDirectionIndicator) {

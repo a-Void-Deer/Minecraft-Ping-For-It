@@ -1,8 +1,8 @@
 package nx.pingwheel.common.screen;
 
-import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.OptionInstance;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
@@ -92,22 +92,22 @@ public class SettingsScreen extends Screen {
 	}
 
 	@Override
-	public void render(PoseStack matrices, int mouseX, int mouseY, float delta) {
-		this.renderBackground(matrices);
-		this.list.render(matrices, mouseX, mouseY, delta);
-		drawCenteredString(matrices, this.font, this.title, this.width / 2, 20, WHITE);
+	public void render(GuiGraphics ctx, int mouseX, int mouseY, float delta) {
+		this.renderBackground(ctx);
+		this.list.render(ctx, mouseX, mouseY, delta);
+		ctx.drawCenteredString(this.font, this.title, this.width / 2, 20, WHITE);
 
-		drawString(matrices, this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, GRAY);
-		this.channelTextField.render(matrices, mouseX, mouseY, delta);
+		ctx.drawString(this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, GRAY);
+		this.channelTextField.render(ctx, mouseX, mouseY, delta);
 
 		if (this.channelTextField.getValue().isEmpty()) {
-			drawString(matrices, this.font, getChannelPlaceholder(), this.width / 2 - 100 + 4, this.channelTextField.getY() + 6, WHITE);
+			ctx.drawString(this.font, getChannelPlaceholder(), this.width / 2 - 100 + 4, this.channelTextField.getY() + 6, WHITE);
 		}
 
-		super.render(matrices, mouseX, mouseY, delta);
+		super.render(ctx, mouseX, mouseY, delta);
 
 		if (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused()) {
-			this.renderTooltip(matrices, Tooltip.create(LanguageUtils.settings("channel.tooltip").get()).toCharSequence(Game), mouseX, mouseY);
+			ctx.renderTooltip(this.font, Tooltip.create(LanguageUtils.settings("channel.tooltip").get()).toCharSequence(Game), mouseX, mouseY);
 		}
 	}
 
