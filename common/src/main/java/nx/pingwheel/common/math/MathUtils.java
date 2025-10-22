@@ -1,8 +1,8 @@
 package nx.pingwheel.common.math;
 
-import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix3x2f;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
 
@@ -31,8 +31,8 @@ public class MathUtils {
 		);
 	}
 
-	public static void rotateZ(PoseStack matrixStack, float theta) {
-		matrixStack.mulPose(new Matrix4f().rotateZ(theta));
+	public static void rotateZ(Matrix3x2f matrixStack, float theta) {
+		matrixStack.mul(new Matrix3x2f().rotateLocal(theta));
 	}
 
 	public static Vec2 calculateAngleRectIntersection(float angle, Vec2 leftTop, Vec2 rightBottom) {
