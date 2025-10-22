@@ -6,8 +6,8 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.Tooltip;
-import net.minecraft.client.gui.screens.OptionsSubScreen;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -29,7 +29,6 @@ public class SettingsScreen extends OptionsSubScreen {
 	private final ClientConfig config;
 
 	private Screen parent;
-	private OptionsList list;
 	private EditBox channelTextField;
 
 	public SettingsScreen() {
@@ -51,8 +50,21 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	protected void init() {
-		this.list = new OptionsList(this.minecraft, this.width, this.height, this);
+		this.addTitle();
+		this.addContents();
+		this.addFooter();
+		this.layout.visitWidgets(this::addRenderableWidget);
+		this.repositionElements();
+	}
 
+	@Override
+	protected void addContents() {
+		this.list = this.layout.addToContents(new OptionsList(this.minecraft, this.width, this));
+		this.addOptions();
+	}
+
+	@Override
+	protected void addOptions() {
 		this.list.addSmall(getPingVolumeOption(), getPingDurationOption());
 
 		this.list.addSmall(getPingDistanceOption(), getCorrectionPeriodOption());
@@ -68,10 +80,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.channelTextField.setValue(config.getChannel());
 		this.channelTextField.setResponder(config::setChannel);
 		this.addWidget(this.channelTextField);
-
-		this.addWidget(this.list);
-
-		super.init();
 	}
 
 	@Override

@@ -94,9 +94,9 @@ public class LegacyMigrationHandler {
 
 	public static void checkResources(ResourceManager resourceManager) {
 		var legacyTextures = List.of(
-			new ResourceLocation("ping-wheel", "ping"),
-			new ResourceLocation("ping-wheel", "textures/ping.png"),
-			new ResourceLocation("ping-wheel", "textures/arrow.png")
+			ResourceLocation.fromNamespaceAndPath("ping-wheel", "ping"),
+			ResourceLocation.fromNamespaceAndPath("ping-wheel", "textures/ping.png"),
+			ResourceLocation.fromNamespaceAndPath("ping-wheel", "textures/arrow.png")
 		);
 
 		notifyDeprecatedResourcePack = false;

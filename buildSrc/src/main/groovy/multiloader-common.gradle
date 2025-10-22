@@ -27,6 +27,19 @@ repositories {
         filter { includeGroupAndSubgroups("org.spongepowered") }
     }
     exclusiveContent {
+        forRepositories(
+                maven {
+                    name = "ParchmentMC"
+                    url = "https://maven.parchmentmc.org/"
+                },
+                maven {
+                    name = "NeoForge"
+                    url = "https://maven.neoforged.net/releases"
+                }
+        )
+        filter { includeGroup("org.parchmentmc.data") }
+    }
+    exclusiveContent {
         forRepository {
             maven {
                 name "Cursemaven"
@@ -120,11 +133,15 @@ def expandProps = [
         "forge_version"          : forge_version,
         "forge_loader_version"   : forge_loader_version,
         "forge_compatible_range" : forge_compatible_range,
+
+        "neoforge_version"          : neoforge_version,
+        "neoforge_loader_version"   : neoforge_loader_version,
+        "neoforge_compatible_range" : neoforge_compatible_range,
 ]
 
 processResources {
 
-    filesMatching(["pack.mcmeta", "fabric.mod.json", "META-INF/mods.toml", "*.mixins.json"]) {
+    filesMatching(["pack.mcmeta", "fabric.mod.json", "META-INF/mods.toml", "META-INF/neoforge.mods.toml", "*.mixins.json"]) {
         expand expandProps
     }
     inputs.properties(expandProps)

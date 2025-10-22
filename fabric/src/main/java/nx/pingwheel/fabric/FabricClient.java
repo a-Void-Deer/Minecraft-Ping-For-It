@@ -29,7 +29,7 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_ID;
 @Environment(EnvType.CLIENT)
 public class FabricClient implements ClientModInitializer {
 
-	public static final ResourceLocation RELOAD_LISTENER_ID = new ResourceLocation(MOD_ID, "reload-listener");
+	public static final ResourceLocation RELOAD_LISTENER_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "reload-listener");
 
 	@Override
 	public void onInitializeClient() {
