@@ -1,27 +1,22 @@
 package nx.pingwheel.common.screen;
 
-import com.google.common.collect.ImmutableList;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
-import net.minecraft.client.gui.components.TooltipAccessor;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.util.FormattedCharSequence;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.TeamColorMode;
 import nx.pingwheel.common.integration.TeamContext;
 import nx.pingwheel.common.integration.TeamContextHandler;
 import nx.pingwheel.common.resource.LanguageUtils;
-
-import java.util.Collections;
-import java.util.List;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
@@ -30,7 +25,6 @@ public class SettingsScreen extends Screen {
 
 	private static final int WHITE = 0xFFFFFF;
 	private static final int GRAY = 0xA0A0A0;
-	private static final int LINE_LENGTH = 170;
 
 	private final ClientConfig config;
 
@@ -51,6 +45,10 @@ public class SettingsScreen extends Screen {
 	@Override
 	public void tick() {
 		this.channelTextField.tick();
+
+		if (this.channelTextField.isFocused() && this.getFocused() != this.channelTextField) {
+			this.setFocused(this.channelTextField);
+		}
 	}
 
 	@Override
@@ -76,7 +74,10 @@ public class SettingsScreen extends Screen {
 
 		this.addWidget(this.list);
 
-		this.addRenderableWidget(new Button(this.width / 2 - 100, this.height - 27, 200, 20, CommonComponents.GUI_DONE, (button) -> onClose()));
+		this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, (button) -> onClose())
+			.pos(this.width / 2 - 100, this.height - 27)
+			.size(200, 20)
+			.build());
 	}
 
 	@Override
@@ -96,32 +97,18 @@ public class SettingsScreen extends Screen {
 		this.list.render(matrices, mouseX, mouseY, delta);
 		drawCenteredString(matrices, this.font, this.title, this.width / 2, 20, WHITE);
 
-		drawString(matrices, this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.y - 12, GRAY);
+		drawString(matrices, this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, GRAY);
 		this.channelTextField.render(matrices, mouseX, mouseY, delta);
 
 		if (this.channelTextField.getValue().isEmpty()) {
-			drawString(matrices, this.font, getChannelPlaceholder(), this.width / 2 - 100 + 4, this.channelTextField.y + 6, WHITE);
+			drawString(matrices, this.font, getChannelPlaceholder(), this.width / 2 - 100 + 4, this.channelTextField.getY() + 6, WHITE);
 		}
 
 		super.render(matrices, mouseX, mouseY, delta);
 
-		var tooltipLines = getHoveredButtonTooltip(this.list, mouseX, mouseY);
-
-		if (tooltipLines.isEmpty() && (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused())) {
-			tooltipLines = this.font.split(LanguageUtils.settings("channel.tooltip").get(), LINE_LENGTH);
+		if (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused()) {
+			this.renderTooltip(matrices, Tooltip.create(LanguageUtils.settings("channel.tooltip").get()).toCharSequence(Game), mouseX, mouseY);
 		}
-
-		this.renderTooltip(matrices, tooltipLines, mouseX, mouseY);
-	}
-
-	private static List<FormattedCharSequence> getHoveredButtonTooltip(OptionsList buttonList, int mouseX, int mouseY) {
-		final var orderableTooltip = (TooltipAccessor)buttonList.getMouseOver(mouseX, mouseY).orElse(null);
-
-		if (orderableTooltip != null) {
-			return orderableTooltip.getTooltip();
-		}
-
-		return Collections.emptyList();
 	}
 
 	private MutableComponent getChannelPlaceholder() {
@@ -240,17 +227,14 @@ public class SettingsScreen extends Screen {
 			PlayerInfoMode.class,
 			(mode) -> LanguageUtils.of("value", mode.toString()).get(),
 			(mode) -> {
-				if (mode != PlayerInfoMode.HOLD) return ImmutableList.of();
+				if (mode != PlayerInfoMode.HOLD) return Component.empty();
 
 				final var kayPlayerListTitle = Component.translatable(Game.options.keyPlayerList.getName());
 				final var kayPlayerListName = Game.options.keyPlayerList.getTranslatedKeyMessage();
 
-				return this.font.split(
-					LanguageUtils.settings("player_info_mode")
-						.path("hold", "tooltip")
-						.get(kayPlayerListTitle, kayPlayerListName),
-					LINE_LENGTH
-				);
+				return LanguageUtils.settings("player_info_mode")
+					.path("hold", "tooltip")
+					.get(kayPlayerListTitle, kayPlayerListName);
 			},
 			config::getPlayerInfoMode,
 			config::setPlayerInfoMode
@@ -262,7 +246,7 @@ public class SettingsScreen extends Screen {
 			LanguageUtils.settings("team_color_mode").getKey(),
 			TeamColorMode.class,
 			(mode) -> LanguageUtils.of("value", mode.toString()).get(),
-			(mode) -> ImmutableList.of(),
+			(mode) -> Component.empty(),
 			config::getTeamColorMode,
 			config::setTeamColorMode
 		);
