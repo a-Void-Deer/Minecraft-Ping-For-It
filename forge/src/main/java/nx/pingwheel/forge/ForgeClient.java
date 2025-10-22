@@ -5,7 +5,7 @@ import net.minecraftforge.client.ConfigScreenHandler;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.eventbus.api.listener.SubscribeEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.EventNetworkChannel;
 import nx.pingwheel.common.CommonClient;
@@ -29,15 +29,24 @@ public class ForgeClient {
 
 		this.context = context;
 
-		MinecraftForge.EVENT_BUS.register(this);
-
 		// packets
 		registerPacketHandler(PING_LOCATION_CHANNEL_S2C, PingLocationS2CPacket::readSafe, CommonClient.INSTANCE::onPingLocationPacket);
 
 		// resource reload
-		this.context
-			.getModEventBus()
+		RegisterClientReloadListenersEvent
+			.getBus(this.context.getModBusGroup())
 			.addListener((RegisterClientReloadListenersEvent event) -> event.registerReloadListener(new ResourceReloadListener()));
+
+		// commands
+		RegisterClientCommandsEvent.BUS.addListener((RegisterClientCommandsEvent event) -> {
+			event.getDispatcher().register(ClientCommandBuilder.build((ctx, success, response) -> {
+				if (success) {
+					ctx.getSource().sendSuccess(() -> LanguageUtils.withModPrefix(response), false);
+				} else {
+					ctx.getSource().sendFailure(LanguageUtils.withModPrefix(response));
+				}
+			}));
+		});
 
 		// config screen
 		this.context.registerExtensionPoint(
@@ -58,16 +67,5 @@ public class ForgeClient {
 
 			ctx.setPacketHandled(true);
 		});
-	}
-
-	@SubscribeEvent
-	public void onRegisterClientCommands(RegisterClientCommandsEvent event) {
-		event.getDispatcher().register(ClientCommandBuilder.build((context, success, response) -> {
-			if (success) {
-				context.getSource().sendSuccess(() -> LanguageUtils.withModPrefix(response), false);
-			} else {
-				context.getSource().sendFailure(LanguageUtils.withModPrefix(response));
-			}
-		}));
 	}
 }

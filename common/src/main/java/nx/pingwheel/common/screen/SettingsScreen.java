@@ -7,6 +7,8 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
+import net.minecraft.client.gui.screens.inventory.tooltip.DefaultTooltipPositioner;
 import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
@@ -23,8 +25,8 @@ import static nx.pingwheel.common.config.ClientConfig.*;
 
 public class SettingsScreen extends OptionsSubScreen {
 
-	private static final int WHITE = 0xFFFFFF;
-	private static final int GRAY = 0xA0A0A0;
+	private static final int WHITE = 0xFFFFFFFF;
+	private static final int GRAY = 0xFFA0A0A0;
 
 	private final ClientConfig config;
 
@@ -109,12 +111,17 @@ public class SettingsScreen extends OptionsSubScreen {
 		ctx.drawString(this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, GRAY);
 		this.channelTextField.render(ctx, mouseX, mouseY, delta);
 
-		if (this.channelTextField.getValue().isEmpty()) {
+		if (this.channelTextField.getValue().isEmpty() && !this.channelTextField.isFocused()) {
 			ctx.drawString(this.font, getChannelPlaceholder(), this.width / 2 - 100 + 4, this.channelTextField.getY() + 6, WHITE);
 		}
 
 		if (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused()) {
-			ctx.renderTooltip(this.font, Tooltip.create(LanguageUtils.settings("channel.tooltip").get()).toCharSequence(Game), mouseX, mouseY);
+			final var clientTooltipComponentList = Tooltip.create(LanguageUtils.settings("channel.tooltip").get()).toCharSequence(Game)
+				.stream()
+				.map(ClientTooltipComponent::create)
+				.toList();
+
+			ctx.renderTooltip(this.font, clientTooltipComponentList, mouseX, mouseY, DefaultTooltipPositioner.INSTANCE, null);
 		}
 	}
 
