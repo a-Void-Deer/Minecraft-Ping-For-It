@@ -1,5 +1,6 @@
 package nx.pingwheel.common.mixin;
 
+import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphics;
 import nx.pingwheel.common.CommonClient;
@@ -12,13 +13,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class GuiMixin {
 
 	@Inject(method = "render", at = @At(value = "HEAD"))
-	public void render(GuiGraphics guiGraphics, float tickDelta, CallbackInfo callbackInfo) {
+	public void render(GuiGraphics guiGraphics, DeltaTracker deltaTracker, CallbackInfo callbackInfo) {
 		final var matrixStack = guiGraphics.pose();
 		matrixStack.pushPose();
 
-		/** the hotbar is rendered at Z -90 {@link Gui#renderItemHotbar(GuiGraphics, float)} */
+		/** the hotbar is rendered at Z -90 {@link Gui#renderItemHotbar(GuiGraphics, DeltaTracker)} */
 		matrixStack.translate(0, 0, -90);
-		CommonClient.INSTANCE.onRenderGUI(guiGraphics, tickDelta);
+		CommonClient.INSTANCE.onRenderGUI(guiGraphics, deltaTracker.getGameTimeDeltaPartialTick(true));
 
 		matrixStack.popPose();
 	}
