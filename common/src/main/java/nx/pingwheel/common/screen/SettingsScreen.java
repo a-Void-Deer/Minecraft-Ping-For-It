@@ -1,5 +1,6 @@
 package nx.pingwheel.common.screen;
 
+import com.google.common.collect.ImmutableList;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Option;
@@ -244,6 +245,7 @@ public class SettingsScreen extends Screen {
 			LanguageUtils.settings("team_color_mode").getKey(),
 			TeamColorMode.class,
 			(mode) -> LanguageUtils.of("value", mode.toString()).get(),
+			(mode) -> ImmutableList.of(),
 			config::getTeamColorMode,
 			config::setTeamColorMode
 		);

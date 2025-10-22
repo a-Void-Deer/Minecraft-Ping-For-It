@@ -3,6 +3,7 @@ package nx.pingwheel.common.screen;
 import net.minecraft.client.CycleOption;
 import net.minecraft.client.Option;
 import net.minecraft.client.ProgressOption;
+import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.network.chat.Component;
 
 import java.util.function.Consumer;
@@ -38,13 +39,13 @@ public class OptionUtils {
 		);
 	}
 
-	public static <E extends Enum<E>> Option ofEnum(String key, Class<E> enumClass, Function<E, Component> formatter, Supplier<E> getter, Consumer<E> setter) {
+	public static <E extends Enum<E>> Option ofEnum(String key, Class<E> enumClass, Function<E, Component> formatter, CycleButton.TooltipSupplier<E> tooltipSupplier, Supplier<E> getter, Consumer<E> setter) {
 		return CycleOption.create(
 			key,
 			enumClass.getEnumConstants(),
 			formatter,
 			gameOptions -> getter.get(),
 			(gameOptions, option, newValue) -> setter.accept(newValue)
-		);
+		).setTooltip((mc) -> tooltipSupplier);
 	}
 }
