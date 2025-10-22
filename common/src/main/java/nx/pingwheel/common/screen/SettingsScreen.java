@@ -60,9 +60,9 @@ public class SettingsScreen extends Screen {
 
 		this.list.addSmall(getItemIconsVisibleOption(), getDirectionIndicatorVisibleOption());
 
-		this.list.addSmall(getNameLabelForcedOption(), getPingSizeOption());
+		this.list.addSmall(getNameLabelForcedOption(), getTeamColorModeOption());
 
-		this.list.addSmall(getTeamColorModeOption(), null);
+		this.list.addSmall(getPingSizeOption(), null);
 
 		final var yOffset = 50 + 25 * this.list.children().size();
 		this.channelTextField = new EditBox(this.font, this.width / 2 - 100, yOffset, 200, 20, Component.empty());
@@ -239,6 +239,16 @@ public class SettingsScreen extends Screen {
 		);
 	}
 
+	private Option getTeamColorModeOption() {
+		return OptionUtils.ofEnum(
+			LanguageUtils.settings("team_color_mode").getKey(),
+			TeamColorMode.class,
+			(mode) -> LanguageUtils.of("value", mode.toString()).get(),
+			config::getTeamColorMode,
+			config::setTeamColorMode
+		);
+	}
+
 	private Option getPingSizeOption() {
 		final var text = LanguageUtils.settings("ping_size");
 
@@ -248,16 +258,6 @@ public class SettingsScreen extends Screen {
 			(value) -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
 			config::getPingSize,
 			config::setPingSize
-		);
-	}
-
-	private Option getTeamColorModeOption() {
-		return OptionUtils.ofEnum(
-			LanguageUtils.settings("team_color_mode").getKey(),
-			TeamColorMode.class,
-			(mode) -> LanguageUtils.of("value", mode.toString()).get(),
-			config::getTeamColorMode,
-			config::setTeamColorMode
 		);
 	}
 }
