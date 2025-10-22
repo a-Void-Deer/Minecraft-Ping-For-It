@@ -1,7 +1,7 @@
 package nx.pingwheel.common;
 
-import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import nx.pingwheel.common.compat.LegacyMigrationHandler;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
@@ -16,7 +16,6 @@ import nx.pingwheel.common.render.OverlayRenderer;
 import nx.pingwheel.common.render.WorldRenderContext;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.util.InputUtils;
-import org.joml.Matrix4f;
 
 import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_PING;
 import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_SETTINGS;
@@ -71,8 +70,8 @@ public class CommonClient {
 		PingController.pollPingAction(ctx.tickDelta);
 	}
 
-	public void onRenderGUI(PoseStack poseStack, float tickDelta) {
-		OverlayRenderer.draw(poseStack, tickDelta);
+	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
+		OverlayRenderer.draw(guiGraphics, tickDelta);
 	}
 
 	public void onPingLocationPacket(PingLocationS2CPacket packet) {
