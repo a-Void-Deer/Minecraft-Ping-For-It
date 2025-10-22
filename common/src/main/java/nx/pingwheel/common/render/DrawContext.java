@@ -5,9 +5,10 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import lombok.Getter;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.FastColor;
+import net.minecraft.util.ARGB;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec2;
 import nx.pingwheel.common.math.MathUtils;
@@ -19,7 +20,7 @@ import static nx.pingwheel.common.resource.ResourceReloadListener.hasCustomTextu
 
 public class DrawContext {
 
-	private static final int SHADOW_BLACK = FastColor.ARGB32.color(64, 0, 0, 0);
+	private static final int SHADOW_BLACK = ARGB.color(64, 0, 0, 0);
 
 	private GuiGraphics guiGraphics;
 	@Getter
@@ -54,8 +55,8 @@ public class DrawContext {
 	public void renderPlayerHead(PlayerInfo player) {
 		var texture = player.getSkin().texture();
 		RenderSystem.enableBlend();
-		guiGraphics.blit(texture, 0, 0, 0, 8, 8, 8, 8, 64, 64);
-		guiGraphics.blit(texture, 0, 0, 0, 40, 8, 8, 8, 64, 64); // Overlay (hat)
+		guiGraphics.blit(RenderType::guiTextured, texture, 0, 0, 8, 8, 8, 8, 64, 64);
+		guiGraphics.blit(RenderType::guiTextured, texture, 0, 0, 40, 8, 8, 8, 64, 64); // Overlay (hat)
 		RenderSystem.disableBlend();
 	}
 
@@ -83,18 +84,18 @@ public class DrawContext {
 
 	public void renderTexture(ResourceLocation texture, int size, int color) {
 		final var offset = size / -2;
-		final float a = FastColor.ARGB32.alpha(color) / 255f;
-		final float r = FastColor.ARGB32.red(color) / 255f;
-		final float g = FastColor.ARGB32.green(color) / 255f;
-		final float b = FastColor.ARGB32.blue(color) / 255f;
+		final float a = ARGB.alpha(color) / 255f;
+		final float r = ARGB.red(color) / 255f;
+		final float g = ARGB.green(color) / 255f;
+		final float b = ARGB.blue(color) / 255f;
 
 		RenderSystem.setShaderColor(r, g, b, a);
 		RenderSystem.enableBlend();
 		guiGraphics.blit(
+			RenderType::guiTextured,
 			texture,
 			offset,
 			offset,
-			0,
 			0,
 			0,
 			size,
