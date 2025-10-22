@@ -43,7 +43,7 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService {
 	public void sendToClient(IPacket packet, ServerPlayer player) {
 		var chan = CHANNEL_MAP.get(packet.getId());
 
-		if (chan == null || !chan.isRemotePresent(player.connection.getConnection())) {
+		if (chan == null || !chan.isRemotePresent(player.connection.connection)) {
 			return;
 		}
 
