@@ -6,7 +6,6 @@ import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.EventNetworkChannel;
 import nx.pingwheel.common.CommonClient;
@@ -23,8 +22,12 @@ import static nx.pingwheel.forge.ForgeMain.PING_LOCATION_CHANNEL_S2C;
 
 public class ForgeClient {
 
-	public ForgeClient() {
+	protected FMLJavaModLoadingContext context;
+
+	public ForgeClient(FMLJavaModLoadingContext context) {
 		CommonClient.INSTANCE.onInit();
+
+		this.context = context;
 
 		MinecraftForge.EVENT_BUS.register(this);
 
@@ -32,13 +35,12 @@ public class ForgeClient {
 		registerPacketHandler(PING_LOCATION_CHANNEL_S2C, PingLocationS2CPacket::readSafe, CommonClient.INSTANCE::onPingLocationPacket);
 
 		// resource reload
-		FMLJavaModLoadingContext
-			.get()
+		this.context
 			.getModEventBus()
 			.addListener((RegisterClientReloadListenersEvent event) -> event.registerReloadListener(new ResourceReloadListener()));
 
 		// config screen
-		ModLoadingContext.get().registerExtensionPoint(
+		this.context.registerExtensionPoint(
 			ConfigScreenHandler.ConfigScreenFactory.class,
 			() -> new ConfigScreenHandler.ConfigScreenFactory((client, parent) -> new SettingsScreen(parent))
 		);
