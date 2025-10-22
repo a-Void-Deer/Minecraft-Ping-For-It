@@ -8,7 +8,7 @@ import nx.pingwheel.common.config.TeamColorMode;
 import nx.pingwheel.common.core.PingView;
 import nx.pingwheel.common.resource.LanguageUtils;
 
-import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_NAME_LABELS;
+import static nx.pingwheel.common.CommonClient.Game;
 
 public class PingLocationRenderer {
 	private PingLocationRenderer() {}
@@ -40,7 +40,7 @@ public class PingLocationRenderer {
 		ctx.renderPing(ping.getItemStack(), CLIENT_CONFIG.isItemIconVisible(), pingColor);
 
 		final var author = ping.getPlayerInfo();
-		final var showNameLabels = CLIENT_CONFIG.isNameLabelForced() || KEY_BINDING_NAME_LABELS.isDown();
+		final var showNameLabels = CLIENT_CONFIG.isNameLabelForced() || Game.options.keyPlayerList.isDown();
 
 		if (showNameLabels && author != null) {
 			var displayName = PlayerTeam.formatNameForTeam(author.getTeam(), Component.literal(author.getProfile().getName()));
