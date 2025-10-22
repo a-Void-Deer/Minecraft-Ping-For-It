@@ -2,11 +2,10 @@ package nx.pingwheel.forge.platform;
 
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
-import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.EventNetworkChannel;
+import net.minecraftforge.network.PacketDistributor;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 
@@ -34,10 +33,9 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService {
 		}
 
 		var buf = new FriendlyByteBuf(Unpooled.buffer());
-		buf.writeResourceLocation(packet.getId());
 		packet.write(buf);
 
-		connection.send(new ServerboundCustomPayloadPacket(buf));
+		chan.send(buf, PacketDistributor.SERVER.noArg());
 	}
 
 	@Override
@@ -49,9 +47,8 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService {
 		}
 
 		var buf = new FriendlyByteBuf(Unpooled.buffer());
-		buf.writeResourceLocation(packet.getId());
 		packet.write(buf);
 
-		player.connection.send(new ClientboundCustomPayloadPacket(buf));
+		chan.send(buf, PacketDistributor.PLAYER.with(player));
 	}
 }
