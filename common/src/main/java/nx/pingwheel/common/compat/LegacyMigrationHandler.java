@@ -16,7 +16,8 @@ import java.util.UUID;
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.Global.MOD_ID;
-import static nx.pingwheel.common.util.InputUtils.*;
+import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_PING;
+import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_SETTINGS;
 
 // TODO: remove this class a few versions/months down the line
 // introduced with 1.12.0 on 09.10.2025
