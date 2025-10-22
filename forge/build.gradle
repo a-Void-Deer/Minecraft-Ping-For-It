@@ -2,12 +2,17 @@ plugins {
     id "idea"
     id "multiloader-loader"
     id "net.minecraftforge.gradle" version "[6.0.24,6.2)"
+    id "org.spongepowered.mixin" version "0.7-SNAPSHOT"
+}
+
+mixin {
+    config("${mod_id}.mixins.json")
 }
 
 minecraft {
     mappings channel: "official", version: minecraft_version
 
-    // reobf = false
+    reobf = false
     copyIdeResources = true
 
     runs {

@@ -33,8 +33,6 @@ public class CommonClient {
 		IPlatformClientEventService.INSTANCE.registerTickStartEvent(this::onTickStart);
 		IPlatformClientEventService.INSTANCE.registerJoinServerEvent(this::onJoinServer);
 		IPlatformClientEventService.INSTANCE.registerLeaveServerEvent(this::onLeaveServer);
-		IPlatformClientEventService.INSTANCE.registerRenderWorldEvent(this::onRenderWorld);
-		IPlatformClientEventService.INSTANCE.registerRenderGUIEvent(this::onRenderGUI);
 
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_PING);
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
