@@ -1,8 +1,8 @@
-package nx.pingwheel.fabric.mixin;
+package nx.pingwheel.common.mixin;
 
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphics;
-import nx.pingwheel.fabric.event.GuiRenderCallback;
+import nx.pingwheel.common.CommonClient;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -16,9 +16,9 @@ public abstract class GuiMixin {
 		final var matrixStack = guiGraphics.pose();
 		matrixStack.pushPose();
 
-		/** the hotbar is rendered at Z -90 {@link Gui#renderHotbar(float, GuiGraphics)} */
+		/** the hotbar is rendered at Z -90 {@link Gui#renderItemHotbar(GuiGraphics, float)} */
 		matrixStack.translate(0, 0, -90);
-		GuiRenderCallback.START.invoker().onRenderGui(guiGraphics, tickDelta);
+		CommonClient.INSTANCE.onRenderGUI(guiGraphics, tickDelta);
 
 		matrixStack.popPose();
 	}
