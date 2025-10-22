@@ -1,6 +1,7 @@
 package nx.pingwheel.neoforge.platform;
 
 import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.neoforge.client.network.ClientPacketDistributor;
 import net.neoforged.neoforge.network.PacketDistributor;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
@@ -17,7 +18,7 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService {
 			return;
 		}
 
-		PacketDistributor.sendToServer(packet);
+		ClientPacketDistributor.sendToServer(packet);
 	}
 
 	@Override

@@ -27,8 +27,7 @@ public class OverlayRenderer {
 			DirectionIndicatorRenderer.prepareSafeZone();
 		}
 
-		m.pushPose();
-		m.translate(0f, 0f, -pingRepo.size() * 16f);
+		m.pushMatrix();
 
 		for (var ping : pingRepo) {
 			final var screenPos = ping.getScreenPos();
@@ -43,8 +42,6 @@ public class OverlayRenderer {
 				continue;
 			}
 
-			m.translate(0f, 0f, 16f);
-
 			if (showDirectionIndicator) {
 				DirectionIndicatorRenderer.draw(ctx, ping);
 			}
@@ -54,6 +51,6 @@ public class OverlayRenderer {
 			}
 		}
 
-		m.popPose();
+		m.popMatrix();
 	}
 }
