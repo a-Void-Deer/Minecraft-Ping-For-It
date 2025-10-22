@@ -53,7 +53,7 @@ public class FabricClient implements ClientModInitializer {
 				}
 
 				@Override
-				public CompletableFuture<Void> reload(PreparationBarrier helper, ResourceManager resourceManager, ProfilerFiller loadProfiler, ProfilerFiller applyProfiler, Executor loadExecutor, Executor applyExecutor) {
+				public CompletableFuture<Void> reload(PreparationBarrier helper, ResourceManager resourceManager, Executor loadExecutor, Executor applyExecutor) {
 					return ResourceReloadListener.reloadTextures(helper, resourceManager, loadExecutor, applyExecutor);
 				}
 			});
