@@ -2,6 +2,7 @@ package nx.pingwheel.common.screen;
 
 import com.mojang.serialization.Codec;
 import net.minecraft.client.OptionInstance;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
 
 import java.util.List;
@@ -49,10 +50,10 @@ public class OptionUtils {
 		);
 	}
 
-	public static <E extends Enum<E>> OptionInstance<E> ofEnum(String key, Class<E> enumClass, Function<E, Component> formatter, OptionInstance.TooltipSupplier<E> tooltipSupplier, Supplier<E> getter, Consumer<E> setter) {
+	public static <E extends Enum<E>> OptionInstance<E> ofEnum(String key, Class<E> enumClass, Function<E, Component> formatter, Function<E, Component> tooltipSupplier, Supplier<E> getter, Consumer<E> setter) {
 		return new OptionInstance<>(
 			key,
-			(mc) -> tooltipSupplier,
+			(mode) -> Tooltip.create(tooltipSupplier.apply(mode)),
 			(optionText, value) -> formatter.apply(value),
 			new OptionInstance.Enum<>(List.of(enumClass.getEnumConstants()), Codec.STRING.xmap(
 				name -> Enum.valueOf(enumClass, name),
