@@ -30,7 +30,7 @@ public class SettingsScreen extends Screen {
 
 	private static final int WHITE = 0xFFFFFF;
 	private static final int GRAY = 0xA0A0A0;
-	private static final int LINE_LENGTH = 140;
+	private static final int LINE_LENGTH = 170;
 
 	private final ClientConfig config;
 
