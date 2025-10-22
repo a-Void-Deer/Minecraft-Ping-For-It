@@ -47,7 +47,7 @@ public class PingLocationRenderer {
 		final var showVerbosePlayerInfo = CLIENT_CONFIG.getPlayerInfoMode() == PlayerInfoMode.ALWAYS || isPlayerListHeld;
 
 		if (showVerbosePlayerInfo && author != null) {
-			var displayName = PlayerTeam.formatNameForTeam(author.getTeam(), Component.literal(author.getProfile().getName()));
+			var displayName = PlayerTeam.formatNameForTeam(author.getTeam(), Component.literal(author.getProfile().name()));
 			if (!labelUseTeamColor) displayName = displayName.withStyle(ChatFormatting.RESET);
 
 			ctx.renderLabel(displayName, 1.75f, author, WHITE);
