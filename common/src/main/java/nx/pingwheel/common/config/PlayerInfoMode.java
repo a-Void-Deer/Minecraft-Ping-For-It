@@ -1,7 +1,7 @@
 package nx.pingwheel.common.config;
 
 public enum PlayerInfoMode {
-	HOLD, DISABLED, ALWAYS;
+	HOLD, DISABLED, ALWAYS, COMPACT;
 
 	public static PlayerInfoMode get(String name) {
 		for (PlayerInfoMode mode : PlayerInfoMode.values()) {
