@@ -30,6 +30,7 @@ public class SettingsScreen extends Screen {
 
 	private static final int WHITE = 0xFFFFFF;
 	private static final int GRAY = 0xA0A0A0;
+	private static final int LINE_LENGTH = 140;
 
 	private final ClientConfig config;
 
@@ -107,7 +108,7 @@ public class SettingsScreen extends Screen {
 		var tooltipLines = getHoveredButtonTooltip(this.list, mouseX, mouseY);
 
 		if (tooltipLines.isEmpty() && (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused())) {
-			tooltipLines = this.font.split(LanguageUtils.settings("channel.tooltip").get(), 140);
+			tooltipLines = this.font.split(LanguageUtils.settings("channel.tooltip").get(), LINE_LENGTH);
 		}
 
 		this.renderTooltip(matrices, tooltipLines, mouseX, mouseY);
@@ -248,7 +249,7 @@ public class SettingsScreen extends Screen {
 					LanguageUtils.settings("player_info_mode")
 						.path("hold", "tooltip")
 						.get(kayPlayerListTitle, kayPlayerListName),
-					140
+					LINE_LENGTH
 				);
 			},
 			config::getPlayerInfoMode,
