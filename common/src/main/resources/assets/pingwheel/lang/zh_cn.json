@@ -11,7 +11,6 @@
 	"settings.pingwheel.correction_period": "校正周期: %s",
 	"settings.pingwheel.item_icon_visible": "物品图标",
 	"settings.pingwheel.direction_indicator_visible": "方向指示器",
-	"settings.pingwheel.name_label_forced": "始终显示标记人名称",
 	"settings.pingwheel.ping_size": "标记点尺寸: %s",
 	"settings.pingwheel.channel": "标记频道",
 	"settings.pingwheel.channel.tooltip": "您只能与相同频道的玩家发送和接收标记。",

@@ -11,7 +11,6 @@
 	"settings.pingwheel.correction_period": "修正週期：%s",
 	"settings.pingwheel.item_icon_visible": "物品圖示",
 	"settings.pingwheel.direction_indicator_visible": "方向指示器",
-	"settings.pingwheel.name_label_forced": "總是顯示名稱",
 	"settings.pingwheel.ping_size": "標記大小：%s",
 	"settings.pingwheel.channel": "標記頻道",
 	"settings.pingwheel.channel.tooltip": "您只會與相同頻道的玩家發送和接收標記",

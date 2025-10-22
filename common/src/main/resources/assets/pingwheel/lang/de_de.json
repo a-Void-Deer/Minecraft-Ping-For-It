@@ -11,7 +11,6 @@
 	"settings.pingwheel.correction_period": "Korrekturzeitraum: %s",
 	"settings.pingwheel.item_icon_visible": "Gegenstands-Symbole",
 	"settings.pingwheel.direction_indicator_visible": "Richtungsindikatoren",
-	"settings.pingwheel.name_label_forced": "Namen immer anzeigen",
 	"settings.pingwheel.ping_size": "Ping-Größe: %s",
 	"settings.pingwheel.channel": "Ping-Kanal",
 	"settings.pingwheel.channel.tooltip": "Du sendest und empfängst Pings nur von Spielern auf demselben Kanal",

@@ -11,7 +11,6 @@
 	"settings.pingwheel.correction_period": "Período de corrección: %s",
 	"settings.pingwheel.item_icon_visible": "Íconos de objetos",
 	"settings.pingwheel.direction_indicator_visible": "Indicador de dirección",
-	"settings.pingwheel.name_label_forced": "Mostrar nombres siempre",
 	"settings.pingwheel.ping_size": "Tamaño del ping: %s",
 	"settings.pingwheel.channel": "Canal de pings",
 	"settings.pingwheel.channel.tooltip": "Solo vas a enviar y recibir pings de jugadores en el mismo canal",
