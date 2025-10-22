@@ -32,7 +32,7 @@ public class MathUtils {
 	}
 
 	public static void rotateZ(PoseStack matrixStack, float theta) {
-		matrixStack.mulPoseMatrix(new Matrix4f().rotateZ(theta));
+		matrixStack.mulPose(new Matrix4f().rotateZ(theta));
 	}
 
 	public static Vec2 calculateAngleRectIntersection(float angle, Vec2 leftTop, Vec2 rightBottom) {

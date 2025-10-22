@@ -3,10 +3,10 @@ package nx.pingwheel.common.screen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.screens.OptionsSubScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
@@ -21,7 +21,7 @@ import nx.pingwheel.common.resource.LanguageUtils;
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 
-public class SettingsScreen extends Screen {
+public class SettingsScreen extends OptionsSubScreen {
 
 	private static final int WHITE = 0xFFFFFF;
 	private static final int GRAY = 0xA0A0A0;
@@ -33,7 +33,7 @@ public class SettingsScreen extends Screen {
 	private EditBox channelTextField;
 
 	public SettingsScreen() {
-		super(LanguageUtils.settings("title").get());
+		super(null, null, LanguageUtils.settings("title").get());
 		this.config = ClientConfig.HANDLER.getConfig();
 	}
 
@@ -51,7 +51,7 @@ public class SettingsScreen extends Screen {
 
 	@Override
 	protected void init() {
-		this.list = new OptionsList(this.minecraft, this.width, this.height - 64, 32, 25);
+		this.list = new OptionsList(this.minecraft, this.width, this.height, this);
 
 		this.list.addSmall(getPingVolumeOption(), getPingDurationOption());
 
@@ -63,8 +63,7 @@ public class SettingsScreen extends Screen {
 
 		this.list.addSmall(getPingSizeOption(), null);
 
-		final var yOffset = 50 + 25 * this.list.children().size();
-		this.channelTextField = new EditBox(this.font, this.width / 2 - 100, yOffset, 200, 20, Component.empty());
+		this.channelTextField = new EditBox(this.font, -1, -1, 200, 20, Component.empty());
 		this.channelTextField.setMaxLength(MAX_CHANNEL_LENGTH);
 		this.channelTextField.setValue(config.getChannel());
 		this.channelTextField.setResponder(config::setChannel);
@@ -72,10 +71,7 @@ public class SettingsScreen extends Screen {
 
 		this.addWidget(this.list);
 
-		this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, (button) -> onClose())
-			.pos(this.width / 2 - 100, this.height - 27)
-			.size(200, 20)
-			.build());
+		super.init();
 	}
 
 	@Override
@@ -90,16 +86,18 @@ public class SettingsScreen extends Screen {
 	}
 
 	@Override
-	public void renderBackground(GuiGraphics ctx, int mouseX, int mouseY, float delta) {
-		this.renderDirtBackground(ctx);
+	public void repositionElements() {
+		super.repositionElements();
+		this.list.updateSize(this.width, this.layout);
 	}
 
 	@Override
 	public void render(GuiGraphics ctx, int mouseX, int mouseY, float delta) {
 		super.render(ctx, mouseX, mouseY, delta);
 		this.list.render(ctx, mouseX, mouseY, delta);
-		ctx.drawCenteredString(this.font, this.title, this.width / 2, 20, WHITE);
 
+		final var yOffset = 50 + 25 * this.list.children().size();
+		this.channelTextField.setPosition(width / 2 - 100, yOffset);
 		ctx.drawString(this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, GRAY);
 		this.channelTextField.render(ctx, mouseX, mouseY, delta);
 
