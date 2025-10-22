@@ -37,7 +37,6 @@ public class CommonClient {
 
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_PING);
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
-		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_NAME_LABELS);
 
 		LegacyMigrationHandler.migrateKeyMappings();
 	}

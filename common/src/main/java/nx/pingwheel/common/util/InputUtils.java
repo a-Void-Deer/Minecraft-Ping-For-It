@@ -14,7 +14,6 @@ public class InputUtils {
 	private static final String SETTINGS_CATEGORY = LanguageUtils.keyOf("key.category", "name");
 	public static final KeyMapping KEY_BINDING_PING = new KeyMapping(LanguageUtils.keyOf("key", "ping_location"), InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_5, SETTINGS_CATEGORY);
 	public static final KeyMapping KEY_BINDING_SETTINGS = new KeyMapping(LanguageUtils.keyOf("key", "open_settings"), InputConstants.Type.KEYSYM, -1, SETTINGS_CATEGORY);
-	public static final KeyMapping KEY_BINDING_NAME_LABELS = new KeyMapping(LanguageUtils.keyOf("key", "name_labels"), InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_LEFT_ALT, SETTINGS_CATEGORY);
 
 	public static boolean consumePingHotkey() {
 		if (!KEY_BINDING_PING.same(Game.options.keyPickItem)) {

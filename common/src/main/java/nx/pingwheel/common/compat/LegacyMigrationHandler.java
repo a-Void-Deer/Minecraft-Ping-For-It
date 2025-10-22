@@ -63,9 +63,6 @@ public class LegacyMigrationHandler {
 				} else if (line.contains("open-settings")) {
 					KEY_BINDING_SETTINGS.setKey(keyKey);
 					LOGGER.info("Migrated KEY_BINDING_SETTINGS: %s".formatted(keyKey));
-				} else if (line.contains("name-labels")) {
-					KEY_BINDING_NAME_LABELS.setKey(keyKey);
-					LOGGER.info("Migrated KEY_BINDING_NAME_LABELS: %s".formatted(keyKey));
 				}
 
 				gameOptionsSaveNeeded = true;
