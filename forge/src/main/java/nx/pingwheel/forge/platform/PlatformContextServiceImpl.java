@@ -34,7 +34,9 @@ public class PlatformContextServiceImpl implements IPlatformContextService {
 
 	@Override
 	public void registerKeyMapping(KeyMapping keyMapping) {
-		context.getModEventBus().addListener((RegisterKeyMappingsEvent event) -> event.register(keyMapping));
+		RegisterKeyMappingsEvent
+			.getBus(context.getModBusGroup())
+			.addListener((RegisterKeyMappingsEvent event) -> event.register(keyMapping));
 	}
 
 	@Override
