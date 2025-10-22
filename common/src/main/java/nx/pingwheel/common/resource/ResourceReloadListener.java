@@ -2,7 +2,6 @@ package nx.pingwheel.common.resource;
 
 import net.minecraft.server.packs.resources.PreparableReloadListener;
 import net.minecraft.server.packs.resources.ResourceManager;
-import net.minecraft.util.profiling.ProfilerFiller;
 import nx.pingwheel.common.compat.LegacyMigrationHandler;
 
 import java.util.concurrent.CompletableFuture;
@@ -13,7 +12,7 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_TEXTURE_ID;
 public class ResourceReloadListener implements PreparableReloadListener {
 
 	@Override
-	public CompletableFuture<Void> reload(PreparationBarrier helper, ResourceManager resourceManager, ProfilerFiller loadProfiler, ProfilerFiller applyProfiler, Executor loadExecutor, Executor applyExecutor) {
+	public CompletableFuture<Void> reload(PreparationBarrier helper, ResourceManager resourceManager, Executor loadExecutor, Executor applyExecutor) {
 		return reloadTextures(helper, resourceManager, loadExecutor, applyExecutor);
 	}
 
