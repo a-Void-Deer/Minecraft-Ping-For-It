@@ -1,6 +1,6 @@
 package nx.pingwheel.forge.platform;
 
-import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
@@ -65,14 +65,14 @@ public class PlatformClientEventServiceImpl implements IPlatformClientEventServi
 	}
 
 	@Override
-	public void registerRenderGUIEvent(BiConsumer<PoseStack, Float> callback) {
+	public void registerRenderGUIEvent(BiConsumer<GuiGraphics, Float> callback) {
 		MinecraftForge.EVENT_BUS.register(new RenderGUIEventEventHandler(callback));
 	}
-	private record RenderGUIEventEventHandler(BiConsumer<PoseStack, Float> callback) {
+	private record RenderGUIEventEventHandler(BiConsumer<GuiGraphics, Float> callback) {
 		@SubscribeEvent
 		public void onPreGuiRender(RenderGuiOverlayEvent.Pre event) {
 			if (event.getOverlay() == VanillaGuiOverlay.VIGNETTE.type()) {
-				callback.accept(event.getPoseStack(), event.getPartialTick());
+				callback.accept(event.getGuiGraphics(), event.getPartialTick());
 			}
 		}
 	}
