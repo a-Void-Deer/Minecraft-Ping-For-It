@@ -1,14 +1,14 @@
 package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.NotNull;
 
 import static nx.pingwheel.common.config.ClientConfig.MAX_CHANNEL_LENGTH;
 
 public record UpdateChannelC2SPacket(String channel) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath("ping-wheel-c2s", "update-channel");
+	public static final Identifier PACKET_ID = Identifier.fromNamespaceAndPath("ping-wheel-c2s", "update-channel");
 	public static final Type<UpdateChannelC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public UpdateChannelC2SPacket() {
@@ -27,7 +27,7 @@ public record UpdateChannelC2SPacket(String channel) implements IPacket {
 		return channel == null;
 	}
 
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return PACKET_ID;
 	}
 

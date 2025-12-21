@@ -11,7 +11,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import nx.pingwheel.common.config.ServerConfig;
+import net.minecraft.server.permissions.Permissions;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.resource.LanguageUtils;
@@ -153,7 +153,7 @@ public class ServerCommandBuilder {
 			.executes(helpCallback);
 
 		return LiteralArgumentBuilder.<CommandSourceStack>literal("pingwheel:server")
-			.requires(source -> source.hasPermission(2))
+			.requires(source -> source.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER))
 			.executes(helpCallback)
 			.then(cmdHelp)
 			.then(cmdDefaultChannel)

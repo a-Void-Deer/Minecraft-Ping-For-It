@@ -19,7 +19,7 @@ public class OptionUtils {
 			OptionInstance.noTooltip(),
 			(optionText, value) -> formatter.apply(getter.get()),
 			(new OptionInstance.IntRange(min / step, max / step))
-				.xmap((value) -> value * step, (value) -> value / step),
+				.xmap((value) -> value * step, (value) -> value / step, true),
 			Codec.intRange(min, max),
 			getter.get(),
 			setter
@@ -35,7 +35,7 @@ public class OptionUtils {
 			OptionInstance.noTooltip(),
 			(optionText, value) -> formatter.apply(getter.get()),
 			(new OptionInstance.IntRange(iMin, iMax))
-				.xmap((value) -> value * step, (value) -> (int) (value / step)),
+				.xmap((value) -> value * step, (value) -> (int) (value / step), true),
 			Codec.floatRange(iMin, iMax),
 			getter.get(),
 			setter

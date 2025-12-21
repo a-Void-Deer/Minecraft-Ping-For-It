@@ -1,7 +1,7 @@
 package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.NotNull;
 
@@ -11,7 +11,7 @@ import static nx.pingwheel.common.config.ClientConfig.MAX_CHANNEL_LENGTH;
 
 public record PingLocationC2SPacket(String channel, Vec3 pos, UUID entity, int sequence, int dimension) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath("ping-wheel-c2s", "ping-location");
+	public static final Identifier PACKET_ID = Identifier.fromNamespaceAndPath("ping-wheel-c2s", "ping-location");
 	public static final Type<PingLocationC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public PingLocationC2SPacket() {
@@ -47,7 +47,7 @@ public record PingLocationC2SPacket(String channel, Vec3 pos, UUID entity, int s
 		return channel == null;
 	}
 
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return PACKET_ID;
 	}
 
