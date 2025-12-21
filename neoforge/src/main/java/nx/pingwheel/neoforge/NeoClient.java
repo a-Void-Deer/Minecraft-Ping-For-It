@@ -1,6 +1,6 @@
 package nx.pingwheel.neoforge;
 
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModLoadingContext;
@@ -18,7 +18,7 @@ import static nx.pingwheel.common.Global.MOD_ID;
 
 public class NeoClient {
 
-	public static final ResourceLocation RELOAD_LISTENER_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "reload-listener");
+	public static final Identifier RELOAD_LISTENER_ID = Identifier.fromNamespaceAndPath(MOD_ID, "reload-listener");
 
 	public NeoClient(IEventBus modBus) {
 		CommonClient.INSTANCE.onInit();
