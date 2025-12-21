@@ -3,7 +3,7 @@ package nx.pingwheel.common.compat;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManager;
 import nx.pingwheel.common.platform.IPlatformContextService;
 import nx.pingwheel.common.resource.LanguageUtils;
@@ -94,9 +94,9 @@ public class LegacyMigrationHandler {
 
 	public static void checkResources(ResourceManager resourceManager) {
 		var legacyTextures = List.of(
-			ResourceLocation.fromNamespaceAndPath("ping-wheel", "ping"),
-			ResourceLocation.fromNamespaceAndPath("ping-wheel", "textures/ping.png"),
-			ResourceLocation.fromNamespaceAndPath("ping-wheel", "textures/arrow.png")
+			Identifier.fromNamespaceAndPath("ping-wheel", "ping"),
+			Identifier.fromNamespaceAndPath("ping-wheel", "textures/ping.png"),
+			Identifier.fromNamespaceAndPath("ping-wheel", "textures/arrow.png")
 		);
 
 		notifyDeprecatedResourcePack = false;
