@@ -45,7 +45,7 @@ public class Raycast {
 			}
 
 			if (terrainCache == null || Duration.between(lastCacheLoad, Instant.now()).getSeconds() > 10) {
-				terrainCache = DhApi.Delayed.terrainRepo.getSoftCache();
+				terrainCache = DhApi.Delayed.terrainRepo.createSoftCache();
 				lastCacheLoad = Instant.now();
 			}
 
