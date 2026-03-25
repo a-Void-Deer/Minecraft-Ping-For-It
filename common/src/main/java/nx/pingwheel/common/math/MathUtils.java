@@ -2,8 +2,8 @@ package nx.pingwheel.common.math;
 
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
+import nx.pingwheel.common.render.WorldRenderContext;
 import org.joml.Matrix3x2f;
-import org.joml.Matrix4f;
 import org.joml.Vector4f;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -11,12 +11,11 @@ import static nx.pingwheel.common.CommonClient.Game;
 public class MathUtils {
 	private MathUtils() {}
 
-	public static ScreenPos worldToScreen(Vec3 worldPos, Matrix4f modelViewMatrix, Matrix4f projectionMatrix) {
+	public static ScreenPos worldToScreen(Vec3 worldPos, WorldRenderContext ctx) {
 		var window = Game.getWindow();
-		var camera = Game.gameRenderer.getMainCamera();
-		var worldPosRel = new Vector4f(camera.position().reverse().add(worldPos).toVector3f(), 1f);
-		worldPosRel.mul(modelViewMatrix);
-		worldPosRel.mul(projectionMatrix);
+		var worldPosRel = new Vector4f(worldPos.subtract(ctx.camera.pos).toVector3f(), 1f);
+		ctx.modelViewMatrix.transform(worldPosRel);
+		ctx.projectionMatrix.transform(worldPosRel);
 
 		var depth = worldPosRel.w;
 

@@ -87,7 +87,7 @@ public class LegacyMigrationHandler {
 			msg.append(" to ");
 			msg.append(Component.literal("\"assets/pingwheel\"").withStyle(ChatFormatting.GRAY));
 
-			Game.player.displayClientMessage(LanguageUtils.withModPrefix(msg), false);
+			Game.player.sendSystemMessage(LanguageUtils.withModPrefix(msg));
 			notifyDeprecatedResourcePack = false;
 		}
 	}

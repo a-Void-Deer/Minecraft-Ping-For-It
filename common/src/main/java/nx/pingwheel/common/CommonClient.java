@@ -1,7 +1,7 @@
 package nx.pingwheel.common;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import nx.pingwheel.common.compat.LegacyMigrationHandler;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
@@ -68,7 +68,7 @@ public class CommonClient {
 		PingController.pollPingAction(ctx.tickDelta);
 	}
 
-	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
+	public void onRenderGUI(GuiGraphicsExtractor guiGraphics, float tickDelta) {
 		OverlayRenderer.draw(guiGraphics, tickDelta);
 	}
 

@@ -89,8 +89,8 @@ public class PingView extends PingData {
 			}
 		}
 
-		this.screenPos = MathUtils.worldToScreen(pos, ctx.modelViewMatrix, ctx.projectionMatrix);
-		this.distance = ctx.camera.position().distanceTo(pos);
+		this.screenPos = MathUtils.worldToScreen(pos, ctx);
+		this.distance = ctx.camera.pos.distanceTo(pos);
 		this.calculateScale();
 	}
 
