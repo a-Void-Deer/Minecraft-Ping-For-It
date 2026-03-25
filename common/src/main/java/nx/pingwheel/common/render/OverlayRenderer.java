@@ -1,9 +1,9 @@
 package nx.pingwheel.common.render;
 
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.core.PingManager;
-import nx.pingwheel.common.config.ClientConfig;
 
 import static nx.pingwheel.common.CommonClient.Game;
 
@@ -12,7 +12,7 @@ public class OverlayRenderer {
 
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
 
-	public static void draw(GuiGraphics guiGraphics, float tickDelta) {
+	public static void draw(GuiGraphicsExtractor guiGraphics, float tickDelta) {
 		final var pingRepo = PingManager.PING_REPO;
 
 		if (Game.player == null || pingRepo.isEmpty()) {

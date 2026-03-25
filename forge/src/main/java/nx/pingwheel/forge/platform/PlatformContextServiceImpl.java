@@ -17,8 +17,7 @@ public class PlatformContextServiceImpl implements IPlatformContextService {
 
 	@Override
 	public String getSelfModVersion() {
-		return ModList.get().getModContainerById(MOD_ID)
-			.map(container -> container.getModInfo().getVersion().toString())
+		return ModList.getModContainerById(MOD_ID).map(container -> container.getModInfo().getVersion().toString())
 			.orElse("Unknown");
 	}
 
@@ -39,6 +38,6 @@ public class PlatformContextServiceImpl implements IPlatformContextService {
 
 	@Override
 	public boolean isModLoaded(String modId) {
-		return ModList.get().isLoaded(modId);
+		return ModList.isLoaded(modId);
 	}
 }

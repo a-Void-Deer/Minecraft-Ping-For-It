@@ -2,7 +2,7 @@ package nx.pingwheel.common.render;
 
 import com.mojang.blaze3d.opengl.GlStateManager;
 import lombok.Getter;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
@@ -22,11 +22,11 @@ public class DrawContext {
 
 	private static final int SHADOW_BLACK = ARGB.color(64, 0, 0, 0);
 
-	private GuiGraphics guiGraphics;
+	private GuiGraphicsExtractor guiGraphics;
 	@Getter
 	private Matrix3x2fStack matrices;
 
-	public DrawContext(GuiGraphics guiGraphics) {
+	public DrawContext(GuiGraphicsExtractor guiGraphics) {
 		this.guiGraphics = guiGraphics;
 		this.matrices = guiGraphics.pose();
 	}
@@ -42,7 +42,7 @@ public class DrawContext {
 		matrices.pushMatrix();
 		matrices.translate(textOffset.x, textOffset.y);
 		guiGraphics.fill(-2, -2, (int)textMetrics.x + 1, (int)textMetrics.y, SHADOW_BLACK);
-		guiGraphics.drawString(Game.font, text, extraWidth, 0, color, false);
+		guiGraphics.text(Game.font, text, extraWidth, 0, color, false);
 
 		if (player != null) {
 			matrices.translate(-0.5f, -0.5f);
@@ -71,7 +71,7 @@ public class DrawContext {
 	}
 
 	public void renderGuiItemModel(ItemStack itemStack) {
-		guiGraphics.renderItem(itemStack, -8, -8, -150);
+		guiGraphics.item(itemStack, -8, -8, -150);
 	}
 
 	public void renderDefaultPingIcon(int color) {

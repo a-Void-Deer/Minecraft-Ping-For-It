@@ -2,7 +2,7 @@ package nx.pingwheel.common.screen;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.OptionInstance;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.Tooltip;
@@ -102,17 +102,17 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	@Override
-	public void render(GuiGraphics ctx, int mouseX, int mouseY, float delta) {
-		super.render(ctx, mouseX, mouseY, delta);
-		this.list.render(ctx, mouseX, mouseY, delta);
+	public void extractRenderState(GuiGraphicsExtractor ctx, int mouseX, int mouseY, float delta) {
+		super.extractRenderState(ctx, mouseX, mouseY, delta);
+		this.list.extractRenderState(ctx, mouseX, mouseY, delta);
 
 		final var yOffset = 50 + 25 * this.list.children().size();
 		this.channelTextField.setPosition(width / 2 - 100, yOffset);
-		ctx.drawString(this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, GRAY);
-		this.channelTextField.render(ctx, mouseX, mouseY, delta);
+		ctx.text(this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, GRAY);
+		this.channelTextField.extractRenderState(ctx, mouseX, mouseY, delta);
 
 		if (this.channelTextField.getValue().isEmpty() && !this.channelTextField.isFocused()) {
-			ctx.drawString(this.font, getChannelPlaceholder(), this.width / 2 - 100 + 4, this.channelTextField.getY() + 6, WHITE);
+			ctx.text(this.font, getChannelPlaceholder(), this.width / 2 - 100 + 4, this.channelTextField.getY() + 6, WHITE);
 		}
 
 		if (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused()) {
@@ -121,7 +121,7 @@ public class SettingsScreen extends OptionsSubScreen {
 				.map(ClientTooltipComponent::create)
 				.toList();
 
-			ctx.renderTooltip(this.font, clientTooltipComponentList, mouseX, mouseY, DefaultTooltipPositioner.INSTANCE, null);
+			ctx.tooltip(this.font, clientTooltipComponentList, mouseX, mouseY, DefaultTooltipPositioner.INSTANCE, null);
 		}
 	}
 
