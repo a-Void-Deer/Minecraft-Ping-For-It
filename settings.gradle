@@ -12,20 +12,14 @@ pluginManagement {
             filter {
                 includeGroup("net.fabricmc.unpick")
                 includeGroup("net.fabricmc")
-                includeGroup("fabric-loom")
+                includeGroup("net.fabricmc.fabric-loom")
             }
         }
-        exclusiveContent {
-            forRepository {
-                maven {
-                    name = "Forge"
-                    url = uri("https://maven.minecraftforge.net")
-                }
-            }
-            filter {
-                includeGroupAndSubgroups("net.minecraftforge")
-            }
+        maven {
+            name = "Forge"
+            url = uri("https://maven.minecraftforge.net")
         }
+        mavenLocal()
         exclusiveContent {
             forRepository {
                 maven {
@@ -41,7 +35,7 @@ pluginManagement {
 }
 
 plugins {
-    id "org.gradle.toolchains.foojay-resolver-convention" version "0.8.0"
+    id "org.gradle.toolchains.foojay-resolver-convention" version "1.0.0"
 }
 
 rootProject.name = "Ping-Wheel"

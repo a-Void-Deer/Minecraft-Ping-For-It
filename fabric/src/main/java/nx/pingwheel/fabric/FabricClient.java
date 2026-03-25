@@ -39,7 +39,7 @@ public class FabricClient implements ClientModInitializer {
 		);
 
 		// resource reload
-		ResourceLoader.get(PackType.CLIENT_RESOURCES).registerReloader(RELOAD_LISTENER_ID, new ResourceReloadListener());
+		ResourceLoader.get(PackType.CLIENT_RESOURCES).registerReloadListener(RELOAD_LISTENER_ID, new ResourceReloadListener());
 
 		// commands
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
