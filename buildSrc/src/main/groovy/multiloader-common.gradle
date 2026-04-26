@@ -62,6 +62,10 @@ repositories {
         name = "Simple Voice Chat"
         url = "https://maven.maxhenkel.de/repository/public"
     }
+    maven {
+        name = "RyanHCode Maven"
+        url = "https://maven.ryanhcode.dev/releases"
+    }
 }
 
 dependencies {
@@ -82,6 +86,10 @@ dependencies {
     // FTB Teams
     // https://www.curseforge.com/minecraft/mc-mods/ftb-teams-forge
     compileOnly "curse.maven:ftbteams-404468:${ftbteams_version}"
+
+    // Sable
+    // https://github.com/ryanhcode/sable-companion
+    compileOnly "dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:${sable_version}"
 }
 
 // Declare capabilities on the outgoing configurations.

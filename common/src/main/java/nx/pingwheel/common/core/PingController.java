@@ -1,6 +1,8 @@
 package nx.pingwheel.common.core;
 
+import dev.ryanhcode.sable.companion.SableCompanion;
 import lombok.Getter;
+import net.minecraft.core.Position;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import nx.pingwheel.common.config.ClientConfig;
@@ -71,6 +73,18 @@ public class PingController {
 			}
 
 			return;
+		}
+
+		if (ModContext.HasSable && hitResult.getType() == HitResult.Type.BLOCK) {
+			var pos = hitResult.getLocation();
+			var subLevelAccess = SableCompanion.INSTANCE.getContainingClient(pos);
+
+			if (subLevelAccess != null) {
+				var realPos = SableCompanion.INSTANCE.projectOutOfSubLevel(Game.level, (Position)pos);
+				IPlatformNetworkService.INSTANCE.sendToServer(new PingLocationC2SPacket(CLIENT_CONFIG.getChannel(), realPos, null, pingSequence, GameContext.getDimension()));
+
+				return;
+			}
 		}
 
 		UUID uuid = null;
