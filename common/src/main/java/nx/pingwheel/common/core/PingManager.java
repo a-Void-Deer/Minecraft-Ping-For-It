@@ -42,7 +42,7 @@ public class PingManager {
 	}
 
 	public static void updatePings(WorldRenderContext ctx) {
-		if (Game.level == null || PING_REPO.isEmpty()) {
+		if (Game == null || Game.level == null || PING_REPO.isEmpty()) {
 			return;
 		}
 
