@@ -31,6 +31,8 @@ public final class TargetTypeCatalog {
 		}
 
 		this.entries = copied;
+		// Lookup-only map: resolution/declaration ordering is carried by the
+		// `entries` and `resolutionOrder` lists, never by this map's iteration order.
 		this.byId = Map.copyOf(map);
 		this.resolutionOrder = computeResolutionOrder(copied);
 	}
