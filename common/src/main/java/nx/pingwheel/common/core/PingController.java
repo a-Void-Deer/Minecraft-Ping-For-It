@@ -1,7 +1,6 @@
 package nx.pingwheel.common.core;
 
 import dev.ryanhcode.sable.companion.SableCompanion;
-import lombok.Getter;
 import net.minecraft.core.Position;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -22,14 +21,9 @@ public class PingController {
 
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
 
-	@Getter
 	private static boolean pingQueued = false;
 	private static int pingSequence = 0;
 	private static int lastPing = 0;
-
-	public static void revokePingAction() {
-		pingQueued = false;
-	}
 
 	public static void queuePingAction() {
 		pingQueued = true;

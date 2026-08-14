@@ -47,7 +47,6 @@ public class PingManager {
 		}
 
 		final var time = (int)Game.level.getGameTime();
-		PingView target = null;
 
 		for (var iter = PING_REPO.iterator(); iter.hasNext(); ) {
 			final var ping = iter.next();
@@ -56,13 +55,7 @@ public class PingManager {
 
 			if (ping.isExpired()) {
 				iter.remove();
-			} else if (PingController.isPingQueued() && ping.isRemovable() && ping.isCloserToCenter(target)) {
-				target = ping;
 			}
-		}
-
-		if (target != null && PING_REPO.remove(target)) {
-			PingController.revokePingAction();
 		}
 
 		PING_REPO.sort((a, b) -> Double.compare(b.getDistance(), a.getDistance()));

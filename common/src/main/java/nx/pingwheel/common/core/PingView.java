@@ -6,7 +6,6 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.math.MathUtils;
@@ -112,29 +111,6 @@ public class PingView extends PingData {
 
 	public boolean isExpired() {
 		return this.age > CLIENT_CONFIG.getPingDuration() * TPS && CLIENT_CONFIG.getPingDuration() < MAX_PING_DURATION;
-	}
-
-	public boolean isRemovable() {
-		return (CLIENT_CONFIG.getCorrectionPeriod() >= MAX_CORRECTION_PERIOD || this.age > CLIENT_CONFIG.getCorrectionPeriod() * TPS) && this.distanceToCenter() < CLIENT_CONFIG.getRemoveRadius();
-	}
-
-	public float distanceToCenter() {
-		if (this.screenPos == null) {
-			return 0f;
-		}
-
-		final var wnd = Game.getWindow();
-		final var center = new Vec2(wnd.getGuiScaledWidth() * 0.5f, wnd.getGuiScaledHeight() * 0.5f);
-
-		return this.screenPos.distanceTo(center);
-	}
-
-	public boolean isCloserToCenter(@Nullable PingView b) {
-		if (b == null) {
-			return true;
-		}
-
-		return this.distanceToCenter() < b.distanceToCenter();
 	}
 
 	public int getTeamColor() {

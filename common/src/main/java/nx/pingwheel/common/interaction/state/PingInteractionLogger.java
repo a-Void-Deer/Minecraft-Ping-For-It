@@ -1,0 +1,43 @@
+package nx.pingwheel.common.interaction.state;
+
+import nx.pingwheel.common.Global;
+
+/**
+ * A tiny, injectable debug logger for the interaction state machine.
+ *
+ * <p>Only safe fields are ever logged by the state machine: token sequence,
+ * ping type id, target kind, {@link TargetGoneReason}, wheel ping type count,
+ * cancellation candidate count, and marker id value. UUIDs, positions,
+ * dimension/registry ids, names, item data, and chat text are never logged.
+ * Tests use {@link #noop()} or an in-memory recording implementation, so the
+ * game logger ({@link Global}) is never initialized in tests unless
+ * {@link #global()} is explicitly requested.
+ */
+@FunctionalInterface
+public interface PingInteractionLogger {
+
+	/**
+	 * Emits a debug message with {@code {}} placeholder arguments.
+	 */
+	void debug(String message, Object... args);
+
+	/**
+	 * A logger that discards every message.
+	 */
+	static PingInteractionLogger noop() {
+		return (message, args) -> {
+			// intentionally empty
+		};
+	}
+
+	/**
+	 * A logger backed by the mod's global Log4j logger.
+	 *
+	 * <p>The reference to {@link Global#LOGGER} is deferred into the returned
+	 * lambda body, so calling this factory does not initialize {@link Global};
+	 * only the first {@code debug(...)} invocation does.
+	 */
+	static PingInteractionLogger global() {
+		return (message, args) -> Global.LOGGER.debug(message, args);
+	}
+}

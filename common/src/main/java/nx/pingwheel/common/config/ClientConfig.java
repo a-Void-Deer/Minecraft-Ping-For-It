@@ -31,7 +31,6 @@ public class ClientConfig implements IConfig {
 	Map<String, String> serverChannels = new HashMap<>();
 
 	// hidden from the settings screen
-	int removeRadius = 10;
 	int raycastDistance = 1024;
 	int safeZoneLeft = 5;
 	int safeZoneRight = 5;
