@@ -11,9 +11,11 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Position;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
@@ -40,6 +42,7 @@ import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.PingInteractionStateMachine;
 import nx.pingwheel.common.interaction.wheel.WheelSelection;
 import nx.pingwheel.common.integration.ModContext;
+import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerRequestKind;
@@ -48,8 +51,10 @@ import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.math.Raycast;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
+import nx.pingwheel.common.util.DirectionalSoundInstance;
 
 import static nx.pingwheel.common.CommonClient.Game;
+import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
 
 /**
  * The phase-7 client runtime: the main-thread-confined composition root that
@@ -64,6 +69,8 @@ import static nx.pingwheel.common.CommonClient.Game;
  *       {@link PingCaptureCoordinator} freeze the key-down capture;</li>
  *   <li>the {@link PingInteractionStateMachine} applies short/long-press,
  *       wheel, cancellation, and timeout rules;</li>
+ *   <li>the {@link WheelMouseCapture} releases the mouse for the open wheel
+ *       and re-grabs it only when this runtime released it;</li>
  *   <li>the {@link ClientPingActionDispatcher} maps the single emitted action
  *       onto the wire or the local error sink.</li>
  * </ul>
@@ -99,6 +106,7 @@ public final class ClientPingRuntime {
 	private final ClientPingActionDispatcher dispatcher;
 	private final ClientPingActionDispatcher.LocalErrorSink errorSink;
 	private final PingInteractionLogger logger;
+	private final WheelMouseCapture wheelMouseCapture;
 
 	/**
 	 * The latest dispatched create request id; a single slot, never a growing
@@ -116,7 +124,8 @@ public final class ClientPingRuntime {
 		PingInteractionStateMachine machine,
 		ClientPingActionDispatcher dispatcher,
 		ClientPingActionDispatcher.LocalErrorSink errorSink,
-		PingInteractionLogger logger
+		PingInteractionLogger logger,
+		WheelMouseCapture wheelMouseCapture
 	) {
 		this.markerStore = Objects.requireNonNull(markerStore, "markerStore");
 		this.activeInteraction = Objects.requireNonNull(activeInteraction, "activeInteraction");
@@ -125,6 +134,7 @@ public final class ClientPingRuntime {
 		this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
 		this.errorSink = Objects.requireNonNull(errorSink, "errorSink");
 		this.logger = Objects.requireNonNull(logger, "logger");
+		this.wheelMouseCapture = Objects.requireNonNull(wheelMouseCapture, "wheelMouseCapture");
 	}
 
 	/**
@@ -167,7 +177,8 @@ public final class ClientPingRuntime {
 			machine,
 			new ClientPingActionDispatcher(packetSender, errorSink, logger),
 			errorSink,
-			logger);
+			logger,
+			new WheelMouseCapture(logger));
 	}
 
 	/**
@@ -177,13 +188,22 @@ public final class ClientPingRuntime {
 	 * edge the machine is pressed and the target is captured immediately
 	 * (synchronously on the game thread, or asynchronously for a Distant
 	 * Horizons miss). Then the machine is updated with the current key state,
-	 * wheel selection, and a live cancellation context, and the returned action
-	 * is dispatched at most once. Finally the marker store's fallback expiry
-	 * runs against the incremented local tick.
+	 * the wheel selection queued by the latest GUI frame, and a live
+	 * cancellation context, and the returned action is dispatched at most
+	 * once. Finally the wheel mouse capture is synced with whatever phase the
+	 * machine ended in, and the marker store's fallback expiry runs against
+	 * the incremented local tick.
+	 *
+	 * <p>The queued wheel selection is consumed exactly once per tick and the
+	 * queued slot is reset to {@link WheelSelection#NONE} before the update,
+	 * so a selection must be refreshed by a later GUI frame to be seen again:
+	 * if rendering stops, a release commits {@code NONE} instead of a stale
+	 * center/sector selection.
 	 *
 	 * <p>While the machine is idle there is no interaction to feed, so the
 	 * live cancellation context (which walks every locally owned marker) is
-	 * not built at all; only the fallback expiry runs.
+	 * not built at all; only the mouse capture sync and the fallback expiry
+	 * run.
 	 */
 	public void onTick(boolean pressEdge, boolean keyDown) {
 		Minecraft game = Game;
@@ -199,27 +219,43 @@ public final class ClientPingRuntime {
 			captureImmediately(token);
 		}
 
-		if (machine.phase() == PingInteractionPhase.IDLE) {
-			expireFallbackMarkers();
-			return;
-		}
+		WheelSelection consumedSelection = wheelSelection;
+		wheelSelection = WheelSelection.NONE;
 
-		Optional<PingInteractionAction> action = machine.update(keyDown, wheelSelection, buildCancellationContext());
+		if (machine.phase() != PingInteractionPhase.IDLE) {
+			Optional<PingInteractionAction> action = machine.update(keyDown, consumedSelection, buildCancellationContext());
 
-		if (action.isPresent()) {
-			PingInteractionAction dispatched = action.get();
+			if (action.isPresent()) {
+				PingInteractionAction dispatched = action.get();
 
-			// Record the create request id before the dispatch so an
-			// authoritative TARGET_GONE rejection can be matched against the
-			// latest create request only.
-			if (dispatched instanceof PingInteractionAction.CreatePing create) {
-				createRequestTracker.onCreateDispatched(create.context().token().sequence());
+				// Record the create request id before the dispatch so an
+				// authoritative TARGET_GONE rejection can be matched against the
+				// latest create request only.
+				if (dispatched instanceof PingInteractionAction.CreatePing create) {
+					createRequestTracker.onCreateDispatched(create.context().token().sequence());
+				}
+
+				dispatcher.dispatch(dispatched);
 			}
-
-			dispatcher.dispatch(dispatched);
 		}
+
+		// Keep the mouse capture in sync with whatever phase the update left
+		// behind: open (release), or timeout/commit/cancel/stale (re-grab).
+		wheelMouseCapture.sync(machine.phase(), game);
 
 		expireFallbackMarkers();
+	}
+
+	/**
+	 * Releases every client-side resource held by this runtime.
+	 *
+	 * <p>Called by {@code CommonClient} on disconnect before the runtime
+	 * reference is dropped. The wheel mouse capture re-grabs the mouse here
+	 * when this runtime released it and no screen is open, so a disconnect
+	 * while the wheel is open can never leak a released mouse.
+	 */
+	public void close() {
+		wheelMouseCapture.close(Game);
 	}
 
 	/**
@@ -386,17 +422,52 @@ public final class ClientPingRuntime {
 	/**
 	 * Applies an authoritative created-marker snapshot on the main thread as of
 	 * the runtime's current local tick.
+	 *
+	 * <p>The existing directional ping sound plays exactly once per newly seen
+	 * marker id whose target lives in the current dimension; a retransmission
+	 * or same-id replacement of an already known marker never replays it.
 	 */
 	public void applyCreated(MarkerSnapshot snapshot) {
 		Objects.requireNonNull(snapshot, "snapshot");
 
+		boolean newlySeen = markerStore.marker(snapshot.id()).isEmpty();
+
 		markerStore.onCreated(snapshot, localTick);
+
+		if (newlySeen) {
+			playCreatedSoundOnce(snapshot);
+		}
 
 		logger.debug("marker created applied: markerId={} kind={} targetType={} pingType={}",
 			snapshot.id().value(),
 			snapshot.target().kind(),
 			snapshot.targetTypeId(),
 			snapshot.pingTypeId());
+	}
+
+	/**
+	 * Plays the existing directional ping sound at the marker anchor with the
+	 * configured volume, but only for a marker in the current dimension.
+	 */
+	private void playCreatedSoundOnce(MarkerSnapshot snapshot) {
+		Minecraft game = Game;
+
+		if (game == null || game.level == null || game.player == null) {
+			return;
+		}
+
+		if (!snapshot.target().dimensionId().equals(game.level.dimension().location().toString())) {
+			return;
+		}
+
+		MarkerAnchor anchor = snapshot.anchor();
+
+		game.getSoundManager().play(new DirectionalSoundInstance(
+			PING_SOUND_EVENT,
+			SoundSource.MASTER,
+			CLIENT_CONFIG.getPingVolume() / 100f,
+			1f,
+			new Vec3(anchor.x(), anchor.y(), anchor.z())));
 	}
 
 	/**

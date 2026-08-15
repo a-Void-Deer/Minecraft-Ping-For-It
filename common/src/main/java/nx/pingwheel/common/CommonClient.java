@@ -4,10 +4,10 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
+import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.compat.LegacyMigrationHandler;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
-import nx.pingwheel.common.core.PingManager;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
@@ -18,10 +18,12 @@ import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.platform.IPlatformContextService;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.render.OverlayRenderer;
+import nx.pingwheel.common.render.WheelOverlayRenderer;
 import nx.pingwheel.common.render.WorldRenderContext;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.util.InputUtils;
 
+import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_PING;
 import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_SETTINGS;
 
@@ -58,8 +60,16 @@ public class CommonClient {
 	}
 
 	public void onLeaveServer() {
+		if (pingRuntime != null) {
+			pingRuntime.close();
+		}
+
 		pingRuntime = null;
-		PingManager.clearPings();
+		MarkerOverlayState.INSTANCE.clear();
+
+		// A disconnect while the ping key is still held must not leak the
+		// armed hold into the next connection.
+		InputUtils.resetPingHold();
 	}
 
 	public void onTickStart() {
@@ -83,15 +93,39 @@ public class CommonClient {
 	}
 
 	public void onRenderWorld(WorldRenderContext ctx) {
-		PingManager.updatePings(ctx);
+		MarkerOverlayState.INSTANCE.prepare(ctx, pingRuntime == null ? null : pingRuntime.store());
 	}
 
 	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
 		OverlayRenderer.draw(guiGraphics, tickDelta);
+		WheelOverlayRenderer.draw(guiGraphics, tickDelta);
 	}
 
+	/**
+	 * The nullable current ping runtime: present only while in a live
+	 * world/connection. The wheel renderer uses this getter so a missing
+	 * runtime can never crash the GUI pass.
+	 */
+	public ClientPingRuntime getPingRuntime() {
+		return pingRuntime;
+	}
+
+	/**
+	 * Legacy S2C ping location handler.
+	 *
+	 * <p>Ping locations of the original protocol are no longer rendered: all
+	 * ping state now arrives as authoritative marker packets (Phase 7). The
+	 * handler stays registered so legacy servers keep receiving the channel
+	 * handshake, but valid legacy packets are ignored without touching any
+	 * client state; corrupt packets are warned about exactly like before.
+	 */
 	public void onPingLocationPacket(PingLocationS2CPacket packet) {
-		PingManager.acceptPingPacket(packet);
+		if (packet.isCorrupt()) {
+			LOGGER.warn("received invalid ping location from server");
+			return;
+		}
+
+		LOGGER.debug("ignoring legacy ping location packet");
 	}
 
 	/**

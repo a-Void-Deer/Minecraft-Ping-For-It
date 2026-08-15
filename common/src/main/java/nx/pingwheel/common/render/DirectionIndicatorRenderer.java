@@ -1,9 +1,8 @@
 package nx.pingwheel.common.render;
 
 import net.minecraft.world.phys.Vec2;
+import nx.pingwheel.common.client.marker.MarkerView;
 import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.config.TeamColorMode;
-import nx.pingwheel.common.core.PingView;
 import nx.pingwheel.common.math.MathUtils;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -12,7 +11,6 @@ public class DirectionIndicatorRenderer {
 	private DirectionIndicatorRenderer() {}
 
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
-	private static final int WHITE = 0xFFFFFFFF;
 
 	private static Vec2 screenSize;
 	private static Vec2 safeZoneTopLeft;
@@ -28,7 +26,7 @@ public class DirectionIndicatorRenderer {
 		safeScreenCenter = new Vec2((safeZoneBottomRight.x - safeZoneTopLeft.x) * 0.5f, (safeZoneBottomRight.y - safeZoneTopLeft.y) * 0.5f);
 	}
 
-	public static void draw(DrawContext ctx, PingView ping) {
+	public static void draw(DrawContext ctx, MarkerView ping) {
 		final var screenPos = ping.getScreenPos();
 
 		if (screenPos == null) {
@@ -60,8 +58,7 @@ public class DirectionIndicatorRenderer {
 		{
 			m.translate(edgePosition.x, edgePosition.y, 0f);
 
-			final var useTeamColor = CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.FULL || CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.PING_ONLY;
-			final var pingColor = useTeamColor ? ping.getTeamColor() : WHITE;
+			final var pingColor = ping.getPingColor();
 
 			m.pushPose();
 			{

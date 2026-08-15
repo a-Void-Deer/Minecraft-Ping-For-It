@@ -83,4 +83,16 @@ public class InputUtils {
 
 		return rawDown;
 	}
+
+	/**
+	 * Disarms the ping hold without touching the raw key state.
+	 *
+	 * <p>Called when leaving a server so a disconnect while the ping key is
+	 * held can never leak the armed hold into the next connection. The raw key
+	 * state is deliberately left alone: the physical key still reports its
+	 * current state, and only the armed-hold edge arbitration is forgotten.
+	 */
+	public static void resetPingHold() {
+		pingHoldArmed = false;
+	}
 }

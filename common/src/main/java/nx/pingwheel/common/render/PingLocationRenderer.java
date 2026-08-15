@@ -3,10 +3,10 @@ package nx.pingwheel.common.render;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.scores.PlayerTeam;
+import nx.pingwheel.common.client.marker.MarkerView;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.TeamColorMode;
-import nx.pingwheel.common.core.PingView;
 import nx.pingwheel.common.resource.LanguageUtils;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -17,7 +17,7 @@ public class PingLocationRenderer {
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
 	private static final int WHITE = 0xFFFFFFFF;
 
-	public static void draw(DrawContext ctx, PingView ping) {
+	public static void draw(DrawContext ctx, MarkerView ping) {
 		final var screenPos = ping.getScreenPos();
 
 		if (screenPos == null) {
@@ -32,9 +32,8 @@ public class PingLocationRenderer {
 		m.scale(pingScale, pingScale, 1f);
 
 		final var labelUseTeamColor = CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.FULL || CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.LABELS_ONLY;
-		final var pingUseTeamColor = CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.FULL || CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.PING_ONLY;
 		final var distanceColor = labelUseTeamColor ? ping.getTeamColor() : WHITE;
-		final var pingColor = pingUseTeamColor ? ping.getTeamColor() : WHITE;
+		final var pingColor = ping.getPingColor();
 
 		final var author = ping.getPlayerInfo();
 		final var compactPlayerInfo = CLIENT_CONFIG.getPlayerInfoMode() == PlayerInfoMode.COMPACT ? author : null;
