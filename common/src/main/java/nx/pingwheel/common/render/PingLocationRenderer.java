@@ -32,14 +32,13 @@ public class PingLocationRenderer {
 		m.scale(pingScale, pingScale, 1f);
 
 		final var labelUseTeamColor = CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.FULL || CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.LABELS_ONLY;
-		final var distanceColor = labelUseTeamColor ? ping.getTeamColor() : WHITE;
-		final var pingColor = ping.getPingColor();
+		final var pingColor = RenderColorPolicy.markerColor(ping.getPingColor());
 
 		final var author = ping.getPlayerInfo();
 		final var compactPlayerInfo = CLIENT_CONFIG.getPlayerInfoMode() == PlayerInfoMode.COMPACT ? author : null;
 
 		final var distanceText = LanguageUtils.UNIT_METERS.get("%,.1f".formatted(ping.getDistance()));
-		ctx.renderLabel(distanceText, -1.5f, compactPlayerInfo, distanceColor);
+		ctx.renderLabel(distanceText, -1.5f, compactPlayerInfo, RenderColorPolicy.distanceTextColor());
 		ctx.renderPing(ping.getItemStack(), CLIENT_CONFIG.isItemIconVisible(), pingColor);
 
 		final var isPlayerListHeld = CLIENT_CONFIG.getPlayerInfoMode() == PlayerInfoMode.HOLD && Game.options.keyPlayerList.isDown();

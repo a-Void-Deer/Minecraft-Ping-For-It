@@ -58,7 +58,7 @@ public class DirectionIndicatorRenderer {
 		{
 			m.translate(edgePosition.x, edgePosition.y, 0f);
 
-			final var pingColor = ping.getPingColor();
+			final var pingColor = RenderColorPolicy.markerColor(ping.getPingColor());
 
 			m.pushPose();
 			{
