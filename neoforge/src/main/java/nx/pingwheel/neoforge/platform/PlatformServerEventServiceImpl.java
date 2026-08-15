@@ -1,9 +1,11 @@
 package nx.pingwheel.neoforge.platform;
 
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import nx.pingwheel.common.platform.IPlatformServerEventService;
 
 import java.util.function.Consumer;
@@ -19,5 +21,10 @@ public class PlatformServerEventServiceImpl implements IPlatformServerEventServi
 		public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
 			callback.accept((ServerPlayer)event.getEntity());
 		}
+	}
+
+	@Override
+	public void registerServerTickEvent(Consumer<MinecraftServer> callback) {
+		NeoForge.EVENT_BUS.addListener((ServerTickEvent.Post event) -> callback.accept(event.getServer()));
 	}
 }

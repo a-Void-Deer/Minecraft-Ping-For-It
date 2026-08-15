@@ -15,6 +15,8 @@ public class ServerConfig implements IConfig {
 	boolean playerTrackingEnabled = true;
 	int msToRegenerate = 1000;
 	int rateLimit = 5;
+	int pingDuration = 7;
+	int pingDistance = 2048;
 
 	@Override
 	public void validate() {
@@ -25,6 +27,9 @@ public class ServerConfig implements IConfig {
 		if (rateLimit < 0) {
 			rateLimit = 0;
 		}
+
+		pingDuration = ServerConfigBounds.clampPingDuration(pingDuration);
+		pingDistance = ServerConfigBounds.clampPingDistance(pingDistance);
 	}
 
 	@Override

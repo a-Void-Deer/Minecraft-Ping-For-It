@@ -10,7 +10,7 @@ import java.util.UUID;
  * Deterministic same-target visible-winner selection.
  *
  * <p>The winner is the active marker with the latest server arrival tick;
- * equal arrival ticks resolve to the larger {@link MarkerId}. The comparison is
+ * equal arrival ticks resolve to the larger {@link nx.pingwheel.common.domain.MarkerId}. The comparison is
  * total and independent of collection iteration order, so the result is
  * deterministic across clients.
  */

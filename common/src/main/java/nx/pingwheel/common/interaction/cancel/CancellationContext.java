@@ -10,7 +10,7 @@ import java.util.UUID;
  * <p>Captures the local player's identity, the dimension the local player is
  * currently in, the eye position, the (non-zero) look direction, and the
  * candidate markers to choose from. The candidate list is defensively copied
- * via {@link List#copyOf(List)}, so mutating the caller's list afterwards has
+ * via {@link List#copyOf}, so mutating the caller's list afterwards has
  * no effect, and the returned list cannot be modified.
  */
 public record CancellationContext(

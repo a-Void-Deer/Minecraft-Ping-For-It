@@ -34,6 +34,10 @@ processResources {
 tasks.named("javadoc", Javadoc).configure {
     dependsOn(configurations.commonJava)
     source(configurations.commonJava)
+    // The mixin annotation processor must not run during javadoc generation:
+    // it cannot resolve injection-point mappings from the javadoc classpath and
+    // fails the build with "Unable to locate method mapping".
+    options.addStringOption('-proc:none')
 }
 
 tasks.named("sourcesJar", Jar) {

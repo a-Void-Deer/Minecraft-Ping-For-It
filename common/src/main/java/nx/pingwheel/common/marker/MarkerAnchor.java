@@ -5,7 +5,7 @@ package nx.pingwheel.common.marker;
  *
  * <p>This is a pure geometric point (finite x/y/z doubles) with no dimension
  * identity of its own; the dimension is carried by the marker's
- * {@link Target}. The coordinates are always expressed in the world/dimension
+ * {@link nx.pingwheel.common.domain.Target}. The coordinates are always expressed in the world/dimension
  * identified by that target (for example, an entity target's position in the
  * dimension that contains the entity), so {@code (x, y, z)} only has a
  * well-defined meaning together with the marker's target. Platform adapters
