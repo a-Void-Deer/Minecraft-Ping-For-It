@@ -5,6 +5,8 @@ import net.minecraft.client.gui.GuiGraphics;
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
+import nx.pingwheel.common.client.outline.EntityOutlineLogger;
+import nx.pingwheel.common.client.outline.EntityOutlineState;
 import nx.pingwheel.common.compat.LegacyMigrationHandler;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
@@ -47,6 +49,9 @@ public class CommonClient {
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
 
 		LegacyMigrationHandler.migrateKeyMappings();
+
+		// The lazy global logger only ever emits aggregate transition counts.
+		EntityOutlineState.setLogger(EntityOutlineLogger.global());
 	}
 
 	public void onJoinServer() {
@@ -66,6 +71,7 @@ public class CommonClient {
 
 		pingRuntime = null;
 		MarkerOverlayState.INSTANCE.clear();
+		EntityOutlineState.INSTANCE.clear();
 
 		// A disconnect while the ping key is still held must not leak the
 		// armed hold into the next connection.
@@ -94,6 +100,25 @@ public class CommonClient {
 
 	public void onRenderWorld(WorldRenderContext ctx) {
 		MarkerOverlayState.INSTANCE.prepare(ctx, pingRuntime == null ? null : pingRuntime.store());
+		prepareEntityOutlines();
+	}
+
+	/**
+	 * Synchronizes the entity outline state for this render frame from the
+	 * current runtime store and level dimension; clears it when the runtime or
+	 * level is absent. Runs on every world render frame, before the entity
+	 * pass of {@link net.minecraft.client.renderer.LevelRenderer#renderLevel}.
+	 */
+	private static void prepareEntityOutlines() {
+		Minecraft game = Game;
+
+		if (pingRuntime == null || game == null || game.level == null) {
+			EntityOutlineState.INSTANCE.clear();
+			return;
+		}
+
+		EntityOutlineState.INSTANCE.prepare(
+			pingRuntime.store(), game.level.dimension().location().toString());
 	}
 
 	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
