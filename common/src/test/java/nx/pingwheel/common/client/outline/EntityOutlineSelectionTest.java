@@ -275,4 +275,24 @@ class EntityOutlineSelectionTest {
 		assertThrows(NullPointerException.class,
 			() -> EntityOutlineSelection.select(Map.of(), null));
 	}
+
+	@Test
+	void specConstructorIsStrictAndForcesOpaque() {
+		assertThrows(NullPointerException.class,
+			() -> new EntityOutlineSpec(new MarkerId(1L), null, "attention", 0xFFC247));
+		assertThrows(IllegalArgumentException.class,
+			() -> new EntityOutlineSpec(new MarkerId(1L), ENTITY_A, "  ", 0xFFC247));
+
+		EntityOutlineSpec spec = new EntityOutlineSpec(
+			new MarkerId(1L), ENTITY_A, "attention", 0xC247);
+
+		assertEquals(0xFF00C247, spec.argbColor());
+
+		// A nonzero partial caller alpha is discarded: the spec stays fully
+		// opaque and keeps only the 24-bit RGB payload.
+		EntityOutlineSpec alphaSpec = new EntityOutlineSpec(
+			new MarkerId(2L), ENTITY_A, "attention", 0x8000C247);
+
+		assertEquals(0xFF00C247, alphaSpec.argbColor());
+	}
 }

@@ -39,6 +39,8 @@ public final class EntityOutlineState {
 
 	public static final EntityOutlineState INSTANCE = new EntityOutlineState();
 
+	private static final PingTypeCatalog BUILT_IN_CATALOG = PingTypeCatalog.builtIn();
+
 	private static volatile EntityOutlineLogger logger = EntityOutlineLogger.noop();
 
 	private Map<UUID, EntityOutlineSpec> specs = Map.of();
@@ -60,7 +62,7 @@ public final class EntityOutlineState {
 		}
 
 		Map<UUID, EntityOutlineSpec> next = EntityOutlineSelection.select(
-			store.visibleWinnersInDimension(dimensionId), PingTypeCatalog.builtIn());
+			store.visibleWinnersInDimension(dimensionId), BUILT_IN_CATALOG);
 
 		if (next.equals(specs)) {
 			return;

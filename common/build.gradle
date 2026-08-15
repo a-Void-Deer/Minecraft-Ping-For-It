@@ -29,6 +29,15 @@ dependencies {
     testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
     testImplementation files(compiledMinecraft)
 
+    // The compiled (merged) Minecraft jar marks client-only classes with
+    // runtime-retained @OnlyIn annotations whose value references the
+    // NeoForge distmarker API. The block outline shape tests load client-only
+    // classes (PoseStack, VertexConsumer, ...), so javac needs the distmarker
+    // classes on the test classpath as well. The mergetool api jar — the same
+    // artifact the main compileClasspath receives transitively via neoform —
+    // provides exactly that and shadows no Minecraft classes.
+    testImplementation "net.neoforged:mergetool:2.0.3:api"
+
     // Minecraft's full runtime library set (netty, datafixerupper, guava,
     // ...) with versions aligned to 1.21.1. Declaring this as a test
     // implementation dependency lets Netty and the other libraries that

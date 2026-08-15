@@ -1,10 +1,15 @@
 package nx.pingwheel.common;
 
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
+import nx.pingwheel.common.client.outline.BlockOutlineLogger;
+import nx.pingwheel.common.client.outline.BlockOutlineRenderer;
+import nx.pingwheel.common.client.outline.BlockOutlineState;
 import nx.pingwheel.common.client.outline.EntityOutlineLogger;
 import nx.pingwheel.common.client.outline.EntityOutlineState;
 import nx.pingwheel.common.compat.LegacyMigrationHandler;
@@ -50,8 +55,9 @@ public class CommonClient {
 
 		LegacyMigrationHandler.migrateKeyMappings();
 
-		// The lazy global logger only ever emits aggregate transition counts.
+		// The lazy global loggers only ever emit aggregate transition counts.
 		EntityOutlineState.setLogger(EntityOutlineLogger.global());
+		BlockOutlineState.setLogger(BlockOutlineLogger.global());
 	}
 
 	public void onJoinServer() {
@@ -72,6 +78,7 @@ public class CommonClient {
 		pingRuntime = null;
 		MarkerOverlayState.INSTANCE.clear();
 		EntityOutlineState.INSTANCE.clear();
+		BlockOutlineState.INSTANCE.clear();
 
 		// A disconnect while the ping key is still held must not leak the
 		// armed hold into the next connection.
@@ -101,6 +108,7 @@ public class CommonClient {
 	public void onRenderWorld(WorldRenderContext ctx) {
 		MarkerOverlayState.INSTANCE.prepare(ctx, pingRuntime == null ? null : pingRuntime.store());
 		prepareEntityOutlines();
+		prepareBlockOutlines();
 	}
 
 	/**
@@ -119,6 +127,45 @@ public class CommonClient {
 
 		EntityOutlineState.INSTANCE.prepare(
 			pingRuntime.store(), game.level.dimension().location().toString());
+	}
+
+	/**
+	 * Synchronizes the block outline state for this render frame from the
+	 * current runtime store and level dimension; clears it when the runtime or
+	 * level is absent. Runs on every world render frame, right after
+	 * {@link #prepareEntityOutlines()} and before
+	 * {@link #renderBlockOutlines(Camera, VertexConsumer)}.
+	 */
+	private static void prepareBlockOutlines() {
+		Minecraft game = Game;
+
+		if (pingRuntime == null || game == null || game.level == null) {
+			BlockOutlineState.INSTANCE.clear();
+			return;
+		}
+
+		BlockOutlineState.INSTANCE.prepare(
+			pingRuntime.store(), game.level.dimension().location().toString());
+	}
+
+	/**
+	 * Draws the prepared block outlines into the {@code RenderType.lines()}
+	 * buffer of the current frame.
+	 *
+	 * <p>Called from {@code LevelRendererMixin} right after the ordinal-0
+	 * {@code applyModelViewMatrix} anchor, so the camera-relative model-view
+	 * matrix is already applied and the vertices can be camera-relative. The
+	 * buffer is never flushed here: vanilla flushes the lines batch later in
+	 * {@code renderLevel}.
+	 */
+	public void renderBlockOutlines(Camera camera, VertexConsumer lineBuffer) {
+		Minecraft game = Game;
+
+		if (game == null || game.level == null) {
+			return;
+		}
+
+		BlockOutlineRenderer.render(game.level, camera, lineBuffer, BlockOutlineState.INSTANCE);
 	}
 
 	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
