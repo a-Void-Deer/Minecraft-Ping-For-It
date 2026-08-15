@@ -16,11 +16,25 @@ neoForge {
     }
 }
 
+// The merged+compiled Minecraft jar is wired only into the main
+// compileClasspath by moddev. The network tests need the same classes to
+// construct FriendlyByteBuf instances, so add the compiled artifact and
+// Minecraft's own runtime dependency set to the test classpath as well.
+def compiledMinecraft = tasks.named('createMinecraftArtifacts', net.neoforged.nfrtgradle.CreateMinecraftArtifacts).flatMap { it.compiledArtifact }
+
 dependencies {
     compileOnly group:"org.spongepowered", name:"mixin", version:"0.8.5"
     implementation group: "com.google.code.findbugs", name: "jsr305", version: "3.0.1"
 
     testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testImplementation files(compiledMinecraft)
+
+    // Minecraft's full runtime library set (netty, datafixerupper, guava,
+    // ...) with versions aligned to 1.21.1. Declaring this as a test
+    // implementation dependency lets Netty and the other libraries that
+    // FriendlyByteBuf references follow Minecraft's own dependency metadata
+    // instead of pinning a Netty version by hand.
+    testImplementation "net.neoforged:minecraft-dependencies:1.21.1"
 }
 
 test {
