@@ -126,3 +126,7 @@ spec.md
 # Eclipse Buildship
 .project
 .settings/
+
+# debug related files
+debug.ps1
+build_jar.ps1

@@ -85,6 +85,29 @@ class CancelCandidatePickerTest {
 	}
 
 	@Test
+	void tallEntityTopCenterIsPickedWhileFeetAtSameXZAreOutsideCone() {
+		// A 4-block tall entity whose feet sit at eye level, straight ahead.
+		// The camera aims exactly at the displayed top-center (0, 6, 10): that
+		// candidate must be cancelable, while the same marker resolved at the
+		// feet point (0, 2, 10) — same X/Z — falls outside the 5-degree cone.
+		WorldVector feet = new WorldVector(0.0, 2.0, 10.0);
+		WorldVector topCenter = new WorldVector(0.0, 6.0, 10.0);
+		WorldVector eye = new WorldVector(0.0, 2.0, 0.0);
+		WorldVector lookAtTopCenter = new WorldVector(0.0, 4.0, 10.0);
+
+		CancelMarkerCandidate atTopCenter = marker(1L, topCenter);
+		CancelMarkerCandidate atFeet = marker(2L, feet);
+
+		assertEquals(new MarkerId(1L), new CancelCandidatePicker()
+			.pick(new CancellationContext(LOCAL_OWNER, OVERWORLD, eye, lookAtTopCenter, List.of(atTopCenter)))
+			.orElseThrow()
+			.markerId());
+		assertTrue(new CancelCandidatePicker()
+			.pick(new CancellationContext(LOCAL_OWNER, OVERWORLD, eye, lookAtTopCenter, List.of(atFeet)))
+			.isEmpty());
+	}
+
+	@Test
 	void equalDistanceTieChoosesLargerMarkerId() {
 		double rad = Math.toRadians(3.0);
 		double distance = 10.0;

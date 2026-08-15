@@ -19,6 +19,7 @@ import net.minecraft.world.phys.Vec3;
 
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
+import nx.pingwheel.common.client.marker.EntityMarkerPoint;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.MarkerId;
@@ -398,8 +399,11 @@ public final class ClientPingRuntime {
 			// GameContext only searches the current level, so a found entity is
 			// already in the marker's dimension.
 			if (entity != null && !entity.isRemoved()) {
-				var position = entity.position();
-				return new WorldVector(position.x, position.y, position.z);
+				// Same top-center geometry the marker outline renders, using the
+				// current-tick position (partialTick 1.0F); the renderer may
+				// additionally sub-tick interpolate between positions.
+				var topCenter = EntityMarkerPoint.forLiveEntity(entity, 1.0F);
+				return new WorldVector(topCenter.x, topCenter.y, topCenter.z);
 			}
 		}
 

@@ -127,7 +127,7 @@ public final class MarkerView {
 					this.itemStack = ((ItemEntity)entity).getItem().copy();
 				}
 
-				this.pos = entity.getPosition(ctx.tickDelta).add(0, entity.getBoundingBox().getYsize(), 0);
+				this.pos = EntityMarkerPoint.forLiveEntity(entity, ctx.tickDelta);
 			}
 		}
 
