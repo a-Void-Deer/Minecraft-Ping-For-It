@@ -2,13 +2,12 @@ package nx.pingwheel.common;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import nx.pingwheel.common.client.ClientPingRuntime;
+import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.compat.LegacyMigrationHandler;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
-import nx.pingwheel.common.core.PingController;
 import nx.pingwheel.common.core.PingManager;
-import nx.pingwheel.common.domain.TargetKind;
-import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
@@ -23,7 +22,6 @@ import nx.pingwheel.common.render.WorldRenderContext;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.util.InputUtils;
 
-import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_PING;
 import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_SETTINGS;
 
@@ -31,6 +29,8 @@ public class CommonClient {
 
 	public static final CommonClient INSTANCE = new CommonClient();
 	public static Minecraft Game = null;
+
+	private static ClientPingRuntime pingRuntime;
 
 	private CommonClient() {}
 
@@ -48,10 +48,17 @@ public class CommonClient {
 	}
 
 	public void onJoinServer() {
+		// Fresh per-connection runtime: interaction and marker state never
+		// leak across worlds/servers. Created only when a live level/player
+		// already exists; otherwise onTickStart creates it lazily once the
+		// world is in.
+		pingRuntime = createPingRuntimeIfInWorld();
+
 		IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(ClientConfig.HANDLER.getConfig().getChannel()));
 	}
 
 	public void onLeaveServer() {
+		pingRuntime = null;
 		PingManager.clearPings();
 	}
 
@@ -61,8 +68,13 @@ public class CommonClient {
 
 		LegacyMigrationHandler.onTick();
 
-		if (InputUtils.consumePingHotkey()) {
-			PingController.queuePingAction();
+		if (pingRuntime == null) {
+			pingRuntime = createPingRuntimeIfInWorld();
+		}
+
+		if (pingRuntime != null) {
+			var pingPressEdge = InputUtils.consumePingHotkey();
+			pingRuntime.onTick(pingPressEdge, InputUtils.isPingHotkeyDown());
 		}
 
 		if (KEY_BINDING_SETTINGS.consumeClick()) {
@@ -72,7 +84,6 @@ public class CommonClient {
 
 	public void onRenderWorld(WorldRenderContext ctx) {
 		PingManager.updatePings(ctx);
-		PingController.pollPingAction(ctx.tickDelta);
 	}
 
 	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
@@ -84,64 +95,65 @@ public class CommonClient {
 	}
 
 	/**
-	 * Marker S2C handlers (Phase 6).
+	 * Marker S2C handlers (Phase 6/7).
 	 *
 	 * <p>The loader network services invoke every handler below on the client
-	 * main thread; callers must keep that convention so Phase 7 can build the
-	 * client marker store, rendering, UI, and chat on top of these entry
-	 * points without threading hazards.
-	 *
-	 * <p>For now these handlers only emit debug logging with safe fields
-	 * (marker/request ids, target kind, catalog type ids, reasons). They never
-	 * touch client marker state, the HUD, or chat, and they never log names,
-	 * UUIDs, positions, or registry ids.
+	 * main thread, so the phase-7 {@link ClientPingRuntime} applies each
+	 * authoritative mutation directly to its main-thread-confined marker
+	 * store. A corrupt packet or a runtime that does not exist (not in a
+	 * world) is dropped safely. Logging happens inside the runtime and only
+	 * ever carries safe fields (marker/request ids, target kind, catalog type
+	 * ids, reasons); names, UUIDs, positions, and registry ids are never
+	 * logged.
 	 */
 	public void onMarkerCreatedPacket(MarkerCreatedS2CPacket packet) {
-		if (packet.isCorrupt()) {
+		if (packet.isCorrupt() || pingRuntime == null) {
 			return;
 		}
 
-		final var snapshot = packet.snapshot();
-
-		LOGGER.debug(() -> "marker created: markerId=%d kind=%s targetType=%s pingType=%s".formatted(
-			snapshot.id().value(),
-			snapshot.target().kind(),
-			snapshot.targetTypeId(),
-			snapshot.pingTypeId()));
+		pingRuntime.applyCreated(packet.snapshot());
 	}
 
 	public void onMarkerRemovedPacket(MarkerRemovedS2CPacket packet) {
-		if (packet.isCorrupt()) {
+		if (packet.isCorrupt() || pingRuntime == null) {
 			return;
 		}
 
-		LOGGER.debug(() -> "marker removed: markerId=%d reason=%s".formatted(packet.markerId().value(), packet.reason()));
+		pingRuntime.applyRemoved(packet.markerId(), packet.reason());
 	}
 
 	public void onMarkerRejectedPacket(MarkerRejectedS2CPacket packet) {
-		if (packet.isCorrupt()) {
+		if (packet.isCorrupt() || pingRuntime == null) {
 			return;
 		}
 
-		LOGGER.debug(() -> "marker rejected: requestId=%d requestKind=%s reason=%s".formatted(
-			packet.requestId(), packet.requestKind(), packet.reason()));
+		pingRuntime.handleRejected(packet.requestId(), packet.requestKind(), packet.reason());
 	}
 
 	public void onMarkerWinnerChangedPacket(MarkerWinnerChangedS2CPacket packet) {
-		if (packet.isCorrupt()) {
+		if (packet.isCorrupt() || pingRuntime == null) {
 			return;
 		}
 
-		LOGGER.debug(() -> "marker winner changed: kind=%s winner=%s".formatted(
-			targetKindOf(packet.targetKey()),
-			packet.winnerId().map(id -> Long.toString(id.value())).orElse("none")));
+		pingRuntime.applyWinnerChanged(packet.targetKey(), packet.winnerId());
 	}
 
-	private static TargetKind targetKindOf(TargetKey targetKey) {
-		return switch (targetKey) {
-			case TargetKey.EntityKey ignored -> TargetKind.ENTITY;
-			case TargetKey.BlockKey ignored -> TargetKind.BLOCK;
-			case TargetKey.LocationKey ignored -> TargetKind.LOCATION;
-		};
+	/**
+	 * Creates a fresh runtime only when a live level and player exist. Returns
+	 * {@code null} otherwise so a menu state (including the post-leave main
+	 * menu) never creates or recreates a runtime.
+	 */
+	private static ClientPingRuntime createPingRuntimeIfInWorld() {
+		if (Game == null || Game.level == null || Game.player == null) {
+			return null;
+		}
+
+		return createPingRuntime();
+	}
+
+	private static ClientPingRuntime createPingRuntime() {
+		return ClientPingRuntime.create(
+			new MinecraftLocalErrorSink(),
+			IPlatformNetworkService.INSTANCE::sendToServer);
 	}
 }
