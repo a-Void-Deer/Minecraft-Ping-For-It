@@ -52,7 +52,11 @@ import static nx.pingwheel.common.Global.LOGGER;
  *       once so the render state exists, and the vanilla
  *       {@code BlockDisplayRenderer} runs through the prepared
  *       {@link EntityRenderDispatcher} with explicit camera-relative x/y/z and
- *       an identity {@link PoseStack} — no +0.5 offset, no extra translation.</li>
+ *       an identity {@link PoseStack} — no +0.5 offset, no extra translation.
+ *       The camera-relative position adds the live {@code BlockState}'s
+ *       vanilla model offset ({@code getOffset}, computed once per frame after
+ *       the current-state validation), so short-grass/flower/bamboo-style
+ *       shifted models glow exactly where they appear in the world.</li>
  * </ul>
  *
  * <p>Every attempt writes exclusively through an {@link OutlineOnlyBufferSource}
@@ -253,11 +257,24 @@ public final class VirtualBlockDisplayRenderer {
 			// exist; the vanilla BlockDisplayRenderer returns early without
 			// them.
 			display.tick();
+
+			// The vanilla BlockDisplayRenderer places the model from the
+			// translated block min corner/origin passed here, so the glow is
+			// placed at the block MIN corner minus the camera, plus the live
+			// state's vanilla model offset (BlockState#getOffset: short grass,
+			// flowers, bamboo, ...) exactly as the block appears in the world.
+			// The offset is computed exactly once per frame, after the chunk/
+			// registry/whitelist validation above; `setPos` stays at the
+			// integer MIN corner and no PoseStack translation applies the
+			// offset.
+			Vec3 renderPosition = BlockDisplayPlacement.cameraRelative(
+				pos, cameraPosition, blockState.getOffset(level, pos));
+
 			dispatcher.render(
 				display,
-				pos.getX() - cameraPosition.x,
-				pos.getY() - cameraPosition.y,
-				pos.getZ() - cameraPosition.z,
+				renderPosition.x,
+				renderPosition.y,
+				renderPosition.z,
 				0.0F,
 				partialTick,
 				new PoseStack(),
