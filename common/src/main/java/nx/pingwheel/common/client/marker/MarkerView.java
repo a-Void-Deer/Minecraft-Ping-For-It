@@ -35,14 +35,15 @@ import static nx.pingwheel.common.CommonClient.Game;
  *
  * <p>Every world render update:
  * <ul>
- *   <li>resets the anchor to the authoritative {@link MarkerAnchor};</li>
+ *   <li>starts entity targets at the authoritative {@link MarkerAnchor} and
+ *       remembers the latest live interpolated point;</li>
  *   <li>resolves the owner's {@link PlayerInfo} from the current connection;</li>
  *   <li>for an entity target, resolves the live entity in the current
  *       dimension via {@link GameContext#getEntity} and follows its current
  *       position; a live {@link ItemEntity} copies its item stack while the
  *       item icon config is enabled;</li>
- *   <li>falls back to the anchor when the entity is absent, unloaded, or
- *       removed;</li>
+ *   <li>keeps the latest live point when the entity is absent, unloaded, or
+ *       removed, using the anchor only until the entity first resolves live;</li>
  *   <li>recomputes the screen position, distance, and scale render fields
  *       with the same world-to-screen, distance, and scale formulas the
  *       legacy ping view used.</li>
@@ -90,6 +91,7 @@ public final class MarkerView {
 	private float scale;
 
 	private Vec3 pos;
+	private final EntityMarkerPositionTracker entityPositionTracker = new EntityMarkerPositionTracker();
 
 	/**
 	 * The displayed target name, decoded from the authoritative name store by
@@ -114,7 +116,13 @@ public final class MarkerView {
 	 * fallback for a frame.
 	 */
 	void replacePayload(ClientMarker marker) {
-		this.marker = Objects.requireNonNull(marker, "marker");
+		Objects.requireNonNull(marker, "marker");
+
+		if (!sameEntityIdentity(this.marker.target(), marker.target())) {
+			this.entityPositionTracker.reset();
+		}
+
+		this.marker = marker;
 		this.playerInfo = null;
 		this.itemStack = null;
 	}
@@ -139,7 +147,8 @@ public final class MarkerView {
 	void update(WorldRenderContext ctx) {
 		final var config = ClientConfig.HANDLER.getConfig();
 
-		this.pos = anchorPosition(this.marker.anchor());
+		final var anchor = anchorPosition(this.marker.anchor());
+		this.pos = anchor;
 		this.itemStack = null;
 
 		final var connection = Game.getConnection();
@@ -149,14 +158,21 @@ public final class MarkerView {
 
 		if (target instanceof Target.EntityTarget entityTarget) {
 			final var entity = GameContext.getEntity(entityTarget.entityId());
+			Vec3 livePosition = null;
 
 			if (entity != null && !entity.isRemoved()) {
 				if (entity.getType() == EntityType.ITEM && config.isItemIconVisible()) {
 					this.itemStack = ((ItemEntity)entity).getItem().copy();
 				}
 
-				this.pos = EntityMarkerPoint.forLiveEntity(entity, ctx.tickDelta);
+				livePosition = EntityMarkerPoint.forLiveEntity(entity, ctx.tickDelta);
 			}
+
+			this.pos = toVec3(this.entityPositionTracker.resolve(
+				toPosition(anchor),
+				livePosition == null ? null : toPosition(livePosition)));
+		} else {
+			this.entityPositionTracker.reset();
 		}
 
 		this.screenPos = MathUtils.worldToScreen(this.pos, ctx.modelViewMatrix, ctx.projectionMatrix);
@@ -217,5 +233,19 @@ public final class MarkerView {
 
 	private static Vec3 anchorPosition(MarkerAnchor anchor) {
 		return new Vec3(anchor.x(), anchor.y(), anchor.z());
+	}
+
+	private static boolean sameEntityIdentity(Target first, Target second) {
+		return first instanceof Target.EntityTarget firstEntity
+			&& second instanceof Target.EntityTarget secondEntity
+			&& firstEntity.equals(secondEntity);
+	}
+
+	private static EntityMarkerPositionTracker.Position toPosition(Vec3 position) {
+		return new EntityMarkerPositionTracker.Position(position.x, position.y, position.z);
+	}
+
+	private static Vec3 toVec3(EntityMarkerPositionTracker.Position position) {
+		return new Vec3(position.x(), position.y(), position.z());
 	}
 }
