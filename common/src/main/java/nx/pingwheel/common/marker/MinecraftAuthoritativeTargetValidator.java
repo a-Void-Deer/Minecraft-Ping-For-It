@@ -16,6 +16,7 @@ import net.minecraft.world.phys.Vec3;
 
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetMatchContext;
+import nx.pingwheel.common.resolve.BlockEntityClassification;
 
 /**
  * The Minecraft 1.21.1 server adapter of {@link AuthoritativeTargetValidator}.
@@ -36,7 +37,12 @@ import nx.pingwheel.common.domain.TargetMatchContext;
  *       preserved with its entity type context;</li>
  *   <li>a block target requires the chunk to be loaded and the current block
  *       registry id to exactly equal the captured id; {@code BlockState}-only
- *       changes remain valid and the anchor is the block center;</li>
+ *       changes remain valid and the anchor is the block center. The match
+ *       context carries the server-derived {@code EntityBlock} classification
+ *       (via {@link BlockEntityClassification}), so the shared built-in
+ *       resolver classifies a BlockEntity-owning block as {@code entity_block}
+ *       exactly like the client capture does, without trusting the
+ *       client;</li>
  *   <li>a location target is already finite and anchors exactly.</li>
  * </ul>
  *
@@ -175,7 +181,7 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 
 		return AuthoritativeTargetValidation.accepted(new ValidatedMarkerTarget(
 			new Target.BlockTarget(dimensionId, requested.x(), requested.y(), requested.z(), currentId.toString()),
-			TargetMatchContext.none(),
+			TargetMatchContext.blockEntityBlock(BlockEntityClassification.hasBlockEntity(state)),
 			anchor));
 	}
 

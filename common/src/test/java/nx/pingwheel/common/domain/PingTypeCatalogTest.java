@@ -12,14 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PingTypeCatalogTest {
 
 	@Test
-	void builtInCatalogContainsAllFourPingTypesInDeclarationOrder() {
+	void builtInCatalogContainsAllSevenPingTypesInDeclarationOrder() {
 		PingTypeCatalog catalog = PingTypeCatalog.builtIn();
 
 		List<PingType> entries = catalog.entries();
 
-		assertEquals(4, entries.size());
+		assertEquals(7, entries.size());
 		assertEquals(
-			List.of("attention", "danger", "go_to", "loot"),
+			List.of("attention", "danger", "go_to", "loot", "destroy", "take", "request"),
 			entries.stream().map(PingType::id).toList());
 	}
 
@@ -38,6 +38,15 @@ class PingTypeCatalogTest {
 
 		assertEquals(0x52D273, catalog.findById("loot").orElseThrow().outlineColor());
 		assertEquals(0x55FF55, catalog.findById("loot").orElseThrow().textColor());
+
+		assertEquals(0xE66BDD, catalog.findById("destroy").orElseThrow().outlineColor());
+		assertEquals(0xF0A0EA, catalog.findById("destroy").orElseThrow().textColor());
+
+		assertEquals(0x52D273, catalog.findById("take").orElseThrow().outlineColor());
+		assertEquals(0x55FF55, catalog.findById("take").orElseThrow().textColor());
+
+		assertEquals(0x8C8CFF, catalog.findById("request").orElseThrow().outlineColor());
+		assertEquals(0xB8B8FF, catalog.findById("request").orElseThrow().textColor());
 	}
 
 	@Test
@@ -49,6 +58,13 @@ class PingTypeCatalogTest {
 		assertEquals("pingforit.ping_type.danger.phrase", catalog.findById("danger").orElseThrow().phraseKey());
 		assertEquals("pingforit.ping_type.go_to.phrase", catalog.findById("go_to").orElseThrow().phraseKey());
 		assertEquals("pingforit.ping_type.loot.phrase", catalog.findById("loot").orElseThrow().phraseKey());
+
+		assertEquals("pingforit.ping_type.destroy.phrase", catalog.findById("destroy").orElseThrow().phraseKey());
+		assertEquals("pingforit.ping_type.destroy", catalog.findById("destroy").orElseThrow().displayKey());
+		assertEquals("pingforit.ping_type.take.phrase", catalog.findById("take").orElseThrow().phraseKey());
+		assertEquals("pingforit.ping_type.take", catalog.findById("take").orElseThrow().displayKey());
+		assertEquals("pingforit.ping_type.request.phrase", catalog.findById("request").orElseThrow().phraseKey());
+		assertEquals("pingforit.ping_type.request", catalog.findById("request").orElseThrow().displayKey());
 	}
 
 	@Test

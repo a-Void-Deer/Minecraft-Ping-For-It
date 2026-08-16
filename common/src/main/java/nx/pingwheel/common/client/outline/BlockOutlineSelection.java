@@ -28,12 +28,19 @@ import nx.pingwheel.common.marker.TargetKey;
  *       position, and block registry id are selected; entity, location, and
  *       any mismatched entries are excluded even when the store already
  *       filtered them.</li>
+ *   <li>Only markers whose authoritative {@code targetTypeId} is a block
+ *       rendering participant ({@code block} or {@code entity_block}, see
+ *       {@link BlockModelOutlineRoute#acceptsForBlockRendering}) are selected;
+ *       a block-shaped marker that was classified as an entity or location
+ *       cannot drive the block outline.</li>
  *   <li>Entries are processed in ascending {@link nx.pingwheel.common.domain.MarkerId}
  *       order, so the result map's iteration order is deterministic and, if
  *       two entries ever resolve to the same block key, the larger marker id
  *       wins — exactly one spec per block key.</li>
- *   <li>The color is the ping type's 24-bit outline color forced opaque;
- *       an unknown ping type id falls back to opaque white.</li>
+ *   <li>The spec retains the marker's authoritative {@code targetTypeId} (the
+ *       renderer routes on it) and the color is the ping type's 24-bit outline
+ *       color forced opaque; an unknown ping type id falls back to opaque
+ *       white.</li>
  * </ul>
  */
 public final class BlockOutlineSelection {
@@ -74,7 +81,8 @@ public final class BlockOutlineSelection {
 				|| blockKey.x() != blockTarget.x()
 				|| blockKey.y() != blockTarget.y()
 				|| blockKey.z() != blockTarget.z()
-				|| !blockKey.blockRegistryId().equals(blockTarget.blockRegistryId())) {
+				|| !blockKey.blockRegistryId().equals(blockTarget.blockRegistryId())
+				|| !BlockModelOutlineRoute.acceptsForBlockRendering(marker.targetTypeId())) {
 				continue;
 			}
 
@@ -84,7 +92,8 @@ public final class BlockOutlineSelection {
 
 			selected.put(
 				blockKey,
-				new BlockOutlineSpec(marker.id(), blockKey, marker.pingTypeId(), argbColor));
+				new BlockOutlineSpec(
+					marker.id(), blockKey, marker.targetTypeId(), marker.pingTypeId(), argbColor));
 		}
 
 		return Collections.unmodifiableMap(selected);

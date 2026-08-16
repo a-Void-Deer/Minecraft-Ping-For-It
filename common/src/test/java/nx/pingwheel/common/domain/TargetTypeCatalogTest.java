@@ -14,7 +14,7 @@ class TargetTypeCatalogTest {
 	@Test
 	void builtInCatalogHasConfirmedDeclarationOrder() {
 		assertEquals(
-			List.of("dropped_item", "entity", "block", "location"),
+			List.of("dropped_item", "entity", "entity_block", "block", "location"),
 			BUILT_IN.entries().stream().map(TargetType::id).toList());
 	}
 
@@ -22,6 +22,7 @@ class TargetTypeCatalogTest {
 	void builtInCatalogHasConfirmedPriorities() {
 		assertEquals(100, target("dropped_item").priority());
 		assertEquals(200, target("entity").priority());
+		assertEquals(250, target("entity_block").priority());
 		assertEquals(300, target("block").priority());
 		assertEquals(Integer.MAX_VALUE, target("location").priority());
 	}
@@ -33,6 +34,9 @@ class TargetTypeCatalogTest {
 
 		assertEquals(TargetKind.ENTITY, target("entity").kind());
 		assertEquals("attention", target("entity").defaultPingType().id());
+
+		assertEquals(TargetKind.BLOCK, target("entity_block").kind());
+		assertEquals("attention", target("entity_block").defaultPingType().id());
 
 		assertEquals(TargetKind.BLOCK, target("block").kind());
 		assertEquals("attention", target("block").defaultPingType().id());
@@ -49,6 +53,9 @@ class TargetTypeCatalogTest {
 		assertEquals(
 			List.of("attention", "danger", "go_to"),
 			target("entity").pingTypes().stream().map(PingType::id).toList());
+		assertEquals(
+			List.of("attention", "destroy", "take", "request"),
+			target("entity_block").pingTypes().stream().map(PingType::id).toList());
 		assertEquals(
 			List.of("attention", "go_to", "danger"),
 			target("block").pingTypes().stream().map(PingType::id).toList());

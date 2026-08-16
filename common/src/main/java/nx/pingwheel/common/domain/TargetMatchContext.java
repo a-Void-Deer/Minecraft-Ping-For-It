@@ -8,25 +8,30 @@ import java.util.Optional;
  * resolution only.
  *
  * <p>It deliberately holds no identity-bearing data that participates in a
- * target's identity: the only field is an optional {@code entityTypeId} used to
- * distinguish finer entity specializations (for example {@code minecraft:item})
- * from a generic entity. That value must never be added to
- * {@link Target.EntityTarget} identity, and this context must never be
- * serialized or frozen into a {@link ResolvedTarget}.
+ * target's identity. The optional {@code entityTypeId} distinguishes finer
+ * entity specializations (for example {@code minecraft:item}) from a generic
+ * entity; the optional {@code blockHasBlockEntity} records whether the
+ * captured block actually owns a Minecraft {@code BlockEntity} (for example a
+ * chest or sign) so the {@code entity_block} target type can outrank the
+ * generic {@code block} type. Neither value may ever be added to
+ * {@link Target.EntityTarget} / {@link Target.BlockTarget} identity, and this
+ * context must never be serialized or frozen into a {@link ResolvedTarget}.
  *
- * <p>The {@link Optional} itself must not be null, and a present value must not
- * be blank. Only JDK types are used here, so this value is testable without a
- * game client.
+ * <p>The {@link Optional}s themselves must not be null, and a present
+ * {@code entityTypeId} must not be blank. Only JDK types are used here, so
+ * this value is testable without a game client.
  *
- * <p>Phase 4 capture must populate {@code entityTypeId} when resolving an
- * entity target so finer specializations (for example {@code minecraft:item})
- * can match; when it is absent, only the generic entity fallback is expected
- * to match.
+ * <p>Capture must populate {@code entityTypeId} when resolving an entity
+ * target and {@code blockHasBlockEntity} when resolving a block target so the
+ * finer specializations can match. An absent classification fails soft: only
+ * the generic entity/block fallback is expected to match. The authoritative
+ * server derives both values from its own game state, never from the client.
  */
-public record TargetMatchContext(Optional<String> entityTypeId) {
+public record TargetMatchContext(Optional<String> entityTypeId, Optional<Boolean> blockHasBlockEntity) {
 
 	public TargetMatchContext {
 		Objects.requireNonNull(entityTypeId, "entityTypeId");
+		Objects.requireNonNull(blockHasBlockEntity, "blockHasBlockEntity");
 
 		entityTypeId.ifPresent(value -> {
 			if (value.isBlank()) {
@@ -36,17 +41,26 @@ public record TargetMatchContext(Optional<String> entityTypeId) {
 	}
 
 	/**
-	 * A context with no entity type information (used for block and location
-	 * targets, and for generic entity resolution).
+	 * A context with no entity type or block classification information (used
+	 * for pure location targets and for generic entity/block resolution).
 	 */
 	public static TargetMatchContext none() {
-		return new TargetMatchContext(Optional.empty());
+		return new TargetMatchContext(Optional.empty(), Optional.empty());
 	}
 
 	/**
 	 * A context carrying an explicit, non-blank entity type id.
 	 */
 	public static TargetMatchContext entityType(String entityTypeId) {
-		return new TargetMatchContext(Optional.of(entityTypeId));
+		return new TargetMatchContext(Optional.of(entityTypeId), Optional.empty());
+	}
+
+	/**
+	 * A context carrying an explicit block classification: whether the
+	 * captured block actually owns a Minecraft {@code BlockEntity} (that is,
+	 * whether the {@code entity_block} target type may match).
+	 */
+	public static TargetMatchContext blockEntityBlock(boolean hasBlockEntity) {
+		return new TargetMatchContext(Optional.empty(), Optional.of(hasBlockEntity));
 	}
 }

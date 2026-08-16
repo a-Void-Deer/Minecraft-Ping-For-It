@@ -10,6 +10,8 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 
+import nx.pingwheel.common.resolve.BlockEntityClassification;
+
 /**
  * Converts a vanilla {@link Level} + {@link HitResult} pair into a frozen
  * {@link TargetSnapshot} on the common side.
@@ -28,7 +30,8 @@ import net.minecraft.world.phys.HitResult;
  *       still match);</li>
  *   <li>{@link BlockHitResult} -> block snapshot keyed by dimension id +
  *       position + block registry id, independent of {@code BlockState}
- *       properties;</li>
+ *       properties, carrying the {@code EntityBlock} classification so the
+ *       {@code entity_block} target type can outrank the generic block;</li>
  *   <li>unavailable/unloaded block data (including distant async hits that
  *       report as {@code MISS}) -> degrade to a location snapshot at the hit
  *       location rather than guessing a block identity;</li>
@@ -81,7 +84,8 @@ public final class MinecraftTargetSnapshotFactory {
 			// data and degrade to a location instead of emitting an air block target.
 			if (blockKey != null && block != Blocks.AIR) {
 				return TargetSnapshotFactory.block(
-					dimensionId, blockPos.getX(), blockPos.getY(), blockPos.getZ(), blockKey.toString());
+					dimensionId, blockPos.getX(), blockPos.getY(), blockPos.getZ(), blockKey.toString(),
+					BlockEntityClassification.hasBlockEntity(block));
 			}
 		}
 

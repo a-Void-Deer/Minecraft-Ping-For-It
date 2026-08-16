@@ -102,7 +102,7 @@ class WheelGeometryTest {
 
 	@Test
 	void sectorBorderColorCarriesTypeOutlineColorForBothBorders() {
-		List<PingType> pingTypes = builtInPingTypes();
+		List<PingType> pingTypes = fourPingTypes();
 		List<WheelSector> sectors = new WheelGeometry().sectors(pingTypes);
 
 		for (WheelSector sector : sectors) {
@@ -185,7 +185,7 @@ class WheelGeometryTest {
 	@Test
 	void selectCardinalAngles() {
 		WheelGeometry geometry = new WheelGeometry();
-		List<PingType> pingTypes = builtInPingTypes();
+		List<PingType> pingTypes = fourPingTypes();
 
 		assertEquals(pingType("attention"), sectorType(geometry.select(0.0, -MID_RADIUS, pingTypes)));
 		assertEquals(pingType("danger"), sectorType(geometry.select(MID_RADIUS, 0.0, pingTypes)));
@@ -196,7 +196,7 @@ class WheelGeometryTest {
 	@Test
 	void selectSectorBoundaryBelongsToStartingSector() {
 		WheelGeometry geometry = new WheelGeometry();
-		List<PingType> pingTypes = builtInPingTypes();
+		List<PingType> pingTypes = fourPingTypes();
 		double halfPi = Math.PI / 2.0;
 
 		// Exactly on the boundary angle π/2 (right side): sector 1 starts there.
@@ -268,7 +268,7 @@ class WheelGeometryTest {
 	@Test
 	void midpointLiesAtMidAngleAndMidRadius() {
 		WheelGeometry geometry = new WheelGeometry();
-		List<WheelSector> sectors = geometry.sectors(builtInPingTypes());
+		List<WheelSector> sectors = geometry.sectors(fourPingTypes());
 
 		WheelPoint midpoint = geometry.midpoint(sectors.get(0));
 
@@ -287,7 +287,7 @@ class WheelGeometryTest {
 	@Test
 	void arcPointsSampleProportionallyWithEndpoints() {
 		WheelGeometry geometry = new WheelGeometry();
-		WheelSector sector = geometry.sectors(builtInPingTypes()).get(0);
+		WheelSector sector = geometry.sectors(fourPingTypes()).get(0);
 
 		List<WheelPoint> points = geometry.arcPoints(sector, MID_RADIUS, 64);
 
@@ -329,7 +329,7 @@ class WheelGeometryTest {
 	@Test
 	void arcPointSamplingIsConsistentAcrossResolutions() {
 		WheelGeometry geometry = new WheelGeometry();
-		WheelSector sector = geometry.sectors(builtInPingTypes()).get(0); // span π/2
+		WheelSector sector = geometry.sectors(fourPingTypes()).get(0); // span π/2
 
 		List<WheelPoint> coarse = geometry.arcPoints(sector, MID_RADIUS, 72);
 		List<WheelPoint> fine = geometry.arcPoints(sector, MID_RADIUS, 144);
@@ -417,6 +417,15 @@ class WheelGeometryTest {
 
 	private static List<PingType> builtInPingTypes() {
 		return PingTypeCatalog.builtIn().entries();
+	}
+
+	/**
+	 * The confirmed original four ping types: geometry tests that assert
+	 * concrete 4-sector angles/counts pin their input to this fixed wheel so
+	 * the assertions stay exact regardless of built-in catalog growth.
+	 */
+	private static List<PingType> fourPingTypes() {
+		return List.of(pingType("attention"), pingType("danger"), pingType("go_to"), pingType("loot"));
 	}
 
 	private static List<PingType> eightPingTypes() {

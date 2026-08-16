@@ -30,11 +30,15 @@ class BlockOutlineSelectionTest {
 	private static final UUID OWNER = new UUID(0L, 100L);
 
 	private static ClientMarker marker(long id, Target target, String pingTypeId) {
+		return marker(id, target, "block", pingTypeId);
+	}
+
+	private static ClientMarker marker(long id, Target target, String targetTypeId, String pingTypeId) {
 		return new ClientMarker(
 			new MarkerId(id),
 			OWNER,
 			target,
-			"block",
+			targetTypeId,
 			pingTypeId,
 			new MarkerAnchor(0, 0, 0),
 			1L,
@@ -189,6 +193,39 @@ class BlockOutlineSelectionTest {
 			selected.values().stream().map(BlockOutlineSpec::markerId).toList());
 	}
 
+	// --- target type routing metadata ---
+
+	@Test
+	void targetTypeIdIsCarriedIntoSpec() {
+		Target block = blockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone");
+		Target entityBlock = blockTarget(OVERWORLD, 4, 5, 6, "minecraft:chest");
+
+		Map<TargetKey.BlockKey, BlockOutlineSpec> selected = BlockOutlineSelection.select(
+			winnersMap(
+				TargetKey.from(block), marker(1L, block, "block", "attention"),
+				TargetKey.from(entityBlock), marker(2L, entityBlock, "entity_block", "destroy")),
+			PingTypeCatalog.builtIn());
+
+		assertEquals(2, selected.size());
+		assertEquals("block", selected.get(keyOf(OVERWORLD, 1, 2, 3, "minecraft:stone")).targetTypeId());
+		assertEquals("entity_block", selected.get(keyOf(OVERWORLD, 4, 5, 6, "minecraft:chest")).targetTypeId());
+	}
+
+	@Test
+	void nonBlockTargetTypesAreExcludedFromBlockSelection() {
+		// Block-shaped winners whose authoritative classification is not a
+		// block rendering participant must never drive the block outline.
+		for (String targetTypeId : List.of("entity", "location", "dropped_item", "unknown_type")) {
+			Target target = blockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone");
+
+			Map<TargetKey.BlockKey, BlockOutlineSpec> selected = BlockOutlineSelection.select(
+				winnersMap(TargetKey.from(target), marker(1L, target, targetTypeId, "attention")),
+				PingTypeCatalog.builtIn());
+
+			assertTrue(selected.isEmpty(), "should exclude target type: '" + targetTypeId + "'");
+		}
+	}
+
 	// --- store-backed behavior ---
 
 	@Test
@@ -298,20 +335,26 @@ class BlockOutlineSelectionTest {
 	@Test
 	void specConstructorIsStrictAndForcesOpaque() {
 		assertThrows(NullPointerException.class,
-			() -> new BlockOutlineSpec(new MarkerId(1L), null, "attention", 0xFFC247));
+			() -> new BlockOutlineSpec(new MarkerId(1L), null, "block", "attention", 0xFFC247));
+		assertThrows(NullPointerException.class,
+			() -> new BlockOutlineSpec(new MarkerId(1L), keyOf(OVERWORLD, 1, 2, 3, "minecraft:stone"), null, "attention", 0xFFC247));
 		assertThrows(IllegalArgumentException.class,
-			() -> new BlockOutlineSpec(new MarkerId(1L), keyOf(OVERWORLD, 1, 2, 3, "minecraft:stone"), "  ", 0xFFC247));
+			() -> new BlockOutlineSpec(new MarkerId(1L), keyOf(OVERWORLD, 1, 2, 3, "minecraft:stone"), "  ", "attention", 0xFFC247));
+		assertThrows(IllegalArgumentException.class,
+			() -> new BlockOutlineSpec(new MarkerId(1L), keyOf(OVERWORLD, 1, 2, 3, "minecraft:stone"), "block", "  ", 0xFFC247));
 
 		BlockOutlineSpec spec = new BlockOutlineSpec(
-			new MarkerId(1L), keyOf(OVERWORLD, 1, 2, 3, "minecraft:stone"), "attention", 0xC247);
+			new MarkerId(1L), keyOf(OVERWORLD, 1, 2, 3, "minecraft:stone"), "block", "attention", 0xC247);
 
+		assertEquals("block", spec.targetTypeId());
 		assertEquals(0xFF00C247, spec.argbColor());
 
 		// A nonzero partial caller alpha is discarded: the spec stays fully
 		// opaque and keeps only the 24-bit RGB payload.
 		BlockOutlineSpec alphaSpec = new BlockOutlineSpec(
-			new MarkerId(2L), keyOf(OVERWORLD, 1, 2, 3, "minecraft:stone"), "attention", 0x8000C247);
+			new MarkerId(2L), keyOf(OVERWORLD, 1, 2, 3, "minecraft:stone"), "entity_block", "attention", 0x8000C247);
 
+		assertEquals("entity_block", alphaSpec.targetTypeId());
 		assertEquals(0xFF00C247, alphaSpec.argbColor());
 	}
 }

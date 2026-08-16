@@ -4,6 +4,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.domain.PingTypeCatalog;
@@ -88,6 +89,36 @@ public final class BlockOutlineState {
 
 		specs = Collections.unmodifiableMap(new LinkedHashMap<>(next));
 		logger.transition(added, removed, changed, next.size());
+	}
+
+	/**
+	 * Whether the current snapshot contains at least one block outline. The
+	 * render pass checks this before acquiring or flushing the custom block
+	 * outline batch, so a frame without block outlines never creates or
+	 * flushes an empty batch.
+	 */
+	public boolean hasOutlines() {
+		return !specs.isEmpty();
+	}
+
+	/**
+	 * Whether every key in the current snapshot is contained in
+	 * {@code succeeded} — the per-frame set of keys whose model-outline pass
+	 * emitted geometry (see {@link BlockModelOutlineState}). When true, the
+	 * late VoxelShape pass has nothing to draw, so the caller can skip
+	 * acquiring and flushing the custom block outline batch entirely. An
+	 * empty snapshot counts as fully covered.
+	 */
+	public boolean allCoveredBy(Set<TargetKey.BlockKey> succeeded) {
+		Objects.requireNonNull(succeeded, "succeeded");
+
+		for (TargetKey.BlockKey blockKey : specs.keySet()) {
+			if (!succeeded.contains(blockKey)) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**

@@ -19,7 +19,10 @@ import nx.pingwheel.common.domain.TargetMatchContext;
  *   <li>an entity snapshot carries dimension id + UUID identity, plus an
  *       optional entity type id used only as transient match context;</li>
  *   <li>a block snapshot carries dimension id + position + block registry id
- *       and deliberately excludes {@code BlockState};</li>
+ *       and deliberately excludes {@code BlockState}; its match context
+ *       carries the transient {@code EntityBlock} classification when the
+ *       caller can derive it, so the {@code entity_block} target type can
+ *       outrank the generic block;</li>
  *   <li>a location snapshot carries dimension id + finite coordinates.</li>
  * </ul>
  */
@@ -48,12 +51,28 @@ public final class TargetSnapshotFactory {
 
 	/**
 	 * A block snapshot carrying dimension, position, and block registry id, but
-	 * no {@code BlockState}.
+	 * no {@code BlockState}. The block classification is unknown, so resolution
+	 * fails soft to the generic {@code block} target type.
 	 */
 	public static TargetSnapshot block(String dimensionId, int x, int y, int z, String blockRegistryId) {
 		return new TargetSnapshot(
 			new Target.BlockTarget(dimensionId, x, y, z, blockRegistryId),
 			TargetMatchContext.none());
+	}
+
+	/**
+	 * A block snapshot carrying dimension, position, block registry id, and the
+	 * transient block classification (whether the block actually owns a
+	 * Minecraft {@code BlockEntity}); no {@code BlockState}. Callers must
+	 * derive the classification from their own game state; it is never
+	 * client-supplied over the wire.
+	 */
+	public static TargetSnapshot block(
+		String dimensionId, int x, int y, int z, String blockRegistryId, boolean hasBlockEntity
+	) {
+		return new TargetSnapshot(
+			new Target.BlockTarget(dimensionId, x, y, z, blockRegistryId),
+			TargetMatchContext.blockEntityBlock(hasBlockEntity));
 	}
 
 	/**

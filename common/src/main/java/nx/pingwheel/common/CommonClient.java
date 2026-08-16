@@ -4,14 +4,19 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.OutlineBufferSource;
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
+import nx.pingwheel.common.client.outline.BlockModelOutlineState;
 import nx.pingwheel.common.client.outline.BlockOutlineLogger;
 import nx.pingwheel.common.client.outline.BlockOutlineRenderer;
+import nx.pingwheel.common.client.outline.BlockOutlineRenderType;
 import nx.pingwheel.common.client.outline.BlockOutlineState;
 import nx.pingwheel.common.client.outline.EntityOutlineLogger;
 import nx.pingwheel.common.client.outline.EntityOutlineState;
+import nx.pingwheel.common.client.outline.VirtualBlockDisplayRenderer;
 import nx.pingwheel.common.compat.LegacyMigrationHandler;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
@@ -79,6 +84,8 @@ public class CommonClient {
 		MarkerOverlayState.INSTANCE.clear();
 		EntityOutlineState.INSTANCE.clear();
 		BlockOutlineState.INSTANCE.clear();
+		BlockModelOutlineState.INSTANCE.clear();
+		VirtualBlockDisplayRenderer.INSTANCE.clear();
 
 		// A disconnect while the ping key is still held must not leak the
 		// armed hold into the next connection.
@@ -109,6 +116,11 @@ public class CommonClient {
 		MarkerOverlayState.INSTANCE.prepare(ctx, pingRuntime == null ? null : pingRuntime.store());
 		prepareEntityOutlines();
 		prepareBlockOutlines();
+
+		// Fresh per-frame success record for the model-outline pass: keys that
+		// successfully emit glow geometry this frame are skipped by the late
+		// VoxelShape fallback pass.
+		BlockModelOutlineState.INSTANCE.beginFrame();
 	}
 
 	/**
@@ -134,7 +146,7 @@ public class CommonClient {
 	 * current runtime store and level dimension; clears it when the runtime or
 	 * level is absent. Runs on every world render frame, right after
 	 * {@link #prepareEntityOutlines()} and before
-	 * {@link #renderBlockOutlines(Camera, VertexConsumer)}.
+	 * {@link #renderBlockOutlines(Camera, MultiBufferSource.BufferSource)}.
 	 */
 	private static void prepareBlockOutlines() {
 		Minecraft game = Game;
@@ -149,23 +161,90 @@ public class CommonClient {
 	}
 
 	/**
-	 * Draws the prepared block outlines into the {@code RenderType.lines()}
-	 * buffer of the current frame.
-	 *
-	 * <p>Called from {@code LevelRendererMixin} right after the ordinal-0
-	 * {@code applyModelViewMatrix} anchor, so the camera-relative model-view
-	 * matrix is already applied and the vertices can be camera-relative. The
-	 * buffer is never flushed here: vanilla flushes the lines batch later in
+	 * Runs the model-outline pass (actual {@code BlockEntity} geometry and
+	 * virtual {@code BlockDisplay} glow) into the vanilla
+	 * {@link OutlineBufferSource}, right before the vanilla
+	 * {@code OutlineBufferSource#endOutlineBatch()} call inside
 	 * {@code renderLevel}.
+	 *
+	 * <p>The {@code LevelRendererMixin} gate ensures this only runs when the
+	 * vanilla entity-outline pipeline is available
+	 * ({@code shouldShowEntityOutlines()}); otherwise every block keeps its
+	 * VoxelShape fallback. Keys that emit at least one outline vertex are
+	 * recorded in {@link BlockModelOutlineState}, which the late
+	 * {@link #renderBlockOutlines(Camera, MultiBufferSource.BufferSource)}
+	 * pass consults to avoid doubling.
 	 */
-	public void renderBlockOutlines(Camera camera, VertexConsumer lineBuffer) {
+	public void renderModelOutlines(Camera camera, OutlineBufferSource outlineBufferSource, float partialTick) {
 		Minecraft game = Game;
 
 		if (game == null || game.level == null) {
 			return;
 		}
 
-		BlockOutlineRenderer.render(game.level, camera, lineBuffer, BlockOutlineState.INSTANCE);
+		VirtualBlockDisplayRenderer.INSTANCE.render(
+			game.level, camera, outlineBufferSource, partialTick,
+			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE);
+	}
+
+	/**
+	 * Whether the model-outline pass emitted at least one vertex this frame;
+	 * the mixin AFTER the {@code endOutlineBatch()} call uses this to decide
+	 * whether the vanilla entity-outline post-process must run even when no
+	 * vanilla entity glowed.
+	 */
+	public boolean modelOutlinesEmittedThisFrame() {
+		return BlockModelOutlineState.INSTANCE.emitted();
+	}
+
+	/**
+	 * Drops the per-frame model-outline success record; used when the outline
+	 * pipeline turned out to be unavailable after all, so every block falls
+	 * back to the VoxelShape outline instead of silently disappearing.
+	 */
+	public void resetModelOutlinesForFrame() {
+		BlockModelOutlineState.INSTANCE.beginFrame();
+	}
+
+	/**
+	 * Draws the prepared block outlines into the custom
+	 * {@link BlockOutlineRenderType#BLOCK_OUTLINE} buffer of the current
+	 * frame and flushes that batch explicitly.
+	 *
+	 * <p>Called from {@code LevelRendererMixin} at the end of
+	 * {@code renderLevel}, right before the world model-view matrix is
+	 * popped (after all 3D batches and composites have been flushed), so
+	 * the camera-relative model-view matrix is still applied and the
+	 * vertices can be camera-relative. The batch is acquired only when
+	 * {@link BlockOutlineState#hasOutlines()} is true, so a frame without
+	 * block outlines never creates or flushes an empty batch; and the frame
+	 * is skipped entirely when every current block outline is already
+	 * covered by the model-outline success set (see
+	 * {@link BlockModelOutlineState#successKeys()}), so the custom batch is
+	 * not even acquired for all-glow frames. The vanilla {@code lines()}
+	 * batch is never touched. Blocks whose model-outline pass succeeded
+	 * this frame are skipped here.
+	 */
+	public void renderBlockOutlines(Camera camera, MultiBufferSource.BufferSource bufferSource) {
+		Minecraft game = Game;
+
+		if (game == null || game.level == null) {
+			return;
+		}
+
+		if (!BlockOutlineState.INSTANCE.hasOutlines()) {
+			return;
+		}
+
+		if (BlockOutlineState.INSTANCE.allCoveredBy(BlockModelOutlineState.INSTANCE.successKeys())) {
+			return;
+		}
+
+		VertexConsumer lines = bufferSource.getBuffer(BlockOutlineRenderType.BLOCK_OUTLINE);
+		BlockOutlineRenderer.render(
+			game.level, camera, lines,
+			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE.successKeys());
+		bufferSource.endBatch(BlockOutlineRenderType.BLOCK_OUTLINE);
 	}
 
 	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {

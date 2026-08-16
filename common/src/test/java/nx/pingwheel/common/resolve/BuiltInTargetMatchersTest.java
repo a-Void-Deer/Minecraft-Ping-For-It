@@ -54,6 +54,33 @@ class BuiltInTargetMatchersTest {
 	}
 
 	@Test
+	void chestLikeBlockResolvesAsEntityBlockBeforeGenericBlock() {
+		Target.BlockTarget chest = new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:chest");
+
+		String resolved = resolver.resolve(chest, TargetMatchContext.blockEntityBlock(true)).targetType().id();
+
+		assertEquals("entity_block", resolved);
+	}
+
+	@Test
+	void plainBlockWithExplicitNegativeClassificationResolvesAsBlock() {
+		Target.BlockTarget stone = new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone");
+
+		String resolved = resolver.resolve(stone, TargetMatchContext.blockEntityBlock(false)).targetType().id();
+
+		assertEquals("block", resolved);
+	}
+
+	@Test
+	void unknownBlockClassificationFailsSoftToGenericBlock() {
+		Target.BlockTarget stone = new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone");
+
+		String resolved = resolver.resolve(stone, TargetMatchContext.none()).targetType().id();
+
+		assertEquals("block", resolved);
+	}
+
+	@Test
 	void locationResolvesAsLocationFallback() {
 		Target.LocationTarget location = new Target.LocationTarget(OVERWORLD, 1.0, 2.0, 3.0);
 
