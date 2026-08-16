@@ -4,6 +4,7 @@ import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,6 +17,7 @@ import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerRequestKind;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.common.name.TargetNameJson;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -130,6 +132,46 @@ class MarkerPacketCodecTest {
 		var buf = buffer();
 		MarkerPacketCodec.writeMarkerAnchor(buf, anchor);
 		assertEquals(anchor, MarkerPacketCodec.readMarkerAnchor(buf));
+	}
+
+	@Test
+	void targetNameJsonRoundTrips() {
+		var name = new TargetNameJson("{\"translate\":\"僵尸.类型\"}");
+
+		var buf = buffer();
+		MarkerPacketCodec.writeTargetNameJson(buf, name);
+
+		assertEquals(name, MarkerPacketCodec.readTargetNameJson(buf));
+		assertEquals(0, buf.readableBytes());
+	}
+
+	@Test
+	void targetNameJsonAcceptsExactlyMaxLengthOnWriteAndRead() {
+		// {"text":" ... "} wrapper is exactly 11 characters.
+		String json = "{\"text\":\"" + "x".repeat(MarkerPacketCodec.MAX_NAME_LENGTH - 11) + "\"}";
+
+		var buf = buffer();
+		MarkerPacketCodec.writeTargetNameJson(buf, new TargetNameJson(json));
+
+		assertEquals(json, MarkerPacketCodec.readTargetNameJson(buf).value());
+	}
+
+	@Test
+	void targetNameJsonRejectsBlankOnRead() {
+		var buf = buffer();
+		buf.writeUtf(" ");
+
+		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTargetNameJson(buf));
+	}
+
+	@Test
+	void targetNameJsonRejectsOverlongOnRead() {
+		var buf = buffer();
+		String tooLong = "x".repeat(MarkerPacketCodec.MAX_NAME_LENGTH + 1);
+		buf.writeVarInt(tooLong.length());
+		buf.writeBytes(tooLong.getBytes(StandardCharsets.UTF_8));
+
+		assertThrows(RuntimeException.class, () -> MarkerPacketCodec.readTargetNameJson(buf));
 	}
 
 	@Test

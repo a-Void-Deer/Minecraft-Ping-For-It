@@ -41,6 +41,11 @@ public class PingLocationRenderer {
 		ctx.renderLabel(distanceText, -1.5f, compactPlayerInfo, RenderColorPolicy.distanceTextColor());
 		ctx.renderPing(ping.getItemStack(), CLIENT_CONFIG.isItemIconVisible(), pingColor);
 
+		// Authoritative target name. Always plain opaque white: the target
+		// text never inherits a ping-type or team color. Its label sits above
+		// the distance label so the two never overlap at common GUI scales.
+		ctx.renderLabel(ping.getTargetName(), -2.75f, null, RenderColorPolicy.targetTextColor());
+
 		final var isPlayerListHeld = CLIENT_CONFIG.getPlayerInfoMode() == PlayerInfoMode.HOLD && Game.options.keyPlayerList.isDown();
 		final var showVerbosePlayerInfo = CLIENT_CONFIG.getPlayerInfoMode() == PlayerInfoMode.ALWAYS || isPlayerListHeld;
 

@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetMatchContext;
+import nx.pingwheel.common.name.TargetNameJson;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -20,7 +21,11 @@ class AuthoritativeTargetValidationTest {
 		new Target.EntityTarget("minecraft:overworld", new UUID(0L, 1L));
 
 	private static ValidatedMarkerTarget validated() {
-		return new ValidatedMarkerTarget(TARGET, TargetMatchContext.none(), new MarkerAnchor(0, 0, 0));
+		return new ValidatedMarkerTarget(
+			TARGET,
+			TargetMatchContext.none(),
+			new MarkerAnchor(0, 0, 0),
+			new TargetNameJson("{\"translate\":\"pingforit.target.unknown\"}"));
 	}
 
 	@Test

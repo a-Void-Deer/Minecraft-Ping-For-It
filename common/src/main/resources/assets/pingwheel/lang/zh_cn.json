@@ -37,5 +37,25 @@
 	"command.pingwheel.default_channel.set.description": "设置默认频道",
 	"command.pingwheel.default_channel.get.response": "当前默认频道: %s",
 	"command.pingwheel.default_channel.set.response": "将默认频道设置为 %s",
-	"command.pingwheel.default_channel.set.reject": "未知模式，有效选项包括: %s"
+	"command.pingwheel.default_channel.set.reject": "未知模式，有效选项包括: %s",
+
+	"pingforit.chat.request": "%s 请求 %s %s",
+
+	"pingforit.ping_type.attention": "注意",
+	"pingforit.ping_type.attention.phrase": "注意",
+	"pingforit.ping_type.danger": "危险",
+	"pingforit.ping_type.danger.phrase": "危险",
+	"pingforit.ping_type.go_to": "前往",
+	"pingforit.ping_type.go_to.phrase": "前往",
+	"pingforit.ping_type.loot": "拾取",
+	"pingforit.ping_type.loot.phrase": "拾取",
+	"pingforit.ping_type.destroy": "摧毁",
+	"pingforit.ping_type.destroy.phrase": "摧毁",
+	"pingforit.ping_type.take": "拿走",
+	"pingforit.ping_type.take.phrase": "拿走",
+	"pingforit.ping_type.request": "请求",
+	"pingforit.ping_type.request.phrase": "请求",
+
+	"pingforit.target.here": "此处",
+	"pingforit.target.unknown": "未知目标"
 }

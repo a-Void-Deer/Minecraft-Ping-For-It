@@ -22,12 +22,20 @@ neoForge {
 // Minecraft's own runtime dependency set to the test classpath as well.
 def compiledMinecraft = tasks.named('createMinecraftArtifacts', net.neoforged.nfrtgradle.CreateMinecraftArtifacts).flatMap { it.compiledArtifact }
 
+// The component JSON codec tests run the vanilla registry bootstrap, whose
+// CreativeModeTabs validation resolves translated display names through
+// Language.loadDefault(), which reads /assets/minecraft/lang/en_us.json from
+// the classpath. That resource lives in the moddev resources artifact (not in
+// the compiled jar), so wire it into the test runtime classpath as well.
+def compiledMinecraftResources = tasks.named('createMinecraftArtifacts', net.neoforged.nfrtgradle.CreateMinecraftArtifacts).flatMap { it.resourcesArtifact }
+
 dependencies {
     compileOnly group:"org.spongepowered", name:"mixin", version:"0.8.5"
     implementation group: "com.google.code.findbugs", name: "jsr305", version: "3.0.1"
 
     testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
     testImplementation files(compiledMinecraft)
+    testRuntimeOnly files(compiledMinecraftResources)
 
     // The compiled (merged) Minecraft jar marks client-only classes with
     // runtime-retained @OnlyIn annotations whose value references the

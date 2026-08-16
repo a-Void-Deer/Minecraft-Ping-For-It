@@ -18,4 +18,10 @@ class RenderColorPolicyTest {
 	void distanceTextColorIsAlwaysOpaqueWhite() {
 		assertEquals(0xFFFFFFFF, RenderColorPolicy.distanceTextColor());
 	}
+
+	@Test
+	void targetTextColorIsAlwaysOpaqueWhite() {
+		assertEquals(0xFFFFFFFF, RenderColorPolicy.targetTextColor());
+		assertEquals(RenderColorPolicy.TARGET_TEXT_COLOR, RenderColorPolicy.targetTextColor());
+	}
 }

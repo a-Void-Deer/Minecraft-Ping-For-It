@@ -5,6 +5,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -17,6 +18,7 @@ import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerRequestKind;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.common.name.TargetNameJson;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,6 +30,8 @@ class MarkerPacketsTest {
 	private static final String OVERWORLD = "minecraft:overworld";
 	private static final UUID ENTITY_ID = UUID.randomUUID();
 	private static final UUID OWNER = UUID.randomUUID();
+
+	private static final TargetNameJson NAME = new TargetNameJson("{\"translate\":\"minecraft.zombie\"}");
 
 	private static FriendlyByteBuf buffer() {
 		return new FriendlyByteBuf(Unpooled.buffer());
@@ -119,7 +123,7 @@ class MarkerPacketsTest {
 
 	@Test
 	void createdPacketRoundTripsDirectly() {
-		var packet = new MarkerCreatedS2CPacket(snapshot(10L, 500L));
+		var packet = new MarkerCreatedS2CPacket(snapshot(10L, 500L), NAME);
 
 		var buf = buffer();
 		packet.write(buf);
@@ -129,7 +133,18 @@ class MarkerPacketsTest {
 
 	@Test
 	void createdPacketRoundTripsThroughReadSafe() {
-		var packet = new MarkerCreatedS2CPacket(snapshot(10L, 500L));
+		var packet = new MarkerCreatedS2CPacket(snapshot(10L, 500L), NAME);
+
+		var buf = buffer();
+		packet.write(buf);
+
+		assertEquals(packet, MarkerCreatedS2CPacket.readSafe(buf));
+	}
+
+	@Test
+	void createdPacketRoundTripsUnicodeName() {
+		var packet = new MarkerCreatedS2CPacket(
+			snapshot(10L, 500L), new TargetNameJson("{\"translate\":\"僵尸.类型\"}"));
 
 		var buf = buffer();
 		packet.write(buf);
@@ -236,6 +251,47 @@ class MarkerPacketsTest {
 		buf.writeLong(100L); // expiry tick
 
 		assertTrue(MarkerCreatedS2CPacket.readSafe(buf).isCorrupt());
+	}
+
+	@Test
+	void createdPacketRejectsMissingNameThroughReadSafe() {
+		var buf = buffer();
+		MarkerPacketCodec.writeMarkerSnapshot(buf, snapshot(10L, 500L));
+		// snapshot only, name never written -> truncated
+
+		assertTrue(MarkerCreatedS2CPacket.readSafe(buf).isCorrupt());
+	}
+
+	@Test
+	void createdPacketRejectsBlankNameThroughReadSafe() {
+		var buf = buffer();
+		MarkerPacketCodec.writeMarkerSnapshot(buf, snapshot(10L, 500L));
+		buf.writeUtf(" "); // blank name JSON
+
+		assertTrue(MarkerCreatedS2CPacket.readSafe(buf).isCorrupt());
+	}
+
+	@Test
+	void createdPacketRejectsOverlongNameThroughReadSafe() {
+		var buf = buffer();
+		MarkerPacketCodec.writeMarkerSnapshot(buf, snapshot(10L, 500L));
+		String tooLong = "x".repeat(MarkerPacketCodec.MAX_NAME_LENGTH + 1);
+		buf.writeVarInt(tooLong.length());
+		buf.writeBytes(tooLong.getBytes(StandardCharsets.UTF_8));
+
+		assertTrue(MarkerCreatedS2CPacket.readSafe(buf).isCorrupt());
+	}
+
+	@Test
+	void createdPacketCarriesNameButCreatePacketDoesNot() {
+		// The C2S create packet must never gain a name field: names are
+		// server-produced only.
+		for (RecordComponent component : MarkerCreateC2SPacket.class.getRecordComponents()) {
+			assertFalse(component.getName().equals("targetName")
+					|| component.getName().equals("name")
+					|| component.getName().equals("displayName"),
+				() -> "MarkerCreateC2SPacket must not carry a name field: " + component.getName());
+		}
 	}
 
 	@Test

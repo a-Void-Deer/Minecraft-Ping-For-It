@@ -10,6 +10,7 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerSnapshot;
+import nx.pingwheel.common.name.TargetNameJson;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,16 +26,19 @@ class PacketHandlerTest {
 
 	@Test
 	void validDecodeLeavesBufferFullyConsumed() {
-		var packet = new MarkerCreatedS2CPacket(new MarkerSnapshot(
-			new MarkerId(9L),
-			UUID.randomUUID(),
-			new Target.LocationTarget("minecraft:overworld", 1.0, 2.0, 3.0),
-			"entity",
-			"attention",
-			new MarkerAnchor(0.5, 64.0, -8.25),
-			10L,
-			1000L
-		));
+		var packet = new MarkerCreatedS2CPacket(
+			new MarkerSnapshot(
+				new MarkerId(9L),
+				UUID.randomUUID(),
+				new Target.LocationTarget("minecraft:overworld", 1.0, 2.0, 3.0),
+				"entity",
+				"attention",
+				new MarkerAnchor(0.5, 64.0, -8.25),
+				10L,
+				1000L
+			),
+			new TargetNameJson("{\"translate\":\"minecraft.zombie\"}")
+		);
 
 		var buf = buffer();
 		packet.write(buf);

@@ -41,10 +41,13 @@ import nx.pingwheel.common.domain.TargetResolver;
  *       target type and the target) becomes {@code INVALID_REQUEST}.</li>
  * </ol>
  *
- * <p>Every rejected outcome is produced without mutating the store. The
- * service never trusts client-supplied target classification, display names,
- * colors, or ownership: the API exposes no target type, name, or color input,
- * and the resolved target type comes exclusively from the server-side resolver.
+ * <p>An accepted outcome carries the validator's {@code authoritativeName}
+ * unchanged: the service never derives, rewrites, or validates the name itself
+ * beyond the validator's own guarantees. Rejected outcomes carry no name and
+ * are produced without mutating the store. The service never trusts
+ * client-supplied target classification, display names, colors, or ownership:
+ * the API exposes no target type, name, or color input, and the resolved
+ * target type comes exclusively from the server-side resolver.
  *
  * <p>Removal delegates to the store: {@link #removeOwned(UUID, MarkerId)} maps
  * the store's {@code NOT_FOUND}/{@code NOT_OWNER} statuses to
@@ -163,7 +166,7 @@ public final class MarkerCreationService {
 			logger.debug("create accepted: id={} targetType={} pingType={}",
 				creation.marker().id(), resolvedTarget.targetType().id(), pingType.id());
 
-			return MarkerCreateOutcome.accepted(creation);
+			return MarkerCreateOutcome.accepted(creation, validated.authoritativeName());
 		} catch (RuntimeException e) {
 			logger.debug("create rejected: store contract failure", e);
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);

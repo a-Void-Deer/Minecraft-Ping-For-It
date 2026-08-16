@@ -10,6 +10,7 @@ import nx.pingwheel.common.domain.TargetKind;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.common.name.TargetNameJson;
 
 /**
  * Centralized, symmetric wire encoding for the marker network model.
@@ -162,6 +163,23 @@ public final class MarkerPacketCodec {
 
 	public static MarkerAnchor readMarkerAnchor(FriendlyByteBuf buf) {
 		return new MarkerAnchor(buf.readDouble(), buf.readDouble(), buf.readDouble());
+	}
+
+	// --- target name json ---
+
+	/**
+	 * The symmetric cap for the authoritative target name JSON, matching
+	 * {@link TargetNameJson#MAX_LENGTH} and the hard cap of the network UTF
+	 * string encoding.
+	 */
+	public static final int MAX_NAME_LENGTH = TargetNameJson.MAX_LENGTH;
+
+	public static void writeTargetNameJson(FriendlyByteBuf buf, TargetNameJson name) {
+		buf.writeUtf(name.value(), MAX_NAME_LENGTH);
+	}
+
+	public static TargetNameJson readTargetNameJson(FriendlyByteBuf buf) {
+		return new TargetNameJson(buf.readUtf(MAX_NAME_LENGTH));
 	}
 
 	// --- snapshot ---

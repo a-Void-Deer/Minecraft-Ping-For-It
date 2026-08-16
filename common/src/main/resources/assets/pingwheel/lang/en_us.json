@@ -62,5 +62,25 @@
 	"command.pingwheel.rate_limit.get.description": "get the current rate limit for ping usages",
 	"command.pingwheel.rate_limit.set.description": "set the rate limit for ping usages",
 	"command.pingwheel.rate_limit.get.response": "Current rate limit: %s",
-	"command.pingwheel.rate_limit.set.response": "Set rate limit to %s"
+	"command.pingwheel.rate_limit.set.response": "Set rate limit to %s",
+
+	"pingforit.chat.request": "%s requests %s %s",
+
+	"pingforit.ping_type.attention": "Attention",
+	"pingforit.ping_type.attention.phrase": "ATTENTION",
+	"pingforit.ping_type.danger": "Danger",
+	"pingforit.ping_type.danger.phrase": "DANGER",
+	"pingforit.ping_type.go_to": "Go To",
+	"pingforit.ping_type.go_to.phrase": "GO TO",
+	"pingforit.ping_type.loot": "Loot",
+	"pingforit.ping_type.loot.phrase": "LOOT",
+	"pingforit.ping_type.destroy": "Destroy",
+	"pingforit.ping_type.destroy.phrase": "DESTROY",
+	"pingforit.ping_type.take": "Take",
+	"pingforit.ping_type.take.phrase": "TAKE",
+	"pingforit.ping_type.request": "Request",
+	"pingforit.ping_type.request.phrase": "REQUEST",
+
+	"pingforit.target.here": "HERE",
+	"pingforit.target.unknown": "Unknown Target"
 }

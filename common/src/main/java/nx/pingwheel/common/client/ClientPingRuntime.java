@@ -50,6 +50,9 @@ import nx.pingwheel.common.marker.MarkerRequestKind;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.math.Raycast;
+import nx.pingwheel.common.name.ClientTargetNameStore;
+import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
@@ -66,6 +69,9 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
  * <ul>
  *   <li>the {@link ClientMarkerStore} (with the local fallback-expiry grace)
  *       applies authoritative S2C marker state;</li>
+ *   <li>the {@link ClientTargetNameStore} applies the authoritative target
+ *       display names carried by created-marker packets and is kept in exact
+ *       step with the marker store (created, removed, and fallback-expired);</li>
  *   <li>the shared {@link ActiveInteraction} plus
  *       {@link PingCaptureCoordinator} freeze the key-down capture;</li>
  *   <li>the {@link PingInteractionStateMachine} applies short/long-press,
@@ -108,6 +114,13 @@ public final class ClientPingRuntime {
 	private final ClientPingActionDispatcher.LocalErrorSink errorSink;
 	private final PingInteractionLogger logger;
 	private final WheelMouseCapture wheelMouseCapture;
+
+	/**
+	 * Authoritative target display names keyed by marker id, main-thread
+	 * confined like the marker store. Created exactly once per runtime and
+	 * dropped with it on leave, so names can never leak across connections.
+	 */
+	private final ClientTargetNameStore nameStore = new ClientTargetNameStore();
 
 	/**
 	 * The latest dispatched create request id; a single slot, never a growing
@@ -418,25 +431,38 @@ public final class ClientPingRuntime {
 			return;
 		}
 
+		// Keep the name store in exact step: a fallback-expired marker's name
+		// goes away with the marker, matching the authoritative removal path.
+		for (ClientMarker marker : expired) {
+			nameStore.onRemoved(marker.id());
+		}
+
 		logger.debug("marker fallback expired: count={} ids={}",
 			expired.size(),
 			expired.stream().map(marker -> Long.toString(marker.id().value())).toList());
 	}
 
 	/**
-	 * Applies an authoritative created-marker snapshot on the main thread as of
+	 * Applies an authoritative created-marker packet on the main thread as of
 	 * the runtime's current local tick.
 	 *
-	 * <p>The existing directional ping sound plays exactly once per newly seen
-	 * marker id whose target lives in the current dimension; a retransmission
-	 * or same-id replacement of an already known marker never replays it.
+	 * <p>The marker snapshot and its authoritative target display name are
+	 * applied to their stores back to back on the main thread, so neither can
+	 * be observed without the other. The existing directional ping sound plays
+	 * exactly once per newly seen marker id whose target lives in the current
+	 * dimension; a retransmission or same-id replacement of an already known
+	 * marker never replays it.
 	 */
-	public void applyCreated(MarkerSnapshot snapshot) {
-		Objects.requireNonNull(snapshot, "snapshot");
+	public void applyCreated(MarkerCreatedS2CPacket packet) {
+		Objects.requireNonNull(packet, "packet");
+
+		MarkerSnapshot snapshot = Objects.requireNonNull(packet.snapshot(), "snapshot");
+		TargetNameJson targetName = Objects.requireNonNull(packet.targetName(), "targetName");
 
 		boolean newlySeen = markerStore.marker(snapshot.id()).isEmpty();
 
 		markerStore.onCreated(snapshot, localTick);
+		nameStore.onCreated(snapshot.id(), targetName);
 
 		if (newlySeen) {
 			playCreatedSoundOnce(snapshot);
@@ -475,13 +501,15 @@ public final class ClientPingRuntime {
 	}
 
 	/**
-	 * Applies an authoritative marker removal on the main thread.
+	 * Applies an authoritative marker removal on the main thread. The
+	 * marker's stored target name is removed with it.
 	 */
 	public void applyRemoved(MarkerId markerId, MarkerRemovalReason reason) {
 		Objects.requireNonNull(markerId, "markerId");
 		Objects.requireNonNull(reason, "reason");
 
 		markerStore.onRemoved(markerId);
+		nameStore.onRemoved(markerId);
 
 		logger.debug("marker removed applied: markerId={} reason={}", markerId.value(), reason);
 	}
@@ -536,6 +564,15 @@ public final class ClientPingRuntime {
 	 */
 	public ClientMarkerStore store() {
 		return markerStore;
+	}
+
+	/**
+	 * The authoritative client target-name store, keyed by marker id. Exposed
+	 * for the target-name HUD rendering added in a later slice; no parsing or
+	 * rendering happens in this runtime.
+	 */
+	public ClientTargetNameStore nameStore() {
+		return nameStore;
 	}
 
 	/**

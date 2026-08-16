@@ -16,6 +16,9 @@ import net.minecraft.world.phys.Vec3;
 
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetMatchContext;
+import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
+import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.name.TargetNameJsonCodec;
 import nx.pingwheel.common.resolve.BlockEntityClassification;
 
 /**
@@ -56,17 +59,39 @@ import nx.pingwheel.common.resolve.BlockEntityClassification;
  * this validator: the normalized identity and the match context are derived
  * exclusively from server state.
  *
+ * <p>Every accepted verdict also carries the target's display name JSON,
+ * resolved through the injected {@link AuthoritativeTargetNameResolver}
+ * against the normalized target. The resolver is required by the constructor
+ * so no production path can forget it; a resolver contract failure (null
+ * return or exception) falls back to {@link #FAIL_SAFE_NAME}, which is a
+ * fail-safe only and never the normal path.
+ *
  * <p>Only server-safe common imports are used; this class never references
  * client-only or loader-specific types and never mutates any store state.
  */
 public final class MinecraftAuthoritativeTargetValidator implements AuthoritativeTargetValidator {
 
+	/**
+	 * The fail-safe display name JSON used only when the injected name
+	 * resolver fails its contract. It is never produced on the normal path and
+	 * shares the single unknown-name payload
+	 * ({@link TargetNameJsonCodec#UNKNOWN}).
+	 */
+	public static final TargetNameJson FAIL_SAFE_NAME = TargetNameJsonCodec.UNKNOWN;
+
 	private final MinecraftServer server;
 	private final int maxRange;
 	private final boolean playerTrackingEnabled;
+	private final AuthoritativeTargetNameResolver nameResolver;
 
-	public MinecraftAuthoritativeTargetValidator(MinecraftServer server, int maxRange, boolean playerTrackingEnabled) {
+	public MinecraftAuthoritativeTargetValidator(
+		MinecraftServer server,
+		int maxRange,
+		boolean playerTrackingEnabled,
+		AuthoritativeTargetNameResolver nameResolver
+	) {
 		this.server = Objects.requireNonNull(server, "server");
+		this.nameResolver = Objects.requireNonNull(nameResolver, "nameResolver");
 
 		if (maxRange < 0) {
 			throw new IllegalArgumentException("maxRange must be non-negative: " + maxRange);
@@ -138,10 +163,13 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.OUT_OF_RANGE);
 		}
 
+		Target normalized = new Target.EntityTarget(dimensionId, entity.getUUID());
+
 		return AuthoritativeTargetValidation.accepted(new ValidatedMarkerTarget(
-			new Target.EntityTarget(dimensionId, entity.getUUID()),
+			normalized,
 			TargetMatchContext.entityType(typeKey.toString()),
-			anchor));
+			anchor,
+			resolveNameSafely(requester, normalized)));
 	}
 
 	/**
@@ -179,10 +207,14 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.OUT_OF_RANGE);
 		}
 
+		Target normalized = new Target.BlockTarget(
+			dimensionId, requested.x(), requested.y(), requested.z(), currentId.toString());
+
 		return AuthoritativeTargetValidation.accepted(new ValidatedMarkerTarget(
-			new Target.BlockTarget(dimensionId, requested.x(), requested.y(), requested.z(), currentId.toString()),
+			normalized,
 			TargetMatchContext.blockEntityBlock(BlockEntityClassification.hasBlockEntity(state)),
-			anchor));
+			anchor,
+			resolveNameSafely(requester, normalized)));
 	}
 
 	/**
@@ -199,10 +231,33 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.OUT_OF_RANGE);
 		}
 
+		Target normalized = new Target.LocationTarget(dimensionId, requested.x(), requested.y(), requested.z());
+
 		return AuthoritativeTargetValidation.accepted(new ValidatedMarkerTarget(
-			new Target.LocationTarget(dimensionId, requested.x(), requested.y(), requested.z()),
+			normalized,
 			TargetMatchContext.none(),
-			anchor));
+			anchor,
+			resolveNameSafely(requester, normalized)));
+	}
+
+	/**
+	 * Resolves the target's display name JSON through the injected resolver
+	 * for the normalized target. A resolver contract failure (null return or
+	 * exception) falls back to {@link #FAIL_SAFE_NAME}; the fail-safe is never
+	 * the normal path.
+	 */
+	private TargetNameJson resolveNameSafely(ServerPlayer requester, Target normalized) {
+		try {
+			TargetNameJson name = nameResolver.resolveName(requester.getUUID(), normalized);
+
+			if (name == null) {
+				return FAIL_SAFE_NAME;
+			}
+
+			return name;
+		} catch (RuntimeException e) {
+			return FAIL_SAFE_NAME;
+		}
 	}
 
 	/**

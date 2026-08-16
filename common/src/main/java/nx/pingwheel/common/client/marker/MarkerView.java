@@ -4,6 +4,7 @@ import java.util.Objects;
 
 import lombok.Getter;
 import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
@@ -15,6 +16,7 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.math.MathUtils;
 import nx.pingwheel.common.math.ScreenPos;
+import nx.pingwheel.common.name.TargetNameComposer;
 import nx.pingwheel.common.render.WorldRenderContext;
 import org.jetbrains.annotations.Nullable;
 
@@ -45,6 +47,12 @@ import static nx.pingwheel.common.CommonClient.Game;
  *       with the same world-to-screen, distance, and scale formulas the
  *       legacy ping view used.</li>
  * </ul>
+ *
+ * <p>The displayed target name is the decoded authoritative name kept in step
+ * with the {@link nx.pingwheel.common.name.ClientTargetNameStore} by
+ * {@link MarkerOverlayState} (see {@link #replaceTargetName}); until a name
+ * has been applied it is the unknown fallback. The name is a plain component
+ * and never carries a ping-type or team color.
  *
  * <p>The dimension identity is the stable string resource id of the marker's
  * target ({@code minecraft:overworld} and friends), not a numeric hash.
@@ -83,6 +91,12 @@ public final class MarkerView {
 
 	private Vec3 pos;
 
+	/**
+	 * The displayed target name, decoded from the authoritative name store by
+	 * {@link MarkerOverlayState}; the unknown fallback until then.
+	 */
+	private Component targetName = TargetNameComposer.unknown();
+
 	MarkerView(ClientMarker marker) {
 		this.marker = Objects.requireNonNull(marker, "marker");
 		this.pos = anchorPosition(marker.anchor());
@@ -90,13 +104,27 @@ public final class MarkerView {
 
 	/**
 	 * Replaces the backing payload when the same marker id is re-applied with
-	 * a newer snapshot, and drops the stale owner/item presentation state; the
-	 * next {@link #update} recomputes everything from the new payload.
+	 * a newer snapshot, and drops the stale owner/item presentation state.
+	 *
+	 * <p>The displayed target name is deliberately preserved: it stays
+	 * independently authoritative through the
+	 * {@link nx.pingwheel.common.name.ClientTargetNameStore} and the
+	 * {@link MarkerOverlayState} name sync, so replacing a payload whose name
+	 * JSON is unchanged keeps the decoded name instead of flashing the unknown
+	 * fallback for a frame.
 	 */
 	void replacePayload(ClientMarker marker) {
 		this.marker = Objects.requireNonNull(marker, "marker");
 		this.playerInfo = null;
 		this.itemStack = null;
+	}
+
+	/**
+	 * Replaces the displayed target name without rebuilding the view or its
+	 * payload; the same view instance survives across frames.
+	 */
+	void replaceTargetName(Component targetName) {
+		this.targetName = Objects.requireNonNull(targetName, "targetName");
 	}
 
 	/**
@@ -141,6 +169,15 @@ public final class MarkerView {
 	 */
 	public String getDimension() {
 		return this.marker.target().dimensionId();
+	}
+
+	/**
+	 * The displayed target name: the decoded authoritative name applied by the
+	 * overlay state, or the unknown fallback. Plain text, never a ping-type or
+	 * team color.
+	 */
+	public Component getTargetName() {
+		return this.targetName;
 	}
 
 	/**

@@ -20,6 +20,7 @@ import nx.pingwheel.common.client.outline.VirtualBlockDisplayRenderer;
 import nx.pingwheel.common.compat.LegacyMigrationHandler;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
+import nx.pingwheel.common.name.ClientTargetNameDecoder;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
@@ -63,6 +64,7 @@ public class CommonClient {
 		// The lazy global loggers only ever emit aggregate transition counts.
 		EntityOutlineState.setLogger(EntityOutlineLogger.global());
 		BlockOutlineState.setLogger(BlockOutlineLogger.global());
+		ClientTargetNameDecoder.setLogger(ClientTargetNameDecoder.Logger.global());
 	}
 
 	public void onJoinServer() {
@@ -113,7 +115,10 @@ public class CommonClient {
 	}
 
 	public void onRenderWorld(WorldRenderContext ctx) {
-		MarkerOverlayState.INSTANCE.prepare(ctx, pingRuntime == null ? null : pingRuntime.store());
+		MarkerOverlayState.INSTANCE.prepare(
+			ctx,
+			pingRuntime == null ? null : pingRuntime.store(),
+			pingRuntime == null ? null : pingRuntime.nameStore());
 		prepareEntityOutlines();
 		prepareBlockOutlines();
 
@@ -296,7 +301,7 @@ public class CommonClient {
 			return;
 		}
 
-		pingRuntime.applyCreated(packet.snapshot());
+		pingRuntime.applyCreated(packet);
 	}
 
 	public void onMarkerRemovedPacket(MarkerRemovedS2CPacket packet) {

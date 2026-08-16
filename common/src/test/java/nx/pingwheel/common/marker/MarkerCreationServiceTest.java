@@ -15,6 +15,7 @@ import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.domain.TargetResolver;
 import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
+import nx.pingwheel.common.name.TargetNameJson;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -36,6 +37,7 @@ class MarkerCreationServiceTest {
 	private static final TargetTypeCatalog TARGET_TYPES = TargetTypeCatalog.builtIn();
 
 	private static final MarkerAnchor ANCHOR = new MarkerAnchor(1.0, 2.0, 3.0);
+	private static final TargetNameJson DEFAULT_NAME = new TargetNameJson("{\"translate\":\"minecraft.zombie\"}");
 
 	private ServerMarkerStore store;
 	private RecordingValidator validator;
@@ -59,7 +61,13 @@ class MarkerCreationServiceTest {
 	}
 
 	private static ValidatedMarkerTarget validated(Target normalized, TargetMatchContext context) {
-		return new ValidatedMarkerTarget(normalized, context, ANCHOR);
+		return validated(normalized, context, DEFAULT_NAME);
+	}
+
+	private static ValidatedMarkerTarget validated(
+		Target normalized, TargetMatchContext context, TargetNameJson name
+	) {
+		return new ValidatedMarkerTarget(normalized, context, ANCHOR, name);
 	}
 
 	private void newService() {
@@ -77,6 +85,7 @@ class MarkerCreationServiceTest {
 		assertFalse(outcome.isAccepted());
 		assertEquals(Optional.of(reason), outcome.rejectReason());
 		assertTrue(outcome.creation().isEmpty());
+		assertTrue(outcome.targetName().isEmpty());
 	}
 
 	// --- pipeline order -------------------------------------------------------
@@ -215,13 +224,39 @@ class MarkerCreationServiceTest {
 		newService();
 		Target requested = entityTarget(ENTITY_A);
 		MarkerAnchor anchor = new MarkerAnchor(4.0, 5.0, 6.0);
-		validator.accepted(new ValidatedMarkerTarget(requested, TargetMatchContext.none(), anchor));
+		validator.accepted(new ValidatedMarkerTarget(
+			requested, TargetMatchContext.none(), anchor, DEFAULT_NAME));
 		resolver.resolves(requested, targetType("entity"));
 
 		MarkerCreateOutcome outcome = create(requested, "attention");
 
 		assertTrue(outcome.isAccepted());
 		assertEquals(anchor, outcome.creation().orElseThrow().marker().anchor());
+	}
+
+	@Test
+	void createPassesValidatorNameThroughUnchanged() {
+		newService();
+		Target requested = entityTarget(ENTITY_A);
+		TargetNameJson name = new TargetNameJson("{\"translate\":\"minecraft.skeleton\"}");
+		validator.accepted(validated(requested, TargetMatchContext.none(), name));
+		resolver.resolves(requested, targetType("entity"));
+
+		MarkerCreateOutcome outcome = create(requested, "attention");
+
+		assertTrue(outcome.isAccepted());
+		assertEquals(Optional.of(name), outcome.targetName());
+	}
+
+	@Test
+	void rejectedCreateCarriesNoName() {
+		newService();
+		Target requested = entityTarget(ENTITY_A);
+		TargetNameJson name = new TargetNameJson("{\"translate\":\"minecraft.skeleton\"}");
+		validator.accepted(validated(requested, TargetMatchContext.none(), name));
+		resolver.resolves(requested, targetType("entity"));
+
+		assertRejected(create(requested, "does_not_exist"), MarkerRejectReason.INVALID_PING_TYPE);
 	}
 
 	@Test

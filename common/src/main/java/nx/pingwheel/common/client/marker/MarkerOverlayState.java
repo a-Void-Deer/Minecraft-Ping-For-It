@@ -10,7 +10,12 @@ import java.util.Objects;
 import java.util.Set;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.RegistryAccess;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.name.ClientTargetNameDecoder;
+import nx.pingwheel.common.name.ClientTargetNameStore;
+import nx.pingwheel.common.name.TargetNameComposer;
+import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.render.WorldRenderContext;
 import org.jetbrains.annotations.Nullable;
 
@@ -21,22 +26,33 @@ import static nx.pingwheel.common.CommonClient.Game;
  * world overlay renderers.
  *
  * <p>Every world render frame {@link #prepare} synchronizes the cached views
- * with the authoritative {@link ClientMarkerStore}:
+ * with the authoritative {@link ClientMarkerStore} and the authoritative
+ * {@link ClientTargetNameStore}:
  * <ul>
  *   <li>a view is created for every newly seen {@link MarkerId};</li>
  *   <li>an existing view's payload is replaced in place when the same id is
  *       re-applied, so view instances survive across frames;</li>
  *   <li>views whose marker disappeared from the store are removed;</li>
+ *   <li>every view's displayed target name is kept in step with the name
+ *       store by marker id: the name JSON is decoded with the current level's
+ *       registry access and applied without rebuilding the view, falling back
+ *       to the unknown name when the store has no entry or the payload is
+ *       malformed. The per-id {@code appliedNames} cache owns the
+ *       reset/update decision: a name is only re-decoded when the stored
+ *       payload for that id actually changed — the every-frame sync is a
+ *       compare, never a forced re-decode — and replacing a view's payload
+ *       in place never resets its displayed name;</li>
  *   <li>only views whose target dimension is the current dimension are
  *       updated (the renderers skip other dimensions anyway);</li>
  *   <li>the exposed render list is immutable and sorted by descending
  *       distance, exactly like the legacy ping repository.</li>
  * </ul>
  *
- * <p>Calling {@link #prepare} with a missing world or a {@code null} store
- * (for example after leaving the server) clears every cached view. No logging
- * happens here at all: the store and the client runtime already own all
- * mutation logging, so nothing in this class can produce per-frame log spam.
+ * <p>Calling {@link #prepare} with a missing world or a {@code null} store or
+ * name store (for example after leaving the server) clears every cached view.
+ * No logging happens here at all: the store and the client runtime already own
+ * all mutation logging, so nothing in this class can produce per-frame log
+ * spam.
  *
  * <p>Thread safety: main-thread-confined, same as the {@link ClientMarkerStore}
  * it mirrors. Concurrent access is unsupported.
@@ -46,21 +62,27 @@ public final class MarkerOverlayState {
 	public static final MarkerOverlayState INSTANCE = new MarkerOverlayState();
 
 	private final Map<MarkerId, MarkerView> views = new LinkedHashMap<>();
+	private final Map<MarkerId, TargetNameJson> appliedNames = new LinkedHashMap<>();
 	private List<MarkerView> renderViews = List.of();
 
 	private MarkerOverlayState() {}
 
 	/**
-	 * Synchronizes the cached views with {@code store} and recomputes the
-	 * current-dimension views for this render frame.
+	 * Synchronizes the cached views with {@code store} and their displayed
+	 * names with {@code nameStore}, then recomputes the current-dimension
+	 * views for this render frame.
 	 *
-	 * <p>With a {@code null} store or context — or without a live level — the
-	 * state is cleared instead.
+	 * <p>With a {@code null} store, name store, or context — or without a live
+	 * level — the state is cleared instead.
 	 */
-	public void prepare(@Nullable WorldRenderContext ctx, @Nullable ClientMarkerStore store) {
+	public void prepare(
+		@Nullable WorldRenderContext ctx,
+		@Nullable ClientMarkerStore store,
+		@Nullable ClientTargetNameStore nameStore
+	) {
 		Minecraft game = Game;
 
-		if (ctx == null || store == null || game == null || game.level == null) {
+		if (ctx == null || store == null || nameStore == null || game == null || game.level == null) {
 			clear();
 			return;
 		}
@@ -86,6 +108,8 @@ public final class MarkerOverlayState {
 			views.get(id).replacePayload(markersById.get(id));
 		}
 
+		syncNames(game.level.registryAccess(), nameStore);
+
 		String currentDimension = game.level.dimension().location().toString();
 
 		for (MarkerView view : views.values()) {
@@ -101,6 +125,39 @@ public final class MarkerOverlayState {
 	}
 
 	/**
+	 * Keeps every cached view's displayed target name in step with the name
+	 * store. The per-id {@code appliedNames} cache owns the reset/update
+	 * decision: the name JSON for a marker id is decoded (with the current
+	 * level's registry access) and applied only when the stored payload for
+	 * that id changed since the last sync, so running every frame merely
+	 * compares and never forces a re-decode; a missing store entry or a
+	 * malformed payload yields the unknown fallback. A payload replacement
+	 * ({@link MarkerView#replacePayload}) never resets a name — this cache is
+	 * the single authority for it. Views whose marker disappeared are
+	 * forgotten, mirroring the marker-id-driven removal.
+	 */
+	private void syncNames(RegistryAccess registryAccess, ClientTargetNameStore nameStore) {
+		appliedNames.keySet().removeIf(id -> !views.containsKey(id));
+
+		for (Map.Entry<MarkerId, MarkerView> entry : views.entrySet()) {
+			MarkerId id = entry.getKey();
+			TargetNameJson current = nameStore.find(id).orElse(null);
+
+			if (Objects.equals(current, appliedNames.get(id))) {
+				continue;
+			}
+
+			appliedNames.put(id, current);
+
+			if (current != null) {
+				entry.getValue().replaceTargetName(ClientTargetNameDecoder.decode(id, current, registryAccess));
+			} else {
+				entry.getValue().replaceTargetName(TargetNameComposer.unknown());
+			}
+		}
+	}
+
+	/**
 	 * The immutable render list for this frame, sorted by descending distance.
 	 */
 	public List<MarkerView> renderViews() {
@@ -112,6 +169,7 @@ public final class MarkerOverlayState {
 	 */
 	public void clear() {
 		views.clear();
+		appliedNames.clear();
 		renderViews = List.of();
 	}
 

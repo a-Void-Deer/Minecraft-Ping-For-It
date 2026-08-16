@@ -6,6 +6,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ServerConfig;
+import nx.pingwheel.common.chat.PingChatBuilder;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.integration.TeamContextHandler;
 import nx.pingwheel.common.marker.MarkerCreationLogger;
@@ -20,6 +21,10 @@ import nx.pingwheel.common.marker.MarkerWinnerChange;
 import nx.pingwheel.common.marker.MinecraftAuthoritativeTargetValidator;
 import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.marker.ServerMarkerStore;
+import nx.pingwheel.common.name.MinecraftTargetNameResolver;
+import nx.pingwheel.common.name.TargetNameComposer;
+import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.name.TargetNameJsonCodec;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
@@ -128,10 +133,10 @@ public class ServerCore {
 
 	/**
 	 * Builds a {@link MarkerCreationService} for one request, sharing the
-	 * static store. The authoritative validator depends on the current server
-	 * instance and live config, so it (and with it the service) is
-	 * instantiated per request while the store, id source, and built-in
-	 * catalogs stay shared.
+	 * static store. The authoritative validator and the authoritative target
+	 * name resolver both depend on the current server instance and live
+	 * config, so they (and with them the service) are instantiated per
+	 * request while the store, id source, and built-in catalogs stay shared.
 	 */
 	private static MarkerCreationService markerService(MinecraftServer server) {
 		return new MarkerCreationService(
@@ -139,7 +144,10 @@ public class ServerCore {
 			DefaultTargetResolver.builtIn(TargetResolutionLogger.global()),
 			PingTypeCatalog.builtIn(),
 			new MinecraftAuthoritativeTargetValidator(
-				server, SERVER_CONFIG.getPingDistance(), SERVER_CONFIG.isPlayerTrackingEnabled()),
+				server,
+				SERVER_CONFIG.getPingDistance(),
+				SERVER_CONFIG.isPlayerTrackingEnabled(),
+				new MinecraftTargetNameResolver(server)),
 			MarkerCreationLogger.global());
 	}
 
@@ -282,6 +290,7 @@ public class ServerCore {
 
 		final var creation = outcome.creation().orElseThrow();
 		final var marker = creation.marker();
+		final var targetName = outcome.targetName().orElseThrow();
 
 		LOGGER.debug(() -> "marker create accepted: requestId=%d markerId=%d kind=%s targetType=%s pingType=%s recipients=%d".formatted(
 			requestId,
@@ -291,7 +300,12 @@ public class ServerCore {
 			marker.pingType().id(),
 			marker.recipients().size()));
 
-		sendMarkerCreated(playerList, marker);
+		// Fixed ordering for every accepted marker: first the created packet
+		// (marker + authoritative name), then the chat line to the same
+		// recipients, then the winner changes. There is no chat on rejection,
+		// removal, or expiry.
+		sendMarkerCreated(playerList, marker, targetName);
+		sendMarkerCreatedChat(server, playerList, marker, targetName);
 		sendWinnerChanges(playerList, creation.winnerChanges(), null);
 	}
 
@@ -425,12 +439,14 @@ public class ServerCore {
 	}
 
 	/**
-	 * Sends a creation packet to every recipient of {@code marker} that is
-	 * currently online. Recipients that logged out since the marker was
-	 * created are skipped; the stored snapshot remains authoritative.
+	 * Sends a creation packet carrying {@code marker}'s snapshot and the
+	 * validator's authoritative target name to every recipient of
+	 * {@code marker} that is currently online. Recipients that logged out
+	 * since the marker was created are skipped; the stored snapshot remains
+	 * authoritative.
 	 */
-	private static void sendMarkerCreated(PlayerList playerList, ServerMarker marker) {
-		final var packet = new MarkerCreatedS2CPacket(MarkerSnapshot.from(marker));
+	private static void sendMarkerCreated(PlayerList playerList, ServerMarker marker, TargetNameJson targetName) {
+		final var packet = new MarkerCreatedS2CPacket(MarkerSnapshot.from(marker), targetName);
 
 		for (final var recipientId : marker.recipients()) {
 			final var recipient = playerList.getPlayer(recipientId);
@@ -439,6 +455,56 @@ public class ServerCore {
 				IPlatformNetworkService.INSTANCE.sendToClient(packet, recipient);
 			}
 		}
+	}
+
+	/**
+	 * Sends the ping chat line for an accepted marker exactly once, right
+	 * after the created packet, to the same online recipients as the stored
+	 * {@code marker.recipients()} snapshot. Recipients that logged out since
+	 * the marker was created are skipped; no chat is ever sent on rejection,
+	 * removal, or expiry.
+	 *
+	 * <p>The message is {@code <owner profile name> requests <phrase>
+	 * <target name>}: the owner name is the plain server profile name, the
+	 * phrase carries the marker ping type's text color, and the target name is
+	 * decoded from the validator's authoritative name JSON. A decode failure
+	 * falls back to the unknown target name and only ever debug-logs the
+	 * marker id and the exception class.
+	 */
+	private static void sendMarkerCreatedChat(
+		MinecraftServer server, PlayerList playerList, ServerMarker marker, TargetNameJson targetNameJson
+	) {
+		final var owner = playerList.getPlayer(marker.owner());
+
+		if (owner == null) {
+			// The owner was online during creation; if they left before the
+			// packets went out they are no longer in the recipient snapshot.
+			return;
+		}
+
+		Component targetName;
+
+		try {
+			targetName = TargetNameJsonCodec.decode(targetNameJson, server.registryAccess());
+		} catch (RuntimeException e) {
+			LOGGER.debug(() -> "marker create chat: target name decode failed, using unknown: markerId=%d reason=%s".formatted(
+				marker.id().value(), e.getClass().getSimpleName()));
+			targetName = TargetNameComposer.unknown();
+		}
+
+		final var message = PingChatBuilder.build(
+			owner.getGameProfile().getName(), marker.pingType(), targetName);
+
+		for (final var recipientId : marker.recipients()) {
+			final var recipient = playerList.getPlayer(recipientId);
+
+			if (recipient != null) {
+				recipient.sendSystemMessage(message);
+			}
+		}
+
+		LOGGER.debug(() -> "marker create chat sent: markerId=%d pingType=%s recipients=%d".formatted(
+			marker.id().value(), marker.pingType().id(), marker.recipients().size()));
 	}
 
 	/**
