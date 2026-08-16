@@ -11,22 +11,8 @@ import static nx.pingwheel.common.CommonClient.Game;
 public class Raycast {
 	private Raycast() {}
 
-	public static HitResult traceDirectional(Vec3 direction,
-													 float tickDelta,
-													 double maxDistance,
-													 boolean hitTranslucent) {
-		var cameraEntity = Game.cameraEntity;
-
-		if (cameraEntity == null || cameraEntity.level() == null) {
-			return null;
-		}
-
-		return traceDirectional(
-			cameraEntity.getEyePosition(tickDelta), direction, maxDistance, hitTranslucent);
-	}
-
 	/**
-	 * Traces using an explicitly supplied origin and direction. The overload is
+	 * Traces using an explicitly supplied origin and direction. This method is
 	 * used by ping capture so the exact press-time ray is shared by the vanilla
 	 * hit test and every fallback path instead of being reconstructed from a
 	 * later camera state.
