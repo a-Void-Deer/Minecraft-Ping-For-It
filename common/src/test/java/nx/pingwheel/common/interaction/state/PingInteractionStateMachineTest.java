@@ -65,10 +65,101 @@ class PingInteractionStateMachineTest {
 		h.clock.now = 300L;
 
 		Optional<PingInteractionAction> action = h.machine.update(true, WheelSelection.NONE, emptyContext());
+		assertTrue(action.isEmpty(), "tick cadence must not open the wheel");
+		h.machine.presentFrame(true);
 
-		assertTrue(action.isEmpty());
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
 		assertSame(token, h.machine.currentToken().orElseThrow());
+	}
+
+	@Test
+	void frameBoundaryAt299And300ControlsWheelAppearance() {
+		Harness h = harness();
+		InteractionToken token = h.press();
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+
+		h.clock.now = 299L;
+		h.machine.presentFrame(true);
+		assertEquals(PingInteractionPhase.PRESSED, h.machine.phase());
+
+		h.clock.now = 300L;
+		h.machine.presentFrame(true);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+	}
+
+	@Test
+	void delayedCaptureUsesPressTimeAsLongPressBaseline() {
+		Harness h = harness();
+		InteractionToken token = h.press();
+
+		h.clock.now = 300L;
+		h.machine.presentFrame(true);
+		assertEquals(PingInteractionPhase.PRESSED, h.machine.phase(),
+			"a frame cannot open before its capture is ready");
+
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.clock.now = 350L;
+		h.machine.presentFrame(true);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase(),
+			"capture readiness must not restart the press timer");
+	}
+
+	@Test
+	void repeatedPresentationFramesAreIdempotent() {
+		Harness h = harness();
+		InteractionToken token = h.press();
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+
+		h.clock.now = 300L;
+		h.machine.presentFrame(true);
+		h.clock.now = 301L;
+		h.machine.presentFrame(true);
+		h.clock.now = 302L;
+		h.machine.presentFrame(true);
+
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+		assertEquals(1L, h.logger.messages().stream().filter(m -> m.contains("wheel open")).count());
+	}
+
+	@Test
+	void releaseBeforeFirstPresentationCannotBecomeWheelInteraction() {
+		Harness h = harness();
+		InteractionToken token = h.press();
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+
+		h.clock.now = 300L;
+		h.machine.presentFrame(false);
+		assertEquals(PingInteractionPhase.PRESSED, h.machine.phase());
+
+		Optional<PingInteractionAction> action =
+			h.machine.update(false, WheelSelection.NONE, emptyContext());
+
+		assertTrue(action.isEmpty());
+		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
+	}
+
+	@Test
+	void releaseBetweenFrameAndTickCommitsOneActionWithoutFrameSideEffects() {
+		Harness h = harness();
+		InteractionToken token = h.press();
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+
+		h.clock.now = 300L;
+		h.machine.presentFrame(true);
+		PingType goTo = pingType("go_to");
+		h.machine.update(true, WheelSelection.sector(goTo), emptyContext());
+
+		// The key can be released after the last frame but before the tick that
+		// owns the commit. Presentation observes no action and leaves the wheel
+		// open for that tick.
+		h.clock.now = 301L;
+		h.machine.presentFrame(false);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+
+		Optional<PingInteractionAction> action =
+			h.machine.update(false, WheelSelection.sector(goTo), emptyContext());
+		assertEquals(goTo, ((PingInteractionAction.CreatePing) action.orElseThrow()).pingType());
+		assertTrue(h.machine.update(false, WheelSelection.sector(goTo), emptyContext()).isEmpty());
 	}
 
 	@Test
@@ -93,7 +184,7 @@ class PingInteractionStateMachineTest {
 
 		h.complete(token, TargetSnapshotFactory.block(OVERWORLD, 0, 0, 0, "minecraft:stone"));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 
 		List<String> ids = h.machine.wheelPingTypes().stream().map(PingType::id).toList();
 
@@ -108,7 +199,7 @@ class PingInteractionStateMachineTest {
 
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 
 		PingType goTo = pingType("go_to");
 		h.clock.now = 310L;
@@ -127,7 +218,7 @@ class PingInteractionStateMachineTest {
 
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 
 		// "loot" is not in the location target type's ping type list.
 		PingType loot = pingType("loot");
@@ -146,7 +237,7 @@ class PingInteractionStateMachineTest {
 
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 
 		h.clock.now = 310L;
 		Optional<PingInteractionAction> action = h.machine.update(false, WheelSelection.NONE, emptyContext());
@@ -162,7 +253,7 @@ class PingInteractionStateMachineTest {
 
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 
 		assertEquals(List.of("only"), h.machine.wheelPingTypes().stream().map(PingType::id).toList());
 
@@ -179,7 +270,7 @@ class PingInteractionStateMachineTest {
 		InteractionToken second = h.press();
 		h.complete(second, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 		h.clock.now = 700L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 		h.clock.now = 710L;
 
 		Optional<PingInteractionAction> cancel = h.machine.update(
@@ -195,13 +286,14 @@ class PingInteractionStateMachineTest {
 
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 
 		h.clock.now = 300L + 4999L;
 		assertTrue(h.machine.update(true, WheelSelection.NONE, emptyContext()).isEmpty());
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
 
 		h.clock.now = 300L + 5000L;
+		h.machine.presentFrame(true);
 		Optional<PingInteractionAction> action =
 			h.machine.update(false, WheelSelection.sector(pingType("go_to")), emptyContext());
 
@@ -252,7 +344,7 @@ class PingInteractionStateMachineTest {
 
 		h.complete(first, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
 
 		InteractionToken second = h.press();
@@ -373,7 +465,7 @@ class PingInteractionStateMachineTest {
 
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 
 		h.clock.now = 310L;
 		Optional<PingInteractionAction> action =
@@ -398,7 +490,7 @@ class PingInteractionStateMachineTest {
 
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 
 		h.clock.now = 310L;
 		Optional<PingInteractionAction> cancel = h.machine.update(
@@ -415,7 +507,7 @@ class PingInteractionStateMachineTest {
 
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 
 		h.clock.now = 310L;
 		Optional<PingInteractionAction> action =
@@ -432,7 +524,7 @@ class PingInteractionStateMachineTest {
 
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 
 		h.clock.now = 310L;
 		CancelMarkerCandidate near = ownCandidate(1L, new WorldVector(0, 0, 5));
@@ -481,11 +573,12 @@ class PingInteractionStateMachineTest {
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 
 		h.clock.now = 10L;
-		custom.update(true, WheelSelection.NONE, emptyContext());
+		custom.presentFrame(true);
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, custom.phase());
 
 		h.clock.now = 110L;
 		assertTrue(custom.update(true, WheelSelection.NONE, emptyContext()).isEmpty());
+		custom.presentFrame(true);
 		assertEquals(PingInteractionPhase.IDLE, custom.phase());
 	}
 
@@ -509,7 +602,7 @@ class PingInteractionStateMachineTest {
 
 		h.complete(token, TargetSnapshotFactory.entity(OVERWORLD, entityUuid, "minecraft:item"));
 		h.clock.now = 300L;
-		h.machine.update(true, WheelSelection.NONE, emptyContext());
+		h.machine.presentFrame(true);
 
 		PingType attention = pingType("attention");
 		h.clock.now = 310L;

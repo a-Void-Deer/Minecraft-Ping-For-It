@@ -26,9 +26,12 @@ import nx.pingwheel.common.interaction.wheel.WheelSelection;
  * <p>Timing is driven by an injected {@link InteractionTimeSource}; all hold
  * durations are computed from monotonic differences, and a clock that moves
  * backwards while an interaction is active is rejected with an
- * {@link IllegalStateException}. No Minecraft, networking, or rendering
- * concerns live here: phase 6 remains authoritative for validation and marker
- * storage, and this class never touches client/server state.
+ * {@link IllegalStateException}. Presentation-only threshold and timeout
+ * transitions are driven by {@link #presentFrame(boolean)} on GUI/render
+ * cadence, while {@link #update(boolean, WheelSelection, CancellationContext)}
+ * remains the tick-authoritative action boundary. No Minecraft, networking, or
+ * rendering concerns live here: phase 6 remains authoritative for validation
+ * and marker storage, and this class never touches client/server state.
  *
  * <p><strong>Key-down contract:</strong> {@link #press()} must be invoked on
  * every physical key-down rising edge, exactly once per press. Releasing the
@@ -189,10 +192,68 @@ public final class PingInteractionStateMachine {
 		}
 
 		if (phase == PingInteractionPhase.WHEEL_OPEN) {
-			return updateWheelOpen(keyDown, wheelSelection, cancellationContext, now);
+			return updateWheelOpen(keyDown, wheelSelection, cancellationContext);
 		}
 
 		return updatePressed(keyDown, capture, now);
+	}
+
+	/**
+	 * Advances presentation-only timing from one GUI/render frame.
+	 *
+	 * <p>This method may open the wheel once a capture-ready interaction has
+	 * reached the long-press threshold, or silently close an already-open wheel
+	 * after its maximum duration. It never validates a target, consumes a wheel
+	 * selection, or emits an action. The press timestamp remains the baseline
+	 * even when the capture arrived asynchronously after the threshold.
+	 *
+	 * <p>A release observed by a frame does not commit or cancel anything; the
+	 * tick path still owns the single release action. Consequently a release
+	 * between this method and the next tick cannot cause a duplicate action or
+	 * make an interaction that never presented as a wheel retroactively become a
+	 * wheel interaction.
+	 */
+	public void presentFrame(boolean keyDown) {
+		if (phase == PingInteractionPhase.IDLE) {
+			return;
+		}
+
+		long now = observeTime();
+
+		if (!activeInteraction.isCurrent(token)) {
+			logger.debug("interaction superseded: token={}", token.sequence());
+			resetMachineState();
+			return;
+		}
+
+		Optional<CapturedPingContext> capture = activeInteraction.currentContext();
+
+		if (capture.isPresent() && capture.get().token() != token) {
+			logger.debug("interaction superseded: token={}", token.sequence());
+			resetMachineState();
+			return;
+		}
+
+		if (phase == PingInteractionPhase.WHEEL_OPEN) {
+			long openDuration = now - wheelOpenTimeMillis;
+
+			if (openDuration >= wheelTimeoutMillis) {
+				logger.debug("wheel timeout: token={} openMillis={}", token.sequence(), openDuration);
+				resetMachineState();
+			}
+
+			return;
+		}
+
+		if (!keyDown || capture.isEmpty()) {
+			return;
+		}
+
+		long elapsed = now - pressTimeMillis;
+
+		if (elapsed >= longPressMillis) {
+			openWheel(capture.get(), now);
+		}
 	}
 
 	/**
@@ -262,31 +323,16 @@ public final class PingInteractionStateMachine {
 			return Optional.empty();
 		}
 
-		long elapsed = now - pressTimeMillis;
-
-		if (elapsed >= longPressMillis) {
-			openWheel(context, now);
-		}
-
-		// Key still down below the threshold: keep waiting.
+		// Key still down: presentation-only threshold handling belongs to
+		// presentFrame(), never to the tick/action path.
 		return Optional.empty();
 	}
 
 	private Optional<PingInteractionAction> updateWheelOpen(
 		boolean keyDown,
 		WheelSelection wheelSelection,
-		CancellationContext cancellationContext,
-		long now
+		CancellationContext cancellationContext
 	) {
-		long openDuration = now - wheelOpenTimeMillis;
-
-		// Timeout is checked first and wins regardless of release or selection.
-		if (openDuration >= wheelTimeoutMillis) {
-			logger.debug("wheel timeout: token={} openMillis={}", token.sequence(), openDuration);
-			resetMachineState();
-			return Optional.empty();
-		}
-
 		WheelSelection effective = normalizeSelection(wheelSelection);
 
 		if (!effective.equals(selection)) {

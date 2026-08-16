@@ -257,6 +257,14 @@ public class CommonClient {
 	}
 
 	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
+		if (pingRuntime != null && Game != null) {
+			// Threshold/timeout transitions are presentation-only and must be
+			// evaluated before either overlay decides whether the wheel is drawn.
+			// The tick path remains the sole owner of queued selection consumption
+			// and packet/action dispatch.
+			pingRuntime.onRenderFrame(InputUtils.isPingHotkeyDown());
+		}
+
 		OverlayRenderer.draw(guiGraphics, tickDelta);
 		WheelOverlayRenderer.draw(guiGraphics, tickDelta);
 	}

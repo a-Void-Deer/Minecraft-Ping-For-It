@@ -89,12 +89,14 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
  *
  * <p>{@link #onTick(boolean, boolean)} is called every client tick from the
  * game thread: it consumes the press edge, captures the target immediately at
- * key-down (never on release or wheel movement), advances the machine with the
- * current wheel selection and a cancellation context built from live local
- * state, dispatches the returned action at most once, and runs the store's
- * fallback expiry using a monotonic local tick counter. One fresh runtime is
- * created per world join and dropped on leave (see {@code CommonClient}), so
- * interaction and marker state can never leak across connections.
+ * key-down (never on release or wheel movement), consumes the queued wheel
+ * selection, advances the machine's action path with a cancellation context
+ * built from live local state, dispatches the returned action at most once, and
+ * runs the store's fallback expiry using a monotonic local tick counter.
+ * Presentation-only threshold/timeout transitions are handled by
+ * {@link #onRenderFrame(boolean)} instead. One fresh runtime is created per
+ * world join and dropped on leave (see {@code CommonClient}), so interaction
+ * and marker state can never leak across connections.
  *
  * <p>Logging only ever carries safe fields: token sequences, request/marker
  * ids, ping type ids, target kinds, candidate counts, and reasons. UUIDs,
@@ -297,6 +299,41 @@ public final class ClientPingRuntime {
 		wheelMouseCapture.sync(machine.phase(), game);
 
 		expireFallbackMarkers();
+	}
+
+	/**
+	 * Advances presentation-only interaction timing for one GUI/render frame.
+	 *
+	 * <p>The frame path can make a capture-ready held interaction visible as an
+	 * open wheel and can silently close a timed-out wheel, but it never consumes
+	 * the queued selection, validates/commits an action, or sends a packet. The
+	 * action and selection boundary remains {@link #onTick(boolean, boolean)}.
+	 * Mouse capture is synchronized here as well as on ticks so a wheel that
+	 * appears or times out between ticks preserves the existing release/re-grab
+	 * semantics without duplicate transitions.
+	 */
+	public void onRenderFrame(boolean keyDown) {
+		Minecraft game = Game;
+
+		if (game == null || game.level == null || game.player == null) {
+			return;
+		}
+
+		machine.presentFrame(keyDown);
+
+		// A frame-side timeout/transition must not leave a prior GUI selection
+		// queued for the next tick. Selection is meaningful only while the wheel
+		// remains open; it is still preserved between open frames and the owning
+		// tick consumes it exactly once.
+		if (machine.phase() != PingInteractionPhase.WHEEL_OPEN) {
+			wheelSelection = WheelSelection.NONE;
+		}
+
+		if (machine.phase() == PingInteractionPhase.IDLE) {
+			pendingRay = null;
+		}
+
+		wheelMouseCapture.sync(machine.phase(), game);
 	}
 
 	/**
