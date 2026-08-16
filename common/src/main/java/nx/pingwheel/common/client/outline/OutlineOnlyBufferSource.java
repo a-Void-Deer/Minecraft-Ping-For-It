@@ -6,27 +6,26 @@ import java.util.Objects;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.OutlineBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 
 /**
- * Outline-only {@link MultiBufferSource} adapter around the vanilla
- * {@link OutlineBufferSource}.
+ * Outline-only {@link MultiBufferSource} adapter around a caller-owned,
+ * attempt-local buffer source.
  *
- * <p>The vanilla outline source writes the geometry of a non-outline render
- * type into <em>both</em> the normal world buffer and the entity-outline
- * buffer (for glowing entities). This adapter deliberately never touches the
- * normal world buffer: for every incoming {@link RenderType} it resolves the
- * outline-only counterpart and issues it straight through the wrapped vanilla
- * outline source, so the silhouettes appear in the entity-outline pass and
- * nowhere else. No duplicate normal block rendering can occur.
+ * <p>Every render attempt through this adapter resolves the incoming
+ * {@link RenderType} to its outline-only counterpart and issues it straight
+ * into the supplied local source, so the silhouette geometry is emitted
+ * nowhere else. The adapter never touches any shared or frame-level vanilla
+ * buffer: the supplied source <em>must be attempt-local</em> (typically a
+ * fresh {@code MultiBufferSource.immediate(...)} over a fresh
+ * {@code ByteBufferBuilder} owned by the same attempt), so a failed attempt
+ * that left an incomplete vertex is discarded together with its buffer
+ * instead of corrupting a buffer some other code path will later flush.
  *
  * <p>Resolution rules for an incoming render type:
  * <ul>
- *   <li>{@link RenderType#isOutline()}: used as-is (the vanilla outline source
- *       tints it with the color set via
- *       {@link OutlineBufferSource#setColor});</li>
+ *   <li>{@link RenderType#isOutline()}: used as-is;</li>
  *   <li>otherwise, when {@link RenderType#outline()} is present: that exact
  *       texture-specific outline type is used;</li>
  *   <li>otherwise, when {@code allowBlocksAtlasFallback} is true (ordinary
@@ -38,15 +37,19 @@ import net.minecraft.client.renderer.texture.TextureAtlas;
  *       stays zero and the caller falls back to the VoxelShape outline.</li>
  * </ul>
  *
- * <p>Every vertex that reaches an outline-only buffer through this adapter is
+ * <p>Every vertex that reaches the local source through this adapter is
  * counted; {@link #vertexCount()} reports the total after a render attempt,
  * and a zero count means the route produced no silhouette.
  *
- * <p>The caller sets the winner color on the wrapped vanilla
- * {@link OutlineBufferSource} (via {@code setColor}) before each render
- * attempt; UVs and texture alpha pass through untouched, so the vanilla
- * {@code rendertype_outline} silhouette (alpha-based discard, vertex-color
- * tint) is produced exactly as for glowing entities.
+ * <p>Color: the adapter applies one opaque marker color, supplied once at
+ * construction, to every vertex itself — exactly mirroring the vanilla 1.21.1
+ * {@code EntityOutlineGenerator}: {@code addVertex} delegates the position
+ * and then sets the fixed opaque color, any renderer {@code setColor} call is
+ * swallowed, {@code setUv} forwards, and {@code setUv1}/{@code setUv2}/
+ * {@code setNormal} are ignored. UVs and texture alpha pass through
+ * untouched, so the vanilla {@code rendertype_outline} silhouette
+ * (alpha-based discard, vertex-color tint) is produced exactly as for
+ * glowing entities.
  *
  * <p>The pure decision core is {@link #decide(boolean, boolean, boolean)},
  * which operates on extracted {@link RenderType} facts and is headless-
@@ -54,26 +57,34 @@ import net.minecraft.client.renderer.texture.TextureAtlas;
  * and no-op consumers are package-private test seams.
  *
  * <p>Thread safety: main-thread render pass only, one instance per render
- * attempt.
+ * attempt, never reused or pooled.
  */
 public final class OutlineOnlyBufferSource implements MultiBufferSource {
 
-	private final OutlineBufferSource outlineSource;
+	private final MultiBufferSource source;
 	private final boolean allowBlocksAtlasFallback;
+	private final int markerColor;
 	private final List<VertexCountingConsumer> issuedConsumers = new ArrayList<>();
 
 	/**
-	 * @param outlineSource              the vanilla outline buffer source of
-	 *                                   the current frame
-	 * @param allowBlocksAtlasFallback   whether render types without an outline
-	 *                                   variant fall back to
-	 *                                   {@code RenderType.outline(TextureAtlas.LOCATION_BLOCKS)}
-	 *                                   (ordinary BlockDisplay route) instead
-	 *                                   of a no-op (actual BlockEntity route)
+	 * @param source                    the attempt-local buffer source to
+	 *                                  issue resolved outline render types
+	 *                                  into; must be created fresh for this
+	 *                                  attempt and never shared across
+	 *                                  attempts or frames
+	 * @param allowBlocksAtlasFallback  whether render types without an outline
+	 *                                  variant fall back to
+	 *                                  {@code RenderType.outline(TextureAtlas.LOCATION_BLOCKS)}
+	 *                                  (ordinary BlockDisplay route) instead
+	 *                                  of a no-op (actual BlockEntity route)
+	 * @param markerColor               the opaque marker color (ARGB; the
+	 *                                  alpha is ignored and forced to 255)
+	 *                                  applied to every emitted vertex
 	 */
-	public OutlineOnlyBufferSource(OutlineBufferSource outlineSource, boolean allowBlocksAtlasFallback) {
-		this.outlineSource = Objects.requireNonNull(outlineSource, "outlineSource");
+	public OutlineOnlyBufferSource(MultiBufferSource source, boolean allowBlocksAtlasFallback, int markerColor) {
+		this.source = Objects.requireNonNull(source, "source");
 		this.allowBlocksAtlasFallback = allowBlocksAtlasFallback;
+		this.markerColor = markerColor;
 	}
 
 	@Override
@@ -88,7 +99,11 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 			return NoOpVertexConsumer.INSTANCE;
 		}
 
-		VertexCountingConsumer consumer = new VertexCountingConsumer(outlineSource.getBuffer(outlineType));
+		VertexCountingConsumer consumer = new VertexCountingConsumer(
+			source.getBuffer(outlineType),
+			(markerColor >> 16) & 0xFF,
+			(markerColor >> 8) & 0xFF,
+			markerColor & 0xFF);
 		issuedConsumers.add(consumer);
 		return consumer;
 	}
@@ -167,22 +182,40 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 
 	/**
 	 * Forwards every vertex to the delegate while counting {@code addVertex}
-	 * invocations. Every method returns {@code this} — exactly like the
-	 * vanilla {@code EntityOutlineGenerator} — so chained calls within one
-	 * vertex emission stay inside the counter; the interface defaults funnel
-	 * the remaining vertex-producing overloads into the abstract
-	 * {@code addVertex}, so no path can bypass the count.
+	 * invocations and applying the fixed opaque marker color — exactly like
+	 * the vanilla 1.21.1 {@code EntityOutlineGenerator}:
+	 * <ul>
+	 *   <li>{@code addVertex} delegates the position and then sets the fixed
+	 *       opaque color on the delegate;</li>
+	 *   <li>{@code setColor} is swallowed (the marker color is applied by
+	 *       {@code addVertex} instead);</li>
+	 *   <li>{@code setUv} forwards;</li>
+	 *   <li>{@code setUv1}, {@code setUv2}, and {@code setNormal} are
+	 *       swallowed.</li>
+	 * </ul>
+	 *
+	 * <p>Every method returns {@code this} — exactly like the vanilla
+	 * generator — so chained calls within one vertex emission stay inside the
+	 * counter; the interface defaults funnel the remaining vertex-producing
+	 * overloads into the abstract {@code addVertex}, so no path can bypass
+	 * the count.
 	 *
 	 * <p>Package-private test seam: tests wrap a recording delegate and assert
-	 * exact counts without any game client.
+	 * exact counts, forwarding, and color semantics without any game client.
 	 */
 	static final class VertexCountingConsumer implements VertexConsumer {
 
 		private final VertexConsumer delegate;
+		private final int red;
+		private final int green;
+		private final int blue;
 		private int vertices;
 
-		VertexCountingConsumer(VertexConsumer delegate) {
+		VertexCountingConsumer(VertexConsumer delegate, int red, int green, int blue) {
 			this.delegate = Objects.requireNonNull(delegate, "delegate");
+			this.red = red;
+			this.green = green;
+			this.blue = blue;
 		}
 
 		/** The number of vertices forwarded so far. */
@@ -194,12 +227,12 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 		public VertexConsumer addVertex(float x, float y, float z) {
 			vertices++;
 			delegate.addVertex(x, y, z);
+			delegate.setColor(red, green, blue, 255);
 			return this;
 		}
 
 		@Override
 		public VertexConsumer setColor(int red, int green, int blue, int alpha) {
-			delegate.setColor(red, green, blue, alpha);
 			return this;
 		}
 
@@ -211,19 +244,16 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 
 		@Override
 		public VertexConsumer setUv1(int u, int v) {
-			delegate.setUv1(u, v);
 			return this;
 		}
 
 		@Override
 		public VertexConsumer setUv2(int u, int v) {
-			delegate.setUv2(u, v);
 			return this;
 		}
 
 		@Override
 		public VertexConsumer setNormal(float normalX, float normalY, float normalZ) {
-			delegate.setNormal(normalX, normalY, normalZ);
 			return this;
 		}
 	}

@@ -5,7 +5,6 @@ import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.OutlineBufferSource;
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
@@ -162,10 +161,15 @@ public class CommonClient {
 
 	/**
 	 * Runs the model-outline pass (actual {@code BlockEntity} geometry and
-	 * virtual {@code BlockDisplay} glow) into the vanilla
-	 * {@link OutlineBufferSource}, right before the vanilla
-	 * {@code OutlineBufferSource#endOutlineBatch()} call inside
+	 * virtual {@code BlockDisplay} glow) immediately before the vanilla
+	 * entity-outline {@code endOutlineBatch()} call inside
 	 * {@code renderLevel}.
+	 *
+	 * <p>Each render attempt now draws through its own attempt-local transient
+	 * buffer that is flushed immediately on success, so no vanilla outline
+	 * buffer source is passed, captured, or written to here and a failed
+	 * attempt can never corrupt a vanilla batch. The vanilla entity-outline
+	 * buffer, entity glowing routing, and post-chain are untouched.
 	 *
 	 * <p>The {@code LevelRendererMixin} gate ensures this only runs when the
 	 * vanilla entity-outline pipeline is available
@@ -175,7 +179,7 @@ public class CommonClient {
 	 * {@link #renderBlockOutlines(Camera, MultiBufferSource.BufferSource)}
 	 * pass consults to avoid doubling.
 	 */
-	public void renderModelOutlines(Camera camera, OutlineBufferSource outlineBufferSource, float partialTick) {
+	public void renderModelOutlines(Camera camera, float partialTick) {
 		Minecraft game = Game;
 
 		if (game == null || game.level == null) {
@@ -183,7 +187,7 @@ public class CommonClient {
 		}
 
 		VirtualBlockDisplayRenderer.INSTANCE.render(
-			game.level, camera, outlineBufferSource, partialTick,
+			game.level, camera, partialTick,
 			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE);
 	}
 

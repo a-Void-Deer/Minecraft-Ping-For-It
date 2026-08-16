@@ -1,12 +1,22 @@
 package nx.pingwheel.common.client.outline;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decision;
+import net.minecraft.SharedConstants;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.server.Bootstrap;
 import nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.NoOpVertexConsumer;
 import nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.VertexCountingConsumer;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decision.AS_IS;
 import static nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decision.BLOCKS_ATLAS;
@@ -15,56 +25,98 @@ import static nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decisio
 
 /**
  * Headless tests for the outline-only buffer adapter seams: the pure render
- * type resolution decision, vertex counting, and the no-op fallback for
- * outline-less block entity geometry.
+ * type resolution decision, the counting/fixed-color consumers, the no-op
+ * fallback for outline-less block entity geometry, and the routing of the
+ * resolved render type into the supplied attempt-local source.
  *
- * <p>Vanilla {@code RenderType} construction requires the full game bootstrap
- * (its class initializer loads the block/item registries), so no real render
- * type can be built in this headless JVM. The production adapter therefore
- * routes every decision through the pure {@code decide} core over extracted
- * {@code RenderType} facts, and the counting/no-op consumers are tested
- * directly with recording delegates — no game client, language resources, or
- * reflection.
+ * <p>The counting and no-op consumers are tested directly with recording
+ * delegates — no game client. The two routing tests need live vanilla
+ * {@code RenderType} instances, whose class initializer reaches the vanilla
+ * block/item registries; those run the plain vanilla registry bootstrap once
+ * (exactly like {@code ClientTargetNameDecoderTest} and friends), never a
+ * game client, language resources, or reflection.
  */
 class OutlineOnlyBufferSourceTest {
 
+	@BeforeAll
+	static void bootStrap() {
+		// Vanilla RenderType construction touches BuiltInRegistries through
+		// its class initializer, so the registry bootstrap must run once,
+		// exactly like the game does before using these classes. The version
+		// must be detected first because Bootstrap.bootStrap() itself does
+		// not do it.
+		SharedConstants.tryDetectVersion();
+		Bootstrap.bootStrap();
+	}
+
 	/**
 	 * Minimal recording {@link VertexConsumer} delegate; mirrors the vanilla
-	 * interface's abstract methods only (the rest are interface defaults).
+	 * interface's abstract methods only (the rest are interface defaults)
+	 * and records call order, colors, and per-setter invocation counts.
 	 */
 	private static final class RecordingVertexConsumer implements VertexConsumer {
 
 		private int vertices;
+		private final List<int[]> colors = new ArrayList<>();
+		private final List<String> calls = new ArrayList<>();
+		private int uvCalls;
+		private int uv1Calls;
+		private int uv2Calls;
+		private int normalCalls;
 
 		@Override
 		public VertexConsumer addVertex(float x, float y, float z) {
 			vertices++;
+			calls.add("addVertex");
 			return this;
 		}
 
 		@Override
 		public VertexConsumer setColor(int red, int green, int blue, int alpha) {
+			colors.add(new int[] { red, green, blue, alpha });
+			calls.add("setColor");
 			return this;
 		}
 
 		@Override
 		public VertexConsumer setUv(float u, float v) {
+			uvCalls++;
+			calls.add("setUv");
 			return this;
 		}
 
 		@Override
 		public VertexConsumer setUv1(int u, int v) {
+			uv1Calls++;
 			return this;
 		}
 
 		@Override
 		public VertexConsumer setUv2(int u, int v) {
+			uv2Calls++;
 			return this;
 		}
 
 		@Override
 		public VertexConsumer setNormal(float normalX, float normalY, float normalZ) {
+			normalCalls++;
 			return this;
+		}
+	}
+
+	/**
+	 * Minimal fake attempt-local {@link MultiBufferSource}: records every
+	 * render type requested and hands out one shared recording consumer.
+	 */
+	private static final class RecordingBufferSource implements MultiBufferSource {
+
+		private final List<RenderType> requested = new ArrayList<>();
+		private final RecordingVertexConsumer delegate = new RecordingVertexConsumer();
+
+		@Override
+		public VertexConsumer getBuffer(RenderType renderType) {
+			requested.add(renderType);
+			return delegate;
 		}
 	}
 
@@ -92,18 +144,30 @@ class OutlineOnlyBufferSourceTest {
 		assertSame(BLOCKS_ATLAS, OutlineOnlyBufferSource.decide(false, false, true));
 	}
 
+	@Test
+	void decisionCoverageIsComplete() {
+		// Pin the full decision matrix so a future routing change is noticed.
+		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, true, true));
+		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, true, false));
+		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, false, true));
+		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, false, false));
+		assertEquals(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true, true));
+		assertEquals(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true, false));
+		assertEquals(BLOCKS_ATLAS, OutlineOnlyBufferSource.decide(false, false, true));
+		assertEquals(NO_OP, OutlineOnlyBufferSource.decide(false, false, false));
+	}
+
 	// --- counting ---
 
 	@Test
 	void countingConsumerCountsEveryVertexAndForwards() {
 		RecordingVertexConsumer delegate = new RecordingVertexConsumer();
-		VertexCountingConsumer consumer = new VertexCountingConsumer(delegate);
+		VertexCountingConsumer consumer = new VertexCountingConsumer(delegate, 0xFF, 0x00, 0x00);
 
 		assertEquals(0, consumer.vertices());
 
 		consumer
 			.addVertex(0.0F, 0.0F, 0.0F)
-			.setColor(255, 255, 255, 255)
 			.setUv(0.0F, 0.0F)
 			.addVertex(1.0F, 0.0F, 0.0F)
 			.setUv(1.0F, 0.0F)
@@ -112,22 +176,78 @@ class OutlineOnlyBufferSourceTest {
 
 		assertEquals(4, consumer.vertices());
 		assertEquals(4, delegate.vertices);
+		assertEquals(4, delegate.colors.size());
 
 		// A fresh attempt always starts at zero.
-		VertexCountingConsumer second = new VertexCountingConsumer(new RecordingVertexConsumer());
+		VertexCountingConsumer second = new VertexCountingConsumer(new RecordingVertexConsumer(), 0xFF, 0x00, 0x00);
 		assertEquals(0, second.vertices());
 	}
 
 	@Test
 	void countingConsumerIsPerAttemptAndStartsAtZero() {
-		VertexCountingConsumer first = new VertexCountingConsumer(new RecordingVertexConsumer());
-		VertexCountingConsumer second = new VertexCountingConsumer(new RecordingVertexConsumer());
+		VertexCountingConsumer first = new VertexCountingConsumer(new RecordingVertexConsumer(), 1, 2, 3);
+		VertexCountingConsumer second = new VertexCountingConsumer(new RecordingVertexConsumer(), 1, 2, 3);
 
 		first.addVertex(0.0F, 0.0F, 0.0F);
 		first.addVertex(1.0F, 0.0F, 0.0F);
 
 		assertEquals(2, first.vertices());
 		assertEquals(0, second.vertices());
+	}
+
+	// --- fixed-color semantics (mirrors vanilla EntityOutlineGenerator) ---
+
+	@Test
+	void addVertexDelegatesThenAppliesOpaqueFixedColor() {
+		RecordingVertexConsumer delegate = new RecordingVertexConsumer();
+		VertexCountingConsumer consumer = new VertexCountingConsumer(delegate, 0x12, 0x34, 0x56);
+
+		consumer.addVertex(1.0F, 2.0F, 3.0F);
+
+		assertEquals(1, delegate.vertices);
+		assertEquals(1, delegate.colors.size());
+		assertArrayEquals(new int[] { 0x12, 0x34, 0x56, 255 }, delegate.colors.get(0));
+		assertEquals(List.of("addVertex", "setColor"), delegate.calls);
+	}
+
+	@Test
+	void wrapperSetColorIsSwallowed() {
+		RecordingVertexConsumer delegate = new RecordingVertexConsumer();
+		VertexCountingConsumer consumer = new VertexCountingConsumer(delegate, 0x12, 0x34, 0x56);
+
+		consumer.setColor(9, 8, 7, 6);
+
+		assertEquals(0, delegate.colors.size());
+		assertEquals(0, delegate.calls.size());
+	}
+
+	@Test
+	void uvIsForwardedButUv1Uv2AndNormalAreSwallowed() {
+		RecordingVertexConsumer delegate = new RecordingVertexConsumer();
+		VertexCountingConsumer consumer = new VertexCountingConsumer(delegate, 0x12, 0x34, 0x56);
+
+		consumer.setUv(0.5F, 0.25F);
+		assertEquals(1, delegate.uvCalls);
+
+		consumer.setUv1(1, 2);
+		consumer.setUv2(3, 4);
+		consumer.setNormal(0.0F, 1.0F, 0.0F);
+
+		assertEquals(0, delegate.uv1Calls);
+		assertEquals(0, delegate.uv2Calls);
+		assertEquals(0, delegate.normalCalls);
+	}
+
+	@Test
+	void chainingPreservesTheConsumerInstance() {
+		VertexCountingConsumer consumer = new VertexCountingConsumer(new RecordingVertexConsumer(), 1, 2, 3);
+
+		assertSame(consumer, consumer.addVertex(0.0F, 0.0F, 0.0F));
+		assertSame(consumer, consumer.setColor(1, 2, 3, 4));
+		assertSame(consumer, consumer.setUv(0.0F, 0.0F));
+		assertSame(consumer, consumer.setUv1(0, 0));
+		assertSame(consumer, consumer.setUv2(0, 0));
+		assertSame(consumer, consumer.setNormal(0.0F, 1.0F, 0.0F));
 	}
 
 	// --- no-op ---
@@ -144,16 +264,64 @@ class OutlineOnlyBufferSourceTest {
 		assertSame(consumer, consumer.setNormal(0.0F, 1.0F, 0.0F));
 	}
 
+	// --- routing into the supplied attempt-local source ---
+
+	/**
+	 * For every render type that resolves to an outline type, the adapter
+	 * must request exactly the resolved type from the supplied local source
+	 * and wrap the source's consumer in the counting/fixed-color consumer.
+	 * {@code RenderType.lines()} has no outline variant (blocks-atlas
+	 * fallback or no-op), {@code RenderType.entitySolid(...)} exposes its
+	 * texture-specific outline variant, and
+	 * {@code RenderType.outline(...)} is itself an outline type.
+	 */
 	@Test
-	void decisionCoverageIsComplete() {
-		// Pin the full decision matrix so a future routing change is noticed.
-		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, true, true));
-		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, true, false));
-		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, false, true));
-		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, false, false));
-		assertEquals(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true, true));
-		assertEquals(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true, false));
-		assertEquals(BLOCKS_ATLAS, OutlineOnlyBufferSource.decide(false, false, true));
-		assertEquals(NO_OP, OutlineOnlyBufferSource.decide(false, false, false));
+	void resolvedTypeIsSentToLocalSource() {
+		RenderType lines = RenderType.lines();
+		RenderType entitySolid = RenderType.entitySolid(TextureAtlas.LOCATION_BLOCKS);
+		RenderType outlineType = RenderType.outline(TextureAtlas.LOCATION_BLOCKS);
+
+		for (RenderType input : List.of(lines, entitySolid, outlineType)) {
+			for (boolean fallback : List.of(false, true)) {
+				RenderType resolved = OutlineOnlyBufferSource.resolve(input, fallback);
+
+				if (resolved == null) {
+					continue; // The no-op branch is pinned by its own test.
+				}
+
+				RecordingBufferSource source = new RecordingBufferSource();
+				OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(source, fallback, 0xFF11AA22);
+
+				VertexConsumer issued = adapter.getBuffer(input);
+
+				assertNotNull(issued);
+				assertEquals(1, source.requested.size());
+				assertSame(resolved, source.requested.get(0));
+
+				// The issued consumer wraps the source's own consumer: vertices
+				// flow through, counted, with the fixed opaque marker color.
+				issued.addVertex(0.0F, 0.0F, 0.0F);
+
+				assertEquals(1, adapter.vertexCount());
+				assertEquals(1, source.delegate.vertices);
+				assertArrayEquals(new int[] { 0x11, 0xAA, 0x22, 255 }, source.delegate.colors.get(0));
+			}
+		}
+	}
+
+	@Test
+	void noOpNeverConsultsLocalSource() {
+		RecordingBufferSource source = new RecordingBufferSource();
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(source, false, 0xFF0000FF);
+
+		// lines() has no outline variant and the fallback is disabled.
+		VertexConsumer issued = adapter.getBuffer(RenderType.lines());
+
+		assertSame(NoOpVertexConsumer.INSTANCE, issued);
+		assertEquals(0, source.requested.size());
+		assertEquals(0, adapter.vertexCount());
+
+		issued.addVertex(1.0F, 2.0F, 3.0F);
+		assertEquals(0, adapter.vertexCount());
 	}
 }
