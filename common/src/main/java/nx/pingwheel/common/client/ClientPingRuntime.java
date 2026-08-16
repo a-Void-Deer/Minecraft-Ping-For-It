@@ -18,6 +18,8 @@ import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.client.marker.EntityMarkerPoint;
+import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
+import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.MarkerId;
@@ -121,6 +123,8 @@ public final class ClientPingRuntime {
 	private final ClientPingActionDispatcher.LocalErrorSink errorSink;
 	private final PingInteractionLogger logger;
 	private final WheelMouseCapture wheelMouseCapture;
+	private final CreateRequestTracker createRequestTracker;
+	private final ClientCreateRateLimiter createRateLimiter;
 
 	/**
 	 * Authoritative target display names keyed by marker id, main-thread
@@ -128,12 +132,6 @@ public final class ClientPingRuntime {
 	 * dropped with it on leave, so names can never leak across connections.
 	 */
 	private final ClientTargetNameStore nameStore = new ClientTargetNameStore();
-
-	/**
-	 * The latest dispatched create request id; a single slot, never a growing
-	 * set of rejected ids.
-	 */
-	private final CreateRequestTracker createRequestTracker = new CreateRequestTracker();
 
 	private long localTick;
 	private WheelSelection wheelSelection = WheelSelection.NONE;
@@ -146,7 +144,9 @@ public final class ClientPingRuntime {
 		ClientPingActionDispatcher dispatcher,
 		ClientPingActionDispatcher.LocalErrorSink errorSink,
 		PingInteractionLogger logger,
-		WheelMouseCapture wheelMouseCapture
+		WheelMouseCapture wheelMouseCapture,
+		CreateRequestTracker createRequestTracker,
+		ClientCreateRateLimiter createRateLimiter
 	) {
 		this.markerStore = Objects.requireNonNull(markerStore, "markerStore");
 		this.activeInteraction = Objects.requireNonNull(activeInteraction, "activeInteraction");
@@ -156,6 +156,8 @@ public final class ClientPingRuntime {
 		this.errorSink = Objects.requireNonNull(errorSink, "errorSink");
 		this.logger = Objects.requireNonNull(logger, "logger");
 		this.wheelMouseCapture = Objects.requireNonNull(wheelMouseCapture, "wheelMouseCapture");
+		this.createRequestTracker = Objects.requireNonNull(createRequestTracker, "createRequestTracker");
+		this.createRateLimiter = Objects.requireNonNull(createRateLimiter, "createRateLimiter");
 	}
 
 	/**
@@ -174,11 +176,27 @@ public final class ClientPingRuntime {
 		ClientPingActionDispatcher.LocalErrorSink errorSink,
 		ClientPingActionDispatcher.PacketSender packetSender
 	) {
+		return create(errorSink, packetSender, ClientRateLimitPolicy.DEFAULT);
+	}
+
+	/**
+	 * Creates a runtime using a supplied server-synchronized policy.
+	 */
+	public static ClientPingRuntime create(
+		ClientPingActionDispatcher.LocalErrorSink errorSink,
+		ClientPingActionDispatcher.PacketSender packetSender,
+		ClientRateLimitPolicy rateLimitPolicy
+	) {
 		Objects.requireNonNull(errorSink, "errorSink");
 		Objects.requireNonNull(packetSender, "packetSender");
+		InteractionTimeSource timeSource = InteractionTimeSource.system();
+		Objects.requireNonNull(timeSource, "timeSource");
+		Objects.requireNonNull(rateLimitPolicy, "rateLimitPolicy");
 
 		ActiveInteraction activeInteraction = new ActiveInteraction();
 		PingInteractionLogger logger = PingInteractionLogger.global();
+		CreateRequestTracker createRequestTracker = new CreateRequestTracker();
+		ClientCreateRateLimiter createRateLimiter = new ClientCreateRateLimiter(timeSource, rateLimitPolicy);
 		PingCaptureCoordinator coordinator = new PingCaptureCoordinator(
 			DefaultTargetResolver.builtIn(TargetResolutionLogger.global()),
 			activeInteraction,
@@ -186,7 +204,7 @@ public final class ClientPingRuntime {
 		PingInteractionStateMachine machine = new PingInteractionStateMachine(
 			coordinator,
 			activeInteraction,
-			InteractionTimeSource.system(),
+			timeSource,
 			new MinecraftClientTargetValidator(),
 			new CancelCandidatePicker(),
 			logger);
@@ -196,10 +214,17 @@ public final class ClientPingRuntime {
 			activeInteraction,
 			coordinator,
 			machine,
-			new ClientPingActionDispatcher(packetSender, errorSink, logger),
+			new ClientPingActionDispatcher(
+				packetSender,
+				errorSink,
+				logger,
+				createRequestTracker,
+				createRateLimiter),
 			errorSink,
 			logger,
-			new WheelMouseCapture(logger));
+			new WheelMouseCapture(logger),
+			createRequestTracker,
+			createRateLimiter);
 	}
 
 	/**
@@ -248,13 +273,6 @@ public final class ClientPingRuntime {
 
 			if (action.isPresent()) {
 				PingInteractionAction dispatched = action.get();
-
-				// Record the create request id before the dispatch so an
-				// authoritative TARGET_GONE rejection can be matched against the
-				// latest create request only.
-				if (dispatched instanceof PingInteractionAction.CreatePing create) {
-					createRequestTracker.onCreateDispatched(create.context().token().sequence());
-				}
 
 				dispatcher.dispatch(dispatched);
 			}
@@ -621,6 +639,14 @@ public final class ClientPingRuntime {
 	 */
 	public ClientTargetNameStore nameStore() {
 		return nameStore;
+	}
+
+	/**
+	 * Applies a newly synchronized policy while preserving this runtime's
+	 * limiter history.
+	 */
+	public void applyRateLimitPolicy(ClientRateLimitPolicy policy) {
+		createRateLimiter.applyPolicy(policy);
 	}
 
 	/**

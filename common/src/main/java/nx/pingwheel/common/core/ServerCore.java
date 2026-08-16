@@ -33,6 +33,7 @@ import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
@@ -161,6 +162,35 @@ public class ServerCore {
 		}
 
 		updatePlayerChannel(player, packet.channel());
+		IPlatformNetworkService.INSTANCE.sendToClient(
+			new RateLimitPolicyS2CPacket(SERVER_CONFIG.getRateLimit(), SERVER_CONFIG.getMsToRegenerate()),
+			player);
+		LOGGER.debug("sent rate limit policy: rateLimit={} msToRegenerate={}",
+			SERVER_CONFIG.getRateLimit(), SERVER_CONFIG.getMsToRegenerate());
+	}
+
+	/**
+	 * Broadcasts the current policy to every online player on the active server.
+	 * A config reload that occurs before a server instance is active has no
+	 * recipients and is intentionally a no-op.
+	 */
+	public static void broadcastRateLimitPolicy() {
+		MinecraftServer server = ACTIVE_SERVER;
+
+		if (server == null) {
+			return;
+		}
+
+		var players = server.getPlayerList().getPlayers();
+		var packet = new RateLimitPolicyS2CPacket(
+			SERVER_CONFIG.getRateLimit(), SERVER_CONFIG.getMsToRegenerate());
+
+		for (ServerPlayer player : players) {
+			IPlatformNetworkService.INSTANCE.sendToClient(packet, player);
+		}
+
+		LOGGER.debug("broadcast rate limit policy: rateLimit={} msToRegenerate={} recipients={}",
+			packet.rateLimit(), packet.msToRegenerate(), players.size());
 	}
 
 	public static void onPingLocation(MinecraftServer server, ServerPlayer player, PingLocationC2SPacket packet) {

@@ -17,6 +17,7 @@ import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.resource.ResourceConstants;
 
@@ -66,6 +67,7 @@ class ModIdentityTest {
 			"pingforit-s2c:marker-removed",
 			"pingforit-s2c:marker-rejected",
 			"pingforit-s2c:marker-winner-changed",
+			"pingforit-s2c:rate-limit-policy",
 			"pingforit-s2c:ping-location"
 		), Set.of(
 			MarkerCreateC2SPacket.PACKET_ID.toString(),
@@ -76,6 +78,7 @@ class ModIdentityTest {
 			MarkerRemovedS2CPacket.PACKET_ID.toString(),
 			MarkerRejectedS2CPacket.PACKET_ID.toString(),
 			MarkerWinnerChangedS2CPacket.PACKET_ID.toString(),
+			RateLimitPolicyS2CPacket.PACKET_ID.toString(),
 			PingLocationS2CPacket.PACKET_ID.toString()
 		));
 	}

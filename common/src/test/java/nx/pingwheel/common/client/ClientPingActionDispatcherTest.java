@@ -8,12 +8,15 @@ import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.PingType;
+import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
+import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.interaction.ActiveInteraction;
 import nx.pingwheel.common.interaction.CapturedPingContext;
 import nx.pingwheel.common.interaction.InteractionToken;
 import nx.pingwheel.common.interaction.TargetSnapshot;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
+import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.TargetGoneReason;
 import nx.pingwheel.common.network.IPacket;
@@ -57,10 +60,17 @@ class ClientPingActionDispatcherTest {
 	private static final class RecordingLogger implements PingInteractionLogger {
 
 		final List<String> rendered = new ArrayList<>();
+		final List<String> throttled = new ArrayList<>();
 
 		@Override
 		public void debug(String message, Object... args) {
 			rendered.add(render(message, args));
+		}
+
+		@Override
+		public void debugCreateThrottled(long requestId, int rateLimit, int msToRegenerate) {
+			throttled.add("requestId=" + requestId + " rateLimit=" + rateLimit
+				+ " msToRegenerate=" + msToRegenerate);
 		}
 	}
 
@@ -69,8 +79,20 @@ class ClientPingActionDispatcherTest {
 		final RecordingPacketSender sender = new RecordingPacketSender();
 		final RecordingErrorSink sink = new RecordingErrorSink();
 		final RecordingLogger logger = new RecordingLogger();
-		final ClientPingActionDispatcher dispatcher =
-			new ClientPingActionDispatcher(sender, sink, logger);
+		final ClientPingActionDispatcher dispatcher;
+
+		Harness() {
+			this.dispatcher = new ClientPingActionDispatcher(
+				sender,
+				sink,
+				logger,
+				new CreateRequestTracker(),
+				new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(0, 0)));
+		}
+
+		Harness(ClientPingActionDispatcher dispatcher) {
+			this.dispatcher = dispatcher;
+		}
 	}
 
 	private static Harness harness() {
@@ -102,6 +124,75 @@ class ClientPingActionDispatcherTest {
 		assertEquals(token.sequence(), packet.requestId());
 		assertEquals(snapshot.target(), packet.target());
 		assertEquals(selected.id(), packet.pingTypeId());
+	}
+
+	@Test
+	void allowedCreateUpdatesTrackerBeforeSending() {
+		Harness h = harness();
+		CreateRequestTracker tracker = new CreateRequestTracker();
+		ManualTime time = new ManualTime();
+		ClientPingActionDispatcher dispatcher = new ClientPingActionDispatcher(
+			h.sender,
+			h.sink,
+			h.logger,
+			tracker,
+			new ClientCreateRateLimiter(time, ClientRateLimitPolicy.DEFAULT));
+		ActiveInteraction interaction = new ActiveInteraction();
+		InteractionToken token = interaction.begin();
+		CapturedPingContext context = capture(TargetSnapshotFactory.location(OVERWORLD, 1, 2, 3), token);
+
+		dispatcher.dispatch(new PingInteractionAction.CreatePing(
+			context, context.resolvedTarget().targetType().defaultPingType()));
+
+		assertEquals(1, h.sender.sent.size());
+		assertTrue(tracker.isLatest(token.sequence()));
+	}
+
+	@Test
+	void blockedCreateIsDroppedWithoutTrackerUpdateOrRetry() {
+		Harness h = harness();
+		CreateRequestTracker tracker = new CreateRequestTracker();
+		ManualTime time = new ManualTime();
+		ClientPingActionDispatcher dispatcher = new ClientPingActionDispatcher(
+			h.sender,
+			h.sink,
+			h.logger,
+			tracker,
+			new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(1, 1000)));
+		ActiveInteraction interaction = new ActiveInteraction();
+		PingInteractionAction.CreatePing first = createAction(interaction.begin());
+		PingInteractionAction.CreatePing blocked = createAction(interaction.begin());
+
+		dispatcher.dispatch(first);
+		dispatcher.dispatch(blocked);
+
+		assertEquals(1, h.sender.sent.size());
+		assertTrue(tracker.isLatest(first.context().token().sequence()));
+		assertEquals(1, h.logger.throttled.size());
+		time.now = 1000;
+		assertEquals(1, h.sender.sent.size(), "a dropped action must not be queued for later");
+	}
+
+	@Test
+	void cancelIsStillSentWhenCreatesAreBlocked() {
+		Harness h = harness();
+		CreateRequestTracker tracker = new CreateRequestTracker();
+		ManualTime time = new ManualTime();
+		ClientPingActionDispatcher dispatcher = new ClientPingActionDispatcher(
+			h.sender,
+			h.sink,
+			h.logger,
+			tracker,
+			new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(1, 1000)));
+		ActiveInteraction interaction = new ActiveInteraction();
+		PingInteractionAction.CreatePing first = createAction(interaction.begin());
+
+		dispatcher.dispatch(first);
+		dispatcher.dispatch(createAction(interaction.begin()));
+		dispatcher.dispatch(new PingInteractionAction.CancelMarker(new MarkerId(8L)));
+
+		assertEquals(2, h.sender.sent.size());
+		assertInstanceOf(MarkerRemoveC2SPacket.class, h.sender.sent.get(1));
 	}
 
 	@Test
@@ -204,5 +295,20 @@ class ClientPingActionDispatcherTest {
 
 		rendered.append(message, from, message.length());
 		return rendered.toString();
+	}
+
+	private static PingInteractionAction.CreatePing createAction(InteractionToken token) {
+		CapturedPingContext context = capture(TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0), token);
+		return new PingInteractionAction.CreatePing(
+			context, context.resolvedTarget().targetType().defaultPingType());
+	}
+
+	private static final class ManualTime implements InteractionTimeSource {
+		private long now;
+
+		@Override
+		public long nowMillis() {
+			return now;
+		}
 	}
 }

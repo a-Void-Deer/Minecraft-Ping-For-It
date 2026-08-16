@@ -35,6 +35,7 @@ public class ServerConfig implements IConfig {
 	@Override
 	public void onUpdate() {
 		ServerCore.init();
+		ServerCore.broadcastRateLimitPolicy();
 	}
 
 	public static final ConfigHandler<ServerConfig> HANDLER = ConfigHandler.of(ServerConfig.class, ".server.json");

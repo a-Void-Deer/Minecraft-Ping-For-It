@@ -2,8 +2,10 @@ package nx.pingwheel.common.client;
 
 import java.util.Objects;
 
+import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
+import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
@@ -54,15 +56,38 @@ public final class ClientPingActionDispatcher {
 	private final PacketSender packetSender;
 	private final LocalErrorSink errorSink;
 	private final PingInteractionLogger logger;
+	private final CreateRequestTracker createRequestTracker;
+	private final ClientCreateRateLimiter createRateLimiter;
 
+	public ClientPingActionDispatcher(
+		PacketSender packetSender,
+		LocalErrorSink errorSink,
+		PingInteractionLogger logger,
+		CreateRequestTracker createRequestTracker,
+		ClientCreateRateLimiter createRateLimiter
+	) {
+		this.packetSender = Objects.requireNonNull(packetSender, "packetSender");
+		this.errorSink = Objects.requireNonNull(errorSink, "errorSink");
+		this.logger = Objects.requireNonNull(logger, "logger");
+		this.createRequestTracker = Objects.requireNonNull(createRequestTracker, "createRequestTracker");
+		this.createRateLimiter = Objects.requireNonNull(createRateLimiter, "createRateLimiter");
+	}
+
+	/**
+	 * Convenience overload retaining the existing dispatcher construction shape
+	 * for callers that do not need to share the runtime-owned dependencies.
+	 */
 	public ClientPingActionDispatcher(
 		PacketSender packetSender,
 		LocalErrorSink errorSink,
 		PingInteractionLogger logger
 	) {
-		this.packetSender = Objects.requireNonNull(packetSender, "packetSender");
-		this.errorSink = Objects.requireNonNull(errorSink, "errorSink");
-		this.logger = Objects.requireNonNull(logger, "logger");
+		this(
+			packetSender,
+			errorSink,
+			logger,
+			new CreateRequestTracker(),
+			new ClientCreateRateLimiter(InteractionTimeSource.system()));
 	}
 
 	/**
@@ -81,6 +106,14 @@ public final class ClientPingActionDispatcher {
 	private void dispatchCreate(PingInteractionAction.CreatePing create) {
 		long requestId = create.context().token().sequence();
 		var target = create.context().resolvedTarget().target();
+		var policy = createRateLimiter.policy();
+
+		if (!createRateLimiter.tryAcquire()) {
+			logger.debugCreateThrottled(requestId, policy.rateLimit(), policy.msToRegenerate());
+			return;
+		}
+
+		createRequestTracker.onCreateDispatched(requestId);
 
 		packetSender.sendToServer(new MarkerCreateC2SPacket(requestId, target, create.pingType().id()));
 

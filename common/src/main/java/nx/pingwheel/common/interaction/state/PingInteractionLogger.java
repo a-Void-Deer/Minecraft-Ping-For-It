@@ -22,6 +22,16 @@ public interface PingInteractionLogger {
 	void debug(String message, Object... args);
 
 	/**
+	 * Records one client-side create action dropped by the send limiter.
+	 * Only the request id and policy values are permitted here; the callback
+	 * must never be used for target, player, identity, position, or name data.
+	 */
+	default void debugCreateThrottled(long requestId, int rateLimit, int msToRegenerate) {
+		debug("dispatch create throttled: requestId={} rateLimit={} msToRegenerate={}",
+			requestId, rateLimit, msToRegenerate);
+	}
+
+	/**
 	 * A logger that discards every message.
 	 */
 	static PingInteractionLogger noop() {

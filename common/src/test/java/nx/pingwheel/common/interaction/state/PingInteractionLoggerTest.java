@@ -12,6 +12,7 @@ class PingInteractionLoggerTest {
 		PingInteractionLogger noop = PingInteractionLogger.noop();
 
 		assertDoesNotThrow(() -> noop.debug("anything {} {}", "a", "b"));
+		assertDoesNotThrow(() -> noop.debugCreateThrottled(7L, 5, 1000));
 	}
 
 	@Test

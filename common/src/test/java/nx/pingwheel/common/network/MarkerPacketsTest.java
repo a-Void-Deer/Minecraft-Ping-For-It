@@ -318,12 +318,14 @@ class MarkerPacketsTest {
 		assertDoesNotThrow(() -> assertTrue(new MarkerRemovedS2CPacket().isCorrupt()));
 		assertDoesNotThrow(() -> assertTrue(new MarkerRejectedS2CPacket().isCorrupt()));
 		assertDoesNotThrow(() -> assertTrue(new MarkerWinnerChangedS2CPacket().isCorrupt()));
+		assertDoesNotThrow(() -> assertTrue(new RateLimitPolicyS2CPacket().isCorrupt()));
 	}
 
 	@Test
 	void packetIdsAreUniqueAndUseExpectedNamespaces() {
 		List<String> ids = List.of(
 			MarkerCreateC2SPacket.PACKET_ID.toString(),
+			RateLimitPolicyS2CPacket.PACKET_ID.toString(),
 			MarkerRemoveC2SPacket.PACKET_ID.toString(),
 			MarkerCreatedS2CPacket.PACKET_ID.toString(),
 			MarkerRemovedS2CPacket.PACKET_ID.toString(),
@@ -337,7 +339,8 @@ class MarkerPacketsTest {
 			"pingforit-s2c:marker-created",
 			"pingforit-s2c:marker-removed",
 			"pingforit-s2c:marker-rejected",
-			"pingforit-s2c:marker-winner-changed"
+			"pingforit-s2c:marker-winner-changed",
+			"pingforit-s2c:rate-limit-policy"
 		), Set.copyOf(ids));
 	}
 

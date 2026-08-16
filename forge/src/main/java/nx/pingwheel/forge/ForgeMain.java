@@ -20,6 +20,7 @@ import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.forge.platform.PlatformNetworkServiceImpl;
@@ -37,6 +38,7 @@ public class ForgeMain {
 	public static final EventNetworkChannel PING_LOCATION_CHANNEL_S2C = ChannelBuilder.named(PingLocationS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel UPDATE_CHANNEL_C2S = ChannelBuilder.named(UpdateChannelC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_CREATE_CHANNEL_C2S = ChannelBuilder.named(MarkerCreateC2SPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel RATE_LIMIT_POLICY_CHANNEL_S2C = ChannelBuilder.named(RateLimitPolicyS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_REMOVE_CHANNEL_C2S = ChannelBuilder.named(MarkerRemoveC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_CREATED_CHANNEL_S2C = ChannelBuilder.named(MarkerCreatedS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_REMOVED_CHANNEL_S2C = ChannelBuilder.named(MarkerRemovedS2CPacket.PACKET_ID).optional().eventNetworkChannel();
@@ -53,6 +55,7 @@ public class ForgeMain {
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PingLocationS2CPacket.PACKET_ID, PING_LOCATION_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(UpdateChannelC2SPacket.PACKET_ID, UPDATE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerCreateC2SPacket.PACKET_ID, MARKER_CREATE_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(RateLimitPolicyS2CPacket.PACKET_ID, RATE_LIMIT_POLICY_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerRemoveC2SPacket.PACKET_ID, MARKER_REMOVE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerCreatedS2CPacket.PACKET_ID, MARKER_CREATED_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerRemovedS2CPacket.PACKET_ID, MARKER_REMOVED_CHANNEL_S2C);

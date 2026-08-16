@@ -7,6 +7,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.MultiBufferSource;
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
+import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.client.outline.BlockModelOutlineState;
 import nx.pingwheel.common.client.outline.BlockOutlineLogger;
@@ -24,6 +25,7 @@ import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.platform.IPlatformContextService;
@@ -44,6 +46,7 @@ public class CommonClient {
 	public static Minecraft Game = null;
 
 	private static ClientPingRuntime pingRuntime;
+	private static ClientRateLimitPolicy storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 
 	private CommonClient() {}
 
@@ -68,6 +71,7 @@ public class CommonClient {
 		// leak across worlds/servers. Created only when a live level/player
 		// already exists; otherwise onTickStart creates it lazily once the
 		// world is in.
+		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		pingRuntime = createPingRuntimeIfInWorld();
 
 		IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(ClientConfig.HANDLER.getConfig().getChannel()));
@@ -79,6 +83,7 @@ public class CommonClient {
 		}
 
 		pingRuntime = null;
+		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		MarkerOverlayState.INSTANCE.clear();
 		EntityOutlineState.INSTANCE.clear();
 		BlockOutlineState.INSTANCE.clear();
@@ -328,6 +333,35 @@ public class CommonClient {
 	}
 
 	/**
+	 * Applies the server-authoritative client create policy. The loader network
+	 * adapters invoke this method on the client thread. The stored value is
+	 * updated even while no runtime exists so a lazily-created runtime starts
+	 * with the latest policy received for this connection.
+	 */
+	public void onRateLimitPolicyPacket(RateLimitPolicyS2CPacket packet) {
+		if (packet.isCorrupt()) {
+			LOGGER.warn("received invalid rate limit policy from server");
+			return;
+		}
+
+		ClientRateLimitPolicy nextPolicy = new ClientRateLimitPolicy(
+			packet.rateLimit(), packet.msToRegenerate());
+
+		if (storedRateLimitPolicy.equals(nextPolicy)) {
+			return;
+		}
+
+		storedRateLimitPolicy = nextPolicy;
+
+		if (pingRuntime != null) {
+			pingRuntime.applyRateLimitPolicy(nextPolicy);
+		}
+
+		LOGGER.debug("client rate limit policy changed: rateLimit={} msToRegenerate={}",
+			nextPolicy.rateLimit(), nextPolicy.msToRegenerate());
+	}
+
+	/**
 	 * Creates a fresh runtime only when a live level and player exist. Returns
 	 * {@code null} otherwise so a menu state (including the post-leave main
 	 * menu) never creates or recreates a runtime.
@@ -343,6 +377,7 @@ public class CommonClient {
 	private static ClientPingRuntime createPingRuntime() {
 		return ClientPingRuntime.create(
 			new MinecraftLocalErrorSink(),
-			IPlatformNetworkService.INSTANCE::sendToServer);
+			IPlatformNetworkService.INSTANCE::sendToServer,
+			storedRateLimitPolicy);
 	}
 }
