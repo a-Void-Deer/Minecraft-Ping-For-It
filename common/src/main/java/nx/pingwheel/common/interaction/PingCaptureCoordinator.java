@@ -62,8 +62,21 @@ public final class PingCaptureCoordinator {
 	 * returned, leaving the token current and uncompleted so a caller may retry.
 	 */
 	public Optional<CapturedPingContext> complete(InteractionToken token, TargetSnapshot snapshot) {
+		return complete(token, snapshot, CapturedRay.defaultRay());
+	}
+
+	/**
+	 * Resolves {@code snapshot} and completes {@code token}, preserving the ray
+	 * captured at the press edge in the resulting context.
+	 */
+	public Optional<CapturedPingContext> complete(
+		InteractionToken token,
+		TargetSnapshot snapshot,
+		CapturedRay ray
+	) {
 		Objects.requireNonNull(token, "token");
 		Objects.requireNonNull(snapshot, "snapshot");
+		Objects.requireNonNull(ray, "ray");
 
 		if (!activeInteraction.isCurrent(token)) {
 			logger.debug("capture reject: stale token={} kind={} dimension={}",
@@ -88,7 +101,7 @@ public final class PingCaptureCoordinator {
 			return Optional.empty();
 		}
 
-		CapturedPingContext context = new CapturedPingContext(token, resolved);
+		CapturedPingContext context = new CapturedPingContext(token, resolved, ray);
 
 		if (!activeInteraction.tryComplete(token, context)) {
 			logger.debug("capture reject: race/duplicate token={} kind={} dimension={}",

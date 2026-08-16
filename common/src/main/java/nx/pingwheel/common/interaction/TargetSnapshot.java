@@ -11,9 +11,10 @@ import nx.pingwheel.common.domain.TargetMatchContext;
  *
  * <p>The snapshot is the raw, unresolved input to
  * {@link PingCaptureCoordinator#complete(InteractionToken, TargetSnapshot)};
- * only the resolved {@link nx.pingwheel.common.domain.ResolvedTarget} is ever
- * frozen into a {@link CapturedPingContext}. The match context never
- * participates in target identity and is never serialized.
+ * the resolved {@link nx.pingwheel.common.domain.ResolvedTarget} and the
+ * press-time ray supplied to the coordinator are frozen into a
+ * {@link CapturedPingContext}. The match context never participates in target
+ * identity and is never serialized.
  */
 public record TargetSnapshot(Target target, TargetMatchContext matchContext) {
 

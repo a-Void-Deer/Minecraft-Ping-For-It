@@ -7,6 +7,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.interaction.CapturedRay;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -126,6 +127,27 @@ class CancelCandidatePickerTest {
 	@Test
 	void emptyCandidatesYieldEmptyResult() {
 		assertTrue(new CancelCandidatePicker().pick(context(List.of())).isEmpty());
+	}
+
+	@Test
+	void frozenPressRayWinsEvenWhenALaterCameraWouldPointAtAnotherMarker() {
+		CapturedRay pressRay = new CapturedRay(
+			new WorldVector(0.0, 0.0, 0.0),
+			new WorldVector(0.0, 0.0, 1.0));
+		CancelMarkerCandidate pressRayCandidate = marker(1L, new WorldVector(0.0, 0.0, 5.0));
+		CancelMarkerCandidate laterCameraCandidate = marker(2L, new WorldVector(5.0, 0.0, 0.0));
+		CancellationContext frozenContext = new CancellationContext(
+			LOCAL_OWNER,
+			OVERWORLD,
+			pressRay.origin(),
+			pressRay.direction(),
+			List.of(laterCameraCandidate, pressRayCandidate));
+
+		// The later camera direction is deliberately not supplied to the picker.
+		// Only the immutable press-time context can make the forward candidate
+		// eligible.
+		assertEquals(pressRayCandidate,
+			new CancelCandidatePicker().pick(frozenContext).orElseThrow());
 	}
 
 	@Test

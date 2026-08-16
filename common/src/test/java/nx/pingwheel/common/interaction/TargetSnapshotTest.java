@@ -136,17 +136,22 @@ class TargetSnapshotTest {
 
 		assertThrows(NullPointerException.class, () -> new CapturedPingContext(null, resolved));
 		assertThrows(NullPointerException.class, () -> new CapturedPingContext(token, null));
+		assertThrows(NullPointerException.class, () -> new CapturedPingContext(token, resolved, null));
 	}
 
 	@Test
 	void capturedPingContextIsAnImmutableRecordOfTokenAndResolvedTarget() {
 		ResolvedTarget resolved = resolvedLocation(OVERWORLD);
 		InteractionToken token = new ActiveInteraction().begin();
+		CapturedRay ray = new CapturedRay(
+			new nx.pingwheel.common.interaction.cancel.WorldVector(1, 2, 3),
+			new nx.pingwheel.common.interaction.cancel.WorldVector(0, 1, 0));
 
-		CapturedPingContext context = new CapturedPingContext(token, resolved);
+		CapturedPingContext context = new CapturedPingContext(token, resolved, ray);
 
 		assertSame(token, context.token());
 		assertSame(resolved, context.resolvedTarget());
+		assertSame(ray, context.ray());
 	}
 
 	@Test

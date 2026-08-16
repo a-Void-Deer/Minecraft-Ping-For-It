@@ -27,10 +27,13 @@ import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetKind;
 import nx.pingwheel.common.interaction.ActiveInteraction;
+import nx.pingwheel.common.interaction.CapturedPingContext;
+import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.InteractionToken;
 import nx.pingwheel.common.interaction.MinecraftTargetSnapshotFactory;
 import nx.pingwheel.common.interaction.PingCaptureCoordinator;
 import nx.pingwheel.common.interaction.PingCaptureLogger;
+import nx.pingwheel.common.interaction.TargetSnapshot;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.interaction.cancel.CancelCandidatePicker;
 import nx.pingwheel.common.interaction.cancel.CancelMarkerCandidate;
@@ -135,6 +138,12 @@ public final class ClientPingRuntime {
 
 	private long localTick;
 	private WheelSelection wheelSelection = WheelSelection.NONE;
+	/**
+	 * The ray captured at the current press edge. It remains available while an
+	 * asynchronous target resolution is pending and is cleared when that
+	 * resolution fails or the interaction ends.
+	 */
+	private CapturedRay pendingRay;
 
 	private ClientPingRuntime(
 		ClientMarkerStore markerStore,
@@ -262,6 +271,7 @@ public final class ClientPingRuntime {
 
 		if (pressEdge) {
 			InteractionToken token = machine.press();
+			pendingRay = null;
 			captureImmediately(token);
 		}
 
@@ -276,6 +286,10 @@ public final class ClientPingRuntime {
 
 				dispatcher.dispatch(dispatched);
 			}
+		}
+
+		if (machine.phase() == PingInteractionPhase.IDLE) {
+			pendingRay = null;
 		}
 
 		// Keep the mouse capture in sync with whatever phase the update left
@@ -294,6 +308,7 @@ public final class ClientPingRuntime {
 	 * while the wheel is open can never leak a released mouse.
 	 */
 	public void close() {
+		pendingRay = null;
 		wheelMouseCapture.close(Game);
 	}
 
@@ -318,24 +333,38 @@ public final class ClientPingRuntime {
 		Minecraft game = Game;
 
 		if (game == null || game.cameraEntity == null || game.level == null) {
+			activeInteraction.invalidate(token);
 			return;
 		}
 
 		ClientLevel level = game.level;
 		var cameraEntity = game.cameraEntity;
+		var rayOrigin = cameraEntity.getEyePosition(1.0f);
 		var cameraDirection = cameraEntity.getViewVector(1.0f);
+		final CapturedRay pressRay;
+
+		try {
+			pressRay = new CapturedRay(
+				new WorldVector(rayOrigin.x, rayOrigin.y, rayOrigin.z),
+				new WorldVector(cameraDirection.x, cameraDirection.y, cameraDirection.z));
+		} catch (IllegalArgumentException invalidRay) {
+			activeInteraction.invalidate(token);
+			return;
+		}
+
+		pendingRay = pressRay;
 		var distance = Math.min(
 			CLIENT_CONFIG.getRaycastDistance(),
 			CLIENT_CONFIG.getPingDistance());
 
 		var hitResult = Raycast.traceDirectional(
-			cameraDirection, 1.0f, distance, cameraEntity.isCrouching());
+			rayOrigin, cameraDirection, distance, cameraEntity.isCrouching());
 
 		if (hitResult == null || hitResult.getType() == HitResult.Type.MISS) {
 			HitResult missHit = hitResult;
 
 			if (missHit == null) {
-				var missPoint = cameraEntity.getEyePosition(1.0f).add(cameraDirection.scale(distance));
+				var missPoint = rayOrigin.add(cameraDirection.scale(distance));
 				missHit = BlockHitResult.miss(missPoint, Direction.UP, BlockPos.containing(missPoint));
 			}
 
@@ -360,8 +389,8 @@ public final class ClientPingRuntime {
 
 				try {
 					scheduled = DistantHorizonsIntegration.traceDistantAsync(
-						cameraEntity.getEyePosition(1.0f), cameraDirection,
-						distantHit -> completeDistantHit(game, level, token, fallbackMiss, distantHit));
+						rayOrigin, cameraDirection,
+						distantHit -> completeDistantHit(game, level, token, fallbackMiss, pressRay, distantHit));
 				} catch (LinkageError error) {
 					ModContext.HasDistantHorizons = false;
 					DistantHorizonsIntegration.logUnguardedLinkFailure(error);
@@ -369,10 +398,10 @@ public final class ClientPingRuntime {
 				}
 
 				if (!scheduled) {
-					captureCoordinator.complete(token, MinecraftTargetSnapshotFactory.from(level, missHit));
+					completeCapture(token, MinecraftTargetSnapshotFactory.from(level, missHit), pressRay);
 				}
 			} else {
-				captureCoordinator.complete(token, MinecraftTargetSnapshotFactory.from(level, missHit));
+				completeCapture(token, MinecraftTargetSnapshotFactory.from(level, missHit), pressRay);
 			}
 
 			return;
@@ -386,15 +415,14 @@ public final class ClientPingRuntime {
 			// location target.
 			if (projected.isPresent()) {
 				var projectedPos = projected.get();
-				captureCoordinator.complete(token, TargetSnapshotFactory.location(
+				completeCapture(token, TargetSnapshotFactory.location(
 					game.level.dimension().location().toString(),
-					projectedPos.x, projectedPos.y, projectedPos.z));
+					projectedPos.x, projectedPos.y, projectedPos.z), pressRay);
 				return;
 			}
 		}
 
-		captureCoordinator.complete(
-			token, MinecraftTargetSnapshotFactory.from(game.level, hitResult));
+		completeCapture(token, MinecraftTargetSnapshotFactory.from(game.level, hitResult), pressRay);
 	}
 
 	/**
@@ -413,7 +441,14 @@ public final class ClientPingRuntime {
 	 * ownership drives the state machine's superseded path back to idle on its
 	 * next update, so a level change can never strand the interaction.
 	 */
-	private void completeDistantHit(Minecraft game, ClientLevel levelAtPress, InteractionToken token, HitResult vanillaMiss, Optional<BlockHitResult> distantHit) {
+	private void completeDistantHit(
+		Minecraft game,
+		ClientLevel levelAtPress,
+		InteractionToken token,
+		HitResult vanillaMiss,
+		CapturedRay pressRay,
+		Optional<BlockHitResult> distantHit
+	) {
 		game.execute(() -> {
 			if (!activeInteraction.isCurrent(token)) {
 				return;
@@ -421,21 +456,38 @@ public final class ClientPingRuntime {
 
 			if (game.level == null || game.level != levelAtPress) {
 				activeInteraction.invalidate(token);
+				pendingRay = null;
 				logger.debug(DISTANT_HIT_ABANDONED_LEVEL_CHANGE);
 				return;
 			}
 
 			HitResult appliedHit = distantHit.map(hit -> (HitResult) hit).orElse(vanillaMiss);
 
-			captureCoordinator.complete(
-				token, MinecraftTargetSnapshotFactory.from(levelAtPress, appliedHit));
+			completeCapture(token, MinecraftTargetSnapshotFactory.from(levelAtPress, appliedHit), pressRay);
 		});
 	}
 
 	/**
+	 * Completes a capture with its immutable press-time ray. A failed current
+	 * completion clears only this interaction's pending ray; a stale callback or
+	 * a duplicate completion can never clear a newer/accepted capture.
+	 */
+	private void completeCapture(InteractionToken token, TargetSnapshot snapshot, CapturedRay pressRay) {
+		Optional<CapturedPingContext> completed = captureCoordinator.complete(token, snapshot, pressRay);
+
+		if (completed.isEmpty()
+			&& activeInteraction.isCurrent(token)
+			&& activeInteraction.currentContext().isEmpty()) {
+			pendingRay = null;
+		}
+	}
+
+	/**
 	 * Builds the cancellation context from live local state: the local owner
-	 * UUID, the current dimension, the eye position and look direction, and
-	 * every marker owned by the local player in the current dimension.
+	 * UUID, the current dimension, and live marker candidate positions. The
+	 * origin and direction come from the immutable press-time ray, never from
+	 * the current/release camera, while candidates still include every marker
+	 * owned by the local player in the current dimension.
 	 *
 	 * <p>A candidate's position is the live entity position when the marker's
 	 * entity target is still resolvable in the same dimension, otherwise the
@@ -448,8 +500,20 @@ public final class ClientPingRuntime {
 
 		UUID ownerId = player.getUUID();
 		String dimensionId = level.dimension().location().toString();
-		var eyePosition = player.getEyePosition();
-		var lookDirection = player.getViewVector(1.0f);
+		CapturedRay frozenRay = pendingRay;
+
+		if (frozenRay == null && machine.phase() == PingInteractionPhase.WHEEL_OPEN) {
+			frozenRay = activeInteraction.currentContext()
+				.map(CapturedPingContext::ray)
+				.orElse(null);
+		}
+
+		// A wheel cannot open without a completed capture. This compatibility value
+		// is used only while a capture is pending/invalid and can never drive a
+		// cancellation action; importantly, it does not read the later camera.
+		if (frozenRay == null) {
+			frozenRay = CapturedRay.defaultRay();
+		}
 
 		List<CancelMarkerCandidate> candidates = markerStore
 			.markersOwnedInDimension(dimensionId, ownerId)
@@ -464,8 +528,8 @@ public final class ClientPingRuntime {
 		return new CancellationContext(
 			ownerId,
 			dimensionId,
-			new WorldVector(eyePosition.x, eyePosition.y, eyePosition.z),
-			new WorldVector(lookDirection.x, lookDirection.y, lookDirection.z),
+			frozenRay.origin(),
+			frozenRay.direction(),
 			candidates);
 	}
 

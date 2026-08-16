@@ -12,20 +12,41 @@ public class Raycast {
 	private Raycast() {}
 
 	public static HitResult traceDirectional(Vec3 direction,
-											 float tickDelta,
-											 double maxDistance,
-											 boolean hitTranslucent) {
+													 float tickDelta,
+													 double maxDistance,
+													 boolean hitTranslucent) {
 		var cameraEntity = Game.cameraEntity;
 
 		if (cameraEntity == null || cameraEntity.level() == null) {
 			return null;
 		}
 
-		var rayStartVec = cameraEntity.getEyePosition(tickDelta);
+		return traceDirectional(
+			cameraEntity.getEyePosition(tickDelta), direction, maxDistance, hitTranslucent);
+	}
+
+	/**
+	 * Traces using an explicitly supplied origin and direction. The overload is
+	 * used by ping capture so the exact press-time ray is shared by the vanilla
+	 * hit test and every fallback path instead of being reconstructed from a
+	 * later camera state.
+	 */
+	public static HitResult traceDirectional(
+		Vec3 rayStartVec,
+		Vec3 direction,
+		double maxDistance,
+		boolean hitTranslucent
+	) {
+		var cameraEntity = Game.cameraEntity;
+
+		if (cameraEntity == null || cameraEntity.level() == null) {
+			return null;
+		}
+
 		var rayEndVec = rayStartVec.add(direction.scale(maxDistance));
 		var boundingBox = cameraEntity
 			.getBoundingBox()
-			.expandTowards(cameraEntity.getViewVector(1.f).scale(maxDistance))
+			.expandTowards(direction.scale(maxDistance))
 			.inflate(1.0, 1.0, 1.0);
 
 		var blockHitResult = cameraEntity.level().clip(
