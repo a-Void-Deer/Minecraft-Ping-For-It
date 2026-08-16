@@ -25,23 +25,23 @@ class WheelMouseCaptureTest {
 
 	@Test
 	void stayingOpenAfterScreenCloseReleasesRegrabbedMouse() {
-		// Screen closed mid-hold: vanilla re-grabbed the cursor while the
-		// wheel stayed open and this controller never claimed a release, so
-		// the grabbed cursor must be released and claimed now, even though
-		// there was no closed->open wheel transition.
-		assertSame(WheelMouseCapture.Action.RELEASE, WheelMouseCapture.nextAction(true, false, false, true));
+		// Screen closed after this controller released the cursor: vanilla
+		// re-grabbed it while the wheel stayed open, so release it again.
+		assertSame(WheelMouseCapture.Action.RELEASE, WheelMouseCapture.nextAction(true, true, false, true));
 	}
 
 	@Test
-	void openWheelWithClaimedReleaseDoesNotReleaseAgain() {
-		// No double release: a claimed release stays claimed.
-		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(true, true, false, true));
+	void openWheelWithClaimedReleaseAndFreeCursorDoesNotReleaseAgain() {
+		// No duplicate release while the cursor is already free.
+		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(true, true, false, false));
 	}
 
 	@Test
 	void openWheelWithScreenOpenDoesNotRelease() {
 		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(true, false, true, true));
+		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(true, true, true, true));
 		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(true, false, true, false));
+		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(true, true, true, false));
 	}
 
 	@Test
@@ -74,6 +74,28 @@ class WheelMouseCaptureTest {
 		// After the wheel closed with a screen open, later idle ticks must keep
 		// deferring until the screen is gone, then regrab.
 		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(false, true, true, false));
+		assertSame(WheelMouseCapture.Action.GRAB, WheelMouseCapture.nextAction(false, true, false, false));
+	}
+
+	@Test
+	void screenCloseAfterInitialReleaseEventuallyReleasesAgainThenGrabsOnClose() {
+		// The screen can open after the wheel has already claimed a release.
+		assertSame(WheelMouseCapture.Action.RELEASE, WheelMouseCapture.nextAction(true, false, false, true));
+		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(true, true, true, false));
+		// Closing the screen lets vanilla grab the cursor; the open wheel must
+		// reclaim it without losing ownership of the eventual re-grab.
+		assertSame(WheelMouseCapture.Action.RELEASE, WheelMouseCapture.nextAction(true, true, false, true));
+		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(true, true, false, false));
+		assertSame(WheelMouseCapture.Action.GRAB, WheelMouseCapture.nextAction(false, true, false, false));
+	}
+
+	@Test
+	void screenCloseBeforeInitialReleaseProtectsScreenThenReleasesAndGrabs() {
+		// If a screen is open when the wheel first appears, it must not steal
+		// the cursor. Once the screen closes, the open wheel can release it.
+		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(true, false, true, true));
+		assertSame(WheelMouseCapture.Action.RELEASE, WheelMouseCapture.nextAction(true, false, false, true));
+		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(true, false, false, false));
 		assertSame(WheelMouseCapture.Action.GRAB, WheelMouseCapture.nextAction(false, true, false, false));
 	}
 }

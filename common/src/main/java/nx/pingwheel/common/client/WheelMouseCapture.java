@@ -14,14 +14,11 @@ import nx.pingwheel.common.interaction.state.PingInteractionPhase;
  * {@link ClientPingRuntime} calls {@link #sync(PingInteractionPhase, Minecraft)}
  * with the machine's current phase:
  * <ul>
- *   <li>whenever the wheel is open, no screen is open, this controller has
- *       not claimed a release, and the mouse is grabbed, the controller
- *       releases the mouse via the 1.21.1 {@code MouseHandler#releaseMouse()}
- *       so the cursor can select sectors, and remembers that only this
- *       controller released it. This covers both the entry into
- *       {@link PingInteractionPhase#WHEEL_OPEN} and a screen closing
- *       mid-hold, when vanilla re-grabs the cursor while the wheel stays
- *       open;</li>
+ *   <li>whenever the wheel is open, no screen is open, and the mouse is
+ *       grabbed, the controller releases the mouse via the 1.21.1
+ *       {@code MouseHandler#releaseMouse()} so the cursor can select sectors.
+ *       It remembers that only this controller released it, including when
+ *       vanilla re-grabs the cursor after a screen closes mid-hold;</li>
  *   <li>on the transition out of {@code WHEEL_OPEN} (commit, timeout,
  *       cancellation, stale, superseded), the mouse is re-grabbed only when
  *       this controller released it and no screen is open. While a screen is
@@ -59,11 +56,10 @@ public final class WheelMouseCapture {
 	 * The pure, stateless mouse transition policy over one sync snapshot.
 	 *
 	 * <ul>
-	 *   <li>while the wheel is open, no screen is open, this controller has
-	 *       not claimed a release, and the mouse is grabbed, the mouse must
-	 *       be released and claimed ({@link Action#RELEASE}). This fires
-	 *       whether the wheel just opened or stayed open across a mid-hold
-	 *       screen close that made vanilla re-grab the cursor;</li>
+	 *   <li>while the wheel is open, no screen is open, and the mouse is grabbed,
+	 *       the mouse must be released and claimed ({@link Action#RELEASE}).
+	 *       This fires whether the wheel just opened or stayed open across a
+	 *       mid-hold screen close that made vanilla re-grab the cursor;</li>
 	 *   <li>leaving the wheel re-grabs only when this controller released it
 	 *       and no screen is open; with a screen open the re-grab stays
 	 *       pending ({@link Action#NONE}) until a later tick;</li>
@@ -78,7 +74,7 @@ public final class WheelMouseCapture {
 	 *                        grabbed
 	 */
 	static Action nextAction(boolean isOpen, boolean releasedByWheel, boolean screenOpen, boolean mouseGrabbed) {
-		if (isOpen && !releasedByWheel && !screenOpen && mouseGrabbed) {
+		if (isOpen && !screenOpen && mouseGrabbed) {
 			return Action.RELEASE;
 		}
 
