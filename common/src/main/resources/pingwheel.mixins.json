@@ -6,7 +6,8 @@
 	"client": [
 		"GuiMixin",
 		"LevelRendererMixin",
-		"DisplayBlockDisplayAccessor"
+		"DisplayBlockDisplayAccessor",
+		"ModelBlockRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

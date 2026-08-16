@@ -270,7 +270,18 @@ public final class VirtualBlockDisplayRenderer {
 			Vec3 renderPosition = BlockDisplayPlacement.cameraRelative(
 				pos, cameraPosition, blockState.getOffset(level, pos));
 
-			dispatcher.render(
+			// The model render seed follows the live state and actual block
+			// position (BlockState#getSeed), exactly as the vanilla chunk
+			// renderer derives it, so weighted/rotated models (turtle eggs,
+			// sea pickles, ...) resolve the same variant the world shows.
+			// The seed is scoped only around the vanilla render dispatch:
+			// the ModelBlockRenderer mixin substitutes it for the vanilla
+			// seed inside the scope, and resolves to the vanilla seed outside
+			// it. The scope is restored before any failure reaches the
+			// fail-soft catch below.
+			long modelSeed = blockState.getSeed(pos);
+
+			BlockModelRenderSeed.runWithSeed(modelSeed, () -> dispatcher.render(
 				display,
 				renderPosition.x,
 				renderPosition.y,
@@ -279,7 +290,7 @@ public final class VirtualBlockDisplayRenderer {
 				partialTick,
 				new PoseStack(),
 				buffer,
-				LevelRenderer.getLightColor(level, pos));
+				LevelRenderer.getLightColor(level, pos)));
 		} catch (Throwable throwable) {
 			// Setup and render share one fail-soft path. A partially mutated
 			// virtual display must never be reused: drop the cache so the next
