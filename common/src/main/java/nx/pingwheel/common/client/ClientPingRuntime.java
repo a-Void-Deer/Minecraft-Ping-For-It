@@ -5,12 +5,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-import dev.ryanhcode.sable.companion.SableCompanion;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.Position;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.BlockHitResult;
@@ -42,7 +40,9 @@ import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.PingInteractionStateMachine;
 import nx.pingwheel.common.interaction.wheel.WheelSelection;
+import nx.pingwheel.common.integration.DistantHorizonsIntegration;
 import nx.pingwheel.common.integration.ModContext;
+import nx.pingwheel.common.integration.SableIntegration;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
@@ -103,6 +103,13 @@ public final class ClientPingRuntime {
 	 * packet is lost).
 	 */
 	public static final long FALLBACK_EXPIRY_GRACE_TICKS = 40L;
+
+	/**
+	 * Constant privacy-safe debug reason logged when an asynchronous distant
+	 * hit is abandoned because the client level is gone or changed; never any
+	 * ids, level references, or coordinates.
+	 */
+	private static final String DISTANT_HIT_ABANDONED_LEVEL_CHANGE = "distant hit abandoned: level unavailable or changed";
 
 	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
 
@@ -281,7 +288,13 @@ public final class ClientPingRuntime {
 	 * Distant Horizons there is no other capture path, so the location
 	 * snapshot is completed synchronously instead of leaving the interaction
 	 * waiting forever. With Distant Horizons the distant trace stays
-	 * asynchronous and may upgrade the miss to a distant block hit later.
+	 * asynchronous: a distant hit upgrades the miss to a distant block hit, a
+	 * no-hit or failed trace falls back to the vanilla miss as a location,
+	 * and a scheduling failure completes the vanilla miss synchronously, so
+	 * none of those outcomes strand the interaction. If the level is gone or
+	 * changed by the time the asynchronous result lands, the interaction is
+	 * abandoned for its exact token (see {@link #completeDistantHit}) so the
+	 * state machine resets to idle instead of waiting forever.
 	 */
 	private void captureImmediately(InteractionToken token) {
 		Minecraft game = Game;
@@ -309,12 +322,37 @@ public final class ClientPingRuntime {
 			}
 
 			if (ModContext.HasDistantHorizons) {
-				// The Distant Horizons callback runs on its completion thread:
+				// The Distant Horizons completion runs on its completion thread:
 				// it only carries the client and level captured at press time
 				// and schedules onto the client's main thread, never reading
-				// CommonClient.Game from the pool thread.
-				Raycast.traceDistantAsync(cameraDirection, 1.0f,
-					(distantHitResult) -> completeDistantHit(game, level, token, distantHitResult));
+				// CommonClient.Game from the pool thread. When the trace cannot
+				// be scheduled — a LinkageError disables the integration, any
+				// other scheduling rejection only debug logs — the vanilla miss
+				// is completed synchronously below, so the ping can never
+				// strand.
+				//
+				// An extreme LinkageError thrown while linking the trace call
+				// itself must never crash the tick: the integration is switched
+				// off for the rest of the session and the vanilla miss is
+				// completed synchronously. Exact-one completion is preserved
+				// because the coordinator rejects a duplicate completion for
+				// the same token.
+				final HitResult fallbackMiss = missHit;
+				boolean scheduled;
+
+				try {
+					scheduled = DistantHorizonsIntegration.traceDistantAsync(
+						cameraEntity.getEyePosition(1.0f), cameraDirection,
+						distantHit -> completeDistantHit(game, level, token, fallbackMiss, distantHit));
+				} catch (LinkageError error) {
+					ModContext.HasDistantHorizons = false;
+					DistantHorizonsIntegration.logUnguardedLinkFailure(error);
+					scheduled = false;
+				}
+
+				if (!scheduled) {
+					captureCoordinator.complete(token, MinecraftTargetSnapshotFactory.from(level, missHit));
+				}
 			} else {
 				captureCoordinator.complete(token, MinecraftTargetSnapshotFactory.from(level, missHit));
 			}
@@ -323,18 +361,16 @@ public final class ClientPingRuntime {
 		}
 
 		if (ModContext.HasSable && hitResult.getType() == HitResult.Type.BLOCK) {
-			var hitPosition = hitResult.getLocation();
-			var subLevelAccess = SableCompanion.INSTANCE.getContainingClient(hitPosition);
+			var projected = SableIntegration.projectOutOfSubLevel(game.level, hitResult.getLocation());
 
 			// Preserve the Sable behavior: a block hit inside a sub-level is
 			// projected back out into the real level and captured as a pure
 			// location target.
-			if (subLevelAccess != null) {
-				var projected = SableCompanion.INSTANCE.projectOutOfSubLevel(
-					game.level, (Position) hitPosition);
+			if (projected.isPresent()) {
+				var projectedPos = projected.get();
 				captureCoordinator.complete(token, TargetSnapshotFactory.location(
 					game.level.dimension().location().toString(),
-					projected.x, projected.y, projected.z));
+					projectedPos.x, projectedPos.y, projectedPos.z));
 				return;
 			}
 		}
@@ -344,25 +380,37 @@ public final class ClientPingRuntime {
 	}
 
 	/**
-	 * Applies an asynchronous Distant Horizons hit on the captured client's
-	 * main thread.
+	 * Applies an asynchronous Distant Horizons result on the captured client's
+	 * main thread: a distant hit upgrades the miss, otherwise the original
+	 * vanilla miss is completed as a pure location target.
 	 *
 	 * <p>This callback runs on the Distant Horizons completion thread and must
 	 * never touch {@link nx.pingwheel.common.CommonClient.Game}: the
 	 * {@link Minecraft} client and the {@link ClientLevel} captured at press
-	 * time are the only live references it carries. The snapshot is taken
-	 * inside {@link Minecraft#execute} (the client main thread) only when the
-	 * current level is still exactly the captured level and the token is still
-	 * the active interaction.
+	 * time are the only live references it carries. On the client main thread a
+	 * stale (superseded) token is ignored. When the level is gone or no longer
+	 * the level captured at press time, the interaction is abandoned for
+	 * exactly that token (the captured level is never snapshotted against) and
+	 * only a constant privacy-safe debug reason is logged: the cleared current
+	 * ownership drives the state machine's superseded path back to idle on its
+	 * next update, so a level change can never strand the interaction.
 	 */
-	private void completeDistantHit(Minecraft game, ClientLevel levelAtPress, InteractionToken token, HitResult distantHitResult) {
+	private void completeDistantHit(Minecraft game, ClientLevel levelAtPress, InteractionToken token, HitResult vanillaMiss, Optional<BlockHitResult> distantHit) {
 		game.execute(() -> {
-			if (game.level == null || game.level != levelAtPress || !activeInteraction.isCurrent(token)) {
+			if (!activeInteraction.isCurrent(token)) {
 				return;
 			}
 
+			if (game.level == null || game.level != levelAtPress) {
+				activeInteraction.invalidate(token);
+				logger.debug(DISTANT_HIT_ABANDONED_LEVEL_CHANGE);
+				return;
+			}
+
+			HitResult appliedHit = distantHit.map(hit -> (HitResult) hit).orElse(vanillaMiss);
+
 			captureCoordinator.complete(
-				token, MinecraftTargetSnapshotFactory.from(levelAtPress, distantHitResult));
+				token, MinecraftTargetSnapshotFactory.from(levelAtPress, appliedHit));
 		});
 	}
 

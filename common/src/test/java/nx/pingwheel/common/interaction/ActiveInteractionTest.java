@@ -111,6 +111,73 @@ class ActiveInteractionTest {
 	}
 
 	@Test
+	void invalidateAbandonsCurrentTokenAndClearsCapture() {
+		ActiveInteraction interaction = new ActiveInteraction();
+
+		InteractionToken token = interaction.begin();
+		assertTrue(interaction.tryComplete(token, context(token, OVERWORLD)));
+		assertTrue(interaction.currentContext().isPresent());
+
+		assertTrue(interaction.invalidate(token));
+
+		assertFalse(interaction.isCurrent(token));
+		assertTrue(interaction.currentContext().isEmpty());
+	}
+
+	@Test
+	void invalidateWithoutCaptureAbandonsCurrentToken() {
+		ActiveInteraction interaction = new ActiveInteraction();
+
+		InteractionToken token = interaction.begin();
+
+		assertTrue(interaction.invalidate(token));
+
+		assertFalse(interaction.isCurrent(token));
+		assertTrue(interaction.currentContext().isEmpty());
+	}
+
+	@Test
+	void invalidatedTokenCanNeverCompleteAndBeginAfterInvalidateWorks() {
+		ActiveInteraction interaction = new ActiveInteraction();
+
+		InteractionToken token = interaction.begin();
+		assertTrue(interaction.invalidate(token));
+
+		assertFalse(interaction.tryComplete(token, context(token, OVERWORLD)));
+		assertTrue(interaction.currentContext().isEmpty());
+
+		InteractionToken next = interaction.begin();
+
+		assertTrue(interaction.isCurrent(next));
+		assertTrue(interaction.tryComplete(next, context(next, OVERWORLD)));
+	}
+
+	@Test
+	void staleTokenInvalidateDoesNotAffectCurrentToken() {
+		ActiveInteraction interaction = new ActiveInteraction();
+
+		InteractionToken first = interaction.begin();
+		InteractionToken second = interaction.begin();
+
+		assertFalse(interaction.invalidate(first));
+
+		assertTrue(interaction.isCurrent(second));
+		assertFalse(interaction.isCurrent(first));
+		assertTrue(interaction.tryComplete(second, context(second, OVERWORLD)));
+	}
+
+	@Test
+	void nullTokenInvalidateDoesNotAffectCurrentToken() {
+		ActiveInteraction interaction = new ActiveInteraction();
+
+		InteractionToken token = interaction.begin();
+
+		assertFalse(interaction.invalidate(null));
+
+		assertTrue(interaction.isCurrent(token));
+	}
+
+	@Test
 	void initialSequenceRejectsNegative() {
 		assertThrows(IllegalArgumentException.class, () -> new ActiveInteraction(-1L));
 	}

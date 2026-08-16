@@ -13,6 +13,14 @@ import java.util.Optional;
  * current token is frozen and can never be replaced by a later duplicate or by
  * a stale token.
  *
+ * <p>{@link #invalidate(InteractionToken)} explicitly abandons a specific
+ * current token (for example when an asynchronous capture path discovers the
+ * world it was captured against is gone): it clears the current token and any
+ * frozen capture only when the given token is still current, so a stale token
+ * can never affect the current interaction. The next state-machine update then
+ * observes the token is no longer current and resets to idle through its
+ * existing superseded path.
+ *
  * <p>Sequence assignment is monotonic ({@code 0, 1, 2, ...}) for the lifetime
  * of this holder. If the sequence space is ever exhausted — i.e. the counter
  * reaches {@link Long#MAX_VALUE} — {@link #begin()} throws an
@@ -109,5 +117,27 @@ public final class ActiveInteraction {
 	 */
 	public synchronized Optional<CapturedPingContext> currentContext() {
 		return Optional.ofNullable(currentContext);
+	}
+
+	/**
+	 * Abandons {@code token}: if it is still the current token, the current
+	 * ownership and any frozen capture are cleared so the state machine's
+	 * existing superseded path resets to idle on its next update.
+	 *
+	 * <p>A null token or a stale (already superseded) token leaves the current
+	 * state untouched, so a stale asynchronous completion can never abandon a
+	 * newer interaction.
+	 *
+	 * @return {@code true} when the current state was cleared; {@code false}
+	 *         when {@code token} was not the current token.
+	 */
+	public synchronized boolean invalidate(InteractionToken token) {
+		if (token == null || token != currentToken) {
+			return false;
+		}
+
+		currentToken = null;
+		currentContext = null;
+		return true;
 	}
 }

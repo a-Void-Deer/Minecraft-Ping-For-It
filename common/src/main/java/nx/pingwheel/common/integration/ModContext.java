@@ -1,6 +1,5 @@
 package nx.pingwheel.common.integration;
 
-import com.seibel.distanthorizons.api.DhApi;
 import nx.pingwheel.common.platform.IPlatformContextService;
 
 import static nx.pingwheel.common.Global.LOGGER;
@@ -19,8 +18,11 @@ public class ModContext {
 		HasFTBTeams = IPlatformContextService.INSTANCE.isModLoaded("ftbteams");
 		HasSable = IPlatformContextService.INSTANCE.isModLoaded("sable");
 
+		LOGGER.debug("optional integrations: distantHorizons={} voiceChat={} ftbTeams={} sable={}",
+			HasDistantHorizons, HasVoiceChat, HasFTBTeams, HasSable);
+
 		if (HasDistantHorizons) {
-			LOGGER.info("Distant Horizons API Version: %s.%s.%s".formatted(DhApi.getApiMajorVersion(), DhApi.getApiMinorVersion(), DhApi.getApiPatchVersion()));
+			DistantHorizonsIntegration.logVersionDiagnostics();
 		}
 	}
 }
