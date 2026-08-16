@@ -36,16 +36,16 @@ public final class WheelGeometry {
 	public static final double TWO_PI = Math.PI * 2.0;
 
 	/** The default inner (cancel center) radius in GUI pixels. */
-	public static final double DEFAULT_INNER_RADIUS = 28.0;
+	public static final double DEFAULT_INNER_RADIUS = 14.0;
 
 	/** The default outer ring radius in GUI pixels. */
-	public static final double DEFAULT_OUTER_RADIUS = 78.0;
+	public static final double DEFAULT_OUTER_RADIUS = 39.0;
 
 	private final double innerRadius;
 	private final double outerRadius;
 
 	/**
-	 * Creates a wheel geometry with the default radii (28/78).
+	 * Creates a wheel geometry with the default radii (14/39).
 	 */
 	public WheelGeometry() {
 		this(DEFAULT_INNER_RADIUS, DEFAULT_OUTER_RADIUS);

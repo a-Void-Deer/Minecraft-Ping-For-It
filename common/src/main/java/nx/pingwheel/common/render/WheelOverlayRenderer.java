@@ -59,7 +59,7 @@ public final class WheelOverlayRenderer {
 	/** Fixed angular samples for the center circle outline. */
 	private static final int CENTER_CIRCLE_SAMPLES = 48;
 
-	private static final int ICON_SIZE = 12;
+	static final int ICON_SIZE = 6;
 
 	private static final int RING_BACKDROP_COLOR = 0x50000000;
 	private static final int CENTER_BACKDROP_COLOR = 0x88000000;
@@ -67,12 +67,12 @@ public final class WheelOverlayRenderer {
 	private static final int CENTER_BORDER_COLOR = 0xFFFF6B6B;
 	private static final int CENTER_MARK_COLOR = 0xFFFF6B6B;
 
-	private static final int ARC_THICKNESS = 1;
-	private static final int SELECTED_ARC_THICKNESS = 3;
-	private static final int SEPARATOR_THICKNESS = 1;
-	private static final int CENTER_BORDER_THICKNESS = 1;
-	private static final int SELECTED_CENTER_BORDER_THICKNESS = 3;
-	private static final int CENTER_MARK_THICKNESS = 2;
+	static final int ARC_THICKNESS = 1;
+	static final int SELECTED_ARC_THICKNESS = 2;
+	static final int SEPARATOR_THICKNESS = 1;
+	static final int CENTER_BORDER_THICKNESS = 1;
+	static final int SELECTED_CENTER_BORDER_THICKNESS = 2;
+	static final int CENTER_MARK_THICKNESS = 1;
 
 	/**
 	 * Draws the wheel overlay for the current frame.

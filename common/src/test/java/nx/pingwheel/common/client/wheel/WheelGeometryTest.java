@@ -18,15 +18,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WheelGeometryTest {
 
 	private static final double TWO_PI = Math.PI * 2.0;
-	private static final double MID_RADIUS = 53.0; // (28 + 78) / 2
+	private static final double MID_RADIUS = 26.5; // (14 + 39) / 2
 
 	@Test
-	void defaultRadiiAre28And78() {
+	void defaultRadiiAre14And39() {
 		WheelGeometry geometry = new WheelGeometry();
 
-		assertEquals(28.0, geometry.innerRadius());
-		assertEquals(78.0, geometry.outerRadius());
-		assertEquals(53.0, geometry.midRadius());
+		assertEquals(14.0, geometry.innerRadius());
+		assertEquals(39.0, geometry.outerRadius());
+		assertEquals(26.5, geometry.midRadius());
 	}
 
 	@Test
@@ -40,12 +40,12 @@ class WheelGeometryTest {
 
 	@Test
 	void rejectsInvalidRadii() {
-		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(0.0, 78.0));
-		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(-1.0, 78.0));
-		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(28.0, 28.0));
-		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(78.0, 28.0));
-		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(Double.NaN, 78.0));
-		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(28.0, Double.POSITIVE_INFINITY));
+		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(0.0, 39.0));
+		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(-1.0, 39.0));
+		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(14.0, 14.0));
+		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(39.0, 14.0));
+		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(Double.NaN, 39.0));
+		assertThrows(IllegalArgumentException.class, () -> new WheelGeometry(14.0, Double.POSITIVE_INFINITY));
 	}
 
 	@Test
@@ -155,11 +155,11 @@ class WheelGeometryTest {
 		List<PingType> pingTypes = builtInPingTypes();
 
 		assertSame(WheelSelection.CENTER, geometry.select(0.0, 0.0, pingTypes));
-		assertSame(WheelSelection.CENTER, geometry.select(10.0, 10.0, pingTypes));
+		assertSame(WheelSelection.CENTER, geometry.select(9.0, 9.0, pingTypes));
 		// The inner radius itself is the center boundary.
-		assertSame(WheelSelection.CENTER, geometry.select(28.0, 0.0, pingTypes));
-		assertSame(WheelSelection.CENTER, geometry.select(0.0, -28.0, pingTypes));
-		assertSame(WheelSelection.CENTER, geometry.select(27.999, 0.0, pingTypes));
+		assertSame(WheelSelection.CENTER, geometry.select(14.0, 0.0, pingTypes));
+		assertSame(WheelSelection.CENTER, geometry.select(0.0, -14.0, pingTypes));
+		assertSame(WheelSelection.CENTER, geometry.select(13.999, 0.0, pingTypes));
 	}
 
 	@Test
@@ -167,8 +167,8 @@ class WheelGeometryTest {
 		WheelGeometry geometry = new WheelGeometry();
 		List<PingType> pingTypes = builtInPingTypes();
 
-		assertSame(WheelSelection.NONE, geometry.select(78.001, 0.0, pingTypes));
-		assertSame(WheelSelection.NONE, geometry.select(0.0, -78.001, pingTypes));
+		assertSame(WheelSelection.NONE, geometry.select(39.001, 0.0, pingTypes));
+		assertSame(WheelSelection.NONE, geometry.select(0.0, -39.001, pingTypes));
 		assertSame(WheelSelection.NONE, geometry.select(500.0, 500.0, pingTypes));
 	}
 
@@ -178,8 +178,8 @@ class WheelGeometryTest {
 		List<PingType> pingTypes = builtInPingTypes();
 
 		// Exactly on the outer radius (right side): sector 1 (danger).
-		assertEquals(pingType("danger"), sectorType(geometry.select(78.0, 0.0, pingTypes)));
-		assertEquals(pingType("attention"), sectorType(geometry.select(0.0, -78.0, pingTypes)));
+		assertEquals(pingType("danger"), sectorType(geometry.select(39.0, 0.0, pingTypes)));
+		assertEquals(pingType("attention"), sectorType(geometry.select(0.0, -39.0, pingTypes)));
 	}
 
 	@Test
@@ -224,10 +224,10 @@ class WheelGeometryTest {
 
 		assertEquals(pingType("attention"), sectorType(geometry.select(0.0, -MID_RADIUS, pingTypes)));
 		assertEquals(pingType("attention"), sectorType(geometry.select(MID_RADIUS, 0.0, pingTypes)));
-		assertEquals(pingType("attention"), sectorType(geometry.select(-30.0, 30.0, pingTypes)));
+		assertEquals(pingType("attention"), sectorType(geometry.select(-15.0, 15.0, pingTypes)));
 		assertSame(WheelSelection.CENTER, geometry.select(0.0, 0.0, pingTypes));
-		assertSame(WheelSelection.NONE, geometry.select(0.0, -79.0, pingTypes));
-		assertEquals(pingType("attention"), sectorType(geometry.select(0.0, -78.0, pingTypes)));
+		assertSame(WheelSelection.NONE, geometry.select(0.0, -40.0, pingTypes));
+		assertEquals(pingType("attention"), sectorType(geometry.select(0.0, -39.0, pingTypes)));
 	}
 
 	@Test
@@ -252,6 +252,31 @@ class WheelGeometryTest {
 				assertEquals(first.select(x, y, pingTypes), second.select(x, y, pingTypes));
 				assertEquals(first.select(x, y, pingTypes), first.select(x, y, pingTypes));
 			}
+		}
+	}
+
+	@Test
+	void selectionPreservesNormalizedSemanticsAtHalfScale() {
+		WheelGeometry priorGeometry = new WheelGeometry(28.0, 78.0);
+		WheelGeometry halvedGeometry = new WheelGeometry();
+		List<PingType> pingTypes = fourPingTypes();
+		double[][] offsets = {
+			{0.0, 0.0},
+			{28.0, 0.0},
+			{14.0, 0.0},
+			{53.0, 0.0},
+			{78.0, 0.0},
+			{78.001, 0.0},
+			{-31.0, -42.0},
+			{42.0, 31.0},
+			{-42.0, 31.0},
+			{31.0, -42.0}
+		};
+
+		for (double[] offset : offsets) {
+			assertEquals(
+				priorGeometry.select(offset[0], offset[1], pingTypes),
+				halvedGeometry.select(offset[0] * 0.5, offset[1] * 0.5, pingTypes));
 		}
 	}
 
