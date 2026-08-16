@@ -192,7 +192,7 @@ public final class PingInteractionStateMachine {
 		}
 
 		if (phase == PingInteractionPhase.WHEEL_OPEN) {
-			return updateWheelOpen(keyDown, wheelSelection, cancellationContext);
+			return updateWheelOpen(keyDown, wheelSelection, cancellationContext, now);
 		}
 
 		return updatePressed(keyDown, capture, now);
@@ -331,8 +331,20 @@ public final class PingInteractionStateMachine {
 	private Optional<PingInteractionAction> updateWheelOpen(
 		boolean keyDown,
 		WheelSelection wheelSelection,
-		CancellationContext cancellationContext
+		CancellationContext cancellationContext,
+		long now
 	) {
+		// Rendering normally owns visible timeout transitions, but a release tick
+		// can arrive after the last frame. The same observed monotonic timestamp
+		// must win before selection or release can commit an action.
+		long openDuration = now - wheelOpenTimeMillis;
+
+		if (openDuration >= wheelTimeoutMillis) {
+			logger.debug("wheel timeout: token={} openMillis={}", token.sequence(), openDuration);
+			resetMachineState();
+			return Optional.empty();
+		}
+
 		WheelSelection effective = normalizeSelection(wheelSelection);
 
 		if (!effective.equals(selection)) {

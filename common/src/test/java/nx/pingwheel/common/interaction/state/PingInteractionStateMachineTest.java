@@ -299,7 +299,74 @@ class PingInteractionStateMachineTest {
 
 		assertTrue(action.isEmpty(), "timeout must win regardless of release/selection");
 		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
-		assertTrue(h.logger.messages().stream().anyMatch(m -> m.contains("wheel timeout")));
+		assertEquals(1L, h.logger.messages().stream().filter(m -> m.contains("wheel timeout")).count());
+	}
+
+	@Test
+	void tickTimeoutClosesWithoutRenderAndIgnoresReleaseSelection() {
+		Harness h = harness();
+		InteractionToken token = h.press();
+
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.clock.now = 300L;
+		h.machine.presentFrame(true);
+
+		// No presentation frame observes the timeout before this release tick.
+		h.clock.now = 300L + 5000L;
+		Optional<PingInteractionAction> action = h.machine.update(
+			false, WheelSelection.sector(pingType("go_to")), emptyContext());
+
+		assertTrue(action.isEmpty());
+		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
+		assertEquals(WheelSelection.NONE, h.machine.selection());
+		assertEquals(1L, h.logger.messages().stream().filter(m -> m.contains("wheel timeout")).count());
+	}
+
+	@Test
+	void releaseTickJustBeforeTimeoutCommitsExactlyOnce() {
+		Harness h = harness();
+		InteractionToken token = h.press();
+
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.clock.now = 300L;
+		h.machine.presentFrame(true);
+
+		PingType goTo = pingType("go_to");
+		h.clock.now = 300L + 4999L;
+		Optional<PingInteractionAction> action = h.machine.update(
+			false, WheelSelection.sector(goTo), emptyContext());
+
+		assertEquals(goTo, ((PingInteractionAction.CreatePing) action.orElseThrow()).pingType());
+		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
+		assertTrue(h.machine.update(false, WheelSelection.sector(goTo), emptyContext()).isEmpty());
+	}
+
+	@Test
+	void tickTimeoutClearsSelectionAndFreshWheelStartsClean() {
+		Harness h = harness();
+		InteractionToken token = h.press();
+
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.clock.now = 300L;
+		h.machine.presentFrame(true);
+		PingType goTo = pingType("go_to");
+		h.machine.update(true, WheelSelection.sector(goTo), emptyContext());
+		assertEquals(WheelSelection.sector(goTo), h.machine.selection());
+
+		h.clock.now = 300L + 5000L;
+		assertTrue(h.machine.update(true, WheelSelection.sector(goTo), emptyContext()).isEmpty());
+		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
+		assertEquals(WheelSelection.NONE, h.machine.selection());
+		assertTrue(h.machine.wheelPingTypes().isEmpty());
+
+		h.clock.now = 5400L;
+		InteractionToken next = h.press();
+		h.complete(next, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.clock.now = 5700L;
+		h.machine.presentFrame(true);
+
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+		assertEquals(WheelSelection.NONE, h.machine.selection());
 	}
 
 	@Test
