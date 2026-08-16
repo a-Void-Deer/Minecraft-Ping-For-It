@@ -1,6 +1,7 @@
 package nx.pingwheel.common.client.marker;
 
 import java.util.Objects;
+import java.util.Optional;
 
 import lombok.Getter;
 import net.minecraft.client.multiplayer.PlayerInfo;
@@ -91,6 +92,7 @@ public final class MarkerView {
 	private float scale;
 
 	private Vec3 pos;
+	private boolean hasPresentationPosition;
 	private final EntityMarkerPositionTracker entityPositionTracker = new EntityMarkerPositionTracker();
 
 	/**
@@ -102,6 +104,27 @@ public final class MarkerView {
 	MarkerView(ClientMarker marker) {
 		this.marker = Objects.requireNonNull(marker, "marker");
 		this.pos = anchorPosition(marker.anchor());
+	}
+
+	/**
+	 * Returns the last position presented by a completed render update. An
+	 * unrendered view deliberately has no position here: its constructor anchor
+	 * is only the cancellation fallback until the view has been presented.
+	 */
+	Optional<Vec3> presentationPosition() {
+		return this.hasPresentationPosition ? Optional.of(this.pos) : Optional.empty();
+	}
+
+	/**
+	 * Checks the payload identity and dimension expected by a caller using the
+	 * cached presentation position.
+	 */
+	boolean matchesTarget(Target expectedTarget, String expectedDimension) {
+		Objects.requireNonNull(expectedTarget, "expectedTarget");
+		Objects.requireNonNull(expectedDimension, "expectedDimension");
+
+		return this.marker.target().equals(expectedTarget)
+			&& this.marker.target().dimensionId().equals(expectedDimension);
 	}
 
 	/**
@@ -125,6 +148,8 @@ public final class MarkerView {
 		this.marker = marker;
 		this.playerInfo = null;
 		this.itemStack = null;
+		this.pos = anchorPosition(marker.anchor());
+		this.hasPresentationPosition = false;
 	}
 
 	/**
@@ -178,6 +203,7 @@ public final class MarkerView {
 		this.screenPos = MathUtils.worldToScreen(this.pos, ctx.modelViewMatrix, ctx.projectionMatrix);
 		this.distance = ctx.camera.getPosition().distanceTo(this.pos);
 		this.calculateScale(config);
+		this.hasPresentationPosition = true;
 	}
 
 	/**

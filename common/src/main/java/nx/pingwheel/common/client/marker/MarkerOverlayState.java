@@ -7,11 +7,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.RegistryAccess;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.interaction.cancel.WorldVector;
 import nx.pingwheel.common.name.ClientTargetNameDecoder;
 import nx.pingwheel.common.name.ClientTargetNameStore;
 import nx.pingwheel.common.name.TargetNameComposer;
@@ -162,6 +165,56 @@ public final class MarkerOverlayState {
 	 */
 	public List<MarkerView> renderViews() {
 		return renderViews;
+	}
+
+	/**
+	 * Looks up the position presented by a marker view, if the cached payload is
+	 * still the expected target in the expected dimension and the view has been
+	 * rendered at least once.
+	 *
+	 * <p>This is main-thread-confined like {@link #prepare}. The target guard is
+	 * intentional: a view is retained by marker id, so a same-id payload
+	 * replacement must never expose the old entity's frozen position to
+	 * cancellation.
+	 */
+	public Optional<WorldVector> lookupPresentationPosition(
+		MarkerId markerId,
+		Target expectedTarget,
+		String expectedDimension
+	) {
+		Objects.requireNonNull(markerId, "markerId");
+		Objects.requireNonNull(expectedTarget, "expectedTarget");
+		Objects.requireNonNull(expectedDimension, "expectedDimension");
+
+		MarkerView view = views.get(markerId);
+
+		if (view == null) {
+			return Optional.empty();
+		}
+
+		return matchingPresentationPosition(view, expectedTarget, expectedDimension);
+	}
+
+	/**
+	 * Applies the payload/dimension guard before exposing a cached view position.
+	 * Kept package-private so the identity rule can be tested without a live
+	 * client render context.
+	 */
+	static Optional<WorldVector> matchingPresentationPosition(
+		MarkerView view,
+		Target expectedTarget,
+		String expectedDimension
+	) {
+		Objects.requireNonNull(view, "view");
+		Objects.requireNonNull(expectedTarget, "expectedTarget");
+		Objects.requireNonNull(expectedDimension, "expectedDimension");
+
+		if (!view.matchesTarget(expectedTarget, expectedDimension)) {
+			return Optional.empty();
+		}
+
+		return view.presentationPosition()
+			.map(position -> new WorldVector(position.x, position.y, position.z));
 	}
 
 	/**

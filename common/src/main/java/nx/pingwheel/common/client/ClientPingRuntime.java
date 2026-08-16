@@ -18,6 +18,7 @@ import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.client.marker.EntityMarkerPoint;
+import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.config.ClientConfig;
@@ -38,6 +39,7 @@ import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.interaction.cancel.CancelCandidatePicker;
 import nx.pingwheel.common.interaction.cancel.CancelMarkerCandidate;
 import nx.pingwheel.common.interaction.cancel.CancellationContext;
+import nx.pingwheel.common.interaction.cancel.MarkerCandidatePosition;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
 import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
@@ -527,8 +529,9 @@ public final class ClientPingRuntime {
 	 * owned by the local player in the current dimension.
 	 *
 	 * <p>A candidate's position is the live entity position when the marker's
-	 * entity target is still resolvable in the same dimension, otherwise the
-	 * authoritative marker anchor.
+	 * entity target is still resolvable in the same dimension. If it is absent,
+	 * the last matching rendered overlay position is used; the authoritative
+	 * marker anchor is the fallback for an absent or never-rendered view.
 	 */
 	private CancellationContext buildCancellationContext() {
 		Minecraft game = Game;
@@ -559,7 +562,7 @@ public final class ClientPingRuntime {
 				marker.id(),
 				ownerId,
 				dimensionId,
-				candidatePosition(marker)))
+				candidatePosition(marker, dimensionId)))
 			.toList();
 
 		return new CancellationContext(
@@ -570,8 +573,10 @@ public final class ClientPingRuntime {
 			candidates);
 	}
 
-	private WorldVector candidatePosition(ClientMarker marker) {
+	private WorldVector candidatePosition(ClientMarker marker, String currentDimension) {
 		Target target = marker.target();
+		var anchor = marker.anchor();
+		WorldVector anchorPosition = new WorldVector(anchor.x(), anchor.y(), anchor.z());
 
 		if (target instanceof Target.EntityTarget entityTarget) {
 			Entity entity = GameContext.getEntity(entityTarget.entityId());
@@ -587,8 +592,10 @@ public final class ClientPingRuntime {
 			}
 		}
 
-		var anchor = marker.anchor();
-		return new WorldVector(anchor.x(), anchor.y(), anchor.z());
+		return MarkerCandidatePosition.resolve(
+			anchorPosition,
+			MarkerOverlayState.INSTANCE.lookupPresentationPosition(
+				marker.id(), target, currentDimension));
 	}
 
 	private void expireFallbackMarkers() {

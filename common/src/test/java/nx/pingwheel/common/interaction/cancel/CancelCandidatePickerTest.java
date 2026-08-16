@@ -151,6 +151,16 @@ class CancelCandidatePickerTest {
 	}
 
 	@Test
+	void frozenPresentationPositionIsSelectedForCancellation() {
+		WorldVector anchor = new WorldVector(0.0, 0.0, 30.0);
+		WorldVector frozenPresentation = new WorldVector(0.0, 0.0, 5.0);
+		CancelMarkerCandidate candidate = marker(1L,
+			MarkerCandidatePosition.resolve(anchor, Optional.of(frozenPresentation)));
+
+		assertEquals(candidate, new CancelCandidatePicker().pick(context(List.of(candidate))).orElseThrow());
+	}
+
+	@Test
 	void noEligibleCandidateYieldsEmptyResult() {
 		CancelMarkerCandidate otherOwner = new CancelMarkerCandidate(
 			new MarkerId(1L), OTHER_OWNER, OVERWORLD, new WorldVector(0, 0, 5));
