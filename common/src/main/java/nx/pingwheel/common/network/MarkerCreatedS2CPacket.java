@@ -7,9 +7,11 @@ import org.jetbrains.annotations.NotNull;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.name.TargetNameJson;
 
+import static nx.pingwheel.common.Global.S2C_NAMESPACE;
+
 public record MarkerCreatedS2CPacket(MarkerSnapshot snapshot, TargetNameJson targetName) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath("ping-wheel-s2c", "marker-created");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "marker-created");
 	public static final Type<MarkerCreatedS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public MarkerCreatedS2CPacket() {

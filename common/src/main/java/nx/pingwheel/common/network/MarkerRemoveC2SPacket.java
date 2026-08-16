@@ -6,9 +6,11 @@ import org.jetbrains.annotations.NotNull;
 
 import nx.pingwheel.common.domain.MarkerId;
 
+import static nx.pingwheel.common.Global.C2S_NAMESPACE;
+
 public record MarkerRemoveC2SPacket(MarkerId markerId) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath("ping-wheel-c2s", "marker-remove");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "marker-remove");
 	public static final Type<MarkerRemoveC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public MarkerRemoveC2SPacket() {

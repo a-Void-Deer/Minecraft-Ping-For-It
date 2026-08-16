@@ -7,11 +7,12 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.UUID;
 
+import static nx.pingwheel.common.Global.C2S_NAMESPACE;
 import static nx.pingwheel.common.config.ClientConfig.MAX_CHANNEL_LENGTH;
 
 public record PingLocationC2SPacket(String channel, Vec3 pos, UUID entity, int sequence, int dimension) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath("ping-wheel-c2s", "ping-location");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "ping-location");
 	public static final Type<PingLocationC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public PingLocationC2SPacket() {

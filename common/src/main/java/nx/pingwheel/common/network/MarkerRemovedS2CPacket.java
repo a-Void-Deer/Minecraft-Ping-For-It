@@ -7,9 +7,11 @@ import org.jetbrains.annotations.NotNull;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
 
+import static nx.pingwheel.common.Global.S2C_NAMESPACE;
+
 public record MarkerRemovedS2CPacket(MarkerId markerId, MarkerRemovalReason reason) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath("ping-wheel-s2c", "marker-removed");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "marker-removed");
 	public static final Type<MarkerRemovedS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public MarkerRemovedS2CPacket() {

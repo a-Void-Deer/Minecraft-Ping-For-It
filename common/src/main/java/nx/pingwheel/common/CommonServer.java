@@ -12,6 +12,8 @@ import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformServerEventService;
 
 import static nx.pingwheel.common.Global.LOGGER;
+import static nx.pingwheel.common.Global.MOD_ID;
+import static nx.pingwheel.common.Global.MOD_VERSION;
 
 public class CommonServer {
 
@@ -21,6 +23,8 @@ public class CommonServer {
 	private boolean serverEventsRegistered;
 
 	public void onInit() {
+		LOGGER.debug("server init: mod_id={} mod_version={}", MOD_ID, MOD_VERSION);
+
 		LOGGER.info("Init");
 
 		ServerConfig.HANDLER.load();

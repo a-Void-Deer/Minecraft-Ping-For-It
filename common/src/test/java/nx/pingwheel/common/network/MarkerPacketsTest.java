@@ -332,12 +332,12 @@ class MarkerPacketsTest {
 		);
 
 		assertEquals(Set.of(
-			"ping-wheel-c2s:marker-create",
-			"ping-wheel-c2s:marker-remove",
-			"ping-wheel-s2c:marker-created",
-			"ping-wheel-s2c:marker-removed",
-			"ping-wheel-s2c:marker-rejected",
-			"ping-wheel-s2c:marker-winner-changed"
+			"pingforit-c2s:marker-create",
+			"pingforit-c2s:marker-remove",
+			"pingforit-s2c:marker-created",
+			"pingforit-s2c:marker-removed",
+			"pingforit-s2c:marker-rejected",
+			"pingforit-s2c:marker-winner-changed"
 		), Set.copyOf(ids));
 	}
 

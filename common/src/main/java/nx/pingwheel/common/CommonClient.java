@@ -17,7 +17,6 @@ import nx.pingwheel.common.client.outline.BlockOutlineState;
 import nx.pingwheel.common.client.outline.EntityOutlineLogger;
 import nx.pingwheel.common.client.outline.EntityOutlineState;
 import nx.pingwheel.common.client.outline.VirtualBlockDisplayRenderer;
-import nx.pingwheel.common.compat.LegacyMigrationHandler;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.name.ClientTargetNameDecoder;
@@ -59,8 +58,6 @@ public class CommonClient {
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_PING);
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
 
-		LegacyMigrationHandler.migrateKeyMappings();
-
 		// The lazy global loggers only ever emit aggregate transition counts.
 		EntityOutlineState.setLogger(EntityOutlineLogger.global());
 		BlockOutlineState.setLogger(BlockOutlineLogger.global());
@@ -97,8 +94,6 @@ public class CommonClient {
 	public void onTickStart() {
 		Game = Minecraft.getInstance();
 		GameContext.updateDimension();
-
-		LegacyMigrationHandler.onTick();
 
 		if (pingRuntime == null) {
 			pingRuntime = createPingRuntimeIfInWorld();

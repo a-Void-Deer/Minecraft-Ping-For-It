@@ -9,9 +9,11 @@ import org.jetbrains.annotations.NotNull;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.TargetKey;
 
+import static nx.pingwheel.common.Global.S2C_NAMESPACE;
+
 public record MarkerWinnerChangedS2CPacket(TargetKey targetKey, Optional<MarkerId> winnerId) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath("ping-wheel-s2c", "marker-winner-changed");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "marker-winner-changed");
 	public static final Type<MarkerWinnerChangedS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public MarkerWinnerChangedS2CPacket() {

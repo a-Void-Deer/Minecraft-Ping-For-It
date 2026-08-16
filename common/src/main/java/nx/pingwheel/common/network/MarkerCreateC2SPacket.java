@@ -6,9 +6,11 @@ import org.jetbrains.annotations.NotNull;
 
 import nx.pingwheel.common.domain.Target;
 
+import static nx.pingwheel.common.Global.C2S_NAMESPACE;
+
 public record MarkerCreateC2SPacket(long requestId, Target target, String pingTypeId) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath("ping-wheel-c2s", "marker-create");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "marker-create");
 	public static final Type<MarkerCreateC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public MarkerCreateC2SPacket() {

@@ -20,6 +20,8 @@ import org.apache.logging.log4j.util.TriConsumer;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
+import static nx.pingwheel.common.Global.SERVER_COMMAND_ROOT;
+
 public class ServerCommandBuilder {
 	private ServerCommandBuilder() {}
 
@@ -129,21 +131,21 @@ public class ServerCommandBuilder {
 		Command<CommandSourceStack> helpCallback = (context) -> {
 			responseHandler.accept(context, true, LanguageUtils.join(
 				Component.empty(),
-				Component.literal("/pingwheel:server default_channel"),
+				Component.literal("/" + SERVER_COMMAND_ROOT + " default_channel"),
 				langDefaultChannel.path("get", "description").wrapped().withStyle(ChatFormatting.GRAY),
-				Component.literal("/pingwheel:server default_channel <mode_name>"),
+				Component.literal("/" + SERVER_COMMAND_ROOT + " default_channel <mode_name>"),
 				langDefaultChannel.path("set", "description").wrapped().withStyle(ChatFormatting.GRAY),
-				Component.literal("/pingwheel:server player_tracking"),
+				Component.literal("/" + SERVER_COMMAND_ROOT + " player_tracking"),
 				langPlayerTracking.path("get", "description").wrapped().withStyle(ChatFormatting.GRAY),
-				Component.literal("/pingwheel:server player_tracking true|false"),
+				Component.literal("/" + SERVER_COMMAND_ROOT + " player_tracking true|false"),
 				langPlayerTracking.path("set", "description").wrapped().withStyle(ChatFormatting.GRAY),
-				Component.literal("/pingwheel:server regen_time"),
+				Component.literal("/" + SERVER_COMMAND_ROOT + " regen_time"),
 				langRegenTime.path("get", "description").wrapped().withStyle(ChatFormatting.GRAY),
-				Component.literal("/pingwheel:server regen_time <milliseconds>"),
+				Component.literal("/" + SERVER_COMMAND_ROOT + " regen_time <milliseconds>"),
 				langRegenTime.path("set", "description").wrapped().withStyle(ChatFormatting.GRAY),
-				Component.literal("/pingwheel:server rate_limit"),
+				Component.literal("/" + SERVER_COMMAND_ROOT + " rate_limit"),
 				langRateLimit.path("get", "description").wrapped().withStyle(ChatFormatting.GRAY),
-				Component.literal("/pingwheel:server rate_limit <limit>"),
+				Component.literal("/" + SERVER_COMMAND_ROOT + " rate_limit <limit>"),
 				langRateLimit.path("set", "description").wrapped().withStyle(ChatFormatting.GRAY)
 			));
 			return 1;
@@ -152,7 +154,7 @@ public class ServerCommandBuilder {
 		var cmdHelp = LiteralArgumentBuilder.<CommandSourceStack>literal("help")
 			.executes(helpCallback);
 
-		return LiteralArgumentBuilder.<CommandSourceStack>literal("pingwheel:server")
+		return LiteralArgumentBuilder.<CommandSourceStack>literal(SERVER_COMMAND_ROOT)
 			.requires(source -> source.hasPermission(2))
 			.executes(helpCallback)
 			.then(cmdHelp)

@@ -7,9 +7,11 @@ import org.jetbrains.annotations.NotNull;
 import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.marker.MarkerRequestKind;
 
+import static nx.pingwheel.common.Global.S2C_NAMESPACE;
+
 public record MarkerRejectedS2CPacket(long requestId, MarkerRequestKind requestKind, MarkerRejectReason reason) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath("ping-wheel-s2c", "marker-rejected");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "marker-rejected");
 	public static final Type<MarkerRejectedS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public MarkerRejectedS2CPacket() {
