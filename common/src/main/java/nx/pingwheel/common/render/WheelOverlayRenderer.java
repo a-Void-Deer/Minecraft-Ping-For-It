@@ -1,19 +1,25 @@
 package nx.pingwheel.common.render;
 
 import java.util.List;
+import java.util.Optional;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.Font;
+import net.minecraft.network.chat.Component;
 import net.minecraft.util.FastColor;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.client.ClientPingRuntime;
+import nx.pingwheel.common.client.WheelPresentationSnapshot;
 import nx.pingwheel.common.client.wheel.WheelGeometry;
+import nx.pingwheel.common.client.wheel.WheelLabelLayout;
 import nx.pingwheel.common.client.wheel.WheelPoint;
 import nx.pingwheel.common.client.wheel.WheelSector;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.wheel.WheelSelection;
+import nx.pingwheel.common.name.ClientTargetNameResolver;
 
 import static nx.pingwheel.common.resource.ResourceConstants.PING_TEXTURE_ID;
 
@@ -42,7 +48,10 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_TEXTURE_ID;
  *       {@link RenderSystem} shader color like the existing
  *       {@link DrawContext}, always reset to white afterwards);</li>
  *   <li>the center is a dark translucent disk with a light-red border and an
- *       {@code X} mark — no localized text is drawn in this phase.</li>
+ *       {@code X} mark, while each sector also carries its localized display
+ *       name;</li>
+ *   <li>the frozen target's presentation name is centered above the wheel and
+ *       is never obtained by a new raycast.</li>
  * </ul>
  *
  * <p>This class never logs: selection-change logging is owned by the state
@@ -52,6 +61,7 @@ public final class WheelOverlayRenderer {
 	private WheelOverlayRenderer() {}
 
 	private static final WheelGeometry GEOMETRY = new WheelGeometry();
+	private static final ClientTargetNameResolver TARGET_NAME_RESOLVER = new ClientTargetNameResolver();
 
 	/** Fixed total angular samples for the whole sector ring. */
 	private static final int ARC_SAMPLES_PER_FULL_RING = 72;
@@ -66,6 +76,7 @@ public final class WheelOverlayRenderer {
 	private static final int CENTER_BACKDROP_SELECTED_COLOR = 0x99FF6B6B;
 	private static final int CENTER_BORDER_COLOR = 0xFFFF6B6B;
 	private static final int CENTER_MARK_COLOR = 0xFFFF6B6B;
+	private static final int TARGET_LABEL_COLOR = 0xFFF5F5F5;
 
 	static final int ARC_THICKNESS = 1;
 	static final int SELECTED_ARC_THICKNESS = 2;
@@ -100,7 +111,15 @@ public final class WheelOverlayRenderer {
 			return;
 		}
 
-		List<PingType> pingTypes = runtime.wheelPingTypes();
+		Optional<WheelPresentationSnapshot> presentation = runtime.wheelPresentation();
+
+		if (presentation.isEmpty()) {
+			resetSelectionIfNeeded(runtime);
+			return;
+		}
+
+		WheelPresentationSnapshot snapshot = presentation.get();
+		List<PingType> pingTypes = snapshot.pingTypes();
 
 		if (pingTypes.isEmpty()) {
 			resetSelectionIfNeeded(runtime);
@@ -118,7 +137,8 @@ public final class WheelOverlayRenderer {
 		pose.pushPose();
 
 		try {
-			drawRing(guiGraphics, sectors, centerX, centerY, selection);
+			drawTargetName(guiGraphics, game.font, centerX, centerY, snapshot);
+			drawRing(guiGraphics, game.font, sectors, centerX, centerY, selection);
 			drawCenter(guiGraphics, centerX, centerY, selection);
 		} finally {
 			pose.popPose();
@@ -162,6 +182,7 @@ public final class WheelOverlayRenderer {
 
 	private static void drawRing(
 		GuiGraphics guiGraphics,
+		Font font,
 		List<WheelSector> sectors,
 		double centerX,
 		double centerY,
@@ -185,9 +206,82 @@ public final class WheelOverlayRenderer {
 			if (sectors.size() > 1) {
 				drawRadialSeparator(guiGraphics, sector, centerX, centerY, borderColor);
 			}
+		}
 
-			WheelPoint midpoint = GEOMETRY.midpoint(sector);
-			drawIcon(guiGraphics, centerX + midpoint.x(), centerY + midpoint.y(), borderColor);
+		List<Component> labels = sectors.stream()
+			.<Component>map(sector -> Component.translatable(sector.pingType().displayKey()))
+			.toList();
+		List<Integer> textWidths = labels.stream().map(font::width).toList();
+		List<WheelLabelLayout.Placement> placements = WheelLabelLayout.layout(GEOMETRY, sectors, textWidths);
+
+		for (int i = 0; i < placements.size(); i++) {
+			WheelLabelLayout.Placement placement = placements.get(i);
+			int color = 0xFF000000 | (isSelected(placement.pingType(), selection)
+				? placement.pingType().textColor()
+				: placement.pingType().outlineColor());
+
+			drawIcon(
+				guiGraphics,
+				centerX + placement.iconAnchor().x(),
+				centerY + placement.iconAnchor().y(),
+				0xFF000000 | placement.pingType().outlineColor());
+			drawLabel(
+				guiGraphics,
+				font,
+				labels.get(i),
+				placement,
+				centerX,
+				centerY,
+				color);
+		}
+	}
+
+	private static void drawTargetName(
+		GuiGraphics guiGraphics,
+		Font font,
+		double centerX,
+		double centerY,
+		WheelPresentationSnapshot snapshot
+	) {
+		Component targetName = TARGET_NAME_RESOLVER.resolve(
+			snapshot.context().resolvedTarget().target());
+		int width = font.width(targetName);
+		int x = (int) Math.round(centerX - width * 0.5);
+		int y = WheelLabelLayout.targetLabelTopY(
+			centerY,
+			GEOMETRY.outerRadius(),
+			font.lineHeight);
+
+		guiGraphics.drawString(font, targetName, x, y, TARGET_LABEL_COLOR, true);
+	}
+
+	private static void drawLabel(
+		GuiGraphics guiGraphics,
+		Font font,
+		Component label,
+		WheelLabelLayout.Placement placement,
+		double centerX,
+		double centerY,
+		int color
+	) {
+		var pose = guiGraphics.pose();
+		pose.pushPose();
+
+		try {
+			pose.translate(
+				centerX + placement.labelAnchor().x(),
+				centerY + placement.labelAnchor().y(),
+				0.0);
+			pose.scale((float) placement.scale(), (float) placement.scale(), 1.0f);
+			guiGraphics.drawString(
+				font,
+				label,
+				-placement.textWidth() / 2,
+				-font.lineHeight / 2,
+				color,
+				true);
+		} finally {
+			pose.popPose();
 		}
 	}
 
@@ -433,5 +527,10 @@ public final class WheelOverlayRenderer {
 	private static boolean isSelected(WheelSector sector, WheelSelection selection) {
 		return selection instanceof WheelSelection.Sector selected
 			&& selected.pingType().equals(sector.pingType());
+	}
+
+	private static boolean isSelected(PingType pingType, WheelSelection selection) {
+		return selection instanceof WheelSelection.Sector selected
+			&& selected.pingType().equals(pingType);
 	}
 }

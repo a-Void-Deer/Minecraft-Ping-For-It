@@ -766,6 +766,32 @@ public final class ClientPingRuntime {
 	}
 
 	/**
+	 * Returns the frozen capture and wheel choices only while the wheel is
+	 * visibly open.  GUI code must use this read-only snapshot rather than
+	 * performing a new target selection; no snapshot is exposed during a press,
+	 * release, timeout, or idle phase.
+	 */
+	public Optional<WheelPresentationSnapshot> wheelPresentation() {
+		if (machine.phase() != PingInteractionPhase.WHEEL_OPEN) {
+			return Optional.empty();
+		}
+
+		Optional<CapturedPingContext> context = activeInteraction.currentContext();
+		Optional<InteractionToken> currentToken = machine.currentToken();
+
+		if (context.isEmpty()
+			|| currentToken.isEmpty()
+			|| context.get().token() != currentToken.get()) {
+			return Optional.empty();
+		}
+
+		return WheelPresentationSnapshot.visible(
+			PingInteractionPhase.WHEEL_OPEN,
+			context,
+			machine.wheelPingTypes());
+	}
+
+	/**
 	 * The machine's normalized wheel selection (never null).
 	 */
 	public WheelSelection selection() {
