@@ -56,6 +56,15 @@ class WheelLabelLayoutTest {
 	}
 
 	@Test
+	void labelOriginCentersOddDimensionsAtTheAnchor() {
+		WheelPoint anchor = new WheelPoint(37.25, -12.75);
+		WheelPoint origin = WheelLabelLayout.labelOrigin(anchor, 9, 9.0, 0.5);
+
+		assertEquals(anchor.x(), origin.x() + 9 * 0.5 * 0.5, 1.0e-12);
+		assertEquals(anchor.y(), origin.y() + 9 * 0.5 * 0.5, 1.0e-12);
+	}
+
+	@Test
 	void realisticAndPessimisticLabelsStayInsideTheirCircleAndSector() {
 		List<WheelSector> sectors = GEOMETRY.sectors(PingTypeCatalog.builtIn().entries());
 

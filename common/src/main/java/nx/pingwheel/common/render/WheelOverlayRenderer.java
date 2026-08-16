@@ -268,16 +268,22 @@ public final class WheelOverlayRenderer {
 		pose.pushPose();
 
 		try {
+			float labelScale = (float) placement.scale();
+			WheelPoint labelOrigin = WheelLabelLayout.labelOrigin(
+				placement.labelAnchor(),
+				placement.textWidth(),
+				font.lineHeight,
+				labelScale);
 			pose.translate(
-				centerX + placement.labelAnchor().x(),
-				centerY + placement.labelAnchor().y(),
+				centerX + labelOrigin.x(),
+				centerY + labelOrigin.y(),
 				0.0);
-			pose.scale((float) placement.scale(), (float) placement.scale(), 1.0f);
+			pose.scale(labelScale, labelScale, 1.0f);
 			guiGraphics.drawString(
 				font,
 				label,
-				-placement.textWidth() / 2,
-				-font.lineHeight / 2,
+				0,
+				0,
 				color,
 				true);
 		} finally {

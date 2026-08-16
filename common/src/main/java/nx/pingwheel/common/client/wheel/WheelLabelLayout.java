@@ -86,6 +86,37 @@ public final class WheelLabelLayout {
 	}
 
 	/**
+	 * Computes the pre-scale origin for a label drawn at local coordinate
+	 * {@code (0, 0)}.  Keeping the scaled half extents here lets the renderer
+	 * use the same floating-point transform for odd-sized labels as the layout
+	 * containment calculations.
+	 */
+	public static WheelPoint labelOrigin(
+		WheelPoint labelAnchor,
+		int textWidth,
+		double lineHeight,
+		double scale
+	) {
+		Objects.requireNonNull(labelAnchor, "labelAnchor");
+
+		if (textWidth < 0) {
+			throw new IllegalArgumentException("textWidth must not be negative: " + textWidth);
+		}
+
+		if (!Double.isFinite(lineHeight) || lineHeight <= 0.0) {
+			throw new IllegalArgumentException("lineHeight must be positive and finite: " + lineHeight);
+		}
+
+		if (!Double.isFinite(scale) || scale <= 0.0) {
+			throw new IllegalArgumentException("scale must be positive and finite: " + scale);
+		}
+
+		return new WheelPoint(
+			labelAnchor.x() - textWidth * scale * 0.5,
+			labelAnchor.y() - lineHeight * scale * 0.5);
+	}
+
+	/**
 	 * Lays out one placement per sector in the exact sector order supplied by
 	 * the wheel geometry.
 	 *
