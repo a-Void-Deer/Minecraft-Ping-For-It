@@ -310,7 +310,7 @@ public final class WheelOverlayRenderer {
 			font.width(targetName),
 			font.lineHeight,
 			requestedScale);
-		int color = WheelOpacity.apply(TARGET_LABEL_COLOR, opacity);
+		int color = WheelOpacity.applyText(TARGET_LABEL_COLOR, opacity);
 
 		var pose = guiGraphics.pose();
 		pose.pushPose();
@@ -355,7 +355,7 @@ public final class WheelOverlayRenderer {
 				label,
 				0,
 				0,
-				WheelOpacity.apply(color, opacity),
+				WheelOpacity.applyText(color, opacity),
 				true);
 		} finally {
 			pose.popPose();

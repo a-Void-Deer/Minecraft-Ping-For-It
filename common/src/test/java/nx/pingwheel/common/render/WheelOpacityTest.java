@@ -38,6 +38,23 @@ class WheelOpacityTest {
 	}
 
 	@Test
+	void textOpacityPromotesOnlyFontAlphaBelowMinecraftMinimum() {
+		int baseColor = 0xFF123456;
+
+		assertEquals(0x00123456, WheelOpacity.applyText(baseColor, 0));
+		assertEquals(0x04123456, WheelOpacity.applyText(baseColor, 1));
+		assertEquals(0x05123456, WheelOpacity.applyText(baseColor, 2));
+		assertEquals(0x08123456, WheelOpacity.applyText(baseColor, 3));
+		assertEquals(0x0A123456, WheelOpacity.applyText(baseColor, 4));
+		assertEquals(0x80123456, WheelOpacity.applyText(baseColor, 50));
+		assertEquals(baseColor, WheelOpacity.applyText(baseColor, 100));
+
+		for (int opacity : new int[] {0, 1, 2, 3, 4, 50, 100}) {
+			assertEquals(0x123456, WheelOpacity.applyText(baseColor, opacity) & 0x00FFFFFF);
+		}
+	}
+
+	@Test
 	void zeroOpacitySkipsVisualWorkWithoutChangingWheelSelectionSemantics() {
 		assertFalse(WheelOpacity.shouldRender(0));
 		assertFalse(WheelOpacity.shouldRender(-1));

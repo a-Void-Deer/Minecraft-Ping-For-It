@@ -11,6 +11,7 @@ public final class WheelOpacity {
 
 	private static final int MIN_PERCENT = 0;
 	private static final int MAX_PERCENT = 100;
+	private static final int MIN_FONT_ALPHA = 4;
 
 	private WheelOpacity() {}
 
@@ -42,5 +43,20 @@ public final class WheelOpacity {
 		int baseAlpha = (argb >>> 24) & 0xFF;
 		int alpha = Math.clamp((int) Math.round(baseAlpha * percent / 100.0), 0, 0xFF);
 		return (argb & 0x00FFFFFF) | (alpha << 24);
+	}
+
+	/**
+	 * Applies wheel opacity to a font color while preserving Minecraft's
+	 * distinction between transparent text and the minimum visible alpha.
+	 */
+	public static int applyText(int argb, int opacityPercent) {
+		int color = apply(argb, opacityPercent);
+		int alpha = (color >>> 24) & 0xFF;
+
+		if (alpha > 0 && alpha < MIN_FONT_ALPHA) {
+			return (color & 0x00FFFFFF) | (MIN_FONT_ALPHA << 24);
+		}
+
+		return color;
 	}
 }
