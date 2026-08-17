@@ -126,6 +126,10 @@ spec.md
 # Eclipse Buildship
 .project
 .settings/
+.classpath
+.factorypath
+bin/
+.eclipse/
 
 # debug related files
 debug.ps1
