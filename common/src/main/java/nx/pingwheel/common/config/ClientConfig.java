@@ -87,10 +87,12 @@ public class ClientConfig implements IConfig {
 	@Override
 	public void validate() {
 		validate((key, suppliedValue, effectiveValue) -> LOGGER.warn(
-			"Client config value clamped: key={}, supplied={}, effective={}",
-			key,
-			suppliedValue,
-			effectiveValue));
+			formatClampWarning(key, suppliedValue, effectiveValue)));
+	}
+
+	static String formatClampWarning(String key, int suppliedValue, int effectiveValue) {
+		return "Client config value clamped: key=%s, supplied=%d, effective=%d"
+			.formatted(key, suppliedValue, effectiveValue);
 	}
 
 	void validate(ClampWarningSink warningSink) {
@@ -161,14 +163,15 @@ public class ClientConfig implements IConfig {
 	@Override
 	public void onUpdate() {
 		LOGGER.debug(
-			"Client wheel settings updated: wheelHoldMillis={}, wheelTimeoutMillis={}, cancelHalfConeAngleDegrees={}, wheelInnerRadius={}, wheelOuterRadius={}, wheelOpacity={}, wheelFontSize={}",
-			wheelHoldMillis,
-			wheelTimeoutMillis,
-			cancelHalfConeAngleDegrees,
-			wheelInnerRadius,
-			wheelOuterRadius,
-			wheelOpacity,
-			wheelFontSize);
+			"Client wheel settings updated: wheelHoldMillis=%d, wheelTimeoutMillis=%d, cancelHalfConeAngleDegrees=%d, wheelInnerRadius=%d, wheelOuterRadius=%d, wheelOpacity=%d, wheelFontSize=%d"
+				.formatted(
+					wheelHoldMillis,
+					wheelTimeoutMillis,
+					cancelHalfConeAngleDegrees,
+					wheelInnerRadius,
+					wheelOuterRadius,
+					wheelOpacity,
+					wheelFontSize));
 
 		if (Game != null) {
 			IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(getChannel()));

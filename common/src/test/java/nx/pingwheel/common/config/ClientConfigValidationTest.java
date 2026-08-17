@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientConfigValidationTest {
@@ -19,6 +20,16 @@ class ClientConfigValidationTest {
 		assertEquals(39, config.getWheelOuterRadius());
 		assertEquals(100, config.getWheelOpacity());
 		assertEquals(100, config.getWheelFontSize());
+	}
+
+	@Test
+	void clampWarningMessageUsesConcreteValuesWithoutPlaceholders() {
+		String message = ClientConfig.formatClampWarning("wheelHoldMillis", -1, 100);
+
+		assertEquals(
+			"Client config value clamped: key=wheelHoldMillis, supplied=-1, effective=100",
+			message);
+		assertFalse(message.contains("{}"));
 	}
 
 	@Test
