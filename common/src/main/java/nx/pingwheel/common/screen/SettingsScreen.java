@@ -104,8 +104,12 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public void repositionElements() {
+		this.layout.setFooterHeight(SettingsScreenLayout.footerHeightFor(this.height, this.layout.getHeaderHeight()));
 		super.repositionElements();
 		this.list.updateSize(this.width, this.layout);
+
+		final var screenLayout = this.getScreenLayout();
+		this.channelTextField.setPosition(screenLayout.channelX(), screenLayout.channelY());
 	}
 
 	@Override
@@ -113,18 +117,25 @@ public class SettingsScreen extends OptionsSubScreen {
 		super.render(ctx, mouseX, mouseY, delta);
 		this.list.render(ctx, mouseX, mouseY, delta);
 
-		final var yOffset = 50 + 25 * this.list.children().size();
-		this.channelTextField.setPosition(width / 2 - 100, yOffset);
-		ctx.drawString(this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, GRAY);
+		ctx.drawString(this.font, LanguageUtils.settings("channel").get(), this.channelTextField.getX(), this.getScreenLayout().channelLabelY(), GRAY);
 		this.channelTextField.render(ctx, mouseX, mouseY, delta);
 
 		if (this.channelTextField.getValue().isEmpty()) {
-			ctx.drawString(this.font, getChannelPlaceholder(), this.width / 2 - 100 + 4, this.channelTextField.getY() + 6, WHITE);
+			ctx.drawString(this.font, getChannelPlaceholder(), this.channelTextField.getX() + 4, this.channelTextField.getY() + 6, WHITE);
 		}
 
 		if (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused()) {
 			ctx.renderTooltip(this.font, Tooltip.create(LanguageUtils.settings("channel.tooltip").get()).toCharSequence(Game), mouseX, mouseY);
 		}
+	}
+
+	private SettingsScreenLayout getScreenLayout() {
+		return SettingsScreenLayout.calculate(
+			this.width,
+			this.height,
+			this.layout.getHeaderHeight(),
+			this.layout.getFooterHeight()
+		);
 	}
 
 	private MutableComponent getChannelPlaceholder() {
