@@ -4,6 +4,9 @@
 	"package": "nx.pingwheel.common.mixin",
 	"compatibilityLevel": "JAVA_17",
 	"client": [
+		"KeyMappingMixin",
+		"MinecraftMixin",
+		"GameRendererMixin",
 		"GuiMixin",
 		"LevelRendererMixin",
 		"DisplayBlockDisplayAccessor",

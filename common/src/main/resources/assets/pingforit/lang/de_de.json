@@ -15,6 +15,11 @@
 	"settings.pingforit.player_info_mode.hold.tooltip": "Die Spieler Info wird angezeigt, wenn ‚%s‘ (%s) Tastenbelegung gehalten wird",
 	"settings.pingforit.team_color_mode": "Team Farbe",
 	"settings.pingforit.ping_size": "Ping-Größe: %s",
+	"settings.pingforit.wheel_font_size": "Radialmenü-Optionsschrift: %s",
+	"settings.pingforit.wheel_target_font_size": "Radialmenü-Zielschrift: %s",
+	"settings.pingforit.reset_all": "Alles zurücksetzen",
+	"settings.pingforit.reset_all.title": "Alle Einstellungen zurücksetzen?",
+	"settings.pingforit.reset_all.message": "Alle Ping For It Einstellungen auf ihre Standardwerte zurücksetzen?",
 	"settings.pingforit.channel": "Ping-Kanal",
 	"settings.pingforit.channel.tooltip": "Du sendest und empfängst Pings nur von Spielern auf demselben Kanal",
 	"settings.pingforit.channel.placeholder": "mit %s synchron",
@@ -63,4 +68,8 @@
 	"command.pingforit.rate_limit.set.description": "Ping-Ratenbegrenzung einstellen",
 	"command.pingforit.rate_limit.get.response": "Ratenbegrenzung ist derzeit ‚%s‘",
 	"command.pingforit.rate_limit.set.response": "Ratenbegrenzung wurde auf ‚%s‘ gesetzt"
+  ,"settings.pingforit.long_press_compatibility_mode": "Langdruck-Kompatibilitätsmodus"
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Erkennt schnelle Klicks als einen virtuellen Langdruck."
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "Kompatibilitätszeitfenster"
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Maximaler Abstand zwischen benachbarten Klicks im Kompatibilitätsmodus."
 }

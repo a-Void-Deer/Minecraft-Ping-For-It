@@ -15,84 +15,106 @@ public class InputUtils {
 	public static final KeyMapping KEY_BINDING_PING = new KeyMapping(LanguageUtils.keyOf("key", "ping_location"), InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_5, SETTINGS_CATEGORY);
 	public static final KeyMapping KEY_BINDING_SETTINGS = new KeyMapping(LanguageUtils.keyOf("key", "open_settings"), InputConstants.Type.KEYSYM, -1, SETTINGS_CATEGORY);
 
-	/**
-	 * True between the moment a ping press edge was consumed and the physical
-	 * release of the bound key. The hold is decided once, at the press edge:
-	 * rotating the camera afterwards (changing {@code hitResult} or creative
-	 * state) must never retroactively end or start a ping hold.
-	 */
-	private static boolean pingHoldArmed = false;
+	/** The physical key and armed state of the current claimed hold. */
+	private static final ClaimedInputState<ClaimedKey> PING_INPUT_STATE = new ClaimedInputState<>();
 
 	/**
-	 * Consumes the ping-key press edge.
+	 * Claims one raw {@link KeyMapping#click(InputConstants.Key)} edge.
 	 *
-	 * <p>The edge is the single arbitration point against the live hit result:
-	 * when the ping key shares its binding with the pick-item key, only a miss
-	 * press is claimed for pinging and the click is left unconsumed otherwise
-	 * (so vanilla pick-block keeps working). A consumed edge arms the hold;
-	 * see {@link #isPingHotkeyDown()}.
+	 * <p>For a dedicated binding only the custom mapping is consumed. When the
+	 * mapping is shared with vanilla pick-item, the established MISS or
+	 * non-creative ENTITY cases consume one queued click from both mappings and
+	 * claim if either mapping received the raw event; in all other cases the
+	 * vanilla click remains queued.
 	 */
-	public static boolean consumePingHotkey() {
-		if (!KEY_BINDING_PING.same(Game.options.keyPickItem)) {
-			var edge = KEY_BINDING_PING.consumeClick();
-
-			if (edge) {
-				pingHoldArmed = true;
-			}
-
-			return edge;
+	public static boolean claimPingClick(InputConstants.Key rawKey) {
+		if (rawKey == null || !matchesPingBinding(rawKey)) {
+			return false;
 		}
 
+		if (Game == null || Game.options == null) {
+			return false;
+		}
+
+		boolean sharedWithPick = KEY_BINDING_PING.same(Game.options.keyPickItem);
+		boolean currentlyEligible = !sharedWithPick || isSharedPickEligible();
+		PingClickArbitration.Plan plan = PingClickArbitration.plan(sharedWithPick, currentlyEligible);
+		boolean alreadyArmed = PING_INPUT_STATE.isArmed();
+
+		// The plan is decided before either counter is consumed.  A shared
+		// eligible event drains both counters and claims if either mapping got the
+		// raw edge; an ineligible event deliberately leaves Pick Block untouched.
+		boolean pickConsumed = plan.consumePick() && Game.options.keyPickItem.consumeClick();
+		boolean customConsumed = plan.consumeCustom() && KEY_BINDING_PING.consumeClick();
+
+		// Some loader input maps can expose the same physical edge through more
+		// than one mapping entry. Drain the counters for each callback, but only
+		// the first callback may arm one physical hold; otherwise a shared binding
+		// would start two interactions for one press.
+		if (!alreadyArmed && plan.claims(pickConsumed, customConsumed)) {
+			arm(rawKey);
+			return true;
+		}
+
+		return false;
+	}
+
+	private static boolean isSharedPickEligible() {
 		if (Game.player == null || Game.hitResult == null) {
 			return false;
 		}
 
-		var isMiss = Game.hitResult.getType() == HitResult.Type.MISS || (!Game.player.isCreative() && Game.hitResult.getType() == HitResult.Type.ENTITY);
+		return Game.hitResult.getType() == HitResult.Type.MISS
+			|| (!Game.player.isCreative() && Game.hitResult.getType() == HitResult.Type.ENTITY);
+	}
 
-		var edge = isMiss && Game.options.keyPickItem.consumeClick();
+	private static boolean matchesPingBinding(InputConstants.Key rawKey) {
+		return switch (rawKey.getType()) {
+			case MOUSE -> KEY_BINDING_PING.matchesMouse(rawKey.getValue());
+			case KEYSYM -> KEY_BINDING_PING.matches(rawKey.getValue(), InputConstants.UNKNOWN.getValue());
+			case SCANCODE -> KEY_BINDING_PING.matches(InputConstants.UNKNOWN.getValue(), rawKey.getValue());
+		};
+	}
 
-		if (edge) {
-			pingHoldArmed = true;
-		}
+	private static void arm(InputConstants.Key rawKey) {
+		PING_INPUT_STATE.arm(ClaimedKey.from(rawKey));
+	}
 
-		return edge;
+	/** Observes a raw mapping state transition and claims only the matching release. */
+	public static boolean observeKeyState(InputConstants.Key rawKey, boolean isDown) {
+		return PING_INPUT_STATE.observe(
+			rawKey == null ? null : ClaimedKey.from(rawKey),
+			isDown);
 	}
 
 	/**
 	 * Reports the held state of the ping key.
 	 *
-	 * <p>Once the press edge was consumed, the hold follows the raw key state
-	 * only (the ping key, or the shared pick-item key) until physical release.
-	 * It is deliberately not re-gated by the current hit result or creative
-	 * mode: those were already arbitrated at the press edge, and a mid-hold
-	 * camera change must not fake a release. A hold whose edge was never
-	 * consumed (for example pick-item aimed at a block) is not a ping hold.
+	 * <p>The state is event-driven. It is deliberately not re-gated by the
+	 * current hit result, creative mode, or the currently configured binding:
+	 * those were arbitrated at the press edge, and a mid-hold camera change or
+	 * rebinding must not fake a release.
 	 */
 	public static boolean isPingHotkeyDown() {
-		if (!pingHoldArmed) {
-			return false;
-		}
-
-		var rawDown = KEY_BINDING_PING.same(Game.options.keyPickItem)
-			? Game.options.keyPickItem.isDown()
-			: KEY_BINDING_PING.isDown();
-
-		if (!rawDown) {
-			pingHoldArmed = false;
-		}
-
-		return rawDown;
+		return PING_INPUT_STATE.isArmed();
 	}
 
 	/**
 	 * Disarms the ping hold without touching the raw key state.
 	 *
-	 * <p>Called when leaving a server so a disconnect while the ping key is
-	 * held can never leak the armed hold into the next connection. The raw key
-	 * state is deliberately left alone: the physical key still reports its
-	 * current state, and only the armed-hold edge arbitration is forgotten.
+	 * <p>Called when leaving a server or when Minecraft releases all mappings
+	 * (for example on focus loss), so a held key cannot leak into the next
+	 * connection or screen. The raw Minecraft mapping state is owned by
+	 * {@link KeyMapping}; only this custom claim is cleared here.
 	 */
 	public static void resetPingHold() {
-		pingHoldArmed = false;
+		PING_INPUT_STATE.reset();
+	}
+
+	/** Value identity avoids depending on loader-specific Key object interning. */
+	private record ClaimedKey(InputConstants.Type type, int value) {
+		private static ClaimedKey from(InputConstants.Key key) {
+			return new ClaimedKey(key.getType(), key.getValue());
+		}
 	}
 }

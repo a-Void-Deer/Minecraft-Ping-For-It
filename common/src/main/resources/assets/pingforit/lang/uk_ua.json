@@ -12,6 +12,11 @@
 	"settings.pingforit.item_icon_visible": "Піктограми предметів",
 	"settings.pingforit.direction_indicator_visible": "Індикатор напрямку",
 	"settings.pingforit.ping_size": "Розмір мітки: %s",
+	"settings.pingforit.wheel_font_size": "Розмір шрифту варіантів колеса: %s",
+	"settings.pingforit.wheel_target_font_size": "Розмір шрифту цілі колеса: %s",
+	"settings.pingforit.reset_all": "Скинути все",
+	"settings.pingforit.reset_all.title": "Скинути всі налаштування?",
+	"settings.pingforit.reset_all.message": "Скинути всі налаштування Ping For It до усталених значень?",
 	"settings.pingforit.channel": "Канал мітки",
 	"settings.pingforit.channel.tooltip": "Мітки один одного бачитимуть лише користувачі певного каналу",
 
@@ -50,4 +55,8 @@
 	"command.pingforit.rate_limit.set.description": "установити ліміт частоти використання міток",
 	"command.pingforit.rate_limit.get.response": "Наразі ліміт частоти становить «%s»",
 	"command.pingforit.rate_limit.set.response": "Ліміт частоти змінено на «%s»"
+  ,"settings.pingforit.long_press_compatibility_mode": "Режим сумісності довгого натискання"
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Розпізнає швидкі клацання як одне віртуальне довге натискання."
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "Часовий інтервал сумісності"
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Максимальна пауза між послідовними клацаннями в режимі сумісності."
 }

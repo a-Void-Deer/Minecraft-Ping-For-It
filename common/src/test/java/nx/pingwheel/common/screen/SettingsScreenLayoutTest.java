@@ -29,6 +29,10 @@ class SettingsScreenLayoutTest {
 		assertEquals(layout.listBottom(), layout.footerTop());
 		assertTrue(layout.listTop() <= layout.listBottom());
 		assertTrue(layout.footerTop() < layout.footerBottom());
+		assertTrue(layout.resetX() >= 0);
+		assertTrue(layout.resetX() + SettingsScreenLayout.RESET_BUTTON_WIDTH <= Math.max(width, SettingsScreenLayout.RESET_BUTTON_WIDTH));
+		assertTrue(layout.resetY() >= layout.footerTop());
+		assertTrue(layout.resetY() + SettingsScreenLayout.RESET_BUTTON_HEIGHT <= layout.footerBottom());
 		assertTrue(layout.channelX() >= 0);
 		assertTrue(layout.channelX() + SettingsScreenLayout.CHANNEL_WIDTH <= width);
 		assertTrue(layout.channelY() >= layout.footerTop());

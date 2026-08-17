@@ -153,9 +153,8 @@ public final class WheelOverlayRenderer {
 			return;
 		}
 
-		int fontSize = ClientConfigBounds.clampWheelFontSize(config.getWheelFontSize());
-		double sectorMaxScale = WheelLabelLayout.BASE_TEXT_SCALE * fontSize / 100.0;
-		double targetLabelScale = fontSize / 100.0;
+		double sectorMaxScale = optionLabelScale(config.getWheelFontSize());
+		double targetLabelScale = targetLabelScale(config.getWheelTargetFontSize());
 
 		var pose = guiGraphics.pose();
 		pose.pushPose();
@@ -185,6 +184,16 @@ public final class WheelOverlayRenderer {
 			pose.popPose();
 			RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
 		}
+	}
+
+	static double optionLabelScale(int fontSize) {
+		return WheelLabelLayout.BASE_TEXT_SCALE
+			* ClientConfigBounds.clampWheelFontSize(fontSize)
+			/ 100.0;
+	}
+
+	static double targetLabelScale(int fontSize) {
+		return ClientConfigBounds.clampWheelTargetFontSize(fontSize) / 100.0;
 	}
 
 	private static void resetSelectionIfNeeded(ClientPingRuntime runtime) {

@@ -73,7 +73,6 @@ public final class PingInteractionStateMachine {
 	private CapturedPingContext capturedContext;
 	private long pressTimeMillis;
 	private long wheelOpenTimeMillis;
-	private long releaseTimeMillis;
 	private long lastObservedTimeMillis;
 	private boolean releaseObserved;
 	private WheelSelection selection = WheelSelection.NONE;
@@ -198,6 +197,35 @@ public final class PingInteractionStateMachine {
 	 * accepted across a reset.
 	 */
 	public InteractionToken press() {
+		long now = observeTime();
+		return pressAtObserved(now);
+	}
+
+	/**
+	 * Starts an interaction using an optional physical press timestamp from the
+	 * same monotonic clock. A timestamp older than the current observation is a
+	 * supported backdated start; a future timestamp is rejected before any token
+	 * or machine state is changed. The clock itself is still observed through
+	 * {@link #observeTime()}, so source rollback preserves the existing
+	 * invariant and fails with {@link IllegalStateException}.
+	 */
+	public InteractionToken pressAt(long physicalPressTimeMillis) {
+		long now = observeTime();
+
+		if (physicalPressTimeMillis > now) {
+			throw new IllegalArgumentException(
+				"physical press time is in the future: " + physicalPressTimeMillis + " > " + now);
+		}
+
+		return pressAtObserved(physicalPressTimeMillis);
+	}
+
+	/** Alias for callers that prefer the existing {@code press(...)} naming. */
+	public InteractionToken press(long physicalPressTimeMillis) {
+		return pressAt(physicalPressTimeMillis);
+	}
+
+	private InteractionToken pressAtObserved(long physicalPressTimeMillis) {
 		long configuredHoldMillis = readConfiguredThreshold(
 			"wheelHoldMillis",
 			wheelHoldMillisSupplier,
@@ -209,9 +237,22 @@ public final class PingInteractionStateMachine {
 		this.phase = PingInteractionPhase.PRESSED;
 		this.longPressMillis = configuredHoldMillis;
 		this.selection = WheelSelection.NONE;
-		this.pressTimeMillis = observeTime();
+		this.pressTimeMillis = physicalPressTimeMillis;
 		logger.debug("press: token={}", freshToken.sequence());
 		return freshToken;
+	}
+
+	/**
+	 * Abandons this machine's current interaction without emitting an action.
+	 * Invalidation precedes local clearing so asynchronous capture completion
+	 * cannot be accepted after the reset.
+	 */
+	public void abort() {
+		if (token != null) {
+			activeInteraction.invalidate(token);
+		}
+
+		resetMachineState();
 	}
 
 	/**
@@ -231,12 +272,43 @@ public final class PingInteractionStateMachine {
 	) {
 		Objects.requireNonNull(wheelSelection, "wheelSelection");
 		Objects.requireNonNull(cancellationContext, "cancellationContext");
-
 		if (phase == PingInteractionPhase.IDLE) {
 			return Optional.empty();
 		}
 
-		long now = observeTime();
+		return updateAt(keyDown, wheelSelection, cancellationContext, observeTime());
+	}
+
+	/**
+	 * Advances the machine using a timestamp already sampled by the enclosing
+	 * client-frame boundary.  This keeps presentation and action advancement on
+	 * one monotonic observation when a caller owns the frame clock read.
+	 */
+	public Optional<PingInteractionAction> updateAt(
+		boolean keyDown,
+		WheelSelection wheelSelection,
+		CancellationContext cancellationContext,
+		long observedTimeMillis
+	) {
+		Objects.requireNonNull(wheelSelection, "wheelSelection");
+		Objects.requireNonNull(cancellationContext, "cancellationContext");
+		if (phase == PingInteractionPhase.IDLE) {
+			return Optional.empty();
+		}
+
+		return updateObserved(keyDown, wheelSelection, cancellationContext, observeTimeValue(observedTimeMillis));
+	}
+
+	private Optional<PingInteractionAction> updateObserved(
+		boolean keyDown,
+		WheelSelection wheelSelection,
+		CancellationContext cancellationContext,
+		long now
+	) {
+
+		if (phase == PingInteractionPhase.IDLE) {
+			return Optional.empty();
+		}
 
 		if (!activeInteraction.isCurrent(token)) {
 			logger.debug("interaction superseded: token={}", token.sequence());
@@ -268,18 +340,34 @@ public final class PingInteractionStateMachine {
 	 * selection, or emits an action. The press timestamp remains the baseline
 	 * even when the capture arrived asynchronously after the threshold.
 	 *
-	 * <p>A release observed by a frame does not commit or cancel anything; the
-	 * tick path still owns the single release action. Consequently a release
-	 * between this method and the next tick cannot cause a duplicate action or
-	 * make an interaction that never presented as a wheel retroactively become a
-	 * wheel interaction.
+	 * <p>A release observed by a frame does not commit or cancel anything by
+	 * itself; the event/frame action path owns the single release action.
+	 * Consequently a release between this method and the next frame cannot cause
+	 * a duplicate action or make an interaction that never presented as a wheel
+	 * retroactively become a wheel interaction. Such an interaction is still a
+	 * short press when the release event/frame arrives, even if the elapsed time
+	 * has reached the threshold.
 	 */
 	public void presentFrame(boolean keyDown) {
 		if (phase == PingInteractionPhase.IDLE) {
 			return;
 		}
 
-		long now = observeTime();
+		presentFrameAt(keyDown, observeTime());
+	}
+
+	/**
+	 * Presentation counterpart to {@link #updateAt(boolean, WheelSelection,
+	 * CancellationContext, long)}.  The caller supplies the same frame timestamp
+	 * to both paths so one rendered frame cannot cross a compatibility boundary
+	 * between two clock reads.
+	 */
+	public void presentFrameAt(boolean keyDown, long observedTimeMillis) {
+		if (phase == PingInteractionPhase.IDLE) {
+			return;
+		}
+
+		long now = observeTimeValue(observedTimeMillis);
 
 		if (!activeInteraction.isCurrent(token)) {
 			logger.debug("interaction superseded: token={}", token.sequence());
@@ -355,7 +443,6 @@ public final class PingInteractionStateMachine {
 		if (capture.isEmpty()) {
 			if (!keyDown && !releaseObserved) {
 				releaseObserved = true;
-				releaseTimeMillis = now;
 				logger.debug("release pending capture: token={}", token.sequence());
 			}
 
@@ -368,20 +455,13 @@ public final class PingInteractionStateMachine {
 		if (!keyDown) {
 			if (!releaseObserved) {
 				releaseObserved = true;
-				releaseTimeMillis = now;
 			}
 
-			long held = releaseTimeMillis - pressTimeMillis;
-
-			if (held < longPressMillis) {
-				return commitPing(context, context.resolvedTarget().targetType().defaultPingType());
-			}
-
-			// Released at/after the threshold while the capture was still pending:
-			// the wheel can no longer open, so no action is possible.
-			logger.debug("long release no action: token={}", token.sequence());
-			resetMachineState();
-			return Optional.empty();
+			// The wheel is a real interaction only after presentFrame() has opened
+			// it. If release wins before that transition, commit the captured
+			// target's default ping regardless of tick-quantized elapsed time. This
+			// also handles a capture that completes after the key was released.
+			return commitPing(context, context.resolvedTarget().targetType().defaultPingType());
 		}
 
 		// Key still down: presentation-only threshold handling belongs to
@@ -500,6 +580,10 @@ public final class PingInteractionStateMachine {
 
 	private long observeTime() {
 		long now = timeSource.nowMillis();
+		return observeTimeValue(now);
+	}
+
+	private long observeTimeValue(long now) {
 
 		if (now < lastObservedTimeMillis) {
 			throw new IllegalStateException(
@@ -516,7 +600,6 @@ public final class PingInteractionStateMachine {
 		capturedContext = null;
 		pressTimeMillis = 0L;
 		wheelOpenTimeMillis = 0L;
-		releaseTimeMillis = 0L;
 		longPressMillis = LONG_PRESS_MILLIS;
 		wheelTimeoutMillis = WHEEL_TIMEOUT_MILLIS;
 		releaseObserved = false;

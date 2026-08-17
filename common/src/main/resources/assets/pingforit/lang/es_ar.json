@@ -15,6 +15,11 @@
 	"settings.pingforit.player_info_mode.hold.tooltip": "La información del jugador se muestra cuando se mantiene la tecla \"%s\" (%s)",
 	"settings.pingforit.team_color_mode": "Color de equipo",
 	"settings.pingforit.ping_size": "Tamaño del ping: %s",
+	"settings.pingforit.wheel_font_size": "Tamaño de fuente de opciones de la rueda: %s",
+	"settings.pingforit.wheel_target_font_size": "Tamaño de fuente del objetivo de la rueda: %s",
+	"settings.pingforit.reset_all": "Restablecer todo",
+	"settings.pingforit.reset_all.title": "¿Restablecer todos los ajustes?",
+	"settings.pingforit.reset_all.message": "¿Restablecer todos los ajustes de Ping For It a sus valores predeterminados?",
 	"settings.pingforit.channel": "Canal de pings",
 	"settings.pingforit.channel.tooltip": "Solo vas a enviar y recibir pings de jugadores en el mismo canal",
 	"settings.pingforit.channel.placeholder": "Sincronizado con %s",
@@ -63,4 +68,8 @@
 	"command.pingforit.rate_limit.set.description": "configurar el límite de uso de pings",
 	"command.pingforit.rate_limit.get.response": "Límite actual de uso: %s",
 	"command.pingforit.rate_limit.set.response": "Límite de uso cambiado a %s"
+  ,"settings.pingforit.long_press_compatibility_mode": "Modo de compatibilidad de pulsación larga"
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Reconoce clics rápidos como una sola pulsación larga virtual."
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "Intervalo de compatibilidad"
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Separación máxima entre clics consecutivos con el modo activado."
 }

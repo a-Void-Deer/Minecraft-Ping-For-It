@@ -15,7 +15,11 @@
 	"settings.pingforit.wheel_inner_radius": "轮盘内半径: %s",
 	"settings.pingforit.wheel_outer_radius": "轮盘外半径: %s",
 	"settings.pingforit.wheel_opacity": "轮盘不透明度: %s",
-	"settings.pingforit.wheel_font_size": "轮盘字体大小: %s",
+	"settings.pingforit.wheel_font_size": "轮盘选项字体大小: %s",
+	"settings.pingforit.wheel_target_font_size": "轮盘目标字体大小: %s",
+	"settings.pingforit.reset_all": "全部重置",
+	"settings.pingforit.reset_all.title": "重置所有设置？",
+	"settings.pingforit.reset_all.message": "要将 Ping For It 的所有设置恢复为默认值吗？",
 	"settings.pingforit.wheel_hold_millis": "轮盘长按时间: %s",
 	"settings.pingforit.wheel_timeout_millis": "轮盘超时时间: %s",
 	"settings.pingforit.cancel_half_cone_angle_degrees": "取消视野半角: %s",
@@ -69,4 +73,8 @@
 
 	"pingforit.target.here": "此处",
 	"pingforit.target.unknown": "未知目标"
+  ,"settings.pingforit.long_press_compatibility_mode": "长按兼容模式"
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "将快速连续点击识别为一次虚拟长按。"
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "兼容时间片"
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "启用兼容模式时相邻点击之间允许的最大间隔。"
 }

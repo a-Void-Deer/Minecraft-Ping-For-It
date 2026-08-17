@@ -18,7 +18,11 @@
 	"settings.pingforit.wheel_inner_radius": "Wheel Inner Radius: %s",
 	"settings.pingforit.wheel_outer_radius": "Wheel Outer Radius: %s",
 	"settings.pingforit.wheel_opacity": "Wheel Opacity: %s",
-	"settings.pingforit.wheel_font_size": "Wheel Font Size: %s",
+	"settings.pingforit.wheel_font_size": "Wheel Option Font Size: %s",
+	"settings.pingforit.wheel_target_font_size": "Wheel Target Font Size: %s",
+	"settings.pingforit.reset_all": "Reset All",
+	"settings.pingforit.reset_all.title": "Reset all settings?",
+	"settings.pingforit.reset_all.message": "Reset all Ping For It settings to their defaults?",
 	"settings.pingforit.wheel_hold_millis": "Wheel Hold Time: %s",
 	"settings.pingforit.wheel_timeout_millis": "Wheel Timeout: %s",
 	"settings.pingforit.cancel_half_cone_angle_degrees": "Cancel Cone Half-Angle: %s",
@@ -94,4 +98,8 @@
 
 	"pingforit.target.here": "HERE",
 	"pingforit.target.unknown": "Unknown Target"
+  ,"settings.pingforit.long_press_compatibility_mode": "Long-Press Compatibility Mode"
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Recognize rapid clicks as one virtual long press."
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "Compatibility Time Slice"
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Maximum gap between adjacent clicks when compatibility mode is enabled."
 }

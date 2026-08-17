@@ -12,12 +12,17 @@ public final class ClientConfigBounds {
 	public static final int DEFAULT_WHEEL_HOLD_MILLIS = 300;
 	public static final int MIN_WHEEL_HOLD_MILLIS = 100;
 	public static final int MAX_WHEEL_HOLD_MILLIS = 2000;
-	public static final int WHEEL_HOLD_MILLIS_STEP = 50;
+	public static final int WHEEL_HOLD_MILLIS_STEP = 10;
+
+	public static final int DEFAULT_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS = 20;
+	public static final int MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS = 10;
+	public static final int MAX_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS = 300;
+	public static final int LONG_PRESS_COMPATIBILITY_SLICE_MILLIS_STEP = 5;
 
 	public static final int DEFAULT_WHEEL_TIMEOUT_MILLIS = 5000;
 	public static final int MIN_WHEEL_TIMEOUT_MILLIS = 1000;
 	public static final int MAX_WHEEL_TIMEOUT_MILLIS = 30000;
-	public static final int WHEEL_TIMEOUT_MILLIS_STEP = 500;
+	public static final int WHEEL_TIMEOUT_MILLIS_STEP = 200;
 
 	public static final int DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES = 5;
 	public static final int MIN_CANCEL_HALF_CONE_ANGLE_DEGREES = 1;
@@ -26,12 +31,12 @@ public final class ClientConfigBounds {
 
 	public static final int DEFAULT_WHEEL_INNER_RADIUS = 14;
 	public static final int MIN_WHEEL_INNER_RADIUS = 6;
-	public static final int MAX_WHEEL_INNER_RADIUS = 30;
+	public static final int MAX_WHEEL_INNER_RADIUS = 120;
 	public static final int WHEEL_INNER_RADIUS_STEP = 1;
 
 	public static final int DEFAULT_WHEEL_OUTER_RADIUS = 39;
 	public static final int MIN_WHEEL_OUTER_RADIUS = 20;
-	public static final int MAX_WHEEL_OUTER_RADIUS = 75;
+	public static final int MAX_WHEEL_OUTER_RADIUS = 300;
 	public static final int WHEEL_OUTER_RADIUS_STEP = 1;
 	public static final int MIN_WHEEL_ANNULUS_THICKNESS = 8;
 
@@ -41,9 +46,15 @@ public final class ClientConfigBounds {
 	public static final int WHEEL_OPACITY_STEP = 5;
 
 	public static final int DEFAULT_WHEEL_FONT_SIZE = 100;
-	public static final int MIN_WHEEL_FONT_SIZE = 50;
-	public static final int MAX_WHEEL_FONT_SIZE = 200;
+	public static final int MIN_WHEEL_FONT_SIZE = 10;
+	public static final int MAX_WHEEL_FONT_SIZE = 500;
 	public static final int WHEEL_FONT_SIZE_STEP = 10;
+
+	/** The target-name setting uses the same shared font bounds as option labels. */
+	public static final int DEFAULT_WHEEL_TARGET_FONT_SIZE = DEFAULT_WHEEL_FONT_SIZE;
+	public static final int MIN_WHEEL_TARGET_FONT_SIZE = MIN_WHEEL_FONT_SIZE;
+	public static final int MAX_WHEEL_TARGET_FONT_SIZE = MAX_WHEEL_FONT_SIZE;
+	public static final int WHEEL_TARGET_FONT_SIZE_STEP = WHEEL_FONT_SIZE_STEP;
 
 	private ClientConfigBounds() {}
 
@@ -51,6 +62,34 @@ public final class ClientConfigBounds {
 
 	public static int clampWheelHoldMillis(int value) {
 		return Math.clamp(value, MIN_WHEEL_HOLD_MILLIS, MAX_WHEEL_HOLD_MILLIS);
+	}
+
+	/**
+	 * Calculates the maximum compatibility gap for a validated wheel-hold
+	 * duration.  The floor is intentional: a slice never becomes a value that
+	 * is not representable by the five-millisecond UI step.
+	 */
+	public static int effectiveLongPressCompatibilitySliceMaxMillis(int wheelHoldMillis) {
+		int effectiveHoldMillis = clampWheelHoldMillis(wheelHoldMillis);
+		int halfHoldMillis = Math.floorDiv(effectiveHoldMillis, 2);
+		int steppedMaximum = Math.floorDiv(
+			halfHoldMillis,
+			LONG_PRESS_COMPATIBILITY_SLICE_MILLIS_STEP)
+			* LONG_PRESS_COMPATIBILITY_SLICE_MILLIS_STEP;
+
+		// Keep the range valid even if the wheel-hold lower bound changes in a
+		// future version.  The current bounds produce a maximum of at least 50.
+		return Math.clamp(
+			Math.max(MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS, steppedMaximum),
+			MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
+			MAX_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS);
+	}
+
+	public static int clampLongPressCompatibilitySliceMillis(int value, int wheelHoldMillis) {
+		return Math.clamp(
+			value,
+			MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
+			effectiveLongPressCompatibilitySliceMaxMillis(wheelHoldMillis));
 	}
 
 	public static int clampWheelTimeoutMillis(int value) {
@@ -97,5 +136,9 @@ public final class ClientConfigBounds {
 
 	public static int clampWheelFontSize(int value) {
 		return Math.clamp(value, MIN_WHEEL_FONT_SIZE, MAX_WHEEL_FONT_SIZE);
+	}
+
+	public static int clampWheelTargetFontSize(int value) {
+		return Math.clamp(value, MIN_WHEEL_TARGET_FONT_SIZE, MAX_WHEEL_TARGET_FONT_SIZE);
 	}
 }

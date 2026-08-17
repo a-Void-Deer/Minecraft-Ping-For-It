@@ -1,9 +1,11 @@
 package nx.pingwheel.common;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.MultiBufferSource;
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
@@ -30,6 +32,8 @@ import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.platform.IPlatformContextService;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.interaction.state.InteractionTimeSource;
+import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.render.OverlayRenderer;
 import nx.pingwheel.common.render.WheelOverlayRenderer;
 import nx.pingwheel.common.render.WorldRenderContext;
@@ -47,6 +51,7 @@ public class CommonClient {
 
 	private static ClientPingRuntime pingRuntime;
 	private static ClientRateLimitPolicy storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
+	private static final InteractionTimeSource INTERACTION_TIME_SOURCE = InteractionTimeSource.system();
 
 	private CommonClient() {}
 
@@ -95,6 +100,96 @@ public class CommonClient {
 		InputUtils.resetPingHold();
 	}
 
+	/**
+	 * Receives the post-{@code KeyMapping.click} raw press edge. Arbitration is
+	 * resolved here while the mapping counters still represent this physical
+	 * event; a claimed edge is captured and minted immediately on the client
+	 * thread.
+	 */
+	public void onKeyMappingClick(InputConstants.Key rawKey) {
+		// Sample before any mapping arbitration or world lookup.  This is the
+		// physical event timestamp, not the later tick/frame time.
+		long eventTimeMillis = INTERACTION_TIME_SOURCE.nowMillis();
+		Game = Minecraft.getInstance();
+
+		if (!InputUtils.claimPingClick(rawKey)) {
+			return;
+		}
+
+		if (Game.screen != null) {
+			abortInteractionIfActive();
+			return;
+		}
+
+		if (pingRuntime == null) {
+			pingRuntime = createPingRuntimeIfInWorld();
+		}
+
+		if (pingRuntime != null) {
+			pingRuntime.onPress(eventTimeMillis);
+			if (Game.level == null || Game.player == null) {
+				// The runtime may have become invalid between arbitration and the
+				// client-thread capture. Do not carry the claimed raw key into a
+				// later world.
+				InputUtils.resetPingHold();
+			}
+		} else {
+			// A click in a menu must never arm an interaction that can leak into
+			// a later world.
+			InputUtils.resetPingHold();
+		}
+	}
+
+	/** Receives a post-{@code KeyMapping.set} raw release edge. */
+	public void onKeyMappingState(InputConstants.Key rawKey, boolean isDown) {
+		Game = Minecraft.getInstance();
+
+		if (!InputUtils.observeKeyState(rawKey, isDown)) {
+			return;
+		}
+
+		if (pingRuntime != null) {
+			pingRuntime.onRelease();
+		}
+	}
+
+	/**
+	 * Aborts the current interaction when Minecraft clears all key mappings,
+	 * such as on focus loss. No default ping is produced.
+	 */
+	public void onInputReset() {
+		abortInteractionIfActive();
+	}
+
+	/**
+	 * Aborts an interaction at the screen transition boundary.  The identity
+	 * check keeps repeated calls for the same screen cheap while still handling
+	 * both opening and closing a menu before a swallowed release can arrive.
+	 */
+	public void onScreenChanged(Screen nextScreen) {
+		Game = Minecraft.getInstance();
+
+		if (Game.screen == nextScreen) {
+			return;
+		}
+
+		abortInteractionIfActive();
+	}
+
+	private void abortInteractionIfActive() {
+		boolean claimedInput = InputUtils.isPingHotkeyDown();
+		boolean activeInteraction = pingRuntime != null
+			&& pingRuntime.phase() != PingInteractionPhase.IDLE;
+		boolean compatibilityState = pingRuntime != null && pingRuntime.hasCompatibilityState();
+
+		InputUtils.resetPingHold();
+		if (activeInteraction || claimedInput || compatibilityState) {
+			if (pingRuntime != null) {
+				pingRuntime.abort();
+			}
+		}
+	}
+
 	public void onTickStart() {
 		Game = Minecraft.getInstance();
 		GameContext.updateDimension();
@@ -104,8 +199,13 @@ public class CommonClient {
 		}
 
 		if (pingRuntime != null) {
-			var pingPressEdge = InputUtils.consumePingHotkey();
-			pingRuntime.onTick(pingPressEdge, InputUtils.isPingHotkeyDown());
+			pingRuntime.onTick();
+		}
+
+		if (Game.level == null || Game.player == null) {
+			// onTick() aborts the runtime interaction when the world disappears;
+			// this also clears the raw claim so a later join cannot inherit it.
+			InputUtils.resetPingHold();
 		}
 
 		if (KEY_BINDING_SETTINGS.consumeClick()) {
@@ -257,16 +357,21 @@ public class CommonClient {
 	}
 
 	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
-		if (pingRuntime != null && Game != null) {
-			// Threshold/timeout transitions are presentation-only and must be
-			// evaluated before either overlay decides whether the wheel is drawn.
-			// The tick path remains the sole owner of queued selection consumption
-			// and packet/action dispatch.
+		OverlayRenderer.draw(guiGraphics, tickDelta);
+		WheelOverlayRenderer.draw(guiGraphics, tickDelta);
+	}
+
+	/** Advances interaction timing once from the GameRenderer frame boundary. */
+	public void onRenderFrame() {
+		Game = Minecraft.getInstance();
+
+		if (pingRuntime != null) {
 			pingRuntime.onRenderFrame(InputUtils.isPingHotkeyDown());
 		}
 
-		OverlayRenderer.draw(guiGraphics, tickDelta);
-		WheelOverlayRenderer.draw(guiGraphics, tickDelta);
+		if (Game.level == null || Game.player == null) {
+			InputUtils.resetPingHold();
+		}
 	}
 
 	/**
@@ -386,6 +491,7 @@ public class CommonClient {
 		return ClientPingRuntime.create(
 			new MinecraftLocalErrorSink(),
 			IPlatformNetworkService.INSTANCE::sendToServer,
-			storedRateLimitPolicy);
+			storedRateLimitPolicy,
+			INTERACTION_TIME_SOURCE);
 	}
 }

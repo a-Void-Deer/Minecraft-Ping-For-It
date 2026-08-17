@@ -19,9 +19,12 @@ This changelog describes the player- and server-admin-facing changes for Minecra
 
 - The target and ray are captured when the ping key is pressed and stay locked for the interaction; moving the camera does not retarget it.
 - A short release sends the default type. Holding the key for the default 300 ms opens the wheel.
+- Releasing at or beyond the hold threshold before a render frame has actually opened the wheel still commits the captured target's default ping, including when capture finishes after release.
 - The wheel times out after the default 5 seconds with no action, while selecting a sector commits the chosen ping type.
 - The center `X` cancels the nearest marker you own within the original press-ray cone and current dimension.
 - When the ping key is shared with Pick Block, vanilla Pick Block behavior is preserved, and mouse capture is recovered after wheel interaction.
+- An optional Long-Press Compatibility Mode recognizes adjacent claimed clicks as one virtual long press. The first short click is sent immediately; suppressed clicks are never replayed, and the existing wheel/cancel action remains authoritative once the wheel actually opens.
+- Compatibility timing is monotonic and event/frame driven: the adjacent-click slice is inclusive at its boundary, uses the effective 10–300 ms range (5 ms steps), and is capped at half the current wheel-hold duration.
 
 ## Multiplayer markers and server behavior
 
@@ -42,24 +45,28 @@ This changelog describes the player- and server-admin-facing changes for Minecra
 
 ## Configuration
 
-The seven configurable keys and their bounds are:
+The ten configurable keys and their bounds are:
 
 - `wheelHoldMillis`: 300 ms by default; 100–2000 ms.
+- `longPressCompatibilityMode`: disabled by default; when enabled, adjacent claimed clicks can form a virtual long press without changing normal short-click timing.
+- `longPressCompatibilitySliceMillis`: 20 ms by default; nominally 10–300 ms in 5 ms steps, with an effective maximum of `min(300, floor((wheelHoldMillis / 2) / 5) * 5)` and a safe lower bound.
 - `wheelTimeoutMillis`: 5000 ms by default; 1000–30000 ms.
 - `cancelHalfConeAngleDegrees`: 5° by default; 1–45°.
-- `wheelInnerRadius`: 14 px by default; 6–30 px.
-- `wheelOuterRadius`: 39 px by default; 20–75 px.
+- `wheelInnerRadius`: 14 px by default; 6–120 px.
+- `wheelOuterRadius`: 39 px by default; 20–300 px.
 - `wheelOpacity`: 100% by default; 0–100%.
-- `wheelFontSize`: 100% by default; 50–200%.
+- `wheelFontSize`: 100% by default; 10–500%, in 10% steps. This legacy JSON key now controls wheel option labels.
+- `wheelTargetFontSize`: 100% by default; 10–500%, in 10% steps. This controls the captured target name.
 
-The wheel keeps an 8 px minimum annulus. The hold-time setting is snapshotted at key press, the timeout setting is snapshotted when the wheel opens, and visual settings update live. Opacity 0 hides the wheel without disabling selection. Out-of-range JSON values are clamped and logged at WARN with the key, supplied value, and effective value. The settings screen now scrolls correctly and keeps its footer visible.
+The wheel keeps an 8 px minimum annulus. The hold-time setting is snapshotted at key press, the timeout setting is snapshotted when the wheel opens, and visual settings update live. The hold-time UI step is 10 ms and the timeout UI step is 200 ms. Opacity 0 hides the wheel without disabling selection. Out-of-range JSON values are clamped and logged at WARN with the key, supplied value, and effective value. The settings screen now includes a Reset All button with confirmation; confirming replaces and persists the complete default config, while canceling preserves current values. The settings screen scrolls correctly and keeps its footer visible.
 
 ## Compatibility and localization
 
 - Distant Horizons integration was added for targeting distant terrain.
 - Compatibility with Sable, FTB Teams, Voice Chat, and vanilla teams is retained and hardened; optional integrations fail soft when absent.
 - Debug and configuration logs avoid exposing player identity, target details, channel names, or server/channel mappings.
-- English and Simplified Chinese include complete new labels. Other bundled languages may fall back to English for new strings.
+- High-precision ping input is observed at client-thread `KeyMapping` press/release edges and advanced once per rendered frame using monotonic time; client tick input quantization is no longer used for the interaction.
+- Compatibility transition logs contain only scalar timing, threshold, count, and result values. All nine bundled languages include the Reset All, split wheel-font, and long-press compatibility labels/tooltips.
 
 ## Known behavior
 

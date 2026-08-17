@@ -52,6 +52,7 @@ import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.PingInteractionStateMachine;
 import nx.pingwheel.common.interaction.wheel.WheelSelection;
+import nx.pingwheel.common.client.LongPressCompatibilityController;
 import nx.pingwheel.common.integration.DistantHorizonsIntegration;
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.integration.SableIntegration;
@@ -70,6 +71,7 @@ import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
+import nx.pingwheel.common.util.InputUtils;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
@@ -96,16 +98,13 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
  *       onto the wire or the local error sink.</li>
  * </ul>
  *
- * <p>{@link #onTick(boolean, boolean)} is called every client tick from the
- * game thread: it consumes the press edge, captures the target immediately at
- * key-down (never on release or wheel movement), consumes the queued wheel
- * selection, advances the machine's action path with a cancellation context
- * built from live local state, dispatches the returned action at most once, and
- * runs the store's fallback expiry using a monotonic local tick counter.
- * Presentation-only threshold/timeout transitions are handled by
- * {@link #onRenderFrame(boolean)} instead. One fresh runtime is created per
- * world join and dropped on leave (see {@code CommonClient}), so interaction
- * and marker state can never leak across connections.
+	 * <p>Press and release events arrive directly from the client-thread
+	 * {@code KeyMapping} hooks. Each rendered frame advances monotonic timing,
+	 * selection, pending asynchronous capture completion, and mouse capture once;
+	 * the client tick retains only fallback marker expiry housekeeping. One fresh
+	 * runtime is created per world join and dropped on leave (see
+	 * {@code CommonClient}), so interaction and marker state can never leak across
+	 * connections.
  *
  * <p>Logging only ever carries safe fields: token sequences, request/marker
  * ids, ping type ids, target kinds, candidate counts, and reasons. UUIDs,
@@ -127,8 +126,6 @@ public final class ClientPingRuntime {
 	 */
 	private static final String DISTANT_HIT_ABANDONED_LEVEL_CHANGE = "distant hit abandoned: level unavailable or changed";
 
-	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
-
 	private final ClientMarkerStore markerStore;
 	private final ActiveInteraction activeInteraction;
 	private final PingCaptureCoordinator captureCoordinator;
@@ -139,6 +136,11 @@ public final class ClientPingRuntime {
 	private final WheelMouseCapture wheelMouseCapture;
 	private final CreateRequestTracker createRequestTracker;
 	private final ClientCreateRateLimiter createRateLimiter;
+	private final InteractionTimeSource timeSource;
+	private final LongPressCompatibilityController compatibilityController;
+	private static final CancellationContext EMPTY_CANCELLATION_CONTEXT = createEmptyCancellationContext();
+	private ClientLevel observedLevel;
+	private String observedDimension;
 
 	/**
 	 * Authoritative target display names keyed by marker id, main-thread
@@ -166,7 +168,8 @@ public final class ClientPingRuntime {
 		PingInteractionLogger logger,
 		WheelMouseCapture wheelMouseCapture,
 		CreateRequestTracker createRequestTracker,
-		ClientCreateRateLimiter createRateLimiter
+		ClientCreateRateLimiter createRateLimiter,
+		InteractionTimeSource timeSource
 	) {
 		this.markerStore = Objects.requireNonNull(markerStore, "markerStore");
 		this.activeInteraction = Objects.requireNonNull(activeInteraction, "activeInteraction");
@@ -178,6 +181,15 @@ public final class ClientPingRuntime {
 		this.wheelMouseCapture = Objects.requireNonNull(wheelMouseCapture, "wheelMouseCapture");
 		this.createRequestTracker = Objects.requireNonNull(createRequestTracker, "createRequestTracker");
 		this.createRateLimiter = Objects.requireNonNull(createRateLimiter, "createRateLimiter");
+		this.timeSource = Objects.requireNonNull(timeSource, "timeSource");
+		this.compatibilityController = new LongPressCompatibilityController(
+			new RuntimeInteractionPort(),
+			timeSource,
+			() -> ClientConfig.HANDLER.getConfig().isLongPressCompatibilityMode(),
+			() -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis(),
+			() -> ClientConfig.HANDLER.getConfig().getLongPressCompatibilitySliceMillis(),
+			logger,
+			InputUtils::resetPingHold);
 	}
 
 	/**
@@ -207,9 +219,21 @@ public final class ClientPingRuntime {
 		ClientPingActionDispatcher.PacketSender packetSender,
 		ClientRateLimitPolicy rateLimitPolicy
 	) {
+		return create(errorSink, packetSender, rateLimitPolicy, InteractionTimeSource.system());
+	}
+
+	/**
+	 * Creates a runtime sharing the supplied monotonic clock across the state
+	 * machine and client courtesy limiter.
+	 */
+	public static ClientPingRuntime create(
+		ClientPingActionDispatcher.LocalErrorSink errorSink,
+		ClientPingActionDispatcher.PacketSender packetSender,
+		ClientRateLimitPolicy rateLimitPolicy,
+		InteractionTimeSource timeSource
+	) {
 		Objects.requireNonNull(errorSink, "errorSink");
 		Objects.requireNonNull(packetSender, "packetSender");
-		InteractionTimeSource timeSource = InteractionTimeSource.system();
 		Objects.requireNonNull(timeSource, "timeSource");
 		Objects.requireNonNull(rateLimitPolicy, "rateLimitPolicy");
 
@@ -247,23 +271,24 @@ public final class ClientPingRuntime {
 			logger,
 			new WheelMouseCapture(logger),
 			createRequestTracker,
-			createRateLimiter);
+			createRateLimiter,
+			timeSource);
 	}
 
 	/**
-	 * Advances the runtime by one client tick.
+	 * The client tick entry point below handles housekeeping only; interaction
+	 * advancement is event/frame driven.
 	 *
-	 * <p>Does nothing while no valid level/player is available. On the press
-	 * edge the machine is pressed and the target is captured immediately
-	 * (synchronously on the game thread, or asynchronously for a Distant
-	 * Horizons miss). Then the machine is updated with the current key state,
-	 * the wheel selection queued by the latest GUI frame, and a live
-	 * cancellation context, and the returned action is dispatched at most
-	 * once. Finally the wheel mouse capture is synced with whatever phase the
-	 * machine ended in, and the marker store's fallback expiry runs against
-	 * the incremented local tick.
+	 * <p>Does nothing while no valid level/player is available. Press and release
+	 * edges are handled immediately by their event methods; rendered frames
+	 * advance the machine with the current key state and queued wheel selection.
+	 * A live cancellation context is built only for a wheel release that can
+	 * perform cancellation. The returned action is dispatched at most once.
+	 * Finally the wheel mouse capture is synced with whatever phase the machine
+	 * ended in, and the marker store's fallback expiry runs against the
+	 * incremented local tick.
 	 *
-	 * <p>The queued wheel selection is consumed exactly once per tick and the
+	 * <p>The queued wheel selection is consumed exactly once per frame and the
 	 * queued slot is reset to {@link WheelSelection#NONE} before the update,
 	 * so a selection must be refreshed by a later GUI frame to be seen again:
 	 * if rendering stops, a release commits {@code NONE} instead of a stale
@@ -274,78 +299,97 @@ public final class ClientPingRuntime {
 	 * not built at all; only the mouse capture sync and the fallback expiry
 	 * run.
 	 */
-	public void onTick(boolean pressEdge, boolean keyDown) {
+	/** Handles client-tick marker expiry only; interaction input is event/frame driven. */
+	public void onTick() {
 		Minecraft game = Game;
 
 		if (game == null || game.level == null || game.player == null) {
+			compatibilityController.abort();
+			InputUtils.resetPingHold();
 			return;
 		}
 
+		observeWorldContinuity(game);
+
 		localTick++;
-
-		if (pressEdge) {
-			InteractionToken token = machine.press();
-			pendingRay = null;
-			captureImmediately(token);
-		}
-
-		WheelSelection consumedSelection = wheelSelection;
-		wheelSelection = WheelSelection.NONE;
-
-		if (machine.phase() != PingInteractionPhase.IDLE) {
-			Optional<PingInteractionAction> action = machine.update(keyDown, consumedSelection, buildCancellationContext());
-
-			if (action.isPresent()) {
-				PingInteractionAction dispatched = action.get();
-
-				dispatcher.dispatch(dispatched);
-			}
-		}
-
-		if (machine.phase() == PingInteractionPhase.IDLE) {
-			pendingRay = null;
-		}
-
-		// Keep the mouse capture in sync with whatever phase the update left
-		// behind: open (release), or timeout/commit/cancel/stale (re-grab).
-		wheelMouseCapture.sync(machine.phase(), game);
-
 		expireFallbackMarkers();
+	}
+
+	/** Handles a claimed physical press immediately on the client thread. */
+	public void onPress(long eventTimeMillis) {
+		Minecraft game = Game;
+
+		if (game == null || game.level == null || game.player == null) {
+			compatibilityController.abort();
+			InputUtils.resetPingHold();
+			return;
+		}
+
+		observeWorldContinuity(game);
+
+		compatibilityController.onPress(eventTimeMillis);
+	}
+
+	/**
+	 * Compatibility overload for non-event callers.  Production raw input uses
+	 * {@link #onPress(long)} so the timestamp is sampled at the mapping callback.
+	 */
+	public void onPress() {
+		onPress(timeSource.nowMillis());
+	}
+
+	/**
+	 * Handles a claimed physical release immediately. If capture is still
+	 * asynchronous, the release is remembered by the machine and the next
+	 * render frame commits it once the frozen capture arrives.
+	 */
+	public void onRelease() {
+		Minecraft game = Game;
+
+		if (game == null || game.level == null || game.player == null) {
+			compatibilityController.abort();
+			InputUtils.resetPingHold();
+			return;
+		}
+
+		observeWorldContinuity(game);
+
+		compatibilityController.onRelease();
 	}
 
 	/**
 	 * Advances presentation-only interaction timing for one GUI/render frame.
 	 *
-	 * <p>The frame path can make a capture-ready held interaction visible as an
-	 * open wheel and can silently close a timed-out wheel, but it never consumes
-	 * the queued selection, validates/commits an action, or sends a packet. The
-	 * action and selection boundary remains {@link #onTick(boolean, boolean)}.
-	 * Mouse capture is synchronized here as well as on ticks so a wheel that
-	 * appears or times out between ticks preserves the existing release/re-grab
-	 * semantics without duplicate transitions.
+	 * <p>The frame path makes a capture-ready held interaction visible as an open
+	 * wheel, silently closes timed-out wheels, consumes the current wheel
+	 * selection, and completes a release whose asynchronous capture arrived
+	 * after the release event. It is the sole per-frame interaction path.
+	 * Mouse capture is synchronized on this single frame path (and immediate
+	 * release/press events) so visible transitions preserve the existing
+	 * release/re-grab semantics without duplicate transitions.
 	 */
 	public void onRenderFrame(boolean keyDown) {
 		Minecraft game = Game;
 
 		if (game == null || game.level == null || game.player == null) {
+			compatibilityController.abort();
+			InputUtils.resetPingHold();
 			return;
 		}
 
-		machine.presentFrame(keyDown);
+		observeWorldContinuity(game);
 
-		// A frame-side timeout/transition must not leave a prior GUI selection
-		// queued for the next tick. Selection is meaningful only while the wheel
-		// remains open; it is still preserved between open frames and the owning
-		// tick consumes it exactly once.
-		if (machine.phase() != PingInteractionPhase.WHEEL_OPEN) {
-			wheelSelection = WheelSelection.NONE;
-		}
+		compatibilityController.onRenderFrame(keyDown);
+	}
 
-		if (machine.phase() == PingInteractionPhase.IDLE) {
-			pendingRay = null;
-		}
-
-		wheelMouseCapture.sync(machine.phase(), game);
+	/**
+	 * Explicitly abandons the active interaction without creating a default
+	 * ping. The token is invalidated first so a late asynchronous capture cannot
+	 * resurrect the interaction.
+	 */
+	public void abort() {
+		compatibilityController.abort();
+		InputUtils.resetPingHold();
 	}
 
 	/**
@@ -357,8 +401,200 @@ public final class ClientPingRuntime {
 	 * while the wheel is open can never leak a released mouse.
 	 */
 	public void close() {
+		abort();
+		InputUtils.resetPingHold();
+		observedLevel = null;
+		observedDimension = null;
+	}
+
+	/**
+	 * True when the compatibility wrapper still owns a seeded or in-flight
+	 * sequence even though the baseline phase may already be idle.
+	 */
+	public boolean hasCompatibilityState() {
+		return compatibilityController.hasPendingState();
+	}
+
+	private void observeWorldContinuity(Minecraft game) {
+		ClientLevel currentLevel = game.level;
+		String currentDimension = currentLevel.dimension().location().toString();
+
+		if (observedLevel != null
+			&& (observedLevel != currentLevel || !Objects.equals(observedDimension, currentDimension))) {
+			compatibilityController.abort();
+			InputUtils.resetPingHold();
+			pendingRay = null;
+			wheelSelection = WheelSelection.NONE;
+		}
+
+		observedLevel = currentLevel;
+		observedDimension = currentDimension;
+	}
+
+	/** The baseline press path used by the compatibility controller. */
+	private Optional<PingInteractionAction> baselinePress(long rawPressTimestamp) {
+		InteractionToken token = machine.pressAt(rawPressTimestamp);
 		pendingRay = null;
+		captureImmediately(token);
+		wheelMouseCapture.sync(machine.phase(), Game);
+		return Optional.empty();
+	}
+
+	/** Baseline press path with a ray captured by a rapid second physical press. */
+	private Optional<PingInteractionAction> baselinePress(
+		long rawPressTimestamp,
+		CapturedRay pressRay
+	) {
+		InteractionToken token = machine.pressAt(rawPressTimestamp);
+		pendingRay = null;
+		captureImmediately(token, pressRay);
+		wheelMouseCapture.sync(machine.phase(), Game);
+		return Optional.empty();
+	}
+
+	private Optional<PingInteractionAction> baselineRelease() {
+		Optional<PingInteractionAction> action = advanceInteraction(false);
+		wheelMouseCapture.sync(machine.phase(), Game);
+		return action;
+	}
+
+	private Optional<PingInteractionAction> baselinePresentFrame(boolean keyDown) {
+		return baselinePresentFrame(keyDown, timeSource.nowMillis());
+	}
+
+	private Optional<PingInteractionAction> baselinePresentFrame(
+		boolean keyDown,
+		long frameTimeMillis
+	) {
+		machine.presentFrameAt(keyDown, frameTimeMillis);
+		// Raw release edges own wheel commit/cancellation.  A stale false key
+		// state on a later frame must not make the frame path walk every owned
+		// marker; keep an already-open wheel logically held until its release
+		// event arrives.  A pressed interaction still uses false here so an
+		// asynchronous capture that completes after release can commit its one
+		// short action on this frame.
+		boolean actionKeyDown = keyDown || machine.phase() == PingInteractionPhase.WHEEL_OPEN;
+		Optional<PingInteractionAction> action = advanceInteraction(actionKeyDown, frameTimeMillis);
+
+		// A frame-side timeout/transition must not leave a prior GUI selection
+		// queued for the next frame. Selection is meaningful only while the wheel
+		// remains open; it is preserved between open frames by the runtime's normal
+		// wheel input path.
+		if (machine.phase() != PingInteractionPhase.WHEEL_OPEN) {
+			wheelSelection = WheelSelection.NONE;
+		}
+
+		if (machine.phase() == PingInteractionPhase.IDLE) {
+			pendingRay = null;
+		}
+
+		wheelMouseCapture.sync(machine.phase(), Game);
+		return action;
+	}
+
+	private void baselineAbort() {
+		machine.abort();
+		pendingRay = null;
+		wheelSelection = WheelSelection.NONE;
 		wheelMouseCapture.close(Game);
+	}
+
+	private final class RuntimeInteractionPort implements LongPressCompatibilityController.InteractionPort {
+
+		@Override
+		public Optional<PingInteractionAction> pressAt(long rawPressTimestamp) {
+			return baselinePress(rawPressTimestamp);
+		}
+
+		@Override
+		public Optional<PingInteractionAction> pressAt(long rawPressTimestamp, CapturedRay pressRay) {
+			return baselinePress(rawPressTimestamp, pressRay);
+		}
+
+		@Override
+		public Optional<CapturedRay> capturePressRay() {
+			return ClientPingRuntime.this.capturePressRay();
+		}
+
+		@Override
+		public Optional<PingInteractionAction> release() {
+			return baselineRelease();
+		}
+
+		@Override
+		public Optional<PingInteractionAction> presentFrame(boolean keyDown) {
+			return baselinePresentFrame(keyDown);
+		}
+
+		@Override
+		public Optional<PingInteractionAction> presentFrame(boolean keyDown, long frameTimeMillis) {
+			return baselinePresentFrame(keyDown, frameTimeMillis);
+		}
+
+		@Override
+		public void abort() {
+			baselineAbort();
+		}
+
+		@Override
+		public PingInteractionPhase phase() {
+			return machine.phase();
+		}
+	}
+
+	private Optional<PingInteractionAction> advanceInteraction(boolean keyDown) {
+		return advanceInteraction(keyDown, null);
+	}
+
+	private Optional<PingInteractionAction> advanceInteraction(boolean keyDown, Long observedTimeMillis) {
+		if (machine.phase() == PingInteractionPhase.IDLE) {
+			wheelSelection = WheelSelection.NONE;
+			pendingRay = null;
+			return Optional.empty();
+		}
+
+		WheelSelection consumedSelection = wheelSelection;
+		wheelSelection = WheelSelection.NONE;
+		// Cancellation is resolved only when the open wheel is released.  While
+		// pressed, including every hover/selection frame, the machine only needs
+		// O(1) state advancement and the empty sentinel below.
+		boolean cancellationMayBeNeeded = machine.phase() == PingInteractionPhase.WHEEL_OPEN && !keyDown;
+		var cancellationContext = cancellationMayBeNeeded
+			? buildCancellationContext()
+			: emptyCancellationContext();
+		Optional<PingInteractionAction> action = observedTimeMillis == null
+			? machine.update(keyDown, consumedSelection, cancellationContext)
+			: machine.updateAt(keyDown, consumedSelection, cancellationContext, observedTimeMillis);
+
+		if (action.isPresent()) {
+			dispatcher.dispatch(action.get());
+		}
+
+		if (machine.phase() == PingInteractionPhase.IDLE) {
+			pendingRay = null;
+			wheelSelection = WheelSelection.NONE;
+		}
+
+		return action;
+	}
+
+	/**
+	 * Supplies a valid, allocation-free context for machine paths that cannot
+	 * cancel.  The real context (and its owned-marker scan) is built only for a
+	 * wheel release or center selection.
+	 */
+	private static CancellationContext emptyCancellationContext() {
+		return EMPTY_CANCELLATION_CONTEXT;
+	}
+
+	private static CancellationContext createEmptyCancellationContext() {
+		CapturedRay ray = CapturedRay.defaultRay();
+		return new CancellationContext(
+			new UUID(0L, 0L),
+			"minecraft:overworld",
+			ray.origin(),
+			ray.direction(),
+			List.of());
 	}
 
 	/**
@@ -379,6 +615,37 @@ public final class ClientPingRuntime {
 	 * state machine resets to idle instead of waiting forever.
 	 */
 	private void captureImmediately(InteractionToken token) {
+		CapturedRay pressRay = capturePressRay().orElse(null);
+		if (pressRay == null) {
+			activeInteraction.invalidate(token);
+			return;
+		}
+
+		captureImmediately(token, pressRay);
+	}
+
+	/** Captures only the immutable press ray; no target ray cast is performed. */
+	private Optional<CapturedRay> capturePressRay() {
+		Minecraft game = Game;
+
+		if (game == null || game.cameraEntity == null || game.level == null) {
+			return Optional.empty();
+		}
+
+		var cameraEntity = game.cameraEntity;
+		var rayOrigin = cameraEntity.getEyePosition(1.0f);
+		var cameraDirection = cameraEntity.getViewVector(1.0f);
+
+		try {
+			return Optional.of(new CapturedRay(
+				new WorldVector(rayOrigin.x, rayOrigin.y, rayOrigin.z),
+				new WorldVector(cameraDirection.x, cameraDirection.y, cameraDirection.z)));
+		} catch (IllegalArgumentException invalidRay) {
+			return Optional.empty();
+		}
+	}
+
+	private void captureImmediately(InteractionToken token, CapturedRay pressRay) {
 		Minecraft game = Game;
 
 		if (game == null || game.cameraEntity == null || game.level == null) {
@@ -388,23 +655,20 @@ public final class ClientPingRuntime {
 
 		ClientLevel level = game.level;
 		var cameraEntity = game.cameraEntity;
-		var rayOrigin = cameraEntity.getEyePosition(1.0f);
-		var cameraDirection = cameraEntity.getViewVector(1.0f);
-		final CapturedRay pressRay;
-
-		try {
-			pressRay = new CapturedRay(
-				new WorldVector(rayOrigin.x, rayOrigin.y, rayOrigin.z),
-				new WorldVector(cameraDirection.x, cameraDirection.y, cameraDirection.z));
-		} catch (IllegalArgumentException invalidRay) {
-			activeInteraction.invalidate(token);
-			return;
-		}
+		var rayOrigin = new Vec3(
+			pressRay.origin().x(),
+			pressRay.origin().y(),
+			pressRay.origin().z());
+		var cameraDirection = new Vec3(
+			pressRay.direction().x(),
+			pressRay.direction().y(),
+			pressRay.direction().z());
 
 		pendingRay = pressRay;
+		ClientConfig config = ClientConfig.HANDLER.getConfig();
 		var distance = Math.min(
-			CLIENT_CONFIG.getRaycastDistance(),
-			CLIENT_CONFIG.getPingDistance());
+			config.getRaycastDistance(),
+			config.getPingDistance());
 
 		var hitResult = Raycast.traceDirectional(
 			rayOrigin, cameraDirection, distance, cameraEntity.isCrouching());
@@ -684,7 +948,7 @@ public final class ClientPingRuntime {
 		game.getSoundManager().play(new DirectionalSoundInstance(
 			PING_SOUND_EVENT,
 			SoundSource.MASTER,
-			CLIENT_CONFIG.getPingVolume() / 100f,
+			ClientConfig.HANDLER.getConfig().getPingVolume() / 100f,
 			1f,
 			new Vec3(anchor.x(), anchor.y(), anchor.z())));
 	}
@@ -877,7 +1141,7 @@ public final class ClientPingRuntime {
 
 	/**
 	 * Replaces the wheel selection consumed by the next
-	 * {@link #onTick(boolean, boolean)} call.
+	 * {@link #onRenderFrame(boolean)} call.
 	 */
 	public void setWheelSelection(WheelSelection selection) {
 		this.wheelSelection = Objects.requireNonNull(selection, "selection");

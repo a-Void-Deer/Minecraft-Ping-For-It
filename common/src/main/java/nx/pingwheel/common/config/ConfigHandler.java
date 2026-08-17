@@ -39,7 +39,24 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	public void save() {
-		if (configHash == config.hashCode()) {
+		save(false);
+	}
+
+	/**
+	 * Replaces the complete config object with a freshly constructed default
+	 * instance and persists it immediately.
+	 */
+	public void resetToDefaults() {
+		try {
+			config = configType.getDeclaredConstructor().newInstance();
+		} catch (ReflectiveOperationException e) {
+			throw new IllegalStateException("creating default config failed", e);
+		}
+		save(true);
+	}
+
+	private void save(boolean force) {
+		if (!force && configHash == config.hashCode()) {
 			return;
 		}
 

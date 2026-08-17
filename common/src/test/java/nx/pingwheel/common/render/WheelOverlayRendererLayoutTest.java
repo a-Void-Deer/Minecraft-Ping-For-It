@@ -20,4 +20,12 @@ class WheelOverlayRendererLayoutTest {
 		assertEquals(1, WheelOverlayRenderer.SEPARATOR_THICKNESS);
 		assertEquals(1, WheelOverlayRenderer.CENTER_BORDER_THICKNESS);
 	}
+
+	@Test
+	void targetAndOptionFontScalesAreIndependent() {
+		assertEquals(0.05, WheelOverlayRenderer.optionLabelScale(10), 0.000001);
+		assertEquals(2.5, WheelOverlayRenderer.optionLabelScale(500), 0.000001);
+		assertEquals(0.1, WheelOverlayRenderer.targetLabelScale(10), 0.000001);
+		assertEquals(5.0, WheelOverlayRenderer.targetLabelScale(500), 0.000001);
+	}
 }

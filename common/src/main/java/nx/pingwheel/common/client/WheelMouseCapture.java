@@ -10,8 +10,8 @@ import nx.pingwheel.common.interaction.state.PingInteractionPhase;
  * Client-only controller that owns the Minecraft mouse grab state while the
  * ping wheel is open.
  *
- * <p>Every tick and GUI/render frame, after the state machine has advanced,
- * {@link ClientPingRuntime} calls {@link #sync(PingInteractionPhase, Minecraft)}
+	 * <p>After each event/frame state-machine advance,
+	 * {@link ClientPingRuntime} calls {@link #sync(PingInteractionPhase, Minecraft)}
  * with the machine's current phase:
  * <ul>
  *   <li>whenever the wheel is open, no screen is open, and the mouse is

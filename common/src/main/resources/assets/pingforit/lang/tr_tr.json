@@ -12,6 +12,11 @@
 	"settings.pingforit.item_icon_visible": "Eşya Simgeleri",
 	"settings.pingforit.direction_indicator_visible": "Yön Göstergesi",
 	"settings.pingforit.ping_size": "Ping Boyutu: %s",
+	"settings.pingforit.wheel_font_size": "Tekerlek Seçenek Yazı Boyutu: %s",
+	"settings.pingforit.wheel_target_font_size": "Tekerlek Hedef Yazı Boyutu: %s",
+	"settings.pingforit.reset_all": "Tümünü Sıfırla",
+	"settings.pingforit.reset_all.title": "Tüm ayarlar sıfırlansın mı?",
+	"settings.pingforit.reset_all.message": "Ping For It ayarlarının tümü varsayılanlara sıfırlansın mı?",
 	"settings.pingforit.channel": "Ping Kanalı",
 	"settings.pingforit.channel.tooltip": "Sadece aynı kanaldaki oyuncularla Ping paylaşırsınız",
 
@@ -38,4 +43,8 @@
 	"command.pingforit.default_channel.get.response": "Şu anki varsayılan kanal modu: %s",
 	"command.pingforit.default_channel.set.response": "%s, artık varsayılan kanal modu",
 	"command.pingforit.default_channel.set.reject": "Bilinmeyen mod, geçerli ayarlar: %s"
+  ,"settings.pingforit.long_press_compatibility_mode": "Uzun basma uyumluluk modu"
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Hızlı tıklamaları tek bir sanal uzun basma olarak algılar."
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "Uyumluluk zaman aralığı"
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Uyumluluk modu etkinken ardışık tıklamalar arasındaki en uzun süre."
 }

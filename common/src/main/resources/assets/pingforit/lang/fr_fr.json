@@ -12,6 +12,11 @@
 	"settings.pingforit.item_icon_visible": "Icônes d'Objets",
 	"settings.pingforit.direction_indicator_visible": "Indicateur de Direction",
 	"settings.pingforit.ping_size": "Taille du Ping : %s",
+	"settings.pingforit.wheel_font_size": "Taille de police des options de la roue : %s",
+	"settings.pingforit.wheel_target_font_size": "Taille de police de la cible de la roue : %s",
+	"settings.pingforit.reset_all": "Tout réinitialiser",
+	"settings.pingforit.reset_all.title": "Réinitialiser tous les paramètres ?",
+	"settings.pingforit.reset_all.message": "Réinitialiser tous les paramètres de Ping For It à leurs valeurs par défaut ?",
 	"settings.pingforit.channel": "Canal de Ping",
 	"settings.pingforit.channel.tooltip": "Vous envoyez et recevez des Pings uniquement aux joueurs du même canal",
 
@@ -38,4 +43,8 @@
 	"command.pingforit.default_channel.get.response": "Mode de canal par défaut actuel : %s",
 	"command.pingforit.default_channel.set.response": "Mode de canal par défaut défini sur %s",
 	"command.pingforit.default_channel.set.reject": "Mode inconnu, les options valides sont : %s"
+  ,"settings.pingforit.long_press_compatibility_mode": "Mode de compatibilité d'appui long"
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Interprète les clics rapides comme un seul appui long virtuel."
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "Intervalle de compatibilité"
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Écart maximal entre deux clics consécutifs lorsque le mode est actif."
 }

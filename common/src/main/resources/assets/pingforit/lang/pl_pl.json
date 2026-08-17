@@ -12,6 +12,11 @@
 	"settings.pingforit.item_icon_visible": "Ikony itemów",
 	"settings.pingforit.direction_indicator_visible": "Wskaźnik kierunku",
 	"settings.pingforit.ping_size": "Rozmiar pingu: %s",
+	"settings.pingforit.wheel_font_size": "Rozmiar czcionki opcji koła: %s",
+	"settings.pingforit.wheel_target_font_size": "Rozmiar czcionki celu koła: %s",
+	"settings.pingforit.reset_all": "Resetuj wszystko",
+	"settings.pingforit.reset_all.title": "Zresetować wszystkie ustawienia?",
+	"settings.pingforit.reset_all.message": "Zresetować wszystkie ustawienia Ping For It do wartości domyślnych?",
 	"settings.pingforit.channel": "Kanał pingowania",
 	"settings.pingforit.channel.tooltip": "Wysyłasz i odbierasz pingi tylko od graczy na tym samym kanale",
 
@@ -50,4 +55,8 @@
 	"command.pingforit.rate_limit.set.description": "ustaw limit częstotliwości użycia pingu",
 	"command.pingforit.rate_limit.get.response": "Obecny limit częstotliwości: %s",
 	"command.pingforit.rate_limit.set.response": "Ustawiono limit częstotliwości na %s"
+  ,"settings.pingforit.long_press_compatibility_mode": "Tryb zgodności długiego naciśnięcia"
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Rozpoznaje szybkie kliknięcia jako jedno wirtualne długie naciśnięcie."
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "Okno zgodności"
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Maksymalny odstęp między kolejnymi kliknięciami w trybie zgodności."
 }

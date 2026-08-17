@@ -9,9 +9,8 @@ import static nx.pingwheel.common.CommonClient.Game;
 public class OverlayRenderer {
 	private OverlayRenderer() {}
 
-	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
-
 	public static void draw(GuiGraphics guiGraphics, float tickDelta) {
+		final var config = ClientConfig.HANDLER.getConfig();
 		final var renderViews = MarkerOverlayState.INSTANCE.renderViews();
 
 		if (Game.player == null || Game.level == null || renderViews.isEmpty()) {
@@ -20,7 +19,7 @@ public class OverlayRenderer {
 
 		final var m = guiGraphics.pose();
 		final var ctx = new DrawContext(guiGraphics);
-		final var showDirectionIndicator = CLIENT_CONFIG.isDirectionIndicatorVisible();
+		final var showDirectionIndicator = config.isDirectionIndicatorVisible();
 		final var currentDimension = Game.level.dimension().location().toString();
 
 		if (showDirectionIndicator) {

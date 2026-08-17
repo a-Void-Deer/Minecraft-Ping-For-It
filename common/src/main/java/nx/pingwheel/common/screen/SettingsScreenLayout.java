@@ -12,15 +12,20 @@ public record SettingsScreenLayout(
 	int listBottom,
 	int footerTop,
 	int footerBottom,
+	int resetX,
+	int resetY,
 	int channelX,
 	int channelY,
 	int channelLabelY
 ) {
 	public static final int FOOTER_HEIGHT = 100;
+	public static final int RESET_BUTTON_WIDTH = 100;
+	public static final int RESET_BUTTON_HEIGHT = 20;
 	public static final int CHANNEL_WIDTH = 200;
 	public static final int CHANNEL_HEIGHT = 20;
 
-	private static final int CHANNEL_TOP_MARGIN = 20;
+	private static final int RESET_TOP_MARGIN = 2;
+	private static final int CHANNEL_TOP_MARGIN = 50;
 	private static final int CHANNEL_LABEL_OFFSET = 12;
 
 	/**
@@ -51,6 +56,9 @@ public record SettingsScreenLayout(
 		final int footerBottom = safeScreenHeight;
 		final int listTop = safeHeaderHeight;
 		final int listBottom = Math.max(listTop, footerTop);
+		final int resetX = Math.max(0, (safeScreenWidth - RESET_BUTTON_WIDTH) / 2);
+		final int maximumResetY = Math.max(footerTop, footerBottom - RESET_BUTTON_HEIGHT);
+		final int resetY = clamp(footerTop + RESET_TOP_MARGIN, footerTop, maximumResetY);
 		final int channelX = Math.max(0, (safeScreenWidth - CHANNEL_WIDTH) / 2);
 		final int maximumChannelY = Math.max(footerTop, footerBottom - CHANNEL_HEIGHT);
 		final int channelY = clamp(footerTop + CHANNEL_TOP_MARGIN, footerTop, maximumChannelY);
@@ -61,6 +69,8 @@ public record SettingsScreenLayout(
 			listBottom,
 			footerTop,
 			footerBottom,
+			resetX,
+			resetY,
 			channelX,
 			channelY,
 			channelLabelY

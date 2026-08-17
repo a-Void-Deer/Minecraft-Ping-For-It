@@ -58,6 +58,58 @@ class PingInteractionStateMachineTest {
 	}
 
 	@Test
+	void backdatedPhysicalPressStartsHoldFromSuppliedMonotonicTimestamp() {
+		Harness h = harness();
+		h.clock.now = 100L;
+		InteractionToken token = h.machine.pressAt(50L);
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+
+		h.clock.now = 350L;
+		h.machine.presentFrame(true);
+
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+	}
+
+	@Test
+	void multiplePressEventsBeforePresentationRetainTheirEventTimestamp() {
+		Harness h = harness();
+		h.clock.now = 1000L;
+
+		InteractionToken first = h.machine.pressAt(100L);
+		h.machine.abort();
+
+		InteractionToken second = h.machine.pressAt(700L);
+		h.complete(second, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.machine.presentFrame(true);
+
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+		assertTrue(first.sequence() < second.sequence());
+	}
+
+	@Test
+	void futurePhysicalPressIsRejectedWithoutMintingOrResettingInteraction() {
+		Harness h = harness();
+		h.clock.now = 100L;
+
+		assertThrows(IllegalArgumentException.class, () -> h.machine.pressAt(101L));
+		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
+		assertTrue(h.machine.currentToken().isEmpty());
+	}
+
+	@Test
+	void abortInvalidatesCaptureAndProducesNoDefaultAction() {
+		Harness h = harness();
+		InteractionToken token = h.press();
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+
+		h.machine.abort();
+
+		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
+		assertTrue(h.machine.currentToken().isEmpty());
+		assertTrue(h.machine.update(false, WheelSelection.NONE, emptyContext()).isEmpty());
+	}
+
+	@Test
 	void exact300IsLongPressAndOpensWheel() {
 		Harness h = harness();
 		InteractionToken token = h.press();
@@ -123,7 +175,7 @@ class PingInteractionStateMachineTest {
 	}
 
 	@Test
-	void releaseBeforeFirstPresentationCannotBecomeWheelInteraction() {
+	void releaseBeforeFirstPresentationCommitsDefaultEvenAtThreshold() {
 		Harness h = harness();
 		InteractionToken token = h.press();
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
@@ -135,7 +187,8 @@ class PingInteractionStateMachineTest {
 		Optional<PingInteractionAction> action =
 			h.machine.update(false, WheelSelection.NONE, emptyContext());
 
-		assertTrue(action.isEmpty());
+		PingInteractionAction.CreatePing create = (PingInteractionAction.CreatePing) action.orElseThrow();
+		assertEquals("go_to", create.pingType().id());
 		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
 	}
 
@@ -164,7 +217,55 @@ class PingInteractionStateMachineTest {
 	}
 
 	@Test
-	void capturedContextReadyReleaseAtExactly300YieldsNoAction() {
+	void completedCaptureReleasePastLowThresholdBeforeFirstFrameCommitsDefault() {
+		Harness h = harness();
+		PingInteractionStateMachine lowThreshold = new PingInteractionStateMachine(
+			h.coordinator,
+			h.interaction,
+			h.clock,
+			resolved -> TargetValidation.valid(),
+			new CancelCandidatePicker(),
+			h.logger,
+			100L,
+			5000L);
+		InteractionToken token = lowThreshold.press();
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+
+		h.clock.now = 150L;
+		Optional<PingInteractionAction> action =
+			lowThreshold.update(false, WheelSelection.NONE, emptyContext());
+
+		assertEquals("go_to", ((PingInteractionAction.CreatePing) action.orElseThrow()).pingType().id());
+		assertEquals(PingInteractionPhase.IDLE, lowThreshold.phase());
+	}
+
+	@Test
+	void pendingCaptureReleasedPastLowThresholdCommitsWhenCaptureCompletes() {
+		Harness h = harness();
+		PingInteractionStateMachine lowThreshold = new PingInteractionStateMachine(
+			h.coordinator,
+			h.interaction,
+			h.clock,
+			resolved -> TargetValidation.valid(),
+			new CancelCandidatePicker(),
+			h.logger,
+			100L,
+			5000L);
+		InteractionToken token = lowThreshold.press();
+
+		h.clock.now = 150L;
+		assertTrue(lowThreshold.update(false, WheelSelection.NONE, emptyContext()).isEmpty());
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.clock.now = 160L;
+		Optional<PingInteractionAction> action =
+			lowThreshold.update(false, WheelSelection.NONE, emptyContext());
+
+		assertEquals("go_to", ((PingInteractionAction.CreatePing) action.orElseThrow()).pingType().id());
+		assertEquals(PingInteractionPhase.IDLE, lowThreshold.phase());
+	}
+
+	@Test
+	void capturedContextReadyReleaseAtExactly300CommitsDefaultWhenWheelNeverOpened() {
 		Harness h = harness();
 		InteractionToken token = h.press();
 
@@ -173,7 +274,8 @@ class PingInteractionStateMachineTest {
 
 		Optional<PingInteractionAction> action = h.machine.update(false, WheelSelection.NONE, emptyContext());
 
-		assertTrue(action.isEmpty(), "release at exactly the threshold must not ping");
+		PingInteractionAction.CreatePing create = (PingInteractionAction.CreatePing) action.orElseThrow();
+		assertEquals("go_to", create.pingType().id());
 		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
 		assertTrue(h.machine.currentToken().isEmpty(), "the wheel cannot open after release");
 	}
@@ -389,7 +491,7 @@ class PingInteractionStateMachineTest {
 	}
 
 	@Test
-	void pendingCaptureReleaseAtOrAfterThresholdYieldsNoAction() {
+	void pendingCaptureReleaseAtOrAfterThresholdCommitsWhenWheelNeverOpened() {
 		Harness h = harness();
 		InteractionToken token = h.press();
 
@@ -400,9 +502,10 @@ class PingInteractionStateMachineTest {
 		h.clock.now = 400L;
 		Optional<PingInteractionAction> action = h.machine.update(false, WheelSelection.NONE, emptyContext());
 
-		assertTrue(action.isEmpty(), "release at/after threshold while pending must not ping");
+		PingInteractionAction.CreatePing create = (PingInteractionAction.CreatePing) action.orElseThrow();
+		assertEquals("go_to", create.pingType().id());
 		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
-		assertTrue(h.logger.messages().stream().anyMatch(m -> m.contains("long release no action")));
+		assertFalse(h.logger.messages().stream().anyMatch(m -> m.contains("long release no action")));
 	}
 
 	@Test

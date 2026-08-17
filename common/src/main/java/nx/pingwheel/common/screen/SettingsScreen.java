@@ -3,9 +3,11 @@ package nx.pingwheel.common.screen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.network.chat.CommonComponents;
@@ -31,6 +33,9 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private Screen parent;
 	private EditBox channelTextField;
+	private Button resetAllButton;
+	private boolean resetConfirmationHandled;
+	private boolean suppressSaveOnClose;
 
 	public SettingsScreen() {
 		super(null, null, LanguageUtils.settings("title").get());
@@ -54,6 +59,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addTitle();
 		this.addContents();
 		this.addFooter();
+		this.addResetAllButton();
 		this.layout.visitWidgets(this::addRenderableWidget);
 		this.repositionElements();
 	}
@@ -78,9 +84,13 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		this.list.addSmall(getWheelInnerRadiusOption(), getWheelOuterRadiusOption());
 
-		this.list.addSmall(getWheelOpacityOption(), getWheelFontSizeOption());
+		this.list.addSmall(getWheelOpacityOption(), null);
+
+		this.list.addSmall(getWheelTargetFontSizeOption(), getWheelOptionFontSizeOption());
 
 		this.list.addSmall(getWheelHoldMillisOption(), getWheelTimeoutMillisOption());
+
+		this.list.addSmall(getLongPressCompatibilityModeOption(), getLongPressCompatibilitySliceMillisOption());
 
 		this.list.addSmall(getCancelHalfConeAngleDegreesOption(), null);
 
@@ -91,9 +101,20 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addWidget(this.channelTextField);
 	}
 
+	private void addResetAllButton() {
+		this.resetAllButton = Button.builder(
+			LanguageUtils.settings("reset_all").get(),
+			button -> this.openResetConfirmation())
+			.bounds(0, 0, SettingsScreenLayout.RESET_BUTTON_WIDTH, SettingsScreenLayout.RESET_BUTTON_HEIGHT)
+			.build();
+		this.addRenderableWidget(this.resetAllButton);
+	}
+
 	@Override
 	public void onClose() {
-		ClientConfig.HANDLER.save();
+		if (!this.suppressSaveOnClose) {
+			ClientConfig.HANDLER.save();
+		}
 
 		if (parent != null && this.minecraft != null) {
 			this.minecraft.setScreen(parent);
@@ -109,6 +130,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.list.updateSize(this.width, this.layout);
 
 		final var screenLayout = this.getScreenLayout();
+		this.resetAllButton.setPosition(screenLayout.resetX(), screenLayout.resetY());
 		this.channelTextField.setPosition(screenLayout.channelX(), screenLayout.channelY());
 	}
 
@@ -305,6 +327,32 @@ public class SettingsScreen extends OptionsSubScreen {
 		);
 	}
 
+	private OptionInstance<Boolean> getLongPressCompatibilityModeOption() {
+		final var text = LanguageUtils.settings("long_press_compatibility_mode");
+
+		return OptionUtils.ofBool(
+			text.getKey(),
+			config::isLongPressCompatibilityMode,
+			config::setLongPressCompatibilityMode,
+			() -> text.path("tooltip").get());
+	}
+
+	private OptionInstance<Integer> getLongPressCompatibilitySliceMillisOption() {
+		final var text = LanguageUtils.settings("long_press_compatibility_slice_millis");
+		final int maximum = effectiveLongPressCompatibilitySliceMaxMillis(config.getWheelHoldMillis());
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
+			maximum,
+			LONG_PRESS_COMPATIBILITY_SLICE_MILLIS_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
+			() -> text.path("tooltip").get(),
+			config::getLongPressCompatibilitySliceMillis,
+			config::setLongPressCompatibilitySliceMillis
+		);
+	}
+
 	private OptionInstance<Integer> getWheelInnerRadiusOption() {
 		final var text = LanguageUtils.settings("wheel_inner_radius");
 
@@ -349,7 +397,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		);
 	}
 
-	private OptionInstance<Integer> getWheelFontSizeOption() {
+	private OptionInstance<Integer> getWheelOptionFontSizeOption() {
 		final var text = LanguageUtils.settings("wheel_font_size");
 
 		return OptionUtils.ofInt(
@@ -360,6 +408,20 @@ public class SettingsScreen extends OptionsSubScreen {
 			(value) -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
 			config::getWheelFontSize,
 			config::setWheelFontSize
+		);
+	}
+
+	private OptionInstance<Integer> getWheelTargetFontSizeOption() {
+		final var text = LanguageUtils.settings("wheel_target_font_size");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_TARGET_FONT_SIZE,
+			MAX_WHEEL_TARGET_FONT_SIZE,
+			WHEEL_TARGET_FONT_SIZE_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			config::getWheelTargetFontSize,
+			config::setWheelTargetFontSize
 		);
 	}
 
@@ -389,5 +451,36 @@ public class SettingsScreen extends OptionsSubScreen {
 			config::getCancelHalfConeAngleDegrees,
 			config::setCancelHalfConeAngleDegrees
 		);
+	}
+
+	private void openResetConfirmation() {
+		if (this.minecraft == null) {
+			return;
+		}
+
+		this.resetConfirmationHandled = false;
+		this.minecraft.setScreen(new ConfirmScreen(
+			confirmed -> this.handleResetConfirmation(confirmed),
+			LanguageUtils.settings("reset_all").path("title").get(),
+			LanguageUtils.settings("reset_all").path("message").get()));
+	}
+
+	private void handleResetConfirmation(boolean confirmed) {
+		if (this.resetConfirmationHandled || this.minecraft == null) {
+			return;
+		}
+
+		this.resetConfirmationHandled = true;
+
+		if (confirmed) {
+			// A replacement settings screen is intentional: the old OptionInstances
+			// retain their pre-reset values and must never save them back over the
+			// freshly constructed defaults.
+			this.suppressSaveOnClose = true;
+			ClientConfig.HANDLER.resetToDefaults();
+			this.minecraft.setScreen(new SettingsScreen(this.parent));
+		} else {
+			this.minecraft.setScreen(this);
+		}
 	}
 }
