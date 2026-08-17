@@ -31,6 +31,7 @@ class MarkerPacketsTest {
 	private static final String OVERWORLD = "minecraft:overworld";
 	private static final UUID ENTITY_ID = UUID.randomUUID();
 	private static final UUID OWNER = UUID.randomUUID();
+	private static final String OWNER_NAME = "Steve";
 
 	private static final TargetNameJson NAME = new TargetNameJson("{\"translate\":\"minecraft.zombie\"}");
 
@@ -137,7 +138,7 @@ class MarkerPacketsTest {
 
 	@Test
 	void createdPacketRoundTripsDirectly() {
-		var packet = new MarkerCreatedS2CPacket(snapshot(10L, 500L), NAME);
+		var packet = new MarkerCreatedS2CPacket(snapshot(10L, 500L), NAME, OWNER_NAME);
 
 		var buf = buffer();
 		packet.write(buf);
@@ -147,7 +148,7 @@ class MarkerPacketsTest {
 
 	@Test
 	void createdPacketRoundTripsThroughReadSafe() {
-		var packet = new MarkerCreatedS2CPacket(snapshot(10L, 500L), NAME);
+		var packet = new MarkerCreatedS2CPacket(snapshot(10L, 500L), NAME, OWNER_NAME);
 
 		var buf = buffer();
 		packet.write(buf);
@@ -166,7 +167,7 @@ class MarkerPacketsTest {
 			new nx.pingwheel.common.marker.MarkerAnchor(1.5, 64.0, -2.5),
 			10L,
 			500L);
-		var packet = new MarkerCreatedS2CPacket(runtimeSnapshot, NAME);
+		var packet = new MarkerCreatedS2CPacket(runtimeSnapshot, NAME, OWNER_NAME);
 
 		var buf = buffer();
 		packet.write(buf);
@@ -177,7 +178,7 @@ class MarkerPacketsTest {
 	@Test
 	void createdPacketRoundTripsUnicodeName() {
 		var packet = new MarkerCreatedS2CPacket(
-			snapshot(10L, 500L), new TargetNameJson("{\"translate\":\"僵尸.类型\"}"));
+			snapshot(10L, 500L), new TargetNameJson("{\"translate\":\"僵尸.类型\"}"), "史蒂夫");
 
 		var buf = buffer();
 		packet.write(buf);
@@ -300,6 +301,37 @@ class MarkerPacketsTest {
 		var buf = buffer();
 		MarkerPacketCodec.writeMarkerSnapshot(buf, snapshot(10L, 500L));
 		buf.writeUtf(" "); // blank name JSON
+
+		assertTrue(MarkerCreatedS2CPacket.readSafe(buf).isCorrupt());
+	}
+
+	@Test
+	void createdPacketRejectsMissingOwnerThroughReadSafe() {
+		var buf = buffer();
+		MarkerPacketCodec.writeMarkerSnapshot(buf, snapshot(10L, 500L));
+		MarkerPacketCodec.writeTargetNameJson(buf, NAME);
+
+		assertTrue(MarkerCreatedS2CPacket.readSafe(buf).isCorrupt());
+	}
+
+	@Test
+	void createdPacketRejectsBlankOwnerThroughReadSafe() {
+		var buf = buffer();
+		MarkerPacketCodec.writeMarkerSnapshot(buf, snapshot(10L, 500L));
+		MarkerPacketCodec.writeTargetNameJson(buf, NAME);
+		buf.writeUtf(" ", MarkerPacketCodec.MAX_OWNER_NAME_LENGTH);
+
+		assertTrue(MarkerCreatedS2CPacket.readSafe(buf).isCorrupt());
+	}
+
+	@Test
+	void createdPacketRejectsOverlongOwnerThroughReadSafe() {
+		var buf = buffer();
+		MarkerPacketCodec.writeMarkerSnapshot(buf, snapshot(10L, 500L));
+		MarkerPacketCodec.writeTargetNameJson(buf, NAME);
+		String tooLong = "x".repeat(MarkerPacketCodec.MAX_OWNER_NAME_LENGTH + 1);
+		buf.writeVarInt(tooLong.length());
+		buf.writeBytes(tooLong.getBytes(StandardCharsets.UTF_8));
 
 		assertTrue(MarkerCreatedS2CPacket.readSafe(buf).isCorrupt());
 	}

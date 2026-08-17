@@ -9,6 +9,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.locale.Language;
+import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.BlockHitResult;
@@ -21,11 +23,13 @@ import nx.pingwheel.common.client.marker.EntityMarkerPoint;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
+import nx.pingwheel.common.chat.PingChatBuilder;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.PingType;
+import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetKind;
 import nx.pingwheel.common.interaction.ActiveInteraction;
@@ -59,6 +63,8 @@ import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.math.Raycast;
 import nx.pingwheel.common.name.ClientTargetNameStore;
+import nx.pingwheel.common.name.ClientTargetNameDecoder;
+import nx.pingwheel.common.name.TargetNameComposer;
 import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
@@ -66,6 +72,7 @@ import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
 
 import static nx.pingwheel.common.CommonClient.Game;
+import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
 
 /**
@@ -634,6 +641,10 @@ public final class ClientPingRuntime {
 	public void applyCreated(MarkerCreatedS2CPacket packet) {
 		Objects.requireNonNull(packet, "packet");
 
+		if (packet.isCorrupt()) {
+			return;
+		}
+
 		MarkerSnapshot snapshot = Objects.requireNonNull(packet.snapshot(), "snapshot");
 		TargetNameJson targetName = Objects.requireNonNull(packet.targetName(), "targetName");
 
@@ -644,6 +655,7 @@ public final class ClientPingRuntime {
 
 		if (newlySeen) {
 			playCreatedSoundOnce(snapshot);
+			sendCreatedChat(packet, snapshot, targetName);
 		}
 
 		logger.debug("marker created applied: markerId={} kind={} targetType={} pingType={}",
@@ -676,6 +688,55 @@ public final class ClientPingRuntime {
 			CLIENT_CONFIG.getPingVolume() / 100f,
 			1f,
 			new Vec3(anchor.x(), anchor.y(), anchor.z())));
+	}
+
+	/**
+	 * Displays the accepted marker chat line only for its first local receipt.
+	 * The target dimension is intentionally not consulted here: sound playback
+	 * keeps its existing current-dimension eligibility, while chat is relevant
+	 * to every recipient regardless of where the target is located.
+	 */
+	private void sendCreatedChat(
+		MarkerCreatedS2CPacket packet, MarkerSnapshot snapshot, TargetNameJson targetName
+	) {
+		Minecraft game = Game;
+
+		if (game == null || game.player == null) {
+			return;
+		}
+
+		try {
+			String pingTypeId = snapshot.pingTypeId();
+
+			if (pingTypeId == null) {
+				return;
+			}
+
+			var pingType = PingTypeCatalog.builtIn().findById(pingTypeId);
+
+			if (pingType.isEmpty()) {
+				return;
+			}
+
+			Component resolvedTargetName = game.level == null
+				? TargetNameComposer.unknown()
+				: ClientTargetNameDecoder.decode(snapshot.id(), targetName, game.level.registryAccess());
+			String template;
+
+			try {
+				template = Language.getInstance().getOrDefault(PingChatBuilder.TEMPLATE_KEY);
+			} catch (RuntimeException ignored) {
+				template = null;
+			}
+
+			Component message = PingChatBuilder.build(
+				template, packet.ownerName(), pingType.get(), resolvedTargetName);
+			game.player.displayClientMessage(message, false);
+		} catch (RuntimeException exception) {
+			LOGGER.debug("marker chat display failed: markerId=" + snapshot.id().value()
+				+ " exception=" + exception.getClass().getSimpleName()
+				+ " reason=malformed server payload");
+		}
 	}
 
 	/**

@@ -178,6 +178,27 @@ class MarkerPacketCodecTest {
 	}
 
 	@Test
+	void ownerNameRoundTripsThroughTheBoundedUtfCodec() {
+		for (String ownerName : new String[] {"Steve", "史蒂夫"}) {
+			var buf = buffer();
+			MarkerPacketCodec.writeOwnerName(buf, ownerName);
+
+			assertEquals(ownerName, MarkerPacketCodec.readOwnerName(buf));
+			assertEquals(0, buf.readableBytes());
+		}
+	}
+
+	@Test
+	void ownerNameCodecRejectsOverlongUtfValueOnRead() {
+		var buf = buffer();
+		String tooLong = "x".repeat(MarkerPacketCodec.MAX_OWNER_NAME_LENGTH + 1);
+		buf.writeVarInt(tooLong.length());
+		buf.writeBytes(tooLong.getBytes(StandardCharsets.UTF_8));
+
+		assertThrows(RuntimeException.class, () -> MarkerPacketCodec.readOwnerName(buf));
+	}
+
+	@Test
 	void snapshotRoundTrips() {
 		var snapshot = new MarkerSnapshot(
 			new MarkerId(99L),
@@ -231,7 +252,7 @@ class MarkerPacketCodecTest {
 			10L,
 			500L);
 		MarkerCreatedS2CPacket created = new MarkerCreatedS2CPacket(
-			snapshot, new TargetNameJson("{\"text\":\"orb\"}"));
+			snapshot, new TargetNameJson("{\"text\":\"orb\"}"), "Steve");
 
 		var createdBuffer = buffer();
 		created.write(createdBuffer);

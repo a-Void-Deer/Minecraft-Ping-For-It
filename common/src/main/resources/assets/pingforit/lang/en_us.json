@@ -75,6 +75,7 @@
 	"command.pingforit.rate_limit.set.response": "Set rate limit to %s",
 
 	"pingforit.chat.request": "%s requests %s %s",
+	"pingforit.chat.request.template": "{playerName} requests {pingType} {targetName}",
 
 	"pingforit.ping_type.attention": "Attention",
 	"pingforit.ping_type.attention.phrase": "ATTENTION",

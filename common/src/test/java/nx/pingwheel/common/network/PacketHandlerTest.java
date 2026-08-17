@@ -37,7 +37,8 @@ class PacketHandlerTest {
 				10L,
 				1000L
 			),
-			new TargetNameJson("{\"translate\":\"minecraft.zombie\"}")
+			new TargetNameJson("{\"translate\":\"minecraft.zombie\"}"),
+			"Steve"
 		);
 
 		var buf = buffer();

@@ -31,6 +31,7 @@ import nx.pingwheel.common.name.TargetNameJson;
 public final class MarkerPacketCodec {
 
 	public static final int MAX_ID_LENGTH = 256;
+	public static final int MAX_OWNER_NAME_LENGTH = MAX_ID_LENGTH;
 
 	private MarkerPacketCodec() {}
 
@@ -42,6 +43,16 @@ public final class MarkerPacketCodec {
 
 	public static String readIdString(FriendlyByteBuf buf) {
 		return buf.readUtf(MAX_ID_LENGTH);
+	}
+
+	// --- authoritative owner profile name ---
+
+	public static void writeOwnerName(FriendlyByteBuf buf, String ownerName) {
+		buf.writeUtf(Objects.requireNonNull(ownerName, "ownerName"), MAX_OWNER_NAME_LENGTH);
+	}
+
+	public static String readOwnerName(FriendlyByteBuf buf) {
+		return buf.readUtf(MAX_OWNER_NAME_LENGTH);
 	}
 
 	// --- enums (by stable name, never ordinal) ---
