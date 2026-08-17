@@ -86,14 +86,54 @@ public class ClientConfig implements IConfig {
 
 	@Override
 	public void validate() {
+		validate((key, suppliedValue, effectiveValue) -> LOGGER.warn(
+			"Client config value clamped: key={}, supplied={}, effective={}",
+			key,
+			suppliedValue,
+			effectiveValue));
+	}
+
+	void validate(ClampWarningSink warningSink) {
+		final int suppliedWheelHoldMillis = wheelHoldMillis;
+		final int suppliedWheelTimeoutMillis = wheelTimeoutMillis;
+		final int suppliedCancelHalfConeAngleDegrees = cancelHalfConeAngleDegrees;
+		final int suppliedWheelInnerRadius = wheelInnerRadius;
+		final int suppliedWheelOuterRadius = wheelOuterRadius;
+		final int suppliedWheelOpacity = wheelOpacity;
+		final int suppliedWheelFontSize = wheelFontSize;
+
 		wheelHoldMillis = ClientConfigBounds.clampWheelHoldMillis(wheelHoldMillis);
+		warnIfChanged(
+			warningSink,
+			"wheelHoldMillis",
+			suppliedWheelHoldMillis,
+			wheelHoldMillis);
+
 		wheelTimeoutMillis = ClientConfigBounds.clampWheelTimeoutMillis(wheelTimeoutMillis);
+		warnIfChanged(
+			warningSink,
+			"wheelTimeoutMillis",
+			suppliedWheelTimeoutMillis,
+			wheelTimeoutMillis);
+
 		cancelHalfConeAngleDegrees = ClientConfigBounds.clampCancelHalfConeAngleDegrees(cancelHalfConeAngleDegrees);
+		warnIfChanged(
+			warningSink,
+			"cancelHalfConeAngleDegrees",
+			suppliedCancelHalfConeAngleDegrees,
+			cancelHalfConeAngleDegrees);
+
 		final var radii = ClientConfigBounds.clampWheelRadii(wheelInnerRadius, wheelOuterRadius);
 		wheelInnerRadius = radii.innerRadius();
 		wheelOuterRadius = radii.outerRadius();
+		warnIfChanged(warningSink, "wheelInnerRadius", suppliedWheelInnerRadius, wheelInnerRadius);
+		warnIfChanged(warningSink, "wheelOuterRadius", suppliedWheelOuterRadius, wheelOuterRadius);
+
 		wheelOpacity = ClientConfigBounds.clampWheelOpacity(wheelOpacity);
+		warnIfChanged(warningSink, "wheelOpacity", suppliedWheelOpacity, wheelOpacity);
+
 		wheelFontSize = ClientConfigBounds.clampWheelFontSize(wheelFontSize);
+		warnIfChanged(warningSink, "wheelFontSize", suppliedWheelFontSize, wheelFontSize);
 
 		if (channel.length() > MAX_CHANNEL_LENGTH) {
 			channel = channel.substring(0, MAX_CHANNEL_LENGTH);
@@ -105,6 +145,16 @@ public class ClientConfig implements IConfig {
 			if (channel.length() > MAX_CHANNEL_LENGTH) {
 				entry.setValue(channel.substring(0, MAX_CHANNEL_LENGTH));
 			}
+		}
+	}
+
+	private static void warnIfChanged(
+		ClampWarningSink warningSink,
+		String key,
+		int suppliedValue,
+		int effectiveValue) {
+		if (suppliedValue != effectiveValue) {
+			warningSink.warn(key, suppliedValue, effectiveValue);
 		}
 	}
 
@@ -126,4 +176,9 @@ public class ClientConfig implements IConfig {
 	}
 
 	public static final ConfigHandler<ClientConfig> HANDLER = ConfigHandler.of(ClientConfig.class, ".json");
+}
+
+@FunctionalInterface
+interface ClampWarningSink {
+	void warn(String key, int suppliedValue, int effectiveValue);
 }
