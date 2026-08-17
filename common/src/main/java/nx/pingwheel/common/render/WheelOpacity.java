@@ -19,6 +19,15 @@ public final class WheelOpacity {
 	}
 
 	/**
+	 * Returns whether visual work should be performed for the configured
+	 * opacity. A zero alpha can still be promoted to opaque by Minecraft's font
+	 * renderer, so the wheel must skip rendering entirely at zero.
+	 */
+	public static boolean shouldRender(int opacityPercent) {
+		return clampPercent(opacityPercent) > MIN_PERCENT;
+	}
+
+	/**
 	 * Returns {@code argb} with its alpha multiplied by {@code opacityPercent}.
 	 * Alpha multiplication is rounded to the nearest integer and clamped to the
 	 * ARGB channel range.

@@ -49,11 +49,27 @@ class ClientConfigBoundsTest {
 
 	@Test
 	void visualWheelBoundsPreserveTheMinimumAnnulus() {
-		assertEquals(8, ClientConfigBounds.clampWheelInnerRadius(Integer.MIN_VALUE));
+		assertEquals(6, ClientConfigBounds.clampWheelInnerRadius(Integer.MIN_VALUE));
 		assertEquals(30, ClientConfigBounds.clampWheelInnerRadius(Integer.MAX_VALUE));
-		assertEquals(39, ClientConfigBounds.clampWheelOuterRadius(Integer.MIN_VALUE));
+		assertEquals(20, ClientConfigBounds.clampWheelOuterRadius(Integer.MIN_VALUE));
 		assertEquals(75, ClientConfigBounds.clampWheelOuterRadius(Integer.MAX_VALUE));
-		assertTrue(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MAX_WHEEL_INNER_RADIUS >= 9);
+		assertEquals(8, ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS);
+	}
+
+	@Test
+	void crossFieldRadiusClampUsesOuterThenInnerOrder() {
+		assertEquals(
+			new ClientConfigBounds.WheelRadii(6, 20),
+			ClientConfigBounds.clampWheelRadii(Integer.MIN_VALUE, Integer.MIN_VALUE));
+		assertEquals(
+			new ClientConfigBounds.WheelRadii(12, 20),
+			ClientConfigBounds.clampWheelRadii(Integer.MAX_VALUE, Integer.MIN_VALUE));
+		assertEquals(
+			new ClientConfigBounds.WheelRadii(30, 75),
+			ClientConfigBounds.clampWheelRadii(Integer.MAX_VALUE, Integer.MAX_VALUE));
+		assertEquals(
+			new ClientConfigBounds.WheelRadii(6, 75),
+			ClientConfigBounds.clampWheelRadii(Integer.MIN_VALUE, Integer.MAX_VALUE));
 	}
 
 	@Test

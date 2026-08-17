@@ -40,14 +40,17 @@ class WheelGeometryTest {
 
 	@Test
 	void configuredRadiusExtremesRemainValidAndSelectable() {
-		WheelGeometry smallest = new WheelGeometry(8.0, 39.0);
+		WheelGeometry smallest = new WheelGeometry(6.0, 20.0);
 		WheelGeometry largest = new WheelGeometry(30.0, 75.0);
 		List<PingType> pingTypes = List.of(pingType("attention"));
 
-		assertEquals(8.0, smallest.innerRadius());
-		assertEquals(39.0, smallest.outerRadius());
+		assertEquals(6.0, smallest.innerRadius());
+		assertEquals(20.0, smallest.outerRadius());
 		assertEquals(30.0, largest.innerRadius());
 		assertEquals(75.0, largest.outerRadius());
+		assertSame(WheelSelection.CENTER, smallest.select(6.0, 0.0, pingTypes));
+		assertEquals(pingType("attention"), sectorType(smallest.select(20.0, 0.0, pingTypes)));
+		assertSame(WheelSelection.NONE, smallest.select(20.001, 0.0, pingTypes));
 		assertSame(WheelSelection.CENTER, largest.select(30.0, 0.0, pingTypes));
 		assertEquals(pingType("attention"), sectorType(largest.select(75.0, 0.0, pingTypes)));
 		assertSame(WheelSelection.NONE, largest.select(75.001, 0.0, pingTypes));

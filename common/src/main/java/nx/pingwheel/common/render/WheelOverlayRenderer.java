@@ -128,13 +128,13 @@ public final class WheelOverlayRenderer {
 		}
 
 		ClientConfig config = ClientConfig.HANDLER.getConfig();
+		ClientConfigBounds.WheelRadii radii = ClientConfigBounds.clampWheelRadii(
+			config.getWheelInnerRadius(),
+			config.getWheelOuterRadius());
 		WheelGeometry geometry = new WheelGeometry(
-			ClientConfigBounds.clampWheelInnerRadius(config.getWheelInnerRadius()),
-			ClientConfigBounds.clampWheelOuterRadius(config.getWheelOuterRadius()));
+			radii.innerRadius(),
+			radii.outerRadius());
 		int opacity = ClientConfigBounds.clampWheelOpacity(config.getWheelOpacity());
-		int fontSize = ClientConfigBounds.clampWheelFontSize(config.getWheelFontSize());
-		double sectorMaxScale = WheelLabelLayout.BASE_TEXT_SCALE * fontSize / 100.0;
-		double targetLabelScale = fontSize / 100.0;
 
 		List<WheelSector> sectors = geometry.sectors(pingTypes);
 		double centerX = guiGraphics.guiWidth() / 2.0;
@@ -148,6 +148,14 @@ public final class WheelOverlayRenderer {
 			centerY);
 
 		runtime.setWheelSelection(selection);
+
+		if (!WheelOpacity.shouldRender(opacity)) {
+			return;
+		}
+
+		int fontSize = ClientConfigBounds.clampWheelFontSize(config.getWheelFontSize());
+		double sectorMaxScale = WheelLabelLayout.BASE_TEXT_SCALE * fontSize / 100.0;
+		double targetLabelScale = fontSize / 100.0;
 
 		var pose = guiGraphics.pose();
 		pose.pushPose();

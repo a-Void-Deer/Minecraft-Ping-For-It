@@ -1,8 +1,17 @@
 package nx.pingwheel.common.render;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
+import nx.pingwheel.common.client.wheel.WheelGeometry;
+import nx.pingwheel.common.domain.PingType;
+import nx.pingwheel.common.domain.PingTypeCatalog;
+import nx.pingwheel.common.interaction.wheel.WheelSelection;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WheelOpacityTest {
 
@@ -26,5 +35,20 @@ class WheelOpacityTest {
 		assertEquals(0xFF010203, WheelOpacity.apply(0xFF010203, 100));
 		assertEquals(0x50010203, WheelOpacity.apply(0x50010203, 100));
 		assertEquals(0x00010203, WheelOpacity.apply(0x00010203, 100));
+	}
+
+	@Test
+	void zeroOpacitySkipsVisualWorkWithoutChangingWheelSelectionSemantics() {
+		assertFalse(WheelOpacity.shouldRender(0));
+		assertFalse(WheelOpacity.shouldRender(-1));
+		assertTrue(WheelOpacity.shouldRender(1));
+
+		WheelGeometry geometry = new WheelGeometry(6.0, 20.0);
+		List<PingType> pingTypes = List.of(
+			PingTypeCatalog.builtIn().entries().get(0));
+		WheelSelection selection = geometry.select(0.0, -20.0, pingTypes);
+
+		assertTrue(selection instanceof WheelSelection.Sector);
+		assertEquals(selection, geometry.select(0.0, -20.0, pingTypes));
 	}
 }

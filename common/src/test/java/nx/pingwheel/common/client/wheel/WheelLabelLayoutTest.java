@@ -162,6 +162,25 @@ class WheelLabelLayoutTest {
 		assertTrue(placement.topY() + placement.renderedHeight() <= 160.0 + 1.0e-9);
 	}
 
+	@Test
+	void smallestConfiguredGeometryStillProvidesUsableLabels() {
+		WheelGeometry geometry = new WheelGeometry(6.0, 20.0);
+		List<WheelSector> sectors = geometry.sectors(PingTypeCatalog.builtIn().entries());
+		List<WheelLabelLayout.Placement> placements = WheelLabelLayout.layout(
+			geometry,
+			sectors,
+			List.of(54, 44, 36, 36, 54, 36, 42));
+
+		assertEquals(6.0, geometry.innerRadius());
+		assertEquals(20.0, geometry.outerRadius());
+		for (WheelLabelLayout.Placement placement : placements) {
+			assertTrue(placement.scale() > 0.0);
+			for (WheelPoint corner : labelCorners(placement, WheelLabelLayout.DEFAULT_LABEL_LINE_HEIGHT)) {
+				assertTrue(Math.hypot(corner.x(), corner.y()) <= geometry.outerRadius() + 1.0e-8);
+			}
+		}
+	}
+
 	private static List<WheelPoint> labelCorners(
 		WheelLabelLayout.Placement placement,
 		double lineHeight

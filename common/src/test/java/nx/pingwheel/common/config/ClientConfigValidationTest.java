@@ -27,10 +27,52 @@ class ClientConfigValidationTest {
 
 		config.validate();
 
-		assertEquals(8, config.getWheelInnerRadius());
+		assertEquals(6, config.getWheelInnerRadius());
 		assertEquals(75, config.getWheelOuterRadius());
 		assertEquals(0, config.getWheelOpacity());
 		assertEquals(200, config.getWheelFontSize());
-		assertTrue(config.getWheelOuterRadius() - config.getWheelInnerRadius() >= 9);
+		assertTrue(config.getWheelOuterRadius() - config.getWheelInnerRadius() >= 8);
+	}
+
+	@Test
+	void directJsonPairConvergesToTheMinimumValidAnnulus() {
+		ClientConfig config = new Gson().fromJson(
+			"{\"wheelInnerRadius\":30,\"wheelOuterRadius\":20}",
+			ClientConfig.class);
+
+		config.validate();
+
+		assertEquals(12, config.getWheelInnerRadius());
+		assertEquals(20, config.getWheelOuterRadius());
+	}
+
+	@Test
+	void radiusSettersKeepEveryLivePairValidInEitherMutationOrder() {
+		ClientConfig config = new ClientConfig();
+
+		config.setWheelOuterRadius(20);
+		assertEquals(12, config.getWheelInnerRadius());
+		assertEquals(20, config.getWheelOuterRadius());
+
+		config.setWheelInnerRadius(30);
+		assertEquals(12, config.getWheelInnerRadius());
+		assertEquals(20, config.getWheelOuterRadius());
+
+		config.setWheelOuterRadius(75);
+		assertEquals(12, config.getWheelInnerRadius());
+		assertEquals(75, config.getWheelOuterRadius());
+
+		config.setWheelInnerRadius(30);
+		assertEquals(30, config.getWheelInnerRadius());
+		assertEquals(75, config.getWheelOuterRadius());
+
+		config.setWheelInnerRadius(Integer.MIN_VALUE);
+		assertEquals(6, config.getWheelInnerRadius());
+		assertEquals(75, config.getWheelOuterRadius());
+
+		config.setWheelOuterRadius(Integer.MIN_VALUE);
+		assertEquals(6, config.getWheelInnerRadius());
+		assertEquals(20, config.getWheelOuterRadius());
+		assertTrue(config.getWheelOuterRadius() - config.getWheelInnerRadius() >= 8);
 	}
 }

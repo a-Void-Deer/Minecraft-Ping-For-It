@@ -72,13 +72,26 @@ public class ClientConfig implements IConfig {
 		}
 	}
 
+	public void setWheelInnerRadius(int wheelInnerRadius) {
+		final var radii = ClientConfigBounds.clampWheelRadii(wheelInnerRadius, this.wheelOuterRadius);
+		this.wheelInnerRadius = radii.innerRadius();
+		this.wheelOuterRadius = radii.outerRadius();
+	}
+
+	public void setWheelOuterRadius(int wheelOuterRadius) {
+		final var radii = ClientConfigBounds.clampWheelRadii(this.wheelInnerRadius, wheelOuterRadius);
+		this.wheelInnerRadius = radii.innerRadius();
+		this.wheelOuterRadius = radii.outerRadius();
+	}
+
 	@Override
 	public void validate() {
 		wheelHoldMillis = ClientConfigBounds.clampWheelHoldMillis(wheelHoldMillis);
 		wheelTimeoutMillis = ClientConfigBounds.clampWheelTimeoutMillis(wheelTimeoutMillis);
 		cancelHalfConeAngleDegrees = ClientConfigBounds.clampCancelHalfConeAngleDegrees(cancelHalfConeAngleDegrees);
-		wheelInnerRadius = ClientConfigBounds.clampWheelInnerRadius(wheelInnerRadius);
-		wheelOuterRadius = ClientConfigBounds.clampWheelOuterRadius(wheelOuterRadius);
+		final var radii = ClientConfigBounds.clampWheelRadii(wheelInnerRadius, wheelOuterRadius);
+		wheelInnerRadius = radii.innerRadius();
+		wheelOuterRadius = radii.outerRadius();
 		wheelOpacity = ClientConfigBounds.clampWheelOpacity(wheelOpacity);
 		wheelFontSize = ClientConfigBounds.clampWheelFontSize(wheelFontSize);
 
