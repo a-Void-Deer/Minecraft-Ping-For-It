@@ -58,6 +58,24 @@ class VoxelShapeRenderUtilTest {
 	}
 
 	@Test
+	void fullCubeUsesNativeWireframeEdgesOnly() {
+		VoxelShape fullCube = Shapes.box(0, 0, 0, 1, 1, 1);
+		List<Edge> edges = collectEdges(fullCube);
+
+		// The native full-cube shape is decomposed into its 12 wireframe edges,
+		// not six faces or a quad abstraction.
+		assertEquals(12, edges.size());
+
+		PoseStack poseStack = new PoseStack();
+		RecordingVertexConsumer consumer = new RecordingVertexConsumer();
+		VoxelShapeRenderUtil.renderEdges(
+			poseStack, consumer, fullCube, 0.0, 0.0, 0.0, 0xFFFFFFFF);
+
+		// Exactly two position vertices per native edge.
+		assertEquals(24, consumer.vertices().size());
+	}
+
+	@Test
 	void emptyShapeEmitsNoEdges() {
 		assertTrue(collectEdges(Shapes.empty()).isEmpty());
 	}

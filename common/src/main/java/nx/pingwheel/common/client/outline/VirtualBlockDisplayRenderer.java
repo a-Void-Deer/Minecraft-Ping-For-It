@@ -27,9 +27,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.mixin.DisplayBlockDisplayAccessor;
-import nx.pingwheel.common.util.ThrowableCauses;
 
 import static nx.pingwheel.common.Global.LOGGER;
+import static nx.pingwheel.common.Global.warnException;
 
 /**
  * Main-thread model-outline pass: renders the vanilla model glow for winning
@@ -88,13 +88,34 @@ import static nx.pingwheel.common.Global.LOGGER;
  * {@code ThreadDeath}) propagate. Logging is aggregated per frame (debug)
  * and at most once per
  * block registry id (warn); never per-frame per-block spam. Warn messages
- * report only the route, the failure stage (render/flush), and the top and
- * bounded root exception class names — never a throwable message, stack,
- * block registry id, position, or name, consistent with the client logging
- * policy. No world, team, scoreboard, or global glowing state is ever
+ * report only the fixed route/stage context plus the bounded safe exception
+ * report — never the throwable message, block registry id, position, or name,
+ * consistent with the client logging policy. No world, team, scoreboard, or
+ * global glowing state is ever
  * mutated; optional-mod block entity classes are never referenced directly.
  */
 public final class VirtualBlockDisplayRenderer {
+	private enum FailureRoute {
+		BLOCK_ENTITY("block entity"),
+		BLOCK_DISPLAY("block display");
+
+		private final String label;
+
+		FailureRoute(String label) {
+			this.label = label;
+		}
+	}
+
+	private enum FailureStage {
+		RENDER("render"),
+		FLUSH("flush");
+
+		private final String label;
+
+		FailureStage(String label) {
+			this.label = label;
+		}
+	}
 
 	public static final VirtualBlockDisplayRenderer INSTANCE = new VirtualBlockDisplayRenderer();
 
@@ -227,7 +248,7 @@ public final class VirtualBlockDisplayRenderer {
 			pos.getY() - cameraPosition.y,
 			pos.getZ() - cameraPosition.z);
 
-		String stage = "render";
+		FailureStage stage = FailureStage.RENDER;
 
 		// The whole attempt lives on its own transient buffer: a failure at
 		// any point — even after an incomplete vertex — is discarded together
@@ -235,7 +256,7 @@ public final class VirtualBlockDisplayRenderer {
 		// some other code path will later flush.
 		try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
 			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
-			OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, false, spec.argbColor());
+			OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, spec.argbColor());
 
 			renderer.render(
 				blockEntity, partialTick, poseStack, buffer,
@@ -245,11 +266,11 @@ public final class VirtualBlockDisplayRenderer {
 				return false;
 			}
 
-			stage = "flush";
+			stage = FailureStage.FLUSH;
 			localSource.endBatch();
 			return true;
 		} catch (Exception | LinkageError | AssertionError throwable) {
-			recordFailure(spec, "block entity", stage, throwable);
+			recordFailure(spec, FailureRoute.BLOCK_ENTITY, stage, throwable);
 			return false;
 		} finally {
 			poseStack.popPose();
@@ -277,7 +298,7 @@ public final class VirtualBlockDisplayRenderer {
 			return false;
 		}
 
-		String stage = "render";
+		FailureStage stage = FailureStage.RENDER;
 
 		// The whole attempt lives on its own transient buffer: a failure at
 		// any point — even after an incomplete vertex — is discarded together
@@ -285,7 +306,7 @@ public final class VirtualBlockDisplayRenderer {
 		// some other code path will later flush.
 		try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
 			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
-			OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, true, spec.argbColor());
+			OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, spec.argbColor());
 
 			display.setPos(pos.getX(), pos.getY(), pos.getZ());
 			((DisplayBlockDisplayAccessor) display).pingForItSetBlockState(blockState);
@@ -318,22 +339,39 @@ public final class VirtualBlockDisplayRenderer {
 			// fail-soft catch below.
 			long modelSeed = blockState.getSeed(pos);
 
-			BlockModelRenderSeed.runWithSeed(modelSeed, () -> dispatcher.render(
-				display,
-				renderPosition.x,
-				renderPosition.y,
-				renderPosition.z,
-				0.0F,
-				partialTick,
-				new PoseStack(),
-				buffer,
-				LevelRenderer.getLightColor(level, pos)));
+			// This display is synthetic and must not participate in F3+B. The
+			// dispatcher would otherwise append RenderType.lines() hitbox
+			// vertices to this model-outline buffer. Save the exact vanilla flag,
+			// disable it only for this dispatch, and restore it in finally so the
+			// scoped guard cannot mutate persistent dispatcher state after an
+			// ordinary return or any caught throwable.
+			boolean shouldRenderHitBoxes = dispatcher.shouldRenderHitBoxes();
+			if (shouldRenderHitBoxes) {
+				dispatcher.setRenderHitBoxes(false);
+			}
+
+			try {
+				BlockModelRenderSeed.runWithSeed(modelSeed, () -> dispatcher.render(
+					display,
+					renderPosition.x,
+					renderPosition.y,
+					renderPosition.z,
+					0.0F,
+					partialTick,
+					new PoseStack(),
+					buffer,
+					LevelRenderer.getLightColor(level, pos)));
+			} finally {
+				if (shouldRenderHitBoxes) {
+					dispatcher.setRenderHitBoxes(true);
+				}
+			}
 
 			if (buffer.vertexCount() == 0) {
 				return false;
 			}
 
-			stage = "flush";
+			stage = FailureStage.FLUSH;
 			localSource.endBatch();
 			return true;
 		} catch (Exception | LinkageError | AssertionError throwable) {
@@ -342,7 +380,7 @@ public final class VirtualBlockDisplayRenderer {
 			// attempt rebuilds it from scratch.
 			cachedDisplay = null;
 			cachedLevel = null;
-			recordFailure(spec, "block display", stage, throwable);
+			recordFailure(spec, FailureRoute.BLOCK_DISPLAY, stage, throwable);
 			return false;
 		}
 	}
@@ -386,20 +424,24 @@ public final class VirtualBlockDisplayRenderer {
 	 * Records a fail-soft model-outline attempt failure: one aggregate count
 	 * for the frame's debug log, and a single session-level warn per block
 	 * registry id (the id keys the warn-once bookkeeping only). The warn
-	 * message reports only the route, the failure stage ({@code render} or
-	 * {@code flush}), and the top and bounded/cycle-safe root exception
-	 * class names (the root name derived through a helper that can never
-	 * throw) — never the throwable message, stack, block registry id,
-	 * position, or name — consistent with the client logging policy, so no
-	 * per-frame warning spam occurs.
+ * message reports only the route, the failure stage ({@code render} or
+ * {@code flush}), and a bounded, message-free, sanitized report of the
+ * throwable's causal and suppressed stacks: exception class names,
+ * relationships, and selected source-frame fields. It never includes
+ * throwable messages or payload data, the block registry id, position, or
+ * name — consistent with the client logging policy, so no per-frame warning
+ * spam occurs.
 	 */
-	private void recordFailure(BlockOutlineSpec spec, String route, String stage, Throwable throwable) {
+	private void recordFailure(
+		BlockOutlineSpec spec, FailureRoute route, FailureStage stage, Throwable throwable
+	) {
 		frameFailures.merge(spec.blockKey().blockRegistryId(), 1, Integer::sum);
 
 		if (warnOnceRegistryIds.add(spec.blockKey().blockRegistryId())) {
-			LOGGER.warn(
-				"block outline model pass failed ({} route, {} stage); voxel fallback applied: {} (root: {})",
-				route, stage, throwable.getClass().getName(), ThrowableCauses.rootCauseClassName(throwable));
+			warnException(
+				"block outline model pass failed; route=" + route.label
+					+ "; stage=" + stage.label + "; voxel fallback applied",
+				throwable);
 		}
 	}
 }

@@ -7,7 +7,6 @@ import java.util.Objects;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.renderer.texture.TextureAtlas;
 
 /**
  * Outline-only {@link MultiBufferSource} adapter around a caller-owned,
@@ -28,18 +27,16 @@ import net.minecraft.client.renderer.texture.TextureAtlas;
  *   <li>{@link RenderType#isOutline()}: used as-is;</li>
  *   <li>otherwise, when {@link RenderType#outline()} is present: that exact
  *       texture-specific outline type is used;</li>
- *   <li>otherwise, when {@code allowBlocksAtlasFallback} is true (ordinary
- *       {@code block} BlockDisplay route only):
- *       {@link RenderType#outline(net.minecraft.resources.ResourceLocation)}
- *       over the blocks atlas is used;</li>
- *   <li>otherwise (actual {@code BlockEntity} route with no outline variant):
- *       a no-op {@link VertexConsumer} is returned so the emitted vertex count
- *       stays zero and the caller falls back to the VoxelShape outline.</li>
+ *   <li>otherwise, a no-op {@link VertexConsumer} is returned. This rejects
+ *       outline-less model, hitbox, shadow, and debug geometry so it cannot be
+ *       mistaken for model-outline vertices; the caller can then use the
+ *       VoxelShape outline.</li>
  * </ul>
  *
  * <p>Every vertex that reaches the local source through this adapter is
- * counted; {@link #vertexCount()} reports the total after a render attempt,
- * and a zero count means the route produced no silhouette.
+ * counted; outline-less geometry never reaches the source, so
+ * {@link #vertexCount()} reports only actual model-outline vertices. A zero
+ * count means the route produced no silhouette.
  *
  * <p>Color: the adapter applies one opaque marker color, supplied once at
  * construction, to every vertex itself — exactly mirroring the vanilla 1.21.1
@@ -51,7 +48,7 @@ import net.minecraft.client.renderer.texture.TextureAtlas;
  * (alpha-based discard, vertex-color tint) is produced exactly as for
  * glowing entities.
  *
- * <p>The pure decision core is {@link #decide(boolean, boolean, boolean)},
+ * <p>The pure decision core is {@link #decide(boolean, boolean)},
  * which operates on extracted {@link RenderType} facts and is headless-
  * testable; {@link #resolve} applies it to a live render type. The counting
  * and no-op consumers are package-private test seams.
@@ -62,7 +59,6 @@ import net.minecraft.client.renderer.texture.TextureAtlas;
 public final class OutlineOnlyBufferSource implements MultiBufferSource {
 
 	private final MultiBufferSource source;
-	private final boolean allowBlocksAtlasFallback;
 	private final int markerColor;
 	private final List<VertexCountingConsumer> issuedConsumers = new ArrayList<>();
 
@@ -72,18 +68,12 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 	 *                                  into; must be created fresh for this
 	 *                                  attempt and never shared across
 	 *                                  attempts or frames
-	 * @param allowBlocksAtlasFallback  whether render types without an outline
-	 *                                  variant fall back to
-	 *                                  {@code RenderType.outline(TextureAtlas.LOCATION_BLOCKS)}
-	 *                                  (ordinary BlockDisplay route) instead
-	 *                                  of a no-op (actual BlockEntity route)
 	 * @param markerColor               the opaque marker color (ARGB; the
 	 *                                  alpha is ignored and forced to 255)
 	 *                                  applied to every emitted vertex
 	 */
-	public OutlineOnlyBufferSource(MultiBufferSource source, boolean allowBlocksAtlasFallback, int markerColor) {
+	public OutlineOnlyBufferSource(MultiBufferSource source, int markerColor) {
 		this.source = Objects.requireNonNull(source, "source");
-		this.allowBlocksAtlasFallback = allowBlocksAtlasFallback;
 		this.markerColor = markerColor;
 	}
 
@@ -91,11 +81,11 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 	public VertexConsumer getBuffer(RenderType renderType) {
 		Objects.requireNonNull(renderType, "renderType");
 
-		RenderType outlineType = resolve(renderType, allowBlocksAtlasFallback);
+		RenderType outlineType = resolve(renderType);
 
 		if (outlineType == null) {
-			// No outline variant exists and no fallback is allowed: the route
-			// cannot silhouette this geometry, so swallow it without counting.
+			// Outline-less model, hitbox, shadow, and debug geometry cannot
+			// silhouette this model pass, so swallow it without counting.
 			return NoOpVertexConsumer.INSTANCE;
 		}
 
@@ -129,21 +119,15 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 	 *   <li>{@code isOutline} — {@code RenderType#isOutline()};</li>
 	 *   <li>{@code hasOutlineVariant} — whether
 	 *       {@code RenderType#outline()} is present;</li>
-	 *   <li>{@code allowBlocksAtlasFallback} — the adapter's fallback mode
-	 *       (ordinary BlockDisplay route vs actual BlockEntity route).</li>
 	 * </ul>
 	 */
-	static Decision decide(boolean isOutline, boolean hasOutlineVariant, boolean allowBlocksAtlasFallback) {
+	static Decision decide(boolean isOutline, boolean hasOutlineVariant) {
 		if (isOutline) {
 			return Decision.AS_IS;
 		}
 
 		if (hasOutlineVariant) {
 			return Decision.OUTLINE_VARIANT;
-		}
-
-		if (allowBlocksAtlasFallback) {
-			return Decision.BLOCKS_ATLAS;
 		}
 
 		return Decision.NO_OP;
@@ -153,11 +137,10 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 	 * The outline-only {@link RenderType} to issue for {@code renderType}, or
 	 * {@code null} for a no-op. No render state is touched here.
 	 */
-	static RenderType resolve(RenderType renderType, boolean allowBlocksAtlasFallback) {
-		return switch (decide(renderType.isOutline(), renderType.outline().isPresent(), allowBlocksAtlasFallback)) {
+	static RenderType resolve(RenderType renderType) {
+		return switch (decide(renderType.isOutline(), renderType.outline().isPresent())) {
 			case AS_IS -> renderType;
 			case OUTLINE_VARIANT -> renderType.outline().get();
-			case BLOCKS_ATLAS -> RenderType.outline(TextureAtlas.LOCATION_BLOCKS);
 			case NO_OP -> null;
 		};
 	}
@@ -173,10 +156,7 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 		/** The incoming type exposes a texture-specific outline variant: use it. */
 		OUTLINE_VARIANT,
 
-		/** No variant exists but the blocks-atlas fallback is allowed: use it. */
-		BLOCKS_ATLAS,
-
-		/** No variant and no fallback: emit nothing, count zero. */
+		/** No variant exists: emit nothing, count zero. */
 		NO_OP
 	}
 

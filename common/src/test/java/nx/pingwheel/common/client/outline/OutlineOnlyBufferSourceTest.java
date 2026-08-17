@@ -19,14 +19,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decision.AS_IS;
-import static nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decision.BLOCKS_ATLAS;
 import static nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decision.NO_OP;
 import static nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decision.OUTLINE_VARIANT;
 
 /**
  * Headless tests for the outline-only buffer adapter seams: the pure render
  * type resolution decision, the counting/fixed-color consumers, the no-op
- * fallback for outline-less block entity geometry, and the routing of the
+ * rejection for outline-less geometry, and the routing of the
  * resolved render type into the supplied attempt-local source.
  *
  * <p>The counting and no-op consumers are tested directly with recording
@@ -124,37 +123,37 @@ class OutlineOnlyBufferSourceTest {
 
 	@Test
 	void outlineRenderTypesAreUsedAsIs() {
-		assertSame(AS_IS, OutlineOnlyBufferSource.decide(true, false, false));
-		assertSame(AS_IS, OutlineOnlyBufferSource.decide(true, true, false));
-		assertSame(AS_IS, OutlineOnlyBufferSource.decide(true, false, true));
+		assertSame(AS_IS, OutlineOnlyBufferSource.decide(true, false));
+		assertSame(AS_IS, OutlineOnlyBufferSource.decide(true, true));
 	}
 
 	@Test
-	void textureSpecificOutlineVariantIsPreferredOverBlocksAtlasFallback() {
-		assertSame(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true, false));
-		assertSame(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true, true));
+	void textureSpecificOutlineVariantIsPreferred() {
+		assertSame(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true));
 	}
 
 	@Test
-	void outlineLessTypesResolveToNoOpOrBlocksAtlasFallback() {
-		// Actual BlockEntity route: no outline variant and no fallback -> no-op.
-		assertSame(NO_OP, OutlineOnlyBufferSource.decide(false, false, false));
-
-		// Ordinary BlockDisplay route: falls back to the blocks-atlas outline.
-		assertSame(BLOCKS_ATLAS, OutlineOnlyBufferSource.decide(false, false, true));
+	void outlineLessTypesAlwaysResolveToNoOp() {
+		assertSame(NO_OP, OutlineOnlyBufferSource.decide(false, false));
 	}
 
 	@Test
 	void decisionCoverageIsComplete() {
 		// Pin the full decision matrix so a future routing change is noticed.
-		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, true, true));
-		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, true, false));
-		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, false, true));
-		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, false, false));
-		assertEquals(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true, true));
-		assertEquals(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true, false));
-		assertEquals(BLOCKS_ATLAS, OutlineOnlyBufferSource.decide(false, false, true));
-		assertEquals(NO_OP, OutlineOnlyBufferSource.decide(false, false, false));
+		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, true));
+		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, false));
+		assertEquals(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true));
+		assertEquals(NO_OP, OutlineOnlyBufferSource.decide(false, false));
+	}
+
+	@Test
+	void normalModelTypesResolveThroughTheirOutlineVariants() {
+		assertSame(
+			RenderType.solid().outline().orElseThrow(),
+			OutlineOnlyBufferSource.resolve(RenderType.solid()));
+		assertSame(
+			RenderType.cutout().outline().orElseThrow(),
+			OutlineOnlyBufferSource.resolve(RenderType.cutout()));
 	}
 
 	// --- counting ---
@@ -270,8 +269,8 @@ class OutlineOnlyBufferSourceTest {
 	 * For every render type that resolves to an outline type, the adapter
 	 * must request exactly the resolved type from the supplied local source
 	 * and wrap the source's consumer in the counting/fixed-color consumer.
-	 * {@code RenderType.lines()} has no outline variant (blocks-atlas
-	 * fallback or no-op), {@code RenderType.entitySolid(...)} exposes its
+	 * {@code RenderType.lines()} and shadows have no outline variant and are
+	 * rejected, {@code RenderType.entitySolid(...)} exposes its
 	 * texture-specific outline variant, and
 	 * {@code RenderType.outline(...)} is itself an outline type.
 	 */
@@ -282,46 +281,49 @@ class OutlineOnlyBufferSourceTest {
 		RenderType outlineType = RenderType.outline(TextureAtlas.LOCATION_BLOCKS);
 
 		for (RenderType input : List.of(lines, entitySolid, outlineType)) {
-			for (boolean fallback : List.of(false, true)) {
-				RenderType resolved = OutlineOnlyBufferSource.resolve(input, fallback);
+			RenderType resolved = OutlineOnlyBufferSource.resolve(input);
 
-				if (resolved == null) {
-					continue; // The no-op branch is pinned by its own test.
-				}
-
-				RecordingBufferSource source = new RecordingBufferSource();
-				OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(source, fallback, 0xFF11AA22);
-
-				VertexConsumer issued = adapter.getBuffer(input);
-
-				assertNotNull(issued);
-				assertEquals(1, source.requested.size());
-				assertSame(resolved, source.requested.get(0));
-
-				// The issued consumer wraps the source's own consumer: vertices
-				// flow through, counted, with the fixed opaque marker color.
-				issued.addVertex(0.0F, 0.0F, 0.0F);
-
-				assertEquals(1, adapter.vertexCount());
-				assertEquals(1, source.delegate.vertices);
-				assertArrayEquals(new int[] { 0x11, 0xAA, 0x22, 255 }, source.delegate.colors.get(0));
+			if (resolved == null) {
+				continue; // The no-op branch is pinned by its own test.
 			}
+
+			RecordingBufferSource source = new RecordingBufferSource();
+			OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(source, 0xFF11AA22);
+
+			VertexConsumer issued = adapter.getBuffer(input);
+
+			assertNotNull(issued);
+			assertEquals(1, source.requested.size());
+			assertSame(resolved, source.requested.get(0));
+
+			// The issued consumer wraps the source's own consumer: vertices
+			// flow through, counted, with the fixed opaque marker color.
+			issued.addVertex(0.0F, 0.0F, 0.0F);
+
+			assertEquals(1, adapter.vertexCount());
+			assertEquals(1, source.delegate.vertices);
+			assertArrayEquals(new int[] { 0x11, 0xAA, 0x22, 255 }, source.delegate.colors.get(0));
 		}
 	}
 
 	@Test
 	void noOpNeverConsultsLocalSource() {
-		RecordingBufferSource source = new RecordingBufferSource();
-		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(source, false, 0xFF0000FF);
+		for (RenderType input : List.of(
+			RenderType.lines(),
+			RenderType.entityShadow(TextureAtlas.LOCATION_BLOCKS))) {
+			RecordingBufferSource source = new RecordingBufferSource();
+			OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(source, 0xFF0000FF);
 
-		// lines() has no outline variant and the fallback is disabled.
-		VertexConsumer issued = adapter.getBuffer(RenderType.lines());
+			// Hitbox, shadow, and other debug geometry has no outline variant
+			// and must never become counted model-outline geometry.
+			VertexConsumer issued = adapter.getBuffer(input);
 
-		assertSame(NoOpVertexConsumer.INSTANCE, issued);
-		assertEquals(0, source.requested.size());
-		assertEquals(0, adapter.vertexCount());
+			assertSame(NoOpVertexConsumer.INSTANCE, issued);
+			assertEquals(0, source.requested.size());
+			assertEquals(0, adapter.vertexCount());
 
-		issued.addVertex(1.0F, 2.0F, 3.0F);
-		assertEquals(0, adapter.vertexCount());
+			issued.addVertex(1.0F, 2.0F, 3.0F);
+			assertEquals(0, adapter.vertexCount());
+		}
 	}
 }
