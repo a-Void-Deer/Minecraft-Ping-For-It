@@ -1,16 +1,17 @@
 package nx.pingwheel.common.client.outline;
 
-import java.util.Objects;
 import java.util.UUID;
 
+import java.util.Objects;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.domain.EntityLocator;
 
 /**
  * An immutable outline specification for one pinged entity.
  *
  * <p>A spec carries the authoritative marker that currently controls the
- * visible outline, the entity identity (dimension-free {@link UUID}; movement
- * and same-dimension teleports never change it), the ping type id the color
+	 * visible outline, the entity {@link EntityLocator}; movement and
+	 * same-dimension teleports never change it), the ping type id the color
  * was resolved from, and the fully opaque ARGB outline color.
  *
  * <p>The compact constructor is strict: every reference must be non-null and
@@ -20,14 +21,14 @@ import nx.pingwheel.common.domain.MarkerId;
  */
 public record EntityOutlineSpec(
 	MarkerId markerId,
-	UUID entityId,
+	EntityLocator locator,
 	String pingTypeId,
 	int argbColor
 ) {
 
 	public EntityOutlineSpec {
 		Objects.requireNonNull(markerId, "markerId");
-		Objects.requireNonNull(entityId, "entityId");
+		Objects.requireNonNull(locator, "locator");
 		Objects.requireNonNull(pingTypeId, "pingTypeId");
 
 		if (pingTypeId.isBlank()) {
@@ -35,5 +36,10 @@ public record EntityOutlineSpec(
 		}
 
 		argbColor = 0xFF000000 | (argbColor & 0x00FFFFFF);
+	}
+
+	/** UUID convenience constructor for the existing UUID-only render edge. */
+	public EntityOutlineSpec(MarkerId markerId, UUID entityId, String pingTypeId, int argbColor) {
+		this(markerId, EntityLocator.uuid(entityId), pingTypeId, argbColor);
 	}
 }

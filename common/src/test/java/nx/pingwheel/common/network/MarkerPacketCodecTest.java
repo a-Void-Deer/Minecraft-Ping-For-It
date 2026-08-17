@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetKind;
 import nx.pingwheel.common.marker.MarkerAnchor;
@@ -38,6 +39,7 @@ class MarkerPacketCodecTest {
 	void targetRoundTripsForEveryKind() {
 		Target[] targets = {
 			new Target.EntityTarget("minecraft:overworld", ENTITY_ID),
+			new Target.EntityTarget("minecraft:overworld", EntityLocator.runtimeId(17)),
 			new Target.BlockTarget("minecraft:overworld", -5, 64, 200, "minecraft:chest"),
 			new Target.LocationTarget("minecraft:the_end", 12.5, -64.0, 0.25)
 		};
@@ -66,6 +68,7 @@ class MarkerPacketCodecTest {
 	void targetKeyRoundTripsForEveryKind() {
 		TargetKey[] keys = {
 			new TargetKey.EntityKey("minecraft:overworld", ENTITY_ID),
+			new TargetKey.EntityKey("minecraft:overworld", EntityLocator.runtimeId(17)),
 			new TargetKey.BlockKey("minecraft:overworld", -5, 64, 200, "minecraft:chest"),
 			new TargetKey.LocationKey("minecraft:the_end", 12.5, -64.0, 0.25)
 		};
@@ -206,6 +209,58 @@ class MarkerPacketCodecTest {
 		buf.writeUtf("NOPE", MarkerPacketCodec.MAX_ID_LENGTH);
 
 		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTargetKey(buf));
+	}
+
+	@Test
+	void rejectsUnknownEntityLocatorTag() {
+		var buf = buffer();
+		MarkerPacketCodec.writeEnum(buf, TargetKind.ENTITY);
+		MarkerPacketCodec.writeIdString(buf, "minecraft:overworld");
+		buf.writeVarInt(99);
+
+		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTarget(buf));
+	}
+
+	@Test
+	void rejectsUnknownEntityLocatorTagForTargetKey() {
+		var buf = buffer();
+		MarkerPacketCodec.writeEnum(buf, TargetKind.ENTITY);
+		MarkerPacketCodec.writeIdString(buf, "minecraft:overworld");
+		buf.writeVarInt(99);
+
+		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTargetKey(buf));
+	}
+
+	@Test
+	void rejectsNegativeRuntimeEntityLocatorId() {
+		var buf = buffer();
+		MarkerPacketCodec.writeEnum(buf, TargetKind.ENTITY);
+		MarkerPacketCodec.writeIdString(buf, "minecraft:overworld");
+		buf.writeVarInt(MarkerPacketCodec.ENTITY_LOCATOR_RUNTIME_ID_TAG);
+		buf.writeVarInt(-1);
+
+		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTarget(buf));
+	}
+
+	@Test
+	void rejectsNegativeRuntimeEntityLocatorIdForTargetKey() {
+		var buf = buffer();
+		MarkerPacketCodec.writeEnum(buf, TargetKind.ENTITY);
+		MarkerPacketCodec.writeIdString(buf, "minecraft:overworld");
+		buf.writeVarInt(MarkerPacketCodec.ENTITY_LOCATOR_RUNTIME_ID_TAG);
+		buf.writeVarInt(-1);
+
+		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTargetKey(buf));
+	}
+
+	@Test
+	void rejectsTruncatedRuntimeEntityLocator() {
+		var buf = buffer();
+		MarkerPacketCodec.writeEnum(buf, TargetKind.ENTITY);
+		MarkerPacketCodec.writeIdString(buf, "minecraft:overworld");
+		buf.writeVarInt(MarkerPacketCodec.ENTITY_LOCATOR_RUNTIME_ID_TAG);
+
+		assertThrows(RuntimeException.class, () -> MarkerPacketCodec.readTarget(buf));
 	}
 
 	@Test

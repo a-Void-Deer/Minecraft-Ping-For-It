@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.core.GameContext;
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
 
 /**
@@ -97,7 +98,11 @@ public final class ClientTargetNameResolver {
 				return Optional.empty();
 			}
 
-			Entity entity = GameContext.getEntity(target.entityId());
+			if (!(target.locator() instanceof EntityLocator.UUID uuidLocator)) {
+				return Optional.empty();
+			}
+
+			Entity entity = GameContext.getEntity(uuidLocator.value());
 
 			if (entity == null || entity.isRemoved() || !entity.isAlive()) {
 				return Optional.empty();

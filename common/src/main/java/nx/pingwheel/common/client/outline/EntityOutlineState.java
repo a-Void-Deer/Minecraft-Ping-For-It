@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 
@@ -43,7 +44,7 @@ public final class EntityOutlineState {
 
 	private static volatile EntityOutlineLogger logger = EntityOutlineLogger.noop();
 
-	private Map<UUID, EntityOutlineSpec> specs = Map.of();
+	private Map<EntityLocator, EntityOutlineSpec> specs = Map.of();
 
 	private EntityOutlineState() {}
 
@@ -61,7 +62,7 @@ public final class EntityOutlineState {
 			return;
 		}
 
-		Map<UUID, EntityOutlineSpec> next = EntityOutlineSelection.select(
+		Map<EntityLocator, EntityOutlineSpec> next = EntityOutlineSelection.select(
 			store.visibleWinnersInDimension(dimensionId), BUILT_IN_CATALOG);
 
 		if (next.equals(specs)) {
@@ -71,7 +72,7 @@ public final class EntityOutlineState {
 		int added = 0;
 		int changed = 0;
 
-		for (Map.Entry<UUID, EntityOutlineSpec> entry : next.entrySet()) {
+		for (Map.Entry<EntityLocator, EntityOutlineSpec> entry : next.entrySet()) {
 			EntityOutlineSpec previous = specs.get(entry.getKey());
 
 			if (previous == null) {
@@ -83,8 +84,8 @@ public final class EntityOutlineState {
 
 		int removed = 0;
 
-		for (UUID entityId : specs.keySet()) {
-			if (!next.containsKey(entityId)) {
+		for (EntityLocator locator : specs.keySet()) {
+			if (!next.containsKey(locator)) {
 				removed++;
 			}
 		}
@@ -97,18 +98,28 @@ public final class EntityOutlineState {
 	 * Whether the entity with {@code entityId} currently controls a visible
 	 * outline.
 	 */
+	public boolean shouldOutline(EntityLocator locator) {
+		return specs.containsKey(locator);
+	}
+
+	/** UUID render-hook convenience while runtime-id lookup is deferred. */
 	public boolean shouldOutline(UUID entityId) {
-		return specs.containsKey(entityId);
+		return shouldOutline(EntityLocator.uuid(entityId));
 	}
 
 	/**
 	 * The fully opaque ARGB outline color for {@code entityId}, or {@code 0}
 	 * when the entity currently has no outline.
 	 */
-	public int colorFor(UUID entityId) {
-		EntityOutlineSpec spec = specs.get(entityId);
+	public int colorFor(EntityLocator locator) {
+		EntityOutlineSpec spec = specs.get(locator);
 
 		return spec == null ? 0 : spec.argbColor();
+	}
+
+	/** UUID render-hook convenience while runtime-id lookup is deferred. */
+	public int colorFor(UUID entityId) {
+		return colorFor(EntityLocator.uuid(entityId));
 	}
 
 	/**
@@ -120,7 +131,7 @@ public final class EntityOutlineState {
 	 * {@link #shouldOutline} and {@link #colorFor} instead of iterating the
 	 * snapshot.
 	 */
-	Map<UUID, EntityOutlineSpec> snapshot() {
+	Map<EntityLocator, EntityOutlineSpec> snapshot() {
 		return specs;
 	}
 

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.EntityLocator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -23,6 +24,16 @@ class TargetKeyTest {
 		assertEquals(new TargetKey.EntityKey(OVERWORLD, uuid), new TargetKey.EntityKey(OVERWORLD, uuid));
 		assertNotEquals(new TargetKey.EntityKey(OVERWORLD, uuid), new TargetKey.EntityKey(OVERWORLD, UUID.randomUUID()));
 		assertNotEquals(new TargetKey.EntityKey(OVERWORLD, uuid), new TargetKey.EntityKey(NETHER, uuid));
+	}
+
+	@Test
+	void entityKeyIdentityIncludesLocatorKind() {
+		UUID uuid = UUID.fromString("aaaaaaaa-1111-2222-3333-444444444444");
+		TargetKey.EntityKey uuidKey = new TargetKey.EntityKey(OVERWORLD, EntityLocator.uuid(uuid));
+		TargetKey.EntityKey runtimeKey = new TargetKey.EntityKey(OVERWORLD, EntityLocator.runtimeId(42));
+
+		assertNotEquals(uuidKey, runtimeKey);
+		assertEquals(EntityLocator.runtimeId(42), runtimeKey.locator());
 	}
 
 	@Test
@@ -98,7 +109,7 @@ class TargetKeyTest {
 	void entityKeyValidatesDimensionAndUuid() {
 		assertThrows(NullPointerException.class, () -> new TargetKey.EntityKey(null, UUID.randomUUID()));
 		assertThrows(IllegalArgumentException.class, () -> new TargetKey.EntityKey(" ", UUID.randomUUID()));
-		assertThrows(NullPointerException.class, () -> new TargetKey.EntityKey(OVERWORLD, null));
+		assertThrows(NullPointerException.class, () -> new TargetKey.EntityKey(OVERWORLD, (EntityLocator)null));
 	}
 
 	@Test

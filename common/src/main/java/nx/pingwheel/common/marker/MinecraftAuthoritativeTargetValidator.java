@@ -16,6 +16,7 @@ import net.minecraft.world.phys.Vec3;
 
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetMatchContext;
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
 import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.name.TargetNameJsonCodec;
@@ -135,7 +136,14 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 	private AuthoritativeTargetValidation validateEntity(
 		ServerPlayer requester, ServerLevel level, String dimensionId, Target.EntityTarget requested
 	) {
-		Entity entity = level.getEntity(requested.entityId());
+		if (!(requested.locator() instanceof EntityLocator.UUID uuidLocator)) {
+			// Runtime-id resolution is intentionally deferred to the next
+			// infrastructure step. Treat an unsupported locator as missing rather
+			// than casting it to a UUID or accepting an unvalidated target.
+			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.TARGET_GONE);
+		}
+
+		Entity entity = level.getEntity(uuidLocator.value());
 
 		if (entity == null || !entity.isAlive() || entity.isRemoved()) {
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.TARGET_GONE);

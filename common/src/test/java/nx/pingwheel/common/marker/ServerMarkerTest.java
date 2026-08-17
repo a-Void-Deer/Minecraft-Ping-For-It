@@ -83,7 +83,7 @@ class ServerMarkerTest {
 		ServerMarker genericEntity = marker(new MarkerId(2L), entity, type("entity"), ping("attention"),
 			10L, 110L, List.of(RECIPIENT));
 
-		assertEquals(new TargetKey.EntityKey(OVERWORLD, entity.entityId()), droppedItem.targetKey());
+		assertEquals(new TargetKey.EntityKey(OVERWORLD, entity.locator()), droppedItem.targetKey());
 		assertEquals(droppedItem.targetKey(), genericEntity.targetKey());
 	}
 

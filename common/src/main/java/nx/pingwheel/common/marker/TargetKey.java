@@ -3,6 +3,7 @@ package nx.pingwheel.common.marker;
 import java.util.Objects;
 import java.util.UUID;
 
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
 
 /**
@@ -12,7 +13,7 @@ import nx.pingwheel.common.domain.Target;
  * server-side same-target winner comparison has one stable, self-contained key
  * type. Every variant carries the full target identity:
  * <ul>
- *   <li>{@link EntityKey}: dimension + entity UUID (stable across movement and
+	 *   <li>{@link EntityKey}: dimension + {@link EntityLocator} (stable across movement and
  *       same-dimension teleports, and deliberately position-free);</li>
  *   <li>{@link BlockKey}: dimension + exact integer position + block registry
  *       id (so a different block type at the same position is a different
@@ -35,7 +36,7 @@ public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKe
 
 		return switch (target) {
 			case Target.EntityTarget entity ->
-				new EntityKey(entity.dimensionId(), entity.entityId());
+				new EntityKey(entity.dimensionId(), entity.locator());
 			case Target.BlockTarget block ->
 				new BlockKey(block.dimensionId(), block.x(), block.y(), block.z(), block.blockRegistryId());
 			case Target.LocationTarget location ->
@@ -43,11 +44,16 @@ public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKe
 		};
 	}
 
-	record EntityKey(String dimensionId, UUID entityId) implements TargetKey {
+	record EntityKey(String dimensionId, EntityLocator locator) implements TargetKey {
 
 		public EntityKey {
 			requireDimensionId(dimensionId);
-			Objects.requireNonNull(entityId, "entityId");
+			Objects.requireNonNull(locator, "locator");
+		}
+
+		/** UUID convenience constructor retained for existing marker callers. */
+		public EntityKey(String dimensionId, UUID entityId) {
+			this(dimensionId, EntityLocator.uuid(entityId));
 		}
 	}
 

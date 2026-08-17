@@ -9,6 +9,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 
 import nx.pingwheel.common.core.GameContext;
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.ResolvedTarget;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.interaction.state.TargetGoneReason;
@@ -84,7 +85,14 @@ public final class MinecraftClientTargetValidator implements TargetValidator {
 		// GameContext iterates the client level's current entity storage
 		// (entitiesForRendering), so a found entity is currently loaded and in
 		// the current dimension (the dimension check above already passed).
-		Entity entity = GameContext.getEntity(entityTarget.entityId());
+		if (!(entityTarget.locator() instanceof EntityLocator.UUID uuidLocator)) {
+			// Runtime-id lookup is added in the next infrastructure step. A missing
+			// client lookup is left to the authoritative server, matching the
+			// existing unloaded-entity behavior.
+			return TargetValidation.valid();
+		}
+
+		Entity entity = GameContext.getEntity(uuidLocator.value());
 
 		// Not currently loaded on the client (out of view distance, never
 		// received, or lost after a reload): the client cannot prove the

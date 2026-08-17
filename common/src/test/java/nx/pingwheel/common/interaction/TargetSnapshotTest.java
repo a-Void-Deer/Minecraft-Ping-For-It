@@ -1,5 +1,6 @@
 package nx.pingwheel.common.interaction;
 
+import nx.pingwheel.common.domain.EntityLocator;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -32,7 +33,7 @@ class TargetSnapshotTest {
 		Target.EntityTarget target = (Target.EntityTarget) snapshot.target();
 
 		assertEquals(OVERWORLD, target.dimensionId());
-		assertEquals(ENTITY_ID, target.entityId());
+		assertEquals(EntityLocator.uuid(ENTITY_ID), target.locator());
 		assertEquals(TargetKind.ENTITY, target.kind());
 		assertEquals(Optional.of("minecraft:item"), snapshot.matchContext().entityTypeId());
 	}

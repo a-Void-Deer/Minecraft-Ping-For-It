@@ -24,6 +24,7 @@ import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetKind;
@@ -578,8 +579,9 @@ public final class ClientPingRuntime {
 		var anchor = marker.anchor();
 		WorldVector anchorPosition = new WorldVector(anchor.x(), anchor.y(), anchor.z());
 
-		if (target instanceof Target.EntityTarget entityTarget) {
-			Entity entity = GameContext.getEntity(entityTarget.entityId());
+		if (target instanceof Target.EntityTarget entityTarget
+			&& entityTarget.locator() instanceof EntityLocator.UUID uuidLocator) {
+			Entity entity = GameContext.getEntity(uuidLocator.value());
 
 			// GameContext only searches the current level, so a found entity is
 			// already in the marker's dimension.

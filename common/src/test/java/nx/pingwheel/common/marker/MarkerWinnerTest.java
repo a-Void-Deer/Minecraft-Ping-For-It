@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.UUID;
 
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
@@ -75,6 +76,21 @@ class MarkerWinnerTest {
 		// onB arrived later but refers to a different target key; it must not win for A.
 		assertEquals(new MarkerId(1L),
 			MarkerWinner.winnerFor(List.of(onA, onB), TargetKey.from(entityTarget(uuidA)), RECIPIENT_A).orElseThrow().id());
+	}
+
+	@Test
+	void uuidAndRuntimeLocatorsUseIndependentWinnerKeys() {
+		Target uuidTarget = new Target.EntityTarget(OVERWORLD, EntityLocator.uuid(new UUID(0L, 7L)));
+		Target runtimeTarget = new Target.EntityTarget(OVERWORLD, EntityLocator.runtimeId(7));
+		ServerMarker uuidMarker = marker(1L, uuidTarget, 20L, RECIPIENT_A);
+		ServerMarker runtimeMarker = marker(2L, runtimeTarget, 10L, RECIPIENT_A);
+
+		assertEquals(new MarkerId(1L),
+			MarkerWinner.winnerFor(List.of(uuidMarker, runtimeMarker), TargetKey.from(uuidTarget), RECIPIENT_A)
+				.orElseThrow().id());
+		assertEquals(new MarkerId(2L),
+			MarkerWinner.winnerFor(List.of(uuidMarker, runtimeMarker), TargetKey.from(runtimeTarget), RECIPIENT_A)
+				.orElseThrow().id());
 	}
 
 	@Test

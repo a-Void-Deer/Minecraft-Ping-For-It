@@ -18,6 +18,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.EntityLocator;
 
 import static nx.pingwheel.common.Global.LOGGER;
 
@@ -133,7 +134,11 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 	 * entity that moved to another dimension is simply not found.
 	 */
 	private Resolution resolveEntity(ServerLevel level, Target.EntityTarget target) {
-		Entity entity = level.getEntity(target.entityId());
+		if (!(target.locator() instanceof EntityLocator.UUID uuidLocator)) {
+			return Resolution.unavailable(FallbackReason.ENTITY_UNAVAILABLE);
+		}
+
+		Entity entity = level.getEntity(uuidLocator.value());
 
 		if (entity == null || entity.isRemoved()) {
 			return Resolution.unavailable(FallbackReason.ENTITY_UNAVAILABLE);

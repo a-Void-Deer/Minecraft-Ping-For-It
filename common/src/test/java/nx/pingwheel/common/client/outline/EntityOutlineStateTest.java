@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerSnapshot;
@@ -94,9 +95,11 @@ class EntityOutlineStateTest {
 
 		state.prepare(store, OVERWORLD);
 
-		assertEquals(List.of(ENTITY_B, ENTITY_A), new ArrayList<>(state.snapshot().keySet()));
+		assertEquals(
+			List.of(EntityLocator.uuid(ENTITY_B), EntityLocator.uuid(ENTITY_A)),
+			new ArrayList<>(state.snapshot().keySet()));
 		assertThrows(UnsupportedOperationException.class,
-			() -> state.snapshot().put(ENTITY_A, null));
+		() -> state.snapshot().put(EntityLocator.uuid(ENTITY_A), null));
 	}
 
 	@Test

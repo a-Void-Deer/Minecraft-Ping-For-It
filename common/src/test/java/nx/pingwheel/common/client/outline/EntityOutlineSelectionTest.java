@@ -9,6 +9,7 @@ import java.util.UUID;
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
@@ -78,13 +79,13 @@ class EntityOutlineSelectionTest {
 			winners.put(TargetKey.from(target), marker(i + 1L, target, pingTypes[i]));
 		}
 
-		Map<UUID, EntityOutlineSpec> selected =
+		Map<EntityLocator, EntityOutlineSpec> selected =
 			EntityOutlineSelection.select(winners, PingTypeCatalog.builtIn());
 
 		assertEquals(4, selected.size());
 
 		for (int i = 0; i < pingTypes.length; i++) {
-			EntityOutlineSpec spec = selected.get(entities[i]);
+			EntityOutlineSpec spec = selected.get(EntityLocator.uuid(entities[i]));
 
 			assertEquals(0xFF000000 | expected[i], spec.argbColor());
 			assertEquals(pingTypes[i], spec.pingTypeId());
@@ -95,11 +96,24 @@ class EntityOutlineSelectionTest {
 	void unknownPingTypeFallsBackToOpaqueWhite() {
 		Target target = entityTarget(OVERWORLD, ENTITY_A);
 
-		Map<UUID, EntityOutlineSpec> selected = EntityOutlineSelection.select(
+		Map<EntityLocator, EntityOutlineSpec> selected = EntityOutlineSelection.select(
 			winnersMap(TargetKey.from(target), marker(1L, target, "unknown_type")),
 			PingTypeCatalog.builtIn());
 
-		assertEquals(0xFFFFFFFF, selected.get(ENTITY_A).argbColor());
+		assertEquals(0xFFFFFFFF, selected.get(EntityLocator.uuid(ENTITY_A)).argbColor());
+	}
+
+	@Test
+	void runtimeLocatorIsRetainedByOutlineSelection() {
+		EntityLocator locator = EntityLocator.runtimeId(42);
+		Target target = new Target.EntityTarget(OVERWORLD, locator);
+
+		Map<EntityLocator, EntityOutlineSpec> selected = EntityOutlineSelection.select(
+			winnersMap(TargetKey.from(target), marker(1L, target, "attention")),
+			PingTypeCatalog.builtIn());
+
+		assertEquals(1, selected.size());
+		assertEquals(locator, selected.get(locator).locator());
 	}
 
 	// --- inclusion / exclusion ---
@@ -110,7 +124,7 @@ class EntityOutlineSelectionTest {
 		Target block = new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone");
 		Target location = new Target.LocationTarget(OVERWORLD, 4, 5, 6);
 
-		Map<UUID, EntityOutlineSpec> selected = EntityOutlineSelection.select(
+		Map<EntityLocator, EntityOutlineSpec> selected = EntityOutlineSelection.select(
 			winnersMap(
 				TargetKey.from(block), marker(1L, block, "attention"),
 				TargetKey.from(entity), marker(2L, entity, "attention"),
@@ -118,7 +132,7 @@ class EntityOutlineSelectionTest {
 			PingTypeCatalog.builtIn());
 
 		assertEquals(1, selected.size());
-		assertEquals(new MarkerId(2L), selected.get(ENTITY_A).markerId());
+		assertEquals(new MarkerId(2L), selected.get(EntityLocator.uuid(ENTITY_A)).markerId());
 	}
 
 	@Test
@@ -127,7 +141,7 @@ class EntityOutlineSelectionTest {
 		Target block = new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone");
 		Target netherEntity = entityTarget(NETHER, ENTITY_A);
 
-		Map<UUID, EntityOutlineSpec> selected = EntityOutlineSelection.select(
+		Map<EntityLocator, EntityOutlineSpec> selected = EntityOutlineSelection.select(
 			winnersMap(
 				// Key names ENTITY_A but the marker target is ENTITY_B.
 				new TargetKey.EntityKey(OVERWORLD, ENTITY_A),
@@ -150,15 +164,15 @@ class EntityOutlineSelectionTest {
 		Target overworld = entityTarget(OVERWORLD, ENTITY_A);
 		Target nether = entityTarget(NETHER, ENTITY_A);
 
-		Map<UUID, EntityOutlineSpec> selected = EntityOutlineSelection.select(
+		Map<EntityLocator, EntityOutlineSpec> selected = EntityOutlineSelection.select(
 			winnersMap(
 				TargetKey.from(overworld), marker(2L, overworld, "danger"),
 				TargetKey.from(nether), marker(1L, nether, "attention")),
 			PingTypeCatalog.builtIn());
 
 		assertEquals(1, selected.size());
-		assertEquals(new MarkerId(2L), selected.get(ENTITY_A).markerId());
-		assertEquals("danger", selected.get(ENTITY_A).pingTypeId());
+		assertEquals(new MarkerId(2L), selected.get(EntityLocator.uuid(ENTITY_A)).markerId());
+		assertEquals("danger", selected.get(EntityLocator.uuid(ENTITY_A)).pingTypeId());
 	}
 
 	@Test
@@ -171,11 +185,11 @@ class EntityOutlineSelectionTest {
 		winners.put(TargetKey.from(targetB), marker(7L, targetB, "attention"));
 		winners.put(TargetKey.from(targetA), marker(3L, targetA, "attention"));
 
-		Map<UUID, EntityOutlineSpec> selected =
+		Map<EntityLocator, EntityOutlineSpec> selected =
 			EntityOutlineSelection.select(winners, PingTypeCatalog.builtIn());
 
 		assertEquals(
-			List.of(ENTITY_A, ENTITY_B),
+			List.of(EntityLocator.uuid(ENTITY_A), EntityLocator.uuid(ENTITY_B)),
 			selected.keySet().stream().toList());
 		assertEquals(
 			List.of(new MarkerId(3L), new MarkerId(7L)),
@@ -207,21 +221,21 @@ class EntityOutlineSelectionTest {
 
 		store.onWinnerChanged(key, Optional.of(attentionId));
 
-		Map<UUID, EntityOutlineSpec> first = EntityOutlineSelection.select(
+		Map<EntityLocator, EntityOutlineSpec> first = EntityOutlineSelection.select(
 			store.visibleWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
 
 		assertEquals(1, first.size());
-		assertEquals(attentionId, first.get(ENTITY_A).markerId());
-		assertEquals(0xFFFFC247, first.get(ENTITY_A).argbColor());
+		assertEquals(attentionId, first.get(EntityLocator.uuid(ENTITY_A)).markerId());
+		assertEquals(0xFFFFC247, first.get(EntityLocator.uuid(ENTITY_A)).argbColor());
 
 		store.onWinnerChanged(key, Optional.of(dangerId));
 
-		Map<UUID, EntityOutlineSpec> second = EntityOutlineSelection.select(
+		Map<EntityLocator, EntityOutlineSpec> second = EntityOutlineSelection.select(
 			store.visibleWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
 
 		assertEquals(1, second.size());
-		assertEquals(dangerId, second.get(ENTITY_A).markerId());
-		assertEquals(0xFFFF4D4D, second.get(ENTITY_A).argbColor());
+		assertEquals(dangerId, second.get(EntityLocator.uuid(ENTITY_A)).markerId());
+		assertEquals(0xFFFF4D4D, second.get(EntityLocator.uuid(ENTITY_A)).argbColor());
 	}
 
 	@Test
@@ -242,11 +256,11 @@ class EntityOutlineSelectionTest {
 
 		store.onWinnerChanged(key, Optional.of(movedId));
 
-		Map<UUID, EntityOutlineSpec> selected = EntityOutlineSelection.select(
+		Map<EntityLocator, EntityOutlineSpec> selected = EntityOutlineSelection.select(
 			store.visibleWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
 
 		assertEquals(1, selected.size());
-		assertEquals(movedId, selected.get(ENTITY_A).markerId());
+		assertEquals(movedId, selected.get(EntityLocator.uuid(ENTITY_A)).markerId());
 	}
 
 	@Test
@@ -279,7 +293,7 @@ class EntityOutlineSelectionTest {
 	@Test
 	void specConstructorIsStrictAndForcesOpaque() {
 		assertThrows(NullPointerException.class,
-			() -> new EntityOutlineSpec(new MarkerId(1L), null, "attention", 0xFFC247));
+			() -> new EntityOutlineSpec(new MarkerId(1L), (EntityLocator)null, "attention", 0xFFC247));
 		assertThrows(IllegalArgumentException.class,
 			() -> new EntityOutlineSpec(new MarkerId(1L), ENTITY_A, "  ", 0xFFC247));
 

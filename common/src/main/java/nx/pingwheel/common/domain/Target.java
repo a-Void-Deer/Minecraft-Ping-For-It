@@ -8,7 +8,8 @@ import java.util.UUID;
  *
  * <p>A target identity is deliberately frozen at capture time:
  * <ul>
- *   <li>an entity is identified by dimension id + UUID only (it carries no
+	 *   <li>an entity is identified by dimension id + an explicit
+	 *       {@link EntityLocator} (it carries no
  *       mutable position, so movement/teleport within a dimension never changes
  *       identity);</li>
  *   <li>a block is identified by dimension + position + block registry id and
@@ -31,11 +32,20 @@ public sealed interface Target permits Target.EntityTarget, Target.BlockTarget, 
 
 	TargetKind kind();
 
-	record EntityTarget(String dimensionId, UUID entityId) implements Target {
+	record EntityTarget(String dimensionId, EntityLocator locator) implements Target {
 
 		public EntityTarget {
 			Target.requireDimensionId(dimensionId);
-			Objects.requireNonNull(entityId, "entityId");
+			Objects.requireNonNull(locator, "locator");
+		}
+
+		/**
+		 * UUID convenience constructor retained for the existing capture flow.
+		 * Production Minecraft capture continues to create UUID locators until the
+		 * runtime-id lookup integration is added.
+		 */
+		public EntityTarget(String dimensionId, UUID entityId) {
+			this(dimensionId, EntityLocator.uuid(entityId));
 		}
 
 		@Override

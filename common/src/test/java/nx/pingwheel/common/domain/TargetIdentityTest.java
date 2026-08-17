@@ -46,6 +46,16 @@ class TargetIdentityTest {
 	}
 
 	@Test
+	void entityIdentityIncludesLocatorKind() {
+		UUID uuid = UUID.fromString("aaaaaaaa-1111-2222-3333-444444444444");
+		Target.EntityTarget uuidTarget = new Target.EntityTarget(OVERWORLD, EntityLocator.uuid(uuid));
+		Target.EntityTarget runtimeTarget = new Target.EntityTarget(OVERWORLD, EntityLocator.runtimeId(42));
+
+		assertNotEquals(uuidTarget, runtimeTarget);
+		assertEquals(EntityLocator.runtimeId(42), runtimeTarget.locator());
+	}
+
+	@Test
 	void blockIdentityEqualsForSameTypeAndPosition() {
 		Target.BlockTarget a = new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone");
 		Target.BlockTarget b = new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone");
@@ -95,7 +105,7 @@ class TargetIdentityTest {
 	@Test
 	void entityUuidMustNotBeNull() {
 		assertThrows(NullPointerException.class,
-			() -> new Target.EntityTarget(OVERWORLD, null));
+			() -> new Target.EntityTarget(OVERWORLD, (EntityLocator)null));
 	}
 
 	@Test

@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
@@ -88,6 +89,19 @@ class MarkerPacketsTest {
 	}
 
 	@Test
+	void createPacketRejectsCorruptEntityLocatorThroughReadSafe() {
+		var buf = buffer();
+		buf.writeLong(5L);
+		MarkerPacketCodec.writeEnum(buf, nx.pingwheel.common.domain.TargetKind.ENTITY);
+		MarkerPacketCodec.writeIdString(buf, OVERWORLD);
+		buf.writeVarInt(MarkerPacketCodec.ENTITY_LOCATOR_RUNTIME_ID_TAG);
+		buf.writeVarInt(-1);
+		MarkerPacketCodec.writeIdString(buf, "attention");
+
+		assertTrue(MarkerCreateC2SPacket.readSafe(buf).isCorrupt());
+	}
+
+	@Test
 	void createPacketRejectsBlankPingTypeId() {
 		assertTrue(new MarkerCreateC2SPacket(1L, locationTarget(), " ").isCorrupt());
 		assertTrue(new MarkerCreateC2SPacket(1L, locationTarget(), "").isCorrupt());
@@ -134,6 +148,25 @@ class MarkerPacketsTest {
 	@Test
 	void createdPacketRoundTripsThroughReadSafe() {
 		var packet = new MarkerCreatedS2CPacket(snapshot(10L, 500L), NAME);
+
+		var buf = buffer();
+		packet.write(buf);
+
+		assertEquals(packet, MarkerCreatedS2CPacket.readSafe(buf));
+	}
+
+	@Test
+	void createdPacketRoundTripsRuntimeEntityLocator() {
+		var runtimeSnapshot = new MarkerSnapshot(
+			new MarkerId(8L),
+			OWNER,
+			new Target.EntityTarget(OVERWORLD, EntityLocator.runtimeId(123)),
+			"entity",
+			"attention",
+			new nx.pingwheel.common.marker.MarkerAnchor(1.5, 64.0, -2.5),
+			10L,
+			500L);
+		var packet = new MarkerCreatedS2CPacket(runtimeSnapshot, NAME);
 
 		var buf = buffer();
 		packet.write(buf);

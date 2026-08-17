@@ -1,9 +1,11 @@
 package nx.pingwheel.common.network;
 
+import java.util.Objects;
 import java.util.Optional;
 
 import net.minecraft.network.FriendlyByteBuf;
 
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetKind;
@@ -54,12 +56,18 @@ public final class MarkerPacketCodec {
 
 	// --- target ---
 
+	/** Explicit, stable wire tag for the UUID entity locator variant. */
+	public static final int ENTITY_LOCATOR_UUID_TAG = EntityLocator.Kind.UUID.wireTag();
+
+	/** Explicit, stable wire tag for the runtime-id entity locator variant. */
+	public static final int ENTITY_LOCATOR_RUNTIME_ID_TAG = EntityLocator.Kind.RUNTIME_ID.wireTag();
+
 	public static void writeTarget(FriendlyByteBuf buf, Target target) {
 		writeEnum(buf, target.kind());
 		writeIdString(buf, target.dimensionId());
 
 		switch (target) {
-			case Target.EntityTarget entity -> buf.writeUUID(entity.entityId());
+			case Target.EntityTarget entity -> writeEntityLocator(buf, entity.locator());
 			case Target.BlockTarget block -> {
 				buf.writeInt(block.x());
 				buf.writeInt(block.y());
@@ -79,7 +87,7 @@ public final class MarkerPacketCodec {
 		String dimensionId = readIdString(buf);
 
 		return switch (kind) {
-			case ENTITY -> new Target.EntityTarget(dimensionId, buf.readUUID());
+			case ENTITY -> new Target.EntityTarget(dimensionId, readEntityLocator(buf));
 			case BLOCK -> new Target.BlockTarget(
 				dimensionId, buf.readInt(), buf.readInt(), buf.readInt(), readIdString(buf));
 			case LOCATION -> new Target.LocationTarget(
@@ -94,7 +102,7 @@ public final class MarkerPacketCodec {
 		writeIdString(buf, targetKey.dimensionId());
 
 		switch (targetKey) {
-			case TargetKey.EntityKey entity -> buf.writeUUID(entity.entityId());
+			case TargetKey.EntityKey entity -> writeEntityLocator(buf, entity.locator());
 			case TargetKey.BlockKey block -> {
 				buf.writeInt(block.x());
 				buf.writeInt(block.y());
@@ -114,11 +122,47 @@ public final class MarkerPacketCodec {
 		String dimensionId = readIdString(buf);
 
 		return switch (kind) {
-			case ENTITY -> new TargetKey.EntityKey(dimensionId, buf.readUUID());
+			case ENTITY -> new TargetKey.EntityKey(dimensionId, readEntityLocator(buf));
 			case BLOCK -> new TargetKey.BlockKey(
 				dimensionId, buf.readInt(), buf.readInt(), buf.readInt(), readIdString(buf));
 			case LOCATION -> new TargetKey.LocationKey(
 				dimensionId, buf.readDouble(), buf.readDouble(), buf.readDouble());
+		};
+	}
+
+	/**
+	 * Encodes an entity locator as its explicit stable tag followed by the
+	 * representation selected by that tag.
+	 */
+	public static void writeEntityLocator(FriendlyByteBuf buf, EntityLocator locator) {
+		Objects.requireNonNull(locator, "locator");
+		buf.writeVarInt(locator.wireTag());
+
+		switch (locator) {
+			case EntityLocator.UUID uuid -> buf.writeUUID(uuid.value());
+			case EntityLocator.RuntimeId runtimeId -> buf.writeVarInt(runtimeId.value());
+		}
+	}
+
+	/**
+	 * Decodes an entity locator and rejects unknown or negative values. Truncated
+	 * reads retain FriendlyByteBuf's existing exception behavior so packet
+	 * read-safe wrappers can mark the packet corrupt.
+	 */
+	public static EntityLocator readEntityLocator(FriendlyByteBuf buf) {
+		EntityLocator.Kind kind = EntityLocator.kindFromWireTag(buf.readVarInt());
+
+		return switch (kind) {
+			case UUID -> EntityLocator.uuid(buf.readUUID());
+			case RUNTIME_ID -> {
+				int value = buf.readVarInt();
+
+				if (value < 0) {
+					throw new IllegalArgumentException("Entity runtime id must be non-negative: " + value);
+				}
+
+				yield EntityLocator.runtimeId(value);
+			}
 		};
 	}
 
