@@ -1,6 +1,7 @@
 package nx.pingwheel.common.marker;
 
 import nx.pingwheel.common.Global;
+import nx.pingwheel.common.util.SafeExceptionReport;
 
 /**
  * A tiny, injectable debug logger used only at the marker creation/removal
@@ -24,6 +25,14 @@ public interface MarkerCreationLogger {
 	void debug(String message, Object... args);
 
 	/**
+	 * Emits a complete bounded exception report without passing the throwable
+	 * to the underlying logger.
+	 */
+	default void debugException(String constantContext, Throwable throwable) {
+		debug(SafeExceptionReport.formatWithContext(constantContext, throwable));
+	}
+
+	/**
 	 * A logger that discards every message. Suitable for tests and for
 	 * configurations that must not touch the game logger.
 	 */
@@ -41,6 +50,16 @@ public interface MarkerCreationLogger {
 	 * only the first {@code debug(...)} invocation does.
 	 */
 	static MarkerCreationLogger global() {
-		return (message, args) -> Global.LOGGER.debug(message, args);
+		return new MarkerCreationLogger() {
+			@Override
+			public void debug(String message, Object... args) {
+				Global.LOGGER.debug(message, args);
+			}
+
+			@Override
+			public void debugException(String constantContext, Throwable throwable) {
+				Global.debugException(constantContext, throwable);
+			}
+		};
 	}
 }

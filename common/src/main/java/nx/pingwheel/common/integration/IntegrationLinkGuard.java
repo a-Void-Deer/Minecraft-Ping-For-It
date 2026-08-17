@@ -1,12 +1,13 @@
 package nx.pingwheel.common.integration;
 
 import static nx.pingwheel.common.Global.LOGGER;
+import static nx.pingwheel.common.Global.debugException;
 
 /**
  * Shared once-only {@link LinkageError} guard for optional-mod boundaries. A
  * link error disables the owning boundary for the rest of the session, warns
- * once with the integration id and the exception class only, and debug-logs
- * the full stack.
+ * once with the integration id, and debug-logs a bounded safe exception
+ * report.
  */
 final class IntegrationLinkGuard {
 	private final String integration;
@@ -29,7 +30,7 @@ final class IntegrationLinkGuard {
 		}
 
 		warned = true;
-		LOGGER.warn("{} integration disabled: linkErrorClass={}", integration, error.getClass().getName());
-		LOGGER.debug("{} integration link error", integration, error);
+		LOGGER.warn("{} integration disabled", integration);
+		debugException(integration + " integration link error", error);
 	}
 }

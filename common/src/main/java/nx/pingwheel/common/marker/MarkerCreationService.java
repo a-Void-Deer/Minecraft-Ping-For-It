@@ -168,7 +168,7 @@ public final class MarkerCreationService {
 
 			return MarkerCreateOutcome.accepted(creation, validated.authoritativeName());
 		} catch (RuntimeException e) {
-			logger.debug("create rejected: store contract failure", e);
+			logger.debugException("create rejected: store contract failure", e);
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}
 	}
@@ -218,7 +218,7 @@ public final class MarkerCreationService {
 
 			return result;
 		} catch (RuntimeException e) {
-			logger.debug("create rejected: validator contract failure", e);
+			logger.debugException("create rejected: validator contract failure", e);
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}
 	}
@@ -242,7 +242,7 @@ public final class MarkerCreationService {
 
 			return Optional.of(resolved);
 		} catch (RuntimeException e) {
-			logger.debug("create rejected: resolver contract failure", e);
+			logger.debugException("create rejected: resolver contract failure", e);
 			return Optional.empty();
 		}
 	}

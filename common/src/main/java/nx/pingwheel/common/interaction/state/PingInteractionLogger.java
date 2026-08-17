@@ -1,6 +1,7 @@
 package nx.pingwheel.common.interaction.state;
 
 import nx.pingwheel.common.Global;
+import nx.pingwheel.common.util.SafeExceptionReport;
 
 /**
  * A tiny, injectable debug logger for the interaction state machine.
@@ -20,6 +21,14 @@ public interface PingInteractionLogger {
 	 * Emits a debug message with {@code {}} placeholder arguments.
 	 */
 	void debug(String message, Object... args);
+
+	/**
+	 * Emits a complete bounded exception report without passing the throwable
+	 * to the underlying logger.
+	 */
+	default void debugException(String constantContext, Throwable throwable) {
+		debug(SafeExceptionReport.formatWithContext(constantContext, throwable));
+	}
 
 	/**
 	 * Records one client-side create action dropped by the send limiter.
@@ -48,6 +57,16 @@ public interface PingInteractionLogger {
 	 * only the first {@code debug(...)} invocation does.
 	 */
 	static PingInteractionLogger global() {
-		return (message, args) -> Global.LOGGER.debug(message, args);
+		return new PingInteractionLogger() {
+			@Override
+			public void debug(String message, Object... args) {
+				Global.LOGGER.debug(message, args);
+			}
+
+			@Override
+			public void debugException(String constantContext, Throwable throwable) {
+				Global.debugException(constantContext, throwable);
+			}
+		};
 	}
 }

@@ -72,7 +72,6 @@ import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
 
 import static nx.pingwheel.common.CommonClient.Game;
-import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
 
 /**
@@ -733,9 +732,7 @@ public final class ClientPingRuntime {
 				template, packet.ownerName(), pingType.get(), resolvedTargetName);
 			game.player.displayClientMessage(message, false);
 		} catch (RuntimeException exception) {
-			LOGGER.debug("marker chat display failed: markerId=" + snapshot.id().value()
-				+ " exception=" + exception.getClass().getSimpleName()
-				+ " reason=malformed server payload");
+			logger.debugException("marker chat display failed: malformed server payload", exception);
 		}
 	}
 

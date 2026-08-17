@@ -1,6 +1,7 @@
 package nx.pingwheel.common;
 
 import nx.pingwheel.common.platform.IPlatformContextService;
+import nx.pingwheel.common.util.SafeExceptionReport;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.FormattedMessageFactory;
@@ -31,4 +32,29 @@ public class Global {
 				return super.newMessage(MOD_PREFIX + message);
 			}
 		});
+
+	/**
+	 * Logs a bounded exception report at debug level. The context must be a
+	 * caller-provided constant or safe scalar; the throwable is rendered before
+	 * it reaches Log4j and is never attached to the log event.
+	 */
+	public static void debugException(String constantContext, Throwable throwable) {
+		LOGGER.debug(SafeExceptionReport.formatWithContext(constantContext, throwable));
+	}
+
+	/**
+	 * Logs a bounded exception report at warn level without attaching the
+	 * throwable to the Log4j event.
+	 */
+	public static void warnException(String constantContext, Throwable throwable) {
+		LOGGER.warn(SafeExceptionReport.formatWithContext(constantContext, throwable));
+	}
+
+	/**
+	 * Logs a bounded exception report at error level without attaching the
+	 * throwable to the Log4j event.
+	 */
+	public static void errorException(String constantContext, Throwable throwable) {
+		LOGGER.error(SafeExceptionReport.formatWithContext(constantContext, throwable));
+	}
 }

@@ -12,6 +12,7 @@ import java.nio.file.Path;
 
 import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.Global.MOD_ID;
+import static nx.pingwheel.common.Global.errorException;
 
 public class ConfigHandler <T extends IConfig> {
 
@@ -49,7 +50,7 @@ public class ConfigHandler <T extends IConfig> {
 				Files.createDirectories(configPath.getParent());
 				Files.createFile(configPath);
 			} catch (IOException e) {
-				LOGGER.error("Creating Config failed: " + e);
+				errorException("creating config failed", e);
 				return;
 			}
 		}
@@ -59,7 +60,7 @@ public class ConfigHandler <T extends IConfig> {
 			gson.toJson(config, writer);
 			writer.close();
 		} catch (Exception e) {
-			LOGGER.error("Saving Config failed: " + e);
+			errorException("saving config failed", e);
 			return;
 		}
 
@@ -80,6 +81,7 @@ public class ConfigHandler <T extends IConfig> {
 			reader.close();
 		} catch (Exception e) {
 			config = null;
+			errorException("loading config failed", e);
 		}
 
 		if (config == null) {
