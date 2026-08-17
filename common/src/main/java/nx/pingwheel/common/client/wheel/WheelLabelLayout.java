@@ -21,6 +21,9 @@ public final class WheelLabelLayout {
 	/** The normal GUI text scale used by the radial menu. */
 	public static final double BASE_TEXT_SCALE = 0.5;
 
+	/** Default maximum sector-label scale, retained for the original overloads. */
+	public static final double DEFAULT_MAX_TEXT_SCALE = BASE_TEXT_SCALE;
+
 	/** The vanilla 1.21.1 font line height used by the wheel renderer. */
 	public static final double DEFAULT_LABEL_LINE_HEIGHT = 9.0;
 
@@ -70,8 +73,8 @@ public final class WheelLabelLayout {
 				throw new IllegalArgumentException("maxWidth must be positive and finite: " + maxWidth);
 			}
 
-			if (!Double.isFinite(scale) || scale <= 0.0 || scale > BASE_TEXT_SCALE) {
-				throw new IllegalArgumentException("scale must be in (0, " + BASE_TEXT_SCALE + "]: " + scale);
+			if (!Double.isFinite(scale) || scale <= 0.0) {
+				throw new IllegalArgumentException("scale must be positive and finite: " + scale);
 			}
 
 			if (textWidth < 0) {
@@ -129,7 +132,12 @@ public final class WheelLabelLayout {
 		List<WheelSector> sectors,
 		List<Integer> textWidths
 	) {
-		return layout(geometry, sectors, textWidths, DEFAULT_LABEL_LINE_HEIGHT);
+		return layout(
+			geometry,
+			sectors,
+			textWidths,
+			DEFAULT_LABEL_LINE_HEIGHT,
+			DEFAULT_MAX_TEXT_SCALE);
 	}
 
 	/**
@@ -144,12 +152,37 @@ public final class WheelLabelLayout {
 		List<Integer> textWidths,
 		double lineHeight
 	) {
+		return layout(
+			geometry,
+			sectors,
+			textWidths,
+			lineHeight,
+			DEFAULT_MAX_TEXT_SCALE);
+	}
+
+	/**
+	 * Lays out labels using the supplied rendered line height and maximum GUI
+	 * text scale.  The maximum is deliberately supplied by the caller so a
+	 * configured font size larger than the historical half-scale is not silently
+	 * reduced back to {@link #BASE_TEXT_SCALE}.
+	 */
+	public static List<Placement> layout(
+		WheelGeometry geometry,
+		List<WheelSector> sectors,
+		List<Integer> textWidths,
+		double lineHeight,
+		double maxScale
+	) {
 		Objects.requireNonNull(geometry, "geometry");
 		Objects.requireNonNull(sectors, "sectors");
 		Objects.requireNonNull(textWidths, "textWidths");
 
 		if (!Double.isFinite(lineHeight) || lineHeight <= 0.0) {
 			throw new IllegalArgumentException("lineHeight must be positive and finite: " + lineHeight);
+		}
+
+		if (!Double.isFinite(maxScale) || maxScale <= 0.0) {
+			throw new IllegalArgumentException("maxScale must be positive and finite: " + maxScale);
 		}
 
 		if (sectors.isEmpty()) {
@@ -179,8 +212,8 @@ public final class WheelLabelLayout {
 			WheelPoint labelAnchor = geometry.pointAt(midpointAngle, labelRadius);
 			double maxWidth = maxLabelWidth(geometry, sector);
 			double scale = measuredWidth == 0
-				? BASE_TEXT_SCALE
-				: Math.min(BASE_TEXT_SCALE, maxWidth / measuredWidth);
+				? maxScale
+				: Math.min(maxScale, maxWidth / measuredWidth);
 			scale = Math.min(
 				scale,
 				containedScaleCap(
@@ -461,6 +494,106 @@ public final class WheelLabelLayout {
 
 		double cap = (centerDistance - ICON_BOX_HALF_SIZE) / labelHalfExtent;
 		return Double.isFinite(cap) && cap > 0.0 ? cap : Math.nextUp(0.0);
+	}
+
+	/**
+	 * The target label's fitted GUI placement.  Coordinates are pre-scale
+	 * translation coordinates: the renderer translates to {@link #x()} and
+	 * {@link #topY()}, then applies {@link #scale()} to the vanilla font.
+	 */
+	public record TargetLabelPlacement(
+		double x,
+		double topY,
+		double scale,
+		double renderedWidth,
+		double renderedHeight
+	) {
+		public TargetLabelPlacement {
+			if (!Double.isFinite(x) || !Double.isFinite(topY)) {
+				throw new IllegalArgumentException("placement coordinates must be finite");
+			}
+
+			if (!Double.isFinite(scale) || scale < 0.0) {
+				throw new IllegalArgumentException("scale must be finite and non-negative: " + scale);
+			}
+
+			if (!Double.isFinite(renderedWidth) || renderedWidth < 0.0
+				|| !Double.isFinite(renderedHeight) || renderedHeight < 0.0) {
+				throw new IllegalArgumentException("rendered dimensions must be finite and non-negative");
+			}
+		}
+	}
+
+	/**
+	 * Fits the target label to the available GUI bounds while preserving its
+	 * requested size whenever the label fits above the configured wheel.  The
+	 * vertical cap uses the wheel's outer radius and target-label gap; the
+	 * horizontal cap keeps the centered label inside the GUI.  If an unusually
+	 * small GUI leaves no room above the wheel, the label is clamped to the top
+	 * of the GUI rather than being clipped.
+	 */
+	public static TargetLabelPlacement targetLabelFit(
+		double centerX,
+		double centerY,
+		double guiWidth,
+		double guiHeight,
+		double outerRadius,
+		int textWidth,
+		double lineHeight,
+		double requestedScale
+	) {
+		if (!Double.isFinite(centerX) || !Double.isFinite(centerY)
+			|| !Double.isFinite(guiWidth) || !Double.isFinite(guiHeight)
+			|| guiWidth < 0.0 || guiHeight < 0.0) {
+			throw new IllegalArgumentException("GUI coordinates and dimensions must be finite and non-negative");
+		}
+
+		if (!Double.isFinite(outerRadius) || outerRadius <= 0.0) {
+			throw new IllegalArgumentException("outerRadius must be positive and finite: " + outerRadius);
+		}
+
+		if (textWidth < 0) {
+			throw new IllegalArgumentException("textWidth must not be negative: " + textWidth);
+		}
+
+		if (!Double.isFinite(lineHeight) || lineHeight <= 0.0) {
+			throw new IllegalArgumentException("lineHeight must be positive and finite: " + lineHeight);
+		}
+
+		if (!Double.isFinite(requestedScale) || requestedScale < 0.0) {
+			throw new IllegalArgumentException(
+				"requestedScale must be finite and non-negative: " + requestedScale);
+		}
+
+		double scale = requestedScale;
+
+		if (textWidth > 0) {
+			double horizontalRoom = Math.max(0.0, 2.0 * Math.min(centerX, guiWidth - centerX));
+			scale = Math.min(scale, horizontalRoom / textWidth);
+		}
+
+		// Prefer the configured size when the label can sit above the wheel with
+		// its existing gap.  The fallback cap still keeps the label inside a very
+		// small GUI when the wheel itself occupies that entire vertical space.
+		double roomAboveWheel = centerY - outerRadius - TARGET_LABEL_GAP;
+		if (roomAboveWheel > 0.0) {
+			scale = Math.min(scale, roomAboveWheel / lineHeight);
+		} else {
+			scale = Math.min(scale, guiHeight / lineHeight);
+		}
+
+		scale = Math.max(0.0, scale);
+		double renderedWidth = textWidth * scale;
+		double renderedHeight = lineHeight * scale;
+		double x = centerX - renderedWidth * 0.5;
+		double maxX = Math.max(0.0, guiWidth - renderedWidth);
+		x = Math.clamp(x, 0.0, maxX);
+
+		double topY = centerY - outerRadius - TARGET_LABEL_GAP - renderedHeight;
+		double maxY = Math.max(0.0, guiHeight - renderedHeight);
+		topY = Math.clamp(topY, 0.0, maxY);
+
+		return new TargetLabelPlacement(x, topY, scale, renderedWidth, renderedHeight);
 	}
 
 	/**

@@ -16,6 +16,8 @@ import nx.pingwheel.common.client.wheel.WheelGeometry;
 import nx.pingwheel.common.client.wheel.WheelLabelLayout;
 import nx.pingwheel.common.client.wheel.WheelPoint;
 import nx.pingwheel.common.client.wheel.WheelSector;
+import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.config.ClientConfigBounds;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.wheel.WheelSelection;
@@ -60,7 +62,6 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_TEXTURE_ID;
 public final class WheelOverlayRenderer {
 	private WheelOverlayRenderer() {}
 
-	private static final WheelGeometry GEOMETRY = new WheelGeometry();
 	private static final ClientTargetNameResolver TARGET_NAME_RESOLVER = new ClientTargetNameResolver();
 
 	/** Fixed total angular samples for the whole sector ring. */
@@ -126,10 +127,25 @@ public final class WheelOverlayRenderer {
 			return;
 		}
 
-		List<WheelSector> sectors = GEOMETRY.sectors(pingTypes);
+		ClientConfig config = ClientConfig.HANDLER.getConfig();
+		WheelGeometry geometry = new WheelGeometry(
+			ClientConfigBounds.clampWheelInnerRadius(config.getWheelInnerRadius()),
+			ClientConfigBounds.clampWheelOuterRadius(config.getWheelOuterRadius()));
+		int opacity = ClientConfigBounds.clampWheelOpacity(config.getWheelOpacity());
+		int fontSize = ClientConfigBounds.clampWheelFontSize(config.getWheelFontSize());
+		double sectorMaxScale = WheelLabelLayout.BASE_TEXT_SCALE * fontSize / 100.0;
+		double targetLabelScale = fontSize / 100.0;
+
+		List<WheelSector> sectors = geometry.sectors(pingTypes);
 		double centerX = guiGraphics.guiWidth() / 2.0;
 		double centerY = guiGraphics.guiHeight() / 2.0;
-		WheelSelection selection = selectionFromMouse(game, guiGraphics, pingTypes, centerX, centerY);
+		WheelSelection selection = selectionFromMouse(
+			game,
+			guiGraphics,
+			geometry,
+			pingTypes,
+			centerX,
+			centerY);
 
 		runtime.setWheelSelection(selection);
 
@@ -137,9 +153,26 @@ public final class WheelOverlayRenderer {
 		pose.pushPose();
 
 		try {
-			drawTargetName(guiGraphics, game.font, centerX, centerY, snapshot);
-			drawRing(guiGraphics, game.font, sectors, centerX, centerY, selection);
-			drawCenter(guiGraphics, centerX, centerY, selection);
+			drawTargetName(
+				guiGraphics,
+				game.font,
+				geometry,
+				centerX,
+				centerY,
+				targetLabelScale,
+				opacity,
+				snapshot);
+			drawRing(
+				guiGraphics,
+				game.font,
+				geometry,
+				sectors,
+				centerX,
+				centerY,
+				sectorMaxScale,
+				opacity,
+				selection);
+			drawCenter(guiGraphics, geometry, centerX, centerY, opacity, selection);
 		} finally {
 			pose.popPose();
 			RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
@@ -160,6 +193,7 @@ public final class WheelOverlayRenderer {
 	private static WheelSelection selectionFromMouse(
 		Minecraft game,
 		GuiGraphics guiGraphics,
+		WheelGeometry geometry,
 		List<PingType> pingTypes,
 		double centerX,
 		double centerY
@@ -177,34 +211,38 @@ public final class WheelOverlayRenderer {
 		double dx = game.mouseHandler.xpos() / windowWidth * guiWidth - centerX;
 		double dy = game.mouseHandler.ypos() / windowHeight * guiHeight - centerY;
 
-		return GEOMETRY.select(dx, dy, pingTypes);
+		return geometry.select(dx, dy, pingTypes);
 	}
 
 	private static void drawRing(
 		GuiGraphics guiGraphics,
 		Font font,
+		WheelGeometry geometry,
 		List<WheelSector> sectors,
 		double centerX,
 		double centerY,
+		double sectorMaxScale,
+		int opacity,
 		WheelSelection selection
 	) {
 		fillAnnulus(
 			guiGraphics,
 			centerX,
 			centerY,
-			GEOMETRY.innerRadius(),
-			GEOMETRY.outerRadius(),
-			RING_BACKDROP_COLOR);
+			geometry.innerRadius(),
+			geometry.outerRadius(),
+			RING_BACKDROP_COLOR,
+			opacity);
 
 		for (WheelSector sector : sectors) {
 			int borderColor = 0xFF000000 | sector.outlineColor();
 			int thickness = isSelected(sector, selection) ? SELECTED_ARC_THICKNESS : ARC_THICKNESS;
 
-			drawArc(guiGraphics, sector, GEOMETRY.innerRadius(), centerX, centerY, thickness, borderColor);
-			drawArc(guiGraphics, sector, GEOMETRY.outerRadius(), centerX, centerY, thickness, borderColor);
+			drawArc(guiGraphics, geometry, sector, geometry.innerRadius(), centerX, centerY, thickness, borderColor, opacity);
+			drawArc(guiGraphics, geometry, sector, geometry.outerRadius(), centerX, centerY, thickness, borderColor, opacity);
 
 			if (sectors.size() > 1) {
-				drawRadialSeparator(guiGraphics, sector, centerX, centerY, borderColor);
+				drawRadialSeparator(guiGraphics, geometry, sector, centerX, centerY, borderColor, opacity);
 			}
 		}
 
@@ -212,7 +250,12 @@ public final class WheelOverlayRenderer {
 			.<Component>map(sector -> Component.translatable(sector.pingType().displayKey()))
 			.toList();
 		List<Integer> textWidths = labels.stream().map(font::width).toList();
-		List<WheelLabelLayout.Placement> placements = WheelLabelLayout.layout(GEOMETRY, sectors, textWidths);
+		List<WheelLabelLayout.Placement> placements = WheelLabelLayout.layout(
+			geometry,
+			sectors,
+			textWidths,
+			font.lineHeight,
+			sectorMaxScale);
 
 		for (int i = 0; i < placements.size(); i++) {
 			WheelLabelLayout.Placement placement = placements.get(i);
@@ -224,7 +267,8 @@ public final class WheelOverlayRenderer {
 				guiGraphics,
 				centerX + placement.iconAnchor().x(),
 				centerY + placement.iconAnchor().y(),
-				0xFF000000 | placement.pingType().outlineColor());
+				0xFF000000 | placement.pingType().outlineColor(),
+				opacity);
 			drawLabel(
 				guiGraphics,
 				font,
@@ -232,27 +276,45 @@ public final class WheelOverlayRenderer {
 				placement,
 				centerX,
 				centerY,
-				color);
+				color,
+				opacity);
 		}
 	}
 
 	private static void drawTargetName(
 		GuiGraphics guiGraphics,
 		Font font,
+		WheelGeometry geometry,
 		double centerX,
 		double centerY,
+		double requestedScale,
+		int opacity,
 		WheelPresentationSnapshot snapshot
 	) {
 		Component targetName = TARGET_NAME_RESOLVER.resolve(
 			snapshot.context().resolvedTarget().target());
-		int width = font.width(targetName);
-		int x = (int) Math.round(centerX - width * 0.5);
-		int y = WheelLabelLayout.targetLabelTopY(
+		WheelLabelLayout.TargetLabelPlacement placement = WheelLabelLayout.targetLabelFit(
+			centerX,
 			centerY,
-			GEOMETRY.outerRadius(),
-			font.lineHeight);
+			guiGraphics.guiWidth(),
+			guiGraphics.guiHeight(),
+			geometry.outerRadius(),
+			font.width(targetName),
+			font.lineHeight,
+			requestedScale);
+		int color = WheelOpacity.apply(TARGET_LABEL_COLOR, opacity);
 
-		guiGraphics.drawString(font, targetName, x, y, TARGET_LABEL_COLOR, true);
+		var pose = guiGraphics.pose();
+		pose.pushPose();
+
+		try {
+			pose.translate(placement.x(), placement.topY(), 0.0);
+			float labelScale = (float) placement.scale();
+			pose.scale(labelScale, labelScale, 1.0f);
+			guiGraphics.drawString(font, targetName, 0, 0, color, true);
+		} finally {
+			pose.popPose();
+		}
 	}
 
 	private static void drawLabel(
@@ -262,7 +324,8 @@ public final class WheelOverlayRenderer {
 		WheelLabelLayout.Placement placement,
 		double centerX,
 		double centerY,
-		int color
+		int color,
+		int opacity
 	) {
 		var pose = guiGraphics.pose();
 		pose.pushPose();
@@ -284,7 +347,7 @@ public final class WheelOverlayRenderer {
 				label,
 				0,
 				0,
-				color,
+				WheelOpacity.apply(color, opacity),
 				true);
 		} finally {
 			pose.popPose();
@@ -293,11 +356,13 @@ public final class WheelOverlayRenderer {
 
 	private static void drawCenter(
 		GuiGraphics guiGraphics,
+		WheelGeometry geometry,
 		double centerX,
 		double centerY,
+		int opacity,
 		WheelSelection selection
 	) {
-		double radius = GEOMETRY.innerRadius();
+		double radius = geometry.innerRadius();
 		boolean selected = selection == WheelSelection.CENTER;
 
 		fillCircle(
@@ -305,30 +370,35 @@ public final class WheelOverlayRenderer {
 			centerX,
 			centerY,
 			radius,
-			selected ? CENTER_BACKDROP_SELECTED_COLOR : CENTER_BACKDROP_COLOR);
+			selected ? CENTER_BACKDROP_SELECTED_COLOR : CENTER_BACKDROP_COLOR,
+			opacity);
 		drawCircleOutline(
 			guiGraphics,
+			geometry,
 			centerX,
 			centerY,
 			radius,
 			selected ? SELECTED_CENTER_BORDER_THICKNESS : CENTER_BORDER_THICKNESS,
-			CENTER_BORDER_COLOR);
+			CENTER_BORDER_COLOR,
+			opacity);
 
 		double arm = radius * 0.4;
-		fillLine(guiGraphics, centerX - arm, centerY - arm, centerX + arm, centerY + arm, CENTER_MARK_THICKNESS, CENTER_MARK_COLOR);
-		fillLine(guiGraphics, centerX - arm, centerY + arm, centerX + arm, centerY - arm, CENTER_MARK_THICKNESS, CENTER_MARK_COLOR);
+		fillLine(guiGraphics, centerX - arm, centerY - arm, centerX + arm, centerY + arm, CENTER_MARK_THICKNESS, CENTER_MARK_COLOR, opacity);
+		fillLine(guiGraphics, centerX - arm, centerY + arm, centerX + arm, centerY - arm, CENTER_MARK_THICKNESS, CENTER_MARK_COLOR, opacity);
 	}
 
 	private static void drawArc(
 		GuiGraphics guiGraphics,
+		WheelGeometry geometry,
 		WheelSector sector,
 		double radius,
 		double centerX,
 		double centerY,
 		int thickness,
-		int color
+		int color,
+		int opacity
 	) {
-		List<WheelPoint> points = GEOMETRY.arcPoints(sector, radius, ARC_SAMPLES_PER_FULL_RING);
+		List<WheelPoint> points = geometry.arcPoints(sector, radius, ARC_SAMPLES_PER_FULL_RING);
 
 		for (int i = 0; i + 1 < points.size(); i++) {
 			WheelPoint from = points.get(i);
@@ -340,19 +410,22 @@ public final class WheelOverlayRenderer {
 				centerX + to.x(),
 				centerY + to.y(),
 				thickness,
-				color);
+				color,
+				opacity);
 		}
 	}
 
 	private static void drawRadialSeparator(
 		GuiGraphics guiGraphics,
+		WheelGeometry geometry,
 		WheelSector sector,
 		double centerX,
 		double centerY,
-		int color
+		int color,
+		int opacity
 	) {
-		WheelPoint inner = GEOMETRY.pointAt(sector.startAngleRadians(), GEOMETRY.innerRadius());
-		WheelPoint outer = GEOMETRY.pointAt(sector.startAngleRadians(), GEOMETRY.outerRadius());
+		WheelPoint inner = geometry.pointAt(sector.startAngleRadians(), geometry.innerRadius());
+		WheelPoint outer = geometry.pointAt(sector.startAngleRadians(), geometry.outerRadius());
 
 		fillLine(
 			guiGraphics,
@@ -361,18 +434,21 @@ public final class WheelOverlayRenderer {
 			centerX + outer.x(),
 			centerY + outer.y(),
 			SEPARATOR_THICKNESS,
-			color);
+			color,
+			opacity);
 	}
 
 	private static void drawCircleOutline(
 		GuiGraphics guiGraphics,
+		WheelGeometry geometry,
 		double centerX,
 		double centerY,
 		double radius,
 		int thickness,
-		int color
+		int color,
+		int opacity
 	) {
-		List<WheelPoint> points = GEOMETRY.circlePoints(radius, CENTER_CIRCLE_SAMPLES);
+		List<WheelPoint> points = geometry.circlePoints(radius, CENTER_CIRCLE_SAMPLES);
 
 		for (int i = 0; i < points.size(); i++) {
 			WheelPoint from = points.get(i);
@@ -385,11 +461,13 @@ public final class WheelOverlayRenderer {
 				centerX + to.x(),
 				centerY + to.y(),
 				thickness,
-				color);
+				color,
+				opacity);
 		}
 	}
 
-	private static void drawIcon(GuiGraphics guiGraphics, double x, double y, int color) {
+	private static void drawIcon(GuiGraphics guiGraphics, double x, double y, int color, int opacity) {
+		color = WheelOpacity.apply(color, opacity);
 		float alpha = FastColor.ARGB32.alpha(color) / 255f;
 		float red = FastColor.ARGB32.red(color) / 255f;
 		float green = FastColor.ARGB32.green(color) / 255f;
@@ -437,8 +515,10 @@ public final class WheelOverlayRenderer {
 		double x2,
 		double y2,
 		int thickness,
-		int color
+		int color,
+		int opacity
 	) {
+		int effectiveColor = WheelOpacity.apply(color, opacity);
 		double dx = x2 - x1;
 		double dy = y2 - y1;
 		int steps = (int) Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)));
@@ -448,7 +528,7 @@ public final class WheelOverlayRenderer {
 			double t = steps == 0 ? 0.0 : (double) i / steps;
 			int x = (int) Math.round(x1 + dx * t) - half;
 			int y = (int) Math.round(y1 + dy * t) - half;
-			guiGraphics.fill(x, y, x + thickness, y + thickness, color);
+			guiGraphics.fill(x, y, x + thickness, y + thickness, effectiveColor);
 		}
 	}
 
@@ -462,8 +542,10 @@ public final class WheelOverlayRenderer {
 		double centerX,
 		double centerY,
 		double radius,
-		int color
+		int color,
+		int opacity
 	) {
+		int effectiveColor = WheelOpacity.apply(color, opacity);
 		int minY = (int) Math.ceil(centerY - radius);
 		int maxY = (int) Math.floor(centerY + radius);
 
@@ -475,7 +557,7 @@ public final class WheelOverlayRenderer {
 			}
 
 			double half = Math.sqrt(radius * radius - dy * dy);
-			fillRow(guiGraphics, centerX - half, centerX + half, y, color);
+			fillRow(guiGraphics, centerX - half, centerX + half, y, effectiveColor);
 		}
 	}
 
@@ -490,8 +572,10 @@ public final class WheelOverlayRenderer {
 		double centerY,
 		double innerRadius,
 		double outerRadius,
-		int color
+		int color,
+		int opacity
 	) {
+		int effectiveColor = WheelOpacity.apply(color, opacity);
 		int minY = (int) Math.ceil(centerY - outerRadius);
 		int maxY = (int) Math.floor(centerY + outerRadius);
 
@@ -507,10 +591,10 @@ public final class WheelOverlayRenderer {
 
 			if (absDy < innerRadius) {
 				double halfInner = Math.sqrt(innerRadius * innerRadius - dy * dy);
-				fillRow(guiGraphics, centerX - halfOuter, centerX - halfInner, y, color);
-				fillRow(guiGraphics, centerX + halfInner, centerX + halfOuter, y, color);
+				fillRow(guiGraphics, centerX - halfOuter, centerX - halfInner, y, effectiveColor);
+				fillRow(guiGraphics, centerX + halfInner, centerX + halfOuter, y, effectiveColor);
 			} else {
-				fillRow(guiGraphics, centerX - halfOuter, centerX + halfOuter, y, color);
+				fillRow(guiGraphics, centerX - halfOuter, centerX + halfOuter, y, effectiveColor);
 			}
 		}
 	}

@@ -76,6 +76,10 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		this.list.addSmall(getPingSizeOption(), null);
 
+		this.list.addSmall(getWheelInnerRadiusOption(), getWheelOuterRadiusOption());
+
+		this.list.addSmall(getWheelOpacityOption(), getWheelFontSizeOption());
+
 		this.list.addSmall(getWheelHoldMillisOption(), getWheelTimeoutMillisOption());
 
 		this.list.addSmall(getCancelHalfConeAngleDegreesOption(), null);
@@ -287,6 +291,64 @@ public class SettingsScreen extends OptionsSubScreen {
 			(value) -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
 			config::getWheelHoldMillis,
 			config::setWheelHoldMillis
+		);
+	}
+
+	private OptionInstance<Integer> getWheelInnerRadiusOption() {
+		final var text = LanguageUtils.settings("wheel_inner_radius");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_INNER_RADIUS,
+			MAX_WHEEL_INNER_RADIUS,
+			WHEEL_INNER_RADIUS_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_PIXELS.get(value)),
+			config::getWheelInnerRadius,
+			config::setWheelInnerRadius
+		);
+	}
+
+	private OptionInstance<Integer> getWheelOuterRadiusOption() {
+		final var text = LanguageUtils.settings("wheel_outer_radius");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_OUTER_RADIUS,
+			MAX_WHEEL_OUTER_RADIUS,
+			WHEEL_OUTER_RADIUS_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_PIXELS.get(value)),
+			config::getWheelOuterRadius,
+			config::setWheelOuterRadius
+		);
+	}
+
+	private OptionInstance<Integer> getWheelOpacityOption() {
+		final var text = LanguageUtils.settings("wheel_opacity");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_OPACITY,
+			MAX_WHEEL_OPACITY,
+			WHEEL_OPACITY_STEP,
+			(value) -> value == 0
+				? text.get(CommonComponents.OPTION_OFF)
+				: text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			config::getWheelOpacity,
+			config::setWheelOpacity
+		);
+	}
+
+	private OptionInstance<Integer> getWheelFontSizeOption() {
+		final var text = LanguageUtils.settings("wheel_font_size");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_FONT_SIZE,
+			MAX_WHEEL_FONT_SIZE,
+			WHEEL_FONT_SIZE_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			config::getWheelFontSize,
+			config::setWheelFontSize
 		);
 	}
 

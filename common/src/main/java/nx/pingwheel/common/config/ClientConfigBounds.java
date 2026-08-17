@@ -24,6 +24,26 @@ public final class ClientConfigBounds {
 	public static final int MAX_CANCEL_HALF_CONE_ANGLE_DEGREES = 45;
 	public static final int CANCEL_HALF_CONE_ANGLE_DEGREES_STEP = 1;
 
+	public static final int DEFAULT_WHEEL_INNER_RADIUS = 14;
+	public static final int MIN_WHEEL_INNER_RADIUS = 8;
+	public static final int MAX_WHEEL_INNER_RADIUS = 30;
+	public static final int WHEEL_INNER_RADIUS_STEP = 1;
+
+	public static final int DEFAULT_WHEEL_OUTER_RADIUS = 39;
+	public static final int MIN_WHEEL_OUTER_RADIUS = 39;
+	public static final int MAX_WHEEL_OUTER_RADIUS = 75;
+	public static final int WHEEL_OUTER_RADIUS_STEP = 1;
+
+	public static final int DEFAULT_WHEEL_OPACITY = 100;
+	public static final int MIN_WHEEL_OPACITY = 0;
+	public static final int MAX_WHEEL_OPACITY = 100;
+	public static final int WHEEL_OPACITY_STEP = 5;
+
+	public static final int DEFAULT_WHEEL_FONT_SIZE = 100;
+	public static final int MIN_WHEEL_FONT_SIZE = 50;
+	public static final int MAX_WHEEL_FONT_SIZE = 200;
+	public static final int WHEEL_FONT_SIZE_STEP = 10;
+
 	private ClientConfigBounds() {}
 
 	public static int clampWheelHoldMillis(int value) {
@@ -39,5 +59,21 @@ public final class ClientConfigBounds {
 			value,
 			MIN_CANCEL_HALF_CONE_ANGLE_DEGREES,
 			MAX_CANCEL_HALF_CONE_ANGLE_DEGREES);
+	}
+
+	public static int clampWheelInnerRadius(int value) {
+		return Math.clamp(value, MIN_WHEEL_INNER_RADIUS, MAX_WHEEL_INNER_RADIUS);
+	}
+
+	public static int clampWheelOuterRadius(int value) {
+		return Math.clamp(value, MIN_WHEEL_OUTER_RADIUS, MAX_WHEEL_OUTER_RADIUS);
+	}
+
+	public static int clampWheelOpacity(int value) {
+		return Math.clamp(value, MIN_WHEEL_OPACITY, MAX_WHEEL_OPACITY);
+	}
+
+	public static int clampWheelFontSize(int value) {
+		return Math.clamp(value, MIN_WHEEL_FONT_SIZE, MAX_WHEEL_FONT_SIZE);
 	}
 }

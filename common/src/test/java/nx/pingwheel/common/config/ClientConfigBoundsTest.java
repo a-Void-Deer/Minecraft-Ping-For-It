@@ -3,6 +3,7 @@ package nx.pingwheel.common.config;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientConfigBoundsTest {
 
@@ -11,9 +12,17 @@ class ClientConfigBoundsTest {
 		assertEquals(300, ClientConfigBounds.DEFAULT_WHEEL_HOLD_MILLIS);
 		assertEquals(5000, ClientConfigBounds.DEFAULT_WHEEL_TIMEOUT_MILLIS);
 		assertEquals(5, ClientConfigBounds.DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES);
+		assertEquals(14, ClientConfigBounds.DEFAULT_WHEEL_INNER_RADIUS);
+		assertEquals(39, ClientConfigBounds.DEFAULT_WHEEL_OUTER_RADIUS);
+		assertEquals(100, ClientConfigBounds.DEFAULT_WHEEL_OPACITY);
+		assertEquals(100, ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE);
 		assertEquals(50, ClientConfigBounds.WHEEL_HOLD_MILLIS_STEP);
 		assertEquals(500, ClientConfigBounds.WHEEL_TIMEOUT_MILLIS_STEP);
 		assertEquals(1, ClientConfigBounds.CANCEL_HALF_CONE_ANGLE_DEGREES_STEP);
+		assertEquals(1, ClientConfigBounds.WHEEL_INNER_RADIUS_STEP);
+		assertEquals(1, ClientConfigBounds.WHEEL_OUTER_RADIUS_STEP);
+		assertEquals(5, ClientConfigBounds.WHEEL_OPACITY_STEP);
+		assertEquals(10, ClientConfigBounds.WHEEL_FONT_SIZE_STEP);
 	}
 
 	@Test
@@ -36,5 +45,24 @@ class ClientConfigBoundsTest {
 		assertEquals(1, ClientConfigBounds.clampCancelHalfConeAngleDegrees(Integer.MIN_VALUE));
 		assertEquals(5, ClientConfigBounds.clampCancelHalfConeAngleDegrees(5));
 		assertEquals(45, ClientConfigBounds.clampCancelHalfConeAngleDegrees(Integer.MAX_VALUE));
+	}
+
+	@Test
+	void visualWheelBoundsPreserveTheMinimumAnnulus() {
+		assertEquals(8, ClientConfigBounds.clampWheelInnerRadius(Integer.MIN_VALUE));
+		assertEquals(30, ClientConfigBounds.clampWheelInnerRadius(Integer.MAX_VALUE));
+		assertEquals(39, ClientConfigBounds.clampWheelOuterRadius(Integer.MIN_VALUE));
+		assertEquals(75, ClientConfigBounds.clampWheelOuterRadius(Integer.MAX_VALUE));
+		assertTrue(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MAX_WHEEL_INNER_RADIUS >= 9);
+	}
+
+	@Test
+	void opacityAndFontSizeClampDirectValues() {
+		assertEquals(0, ClientConfigBounds.clampWheelOpacity(Integer.MIN_VALUE));
+		assertEquals(50, ClientConfigBounds.clampWheelOpacity(50));
+		assertEquals(100, ClientConfigBounds.clampWheelOpacity(Integer.MAX_VALUE));
+		assertEquals(50, ClientConfigBounds.clampWheelFontSize(Integer.MIN_VALUE));
+		assertEquals(100, ClientConfigBounds.clampWheelFontSize(100));
+		assertEquals(200, ClientConfigBounds.clampWheelFontSize(Integer.MAX_VALUE));
 	}
 }

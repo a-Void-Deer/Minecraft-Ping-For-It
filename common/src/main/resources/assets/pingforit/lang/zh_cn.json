@@ -12,6 +12,10 @@
 	"settings.pingforit.item_icon_visible": "物品图标",
 	"settings.pingforit.direction_indicator_visible": "方向指示器",
 	"settings.pingforit.ping_size": "标记点尺寸: %s",
+	"settings.pingforit.wheel_inner_radius": "轮盘内半径: %s",
+	"settings.pingforit.wheel_outer_radius": "轮盘外半径: %s",
+	"settings.pingforit.wheel_opacity": "轮盘不透明度: %s",
+	"settings.pingforit.wheel_font_size": "轮盘字体大小: %s",
 	"settings.pingforit.wheel_hold_millis": "轮盘长按时间: %s",
 	"settings.pingforit.wheel_timeout_millis": "轮盘超时时间: %s",
 	"settings.pingforit.cancel_half_cone_angle_degrees": "取消视野半角: %s",
@@ -29,6 +33,7 @@
 	"unit.pingforit.percent": "%s%%",
 	"unit.pingforit.milliseconds": "%s毫秒",
 	"unit.pingforit.degrees": "%s°",
+	"unit.pingforit.pixels": "%s像素",
 
 	"command.pingforit.config.description": "打开配置界面",
 	"command.pingforit.channel.get.description": "获取当前频道",

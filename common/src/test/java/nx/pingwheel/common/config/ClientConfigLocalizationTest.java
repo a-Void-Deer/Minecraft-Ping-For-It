@@ -24,8 +24,13 @@ class ClientConfigLocalizationTest {
 		assertContainsKey(enUs, "settings.pingforit.wheel_hold_millis");
 		assertContainsKey(enUs, "settings.pingforit.wheel_timeout_millis");
 		assertContainsKey(enUs, "settings.pingforit.cancel_half_cone_angle_degrees");
+		assertContainsKey(enUs, "settings.pingforit.wheel_inner_radius");
+		assertContainsKey(enUs, "settings.pingforit.wheel_outer_radius");
+		assertContainsKey(enUs, "settings.pingforit.wheel_opacity");
+		assertContainsKey(enUs, "settings.pingforit.wheel_font_size");
 		assertContainsKey(enUs, "unit.pingforit.milliseconds");
 		assertContainsKey(enUs, "unit.pingforit.degrees");
+		assertContainsKey(enUs, "unit.pingforit.pixels");
 	}
 
 	private static void assertContainsKey(String contents, String key) {

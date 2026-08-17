@@ -56,6 +56,22 @@ class WheelLabelLayoutTest {
 	}
 
 	@Test
+	void configuredMaximumScaleCanExceedTheHistoricalHalfScale() {
+		List<WheelSector> sectors = GEOMETRY.sectors(List.of(PingTypeCatalog.builtIn().entries().get(0)));
+
+		for (double configuredScale : List.of(0.25, 0.5, 1.0)) {
+			WheelLabelLayout.Placement placement = WheelLabelLayout.layout(
+				GEOMETRY,
+				sectors,
+				List.of(1),
+				WheelLabelLayout.DEFAULT_LABEL_LINE_HEIGHT,
+				configuredScale).get(0);
+
+			assertEquals(configuredScale, placement.scale(), 1.0e-12);
+		}
+	}
+
+	@Test
 	void labelOriginCentersOddDimensionsAtTheAnchor() {
 		WheelPoint anchor = new WheelPoint(37.25, -12.75);
 		WheelPoint origin = WheelLabelLayout.labelOrigin(anchor, 9, 9.0, 0.5);
@@ -105,6 +121,45 @@ class WheelLabelLayoutTest {
 		int top = WheelLabelLayout.targetLabelTopY(centerY, GEOMETRY.outerRadius(), lineHeight);
 
 		assertTrue(top + lineHeight <= centerY - GEOMETRY.outerRadius() - WheelLabelLayout.TARGET_LABEL_GAP);
+	}
+
+	@Test
+	void targetLabelFitPreservesConfiguredSizeWhenItFits() {
+		WheelLabelLayout.TargetLabelPlacement placement = WheelLabelLayout.targetLabelFit(
+			160.0,
+			100.0,
+			320.0,
+			200.0,
+			39.0,
+			100,
+			9.0,
+			2.0);
+
+		assertEquals(2.0, placement.scale(), 1.0e-12);
+		assertEquals(60.0, placement.x(), 1.0e-12);
+		assertEquals(39.0, placement.topY(), 1.0e-12);
+		assertTrue(placement.x() >= 0.0);
+		assertTrue(placement.x() + placement.renderedWidth() <= 320.0);
+		assertTrue(placement.topY() + placement.renderedHeight() <= 100.0 - 39.0 - WheelLabelLayout.TARGET_LABEL_GAP);
+	}
+
+	@Test
+	void targetLabelFitCapsWidthAndTopForLargeVisuals() {
+		WheelLabelLayout.TargetLabelPlacement placement = WheelLabelLayout.targetLabelFit(
+			160.0,
+			80.0,
+			320.0,
+			160.0,
+			75.0,
+			600,
+			9.0,
+			2.0);
+
+		assertTrue(placement.scale() < 2.0);
+		assertTrue(placement.x() >= 0.0);
+		assertTrue(placement.x() + placement.renderedWidth() <= 320.0 + 1.0e-9);
+		assertTrue(placement.topY() >= 0.0);
+		assertTrue(placement.topY() + placement.renderedHeight() <= 160.0 + 1.0e-9);
 	}
 
 	private static List<WheelPoint> labelCorners(
