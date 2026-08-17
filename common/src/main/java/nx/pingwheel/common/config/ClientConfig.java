@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static nx.pingwheel.common.CommonClient.Game;
+import static nx.pingwheel.common.Global.LOGGER;
 
 @Getter
 @Setter
@@ -27,7 +28,13 @@ public class ClientConfig implements IConfig {
 	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
 	TeamColorMode teamColorMode = TeamColorMode.FULL;
 	int pingSize = 100;
+	int wheelHoldMillis = ClientConfigBounds.DEFAULT_WHEEL_HOLD_MILLIS;
+	int wheelTimeoutMillis = ClientConfigBounds.DEFAULT_WHEEL_TIMEOUT_MILLIS;
+	int cancelHalfConeAngleDegrees = ClientConfigBounds.DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES;
+
+	@ToString.Exclude
 	String channel = "";
+	@ToString.Exclude
 	Map<String, String> serverChannels = new HashMap<>();
 
 	// hidden from the settings screen
@@ -63,6 +70,10 @@ public class ClientConfig implements IConfig {
 
 	@Override
 	public void validate() {
+		wheelHoldMillis = ClientConfigBounds.clampWheelHoldMillis(wheelHoldMillis);
+		wheelTimeoutMillis = ClientConfigBounds.clampWheelTimeoutMillis(wheelTimeoutMillis);
+		cancelHalfConeAngleDegrees = ClientConfigBounds.clampCancelHalfConeAngleDegrees(cancelHalfConeAngleDegrees);
+
 		if (channel.length() > MAX_CHANNEL_LENGTH) {
 			channel = channel.substring(0, MAX_CHANNEL_LENGTH);
 		}
@@ -78,6 +89,12 @@ public class ClientConfig implements IConfig {
 
 	@Override
 	public void onUpdate() {
+		LOGGER.debug(
+			"Client wheel settings updated: wheelHoldMillis={}, wheelTimeoutMillis={}, cancelHalfConeAngleDegrees={}",
+			wheelHoldMillis,
+			wheelTimeoutMillis,
+			cancelHalfConeAngleDegrees);
+
 		if (Game != null) {
 			IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(getChannel()));
 		}

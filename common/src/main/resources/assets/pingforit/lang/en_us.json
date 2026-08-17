@@ -15,6 +15,9 @@
 	"settings.pingforit.player_info_mode.hold.tooltip": "Player Info is shown when the \"%s\" (%s) Key Bind is held",
 	"settings.pingforit.team_color_mode": "Team Color",
 	"settings.pingforit.ping_size": "Ping Size: %s",
+	"settings.pingforit.wheel_hold_millis": "Wheel Hold Time: %s",
+	"settings.pingforit.wheel_timeout_millis": "Wheel Timeout: %s",
+	"settings.pingforit.cancel_half_cone_angle_degrees": "Cancel Cone Half-Angle: %s",
 	"settings.pingforit.channel": "Ping Channel",
 	"settings.pingforit.channel.tooltip": "You only send and receive Pings to and from players on the same channel",
 	"settings.pingforit.channel.placeholder": "Synced to %s",
@@ -37,6 +40,8 @@
 	"unit.pingforit.seconds": "%ss",
 	"unit.pingforit.meters": "%sm",
 	"unit.pingforit.percent": "%s%%",
+	"unit.pingforit.milliseconds": "%sms",
+	"unit.pingforit.degrees": "%s°",
 
 	"command.pingforit.config.description": "open configuration interface",
 	"command.pingforit.channel.get.description": "get your current channel",

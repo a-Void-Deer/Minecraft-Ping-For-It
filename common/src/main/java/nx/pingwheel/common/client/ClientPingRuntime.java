@@ -220,8 +220,11 @@ public final class ClientPingRuntime {
 			activeInteraction,
 			timeSource,
 			new MinecraftClientTargetValidator(),
-			new CancelCandidatePicker(),
-			logger);
+			new CancelCandidatePicker(
+				() -> ClientConfig.HANDLER.getConfig().getCancelHalfConeAngleDegrees()),
+			logger,
+			() -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis(),
+			() -> ClientConfig.HANDLER.getConfig().getWheelTimeoutMillis());
 
 		return new ClientPingRuntime(
 			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS),

@@ -20,6 +20,7 @@ import nx.pingwheel.common.resource.LanguageUtils;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
+import static nx.pingwheel.common.config.ClientConfigBounds.*;
 
 public class SettingsScreen extends OptionsSubScreen {
 
@@ -74,6 +75,10 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.list.addSmall(getPlayerInfoModeOption(), getTeamColorModeOption());
 
 		this.list.addSmall(getPingSizeOption(), null);
+
+		this.list.addSmall(getWheelHoldMillisOption(), getWheelTimeoutMillisOption());
+
+		this.list.addSmall(getCancelHalfConeAngleDegreesOption(), null);
 
 		this.channelTextField = new EditBox(this.font, -1, -1, 200, 20, Component.empty());
 		this.channelTextField.setMaxLength(MAX_CHANNEL_LENGTH);
@@ -268,6 +273,48 @@ public class SettingsScreen extends OptionsSubScreen {
 			(value) -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
 			config::getPingSize,
 			config::setPingSize
+		);
+	}
+
+	private OptionInstance<Integer> getWheelHoldMillisOption() {
+		final var text = LanguageUtils.settings("wheel_hold_millis");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_HOLD_MILLIS,
+			MAX_WHEEL_HOLD_MILLIS,
+			WHEEL_HOLD_MILLIS_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
+			config::getWheelHoldMillis,
+			config::setWheelHoldMillis
+		);
+	}
+
+	private OptionInstance<Integer> getWheelTimeoutMillisOption() {
+		final var text = LanguageUtils.settings("wheel_timeout_millis");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_TIMEOUT_MILLIS,
+			MAX_WHEEL_TIMEOUT_MILLIS,
+			WHEEL_TIMEOUT_MILLIS_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
+			config::getWheelTimeoutMillis,
+			config::setWheelTimeoutMillis
+		);
+	}
+
+	private OptionInstance<Integer> getCancelHalfConeAngleDegreesOption() {
+		final var text = LanguageUtils.settings("cancel_half_cone_angle_degrees");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_CANCEL_HALF_CONE_ANGLE_DEGREES,
+			MAX_CANCEL_HALF_CONE_ANGLE_DEGREES,
+			CANCEL_HALF_CONE_ANGLE_DEGREES_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_DEGREES.get(value)),
+			config::getCancelHalfConeAngleDegrees,
+			config::setCancelHalfConeAngleDegrees
 		);
 	}
 }

@@ -3,7 +3,9 @@ package nx.pingwheel.common.interaction.state;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.LongSupplier;
 
+import nx.pingwheel.common.config.ClientConfigBounds;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.interaction.ActiveInteraction;
 import nx.pingwheel.common.interaction.CapturedPingContext;
@@ -60,8 +62,11 @@ public final class PingInteractionStateMachine {
 	private final TargetValidator targetValidator;
 	private final CancelCandidatePicker cancelCandidatePicker;
 	private final PingInteractionLogger logger;
-	private final long longPressMillis;
-	private final long wheelTimeoutMillis;
+	private final LongSupplier wheelHoldMillisSupplier;
+	private final LongSupplier wheelTimeoutMillisSupplier;
+	private final boolean supplierValuesUseClientConfigBounds;
+	private long longPressMillis = LONG_PRESS_MILLIS;
+	private long wheelTimeoutMillis = WHEEL_TIMEOUT_MILLIS;
 
 	private PingInteractionPhase phase = PingInteractionPhase.IDLE;
 	private InteractionToken token;
@@ -85,8 +90,43 @@ public final class PingInteractionStateMachine {
 		CancelCandidatePicker cancelCandidatePicker,
 		PingInteractionLogger logger
 	) {
-		this(coordinator, activeInteraction, timeSource, targetValidator, cancelCandidatePicker, logger,
-			LONG_PRESS_MILLIS, WHEEL_TIMEOUT_MILLIS);
+		this(
+			coordinator,
+			activeInteraction,
+			timeSource,
+			targetValidator,
+			cancelCandidatePicker,
+			logger,
+			() -> LONG_PRESS_MILLIS,
+			() -> WHEEL_TIMEOUT_MILLIS);
+	}
+
+	/**
+	 * Creates a state machine whose interaction settings are read lazily from
+	 * the supplied providers. The hold threshold is read once by
+	 * {@link #press()}, and the wheel timeout is read once when the wheel opens,
+	 * so changing a live config never changes an interaction already in progress.
+	 */
+	public PingInteractionStateMachine(
+		PingCaptureCoordinator coordinator,
+		ActiveInteraction activeInteraction,
+		InteractionTimeSource timeSource,
+		TargetValidator targetValidator,
+		CancelCandidatePicker cancelCandidatePicker,
+		PingInteractionLogger logger,
+		LongSupplier wheelHoldMillisSupplier,
+		LongSupplier wheelTimeoutMillisSupplier
+	) {
+		this(
+			coordinator,
+			activeInteraction,
+			timeSource,
+			targetValidator,
+			cancelCandidatePicker,
+			logger,
+			wheelHoldMillisSupplier,
+			wheelTimeoutMillisSupplier,
+			true);
 	}
 
 	/**
@@ -95,7 +135,7 @@ public final class PingInteractionStateMachine {
 	 * <p>Package-private test seam: production callers use the default
 	 * thresholds above.
 	 */
-	PingInteractionStateMachine(
+		PingInteractionStateMachine(
 		PingCaptureCoordinator coordinator,
 		ActiveInteraction activeInteraction,
 		InteractionTimeSource timeSource,
@@ -105,23 +145,38 @@ public final class PingInteractionStateMachine {
 		long longPressMillis,
 		long wheelTimeoutMillis
 	) {
+		this(
+			coordinator,
+			activeInteraction,
+			timeSource,
+			targetValidator,
+			cancelCandidatePicker,
+			logger,
+			constantThresholdSupplier("longPressMillis", longPressMillis),
+			constantThresholdSupplier("wheelTimeoutMillis", wheelTimeoutMillis),
+			false);
+	}
+
+	private PingInteractionStateMachine(
+		PingCaptureCoordinator coordinator,
+		ActiveInteraction activeInteraction,
+		InteractionTimeSource timeSource,
+		TargetValidator targetValidator,
+		CancelCandidatePicker cancelCandidatePicker,
+		PingInteractionLogger logger,
+		LongSupplier wheelHoldMillisSupplier,
+		LongSupplier wheelTimeoutMillisSupplier,
+		boolean supplierValuesUseClientConfigBounds
+	) {
 		this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
 		this.activeInteraction = Objects.requireNonNull(activeInteraction, "activeInteraction");
 		this.timeSource = Objects.requireNonNull(timeSource, "timeSource");
 		this.targetValidator = Objects.requireNonNull(targetValidator, "targetValidator");
 		this.cancelCandidatePicker = Objects.requireNonNull(cancelCandidatePicker, "cancelCandidatePicker");
 		this.logger = Objects.requireNonNull(logger, "logger");
-
-		if (longPressMillis <= 0L) {
-			throw new IllegalArgumentException("longPressMillis must be positive: " + longPressMillis);
-		}
-
-		if (wheelTimeoutMillis <= 0L) {
-			throw new IllegalArgumentException("wheelTimeoutMillis must be positive: " + wheelTimeoutMillis);
-		}
-
-		this.longPressMillis = longPressMillis;
-		this.wheelTimeoutMillis = wheelTimeoutMillis;
+		this.wheelHoldMillisSupplier = Objects.requireNonNull(wheelHoldMillisSupplier, "wheelHoldMillisSupplier");
+		this.wheelTimeoutMillisSupplier = Objects.requireNonNull(wheelTimeoutMillisSupplier, "wheelTimeoutMillisSupplier");
+		this.supplierValuesUseClientConfigBounds = supplierValuesUseClientConfigBounds;
 	}
 
 	/**
@@ -143,10 +198,16 @@ public final class PingInteractionStateMachine {
 	 * accepted across a reset.
 	 */
 	public InteractionToken press() {
+		long configuredHoldMillis = readConfiguredThreshold(
+			"wheelHoldMillis",
+			wheelHoldMillisSupplier,
+			ClientConfigBounds.MIN_WHEEL_HOLD_MILLIS,
+			ClientConfigBounds.MAX_WHEEL_HOLD_MILLIS);
 		InteractionToken freshToken = coordinator.begin();
 		resetMachineState();
 		this.token = freshToken;
 		this.phase = PingInteractionPhase.PRESSED;
+		this.longPressMillis = configuredHoldMillis;
 		this.selection = WheelSelection.NONE;
 		this.pressTimeMillis = observeTime();
 		logger.debug("press: token={}", freshToken.sequence());
@@ -406,9 +467,15 @@ public final class PingInteractionStateMachine {
 	}
 
 	private void openWheel(CapturedPingContext context, long now) {
+		long configuredTimeoutMillis = readConfiguredThreshold(
+			"wheelTimeoutMillis",
+			wheelTimeoutMillisSupplier,
+			ClientConfigBounds.MIN_WHEEL_TIMEOUT_MILLIS,
+			ClientConfigBounds.MAX_WHEEL_TIMEOUT_MILLIS);
 		this.capturedContext = context;
 		this.wheelPingTypes = List.copyOf(context.resolvedTarget().targetType().pingTypes());
 		this.wheelOpenTimeMillis = now;
+		this.wheelTimeoutMillis = configuredTimeoutMillis;
 		this.selection = WheelSelection.NONE;
 		this.phase = PingInteractionPhase.WHEEL_OPEN;
 		logger.debug("wheel open: token={} pingTypeCount={}", token.sequence(), wheelPingTypes.size());
@@ -450,8 +517,38 @@ public final class PingInteractionStateMachine {
 		pressTimeMillis = 0L;
 		wheelOpenTimeMillis = 0L;
 		releaseTimeMillis = 0L;
+		longPressMillis = LONG_PRESS_MILLIS;
+		wheelTimeoutMillis = WHEEL_TIMEOUT_MILLIS;
 		releaseObserved = false;
 		selection = WheelSelection.NONE;
 		wheelPingTypes = List.of();
+	}
+
+	private long readConfiguredThreshold(
+		String settingName,
+		LongSupplier supplier,
+		int minimum,
+		int maximum
+	) {
+		long value = supplier.getAsLong();
+
+		if (supplierValuesUseClientConfigBounds) {
+			if (value < minimum || value > maximum) {
+				throw new IllegalArgumentException(
+					settingName + " must be in [" + minimum + ", " + maximum + "], got " + value);
+			}
+		} else if (value <= 0L) {
+			throw new IllegalArgumentException(settingName + " must be positive: " + value);
+		}
+
+		return value;
+	}
+
+	private static LongSupplier constantThresholdSupplier(String settingName, long value) {
+		if (value <= 0L) {
+			throw new IllegalArgumentException(settingName + " must be positive: " + value);
+		}
+
+		return () -> value;
 	}
 }

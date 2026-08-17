@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
 
@@ -659,6 +660,51 @@ class PingInteractionStateMachineTest {
 		assertThrows(IllegalArgumentException.class, () -> new PingInteractionStateMachine(
 			h.coordinator, h.interaction, h.clock,
 			r -> TargetValidation.valid(), new CancelCandidatePicker(), h.logger, 10L, -1L));
+	}
+
+	@Test
+	void configuredThresholdsAreSnapshottedAndNextInteractionSeesChanges() {
+		Harness h = harness();
+		AtomicLong holdMillis = new AtomicLong(500L);
+		AtomicLong timeoutMillis = new AtomicLong(1000L);
+		PingInteractionStateMachine configured = new PingInteractionStateMachine(
+			h.coordinator,
+			h.interaction,
+			h.clock,
+			r -> TargetValidation.valid(),
+			new CancelCandidatePicker(),
+			h.logger,
+			holdMillis::get,
+			timeoutMillis::get);
+
+		InteractionToken first = configured.press();
+		holdMillis.set(1000L);
+		h.complete(first, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.clock.now = 500L;
+		configured.presentFrame(true);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, configured.phase(),
+			"the hold threshold is frozen at press time");
+
+		timeoutMillis.set(2000L);
+		h.clock.now = 1499L;
+		assertTrue(configured.update(true, WheelSelection.NONE, emptyContext()).isEmpty());
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, configured.phase(),
+			"the timeout is frozen at wheel-open time");
+		h.clock.now = 1500L;
+		assertTrue(configured.update(false, WheelSelection.sector(pingType("go_to")), emptyContext()).isEmpty());
+		assertEquals(PingInteractionPhase.IDLE, configured.phase());
+
+		holdMillis.set(1000L);
+		h.clock.now = 2000L;
+		InteractionToken second = configured.press();
+		h.complete(second, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.clock.now = 2999L;
+		configured.presentFrame(true);
+		assertEquals(PingInteractionPhase.PRESSED, configured.phase());
+		h.clock.now = 3000L;
+		configured.presentFrame(true);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, configured.phase(),
+			"the next interaction reads the changed hold threshold");
 	}
 
 	@Test

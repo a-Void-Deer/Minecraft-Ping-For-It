@@ -3,6 +3,7 @@ package nx.pingwheel.common.interaction.cancel;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
@@ -179,6 +180,24 @@ class CancelCandidatePickerTest {
 		assertTrue(new CancelCandidatePicker().pick(context(List.of(marker))).isEmpty());
 		assertEquals(new MarkerId(1L),
 			new CancelCandidatePicker(15.0).pick(context(List.of(marker))).orElseThrow().markerId());
+	}
+
+	@Test
+	void configuredAngleIsReadOncePerSelectionAndCanChangeForTheNextSelection() {
+		AtomicInteger angle = new AtomicInteger(5);
+		AtomicInteger reads = new AtomicInteger();
+		CancelCandidatePicker picker = new CancelCandidatePicker(() -> {
+			reads.incrementAndGet();
+			return angle.get();
+		});
+		CancelMarkerCandidate marker = markerAtAngle(1L, 10.0);
+
+		assertTrue(picker.pick(context(List.of(marker))).isEmpty());
+		assertEquals(1, reads.get());
+
+		angle.set(15);
+		assertEquals(new MarkerId(1L), picker.pick(context(List.of(marker))).orElseThrow().markerId());
+		assertEquals(2, reads.get());
 	}
 
 	@Test

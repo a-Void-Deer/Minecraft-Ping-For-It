@@ -12,6 +12,9 @@
 	"settings.pingforit.item_icon_visible": "物品图标",
 	"settings.pingforit.direction_indicator_visible": "方向指示器",
 	"settings.pingforit.ping_size": "标记点尺寸: %s",
+	"settings.pingforit.wheel_hold_millis": "轮盘长按时间: %s",
+	"settings.pingforit.wheel_timeout_millis": "轮盘超时时间: %s",
+	"settings.pingforit.cancel_half_cone_angle_degrees": "取消视野半角: %s",
 	"settings.pingforit.channel": "标记频道",
 	"settings.pingforit.channel.tooltip": "您只能与相同频道的玩家发送和接收标记。",
 
@@ -24,6 +27,8 @@
 	"unit.pingforit.seconds": "%ss",
 	"unit.pingforit.meters": "%sm",
 	"unit.pingforit.percent": "%s%%",
+	"unit.pingforit.milliseconds": "%s毫秒",
+	"unit.pingforit.degrees": "%s°",
 
 	"command.pingforit.config.description": "打开配置界面",
 	"command.pingforit.channel.get.description": "获取当前频道",

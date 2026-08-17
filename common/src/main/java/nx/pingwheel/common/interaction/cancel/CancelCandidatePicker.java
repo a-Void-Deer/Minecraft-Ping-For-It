@@ -2,6 +2,9 @@ package nx.pingwheel.common.interaction.cancel;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.IntSupplier;
+
+import nx.pingwheel.common.config.ClientConfigBounds;
 
 /**
  * Deterministically selects the marker to cancel from a
@@ -38,6 +41,7 @@ public final class CancelCandidatePicker {
 	 */
 	public static final double DEFAULT_HALF_CONE_ANGLE_DEGREES = 5.0;
 
+	private final IntSupplier configuredHalfConeAngleSupplier;
 	private final double halfConeAngleDegrees;
 	private final double cosHalfConeAngle;
 	private final double inclusiveCosThreshold;
@@ -57,6 +61,7 @@ public final class CancelCandidatePicker {
 	public CancelCandidatePicker(double halfConeAngleDegrees) {
 		validateAngle(halfConeAngleDegrees);
 
+		this.configuredHalfConeAngleSupplier = null;
 		this.halfConeAngleDegrees = halfConeAngleDegrees;
 		this.cosHalfConeAngle = Math.cos(Math.toRadians(halfConeAngleDegrees));
 		// Inclusive boundary: nextDown shifts the nominal threshold one ULP down so a
@@ -66,10 +71,28 @@ public final class CancelCandidatePicker {
 	}
 
 	/**
+	 * Creates a picker that reads the configured integer angle once for each
+	 * cancellation selection. The supplier is retained rather than rebuilding a
+	 * picker on every client tick.
+	 */
+	public CancelCandidatePicker(IntSupplier halfConeAngleDegreesSupplier) {
+		this.configuredHalfConeAngleSupplier = Objects.requireNonNull(
+			halfConeAngleDegreesSupplier,
+			"halfConeAngleDegreesSupplier");
+		this.halfConeAngleDegrees = Double.NaN;
+		this.cosHalfConeAngle = Double.NaN;
+		this.inclusiveCosThreshold = Double.NaN;
+	}
+
+	/**
 	 * The half-angle cone, in degrees, this picker uses.
 	 */
 	public double halfConeAngleDegrees() {
-		return halfConeAngleDegrees;
+		if (configuredHalfConeAngleSupplier == null) {
+			return halfConeAngleDegrees;
+		}
+
+		return configuredHalfConeAngleDegrees();
 	}
 
 	/**
@@ -78,6 +101,12 @@ public final class CancelCandidatePicker {
 	 */
 	public Optional<CancelMarkerCandidate> pick(CancellationContext context) {
 		Objects.requireNonNull(context, "context");
+
+		double inclusiveCosThreshold = this.inclusiveCosThreshold;
+
+		if (configuredHalfConeAngleSupplier != null) {
+			inclusiveCosThreshold = configuredInclusiveCosThreshold();
+		}
 
 		double invLookLength = 1.0 / Math.sqrt(context.lookDirection().lengthSquared());
 
@@ -128,5 +157,28 @@ public final class CancelCandidatePicker {
 			throw new IllegalArgumentException(
 				"halfConeAngleDegrees must be in (0, 180], got " + halfConeAngleDegrees);
 		}
+	}
+
+	private double configuredHalfConeAngleDegrees() {
+		int value = configuredHalfConeAngleSupplier.getAsInt();
+
+		if (value < ClientConfigBounds.MIN_CANCEL_HALF_CONE_ANGLE_DEGREES
+			|| value > ClientConfigBounds.MAX_CANCEL_HALF_CONE_ANGLE_DEGREES) {
+			throw new IllegalArgumentException(
+				"cancelHalfConeAngleDegrees must be in ["
+					+ ClientConfigBounds.MIN_CANCEL_HALF_CONE_ANGLE_DEGREES
+					+ ", "
+					+ ClientConfigBounds.MAX_CANCEL_HALF_CONE_ANGLE_DEGREES
+					+ "], got "
+					+ value);
+		}
+
+		double angle = value;
+		validateAngle(angle);
+		return angle;
+	}
+
+	private double configuredInclusiveCosThreshold() {
+		return Math.nextDown(Math.cos(Math.toRadians(configuredHalfConeAngleDegrees())));
 	}
 }
