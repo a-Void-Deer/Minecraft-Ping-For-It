@@ -579,9 +579,8 @@ public final class ClientPingRuntime {
 		var anchor = marker.anchor();
 		WorldVector anchorPosition = new WorldVector(anchor.x(), anchor.y(), anchor.z());
 
-		if (target instanceof Target.EntityTarget entityTarget
-			&& entityTarget.locator() instanceof EntityLocator.UUID uuidLocator) {
-			Entity entity = GameContext.getEntity(uuidLocator.value());
+		if (target instanceof Target.EntityTarget entityTarget) {
+			Entity entity = GameContext.getEntity(entityTarget.locator());
 
 			// GameContext only searches the current level, so a found entity is
 			// already in the marker's dimension.

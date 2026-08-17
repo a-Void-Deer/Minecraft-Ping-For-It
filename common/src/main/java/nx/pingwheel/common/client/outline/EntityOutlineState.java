@@ -102,7 +102,7 @@ public final class EntityOutlineState {
 		return specs.containsKey(locator);
 	}
 
-	/** UUID render-hook convenience while runtime-id lookup is deferred. */
+	/** UUID convenience for callers that already have an ordinary locator. */
 	public boolean shouldOutline(UUID entityId) {
 		return shouldOutline(EntityLocator.uuid(entityId));
 	}
@@ -117,7 +117,7 @@ public final class EntityOutlineState {
 		return spec == null ? 0 : spec.argbColor();
 	}
 
-	/** UUID render-hook convenience while runtime-id lookup is deferred. */
+	/** UUID convenience for callers that already have an ordinary locator. */
 	public int colorFor(UUID entityId) {
 		return colorFor(EntityLocator.uuid(entityId));
 	}

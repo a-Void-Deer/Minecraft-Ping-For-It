@@ -1,6 +1,7 @@
 package nx.pingwheel.common.interaction;
 
 import nx.pingwheel.common.domain.EntityLocator;
+import nx.pingwheel.common.domain.EntityCaptureMetadata;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -138,6 +139,18 @@ class TargetSnapshotTest {
 		assertThrows(NullPointerException.class, () -> new CapturedPingContext(null, resolved));
 		assertThrows(NullPointerException.class, () -> new CapturedPingContext(token, null));
 		assertThrows(NullPointerException.class, () -> new CapturedPingContext(token, resolved, null));
+	}
+
+	@Test
+	void entitySnapshotCanCarryRuntimeLocatorAndCaptureMetadata() {
+		EntityCaptureMetadata metadata = new EntityCaptureMetadata(
+			EntityLocator.Kind.RUNTIME_ID, false);
+		TargetSnapshot snapshot = TargetSnapshotFactory.entity(
+			OVERWORLD, EntityLocator.runtimeId(23), "minecraft:experience_orb", metadata);
+
+		assertEquals(new Target.EntityTarget(OVERWORLD, EntityLocator.runtimeId(23)), snapshot.target());
+		assertEquals(Optional.of("minecraft:experience_orb"), snapshot.matchContext().entityTypeId());
+		assertEquals(Optional.of(metadata), snapshot.entityCaptureMetadata());
 	}
 
 	@Test

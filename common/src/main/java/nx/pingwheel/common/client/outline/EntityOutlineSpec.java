@@ -38,7 +38,7 @@ public record EntityOutlineSpec(
 		argbColor = 0xFF000000 | (argbColor & 0x00FFFFFF);
 	}
 
-	/** UUID convenience constructor for the existing UUID-only render edge. */
+	/** UUID convenience constructor for callers using the ordinary locator. */
 	public EntityOutlineSpec(MarkerId markerId, UUID entityId, String pingTypeId, int argbColor) {
 		this(markerId, EntityLocator.uuid(entityId), pingTypeId, argbColor);
 	}

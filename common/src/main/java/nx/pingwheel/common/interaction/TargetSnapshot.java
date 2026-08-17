@@ -3,6 +3,7 @@ package nx.pingwheel.common.interaction;
 import java.util.Objects;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.EntityCaptureMetadata;
 import nx.pingwheel.common.domain.TargetMatchContext;
 
 /**
@@ -16,10 +17,19 @@ import nx.pingwheel.common.domain.TargetMatchContext;
  * {@link CapturedPingContext}. The match context never participates in target
  * identity and is never serialized.
  */
-public record TargetSnapshot(Target target, TargetMatchContext matchContext) {
+public record TargetSnapshot(
+	Target target,
+	TargetMatchContext matchContext,
+	java.util.Optional<EntityCaptureMetadata> entityCaptureMetadata
+) {
+
+	public TargetSnapshot(Target target, TargetMatchContext matchContext) {
+		this(target, matchContext, java.util.Optional.empty());
+	}
 
 	public TargetSnapshot {
 		Objects.requireNonNull(target, "target");
 		Objects.requireNonNull(matchContext, "matchContext");
+		Objects.requireNonNull(entityCaptureMetadata, "entityCaptureMetadata");
 	}
 }

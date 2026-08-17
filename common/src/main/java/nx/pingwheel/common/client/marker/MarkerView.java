@@ -14,7 +14,6 @@ import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.Target;
-import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.math.MathUtils;
 import nx.pingwheel.common.math.ScreenPos;
@@ -182,9 +181,8 @@ public final class MarkerView {
 
 		final var target = this.marker.target();
 
-		if (target instanceof Target.EntityTarget entityTarget
-			&& entityTarget.locator() instanceof EntityLocator.UUID uuidLocator) {
-			final var entity = GameContext.getEntity(uuidLocator.value());
+		if (target instanceof Target.EntityTarget entityTarget) {
+			final var entity = GameContext.getEntity(entityTarget.locator());
 			Vec3 livePosition = null;
 
 			if (entity != null && !entity.isRemoved()) {

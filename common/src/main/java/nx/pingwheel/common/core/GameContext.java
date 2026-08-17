@@ -3,6 +3,9 @@ package nx.pingwheel.common.core;
 import lombok.Getter;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.ExperienceOrb;
+
+import nx.pingwheel.common.domain.EntityLocator;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -37,6 +40,25 @@ public class GameContext {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Resolves a client entity using the locator representation captured on the
+	 * wire. UUIDs retain the existing rendering-entity scan; runtime ids use the
+	 * client level's integer lookup and are accepted only for experience orbs.
+	 */
+	public static Entity getEntity(EntityLocator locator) {
+		if (Game.level == null || locator == null) {
+			return null;
+		}
+
+		return switch (locator) {
+			case EntityLocator.UUID uuid -> getEntity(uuid.value());
+			case EntityLocator.RuntimeId runtimeId -> {
+				Entity entity = Game.level.getEntity(runtimeId.value());
+				yield entity instanceof ExperienceOrb ? entity : null;
+			}
+		};
 	}
 
 	public static Optional<String> getCurrentServerIp() {

@@ -40,9 +40,8 @@ public sealed interface Target permits Target.EntityTarget, Target.BlockTarget, 
 		}
 
 		/**
-		 * UUID convenience constructor retained for the existing capture flow.
-		 * Production Minecraft capture continues to create UUID locators until the
-		 * runtime-id lookup integration is added.
+		 * UUID convenience constructor retained for callers that already have a
+		 * UUID locator.
 		 */
 		public EntityTarget(String dimensionId, UUID entityId) {
 			this(dimensionId, EntityLocator.uuid(entityId));

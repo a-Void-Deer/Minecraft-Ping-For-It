@@ -3,6 +3,8 @@ package nx.pingwheel.common.interaction;
 import java.util.UUID;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.EntityCaptureMetadata;
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.TargetMatchContext;
 
 /**
@@ -15,8 +17,8 @@ import nx.pingwheel.common.domain.TargetMatchContext;
  * validation is delegated to the existing {@link Target} /
  * {@link TargetMatchContext} constructors.
  *
- * <ul>
- *   <li>an entity snapshot carries dimension id + UUID identity, plus an
+	 * <ul>
+	 *   <li>an entity snapshot carries dimension id + an explicit entity locator, plus an
  *       optional entity type id used only as transient match context;</li>
  *   <li>a block snapshot carries dimension id + position + block registry id
  *       and deliberately excludes {@code BlockState}; its match context
@@ -35,8 +37,43 @@ public final class TargetSnapshotFactory {
 	 */
 	public static TargetSnapshot entity(String dimensionId, UUID entityId, String entityTypeId) {
 		return new TargetSnapshot(
-			new Target.EntityTarget(dimensionId, entityId),
+			new Target.EntityTarget(dimensionId, EntityLocator.uuid(entityId)),
 			TargetMatchContext.entityType(entityTypeId));
+	}
+
+	/** An entity snapshot with an explicit locator and no type id. */
+	public static TargetSnapshot entity(String dimensionId, EntityLocator locator) {
+		return new TargetSnapshot(
+			new Target.EntityTarget(dimensionId, locator),
+			TargetMatchContext.none());
+	}
+
+	/**
+	 * An entity snapshot carrying capture-only identity metadata for safe debug
+	 * logging. The metadata is never serialized or used for resolution.
+	 */
+	public static TargetSnapshot entity(
+		String dimensionId,
+		EntityLocator locator,
+		String entityTypeId,
+		EntityCaptureMetadata metadata
+	) {
+		return new TargetSnapshot(
+			new Target.EntityTarget(dimensionId, locator),
+			TargetMatchContext.entityType(entityTypeId),
+			java.util.Optional.of(metadata));
+	}
+
+	/** Entity snapshot with capture-only metadata and no type id. */
+	public static TargetSnapshot entity(
+		String dimensionId,
+		EntityLocator locator,
+		EntityCaptureMetadata metadata
+	) {
+		return new TargetSnapshot(
+			new Target.EntityTarget(dimensionId, locator),
+			TargetMatchContext.none(),
+			java.util.Optional.of(metadata));
 	}
 
 	/**
@@ -44,9 +81,7 @@ public final class TargetSnapshotFactory {
 	 * target type is expected to match during resolution.
 	 */
 	public static TargetSnapshot entity(String dimensionId, UUID entityId) {
-		return new TargetSnapshot(
-			new Target.EntityTarget(dimensionId, entityId),
-			TargetMatchContext.none());
+		return entity(dimensionId, EntityLocator.uuid(entityId));
 	}
 
 	/**

@@ -22,6 +22,8 @@ import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.name.TargetNameJsonCodec;
 import nx.pingwheel.common.resolve.BlockEntityClassification;
 
+import static nx.pingwheel.common.Global.LOGGER;
+
 /**
  * The Minecraft 1.21.1 server adapter of {@link AuthoritativeTargetValidator}.
  *
@@ -136,18 +138,18 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 	private AuthoritativeTargetValidation validateEntity(
 		ServerPlayer requester, ServerLevel level, String dimensionId, Target.EntityTarget requested
 	) {
-		if (!(requested.locator() instanceof EntityLocator.UUID uuidLocator)) {
-			// Runtime-id resolution is intentionally deferred to the next
-			// infrastructure step. Treat an unsupported locator as missing rather
-			// than casting it to a UUID or accepting an unvalidated target.
+		MinecraftServerEntityLookup.Result lookup = MinecraftServerEntityLookup.find(level, requested.locator());
+
+		if (requested.locator() instanceof EntityLocator.RuntimeId) {
+			LOGGER.debug("authoritative entity lookup: locatorStrategy={} outcome={}",
+				requested.locator().tag(), lookup.outcome().tag());
+		}
+
+		if (!lookup.accepted()) {
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.TARGET_GONE);
 		}
 
-		Entity entity = level.getEntity(uuidLocator.value());
-
-		if (entity == null || !entity.isAlive() || entity.isRemoved()) {
-			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.TARGET_GONE);
-		}
+		Entity entity = lookup.entity();
 
 		Vec3 position = entity.position();
 
@@ -171,7 +173,7 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.OUT_OF_RANGE);
 		}
 
-		Target normalized = new Target.EntityTarget(dimensionId, entity.getUUID());
+		Target normalized = new Target.EntityTarget(dimensionId, lookup.normalized());
 
 		return AuthoritativeTargetValidation.accepted(new ValidatedMarkerTarget(
 			normalized,

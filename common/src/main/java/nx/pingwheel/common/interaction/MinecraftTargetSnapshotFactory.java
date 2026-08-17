@@ -3,7 +3,6 @@ package nx.pingwheel.common.interaction;
 import java.util.Objects;
 
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
@@ -24,10 +23,10 @@ import nx.pingwheel.common.resolve.BlockEntityClassification;
  *
  * <p>Behavior:
  * <ul>
- *   <li>{@link EntityHitResult} -> entity snapshot keyed by dimension id + UUID,
- *       carrying the entity type id as match context (or no type when the
- *       registry key is unexpectedly absent, so the generic entity type can
- *       still match);</li>
+ *   <li>{@link EntityHitResult} -> entity snapshot keyed by the canonical
+ *       entity locator, carrying the canonical entity type id as match context
+ *       (or no type when the registry key is unexpectedly absent, so the
+ *       generic entity type can still match);</li>
  *   <li>{@link BlockHitResult} -> block snapshot keyed by dimension id +
  *       position + block registry id, independent of {@code BlockState}
  *       properties, carrying the {@code EntityBlock} classification so the
@@ -63,14 +62,18 @@ public final class MinecraftTargetSnapshotFactory {
 	}
 
 	private static TargetSnapshot entitySnapshot(String dimensionId, EntityHitResult hitResult) {
-		Entity entity = hitResult.getEntity();
-		var entityTypeKey = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+		var captured = MinecraftEntityTargetAdapter.capture(hitResult.getEntity());
 
-		if (entityTypeKey == null) {
-			return TargetSnapshotFactory.entity(dimensionId, entity.getUUID());
+		if (captured.entityTypeId().isEmpty()) {
+			return TargetSnapshotFactory.entity(
+				dimensionId, captured.locator(), captured.metadata());
 		}
 
-		return TargetSnapshotFactory.entity(dimensionId, entity.getUUID(), entityTypeKey.toString());
+		return TargetSnapshotFactory.entity(
+			dimensionId,
+			captured.locator(),
+			captured.entityTypeId().orElseThrow(),
+			captured.metadata());
 	}
 
 	private static TargetSnapshot blockSnapshot(Level level, String dimensionId, BlockHitResult hitResult) {

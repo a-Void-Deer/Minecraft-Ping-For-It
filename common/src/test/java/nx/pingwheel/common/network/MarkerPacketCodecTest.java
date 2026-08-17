@@ -212,6 +212,39 @@ class MarkerPacketCodecTest {
 	}
 
 	@Test
+	void experienceOrbLocatorSurvivesCreateCreatedAndWinnerPacketFlow() {
+		Target orbTarget = new Target.EntityTarget(
+			"minecraft:overworld", EntityLocator.runtimeId(23));
+		MarkerCreateC2SPacket create = new MarkerCreateC2SPacket(7L, orbTarget, "attention");
+
+		var createBuffer = buffer();
+		create.write(createBuffer);
+		assertEquals(create, MarkerCreateC2SPacket.readSafe(createBuffer));
+
+		MarkerSnapshot snapshot = new MarkerSnapshot(
+			new MarkerId(8L),
+			UUID.randomUUID(),
+			orbTarget,
+			"entity",
+			"attention",
+			new MarkerAnchor(1.5, 64.0, -2.5),
+			10L,
+			500L);
+		MarkerCreatedS2CPacket created = new MarkerCreatedS2CPacket(
+			snapshot, new TargetNameJson("{\"text\":\"orb\"}"));
+
+		var createdBuffer = buffer();
+		created.write(createdBuffer);
+		assertEquals(created, MarkerCreatedS2CPacket.readSafe(createdBuffer));
+
+		MarkerWinnerChangedS2CPacket winner = new MarkerWinnerChangedS2CPacket(
+			TargetKey.from(orbTarget), Optional.of(snapshot.id()));
+		var winnerBuffer = buffer();
+		winner.write(winnerBuffer);
+		assertEquals(winner, MarkerWinnerChangedS2CPacket.readSafe(winnerBuffer));
+	}
+
+	@Test
 	void rejectsUnknownEntityLocatorTag() {
 		var buf = buffer();
 		MarkerPacketCodec.writeEnum(buf, TargetKind.ENTITY);
@@ -326,6 +359,7 @@ class MarkerPacketCodecTest {
 		MarkerPacketCodec.writeIdString(buf, " ");
 		// The uuid must be present so the record constructor reaches the
 		// dimension validation instead of failing on a truncated buffer.
+		buf.writeVarInt(MarkerPacketCodec.ENTITY_LOCATOR_UUID_TAG);
 		buf.writeUUID(ENTITY_ID);
 
 		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTarget(buf));

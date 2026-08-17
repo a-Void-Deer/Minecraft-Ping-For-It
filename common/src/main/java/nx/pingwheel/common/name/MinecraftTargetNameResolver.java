@@ -18,7 +18,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 
 import nx.pingwheel.common.domain.Target;
-import nx.pingwheel.common.domain.EntityLocator;
+import nx.pingwheel.common.marker.MinecraftServerEntityLookup;
 
 import static nx.pingwheel.common.Global.LOGGER;
 
@@ -134,15 +134,13 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 	 * entity that moved to another dimension is simply not found.
 	 */
 	private Resolution resolveEntity(ServerLevel level, Target.EntityTarget target) {
-		if (!(target.locator() instanceof EntityLocator.UUID uuidLocator)) {
+		MinecraftServerEntityLookup.Result lookup = MinecraftServerEntityLookup.find(level, target.locator());
+
+		if (!lookup.accepted()) {
 			return Resolution.unavailable(FallbackReason.ENTITY_UNAVAILABLE);
 		}
 
-		Entity entity = level.getEntity(uuidLocator.value());
-
-		if (entity == null || entity.isRemoved()) {
-			return Resolution.unavailable(FallbackReason.ENTITY_UNAVAILABLE);
-		}
+		Entity entity = lookup.entity();
 
 		if (entity instanceof ServerPlayer player) {
 			// Plain profile name, deliberately unstyled: a player target never

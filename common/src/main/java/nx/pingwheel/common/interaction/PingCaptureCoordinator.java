@@ -109,6 +109,12 @@ public final class PingCaptureCoordinator {
 			return Optional.empty();
 		}
 
+		snapshot.entityCaptureMetadata()
+			.filter(metadata -> metadata.isSpecialIdentity())
+			.ifPresent(metadata -> logger.debug(
+				"capture special entity identity: locatorStrategy={} canonicalizedMultipart={}",
+				metadata.locatorStrategy(), metadata.canonicalizedMultipart()));
+
 		logger.debug("capture accepted: token={} kind={} dimension={} targetType={}",
 			token.sequence(), resolved.target().kind(), resolved.target().dimensionId(),
 			resolved.targetType().id());

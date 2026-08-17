@@ -11,6 +11,7 @@ import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.world.entity.Entity;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.client.outline.EntityOutlineState;
+import nx.pingwheel.common.interaction.MinecraftEntityTargetAdapter;
 import nx.pingwheel.common.render.WorldRenderContext;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Final;
@@ -143,7 +144,7 @@ public abstract class LevelRendererMixin {
 	@Redirect(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Minecraft;shouldEntityAppearGlowing(Lnet/minecraft/world/entity/Entity;)Z"))
 	private boolean pingForItShouldEntityAppearGlowing(Minecraft minecraft, Entity entity) {
 		return minecraft.shouldEntityAppearGlowing(entity)
-			|| EntityOutlineState.INSTANCE.shouldOutline(entity.getUUID());
+			|| EntityOutlineState.INSTANCE.shouldOutline(MinecraftEntityTargetAdapter.locatorFor(entity));
 	}
 
 	/**
@@ -152,7 +153,7 @@ public abstract class LevelRendererMixin {
 	 */
 	@Redirect(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;getTeamColor()I"))
 	private int pingForItGetTeamColor(Entity entity) {
-		int outlineColor = EntityOutlineState.INSTANCE.colorFor(entity.getUUID());
+		int outlineColor = EntityOutlineState.INSTANCE.colorFor(MinecraftEntityTargetAdapter.locatorFor(entity));
 
 		if (outlineColor != 0) {
 			return outlineColor;
