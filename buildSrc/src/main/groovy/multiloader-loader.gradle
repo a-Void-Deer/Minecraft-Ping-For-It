@@ -28,7 +28,14 @@ tasks.named("compileJava", JavaCompile) {
 
 processResources {
     dependsOn(configurations.commonResources)
-    from(configurations.commonResources)
+    // Fabric uses Loom's generated intermediary refmap from the common
+    // mixin config. Forge and NeoForge use their loader-local official-Mojmap
+    // config instead, so do not copy the common config into those jars.
+    from(configurations.commonResources) {
+        if (project.name != "fabric") {
+            exclude("${mod_id}.mixins.json")
+        }
+    }
 }
 
 tasks.named("javadoc", Javadoc).configure {
@@ -44,5 +51,9 @@ tasks.named("sourcesJar", Jar) {
     dependsOn(configurations.commonJava)
     from(configurations.commonJava)
     dependsOn(configurations.commonResources)
-    from(configurations.commonResources)
+    from(configurations.commonResources) {
+        if (project.name != "fabric") {
+            exclude("${mod_id}.mixins.json")
+        }
+    }
 }
