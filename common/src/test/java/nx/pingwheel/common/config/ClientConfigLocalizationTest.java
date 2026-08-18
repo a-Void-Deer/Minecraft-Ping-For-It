@@ -1,19 +1,33 @@
 package nx.pingwheel.common.config;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientConfigLocalizationTest {
+
+	private static final List<String> BUNDLED_LOCALES = List.of(
+		"de_de", "en_us", "es_ar", "fr_fr", "pl_pl", "tr_tr", "zh_cn", "zh_tw");
+	private static final List<String> PING_TYPES = List.of(
+		"attention", "danger", "go_to", "loot", "destroy", "take", "request");
+	private static final List<String> TEMPLATE_PLACEHOLDERS = List.of(
+		"{playerName}", "{pingType}", "{targetName}");
 
 	@Test
 	void englishLocaleContainsInteractionSettingsAndUnits() throws IOException {
@@ -46,8 +60,7 @@ class ClientConfigLocalizationTest {
 
 	@Test
 	void everyBundledLocaleContainsThePhase13SettingsLabels() throws IOException {
-		for (String locale : java.util.List.of(
-			"en_us", "zh_cn", "de_de", "es_ar", "fr_fr", "pl_pl", "tr_tr", "uk_ua", "zh_tw")) {
+		for (String locale : BUNDLED_LOCALES) {
 			String contents;
 			try (InputStream stream = getClass().getClassLoader().getResourceAsStream(
 				"assets/pingforit/lang/" + locale + ".json")) {
@@ -72,19 +85,103 @@ class ClientConfigLocalizationTest {
 	}
 
 	@Test
+	void bundledLocaleFileSetIsIntentional() throws Exception {
+		var resource = getClass().getClassLoader().getResource("assets/pingforit/lang");
+		assertNotNull(resource);
+
+		Set<String> actualLocales;
+		try (var files = Files.list(Path.of(resource.toURI()))) {
+			actualLocales = files
+				.filter(Files::isRegularFile)
+				.map(path -> path.getFileName().toString())
+				.filter(name -> name.endsWith(".json"))
+				.map(name -> name.substring(0, name.length() - ".json".length()))
+				.collect(Collectors.toSet());
+		}
+
+		assertEquals(Set.copyOf(BUNDLED_LOCALES), actualLocales);
+	}
+
+	@Test
+	void everyBundledLocaleContainsCompleteChatLocalization() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			String legacy = nonBlankTranslation(json, locale, "pingforit.chat.pingmsg");
+			assertEquals(3, countOccurrences(legacy, "%s"),
+				() -> "legacy chat translation must contain exactly three %s placeholders: " + locale);
+			assertFalse(legacy.replace("%s", "").contains("%"),
+				() -> "legacy chat translation contains an invalid format specifier: " + locale);
+			String.format(java.util.Locale.ROOT, legacy, "player", "ping", "target");
+
+			String general = nonBlankTranslation(json, locale, "pingforit.chat.pingmsg.template");
+			for (String placeholder : TEMPLATE_PLACEHOLDERS) {
+				assertTrue(general.contains(placeholder),
+					() -> "missing chat template placeholder for " + locale + ": " + placeholder);
+			}
+
+			for (String pingType : PING_TYPES) {
+				nonBlankTranslation(json, locale, "pingforit.ping_type." + pingType);
+				nonBlankTranslation(json, locale, "pingforit.ping_type." + pingType + ".phrase");
+			}
+			nonBlankTranslation(json, locale, "pingforit.target.here");
+			nonBlankTranslation(json, locale, "pingforit.target.unknown");
+
+			for (var entry : json.entrySet()) {
+				String key = entry.getKey();
+				if (key.startsWith("pingforit.chat.") && key.endsWith(".template.override")) {
+					String override = nonBlankTranslation(json, locale, key);
+					for (String placeholder : TEMPLATE_PLACEHOLDERS) {
+						assertTrue(override.contains(placeholder),
+							() -> "missing override placeholder for " + locale + ": " + key);
+					}
+				}
+			}
+		}
+	}
+
+	@Test
 	void chatLegacyAndGeneralTemplatesAreRenamedWithoutOldAliases() throws IOException {
-		assertEquals("%s requests %s %s", readTranslation("en_us", "pingforit.chat.pingmsg"));
+		assertEquals("%s requests %s on %s", readTranslation("en_us", "pingforit.chat.pingmsg"));
 		assertEquals(
 			"{playerName} requests {pingType} {targetName}",
 			readTranslation("en_us", "pingforit.chat.pingmsg.template"));
 		assertEquals("%s 请求 %s %s", readTranslation("zh_cn", "pingforit.chat.pingmsg"));
 		assertEquals(
-			"{playerName} 请求 {pingType} {targetName}",
+			"{playerName}: 请求 {pingType} {targetName}",
 			readTranslation("zh_cn", "pingforit.chat.pingmsg.template"));
 		assertTranslationAbsent("en_us", "pingforit.chat." + "request");
 		assertTranslationAbsent("en_us", "pingforit.chat." + "request.template");
 		assertTranslationAbsent("zh_cn", "pingforit.chat." + "request");
 		assertTranslationAbsent("zh_cn", "pingforit.chat." + "request.template");
+	}
+
+	private JsonObject readLocaleJson(String locale) throws IOException {
+		return JsonParser.parseString(readLocale(locale)).getAsJsonObject();
+	}
+
+	private String readLocale(String locale) throws IOException {
+		try (InputStream stream = getClass().getClassLoader().getResourceAsStream(
+			"assets/pingforit/lang/" + locale + ".json")) {
+			assertNotNull(stream);
+			return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+		}
+	}
+
+	private static String nonBlankTranslation(JsonObject json, String locale, String key) {
+		assertTrue(json.has(key), () -> "missing translation: " + locale + ":" + key);
+		String value = json.get(key).getAsString();
+		assertFalse(value.isBlank(), () -> "blank translation: " + locale + ":" + key);
+		return value;
+	}
+
+	private static int countOccurrences(String value, String token) {
+		int count = 0;
+		int index = 0;
+		while ((index = value.indexOf(token, index)) >= 0) {
+			count++;
+			index += token.length();
+		}
+		return count;
 	}
 
 	private String readTranslation(String locale, String key) throws IOException {

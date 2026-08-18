@@ -54,7 +54,28 @@
 	"command.pingforit.rate_limit.get.description": "pokaż aktualny limit częstotliwości użycia pingu",
 	"command.pingforit.rate_limit.set.description": "ustaw limit częstotliwości użycia pingu",
 	"command.pingforit.rate_limit.get.response": "Obecny limit częstotliwości: %s",
-	"command.pingforit.rate_limit.set.response": "Ustawiono limit częstotliwości na %s"
+	"command.pingforit.rate_limit.set.response": "Ustawiono limit częstotliwości na %s",
+
+	"pingforit.chat.pingmsg": "%s: %s: %s",
+	"pingforit.chat.pingmsg.template": "{playerName}: {pingType}: {targetName}",
+
+	"pingforit.ping_type.attention": "Uwaga",
+	"pingforit.ping_type.attention.phrase": "UWAGA",
+	"pingforit.ping_type.danger": "Niebezpieczeństwo",
+	"pingforit.ping_type.danger.phrase": "NIEBEZPIECZEŃSTWO",
+	"pingforit.ping_type.go_to": "Idź tam",
+	"pingforit.ping_type.go_to.phrase": "CEL PODRÓŻY",
+	"pingforit.ping_type.loot": "Zbierz łup",
+	"pingforit.ping_type.loot.phrase": "ŁUP",
+	"pingforit.ping_type.destroy": "Zniszcz",
+	"pingforit.ping_type.destroy.phrase": "DO ZNISZCZENIA",
+	"pingforit.ping_type.take": "Zabierz",
+	"pingforit.ping_type.take.phrase": "DO ZABRANIA",
+	"pingforit.ping_type.request": "Chcę użyć",
+	"pingforit.ping_type.request.phrase": "PROŚBA O UŻYCIE",
+
+	"pingforit.target.here": "TUTAJ",
+	"pingforit.target.unknown": "Nieznany cel"
   ,"settings.pingforit.long_press_compatibility_mode": "Tryb zgodności długiego naciśnięcia"
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Rozpoznaje szybkie kliknięcia jako jedno wirtualne długie naciśnięcie."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Okno zgodności"

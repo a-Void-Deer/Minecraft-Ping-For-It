@@ -42,7 +42,30 @@
 	"command.pingforit.default_channel.set.description": "設定預設頻道模式",
 	"command.pingforit.default_channel.get.response": "目前預設頻道模式：%s",
 	"command.pingforit.default_channel.set.response": "設定預設頻道模式為 %s",
-	"command.pingforit.default_channel.set.reject": "未知模式，有效的選項為：%s"
+	"command.pingforit.default_channel.set.reject": "未知模式，有效的選項為：%s",
+
+	"pingforit.chat.pingmsg": "%s 請求 %s %s",
+	"pingforit.chat.pingmsg.template": "{playerName}：請求 {pingType} {targetName}",
+	"pingforit.chat.danger.template.override": "{playerName}：{pingType} {targetName}！",
+	"pingforit.chat.request.template.override": "{playerName} {pingType} {targetName}",
+
+	"pingforit.ping_type.attention": "注意",
+	"pingforit.ping_type.attention.phrase": "注意",
+	"pingforit.ping_type.danger": "小心",
+	"pingforit.ping_type.danger.phrase": "危險",
+	"pingforit.ping_type.go_to": "前往",
+	"pingforit.ping_type.go_to.phrase": "前往",
+	"pingforit.ping_type.loot": "拾取",
+	"pingforit.ping_type.loot.phrase": "拾取",
+	"pingforit.ping_type.destroy": "摧毀",
+	"pingforit.ping_type.destroy.phrase": "摧毀",
+	"pingforit.ping_type.take": "拿走",
+	"pingforit.ping_type.take.phrase": "拿走",
+	"pingforit.ping_type.request": "希望使用",
+	"pingforit.ping_type.request.phrase": "請求",
+
+	"pingforit.target.here": "此處",
+	"pingforit.target.unknown": "未知目標"
   ,"settings.pingforit.long_press_compatibility_mode": "長按相容模式"
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "將快速連續點擊識別為一次虛擬長按。"
   ,"settings.pingforit.long_press_compatibility_slice_millis": "相容時間片"

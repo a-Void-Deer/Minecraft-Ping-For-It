@@ -67,7 +67,33 @@
 	"command.pingforit.rate_limit.get.description": "Aktuelle Ping-Ratenbegrenzung abrufen",
 	"command.pingforit.rate_limit.set.description": "Ping-Ratenbegrenzung einstellen",
 	"command.pingforit.rate_limit.get.response": "Ratenbegrenzung ist derzeit ‚%s‘",
-	"command.pingforit.rate_limit.set.response": "Ratenbegrenzung wurde auf ‚%s‘ gesetzt"
+	"command.pingforit.rate_limit.set.response": "Ratenbegrenzung wurde auf ‚%s‘ gesetzt",
+
+	"pingforit.chat.pingmsg": "%s: %s - %s",
+	"pingforit.chat.pingmsg.template": "{playerName} meldet bei {targetName}: {pingType}",
+	"pingforit.chat.go_to.template.override": "{playerName} will zu {targetName} {pingType}",
+	"pingforit.chat.loot.template.override": "{playerName} will {targetName} {pingType}",
+	"pingforit.chat.destroy.template.override": "{playerName} will {targetName} {pingType}",
+	"pingforit.chat.take.template.override": "{playerName} will {targetName} {pingType}",
+	"pingforit.chat.request.template.override": "{playerName} {pingType}: {targetName}",
+
+	"pingforit.ping_type.attention": "Achtung",
+	"pingforit.ping_type.attention.phrase": "ACHTUNG",
+	"pingforit.ping_type.danger": "Gefahr",
+	"pingforit.ping_type.danger.phrase": "GEFAHR",
+	"pingforit.ping_type.go_to": "Hingehen",
+	"pingforit.ping_type.go_to.phrase": "GEHEN",
+	"pingforit.ping_type.loot": "Plündern",
+	"pingforit.ping_type.loot.phrase": "PLÜNDERN",
+	"pingforit.ping_type.destroy": "Zerstören",
+	"pingforit.ping_type.destroy.phrase": "ZERSTÖREN",
+	"pingforit.ping_type.take": "Nehmen",
+	"pingforit.ping_type.take.phrase": "NEHMEN",
+	"pingforit.ping_type.request": "Anfrage",
+	"pingforit.ping_type.request.phrase": "ANFRAGE",
+
+	"pingforit.target.here": "HIER",
+	"pingforit.target.unknown": "Unbekanntes Ziel"
   ,"settings.pingforit.long_press_compatibility_mode": "Langdruck-Kompatibilitätsmodus"
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Erkennt schnelle Klicks als einen virtuellen Langdruck."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Kompatibilitätszeitfenster"

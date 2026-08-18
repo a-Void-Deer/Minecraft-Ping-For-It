@@ -42,7 +42,33 @@
 	"command.pingforit.default_channel.set.description": "définir le mode de canal par défaut",
 	"command.pingforit.default_channel.get.response": "Mode de canal par défaut actuel : %s",
 	"command.pingforit.default_channel.set.response": "Mode de canal par défaut défini sur %s",
-	"command.pingforit.default_channel.set.reject": "Mode inconnu, les options valides sont : %s"
+	"command.pingforit.default_channel.set.reject": "Mode inconnu, les options valides sont : %s",
+
+	"pingforit.chat.pingmsg": "%s : %s - %s",
+	"pingforit.chat.pingmsg.template": "{playerName} signale {targetName} : {pingType}",
+	"pingforit.chat.go_to.template.override": "{playerName} désigne {targetName} comme destination : {pingType}",
+	"pingforit.chat.loot.template.override": "{playerName} propose de {pingType} {targetName}",
+	"pingforit.chat.destroy.template.override": "{playerName} demande de {pingType} {targetName}",
+	"pingforit.chat.take.template.override": "{playerName} demande de {pingType} {targetName}",
+	"pingforit.chat.request.template.override": "{playerName} {pingType} : {targetName}",
+
+	"pingforit.ping_type.attention": "Attention",
+	"pingforit.ping_type.attention.phrase": "ATTENTION",
+	"pingforit.ping_type.danger": "Danger",
+	"pingforit.ping_type.danger.phrase": "DANGER",
+	"pingforit.ping_type.go_to": "S’y rendre",
+	"pingforit.ping_type.go_to.phrase": "ALLEZ-Y",
+	"pingforit.ping_type.loot": "Fouiller",
+	"pingforit.ping_type.loot.phrase": "FOUILLER",
+	"pingforit.ping_type.destroy": "Détruire",
+	"pingforit.ping_type.destroy.phrase": "DÉTRUIRE",
+	"pingforit.ping_type.take": "Prendre",
+	"pingforit.ping_type.take.phrase": "PRENDRE",
+	"pingforit.ping_type.request": "Demande",
+	"pingforit.ping_type.request.phrase": "DEMANDE",
+
+	"pingforit.target.here": "ICI",
+	"pingforit.target.unknown": "Cible inconnue"
   ,"settings.pingforit.long_press_compatibility_mode": "Mode de compatibilité d'appui long"
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Interprète les clics rapides comme un seul appui long virtuel."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Intervalle de compatibilité"

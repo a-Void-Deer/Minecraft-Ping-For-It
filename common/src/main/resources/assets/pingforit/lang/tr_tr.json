@@ -42,7 +42,28 @@
 	"command.pingforit.default_channel.set.description": "varsayılan kanal modunu ayarla",
 	"command.pingforit.default_channel.get.response": "Şu anki varsayılan kanal modu: %s",
 	"command.pingforit.default_channel.set.response": "%s, artık varsayılan kanal modu",
-	"command.pingforit.default_channel.set.reject": "Bilinmeyen mod, geçerli ayarlar: %s"
+	"command.pingforit.default_channel.set.reject": "Bilinmeyen mod, geçerli ayarlar: %s",
+
+	"pingforit.chat.pingmsg": "%s: %s: %s",
+	"pingforit.chat.pingmsg.template": "{playerName}: {pingType}: {targetName}",
+
+	"pingforit.ping_type.attention": "Dikkat",
+	"pingforit.ping_type.attention.phrase": "DİKKAT",
+	"pingforit.ping_type.danger": "Tehlike",
+	"pingforit.ping_type.danger.phrase": "TEHLİKE",
+	"pingforit.ping_type.go_to": "Oraya git",
+	"pingforit.ping_type.go_to.phrase": "GİDİLECEK YER",
+	"pingforit.ping_type.loot": "Yağmala",
+	"pingforit.ping_type.loot.phrase": "GANİMET",
+	"pingforit.ping_type.destroy": "Yok et",
+	"pingforit.ping_type.destroy.phrase": "YOK EDİLECEK",
+	"pingforit.ping_type.take": "Al",
+	"pingforit.ping_type.take.phrase": "ALINACAK",
+	"pingforit.ping_type.request": "Kullanmak istiyorum",
+	"pingforit.ping_type.request.phrase": "KULLANMA İSTEĞİ",
+
+	"pingforit.target.here": "BURASI",
+	"pingforit.target.unknown": "Bilinmeyen hedef"
   ,"settings.pingforit.long_press_compatibility_mode": "Uzun basma uyumluluk modu"
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Hızlı tıklamaları tek bir sanal uzun basma olarak algılar."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Uyumluluk zaman aralığı"

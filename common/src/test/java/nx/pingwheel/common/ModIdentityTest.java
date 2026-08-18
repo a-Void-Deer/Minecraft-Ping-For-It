@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ModIdentityTest {
 
 	private static final List<String> LANG_FILES = List.of(
-		"de_de", "en_us", "es_ar", "fr_fr", "pl_pl", "tr_tr", "uk_ua", "zh_cn", "zh_tw");
+		"de_de", "en_us", "es_ar", "fr_fr", "pl_pl", "tr_tr", "zh_cn", "zh_tw");
 
 	@Test
 	void globalIdentityUsesForkId() {

@@ -67,7 +67,33 @@
 	"command.pingforit.rate_limit.get.description": "ver el límite actual de uso de pings",
 	"command.pingforit.rate_limit.set.description": "configurar el límite de uso de pings",
 	"command.pingforit.rate_limit.get.response": "Límite actual de uso: %s",
-	"command.pingforit.rate_limit.set.response": "Límite de uso cambiado a %s"
+	"command.pingforit.rate_limit.set.response": "Límite de uso cambiado a %s",
+
+	"pingforit.chat.pingmsg": "%s: %s - %s",
+	"pingforit.chat.pingmsg.template": "{playerName} señala {targetName}: {pingType}",
+	"pingforit.chat.go_to.template.override": "{playerName} marca {targetName} como destino: {pingType}",
+	"pingforit.chat.loot.template.override": "{playerName} propone {pingType}: {targetName}",
+	"pingforit.chat.destroy.template.override": "{playerName} pide {pingType}: {targetName}",
+	"pingforit.chat.take.template.override": "{playerName} pide {pingType}: {targetName}",
+	"pingforit.chat.request.template.override": "{playerName} {pingType}: {targetName}",
+
+	"pingforit.ping_type.attention": "Atención",
+	"pingforit.ping_type.attention.phrase": "ATENCIÓN",
+	"pingforit.ping_type.danger": "Peligro",
+	"pingforit.ping_type.danger.phrase": "PELIGRO",
+	"pingforit.ping_type.go_to": "Ir ahí",
+	"pingforit.ping_type.go_to.phrase": "ANDÁ AHÍ",
+	"pingforit.ping_type.loot": "Saquear",
+	"pingforit.ping_type.loot.phrase": "SAQUEAR",
+	"pingforit.ping_type.destroy": "Destruir",
+	"pingforit.ping_type.destroy.phrase": "DESTRUIR",
+	"pingforit.ping_type.take": "Recoger",
+	"pingforit.ping_type.take.phrase": "RECOGER",
+	"pingforit.ping_type.request": "Pedido",
+	"pingforit.ping_type.request.phrase": "PEDIDO",
+
+	"pingforit.target.here": "ACÁ",
+	"pingforit.target.unknown": "Objetivo desconocido"
   ,"settings.pingforit.long_press_compatibility_mode": "Modo de compatibilidad de pulsación larga"
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Reconoce clics rápidos como una sola pulsación larga virtual."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Intervalo de compatibilidad"
