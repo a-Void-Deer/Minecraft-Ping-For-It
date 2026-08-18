@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static nx.pingwheel.common.CommonClient.Game;
+import static nx.pingwheel.common.Global.LOGGER;
 
 @Getter
 @Setter
@@ -27,11 +28,24 @@ public class ClientConfig implements IConfig {
 	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
 	TeamColorMode teamColorMode = TeamColorMode.FULL;
 	int pingSize = 100;
+	int wheelHoldMillis = ClientConfigBounds.DEFAULT_WHEEL_HOLD_MILLIS;
+	boolean longPressCompatibilityMode = false;
+	int longPressCompatibilitySliceMillis = ClientConfigBounds.DEFAULT_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS;
+	int wheelTimeoutMillis = ClientConfigBounds.DEFAULT_WHEEL_TIMEOUT_MILLIS;
+	int cancelHalfConeAngleDegrees = ClientConfigBounds.DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES;
+	int wheelInnerRadius = ClientConfigBounds.DEFAULT_WHEEL_INNER_RADIUS;
+	int wheelOuterRadius = ClientConfigBounds.DEFAULT_WHEEL_OUTER_RADIUS;
+	int wheelOpacity = ClientConfigBounds.DEFAULT_WHEEL_OPACITY;
+	/** Kept as wheelFontSize in JSON: this is the radial option-label value. */
+	int wheelFontSize = ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE;
+	int wheelTargetFontSize = ClientConfigBounds.DEFAULT_WHEEL_TARGET_FONT_SIZE;
+
+	@ToString.Exclude
 	String channel = "";
+	@ToString.Exclude
 	Map<String, String> serverChannels = new HashMap<>();
 
 	// hidden from the settings screen
-	int removeRadius = 10;
 	int raycastDistance = 1024;
 	int safeZoneLeft = 5;
 	int safeZoneRight = 5;
@@ -62,8 +76,108 @@ public class ClientConfig implements IConfig {
 		}
 	}
 
+	public void setWheelInnerRadius(int wheelInnerRadius) {
+		final var radii = ClientConfigBounds.clampWheelRadii(wheelInnerRadius, this.wheelOuterRadius);
+		this.wheelInnerRadius = radii.innerRadius();
+		this.wheelOuterRadius = radii.outerRadius();
+	}
+
+	public void setWheelOuterRadius(int wheelOuterRadius) {
+		final var radii = ClientConfigBounds.clampWheelRadii(this.wheelInnerRadius, wheelOuterRadius);
+		this.wheelInnerRadius = radii.innerRadius();
+		this.wheelOuterRadius = radii.outerRadius();
+	}
+
+	public void setWheelHoldMillis(int wheelHoldMillis) {
+		this.wheelHoldMillis = ClientConfigBounds.clampWheelHoldMillis(wheelHoldMillis);
+		this.longPressCompatibilitySliceMillis = ClientConfigBounds.clampLongPressCompatibilitySliceMillis(
+			this.longPressCompatibilitySliceMillis,
+			this.wheelHoldMillis);
+	}
+
+	public void setLongPressCompatibilitySliceMillis(int longPressCompatibilitySliceMillis) {
+		this.longPressCompatibilitySliceMillis = ClientConfigBounds.clampLongPressCompatibilitySliceMillis(
+			longPressCompatibilitySliceMillis,
+			this.wheelHoldMillis);
+	}
+
+	/**
+	 * Returns the runtime-safe slice even if a caller mutated a field through a
+	 * deserializer or an older reflective config path without invoking a setter.
+	 */
+	public int getEffectiveLongPressCompatibilitySliceMillis() {
+		return ClientConfigBounds.clampLongPressCompatibilitySliceMillis(
+			longPressCompatibilitySliceMillis,
+			wheelHoldMillis);
+	}
+
 	@Override
 	public void validate() {
+		validate((key, suppliedValue, effectiveValue) -> LOGGER.warn(
+			formatClampWarning(key, suppliedValue, effectiveValue)));
+	}
+
+	static String formatClampWarning(String key, int suppliedValue, int effectiveValue) {
+		return "Client config value clamped: key=%s, supplied=%d, effective=%d"
+			.formatted(key, suppliedValue, effectiveValue);
+	}
+
+	void validate(ClampWarningSink warningSink) {
+		final int suppliedWheelHoldMillis = wheelHoldMillis;
+		final int suppliedLongPressCompatibilitySliceMillis = longPressCompatibilitySliceMillis;
+		final int suppliedWheelTimeoutMillis = wheelTimeoutMillis;
+		final int suppliedCancelHalfConeAngleDegrees = cancelHalfConeAngleDegrees;
+		final int suppliedWheelInnerRadius = wheelInnerRadius;
+		final int suppliedWheelOuterRadius = wheelOuterRadius;
+		final int suppliedWheelOpacity = wheelOpacity;
+		final int suppliedWheelFontSize = wheelFontSize;
+		final int suppliedWheelTargetFontSize = wheelTargetFontSize;
+
+		wheelHoldMillis = ClientConfigBounds.clampWheelHoldMillis(wheelHoldMillis);
+		warnIfChanged(
+			warningSink,
+			"wheelHoldMillis",
+			suppliedWheelHoldMillis,
+			wheelHoldMillis);
+
+		longPressCompatibilitySliceMillis = ClientConfigBounds.clampLongPressCompatibilitySliceMillis(
+			longPressCompatibilitySliceMillis,
+			wheelHoldMillis);
+		warnIfChanged(
+			warningSink,
+			"longPressCompatibilitySliceMillis",
+			suppliedLongPressCompatibilitySliceMillis,
+			longPressCompatibilitySliceMillis);
+
+		wheelTimeoutMillis = ClientConfigBounds.clampWheelTimeoutMillis(wheelTimeoutMillis);
+		warnIfChanged(
+			warningSink,
+			"wheelTimeoutMillis",
+			suppliedWheelTimeoutMillis,
+			wheelTimeoutMillis);
+
+		cancelHalfConeAngleDegrees = ClientConfigBounds.clampCancelHalfConeAngleDegrees(cancelHalfConeAngleDegrees);
+		warnIfChanged(
+			warningSink,
+			"cancelHalfConeAngleDegrees",
+			suppliedCancelHalfConeAngleDegrees,
+			cancelHalfConeAngleDegrees);
+
+		final var radii = ClientConfigBounds.clampWheelRadii(wheelInnerRadius, wheelOuterRadius);
+		wheelInnerRadius = radii.innerRadius();
+		wheelOuterRadius = radii.outerRadius();
+		warnIfChanged(warningSink, "wheelInnerRadius", suppliedWheelInnerRadius, wheelInnerRadius);
+		warnIfChanged(warningSink, "wheelOuterRadius", suppliedWheelOuterRadius, wheelOuterRadius);
+
+		wheelOpacity = ClientConfigBounds.clampWheelOpacity(wheelOpacity);
+		warnIfChanged(warningSink, "wheelOpacity", suppliedWheelOpacity, wheelOpacity);
+
+		wheelFontSize = ClientConfigBounds.clampWheelFontSize(wheelFontSize);
+		warnIfChanged(warningSink, "wheelFontSize", suppliedWheelFontSize, wheelFontSize);
+
+		wheelTargetFontSize = ClientConfigBounds.clampWheelTargetFontSize(wheelTargetFontSize);
+		warnIfChanged(warningSink, "wheelTargetFontSize", suppliedWheelTargetFontSize, wheelTargetFontSize);
+
 		if (channel.length() > MAX_CHANNEL_LENGTH) {
 			channel = channel.substring(0, MAX_CHANNEL_LENGTH);
 		}
@@ -77,12 +191,41 @@ public class ClientConfig implements IConfig {
 		}
 	}
 
+	private static void warnIfChanged(
+		ClampWarningSink warningSink,
+		String key,
+		int suppliedValue,
+		int effectiveValue) {
+		if (suppliedValue != effectiveValue) {
+			warningSink.warn(key, suppliedValue, effectiveValue);
+		}
+	}
+
 	@Override
 	public void onUpdate() {
+		LOGGER.debug(
+			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, wheelTimeoutMillis=%d, cancelHalfConeAngleDegrees=%d, wheelInnerRadius=%d, wheelOuterRadius=%d, wheelOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d"
+				.formatted(
+					wheelHoldMillis,
+					longPressCompatibilityMode,
+					getEffectiveLongPressCompatibilitySliceMillis(),
+					wheelTimeoutMillis,
+					cancelHalfConeAngleDegrees,
+					wheelInnerRadius,
+					wheelOuterRadius,
+					wheelOpacity,
+					wheelFontSize,
+					wheelTargetFontSize));
+
 		if (Game != null) {
 			IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(getChannel()));
 		}
 	}
 
 	public static final ConfigHandler<ClientConfig> HANDLER = ConfigHandler.of(ClientConfig.class, ".json");
+}
+
+@FunctionalInterface
+interface ClampWarningSink {
+	void warn(String key, int suppliedValue, int effectiveValue);
 }

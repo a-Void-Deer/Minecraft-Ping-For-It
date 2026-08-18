@@ -1,19 +1,9 @@
 package nx.pingwheel.common.math;
 
-
-import com.seibel.distanthorizons.api.DhApi;
-import com.seibel.distanthorizons.api.interfaces.data.IDhApiTerrainDataCache;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.*;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -21,69 +11,28 @@ import static nx.pingwheel.common.CommonClient.Game;
 public class Raycast {
 	private Raycast() {}
 
-	private static IDhApiTerrainDataCache terrainCache = null;
-	private static Instant lastCacheLoad = Instant.EPOCH;
-
-	public static void traceDistantAsync(Vec3 direction, float tickDelta, Consumer<BlockHitResult> callback) {
-		final var cameraEntity = Game.cameraEntity;
-
-		if (cameraEntity == null || cameraEntity.level() == null) {
-			return;
-		}
-
-		final var rayStartVec = cameraEntity.getEyePosition(tickDelta);
-
-		final var ft = CompletableFuture.supplyAsync(() -> {
-			if (DhApi.Delayed.worldProxy == null) {
-				return null;
-			}
-
-			final var levelWrapper = DhApi.Delayed.worldProxy.getSinglePlayerLevel();
-
-			if (levelWrapper == null) {
-				return null;
-			}
-
-			if (terrainCache == null || Duration.between(lastCacheLoad, Instant.now()).getSeconds() > 10) {
-				terrainCache = DhApi.Delayed.terrainRepo.createSoftCache();
-				lastCacheLoad = Instant.now();
-			}
-
-			final var rayCastResult = DhApi.Delayed.terrainRepo.raycast(
-				levelWrapper,
-				rayStartVec.x, rayStartVec.y, rayStartVec.z,
-				(float)direction.x, (float)direction.y, (float)direction.z,
-				4096,
-				terrainCache
-			);
-
-			if (!rayCastResult.success || rayCastResult.payload == null) {
-				return null;
-			}
-
-			final var pos = new Vec3(rayCastResult.payload.pos.x, rayCastResult.payload.pos.y, rayCastResult.payload.pos.z);
-
-			return new BlockHitResult(pos, Direction.UP, new BlockPos((int)pos.x, (int)pos.y, (int)pos.z), true);
-		});
-
-		ft.thenAccept(result -> Optional.ofNullable(result).ifPresent(callback));
-	}
-
-	public static HitResult traceDirectional(Vec3 direction,
-											 float tickDelta,
-											 double maxDistance,
-											 boolean hitTranslucent) {
+	/**
+	 * Traces using an explicitly supplied origin and direction. This method is
+	 * used by ping capture so the exact press-time ray is shared by the vanilla
+	 * hit test and every fallback path instead of being reconstructed from a
+	 * later camera state.
+	 */
+	public static HitResult traceDirectional(
+		Vec3 rayStartVec,
+		Vec3 direction,
+		double maxDistance,
+		boolean hitTranslucent
+	) {
 		var cameraEntity = Game.cameraEntity;
 
 		if (cameraEntity == null || cameraEntity.level() == null) {
 			return null;
 		}
 
-		var rayStartVec = cameraEntity.getEyePosition(tickDelta);
 		var rayEndVec = rayStartVec.add(direction.scale(maxDistance));
 		var boundingBox = cameraEntity
 			.getBoundingBox()
-			.expandTowards(cameraEntity.getViewVector(1.f).scale(maxDistance))
+			.expandTowards(direction.scale(maxDistance))
 			.inflate(1.0, 1.0, 1.0);
 
 		var blockHitResult = cameraEntity.level().clip(

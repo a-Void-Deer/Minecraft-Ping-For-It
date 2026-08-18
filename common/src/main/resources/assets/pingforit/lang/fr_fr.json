@@ -1,0 +1,50 @@
+{
+	"key.category.pingforit.name": "Ping For It",
+	"key.pingforit.ping_location": "Localisation du Ping",
+	"key.pingforit.open_settings": "Ouvrir les Paramètres",
+	"subtitles.pingforit.ping": "Alerte Ping de Localisation",
+
+	"settings.pingforit.title": "Paramètres du Ping For It",
+	"settings.pingforit.ping_volume": "Volume du Ping : %s",
+	"settings.pingforit.ping_duration": "Durée du Ping : %s",
+	"settings.pingforit.ping_distance": "Distance du Ping : %s",
+	"settings.pingforit.correction_period": "Période de Correction : %s",
+	"settings.pingforit.item_icon_visible": "Icônes d'Objets",
+	"settings.pingforit.direction_indicator_visible": "Indicateur de Direction",
+	"settings.pingforit.ping_size": "Taille du Ping : %s",
+	"settings.pingforit.wheel_font_size": "Taille de police des options de la roue : %s",
+	"settings.pingforit.wheel_target_font_size": "Taille de police de la cible de la roue : %s",
+	"settings.pingforit.reset_all": "Tout réinitialiser",
+	"settings.pingforit.reset_all.title": "Réinitialiser tous les paramètres ?",
+	"settings.pingforit.reset_all.message": "Réinitialiser tous les paramètres de Ping For It à leurs valeurs par défaut ?",
+	"settings.pingforit.channel": "Canal de Ping",
+	"settings.pingforit.channel.tooltip": "Vous envoyez et recevez des Pings uniquement aux joueurs du même canal",
+
+	"value.pingforit.auto": "Auto",
+	"value.pingforit.disabled": "Désactivé",
+	"value.pingforit.global": "Global",
+	"value.pingforit.team_only": "Équipe uniquement",
+	"value.pingforit.hidden": "Caché",
+	"value.pingforit.infinite": "∞",
+	"unit.pingforit.seconds": "%ss",
+	"unit.pingforit.meters": "%sm",
+	"unit.pingforit.percent": "%s%%",
+
+	"command.pingforit.config.description": "ouvrir l'interface de configuration",
+	"command.pingforit.channel.get.description": "obtenir votre canal actuel",
+	"command.pingforit.channel.set.description": "définir votre canal, utilisez \"\" pour le canal par défaut",
+	"command.pingforit.channel.get.response": "Canal actuel : \"%s\"",
+	"command.pingforit.channel.get.response.default": "Utilisation du canal par défaut",
+	"command.pingforit.channel.set.response": "Canal défini sur \"%s\"",
+	"command.pingforit.channel.set.response.default": "Canal défini sur par défaut",
+	"command.pingforit.channel.set.reject": "Les noms de canal sont limités à une longueur de %s caractères",
+	"command.pingforit.default_channel.get.description": "obtenir le mode de canal par défaut actuel",
+	"command.pingforit.default_channel.set.description": "définir le mode de canal par défaut",
+	"command.pingforit.default_channel.get.response": "Mode de canal par défaut actuel : %s",
+	"command.pingforit.default_channel.set.response": "Mode de canal par défaut défini sur %s",
+	"command.pingforit.default_channel.set.reject": "Mode inconnu, les options valides sont : %s"
+  ,"settings.pingforit.long_press_compatibility_mode": "Mode de compatibilité d'appui long"
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Interprète les clics rapides comme un seul appui long virtuel."
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "Intervalle de compatibilité"
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Écart maximal entre deux clics consécutifs lorsque le mode est actif."
+}

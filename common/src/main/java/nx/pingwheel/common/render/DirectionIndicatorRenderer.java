@@ -1,18 +1,14 @@
 package nx.pingwheel.common.render;
 
 import net.minecraft.world.phys.Vec2;
+import nx.pingwheel.common.client.marker.MarkerView;
 import nx.pingwheel.common.config.ClientConfig;
-import nx.pingwheel.common.config.TeamColorMode;
-import nx.pingwheel.common.core.PingView;
 import nx.pingwheel.common.math.MathUtils;
 
 import static nx.pingwheel.common.CommonClient.Game;
 
 public class DirectionIndicatorRenderer {
 	private DirectionIndicatorRenderer() {}
-
-	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
-	private static final int WHITE = 0xFFFFFFFF;
 
 	private static Vec2 screenSize;
 	private static Vec2 safeZoneTopLeft;
@@ -21,14 +17,16 @@ public class DirectionIndicatorRenderer {
 
 	public static void prepareSafeZone() {
 		final var wnd = Game.getWindow();
+		final var config = ClientConfig.HANDLER.getConfig();
 
 		screenSize = new Vec2(wnd.getGuiScaledWidth(), wnd.getGuiScaledHeight());
-		safeZoneTopLeft = new Vec2(CLIENT_CONFIG.getSafeZoneLeft(), CLIENT_CONFIG.getSafeZoneTop());
-		safeZoneBottomRight = new Vec2(screenSize.x - CLIENT_CONFIG.getSafeZoneRight(), screenSize.y - CLIENT_CONFIG.getSafeZoneBottom());
+		safeZoneTopLeft = new Vec2(config.getSafeZoneLeft(), config.getSafeZoneTop());
+		safeZoneBottomRight = new Vec2(screenSize.x - config.getSafeZoneRight(), screenSize.y - config.getSafeZoneBottom());
 		safeScreenCenter = new Vec2((safeZoneBottomRight.x - safeZoneTopLeft.x) * 0.5f, (safeZoneBottomRight.y - safeZoneTopLeft.y) * 0.5f);
 	}
 
-	public static void draw(DrawContext ctx, PingView ping) {
+	public static void draw(DrawContext ctx, MarkerView ping) {
+		final var config = ClientConfig.HANDLER.getConfig();
 		final var screenPos = ping.getScreenPos();
 
 		if (screenPos == null) {
@@ -50,7 +48,7 @@ public class DirectionIndicatorRenderer {
 
 		final var m = ctx.getMatrices();
 		final var pingScale = ping.getScale();
-		final var pingSize = CLIENT_CONFIG.getPingSize() / 100f;
+		final var pingSize = config.getPingSize() / 100f;
 		final var pingAngle = (float)Math.atan2(pingDirectionVec.y, pingDirectionVec.x);
 		final var edgePosition = MathUtils.calculateAngleRectIntersection(pingAngle, safeZoneTopLeft, safeZoneBottomRight);
 		final var indicatorOffsetX = Math.cos(pingAngle + Math.PI) * 12;
@@ -60,14 +58,13 @@ public class DirectionIndicatorRenderer {
 		{
 			m.translate(edgePosition.x, edgePosition.y, 0f);
 
-			final var useTeamColor = CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.FULL || CLIENT_CONFIG.getTeamColorMode() == TeamColorMode.PING_ONLY;
-			final var pingColor = useTeamColor ? ping.getTeamColor() : WHITE;
+			final var pingColor = RenderColorPolicy.markerColor(ping.getPingColor());
 
 			m.pushPose();
 			{
 				m.scale(pingScale, pingScale, 1f);
 				m.translate(indicatorOffsetX, indicatorOffsetY, 0);
-				ctx.renderPing(ping.getItemStack(), CLIENT_CONFIG.isItemIconVisible(), pingColor);
+				ctx.renderPing(ping.getItemStack(), config.isItemIconVisible(), pingColor);
 			}
 			m.popPose();
 

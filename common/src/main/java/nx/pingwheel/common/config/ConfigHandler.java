@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import lombok.Getter;
 import lombok.SneakyThrows;
-import nx.pingwheel.common.compat.LegacyMigrationHandler;
 import nx.pingwheel.common.platform.IPlatformContextService;
 
 import java.io.IOException;
@@ -13,6 +12,7 @@ import java.nio.file.Path;
 
 import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.Global.MOD_ID;
+import static nx.pingwheel.common.Global.errorException;
 
 public class ConfigHandler <T extends IConfig> {
 
@@ -25,8 +25,6 @@ public class ConfigHandler <T extends IConfig> {
 	private int configHash;
 
 	public static <T extends IConfig> ConfigHandler<T> of(Class<T> configType, String configExtension) {
-		LegacyMigrationHandler.migrateConfig(configExtension);
-
 		return new ConfigHandler<>(configType, IPlatformContextService.INSTANCE.resolveConfigDir(MOD_ID + configExtension));
 	}
 
@@ -41,7 +39,24 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	public void save() {
-		if (configHash == config.hashCode()) {
+		save(false);
+	}
+
+	/**
+	 * Replaces the complete config object with a freshly constructed default
+	 * instance and persists it immediately.
+	 */
+	public void resetToDefaults() {
+		try {
+			config = configType.getDeclaredConstructor().newInstance();
+		} catch (ReflectiveOperationException e) {
+			throw new IllegalStateException("creating default config failed", e);
+		}
+		save(true);
+	}
+
+	private void save(boolean force) {
+		if (!force && configHash == config.hashCode()) {
 			return;
 		}
 
@@ -52,7 +67,7 @@ public class ConfigHandler <T extends IConfig> {
 				Files.createDirectories(configPath.getParent());
 				Files.createFile(configPath);
 			} catch (IOException e) {
-				LOGGER.error("Creating Config failed: " + e);
+				errorException("creating config failed", e);
 				return;
 			}
 		}
@@ -62,7 +77,7 @@ public class ConfigHandler <T extends IConfig> {
 			gson.toJson(config, writer);
 			writer.close();
 		} catch (Exception e) {
-			LOGGER.error("Saving Config failed: " + e);
+			errorException("saving config failed", e);
 			return;
 		}
 
@@ -83,6 +98,7 @@ public class ConfigHandler <T extends IConfig> {
 			reader.close();
 		} catch (Exception e) {
 			config = null;
+			errorException("loading config failed", e);
 		}
 
 		if (config == null) {

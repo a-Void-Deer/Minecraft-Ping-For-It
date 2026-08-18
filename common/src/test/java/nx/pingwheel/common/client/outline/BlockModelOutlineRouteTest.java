@@ -1,0 +1,59 @@
+package nx.pingwheel.common.client.outline;
+
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static nx.pingwheel.common.client.outline.BlockModelOutlineRoute.BLOCK_DISPLAY;
+import static nx.pingwheel.common.client.outline.BlockModelOutlineRoute.ENTITY_BLOCK;
+import static nx.pingwheel.common.client.outline.BlockModelOutlineRoute.VOXEL;
+
+/**
+ * Headless tests for the pure per-frame block outline route policy.
+ */
+class BlockModelOutlineRouteTest {
+
+	// --- routing ---
+
+	@Test
+	void entityBlockAlwaysRoutesToEntityBlockRegardlessOfWhitelist() {
+		// The ordinary-block whitelist is never applied to entity_block
+		// targets, so its result must not influence the route.
+		assertEquals(ENTITY_BLOCK, BlockModelOutlineRoute.route("entity_block", false));
+		assertEquals(ENTITY_BLOCK, BlockModelOutlineRoute.route("entity_block", true));
+	}
+
+	@Test
+	void plainBlockRoutesToBlockDisplayOnlyWhenWhitelisted() {
+		assertEquals(BLOCK_DISPLAY, BlockModelOutlineRoute.route("block", true));
+		assertEquals(VOXEL, BlockModelOutlineRoute.route("block", false));
+	}
+
+	@Test
+	void nonBlockTargetTypesAlwaysRouteToVoxel() {
+		for (String targetTypeId : new String[] {"entity", "location", "dropped_item", "", "unknown_type"}) {
+			assertEquals(VOXEL, BlockModelOutlineRoute.route(targetTypeId, true), "should be voxel: '" + targetTypeId + "'");
+			assertEquals(VOXEL, BlockModelOutlineRoute.route(targetTypeId, false), "should be voxel: '" + targetTypeId + "'");
+		}
+	}
+
+	// --- block rendering participation ---
+
+	@Test
+	void onlyBlockAndEntityBlockParticipateInBlockRendering() {
+		assertTrue(BlockModelOutlineRoute.acceptsForBlockRendering("block"));
+		assertTrue(BlockModelOutlineRoute.acceptsForBlockRendering("entity_block"));
+
+		for (String targetTypeId : new String[] {"entity", "location", "dropped_item", "", "unknown_type"}) {
+			assertFalse(BlockModelOutlineRoute.acceptsForBlockRendering(targetTypeId), "should reject: '" + targetTypeId + "'");
+		}
+	}
+
+	@Test
+	void nullTargetTypeIdIsRejected() {
+		assertThrows(NullPointerException.class, () -> BlockModelOutlineRoute.route(null, true));
+		assertThrows(NullPointerException.class, () -> BlockModelOutlineRoute.acceptsForBlockRendering(null));
+	}
+}

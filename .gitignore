@@ -122,3 +122,15 @@ runs/
 AGENTS.md
 plan.md
 spec.md
+
+# Eclipse Buildship
+.project
+.settings/
+.classpath
+.factorypath
+bin/
+.eclipse/
+
+# debug related files
+debug.ps1
+build_jar.ps1

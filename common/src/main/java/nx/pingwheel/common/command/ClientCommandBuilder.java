@@ -14,6 +14,7 @@ import nx.pingwheel.common.screen.SettingsScreen;
 import org.apache.logging.log4j.util.TriConsumer;
 
 import static nx.pingwheel.common.CommonClient.Game;
+import static nx.pingwheel.common.Global.CLIENT_COMMAND_ROOT;
 import static nx.pingwheel.common.config.ClientConfig.MAX_CHANNEL_LENGTH;
 
 public class ClientCommandBuilder {
@@ -68,11 +69,11 @@ public class ClientCommandBuilder {
 		Command<S> helpCallback = (context) -> {
 			responseHandler.accept(context, true, LanguageUtils.join(
 				Component.empty(),
-				Component.literal("/pingwheel config"),
+				Component.literal("/" + CLIENT_COMMAND_ROOT + " config"),
 				langConfig.path("description").wrapped().withStyle(ChatFormatting.GRAY),
-				Component.literal("/pingwheel channel"),
+				Component.literal("/" + CLIENT_COMMAND_ROOT + " channel"),
 				langChannel.path("get", "description").wrapped().withStyle(ChatFormatting.GRAY),
-				Component.literal("/pingwheel channel <channel_name>"),
+				Component.literal("/" + CLIENT_COMMAND_ROOT + " channel <channel_name>"),
 				langChannel.path("set", "description").wrapped().withStyle(ChatFormatting.GRAY)
 			));
 			return 1;
@@ -81,7 +82,7 @@ public class ClientCommandBuilder {
 		var cmdHelp = LiteralArgumentBuilder.<S>literal("help")
 			.executes(helpCallback);
 
-		return LiteralArgumentBuilder.<S>literal("pingwheel")
+		return LiteralArgumentBuilder.<S>literal(CLIENT_COMMAND_ROOT)
 			.executes(helpCallback)
 			.then(cmdHelp)
 			.then(cmdConfig)

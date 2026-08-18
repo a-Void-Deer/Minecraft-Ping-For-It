@@ -1,0 +1,50 @@
+{
+	"key.category.pingforit.name": "Ping For It",
+	"key.pingforit.ping_location": "標記位置",
+	"key.pingforit.open_settings": "開啟設定",
+	"subtitles.pingforit.ping": "標記位置警報",
+
+	"settings.pingforit.title": "標記圓環設定",
+	"settings.pingforit.ping_volume": "標記音量：%s",
+	"settings.pingforit.ping_duration": "標記持續時間：%s",
+	"settings.pingforit.ping_distance": "標記距離：%s",
+	"settings.pingforit.correction_period": "修正週期：%s",
+	"settings.pingforit.item_icon_visible": "物品圖示",
+	"settings.pingforit.direction_indicator_visible": "方向指示器",
+	"settings.pingforit.ping_size": "標記大小：%s",
+	"settings.pingforit.wheel_font_size": "輪盤選項字型大小：%s",
+	"settings.pingforit.wheel_target_font_size": "輪盤目標字型大小：%s",
+	"settings.pingforit.reset_all": "全部重設",
+	"settings.pingforit.reset_all.title": "要重設所有設定嗎？",
+	"settings.pingforit.reset_all.message": "要將 Ping For It 的所有設定恢復為預設值嗎？",
+	"settings.pingforit.channel": "標記頻道",
+	"settings.pingforit.channel.tooltip": "您只會與相同頻道的玩家發送和接收標記",
+
+	"value.pingforit.auto": "自動",
+	"value.pingforit.disabled": "已停用",
+	"value.pingforit.global": "全域",
+	"value.pingforit.team_only": "僅限隊伍",
+	"value.pingforit.hidden": "隱藏",
+	"value.pingforit.infinite": "∞",
+	"unit.pingforit.seconds": "%s 秒",
+	"unit.pingforit.meters": "%s 公尺",
+	"unit.pingforit.percent": "%s%%",
+
+	"command.pingforit.config.description": "開啟設定介面",
+	"command.pingforit.channel.get.description": "取得您目前的頻道",
+	"command.pingforit.channel.set.description": "設定您的頻道，使用 \"\" 表示預設頻道",
+	"command.pingforit.channel.get.response": "目前頻道：\"%s\"",
+	"command.pingforit.channel.get.response.default": "目前使用預設頻道",
+	"command.pingforit.channel.set.response": "設定頻道為 \"%s\"",
+	"command.pingforit.channel.set.response.default": "設定頻道為預設",
+	"command.pingforit.channel.set.reject": "頻道名稱限制為 %s 個字元",
+	"command.pingforit.default_channel.get.description": "取得目前預設頻道模式",
+	"command.pingforit.default_channel.set.description": "設定預設頻道模式",
+	"command.pingforit.default_channel.get.response": "目前預設頻道模式：%s",
+	"command.pingforit.default_channel.set.response": "設定預設頻道模式為 %s",
+	"command.pingforit.default_channel.set.reject": "未知模式，有效的選項為：%s"
+  ,"settings.pingforit.long_press_compatibility_mode": "長按相容模式"
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "將快速連續點擊識別為一次虛擬長按。"
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "相容時間片"
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "啟用相容模式時相鄰點擊之間允許的最大間隔。"
+}

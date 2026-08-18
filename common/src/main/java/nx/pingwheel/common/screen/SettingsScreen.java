@@ -3,9 +3,11 @@ package nx.pingwheel.common.screen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.network.chat.CommonComponents;
@@ -20,6 +22,7 @@ import nx.pingwheel.common.resource.LanguageUtils;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
+import static nx.pingwheel.common.config.ClientConfigBounds.*;
 
 public class SettingsScreen extends OptionsSubScreen {
 
@@ -30,6 +33,9 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private Screen parent;
 	private EditBox channelTextField;
+	private Button resetAllButton;
+	private boolean resetConfirmationHandled;
+	private boolean suppressSaveOnClose;
 
 	public SettingsScreen() {
 		super(null, null, LanguageUtils.settings("title").get());
@@ -53,6 +59,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addTitle();
 		this.addContents();
 		this.addFooter();
+		this.addResetAllButton();
 		this.layout.visitWidgets(this::addRenderableWidget);
 		this.repositionElements();
 	}
@@ -75,6 +82,18 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		this.list.addSmall(getPingSizeOption(), null);
 
+		this.list.addSmall(getWheelInnerRadiusOption(), getWheelOuterRadiusOption());
+
+		this.list.addSmall(getWheelOpacityOption(), null);
+
+		this.list.addSmall(getWheelTargetFontSizeOption(), getWheelOptionFontSizeOption());
+
+		this.list.addSmall(getWheelHoldMillisOption(), getWheelTimeoutMillisOption());
+
+		this.list.addSmall(getLongPressCompatibilityModeOption(), getLongPressCompatibilitySliceMillisOption());
+
+		this.list.addSmall(getCancelHalfConeAngleDegreesOption(), null);
+
 		this.channelTextField = new EditBox(this.font, -1, -1, 200, 20, Component.empty());
 		this.channelTextField.setMaxLength(MAX_CHANNEL_LENGTH);
 		this.channelTextField.setValue(config.getChannel());
@@ -82,9 +101,20 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addWidget(this.channelTextField);
 	}
 
+	private void addResetAllButton() {
+		this.resetAllButton = Button.builder(
+			LanguageUtils.settings("reset_all").get(),
+			button -> this.openResetConfirmation())
+			.bounds(0, 0, SettingsScreenLayout.RESET_BUTTON_WIDTH, SettingsScreenLayout.RESET_BUTTON_HEIGHT)
+			.build();
+		this.addRenderableWidget(this.resetAllButton);
+	}
+
 	@Override
 	public void onClose() {
-		ClientConfig.HANDLER.save();
+		if (!this.suppressSaveOnClose) {
+			ClientConfig.HANDLER.save();
+		}
 
 		if (parent != null && this.minecraft != null) {
 			this.minecraft.setScreen(parent);
@@ -95,8 +125,13 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public void repositionElements() {
+		this.layout.setFooterHeight(SettingsScreenLayout.footerHeightFor(this.height, this.layout.getHeaderHeight()));
 		super.repositionElements();
 		this.list.updateSize(this.width, this.layout);
+
+		final var screenLayout = this.getScreenLayout();
+		this.resetAllButton.setPosition(screenLayout.resetX(), screenLayout.resetY());
+		this.channelTextField.setPosition(screenLayout.channelX(), screenLayout.channelY());
 	}
 
 	@Override
@@ -104,18 +139,25 @@ public class SettingsScreen extends OptionsSubScreen {
 		super.render(ctx, mouseX, mouseY, delta);
 		this.list.render(ctx, mouseX, mouseY, delta);
 
-		final var yOffset = 50 + 25 * this.list.children().size();
-		this.channelTextField.setPosition(width / 2 - 100, yOffset);
-		ctx.drawString(this.font, LanguageUtils.settings("channel").get(), this.width / 2 - 100, this.channelTextField.getY() - 12, GRAY);
+		ctx.drawString(this.font, LanguageUtils.settings("channel").get(), this.channelTextField.getX(), this.getScreenLayout().channelLabelY(), GRAY);
 		this.channelTextField.render(ctx, mouseX, mouseY, delta);
 
 		if (this.channelTextField.getValue().isEmpty()) {
-			ctx.drawString(this.font, getChannelPlaceholder(), this.width / 2 - 100 + 4, this.channelTextField.getY() + 6, WHITE);
+			ctx.drawString(this.font, getChannelPlaceholder(), this.channelTextField.getX() + 4, this.channelTextField.getY() + 6, WHITE);
 		}
 
 		if (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused()) {
 			ctx.renderTooltip(this.font, Tooltip.create(LanguageUtils.settings("channel.tooltip").get()).toCharSequence(Game), mouseX, mouseY);
 		}
+	}
+
+	private SettingsScreenLayout getScreenLayout() {
+		return SettingsScreenLayout.calculate(
+			this.width,
+			this.height,
+			this.layout.getHeaderHeight(),
+			this.layout.getFooterHeight()
+		);
 	}
 
 	private MutableComponent getChannelPlaceholder() {
@@ -269,5 +311,176 @@ public class SettingsScreen extends OptionsSubScreen {
 			config::getPingSize,
 			config::setPingSize
 		);
+	}
+
+	private OptionInstance<Integer> getWheelHoldMillisOption() {
+		final var text = LanguageUtils.settings("wheel_hold_millis");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_HOLD_MILLIS,
+			MAX_WHEEL_HOLD_MILLIS,
+			WHEEL_HOLD_MILLIS_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
+			config::getWheelHoldMillis,
+			config::setWheelHoldMillis
+		);
+	}
+
+	private OptionInstance<Boolean> getLongPressCompatibilityModeOption() {
+		final var text = LanguageUtils.settings("long_press_compatibility_mode");
+
+		return OptionUtils.ofBool(
+			text.getKey(),
+			config::isLongPressCompatibilityMode,
+			config::setLongPressCompatibilityMode,
+			() -> text.path("tooltip").get());
+	}
+
+	private OptionInstance<Integer> getLongPressCompatibilitySliceMillisOption() {
+		final var text = LanguageUtils.settings("long_press_compatibility_slice_millis");
+		final int maximum = effectiveLongPressCompatibilitySliceMaxMillis(config.getWheelHoldMillis());
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
+			maximum,
+			LONG_PRESS_COMPATIBILITY_SLICE_MILLIS_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
+			() -> text.path("tooltip").get(),
+			config::getLongPressCompatibilitySliceMillis,
+			config::setLongPressCompatibilitySliceMillis
+		);
+	}
+
+	private OptionInstance<Integer> getWheelInnerRadiusOption() {
+		final var text = LanguageUtils.settings("wheel_inner_radius");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_INNER_RADIUS,
+			MAX_WHEEL_INNER_RADIUS,
+			WHEEL_INNER_RADIUS_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_PIXELS.get(value)),
+			config::getWheelInnerRadius,
+			config::setWheelInnerRadius
+		);
+	}
+
+	private OptionInstance<Integer> getWheelOuterRadiusOption() {
+		final var text = LanguageUtils.settings("wheel_outer_radius");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_OUTER_RADIUS,
+			MAX_WHEEL_OUTER_RADIUS,
+			WHEEL_OUTER_RADIUS_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_PIXELS.get(value)),
+			config::getWheelOuterRadius,
+			config::setWheelOuterRadius
+		);
+	}
+
+	private OptionInstance<Integer> getWheelOpacityOption() {
+		final var text = LanguageUtils.settings("wheel_opacity");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_OPACITY,
+			MAX_WHEEL_OPACITY,
+			WHEEL_OPACITY_STEP,
+			(value) -> value == 0
+				? text.get(CommonComponents.OPTION_OFF)
+				: text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			config::getWheelOpacity,
+			config::setWheelOpacity
+		);
+	}
+
+	private OptionInstance<Integer> getWheelOptionFontSizeOption() {
+		final var text = LanguageUtils.settings("wheel_font_size");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_FONT_SIZE,
+			MAX_WHEEL_FONT_SIZE,
+			WHEEL_FONT_SIZE_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			config::getWheelFontSize,
+			config::setWheelFontSize
+		);
+	}
+
+	private OptionInstance<Integer> getWheelTargetFontSizeOption() {
+		final var text = LanguageUtils.settings("wheel_target_font_size");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_TARGET_FONT_SIZE,
+			MAX_WHEEL_TARGET_FONT_SIZE,
+			WHEEL_TARGET_FONT_SIZE_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			config::getWheelTargetFontSize,
+			config::setWheelTargetFontSize
+		);
+	}
+
+	private OptionInstance<Integer> getWheelTimeoutMillisOption() {
+		final var text = LanguageUtils.settings("wheel_timeout_millis");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_WHEEL_TIMEOUT_MILLIS,
+			MAX_WHEEL_TIMEOUT_MILLIS,
+			WHEEL_TIMEOUT_MILLIS_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
+			config::getWheelTimeoutMillis,
+			config::setWheelTimeoutMillis
+		);
+	}
+
+	private OptionInstance<Integer> getCancelHalfConeAngleDegreesOption() {
+		final var text = LanguageUtils.settings("cancel_half_cone_angle_degrees");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_CANCEL_HALF_CONE_ANGLE_DEGREES,
+			MAX_CANCEL_HALF_CONE_ANGLE_DEGREES,
+			CANCEL_HALF_CONE_ANGLE_DEGREES_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_DEGREES.get(value)),
+			config::getCancelHalfConeAngleDegrees,
+			config::setCancelHalfConeAngleDegrees
+		);
+	}
+
+	private void openResetConfirmation() {
+		if (this.minecraft == null) {
+			return;
+		}
+
+		this.resetConfirmationHandled = false;
+		this.minecraft.setScreen(new ConfirmScreen(
+			confirmed -> this.handleResetConfirmation(confirmed),
+			LanguageUtils.settings("reset_all").path("title").get(),
+			LanguageUtils.settings("reset_all").path("message").get()));
+	}
+
+	private void handleResetConfirmation(boolean confirmed) {
+		if (this.resetConfirmationHandled || this.minecraft == null) {
+			return;
+		}
+
+		this.resetConfirmationHandled = true;
+
+		if (confirmed) {
+			// A replacement settings screen is intentional: the old OptionInstances
+			// retain their pre-reset values and must never save them back over the
+			// freshly constructed defaults.
+			this.suppressSaveOnClose = true;
+			ClientConfig.HANDLER.resetToDefaults();
+			this.minecraft.setScreen(new SettingsScreen(this.parent));
+		} else {
+			this.minecraft.setScreen(this);
+		}
 	}
 }

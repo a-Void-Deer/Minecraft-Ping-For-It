@@ -90,19 +90,24 @@ public class DrawContext {
 
 		RenderSystem.setShaderColor(r, g, b, a);
 		RenderSystem.enableBlend();
-		guiGraphics.blit(
-			texture,
-			offset,
-			offset,
-			0,
-			0,
-			0,
-			size,
-			size,
-			size,
-			size
-		);
-		RenderSystem.disableBlend();
+
+		try {
+			guiGraphics.blit(
+				texture,
+				offset,
+				offset,
+				0,
+				0,
+				0,
+				size,
+				size,
+				size,
+				size
+			);
+		} finally {
+			RenderSystem.disableBlend();
+			RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
+		}
 	}
 
 	public void renderArrowIcon(int color) {

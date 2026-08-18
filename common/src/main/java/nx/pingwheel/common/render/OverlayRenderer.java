@@ -1,8 +1,7 @@
 package nx.pingwheel.common.render;
 
 import net.minecraft.client.gui.GuiGraphics;
-import nx.pingwheel.common.core.GameContext;
-import nx.pingwheel.common.core.PingManager;
+import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.config.ClientConfig;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -10,30 +9,30 @@ import static nx.pingwheel.common.CommonClient.Game;
 public class OverlayRenderer {
 	private OverlayRenderer() {}
 
-	private static final ClientConfig CLIENT_CONFIG = ClientConfig.HANDLER.getConfig();
-
 	public static void draw(GuiGraphics guiGraphics, float tickDelta) {
-		final var pingRepo = PingManager.PING_REPO;
+		final var config = ClientConfig.HANDLER.getConfig();
+		final var renderViews = MarkerOverlayState.INSTANCE.renderViews();
 
-		if (Game.player == null || pingRepo.isEmpty()) {
+		if (Game.player == null || Game.level == null || renderViews.isEmpty()) {
 			return;
 		}
 
 		final var m = guiGraphics.pose();
 		final var ctx = new DrawContext(guiGraphics);
-		final var showDirectionIndicator = CLIENT_CONFIG.isDirectionIndicatorVisible();
+		final var showDirectionIndicator = config.isDirectionIndicatorVisible();
+		final var currentDimension = Game.level.dimension().location().toString();
 
 		if (showDirectionIndicator) {
 			DirectionIndicatorRenderer.prepareSafeZone();
 		}
 
 		m.pushPose();
-		m.translate(0f, 0f, -pingRepo.size() * 16f);
+		m.translate(0f, 0f, -renderViews.size() * 16f);
 
-		for (var ping : pingRepo) {
-			final var screenPos = ping.getScreenPos();
+		for (var view : renderViews) {
+			final var screenPos = view.getScreenPos();
 
-			if (screenPos == null || ping.dimension != GameContext.getDimension()) {
+			if (screenPos == null || !view.getDimension().equals(currentDimension)) {
 				continue;
 			}
 
@@ -46,11 +45,11 @@ public class OverlayRenderer {
 			m.translate(0f, 0f, 16f);
 
 			if (showDirectionIndicator) {
-				DirectionIndicatorRenderer.draw(ctx, ping);
+				DirectionIndicatorRenderer.draw(ctx, view);
 			}
 
 			if (!behindCamera) {
-				PingLocationRenderer.draw(ctx, ping);
+				PingLocationRenderer.draw(ctx, view);
 			}
 		}
 

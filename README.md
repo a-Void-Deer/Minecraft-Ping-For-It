@@ -1,49 +1,77 @@
-<p align="center" style="text-align: center">
-  <a href="https://github.com/LukenSkyne/Minecraft-Ping-Wheel">
-    <img alt="Ping Wheel Logo" src=".github/icon.png" width="128" height="128" />
-  </a>
-</p>
+# Ping For It
 
-<h1 align="center">Ping Wheel</h1>
-<h3 align="center">ease communication with your friends by pinging locations</h3>
-<br>
+Ping For It is a target-aware ping mod with mod ID `pingforit`.
 
-<div align="center">
+- Version: `0.1.0-pfi-beta1`
+- Minecraft: `1.21.1`
+- Java: `21`
+- Loaders: Fabric, Forge, and NeoForge
 
-<a href="#">![NeoForge](https://luken.cc/badges/neoforge)</a>
-<a href="#">![Forge](https://luken.cc/badges/forge)</a>
-<a href="#">![Fabric](https://luken.cc/badges/fabric)</a>  
-<a href="https://www.curseforge.com/minecraft/mc-mods/ping-wheel">![Curseforge](https://luken.cc/badges/curseforge/734339)</a>
-<a href="https://modrinth.com/mod/ping-wheel">![Modrinth](https://luken.cc/badges/modrinth/QQXAdCzh)</a>  
-<a href="#">![Environment](https://luken.cc/badges/environment)</a>
+## Features
 
-</div>
+Ping For It captures the target and ray result when the ping key is first
+pressed, then keeps that target locked for the interaction. It provides seven
+ping types: Attention, Danger, Go To, Loot, Destroy, Take, and Request.
 
-## About
+- A short click uses the captured target type's default ping type.
+- Holding the key opens a wheel for the captured target's available ping types.
+- The wheel center cancels the nearest eligible marker owned by the local player.
+- Long-Press Compatibility Mode can recognize rapid clicks as one virtual long
+  press.
+- Markers, target validation, ownership, shared-target winner selection, and
+  rate limiting are server-authoritative. The client only mirrors the server's
+  create policy as a courtesy gate.
+- Entity outlines and native `VoxelShape` block outlines follow the selected
+  ping type, including shape-accurate non-full-cube outlines.
+- Settings and chat output use Minecraft localization.
 
-Modern co-op games often allow players to communicate via "pings" to mark in-game locations.  
-This simple mod provides such pinging mechanism for the fabric and forge mod loaders.
+## Controls and commands
 
-Default keybind is "Mouse5" aka "Forward" to ping. Hold "Tab" (Player List) to see player names on pings.  
-The settings can be changed via `/pingwheel config` or [Mod Menu](https://github.com/TerraformersMC/ModMenu).  
-Read the [Wiki](https://github.com/LukenSkyne/Minecraft-Ping-Wheel/wiki) for additional information.
+| Action | Default |
+| --- | --- |
+| Ping Location | Mouse5 (rebindable) |
+| Open Settings | Unbound (rebindable) |
 
-If you are looking to use the mod on Bukkit servers, you can install our [official Plugin](https://github.com/RXJpaw/Minecraft-Ping-Wheel-Plugin/).
+The available commands are:
 
-## Gallery
+- `/pingforit config` opens the settings screen.
+- `/pingforit channel` reads or changes the player's ping channel.
+- `/pingforit:server` opens operator-only server settings, including channel,
+  player tracking, regeneration time, and rate limit controls.
 
-The following screenshot shows two pings in different distances with according scale.
+## Installation
 
-<img src=".github/in-game-screenshot.png" alt="In-Game">
+Install the jar matching both your loader and Minecraft `1.21.1`. Fabric also
+requires Fabric API. Do not use a Fabric, Forge, or NeoForge jar with a
+different loader.
 
-When enabled, this feature replaces the ping icon with the respective item texture (or model).
+Optional integrations and optional target content are soft dependencies. If an
+optional mod, registry entry, or integration is absent, unrelated ping
+functionality continues to work.
 
-<img src=".github/item-icon-showcase.png" alt="Item-Icons">
+This fork uses its own identity and protocol. It provides no old protocol or
+configuration migration and does not promise cross-mod interoperability. It
+does not declare or enforce a runtime block against the original mod;
+simultaneous installation is not explicitly blocked, but cross-mod behavior is
+not guaranteed.
 
-## Dependencies
+## Build and verification
 
-<p>
-  <a href="https://github.com/FabricMC/fabric">
-    <img alt="Fabric API" height="56" src="https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/cozy/requires/fabric-api_vector.svg">
-  </a>
-</p>
+From the repository root with JDK 21:
+
+```powershell
+.\gradlew.bat --no-daemon build
+.\gradlew.bat --no-daemon verifyModIdentity
+```
+
+The verification task checks the identity and required resources in all three
+shippable loader jars.
+
+## Status and attribution
+
+This is a beta fork. Rendering, multiplayer synchronization, and hold/wheel
+interaction still require in-game validation on each supported loader; build
+verification does not claim that manual validation has been performed.
+
+The fork retains factual attribution to the original Ping Wheel work by
+LukenSkyne. Existing metadata author attribution is unchanged.

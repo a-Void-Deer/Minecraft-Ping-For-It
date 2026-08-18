@@ -14,9 +14,15 @@ public class OptionUtils {
 	private OptionUtils() {}
 
 	public static OptionInstance<Integer> ofInt(String key, int min, int max, int step, Function<Integer, Component> formatter, Supplier<Integer> getter, Consumer<Integer> setter) {
+		return ofInt(key, min, max, step, formatter, null, getter, setter);
+	}
+
+	public static OptionInstance<Integer> ofInt(String key, int min, int max, int step, Function<Integer, Component> formatter, Supplier<Component> tooltipSupplier, Supplier<Integer> getter, Consumer<Integer> setter) {
 		return new OptionInstance<>(
 			key,
-			OptionInstance.noTooltip(),
+			tooltipSupplier == null
+				? OptionInstance.noTooltip()
+				: (value) -> Tooltip.create(tooltipSupplier.get()),
 			(optionText, value) -> formatter.apply(getter.get()),
 			(new OptionInstance.IntRange(min / step, max / step))
 				.xmap((value) -> value * step, (value) -> value / step),
@@ -43,8 +49,15 @@ public class OptionUtils {
 	}
 
 	public static OptionInstance<Boolean> ofBool(String key, Supplier<Boolean> getter, Consumer<Boolean> setter) {
+		return ofBool(key, getter, setter, null);
+	}
+
+	public static OptionInstance<Boolean> ofBool(String key, Supplier<Boolean> getter, Consumer<Boolean> setter, Supplier<Component> tooltipSupplier) {
 		return OptionInstance.createBoolean(
 			key,
+			tooltipSupplier == null
+				? OptionInstance.noTooltip()
+				: (value) -> Tooltip.create(tooltipSupplier.get()),
 			getter.get(),
 			setter
 		);
