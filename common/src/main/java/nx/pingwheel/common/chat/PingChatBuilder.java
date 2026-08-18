@@ -1,6 +1,7 @@
 package nx.pingwheel.common.chat;
 
 import java.util.Objects;
+import java.util.function.Predicate;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -11,8 +12,8 @@ import nx.pingwheel.common.domain.PingType;
  * Builds ping chat lines. The established three-argument form remains the
  * explicit fallback when a client language template cannot be composed.
  *
- * <p>The message uses the fixed template
- * {@code pingforit.chat.request} with the structure equivalent to
+ * <p>The legacy fallback uses the fixed translation key
+ * {@code pingforit.chat.pingmsg} with the structure equivalent to
  * {@code <player> requests <ping-type phrase> <target>}:
  * <ul>
  *   <li>{@code player} is the plain, default-colored literal server profile
@@ -32,13 +33,44 @@ import nx.pingwheel.common.domain.PingType;
  */
 public final class PingChatBuilder {
 
-	public static final String TEMPLATE_KEY = "pingforit.chat.request.template";
+	public static final String LEGACY_KEY = "pingforit.chat.pingmsg";
+	public static final String TEMPLATE_KEY = "pingforit.chat.pingmsg.template";
 
 	private static final String PLAYER_NAME_PLACEHOLDER = "playerName";
 	private static final String PING_TYPE_PLACEHOLDER = "pingType";
 	private static final String TARGET_NAME_PLACEHOLDER = "targetName";
 
 	private PingChatBuilder() {}
+
+	/**
+	 * Returns the optional language override key for a validated catalog ping
+	 * type. The caller must use the current client language when checking this
+	 * key so resource-pack translations are included.
+	 */
+	public static String templateOverrideKey(PingType pingType) {
+		Objects.requireNonNull(pingType, "pingType");
+		return "pingforit.chat." + pingType.id() + ".template.override";
+	}
+
+	/**
+	 * Selects the key to resolve for a ping chat template.
+	 *
+	 * <p>The presence predicate represents the merged client language, not the
+	 * mod's bundled language, so an override supplied only by a resource pack is
+	 * selected correctly. The selected value is parsed once by
+	 * {@link #build(String, String, PingType, Component)}; parsing failure must
+	 * fall back to the legacy component rather than selecting another template.
+	 *
+	 * @param pingType the already client-resolved and validated ping type
+	 * @param hasTranslation whether the current language contains a key
+	 */
+	public static String selectTemplateKey(PingType pingType, Predicate<String> hasTranslation) {
+		Objects.requireNonNull(pingType, "pingType");
+		Objects.requireNonNull(hasTranslation, "hasTranslation");
+
+		String overrideKey = templateOverrideKey(pingType);
+		return hasTranslation.test(overrideKey) ? overrideKey : TEMPLATE_KEY;
+	}
 
 	/**
 	 * Builds the ping chat line for one accepted marker.
@@ -53,7 +85,7 @@ public final class PingChatBuilder {
 		Objects.requireNonNull(targetName, "targetName");
 
 		return Component.translatable(
-			"pingforit.chat.request",
+			LEGACY_KEY,
 			Component.literal(playerName),
 			Component.translatable(pingType.phraseKey()).withColor(pingType.textColor()),
 			targetName);
@@ -69,7 +101,8 @@ public final class PingChatBuilder {
 	 * {@link #build(String, PingType, Component)}, preserving the established
 	 * server-side component shape.
 	 *
-	 * @param template   the resolved language value for {@link #TEMPLATE_KEY}
+	 * @param template   the resolved language value for {@link #TEMPLATE_KEY} or
+	 *                   {@link #templateOverrideKey(PingType)}
 	 * @param playerName the plain profile name of the marker owner
 	 * @param pingType   the catalog ping type of the marker
 	 * @param targetName the trusted target name component

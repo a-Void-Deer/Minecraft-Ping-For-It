@@ -53,8 +53,8 @@
 	"command.pingforit.default_channel.set.response": "将默认频道设置为 %s",
 	"command.pingforit.default_channel.set.reject": "未知模式，有效选项包括: %s",
 
-	"pingforit.chat.request": "%s 请求 %s %s",
-	"pingforit.chat.request.template": "{playerName} 请求 {pingType} {targetName}",
+	"pingforit.chat.pingmsg": "%s 请求 %s %s",
+	"pingforit.chat.pingmsg.template": "{playerName} 请求 {pingType} {targetName}",
 
 	"pingforit.ping_type.attention": "注意",
 	"pingforit.ping_type.attention.phrase": "注意",

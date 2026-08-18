@@ -987,7 +987,9 @@ public final class ClientPingRuntime {
 			String template;
 
 			try {
-				template = Language.getInstance().getOrDefault(PingChatBuilder.TEMPLATE_KEY);
+				Language language = Language.getInstance();
+				String templateKey = PingChatBuilder.selectTemplateKey(pingType.get(), language::has);
+				template = language.getOrDefault(templateKey);
 			} catch (RuntimeException ignored) {
 				template = null;
 			}

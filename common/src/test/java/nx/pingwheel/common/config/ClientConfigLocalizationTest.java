@@ -72,13 +72,19 @@ class ClientConfigLocalizationTest {
 	}
 
 	@Test
-	void chatTemplateIsPresentWithExactCompositionInEnglishAndChinese() throws IOException {
+	void chatLegacyAndGeneralTemplatesAreRenamedWithoutOldAliases() throws IOException {
+		assertEquals("%s requests %s %s", readTranslation("en_us", "pingforit.chat.pingmsg"));
 		assertEquals(
 			"{playerName} requests {pingType} {targetName}",
-			readTranslation("en_us", "pingforit.chat.request.template"));
+			readTranslation("en_us", "pingforit.chat.pingmsg.template"));
+		assertEquals("%s 请求 %s %s", readTranslation("zh_cn", "pingforit.chat.pingmsg"));
 		assertEquals(
 			"{playerName} 请求 {pingType} {targetName}",
-			readTranslation("zh_cn", "pingforit.chat.request.template"));
+			readTranslation("zh_cn", "pingforit.chat.pingmsg.template"));
+		assertTranslationAbsent("en_us", "pingforit.chat." + "request");
+		assertTranslationAbsent("en_us", "pingforit.chat." + "request.template");
+		assertTranslationAbsent("zh_cn", "pingforit.chat." + "request");
+		assertTranslationAbsent("zh_cn", "pingforit.chat." + "request.template");
 	}
 
 	private String readTranslation(String locale, String key) throws IOException {
@@ -99,5 +105,17 @@ class ClientConfigLocalizationTest {
 		assertTrue(
 			Pattern.compile("\\\"" + Pattern.quote(key) + "\\\"\\s*:").matcher(contents).find(),
 			() -> "missing en_us translation: " + key);
+	}
+
+	private void assertTranslationAbsent(String locale, String key) throws IOException {
+		String contents;
+		try (InputStream stream = getClass().getClassLoader().getResourceAsStream(
+			"assets/pingforit/lang/" + locale + ".json")) {
+			assertNotNull(stream);
+			contents = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+		}
+
+		assertTrue(!JsonParser.parseString(contents).getAsJsonObject().has(key),
+			() -> "unexpected translation alias: " + locale + ":" + key);
 	}
 }
