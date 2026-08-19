@@ -28,6 +28,24 @@ class ClientConfigLocalizationTest {
 		"attention", "danger", "go_to", "loot", "destroy", "take", "request");
 	private static final List<String> TEMPLATE_PLACEHOLDERS = List.of(
 		"{playerName}", "{pingType}", "{targetName}");
+	private static final List<String> SERVER_SETTINGS_KEYS = List.of(
+		"settings.pingforit.client_settings",
+		"settings.pingforit.server_settings",
+		"settings.pingforit.server_settings.loading",
+		"settings.pingforit.server_settings.locked",
+		"settings.pingforit.server_settings.validation",
+		"settings.pingforit.server_settings.confirm.title",
+		"settings.pingforit.server_settings.confirm.message",
+		"settings.pingforit.server_settings.confirm.discard",
+		"settings.pingforit.server_settings.confirm.cancel",
+		"settings.pingforit.default_channel_mode",
+		"settings.pingforit.default_channel_mode.tooltip",
+		"settings.pingforit.player_tracking_enabled",
+		"settings.pingforit.player_tracking_enabled.tooltip",
+		"settings.pingforit.ms_to_regenerate",
+		"settings.pingforit.ms_to_regenerate.tooltip",
+		"settings.pingforit.rate_limit",
+		"settings.pingforit.rate_limit.tooltip");
 
 	@Test
 	void englishLocaleContainsInteractionSettingsAndUnits() throws IOException {
@@ -79,7 +97,30 @@ class ClientConfigLocalizationTest {
 				"settings.pingforit.reset_all",
 				"settings.pingforit.reset_all.title",
 				"settings.pingforit.reset_all.message")) {
-				assertTrue(json.has(key), () -> "missing translation: " + locale + ":" + key);
+				nonBlankTranslation(json, locale, key);
+			}
+			for (String key : SERVER_SETTINGS_KEYS) {
+				nonBlankTranslation(json, locale, key);
+			}
+			nonBlankTranslation(json, locale, "unit.pingforit.milliseconds");
+			assertTrue(
+				json.get("settings.pingforit.long_press_compatibility_slice_millis").getAsString().contains("%s"),
+				() -> "compatibility slice must be formatted: " + locale);
+		}
+	}
+
+	@Test
+	void playerAndTeamSettingsAreFullyTranslatedInPreviouslyIncompleteLocales() throws IOException {
+		for (String locale : List.of("zh_cn", "zh_tw", "fr_fr", "pl_pl", "tr_tr")) {
+			JsonObject json = readLocaleJson(locale);
+			for (String key : List.of(
+				"settings.pingforit.player_info_mode",
+				"settings.pingforit.player_info_mode.hold.tooltip",
+				"settings.pingforit.team_color_mode")) {
+				nonBlankTranslation(json, locale, key);
+			}
+			for (String value : List.of("hold", "always", "compact", "full", "ping_only", "labels_only")) {
+				nonBlankTranslation(json, locale, "value.pingforit." + value);
 			}
 		}
 	}
@@ -199,9 +240,10 @@ class ClientConfigLocalizationTest {
 	}
 
 	private static void assertContainsKey(String contents, String key) {
-		assertTrue(
-			Pattern.compile("\\\"" + Pattern.quote(key) + "\\\"\\s*:").matcher(contents).find(),
-			() -> "missing en_us translation: " + key);
+		var matcher = Pattern.compile(
+			"\\\"" + Pattern.quote(key) + "\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"").matcher(contents);
+		assertTrue(matcher.find(), () -> "missing en_us translation: " + key);
+		assertFalse(matcher.group(1).isBlank(), () -> "blank en_us translation: " + key);
 	}
 
 	private void assertTranslationAbsent(String locale, String key) throws IOException {

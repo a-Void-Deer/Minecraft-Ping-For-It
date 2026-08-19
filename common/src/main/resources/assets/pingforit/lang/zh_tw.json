@@ -5,8 +5,16 @@
 	"subtitles.pingforit.ping": "標記位置警報",
 
 	"settings.pingforit.title": "標記圓環設定",
+	"settings.pingforit.client_settings": "用戶端設定",
+	"settings.pingforit.server_settings": "伺服器設定",
+	"settings.pingforit.server_settings.loading": "（載入中…）",
+	"settings.pingforit.server_settings.locked": "（已鎖定）",
+	"settings.pingforit.server_settings.validation": "請修正非負整數，或收起並放棄伺服器變更。",
+	"settings.pingforit.server_settings.confirm.title": "放棄伺服器變更？",
+	"settings.pingforit.server_settings.confirm.message": "放棄未儲存的伺服器變更並收起此區段？",
+	"settings.pingforit.server_settings.confirm.discard": "放棄",
+	"settings.pingforit.server_settings.confirm.cancel": "繼續編輯",
 	"settings.pingforit.ping_volume": "標記音量：%s",
-	"settings.pingforit.ping_duration": "標記持續時間：%s",
 	"settings.pingforit.ping_distance": "標記距離：%s",
 	"settings.pingforit.correction_period": "修正週期：%s",
 	"settings.pingforit.item_icon_visible": "物品圖示",
@@ -19,9 +27,28 @@
 	"settings.pingforit.reset_all.message": "要將 Ping For It 的所有設定恢復為預設值嗎？",
 	"settings.pingforit.channel": "標記頻道",
 	"settings.pingforit.channel.tooltip": "您只會與相同頻道的玩家發送和接收標記",
+	"settings.pingforit.channel.placeholder": "已與 %s 同步",
+	"settings.pingforit.player_info_mode": "玩家資訊",
+	"settings.pingforit.player_info_mode.hold.tooltip": "按住「%s」（%s）按鍵時顯示玩家資訊",
+	"settings.pingforit.team_color_mode": "隊伍顏色",
+	"settings.pingforit.default_channel_mode": "預設頻道模式",
+	"settings.pingforit.default_channel_mode.tooltip": "控制未選擇頻道時使用的頻道。",
+	"settings.pingforit.player_tracking_enabled": "玩家追蹤",
+	"settings.pingforit.player_tracking_enabled.tooltip": "允許標記識別並追蹤玩家。",
+	"settings.pingforit.ms_to_regenerate": "恢復時間（毫秒）",
+	"settings.pingforit.ms_to_regenerate.tooltip": "恢復一次標記使用次數所需的毫秒數。",
+	"settings.pingforit.rate_limit": "頻率限制",
+	"settings.pingforit.rate_limit.tooltip": "恢復時間窗口內允許的最大標記次數。",
 
 	"value.pingforit.auto": "自動",
 	"value.pingforit.disabled": "已停用",
+	"value.pingforit.enabled": "已啟用",
+	"value.pingforit.always": "永遠",
+	"value.pingforit.compact": "精簡",
+	"value.pingforit.hold": "按住",
+	"value.pingforit.full": "完整",
+	"value.pingforit.ping_only": "僅標記",
+	"value.pingforit.labels_only": "僅標籤",
 	"value.pingforit.global": "全域",
 	"value.pingforit.team_only": "僅限隊伍",
 	"value.pingforit.hidden": "隱藏",
@@ -29,6 +56,7 @@
 	"unit.pingforit.seconds": "%s 秒",
 	"unit.pingforit.meters": "%s 公尺",
 	"unit.pingforit.percent": "%s%%",
+	"unit.pingforit.milliseconds": "%s毫秒",
 
 	"command.pingforit.config.description": "開啟設定介面",
 	"command.pingforit.channel.get.description": "取得您目前的頻道",
@@ -38,12 +66,6 @@
 	"command.pingforit.channel.set.response": "設定頻道為 \"%s\"",
 	"command.pingforit.channel.set.response.default": "設定頻道為預設",
 	"command.pingforit.channel.set.reject": "頻道名稱限制為 %s 個字元",
-	"command.pingforit.default_channel.get.description": "取得目前預設頻道模式",
-	"command.pingforit.default_channel.set.description": "設定預設頻道模式",
-	"command.pingforit.default_channel.get.response": "目前預設頻道模式：%s",
-	"command.pingforit.default_channel.set.response": "設定預設頻道模式為 %s",
-	"command.pingforit.default_channel.set.reject": "未知模式，有效的選項為：%s",
-
 	"pingforit.chat.pingmsg": "%s 請求 %s %s",
 	"pingforit.chat.pingmsg.template": "{playerName}：請求 {pingType} {targetName}",
 	"pingforit.chat.danger.template.override": "{playerName}：{pingType} {targetName}！",
@@ -68,6 +90,6 @@
 	"pingforit.target.unknown": "未知目標"
   ,"settings.pingforit.long_press_compatibility_mode": "長按相容模式"
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "將快速連續點擊識別為一次虛擬長按。"
-  ,"settings.pingforit.long_press_compatibility_slice_millis": "相容時間片"
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "相容時間片：%s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "啟用相容模式時相鄰點擊之間允許的最大間隔。"
 }

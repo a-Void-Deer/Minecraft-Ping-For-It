@@ -5,8 +5,16 @@
 	"subtitles.pingforit.ping": "Alerte Ping de Localisation",
 
 	"settings.pingforit.title": "Paramètres du Ping For It",
+	"settings.pingforit.client_settings": "Paramètres client",
+	"settings.pingforit.server_settings": "Paramètres serveur",
+	"settings.pingforit.server_settings.loading": "(Chargement…)",
+	"settings.pingforit.server_settings.locked": "(Verrouillé)",
+	"settings.pingforit.server_settings.validation": "Corrigez les nombres entiers non négatifs ou réduisez la section pour abandonner les modifications du serveur.",
+	"settings.pingforit.server_settings.confirm.title": "Abandonner les modifications du serveur ?",
+	"settings.pingforit.server_settings.confirm.message": "Abandonner les modifications du serveur non enregistrées et réduire cette section ?",
+	"settings.pingforit.server_settings.confirm.discard": "Abandonner",
+	"settings.pingforit.server_settings.confirm.cancel": "Continuer la modification",
 	"settings.pingforit.ping_volume": "Volume du Ping : %s",
-	"settings.pingforit.ping_duration": "Durée du Ping : %s",
 	"settings.pingforit.ping_distance": "Distance du Ping : %s",
 	"settings.pingforit.correction_period": "Période de Correction : %s",
 	"settings.pingforit.item_icon_visible": "Icônes d'Objets",
@@ -19,9 +27,28 @@
 	"settings.pingforit.reset_all.message": "Réinitialiser tous les paramètres de Ping For It à leurs valeurs par défaut ?",
 	"settings.pingforit.channel": "Canal de Ping",
 	"settings.pingforit.channel.tooltip": "Vous envoyez et recevez des Pings uniquement aux joueurs du même canal",
+	"settings.pingforit.channel.placeholder": "Synchronisé avec %s",
+	"settings.pingforit.player_info_mode": "Informations du joueur",
+	"settings.pingforit.player_info_mode.hold.tooltip": "Les informations du joueur s'affichent lorsque la touche \"%s\" (%s) est maintenue",
+	"settings.pingforit.team_color_mode": "Couleur de l'équipe",
+	"settings.pingforit.default_channel_mode": "Mode du canal par défaut",
+	"settings.pingforit.default_channel_mode.tooltip": "Contrôle le canal utilisé lorsqu'aucun canal n'est sélectionné.",
+	"settings.pingforit.player_tracking_enabled": "Suivi des joueurs",
+	"settings.pingforit.player_tracking_enabled.tooltip": "Autorise les pings à identifier et suivre les joueurs.",
+	"settings.pingforit.ms_to_regenerate": "Temps de régénération (ms)",
+	"settings.pingforit.ms_to_regenerate.tooltip": "Millisecondes nécessaires pour régénérer une utilisation de ping.",
+	"settings.pingforit.rate_limit": "Limite de fréquence",
+	"settings.pingforit.rate_limit.tooltip": "Nombre maximal d'utilisations de ping dans la fenêtre de régénération.",
 
 	"value.pingforit.auto": "Auto",
 	"value.pingforit.disabled": "Désactivé",
+	"value.pingforit.enabled": "Activé",
+	"value.pingforit.always": "Toujours",
+	"value.pingforit.compact": "Compact",
+	"value.pingforit.hold": "Maintenir",
+	"value.pingforit.full": "Complet",
+	"value.pingforit.ping_only": "Ping uniquement",
+	"value.pingforit.labels_only": "Étiquettes uniquement",
 	"value.pingforit.global": "Global",
 	"value.pingforit.team_only": "Équipe uniquement",
 	"value.pingforit.hidden": "Caché",
@@ -29,6 +56,7 @@
 	"unit.pingforit.seconds": "%ss",
 	"unit.pingforit.meters": "%sm",
 	"unit.pingforit.percent": "%s%%",
+	"unit.pingforit.milliseconds": "%sms",
 
 	"command.pingforit.config.description": "ouvrir l'interface de configuration",
 	"command.pingforit.channel.get.description": "obtenir votre canal actuel",
@@ -38,12 +66,6 @@
 	"command.pingforit.channel.set.response": "Canal défini sur \"%s\"",
 	"command.pingforit.channel.set.response.default": "Canal défini sur par défaut",
 	"command.pingforit.channel.set.reject": "Les noms de canal sont limités à une longueur de %s caractères",
-	"command.pingforit.default_channel.get.description": "obtenir le mode de canal par défaut actuel",
-	"command.pingforit.default_channel.set.description": "définir le mode de canal par défaut",
-	"command.pingforit.default_channel.get.response": "Mode de canal par défaut actuel : %s",
-	"command.pingforit.default_channel.set.response": "Mode de canal par défaut défini sur %s",
-	"command.pingforit.default_channel.set.reject": "Mode inconnu, les options valides sont : %s",
-
 	"pingforit.chat.pingmsg": "%s : %s - %s",
 	"pingforit.chat.pingmsg.template": "{playerName} signale {targetName} : {pingType}",
 	"pingforit.chat.go_to.template.override": "{playerName} désigne {targetName} comme destination : {pingType}",
@@ -71,6 +93,6 @@
 	"pingforit.target.unknown": "Cible inconnue"
   ,"settings.pingforit.long_press_compatibility_mode": "Mode de compatibilité d'appui long"
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Interprète les clics rapides comme un seul appui long virtuel."
-  ,"settings.pingforit.long_press_compatibility_slice_millis": "Intervalle de compatibilité"
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "Intervalle de compatibilité : %s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Écart maximal entre deux clics consécutifs lorsque le mode est actif."
 }

@@ -5,8 +5,16 @@
 	"subtitles.pingforit.ping": "Konum Pingi Uyarısı",
 
 	"settings.pingforit.title": "Ping For It Ayarları",
+	"settings.pingforit.client_settings": "İstemci Ayarları",
+	"settings.pingforit.server_settings": "Sunucu Ayarları",
+	"settings.pingforit.server_settings.loading": "(Yükleniyor…)",
+	"settings.pingforit.server_settings.locked": "(Kilitli)",
+	"settings.pingforit.server_settings.validation": "Negatif olmayan tam sayıları düzeltin veya sunucu değişikliklerini atmak için bölümü daraltın.",
+	"settings.pingforit.server_settings.confirm.title": "Sunucu değişiklikleri atılsın mı?",
+	"settings.pingforit.server_settings.confirm.message": "Kaydedilmemiş sunucu değişiklikleri atılıp bu bölüm daraltılsın mı?",
+	"settings.pingforit.server_settings.confirm.discard": "At",
+	"settings.pingforit.server_settings.confirm.cancel": "Düzenlemeye devam et",
 	"settings.pingforit.ping_volume": "Ping Sesi: %s",
-	"settings.pingforit.ping_duration": "Ping Süresi: %s",
 	"settings.pingforit.ping_distance": "Ping Mesafesi: %s",
 	"settings.pingforit.correction_period": "Doğrulama Süresi: %s",
 	"settings.pingforit.item_icon_visible": "Eşya Simgeleri",
@@ -19,9 +27,28 @@
 	"settings.pingforit.reset_all.message": "Ping For It ayarlarının tümü varsayılanlara sıfırlansın mı?",
 	"settings.pingforit.channel": "Ping Kanalı",
 	"settings.pingforit.channel.tooltip": "Sadece aynı kanaldaki oyuncularla Ping paylaşırsınız",
+	"settings.pingforit.channel.placeholder": "%s ile eşzamanlandı",
+	"settings.pingforit.player_info_mode": "Oyuncu Bilgisi",
+	"settings.pingforit.player_info_mode.hold.tooltip": "Oyuncu bilgisi \"%s\" (%s) tuşu basılı tutulduğunda gösterilir",
+	"settings.pingforit.team_color_mode": "Takım Rengi",
+	"settings.pingforit.default_channel_mode": "Varsayılan Kanal Modu",
+	"settings.pingforit.default_channel_mode.tooltip": "Kanal seçilmediğinde kullanılacak kanalı belirler.",
+	"settings.pingforit.player_tracking_enabled": "Oyuncu Takibi",
+	"settings.pingforit.player_tracking_enabled.tooltip": "Pinglerin oyuncuları tanımlamasına ve takip etmesine izin verir.",
+	"settings.pingforit.ms_to_regenerate": "Yenilenme Süresi (ms)",
+	"settings.pingforit.ms_to_regenerate.tooltip": "Bir ping kullanımını yenilemek için gereken milisaniye.",
+	"settings.pingforit.rate_limit": "Hız Sınırı",
+	"settings.pingforit.rate_limit.tooltip": "Yenilenme penceresindeki en yüksek ping kullanım sayısı.",
 
 	"value.pingforit.auto": "Otomatik",
 	"value.pingforit.disabled": "Kapalı",
+	"value.pingforit.enabled": "Açık",
+	"value.pingforit.always": "Her Zaman",
+	"value.pingforit.compact": "Özet",
+	"value.pingforit.hold": "Basılı Tut",
+	"value.pingforit.full": "Tam",
+	"value.pingforit.ping_only": "Yalnızca Ping",
+	"value.pingforit.labels_only": "Yalnızca Etiketler",
 	"value.pingforit.global": "Global",
 	"value.pingforit.team_only": "Sadece Takım",
 	"value.pingforit.hidden": "Gizli",
@@ -29,6 +56,7 @@
 	"unit.pingforit.seconds": "%ss",
 	"unit.pingforit.meters": "%sm",
 	"unit.pingforit.percent": "%s%%",
+	"unit.pingforit.milliseconds": "%sms",
 
 	"command.pingforit.config.description": "ayar arayüzünü aç",
 	"command.pingforit.channel.get.description": "aktif kanalını al",
@@ -38,12 +66,6 @@
 	"command.pingforit.channel.set.response": "\"%s\" kanalına ayarlandı",
 	"command.pingforit.channel.set.response.default": "Kanal varsayılana ayarlandı",
 	"command.pingforit.channel.set.reject": "Kanal adı uzunlukları %s ile sınırlı",
-	"command.pingforit.default_channel.get.description": "şu anki varsayılan kanal modunu al",
-	"command.pingforit.default_channel.set.description": "varsayılan kanal modunu ayarla",
-	"command.pingforit.default_channel.get.response": "Şu anki varsayılan kanal modu: %s",
-	"command.pingforit.default_channel.set.response": "%s, artık varsayılan kanal modu",
-	"command.pingforit.default_channel.set.reject": "Bilinmeyen mod, geçerli ayarlar: %s",
-
 	"pingforit.chat.pingmsg": "%s: %s: %s",
 	"pingforit.chat.pingmsg.template": "{playerName}: {pingType}: {targetName}",
 
@@ -66,6 +88,6 @@
 	"pingforit.target.unknown": "Bilinmeyen hedef"
   ,"settings.pingforit.long_press_compatibility_mode": "Uzun basma uyumluluk modu"
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Hızlı tıklamaları tek bir sanal uzun basma olarak algılar."
-  ,"settings.pingforit.long_press_compatibility_slice_millis": "Uyumluluk zaman aralığı"
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "Uyumluluk zaman aralığı: %s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Uyumluluk modu etkinken ardışık tıklamalar arasındaki en uzun süre."
 }

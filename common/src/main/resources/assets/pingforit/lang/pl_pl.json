@@ -5,8 +5,16 @@
 	"subtitles.pingforit.ping": "Alert lokalizacji pingu",
 
 	"settings.pingforit.title": "Ustawienia Ping For It",
+	"settings.pingforit.client_settings": "Ustawienia klienta",
+	"settings.pingforit.server_settings": "Ustawienia serwera",
+	"settings.pingforit.server_settings.loading": "(Wczytywanie…)",
+	"settings.pingforit.server_settings.locked": "(Zablokowane)",
+	"settings.pingforit.server_settings.validation": "Popraw nieujemne liczby całkowite albo zwiń sekcję, aby odrzucić zmiany serwera.",
+	"settings.pingforit.server_settings.confirm.title": "Odrzucić zmiany serwera?",
+	"settings.pingforit.server_settings.confirm.message": "Odrzucić niezapisane zmiany serwera i zwinąć tę sekcję?",
+	"settings.pingforit.server_settings.confirm.discard": "Odrzuć",
+	"settings.pingforit.server_settings.confirm.cancel": "Edytuj dalej",
 	"settings.pingforit.ping_volume": "Głośność pingu: %s",
-	"settings.pingforit.ping_duration": "Czas trwania pingu: %s",
 	"settings.pingforit.ping_distance": "Zasięg pingu: %s",
 	"settings.pingforit.correction_period": "Okres korekcji: %s",
 	"settings.pingforit.item_icon_visible": "Ikony itemów",
@@ -19,9 +27,28 @@
 	"settings.pingforit.reset_all.message": "Zresetować wszystkie ustawienia Ping For It do wartości domyślnych?",
 	"settings.pingforit.channel": "Kanał pingowania",
 	"settings.pingforit.channel.tooltip": "Wysyłasz i odbierasz pingi tylko od graczy na tym samym kanale",
+	"settings.pingforit.channel.placeholder": "Zsynchronizowano z %s",
+	"settings.pingforit.player_info_mode": "Informacje o graczu",
+	"settings.pingforit.player_info_mode.hold.tooltip": "Informacje o graczu są wyświetlane po przytrzymaniu klawisza \"%s\" (%s)",
+	"settings.pingforit.team_color_mode": "Kolor drużyny",
+	"settings.pingforit.default_channel_mode": "Tryb domyślnego kanału",
+	"settings.pingforit.default_channel_mode.tooltip": "Określa kanał używany, gdy nie wybrano żadnego kanału.",
+	"settings.pingforit.player_tracking_enabled": "Śledzenie graczy",
+	"settings.pingforit.player_tracking_enabled.tooltip": "Pozwala pingom rozpoznawać i śledzić graczy.",
+	"settings.pingforit.ms_to_regenerate": "Czas regeneracji (ms)",
+	"settings.pingforit.ms_to_regenerate.tooltip": "Liczba milisekund potrzebna do odnowienia jednego użycia pingu.",
+	"settings.pingforit.rate_limit": "Limit częstotliwości",
+	"settings.pingforit.rate_limit.tooltip": "Maksymalna liczba użyć pingu w oknie regeneracji.",
 
 	"value.pingforit.auto": "Automatyczny",
 	"value.pingforit.disabled": "Wyłączony",
+	"value.pingforit.enabled": "Włączony",
+	"value.pingforit.always": "Zawsze",
+	"value.pingforit.compact": "Skrócone",
+	"value.pingforit.hold": "Przytrzymaj",
+	"value.pingforit.full": "Pełne",
+	"value.pingforit.ping_only": "Tylko ping",
+	"value.pingforit.labels_only": "Tylko etykiety",
 	"value.pingforit.global": "Globalny",
 	"value.pingforit.team_only": "Tylko drużyna",
 	"value.pingforit.hidden": "Ukryty",
@@ -29,6 +56,7 @@
 	"unit.pingforit.seconds": "%ss",
 	"unit.pingforit.meters": "%sm",
 	"unit.pingforit.percent": "%s%%",
+	"unit.pingforit.milliseconds": "%sms",
 
 	"command.pingforit.config.description": "otwórz interfejs konfiguracji",
 	"command.pingforit.channel.get.description": "pokaż aktualny kanał",
@@ -38,24 +66,6 @@
 	"command.pingforit.channel.set.response": "Ustaw kanał na \"%s\"",
 	"command.pingforit.channel.set.response.default": "Ustawiono kanał na domyślny",
 	"command.pingforit.channel.set.reject": "Nazwy kanałów są ograniczone do %s znaków",
-	"command.pingforit.default_channel.get.description": "pokaż aktualny domyślny kanał",
-	"command.pingforit.default_channel.set.description": "ustaw domyślny kanał",
-	"command.pingforit.default_channel.get.response": "Aktualny tryb domyślnego kanału: %s",
-	"command.pingforit.default_channel.set.response": "Ustaw tryb domyślnego kanału na %s",
-	"command.pingforit.default_channel.set.reject": "Nieznany tryb, prawidłowe opcje to: %s",
-	"command.pingforit.player_tracking.get.description": "sprawdź czy śledznie graczy jest obecnie włączone",
-	"command.pingforit.player_tracking.set.description": "włącz lub wyłącz śledzenie graczy",
-	"command.pingforit.player_tracking.get.response": "Śledzenie graczy jest obecnie: %s",
-	"command.pingforit.player_tracking.set.response": "Śledzenie graczy jest teraz: %s",
-	"command.pingforit.regen_time.get.description": "pokaż aktualny czas regeneracji użyć pingu",
-	"command.pingforit.regen_time.set.description": "ustaw czas regeneracji użyć pingu",
-	"command.pingforit.regen_time.get.response": "Obecny czas regeneracji pingu: %s",
-	"command.pingforit.regen_time.set.response": "Ustawiono czas regeneracji na %s",
-	"command.pingforit.rate_limit.get.description": "pokaż aktualny limit częstotliwości użycia pingu",
-	"command.pingforit.rate_limit.set.description": "ustaw limit częstotliwości użycia pingu",
-	"command.pingforit.rate_limit.get.response": "Obecny limit częstotliwości: %s",
-	"command.pingforit.rate_limit.set.response": "Ustawiono limit częstotliwości na %s",
-
 	"pingforit.chat.pingmsg": "%s: %s: %s",
 	"pingforit.chat.pingmsg.template": "{playerName}: {pingType}: {targetName}",
 
@@ -78,6 +88,6 @@
 	"pingforit.target.unknown": "Nieznany cel"
   ,"settings.pingforit.long_press_compatibility_mode": "Tryb zgodności długiego naciśnięcia"
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Rozpoznaje szybkie kliknięcia jako jedno wirtualne długie naciśnięcie."
-  ,"settings.pingforit.long_press_compatibility_slice_millis": "Okno zgodności"
+  ,"settings.pingforit.long_press_compatibility_slice_millis": "Okno zgodności: %s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Maksymalny odstęp między kolejnymi kliknięciami w trybie zgodności."
 }
