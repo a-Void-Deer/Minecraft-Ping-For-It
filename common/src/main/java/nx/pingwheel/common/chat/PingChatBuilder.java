@@ -44,8 +44,10 @@ public final class PingChatBuilder {
 
 	/**
 	 * Returns the optional language override key for a validated catalog ping
-	 * type. The caller must use the current client language when checking this
-	 * key so resource-pack translations are included.
+	 * type. The caller must check override presence in the selected locale's own
+	 * active resource stack, not in the merged {@link net.minecraft.locale.Language};
+	 * this includes selected-locale resource-pack translations without treating
+	 * fallback entries as an override for another locale.
 	 */
 	public static String templateOverrideKey(PingType pingType) {
 		Objects.requireNonNull(pingType, "pingType");
@@ -55,9 +57,10 @@ public final class PingChatBuilder {
 	/**
 	 * Selects the key to resolve for a ping chat template.
 	 *
-	 * <p>The presence predicate represents the merged client language, not the
-	 * mod's bundled language, so an override supplied only by a resource pack is
-	 * selected correctly. The selected value is parsed once by
+	 * <p>The presence predicate represents the currently selected locale's own
+	 * resource stack, not the merged client language. This distinction prevents
+	 * an {@code en_us}-only override from applying to another locale. The selected
+	 * value is parsed once by
 	 * {@link #build(String, String, PingType, Component)}; parsing failure must
 	 * fall back to the legacy component rather than selecting another template.
 	 *

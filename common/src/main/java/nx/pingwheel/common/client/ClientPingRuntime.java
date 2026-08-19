@@ -138,6 +138,8 @@ public final class ClientPingRuntime {
 	private final ClientCreateRateLimiter createRateLimiter;
 	private final InteractionTimeSource timeSource;
 	private final LongPressCompatibilityController compatibilityController;
+	private final SelectedLocaleTranslationKeyCache selectedLocaleTranslationKeys =
+		new SelectedLocaleTranslationKeyCache();
 	private static final CancellationContext EMPTY_CANCELLATION_CONTEXT = createEmptyCancellationContext();
 	private ClientLevel observedLevel;
 	private String observedDimension;
@@ -988,7 +990,13 @@ public final class ClientPingRuntime {
 
 			try {
 				Language language = Language.getInstance();
-				String templateKey = PingChatBuilder.selectTemplateKey(pingType.get(), language::has);
+				String templateKey = PingChatBuilder.selectTemplateKey(
+					pingType.get(),
+					key -> selectedLocaleTranslationKeys.contains(
+						game.getLanguageManager().getSelected(),
+						language,
+						game.getResourceManager(),
+						key));
 				template = language.getOrDefault(templateKey);
 			} catch (RuntimeException ignored) {
 				template = null;
