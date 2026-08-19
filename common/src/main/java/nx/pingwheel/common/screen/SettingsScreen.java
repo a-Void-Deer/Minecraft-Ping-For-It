@@ -6,6 +6,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
+import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -15,27 +16,63 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.PlayerInfoMode;
+import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.TeamColorMode;
 import nx.pingwheel.common.integration.TeamContext;
 import nx.pingwheel.common.integration.TeamContextHandler;
+import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
+import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
+import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.resource.LanguageUtils;
+
+import java.lang.ref.WeakReference;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 import static nx.pingwheel.common.config.ClientConfigBounds.*;
 
 public class SettingsScreen extends OptionsSubScreen {
-
-	private static final int WHITE = 0xFFFFFF;
-	private static final int GRAY = 0xA0A0A0;
+	private static WeakReference<SettingsScreen> currentSettingsScreen = new WeakReference<>(null);
 
 	private final ClientConfig config;
+	private final ServerSettingsModel serverSettings = new ServerSettingsModel(false);
 
 	private Screen parent;
 	private EditBox channelTextField;
 	private Button resetAllButton;
 	private boolean resetConfirmationHandled;
+	private boolean serverCollapseConfirmationHandled;
 	private boolean suppressSaveOnClose;
+	private MutableComponent serverValidationMessage;
+	private StringWidget serverValidationWidget;
+
+	private static void registerCurrent(SettingsScreen screen) {
+		currentSettingsScreen = new WeakReference<>(screen);
+	}
+
+	private static void clearCurrent(SettingsScreen screen) {
+		if (currentSettingsScreen.get() == screen) {
+			currentSettingsScreen.clear();
+		}
+	}
+
+	/** Notifies the live settings session even when a ConfirmScreen is on top. */
+	public static void notifyServerDisconnected() {
+		final SettingsScreen screen = currentSettingsScreen.get();
+		if (screen != null) {
+			screen.onServerDisconnected();
+		}
+	}
+
+	/** Routes a delayed response to the latest live settings session. */
+	public static void notifyServerConfigSnapshot(long requestId, ServerConfigSnapshot snapshot) {
+		final SettingsScreen screen = currentSettingsScreen.get();
+		if (screen != null) {
+			screen.onServerConfigSnapshot(requestId, snapshot);
+		}
+	}
 
 	public SettingsScreen() {
 		super(null, null, LanguageUtils.settings("title").get());
@@ -49,14 +86,20 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public void tick() {
-		if (this.channelTextField.isFocused() && this.getFocused() != this.channelTextField) {
+		this.updatePermissionState();
+
+		if (this.channelTextField != null
+			&& this.channelTextField.isFocused()
+			&& this.getFocused() != this.channelTextField) {
 			this.setFocused(this.channelTextField);
 		}
 	}
 
 	@Override
 	protected void init() {
+		registerCurrent(this);
 		this.addTitle();
+		this.updatePermissionState();
 		this.addContents();
 		this.addFooter();
 		this.addResetAllButton();
@@ -66,21 +109,27 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	protected void addContents() {
-		this.list = this.layout.addToContents(new OptionsList(this.minecraft, this.width, this));
+		this.list = this.layout.addToContents(new SettingsOptionsList(this.minecraft, this.width, this));
 		this.addOptions();
 	}
 
 	@Override
 	protected void addOptions() {
-		this.list.addSmall(getPingVolumeOption(), getPingDurationOption());
+		this.list.addSmall(this.createCategoryHeader(
+			LanguageUtils.settings("client_settings").get(),
+			false,
+			() -> {}),
+			null);
 
-		this.list.addSmall(getPingDistanceOption(), getCorrectionPeriodOption());
+		this.addChannelRow();
 
-		this.list.addSmall(getItemIconsVisibleOption(), getDirectionIndicatorVisibleOption());
+		this.list.addSmall(getPingVolumeOption(), getPingDistanceOption());
 
-		this.list.addSmall(getPlayerInfoModeOption(), getTeamColorModeOption());
+		this.list.addSmall(getCorrectionPeriodOption(), getItemIconsVisibleOption());
 
-		this.list.addSmall(getPingSizeOption(), null);
+		this.list.addSmall(getDirectionIndicatorVisibleOption(), getPlayerInfoModeOption());
+
+		this.list.addSmall(getTeamColorModeOption(), getPingSizeOption());
 
 		this.list.addSmall(getWheelInnerRadiusOption(), getWheelOuterRadiusOption());
 
@@ -94,11 +143,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		this.list.addSmall(getCancelHalfConeAngleDegreesOption(), null);
 
-		this.channelTextField = new EditBox(this.font, -1, -1, 200, 20, Component.empty());
-		this.channelTextField.setMaxLength(MAX_CHANNEL_LENGTH);
-		this.channelTextField.setValue(config.getChannel());
-		this.channelTextField.setResponder(config::setChannel);
-		this.addWidget(this.channelTextField);
+		this.addServerOptions();
 	}
 
 	private void addResetAllButton() {
@@ -113,12 +158,19 @@ public class SettingsScreen extends OptionsSubScreen {
 	@Override
 	public void onClose() {
 		if (!this.suppressSaveOnClose) {
+			// Client options are local and must be persisted even when an invalid
+			// server draft keeps this screen open.
 			ClientConfig.HANDLER.save();
+			if (!this.commitServerSettings()) {
+				return;
+			}
 		}
 
 		if (parent != null && this.minecraft != null) {
+			clearCurrent(this);
 			this.minecraft.setScreen(parent);
 		} else {
+			clearCurrent(this);
 			super.onClose();
 		}
 	}
@@ -131,7 +183,6 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		final var screenLayout = this.getScreenLayout();
 		this.resetAllButton.setPosition(screenLayout.resetX(), screenLayout.resetY());
-		this.channelTextField.setPosition(screenLayout.channelX(), screenLayout.channelY());
 	}
 
 	@Override
@@ -139,16 +190,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		super.render(ctx, mouseX, mouseY, delta);
 		this.list.render(ctx, mouseX, mouseY, delta);
 
-		ctx.drawString(this.font, LanguageUtils.settings("channel").get(), this.channelTextField.getX(), this.getScreenLayout().channelLabelY(), GRAY);
-		this.channelTextField.render(ctx, mouseX, mouseY, delta);
-
-		if (this.channelTextField.getValue().isEmpty()) {
-			ctx.drawString(this.font, getChannelPlaceholder(), this.channelTextField.getX() + 4, this.channelTextField.getY() + 6, WHITE);
-		}
-
-		if (this.channelTextField.isHoveredOrFocused() && !this.channelTextField.isFocused()) {
-			ctx.renderTooltip(this.font, Tooltip.create(LanguageUtils.settings("channel.tooltip").get()).toCharSequence(Game), mouseX, mouseY);
-		}
 	}
 
 	private SettingsScreenLayout getScreenLayout() {
@@ -195,24 +236,6 @@ public class SettingsScreen extends OptionsSubScreen {
 			},
 			config::getPingVolume,
 			config::setPingVolume
-		);
-	}
-
-	private OptionInstance<Integer> getPingDurationOption() {
-		final var text = LanguageUtils.settings("ping_duration");
-
-		return OptionUtils.ofInt(
-			text.getKey(),
-			1, MAX_PING_DURATION, 1,
-			(value) -> {
-				if (value >= MAX_PING_DURATION) {
-					return text.get(LanguageUtils.VALUE_INFINITE);
-				}
-
-				return text.get(LanguageUtils.UNIT_SECONDS.get(value));
-			},
-			config::getPingDuration,
-			config::setPingDuration
 		);
 	}
 
@@ -453,6 +476,310 @@ public class SettingsScreen extends OptionsSubScreen {
 		);
 	}
 
+	private void addChannelRow() {
+		final var label = new StringWidget(
+			0,
+			0,
+			SettingsScreenLayout.SMALL_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			LanguageUtils.settings("channel").get(),
+			this.font);
+
+		this.channelTextField = new EditBox(
+			this.font,
+			-1,
+			-1,
+			SettingsScreenLayout.SMALL_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			Component.empty());
+		this.channelTextField.setMaxLength(MAX_CHANNEL_LENGTH);
+		this.channelTextField.setValue(config.getChannel());
+		this.channelTextField.setHint(this.getChannelPlaceholder());
+		this.channelTextField.setTooltip(Tooltip.create(LanguageUtils.settings("channel.tooltip").get()));
+		this.channelTextField.setResponder(config::setChannel);
+		this.list.addSmall(label, this.channelTextField);
+	}
+
+	private void addServerOptions() {
+		this.serverValidationWidget = null;
+		final boolean serverPermission = this.serverSettings.clientPermission()
+			&& !this.serverSettings.accessDenied()
+			&& (this.serverSettings.authoritative() == null || this.serverSettings.authoritative().canEdit());
+		this.list.addSmall(
+			this.createCategoryHeader(this.serverHeaderText(), serverPermission, this::onServerHeaderClicked),
+			null);
+
+		if (!this.serverSettings.expanded() || !this.serverSettings.canEdit()) {
+			return;
+		}
+
+		final var mode = this.createServerValueButton(
+			"default_channel_mode",
+			() -> LanguageUtils.of("value", this.serverSettings.defaultChannelMode().toString()).get(),
+			this.serverSettings::cycleDefaultChannelMode);
+		final var tracking = this.createServerValueButton(
+			"player_tracking_enabled",
+			() -> LanguageUtils.of("value", this.serverSettings.playerTrackingEnabled() ? "enabled" : "disabled").get(),
+			this.serverSettings::togglePlayerTracking);
+		this.list.addSmall(mode, tracking);
+
+		final var serverMsToRegenerateField = this.createServerIntegerField(
+			this.serverSettings.msToRegenerateText(),
+			this.serverSettings::setMsToRegenerateText,
+			"ms_to_regenerate.tooltip");
+		final var serverRateLimitField = this.createServerIntegerField(
+			this.serverSettings.rateLimitText(),
+			this.serverSettings::setRateLimitText,
+			"rate_limit.tooltip");
+		this.list.addSmall(
+			this.createServerLabel("ms_to_regenerate", "ms_to_regenerate.tooltip"),
+			serverMsToRegenerateField);
+		this.list.addSmall(
+			this.createServerLabel("rate_limit", "rate_limit.tooltip"),
+			serverRateLimitField);
+
+		if (this.serverValidationMessage != null) {
+			this.serverValidationWidget = this.createServerValidationLabel();
+			this.list.addSmall(this.serverValidationWidget, null);
+		}
+	}
+
+	private Button createCategoryHeader(Component text, boolean active, Runnable action) {
+		final var button = Button.builder(text, ignored -> action.run())
+			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+			.build();
+		button.active = active;
+		return button;
+	}
+
+	private MutableComponent serverHeaderText() {
+		final var text = LanguageUtils.settings("server_settings").get();
+		if (!this.serverSettings.clientPermission()
+			|| this.serverSettings.accessDenied()
+			|| (this.serverSettings.authoritative() != null && !this.serverSettings.authoritative().canEdit())) {
+			return text.append(" ").append(LanguageUtils.settings("server_settings.locked").get());
+		}
+		if (this.serverSettings.loading()) {
+			return text.append(" ").append(LanguageUtils.settings("server_settings.loading").get());
+		}
+		return text;
+	}
+
+	private void onServerHeaderClicked() {
+		if (!this.serverSettings.clientPermission() || this.serverSettings.accessDenied()) {
+			return;
+		}
+
+		if (this.serverSettings.expanded()) {
+			if (this.serverSettings.loading()) {
+				this.collapseServerSettings();
+				return;
+			}
+
+			if (this.serverSettings.dirty()) {
+				this.openServerCollapseConfirmation();
+				return;
+			}
+
+			this.collapseServerSettings();
+			return;
+		}
+
+		final long requestId = this.serverSettings.beginExpansion();
+		if (requestId > 0L) {
+			this.serverValidationMessage = null;
+			this.rebuildSettingsList();
+			IPlatformNetworkService.INSTANCE.sendToServer(new ServerConfigRequestC2SPacket(requestId));
+		}
+	}
+
+	private void collapseServerSettings() {
+		this.serverSettings.collapseAndDiscard();
+		this.serverValidationMessage = null;
+		this.rebuildSettingsList();
+	}
+
+	private Button createServerValueButton(String key, Supplier<Component> value, Runnable action) {
+		final var label = LanguageUtils.settings(key).get();
+		final var button = Button.builder(
+			this.serverRowText(label, value.get()),
+			clicked -> {
+				action.run();
+				clicked.setMessage(this.serverRowText(label, value.get()));
+			})
+			.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+			.build();
+		button.setTooltip(Tooltip.create(LanguageUtils.settings(key).path("tooltip").get()));
+		return button;
+	}
+
+	private StringWidget createServerLabel(String key, String tooltipKey) {
+		final var label = new StringWidget(
+			0,
+			0,
+			SettingsScreenLayout.SMALL_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			LanguageUtils.settings(key).get(),
+			this.font);
+		label.setTooltip(Tooltip.create(LanguageUtils.settings(tooltipKey).get()));
+		return label;
+	}
+
+	private StringWidget createServerValidationLabel() {
+		final var label = new StringWidget(
+			0,
+			0,
+			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			this.serverValidationMessage.copy().withStyle(ChatFormatting.RED),
+			this.font);
+		return label;
+	}
+
+	private EditBox createServerIntegerField(String value, Consumer<String> responder, String tooltipKey) {
+		final var field = new EditBox(
+			this.font,
+			-1,
+			-1,
+			SettingsScreenLayout.SMALL_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			Component.empty());
+		field.setMaxLength(Integer.toString(Integer.MAX_VALUE).length());
+		field.setFilter(text -> text.isEmpty()
+			|| text.chars().allMatch(character -> character >= '0' && character <= '9'));
+		field.setValue(value);
+		field.setTooltip(Tooltip.create(LanguageUtils.settings(tooltipKey).get()));
+		field.setResponder(text -> {
+			if (this.serverValidationMessage != null) {
+				this.serverValidationMessage = null;
+				if (this.serverValidationWidget != null) {
+					this.serverValidationWidget.setMessage(Component.empty());
+				}
+			}
+			responder.accept(text);
+		});
+		return field;
+	}
+
+	private MutableComponent serverRowText(Component label, Component value) {
+		return Component.empty().append(label).append(": ").append(value);
+	}
+
+	private void updatePermissionState() {
+		final boolean permission = this.hasLiveServerConnection()
+			&& this.minecraft.player.hasPermissions(3);
+		if (permission == this.serverSettings.clientPermission()) {
+			return;
+		}
+
+		this.serverSettings.setClientPermission(permission);
+		this.serverValidationMessage = null;
+		this.rebuildSettingsList();
+	}
+
+	public void onServerConfigSnapshot(long requestId, ServerConfigSnapshot snapshot) {
+		if (!this.serverSettings.applySnapshot(requestId, snapshot)) {
+			return;
+		}
+		this.serverValidationMessage = null;
+		this.rebuildSettingsList();
+	}
+
+	public void onServerDisconnected() {
+		this.serverSettings.resetForDisconnect();
+		this.serverValidationMessage = null;
+		this.rebuildSettingsList();
+	}
+
+	private void rebuildSettingsList() {
+		if (this.list == null) {
+			return;
+		}
+
+		((SettingsOptionsList) this.list).resetEntries();
+		this.addOptions();
+		this.list.updateSize(this.width, this.layout);
+	}
+
+	private boolean commitServerSettings() {
+		if (!this.hasLiveServerConnection()) {
+			this.serverSettings.resetForDisconnect();
+			this.serverValidationMessage = null;
+			return true;
+		}
+
+		if (!this.serverSettings.dirty()) {
+			return true;
+		}
+
+		if (this.serverSettings.hasInvalidDraft()) {
+			this.serverValidationMessage = LanguageUtils.settings("server_settings.validation").get();
+			this.rebuildSettingsList();
+			return false;
+		}
+
+		final var update = this.serverSettings.updatePlan();
+		if (update.isEmpty()) {
+			return true;
+		}
+		if (!this.hasLiveServerConnection()) {
+			this.serverSettings.resetForDisconnect();
+			this.serverValidationMessage = null;
+			return true;
+		}
+
+		final var values = update.orElseThrow();
+		this.serverSettings.markClean();
+		IPlatformNetworkService.INSTANCE.sendToServer(new ServerConfigUpdateC2SPacket(
+			values.changedFields(),
+			values.defaultChannelMode(),
+			values.playerTrackingEnabled(),
+			values.msToRegenerate(),
+			values.rateLimit()));
+		return true;
+	}
+
+	private boolean hasLiveServerConnection() {
+		return this.minecraft != null
+			&& this.minecraft.level != null
+			&& this.minecraft.player != null
+			&& this.minecraft.getConnection() != null;
+	}
+
+	private void openServerCollapseConfirmation() {
+		if (this.minecraft == null) {
+			return;
+		}
+
+		this.serverCollapseConfirmationHandled = false;
+		this.minecraft.setScreen(new ConfirmScreen(
+			this::handleServerCollapseConfirmation,
+			LanguageUtils.settings("server_settings").path("confirm", "title").get(),
+			LanguageUtils.settings("server_settings").path("confirm", "message").get(),
+			LanguageUtils.settings("server_settings").path("confirm", "discard").get(),
+			LanguageUtils.settings("server_settings").path("confirm", "cancel").get()));
+	}
+
+	private void handleServerCollapseConfirmation(boolean confirmed) {
+		if (this.serverCollapseConfirmationHandled) {
+			return;
+		}
+
+		this.serverCollapseConfirmationHandled = true;
+		if (this.minecraft == null) {
+			this.serverSettings.resetForDisconnect();
+			this.serverValidationMessage = null;
+			return;
+		}
+		if (!this.hasLiveServerConnection()) {
+			this.serverSettings.resetForDisconnect();
+			this.serverValidationMessage = null;
+		} else if (confirmed) {
+			this.collapseServerSettings();
+		}
+		this.minecraft.setScreen(this);
+	}
+
 	private void openResetConfirmation() {
 		if (this.minecraft == null) {
 			return;
@@ -477,10 +804,21 @@ public class SettingsScreen extends OptionsSubScreen {
 			// retain their pre-reset values and must never save them back over the
 			// freshly constructed defaults.
 			this.suppressSaveOnClose = true;
+			clearCurrent(this);
 			ClientConfig.HANDLER.resetToDefaults();
 			this.minecraft.setScreen(new SettingsScreen(this.parent));
 		} else {
 			this.minecraft.setScreen(this);
+		}
+	}
+
+	private static final class SettingsOptionsList extends OptionsList {
+		private SettingsOptionsList(net.minecraft.client.Minecraft minecraft, int width, SettingsScreen screen) {
+			super(minecraft, width, screen);
+		}
+
+		private void resetEntries() {
+			this.clearEntries();
 		}
 	}
 }

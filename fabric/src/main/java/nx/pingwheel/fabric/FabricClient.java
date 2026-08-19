@@ -21,6 +21,7 @@ import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
+import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
 
@@ -53,6 +54,9 @@ public class FabricClient implements ClientModInitializer {
 				client.execute(() -> CommonClient.INSTANCE.onPingLocationPacket(packet));
 			}
 		);
+		ClientPlayNetworking.registerGlobalReceiver(
+			ServerConfigSnapshotS2CPacket.PACKET_TYPE,
+			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onServerConfigSnapshotPacket(packet)));
 		ClientPlayNetworking.registerGlobalReceiver(
 			MarkerCreatedS2CPacket.PACKET_TYPE,
 			(packet, context) -> {

@@ -8,6 +8,8 @@ import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
+import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
+import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformServerEventService;
 
@@ -54,6 +56,14 @@ public class CommonServer {
 
 	public void onMarkerRemovePacket(MinecraftServer server, ServerPlayer player, MarkerRemoveC2SPacket packet) {
 		ServerCore.onMarkerRemove(server, player, packet);
+	}
+
+	public void onServerConfigRequestPacket(MinecraftServer server, ServerPlayer player, ServerConfigRequestC2SPacket packet) {
+		ServerCore.onServerConfigRequest(server, player, packet);
+	}
+
+	public void onServerConfigUpdatePacket(MinecraftServer server, ServerPlayer player, ServerConfigUpdateC2SPacket packet) {
+		ServerCore.onServerConfigUpdate(server, player, packet);
 	}
 
 	public void onServerTick(MinecraftServer server) {

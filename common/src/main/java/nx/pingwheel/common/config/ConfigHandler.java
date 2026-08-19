@@ -82,7 +82,7 @@ public class ConfigHandler <T extends IConfig> {
 		}
 
 		configHash = config.hashCode();
-		LOGGER.info("Saved " + config);
+		LOGGER.info("Saved config type=%s".formatted(configType.getSimpleName()));
 	}
 
 	@SneakyThrows
@@ -111,6 +111,6 @@ public class ConfigHandler <T extends IConfig> {
 
 		config.validate();
 		configHash = config.hashCode();
-		LOGGER.info("Loaded " + config);
+		LOGGER.info("Loaded config type=%s".formatted(configType.getSimpleName()));
 	}
 }

@@ -1,11 +1,9 @@
 package nx.pingwheel.common.screen;
 
 /**
- * Screen-space layout for the settings screen's non-scrolling channel control.
- *
- * <p>The footer height is deliberately larger than the vanilla options footer:
- * the inherited Done button and the channel label/edit box both need a stable
- * region at the bottom of the screen.</p>
+ * Screen-space layout for the scrolling settings list and the two footer
+ * actions.  The channel field is part of the list now; the footer contains
+ * only Reset and the inherited Done button.
  */
 public record SettingsScreenLayout(
 	int listTop,
@@ -14,24 +12,24 @@ public record SettingsScreenLayout(
 	int footerBottom,
 	int resetX,
 	int resetY,
-	int channelX,
-	int channelY,
-	int channelLabelY
+	int doneX,
+	int doneY
 ) {
-	public static final int FOOTER_HEIGHT = 100;
+	public static final int FOOTER_HEIGHT = 70;
 	public static final int RESET_BUTTON_WIDTH = 100;
 	public static final int RESET_BUTTON_HEIGHT = 20;
-	public static final int CHANNEL_WIDTH = 200;
-	public static final int CHANNEL_HEIGHT = 20;
+	public static final int DONE_BUTTON_WIDTH = 200;
+	public static final int DONE_BUTTON_HEIGHT = 20;
+	public static final int SMALL_WIDGET_WIDTH = 150;
+	public static final int LARGE_WIDGET_WIDTH = 310;
+	public static final int ROW_HEIGHT = 20;
 
 	private static final int RESET_TOP_MARGIN = 2;
-	private static final int CHANNEL_TOP_MARGIN = 50;
-	private static final int CHANNEL_LABEL_OFFSET = 12;
 
 	/**
-	 * Keeps the requested footer inside the area below the screen header. The
-	 * normal supported GUI sizes retain the complete fixed footer; this clamp
-	 * prevents a negative OptionsList viewport on unusually short screens.
+	 * Keeps the requested footer inside the area below the screen header.  The
+	 * clamp also prevents a negative OptionsList viewport on unusually short
+	 * screens.
 	 */
 	public static int footerHeightFor(int screenHeight, int headerHeight) {
 		final int safeScreenHeight = Math.max(0, screenHeight);
@@ -40,9 +38,9 @@ public record SettingsScreenLayout(
 	}
 
 	/**
-	 * Calculates both sides of the OptionsList/footer boundary and the channel
-	 * control position. The inputs mirror the mapped HeaderAndFooterLayout API
-	 * used by OptionsList.updateSize(int, HeaderAndFooterLayout).
+	 * Calculates both sides of the OptionsList/footer boundary and the footer
+	 * action positions.  Done is centered in the footer by vanilla's
+	 * HeaderAndFooterLayout; Reset is kept in a separate row above it.
 	 */
 	public static SettingsScreenLayout calculate(int screenWidth, int screenHeight, int headerHeight, int footerHeight) {
 		final int safeScreenWidth = Math.max(0, screenWidth);
@@ -50,19 +48,21 @@ public record SettingsScreenLayout(
 		final int safeHeaderHeight = clamp(headerHeight, 0, safeScreenHeight);
 		final int safeFooterHeight = Math.min(
 			Math.max(0, footerHeight),
-			safeScreenHeight - safeHeaderHeight
-		);
+			safeScreenHeight - safeHeaderHeight);
 		final int footerTop = safeScreenHeight - safeFooterHeight;
 		final int footerBottom = safeScreenHeight;
 		final int listTop = safeHeaderHeight;
 		final int listBottom = Math.max(listTop, footerTop);
 		final int resetX = Math.max(0, (safeScreenWidth - RESET_BUTTON_WIDTH) / 2);
-		final int maximumResetY = Math.max(footerTop, footerBottom - RESET_BUTTON_HEIGHT);
-		final int resetY = clamp(footerTop + RESET_TOP_MARGIN, footerTop, maximumResetY);
-		final int channelX = Math.max(0, (safeScreenWidth - CHANNEL_WIDTH) / 2);
-		final int maximumChannelY = Math.max(footerTop, footerBottom - CHANNEL_HEIGHT);
-		final int channelY = clamp(footerTop + CHANNEL_TOP_MARGIN, footerTop, maximumChannelY);
-		final int channelLabelY = Math.max(footerTop, channelY - CHANNEL_LABEL_OFFSET);
+		final int resetY = clamp(
+			footerTop + RESET_TOP_MARGIN,
+			footerTop,
+			Math.max(footerTop, footerBottom - RESET_BUTTON_HEIGHT));
+		final int doneX = Math.max(0, (safeScreenWidth - DONE_BUTTON_WIDTH) / 2);
+		final int doneY = clamp(
+			footerTop + Math.max(0, (safeFooterHeight - DONE_BUTTON_HEIGHT) / 2),
+			footerTop,
+			Math.max(footerTop, footerBottom - DONE_BUTTON_HEIGHT));
 
 		return new SettingsScreenLayout(
 			listTop,
@@ -71,10 +71,8 @@ public record SettingsScreenLayout(
 			footerBottom,
 			resetX,
 			resetY,
-			channelX,
-			channelY,
-			channelLabelY
-		);
+			doneX,
+			doneY);
 	}
 
 	private static int clamp(int value, int minimum, int maximum) {

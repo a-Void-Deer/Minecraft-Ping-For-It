@@ -20,7 +20,6 @@ import static nx.pingwheel.common.Global.LOGGER;
 @EqualsAndHashCode
 public class ClientConfig implements IConfig {
 	int pingVolume = 100;
-	int pingDuration = 7;
 	int pingDistance = 2048;
 	float correctionPeriod = 1f;
 	boolean itemIconVisible = true;
@@ -53,7 +52,6 @@ public class ClientConfig implements IConfig {
 	int safeZoneBottom = 60;
 
 	public static final int TPS = 20;
-	public static final int MAX_PING_DURATION = 60;
 	public static final int MAX_PING_DISTANCE = 2048;
 	public static final float MAX_CORRECTION_PERIOD = 5f;
 	public static final int MAX_CHANNEL_LENGTH = 128;

@@ -28,6 +28,7 @@ import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
+import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.platform.IPlatformContextService;
@@ -98,6 +99,8 @@ public class CommonClient {
 		// A disconnect while the ping key is still held must not leak the
 		// armed hold into the next connection.
 		InputUtils.resetPingHold();
+
+		SettingsScreen.notifyServerDisconnected();
 	}
 
 	/**
@@ -470,8 +473,22 @@ public class CommonClient {
 			pingRuntime.applyRateLimitPolicy(nextPolicy);
 		}
 
-		LOGGER.debug("client rate limit policy changed: rateLimit={} msToRegenerate={}",
-			nextPolicy.rateLimit(), nextPolicy.msToRegenerate());
+		LOGGER.debug("client rate limit policy changed");
+	}
+
+	/**
+	 * Routes server settings to the latest live settings session. No snapshot is
+	 * retained globally, so a later connection cannot inherit a previous
+	 * server's configuration; the session callback also works under a
+	 * confirmation screen.
+	 */
+	public void onServerConfigSnapshotPacket(ServerConfigSnapshotS2CPacket packet) {
+		if (packet.isCorrupt()) {
+			return;
+		}
+
+		Game = Minecraft.getInstance();
+		SettingsScreen.notifyServerConfigSnapshot(packet.requestId(), packet.snapshot());
 	}
 
 	/**
