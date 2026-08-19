@@ -6,7 +6,7 @@ This changelog describes the player- and server-admin-facing changes for Minecra
 
 - The fork is named **Ping For It** and uses `pingforit` as its mod ID.
 - It targets Minecraft 1.21.1 on Fabric, Forge, and NeoForge.
-- Use `/pingforit config` for settings and `/pingforit:server` for the server command.
+- Use `/pingforit config` for client and permission-gated server settings.
 
 ## Target-aware pings
 
