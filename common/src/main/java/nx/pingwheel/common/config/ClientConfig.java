@@ -29,6 +29,7 @@ public class ClientConfig implements IConfig {
 	boolean directionIndicatorVisible = true;
 	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
 	TeamColorMode teamColorMode = TeamColorMode.FULL;
+	EntityBlockRenderMode entityBlockRenderMode = EntityBlockRenderMode.COMPATIBLE;
 	int pingSize = 100;
 	int wheelHoldMillis = ClientConfigBounds.DEFAULT_WHEEL_HOLD_MILLIS;
 	boolean longPressCompatibilityMode = false;
@@ -121,6 +122,22 @@ public class ClientConfig implements IConfig {
 			wheelHoldMillis);
 	}
 
+	/**
+	 * Returns the local entity-block geometry mode with the safe fallback even
+	 * if an older deserializer or reflective path supplied {@code null}.
+	 */
+	public EntityBlockRenderMode getEntityBlockRenderMode() {
+		return EntityBlockRenderMode.effective(entityBlockRenderMode);
+	}
+
+	/**
+	 * Updates the live local setting immediately. This setter intentionally has
+	 * no network or reconnect side effect.
+	 */
+	public void setEntityBlockRenderMode(EntityBlockRenderMode mode) {
+		this.entityBlockRenderMode = EntityBlockRenderMode.effective(mode);
+	}
+
 	public void setBlockDisplayWhitelist(List<String> entries) {
 		List<String> copy = validatedEntries(entries, "blockDisplayWhitelist");
 		BlockDisplayPolicy nextPolicy = BlockDisplayPolicy.compile(copy, blockShapeBlacklist);
@@ -156,6 +173,10 @@ public class ClientConfig implements IConfig {
 	}
 
 	void validate(ClampWarningSink warningSink) {
+		// Gson maps unknown enum names to null. Recover them locally so malformed
+		// client data never selects a new geometry route accidentally.
+		entityBlockRenderMode = EntityBlockRenderMode.effective(entityBlockRenderMode);
+
 		final int suppliedWheelHoldMillis = wheelHoldMillis;
 		final int suppliedLongPressCompatibilitySliceMillis = longPressCompatibilitySliceMillis;
 		final int suppliedWheelTimeoutMillis = wheelTimeoutMillis;

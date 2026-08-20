@@ -16,6 +16,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.Util;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.TeamColorMode;
@@ -125,6 +126,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		this.addChannelRow();
 		this.addBlockShapeBlacklistButton();
+		this.list.addSmall(getEntityBlockRenderModeOption(), null);
 
 		this.list.addSmall(getPingVolumeOption(), getPingDistanceOption());
 
@@ -461,6 +463,19 @@ public class SettingsScreen extends OptionsSubScreen {
 			(value) -> text.get(LanguageUtils.UNIT_DEGREES.get(value)),
 			config::getCancelHalfConeAngleDegrees,
 			config::setCancelHalfConeAngleDegrees
+		);
+	}
+
+	private OptionInstance<EntityBlockRenderMode> getEntityBlockRenderModeOption() {
+		final var text = LanguageUtils.settings("entity_block_render_mode");
+
+		return OptionUtils.ofEnum(
+			text.getKey(),
+			EntityBlockRenderMode.class,
+			(mode) -> LanguageUtils.of("value", mode.toString()).get(),
+			(mode) -> text.path(mode.toString(), "tooltip").get(),
+			config::getEntityBlockRenderMode,
+			config::setEntityBlockRenderMode
 		);
 	}
 

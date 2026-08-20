@@ -122,6 +122,26 @@ class ClientConfigLocalizationTest {
 	}
 
 	@Test
+	void everyBundledLocaleContainsAllEntityBlockRenderModeLabelsAndTooltips() throws IOException {
+		List<String> keys = List.of(
+			"settings.pingforit.entity_block_render_mode",
+			"settings.pingforit.entity_block_render_mode.tooltip",
+			"settings.pingforit.entity_block_render_mode.all.tooltip",
+			"settings.pingforit.entity_block_render_mode.compatible.tooltip",
+			"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip",
+			"value.pingforit.all",
+			"value.pingforit.compatible",
+			"value.pingforit.voxel_shape_only");
+
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			for (String key : keys) {
+				nonBlankTranslation(json, locale, key);
+			}
+		}
+	}
+
+	@Test
 	void everyExternalListTooltipRequiresRestartingTheClient() throws IOException {
 		for (String locale : BUNDLED_LOCALES) {
 			String tooltip = readTranslation(locale,

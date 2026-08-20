@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -48,6 +49,46 @@ class ClientConfigValidationTest {
 		assertEquals(List.of(), config.getBlockShapeBlacklist());
 		assertTrue(new Gson().toJson(config).contains("\"blockDisplayWhitelist\""));
 		assertTrue(new Gson().toJson(config).contains("\"blockShapeBlacklist\""));
+	}
+
+	@Test
+	void entityBlockRenderModeDefaultsToCompatibleAndIsSerializedLocally() {
+		ClientConfig config = new ClientConfig();
+
+		assertEquals(EntityBlockRenderMode.COMPATIBLE, config.getEntityBlockRenderMode());
+		assertEquals(EntityBlockRenderMode.ALL, EntityBlockRenderMode.get("all"));
+		assertEquals("voxel_shape_only", EntityBlockRenderMode.VOXEL_SHAPE_ONLY.toString());
+		assertTrue(new Gson().toJson(config).contains("\"entityBlockRenderMode\":\"COMPATIBLE\""));
+
+		config.setEntityBlockRenderMode(EntityBlockRenderMode.ALL);
+		assertEquals(EntityBlockRenderMode.ALL, config.getEntityBlockRenderMode());
+		config.setEntityBlockRenderMode(null);
+		assertEquals(EntityBlockRenderMode.COMPATIBLE, config.getEntityBlockRenderMode());
+		config.setEntityBlockRenderMode(EntityBlockRenderMode.ALL);
+		assertTrue(new Gson().toJson(config).contains("\"entityBlockRenderMode\":\"ALL\""));
+	}
+
+	@Test
+	void entityBlockRenderModeLowercaseIsLocaleIndependent() {
+		Locale previous = Locale.getDefault();
+		try {
+			Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+			assertEquals("all", EntityBlockRenderMode.ALL.toString());
+			assertEquals("voxel_shape_only", EntityBlockRenderMode.VOXEL_SHAPE_ONLY.toString());
+		} finally {
+			Locale.setDefault(previous);
+		}
+	}
+
+	@Test
+	void nullAndUnknownEntityBlockRenderModesRecoverToCompatibleDuringValidation() {
+		for (String json : List.of(
+			"{\"entityBlockRenderMode\":null}",
+			"{\"entityBlockRenderMode\":\"unknown\"}")) {
+			ClientConfig config = new Gson().fromJson(json, ClientConfig.class);
+			config.validate((key, supplied, effective) -> {});
+			assertEquals(EntityBlockRenderMode.COMPATIBLE, config.getEntityBlockRenderMode(), json);
+		}
 	}
 
 	@Test
