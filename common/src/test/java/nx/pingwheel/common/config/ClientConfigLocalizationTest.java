@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -46,6 +47,15 @@ class ClientConfigLocalizationTest {
 		"settings.pingforit.ms_to_regenerate.tooltip",
 		"settings.pingforit.rate_limit",
 		"settings.pingforit.rate_limit.tooltip");
+	private static final Map<String, String> EXTERNAL_LIST_RESTART_MARKERS = Map.of(
+		"de_de", "Neustart des Clients",
+		"en_us", "restarting the client",
+		"es_ar", "reiniciar el cliente",
+		"fr_fr", "redémarrage du client",
+		"pl_pl", "ponownym uruchomieniu klienta",
+		"tr_tr", "istemci yeniden başlatıldıktan sonra",
+		"zh_cn", "重启客户端后",
+		"zh_tw", "重新啟動用戶端後");
 
 	@Test
 	void englishLocaleContainsInteractionSettingsAndUnits() throws IOException {
@@ -71,6 +81,7 @@ class ClientConfigLocalizationTest {
 		assertContainsKey(enUs, "settings.pingforit.reset_all");
 		assertContainsKey(enUs, "settings.pingforit.reset_all.title");
 		assertContainsKey(enUs, "settings.pingforit.reset_all.message");
+		assertContainsKey(enUs, "settings.pingforit.open_block_shape_blacklist_config");
 		assertContainsKey(enUs, "unit.pingforit.milliseconds");
 		assertContainsKey(enUs, "unit.pingforit.degrees");
 		assertContainsKey(enUs, "unit.pingforit.pixels");
@@ -99,6 +110,7 @@ class ClientConfigLocalizationTest {
 				"settings.pingforit.reset_all.message")) {
 				nonBlankTranslation(json, locale, key);
 			}
+			nonBlankTranslation(json, locale, "settings.pingforit.open_block_shape_blacklist_config");
 			for (String key : SERVER_SETTINGS_KEYS) {
 				nonBlankTranslation(json, locale, key);
 			}
@@ -106,6 +118,17 @@ class ClientConfigLocalizationTest {
 			assertTrue(
 				json.get("settings.pingforit.long_press_compatibility_slice_millis").getAsString().contains("%s"),
 				() -> "compatibility slice must be formatted: " + locale);
+		}
+	}
+
+	@Test
+	void everyExternalListTooltipRequiresRestartingTheClient() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			String tooltip = readTranslation(locale,
+				"settings.pingforit.open_block_shape_blacklist_config.tooltip");
+			assertTrue(
+				tooltip.contains(EXTERNAL_LIST_RESTART_MARKERS.get(locale)),
+				() -> "external list tooltip must require a client restart: " + locale);
 		}
 	}
 

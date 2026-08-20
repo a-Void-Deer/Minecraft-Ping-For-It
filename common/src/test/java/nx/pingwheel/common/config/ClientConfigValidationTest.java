@@ -1,6 +1,7 @@
 package nx.pingwheel.common.config;
 
 import com.google.gson.Gson;
+import nx.pingwheel.common.client.outline.BlockDisplayPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -18,6 +19,20 @@ class ClientConfigValidationTest {
 	}
 
 	@Test
+	void correctionPeriodIsNotExposedOrPersisted() {
+		assertThrows(NoSuchFieldException.class, () -> ClientConfig.class.getDeclaredField("correctionPeriod"));
+		assertThrows(NoSuchFieldException.class, () -> ClientConfig.class.getDeclaredField("MAX_CORRECTION_PERIOD"));
+		assertThrows(NoSuchMethodException.class, () -> ClientConfig.class.getMethod("getCorrectionPeriod"));
+		assertThrows(
+			NoSuchMethodException.class,
+			() -> ClientConfig.class.getMethod("setCorrectionPeriod", float.class));
+
+		ClientConfig config = new Gson().fromJson("{\"correctionPeriod\":4.5}", ClientConfig.class);
+
+		assertFalse(new Gson().toJson(config).contains("\"correctionPeriod\""));
+	}
+
+	@Test
 	void defaultsMatchTheCurrentWheelLook() {
 		ClientConfig config = new ClientConfig();
 
@@ -29,6 +44,46 @@ class ClientConfigValidationTest {
 		assertEquals(100, config.getWheelOpacity());
 		assertEquals(100, config.getWheelFontSize());
 		assertEquals(100, config.getWheelTargetFontSize());
+		assertEquals(List.of("*:*"), config.getBlockDisplayWhitelist());
+		assertEquals(List.of(), config.getBlockShapeBlacklist());
+		assertTrue(new Gson().toJson(config).contains("\"blockDisplayWhitelist\""));
+		assertTrue(new Gson().toJson(config).contains("\"blockShapeBlacklist\""));
+	}
+
+	@Test
+	void oldJsonWithoutTheNewListsKeepsTheirDefaults() {
+		ClientConfig config = new Gson().fromJson("{\"pingVolume\":42}", ClientConfig.class);
+
+		config.validate((key, suppliedValue, effectiveValue) -> {});
+
+		assertEquals(List.of("*:*"), config.getBlockDisplayWhitelist());
+		assertEquals(List.of(), config.getBlockShapeBlacklist());
+	}
+
+	@Test
+	void nullBlankAndMalformedConfiguredListsAreInvalid() {
+		for (String json : List.of(
+			"{\"blockDisplayWhitelist\":null}",
+			"{\"blockShapeBlacklist\":null}",
+			"{\"blockDisplayWhitelist\":[\" \"]}",
+			"{\"blockShapeBlacklist\":[\"minecraft:stone:*\"]}")) {
+			ClientConfig config = new Gson().fromJson(json, ClientConfig.class);
+			assertThrows(IllegalArgumentException.class, () -> config.validate((key, supplied, effective) -> {}), json);
+		}
+	}
+
+	@Test
+	void matcherIsCompiledAtValidationAndSetTimeInsteadOfPerFrame() {
+		ClientConfig config = new ClientConfig();
+		BlockDisplayPolicy initial = config.getBlockDisplayPolicy();
+
+		config.validate((key, suppliedValue, effectiveValue) -> {});
+		assertTrue(initial != config.getBlockDisplayPolicy());
+
+		BlockDisplayPolicy afterValidation = config.getBlockDisplayPolicy();
+		config.setBlockShapeBlacklist(List.of("minecraft:stone"));
+		assertTrue(afterValidation != config.getBlockDisplayPolicy());
+		assertEquals(List.of("minecraft:stone"), config.getBlockShapeBlacklist());
 	}
 
 	@Test

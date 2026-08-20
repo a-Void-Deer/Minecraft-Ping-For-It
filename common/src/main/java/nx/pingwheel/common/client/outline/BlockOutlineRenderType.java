@@ -59,20 +59,56 @@ public final class BlockOutlineRenderType extends RenderType {
 		new RenderStateShard.LineStateShard(OptionalDouble.of(LINE_WIDTH));
 
 	/**
+	 * Immutable description of the product-required VoxelShape outline state.
+	 * The actual composite state and setup/clear shard list are both built from
+	 * this descriptor, so the package-private test seam can pin the live
+	 * production configuration without reflecting into vanilla's private
+	 * {@link RenderType.CompositeState} fields.
+	 */
+	static record OutlineStateDescriptor(
+		VertexFormat.Mode mode,
+		double lineWidth,
+		String shaderName,
+		RenderStateShard.ShaderStateShard shaderState,
+		RenderStateShard.LineStateShard lineState,
+		RenderStateShard.LayeringStateShard layeringState,
+		RenderStateShard.TransparencyStateShard transparencyState,
+		RenderStateShard.OutputStateShard outputState,
+		RenderStateShard.CullStateShard cullState,
+		RenderStateShard.DepthTestStateShard depthTestState,
+		RenderStateShard.WriteMaskStateShard writeMaskState
+	) {}
+
+	private static final OutlineStateDescriptor OUTLINE_STATE = new OutlineStateDescriptor(
+		VertexFormat.Mode.LINES,
+		LINE_WIDTH,
+		"rendertype_lines",
+		RENDERTYPE_LINES_SHADER,
+		LINE_STATE,
+		VIEW_OFFSET_Z_LAYERING,
+		TRANSLUCENT_TRANSPARENCY,
+		MAIN_TARGET,
+		NO_CULL,
+		NO_DEPTH_TEST,
+		COLOR_WRITE);
+
+	private final OutlineStateDescriptor descriptor;
+
+	/**
 	 * The composite state mirroring {@code RenderType.lines()} plus the
 	 * depth-test, line-width, and write-mask deltas above. Kept for parity
 	 * with the vanilla construction and exposed via {@link #state()} as a
 	 * non-reflective test seam.
 	 */
 	private static final RenderType.CompositeState STATE = RenderType.CompositeState.builder()
-		.setShaderState(RENDERTYPE_LINES_SHADER)
-		.setLineState(LINE_STATE)
-		.setLayeringState(VIEW_OFFSET_Z_LAYERING)
-		.setTransparencyState(TRANSLUCENT_TRANSPARENCY)
-		.setOutputState(MAIN_TARGET)
-		.setCullState(NO_CULL)
-		.setDepthTestState(NO_DEPTH_TEST)
-		.setWriteMaskState(COLOR_WRITE)
+		.setShaderState(OUTLINE_STATE.shaderState())
+		.setLineState(OUTLINE_STATE.lineState())
+		.setLayeringState(OUTLINE_STATE.layeringState())
+		.setTransparencyState(OUTLINE_STATE.transparencyState())
+		.setOutputState(OUTLINE_STATE.outputState())
+		.setCullState(OUTLINE_STATE.cullState())
+		.setDepthTestState(OUTLINE_STATE.depthTestState())
+		.setWriteMaskState(OUTLINE_STATE.writeMaskState())
 		.createCompositeState(false);
 
 	/**
@@ -86,18 +122,18 @@ public final class BlockOutlineRenderType extends RenderType {
 	 */
 	private static final List<RenderStateShard> SHARDS = List.of(
 		NO_TEXTURE,
-		RENDERTYPE_LINES_SHADER,
-		TRANSLUCENT_TRANSPARENCY,
-		NO_DEPTH_TEST,
-		NO_CULL,
+		OUTLINE_STATE.shaderState(),
+		OUTLINE_STATE.transparencyState(),
+		OUTLINE_STATE.depthTestState(),
+		OUTLINE_STATE.cullState(),
 		NO_LIGHTMAP,
 		NO_OVERLAY,
-		VIEW_OFFSET_Z_LAYERING,
-		MAIN_TARGET,
+		OUTLINE_STATE.layeringState(),
+		OUTLINE_STATE.outputState(),
 		DEFAULT_TEXTURING,
-		COLOR_WRITE,
+		OUTLINE_STATE.writeMaskState(),
 		NO_COLOR_LOGIC,
-		LINE_STATE
+		OUTLINE_STATE.lineState()
 	);
 
 	/**
@@ -108,15 +144,36 @@ public final class BlockOutlineRenderType extends RenderType {
 	public static final RenderType BLOCK_OUTLINE = new BlockOutlineRenderType();
 
 	private BlockOutlineRenderType() {
+		this(OUTLINE_STATE);
+	}
+
+	private BlockOutlineRenderType(OutlineStateDescriptor descriptor) {
 		super(
 			NAME,
 			DefaultVertexFormat.POSITION_COLOR_NORMAL,
-			VertexFormat.Mode.LINES,
+			descriptor.mode(),
 			1536,
 			false,
 			false,
 			() -> SHARDS.forEach(RenderStateShard::setupRenderState),
 			() -> SHARDS.forEach(RenderStateShard::clearRenderState));
+		this.descriptor = descriptor;
+	}
+
+	/**
+	 * Package-private production descriptor seam for focused render-state
+	 * regression tests. The public render type remains the singleton above.
+	 */
+	OutlineStateDescriptor descriptor() {
+		return descriptor;
+	}
+
+	/**
+	 * Package-private descriptor seam for tests; the returned descriptor is the
+	 * same immutable instance used to construct the composite state and type.
+	 */
+	static OutlineStateDescriptor outlineState() {
+		return OUTLINE_STATE;
 	}
 
 	/**

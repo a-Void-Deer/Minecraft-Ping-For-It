@@ -18,10 +18,8 @@ class BlockModelOutlineRouteTest {
 	// --- routing ---
 
 	@Test
-	void entityBlockAlwaysRoutesToEntityBlockRegardlessOfWhitelist() {
-		// The ordinary-block whitelist is never applied to entity_block
-		// targets, so its result must not influence the route.
-		assertEquals(ENTITY_BLOCK, BlockModelOutlineRoute.route("entity_block", false));
+	void entityBlockUsesTheEffectiveNativeGlowDecision() {
+		assertEquals(VOXEL, BlockModelOutlineRoute.route("entity_block", false));
 		assertEquals(ENTITY_BLOCK, BlockModelOutlineRoute.route("entity_block", true));
 	}
 

@@ -14,6 +14,7 @@ import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.Util;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
@@ -32,6 +33,7 @@ import java.util.function.Supplier;
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 import static nx.pingwheel.common.config.ClientConfigBounds.*;
+import static nx.pingwheel.common.Global.warnException;
 
 public class SettingsScreen extends OptionsSubScreen {
 	private static WeakReference<SettingsScreen> currentSettingsScreen = new WeakReference<>(null);
@@ -122,18 +124,17 @@ public class SettingsScreen extends OptionsSubScreen {
 			null);
 
 		this.addChannelRow();
+		this.addBlockShapeBlacklistButton();
 
 		this.list.addSmall(getPingVolumeOption(), getPingDistanceOption());
 
-		this.list.addSmall(getCorrectionPeriodOption(), getItemIconsVisibleOption());
+		this.list.addSmall(getItemIconsVisibleOption(), getDirectionIndicatorVisibleOption());
 
-		this.list.addSmall(getDirectionIndicatorVisibleOption(), getPlayerInfoModeOption());
+		this.list.addSmall(getPlayerInfoModeOption(), getTeamColorModeOption());
 
-		this.list.addSmall(getTeamColorModeOption(), getPingSizeOption());
+		this.list.addSmall(getPingSizeOption(), getWheelInnerRadiusOption());
 
-		this.list.addSmall(getWheelInnerRadiusOption(), getWheelOuterRadiusOption());
-
-		this.list.addSmall(getWheelOpacityOption(), null);
+		this.list.addSmall(getWheelOuterRadiusOption(), getWheelOpacityOption());
 
 		this.list.addSmall(getWheelTargetFontSizeOption(), getWheelOptionFontSizeOption());
 
@@ -157,15 +158,20 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public void onClose() {
-		if (!this.suppressSaveOnClose) {
-			// Client options are local and must be persisted even when an invalid
-			// server draft keeps this screen open.
-			ClientConfig.HANDLER.save();
-			if (!this.commitServerSettings()) {
-				return;
-			}
+		if (!this.suppressSaveOnClose && !this.persistSettings()) {
+			return;
 		}
 
+		this.leaveSettingsScreen();
+	}
+
+	private boolean persistSettings() {
+		// Client options are local and must be persisted even when an invalid
+		// server draft keeps this screen open.
+		return ClientConfig.HANDLER.saveSafely() && this.commitServerSettings();
+	}
+
+	private void leaveSettingsScreen() {
 		if (parent != null && this.minecraft != null) {
 			clearCurrent(this);
 			this.minecraft.setScreen(parent);
@@ -256,24 +262,6 @@ public class SettingsScreen extends OptionsSubScreen {
 			},
 			config::getPingDistance,
 			config::setPingDistance
-		);
-	}
-
-	private OptionInstance<Float> getCorrectionPeriodOption() {
-		final var text = LanguageUtils.settings("correction_period");
-
-		return OptionUtils.ofFloat(
-			text.getKey(),
-			0.1f, MAX_CORRECTION_PERIOD, 0.1f,
-			(value) -> {
-				if (value >= MAX_CORRECTION_PERIOD) {
-					return text.get(LanguageUtils.VALUE_INFINITE);
-				}
-
-				return text.get(LanguageUtils.UNIT_SECONDS.get("%.1f".formatted(value)));
-			},
-			config::getCorrectionPeriod,
-			config::setCorrectionPeriod
 		);
 	}
 
@@ -498,6 +486,34 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.channelTextField.setTooltip(Tooltip.create(LanguageUtils.settings("channel.tooltip").get()));
 		this.channelTextField.setResponder(config::setChannel);
 		this.list.addSmall(label, this.channelTextField);
+	}
+
+	private void addBlockShapeBlacklistButton() {
+		Button button = Button.builder(
+			LanguageUtils.settings("open_block_shape_blacklist_config").get(),
+			ignored -> this.openBlockShapeBlacklistConfig())
+			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+			.build();
+		button.setTooltip(Tooltip.create(
+			LanguageUtils.settings("open_block_shape_blacklist_config").path("tooltip").get()));
+		this.list.addSmall(button, null);
+	}
+
+	private void openBlockShapeBlacklistConfig() {
+		if (this.minecraft == null || !this.persistSettings()) {
+			return;
+		}
+
+		// Prevent any later lifecycle callback on this old screen from saving its
+		// stale OptionInstances over edits made by the external editor.
+		this.suppressSaveOnClose = true;
+		this.leaveSettingsScreen();
+
+		try {
+			Util.getPlatform().openFile(ClientConfig.HANDLER.getConfigPath().toFile());
+		} catch (Exception | LinkageError failure) {
+			warnException("opening client config file failed", failure);
+		}
 	}
 
 	private void addServerOptions() {

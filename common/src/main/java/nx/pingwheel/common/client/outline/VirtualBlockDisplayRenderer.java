@@ -23,10 +23,12 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.mixin.DisplayBlockDisplayAccessor;
+import nx.pingwheel.common.config.ClientConfig;
 
 import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.Global.warnException;
@@ -43,10 +45,12 @@ import static nx.pingwheel.common.Global.warnException;
  *       position is rendered through its real {@link BlockEntityRenderer}
  *       (dynamic geometry: chest lids, sign text, furnace flames), after
  *       validating the renderer exists and
- *       {@code BlockEntityType#isValid(currentState)} holds. The renderer is
- *       invoked directly inside a try/catch (never through the dispatcher's
- *       crash-report path), with an identity {@link PoseStack} translated by
- *       {@code blockPos - cameraPos}.</li>
+ *       {@code BlockEntityType#isValid(currentState)} holds. The live baked
+ *       model is independently attempted as a second route when the current
+ *       state has {@link RenderShape#MODEL}; either route may provide the
+ *       native glow. The renderer is invoked directly inside a try/catch
+ *       (never through the dispatcher's crash-report path), with an identity
+ *       {@link PoseStack} translated by {@code blockPos - cameraPos}.</li>
  *   <li>{@code block} (whitelisted ordinary block) — a single cached, virtual
  *       {@code Display.BlockDisplay} that is <em>never added to or spawned
  *       into the level</em> is repositioned at the block MIN corner, its
@@ -119,8 +123,6 @@ public final class VirtualBlockDisplayRenderer {
 
 	public static final VirtualBlockDisplayRenderer INSTANCE = new VirtualBlockDisplayRenderer();
 
-	private static final BlockDisplayWhitelist WHITELIST = BlockDisplayWhitelist.builtIn();
-
 	/** Registry ids already warned about this session; bounded by distinct failing blocks. */
 	private final Set<String> warnOnceRegistryIds = new HashSet<>();
 
@@ -183,17 +185,17 @@ public final class VirtualBlockDisplayRenderer {
 				continue;
 			}
 
-			// The ordinary-block whitelist is evaluated lazily and only for
-			// the generic `block` target type; `entity_block` never consults it.
-			boolean whitelistMatches = false;
+			// The immutable policy is compiled by ClientConfig validation/load/set
+			// paths. This frame only evaluates the current state against it; no
+			// configured string is reparsed here. Both block target types consult
+			// the whitelist and the blacklist, with target-safety gates in policy.
+			boolean nativeGlowMatches = ClientConfig.HANDLER.getConfig()
+				.getBlockDisplayPolicy()
+				.shouldUseNativeGlow(spec.targetTypeId(), blockState);
 
-			if (BlockModelOutlineRoute.TARGET_TYPE_BLOCK.equals(spec.targetTypeId())) {
-				whitelistMatches = WHITELIST.matches(blockState);
-			}
-
-			boolean success = switch (BlockModelOutlineRoute.route(spec.targetTypeId(), whitelistMatches)) {
-				case ENTITY_BLOCK -> renderBlockEntity(
-					level, pos, blockState, spec, blockEntityDispatcher,
+			boolean success = switch (BlockModelOutlineRoute.route(spec.targetTypeId(), nativeGlowMatches)) {
+				case ENTITY_BLOCK -> renderEntityBlock(
+					level, pos, blockState, spec, blockEntityDispatcher, entityDispatcher,
 					cameraPosition, partialTick);
 				case BLOCK_DISPLAY -> renderBlockDisplay(
 					level, pos, blockState, spec, entityDispatcher,
@@ -215,6 +217,33 @@ public final class VirtualBlockDisplayRenderer {
 	}
 
 	/**
+	 * Attempts both native-glow routes for an {@code entity_block}. A block
+	 * entity may have dynamic renderer geometry and a static baked model, so a
+	 * successful BER attempt must not suppress the model attempt. The model
+	 * route is restricted to {@link RenderShape#MODEL}; animated/no-model
+	 * states must not produce a missing-model display.
+	 */
+	private boolean renderEntityBlock(
+		ClientLevel level,
+		BlockPos pos,
+		BlockState blockState,
+		BlockOutlineSpec spec,
+		BlockEntityRenderDispatcher blockEntityDispatcher,
+		EntityRenderDispatcher entityDispatcher,
+		Vec3 cameraPosition,
+		float partialTick
+	) {
+		return EntityBlockGlowAttempts.attemptBoth(
+			() -> renderBlockEntity(
+				level, pos, blockState, spec, blockEntityDispatcher,
+				cameraPosition, partialTick),
+			() -> blockState.getRenderShape() == RenderShape.MODEL
+				&& renderBlockDisplay(
+					level, pos, blockState, spec, entityDispatcher,
+					cameraPosition, partialTick));
+	}
+
+	/**
 	 * Renders the actual {@link BlockEntity} at {@code pos} through its real
 	 * renderer into an attempt-local transient buffer that is flushed exactly
 	 * once on success. Returns whether at least one outline vertex was
@@ -229,51 +258,58 @@ public final class VirtualBlockDisplayRenderer {
 		Vec3 cameraPosition,
 		float partialTick
 	) {
-		BlockEntity blockEntity = level.getBlockEntity(pos);
-
-		if (blockEntity == null || !blockEntity.getType().isValid(blockState)) {
-			return false;
-		}
-
-		BlockEntityRenderer<BlockEntity> renderer = dispatcher.getRenderer(blockEntity);
-
-		if (renderer == null) {
-			return false;
-		}
-
-		PoseStack poseStack = new PoseStack();
-		poseStack.pushPose();
-		poseStack.translate(
-			pos.getX() - cameraPosition.x,
-			pos.getY() - cameraPosition.y,
-			pos.getZ() - cameraPosition.z);
-
 		FailureStage stage = FailureStage.RENDER;
+		PoseStack poseStack = null;
+		boolean posePushed = false;
 
 		// The whole attempt lives on its own transient buffer: a failure at
 		// any point — even after an incomplete vertex — is discarded together
 		// with the builder instead of corrupting a shared vanilla buffer that
 		// some other code path will later flush.
-		try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
-			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
-			OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, spec.argbColor());
+		try {
+			BlockEntity blockEntity = level.getBlockEntity(pos);
 
-			renderer.render(
-				blockEntity, partialTick, poseStack, buffer,
-				LevelRenderer.getLightColor(level, pos), OverlayTexture.NO_OVERLAY);
-
-			if (buffer.vertexCount() == 0) {
+			if (blockEntity == null || !blockEntity.getType().isValid(blockState)) {
 				return false;
 			}
 
-			stage = FailureStage.FLUSH;
-			localSource.endBatch();
-			return true;
+			BlockEntityRenderer<BlockEntity> renderer = dispatcher.getRenderer(blockEntity);
+
+			if (renderer == null) {
+				return false;
+			}
+
+			poseStack = new PoseStack();
+			poseStack.pushPose();
+			posePushed = true;
+			poseStack.translate(
+				pos.getX() - cameraPosition.x,
+				pos.getY() - cameraPosition.y,
+				pos.getZ() - cameraPosition.z);
+
+			try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
+				MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
+				OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, spec.argbColor());
+
+				renderer.render(
+					blockEntity, partialTick, poseStack, buffer,
+					LevelRenderer.getLightColor(level, pos), OverlayTexture.NO_OVERLAY);
+
+				if (buffer.vertexCount() == 0) {
+					return false;
+				}
+
+				stage = FailureStage.FLUSH;
+				localSource.endBatch();
+				return true;
+			}
 		} catch (Exception | LinkageError | AssertionError throwable) {
 			recordFailure(spec, FailureRoute.BLOCK_ENTITY, stage, throwable);
 			return false;
 		} finally {
-			poseStack.popPose();
+			if (posePushed) {
+				poseStack.popPose();
+			}
 		}
 	}
 

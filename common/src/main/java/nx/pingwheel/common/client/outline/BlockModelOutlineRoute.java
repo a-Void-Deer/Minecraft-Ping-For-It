@@ -6,8 +6,9 @@ import java.util.Objects;
  * Pure, deterministic renderer route policy for a block outline spec.
  *
  * <p>Given the authoritative marker {@code targetTypeId} of a winning block
- * marker and whether the current block state is a whitelisted ordinary block,
- * the policy picks exactly one of:
+ * marker and whether the current block state passed the compiled native-glow
+ * policy (whitelist match and blacklist miss), the policy picks exactly one
+ * of:
  * <ul>
  *   <li>{@link #ENTITY_BLOCK} — the target block actually owns a Minecraft
  *       {@code BlockEntity}: render its real {@code BlockEntityRenderer}
@@ -22,10 +23,9 @@ import java.util.Objects;
  *
  * <p>Only the confirmed built-in target type ids {@code block} and
  * {@code entity_block} participate in block rendering at all; every other
- * target type resolves to {@link #VOXEL}. The whitelist is deliberately
- * evaluated lazily by the caller and never applied to {@code entity_block}
- * targets: this policy short-circuits the {@code entity_block} id before the
- * whitelist result is consulted.
+ * target type resolves to {@link #VOXEL}. The caller evaluates the immutable
+ * configured policy and passes its effective result here; both concrete block
+ * target types therefore obey the same whitelist / blacklist decision.
  *
  * <p>This class is pure JDK and fully headless-testable; no Minecraft classes
  * are referenced.
@@ -60,20 +60,20 @@ public enum BlockModelOutlineRoute {
 	/**
 	 * Resolves the renderer route for the winning block marker.
 	 *
-	 * <p>{@code entity_block} wins unconditionally — the ordinary-block
-	 * whitelist is never applied to it. {@code block} becomes
-	 * {@link #BLOCK_DISPLAY} only when {@code whitelistMatches} is true.
+ * <p>{@code entity_block} becomes {@link #ENTITY_BLOCK} only when the
+ * effective native-glow decision is true. {@code block} becomes
+ * {@link #BLOCK_DISPLAY} only under the same condition.
 	 * Any other target type id (including {@code location}, {@code entity},
 	 * {@code dropped_item}, and unknown ids) is {@link #VOXEL}.
 	 */
-	public static BlockModelOutlineRoute route(String targetTypeId, boolean whitelistMatches) {
+	public static BlockModelOutlineRoute route(String targetTypeId, boolean nativeGlowMatches) {
 		Objects.requireNonNull(targetTypeId, "targetTypeId");
 
-		if (TARGET_TYPE_ENTITY_BLOCK.equals(targetTypeId)) {
+		if (TARGET_TYPE_ENTITY_BLOCK.equals(targetTypeId) && nativeGlowMatches) {
 			return ENTITY_BLOCK;
 		}
 
-		if (TARGET_TYPE_BLOCK.equals(targetTypeId) && whitelistMatches) {
+		if (TARGET_TYPE_BLOCK.equals(targetTypeId) && nativeGlowMatches) {
 			return BLOCK_DISPLAY;
 		}
 

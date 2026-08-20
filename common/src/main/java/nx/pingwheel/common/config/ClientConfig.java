@@ -1,14 +1,18 @@
 package nx.pingwheel.common.config;
 
+import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+import nx.pingwheel.common.client.outline.BlockDisplayPolicy;
+import nx.pingwheel.common.client.outline.BlockDisplayWhitelist;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -21,7 +25,6 @@ import static nx.pingwheel.common.Global.LOGGER;
 public class ClientConfig implements IConfig {
 	int pingVolume = 100;
 	int pingDistance = 2048;
-	float correctionPeriod = 1f;
 	boolean itemIconVisible = true;
 	boolean directionIndicatorVisible = true;
 	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
@@ -38,6 +41,16 @@ public class ClientConfig implements IConfig {
 	/** Kept as wheelFontSize in JSON: this is the radial option-label value. */
 	int wheelFontSize = ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE;
 	int wheelTargetFontSize = ClientConfigBounds.DEFAULT_WHEEL_TARGET_FONT_SIZE;
+	@Setter(AccessLevel.NONE)
+	List<String> blockDisplayWhitelist = List.of("*:*");
+	@Setter(AccessLevel.NONE)
+	List<String> blockShapeBlacklist = List.of();
+
+	@ToString.Exclude
+	@EqualsAndHashCode.Exclude
+	@Getter(AccessLevel.NONE)
+	@Setter(AccessLevel.NONE)
+	private transient BlockDisplayPolicy blockDisplayPolicy = BlockDisplayPolicy.defaults();
 
 	@ToString.Exclude
 	String channel = "";
@@ -53,7 +66,6 @@ public class ClientConfig implements IConfig {
 
 	public static final int TPS = 20;
 	public static final int MAX_PING_DISTANCE = 2048;
-	public static final float MAX_CORRECTION_PERIOD = 5f;
 	public static final int MAX_CHANNEL_LENGTH = 128;
 
 	public String getChannel() {
@@ -107,6 +119,29 @@ public class ClientConfig implements IConfig {
 		return ClientConfigBounds.clampLongPressCompatibilitySliceMillis(
 			longPressCompatibilitySliceMillis,
 			wheelHoldMillis);
+	}
+
+	public void setBlockDisplayWhitelist(List<String> entries) {
+		List<String> copy = validatedEntries(entries, "blockDisplayWhitelist");
+		BlockDisplayPolicy nextPolicy = BlockDisplayPolicy.compile(copy, blockShapeBlacklist);
+		blockDisplayWhitelist = copy;
+		blockDisplayPolicy = nextPolicy;
+	}
+
+	public void setBlockShapeBlacklist(List<String> entries) {
+		List<String> copy = validatedEntries(entries, "blockShapeBlacklist");
+		BlockDisplayPolicy nextPolicy = BlockDisplayPolicy.compile(blockDisplayWhitelist, copy);
+		blockShapeBlacklist = copy;
+		blockDisplayPolicy = nextPolicy;
+	}
+
+	public BlockDisplayPolicy getBlockDisplayPolicy() {
+		return blockDisplayPolicy;
+	}
+
+	private static List<String> validatedEntries(List<String> entries, String fieldName) {
+		BlockDisplayWhitelist.validateEntries(entries, fieldName);
+		return List.copyOf(entries);
 	}
 
 	@Override
@@ -187,6 +222,12 @@ public class ClientConfig implements IConfig {
 				entry.setValue(channel.substring(0, MAX_CHANNEL_LENGTH));
 			}
 		}
+
+		List<String> validatedWhitelist = validatedEntries(blockDisplayWhitelist, "blockDisplayWhitelist");
+		List<String> validatedBlacklist = validatedEntries(blockShapeBlacklist, "blockShapeBlacklist");
+		blockDisplayWhitelist = validatedWhitelist;
+		blockShapeBlacklist = validatedBlacklist;
+		blockDisplayPolicy = BlockDisplayPolicy.compile(validatedWhitelist, validatedBlacklist);
 	}
 
 	private static void warnIfChanged(
@@ -201,6 +242,7 @@ public class ClientConfig implements IConfig {
 
 	@Override
 	public void onUpdate() {
+		blockDisplayPolicy = BlockDisplayPolicy.compile(blockDisplayWhitelist, blockShapeBlacklist);
 		LOGGER.debug(
 			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, wheelTimeoutMillis=%d, cancelHalfConeAngleDegrees=%d, wheelInnerRadius=%d, wheelOuterRadius=%d, wheelOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d"
 				.formatted(
@@ -218,6 +260,11 @@ public class ClientConfig implements IConfig {
 		if (Game != null) {
 			IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(getChannel()));
 		}
+	}
+
+	@Override
+	public boolean recoverInvalidOnLoad() {
+		return true;
 	}
 
 	public static final ConfigHandler<ClientConfig> HANDLER = ConfigHandler.of(ClientConfig.class, ".json");
