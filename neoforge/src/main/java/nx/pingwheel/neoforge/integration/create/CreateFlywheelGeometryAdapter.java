@@ -15,6 +15,7 @@ import dev.engine_room.flywheel.api.model.Model;
 import dev.engine_room.flywheel.backend.engine.AbstractInstancer;
 import dev.engine_room.flywheel.backend.engine.InstanceHandleImpl;
 import dev.engine_room.flywheel.backend.engine.embed.GlobalEnvironment;
+import dev.engine_room.flywheel.backend.engine.indirect.IndirectInstancer;
 import dev.engine_room.flywheel.backend.mixin.LevelRendererAccessor;
 import dev.engine_room.flywheel.impl.visualization.VisualManagerImpl;
 import dev.engine_room.flywheel.impl.visualization.VisualizationManagerImpl;
@@ -210,8 +211,42 @@ public final class CreateFlywheelGeometryAdapter {
 					manager, visual, instances, () -> "visual returned no instances");
 			}
 
-			if (instances.size() > MAX_INSTANCES_PER_TARGET) {
-				final int instanceCount = instances.size();
+
+			List<ResolvedInstance> liveInstances = new ArrayList<>(instances.size());
+			int nonLiveInstanceCount = 0;
+			int resolutionFailureCount = 0;
+			for (Instance instance : instances) {
+				try {
+					LiveInstanceResolution resolution = resolveLiveInstance(instance);
+					if (resolution == null) {
+						nonLiveInstanceCount++;
+						continue;
+					}
+					liveInstances.add(new ResolvedInstance(
+						instance, resolution.instancer(), resolution.model()));
+				} catch (Exception | LinkageError | AssertionError ignored) {
+					// A stale optional instance must not prevent valid sibling instances
+					// from contributing geometry. The state class is retained in the
+					// diagnostic list below for the next-frame retry.
+					nonLiveInstanceCount++;
+					resolutionFailureCount++;
+				}
+			}
+
+			if (liveInstances.isEmpty()) {
+				final int collectedInstanceCount = instances.size();
+				final int skippedInstanceCount = nonLiveInstanceCount;
+				final int failedResolutionCount = resolutionFailureCount;
+				return empty(context, FlywheelDiagnosticReason.NO_INSTANCES,
+					manager, visual, instances,
+					() -> "no live instances; collectedInstanceCount=" + collectedInstanceCount
+						+ "; nonLiveInstanceCount=" + skippedInstanceCount
+						+ "; resolutionFailureCount=" + failedResolutionCount
+						+ "; retryNextFrame=true");
+			}
+
+			if (liveInstances.size() > MAX_INSTANCES_PER_TARGET) {
+				final int instanceCount = liveInstances.size();
 				return empty(context, FlywheelDiagnosticReason.BUDGET_EXCEEDED,
 					manager, visual, instances,
 					() -> "instanceCount=" + instanceCount + "; maxInstances=" + MAX_INSTANCES_PER_TARGET);
@@ -260,32 +295,12 @@ public final class CreateFlywheelGeometryAdapter {
 					manager, visual, instances, () -> "render tick values are non-finite");
 			}
 
-			List<InstanceGeometry> geometries = new ArrayList<>(instances.size());
+			List<InstanceGeometry> geometries = new ArrayList<>(liveInstances.size());
 			long triangleCount = 0L;
 
-			for (Instance instance : instances) {
-				if (instance == null) {
-					return empty(context, FlywheelDiagnosticReason.UNSUPPORTED_TYPE,
-						manager, visual, instances, () -> "null instance in live collection");
-				}
-
-				if (!(instance.handle() instanceof InstanceHandleImpl<?> handle)
-					|| !(handle.state instanceof AbstractInstancer<?> instancer)
-					|| instancer.environment != GlobalEnvironment.INSTANCE
-					|| instancer.recreate == null || instancer.recreate.key() == null
-					|| instancer.recreate.key().model() == null) {
-					return empty(context, FlywheelDiagnosticReason.MODEL_UNAVAILABLE,
-						manager, visual, instances,
-						() -> "instance handle/instancer/recreate/model unavailable");
-				}
-
-				if (!supportedInstanceType(instance)) {
-					return empty(context, FlywheelDiagnosticReason.UNSUPPORTED_TYPE,
-						manager, visual, instances,
-						() -> "unsupported instance=" + instanceDetails(instance));
-				}
-
-				Model model = instancer.recreate.key().model();
+			for (ResolvedInstance resolved : liveInstances) {
+				Instance instance = resolved.instance();
+				Model model = resolved.model();
 				ModelGeometry geometry;
 				try {
 					geometry = modelCache.get(model);
@@ -414,6 +429,52 @@ public final class CreateFlywheelGeometryAdapter {
 			}
 		});
 		return Collections.unmodifiableList(instances);
+	}
+
+	/**
+	 * Resolves only a state that still belongs to a live Flywheel instancer.
+	 *
+	 * <p>Direct instancing stores the instancer itself as the handle state, while
+	 * the indirect backend stores an {@code InstancePage}. The public
+	 * {@link IndirectInstancer#fromState(InstanceHandleImpl.State)} mapping is
+	 * deliberately used instead of probing visibility: indirect live pages are
+	 * not reported visible by {@code InstanceHandleImpl}.</p>
+	 */
+	private static AbstractInstancer<?> resolveLiveInstancer(InstanceHandleImpl.State<?> state) {
+		if (state instanceof AbstractInstancer<?> instancer) {
+			return instancer;
+		}
+		return IndirectInstancer.fromState(state);
+	}
+
+	private static LiveInstanceResolution resolveLiveInstance(Instance instance) {
+		if (instance == null || !(instance.handle() instanceof InstanceHandleImpl<?> handle)) {
+			return null;
+		}
+
+		AbstractInstancer<?> instancer = resolveLiveInstancer(handle.state);
+		if (instancer == null || instancer.environment != GlobalEnvironment.INSTANCE) {
+			return null;
+		}
+
+		AbstractInstancer.Recreate<?> recreate = instancer.recreate;
+		if (recreate == null || recreate.key() == null) {
+			return null;
+		}
+
+		var key = recreate.key();
+		Model model = key.model();
+		if (model == null) {
+			return null;
+		}
+
+		InstanceType<?> instanceType = instance.type();
+		if (instanceType == null || instancer.type != instanceType || key.type() != instanceType
+			|| !supportedInstanceType(instance)) {
+			return null;
+		}
+
+		return new LiveInstanceResolution(instancer, model);
 	}
 
 	private static boolean supportedInstanceType(Instance instance) {
@@ -754,7 +815,7 @@ public final class CreateFlywheelGeometryAdapter {
 			type = "<type-unavailable:" + failure + ">";
 		}
 		return className(instance) + "@" + Integer.toHexString(System.identityHashCode(instance))
-			+ "{type=" + type + "}";
+			+ "{type=" + type + "; " + instanceStateDetails(instance) + "}";
 	}
 
 	private static String modelDetails(Instance instance) {
@@ -762,13 +823,11 @@ public final class CreateFlywheelGeometryAdapter {
 			return "<null-instance>";
 		}
 		try {
-			if (!(instance.handle() instanceof InstanceHandleImpl<?> handle)
-				|| !(handle.state instanceof AbstractInstancer<?> instancer)
-				|| instancer.recreate == null || instancer.recreate.key() == null
-				|| instancer.recreate.key().model() == null) {
-				return "<model-unavailable>";
+			LiveInstanceResolution resolution = resolveLiveInstance(instance);
+			if (resolution == null) {
+				return "<model-unavailable; " + instanceStateDetails(instance) + ">";
 			}
-			Model model = instancer.recreate.key().model();
+			Model model = resolution.model();
 			List<Model.ConfiguredMesh> meshes = model.meshes();
 			StringBuilder result = new StringBuilder(identity(model))
 				.append("{meshCount=").append(meshes == null ? "<null>" : meshes.size());
@@ -794,6 +853,27 @@ public final class CreateFlywheelGeometryAdapter {
 			return result.append("}").toString();
 		} catch (Exception | LinkageError | AssertionError failure) {
 			return "<model-details-failed: " + failure + ">";
+		}
+	}
+
+	private static String instanceStateDetails(Instance instance) {
+		if (instance == null) {
+			return "handleClass=<null>; backendStateClass=<null>; resolvedInstancerClass=<null>";
+		}
+		try {
+			Object handleValue = instance.handle();
+			if (!(handleValue instanceof InstanceHandleImpl<?> handle)) {
+				return "handleClass=" + className(handleValue)
+					+ "; backendStateClass=<not-InstanceHandleImpl>; resolvedInstancerClass=<null>";
+			}
+			InstanceHandleImpl.State<?> state = handle.state;
+			AbstractInstancer<?> instancer = resolveLiveInstancer(state);
+			return "handleClass=" + className(handleValue)
+				+ "; backendStateClass=" + className(state)
+				+ "; resolvedInstancerClass=" + className(instancer);
+		} catch (Exception | LinkageError | AssertionError failure) {
+			return "handleClass=<unavailable>; backendStateClass=<unavailable>; resolvedInstancerClass=<unavailable:"
+				+ failure + ">";
 		}
 	}
 
@@ -842,6 +922,14 @@ public final class CreateFlywheelGeometryAdapter {
 	) {}
 
 	private record InstanceGeometry(Instance instance, ModelGeometry model) {}
+
+	private record LiveInstanceResolution(AbstractInstancer<?> instancer, Model model) {}
+
+	private record ResolvedInstance(
+		Instance instance,
+		AbstractInstancer<?> instancer,
+		Model model
+	) {}
 
 	private static final class ModelGeometryCache {
 		private final WeakIdentityCache<Model, ModelGeometry> entries = new WeakIdentityCache<>();
