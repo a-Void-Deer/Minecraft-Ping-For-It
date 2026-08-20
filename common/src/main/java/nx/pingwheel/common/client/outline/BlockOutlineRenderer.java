@@ -27,13 +27,13 @@ import nx.pingwheel.common.marker.TargetKey;
  *   <li>specs whose dimension differs from the level's are skipped;</li>
  *   <li>unloaded blocks are skipped;</li>
  *   <li>the current block state's registry id is compared exactly to the
- *       spec's frozen id, so a replaced block type drops the outline;</li>
- *   <li>keys recorded in {@code modelOutlineKeys} (the per-frame set of
- *       blocks whose model-outline pass succeeded, see
- *       {@link BlockModelOutlineState}) are skipped, so a successful
- *       {@code entity_block} or whitelisted {@code block} glow is never
- *       doubled by the line outline; every other key — including failed or
- *       zero-vertex model routes — keeps the line fallback;</li>
+	 *       spec's frozen id, so a replaced block type drops the outline;</li>
+	 *   <li>committed deferred source lines are always emitted into this late
+	 *       line batch, including for keys recorded in {@code modelOutlineKeys};
+	 *       those keys suppress only the ordinary VoxelShape fallback, so a
+	 *       successful {@code entity_block} or whitelisted {@code block} glow
+	 *       never doubles the shape outline while deferred modded geometry is
+	 *       not lost;</li>
  *   <li>a same-type {@code BlockState} change re-reads the current shape
  *       every frame instead of caching anything;</li>
  *   <li>null or empty shapes are skipped; no full-cube fallback exists.</li>
@@ -83,10 +83,6 @@ public final class BlockOutlineRenderer {
 			TargetKey.BlockKey blockKey = entry.getKey();
 			BlockOutlineSpec spec = entry.getValue();
 
-			if (modelOutlineKeys.contains(blockKey)) {
-				continue;
-			}
-
 			if (!blockKey.dimensionId().equals(dimensionId)) {
 				continue;
 			}
@@ -101,6 +97,21 @@ public final class BlockOutlineRenderer {
 
 			if (!blockKey.blockRegistryId()
 				.equals(BuiltInRegistries.BLOCK.getKey(blockState.getBlock()).toString())) {
+				continue;
+			}
+
+			// Optional deferred sources publish complete camera-relative batches
+			// before this late pass. They are intentionally emitted even when a
+			// model-outline key suppresses the ordinary VoxelShape fallback.
+			for (EntityBlockGeometryLine line :
+				DeferredEntityBlockGeometryState.INSTANCE.linesFor(blockKey)) {
+				VoxelShapeRenderUtil.renderLine(poseStack, lines, line, spec.argbColor());
+			}
+
+			// Native/model success suppresses only VoxelShape generation. Deferred
+			// modded lines above have already been committed in source order and
+			// must remain in the production line consumer for this target.
+			if (modelOutlineKeys.contains(blockKey)) {
 				continue;
 			}
 

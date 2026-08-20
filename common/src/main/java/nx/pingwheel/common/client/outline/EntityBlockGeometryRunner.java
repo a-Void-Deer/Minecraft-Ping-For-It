@@ -73,26 +73,37 @@ public final class EntityBlockGeometryRunner {
 		}
 
 		Objects.requireNonNull(contextFactory, "contextFactory");
-		final EntityBlockGeometryContext context;
-		try {
-			context = contextFactory.get();
-		} catch (Exception | LinkageError | AssertionError failure) {
-			Global.warnException(
-				"entity block geometry attempt failed; category=context-creation",
-				failure);
-			return false;
-		}
-
-		if (context == null) {
-			Global.LOGGER.warn("entity block geometry attempt failed; category=null-context");
-			return false;
-		}
 
 		boolean rendered = false;
 		for (EntityBlockGeometrySource source : allowedSources) {
-			EntityBlockGeometryOutcome outcome = attempt(source, context);
-			if (outcome == EntityBlockGeometryOutcome.RENDERED) {
-				rendered = true;
+			EntityBlockGeometryContext context = null;
+			try {
+				// A fresh context is important: its deferred sink belongs to exactly
+				// one source attempt, so an earlier successful commit cannot close or
+				// otherwise block a later source for the same target.
+				context = contextFactory.get();
+			} catch (Exception | LinkageError | AssertionError failure) {
+				Global.warnException(
+					"entity block geometry attempt failed; category=context-creation",
+					failure);
+				continue;
+			}
+
+			if (context == null) {
+				Global.LOGGER.warn("entity block geometry attempt failed; category=null-context");
+				continue;
+			}
+
+			try {
+				EntityBlockGeometryOutcome outcome = attempt(source, context);
+				if (outcome == EntityBlockGeometryOutcome.RENDERED) {
+					rendered = true;
+				}
+			} finally {
+				// Clean up an uncommitted private sink without imposing any sink
+				// contract on sources that render through another backend. A
+				// successful deferred commit remains published by the state.
+				context.lineSink().abort();
 			}
 		}
 

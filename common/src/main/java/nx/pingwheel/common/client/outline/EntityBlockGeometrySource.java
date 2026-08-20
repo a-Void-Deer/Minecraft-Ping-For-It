@@ -18,7 +18,11 @@ public interface EntityBlockGeometrySource {
 
 	/**
 	 * Attempts to render this target into the source's own isolated geometry
-	 * route. The source must not retain the supplied context.
+	 * route. The source must not retain the supplied context. A {@link
+	 * EntityBlockGeometryOutcome#RENDERED} result is the source's honest
+	 * responsibility: sources using {@link EntityBlockGeometryContext#lineSink}
+	 * must return it only after a successful commit, while a future source may
+	 * legitimately render through another backend without using that sink.
 	 */
 	EntityBlockGeometryOutcome attempt(EntityBlockGeometryContext context);
 

@@ -148,7 +148,7 @@ public final class BlockOutlineState {
 	 * order; production callers query per block via {@link #specFor} and
 	 * {@link #colorFor}.
 	 */
-	Map<TargetKey.BlockKey, BlockOutlineSpec> snapshot() {
+	public Map<TargetKey.BlockKey, BlockOutlineSpec> snapshot() {
 		return specs;
 	}
 

@@ -210,7 +210,7 @@ public final class VirtualBlockDisplayRenderer {
 			boolean success = switch (BlockModelOutlineRoute.route(spec.targetTypeId(), nativeGlowMatches)) {
 				case ENTITY_BLOCK -> renderEntityBlock(
 					level, pos, blockState, spec, blockEntityDispatcher, entityDispatcher,
-					cameraPosition, partialTick);
+					cameraPosition, partialTick, blockKey);
 				case BLOCK_DISPLAY -> renderBlockDisplay(
 					level, pos, blockState, entityDispatcher,
 					cameraPosition, partialTick,
@@ -247,7 +247,8 @@ public final class VirtualBlockDisplayRenderer {
 		BlockEntityRenderDispatcher blockEntityDispatcher,
 		EntityRenderDispatcher entityDispatcher,
 		Vec3 cameraPosition,
-		float partialTick
+		float partialTick,
+		TargetKey.BlockKey targetKey
 	) {
 		// Read the live local mode for every entity-block render attempt. It is
 		// intentionally absent from the ordinary `block` route above and is not
@@ -265,7 +266,10 @@ public final class VirtualBlockDisplayRenderer {
 				partialTick,
 				LevelRenderer.getLightColor(level, pos),
 				entityDispatcher,
-				blockEntityDispatcher));
+				blockEntityDispatcher,
+				Minecraft.getInstance().levelRenderer,
+				targetKey,
+				DeferredEntityBlockGeometryState.INSTANCE.open(targetKey)));
 	}
 
 	/**

@@ -3,10 +3,12 @@ package nx.pingwheel.common.client.outline;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
+import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import nx.pingwheel.common.marker.TargetKey;
 
 /**
  * Immutable, per-attempt data passed to an entity-block geometry source.
@@ -16,7 +18,9 @@ import net.minecraft.world.phys.Vec3;
  * is guaranteed. It contains only the live
  * target and render data such an adapter may need: level, position, state,
  * block entity when available, public outline color, camera/timing/light
- * values, and the vanilla render dispatchers. It deliberately contains no
+ * values, the level renderer used for exact frame-time parity, the frozen
+ * target key, the vanilla render dispatchers, and a per-attempt deferred line
+ * sink. It deliberately contains no
  * marker ownership, network, or other protocol state, and has no dependency
  * on Create, Flywheel, or another optional mod.</p>
  *
@@ -35,11 +39,33 @@ public record EntityBlockGeometryContext(
 	float partialTick,
 	int packedLight,
 	EntityRenderDispatcher entityRenderDispatcher,
-	BlockEntityRenderDispatcher blockEntityRenderDispatcher
+	BlockEntityRenderDispatcher blockEntityRenderDispatcher,
+	LevelRenderer levelRenderer,
+	TargetKey.BlockKey targetKey,
+	EntityBlockGeometryLineSink lineSink
 ) {
 	public EntityBlockGeometryContext {
 		cameraPosition = cameraPosition == null ? Vec3.ZERO : cameraPosition;
 		argbColor = 0xFF000000 | (argbColor & 0x00FFFFFF);
+		lineSink = lineSink == null ? EntityBlockGeometryLineSink.NOOP : lineSink;
+	}
+
+	/** Compatibility constructor for fixed/built-in sources that do not defer lines. */
+	public EntityBlockGeometryContext(
+		ClientLevel level,
+		BlockPos blockPos,
+		BlockState blockState,
+		BlockEntity blockEntity,
+		int argbColor,
+		Vec3 cameraPosition,
+		float partialTick,
+		int packedLight,
+		EntityRenderDispatcher entityRenderDispatcher,
+		BlockEntityRenderDispatcher blockEntityRenderDispatcher
+	) {
+		this(level, blockPos, blockState, blockEntity, argbColor, cameraPosition,
+			partialTick, packedLight, entityRenderDispatcher, blockEntityRenderDispatcher,
+			null, null, EntityBlockGeometryLineSink.NOOP);
 	}
 
 	/**
@@ -57,6 +83,9 @@ public record EntityBlockGeometryContext(
 			0.0F,
 			0,
 			null,
-			null);
+			null,
+			null,
+			null,
+		EntityBlockGeometryLineSink.NOOP);
 	}
 }

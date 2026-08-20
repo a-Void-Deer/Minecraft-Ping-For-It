@@ -16,6 +16,7 @@ import nx.pingwheel.common.client.outline.BlockOutlineLogger;
 import nx.pingwheel.common.client.outline.BlockOutlineRenderer;
 import nx.pingwheel.common.client.outline.BlockOutlineRenderType;
 import nx.pingwheel.common.client.outline.BlockOutlineState;
+import nx.pingwheel.common.client.outline.DeferredEntityBlockGeometryState;
 import nx.pingwheel.common.client.outline.EntityOutlineLogger;
 import nx.pingwheel.common.client.outline.EntityOutlineState;
 import nx.pingwheel.common.client.outline.VirtualBlockDisplayRenderer;
@@ -94,6 +95,7 @@ public class CommonClient {
 		EntityOutlineState.INSTANCE.clear();
 		BlockOutlineState.INSTANCE.clear();
 		BlockModelOutlineState.INSTANCE.clear();
+		DeferredEntityBlockGeometryState.INSTANCE.leave();
 		VirtualBlockDisplayRenderer.INSTANCE.clear();
 
 		// A disconnect while the ping key is still held must not leak the
@@ -228,6 +230,7 @@ public class CommonClient {
 		// successfully emit glow geometry this frame are skipped by the late
 		// VoxelShape fallback pass.
 		BlockModelOutlineState.INSTANCE.beginFrame();
+		DeferredEntityBlockGeometryState.INSTANCE.beginFrame();
 	}
 
 	/**
@@ -278,6 +281,9 @@ public class CommonClient {
 	 * buffer source is passed, captured, or written to here and a failed
 	 * attempt can never corrupt a vanilla batch. The vanilla entity-outline
 	 * buffer, entity glowing routing, and post-chain are untouched.
+	 * Modded sources that commit deferred line batches are emitted later by
+	 * the custom {@link BlockOutlineRenderType#BLOCK_OUTLINE} pass even when
+	 * this model pass reports the target as successful.
 	 *
 	 * <p>The {@code LevelRendererMixin} gate ensures this only runs when the
 	 * vanilla entity-outline pipeline is available
@@ -332,10 +338,12 @@ public class CommonClient {
 	 * block outlines never creates or flushes an empty batch; and the frame
 	 * is skipped entirely when every current block outline is already
 	 * covered by the model-outline success set (see
-	 * {@link BlockModelOutlineState#successKeys()}), so the custom batch is
-	 * not even acquired for all-glow frames. The vanilla {@code lines()}
-	 * batch is never touched. Blocks whose model-outline pass succeeded
-	 * this frame are skipped here.
+	 * {@link BlockModelOutlineState#successKeys()}) and no deferred source
+	 * batch exists for those keys, so the custom batch is not acquired for
+	 * truly all-glow frames. A deferred-only batch keeps the custom consumer
+	 * alive even when every key is model-covered. The vanilla
+	 * {@code lines()} batch is never touched. Blocks whose model-outline pass
+	 * succeeded suppress only their VoxelShape geometry.
 	 */
 	public void renderBlockOutlines(Camera camera, MultiBufferSource.BufferSource bufferSource) {
 		Minecraft game = Game;
@@ -348,7 +356,10 @@ public class CommonClient {
 			return;
 		}
 
-		if (BlockOutlineState.INSTANCE.allCoveredBy(BlockModelOutlineState.INSTANCE.successKeys())) {
+		boolean hasDeferredLines = DeferredEntityBlockGeometryState.INSTANCE.hasLinesFor(
+			BlockOutlineState.INSTANCE.snapshot().keySet());
+		if (BlockOutlineState.INSTANCE.allCoveredBy(BlockModelOutlineState.INSTANCE.successKeys())
+			&& !hasDeferredLines) {
 			return;
 		}
 

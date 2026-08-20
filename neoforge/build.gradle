@@ -3,6 +3,13 @@ plugins {
     id "net.neoforged.moddev"
 }
 
+repositories {
+    maven {
+        name = "Create"
+        url = uri("https://maven.createmod.net")
+    }
+}
+
 neoForge {
     version = neoforge_version
     // Automatically enable neoforge AccessTransformers if the file exists
@@ -40,4 +47,12 @@ sourceSets.main.resources { srcDir "src/generated/resources" }
 
 jar {
     archiveClassifier = "${project.name}-${minecraft_version}"
+}
+
+// Soft optional integration: these jars are needed only to compile the
+// reflectively-loaded adapter. They are not shipped and no loader metadata
+// dependency is declared, so a client without Create/Flywheel remains valid.
+dependencies {
+    compileOnly "dev.engine-room.flywheel:flywheel-neoforge-1.21.1:${flywheel_version}"
+    compileOnly "com.simibubi.create:create-1.21.1:${create_version}"
 }
