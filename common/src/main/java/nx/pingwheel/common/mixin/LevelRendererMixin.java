@@ -61,12 +61,12 @@ public abstract class LevelRendererMixin {
 	}
 
 	/**
-	 * Runs the model-outline pass (actual {@code BlockEntity} geometry and
-	 * virtual {@code BlockDisplay} glow) immediately before the vanilla
-	 * {@code OutlineBufferSource.endOutlineBatch()} call — the timing anchor
-	 * only: the pass no longer receives, captures, or writes into the vanilla
-	 * outline source; every attempt renders into its own attempt-local
-	 * transient buffer that is flushed on success. Gated on
+	 * Runs the model-outline pass (actual {@code BlockEntity} geometry,
+	 * virtual {@code BlockDisplay} glow, and the optional Flywheel silhouette
+	 * mask) immediately before the vanilla
+	 * {@code OutlineBufferSource.endOutlineBatch()} call. Built-in attempts use
+	 * transient local buffers; the Flywheel source writes the vanilla outline
+	 * buffer but never flushes it. Gated on
 	 * {@code shouldShowEntityOutlines()}: without the shader/entity-outline
 	 * target nothing is emitted and every block keeps the late VoxelShape
 	 * fallback.
@@ -74,7 +74,10 @@ public abstract class LevelRendererMixin {
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/OutlineBufferSource;endOutlineBatch()V"))
 	private void pingForItRenderBlockModels(DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
 		if (this.shouldShowEntityOutlines()) {
-			CommonClient.INSTANCE.renderModelOutlines(camera, deltaTracker.getGameTimeDeltaPartialTick(true));
+			CommonClient.INSTANCE.renderModelOutlines(
+				camera,
+				deltaTracker.getGameTimeDeltaPartialTick(true),
+				deltaTracker.getGameTimeDeltaPartialTick(false));
 		}
 	}
 

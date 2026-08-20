@@ -24,7 +24,10 @@ import nx.pingwheel.common.config.EntityBlockRenderMode;
  *
  * <p>This runner is an internal compatibility seam for a future
  * separately-loaded optional adapter package, not a stable public API; no API
- * stability is guaranteed. Sources must not retain the per-attempt context.</p>
+ * stability is guaranteed. Sources must not retain the per-attempt context.
+ * Generic runner failures are logged once per source and failure category with
+ * the complete available context and original throwable; the once-set keeps a
+ * bad source from producing per-frame log spam.</p>
  */
 public final class EntityBlockGeometryRunner {
 	public static final String BLOCK_ENTITY_RENDERER_SOURCE_ID =
@@ -33,7 +36,13 @@ public final class EntityBlockGeometryRunner {
 
 	private final EntityBlockGeometrySourceRegistry registry;
 	private final List<EntityBlockGeometrySource> builtInSources;
-	private final Set<String> warnedSourceIds = new HashSet<>();
+	private final Set<String> warnedFailureKeys = new HashSet<>();
+	private final WarningSink warningSink;
+
+	@FunctionalInterface
+	interface WarningSink {
+		void warn(String message, Throwable failure);
+	}
 
 	/**
 	 * Creates a runner whose fixed sources are supplied explicitly. The
@@ -45,10 +54,21 @@ public final class EntityBlockGeometryRunner {
 		EntityBlockGeometrySource blockEntityRendererSource,
 		EntityBlockGeometrySource bakedModelSource
 	) {
+		this(registry, blockEntityRendererSource, bakedModelSource,
+			EntityBlockGeometryRunner::warnGlobally);
+	}
+
+	EntityBlockGeometryRunner(
+		EntityBlockGeometrySourceRegistry registry,
+		EntityBlockGeometrySource blockEntityRendererSource,
+		EntityBlockGeometrySource bakedModelSource,
+		WarningSink warningSink
+	) {
 		this.registry = Objects.requireNonNull(registry, "registry");
 		this.builtInSources = List.of(
 			Objects.requireNonNull(blockEntityRendererSource, "blockEntityRendererSource"),
 			Objects.requireNonNull(bakedModelSource, "bakedModelSource"));
+		this.warningSink = Objects.requireNonNull(warningSink, "warningSink");
 	}
 
 	/**
@@ -78,32 +98,32 @@ public final class EntityBlockGeometryRunner {
 		for (EntityBlockGeometrySource source : allowedSources) {
 			EntityBlockGeometryContext context = null;
 			try {
-				// A fresh context is important: its deferred sink belongs to exactly
-				// one source attempt, so an earlier successful commit cannot close or
-				// otherwise block a later source for the same target.
+				// A fresh context is important: a source must observe one immutable
+				// attempt snapshot and must not retain live render state across calls.
 				context = contextFactory.get();
 			} catch (Exception | LinkageError | AssertionError failure) {
-				Global.warnException(
-					"entity block geometry attempt failed; category=context-creation",
+				String sourceId = safeSourceId(source);
+				warnOnce(
+					"context-creation:" + sourceId,
+					() -> "entity block geometry attempt failed; id=" + sourceId
+						+ "; category=context-creation; context=<unavailable>",
 					failure);
 				continue;
 			}
 
 			if (context == null) {
-				Global.LOGGER.warn("entity block geometry attempt failed; category=null-context");
+				String sourceId = safeSourceId(source);
+				warnOnce(
+					"null-context:" + sourceId,
+					() -> "entity block geometry attempt failed; id=" + sourceId
+						+ "; category=null-context; context=null",
+					null);
 				continue;
 			}
 
-			try {
-				EntityBlockGeometryOutcome outcome = attempt(source, context);
-				if (outcome == EntityBlockGeometryOutcome.RENDERED) {
-					rendered = true;
-				}
-			} finally {
-				// Clean up an uncommitted private sink without imposing any sink
-				// contract on sources that render through another backend. A
-				// successful deferred commit remains published by the state.
-				context.lineSink().abort();
+			EntityBlockGeometryOutcome outcome = attempt(source, context);
+			if (outcome == EntityBlockGeometryOutcome.RENDERED) {
+				rendered = true;
 			}
 		}
 
@@ -119,12 +139,27 @@ public final class EntityBlockGeometryRunner {
 			return outcome == null ? EntityBlockGeometryOutcome.FAILED : outcome;
 		} catch (Exception | LinkageError | AssertionError failure) {
 			String sourceId = safeSourceId(source);
-			if (warnedSourceIds.add(sourceId)) {
-				Global.warnException(
-					"entity block geometry source failed; id=" + sourceId + "; category=attempt",
-					failure);
-			}
+			warnOnce(
+				"attempt:" + sourceId,
+				() -> "entity block geometry source failed; id=" + sourceId
+					+ "; category=attempt; context=" + context,
+				failure);
 			return EntityBlockGeometryOutcome.FAILED;
+		}
+	}
+
+	void warnOnce(String key, Supplier<String> message, Throwable failure) {
+		if (!warnedFailureKeys.add(key)) {
+			return;
+		}
+		warningSink.warn(message.get(), failure);
+	}
+
+	private static void warnGlobally(String message, Throwable failure) {
+		if (failure == null) {
+			Global.LOGGER.warn(message);
+		} else {
+			Global.LOGGER.warn(message, failure);
 		}
 	}
 

@@ -33,7 +33,6 @@ import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 
 import static nx.pingwheel.common.Global.LOGGER;
-import static nx.pingwheel.common.Global.warnException;
 
 /**
  * Main-thread model-outline pass: renders the vanilla model glow for winning
@@ -68,36 +67,35 @@ import static nx.pingwheel.common.Global.warnException;
  *       shifted models glow exactly where they appear in the world.</li>
  * </ul>
  *
- * <p>Every attempt writes exclusively through an {@link OutlineOnlyBufferSource}
- * adapter (never the normal world buffer and never any shared vanilla
- * buffer): each attempt creates its own transient {@link ByteBufferBuilder}
- * and its own {@code MultiBufferSource.immediate(...)} source around it, so a
- * failure that left an incomplete vertex is discarded together with the
- * attempt-local buffer and can never corrupt a batch that vanilla (or any
- * other code path) will later flush. The adapter applies the winning ping
- * type's opaque marker color to every vertex itself. A render-type switch
- * inside one attempt can make the local immediate source synchronously draw
- * an earlier local batch before the explicit final flush; if a later
- * operation in that same attempt then fails, the VoxelShape fallback may
- * overlap that already-drawn partial model for one frame only — the outline
- * target clears next frame and the vanilla buffer remains untouched. All
- * local-buffer draws, flushes, and closes run synchronously on the render
- * thread: every vertex written is submitted or discarded before the attempt
- * returns, so attempt-local state can never outlive the attempt.
+	 * <p>Built-in BER/baked attempts write exclusively through an
+	 * {@link OutlineOnlyBufferSource} backed by a fresh transient
+	 * {@link ByteBufferBuilder}, so a recoverable failure discards the complete
+	 * attempt-local buffer. Optional sources may use a different strategy: the
+	 * Flywheel mask stages fixed per-texture batches first and only then commits
+	 * them to vanilla's shared {@code OutlineBufferSource}. That shared source
+	 * cannot roll back a recoverable failure after one or more vertices have been
+	 * written; such a source is recorded as rendered for this frame so the
+	 * VoxelShape fallback cannot overlay the partial mask, and it is retried on
+	 * the next frame. A fatal JVM/resource error still propagates.
+	 * The adapter applies the winning ping type's opaque marker color to every
+	 * vertex itself. All local-buffer work and the shared commit run
+	 * synchronously on the render thread.
  *
- * <p>Attempts that throw or emit zero vertices are fail-soft: the key is
- * not recorded and the late VoxelShape fallback covers it. Only
+	 * <p>Built-in attempts that throw or emit zero vertices are fail-soft: the
+	 * key is not recorded and the late VoxelShape fallback covers it. An
+	 * optional shared-buffer attempt that has already written a vertex is
+	 * recorded for this frame even when its recoverable commit exception leaves
+	 * an incomplete mask; the fallback is suppressed for that frame and the
+	 * attempt is retried normally on the next frame. Only
  * {@link Exception}s, {@link LinkageError}s, and {@link AssertionError}s are
  * caught — application, linkage, and assertion failures are quarantined —
  * while resource and JVM errors ({@code OutOfMemoryError},
  * {@code StackOverflowError}, {@code InternalError}/{@code VirtualMachineError},
  * {@code ThreadDeath}) propagate. Logging is aggregated per frame (debug)
  * and at most once per
- * block registry id (warn); never per-frame per-block spam. Warn messages
- * report only the fixed route/stage context plus the bounded safe exception
- * report — never the throwable message, block registry id, position, or name,
- * consistent with the client logging policy. No world, team, scoreboard, or
- * global glowing state is ever
+ * block registry id (warn); never per-frame per-block spam. Diagnostics may
+ * include complete target/component and exception details. No world, team,
+ * scoreboard, or global glowing state is ever
  * mutated; optional-mod block entity classes are never referenced directly.
  */
 public final class VirtualBlockDisplayRenderer {
@@ -161,7 +159,8 @@ public final class VirtualBlockDisplayRenderer {
 	public void render(
 		ClientLevel level,
 		Camera camera,
-		float partialTick,
+		float builtInPartialTick,
+		float flywheelPartialTick,
 		BlockOutlineState state,
 		BlockModelOutlineState frameState
 	) {
@@ -210,11 +209,11 @@ public final class VirtualBlockDisplayRenderer {
 			boolean success = switch (BlockModelOutlineRoute.route(spec.targetTypeId(), nativeGlowMatches)) {
 				case ENTITY_BLOCK -> renderEntityBlock(
 					level, pos, blockState, spec, blockEntityDispatcher, entityDispatcher,
-					cameraPosition, partialTick, blockKey);
+					cameraPosition, builtInPartialTick, flywheelPartialTick, blockKey);
 				case BLOCK_DISPLAY -> renderBlockDisplay(
 					level, pos, blockState, entityDispatcher,
-					cameraPosition, partialTick,
-					spec.argbColor(), blockKey.blockRegistryId())
+					cameraPosition, builtInPartialTick,
+					spec.argbColor(), blockKey.blockRegistryId(), blockKey)
 					== EntityBlockGeometryOutcome.RENDERED;
 				case VOXEL -> false;
 			};
@@ -247,7 +246,8 @@ public final class VirtualBlockDisplayRenderer {
 		BlockEntityRenderDispatcher blockEntityDispatcher,
 		EntityRenderDispatcher entityDispatcher,
 		Vec3 cameraPosition,
-		float partialTick,
+		float builtInPartialTick,
+		float flywheelPartialTick,
 		TargetKey.BlockKey targetKey
 	) {
 		// Read the live local mode for every entity-block render attempt. It is
@@ -263,13 +263,14 @@ public final class VirtualBlockDisplayRenderer {
 				level.getBlockEntity(pos),
 				spec.argbColor(),
 				cameraPosition,
-				partialTick,
+				builtInPartialTick,
+				FlywheelRenderClock.maskPartialTick(builtInPartialTick, flywheelPartialTick),
 				LevelRenderer.getLightColor(level, pos),
 				entityDispatcher,
 				blockEntityDispatcher,
 				Minecraft.getInstance().levelRenderer,
 				targetKey,
-				DeferredEntityBlockGeometryState.INSTANCE.open(targetKey)));
+				BlockModelOutlineState.INSTANCE.frameId()));
 	}
 
 	/**
@@ -329,7 +330,9 @@ public final class VirtualBlockDisplayRenderer {
 				return EntityBlockGeometryOutcome.RENDERED;
 			}
 		} catch (Exception | LinkageError | AssertionError throwable) {
-			recordFailure(failureRegistryId(context), FailureRoute.BLOCK_ENTITY, stage, throwable);
+			recordFailure(
+				failureRegistryId(context), context.blockPos(), context.blockState(),
+				context.targetKey(), context.blockEntity(), FailureRoute.BLOCK_ENTITY, stage, throwable);
 			return EntityBlockGeometryOutcome.FAILED;
 		} finally {
 			if (posePushed) {
@@ -362,7 +365,8 @@ public final class VirtualBlockDisplayRenderer {
 		Vec3 cameraPosition,
 		float partialTick,
 		int argbColor,
-		String failureRegistryId
+		String failureRegistryId,
+		TargetKey.BlockKey targetKey
 	) {
 		return renderBlockDisplay(
 			level,
@@ -373,7 +377,8 @@ public final class VirtualBlockDisplayRenderer {
 			partialTick,
 			() -> LevelRenderer.getLightColor(level, pos),
 			argbColor,
-			failureRegistryId);
+			failureRegistryId,
+			targetKey);
 	}
 
 	private EntityBlockGeometryOutcome renderBlockDisplay(
@@ -385,7 +390,8 @@ public final class VirtualBlockDisplayRenderer {
 		float partialTick,
 		IntSupplier packedLightSupplier,
 		int argbColor,
-		String failureRegistryId
+		String failureRegistryId,
+		TargetKey.BlockKey targetKey
 	) {
 		if (dispatcher == null) {
 			return EntityBlockGeometryOutcome.EMPTY;
@@ -479,7 +485,9 @@ public final class VirtualBlockDisplayRenderer {
 			// attempt rebuilds it from scratch.
 			cachedDisplay = null;
 			cachedLevel = null;
-			recordFailure(failureRegistryId, FailureRoute.BLOCK_DISPLAY, stage, throwable);
+			recordFailure(
+				failureRegistryId, pos, blockState, targetKey, Display.BlockDisplay.class,
+				FailureRoute.BLOCK_DISPLAY, stage, throwable);
 			return EntityBlockGeometryOutcome.FAILED;
 		}
 	}
@@ -501,7 +509,8 @@ public final class VirtualBlockDisplayRenderer {
 			context.partialTick(),
 			() -> context.packedLight(),
 			context.argbColor(),
-			failureRegistryId(context));
+			failureRegistryId(context),
+			context.targetKey());
 	}
 
 	/**
@@ -521,8 +530,9 @@ public final class VirtualBlockDisplayRenderer {
 		} catch (Exception | LinkageError | AssertionError throwable) {
 			if (!displayCreationWarned) {
 				displayCreationWarned = true;
-				warnException(
-					"unable to create virtual block display; category=display-creation",
+				LOGGER.warn(
+					() -> "unable to create virtual block display; stage=display-creation; class="
+						+ Display.BlockDisplay.class.getName(),
 					throwable);
 			}
 
@@ -544,26 +554,65 @@ public final class VirtualBlockDisplayRenderer {
 	/**
 	 * Records a fail-soft model-outline attempt failure: one aggregate count
 	 * for the frame's debug log, and a single session-level warn per block
-	 * registry id (the id keys the warn-once bookkeeping only). The warn
- * message reports only the route, the failure stage ({@code render} or
- * {@code flush}), and a bounded, message-free, sanitized report of the
- * throwable's causal and suppressed stacks: exception class names,
- * relationships, and selected source-frame fields. It never includes
- * throwable messages or payload data, the block registry id, position, or
- * name — consistent with the client logging policy, so no per-frame warning
- * spam occurs.
+	 * registry id (the id keys the warn-once bookkeeping only). The lazily
+	 * preformatted message includes the complete target, registry, position,
+	 * source/block class, failure stage ({@code render} or {@code flush}), and
+	 * exception class; the original throwable is attached so its complete
+	 * causal/suppressed stack is retained. The session-level warning still
+	 * prevents per-frame warning spam.
 	 */
 	private void recordFailure(
-		String registryId, FailureRoute route, FailureStage stage, Throwable throwable
+		String registryId,
+		BlockPos position,
+		BlockState blockState,
+		TargetKey.BlockKey targetKey,
+		Object sourceTarget,
+		FailureRoute route,
+		FailureStage stage,
+		Throwable throwable
 	) {
 		frameFailures.merge(registryId, 1, Integer::sum);
 
 		if (warnOnceRegistryIds.add(registryId)) {
-			warnException(
-				"block outline model pass failed; route=" + route.label
-					+ "; stage=" + stage.label + "; voxel fallback applied",
+			LOGGER.warn(
+				() -> failureMessage(
+					registryId, position, blockState, targetKey, sourceTarget,
+					route, stage, throwable),
 				throwable);
 		}
+	}
+
+	private static String failureMessage(
+		String registryId,
+		BlockPos position,
+		BlockState blockState,
+		TargetKey.BlockKey targetKey,
+		Object sourceTarget,
+		FailureRoute route,
+		FailureStage stage,
+		Throwable throwable
+	) {
+		String blockClass = blockState == null || blockState.getBlock() == null
+			? "<null>" : blockState.getBlock().getClass().getName();
+		String sourceClass = sourceTarget == null ? "<null>"
+			: sourceTarget instanceof Class<?> type ? type.getName() : sourceTarget.getClass().getName();
+		String target = targetKey == null ? "<unknown>"
+			: "dimension=" + targetKey.dimensionId()
+				+ "; position=" + targetKey.x() + "," + targetKey.y() + "," + targetKey.z()
+				+ "; blockRegistryId=" + targetKey.blockRegistryId();
+		String positionText = position == null
+			? "<null>"
+			: position.getX() + "," + position.getY() + "," + position.getZ();
+		String exceptionClass = throwable == null ? "<null>" : throwable.getClass().getName();
+		return "block outline model pass failed; route=" + route.label
+			+ "; stage=" + stage.label
+			+ "; target=" + target
+			+ "; registry=" + registryId
+			+ "; position=" + positionText
+			+ "; class=" + sourceClass
+			+ "; blockClass=" + blockClass
+			+ "; exceptionClass=" + exceptionClass
+			+ "; voxelFallback=applied";
 	}
 
 	private static String failureRegistryId(EntityBlockGeometryContext context) {

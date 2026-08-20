@@ -33,31 +33,6 @@ class EntityBlockGeometryRunnerTest {
 	}
 
 	@Test
-	void eachSourceGetsAnIndependentDeferredSinkForTheSameTarget() {
-		DeferredEntityBlockGeometryState state = DeferredEntityBlockGeometryState.INSTANCE;
-		TargetKey.BlockKey key = new TargetKey.BlockKey(
-			"minecraft:overworld", 20, 64, 0, "minecraft:stone");
-		state.beginFrame();
-		EntityBlockGeometrySourceRegistry registry = quietRegistry();
-
-		registry.register(deferredSource("test:first", key, 1));
-		registry.register(deferredSource("test:second", key, 2));
-		EntityBlockGeometryRunner runner = new EntityBlockGeometryRunner(
-			registry,
-			EntityBlockGeometrySource.of("test:ber", ignored -> EntityBlockGeometryOutcome.EMPTY),
-			EntityBlockGeometrySource.of("test:baked", ignored -> EntityBlockGeometryOutcome.EMPTY));
-
-		try {
-			assertTrue(runner.run(EntityBlockRenderMode.ALL,
-				() -> context(state.open(key), key)));
-			assertEquals(2, state.linesFor(key).size());
-			assertEquals(2, state.committedLineCount());
-		} finally {
-			state.leave();
-		}
-	}
-
-	@Test
 	void allAllowsOnlyModdedSuccessToSuppressVoxelFallback() {
 		EntityBlockGeometrySourceRegistry registry = quietRegistry();
 		AtomicInteger moddedCalls = new AtomicInteger();
@@ -203,6 +178,29 @@ class EntityBlockGeometryRunnerTest {
 		assertEquals(1, moddedCalls.get());
 	}
 
+	@Test
+	void suppressedWarningDoesNotEvaluateItsLazyContextSupplier() {
+		AtomicInteger supplierCalls = new AtomicInteger();
+		AtomicInteger warningCalls = new AtomicInteger();
+		EntityBlockGeometryRunner runner = new EntityBlockGeometryRunner(
+			quietRegistry(),
+			source("test:ber", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY),
+			source("test:baked", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY),
+			(message, failure) -> warningCalls.incrementAndGet());
+
+		runner.warnOnce("same-failure", () -> {
+			supplierCalls.incrementAndGet();
+			return "complete context";
+		}, null);
+		runner.warnOnce("same-failure", () -> {
+			supplierCalls.incrementAndGet();
+			return "must remain suppressed";
+		}, null);
+
+		assertEquals(1, warningCalls.get());
+		assertEquals(1, supplierCalls.get());
+	}
+
 	private static EntityBlockGeometrySourceRegistry quietRegistry() {
 		return new EntityBlockGeometrySourceRegistry(EntityBlockGeometrySourceRegistry.WarningSink.noop());
 	}
@@ -216,29 +214,6 @@ class EntityBlockGeometryRunnerTest {
 			calls.incrementAndGet();
 			return outcome;
 		});
-	}
-
-	private static EntityBlockGeometrySource deferredSource(
-		String id,
-		TargetKey.BlockKey key,
-		int offset
-	) {
-		return EntityBlockGeometrySource.of(id, context -> {
-			EntityBlockGeometryLineSink sink = context.lineSink();
-			assertTrue(sink.addLine(offset, 0, 0, offset, 1, 0));
-			return sink.commit()
-				? EntityBlockGeometryOutcome.RENDERED
-				: EntityBlockGeometryOutcome.FAILED;
-		});
-	}
-
-	private static EntityBlockGeometryContext context(
-		EntityBlockGeometryLineSink sink,
-		TargetKey.BlockKey key
-	) {
-		return new EntityBlockGeometryContext(
-			null, null, null, null, 0xFFFFFFFF, null, 0.0F, 0,
-			null, null, null, key, sink);
 	}
 
 	private static final class FatalGeometryError extends Error {

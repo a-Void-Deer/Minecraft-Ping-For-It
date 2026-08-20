@@ -16,7 +16,6 @@ import nx.pingwheel.common.client.outline.BlockOutlineLogger;
 import nx.pingwheel.common.client.outline.BlockOutlineRenderer;
 import nx.pingwheel.common.client.outline.BlockOutlineRenderType;
 import nx.pingwheel.common.client.outline.BlockOutlineState;
-import nx.pingwheel.common.client.outline.DeferredEntityBlockGeometryState;
 import nx.pingwheel.common.client.outline.EntityOutlineLogger;
 import nx.pingwheel.common.client.outline.EntityOutlineState;
 import nx.pingwheel.common.client.outline.VirtualBlockDisplayRenderer;
@@ -95,7 +94,6 @@ public class CommonClient {
 		EntityOutlineState.INSTANCE.clear();
 		BlockOutlineState.INSTANCE.clear();
 		BlockModelOutlineState.INSTANCE.clear();
-		DeferredEntityBlockGeometryState.INSTANCE.leave();
 		VirtualBlockDisplayRenderer.INSTANCE.clear();
 
 		// A disconnect while the ping key is still held must not leak the
@@ -230,7 +228,6 @@ public class CommonClient {
 		// successfully emit glow geometry this frame are skipped by the late
 		// VoxelShape fallback pass.
 		BlockModelOutlineState.INSTANCE.beginFrame();
-		DeferredEntityBlockGeometryState.INSTANCE.beginFrame();
 	}
 
 	/**
@@ -276,14 +273,12 @@ public class CommonClient {
 	 * entity-outline {@code endOutlineBatch()} call inside
 	 * {@code renderLevel}.
 	 *
-	 * <p>Each render attempt now draws through its own attempt-local transient
-	 * buffer that is flushed immediately on success, so no vanilla outline
-	 * buffer source is passed, captured, or written to here and a failed
-	 * attempt can never corrupt a vanilla batch. The vanilla entity-outline
-	 * buffer, entity glowing routing, and post-chain are untouched.
-	 * Modded sources that commit deferred line batches are emitted later by
-	 * the custom {@link BlockOutlineRenderType#BLOCK_OUTLINE} pass even when
-	 * this model pass reports the target as successful.
+	 * <p>Built-in attempts still draw through their own attempt-local transient
+	 * buffers. The optional Create/Flywheel source first encodes a complete
+	 * immutable attempt-local mask, then commits its texture batches to the
+	 * vanilla outline buffer without flushing it; vanilla's existing
+	 * {@code endOutlineBatch()} call remains the sole flush point. A failure
+	 * before that commit cannot leave a partial shared-buffer mask.
 	 *
 	 * <p>The {@code LevelRendererMixin} gate ensures this only runs when the
 	 * vanilla entity-outline pipeline is available
@@ -293,7 +288,11 @@ public class CommonClient {
 	 * {@link #renderBlockOutlines(Camera, MultiBufferSource.BufferSource)}
 	 * pass consults to avoid doubling.
 	 */
-	public void renderModelOutlines(Camera camera, float partialTick) {
+	public void renderModelOutlines(
+		Camera camera,
+		float builtInPartialTick,
+		float flywheelPartialTick
+	) {
 		Minecraft game = Game;
 
 		if (game == null || game.level == null) {
@@ -301,7 +300,7 @@ public class CommonClient {
 		}
 
 		VirtualBlockDisplayRenderer.INSTANCE.render(
-			game.level, camera, partialTick,
+			game.level, camera, builtInPartialTick, flywheelPartialTick,
 			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE);
 	}
 
@@ -309,7 +308,8 @@ public class CommonClient {
 	 * Whether the model-outline pass emitted at least one vertex this frame;
 	 * the mixin AFTER the {@code endOutlineBatch()} call uses this to decide
 	 * whether the vanilla entity-outline post-process must run even when no
-	 * vanilla entity glowed.
+	 * vanilla entity glowed. This includes a frame where the Flywheel mask is
+	 * the only native geometry.
 	 */
 	public boolean modelOutlinesEmittedThisFrame() {
 		return BlockModelOutlineState.INSTANCE.emitted();
@@ -338,10 +338,7 @@ public class CommonClient {
 	 * block outlines never creates or flushes an empty batch; and the frame
 	 * is skipped entirely when every current block outline is already
 	 * covered by the model-outline success set (see
-	 * {@link BlockModelOutlineState#successKeys()}) and no deferred source
-	 * batch exists for those keys, so the custom batch is not acquired for
-	 * truly all-glow frames. A deferred-only batch keeps the custom consumer
-	 * alive even when every key is model-covered. The vanilla
+	 * {@link BlockModelOutlineState#successKeys()}). The vanilla
 	 * {@code lines()} batch is never touched. Blocks whose model-outline pass
 	 * succeeded suppress only their VoxelShape geometry.
 	 */
@@ -356,10 +353,7 @@ public class CommonClient {
 			return;
 		}
 
-		boolean hasDeferredLines = DeferredEntityBlockGeometryState.INSTANCE.hasLinesFor(
-			BlockOutlineState.INSTANCE.snapshot().keySet());
-		if (BlockOutlineState.INSTANCE.allCoveredBy(BlockModelOutlineState.INSTANCE.successKeys())
-			&& !hasDeferredLines) {
+		if (BlockOutlineState.INSTANCE.allCoveredBy(BlockModelOutlineState.INSTANCE.successKeys())) {
 			return;
 		}
 
@@ -422,10 +416,9 @@ public class CommonClient {
 	 * main thread, so the phase-7 {@link ClientPingRuntime} applies each
 	 * authoritative mutation directly to its main-thread-confined marker
 	 * store. A corrupt packet or a runtime that does not exist (not in a
-	 * world) is dropped safely. Logging happens inside the runtime and only
-	 * ever carries safe fields (marker/request ids, target kind, catalog type
-	 * ids, reasons); names, UUIDs, positions, and registry ids are never
-	 * logged.
+	 * world) is dropped safely. Detailed optional-render diagnostics may carry
+	 * complete target, component, payload, and exception data under their own
+	 * rate control.
 	 */
 	public void onMarkerCreatedPacket(MarkerCreatedS2CPacket packet) {
 		if (packet.isCorrupt() || pingRuntime == null) {

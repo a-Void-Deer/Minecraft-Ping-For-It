@@ -28,13 +28,7 @@ import nx.pingwheel.common.marker.TargetKey;
  *   <li>unloaded blocks are skipped;</li>
  *   <li>the current block state's registry id is compared exactly to the
 	 *       spec's frozen id, so a replaced block type drops the outline;</li>
-	 *   <li>committed deferred source lines are always emitted into this late
-	 *       line batch, including for keys recorded in {@code modelOutlineKeys};
-	 *       those keys suppress only the ordinary VoxelShape fallback, so a
-	 *       successful {@code entity_block} or whitelisted {@code block} glow
-	 *       never doubles the shape outline while deferred modded geometry is
-	 *       not lost;</li>
- *   <li>a same-type {@code BlockState} change re-reads the current shape
+	 *   <li>a same-type {@code BlockState} change re-reads the current shape
  *       every frame instead of caching anything;</li>
  *   <li>null or empty shapes are skipped; no full-cube fallback exists.</li>
  * </ul>
@@ -100,17 +94,9 @@ public final class BlockOutlineRenderer {
 				continue;
 			}
 
-			// Optional deferred sources publish complete camera-relative batches
-			// before this late pass. They are intentionally emitted even when a
-			// model-outline key suppresses the ordinary VoxelShape fallback.
-			for (EntityBlockGeometryLine line :
-				DeferredEntityBlockGeometryState.INSTANCE.linesFor(blockKey)) {
-				VoxelShapeRenderUtil.renderLine(poseStack, lines, line, spec.argbColor());
-			}
-
-			// Native/model success suppresses only VoxelShape generation. Deferred
-			// modded lines above have already been committed in source order and
-			// must remain in the production line consumer for this target.
+			// Native/model success suppresses only VoxelShape generation. The
+			// optional Flywheel source writes its vanilla outline mask before the
+			// entity-outline batch ends, so it needs no late line state here.
 			if (modelOutlineKeys.contains(blockKey)) {
 				continue;
 			}

@@ -19,8 +19,7 @@ import nx.pingwheel.common.marker.TargetKey;
  * target and render data such an adapter may need: level, position, state,
  * block entity when available, public outline color, camera/timing/light
  * values, the level renderer used for exact frame-time parity, the frozen
- * target key, the vanilla render dispatchers, and a per-attempt deferred line
- * sink. It deliberately contains no
+ * target key, the current frame id, and the vanilla render dispatchers. It deliberately contains no
  * marker ownership, network, or other protocol state, and has no dependency
  * on Create, Flywheel, or another optional mod.</p>
  *
@@ -37,17 +36,17 @@ public record EntityBlockGeometryContext(
 	int argbColor,
 	Vec3 cameraPosition,
 	float partialTick,
+	float flywheelPartialTick,
 	int packedLight,
 	EntityRenderDispatcher entityRenderDispatcher,
 	BlockEntityRenderDispatcher blockEntityRenderDispatcher,
 	LevelRenderer levelRenderer,
 	TargetKey.BlockKey targetKey,
-	EntityBlockGeometryLineSink lineSink
+	long frameId
 ) {
 	public EntityBlockGeometryContext {
 		cameraPosition = cameraPosition == null ? Vec3.ZERO : cameraPosition;
 		argbColor = 0xFF000000 | (argbColor & 0x00FFFFFF);
-		lineSink = lineSink == null ? EntityBlockGeometryLineSink.NOOP : lineSink;
 	}
 
 	/** Compatibility constructor for fixed/built-in sources that do not defer lines. */
@@ -64,8 +63,8 @@ public record EntityBlockGeometryContext(
 		BlockEntityRenderDispatcher blockEntityRenderDispatcher
 	) {
 		this(level, blockPos, blockState, blockEntity, argbColor, cameraPosition,
-			partialTick, packedLight, entityRenderDispatcher, blockEntityRenderDispatcher,
-			null, null, EntityBlockGeometryLineSink.NOOP);
+			partialTick, partialTick, packedLight, entityRenderDispatcher, blockEntityRenderDispatcher,
+			null, null, 0L);
 	}
 
 	/**
@@ -79,13 +78,14 @@ public record EntityBlockGeometryContext(
 			null,
 			null,
 			0xFFFFFFFF,
-			Vec3.ZERO,
-			0.0F,
-			0,
+		Vec3.ZERO,
+		0.0F,
+		0.0F,
+		0,
 			null,
 			null,
 			null,
 			null,
-		EntityBlockGeometryLineSink.NOOP);
+		0L);
 	}
 }

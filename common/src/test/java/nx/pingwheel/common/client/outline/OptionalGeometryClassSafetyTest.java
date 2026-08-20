@@ -13,6 +13,6 @@ class OptionalGeometryClassSafetyTest {
 		assertThrows(ClassNotFoundException.class,
 			() -> Class.forName("com.simibubi.create.content.kinetics.base.RotatingInstance"));
 		assertDoesNotThrow(() -> Class.forName(EntityBlockGeometryContext.class.getName()));
-		assertDoesNotThrow(() -> Class.forName(DeferredEntityBlockGeometryState.class.getName()));
+		assertDoesNotThrow(() -> Class.forName(FlywheelSilhouetteMask.class.getName()));
 	}
 }

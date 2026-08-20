@@ -14,7 +14,7 @@ import nx.pingwheel.common.Global;
  * <p>Registrations retain declaration order. The volatile snapshot is replaced
  * atomically with an immutable list, so a render invocation gets an O(1)
  * snapshot reference and never iterates a mutating collection. Duplicate ids
- * keep the first registration and are ignored with a privacy-safe warning. A
+ * keep the first registration and are ignored with a warning. A
  * successful registration returns a handle whose lifetime is scoped to that
  * exact registration; optional integrations must retain and close that handle
  * during teardown. Built-in BER and baked-model sources are owned by
@@ -147,6 +147,11 @@ public final class EntityBlockGeometrySourceRegistry {
 
 		private EntityBlockGeometrySource source() {
 			return source;
+		}
+
+		/** Whether this handle owns an accepted registration rather than a no-op rejection. */
+		public boolean accepted() {
+			return registry != null;
 		}
 
 		@Override

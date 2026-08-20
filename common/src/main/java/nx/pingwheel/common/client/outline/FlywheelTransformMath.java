@@ -7,9 +7,8 @@ package nx.pingwheel.common.client.outline;
  * <p>The shader intentionally rotates model vertices around {@code .5} for
  * Create's rotating and scrolling instances. The helper keeps those formulas
  * independent of optional classes so they can be regression-tested on every
- * loader. Texture scrolling does not change wireframe positions, but its
- * exact coordinate formula is exposed as {@link #scrollOffset} for parity
- * tests and documentation.</p>
+ * loader. It also exposes Create's exact scrolling UV formula for the vanilla
+ * silhouette mask.</p>
  */
 public final class FlywheelTransformMath {
 	private FlywheelTransformMath() {}
@@ -25,6 +24,12 @@ public final class FlywheelTransformMath {
 		float m20, float m21, float m22, float m23,
 		float m30, float m31, float m32, float m33
 	) {}
+
+	/** True when all transformed position components are finite. */
+	public static boolean isFinite(Point point) {
+		return point != null && Float.isFinite(point.x())
+			&& Float.isFinite(point.y()) && Float.isFinite(point.z());
+	}
 
 	public static Point transformed(Point point, Matrix4 matrix) {
 		float x = matrix.m00() * point.x() + matrix.m10() * point.y()
@@ -92,6 +97,18 @@ public final class FlywheelTransformMath {
 	public static float scrollOffset(float speed, float offset, float scale, float renderTicks) {
 		float value = speed * renderTicks + offset;
 		return (value - (float) Math.floor(value)) * scale;
+	}
+
+	/** Exact Create shader coordinate: base + diff + fract(speed * ticks + offset) * scale. */
+	public static float scrollingUv(
+		float coordinate,
+		float diff,
+		float speed,
+		float offset,
+		float scale,
+		float renderTicks
+	) {
+		return coordinate + diff + scrollOffset(speed, offset, scale, renderTicks);
 	}
 
 	public static Point rotateByQuaternion(Point vector, Quaternion quaternion) {

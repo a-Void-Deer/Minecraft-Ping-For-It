@@ -20,9 +20,11 @@ public interface EntityBlockGeometrySource {
 	 * Attempts to render this target into the source's own isolated geometry
 	 * route. The source must not retain the supplied context. A {@link
 	 * EntityBlockGeometryOutcome#RENDERED} result is the source's honest
-	 * responsibility: sources using {@link EntityBlockGeometryContext#lineSink}
-	 * must return it only after a successful commit, while a future source may
-	 * legitimately render through another backend without using that sink.
+	 * responsibility: a source returns it when geometry was emitted for the
+	 * current frame. A shared-buffer commit may have emitted a partial mask that
+	 * cannot be rolled back; that result still suppresses the VoxelShape fallback
+	 * for this frame and is retried on the next frame. A source may render
+	 * through any backend allowed by the current render pass.
 	 */
 	EntityBlockGeometryOutcome attempt(EntityBlockGeometryContext context);
 

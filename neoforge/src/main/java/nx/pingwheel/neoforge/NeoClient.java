@@ -15,11 +15,14 @@ import nx.pingwheel.common.resource.ResourceReloadListener;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 
-import static nx.pingwheel.common.Global.warnException;
+import static nx.pingwheel.common.Global.LOGGER;
 
 public class NeoClient {
 	private static final String CREATE_FLYWHEEL_ADAPTER =
 		"nx.pingwheel.neoforge.integration.create.CreateFlywheelGeometryAdapter";
+	private static Boolean lastCreateDetected;
+	private static Boolean lastFlywheelDetected;
+	private static String lastAdapterState;
 
 	public NeoClient(IEventBus modBus) {
 		CommonClient.INSTANCE.onInit();
@@ -49,21 +52,43 @@ public class NeoClient {
 	 * normal client class-loading path.
 	 */
 	private static void loadCreateFlywheelAdapter() {
-		if (!ModList.get().isLoaded("create") || !ModList.get().isLoaded("flywheel")) {
+		boolean createDetected = ModList.get().isLoaded("create");
+		boolean flywheelDetected = ModList.get().isLoaded("flywheel");
+		if (!Boolean.valueOf(createDetected).equals(lastCreateDetected)
+			|| !Boolean.valueOf(flywheelDetected).equals(lastFlywheelDetected)) {
+			lastCreateDetected = createDetected;
+			lastFlywheelDetected = flywheelDetected;
+			LOGGER.info("create/flywheel detection changed: createDetected={} flywheelDetected={}",
+				createDetected, flywheelDetected);
+		}
+
+		if (!createDetected || !flywheelDetected) {
+			logAdapterState("not-detected");
 			return;
 		}
 
 		try {
+			LOGGER.debug("optional create/flywheel adapter reflection attempt: class={}",
+				CREATE_FLYWHEEL_ADAPTER);
 			Class<?> adapter = Class.forName(CREATE_FLYWHEEL_ADAPTER, true,
 				NeoClient.class.getClassLoader());
 			adapter.getMethod("register").invoke(null);
+			String state = String.valueOf(adapter.getMethod("registrationState").invoke(null));
+			logAdapterState("reflection-success; sourceHandleState=" + state);
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
-			warnException("optional create flywheel adapter unavailable; category=load", failure);
+			logAdapterState("reflection-failure");
+			LOGGER.warn(
+				"optional create/flywheel adapter registration failed; createDetected={} flywheelDetected="
+					+ flywheelDetected + "; sourceHandleState=failed",
+				failure);
 		}
 	}
 
 	private static void closeCreateFlywheelAdapter() {
-		if (!ModList.get().isLoaded("create") || !ModList.get().isLoaded("flywheel")) {
+		boolean createDetected = ModList.get().isLoaded("create");
+		boolean flywheelDetected = ModList.get().isLoaded("flywheel");
+		if (!createDetected || !flywheelDetected) {
+			logAdapterState("not-detected");
 			return;
 		}
 
@@ -71,11 +96,22 @@ public class NeoClient {
 			Class<?> adapter = Class.forName(CREATE_FLYWHEEL_ADAPTER, false,
 				NeoClient.class.getClassLoader());
 			adapter.getMethod("close").invoke(null);
+			logAdapterState("closed");
 		} catch (ClassNotFoundException ignored) {
 			// The optional adapter was never loaded.
+			logAdapterState("not-loaded");
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
-			warnException("optional create flywheel adapter teardown failed; category=close", failure);
+			logAdapterState("close-failure");
+			LOGGER.warn("optional create/flywheel adapter teardown failed; sourceHandleState=close-failure", failure);
 		}
+	}
+
+	private static void logAdapterState(String state) {
+		if (state.equals(lastAdapterState)) {
+			return;
+		}
+		lastAdapterState = state;
+		LOGGER.info("create/flywheel source handle state: {}", state);
 	}
 
 	@SubscribeEvent

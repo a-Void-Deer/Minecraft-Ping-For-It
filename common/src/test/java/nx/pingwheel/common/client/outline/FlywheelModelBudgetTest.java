@@ -22,7 +22,7 @@ class FlywheelModelBudgetTest {
 	}
 
 	@Test
-	void validAggregateCountsStayWithinCheckedPositionAndIndexBudgets() {
+	void validAggregateCountsStayWithinCheckedPositionUvIndexAndTriangleBudgets() {
 		FlywheelModelBudget.Preflight result = FlywheelModelBudget.preflight(List.of(
 			new FlywheelModelBudget.MeshCounts(2, 3),
 			new FlywheelModelBudget.MeshCounts(4, 6)));
@@ -30,14 +30,22 @@ class FlywheelModelBudgetTest {
 		assertTrue(result.valid());
 		assertTrue(result.positionComponentCount() <=
 			FlywheelModelBudget.MAX_POSITION_COMPONENTS_PER_MODEL);
+		assertTrue(result.uvComponentCount() <=
+			FlywheelModelBudget.MAX_UV_COMPONENTS_PER_MODEL);
 		assertTrue(result.indexCount() <= FlywheelModelBudget.MAX_INDICES_PER_MODEL);
+		assertTrue(result.triangleCount() <= FlywheelModelBudget.MAX_TRIANGLES_PER_MODEL);
 	}
 
 	@Test
-	void exactCachedEdgeBudgetRejectsAnOverBudgetModel() {
-		assertTrue(FlywheelModelBudget.edgesWithinModelBudget(
-			FlywheelModelBudget.MAX_EDGES_PER_MODEL));
-		assertFalse(FlywheelModelBudget.edgesWithinModelBudget(
-			(long) FlywheelModelBudget.MAX_EDGES_PER_MODEL + 1));
+	void targetAndFrameTriangleBudgetsRejectOverBudgetPlans() {
+		assertTrue(FlywheelModelBudget.trianglesWithinBudget(
+			FlywheelModelBudget.MAX_TRIANGLES_PER_TARGET,
+			FlywheelModelBudget.MAX_TRIANGLES_PER_TARGET));
+		assertFalse(FlywheelModelBudget.trianglesWithinBudget(
+			(long) FlywheelModelBudget.MAX_TRIANGLES_PER_TARGET + 1,
+			FlywheelModelBudget.MAX_TRIANGLES_PER_TARGET));
+		assertTrue(FlywheelModelBudget.trianglesWithinBudget(
+			FlywheelModelBudget.MAX_TRIANGLES_PER_FRAME,
+			FlywheelModelBudget.MAX_TRIANGLES_PER_FRAME));
 	}
 }

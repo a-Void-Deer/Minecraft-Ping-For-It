@@ -111,40 +111,4 @@ public final class VoxelShapeRenderUtil {
 		});
 	}
 
-	/** Emits one already camera-relative line with the same state as the shape route. */
-	public static void renderLine(
-		PoseStack poseStack,
-		VertexConsumer vertexConsumer,
-		EntityBlockGeometryLine line,
-		int argbColor
-	) {
-		Objects.requireNonNull(poseStack, "poseStack");
-		Objects.requireNonNull(vertexConsumer, "vertexConsumer");
-		Objects.requireNonNull(line, "line");
-
-		if (!line.isFiniteNonZero()) {
-			return;
-		}
-
-		double deltaX = line.x1() - line.x0();
-		double deltaY = line.y1() - line.y0();
-		double deltaZ = line.z1() - line.z0();
-		double length = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
-		float normalX = (float) (deltaX / length);
-		float normalY = (float) (deltaY / length);
-		float normalZ = (float) (deltaZ / length);
-		int red = (argbColor >> 16) & 0xFF;
-		int green = (argbColor >> 8) & 0xFF;
-		int blue = argbColor & 0xFF;
-		PoseStack.Pose pose = poseStack.last();
-
-		vertexConsumer
-			.addVertex(pose, (float) line.x0(), (float) line.y0(), (float) line.z0())
-			.setColor(red, green, blue, 255)
-			.setNormal(pose, normalX, normalY, normalZ);
-		vertexConsumer
-			.addVertex(pose, (float) line.x1(), (float) line.y1(), (float) line.z1())
-			.setColor(red, green, blue, 255)
-			.setNormal(pose, normalX, normalY, normalZ);
-	}
 }
