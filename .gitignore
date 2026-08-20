@@ -134,3 +134,5 @@ bin/
 # debug related files
 debug.ps1
 build_jar.ps1
+common/logs/
+/net/

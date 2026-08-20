@@ -1,75 +1,124 @@
 # Ping For It 0.1.0-pfi-beta1
 
-This changelog describes the player- and server-admin-facing changes for Minecraft 1.21.1.
+Release notes for the Minecraft 1.21.1 beta fork. These notes summarize the
+player- and administrator-visible branch changes rather than listing commits.
 
-## Fork identity and support
+## Fork identity and supported loaders
 
-- The fork is named **Ping For It** and uses `pingforit` as its mod ID.
-- It targets Minecraft 1.21.1 on Fabric, Forge, and NeoForge.
-- Use `/pingforit config` for client and permission-gated server settings.
+- Ping For It uses the new mod ID `pingforit` and its own network protocol.
+- Release artifacts target Minecraft `1.21.1` on Fabric, Forge, and NeoForge
+  with Java `21`.
+- The fork does not migrate the original Ping Wheel protocol or configuration.
+  It does not declare or enforce a conflict block against the original mod;
+  simultaneous installation is not explicitly blocked and interoperability is
+  not guaranteed.
 
-## Target-aware pings
+## Target-aware input
 
-- Target selection follows a deterministic priority: dropped item > entity > block with a block entity or custom shape > block > location.
-- The default type is **Loot** for dropped items, **Go To** for locations, and **Attention** for all other targets.
-- The seven ping types are **Attention**, **Danger**, **Go To**, **Loot**, **Destroy**, **Take**, and **Request**.
-- XP orbs and dragon parts are handled correctly.
+- A target is captured when the ping key is initially pressed and remains fixed
+  through short press, long press, wheel selection, cancellation, and timeout.
+  Entity UUIDs preserve same-dimension movement and teleportation; block
+  identity preserves dimension, position, and block type across state changes.
+- The deterministic target catalog covers dropped items, entities,
+  `entity_block` blocks, ordinary blocks, and the pure location fallback.
+  Blocks with a `BlockEntity` resolve as `entity_block` before generic blocks;
+  missing classification fails soft to `block`.
+- The seven predefined ping types are **Attention**, **Danger**, **Go To**,
+  **Loot**, **Destroy**, **Take**, and **Request**. Each target type has an
+  ordered set and default, so short release is direct while long hold opens the
+  captured target's wheel.
+- The wheel center is Cancel Marker: only the local player's nearest owned
+  marker in the view cone is eligible. Timeout closes the wheel with no action.
+  Gone, dead, cross-dimension, or replaced targets are rejected with the
+  localized target-gone feedback.
 
-## Input and wheel behavior
+## Server-authoritative markers
 
-- The target and ray are captured when the ping key is pressed and stay locked for the interaction; moving the camera does not retarget it.
-- A short release sends the default type. Holding the key for the default 300 ms opens the wheel.
-- Releasing at or beyond the hold threshold before a render frame has actually opened the wheel still commits the captured target's default ping, including when capture finishes after release.
-- The wheel times out after the default 5 seconds with no action, while selecting a sector commits the chosen ping type.
-- The center `X` cancels the nearest marker you own within the original press-ray cone and current dimension.
-- When the ping key is shared with Pick Block, vanilla Pick Block behavior is preserved, and mouse capture is recovered after wheel interaction.
-- An optional Long-Press Compatibility Mode recognizes adjacent claimed clicks as one virtual long press. The first short click is sent immediately; suppressed clicks are never replayed, and the existing wheel/cancel action remains authoritative once the wheel actually opens.
-- Compatibility timing is monotonic and event/frame driven: the adjacent-click slice is inclusive at its boundary, uses the effective 10–300 ms range (5 ms steps), and is capped at half the current wheel-hold duration.
+- The server validates target identity, dimension, range, target type, ping
+  type, lifetime, and marker ownership. It derives display names and target
+  classification instead of trusting client presentation data.
+- Multiple active markers may refer to one target. The latest server-arriving
+  marker controls the visible outline and color; equal arrival times use the
+  larger Marker ID. Removing or expiring the winner recomputes the next winner.
+- The server remains authoritative for create rate limiting. Its active
+  `rateLimit` and `msToRegenerate` policy is synchronized on reconnect and
+  effective configuration changes. The client mirrors only `MarkerCreate` with
+  a courtesy token bucket; a throttled create is dropped, not queued or marked
+  dispatched. Removal and channel updates retain their existing behavior.
+- Rate-controlled Flywheel diagnostics can retain complete target, position,
+  registry, class, material, component, payload, and exception details.
+  Negative or corrupt rate policy values fail safely without toast or action-bar
+  feedback.
 
-## Multiplayer markers and server behavior
+## Rendering, chat, and localization
 
-- Creation and removal are validated by the server: target, range, dimension, and target name are checked, and ownership is required for removal.
-- When several players ping the same target, the latest accepted marker receives visual emphasis without deleting the other owners' markers.
-- Markers expire according to server settings, and an owner's markers are removed on disconnect. Audience channels, team behavior, and current-dimension visibility continue to apply.
-- Rate limiting is authoritative and its policy is synchronized to clients. Rapid create requests are silently dropped rather than queued; removal and channel updates are unaffected.
-- If a target is gone, the user receives target-gone feedback. A missing entity marker freezes at its last known position and resumes tracking if the entity returns.
+- Entity markers outline ordinary entities and dropped items without requiring
+  persistent vanilla glowing or team-state changes. Ping colors drive outlines,
+  wheel borders, and the emphasized ping phrase in chat.
+- Block markers use the native current `VoxelShape` for accurate non-full-cube,
+  through-wall outlines. Whitelisted ordinary blocks use their native model
+  route; `entity_block` targets independently try the live
+  `BlockEntityRenderer` and baked-model geometry before falling back to shape.
+- The client `blockDisplayWhitelist` defaults to exactly `*:*`; the separate
+  `blockShapeBlacklist` defaults to empty, and a blacklist match wins. Strict
+  entries are exact `namespace:block`, namespace wildcard `namespace:*`, global
+  wildcard `*:*`, or block tag `#namespace:tag`; valid entries are combined by
+  union, while invalid or missing content fails closed.
+- Entity-block geometry selection is local and unsynchronized. `ALL` runs the
+  built-in renderer and model sources plus registered optional sources;
+  `COMPATIBLE` runs the built-ins; `VOXEL_SHAPE_ONLY` skips source construction
+  and uses the shape fallback. The default is `COMPATIBLE`, and invalid saved
+  values recover to it.
+- On NeoForge, the optional Create `6.0.10` / Flywheel `1.0.6` adapter provides
+  a vanilla outline-buffer silhouette mask in `ALL` mode. It handles both
+  direct Flywheel instancing and indirect backends, resolves only live states,
+  and loads lazily as a soft compile-only integration. It is beta functionality
+  and remains optional when Create or Flywheel is absent.
+- Chat and target names are localized. Exactly 8 languages are bundled:
+  English (`en_us`), German (`de_de`), Argentine Spanish (`es_ar`), French
+  (`fr_fr`), Polish (`pl_pl`), Turkish (`tr_tr`), Simplified Chinese
+  (`zh_cn`), and Traditional Chinese (`zh_tw`).
 
-## Visual and chat polish
+## Configuration and commands
 
-- Entity outlines are colored without changing vanilla global glow or team state.
-- Block outlines follow the target's shape and model, keeping non-full-cube outlines accurate instead of approximating them as full cubes.
-- The radial wheel has labels, borders, icons, a target name, and a center `X` in a smaller layout.
-- In-world markers can show target names, item icons, direction, owner display names, and team colors, with directional sound.
-- Target names use `Custom Name (Vanilla Name)`, with `HERE` for location pings and `Unknown Target` as the fallback.
-- Chat uses a server-derived sentence, with the ping phrase colored according to the selected ping type.
+- The client settings screen now includes the server configuration section for
+  connected players with permission level 3. Server values are edited through
+  the authoritative GUI and rate policy changes are propagated to clients.
+- The former standalone server command was removed. `/pingforit` and
+  `/pingforit help` show help; `/pingforit config` opens settings; and
+  `/pingforit channel` reads or changes the player's ping channel.
+- Client settings are stored in `config/pingforit.json`; server settings are in
+  `config/pingforit.server.json`. The GUI has no list editor: saving and closing
+  opens the client file for external block-list edits. Changes to those lists
+  apply after a client restart, and reopening settings in the same session does
+  not reload them.
 
-## Configuration
+## Optional compatibility
 
-The ten configurable keys and their bounds are:
+- Optional target content and integrations fail soft when a mod, registry entry,
+  renderer, or backend is missing. Existing compatibility paths for Distant
+  Horizons, Sable, FTB Teams, and Voice Chat remain optional; vanilla team
+  behavior continues to be respected.
+- The Create/Flywheel adapter is NeoForge-only and does not make Create or
+  Flywheel a hard runtime requirement for other loaders or ordinary pings.
 
-- `wheelHoldMillis`: 300 ms by default; 100–2000 ms.
-- `longPressCompatibilityMode`: disabled by default; when enabled, adjacent claimed clicks can form a virtual long press without changing normal short-click timing.
-- `longPressCompatibilitySliceMillis`: 20 ms by default; nominally 10–300 ms in 5 ms steps, with an effective maximum of `min(300, floor((wheelHoldMillis / 2) / 5) * 5)` and a safe lower bound.
-- `wheelTimeoutMillis`: 5000 ms by default; 1000–30000 ms.
-- `cancelHalfConeAngleDegrees`: 5° by default; 1–45°.
-- `wheelInnerRadius`: 14 px by default; 6–120 px.
-- `wheelOuterRadius`: 39 px by default; 20–300 px.
-- `wheelOpacity`: 100% by default; 0–100%.
-- `wheelFontSize`: 100% by default; 10–500%, in 10% steps. This legacy JSON key now controls wheel option labels.
-- `wheelTargetFontSize`: 100% by default; 10–500%, in 10% steps. This controls the captured target name.
+## Tests and build verification
 
-The wheel keeps an 8 px minimum annulus. The hold-time setting is snapshotted at key press, the timeout setting is snapshotted when the wheel opens, and visual settings update live. The hold-time UI step is 10 ms and the timeout UI step is 200 ms. Opacity 0 hides the wheel without disabling selection. Out-of-range JSON values are clamped and logged at WARN with the key, supplied value, and effective value. The settings screen now includes a Reset All button with confirmation; confirming replaces and persists the complete default config, while canceling preserves current values. The settings screen scrolls correctly and keeps its footer visible.
+- Focused automated coverage exercises target priority and identity, input
+  state transitions and wheel timeout, marker conflict/cancellation behavior,
+  packet round trips, server configuration synchronization, rate limiting,
+  whitelist grammar, entity-block modes, optional-class safety, localization,
+  and Flywheel transform/silhouette planning.
+- The release verification path builds the supported loader artifacts and runs
+  `verifyModIdentity` for the fork ID and required resources. Manual in-game
+  checks remain necessary for rendering, multiplayer interaction, and optional
+  integrations.
 
-## Compatibility and localization
+## Known beta limitations
 
-- Distant Horizons integration was added for targeting distant terrain.
-- Compatibility with Sable, FTB Teams, Voice Chat, and vanilla teams is retained and hardened; optional integrations fail soft when absent.
-- Debug and configuration logs avoid exposing player identity, target details, channel names, or server/channel mappings.
-- High-precision ping input is observed at client-thread `KeyMapping` press/release edges and advanced once per rendered frame using monotonic time; client tick input quantization is no longer used for the interaction.
-- Compatibility transition logs contain only scalar timing, threshold, count, and result values. All nine bundled languages include the Reset All, split wheel-font, and long-press compatibility labels/tooltips.
-
-## Known behavior
-
-- This fork provides no old Ping Wheel protocol interoperability or configuration migration. Simultaneous installation is not explicitly blocked, but interoperability is not guaranteed.
-- Most rejected or throttled sends are intentionally silent; target-gone feedback is the exception.
-- Wheel opacity 0 hides the wheel while leaving its selection behavior interactive.
+- This is a beta release; loader-specific rendering, multiplayer synchronization,
+  Create/Flywheel silhouettes, and hold/wheel behavior still require manual
+  validation in real game sessions.
+- Cross-dimension entity tracking and Immersive Portals support are not part of
+  this release. There is no backward protocol migration or interoperability
+  guarantee with the original Ping Wheel installation.
