@@ -1,6 +1,8 @@
 package nx.pingwheel.common.client.outline;
 
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.ExperienceOrb;
+import net.minecraft.world.entity.boss.EnderDragonPart;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.interaction.MinecraftEntityTargetAdapter;
 
