@@ -17,11 +17,12 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConfigHandlerResetTest {
+	private static final String CURRENT_VERSION = "1.0.0-pfi-beta1";
 
 	@Test
 	void saveRecreatesADeletedConfigEvenWhenTheInMemoryConfigIsUnchanged(@TempDir Path tempDir) throws IOException {
 		Path configPath = tempDir.resolve("client.json");
-		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
 
 		assertTrue(handler.saveSafely());
 		Files.delete(configPath);
@@ -33,7 +34,7 @@ class ConfigHandlerResetTest {
 	@Test
 	void resetReplacesTheWholeConfigAndPersistsDefaults(@TempDir Path tempDir) throws IOException {
 		Path configPath = tempDir.resolve("client.json");
-		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
 		ClientConfig changed = handler.getConfig();
 		changed.setPingVolume(1);
 		changed.setDirectionIndicatorVisible(false);
@@ -76,7 +77,7 @@ class ConfigHandlerResetTest {
 		byte[] original = invalidConfig();
 		Files.write(configPath, original);
 
-		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
 		handler.load();
 
 		ClientConfig defaults = new ClientConfig();
@@ -110,7 +111,7 @@ class ConfigHandlerResetTest {
 			.getBytes(StandardCharsets.UTF_8);
 		Files.write(configPath, original);
 
-		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
 		handler.load();
 
 		String[] lines = Files.readString(configPath, StandardCharsets.UTF_8).split("\\R", 4);
@@ -132,7 +133,8 @@ class ConfigHandlerResetTest {
 			configPath,
 			(source, backupPath, originalBytes) -> {
 				throw new IOException("test backup failure with private path " + source);
-			});
+			},
+			CURRENT_VERSION);
 
 		handler.load();
 		assertEquals(new ClientConfig(), handler.getConfig());
@@ -166,7 +168,8 @@ class ConfigHandlerResetTest {
 					originalBytes,
 					StandardOpenOption.CREATE_NEW,
 					StandardOpenOption.WRITE);
-			});
+			},
+			CURRENT_VERSION);
 
 		handler.load();
 		handler.resetToDefaults();
@@ -182,7 +185,8 @@ class ConfigHandlerResetTest {
 	}
 
 	private static byte[] invalidConfig() {
-		return "{\n  \"blockDisplayWhitelist\": [\"minecraft:stone:*\"]\n}\n"
+		return ("{\n  \"pingforit-version\": \"" + CURRENT_VERSION + "\",\n"
+			+ "  \"blockDisplayWhitelist\": [\"minecraft:stone:*\"]\n}\n")
 			.getBytes(StandardCharsets.UTF_8);
 	}
 }
