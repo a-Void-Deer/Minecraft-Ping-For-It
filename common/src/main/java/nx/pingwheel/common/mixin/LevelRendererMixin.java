@@ -10,6 +10,9 @@ import net.minecraft.client.renderer.PostChain;
 import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.world.entity.Entity;
 import nx.pingwheel.common.CommonClient;
+import nx.pingwheel.common.client.outline.EntityOutlineFrameState;
+import nx.pingwheel.common.client.outline.EntityOutlineRenderDecision;
+import nx.pingwheel.common.client.outline.EntityOutlineSourceRegistry;
 import nx.pingwheel.common.client.outline.EntityOutlineState;
 import nx.pingwheel.common.interaction.MinecraftEntityTargetAdapter;
 import nx.pingwheel.common.render.WorldRenderContext;
@@ -63,21 +66,33 @@ public abstract class LevelRendererMixin {
 	/**
 	 * Runs the model-outline pass (actual {@code BlockEntity} geometry,
 	 * virtual {@code BlockDisplay} glow, and the optional Flywheel silhouette
-	 * mask) immediately before the vanilla
-	 * {@code OutlineBufferSource.endOutlineBatch()} call. Built-in attempts use
-	 * transient local buffers; the Flywheel source writes the vanilla outline
-	 * buffer but never flushes it. Gated on
-	 * {@code shouldShowEntityOutlines()}: without the shader/entity-outline
-	 * target nothing is emitted and every block keeps the late VoxelShape
-	 * fallback.
+	 * mask) and the registered entity-outline sources immediately before the
+	 * vanilla {@code OutlineBufferSource.endOutlineBatch()} call. Built-in
+	 * block attempts use transient local buffers; the Flywheel source writes
+	 * the vanilla outline buffer but never flushes it, and the entity-outline
+	 * sources write into the shared vanilla outline buffer (flushed by that
+	 * same vanilla call). The model and entity-outline passes run when either
+	 * vanilla's {@code shouldShowEntityOutlines()} gate or the reflection
+	 * {@code requestOutlineEffect()} probe succeeded this frame, so a block
+	 * model source can establish the outline pipeline too.
 	 */
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/OutlineBufferSource;endOutlineBatch()V"))
 	private void pingForItRenderBlockModels(DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
-		if (this.shouldShowEntityOutlines()) {
+		boolean outlinePipelineAvailable = this.shouldShowEntityOutlines()
+			|| CommonClient.INSTANCE.entityOutlineRequestSucceededThisFrame();
+
+		if (outlinePipelineAvailable) {
 			CommonClient.INSTANCE.renderModelOutlines(
 				camera,
 				deltaTracker.getGameTimeDeltaPartialTick(true),
 				deltaTracker.getGameTimeDeltaPartialTick(false));
+		}
+
+		if (outlinePipelineAvailable) {
+			CommonClient.INSTANCE.renderEntityOutlines(
+				camera,
+				deltaTracker.getGameTimeDeltaPartialTick(true),
+				this.renderBuffers.outlineBufferSource());
 		}
 	}
 
@@ -142,12 +157,26 @@ public abstract class LevelRendererMixin {
 	 * {@link net.minecraft.client.renderer.OutlineBufferSource} and the
 	 * entity-outline post-process flag is set by vanilla itself, exactly as
 	 * for glowing entities; no buffer flushing, post-process trigger, or
-	 * glowing/team mutation happens here.
+	 * glowing/team mutation happens here. Vanilla glowing entities are always
+	 * preserved. The ping-only outline route is suppressed for an entity a
+	 * registered {@link EntityOutlineSourceRegistry} source claims, because
+	 * that source owns the outline for the entity.
 	 */
 	@Redirect(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Minecraft;shouldEntityAppearGlowing(Lnet/minecraft/world/entity/Entity;)Z"))
 	private boolean pingForItShouldEntityAppearGlowing(Minecraft minecraft, Entity entity) {
-		return minecraft.shouldEntityAppearGlowing(entity)
-			|| EntityOutlineState.INSTANCE.shouldOutline(MinecraftEntityTargetAdapter.locatorFor(entity));
+		if (minecraft.shouldEntityAppearGlowing(entity)) {
+			return true;
+		}
+
+		boolean pingOutline = EntityOutlineState.INSTANCE.shouldOutline(
+			MinecraftEntityTargetAdapter.locatorFor(entity));
+		boolean sourceHandlesEntity = pingOutline
+			&& EntityOutlineSourceRegistry.INSTANCE.handlesAny(entity);
+
+		return EntityOutlineRenderDecision.shouldShowPingOutline(
+			pingOutline,
+			EntityOutlineFrameState.INSTANCE.requestSucceeded(),
+			sourceHandlesEntity);
 	}
 
 	/**

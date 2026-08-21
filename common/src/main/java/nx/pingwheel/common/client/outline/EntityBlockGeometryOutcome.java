@@ -8,7 +8,7 @@ package nx.pingwheel.common.client.outline;
  * guarantee.</p>
  */
 public enum EntityBlockGeometryOutcome {
-	/** At least one outline vertex was submitted by this source. */
+	/** At least one outline vertex was submitted by this source, including a partial commit. */
 	RENDERED,
 	/** The source was applicable but submitted no geometry. */
 	EMPTY,

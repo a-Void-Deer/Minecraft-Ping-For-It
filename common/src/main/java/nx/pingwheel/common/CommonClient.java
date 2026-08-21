@@ -7,6 +7,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.OutlineBufferSource;
+import net.minecraft.world.entity.Entity;
+
+import java.util.Map;
+
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
@@ -16,11 +21,21 @@ import nx.pingwheel.common.client.outline.BlockOutlineLogger;
 import nx.pingwheel.common.client.outline.BlockOutlineRenderer;
 import nx.pingwheel.common.client.outline.BlockOutlineRenderType;
 import nx.pingwheel.common.client.outline.BlockOutlineState;
+import nx.pingwheel.common.client.outline.EntityBlockGeometryOutcome;
+import nx.pingwheel.common.client.outline.EntityOutlineContext;
+import nx.pingwheel.common.client.outline.EntityOutlineFrameState;
+import nx.pingwheel.common.client.outline.EntityOutlineLocatorResolver;
 import nx.pingwheel.common.client.outline.EntityOutlineLogger;
+import nx.pingwheel.common.client.outline.EntityOutlineRunner;
+import nx.pingwheel.common.client.outline.EntityOutlineSourceRegistry;
+import nx.pingwheel.common.client.outline.EntityOutlineSpec;
 import nx.pingwheel.common.client.outline.EntityOutlineState;
+import nx.pingwheel.common.client.outline.LevelRendererOutlineRequest;
 import nx.pingwheel.common.client.outline.VirtualBlockDisplayRenderer;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
+import nx.pingwheel.common.domain.EntityLocator;
+import nx.pingwheel.common.interaction.MinecraftEntityTargetAdapter;
 import nx.pingwheel.common.name.ClientTargetNameDecoder;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
@@ -53,6 +68,10 @@ public class CommonClient {
 	private static ClientPingRuntime pingRuntime;
 	private static ClientRateLimitPolicy storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 	private static final InteractionTimeSource INTERACTION_TIME_SOURCE = InteractionTimeSource.system();
+
+	/** Runs the registered entity-outline sources over the production registry. */
+	private static final EntityOutlineRunner ENTITY_OUTLINE_RUNNER =
+		new EntityOutlineRunner(EntityOutlineSourceRegistry.INSTANCE);
 
 	private CommonClient() {}
 
@@ -94,6 +113,7 @@ public class CommonClient {
 		EntityOutlineState.INSTANCE.clear();
 		BlockOutlineState.INSTANCE.clear();
 		BlockModelOutlineState.INSTANCE.clear();
+		EntityOutlineFrameState.INSTANCE.clear();
 		VirtualBlockDisplayRenderer.INSTANCE.clear();
 
 		// A disconnect while the ping key is still held must not leak the
@@ -224,10 +244,12 @@ public class CommonClient {
 		prepareEntityOutlines();
 		prepareBlockOutlines();
 
-		// Fresh per-frame success record for the model-outline pass: keys that
-		// successfully emit glow geometry this frame are skipped by the late
-		// VoxelShape fallback pass.
+		// Fresh per-frame bookkeeping must precede the reflection probe. The
+		// probe runs after both entity and block snapshots are prepared so a
+		// block-only frame can establish the shared outline pipeline too.
+		EntityOutlineFrameState.INSTANCE.beginFrame();
 		BlockModelOutlineState.INSTANCE.beginFrame();
+		requestEntityOutlineEffect();
 	}
 
 	/**
@@ -268,6 +290,28 @@ public class CommonClient {
 	}
 
 	/**
+	 * Invokes the cached reflection {@code requestOutlineEffect()} probe on the
+	 * current {@link LevelRenderer} once per frame, only while live entity
+	 * entity or block outlines exist. A missing method (the normal vanilla 1.21.1 case) records
+	 * {@code false}; a successful invocation records {@code true} on the frame
+	 * state so the model and entity-outline passes in {@code LevelRendererMixin}
+	 * can run even when vanilla's {@code shouldShowEntityOutlines()} gate is off.
+	 */
+	private static void requestEntityOutlineEffect() {
+		Minecraft game = Game;
+
+		if (game == null || game.levelRenderer == null
+			|| (!EntityOutlineState.INSTANCE.hasOutlines()
+				&& !BlockOutlineState.INSTANCE.hasOutlines())) {
+			EntityOutlineFrameState.INSTANCE.markRequestSucceeded(false);
+			return;
+		}
+
+		EntityOutlineFrameState.INSTANCE.markRequestSucceeded(
+			LevelRendererOutlineRequest.request(game.levelRenderer));
+	}
+
+	/**
 	 * Runs the model-outline pass (actual {@code BlockEntity} geometry and
 	 * virtual {@code BlockDisplay} glow) immediately before the vanilla
 	 * entity-outline {@code endOutlineBatch()} call inside
@@ -305,23 +349,89 @@ public class CommonClient {
 	}
 
 	/**
-	 * Whether the model-outline pass emitted at least one vertex this frame;
-	 * the mixin AFTER the {@code endOutlineBatch()} call uses this to decide
-	 * whether the vanilla entity-outline post-process must run even when no
-	 * vanilla entity glowed. This includes a frame where the Flywheel mask is
-	 * the only native geometry.
+	 * Runs the registered entity-outline sources for every live selected
+	 * entity, immediately before the vanilla {@code OutlineBufferSource
+	 * endOutlineBatch()} call, writing silhouette geometry into the shared
+	 * vanilla outline buffer (flushed by that same vanilla call).
+	 *
+	 * <p>Each entity locator is resolved to its canonical live entity
+	 * ({@link EntityOutlineLocatorResolver}); unresolved or mismatched locators
+	 * are skipped. Every resolved entity gets one fresh
+	 * {@link EntityOutlineContext} carrying the selected
+	 * {@link EntityOutlineSpec}, the camera position, the frame partial tick,
+	 * the current frame id, and the shared outline buffer, then the runner
+	 * iterates the registry in order. If any source reports
+	 * {@link EntityBlockGeometryOutcome#RENDERED}, the frame state is marked
+	 * emitted so the combined post-process handoff runs the entity-outline
+	 * effect.
 	 */
-	public boolean modelOutlinesEmittedThisFrame() {
-		return BlockModelOutlineState.INSTANCE.emitted();
+	public void renderEntityOutlines(Camera camera, float partialTick, OutlineBufferSource outlineBuffer) {
+		Minecraft game = Game;
+
+		if (game == null || game.level == null || outlineBuffer == null
+			|| !EntityOutlineState.INSTANCE.hasOutlines()) {
+			return;
+		}
+
+		boolean emitted = false;
+
+		for (Map.Entry<EntityLocator, EntityOutlineSpec> entry
+			: EntityOutlineState.INSTANCE.snapshot().entrySet()) {
+			Entity entity = EntityOutlineLocatorResolver.resolve(entry.getKey(), GameContext::getEntity);
+
+			if (entity == null) {
+				continue;
+			}
+
+			EntityOutlineContext context = new EntityOutlineContext(
+				game.level,
+				entity,
+				entry.getValue(),
+				camera.getPosition(),
+				partialTick,
+				EntityOutlineFrameState.INSTANCE.frameId(),
+				outlineBuffer);
+
+			if (ENTITY_OUTLINE_RUNNER.run(context) == EntityBlockGeometryOutcome.RENDERED) {
+				emitted = true;
+			}
+		}
+
+		if (emitted) {
+			EntityOutlineFrameState.INSTANCE.markEmitted();
+		}
 	}
 
 	/**
-	 * Drops the per-frame model-outline success record; used when the outline
-	 * pipeline turned out to be unavailable after all, so every block falls
-	 * back to the VoxelShape outline instead of silently disappearing.
+	 * Whether the cached reflection {@code requestOutlineEffect()} probe
+	 * succeeded this frame. The {@code LevelRendererMixin} entity-source gate
+	 * combines this with vanilla's {@code shouldShowEntityOutlines()} so the
+	 * entity-outline sources run when either path is live.
+	 */
+	public boolean entityOutlineRequestSucceededThisFrame() {
+		return EntityOutlineFrameState.INSTANCE.requestSucceeded();
+	}
+
+	/**
+	 * Whether the model-outline pass and/or the entity-outline sources emitted
+	 * at least one vertex this frame; the mixin AFTER the
+	 * {@code endOutlineBatch()} call uses this to decide whether the vanilla
+	 * entity-outline post-process must run even when no vanilla entity glowed.
+	 */
+	public boolean modelOutlinesEmittedThisFrame() {
+		return BlockModelOutlineState.INSTANCE.emitted()
+			|| EntityOutlineFrameState.INSTANCE.emitted();
+	}
+
+	/**
+	 * Drops the per-frame outline success records (model and entity); used
+	 * when the outline pipeline turned out to be unavailable after all, so
+	 * every block falls back to the VoxelShape outline instead of silently
+	 * disappearing.
 	 */
 	public void resetModelOutlinesForFrame() {
 		BlockModelOutlineState.INSTANCE.beginFrame();
+		EntityOutlineFrameState.INSTANCE.beginFrame();
 	}
 
 	/**

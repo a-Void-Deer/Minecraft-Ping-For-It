@@ -95,6 +95,16 @@ public final class EntityOutlineState {
 	}
 
 	/**
+	 * Whether the current snapshot contains at least one entity outline. The
+	 * frame bridge checks this before invoking the reflection
+	 * {@code requestOutlineEffect()} probe and before running the entity-outline
+	 * sources, so an empty frame never requests or renders anything.
+	 */
+	public boolean hasOutlines() {
+		return !specs.isEmpty();
+	}
+
+	/**
 	 * Whether the entity with {@code entityId} currently controls a visible
 	 * outline.
 	 */
@@ -127,11 +137,12 @@ public final class EntityOutlineState {
 	 * ascending {@link nx.pingwheel.common.domain.MarkerId} order produced by
 	 * {@link EntityOutlineSelection#select}.
 	 *
-	 * <p>Mainly a test seam: production callers query per entity via
-	 * {@link #shouldOutline} and {@link #colorFor} instead of iterating the
-	 * snapshot.
+	 * <p>The frame bridge iterates this snapshot in this exact order to resolve
+	 * live entities and build per-entity source contexts; production callers
+	 * query per entity via {@link #shouldOutline} and {@link #colorFor}
+	 * instead.
 	 */
-	Map<EntityLocator, EntityOutlineSpec> snapshot() {
+	public Map<EntityLocator, EntityOutlineSpec> snapshot() {
 		return specs;
 	}
 

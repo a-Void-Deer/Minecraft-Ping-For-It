@@ -7,6 +7,7 @@ import java.util.Objects;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.resources.ResourceLocation;
 
 /**
  * Outline-only {@link MultiBufferSource} adapter around a caller-owned,
@@ -34,9 +35,11 @@ import net.minecraft.client.renderer.RenderType;
  * </ul>
  *
  * <p>Every vertex that reaches the local source through this adapter is
- * counted; outline-less geometry never reaches the source, so
- * {@link #vertexCount()} reports only actual model-outline vertices. A zero
- * count means the route produced no silhouette.
+ * counted, including fallback geometry, so {@link #vertexCount()} reports only
+ * silhouette vertices. A zero count means the route produced no silhouette.
+ * When a non-negative max-vertex budget was supplied, the adapter throws the
+ * dedicated recoverable {@link BudgetExceededException} once the next write
+ * would push the total past the cap.</p>
  *
  * <p>Color: the adapter applies one opaque marker color, supplied once at
  * construction, to every vertex itself — exactly mirroring the vanilla 1.21.1
@@ -60,7 +63,10 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 
 	private final MultiBufferSource source;
 	private final int markerColor;
+	private final ResourceLocation fallbackTexture;
+	private final int maxVertices;
 	private final List<VertexCountingConsumer> issuedConsumers = new ArrayList<>();
+	private int totalVertices;
 
 	/**
 	 * @param source                    the attempt-local buffer source to
@@ -73,8 +79,46 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 	 *                                  applied to every emitted vertex
 	 */
 	public OutlineOnlyBufferSource(MultiBufferSource source, int markerColor) {
+		this(source, markerColor, null, -1);
+	}
+
+	/**
+	 * @param source                    the attempt-local buffer source to
+	 *                                  issue resolved outline render types
+	 *                                  into; must be created fresh for this
+	 *                                  attempt and never shared across
+	 *                                  attempts or frames
+	 * @param markerColor               the opaque marker color (ARGB; the
+	 *                                  alpha is ignored and forced to 255)
+	 *                                  applied to every emitted vertex
+	 * @param fallbackTexture           when non-null, outline-less geometry
+	 *                                  resolves to
+	 *                                  {@link RenderType#outline(ResourceLocation)}
+	 *                                  for this texture instead of being
+	 *                                  rejected with a no-op consumer, so a
+	 *                                  model pass without an outline variant
+	 *                                  still produces a silhouette mask; when
+	 *                                  {@code null} the original no-op
+	 *                                  rejection is kept
+	 * @param maxVertices               the hard total vertex budget for this
+	 *                                  adapter; once exactly this many vertices
+	 *                                  have been written, the next write throws
+	 *                                  {@link BudgetExceededException}. Use
+	 *                                  {@code -1} for an unbounded adapter.
+	 */
+	public OutlineOnlyBufferSource(
+		MultiBufferSource source,
+		int markerColor,
+		ResourceLocation fallbackTexture,
+		int maxVertices
+	) {
 		this.source = Objects.requireNonNull(source, "source");
 		this.markerColor = markerColor;
+		this.fallbackTexture = fallbackTexture;
+		if (maxVertices < -1) {
+			throw new IllegalArgumentException("maxVertices must be -1 (unbounded) or non-negative: " + maxVertices);
+		}
+		this.maxVertices = maxVertices;
 	}
 
 	@Override
@@ -84,32 +128,77 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 		RenderType outlineType = resolve(renderType);
 
 		if (outlineType == null) {
-			// Outline-less model, hitbox, shadow, and debug geometry cannot
-			// silhouette this model pass, so swallow it without counting.
-			return NoOpVertexConsumer.INSTANCE;
+			if (fallbackTexture != null) {
+				// Outline-less model, hitbox, shadow, and debug geometry still
+				// silhouettes through the fixed fallback texture with the same
+				// fixed color and count, instead of being swallowed.
+				outlineType = RenderType.outline(fallbackTexture);
+			} else {
+				// Outline-less model, hitbox, shadow, and debug geometry cannot
+				// silhouette this model pass, so swallow it without counting.
+				return NoOpVertexConsumer.INSTANCE;
+			}
 		}
 
 		VertexCountingConsumer consumer = new VertexCountingConsumer(
 			source.getBuffer(outlineType),
 			(markerColor >> 16) & 0xFF,
 			(markerColor >> 8) & 0xFF,
-			markerColor & 0xFF);
+			markerColor & 0xFF,
+			this);
 		issuedConsumers.add(consumer);
 		return consumer;
 	}
 
 	/**
 	 * The total number of vertices emitted through this adapter since its
-	 * construction, across every render type issued.
+	 * construction, across every render type issued (including any fallback
+	 * geometry).
 	 */
 	public int vertexCount() {
-		int total = 0;
+		return totalVertices;
+	}
 
-		for (VertexCountingConsumer consumer : issuedConsumers) {
-			total += consumer.vertices;
+	/**
+	 * Registers a vertex write against the shared budget. Called by every
+	 * issued consumer before it forwards a vertex; throws the dedicated
+	 * recoverable {@link BudgetExceededException} once the {@link #maxVertices}
+	 * cap would be exceeded.
+	 */
+	void noteVertexWrite() {
+		int next = totalVertices + 1;
+		if (maxVertices >= 0 && next > maxVertices) {
+			throw new BudgetExceededException(next, maxVertices);
+		}
+		totalVertices = next;
+	}
+
+	/**
+	 * Dedicated, recoverable budget exception: a source that keeps writing
+	 * past {@link #maxVertices} hits this instead of a generic error, so the
+	 * entity-outline runner can treat it like any other recoverable source
+	 * failure (a partial shared-buffer commit is still reported as rendered
+	 * for that frame and retried on the next).
+	 */
+	public static final class BudgetExceededException extends RuntimeException {
+		private final int attemptedVertices;
+		private final int maxVertices;
+
+		private BudgetExceededException(int attemptedVertices, int maxVertices) {
+			super("outline vertex budget exceeded; attempted=" + attemptedVertices + "; max=" + maxVertices);
+			this.attemptedVertices = attemptedVertices;
+			this.maxVertices = maxVertices;
 		}
 
-		return total;
+		/** The total vertex count whose write triggered the budget. */
+		public int attemptedVertices() {
+			return attemptedVertices;
+		}
+
+		/** The configured hard cap. */
+		public int maxVertices() {
+			return maxVertices;
+		}
 	}
 
 	/**
@@ -189,13 +278,26 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 		private final int red;
 		private final int green;
 		private final int blue;
+		private final OutlineOnlyBufferSource adapter;
 		private int vertices;
 
+		/** Standalone consumer (no shared adapter budget); used by focused tests. */
 		VertexCountingConsumer(VertexConsumer delegate, int red, int green, int blue) {
+			this(delegate, red, green, blue, null);
+		}
+
+		VertexCountingConsumer(
+			VertexConsumer delegate,
+			int red,
+			int green,
+			int blue,
+			OutlineOnlyBufferSource adapter
+		) {
 			this.delegate = Objects.requireNonNull(delegate, "delegate");
 			this.red = red;
 			this.green = green;
 			this.blue = blue;
+			this.adapter = adapter;
 		}
 
 		/** The number of vertices forwarded so far. */
@@ -205,6 +307,9 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 
 		@Override
 		public VertexConsumer addVertex(float x, float y, float z) {
+			if (adapter != null) {
+				adapter.noteVertexWrite();
+			}
 			vertices++;
 			delegate.addVertex(x, y, z);
 			delegate.setColor(red, green, blue, 255);

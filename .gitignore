@@ -136,3 +136,4 @@ debug.ps1
 build_jar.ps1
 common/logs/
 /net/
+/com/
