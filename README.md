@@ -7,7 +7,7 @@ hold the ping key when a choice is needed, and show friends what you mean.
 
 ## Release
 
-- Version: `0.1.0-pfi-beta1`
+- Version: `0.2.0-pfi-beta1`
 - Minecraft: `1.21.1`
 - Java: `21`
 - Loaders: Fabric, Forge, and NeoForge
