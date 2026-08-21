@@ -125,13 +125,19 @@ class OptionalGeometryClassSafetyTest {
 			"CreateVisualizationManagerMixin.java"));
 		Path configPath = findRepositoryFile(Path.of(
 			"neoforge", "src", "main", "resources", "pingforit.mixins.json"));
+		Path adapterPath = findRepositoryFile(Path.of(
+			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
+			"integration", "create", "CreateEntityOutlineAdapter.java"));
 		assertTrue(Files.isRegularFile(scopePath));
 		assertTrue(Files.isRegularFile(mixinPath));
 		assertTrue(Files.isRegularFile(configPath));
+		assertTrue(Files.isRegularFile(adapterPath));
 
 		String scope = Files.readString(scopePath, StandardCharsets.UTF_8);
 		String mixin = Files.readString(mixinPath, StandardCharsets.UTF_8);
 		String config = Files.readString(configPath, StandardCharsets.UTF_8);
+		String adapter = Files.readString(adapterPath, StandardCharsets.UTF_8);
+		String normalizedMixin = normalizeJavaSource(mixin);
 
 		assertTrue(scope.contains("ThreadLocal<Integer>"));
 		assertTrue(scope.contains("public static Scope enter()"));
@@ -139,17 +145,81 @@ class OptionalGeometryClassSafetyTest {
 		assertTrue(scope.contains("DEPTH.remove()"));
 		assertTrue(scope.contains("if (closed)"));
 
-		assertTrue(mixin.contains("@Pseudo"));
-		assertTrue(mixin.contains(
-			"@Mixin(targets = \"dev.engine_room.flywheel.api.visualization.VisualizationManager\""));
+		assertTrue(normalizedMixin.contains("@Pseudo"));
+		assertTrue(normalizedMixin.contains(
+			"public interface CreateVisualizationManagerMixin"),
+			"the optional target is an interface and must use an interface mixin");
+		assertTrue(normalizedMixin.contains(
+			"@Mixin(targets = \"dev.engine_room.flywheel.api.visualization.VisualizationManager\", remap = false)"),
+			"the Flywheel target must remain a string target with remapping disabled");
 		assertTrue(mixin.contains("dev.engine_room.flywheel.api.visualization.VisualizationManager"));
-		assertTrue(mixin.contains(
-			"method = \"supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z\""));
-		assertTrue(mixin.contains("supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z"));
-		assertTrue(mixin.contains("require = 0"));
-		assertTrue(mixin.contains("remap = false"));
+		String injectBlock = extractAnnotationBlock(normalizedMixin, "@Inject(");
+		String visualizationMethodDescriptor =
+			"supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z";
+		assertTrue(!injectBlock.isEmpty(), "the optional mixin must declare an @Inject block");
+		assertTrue(injectBlock.contains("method = \"" + visualizationMethodDescriptor + "\""),
+			"the @Inject must target the exact supportsVisualization descriptor");
+		assertTrue(normalizedMixin.contains("at = @At(\"HEAD\")"));
+		assertTrue(normalizedMixin.contains("cancellable = true"));
+		assertTrue(normalizedMixin.contains("require = 0"));
+		assertTrue(injectBlock.contains("remap = false"),
+			"the supportsVisualization injection must disable remapping at injection level");
+		assertTrue(normalizedMixin.contains("CallbackInfoReturnable<Boolean>"),
+			"the handler must receive the boolean returnable callback");
+		assertTrue(normalizedMixin.contains("private static void pingForItDisableVisualization("),
+			"the optional mixin handler must be static");
 		assertTrue(mixin.contains("CreateEntityOutlineMaskScope.active()"));
+		assertFalse(adapterContainsDirectFlywheelLink(adapter));
 		assertTrue(config.contains("\"CreateVisualizationManagerMixin\""));
+	}
+
+	private static String normalizeJavaSource(String source) {
+		return source
+			.replaceAll("(?s)/\\*.*?\\*/", "")
+			.replaceAll("(?m)//[^\\r\\n]*", "")
+			.replaceAll("\\s+", " ")
+			.trim();
+	}
+
+	private static boolean adapterContainsDirectFlywheelLink(String adapter) {
+		return adapter.contains("import dev.engine_room.flywheel")
+			|| adapter.contains("VisualizationManager.class")
+			|| adapter.contains("VisualizationManager.");
+	}
+
+	private static String extractAnnotationBlock(String normalizedSource, String annotation) {
+		int annotationStart = normalizedSource.indexOf(annotation);
+		if (annotationStart < 0) {
+			return "";
+		}
+
+		int depth = 0;
+		boolean inString = false;
+		boolean escaped = false;
+		for (int index = annotationStart + annotation.length() - 1;
+			index < normalizedSource.length();
+			index++) {
+			char character = normalizedSource.charAt(index);
+			if (inString) {
+				if (escaped) {
+					escaped = false;
+				} else if (character == '\\') {
+					escaped = true;
+				} else if (character == '"') {
+					inString = false;
+				}
+				continue;
+			}
+
+			if (character == '"') {
+				inString = true;
+			} else if (character == '(') {
+				depth++;
+			} else if (character == ')' && --depth == 0) {
+				return normalizedSource.substring(annotationStart, index + 1);
+			}
+		}
+		return "";
 	}
 
 	private static int occurrences(String text, String needle) {

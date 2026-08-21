@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Pseudo
 @Mixin(targets = "dev.engine_room.flywheel.api.visualization.VisualizationManager", remap = false)
-public class CreateVisualizationManagerMixin {
+public interface CreateVisualizationManagerMixin {
 	@Inject(
 		method = "supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z",
 		at = @At("HEAD"),
