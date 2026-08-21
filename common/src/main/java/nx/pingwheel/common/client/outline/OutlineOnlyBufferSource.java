@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Objects;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import com.mojang.blaze3d.vertex.VertexFormatElement;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.resources.ResourceLocation;
@@ -29,12 +31,16 @@ import net.minecraft.resources.ResourceLocation;
  * <p>Resolution rules for an incoming render type:
  * <ul>
  *   <li>{@link RenderType#isOutline()}: used as-is;</li>
- *   <li>otherwise, when {@link RenderType#outline()} is present: that exact
- *       texture-specific outline type is used;</li>
- *   <li>otherwise, a no-op {@link VertexConsumer} is returned. This rejects
- *       outline-less model, hitbox, shadow, and debug geometry so it cannot be
- *       mistaken for model-outline vertices; the caller can then use the
- *       VoxelShape outline.</li>
+	 *   <li>otherwise, when the input is textured model-compatible geometry
+	 *       (exactly {@link VertexFormat.Mode#QUADS} and supplying UV0), an
+	 *       available exact texture-specific outline type is used;</li>
+	 *   <li>otherwise, when a fallback texture is configured and the input is
+	 *       textured model-compatible geometry, {@link RenderType#outline(ResourceLocation)}
+	 *       is used;</li>
+	 *   <li>otherwise, a no-op {@link VertexConsumer} is returned. The block-atlas
+	 *       fallback is for textured model/terrain geometry only; line, debug,
+	 *       hitbox, shadow, and other no-UV geometry must never be mapped into the
+	 *       textured outline format.</li>
  * </ul>
  *
  * <p>Every vertex that reaches the local source through this adapter is
@@ -103,10 +109,10 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 	 *                                  {@link RenderType#outline(ResourceLocation)}
 	 *                                  for this texture instead of being
 	 *                                  rejected with a no-op consumer, so a
-	 *                                  model pass without an outline variant
-	 *                                  still produces a silhouette mask; when
-	 *                                  {@code null} the original no-op
-	 *                                  rejection is kept
+	 *                                  textured QUADS model pass without an
+	 *                                  outline variant still produces a
+	 *                                  silhouette mask; when {@code null} the
+	 *                                  original no-op rejection is kept
 	 * @param maxVertices               the hard total vertex budget for this
 	 *                                  adapter; once exactly this many vertices
 	 *                                  have been written, the next write throws
@@ -132,19 +138,13 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 	public VertexConsumer getBuffer(RenderType renderType) {
 		Objects.requireNonNull(renderType, "renderType");
 
-		RenderType outlineType = resolve(renderType);
+		RenderType outlineType = resolve(renderType, fallbackTexture);
 
 		if (outlineType == null) {
-			if (fallbackTexture != null) {
-				// Outline-less model, hitbox, shadow, and debug geometry still
-				// silhouettes through the fixed fallback texture with the same
-				// fixed color and count, instead of being swallowed.
-				outlineType = RenderType.outline(fallbackTexture);
-			} else {
-				// Outline-less model, hitbox, shadow, and debug geometry cannot
-				// silhouette this model pass, so swallow it without counting.
-				return NoOpVertexConsumer.INSTANCE;
-			}
+			// Line, debug, hitbox, shadow, and other no-UV geometry cannot
+			// be emitted into the textured outline format, so swallow it
+			// without asking the caller-owned source for a buffer.
+			return NoOpVertexConsumer.INSTANCE;
 		}
 
 		VertexCountingConsumer consumer = new VertexCountingConsumer(
@@ -214,22 +214,46 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 		}
 	}
 
+	/** Compatibility convenience for callers that do not configure a fallback. */
+	static Decision decide(boolean isOutline, boolean hasOutlineVariant) {
+		return decide(isOutline, hasOutlineVariant, false, true, true);
+	}
+
 	/**
-	 * The pure resolution decision, stated over the extracted {@link RenderType}
+	 * The pure resolution decision, stated over extracted {@link RenderType}
 	 * facts so it is fully headless-testable:
 	 * <ul>
 	 *   <li>{@code isOutline} — {@code RenderType#isOutline()};</li>
 	 *   <li>{@code hasOutlineVariant} — whether
 	 *       {@code RenderType#outline()} is present;</li>
+	 *   <li>{@code fallbackConfigured} — whether a block-atlas fallback is
+	 *       available;</li>
+	 *   <li>{@code hasUv0} — whether the incoming format supplies UV0;</li>
+	 *   <li>{@code isQuads} — whether the incoming mode is exactly {@link
+	 *       VertexFormat.Mode#QUADS};</li>
 	 * </ul>
 	 */
-	static Decision decide(boolean isOutline, boolean hasOutlineVariant) {
+	static Decision decide(
+		boolean isOutline,
+		boolean hasOutlineVariant,
+		boolean fallbackConfigured,
+		boolean hasUv0,
+		boolean isQuads
+	) {
 		if (isOutline) {
 			return Decision.AS_IS;
 		}
 
+		if (!isQuads || !hasUv0) {
+			return Decision.NO_OP;
+		}
+
 		if (hasOutlineVariant) {
 			return Decision.OUTLINE_VARIANT;
+		}
+
+		if (fallbackConfigured) {
+			return Decision.FALLBACK;
 		}
 
 		return Decision.NO_OP;
@@ -240,11 +264,30 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 	 * {@code null} for a no-op. No render state is touched here.
 	 */
 	static RenderType resolve(RenderType renderType) {
-		return switch (decide(renderType.isOutline(), renderType.outline().isPresent())) {
+		return resolve(renderType, null);
+	}
+
+	/**
+	 * Resolves an incoming render type, optionally using a textured fallback for
+	 * textured QUADS model-compatible geometry.
+	 */
+	private static RenderType resolve(RenderType renderType, ResourceLocation fallbackTexture) {
+		return switch (decide(
+			renderType.isOutline(),
+			renderType.outline().isPresent(),
+			fallbackTexture != null,
+			hasUv0(renderType),
+			renderType.mode() == VertexFormat.Mode.QUADS)) {
 			case AS_IS -> renderType;
 			case OUTLINE_VARIANT -> renderType.outline().get();
+			case FALLBACK -> RenderType.outline(fallbackTexture);
 			case NO_OP -> null;
 		};
+	}
+
+	private static boolean hasUv0(RenderType renderType) {
+		return renderType.format().getElements().stream().anyMatch(element ->
+			element.usage() == VertexFormatElement.Usage.UV && element.index() == 0);
 	}
 
 	/**
@@ -258,7 +301,10 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 		/** The incoming type exposes a texture-specific outline variant: use it. */
 		OUTLINE_VARIANT,
 
-		/** No variant exists: emit nothing, count zero. */
+		/** The incoming model type uses the configured textured fallback. */
+		FALLBACK,
+
+		/** The incoming type is not safe for an outline mask: emit nothing. */
 		NO_OP
 	}
 
