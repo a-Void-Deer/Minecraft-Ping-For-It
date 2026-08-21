@@ -11,7 +11,7 @@ public final class TestPlatformContextService implements IPlatformContextService
 
 	@Override
 	public String getSelfModVersion() {
-		return "test";
+		return "0.2.0-pfi-beta1";
 	}
 
 	@Override

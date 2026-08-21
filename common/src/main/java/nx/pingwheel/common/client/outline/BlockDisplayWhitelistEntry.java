@@ -9,34 +9,35 @@ import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.block.Block;
 
 /**
- * A parsed entry of the fixed ordinary-block display whitelist grammar:
+ * A parsed entry of the client block glow-list grammar:
  * <ul>
  *   <li>exact {@code namespace:block};</li>
  *   <li>namespace wildcard {@code namespace:*};</li>
+ *   <li>global wildcard {@code *:*};</li>
  *   <li>block tag {@code #namespace:tag} (no wildcard allowed).</li>
  * </ul>
  *
  * <p>Parsing is strict and headless-safe: invalid strings (no colon, blank
  * namespace/path, extra colons, wildcard characters inside a tag or a
  * non-suffix path, a bare {@code *}) fail false and never throw. There is no
- * negation and no bare-star form. Only {@code Block}-level {@link TagKey}s are
- * produced, so evaluation can never load optional-mod classes; an absent tag
- * simply answers false through the injected {@link BlockTagLookup}.
+ * negation and no bare-star form other than the exact {@code *:*} wildcard.
+ * Only {@code Block}-level {@link TagKey}s are produced, so evaluation can
+ * never load optional-mod classes; an absent tag simply answers false through
+ * the injected {@link BlockTagLookup}.
  *
  * <p>Entries are evaluated in explicit declaration order and unioned: the
- * first matching entry decides. Callers are responsible for applying the
- * BlockEntity/non-MODEL render-shape gate before evaluating entries (see
- * {@link BlockDisplayWhitelist}).
+ * first matching entry decides. Typed policy callers apply the
+ * BlockEntity/non-MODEL render-shape gate where a renderer route requires it.
  */
-public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelistEntry.Exact,
-	BlockDisplayWhitelistEntry.NamespaceWildcard, BlockDisplayWhitelistEntry.Tag {
+public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelistEntry.Any,
+	BlockDisplayWhitelistEntry.Exact, BlockDisplayWhitelistEntry.NamespaceWildcard, BlockDisplayWhitelistEntry.Tag {
 
 	/**
 	 * Parses a raw entry string into the matching entry kind; empty when the
 	 * string is not valid grammar (the entry then never matches).
 	 */
 	static Optional<BlockDisplayWhitelistEntry> tryParse(String raw) {
-		if (raw == null || raw.isEmpty()) {
+		if (raw == null || raw.isBlank()) {
 			return Optional.empty();
 		}
 
@@ -53,6 +54,18 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 	 * blocks (missing/absent registry ids fail false).
 	 */
 	boolean matches(ResourceLocation blockKey, BlockTagLookup tagLookup);
+
+	/**
+	 * The global block wildcard {@code *:*}. It matches every registered block
+	 * key supplied by the caller, regardless of namespace or path.
+	 */
+	record Any() implements BlockDisplayWhitelistEntry {
+
+		@Override
+		public boolean matches(ResourceLocation blockKey, BlockTagLookup tagLookup) {
+			return blockKey != null;
+		}
+	}
 
 	/**
 	 * An exact block match: {@code namespace:block}.
@@ -121,6 +134,10 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 	}
 
 	private static Optional<BlockDisplayWhitelistEntry> parseBlockId(String raw) {
+		if ("*:*".equals(raw)) {
+			return Optional.of(new Any());
+		}
+
 		int colon = raw.indexOf(':');
 
 		if (colon <= 0 || raw.indexOf(':', colon + 1) >= 0) {

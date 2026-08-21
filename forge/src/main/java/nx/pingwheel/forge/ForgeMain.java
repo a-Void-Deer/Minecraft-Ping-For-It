@@ -4,14 +4,11 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.event.RegisterCommandsEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.network.ChannelBuilder;
 import net.minecraftforge.network.EventNetworkChannel;
 import nx.pingwheel.common.CommonServer;
-import nx.pingwheel.common.command.ServerCommandBuilder;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
@@ -21,8 +18,10 @@ import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
+import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
+import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
+import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
-import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.forge.platform.PlatformNetworkServiceImpl;
 import org.apache.logging.log4j.util.TriConsumer;
 
@@ -31,7 +30,6 @@ import java.util.function.Function;
 import static nx.pingwheel.common.Global.MOD_ID;
 
 @Mod(MOD_ID)
-@Mod.EventBusSubscriber(bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class ForgeMain {
 
 	public static final EventNetworkChannel PING_LOCATION_CHANNEL_C2S = ChannelBuilder.named(PingLocationC2SPacket.PACKET_ID).optional().eventNetworkChannel();
@@ -39,6 +37,9 @@ public class ForgeMain {
 	public static final EventNetworkChannel UPDATE_CHANNEL_C2S = ChannelBuilder.named(UpdateChannelC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_CREATE_CHANNEL_C2S = ChannelBuilder.named(MarkerCreateC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel RATE_LIMIT_POLICY_CHANNEL_S2C = ChannelBuilder.named(RateLimitPolicyS2CPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel SERVER_CONFIG_REQUEST_CHANNEL_C2S = ChannelBuilder.named(ServerConfigRequestC2SPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel SERVER_CONFIG_UPDATE_CHANNEL_C2S = ChannelBuilder.named(ServerConfigUpdateC2SPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C = ChannelBuilder.named(ServerConfigSnapshotS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_REMOVE_CHANNEL_C2S = ChannelBuilder.named(MarkerRemoveC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_CREATED_CHANNEL_S2C = ChannelBuilder.named(MarkerCreatedS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_REMOVED_CHANNEL_S2C = ChannelBuilder.named(MarkerRemovedS2CPacket.PACKET_ID).optional().eventNetworkChannel();
@@ -56,6 +57,9 @@ public class ForgeMain {
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(UpdateChannelC2SPacket.PACKET_ID, UPDATE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerCreateC2SPacket.PACKET_ID, MARKER_CREATE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(RateLimitPolicyS2CPacket.PACKET_ID, RATE_LIMIT_POLICY_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigRequestC2SPacket.PACKET_ID, SERVER_CONFIG_REQUEST_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigUpdateC2SPacket.PACKET_ID, SERVER_CONFIG_UPDATE_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigSnapshotS2CPacket.PACKET_ID, SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerRemoveC2SPacket.PACKET_ID, MARKER_REMOVE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerCreatedS2CPacket.PACKET_ID, MARKER_CREATED_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerRemovedS2CPacket.PACKET_ID, MARKER_REMOVED_CHANNEL_S2C);
@@ -65,6 +69,8 @@ public class ForgeMain {
 		registerPacketHandler(UPDATE_CHANNEL_C2S, UpdateChannelC2SPacket::readSafe, CommonServer.INSTANCE::onChannelUpdatePacket);
 		registerPacketHandler(MARKER_CREATE_CHANNEL_C2S, MarkerCreateC2SPacket::readSafe, CommonServer.INSTANCE::onMarkerCreatePacket);
 		registerPacketHandler(MARKER_REMOVE_CHANNEL_C2S, MarkerRemoveC2SPacket::readSafe, CommonServer.INSTANCE::onMarkerRemovePacket);
+		registerPacketHandler(SERVER_CONFIG_REQUEST_CHANNEL_C2S, ServerConfigRequestC2SPacket::readSafe, CommonServer.INSTANCE::onServerConfigRequestPacket);
+		registerPacketHandler(SERVER_CONFIG_UPDATE_CHANNEL_C2S, ServerConfigUpdateC2SPacket::readSafe, CommonServer.INSTANCE::onServerConfigUpdatePacket);
 	}
 
 	public static <T> void registerPacketHandler(EventNetworkChannel channel, Function<FriendlyByteBuf, T> packetReader, TriConsumer<MinecraftServer, ServerPlayer, T> packetHandler) {
@@ -82,14 +88,4 @@ public class ForgeMain {
 		});
 	}
 
-	@SubscribeEvent
-	public static void onRegisterCommands(RegisterCommandsEvent event) {
-		event.getDispatcher().register(ServerCommandBuilder.build((context, success, response) -> {
-			if (success) {
-				context.getSource().sendSuccess(() -> LanguageUtils.withModPrefix(response), false);
-			} else {
-				context.getSource().sendFailure(LanguageUtils.withModPrefix(response));
-			}
-		}));
-	}
 }

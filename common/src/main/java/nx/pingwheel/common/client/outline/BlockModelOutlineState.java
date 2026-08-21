@@ -27,10 +27,17 @@ import nx.pingwheel.common.marker.TargetKey;
  * main-thread render passes.
  */
 public final class BlockModelOutlineState {
+	/*
+	 * A shared OutlineBufferSource cannot roll back a recoverable partial
+	 * commit. Such a key is retained as rendered for this frame to suppress a
+	 * partial-mask plus VoxelShape overlay; beginFrame clears it so the source
+	 * is retried normally on the next frame.
+	 */
 
 	public static final BlockModelOutlineState INSTANCE = new BlockModelOutlineState();
 
 	private Set<TargetKey.BlockKey> successKeys = Set.of();
+	private long frameId;
 
 	private BlockModelOutlineState() {}
 
@@ -39,7 +46,16 @@ public final class BlockModelOutlineState {
 	 * records keys. Called before the model pass on every world render frame.
 	 */
 	public void beginFrame() {
+		frameId++;
 		successKeys = Set.of();
+	}
+
+	/**
+	 * Monotonic render-frame identity for sources that need a hard aggregate
+	 * budget without retaining any live geometry or transform state.
+	 */
+	public long frameId() {
+		return frameId;
 	}
 
 	/**

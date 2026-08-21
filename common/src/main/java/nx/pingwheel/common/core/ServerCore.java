@@ -6,6 +6,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ServerConfig;
+import nx.pingwheel.common.config.ServerConfigSnapshot;
+import nx.pingwheel.common.config.ServerConfigUpdate;
+import nx.pingwheel.common.config.ServerConfigUpdateService;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.integration.TeamContextHandler;
 import nx.pingwheel.common.marker.MarkerCreationLogger;
@@ -31,6 +34,9 @@ import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
+import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
+import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
+import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
@@ -162,8 +168,7 @@ public class ServerCore {
 		IPlatformNetworkService.INSTANCE.sendToClient(
 			new RateLimitPolicyS2CPacket(SERVER_CONFIG.getRateLimit(), SERVER_CONFIG.getMsToRegenerate()),
 			player);
-		LOGGER.debug("sent rate limit policy: rateLimit={} msToRegenerate={}",
-			SERVER_CONFIG.getRateLimit(), SERVER_CONFIG.getMsToRegenerate());
+		LOGGER.debug("sent rate limit policy");
 	}
 
 	/**
@@ -186,8 +191,81 @@ public class ServerCore {
 			IPlatformNetworkService.INSTANCE.sendToClient(packet, player);
 		}
 
-		LOGGER.debug("broadcast rate limit policy: rateLimit={} msToRegenerate={} recipients={}",
-			packet.rateLimit(), packet.msToRegenerate(), players.size());
+		LOGGER.debug("broadcast rate limit policy");
+	}
+
+	/**
+	 * Sends a fresh snapshot for the authenticated sender. Permission is read
+	 * here, on the server thread, for every request rather than being cached from
+	 * the client.
+	 */
+	public static void onServerConfigRequest(
+		MinecraftServer server,
+		ServerPlayer player,
+		ServerConfigRequestC2SPacket packet) {
+		if (packet.isCorrupt()) {
+			LOGGER.debug("server settings request rejected: invalid request id");
+			return;
+		}
+
+		sendServerConfigSnapshot(player, player.hasPermissions(3), packet.requestId());
+	}
+
+	/**
+	 * Applies only the fields selected by a valid dirty mask. The permission
+	 * check is deliberately repeated for every update and no client-provided
+	 * permission or display data is accepted.
+	 */
+	public static void onServerConfigUpdate(
+		MinecraftServer server,
+		ServerPlayer player,
+		ServerConfigUpdateC2SPacket packet) {
+		final boolean canEdit = player.hasPermissions(3);
+
+		if (packet.isCorrupt()) {
+			LOGGER.debug("server settings update rejected: invalid packet");
+			return;
+		}
+
+		if (!canEdit) {
+			LOGGER.debug("server settings update rejected: insufficient permission");
+			return;
+		}
+
+		final var config = ServerConfig.HANDLER.getConfig();
+		final var update = packet.update();
+		final var plan = ServerConfigUpdateService.apply(
+			true,
+			ServerConfigSnapshot.from(config, true),
+			update);
+		if (!plan.applied()) {
+			LOGGER.debug("server settings update rejected: invalid update");
+			return;
+		}
+
+		if ((update.changedFields() & ServerConfigUpdate.DEFAULT_CHANNEL_MODE) != 0) {
+			config.setDefaultChannelMode(update.defaultChannelMode());
+		}
+		if ((update.changedFields() & ServerConfigUpdate.PLAYER_TRACKING_ENABLED) != 0) {
+			config.setPlayerTrackingEnabled(update.playerTrackingEnabled());
+		}
+		if ((update.changedFields() & ServerConfigUpdate.MS_TO_REGENERATE) != 0) {
+			config.setMsToRegenerate(update.msToRegenerate());
+		}
+		if ((update.changedFields() & ServerConfigUpdate.RATE_LIMIT) != 0) {
+			config.setRateLimit(update.rateLimit());
+		}
+
+		config.validate();
+		ServerConfig.HANDLER.save();
+	}
+
+	private static void sendServerConfigSnapshot(ServerPlayer player, boolean canEdit, long requestId) {
+		IPlatformNetworkService.INSTANCE.sendToClient(
+			new ServerConfigSnapshotS2CPacket(
+				requestId,
+				ServerConfigSnapshot.from(ServerConfig.HANDLER.getConfig(), canEdit)),
+			player);
 	}
 
 	public static void onPingLocation(MinecraftServer server, ServerPlayer player, PingLocationC2SPacket packet) {

@@ -1,16 +1,37 @@
 package nx.pingwheel.common.config;
 
 import com.google.gson.Gson;
+import nx.pingwheel.common.client.outline.BlockDisplayPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientConfigValidationTest {
+	@Test
+	void pingDurationIsNotAClientSetting() {
+		assertThrows(NoSuchFieldException.class, () -> ClientConfig.class.getDeclaredField("pingDuration"));
+	}
+
+	@Test
+	void correctionPeriodIsNotExposedOrPersisted() {
+		assertThrows(NoSuchFieldException.class, () -> ClientConfig.class.getDeclaredField("correctionPeriod"));
+		assertThrows(NoSuchFieldException.class, () -> ClientConfig.class.getDeclaredField("MAX_CORRECTION_PERIOD"));
+		assertThrows(NoSuchMethodException.class, () -> ClientConfig.class.getMethod("getCorrectionPeriod"));
+		assertThrows(
+			NoSuchMethodException.class,
+			() -> ClientConfig.class.getMethod("setCorrectionPeriod", float.class));
+
+		ClientConfig config = new Gson().fromJson("{\"correctionPeriod\":4.5}", ClientConfig.class);
+
+		assertFalse(new Gson().toJson(config).contains("\"correctionPeriod\""));
+	}
 
 	@Test
 	void defaultsMatchTheCurrentWheelLook() {
@@ -24,6 +45,86 @@ class ClientConfigValidationTest {
 		assertEquals(100, config.getWheelOpacity());
 		assertEquals(100, config.getWheelFontSize());
 		assertEquals(100, config.getWheelTargetFontSize());
+		assertEquals(List.of("*:*"), config.getBlockDisplayWhitelist());
+		assertEquals(List.of(), config.getBlockShapeBlacklist());
+		assertTrue(new Gson().toJson(config).contains("\"blockDisplayWhitelist\""));
+		assertTrue(new Gson().toJson(config).contains("\"blockShapeBlacklist\""));
+	}
+
+	@Test
+	void entityBlockRenderModeDefaultsToCompatibleAndIsSerializedLocally() {
+		ClientConfig config = new ClientConfig();
+
+		assertEquals(EntityBlockRenderMode.COMPATIBLE, config.getEntityBlockRenderMode());
+		assertEquals(EntityBlockRenderMode.ALL, EntityBlockRenderMode.get("all"));
+		assertEquals("voxel_shape_only", EntityBlockRenderMode.VOXEL_SHAPE_ONLY.toString());
+		assertTrue(new Gson().toJson(config).contains("\"entityBlockRenderMode\":\"COMPATIBLE\""));
+
+		config.setEntityBlockRenderMode(EntityBlockRenderMode.ALL);
+		assertEquals(EntityBlockRenderMode.ALL, config.getEntityBlockRenderMode());
+		config.setEntityBlockRenderMode(null);
+		assertEquals(EntityBlockRenderMode.COMPATIBLE, config.getEntityBlockRenderMode());
+		config.setEntityBlockRenderMode(EntityBlockRenderMode.ALL);
+		assertTrue(new Gson().toJson(config).contains("\"entityBlockRenderMode\":\"ALL\""));
+	}
+
+	@Test
+	void entityBlockRenderModeLowercaseIsLocaleIndependent() {
+		Locale previous = Locale.getDefault();
+		try {
+			Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+			assertEquals("all", EntityBlockRenderMode.ALL.toString());
+			assertEquals("voxel_shape_only", EntityBlockRenderMode.VOXEL_SHAPE_ONLY.toString());
+		} finally {
+			Locale.setDefault(previous);
+		}
+	}
+
+	@Test
+	void nullAndUnknownEntityBlockRenderModesRecoverToCompatibleDuringValidation() {
+		for (String json : List.of(
+			"{\"entityBlockRenderMode\":null}",
+			"{\"entityBlockRenderMode\":\"unknown\"}")) {
+			ClientConfig config = new Gson().fromJson(json, ClientConfig.class);
+			config.validate((key, supplied, effective) -> {});
+			assertEquals(EntityBlockRenderMode.COMPATIBLE, config.getEntityBlockRenderMode(), json);
+		}
+	}
+
+	@Test
+	void oldJsonWithoutTheNewListsKeepsTheirDefaults() {
+		ClientConfig config = new Gson().fromJson("{\"pingVolume\":42}", ClientConfig.class);
+
+		config.validate((key, suppliedValue, effectiveValue) -> {});
+
+		assertEquals(List.of("*:*"), config.getBlockDisplayWhitelist());
+		assertEquals(List.of(), config.getBlockShapeBlacklist());
+	}
+
+	@Test
+	void nullBlankAndMalformedConfiguredListsAreInvalid() {
+		for (String json : List.of(
+			"{\"blockDisplayWhitelist\":null}",
+			"{\"blockShapeBlacklist\":null}",
+			"{\"blockDisplayWhitelist\":[\" \"]}",
+			"{\"blockShapeBlacklist\":[\"minecraft:stone:*\"]}")) {
+			ClientConfig config = new Gson().fromJson(json, ClientConfig.class);
+			assertThrows(IllegalArgumentException.class, () -> config.validate((key, supplied, effective) -> {}), json);
+		}
+	}
+
+	@Test
+	void matcherIsCompiledAtValidationAndSetTimeInsteadOfPerFrame() {
+		ClientConfig config = new ClientConfig();
+		BlockDisplayPolicy initial = config.getBlockDisplayPolicy();
+
+		config.validate((key, suppliedValue, effectiveValue) -> {});
+		assertTrue(initial != config.getBlockDisplayPolicy());
+
+		BlockDisplayPolicy afterValidation = config.getBlockDisplayPolicy();
+		config.setBlockShapeBlacklist(List.of("minecraft:stone"));
+		assertTrue(afterValidation != config.getBlockDisplayPolicy());
+		assertEquals(List.of("minecraft:stone"), config.getBlockShapeBlacklist());
 	}
 
 	@Test

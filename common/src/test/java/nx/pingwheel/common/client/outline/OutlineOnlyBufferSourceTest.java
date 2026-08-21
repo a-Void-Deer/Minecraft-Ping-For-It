@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import com.mojang.blaze3d.vertex.VertexFormatElement;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
@@ -17,7 +19,10 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decision.AS_IS;
 import static nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decision.NO_OP;
 import static nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decision.OUTLINE_VARIANT;
@@ -26,7 +31,8 @@ import static nx.pingwheel.common.client.outline.OutlineOnlyBufferSource.Decisio
  * Headless tests for the outline-only buffer adapter seams: the pure render
  * type resolution decision, the counting/fixed-color consumers, the no-op
  * rejection for outline-less geometry, and the routing of the
- * resolved render type into the supplied attempt-local source.
+ * resolved render type into the supplied caller-owned source (the focused
+ * tests use a local recording source).
  *
  * <p>The counting and no-op consumers are tested directly with recording
  * delegates — no game client. The two routing tests need live vanilla
@@ -55,6 +61,8 @@ class OutlineOnlyBufferSourceTest {
 	 */
 	private static final class RecordingVertexConsumer implements VertexConsumer {
 
+		private final boolean throwOnAddVertex;
+		private final boolean throwOnColor;
 		private int vertices;
 		private final List<int[]> colors = new ArrayList<>();
 		private final List<String> calls = new ArrayList<>();
@@ -63,8 +71,20 @@ class OutlineOnlyBufferSourceTest {
 		private int uv2Calls;
 		private int normalCalls;
 
+		private RecordingVertexConsumer() {
+			this(false, false);
+		}
+
+		private RecordingVertexConsumer(boolean throwOnAddVertex, boolean throwOnColor) {
+			this.throwOnAddVertex = throwOnAddVertex;
+			this.throwOnColor = throwOnColor;
+		}
+
 		@Override
 		public VertexConsumer addVertex(float x, float y, float z) {
+			if (throwOnAddVertex) {
+				throw new IllegalStateException("delegate addVertex failed");
+			}
 			vertices++;
 			calls.add("addVertex");
 			return this;
@@ -74,6 +94,9 @@ class OutlineOnlyBufferSourceTest {
 		public VertexConsumer setColor(int red, int green, int blue, int alpha) {
 			colors.add(new int[] { red, green, blue, alpha });
 			calls.add("setColor");
+			if (throwOnColor) {
+				throw new IllegalStateException("delegate setColor failed");
+			}
 			return this;
 		}
 
@@ -110,7 +133,15 @@ class OutlineOnlyBufferSourceTest {
 	private static final class RecordingBufferSource implements MultiBufferSource {
 
 		private final List<RenderType> requested = new ArrayList<>();
-		private final RecordingVertexConsumer delegate = new RecordingVertexConsumer();
+		private final RecordingVertexConsumer delegate;
+
+		private RecordingBufferSource() {
+			this(new RecordingVertexConsumer());
+		}
+
+		private RecordingBufferSource(RecordingVertexConsumer delegate) {
+			this.delegate = delegate;
+		}
 
 		@Override
 		public VertexConsumer getBuffer(RenderType renderType) {
@@ -135,6 +166,51 @@ class OutlineOnlyBufferSourceTest {
 	@Test
 	void outlineLessTypesAlwaysResolveToNoOp() {
 		assertSame(NO_OP, OutlineOnlyBufferSource.decide(false, false));
+	}
+
+	@Test
+	void f3bHitboxLinesNeverUseTheTexturedFallback() {
+		assertSame(NO_OP, OutlineOnlyBufferSource.decide(false, false, true, false, true));
+
+		RecordingBufferSource source = new RecordingBufferSource();
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(
+			source, 0xFF123456, TextureAtlas.LOCATION_BLOCKS, -1);
+
+		VertexConsumer issued = adapter.getBuffer(RenderType.lines());
+		issued.addVertex(1.0F, 2.0F, 3.0F);
+
+		assertSame(NoOpVertexConsumer.INSTANCE, issued);
+		assertEquals(0, source.requested.size());
+		assertEquals(0, source.delegate.vertices);
+		assertEquals(0, adapter.vertexCount());
+	}
+
+	@Test
+	void lineStripGeometryNeverUsesTheTexturedFallback() {
+		assertSame(NO_OP, OutlineOnlyBufferSource.decide(false, false, true, true, false));
+	}
+
+	@Test
+	void quadsWithoutUv0NeverUseTheTexturedFallback() {
+		assertSame(NO_OP, OutlineOnlyBufferSource.decide(false, false, true, false, true));
+	}
+
+	@Test
+	void lineWithAnOutlineVariantIsStillRejected() {
+		assertSame(NO_OP, OutlineOnlyBufferSource.decide(false, true, true, true, false));
+	}
+
+	@Test
+	void nonQuadWithUv0IsStillRejected() {
+		assertSame(NO_OP, OutlineOnlyBufferSource.decide(false, false, true, true, false));
+	}
+
+	@Test
+	void outlineAndSafeVariantRoutesRemainUnaffectedBySafetyChecks() {
+		assertSame(AS_IS, OutlineOnlyBufferSource.decide(true, false, true, false, true));
+		assertSame(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true, false, true, true));
+		assertSame(NO_OP, OutlineOnlyBufferSource.decide(false, true, false, true, false));
+		assertSame(NO_OP, OutlineOnlyBufferSource.decide(false, true, false, false, false));
 	}
 
 	@Test
@@ -210,6 +286,38 @@ class OutlineOnlyBufferSourceTest {
 	}
 
 	@Test
+	void delegateAddVertexFailureDoesNotCommitAVertex() {
+		RecordingVertexConsumer delegate = new RecordingVertexConsumer(true, false);
+		RecordingBufferSource source = new RecordingBufferSource(delegate);
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(source, 0xFF123456);
+		VertexCountingConsumer consumer = (VertexCountingConsumer) adapter.getBuffer(
+			RenderType.entitySolid(TextureAtlas.LOCATION_BLOCKS));
+
+		assertThrows(IllegalStateException.class, () -> consumer.addVertex(1.0F, 2.0F, 3.0F));
+
+		assertEquals(0, consumer.vertices());
+		assertEquals(0, adapter.vertexCount());
+		assertEquals(0, delegate.vertices);
+		assertEquals(0, delegate.colors.size());
+	}
+
+	@Test
+	void delegateColorFailureRetainsTheCommittedVertex() {
+		RecordingVertexConsumer delegate = new RecordingVertexConsumer(false, true);
+		RecordingBufferSource source = new RecordingBufferSource(delegate);
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(source, 0xFF123456);
+		VertexCountingConsumer consumer = (VertexCountingConsumer) adapter.getBuffer(
+			RenderType.entitySolid(TextureAtlas.LOCATION_BLOCKS));
+
+		assertThrows(IllegalStateException.class, () -> consumer.addVertex(1.0F, 2.0F, 3.0F));
+
+		assertEquals(1, consumer.vertices());
+		assertEquals(1, adapter.vertexCount());
+		assertEquals(1, delegate.vertices);
+		assertEquals(1, delegate.colors.size());
+	}
+
+	@Test
 	void wrapperSetColorIsSwallowed() {
 		RecordingVertexConsumer delegate = new RecordingVertexConsumer();
 		VertexCountingConsumer consumer = new VertexCountingConsumer(delegate, 0x12, 0x34, 0x56);
@@ -263,7 +371,7 @@ class OutlineOnlyBufferSourceTest {
 		assertSame(consumer, consumer.setNormal(0.0F, 1.0F, 0.0F));
 	}
 
-	// --- routing into the supplied attempt-local source ---
+	// --- routing into the supplied caller-owned source ---
 
 	/**
 	 * For every render type that resolves to an outline type, the adapter
@@ -325,5 +433,150 @@ class OutlineOnlyBufferSourceTest {
 			issued.addVertex(1.0F, 2.0F, 3.0F);
 			assertEquals(0, adapter.vertexCount());
 		}
+	}
+
+	@Test
+	void liveLineStripNeverConsultsBackingSourceEvenAfterWrites() {
+		RenderType lineStrip = RenderType.lineStrip();
+		assertEquals(VertexFormat.Mode.LINE_STRIP, lineStrip.mode());
+
+		RecordingBufferSource source = new RecordingBufferSource();
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(
+			source, 0xFF0000FF, TextureAtlas.LOCATION_BLOCKS, -1);
+		VertexConsumer issued = adapter.getBuffer(lineStrip);
+
+		issued.addVertex(1.0F, 2.0F, 3.0F).addVertex(4.0F, 5.0F, 6.0F);
+
+		assertSame(NoOpVertexConsumer.INSTANCE, issued);
+		assertEquals(0, source.requested.size());
+		assertEquals(0, source.delegate.vertices);
+		assertEquals(0, adapter.vertexCount());
+	}
+
+	@Test
+	void liveNoUvDebugNonQuadNeverConsultsBackingSourceEvenAfterWrites() {
+		RenderType debugLine = RenderType.debugLineStrip(1.0D);
+		assertNotEquals(VertexFormat.Mode.QUADS, debugLine.mode());
+		assertTrue(debugLine.format().getElements().stream().noneMatch(element ->
+			element.usage() == VertexFormatElement.Usage.UV && element.index() == 0));
+
+		RecordingBufferSource source = new RecordingBufferSource();
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(
+			source, 0xFF0000FF, TextureAtlas.LOCATION_BLOCKS, -1);
+		VertexConsumer issued = adapter.getBuffer(debugLine);
+
+		issued.addVertex(1.0F, 2.0F, 3.0F).setUv(0.25F, 0.75F).addVertex(4.0F, 5.0F, 6.0F);
+
+		assertSame(NoOpVertexConsumer.INSTANCE, issued);
+		assertEquals(0, source.requested.size());
+		assertEquals(0, source.delegate.vertices);
+		assertEquals(0, adapter.vertexCount());
+	}
+
+	// --- fallback texture resolution ---
+
+	@Test
+	void fallbackConstructorRoutesTexturedModelWithoutVariantThroughFallbackTexture() {
+		RecordingBufferSource source = new RecordingBufferSource();
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(
+			source, 0xFF123456, TextureAtlas.LOCATION_BLOCKS, -1);
+
+		// Textured QUADS model geometry without an outline variant resolves to
+		// RenderType.outline(fallback), while line/debug geometry is rejected.
+		VertexConsumer issued = adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS));
+
+		RenderType expected = RenderType.outline(TextureAtlas.LOCATION_BLOCKS);
+		assertSame(expected, source.requested.get(0));
+		assertTrue(expected.isOutline());
+
+		issued.addVertex(1.0F, 2.0F, 3.0F);
+		assertEquals(1, adapter.vertexCount());
+		assertEquals(1, source.delegate.vertices);
+		assertArrayEquals(new int[] { 0x12, 0x34, 0x56, 255 }, source.delegate.colors.get(0));
+	}
+
+	@Test
+	void fallbackConstructorCountsFallbackAndVariantGeometryTogether() {
+		RecordingBufferSource source = new RecordingBufferSource();
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(
+			source, 0xFF0000FF, TextureAtlas.LOCATION_BLOCKS, -1);
+
+		adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).addVertex(0.0F, 0.0F, 0.0F);
+		adapter.getBuffer(RenderType.entitySolid(TextureAtlas.LOCATION_BLOCKS)).addVertex(1.0F, 1.0F, 1.0F);
+
+		assertEquals(2, adapter.vertexCount());
+	}
+
+	@Test
+	void legacyConstructorStillRejectsOutlineLessGeometry() {
+		RecordingBufferSource source = new RecordingBufferSource();
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(source, 0xFF0000FF);
+
+		// The two-argument constructor keeps the original no-op behavior for
+		// outline-less geometry; only the fallback constructor maps it.
+		VertexConsumer issued = adapter.getBuffer(RenderType.lines());
+
+		assertSame(NoOpVertexConsumer.INSTANCE, issued);
+		assertEquals(0, source.requested.size());
+		assertEquals(0, adapter.vertexCount());
+	}
+
+	// --- vertex budget ---
+
+	@Test
+	void budgetAllowsExactlyTheCapAndThrowsTheDedicatedExceptionAfterwards() {
+		RecordingBufferSource source = new RecordingBufferSource();
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(
+			source, 0xFF0000FF, TextureAtlas.LOCATION_BLOCKS, 4);
+
+		VertexConsumer consumer = adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS));
+		for (int i = 0; i < 4; i++) {
+			consumer.addVertex(i, 0.0F, 0.0F);
+		}
+		assertEquals(4, adapter.vertexCount());
+
+		OutlineOnlyBufferSource.BudgetExceededException thrown = assertThrows(
+			OutlineOnlyBufferSource.BudgetExceededException.class,
+			() -> consumer.addVertex(5, 0.0F, 0.0F));
+		assertEquals(5, thrown.attemptedVertices());
+		assertEquals(4, thrown.maxVertices());
+		assertEquals(4, ((VertexCountingConsumer) consumer).vertices());
+		assertEquals(4, source.delegate.vertices);
+		assertEquals(4, source.delegate.colors.size());
+	}
+
+	@Test
+	void budgetIsSharedAcrossRenderTypes() {
+		RecordingBufferSource source = new RecordingBufferSource();
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(
+			source, 0xFF0000FF, TextureAtlas.LOCATION_BLOCKS, 3);
+
+		adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).addVertex(0.0F, 0.0F, 0.0F);
+		adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).addVertex(1.0F, 0.0F, 0.0F);
+		adapter.getBuffer(RenderType.entitySolid(TextureAtlas.LOCATION_BLOCKS)).addVertex(2.0F, 0.0F, 0.0F);
+
+		assertThrows(OutlineOnlyBufferSource.BudgetExceededException.class,
+			() -> adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).addVertex(3.0F, 0.0F, 0.0F));
+		assertEquals(3, adapter.vertexCount());
+	}
+
+	@Test
+	void unboundedAdaptersNeverThrowTheBudgetException() {
+		RecordingBufferSource source = new RecordingBufferSource();
+		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(
+			source, 0xFF0000FF, TextureAtlas.LOCATION_BLOCKS, -1);
+
+		VertexConsumer consumer = adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS));
+		for (int i = 0; i < 1000; i++) {
+			consumer.addVertex(i, 0.0F, 0.0F);
+		}
+		assertEquals(1000, adapter.vertexCount());
+	}
+
+	@Test
+	void negativeBudgetValuesOtherThanUnboundedAreRejected() {
+		assertThrows(IllegalArgumentException.class,
+			() -> new OutlineOnlyBufferSource(
+				new RecordingBufferSource(), 0xFF0000FF, TextureAtlas.LOCATION_BLOCKS, -2));
 	}
 }

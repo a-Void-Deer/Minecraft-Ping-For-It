@@ -33,10 +33,13 @@ class SettingsScreenLayoutTest {
 		assertTrue(layout.resetX() + SettingsScreenLayout.RESET_BUTTON_WIDTH <= Math.max(width, SettingsScreenLayout.RESET_BUTTON_WIDTH));
 		assertTrue(layout.resetY() >= layout.footerTop());
 		assertTrue(layout.resetY() + SettingsScreenLayout.RESET_BUTTON_HEIGHT <= layout.footerBottom());
-		assertTrue(layout.channelX() >= 0);
-		assertTrue(layout.channelX() + SettingsScreenLayout.CHANNEL_WIDTH <= width);
-		assertTrue(layout.channelY() >= layout.footerTop());
-		assertTrue(layout.channelY() + SettingsScreenLayout.CHANNEL_HEIGHT <= layout.footerBottom());
-		assertTrue(layout.channelLabelY() >= layout.footerTop());
+		assertTrue(layout.doneX() >= 0);
+		assertTrue(layout.doneX() + SettingsScreenLayout.DONE_BUTTON_WIDTH <= Math.max(width, SettingsScreenLayout.DONE_BUTTON_WIDTH));
+		assertTrue(layout.doneY() >= layout.footerTop());
+		assertTrue(layout.doneY() + SettingsScreenLayout.DONE_BUTTON_HEIGHT <= layout.footerBottom());
+		assertTrue(
+			layout.resetY() + SettingsScreenLayout.RESET_BUTTON_HEIGHT <= layout.doneY()
+			|| layout.doneY() + SettingsScreenLayout.DONE_BUTTON_HEIGHT <= layout.resetY(),
+			"Reset and Done must not overlap");
 	}
 }

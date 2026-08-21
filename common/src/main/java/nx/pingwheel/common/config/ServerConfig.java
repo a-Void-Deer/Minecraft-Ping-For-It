@@ -20,6 +20,10 @@ public class ServerConfig implements IConfig {
 
 	@Override
 	public void validate() {
+		if (defaultChannelMode == null) {
+			defaultChannelMode = ChannelMode.AUTO;
+		}
+
 		if (msToRegenerate < 0) {
 			msToRegenerate = 1000;
 		}

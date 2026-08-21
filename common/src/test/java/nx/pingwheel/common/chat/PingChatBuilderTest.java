@@ -25,11 +25,11 @@ class PingChatBuilderTest {
 	// --- template shape ---
 
 	@Test
-	void buildUsesTheRequestTemplateWithThreeArgs() {
+	void buildUsesTheLegacyPingMessageWithThreeArgs() {
 		Component chat = chatFor(pingType("attention"));
 
 		TranslatableContents contents = assertTranslatable(chat);
-		assertEquals("pingforit.chat.request", contents.getKey());
+		assertEquals("pingforit.chat.pingmsg", contents.getKey());
 		assertEquals(3, contents.getArgs().length);
 	}
 
@@ -134,7 +134,7 @@ class PingChatBuilderTest {
 			"{playerName} {pingType}")) {
 			Component fallback = PingChatBuilder.build(template, "Steve", pingType, target);
 			TranslatableContents contents = assertTranslatable(fallback);
-			assertEquals("pingforit.chat.request", contents.getKey());
+			assertEquals("pingforit.chat.pingmsg", contents.getKey());
 			assertEquals(3, contents.getArgs().length);
 		}
 	}
@@ -149,9 +149,57 @@ class PingChatBuilderTest {
 			"{playerName} {pingType} {unknown} {targetName}",
 			"{playerName} {pingType} {targetName",
 			"{playerName} {pingType} {targetName}" + "}"}) {
-			assertEquals("pingforit.chat.request",
+			assertEquals("pingforit.chat.pingmsg",
 				assertTranslatable(PingChatBuilder.build(template, "Steve", pingType, target)).getKey());
 		}
+	}
+
+	@Test
+	void namedTemplateUsesTheRenamedGeneralKey() {
+		assertEquals("pingforit.chat.pingmsg.template", PingChatBuilder.TEMPLATE_KEY);
+	}
+
+	@Test
+	void templateOverrideKeyUsesEveryBuiltInPingTypeIdExactly() {
+		for (PingType pingType : PingTypeCatalog.builtIn().entries()) {
+			assertEquals(
+				"pingforit.chat." + pingType.id() + ".template.override",
+				PingChatBuilder.templateOverrideKey(pingType));
+		}
+	}
+
+	@Test
+	void overridePresenceSelectsOverrideAndOtherwiseGeneralTemplate() {
+		PingType pingType = pingType("danger");
+		Map<String, String> baseLanguage = Map.of(
+			PingChatBuilder.TEMPLATE_KEY, "general");
+		Map<String, String> mergedLanguage = new java.util.HashMap<>(baseLanguage);
+		String overrideKey = PingChatBuilder.templateOverrideKey(pingType);
+		mergedLanguage.put(overrideKey, "override");
+
+		assertEquals(
+			overrideKey,
+			PingChatBuilder.selectTemplateKey(pingType, mergedLanguage::containsKey));
+		assertEquals(
+			PingChatBuilder.TEMPLATE_KEY,
+			PingChatBuilder.selectTemplateKey(pingType, baseLanguage::containsKey));
+		assertTrue(!baseLanguage.containsKey(overrideKey));
+	}
+
+	@Test
+	void malformedSelectedOverrideFallsDirectlyBackToLegacyPingMessage() {
+		PingType pingType = pingType("request");
+		Component target = Component.translatable("pingforit.target.here");
+		String overrideKey = PingChatBuilder.templateOverrideKey(pingType);
+		Map<String, String> mergedLanguage = Map.of(
+			PingChatBuilder.TEMPLATE_KEY, "{playerName} {pingType} {targetName}",
+			overrideKey, "{playerName} {pingType}");
+
+		String selectedKey = PingChatBuilder.selectTemplateKey(pingType, mergedLanguage::containsKey);
+		Component fallback = PingChatBuilder.build(
+			mergedLanguage.get(selectedKey), "Steve", pingType, target);
+
+		assertEquals("pingforit.chat.pingmsg", assertTranslatable(fallback).getKey());
 	}
 
 	// --- phrase coloring ---

@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Headless tests for the fixed ordinary-block display whitelist: entry
+	 * Headless tests for the client block glow matcher: entry
  * grammar (exact / namespace wildcard / tag / invalid), union semantics with
  * explicit declaration order, the BlockEntity and non-MODEL render-shape
  * gates, and fail-soft behavior for invalid, missing, and unregistered
@@ -44,13 +44,14 @@ class BlockDisplayWhitelistTest {
 	// --- default entries ---
 
 	@Test
-	void defaultEntriesAreExactlyMinecraftNamespaceWildcard() {
+	void defaultEntriesAreExactlyGlobalWildcard() {
 		BlockDisplayWhitelist whitelist = BlockDisplayWhitelist.builtIn();
 
-		assertEquals(List.of("minecraft:*"), whitelist.entries());
+		assertEquals(List.of("*:*"), whitelist.entries());
 		assertEquals(1, whitelist.parsedEntries().size());
 		assertTrue(matches(whitelist, STONE));
 		assertTrue(matches(whitelist, DIRT));
+		assertTrue(matches(whitelist, ResourceLocation.fromNamespaceAndPath("optional_mod", "special_block")));
 	}
 
 	// --- parsing ---
@@ -69,6 +70,15 @@ class BlockDisplayWhitelistTest {
 
 		assertTrue(entry instanceof BlockDisplayWhitelistEntry.NamespaceWildcard);
 		assertEquals("modded", ((BlockDisplayWhitelistEntry.NamespaceWildcard) entry).namespace());
+	}
+
+	@Test
+	void parsesGlobalWildcardEntry() {
+		BlockDisplayWhitelistEntry entry = BlockDisplayWhitelistEntry.tryParse("*:* ".trim()).orElseThrow();
+
+		assertTrue(entry instanceof BlockDisplayWhitelistEntry.Any);
+		assertTrue(entry.matches(STONE, (tag, key) -> false));
+		assertTrue(entry.matches(ResourceLocation.fromNamespaceAndPath("optional_mod", "special_block"), (tag, key) -> false));
 	}
 
 	@Test
@@ -101,6 +111,21 @@ class BlockDisplayWhitelistTest {
 		// the valid exact entry still matches stone, proving invalid entries are
 		// dropped rather than poisoning evaluation
 		assertTrue(matches(whitelist, STONE));
+	}
+
+	@Test
+	void configuredEntriesAreValidatedStrictly() {
+		assertThrows(IllegalArgumentException.class,
+			() -> BlockDisplayWhitelist.validateEntries(null, "blockDisplayWhitelist"));
+		assertThrows(IllegalArgumentException.class,
+			() -> BlockDisplayWhitelist.validateEntries(List.of(" "), "blockDisplayWhitelist"));
+		assertThrows(IllegalArgumentException.class,
+			() -> BlockDisplayWhitelist.validateEntries(List.of("minecraft:stone:*"), "blockDisplayWhitelist"));
+
+		List<String> withNull = new java.util.ArrayList<>();
+		withNull.add(null);
+		assertThrows(IllegalArgumentException.class,
+			() -> BlockDisplayWhitelist.validateEntries(withNull, "blockDisplayWhitelist"));
 	}
 
 	@Test
@@ -148,23 +173,19 @@ class BlockDisplayWhitelistTest {
 	}
 
 	@Test
-	void blockEntityBlocksNeverWhitelistMatch() {
+	void blockEntityBlocksCanMatchTheSharedGlowList() {
 		BlockDisplayWhitelist whitelist = new BlockDisplayWhitelist(List.of("minecraft:chest", "minecraft:*"));
 
-		// A chest-like candidate owns a BlockEntity: the gate rejects it even
-		// though both entries would otherwise match.
-		assertFalse(whitelist.matches(CHEST, true, RenderShape.MODEL, (tag, key) -> false));
-		assertFalse(whitelist.matches(CHEST, true, RenderShape.ENTITYBLOCK_ANIMATED, (tag, key) -> false));
+		assertTrue(whitelist.matches(CHEST, true, RenderShape.MODEL, (tag, key) -> false));
+		assertTrue(whitelist.matches(CHEST, true, RenderShape.ENTITYBLOCK_ANIMATED, (tag, key) -> false));
 	}
 
 	@Test
-	void nonModelRenderShapesNeverWhitelistMatch() {
+	void nonModelRenderShapesStillMatchTheSharedList() {
 		BlockDisplayWhitelist whitelist = new BlockDisplayWhitelist(List.of("minecraft:*"));
 
-		// Lava-like candidates render as INVISIBLE and own no BlockEntity: the
-		// gate must reject them on the render-shape criterion alone.
-		assertFalse(whitelist.matches(STONE, false, RenderShape.INVISIBLE, (tag, key) -> false));
-		assertFalse(whitelist.matches(STONE, false, RenderShape.ENTITYBLOCK_ANIMATED, (tag, key) -> false));
+		assertTrue(whitelist.matches(STONE, false, RenderShape.INVISIBLE, (tag, key) -> false));
+		assertTrue(whitelist.matches(STONE, false, RenderShape.ENTITYBLOCK_ANIMATED, (tag, key) -> false));
 	}
 
 	@Test

@@ -6,13 +6,10 @@ import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.loading.FMLEnvironment;
-import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.CommonServer;
-import nx.pingwheel.common.command.ServerCommandBuilder;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
@@ -22,8 +19,10 @@ import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
+import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
+import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
+import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
-import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.neoforge.platform.PlatformContextServiceImpl;
 
 import static nx.pingwheel.common.Global.MOD_ID;
@@ -41,6 +40,9 @@ public class NeoMain {
 	private static final StreamCodec<FriendlyByteBuf, MarkerRejectedS2CPacket> MARKER_REJECTED_S2C_CODEC = StreamCodec.ofMember(MarkerRejectedS2CPacket::write, MarkerRejectedS2CPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, MarkerWinnerChangedS2CPacket> MARKER_WINNER_CHANGED_S2C_CODEC = StreamCodec.ofMember(MarkerWinnerChangedS2CPacket::write, MarkerWinnerChangedS2CPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, RateLimitPolicyS2CPacket> RATE_LIMIT_POLICY_S2C_CODEC = StreamCodec.ofMember(RateLimitPolicyS2CPacket::write, RateLimitPolicyS2CPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, ServerConfigRequestC2SPacket> SERVER_CONFIG_REQUEST_C2S_CODEC = StreamCodec.ofMember(ServerConfigRequestC2SPacket::write, ServerConfigRequestC2SPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, ServerConfigUpdateC2SPacket> SERVER_CONFIG_UPDATE_C2S_CODEC = StreamCodec.ofMember(ServerConfigUpdateC2SPacket::write, ServerConfigUpdateC2SPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, ServerConfigSnapshotS2CPacket> SERVER_CONFIG_SNAPSHOT_S2C_CODEC = StreamCodec.ofMember(ServerConfigSnapshotS2CPacket::write, ServerConfigSnapshotS2CPacket::readSafe);
 
 	public NeoMain(IEventBus modBus) {
 		CommonServer.INSTANCE.onInit();
@@ -48,7 +50,6 @@ public class NeoMain {
 		PlatformContextServiceImpl.modBus = modBus;
 
 		modBus.addListener(this::onRegisterPackets);
-		NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
 
 		if (FMLEnvironment.dist.isClient()) {
 			new NeoClient(modBus);
@@ -96,15 +97,17 @@ public class NeoMain {
 		registrar.playToClient(RateLimitPolicyS2CPacket.PACKET_TYPE, RATE_LIMIT_POLICY_S2C_CODEC, (payload, context) -> {
 			context.enqueueWork(() -> CommonClient.INSTANCE.onRateLimitPolicyPacket(payload));
 		});
-	}
 
-	public void onRegisterCommands(RegisterCommandsEvent event) {
-		event.getDispatcher().register(ServerCommandBuilder.build((context, success, response) -> {
-			if (success) {
-				context.getSource().sendSuccess(() -> LanguageUtils.withModPrefix(response), false);
-			} else {
-				context.getSource().sendFailure(LanguageUtils.withModPrefix(response));
-			}
-		}));
+		registrar.playToServer(ServerConfigRequestC2SPacket.PACKET_TYPE, SERVER_CONFIG_REQUEST_C2S_CODEC, (payload, context) -> {
+			context.enqueueWork(() -> CommonServer.INSTANCE.onServerConfigRequestPacket(context.player().getServer(), (ServerPlayer) context.player(), payload));
+		});
+
+		registrar.playToServer(ServerConfigUpdateC2SPacket.PACKET_TYPE, SERVER_CONFIG_UPDATE_C2S_CODEC, (payload, context) -> {
+			context.enqueueWork(() -> CommonServer.INSTANCE.onServerConfigUpdatePacket(context.player().getServer(), (ServerPlayer) context.player(), payload));
+		});
+
+		registrar.playToClient(ServerConfigSnapshotS2CPacket.PACKET_TYPE, SERVER_CONFIG_SNAPSHOT_S2C_CODEC, (payload, context) -> {
+			context.enqueueWork(() -> CommonClient.INSTANCE.onServerConfigSnapshotPacket(payload));
+		});
 	}
 }

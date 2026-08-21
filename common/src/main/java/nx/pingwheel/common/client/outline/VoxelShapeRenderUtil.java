@@ -110,4 +110,5 @@ public final class VoxelShapeRenderUtil {
 				.setNormal(pose, normalX, normalY, normalZ);
 		});
 	}
+
 }

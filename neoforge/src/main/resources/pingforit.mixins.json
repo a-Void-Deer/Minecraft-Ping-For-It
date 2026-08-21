@@ -10,7 +10,8 @@
 		"GuiMixin",
 		"LevelRendererMixin",
 		"DisplayBlockDisplayAccessor",
-		"ModelBlockRendererMixin"
+		"ModelBlockRendererMixin",
+		"CreateVisualizationManagerMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
