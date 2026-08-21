@@ -10,18 +10,21 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.resources.ResourceLocation;
 
 /**
- * Outline-only {@link MultiBufferSource} adapter around a caller-owned,
- * attempt-local buffer source.
+ * Outline-only {@link MultiBufferSource} adapter around a caller-owned
+ * buffer source.
  *
  * <p>Every render attempt through this adapter resolves the incoming
  * {@link RenderType} to its outline-only counterpart and issues it straight
- * into the supplied local source, so the silhouette geometry is emitted
- * nowhere else. The adapter never touches any shared or frame-level vanilla
- * buffer: the supplied source <em>must be attempt-local</em> (typically a
- * fresh {@code MultiBufferSource.immediate(...)} over a fresh
+ * into the supplied source, so the silhouette geometry is emitted nowhere
+ * else. An attempt-local source is a valid and preferred isolation strategy
+ * (typically a fresh {@code MultiBufferSource.immediate(...)} over a fresh
  * {@code ByteBufferBuilder} owned by the same attempt), so a failed attempt
- * that left an incomplete vertex is discarded together with its buffer
- * instead of corrupting a buffer some other code path will later flush.
+ * that left an incomplete vertex can be discarded together with its buffer.
+ * The caller may also provide its own shared/frame-level vanilla
+ * {@code OutlineBufferSource}; in that mode partial writes cannot be rolled
+ * back, so any recoverable exception after a committed vertex is treated as
+ * {@code RENDERED}. The adapter never flushes that shared source or takes
+ * ownership of its lifetime.
  *
  * <p>Resolution rules for an incoming render type:
  * <ul>
@@ -69,11 +72,13 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 	private int totalVertices;
 
 	/**
-	 * @param source                    the attempt-local buffer source to
-	 *                                  issue resolved outline render types
-	 *                                  into; must be created fresh for this
-	 *                                  attempt and never shared across
-	 *                                  attempts or frames
+	 * @param source                    the caller-owned buffer source to issue
+	 *                                  resolved outline render types into; an
+	 *                                  attempt-local source is preferred for
+	 *                                  rollback isolation, while a shared
+	 *                                  {@code OutlineBufferSource} is also valid
+	 *                                  when the caller owns flushing and treats
+	 *                                  partial committed writes as rendered
 	 * @param markerColor               the opaque marker color (ARGB; the
 	 *                                  alpha is ignored and forced to 255)
 	 *                                  applied to every emitted vertex
@@ -83,11 +88,13 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 	}
 
 	/**
-	 * @param source                    the attempt-local buffer source to
-	 *                                  issue resolved outline render types
-	 *                                  into; must be created fresh for this
-	 *                                  attempt and never shared across
-	 *                                  attempts or frames
+	 * @param source                    the caller-owned buffer source to issue
+	 *                                  resolved outline render types into; an
+	 *                                  attempt-local source is preferred for
+	 *                                  rollback isolation, while a shared
+	 *                                  {@code OutlineBufferSource} is also valid
+	 *                                  when the caller owns flushing and treats
+	 *                                  partial committed writes as rendered
 	 * @param markerColor               the opaque marker color (ARGB; the
 	 *                                  alpha is ignored and forced to 255)
 	 *                                  applied to every emitted vertex
@@ -160,17 +167,23 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 	}
 
 	/**
-	 * Registers a vertex write against the shared budget. Called by every
-	 * issued consumer before it forwards a vertex; throws the dedicated
-	 * recoverable {@link BudgetExceededException} once the {@link #maxVertices}
-	 * cap would be exceeded.
+	 * Checks the shared budget before an issued consumer forwards a vertex.
+	 * This is deliberately separate from {@link #commitVertexWrite()}: the
+	 * delegate may reject the vertex, in which case nothing was committed.
 	 */
 	void noteVertexWrite() {
-		int next = totalVertices + 1;
+		long next = (long) totalVertices + 1L;
 		if (maxVertices >= 0 && next > maxVertices) {
-			throw new BudgetExceededException(next, maxVertices);
+			// The public exception API uses int counts. Saturate the diagnostic at
+			// MAX_VALUE rather than overflowing when the hard cap is MAX_VALUE.
+			int attemptedVertices = next > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) next;
+			throw new BudgetExceededException(attemptedVertices, maxVertices);
 		}
-		totalVertices = next;
+	}
+
+	/** Records a vertex after the delegate has accepted it. */
+	void commitVertexWrite() {
+		totalVertices++;
 	}
 
 	/**
@@ -310,8 +323,11 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 			if (adapter != null) {
 				adapter.noteVertexWrite();
 			}
-			vertices++;
 			delegate.addVertex(x, y, z);
+			vertices++;
+			if (adapter != null) {
+				adapter.commitVertexWrite();
+			}
 			delegate.setColor(red, green, blue, 255);
 			return this;
 		}
