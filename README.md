@@ -108,3 +108,7 @@ The fork retains attribution to LukenSkyne's original Ping Wheel work. It has
 its own identity and protocol, does not migrate the original protocol, does not
 declare or enforce a conflict block against the original mod, and gives no
 interoperability guarantee when both are installed.
+
+## Special Thanks
+
+- **SHARK_oi** for providing this simple icon when I'm hesitating.
