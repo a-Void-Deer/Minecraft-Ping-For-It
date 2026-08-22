@@ -55,7 +55,7 @@ pings.
 
 ## Languages
 
-Exactly eight bundled locales are supported: `en_us`, `de_de`, `es_ar`,
+Eight bundled locales are supported: `en_us`, `de_de`, `es_ar`,
 `fr_fr`, `pl_pl`, `tr_tr`, `zh_cn`, and `zh_tw`. Ping chat, target names,
 settings, and wheel text use Minecraft localization.
 
@@ -111,4 +111,5 @@ interoperability guarantee when both are installed.
 
 ## Special Thanks
 
+- **LukenSkyne** and other Ping Wheel contributers for creating the original work
 - **SHARK_oi** for providing this simple icon when I'm hesitating.
