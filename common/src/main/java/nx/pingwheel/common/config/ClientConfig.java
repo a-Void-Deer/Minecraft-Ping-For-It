@@ -29,7 +29,7 @@ public class ClientConfig implements IConfig {
 	boolean directionIndicatorVisible = true;
 	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
 	TeamColorMode teamColorMode = TeamColorMode.FULL;
-	EntityBlockRenderMode entityBlockRenderMode = EntityBlockRenderMode.COMPATIBLE;
+	EntityBlockRenderMode entityBlockRenderMode = EntityBlockRenderMode.ALL;
 	int pingSize = 100;
 	int wheelHoldMillis = ClientConfigBounds.DEFAULT_WHEEL_HOLD_MILLIS;
 	boolean longPressCompatibilityMode = false;
