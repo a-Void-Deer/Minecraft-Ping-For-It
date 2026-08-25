@@ -41,6 +41,10 @@ class MarkerPacketCodecTest {
 			new Target.EntityTarget("minecraft:overworld", ENTITY_ID),
 			new Target.EntityTarget("minecraft:overworld", EntityLocator.runtimeId(17)),
 			new Target.BlockTarget("minecraft:overworld", -5, 64, 200, "minecraft:chest"),
+			Target.ExternalBlockTarget.candidate(
+				"minecraft:overworld", "provider:test", "minecraft:chest", "candidate-locator", true),
+			Target.ExternalBlockTarget.committed(
+				"minecraft:overworld", "provider:test", "target-1", "minecraft:chest", "committed-locator", false),
 			new Target.LocationTarget("minecraft:the_end", 12.5, -64.0, 0.25)
 		};
 
@@ -70,6 +74,8 @@ class MarkerPacketCodecTest {
 			new TargetKey.EntityKey("minecraft:overworld", ENTITY_ID),
 			new TargetKey.EntityKey("minecraft:overworld", EntityLocator.runtimeId(17)),
 			new TargetKey.BlockKey("minecraft:overworld", -5, 64, 200, "minecraft:chest"),
+			new TargetKey.ExternalBlockKey(
+				"minecraft:overworld", "provider:test", "target-1", "minecraft:chest"),
 			new TargetKey.LocationKey("minecraft:the_end", 12.5, -64.0, 0.25)
 		};
 
@@ -203,7 +209,8 @@ class MarkerPacketCodecTest {
 		var snapshot = new MarkerSnapshot(
 			new MarkerId(99L),
 			UUID.randomUUID(),
-			new Target.BlockTarget(UNICODE_DIMENSION, 1, 2, 3, UNICODE_BLOCK),
+			Target.ExternalBlockTarget.committed(
+				UNICODE_DIMENSION, "provider:test", "target-1", UNICODE_BLOCK, "locator", true),
 			UNICODE_TARGET_TYPE,
 			UNICODE_PING_TYPE,
 			new MarkerAnchor(0.5, 64.0, -8.25),
@@ -214,6 +221,37 @@ class MarkerPacketCodecTest {
 		var buf = buffer();
 		MarkerPacketCodec.writeMarkerSnapshot(buf, snapshot);
 		assertEquals(snapshot, MarkerPacketCodec.readMarkerSnapshot(buf));
+	}
+
+	@Test
+	void externalBlockTargetKeyRoundTripsWithStableIdentityOnly() {
+		Target.ExternalBlockTarget target = new Target.ExternalBlockTarget(
+			UNICODE_DIMENSION, "provider:test", "target-1", UNICODE_BLOCK, "locator-a", true);
+		TargetKey key = TargetKey.from(target);
+
+		var targetBuffer = buffer();
+		MarkerPacketCodec.writeTarget(targetBuffer, target);
+		assertEquals(target, MarkerPacketCodec.readTarget(targetBuffer));
+
+		var keyBuffer = buffer();
+		MarkerPacketCodec.writeTargetKey(keyBuffer, key);
+		assertEquals(key, MarkerPacketCodec.readTargetKey(keyBuffer));
+	}
+
+	@Test
+	void committedMarkerSnapshotRejectsAnUncommittedExternalCandidate() {
+		Target candidate = Target.ExternalBlockTarget.candidate(
+			UNICODE_DIMENSION, "provider:test", UNICODE_BLOCK, "locator", true);
+
+		assertThrows(IllegalArgumentException.class, () -> new MarkerSnapshot(
+			new MarkerId(99L),
+			UUID.randomUUID(),
+			candidate,
+			"block",
+			"attention",
+			new MarkerAnchor(0.5, 64.0, -8.25),
+			10L,
+			1000L));
 	}
 
 	@Test
@@ -230,6 +268,60 @@ class MarkerPacketCodecTest {
 		buf.writeUtf("NOPE", MarkerPacketCodec.MAX_ID_LENGTH);
 
 		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTargetKey(buf));
+	}
+
+	@Test
+	void rejectsUnknownExternalBlockVariantTag() {
+		var buf = buffer();
+		MarkerPacketCodec.writeEnum(buf, TargetKind.BLOCK);
+		MarkerPacketCodec.writeIdString(buf, "minecraft:overworld");
+		buf.writeVarInt(99);
+
+		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTarget(buf));
+	}
+
+	@Test
+	void rejectsEmptyStableIdForExternalTargetKey() {
+		var buf = buffer();
+		MarkerPacketCodec.writeEnum(buf, TargetKind.BLOCK);
+		MarkerPacketCodec.writeIdString(buf, "minecraft:overworld");
+		buf.writeVarInt(MarkerPacketCodec.BLOCK_TARGET_EXTERNAL_TAG);
+		MarkerPacketCodec.writeIdString(buf, "provider:test");
+		MarkerPacketCodec.writeIdString(buf, "");
+		MarkerPacketCodec.writeIdString(buf, "minecraft:chest");
+
+		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTargetKey(buf));
+	}
+
+	@Test
+	void rejectsInvalidExternalBlockClassificationByte() {
+		var buf = buffer();
+		MarkerPacketCodec.writeEnum(buf, TargetKind.BLOCK);
+		MarkerPacketCodec.writeIdString(buf, "minecraft:overworld");
+		buf.writeVarInt(MarkerPacketCodec.BLOCK_TARGET_EXTERNAL_TAG);
+		MarkerPacketCodec.writeIdString(buf, "provider:test");
+		MarkerPacketCodec.writeIdString(buf, "");
+		MarkerPacketCodec.writeIdString(buf, "minecraft:chest");
+		buf.writeUtf("locator", MarkerPacketCodec.MAX_EXTERNAL_PROVIDER_LOCATOR_LENGTH);
+		buf.writeByte(2);
+
+		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTarget(buf));
+	}
+
+	@Test
+	void rejectsOversizedExternalProviderLocatorOnRead() {
+		var buf = buffer();
+		MarkerPacketCodec.writeEnum(buf, TargetKind.BLOCK);
+		MarkerPacketCodec.writeIdString(buf, "minecraft:overworld");
+		buf.writeVarInt(MarkerPacketCodec.BLOCK_TARGET_EXTERNAL_TAG);
+		MarkerPacketCodec.writeIdString(buf, "provider:test");
+		MarkerPacketCodec.writeIdString(buf, "target-1");
+		MarkerPacketCodec.writeIdString(buf, "minecraft:chest");
+		String tooLong = "x".repeat(MarkerPacketCodec.MAX_EXTERNAL_PROVIDER_LOCATOR_LENGTH + 1);
+		buf.writeVarInt(tooLong.length());
+		buf.writeBytes(tooLong.getBytes(StandardCharsets.UTF_8));
+
+		assertThrows(RuntimeException.class, () -> MarkerPacketCodec.readTarget(buf));
 	}
 
 	@Test

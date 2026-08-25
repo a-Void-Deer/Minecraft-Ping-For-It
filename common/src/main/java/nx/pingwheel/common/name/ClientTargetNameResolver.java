@@ -42,6 +42,14 @@ public final class ClientTargetNameResolver {
 		Optional<Component> entity(Target.EntityTarget target);
 
 		Optional<Component> block(Target.BlockTarget target);
+
+		/**
+		 * Optional generic seam for a later external-provider name adapter. The
+		 * default keeps this stage provider-free and fails soft to the unknown name.
+		 */
+		default Optional<Component> externalBlock(Target.ExternalBlockTarget target) {
+			return Optional.empty();
+		}
 	}
 
 	private final Lookup lookup;
@@ -77,6 +85,9 @@ public final class ClientTargetNameResolver {
 					.map(Objects::requireNonNull)
 					.orElseGet(TargetNameComposer::unknown);
 				case Target.BlockTarget block -> lookup.block(block)
+					.map(Objects::requireNonNull)
+					.orElseGet(TargetNameComposer::unknown);
+				case Target.ExternalBlockTarget external -> lookup.externalBlock(external)
 					.map(Objects::requireNonNull)
 					.orElseGet(TargetNameComposer::unknown);
 			};

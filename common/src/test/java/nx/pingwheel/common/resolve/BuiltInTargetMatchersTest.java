@@ -81,6 +81,37 @@ class BuiltInTargetMatchersTest {
 	}
 
 	@Test
+	void externalPlainBlockResolvesAsExistingGenericBlockType() {
+		Target.ExternalBlockTarget external = new Target.ExternalBlockTarget(
+			OVERWORLD, "provider:test", "target-1", "minecraft:stone", "locator", false);
+
+		String resolved = resolver.resolve(external, TargetMatchContext.none()).targetType().id();
+
+		assertEquals("block", resolved);
+	}
+
+	@Test
+	void externalBlockEntityResolvesAsEntityBlockBeforeGenericBlock() {
+		Target.ExternalBlockTarget external = new Target.ExternalBlockTarget(
+			OVERWORLD, "provider:test", "target-1", "minecraft:chest", "locator", true);
+
+		String resolved = resolver.resolve(external, TargetMatchContext.none()).targetType().id();
+
+		assertEquals("entity_block", resolved);
+	}
+
+	@Test
+	void externalClassificationContextRemainsAuthoritativeForMatching() {
+		Target.ExternalBlockTarget external = new Target.ExternalBlockTarget(
+			OVERWORLD, "provider:test", "target-1", "minecraft:chest", "locator", false);
+
+		String resolved = resolver.resolve(external, TargetMatchContext.blockEntityBlock(true))
+			.targetType().id();
+
+		assertEquals("entity_block", resolved);
+	}
+
+	@Test
 	void locationResolvesAsLocationFallback() {
 		Target.LocationTarget location = new Target.LocationTarget(OVERWORLD, 1.0, 2.0, 3.0);
 

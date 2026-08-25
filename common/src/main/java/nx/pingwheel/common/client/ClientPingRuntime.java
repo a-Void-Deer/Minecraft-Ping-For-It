@@ -1161,6 +1161,7 @@ public final class ClientPingRuntime {
 		return switch (targetKey) {
 			case TargetKey.EntityKey ignored -> TargetKind.ENTITY;
 			case TargetKey.BlockKey ignored -> TargetKind.BLOCK;
+			case TargetKey.ExternalBlockKey ignored -> TargetKind.BLOCK;
 			case TargetKey.LocationKey ignored -> TargetKind.LOCATION;
 		};
 	}

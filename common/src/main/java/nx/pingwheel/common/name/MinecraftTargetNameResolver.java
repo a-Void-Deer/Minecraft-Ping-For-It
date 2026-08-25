@@ -124,6 +124,9 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 		return switch (normalizedTarget) {
 			case Target.EntityTarget entity -> resolveEntity(level, entity);
 			case Target.BlockTarget block -> resolveBlock(level, block);
+			// External target naming belongs to the later provider adapter. It is
+			// deliberately not presented as a pure location name.
+			case Target.ExternalBlockTarget ignored -> Resolution.unavailable(FallbackReason.BLOCK_UNAVAILABLE);
 			case Target.LocationTarget ignored -> Resolution.of(TargetNameComposer.here());
 		};
 	}

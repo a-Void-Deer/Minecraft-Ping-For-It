@@ -7,6 +7,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TargetIdentityTest {
 
@@ -78,6 +79,46 @@ class TargetIdentityTest {
 
 		assertNotEquals(a, new Target.BlockTarget(OVERWORLD, 1, 2, 4, "minecraft:stone"));
 		assertNotEquals(a, new Target.BlockTarget(NETHER, 1, 2, 3, "minecraft:stone"));
+	}
+
+	@Test
+	void externalBlockUsesBlockKindAndAllowsAnUncommittedCandidate() {
+		Target.ExternalBlockTarget candidate = Target.ExternalBlockTarget.candidate(
+			OVERWORLD, "provider:test", "minecraft:chest", "opaque-candidate", true);
+
+		assertEquals(TargetKind.BLOCK, candidate.kind());
+		assertTrue(candidate.isCandidate());
+		assertEquals("provider:test", candidate.providerId());
+		assertEquals("", candidate.stableTargetId());
+		assertEquals("minecraft:chest", candidate.expectedBlockRegistryId());
+		assertEquals("opaque-candidate", candidate.providerLocator());
+		assertTrue(candidate.hasBlockEntity());
+	}
+
+	@Test
+	void externalBlockEqualityUsesStableIdentityNotLocatorOrClassification() {
+		Target.ExternalBlockTarget first = new Target.ExternalBlockTarget(
+			OVERWORLD, "provider:test", "target-1", "minecraft:chest", "locator-a", true);
+		Target.ExternalBlockTarget second = new Target.ExternalBlockTarget(
+			OVERWORLD, "provider:test", "target-1", "minecraft:chest", "locator-b", false);
+
+		assertEquals(first, second);
+		assertEquals(first.hashCode(), second.hashCode());
+		assertTrue(first.isCommitted());
+	}
+
+	@Test
+	void externalBlockValidatesOpaqueAndStableValues() {
+		assertThrows(NullPointerException.class,
+			() -> new Target.ExternalBlockTarget(OVERWORLD, null, "id", "minecraft:stone", "locator", false));
+		assertThrows(IllegalArgumentException.class,
+			() -> new Target.ExternalBlockTarget(OVERWORLD, " ", "id", "minecraft:stone", "locator", false));
+		assertThrows(IllegalArgumentException.class,
+			() -> new Target.ExternalBlockTarget(OVERWORLD, "provider:test", " ", "minecraft:stone", "locator", false));
+		assertThrows(IllegalArgumentException.class,
+			() -> new Target.ExternalBlockTarget(
+				OVERWORLD, "provider:test", "id", "minecraft:stone",
+				"x".repeat(Target.ExternalBlockTarget.MAX_PROVIDER_LOCATOR_LENGTH + 1), false));
 	}
 
 	@Test

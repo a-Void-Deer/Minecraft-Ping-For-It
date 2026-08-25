@@ -31,6 +31,11 @@ class OptionalDependencySafetyTest {
 		"nx/pingwheel/common/resolve/RegistryBackedTargetMatcher",
 		"nx/pingwheel/common/resolve/BuiltInTargetMatchers",
 		"nx/pingwheel/common/resolve/TargetMatcher",
+		"nx/pingwheel/common/domain/Target",
+		"nx/pingwheel/common/domain/TargetMatchContext",
+		"nx/pingwheel/common/interaction/TargetSnapshotFactory",
+		"nx/pingwheel/common/marker/TargetKey",
+		"nx/pingwheel/common/network/MarkerPacketCodec",
 		"nx/pingwheel/common/marker/MinecraftAuthoritativeTargetValidator",
 		"nx/pingwheel/common/marker/AuthoritativeTargetValidator");
 

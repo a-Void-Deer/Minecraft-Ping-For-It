@@ -17,7 +17,8 @@ import nx.pingwheel.common.registry.RegistryLookup;
  * {@link TargetKind#ENTITY} kinds only. It is {@linkplain #isActive() active}
  * iff at least one referenced entry exists; missing entries are ignored. A
  * target matches iff its concrete identity equals a <em>present</em>
- * reference: {@code BlockTarget.blockRegistryId} for block kinds, or
+	 * reference: {@code BlockTarget.blockRegistryId} (or an external target's
+	 * {@code expectedBlockRegistryId}) for block kinds, or
  * {@code TargetMatchContext.entityTypeId} for entity kinds.
  *
  * <p>No optional-mod class is referenced; absence of all referenced content
@@ -126,7 +127,13 @@ public final class RegistryBackedTargetMatcher implements TargetMatcher {
 	 */
 	private String matchingEntryId(Target target, TargetMatchContext context) {
 		if (kind == TargetKind.BLOCK) {
-			return target instanceof Target.BlockTarget block ? block.blockRegistryId() : null;
+			if (target instanceof Target.BlockTarget block) {
+				return block.blockRegistryId();
+			}
+
+			return target instanceof Target.ExternalBlockTarget external
+				? external.expectedBlockRegistryId()
+				: null;
 		}
 
 		if (!(target instanceof Target.EntityTarget)) {

@@ -23,9 +23,12 @@ import nx.pingwheel.common.domain.TargetMatchContext;
  *   <li>a block snapshot carries dimension id + position + block registry id
  *       and deliberately excludes {@code BlockState}; its match context
  *       carries the transient {@code EntityBlock} classification when the
- *       caller can derive it, so the {@code entity_block} target type can
- *       outrank the generic block;</li>
- *   <li>a location snapshot carries dimension id + finite coordinates.</li>
+	 *       caller can derive it, so the {@code entity_block} target type can
+	 *       outrank the generic block;</li>
+	 *   <li>an external block snapshot carries provider id, optional committed
+	 *       stable id, an opaque locator, expected block registry id, and the
+	 *       provider-derived block-entity classification;</li>
+	 *   <li>a location snapshot carries dimension id + finite coordinates.</li>
  * </ul>
  */
 public final class TargetSnapshotFactory {
@@ -108,6 +111,66 @@ public final class TargetSnapshotFactory {
 		return new TargetSnapshot(
 			new Target.BlockTarget(dimensionId, x, y, z, blockRegistryId),
 			TargetMatchContext.blockEntityBlock(hasBlockEntity));
+	}
+
+	/**
+	 * An external block snapshot with an explicit provider locator and
+	 * provider-derived block-entity classification. An empty stable target id
+	 * represents the uncommitted C2S candidate form.
+	 */
+	public static TargetSnapshot externalBlock(
+		String dimensionId,
+		String providerId,
+		String stableTargetId,
+		String expectedBlockRegistryId,
+		String providerLocator,
+		boolean hasBlockEntity
+	) {
+		return externalBlock(new Target.ExternalBlockTarget(
+			dimensionId, providerId, stableTargetId, expectedBlockRegistryId, providerLocator, hasBlockEntity));
+	}
+
+	/** An external block snapshot with no explicit classification. */
+	public static TargetSnapshot externalBlock(
+		String dimensionId,
+		String providerId,
+		String stableTargetId,
+		String expectedBlockRegistryId,
+		String providerLocator
+	) {
+		Target.ExternalBlockTarget target = new Target.ExternalBlockTarget(
+			dimensionId, providerId, stableTargetId, expectedBlockRegistryId, providerLocator);
+
+		return new TargetSnapshot(target, TargetMatchContext.none());
+	}
+
+	/** Builds an uncommitted external block candidate snapshot. */
+	public static TargetSnapshot externalBlockCandidate(
+		String dimensionId,
+		String providerId,
+		String expectedBlockRegistryId,
+		String providerLocator,
+		boolean hasBlockEntity
+	) {
+		return externalBlock(dimensionId, providerId, "", expectedBlockRegistryId, providerLocator, hasBlockEntity);
+	}
+
+	/** Builds a committed external block snapshot. */
+	public static TargetSnapshot externalBlockCommitted(
+		String dimensionId,
+		String providerId,
+		String stableTargetId,
+		String expectedBlockRegistryId,
+		String providerLocator,
+		boolean hasBlockEntity
+	) {
+		return externalBlock(
+			dimensionId, providerId, stableTargetId, expectedBlockRegistryId, providerLocator, hasBlockEntity);
+	}
+
+	/** Builds a snapshot from an already constructed external target. */
+	public static TargetSnapshot externalBlock(Target.ExternalBlockTarget target) {
+		return new TargetSnapshot(target, TargetMatchContext.blockEntityBlock(target.hasBlockEntity()));
 	}
 
 	/**

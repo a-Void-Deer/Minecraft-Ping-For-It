@@ -77,6 +77,18 @@ class MarkerPacketsTest {
 	}
 
 	@Test
+	void createPacketRoundTripsAnUncommittedExternalBlockCandidate() {
+		Target candidate = Target.ExternalBlockTarget.candidate(
+			OVERWORLD, "provider:test", "minecraft:chest", "opaque-locator", true);
+		var packet = new MarkerCreateC2SPacket(42L, candidate, "attention");
+
+		var buf = buffer();
+		packet.write(buf);
+
+		assertEquals(packet, MarkerCreateC2SPacket.readSafe(buf));
+	}
+
+	@Test
 	void createPacketRejectsNegativeRequestId() {
 		var negative = new MarkerCreateC2SPacket(-5L, locationTarget(), "go_to");
 		assertTrue(negative.isCorrupt());

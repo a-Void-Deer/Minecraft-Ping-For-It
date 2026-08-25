@@ -59,6 +59,17 @@ class RegistryBackedTargetMatcherTest {
 	}
 
 	@Test
+	void blockMatcherUsesExternalExpectedRegistryId() {
+		RegistryBackedTargetMatcher matcher = blockMatcher(
+			lookup(BLOCK_REGISTRY + ":minecraft:chest"), "minecraft:chest");
+
+		Target.ExternalBlockTarget chest = new Target.ExternalBlockTarget(
+			OVERWORLD, "provider:test", "target-1", "minecraft:chest", "locator", true);
+
+		assertTrue(matcher.matches(chest, TargetMatchContext.none()));
+	}
+
+	@Test
 	void blockMatcherIgnoresMissingEntry() {
 		RegistryBackedTargetMatcher matcher = blockMatcher(
 			lookup(BLOCK_REGISTRY + ":minecraft:stone"),

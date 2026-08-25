@@ -38,6 +38,9 @@ public record ServerMarker(
 		Objects.requireNonNull(targetType, "targetType");
 		Objects.requireNonNull(pingType, "pingType");
 		Objects.requireNonNull(anchor, "anchor");
+		// Server markers are committed state; an external C2S candidate has no
+		// stable key until its provider has authoritatively resolved it.
+		TargetKey.from(target);
 
 		if (arrivalTick < 0L) {
 			throw new IllegalArgumentException("arrivalTick must be non-negative: " + arrivalTick);

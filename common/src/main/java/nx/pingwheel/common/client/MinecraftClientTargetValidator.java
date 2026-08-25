@@ -76,6 +76,9 @@ public final class MinecraftClientTargetValidator implements TargetValidator {
 		return switch (target) {
 			case Target.EntityTarget entity -> validateEntity(entity);
 			case Target.BlockTarget block -> validateBlock(level, block);
+			// Provider-specific validation is intentionally deferred to the later
+			// integration. The server remains authoritative for this opaque target.
+			case Target.ExternalBlockTarget ignored -> TargetValidation.valid();
 			case Target.LocationTarget ignored -> TargetValidation.valid();
 		};
 	}

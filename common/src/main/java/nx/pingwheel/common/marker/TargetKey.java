@@ -14,17 +14,20 @@ import nx.pingwheel.common.domain.Target;
  * type. Every variant carries the full target identity:
  * <ul>
 	 *   <li>{@link EntityKey}: dimension + {@link EntityLocator} (stable across movement and
- *       same-dimension teleports, and deliberately position-free);</li>
- *   <li>{@link BlockKey}: dimension + exact integer position + block registry
- *       id (so a different block type at the same position is a different
- *       key, while a {@code BlockState}-only change is not);</li>
- *   <li>{@link LocationKey}: dimension + exact finite coordinates.</li>
+	 *       same-dimension teleports, and deliberately position-free);</li>
+	 *   <li>{@link BlockKey}: dimension + exact integer position + block registry
+	 *       id (so a different block type at the same position is a different
+	 *       key, while a {@code BlockState}-only change is not);</li>
+	 *   <li>{@link ExternalBlockKey}: dimension + provider + stable target id +
+	 *       expected block registry id, without the provider locator or
+	 *       classification;</li>
+	 *   <li>{@link LocationKey}: dimension + exact finite coordinates.</li>
  * </ul>
  *
  * <p>Only JDK types are used here; there are no {@code net.minecraft}
  * references, so keys can be constructed and compared in tests.
  */
-public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKey, TargetKey.LocationKey {
+public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKey, TargetKey.ExternalBlockKey, TargetKey.LocationKey {
 
 	String dimensionId();
 
@@ -39,6 +42,15 @@ public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKe
 				new EntityKey(entity.dimensionId(), entity.locator());
 			case Target.BlockTarget block ->
 				new BlockKey(block.dimensionId(), block.x(), block.y(), block.z(), block.blockRegistryId());
+			case Target.ExternalBlockTarget external -> {
+				if (!external.isCommitted()) {
+					throw new IllegalArgumentException("an uncommitted external target has no marker key");
+				}
+
+				yield new ExternalBlockKey(
+					external.dimensionId(),
+					external.providerId(), external.stableTargetId(), external.expectedBlockRegistryId());
+			}
 			case Target.LocationTarget location ->
 				new LocationKey(location.dimensionId(), location.x(), location.y(), location.z());
 		};
@@ -66,6 +78,42 @@ public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKe
 			if (blockRegistryId.isBlank()) {
 				throw new IllegalArgumentException("blockRegistryId must not be blank");
 			}
+		}
+	}
+
+	/**
+	 * Stable identity for a committed external block target.
+	 *
+	 * <p>The provider locator, world anchor, and block-entity classification are
+	 * intentionally absent. A provider may update its locator without changing
+	 * the marker's same-target key.
+	 */
+	record ExternalBlockKey(
+		String dimensionId,
+		String providerId,
+		String stableTargetId,
+		String expectedBlockRegistryId
+	) implements TargetKey {
+
+		public ExternalBlockKey {
+			requireDimensionId(dimensionId);
+			requireIdentifier("providerId", providerId);
+			requireIdentifier("stableTargetId", stableTargetId);
+			requireIdentifier("expectedBlockRegistryId", expectedBlockRegistryId);
+		}
+
+		private static String requireIdentifier(String name, String value) {
+			Objects.requireNonNull(value, name);
+
+			if (value.isBlank()) {
+				throw new IllegalArgumentException(name + " must not be blank");
+			}
+
+			if (value.length() > Target.ExternalBlockTarget.MAX_IDENTIFIER_LENGTH) {
+				throw new IllegalArgumentException(name + " exceeds the maximum length");
+			}
+
+			return value;
 		}
 	}
 

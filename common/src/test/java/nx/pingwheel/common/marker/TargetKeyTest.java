@@ -57,6 +57,45 @@ class TargetKeyTest {
 	}
 
 	@Test
+	void externalBlockKeyExcludesLocatorAndBlockEntityClassification() {
+		Target.ExternalBlockTarget first = new Target.ExternalBlockTarget(
+			OVERWORLD, "provider:test", "target-1", "minecraft:chest", "locator-a", true);
+		Target.ExternalBlockTarget second = new Target.ExternalBlockTarget(
+			OVERWORLD, "provider:test", "target-1", "minecraft:chest", "locator-b", false);
+
+		TargetKey firstKey = TargetKey.from(first);
+		TargetKey secondKey = TargetKey.from(second);
+
+		assertEquals(firstKey, secondKey);
+		assertEquals(
+			new TargetKey.ExternalBlockKey(OVERWORLD, "provider:test", "target-1", "minecraft:chest"),
+			firstKey);
+	}
+
+	@Test
+	void externalBlockKeyIdentityIncludesStableProviderFields() {
+		TargetKey base = new TargetKey.ExternalBlockKey(
+			OVERWORLD, "provider:test", "target-1", "minecraft:chest");
+
+		assertNotEquals(base, new TargetKey.ExternalBlockKey(
+			NETHER, "provider:test", "target-1", "minecraft:chest"));
+		assertNotEquals(base, new TargetKey.ExternalBlockKey(
+			OVERWORLD, "provider:other", "target-1", "minecraft:chest"));
+		assertNotEquals(base, new TargetKey.ExternalBlockKey(
+			OVERWORLD, "provider:test", "target-2", "minecraft:chest"));
+		assertNotEquals(base, new TargetKey.ExternalBlockKey(
+			OVERWORLD, "provider:test", "target-1", "minecraft:stone"));
+	}
+
+	@Test
+	void uncommittedExternalTargetHasNoTargetKey() {
+		Target.ExternalBlockTarget candidate = Target.ExternalBlockTarget.candidate(
+			OVERWORLD, "provider:test", "minecraft:chest", "locator", true);
+
+		assertThrows(IllegalArgumentException.class, () -> TargetKey.from(candidate));
+	}
+
+	@Test
 	void locationKeyIdentityUsesExactCoordinates() {
 		assertEquals(
 			new TargetKey.LocationKey(OVERWORLD, 1.5, 2.5, 3.5),
@@ -118,6 +157,18 @@ class TargetKeyTest {
 		assertThrows(IllegalArgumentException.class, () -> new TargetKey.BlockKey(" ", 0, 0, 0, "minecraft:stone"));
 		assertThrows(NullPointerException.class, () -> new TargetKey.BlockKey(OVERWORLD, 0, 0, 0, null));
 		assertThrows(IllegalArgumentException.class, () -> new TargetKey.BlockKey(OVERWORLD, 0, 0, 0, " "));
+	}
+
+	@Test
+	void externalBlockKeyValidatesCommittedIdentityFields() {
+		assertThrows(NullPointerException.class,
+			() -> new TargetKey.ExternalBlockKey(null, "provider:test", "target", "minecraft:stone"));
+		assertThrows(IllegalArgumentException.class,
+			() -> new TargetKey.ExternalBlockKey(OVERWORLD, " ", "target", "minecraft:stone"));
+		assertThrows(IllegalArgumentException.class,
+			() -> new TargetKey.ExternalBlockKey(OVERWORLD, "provider:test", " ", "minecraft:stone"));
+		assertThrows(IllegalArgumentException.class,
+			() -> new TargetKey.ExternalBlockKey(OVERWORLD, "provider:test", "target", " "));
 	}
 
 	@Test

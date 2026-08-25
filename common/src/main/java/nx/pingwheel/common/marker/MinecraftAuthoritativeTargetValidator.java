@@ -125,6 +125,10 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 		return switch (requestedTarget) {
 			case Target.EntityTarget entity -> validateEntity(requesterPlayer, level, dimensionId, entity);
 			case Target.BlockTarget block -> validateBlock(requesterPlayer, level, dimensionId, block);
+			// No provider registry or runtime adapter is installed in this stage.
+			// Do not reinterpret an external block candidate as a location.
+			case Target.ExternalBlockTarget ignored ->
+				AuthoritativeTargetValidation.rejected(MarkerRejectReason.INVALID_REQUEST);
 			case Target.LocationTarget location -> validateLocation(requesterPlayer, dimensionId, location);
 		};
 	}
