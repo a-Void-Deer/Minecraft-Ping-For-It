@@ -1,15 +1,23 @@
 package nx.pingwheel.common.core;
 
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
+import net.minecraft.world.level.Level;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.ServerConfigUpdateService;
 import nx.pingwheel.common.domain.PingTypeCatalog;
+import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.integration.ExternalBlockServerProviders;
+import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.integration.TeamContextHandler;
 import nx.pingwheel.common.marker.MarkerCreationLogger;
 import nx.pingwheel.common.marker.MarkerCreationService;
@@ -57,6 +65,7 @@ public class ServerCore {
 	private ServerCore() {}
 
 	private static final int TICKS_PER_SECOND = 20;
+	private static final int EXTERNAL_REFRESH_INTERVAL_TICKS = 5;
 
 	private static final ServerConfig SERVER_CONFIG = ServerConfig.HANDLER.getConfig();
 	private static final HashMap<UUID, String> PLAYER_CHANNELS = new HashMap<>();
@@ -97,6 +106,12 @@ public class ServerCore {
 	 * remain to synchronize after a reset, so this is a plain drop.
 	 */
 	public static synchronized void initMarkers() {
+		if (ACTIVE_SERVER != null && MARKER_STORE != null) {
+			releaseExternalMarkers(ACTIVE_SERVER, MARKER_STORE.allMarkers());
+			MARKER_STORE.clear();
+			ExternalBlockServerProviders.close(ACTIVE_SERVER);
+		}
+
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
 		ACTIVE_SERVER = null;
 	}
@@ -115,6 +130,12 @@ public class ServerCore {
 	private static synchronized void ensureMarkerStore(MinecraftServer server) {
 		if (ACTIVE_SERVER == server) {
 			return;
+		}
+
+		if (ACTIVE_SERVER != null && MARKER_STORE != null) {
+			releaseExternalMarkers(ACTIVE_SERVER, MARKER_STORE.allMarkers());
+			MARKER_STORE.clear();
+			ExternalBlockServerProviders.close(ACTIVE_SERVER);
 		}
 
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
@@ -145,6 +166,9 @@ public class ServerCore {
 	 * request while the store, id source, and built-in catalogs stay shared.
 	 */
 	private static MarkerCreationService markerService(MinecraftServer server) {
+		final var externalProviders = ExternalBlockServerProviders.registry();
+		final var nameResolver = new MinecraftTargetNameResolver(server);
+
 		return new MarkerCreationService(
 			markerStore(),
 			DefaultTargetResolver.builtIn(TargetResolutionLogger.global()),
@@ -153,8 +177,11 @@ public class ServerCore {
 				server,
 				SERVER_CONFIG.getPingDistance(),
 				SERVER_CONFIG.isPlayerTrackingEnabled(),
-				new MinecraftTargetNameResolver(server)),
-			MarkerCreationLogger.global());
+				nameResolver,
+				externalProviders),
+			MarkerCreationLogger.global(),
+			externalProviders,
+			nameResolver);
 	}
 
 	public static void onChannelUpdate(ServerPlayer player, UpdateChannelC2SPacket packet) {
@@ -385,6 +412,7 @@ public class ServerCore {
 		final long expiresAtTick = arrivalTick + SERVER_CONFIG.getPingDuration() * (long) TICKS_PER_SECOND;
 
 		final var outcome = markerService(server).create(
+			player.serverLevel(),
 			player.getUUID(), packet.target(), packet.pingTypeId(), arrivalTick, expiresAtTick, recipients);
 
 		if (!outcome.isAccepted()) {
@@ -438,6 +466,7 @@ public class ServerCore {
 		switch (result.status()) {
 			case REMOVED -> {
 				final var removal = result.removal().orElseThrow();
+				releaseExternal(server, removal.marker());
 
 				LOGGER.debug(() -> "marker remove accepted: markerId=%d reason=%s".formatted(markerId.value(), removal.reason()));
 				sendMarkerRemoved(server.getPlayerList(), removal, null);
@@ -467,20 +496,23 @@ public class ServerCore {
 
 		final var batch = markerStore().expire(server.getTickCount());
 
-		if (batch.removals().isEmpty()) {
-			return;
-		}
-
-		LOGGER.debug(() -> "marker expiry: removed=%d winnerChanges=%d".formatted(
-			batch.removals().size(), batch.winnerChanges().size()));
-
 		final var playerList = server.getPlayerList();
 
-		for (final var removal : batch.removals()) {
-			sendMarkerRemoved(playerList, removal, null);
+		if (!batch.removals().isEmpty()) {
+			LOGGER.debug(() -> "marker expiry: removed=%d winnerChanges=%d".formatted(
+				batch.removals().size(), batch.winnerChanges().size()));
+
+			for (final var removal : batch.removals()) {
+				releaseExternal(server, removal.marker());
+				sendMarkerRemoved(playerList, removal, null);
+			}
+
+			sendWinnerChanges(playerList, batch.winnerChanges(), null);
 		}
 
-		sendWinnerChanges(playerList, batch.winnerChanges(), null);
+		if (server.getTickCount() % EXTERNAL_REFRESH_INTERVAL_TICKS == 0) {
+			refreshExternalMarkers(server);
+		}
 	}
 
 	/**
@@ -500,6 +532,7 @@ public class ServerCore {
 		final var playerList = server.getPlayerList();
 
 		for (final var removal : removed.removals()) {
+			releaseExternal(server, removal.marker());
 			sendMarkerRemoved(playerList, removal, player.getUUID());
 		}
 
@@ -507,11 +540,109 @@ public class ServerCore {
 
 		final var dropped = store.forgetRecipient(player.getUUID());
 
+		for (final var droppedMarker : dropped) {
+			releaseExternal(server, droppedMarker);
+		}
+
 		LOGGER.debug(() -> "marker disconnect cleanup: removed=%d audienceEmptyDrops=%d".formatted(
 			removed.removals().size(), dropped.size()));
 
 		PLAYER_CHANNELS.remove(player.getUUID());
 		PLAYER_RATES.remove(player.getUUID());
+	}
+
+	/**
+	 * Refreshes committed external markers at a fixed, modest cadence. Provider
+	 * temporary-unavailable results retain the marker; an invalid live block is
+	 * removed through the ordinary authoritative removal path.
+	 */
+	private static void refreshExternalMarkers(MinecraftServer server) {
+		final var store = markerStore();
+		final var registry = ExternalBlockServerProviders.registry();
+		final var playerList = server.getPlayerList();
+		final var nameResolver = new MinecraftTargetNameResolver(server);
+
+		for (final ServerMarker marker : store.allMarkers()) {
+			if (!(marker.target() instanceof Target.ExternalBlockTarget external)) {
+				continue;
+			}
+
+			ServerLevel level = levelFor(server, external.dimensionId());
+			if (level == null) {
+				continue;
+			}
+
+			ExternalBlockServerProvider.RefreshResult result = registry.refresh(level, external);
+
+			if (result instanceof ExternalBlockServerProvider.RefreshResult.TemporarilyUnavailable) {
+				continue;
+			}
+
+			boolean sameTargetKey = false;
+			if (result instanceof ExternalBlockServerProvider.RefreshResult.Available available) {
+				try {
+					sameTargetKey = marker.targetKey().equals(nx.pingwheel.common.marker.TargetKey.from(available.target()));
+				} catch (RuntimeException ignored) {
+					sameTargetKey = false;
+				}
+			}
+
+			if (result instanceof ExternalBlockServerProvider.RefreshResult.Available available && sameTargetKey) {
+				Target.ExternalBlockTarget refreshedTarget = available.target();
+				Target.ExternalBlockTarget previousTarget = (Target.ExternalBlockTarget) marker.target();
+				boolean changed = !previousTarget.providerLocator().equals(refreshedTarget.providerLocator())
+					|| previousTarget.hasBlockEntity() != refreshedTarget.hasBlockEntity()
+					|| !marker.anchor().equals(available.anchor());
+
+				if (!changed) {
+					continue;
+				}
+
+				final ServerMarker updated = store.updateExternalTarget(
+					marker.id(), refreshedTarget, available.anchor()).orElse(null);
+
+				if (updated == null) {
+					continue;
+				}
+
+				ServerPlayer owner = playerList.getPlayer(updated.owner());
+				if (owner != null) {
+					TargetNameJson targetName = nameResolver.resolveName(updated.owner(), updated.target());
+					sendMarkerCreated(playerList, updated, targetName, owner.getGameProfile().getName());
+				}
+
+				continue;
+			}
+
+			final var removalResult = store.removeByServer(marker.id(), MarkerRemovalReason.TARGET_INVALID);
+			if (removalResult.status() == nx.pingwheel.common.marker.MarkerRemovalResult.Status.REMOVED) {
+				final var removal = removalResult.removal().orElseThrow();
+				releaseExternal(server, removal.marker());
+				sendMarkerRemoved(playerList, removal, null);
+				sendWinnerChanges(playerList, removalResult.winnerChanges(), null);
+			}
+		}
+	}
+
+	private static ServerLevel levelFor(MinecraftServer server, String dimensionId) {
+		ResourceLocation location = ResourceLocation.tryParse(dimensionId);
+		if (location == null) {
+			return null;
+		}
+
+		return server.getLevel(ResourceKey.create(Registries.DIMENSION, location));
+	}
+
+	private static void releaseExternal(MinecraftServer server, ServerMarker marker) {
+		if (marker.target() instanceof Target.ExternalBlockTarget external) {
+			ExternalBlockServerProviders.registry().release(server, external);
+		}
+	}
+
+	private static void releaseExternalMarkers(MinecraftServer server, List<ServerMarker> markers) {
+		for (ServerMarker marker : markers) {
+			releaseExternal(server, marker);
+		}
 	}
 
 	/**

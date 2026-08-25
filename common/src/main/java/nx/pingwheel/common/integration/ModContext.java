@@ -17,6 +17,7 @@ public class ModContext {
 		HasVoiceChat = IPlatformContextService.INSTANCE.isModLoaded("voicechat");
 		HasFTBTeams = IPlatformContextService.INSTANCE.isModLoaded("ftbteams");
 		HasSable = IPlatformContextService.INSTANCE.isModLoaded("sable");
+		ExternalBlockServerProviders.configure(HasSable);
 
 		LOGGER.debug("optional integrations: distantHorizons={} voiceChat={} ftbTeams={} sable={}",
 			HasDistantHorizons, HasVoiceChat, HasFTBTeams, HasSable);

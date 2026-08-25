@@ -5,12 +5,20 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
+import net.minecraft.server.level.ServerLevel;
+
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.ResolvedTarget;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.domain.TargetResolver;
+import nx.pingwheel.common.domain.TargetType;
+import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
+import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry;
+import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
+import nx.pingwheel.common.name.TargetNameJson;
 
 /**
  * Server-side orchestration for marker creation and removal.
@@ -65,6 +73,8 @@ public final class MarkerCreationService {
 	private final PingTypeCatalog catalog;
 	private final AuthoritativeTargetValidator validator;
 	private final MarkerCreationLogger logger;
+	private final ExternalBlockServerProviderRegistry externalProviders;
+	private final AuthoritativeTargetNameResolver nameResolver;
 
 	public MarkerCreationService(
 		ServerMarkerStore store,
@@ -72,7 +82,14 @@ public final class MarkerCreationService {
 		PingTypeCatalog catalog,
 		AuthoritativeTargetValidator validator
 	) {
-		this(store, resolver, catalog, validator, MarkerCreationLogger.noop());
+		this(
+			store,
+			resolver,
+			catalog,
+			validator,
+			MarkerCreationLogger.noop(),
+			new ExternalBlockServerProviderRegistry(),
+			null);
 	}
 
 	public MarkerCreationService(
@@ -82,11 +99,32 @@ public final class MarkerCreationService {
 		AuthoritativeTargetValidator validator,
 		MarkerCreationLogger logger
 	) {
+		this(
+			store,
+			resolver,
+			catalog,
+			validator,
+			logger,
+			new ExternalBlockServerProviderRegistry(),
+			null);
+	}
+
+	public MarkerCreationService(
+		ServerMarkerStore store,
+		TargetResolver resolver,
+		PingTypeCatalog catalog,
+		AuthoritativeTargetValidator validator,
+		MarkerCreationLogger logger,
+		ExternalBlockServerProviderRegistry externalProviders,
+		AuthoritativeTargetNameResolver nameResolver
+	) {
 		this.store = Objects.requireNonNull(store, "store");
 		this.resolver = Objects.requireNonNull(resolver, "resolver");
 		this.catalog = Objects.requireNonNull(catalog, "catalog");
 		this.validator = Objects.requireNonNull(validator, "validator");
 		this.logger = Objects.requireNonNull(logger, "logger");
+		this.externalProviders = Objects.requireNonNull(externalProviders, "externalProviders");
+		this.nameResolver = nameResolver;
 	}
 
 	/**
@@ -97,6 +135,23 @@ public final class MarkerCreationService {
 	 *         guarantees the store was not modified.
 	 */
 	public MarkerCreateOutcome create(
+		UUID owner,
+		Target requestedTarget,
+		String pingTypeId,
+		long arrivalTick,
+		long expiresAtTick,
+		List<UUID> recipients
+	) {
+		return create(null, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients);
+	}
+
+	/**
+	 * Minecraft-bound creation entry point.  The level is needed only for the
+	 * final external-block materialization transaction; ordinary targets follow
+	 * exactly the same pipeline as the compatibility overload above.
+	 */
+	public MarkerCreateOutcome create(
+		ServerLevel level,
 		UUID owner,
 		Target requestedTarget,
 		String pingTypeId,
@@ -152,24 +207,93 @@ public final class MarkerCreationService {
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_PING_TYPE);
 		}
 
+		Target markerTarget = resolvedTarget.target();
+		TargetType markerTargetType = resolvedTarget.targetType();
+		MarkerAnchor markerAnchor = validated.anchor();
+		TargetNameJson markerName = validated.authoritativeName();
+		Target.ExternalBlockTarget materializedTarget = null;
+
+		if (requestedTarget instanceof Target.ExternalBlockTarget
+			|| resolvedTarget.target() instanceof Target.ExternalBlockTarget) {
+			if (!(resolvedTarget.target() instanceof Target.ExternalBlockTarget external) || level == null) {
+				return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
+			}
+
+			ExternalBlockServerProvider.MaterializationResult materialization =
+				externalProviders.materialize(level, external);
+
+			if (materialization instanceof ExternalBlockServerProvider.MaterializationResult.TemporarilyUnavailable) {
+				return MarkerCreateOutcome.rejected(MarkerRejectReason.TARGET_GONE);
+			}
+
+			if (!(materialization instanceof ExternalBlockServerProvider.MaterializationResult.Materialized committed)) {
+				return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
+			}
+
+			ExternalBlockServerProvider.MaterializedTarget materialized = committed.target();
+			materializedTarget = materialized.target();
+			markerTarget = materialized.target();
+			markerAnchor = materialized.anchor();
+
+			Optional<ResolvedTarget> reclassified = resolve(
+				materialized.target(), materialized.matchContext());
+
+			if (reclassified.isEmpty()) {
+				releaseMaterialized(level, materializedTarget);
+				return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
+			}
+
+			markerTargetType = reclassified.get().targetType();
+
+			if (!markerTargetType.pingTypes().contains(pingType)) {
+				releaseMaterialized(level, materializedTarget);
+				return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_PING_TYPE);
+			}
+
+			markerName = resolveName(owner, markerTarget, markerName);
+		}
+
 		try {
 			MarkerCreation creation = store.create(
 				owner,
-				resolvedTarget.target(),
-				resolvedTarget.targetType(),
+				markerTarget,
+				markerTargetType,
 				pingType,
-				validated.anchor(),
+				markerAnchor,
 				arrivalTick,
 				expiresAtTick,
 				recipients);
 
 			logger.debug("create accepted: id={} targetType={} pingType={}",
-				creation.marker().id(), resolvedTarget.targetType().id(), pingType.id());
+				creation.marker().id(), markerTargetType.id(), pingType.id());
 
-			return MarkerCreateOutcome.accepted(creation, validated.authoritativeName());
+			return MarkerCreateOutcome.accepted(creation, markerName);
 		} catch (RuntimeException e) {
+			if (materializedTarget != null) {
+				releaseMaterialized(level, materializedTarget);
+			}
+
 			logger.debugException("create rejected: store contract failure", e);
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
+		}
+	}
+
+	private TargetNameJson resolveName(UUID owner, Target target, TargetNameJson fallback) {
+		if (nameResolver == null) {
+			return fallback;
+		}
+
+		try {
+			TargetNameJson resolved = nameResolver.resolveName(owner, target);
+			return resolved == null ? fallback : resolved;
+		} catch (RuntimeException ignored) {
+			return fallback;
+		}
+	}
+
+	private void releaseMaterialized(ServerLevel level, Target.ExternalBlockTarget target) {
+		if (level != null) {
+			externalProviders.release(level.getServer(), target);
 		}
 	}
 
@@ -229,8 +353,12 @@ public final class MarkerCreationService {
 	 * pipeline keeps its single error path.
 	 */
 	private Optional<ResolvedTarget> resolve(ValidatedMarkerTarget validated) {
+		return resolve(validated.normalizedTarget(), validated.matchContext());
+	}
+
+	private Optional<ResolvedTarget> resolve(Target target, TargetMatchContext context) {
 		try {
-			ResolvedTarget resolved = resolver.resolve(validated.normalizedTarget(), validated.matchContext());
+			ResolvedTarget resolved = resolver.resolve(target, context);
 
 			if (resolved == null) {
 				logger.debug("create rejected: resolver returned null");

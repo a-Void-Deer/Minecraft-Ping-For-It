@@ -230,6 +230,40 @@ public final class ServerMarkerStore {
 	}
 
 	/**
+	 * Replaces the locator and fallback anchor of an active external marker
+	 * without changing its marker id, owner, lifetime, audience, target key, or
+	 * winner slot.  A provider must keep the committed stable identity and
+	 * expected block id unchanged while migrating its locator.
+	 */
+	public synchronized Optional<ServerMarker> updateExternalTarget(
+		MarkerId id, Target.ExternalBlockTarget target, MarkerAnchor anchor
+	) {
+		Objects.requireNonNull(id, "id");
+		Objects.requireNonNull(target, "target");
+		Objects.requireNonNull(anchor, "anchor");
+
+		ServerMarker current = markers.get(id);
+		if (current == null || !(current.target() instanceof Target.ExternalBlockTarget)
+			|| !current.targetKey().equals(TargetKey.from(target))) {
+			return Optional.empty();
+		}
+
+		ServerMarker updated = new ServerMarker(
+			current.id(),
+			current.owner(),
+			target,
+			current.targetType(),
+			current.pingType(),
+			anchor,
+			current.arrivalTick(),
+			current.expiresAtTick(),
+			current.recipients());
+
+		markers.put(id, updated);
+		return Optional.of(updated);
+	}
+
+	/**
 	 * All active markers, sorted by ascending {@link MarkerId}.
 	 */
 	public synchronized List<ServerMarker> allMarkers() {

@@ -24,6 +24,10 @@ class OptionalDependencySafetyTest {
 	private static final List<String> STABLE_CLASS_NAMES = List.of(
 		"nx/pingwheel/common/math/Raycast",
 		"nx/pingwheel/common/integration/ModContext",
+		"nx/pingwheel/common/integration/ExternalBlockServerProviders",
+		"nx/pingwheel/common/integration/externalblock/ExternalBlockServerProvider",
+		"nx/pingwheel/common/integration/externalblock/ExternalBlockServerProviderRegistry",
+		"nx/pingwheel/common/integration/externalblock/ExternalBlockReferenceIndex",
 		"nx/pingwheel/common/client/ClientPingRuntime",
 		"nx/pingwheel/common/integration/TeamContextHandler",
 		"nx/pingwheel/common/resolve/DefaultTargetResolver",

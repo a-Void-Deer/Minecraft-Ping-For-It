@@ -17,6 +17,8 @@ import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.domain.EntityLocator;
+import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
+import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry;
 import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
 import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.name.TargetNameJsonCodec;
@@ -86,6 +88,7 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 	private final int maxRange;
 	private final boolean playerTrackingEnabled;
 	private final AuthoritativeTargetNameResolver nameResolver;
+	private final ExternalBlockServerProviderRegistry externalProviders;
 
 	public MinecraftAuthoritativeTargetValidator(
 		MinecraftServer server,
@@ -93,8 +96,20 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 		boolean playerTrackingEnabled,
 		AuthoritativeTargetNameResolver nameResolver
 	) {
+		this(server, maxRange, playerTrackingEnabled, nameResolver,
+			new ExternalBlockServerProviderRegistry());
+	}
+
+	public MinecraftAuthoritativeTargetValidator(
+		MinecraftServer server,
+		int maxRange,
+		boolean playerTrackingEnabled,
+		AuthoritativeTargetNameResolver nameResolver,
+		ExternalBlockServerProviderRegistry externalProviders
+	) {
 		this.server = Objects.requireNonNull(server, "server");
 		this.nameResolver = Objects.requireNonNull(nameResolver, "nameResolver");
+		this.externalProviders = Objects.requireNonNull(externalProviders, "externalProviders");
 
 		if (maxRange < 0) {
 			throw new IllegalArgumentException("maxRange must be non-negative: " + maxRange);
@@ -125,12 +140,35 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 		return switch (requestedTarget) {
 			case Target.EntityTarget entity -> validateEntity(requesterPlayer, level, dimensionId, entity);
 			case Target.BlockTarget block -> validateBlock(requesterPlayer, level, dimensionId, block);
-			// No provider registry or runtime adapter is installed in this stage.
-			// Do not reinterpret an external block candidate as a location.
-			case Target.ExternalBlockTarget ignored ->
-				AuthoritativeTargetValidation.rejected(MarkerRejectReason.INVALID_REQUEST);
+			case Target.ExternalBlockTarget external -> validateExternalBlock(requesterPlayer, level, external);
 			case Target.LocationTarget location -> validateLocation(requesterPlayer, dimensionId, location);
 		};
+	}
+
+	private AuthoritativeTargetValidation validateExternalBlock(
+		ServerPlayer requester, ServerLevel level, Target.ExternalBlockTarget requested
+	) {
+		ExternalBlockServerProvider.ValidationResult result = externalProviders.validate(level, requested);
+
+		if (result instanceof ExternalBlockServerProvider.ValidationResult.TemporarilyUnavailable) {
+			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.TARGET_GONE);
+		}
+
+		if (!(result instanceof ExternalBlockServerProvider.ValidationResult.Accepted accepted)) {
+			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.INVALID_REQUEST);
+		}
+
+		ExternalBlockServerProvider.ValidatedTarget validated = accepted.target();
+
+		if (outOfRange(requester, validated.anchor())) {
+			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.OUT_OF_RANGE);
+		}
+
+		return AuthoritativeTargetValidation.accepted(new ValidatedMarkerTarget(
+			validated.target(),
+			validated.matchContext(),
+			validated.anchor(),
+			resolveNameSafely(requester, validated.target())));
 	}
 
 	/**
