@@ -2,6 +2,8 @@ package nx.pingwheel.common.integration.sable.client;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.HashSet;
+import java.util.Set;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -15,6 +17,7 @@ import org.joml.Matrix4f;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.integration.IntegrationLinkGuard;
 import nx.pingwheel.common.integration.ModContext;
+import nx.pingwheel.common.integration.sable.SableDiagnostics;
 import nx.pingwheel.common.interaction.TargetSnapshot;
 import nx.pingwheel.common.integration.sable.server.SableExternalBlockLocator;
 
@@ -32,6 +35,8 @@ public final class SableClientProvider {
 
 	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard(PROVIDER_ID);
 	private static volatile SableClientCompanionAccess access;
+	private static volatile SableDiagnostics diagnostics = SableDiagnostics.global();
+	private static final Set<String> PRESENTATION_FAILURES = new HashSet<>();
 
 	private SableClientProvider() {
 	}
@@ -44,16 +49,76 @@ public final class SableClientProvider {
 	public static Optional<TargetSnapshot> capture(
 		ClientLevel level, BlockHitResult hit, Vec3 rayStart, Vec3 rayEnd
 	) {
-		if (!enabled() || level == null || hit == null || rayStart == null || rayEnd == null) {
+		SableDiagnostics currentDiagnostics = diagnostics;
+		currentDiagnostics.capture(
+			"attempt",
+			"start",
+			"sable_loaded", ModContext.HasSable,
+			"enabled", enabled(),
+			"link_guard_disabled", LINK_GUARD.disabled(),
+			"provider_initialized", access != null,
+			"hit_type", hit == null ? null : hit.getType(),
+			"hit_location", hit == null ? null : hit.getLocation(),
+			"block_pos", hit == null ? null : hit.getBlockPos(),
+			"ray_start", rayStart,
+			"ray_end", rayEnd,
+			"ray_direction", rayDirection(rayStart, rayEnd));
+
+		if (!ModContext.HasSable) {
+			logCaptureFallback("EXTERNAL_CAPTURE_FAILED", "sable-not-loaded", "attempt");
+			return Optional.empty();
+		}
+
+		if (LINK_GUARD.disabled()) {
+			logCaptureFallback("EXTERNAL_CAPTURE_FAILED", "link-guard-disabled", "attempt");
+			return Optional.empty();
+		}
+
+		if (level == null || hit == null || rayStart == null || rayEnd == null) {
+			logCaptureFallback("EXTERNAL_CAPTURE_FAILED", "invalid-capture-input", "attempt");
 			return Optional.empty();
 		}
 
 		try {
-			return getAccess().capture(level, hit, rayStart, rayEnd);
-		} catch (ReflectiveOperationException | RuntimeException ignored) {
+			Optional<TargetSnapshot> result = getAccess().capture(level, hit, rayStart, rayEnd);
+
+			if (result.isEmpty()) {
+				currentDiagnostics.capture(
+					"external-capture",
+					"failed",
+					"reason", "no-positive-candidate",
+					"hit_location", hit.getLocation(),
+					"block_pos", hit.getBlockPos());
+				logCaptureFallback("EXTERNAL_CAPTURE_FAILED", "no-positive-candidate", "capture");
+			}
+
+			return result;
+		} catch (ReflectiveOperationException | RuntimeException failure) {
+			currentDiagnostics.captureException(
+				"capture",
+				"exception",
+				failure,
+				"hit", hit,
+				"hit_location", hit.getLocation(),
+				"block_pos", hit.getBlockPos(),
+				"ray_start", rayStart,
+				"ray_end", rayEnd,
+				"ray_direction", rayDirection(rayStart, rayEnd));
+			logCaptureFallback("EXTERNAL_CAPTURE_FAILED", "exception", "capture");
 			return Optional.empty();
-		} catch (LinkageError ignored) {
+		} catch (LinkageError failure) {
+			currentDiagnostics.captureException(
+				"capture",
+				"linkage-error",
+				failure,
+				"hit", hit,
+				"hit_location", hit.getLocation(),
+				"block_pos", hit.getBlockPos(),
+				"ray_start", rayStart,
+				"ray_end", rayEnd,
+				"ray_direction", rayDirection(rayStart, rayEnd));
 			LINK_GUARD.disableSilently();
+			logCaptureFallback("EXTERNAL_CAPTURE_FAILED", "linkage-error", "capture");
 			return Optional.empty();
 		}
 	}
@@ -70,10 +135,30 @@ public final class SableClientProvider {
 
 		try {
 			Vec3 projected = getAccess().projectOutOfSubLevel(level, hitPosition);
-			return projected != null && finite(projected) ? Optional.of(projected) : Optional.empty();
-		} catch (RuntimeException ignored) {
+			if (projected != null && finite(projected)) {
+				return Optional.of(projected);
+			}
+
+			diagnostics.capture(
+				"projection",
+				"failed",
+				"reason", projected == null ? "no-result" : "non-finite-result",
+				"hit_position", hitPosition,
+				"projected_position", projected);
 			return Optional.empty();
-		} catch (LinkageError ignored) {
+		} catch (RuntimeException failure) {
+			diagnostics.captureException(
+				"projection",
+				"exception",
+				failure,
+				"hit_position", hitPosition);
+			return Optional.empty();
+		} catch (LinkageError failure) {
+			diagnostics.captureException(
+				"projection",
+				"linkage-error",
+				failure,
+				"hit_position", hitPosition);
 			LINK_GUARD.disableSilently();
 			return Optional.empty();
 		}
@@ -98,16 +183,37 @@ public final class SableClientProvider {
 	public static Optional<Vec3> resolvePosition(
 		ClientLevel level, Target.ExternalBlockTarget target, float partialTick
 	) {
-		if (!enabled() || level == null || target == null || !PROVIDER_ID.equals(target.providerId())
-			|| !target.isCommitted() || SableExternalBlockLocator.parse(target.providerLocator()).isEmpty()) {
+		if (!enabled()) {
+			return Optional.empty();
+		}
+
+		if (level == null || target == null || !PROVIDER_ID.equals(target.providerId())
+			|| !target.isCommitted()) {
+			logPresentationFailure("resolve-position", "invalid-target", "target", target);
+			return Optional.empty();
+		}
+
+		if (SableExternalBlockLocator.parse(target.providerLocator()).isEmpty()) {
+			logPresentationFailure(
+				"resolve-position", "provider-locator-parse-failure",
+				"target", target,
+				"provider_locator", target.providerLocator());
 			return Optional.empty();
 		}
 
 		try {
-			return getAccess().resolvePosition(level, target, partialTick);
-		} catch (ReflectiveOperationException | RuntimeException ignored) {
+			Optional<Vec3> result = getAccess().resolvePosition(level, target, partialTick);
+			if (result.isPresent()) {
+				clearPresentationFailure("resolve-position");
+			} else {
+				logPresentationFailure("resolve-position", "provider-unavailable", "target", target);
+			}
+			return result;
+		} catch (ReflectiveOperationException | RuntimeException failure) {
+			logPresentationException("resolve-position", failure, "target", target);
 			return Optional.empty();
-		} catch (LinkageError ignored) {
+		} catch (LinkageError failure) {
+			logPresentationException("resolve-position", failure, "target", target);
 			LINK_GUARD.disableSilently();
 			return Optional.empty();
 		}
@@ -124,17 +230,38 @@ public final class SableClientProvider {
 		float partialTick,
 		CollisionContext collisionContext
 	) {
-		if (!enabled() || level == null || target == null || collisionContext == null
-			|| !PROVIDER_ID.equals(target.providerId()) || !target.isCommitted()
-			|| SableExternalBlockLocator.parse(target.providerLocator()).isEmpty()) {
+		if (!enabled()) {
+			return Optional.empty();
+		}
+
+		if (level == null || target == null || collisionContext == null
+			|| !PROVIDER_ID.equals(target.providerId()) || !target.isCommitted()) {
+			logPresentationFailure("resolve-presentation", "invalid-target", "target", target);
+			return Optional.empty();
+		}
+
+		if (SableExternalBlockLocator.parse(target.providerLocator()).isEmpty()) {
+			logPresentationFailure(
+				"resolve-presentation", "provider-locator-parse-failure",
+				"target", target,
+				"provider_locator", target.providerLocator());
 			return Optional.empty();
 		}
 
 		try {
-			return getAccess().resolve(level, target, partialTick, collisionContext);
-		} catch (ReflectiveOperationException | RuntimeException ignored) {
+			Optional<ExternalBlockPresentation> result =
+				getAccess().resolve(level, target, partialTick, collisionContext);
+			if (result.isPresent()) {
+				clearPresentationFailure("resolve-presentation");
+			} else {
+				logPresentationFailure("resolve-presentation", "provider-unavailable", "target", target);
+			}
+			return result;
+		} catch (ReflectiveOperationException | RuntimeException failure) {
+			logPresentationException("resolve-presentation", failure, "target", target);
 			return Optional.empty();
-		} catch (LinkageError ignored) {
+		} catch (LinkageError failure) {
+			logPresentationException("resolve-presentation", failure, "target", target);
 			LINK_GUARD.disableSilently();
 			return Optional.empty();
 		}
@@ -144,16 +271,36 @@ public final class SableClientProvider {
 	public static Optional<Component> resolveName(
 		ClientLevel level, Target.ExternalBlockTarget target
 	) {
-		if (!enabled() || level == null || target == null || !PROVIDER_ID.equals(target.providerId())
-			|| SableExternalBlockLocator.parse(target.providerLocator()).isEmpty()) {
+		if (!enabled()) {
+			return Optional.empty();
+		}
+
+		if (level == null || target == null || !PROVIDER_ID.equals(target.providerId())) {
+			logPresentationFailure("resolve-name", "invalid-target", "target", target);
+			return Optional.empty();
+		}
+
+		if (SableExternalBlockLocator.parse(target.providerLocator()).isEmpty()) {
+			logPresentationFailure(
+				"resolve-name", "provider-locator-parse-failure",
+				"target", target,
+				"provider_locator", target.providerLocator());
 			return Optional.empty();
 		}
 
 		try {
-			return getAccess().resolveName(level, target);
-		} catch (ReflectiveOperationException | RuntimeException ignored) {
+			Optional<Component> result = getAccess().resolveName(level, target);
+			if (result.isPresent()) {
+				clearPresentationFailure("resolve-name");
+			} else {
+				logPresentationFailure("resolve-name", "provider-unavailable", "target", target);
+			}
+			return result;
+		} catch (ReflectiveOperationException | RuntimeException failure) {
+			logPresentationException("resolve-name", failure, "target", target);
 			return Optional.empty();
-		} catch (LinkageError ignored) {
+		} catch (LinkageError failure) {
+			logPresentationException("resolve-name", failure, "target", target);
 			LINK_GUARD.disableSilently();
 			return Optional.empty();
 		}
@@ -170,19 +317,46 @@ public final class SableClientProvider {
 			return current;
 		}
 
-		synchronized (SableClientProvider.class) {
+			synchronized (SableClientProvider.class) {
 			current = access;
 
 			if (current == null) {
+				diagnostics.capture(
+					"provider-init",
+					"start",
+					"link_guard_disabled", LINK_GUARD.disabled(),
+					"provider_initialized", false);
+
 				try {
-					current = SableClientCompanionAccess.create();
+					current = SableClientCompanionAccess.create(diagnostics);
 					access = current;
+					diagnostics.capture(
+						"provider-init",
+						"success",
+						"provider_initialized", true,
+						"internal_access", current.hasInternalAccess());
 				} catch (ReflectiveOperationException failure) {
+					diagnostics.captureException(
+						"provider-init",
+						"reflection-failure",
+						failure,
+						"provider_initialized", false);
 					LINK_GUARD.disableSilently();
 					throw new IllegalStateException("Sable client integration is unavailable", failure);
-				} catch (RuntimeException | LinkageError failure) {
-					// Sable's client internals are optional and privacy-sensitive. Do
-					// not expose reflection arguments or exception details in logs.
+				} catch (RuntimeException failure) {
+					diagnostics.captureException(
+						"provider-init",
+						"runtime-failure",
+						failure,
+						"provider_initialized", false);
+					LINK_GUARD.disableSilently();
+					throw failure;
+				} catch (LinkageError failure) {
+					diagnostics.captureException(
+						"provider-init",
+						"linkage-error",
+						failure,
+						"provider_initialized", false);
 					LINK_GUARD.disableSilently();
 					throw failure;
 				}
@@ -194,6 +368,71 @@ public final class SableClientProvider {
 
 	private static boolean finite(Vec3 value) {
 		return Double.isFinite(value.x) && Double.isFinite(value.y) && Double.isFinite(value.z);
+	}
+
+	/** Emits a capture fallback without making the runtime know logger details. */
+	public static void logCaptureFallback(
+		String fallback, String detailReason, String stage, Object... fields
+	) {
+		Object[] base = {
+			"fallback", fallback,
+			"detail_reason", detailReason,
+			"fallback_stage", stage
+		};
+		diagnostics.capture("fallback", fallback, append(base, fields));
+	}
+
+	static void setDiagnosticsForTests(SableDiagnostics replacement) {
+		diagnostics = Objects.requireNonNull(replacement, "replacement");
+		synchronized (PRESENTATION_FAILURES) {
+			PRESENTATION_FAILURES.clear();
+		}
+	}
+
+	private static Vec3 rayDirection(Vec3 rayStart, Vec3 rayEnd) {
+		return rayStart == null || rayEnd == null ? null : rayEnd.subtract(rayStart);
+	}
+
+	private static void logPresentationFailure(String operation, String reason, Object... fields) {
+		String key = operation + "|" + reason;
+		synchronized (PRESENTATION_FAILURES) {
+			if (!PRESENTATION_FAILURES.add(key)) {
+				return;
+			}
+		}
+
+		diagnostics.capture("presentation", reason, append(
+			new Object[] {"operation", operation}, fields));
+	}
+
+	private static void logPresentationException(
+		String operation, Throwable failure, Object... fields
+	) {
+		String key = operation + "|exception|" + failure.getClass().getName()
+			+ "|" + String.valueOf(failure.getMessage());
+		synchronized (PRESENTATION_FAILURES) {
+			if (!PRESENTATION_FAILURES.add(key)) {
+				return;
+			}
+		}
+
+		diagnostics.captureException(
+			"presentation", "exception", failure,
+			append(new Object[] {"operation", operation}, fields));
+	}
+
+	private static void clearPresentationFailure(String operation) {
+		String prefix = operation + "|";
+		synchronized (PRESENTATION_FAILURES) {
+			PRESENTATION_FAILURES.removeIf(key -> key.startsWith(prefix));
+		}
+	}
+
+	private static Object[] append(Object[] first, Object[] second) {
+		Object[] result = new Object[first.length + second.length];
+		System.arraycopy(first, 0, result, 0, first.length);
+		System.arraycopy(second, 0, result, first.length, second.length);
+		return result;
 	}
 
 	/** Immutable render data resolved from the live Sable sub-level. */

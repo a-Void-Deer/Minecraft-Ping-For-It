@@ -43,8 +43,33 @@ public interface ExternalBlockServerProvider {
 	/** Resolves a current server-side name for a candidate or committed target. */
 	Optional<ExternalBlockName> resolveName(ServerLevel level, Target.ExternalBlockTarget target);
 
+	/**
+	 * Receives the authoritative range observation for a validated external
+	 * target. Providers normally ignore this hook; optional adapters may use it
+	 * for detailed diagnostics without making the core depend on provider APIs.
+	 */
+	default void observeValidationDistance(
+		ServerLevel level,
+		Target.ExternalBlockTarget target,
+		MarkerAnchor anchor,
+		double distance,
+		boolean withinRange
+	) {
+	}
+
 	/** Releases one marker's reference to the committed provider target. */
 	void release(MinecraftServer server, Target.ExternalBlockTarget committed);
+
+	/**
+	 * Releases one marker reference while optionally exposing its marker id to a
+	 * diagnostics-capable provider. Existing providers only need the two-argument
+	 * contract.
+	 */
+	default void release(
+		MinecraftServer server, Target.ExternalBlockTarget committed, String markerId
+	) {
+		release(server, committed);
+	}
 
 	/** Releases any defensive provider state left for a server being replaced. */
 	default void close(MinecraftServer server) {

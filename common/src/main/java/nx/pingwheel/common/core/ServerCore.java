@@ -638,7 +638,8 @@ public class ServerCore {
 
 	private static void releaseExternal(MinecraftServer server, ServerMarker marker) {
 		if (marker.target() instanceof Target.ExternalBlockTarget external) {
-			ExternalBlockServerProviders.registry().release(server, external);
+			ExternalBlockServerProviders.registry().release(
+				server, external, Long.toString(marker.id().value()));
 		}
 	}
 

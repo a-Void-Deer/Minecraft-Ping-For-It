@@ -2,6 +2,7 @@ package nx.pingwheel.common.integration;
 
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry;
+import nx.pingwheel.common.integration.sable.SableDiagnostics;
 
 import net.minecraft.server.MinecraftServer;
 
@@ -17,6 +18,7 @@ public final class ExternalBlockServerProviders {
 
 	private static final ExternalBlockServerProviderRegistry REGISTRY =
 		new ExternalBlockServerProviderRegistry();
+	private static final SableDiagnostics DIAGNOSTICS = SableDiagnostics.global();
 
 	private ExternalBlockServerProviders() {
 	}
@@ -30,8 +32,18 @@ public final class ExternalBlockServerProviders {
 		REGISTRY.clear();
 
 		if (!sableLoaded) {
+			DIAGNOSTICS.server(
+				"provider-selection",
+				"sable-not-loaded",
+				"provider_class", SABLE_PROVIDER_CLASS);
 			return;
 		}
+
+		DIAGNOSTICS.server(
+			"provider-selection",
+			"start",
+			"provider_class", SABLE_PROVIDER_CLASS,
+			"sable_loaded", true);
 
 		try {
 			ClassLoader loader = ExternalBlockServerProviders.class.getClassLoader();
@@ -40,12 +52,31 @@ public final class ExternalBlockServerProviders {
 
 			if (provider instanceof ExternalBlockServerProvider externalProvider) {
 				REGISTRY.register(externalProvider);
+				DIAGNOSTICS.server(
+					"provider-selection",
+					"selected",
+					"provider_class", providerClass.getName(),
+					"provider_id", externalProvider.providerId(),
+					"registered", true);
+			} else {
+				DIAGNOSTICS.server(
+					"provider-selection",
+					"type-mismatch",
+					"provider_class", providerClass.getName(),
+					"provider_value", provider);
 			}
-		} catch (ReflectiveOperationException | SecurityException | LinkageError ignored) {
-			// An absent, incompatible, or partially installed optional provider is
-			// simply not registered.  No provider payload is safe to log here.
-		} catch (RuntimeException ignored) {
-			// Keep optional bootstrap fail-soft for malformed adapter construction.
+		} catch (ReflectiveOperationException | LinkageError failure) {
+			DIAGNOSTICS.serverException(
+				"provider-selection",
+				"failure",
+				failure,
+				"provider_class", SABLE_PROVIDER_CLASS);
+		} catch (RuntimeException failure) {
+			DIAGNOSTICS.serverException(
+				"provider-selection",
+				"runtime-failure",
+				failure,
+				"provider_class", SABLE_PROVIDER_CLASS);
 		}
 	}
 

@@ -138,6 +138,31 @@ public final class ExternalBlockServerProviderRegistry {
 		}
 	}
 
+	/** Forwards the authoritative range observation without exposing provider APIs to core code. */
+	public void observeValidationDistance(
+		ServerLevel level,
+		Target.ExternalBlockTarget target,
+		nx.pingwheel.common.marker.MarkerAnchor anchor,
+		double distance,
+		boolean withinRange
+	) {
+		if (level == null || target == null || anchor == null) {
+			return;
+		}
+
+		ExternalBlockServerProvider provider = find(target.providerId());
+
+		if (provider == null) {
+			return;
+		}
+
+		try {
+			provider.observeValidationDistance(level, target, anchor, distance, withinRange);
+		} catch (RuntimeException | LinkageError ignored) {
+			// Diagnostics must never change authoritative validation behavior.
+		}
+	}
+
 	/** Releases one committed marker reference, if its provider is registered. */
 	public void release(MinecraftServer server, Target.ExternalBlockTarget committed) {
 		if (server == null || committed == null || !committed.isCommitted()) {
@@ -155,6 +180,27 @@ public final class ExternalBlockServerProviderRegistry {
 		} catch (RuntimeException | LinkageError ignored) {
 			// Provider cleanup is deliberately fail-soft. A later server close can
 			// still give the provider one final opportunity to release its index.
+		}
+	}
+
+	/** Releases one committed marker reference and carries its marker id when available. */
+	public void release(
+		MinecraftServer server, Target.ExternalBlockTarget committed, String markerId
+	) {
+		if (server == null || committed == null || !committed.isCommitted()) {
+			return;
+		}
+
+		ExternalBlockServerProvider provider = find(committed.providerId());
+
+		if (provider == null) {
+			return;
+		}
+
+		try {
+			provider.release(server, committed, markerId);
+		} catch (RuntimeException | LinkageError ignored) {
+			// Provider cleanup is deliberately fail-soft, as in the legacy overload.
 		}
 	}
 

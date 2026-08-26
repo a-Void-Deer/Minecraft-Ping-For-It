@@ -14,7 +14,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * The deliberately tiny reflective part of the Sable client adapter.
  * Companion 1.6.0 exposes poses but not UUID-to-container lookup, the owning
  * client level, or the actual sub-level BlockState, so only those accessors are
- * reflected here. No invocation detail is logged.
+ * reflected here.
  */
 final class SableClientInternalAccess {
 
@@ -53,34 +53,41 @@ final class SableClientInternalAccess {
 		return new SableClientInternalAccess(getContainer, getSubLevel, getLevel, getBlockState);
 	}
 
-	Optional<ResolvedSubLevel> resolve(ClientLevel parent, UUID subLevelId, BlockPos localPos)
+	Resolution resolve(ClientLevel parent, UUID subLevelId, BlockPos localPos)
 		throws ReflectiveOperationException {
 		Object container = invoke(getContainer, null, parent);
 
 		if (container == null) {
-			return Optional.empty();
+			return Resolution.unavailable("sublevel_container_unavailable");
 		}
 
 		Object subLevel = invoke(getSubLevel, container, subLevelId);
 
 		if (subLevel == null) {
-			return Optional.empty();
+			return Resolution.unavailable("sublevel_unresolved_or_removed");
 		}
 
 		Object levelObject = invoke(getLevel, subLevel);
 
-		if (!(levelObject instanceof ClientLevel clientLevel) || clientLevel != parent
-			|| !clientLevel.isLoaded(localPos)) {
-			return Optional.empty();
+		if (!(levelObject instanceof ClientLevel clientLevel)) {
+			return Resolution.unavailable("sublevel_unresolved_or_removed");
+		}
+
+		if (clientLevel != parent) {
+			return Resolution.unavailable("sublevel_level_mismatch");
+		}
+
+		if (!clientLevel.isLoaded(localPos)) {
+			return Resolution.unavailable("unloaded_or_missing_state");
 		}
 
 		Object stateObject = invoke(getBlockState, clientLevel, localPos);
 
 		if (!(stateObject instanceof BlockState state)) {
-			return Optional.empty();
+			return Resolution.unavailable("unloaded_or_missing_state");
 		}
 
-		return Optional.of(new ResolvedSubLevel(subLevel, clientLevel, state));
+		return Resolution.available(new ResolvedSubLevel(subLevel, clientLevel, state));
 	}
 
 	private static Object invoke(Method method, Object receiver, Object... arguments)
@@ -107,5 +114,25 @@ final class SableClientInternalAccess {
 	}
 
 	record ResolvedSubLevel(Object subLevel, ClientLevel level, BlockState state) {
+	}
+
+	record Resolution(Optional<ResolvedSubLevel> value, String failureReason) {
+		Resolution {
+			if (value.isPresent() && failureReason != null) {
+				throw new IllegalArgumentException("available resolution cannot have a failure reason");
+			}
+
+			if (value.isEmpty() && failureReason == null) {
+				throw new IllegalArgumentException("unavailable resolution needs a failure reason");
+			}
+		}
+
+		static Resolution available(ResolvedSubLevel resolved) {
+			return new Resolution(Optional.of(resolved), null);
+		}
+
+		static Resolution unavailable(String reason) {
+			return new Resolution(Optional.empty(), reason);
+		}
 	}
 }

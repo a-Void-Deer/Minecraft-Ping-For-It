@@ -160,7 +160,12 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 
 		ExternalBlockServerProvider.ValidatedTarget validated = accepted.target();
 
-		if (outOfRange(requester, validated.anchor())) {
+		double distance = distanceTo(requester, validated.anchor());
+		boolean withinRange = !outOfRange(requester, validated.anchor());
+		externalProviders.observeValidationDistance(
+			level, requested, validated.anchor(), distance, withinRange);
+
+		if (!withinRange) {
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.OUT_OF_RANGE);
 		}
 
@@ -314,15 +319,21 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 
 	/**
 	 * Whether the requester's eye-to-anchor squared distance exceeds the
-	 * configured server max range (squared).
+	 * configured server max range.
 	 */
 	private boolean outOfRange(ServerPlayer requester, MarkerAnchor anchor) {
+		return distanceSquaredTo(requester, anchor) > (double) maxRange * maxRange;
+	}
+
+	private double distanceTo(ServerPlayer requester, MarkerAnchor anchor) {
+		return Math.sqrt(distanceSquaredTo(requester, anchor));
+	}
+
+	private double distanceSquaredTo(ServerPlayer requester, MarkerAnchor anchor) {
 		Vec3 eye = requester.getEyePosition();
 		double dx = eye.x - anchor.x();
 		double dy = eye.y - anchor.y();
 		double dz = eye.z - anchor.z();
-		double distanceSquared = dx * dx + dy * dy + dz * dz;
-
-		return distanceSquared > (double) maxRange * maxRange;
+		return dx * dx + dy * dy + dz * dz;
 	}
 }

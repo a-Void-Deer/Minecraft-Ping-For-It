@@ -723,7 +723,9 @@ public final class ClientPingRuntime {
 			return;
 		}
 
-		if (ModContext.HasSable && hitResult.getType() == HitResult.Type.BLOCK) {
+		boolean sableCaptureAttempted = ModContext.HasSable && hitResult.getType() == HitResult.Type.BLOCK;
+
+		if (sableCaptureAttempted) {
 			Optional<TargetSnapshot> sableCandidate = SableClientProvider.capture(
 				level,
 				(BlockHitResult) hitResult,
@@ -741,11 +743,22 @@ public final class ClientPingRuntime {
 			// the pre-existing projected-location fallback.
 			if (projected.isPresent()) {
 				var projectedPos = projected.get();
+				SableClientProvider.logCaptureFallback(
+					"PROJECTED_LOCATION", "external-capture-failed", "projection",
+					"hit_location", hitResult.getLocation(),
+					"projected_position", projectedPos);
 				completeCapture(token, TargetSnapshotFactory.location(
 					game.level.dimension().location().toString(),
 					projectedPos.x, projectedPos.y, projectedPos.z), pressRay);
 				return;
 			}
+		}
+
+		if (sableCaptureAttempted) {
+			SableClientProvider.logCaptureFallback(
+				"VANILLA_TARGET_FACTORY", "external-and-projected-capture-failed", "vanilla-target-factory",
+				"hit_location", hitResult.getLocation(),
+				"block_pos", hitResult instanceof BlockHitResult blockHit ? blockHit.getBlockPos() : null);
 		}
 
 		completeCapture(token, MinecraftTargetSnapshotFactory.from(game.level, hitResult), pressRay);

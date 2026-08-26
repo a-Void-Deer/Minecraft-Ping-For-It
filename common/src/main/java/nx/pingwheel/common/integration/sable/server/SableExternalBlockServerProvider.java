@@ -5,7 +5,9 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -29,6 +31,7 @@ import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.integration.IntegrationLinkGuard;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockReferenceIndex;
+import nx.pingwheel.common.integration.sable.SableDiagnostics;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.resolve.BlockEntityClassification;
 
@@ -54,6 +57,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		"dev.ryanhcode.sable.sublevel.tracking_points.TrackingPoint";
 
 	private final IntegrationLinkGuard linkGuard = new IntegrationLinkGuard(PROVIDER_ID);
+	private final SableDiagnostics diagnostics;
 	private final ReflectiveApi api;
 	private final Map<MinecraftServer, ServerState> servers = new IdentityHashMap<>();
 
@@ -63,14 +67,46 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	}
 
 	private SableExternalBlockServerProvider() {
+		this(SableDiagnostics.global());
+	}
+
+	SableExternalBlockServerProvider(SableDiagnostics diagnostics) {
+		this.diagnostics = Objects.requireNonNull(diagnostics, "diagnostics");
+		diagnostics.server(
+			"provider-init",
+			"start",
+			"provider", PROVIDER_ID,
+			"container_class", SUB_LEVEL_CONTAINER_CLASS,
+			"server_sublevel_class", SERVER_SUB_LEVEL_CLASS,
+			"tracking_data_class", TRACKING_DATA_CLASS,
+			"tracking_point_class", TRACKING_POINT_CLASS);
+
 		ReflectiveApi discovered;
 
 		try {
-			discovered = ReflectiveApi.discover();
-		} catch (ReflectiveOperationException | RuntimeException ignored) {
+			discovered = ReflectiveApi.discover(diagnostics);
+			diagnostics.server(
+				"provider-init",
+				"success",
+				"provider", PROVIDER_ID,
+				"api_methods", discovered.signatures());
+		} catch (ReflectiveOperationException | RuntimeException failure) {
+			diagnostics.serverException(
+				"reflection-discovery",
+				"failure",
+				failure,
+				"provider", PROVIDER_ID,
+				"expected_classes", expectedClasses(),
+				"expected_methods", expectedMethods());
 			discovered = null;
-		} catch (LinkageError error) {
-			linkGuard.disableSilently();
+		} catch (LinkageError failure) {
+			diagnostics.serverException(
+				"reflection-discovery",
+				"linkage-error",
+				failure,
+				"provider", PROVIDER_ID,
+				"expected_classes", expectedClasses(),
+				"expected_methods", expectedMethods());
 			discovered = null;
 		}
 
@@ -78,6 +114,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 
 		if (discovered == null) {
 			linkGuard.disableSilently();
+			diagnostics.server(
+				"provider-init",
+				"disabled",
+				"provider", PROVIDER_ID,
+				"link_guard_disabled", true);
 		}
 	}
 
@@ -88,20 +129,71 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 
 	@Override
 	public synchronized ValidationResult validate(ServerLevel level, Target.ExternalBlockTarget candidate) {
-		if (!usable() || level == null || candidate == null || !candidate.isCandidate()
-			|| !PROVIDER_ID.equals(candidate.providerId())
-			|| !dimensionMatches(level, candidate.dimensionId())) {
-			return new ValidationResult.Invalid();
+		diagnostics.server(
+			"provider-selection",
+			"selected",
+			"provider", PROVIDER_ID,
+			"operation", "validate");
+		diagnostics.server(
+			"candidate-validation",
+			"start",
+			"candidate", candidate,
+			"level", level,
+			"provider_usable", usable());
+
+		if (!usable()) {
+			return invalidValidation("provider-unavailable", candidate);
+		}
+
+		if (level == null || candidate == null) {
+			return invalidValidation("missing-level-or-candidate", candidate);
+		}
+
+		if (!candidate.isCandidate()) {
+			return invalidValidation("not-a-candidate", candidate);
+		}
+
+		if (!PROVIDER_ID.equals(candidate.providerId())) {
+			return invalidValidation("provider-mismatch", candidate);
+		}
+
+		if (!dimensionMatches(level, candidate.dimensionId())) {
+			return invalidValidation("dimension-mismatch", candidate);
 		}
 
 		Optional<SableExternalBlockLocator> parsed = SableExternalBlockLocator.parse(candidate.providerLocator());
 		Optional<ResourceLocation> expectedId = parseBlockId(candidate.expectedBlockRegistryId());
 
-		if (parsed.isEmpty() || expectedId.isEmpty()) {
-			return new ValidationResult.Invalid();
+		if (parsed.isEmpty()) {
+			diagnostics.server(
+				"locator",
+				"decode-failure",
+				"operation", "validate",
+				"provider_locator", candidate.providerLocator(),
+				"candidate", candidate);
+			return invalidValidation("locator-decode-failure", candidate);
+		}
+
+		diagnostics.server(
+			"locator",
+			"decoded",
+			"operation", "validate",
+			"provider_locator", candidate.providerLocator(),
+			"sublevel_uuid", parsed.get().subLevelId(),
+			"local_block_pos", parsed.get().blockPos());
+
+		if (expectedId.isEmpty()) {
+			diagnostics.server(
+				"candidate-validation",
+				"registry-id-decode-failure",
+				"operation", "validate",
+				"expected_block_registry_id", candidate.expectedBlockRegistryId(),
+				"candidate", candidate);
+			return invalidValidation("registry-id-decode-failure", candidate);
 		}
 
 		LiveResult live = resolveLive(level, parsed.get(), expectedId.get());
+		logLiveResult("validate", candidate, live);
 
 		if (live instanceof LiveResult.TemporarilyUnavailable) {
 			return new ValidationResult.TemporarilyUnavailable();
@@ -117,30 +209,91 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			available.registryId(),
 			available.hasBlockEntity());
 
-		return new ValidationResult.Accepted(new ValidatedTarget(
+		ValidationResult.Accepted accepted = new ValidationResult.Accepted(new ValidatedTarget(
 			normalized,
 			TargetMatchContext.blockEntityBlock(available.hasBlockEntity()),
 			available.anchor()));
+		diagnostics.server(
+			"candidate-validation",
+			"accepted",
+			"candidate", candidate,
+			"normalized_target", normalized,
+			"sublevel_uuid", available.locator().subLevelId(),
+			"local_block_pos", available.position(),
+			"block_registry_id", available.registryId(),
+			"block_entity", available.hasBlockEntity(),
+			"anchor", available.anchor());
+		return accepted;
 	}
 
 	@Override
 	public synchronized MaterializationResult materialize(
 		ServerLevel level, Target.ExternalBlockTarget candidate
 	) {
-		if (!usable() || level == null || candidate == null || !candidate.isCandidate()
-			|| !PROVIDER_ID.equals(candidate.providerId())
-			|| !dimensionMatches(level, candidate.dimensionId())) {
-			return new MaterializationResult.Invalid();
+		diagnostics.server(
+			"provider-selection",
+			"selected",
+			"provider", PROVIDER_ID,
+			"operation", "materialize");
+		diagnostics.server(
+			"materialization",
+			"start",
+			"candidate", candidate,
+			"level", level,
+			"provider_usable", usable());
+
+		if (!usable()) {
+			return invalidMaterialization("provider-unavailable", candidate);
+		}
+
+		if (level == null || candidate == null) {
+			return invalidMaterialization("missing-level-or-candidate", candidate);
+		}
+
+		if (!candidate.isCandidate()) {
+			return invalidMaterialization("not-a-candidate", candidate);
+		}
+
+		if (!PROVIDER_ID.equals(candidate.providerId())) {
+			return invalidMaterialization("provider-mismatch", candidate);
+		}
+
+		if (!dimensionMatches(level, candidate.dimensionId())) {
+			return invalidMaterialization("dimension-mismatch", candidate);
 		}
 
 		Optional<SableExternalBlockLocator> parsed = SableExternalBlockLocator.parse(candidate.providerLocator());
 		Optional<ResourceLocation> expectedId = parseBlockId(candidate.expectedBlockRegistryId());
 
-		if (parsed.isEmpty() || expectedId.isEmpty()) {
-			return new MaterializationResult.Invalid();
+		if (parsed.isEmpty()) {
+			diagnostics.server(
+				"locator",
+				"decode-failure",
+				"operation", "materialize",
+				"provider_locator", candidate.providerLocator(),
+				"candidate", candidate);
+			return invalidMaterialization("locator-decode-failure", candidate);
+		}
+
+		diagnostics.server(
+			"locator",
+			"decoded",
+			"operation", "materialize",
+			"provider_locator", candidate.providerLocator(),
+			"sublevel_uuid", parsed.get().subLevelId(),
+			"local_block_pos", parsed.get().blockPos());
+
+		if (expectedId.isEmpty()) {
+			diagnostics.server(
+				"materialization",
+				"registry-id-decode-failure",
+				"expected_block_registry_id", candidate.expectedBlockRegistryId(),
+				"candidate", candidate);
+			return invalidMaterialization("registry-id-decode-failure", candidate);
 		}
 
 		LiveResult live = resolveLive(level, parsed.get(), expectedId.get());
+		logLiveResult("materialize", candidate, live);
 
 		if (live instanceof LiveResult.TemporarilyUnavailable) {
 			return new MaterializationResult.TemporarilyUnavailable();
@@ -152,6 +305,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 
 		MinecraftServer server = level.getServer();
 		if (server == null) {
+			diagnostics.server(
+				"materialization",
+				"invalid",
+				"reason", "server-unavailable",
+				"candidate", candidate);
 			return new MaterializationResult.Invalid();
 		}
 
@@ -165,18 +323,59 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		try {
 			if (existingStableId.isPresent()) {
 				if (entry == null || !trackingPointExists(entry)) {
+					diagnostics.server(
+						"materialization",
+						"reused-tracking-point-missing",
+						"stable_target_uuid", existingStableId.get(),
+						"provider_locator", available.locator().encode(),
+						"candidate", candidate);
 					return new MaterializationResult.Invalid();
 				}
 
+				diagnostics.server(
+					"materialization",
+					"tracking-point-reused",
+					"stable_target_uuid", existingStableId.get(),
+					"provider_locator", available.locator().encode(),
+					"anchor", available.anchor(),
+					"refcount_before", state.references.references(existingStableId.get()));
 				ExternalBlockReferenceIndex.Lease lease = state.references.prepare(
 					key, existingStableId::orElseThrow);
+				diagnostics.server(
+					"materialization",
+					"lease-prepared",
+					"stable_target_uuid", lease.stableId(),
+					"lease_new", lease.newlyCreated(),
+					"provider_locator", available.locator().encode());
 				if (!state.references.commit(lease)) {
+					diagnostics.server(
+						"materialization",
+						"lease-commit-failure",
+						"stable_target_uuid", lease.stableId(),
+						"provider_locator", available.locator().encode());
 					return new MaterializationResult.Invalid();
 				}
 
+				state.refreshDiagnostics.available(
+					existingStableId.get(), available.locator().encode(), available.anchor());
+				diagnostics.server(
+					"materialization",
+					"lease-committed",
+					"stable_target_uuid", lease.stableId(),
+					"lease_new", lease.newlyCreated(),
+					"refcount_after", state.references.references(lease.stableId()),
+					"provider_locator", available.locator().encode(),
+					"anchor", available.anchor());
 				return materialized(available, entry.trackingId());
 			}
 
+			diagnostics.server(
+				"materialization",
+				"tracking-point-generation-start",
+				"provider_locator", available.locator().encode(),
+				"sublevel_uuid", available.locator().subLevelId(),
+				"local_block_pos", available.position(),
+				"anchor", available.anchor());
 			Object data = invoke(api.getOrLoad, null, level);
 			generatedData = data;
 			Object generated = invoke(
@@ -195,24 +394,66 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				throw new IllegalStateException("tracking point generator violated its UUID return contract");
 			}
 			generatedId = trackingId;
+			diagnostics.server(
+				"materialization",
+				"tracking-point-generated",
+				"stable_target_uuid", trackingId,
+				"provider_locator", available.locator().encode(),
+				"sublevel_uuid", available.locator().subLevelId(),
+				"local_block_pos", available.position());
 
 			ExternalBlockReferenceIndex.Lease lease = state.references.prepare(key, trackingId::toString);
+			diagnostics.server(
+				"materialization",
+				"lease-prepared",
+				"stable_target_uuid", lease.stableId(),
+				"lease_new", lease.newlyCreated(),
+				"provider_locator", available.locator().encode());
 			if (!state.references.commit(lease)) {
+				diagnostics.server(
+					"materialization",
+					"lease-commit-failure",
+					"stable_target_uuid", lease.stableId(),
+					"provider_locator", available.locator().encode());
 				state.references.rollback(lease, retiredId -> removeTrackingPoint(data, trackingId));
 				return new MaterializationResult.Invalid();
 			}
 
 			Entry created = new Entry(trackingId, data);
 			state.entries.put(trackingId.toString(), created);
+			state.refreshDiagnostics.available(
+				trackingId.toString(), available.locator().encode(), available.anchor());
+			diagnostics.server(
+				"materialization",
+				"lease-committed",
+				"stable_target_uuid", lease.stableId(),
+				"lease_new", lease.newlyCreated(),
+				"refcount_after", state.references.references(lease.stableId()),
+				"provider_locator", available.locator().encode(),
+				"anchor", available.anchor());
 
 			return materialized(available, trackingId);
-		} catch (ReflectiveOperationException | RuntimeException ignored) {
+		} catch (ReflectiveOperationException | RuntimeException failure) {
+			diagnostics.serverException(
+				"materialization",
+				"exception",
+				failure,
+				"candidate", candidate,
+				"generated_tracking_id", generatedId,
+				"provider_locator", available.locator().encode());
 			if (generatedId != null && generatedData != null) {
 				removeTrackingPoint(generatedData, generatedId);
 			}
 
 			return new MaterializationResult.Invalid();
-		} catch (LinkageError error) {
+		} catch (LinkageError failure) {
+			diagnostics.serverException(
+				"materialization",
+				"linkage-error",
+				failure,
+				"candidate", candidate,
+				"generated_tracking_id", generatedId,
+				"provider_locator", available.locator().encode());
 			linkGuard.disableSilently();
 			if (generatedId != null && generatedData != null) {
 				removeTrackingPoint(generatedData, generatedId);
@@ -224,30 +465,55 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 
 	@Override
 	public synchronized RefreshResult refresh(ServerLevel level, Target.ExternalBlockTarget committed) {
-		if (!usable() || level == null || committed == null || !committed.isCommitted()
-			|| !PROVIDER_ID.equals(committed.providerId())
-			|| !dimensionMatches(level, committed.dimensionId())) {
-			return new RefreshResult.Invalid();
+		ServerState state = level == null ? null : serverState(level);
+		String stableIdValue = committed == null ? null : committed.stableTargetId();
+
+		if (!usable()) {
+			return refreshInvalid(state, stableIdValue, committed, "provider-unavailable", null);
+		}
+
+		if (level == null || committed == null) {
+			return refreshInvalid(state, stableIdValue, committed, "missing-level-or-target", null);
+		}
+
+		if (!committed.isCommitted()) {
+			return refreshInvalid(state, stableIdValue, committed, "not-committed", null);
+		}
+
+		if (!PROVIDER_ID.equals(committed.providerId())) {
+			return refreshInvalid(state, stableIdValue, committed, "provider-mismatch", null);
+		}
+
+		if (!dimensionMatches(level, committed.dimensionId())) {
+			return refreshInvalid(state, stableIdValue, committed, "dimension-mismatch", null);
 		}
 
 		Optional<UUID> trackingId = parseUuid(committed.stableTargetId());
 		Optional<ResourceLocation> expectedId = parseBlockId(committed.expectedBlockRegistryId());
-		ServerState state = serverState(level);
 
-		if (trackingId.isEmpty() || expectedId.isEmpty() || state == null) {
-			return new RefreshResult.Invalid();
+		if (trackingId.isEmpty()) {
+			return refreshInvalid(state, stableIdValue, committed, "tracking-id-decode-failure", null);
+		}
+
+		if (expectedId.isEmpty()) {
+			return refreshInvalid(state, stableIdValue, committed, "registry-id-decode-failure", null);
+		}
+
+		if (state == null) {
+			return refreshInvalid(state, stableIdValue, committed, "server-state-missing", null);
 		}
 
 		Entry entry = state.entries.get(trackingId.get().toString());
 		if (entry == null) {
-			return new RefreshResult.Invalid();
+			return refreshInvalid(state, trackingId.get().toString(), committed, "tracking-point-entry-missing", null);
 		}
 
 		try {
 			Object trackingPoint = invoke(api.getTrackingPoint, entry.data(), trackingId.get());
 
 			if (trackingPoint == null) {
-				return new RefreshResult.Invalid();
+				return refreshInvalid(state, trackingId.get().toString(), committed,
+					"tracking-point-missing", null);
 			}
 
 			Object inSubLevel = invoke(api.inSubLevel(), trackingPoint);
@@ -258,28 +524,39 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				|| !(subLevelId instanceof UUID currentSubLevelId)
 				|| !(point instanceof Vector3dc currentPoint)
 				|| !finite(currentPoint)) {
-				return new RefreshResult.Invalid();
+				return refreshInvalid(state, trackingId.get().toString(), committed,
+					"tracking-point-invalid", null);
 			}
 
 			Object container = invoke(api.getContainer, null, level);
 			if (container == null) {
-				return new RefreshResult.TemporarilyUnavailable();
+				return refreshTemporary(state, trackingId.get().toString(), committed,
+					"sublevel-container-unavailable");
 			}
 
 			Object subLevel = invoke(api.getSubLevel, container, currentSubLevelId);
 			if (subLevel == null || isRemoved(subLevel)) {
-				return new RefreshResult.TemporarilyUnavailable();
+				return refreshTemporary(state, trackingId.get().toString(), committed,
+					"sublevel-unresolved-or-removed");
 			}
 
 			BlockPos position = BlockPos.containing(currentPoint.x(), currentPoint.y(), currentPoint.z());
-			LiveResult live = resolveLive(level, subLevel, currentSubLevelId, position, expectedId.get());
+			LiveResult live = resolveLive(
+				level, subLevel, currentSubLevelId, position, expectedId.get(), false);
 
-			if (live instanceof LiveResult.TemporarilyUnavailable) {
-				return new RefreshResult.TemporarilyUnavailable();
+			if (live instanceof LiveResult.TemporarilyUnavailable temporary) {
+				return refreshTemporary(
+					state, trackingId.get().toString(), committed, temporary.reason());
 			}
 
 			if (!(live instanceof LiveResult.Available available)) {
-				return new RefreshResult.Invalid();
+				LiveResult.Invalid invalid = (LiveResult.Invalid) live;
+				return refreshInvalid(
+					state,
+					trackingId.get().toString(),
+					committed,
+					invalid.reason(),
+					"linkage-error".equals(invalid.reason()) ? null : invalid.failure());
 			}
 
 			// The expected registry identity freezes the target classification for
@@ -288,7 +565,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			// different Java-side flag.
 			ExternalBlockReferenceIndex.LocatorKey newKey = locatorKey(available, committed.hasBlockEntity());
 			if (!state.references.migrate(trackingId.get().toString(), newKey)) {
-				return new RefreshResult.Invalid();
+				return refreshInvalid(state, trackingId.get().toString(), committed,
+					"locator-collision", null);
 			}
 
 			Target.ExternalBlockTarget target = committed(
@@ -298,15 +576,27 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				available.registryId(),
 				committed.hasBlockEntity());
 
+			logRefreshAvailable(state, trackingId.get().toString(), committed, available);
 			return new RefreshResult.Available(
 				target,
 				TargetMatchContext.blockEntityBlock(committed.hasBlockEntity()),
 				available.anchor());
-		} catch (ReflectiveOperationException | RuntimeException ignored) {
-			return new RefreshResult.Invalid();
-		} catch (LinkageError error) {
+		} catch (ReflectiveOperationException | RuntimeException failure) {
+			return refreshInvalid(
+				state,
+				trackingId.get().toString(),
+				committed,
+				"refresh-exception",
+				failure);
+		} catch (LinkageError failure) {
+			diagnostics.refreshException(
+				"refresh",
+				"linkage-error",
+				failure,
+				"stable_target_uuid", trackingId.get(),
+				"committed_target", committed);
 			linkGuard.disableSilently();
-			return new RefreshResult.Invalid();
+			return refreshInvalid(state, trackingId.get().toString(), committed, "linkage-error", null);
 		}
 	}
 
@@ -316,21 +606,43 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	) {
 		if (!usable() || level == null || target == null || !PROVIDER_ID.equals(target.providerId())
 			|| !dimensionMatches(level, target.dimensionId())) {
+			diagnostics.server(
+				"name-resolution",
+				"rejected",
+				"target", target,
+				"provider_usable", usable());
 			return Optional.empty();
 		}
 
 		Optional<SableExternalBlockLocator> parsed = SableExternalBlockLocator.parse(target.providerLocator());
 		Optional<ResourceLocation> expectedId = parseBlockId(target.expectedBlockRegistryId());
 
-		if (parsed.isEmpty() || expectedId.isEmpty()) {
+		if (parsed.isEmpty()) {
+			diagnostics.server(
+				"locator",
+				"decode-failure",
+				"operation", "resolve-name",
+				"provider_locator", target.providerLocator(),
+				"target", target);
+			return Optional.empty();
+		}
+
+		if (expectedId.isEmpty()) {
+			diagnostics.server(
+				"name-resolution",
+				"registry-id-decode-failure",
+				"expected_block_registry_id", target.expectedBlockRegistryId(),
+				"target", target);
 			return Optional.empty();
 		}
 
 		LiveResult live = resolveLive(level, parsed.get(), expectedId.get());
+		logLiveResult("resolve-name", target, live);
 		if (!(live instanceof LiveResult.Available available)) {
 			return Optional.empty();
 		}
 
+		Component vanillaName = available.state().getBlock().getName();
 		BlockEntity blockEntity = available.level().getBlockEntity(available.position());
 		Optional<Component> customName = Optional.empty();
 
@@ -341,34 +653,110 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			}
 		}
 
-		return Optional.of(new ExternalBlockName(available.state().getBlock().getName(), customName));
+		Optional<ExternalBlockName> result = Optional.of(new ExternalBlockName(vanillaName, customName));
+		diagnostics.server(
+			"name-resolution",
+			"success",
+			"target", target,
+			"block_registry_id", available.registryId(),
+			"block_entity", available.hasBlockEntity(),
+			"vanilla_name", vanillaName,
+			"custom_name", customName.orElse(null));
+		return result;
+	}
+
+	@Override
+	public synchronized void observeValidationDistance(
+		ServerLevel level,
+		Target.ExternalBlockTarget target,
+		MarkerAnchor anchor,
+		double distance,
+		boolean withinRange
+	) {
+		diagnostics.server(
+			"distance-validation",
+			withinRange ? "within-range" : "out-of-range",
+			"provider", PROVIDER_ID,
+			"target", target,
+			"anchor", anchor,
+			"distance", distance,
+			"within_range", withinRange);
 	}
 
 	@Override
 	public synchronized void release(MinecraftServer server, Target.ExternalBlockTarget committed) {
+		release(server, committed, null);
+	}
+
+	@Override
+	public synchronized void release(
+		MinecraftServer server, Target.ExternalBlockTarget committed, String markerId
+	) {
 		if (api == null || server == null || committed == null || !committed.isCommitted()
 			|| !PROVIDER_ID.equals(committed.providerId())) {
+			diagnostics.server(
+				"release",
+				"ignored-invalid-target",
+				"server", server,
+				"target", committed,
+				"provider_usable", usable());
 			return;
 		}
 
 		Optional<UUID> trackingId = parseUuid(committed.stableTargetId());
 		ServerState state = servers.get(server);
 		if (trackingId.isEmpty() || state == null) {
+			diagnostics.server(
+				"release",
+				"tracking-state-missing",
+				"target", committed,
+				"tracking_id", committed.stableTargetId());
 			return;
 		}
 
-		Entry entry = state.entries.get(trackingId.get().toString());
-		if (entry == null || state.references.references(trackingId.get().toString()) <= 0) {
+		String stableId = trackingId.get().toString();
+		Entry entry = state.entries.get(stableId);
+		int before = state.references.references(stableId);
+		if (entry == null || before <= 0) {
+			diagnostics.server(
+				"release",
+				"ignored-inactive",
+				"target", committed,
+				"tracking_id", stableId,
+				"remaining_refcount", before);
 			return;
 		}
 
-		state.references.release(trackingId.get().toString(), retiredId -> {
+		diagnostics.server(
+			"release",
+			"start",
+			"target", committed,
+			"marker_id", markerId,
+			"tracking_id", stableId,
+			"provider_locator", committed.providerLocator(),
+			"refcount_before", before);
+		state.references.release(stableId, retiredId -> {
 			try {
 				removeTrackingPoint(entry.data(), trackingId.get());
 			} finally {
 				state.entries.remove(retiredId);
+				state.refreshDiagnostics.remove(retiredId);
+				diagnostics.server(
+					"cleanup",
+					"tracking-point-retired",
+					"target", committed,
+					"marker_id", markerId,
+					"tracking_id", retiredId,
+					"remaining_refcount", 0);
 			}
 		});
+		diagnostics.server(
+			"release",
+			"lease-released",
+			"target", committed,
+			"marker_id", markerId,
+			"tracking_id", stableId,
+			"remaining_refcount", state.references.references(stableId));
 	}
 
 	@Override
@@ -382,14 +770,31 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			return;
 		}
 
+		diagnostics.server(
+			"cleanup",
+			"server-close-start",
+			"server", server,
+			"tracking_point_count", state.entries.size());
+
 		state.references.close(stableId -> {
 			Entry entry = state.entries.remove(stableId);
 			if (entry != null) {
 				removeTrackingPoint(entry.data(), entry.trackingId());
 			}
+			state.refreshDiagnostics.remove(stableId);
+			diagnostics.server(
+				"cleanup",
+				"tracking-point-closed",
+				"tracking_id", stableId,
+				"remaining_refcount", 0);
 		});
 
 		state.entries.clear();
+		diagnostics.server(
+			"cleanup",
+			"server-close-complete",
+			"server", server,
+			"tracking_point_count", 0);
 	}
 
 	private boolean usable() {
@@ -400,26 +805,168 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		return dimensionId != null && dimensionId.equals(level.dimension().location().toString());
 	}
 
+	private ValidationResult invalidValidation(String reason, Target.ExternalBlockTarget candidate) {
+		diagnostics.server(
+			"candidate-validation",
+			"rejected",
+			"rejection_reason", reason,
+			"candidate", candidate);
+		return new ValidationResult.Invalid();
+	}
+
+	private MaterializationResult invalidMaterialization(
+		String reason, Target.ExternalBlockTarget candidate
+	) {
+		diagnostics.server(
+			"materialization",
+			"rejected",
+			"rejection_reason", reason,
+			"candidate", candidate);
+		return new MaterializationResult.Invalid();
+	}
+
+	private void logLiveResult(String operation, Target.ExternalBlockTarget target, LiveResult result) {
+		if (result instanceof LiveResult.Available) {
+			return;
+		}
+
+		if (result instanceof LiveResult.TemporarilyUnavailable temporary) {
+			diagnostics.server(
+				"live-resolution",
+				temporary.reason(),
+				"operation", operation,
+				"target", target);
+			return;
+		}
+
+		LiveResult.Invalid invalid = (LiveResult.Invalid) result;
+		if (invalid.failure() != null) {
+			diagnostics.serverException(
+				"live-resolution",
+				invalid.reason(),
+				invalid.failure(),
+				"operation", operation,
+				"target", target);
+		} else {
+			diagnostics.server(
+				"live-resolution",
+				invalid.reason(),
+				"operation", operation,
+				"target", target);
+		}
+	}
+
+	private RefreshResult refreshTemporary(
+		ServerState state,
+		String stableId,
+		Target.ExternalBlockTarget committed,
+		String reason
+	) {
+		boolean emit = state == null || stableId == null
+			|| state.refreshDiagnostics.temporarilyUnavailable(stableId, reason);
+
+		if (emit) {
+			diagnostics.refresh(
+				"refresh",
+				"temporary-unavailable",
+				"unavailable_reason", reason,
+				"stable_target_uuid", stableId,
+				"committed_target", committed);
+		}
+
+		return new RefreshResult.TemporarilyUnavailable();
+	}
+
+	private RefreshResult refreshInvalid(
+		ServerState state,
+		String stableId,
+		Target.ExternalBlockTarget committed,
+		String reason,
+		Throwable failure
+	) {
+		boolean emit = state == null || stableId == null
+			|| state.refreshDiagnostics.invalid(stableId, reason);
+
+		if (emit) {
+			if (failure != null) {
+				diagnostics.refreshException(
+					"refresh",
+					"exception",
+					failure,
+					"invalidation_reason", reason,
+					"stable_target_uuid", stableId,
+					"committed_target", committed);
+			} else {
+				diagnostics.refresh(
+					"refresh",
+					"invalidation",
+					"invalidation_reason", reason,
+					"stable_target_uuid", stableId,
+					"committed_target", committed);
+			}
+		}
+
+		return new RefreshResult.Invalid();
+	}
+
+	private void logRefreshAvailable(
+		ServerState state,
+		String stableId,
+		Target.ExternalBlockTarget committed,
+		LiveResult.Available available
+	) {
+		boolean changed = state.refreshDiagnostics.available(
+			stableId, available.locator().encode(), available.anchor());
+
+		if (changed) {
+			diagnostics.refresh(
+				"refresh",
+				"locator-or-anchor-changed",
+				"stable_target_uuid", stableId,
+				"previous_target", committed,
+				"current_locator", available.locator().encode(),
+				"current_anchor", available.anchor(),
+				"block_registry_id", available.registryId(),
+				"block_entity", available.hasBlockEntity());
+		}
+	}
+
 	private LiveResult resolveLive(
 		ServerLevel level, SableExternalBlockLocator locator, ResourceLocation expectedId
+	) {
+		return resolveLive(level, locator, expectedId, true);
+	}
+
+	private LiveResult resolveLive(
+		ServerLevel level,
+		SableExternalBlockLocator locator,
+		ResourceLocation expectedId,
+		boolean logExceptions
 	) {
 		try {
 			Object container = invoke(api.getContainer, null, level);
 			if (container == null) {
-				return new LiveResult.TemporarilyUnavailable();
+				return new LiveResult.TemporarilyUnavailable("sublevel-container-unavailable");
 			}
 
 			Object subLevel = invoke(api.getSubLevel, container, locator.subLevelId());
 			if (subLevel == null || isRemoved(subLevel)) {
-				return new LiveResult.TemporarilyUnavailable();
+				return new LiveResult.TemporarilyUnavailable("sublevel-unresolved-or-removed");
 			}
 
-			return resolveLive(level, subLevel, locator.subLevelId(), locator.blockPos(), expectedId);
-		} catch (ReflectiveOperationException | RuntimeException ignored) {
-			return new LiveResult.Invalid();
-		} catch (LinkageError error) {
+			return resolveLive(level, subLevel, locator.subLevelId(), locator.blockPos(), expectedId, logExceptions);
+		} catch (ReflectiveOperationException | RuntimeException failure) {
+			return new LiveResult.Invalid("live-resolution-exception", failure);
+		} catch (LinkageError failure) {
+			diagnostics.serverException(
+				"live-resolution",
+				"linkage-error",
+				failure,
+				"provider", PROVIDER_ID,
+				"provider_locator", locator,
+				"expected_block_registry_id", expectedId);
 			linkGuard.disableSilently();
-			return new LiveResult.Invalid();
+			return new LiveResult.Invalid("linkage-error", failure);
 		}
 	}
 
@@ -428,34 +975,35 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		Object subLevel,
 		UUID subLevelId,
 		BlockPos position,
-		ResourceLocation expectedId
+		ResourceLocation expectedId,
+		boolean logExceptions
 	) throws ReflectiveOperationException {
 		if (isRemoved(subLevel)) {
-			return new LiveResult.TemporarilyUnavailable();
+			return new LiveResult.TemporarilyUnavailable("sublevel-removed");
 		}
 
 		Object localLevelObject = invoke(api.getLevel, subLevel);
 		if (!(localLevelObject instanceof ServerLevel localLevel) || localLevel != parentLevel) {
-			return new LiveResult.Invalid();
+			return new LiveResult.Invalid("sublevel-level-mismatch", null);
 		}
 
 		if (!localLevel.isLoaded(position)) {
-			return new LiveResult.TemporarilyUnavailable();
+			return new LiveResult.TemporarilyUnavailable("unloaded-or-missing-state");
 		}
 
 		BlockState state = localLevel.getBlockState(position);
 		if (state == null || state.isAir()) {
-			return new LiveResult.Invalid();
+			return new LiveResult.Invalid("air-or-missing-state", null);
 		}
 
 		ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
 		if (actualId == null || !expectedId.equals(actualId)) {
-			return new LiveResult.Invalid();
+			return new LiveResult.Invalid("registry-identity-mismatch", null);
 		}
 
 		Object poseObject = invoke(api.logicalPose, subLevel);
 		if (!(poseObject instanceof Pose3dc pose)) {
-			return new LiveResult.Invalid();
+			return new LiveResult.Invalid("logical-pose-missing", null);
 		}
 
 		Vector3d globalCenter = pose.transformPosition(
@@ -463,11 +1011,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			new Vector3d());
 
 		if (!finite(globalCenter)) {
-			return new LiveResult.Invalid();
+			return new LiveResult.Invalid("non-finite-anchor", null);
 		}
 
 		boolean hasBlockEntity = BlockEntityClassification.hasBlockEntity(state);
-		return new LiveResult.Available(
+		LiveResult.Available available = new LiveResult.Available(
 			subLevel,
 			localLevel,
 			position,
@@ -476,6 +1024,20 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			hasBlockEntity,
 			new MarkerAnchor(globalCenter.x, globalCenter.y, globalCenter.z),
 			new SableExternalBlockLocator(subLevelId, position));
+
+		if (logExceptions) {
+			diagnostics.server(
+				"live-resolution",
+				"available",
+				"sublevel_uuid", subLevelId,
+				"local_block_pos", position,
+				"block_registry_id", actualId,
+				"block_entity", hasBlockEntity,
+				"anchor", available.anchor(),
+				"provider_locator", available.locator().encode());
+		}
+
+		return available;
 	}
 
 	private boolean trackingPointExists(Entry entry) throws ReflectiveOperationException {
@@ -485,9 +1047,24 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	private void removeTrackingPoint(Object data, UUID trackingId) {
 		try {
 			invoke(api.removeTrackingPoint, data, trackingId);
-		} catch (ReflectiveOperationException | RuntimeException ignored) {
-			// Provider cleanup is intentionally silent and idempotent at the index.
-		} catch (LinkageError error) {
+			diagnostics.server(
+				"cleanup",
+				"tracking-point-removed",
+				"tracking_id", trackingId);
+		} catch (ReflectiveOperationException | RuntimeException failure) {
+			diagnostics.serverException(
+				"cleanup",
+				"tracking-point-removal-failure",
+				failure,
+				"tracking_id", trackingId,
+				"data", data);
+		} catch (LinkageError failure) {
+			diagnostics.serverException(
+				"cleanup",
+				"tracking-point-removal-linkage-error",
+				failure,
+				"tracking_id", trackingId,
+				"data", data);
 			linkGuard.disableSilently();
 		}
 	}
@@ -605,6 +1182,30 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		}
 	}
 
+	private static List<String> expectedClasses() {
+		return List.of(
+			SUB_LEVEL_CONTAINER_CLASS,
+			SERVER_SUB_LEVEL_CLASS,
+			TRACKING_DATA_CLASS,
+			TRACKING_POINT_CLASS);
+	}
+
+	private static List<String> expectedMethods() {
+		return List.of(
+			"SubLevelContainer#getContainer(ServerLevel|Level)",
+			"SubLevelContainer#getSubLevel(UUID)",
+			"ServerSubLevel#getLevel()",
+			"ServerSubLevel#isRemoved()",
+			"ServerSubLevel#logicalPose()",
+			"SubLevelTrackingPointSavedData#getOrLoad(ServerLevel)",
+			"SubLevelTrackingPointSavedData#generateTrackingPoint(Vec3,ServerSubLevel)",
+			"SubLevelTrackingPointSavedData#getTrackingPoint(UUID)",
+			"SubLevelTrackingPointSavedData#removeTrackingPoint(UUID)",
+			"TrackingPoint#inSubLevel()",
+			"TrackingPoint#subLevelID()",
+			"TrackingPoint#point()");
+	}
+
 	private sealed interface LiveResult permits LiveResult.Available, LiveResult.TemporarilyUnavailable,
 		LiveResult.Invalid {
 
@@ -620,10 +1221,10 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		) implements LiveResult {
 		}
 
-		record TemporarilyUnavailable() implements LiveResult {
+		record TemporarilyUnavailable(String reason) implements LiveResult {
 		}
 
-		record Invalid() implements LiveResult {
+		record Invalid(String reason, Throwable failure) implements LiveResult {
 		}
 	}
 
@@ -648,6 +1249,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	private static final class ServerState {
 		private final ExternalBlockReferenceIndex references = new ExternalBlockReferenceIndex();
 		private final Map<String, Entry> entries = new LinkedHashMap<>();
+		private final SableRefreshLogGate refreshDiagnostics = new SableRefreshLogGate();
 	}
 
 	private record ReflectiveApi(
@@ -665,37 +1267,87 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		Method point
 	) {
 
-		private static ReflectiveApi discover() throws ReflectiveOperationException {
-			Class<?> containerClass = Class.forName(SUB_LEVEL_CONTAINER_CLASS, false,
-				SableExternalBlockServerProvider.class.getClassLoader());
-			Class<?> serverSubLevelClass = Class.forName(SERVER_SUB_LEVEL_CLASS, false,
-				SableExternalBlockServerProvider.class.getClassLoader());
-			Class<?> trackingDataClass = Class.forName(TRACKING_DATA_CLASS, false,
-				SableExternalBlockServerProvider.class.getClassLoader());
-			Class<?> trackingPointClass = Class.forName(TRACKING_POINT_CLASS, false,
-				SableExternalBlockServerProvider.class.getClassLoader());
+		private static ReflectiveApi discover(SableDiagnostics diagnostics)
+			throws ReflectiveOperationException {
+			Class<?> containerClass = loadClass(SUB_LEVEL_CONTAINER_CLASS, diagnostics);
+			Class<?> serverSubLevelClass = loadClass(SERVER_SUB_LEVEL_CLASS, diagnostics);
+			Class<?> trackingDataClass = loadClass(TRACKING_DATA_CLASS, diagnostics);
+			Class<?> trackingPointClass = loadClass(TRACKING_POINT_CLASS, diagnostics);
 
 			return new ReflectiveApi(
-				containerLookup(containerClass),
-				required(containerClass, "getSubLevel", Object.class, UUID.class, false),
-				required(serverSubLevelClass, "getLevel", Level.class, false),
-				required(serverSubLevelClass, "isRemoved", boolean.class, false),
-				required(serverSubLevelClass, "logicalPose", Pose3dc.class, false),
-				required(trackingDataClass, "getOrLoad", trackingDataClass, ServerLevel.class, true),
-				required(trackingDataClass, "generateTrackingPoint", UUID.class, false, Vec3.class, serverSubLevelClass),
-				required(trackingDataClass, "getTrackingPoint", trackingPointClass, UUID.class, false),
-				required(trackingDataClass, "removeTrackingPoint", void.class, UUID.class, false),
-				required(trackingPointClass, "inSubLevel", boolean.class, false),
-				required(trackingPointClass, "subLevelID", UUID.class, false),
-				required(trackingPointClass, "point", Vector3dc.class, false));
+				containerLookup(containerClass, diagnostics),
+				discovered(containerClass, "getSubLevel", Object.class, false, diagnostics, UUID.class),
+				discovered(serverSubLevelClass, "getLevel", Level.class, false, diagnostics),
+				discovered(serverSubLevelClass, "isRemoved", boolean.class, false, diagnostics),
+				discovered(serverSubLevelClass, "logicalPose", Pose3dc.class, false, diagnostics),
+				discovered(trackingDataClass, "getOrLoad", trackingDataClass, true, diagnostics, ServerLevel.class),
+				discovered(trackingDataClass, "generateTrackingPoint", UUID.class, false, diagnostics, Vec3.class, serverSubLevelClass),
+				discovered(trackingDataClass, "getTrackingPoint", trackingPointClass, false, diagnostics, UUID.class),
+				discovered(trackingDataClass, "removeTrackingPoint", void.class, false, diagnostics, UUID.class),
+				discovered(trackingPointClass, "inSubLevel", boolean.class, false, diagnostics),
+				discovered(trackingPointClass, "subLevelID", UUID.class, false, diagnostics),
+				discovered(trackingPointClass, "point", Vector3dc.class, false, diagnostics));
 		}
 
-		private static Method containerLookup(Class<?> containerClass) throws ReflectiveOperationException {
+		private static Class<?> loadClass(String name, SableDiagnostics diagnostics)
+			throws ClassNotFoundException {
+			Class<?> loaded = Class.forName(
+				name, false, SableExternalBlockServerProvider.class.getClassLoader());
+			diagnostics.server(
+				"reflection-discovery",
+				"class-found",
+				"class_name", loaded.getName());
+			return loaded;
+		}
+
+		private static Method containerLookup(
+			Class<?> containerClass, SableDiagnostics diagnostics
+		) throws ReflectiveOperationException {
 			try {
-				return required(containerClass, "getContainer", Object.class, ServerLevel.class, true);
+				return discovered(
+					containerClass, "getContainer", Object.class, true, diagnostics, ServerLevel.class);
 			} catch (NoSuchMethodException missingServerLevelOverload) {
-				return required(containerClass, "getContainer", Object.class, Level.class, true);
+				diagnostics.server(
+					"reflection-discovery",
+					"server-level-overload-missing",
+					"class_name", containerClass.getName(),
+					"fallback_signature", "getContainer(Level)");
+				return discovered(
+					containerClass, "getContainer", Object.class, true, diagnostics, Level.class);
 			}
+		}
+
+		private static Method discovered(
+			Class<?> owner,
+			String name,
+			Class<?> returnType,
+			boolean isStatic,
+			SableDiagnostics diagnostics,
+			Class<?>... parameters
+		) throws ReflectiveOperationException {
+			Method method = required(owner, name, returnType, isStatic, parameters);
+			diagnostics.server(
+				"reflection-discovery",
+				"method-found",
+				"class_name", owner.getName(),
+				"method_signature", method.toGenericString());
+			return method;
+		}
+
+		private List<String> signatures() {
+			return List.of(
+				getContainer.toGenericString(),
+				getSubLevel.toGenericString(),
+				getLevel.toGenericString(),
+				isRemoved.toGenericString(),
+				logicalPose.toGenericString(),
+				getOrLoad.toGenericString(),
+				generateTrackingPoint.toGenericString(),
+				getTrackingPoint.toGenericString(),
+				removeTrackingPoint.toGenericString(),
+				inSubLevel.toGenericString(),
+				subLevelId.toGenericString(),
+				point.toGenericString());
 		}
 
 		private static Method required(
