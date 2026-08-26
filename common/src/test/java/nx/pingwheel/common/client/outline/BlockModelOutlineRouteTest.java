@@ -30,21 +30,35 @@ class BlockModelOutlineRouteTest {
 	}
 
 	@Test
-	void externalBlockUsesTheSharedPolicyAndRequiresModelGeometry() {
-		for (String targetTypeId : new String[] {"block", "entity_block"}) {
-			assertEquals(
-				BLOCK_DISPLAY,
-				BlockModelOutlineRoute.routeExternal(targetTypeId, true, true));
-			assertEquals(
-				VOXEL,
-				BlockModelOutlineRoute.routeExternal(targetTypeId, false, true));
-			assertEquals(
-				VOXEL,
-				BlockModelOutlineRoute.routeExternal(targetTypeId, true, false));
-			assertEquals(
-				VOXEL,
-				BlockModelOutlineRoute.routeExternal(targetTypeId, false, false));
-		}
+	void externalOrdinaryBlockKeepsTheSharedPolicyAndModelGate() {
+		assertEquals(
+			BLOCK_DISPLAY,
+			BlockModelOutlineRoute.routeExternal("block", true, true));
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("block", false, true));
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("block", true, false));
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("block", false, false));
+	}
+
+	@Test
+	void externalEntityBlockUsesTheRunnerEvenWithoutAStaticModel() {
+		assertEquals(
+			ENTITY_BLOCK,
+			BlockModelOutlineRoute.routeExternal("entity_block", true, true));
+		assertEquals(
+			ENTITY_BLOCK,
+			BlockModelOutlineRoute.routeExternal("entity_block", true, false));
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("entity_block", false, true));
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("entity_block", false, false));
 	}
 
 	@Test

@@ -22,7 +22,7 @@ import nx.pingwheel.common.integration.sable.client.SableClientProvider;
  * Main-thread block outline render pass.
  *
  * <p>Draws the current native {@link VoxelShape} wireframe of every ordinary
- * and provider-owned block whose model route did not emit geometry in the
+ * and provider-owned block whose model/geometry route did not emit geometry in the
  * prepared {@link BlockOutlineState} snapshots into the given line buffer.
  * The pass is deliberately conservative and never mutates the level:
  * <ul>
@@ -50,11 +50,12 @@ public final class BlockOutlineRenderer {
 	/**
 	 * Renders ordinary and provider-owned block outlines for one render frame.
 	 * Each success set is keyed in the same domain as its corresponding outline
-	 * snapshot, so a provider-owned baked-model success suppresses only that
+	 * snapshot, so a provider-owned geometry success suppresses only that
 	 * external key's VoxelShape fallback.
 	 *
-	 * @param externalModelOutlineKeys the per-frame external keys whose model
-	 *                                 pass succeeded; those fallbacks are skipped
+	 * @param externalModelOutlineKeys the per-frame external keys whose model or
+	 *                                 entity geometry pass succeeded; fallbacks
+	 *                                 for those keys are skipped
 	 */
 	public static void render(
 		ClientLevel level,

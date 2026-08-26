@@ -69,10 +69,13 @@ import static nx.pingwheel.common.Global.LOGGER;
  *       vanilla model offset ({@code getOffset}, computed once per frame after
  *       the current-state validation), so short-grass/flower/bamboo-style
  *       shifted models glow exactly where they appear in the world.</li>
- *   <li>provider-owned Sable blocks use the same cached virtual display and
- *       baked-model outline route when the live local state is a compatible
- *       {@link RenderShape#MODEL}; unavailable, non-model, empty, and failed
- *       attempts retain the native VoxelShape fallback.</li>
+ *   <li>provider-owned Sable {@code block} targets use the same cached virtual
+ *       display and baked-model outline route when the live local state is a
+ *       compatible {@link RenderShape#MODEL}; provider-owned
+ *       {@code entity_block} targets use the shared entity-block geometry
+ *       runner, which attempts fresh local BER and baked-model geometry (and
+ *       optional sources in {@code ALL}) before retaining the native
+ *       VoxelShape fallback.</li>
  * </ul>
  *
 	 * <p>Built-in BER/baked attempts write exclusively through an
@@ -244,8 +247,8 @@ public final class VirtualBlockDisplayRenderer {
 			}
 
 			if (renderExternalBlockModel(
-				level, cameraPosition, collisionContext, builtInPartialTick,
-				entityDispatcher, blockKey, spec) == EntityBlockGeometryOutcome.RENDERED) {
+				level, cameraPosition, collisionContext, builtInPartialTick, flywheelPartialTick,
+				entityDispatcher, blockEntityDispatcher, blockKey, spec) == EntityBlockGeometryOutcome.RENDERED) {
 				frameState.addExternalSuccess(blockKey);
 			}
 		}
@@ -302,25 +305,27 @@ public final class VirtualBlockDisplayRenderer {
 	}
 
 	/**
-	 * Attempts the baked-model half of a provider-owned block outline. The
-	 * provider resolves a fresh local state and pose for this frame; no
-	 * BlockEntity instance is retained or looked up in the parent level. Both
-	 * ordinary {@code block} and {@code entity_block} targets use the same
-	 * whitelist/blacklist policy, but only a live {@code MODEL} state can enter
-	 * this cached virtual-display route.
+	 * Attempts the configured geometry route for a provider-owned block outline.
+	 * The provider resolves a fresh local state and pose for this frame; no
+	 * BlockEntity instance is retained or looked up in the parent level.
+	 * Ordinary {@code block} targets use the existing cached virtual-display
+	 * route, while {@code entity_block} targets use the shared runner for direct
+	 * BER, baked-model, and (when enabled) optional geometry sources.
 	 */
 	private EntityBlockGeometryOutcome renderExternalBlockModel(
 		ClientLevel level,
 		Vec3 cameraPosition,
 		CollisionContext collisionContext,
-		float partialTick,
-		EntityRenderDispatcher dispatcher,
+		float builtInPartialTick,
+		float flywheelPartialTick,
+		EntityRenderDispatcher entityDispatcher,
+		BlockEntityRenderDispatcher blockEntityDispatcher,
 		TargetKey.ExternalBlockKey targetKey,
 		ExternalBlockOutlineSpec spec
 	) {
 		try {
 			var presentationResult = SableClientProvider.resolvePresentation(
-				level, spec.target(), partialTick, collisionContext);
+				level, spec.target(), builtInPartialTick, collisionContext);
 
 			if (presentationResult.isEmpty()) {
 				return EntityBlockGeometryOutcome.EMPTY;
@@ -345,17 +350,58 @@ public final class VirtualBlockDisplayRenderer {
 				spec.targetTypeId(), nativeGlowMatches,
 				blockState.getRenderShape() == RenderShape.MODEL);
 
+			BlockPos localBlockPos = presentation.localBlockPos();
+
+			if (route == BlockModelOutlineRoute.ENTITY_BLOCK) {
+				EntityBlockRenderMode mode =
+					ClientConfig.HANDLER.getConfig().getEntityBlockRenderMode();
+				if (presentation.localLevel().getBlockEntity(localBlockPos) == null) {
+					// A provider state can outlive or temporarily lose its live
+					// BlockEntity. Do not let the static baked source turn that
+					// incomplete entity_block back into a model success.
+					return EntityBlockGeometryOutcome.EMPTY;
+				}
+				EntityBlockGeometryTransform transform =
+					new EntityBlockGeometryTransform(presentation.renderPose());
+
+				boolean rendered = entityBlockGeometryRunner.run(
+					mode,
+					() -> new EntityBlockGeometryContext(
+						presentation.localLevel(),
+						localBlockPos,
+						blockState,
+						// The runner asks for a new context for every source. Resolve the
+						// local BlockEntity at that point rather than retaining an instance
+						// identity across frames or source attempts.
+						presentation.localLevel().getBlockEntity(localBlockPos),
+						spec.argbColor(),
+						cameraPosition,
+						builtInPartialTick,
+						flywheelPartialTick,
+						LevelRenderer.getLightColor(presentation.localLevel(), localBlockPos),
+						entityDispatcher,
+						blockEntityDispatcher,
+						Minecraft.getInstance().levelRenderer,
+						targetKey,
+						BlockModelOutlineState.INSTANCE.frameId(),
+						transform));
+				return rendered
+					? EntityBlockGeometryOutcome.RENDERED : EntityBlockGeometryOutcome.EMPTY;
+			}
+
 			if (route != BlockModelOutlineRoute.BLOCK_DISPLAY) {
 				return EntityBlockGeometryOutcome.EMPTY;
 			}
 
-			BlockPos localBlockPos = presentation.localBlockPos();
+			// Ordinary provider-owned blocks retain the existing virtual display
+			// route. The entity_block runner's baked source owns its own display
+			// attempt, so entity_block never reaches this branch.
 			return renderBlockDisplay(
 				level,
 				localBlockPos,
 				blockState,
-				dispatcher,
-				partialTick,
+				entityDispatcher,
+				builtInPartialTick,
 				() -> LevelRenderer.getLightColor(presentation.localLevel(), localBlockPos),
 				spec.argbColor(),
 				actualRegistryKey.toString(),

@@ -85,27 +85,34 @@ public enum BlockModelOutlineRoute {
 	 *
 	 * <p>The outer native-glow decision is still supplied by the same compiled
 	 * {@code BlockDisplayPolicy} used for ordinary blocks. Provider-owned
-	 * {@code entity_block} targets deliberately do not enter the fixed
-	 * BlockEntityRenderer route: a live local block state may safely provide a
-	 * baked model, while a long-lived BlockEntity instance at a plot position is
-	 * not safe to retain. A non-model state therefore remains on the native
-	 * VoxelShape fallback even when the entity-block whitelist gate itself
-	 * matches.</p>
+	 * {@code entity_block} targets enter the shared entity-block geometry runner,
+	 * which resolves a fresh local BlockEntity for each source attempt and owns
+	 * both the direct renderer and baked-model routes. A non-model state may
+	 * still use the direct BlockEntityRenderer route, while the baked-model
+	 * source remains restricted to {@code MODEL} states. Ordinary provider-owned
+	 * {@code block} targets retain their virtual BlockDisplay route.</p>
 	 *
 	 * @param targetTypeId      authoritative target type id
 	 * @param nativeGlowMatches result of the shared block display policy
 	 * @param modelState        whether the live state has {@code MODEL} render
-	 *                          shape
+	 *                          shape; this gate applies only to ordinary
+	 *                          {@code block} targets because an {@code entity_block}
+	 *                          may have dynamic renderer geometry without a model
 	 */
 	public static BlockModelOutlineRoute routeExternal(
 		String targetTypeId, boolean nativeGlowMatches, boolean modelState
 	) {
 		Objects.requireNonNull(targetTypeId, "targetTypeId");
 
-		if (!modelState || !nativeGlowMatches) {
+		if (!nativeGlowMatches) {
 			return VOXEL;
 		}
 
-		return acceptsForBlockRendering(targetTypeId) ? BLOCK_DISPLAY : VOXEL;
+		if (TARGET_TYPE_ENTITY_BLOCK.equals(targetTypeId)) {
+			return ENTITY_BLOCK;
+		}
+
+		return TARGET_TYPE_BLOCK.equals(targetTypeId) && modelState
+			? BLOCK_DISPLAY : VOXEL;
 	}
 }
