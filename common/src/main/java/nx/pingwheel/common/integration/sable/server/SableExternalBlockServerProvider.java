@@ -556,7 +556,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 					trackingId.get().toString(),
 					committed,
 					invalid.reason(),
-					"linkage-error".equals(invalid.reason()) ? null : invalid.failure());
+					invalid.failure());
 			}
 
 			// The expected registry identity freezes the target classification for
@@ -589,14 +589,9 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				"refresh-exception",
 				failure);
 		} catch (LinkageError failure) {
-			diagnostics.refreshException(
-				"refresh",
-				"linkage-error",
-				failure,
-				"stable_target_uuid", trackingId.get(),
-				"committed_target", committed);
 			linkGuard.disableSilently();
-			return refreshInvalid(state, trackingId.get().toString(), committed, "linkage-error", null);
+			return refreshInvalid(
+				state, trackingId.get().toString(), committed, "linkage-error", failure);
 		}
 	}
 
@@ -826,6 +821,19 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	}
 
 	private void logLiveResult(String operation, Target.ExternalBlockTarget target, LiveResult result) {
+		logLiveResult(diagnostics, operation, target, result);
+	}
+
+	static void logLiveResult(
+		SableDiagnostics diagnostics,
+		String operation,
+		Target.ExternalBlockTarget target,
+		LiveResult result
+	) {
+		Objects.requireNonNull(diagnostics, "diagnostics");
+		Objects.requireNonNull(operation, "operation");
+		Objects.requireNonNull(result, "result");
+
 		if (result instanceof LiveResult.Available) {
 			return;
 		}
@@ -958,13 +966,6 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		} catch (ReflectiveOperationException | RuntimeException failure) {
 			return new LiveResult.Invalid("live-resolution-exception", failure);
 		} catch (LinkageError failure) {
-			diagnostics.serverException(
-				"live-resolution",
-				"linkage-error",
-				failure,
-				"provider", PROVIDER_ID,
-				"provider_locator", locator,
-				"expected_block_registry_id", expectedId);
 			linkGuard.disableSilently();
 			return new LiveResult.Invalid("linkage-error", failure);
 		}
@@ -1206,7 +1207,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			"TrackingPoint#point()");
 	}
 
-	private sealed interface LiveResult permits LiveResult.Available, LiveResult.TemporarilyUnavailable,
+	sealed interface LiveResult permits LiveResult.Available, LiveResult.TemporarilyUnavailable,
 		LiveResult.Invalid {
 
 		record Available(

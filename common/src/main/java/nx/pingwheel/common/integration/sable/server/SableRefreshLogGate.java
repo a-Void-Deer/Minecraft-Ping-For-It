@@ -23,6 +23,8 @@ final class SableRefreshLogGate {
 		Observation previous = observations.put(
 			stableId, new Observation(Status.AVAILABLE, "available", locator, anchor));
 
+		// The first AVAILABLE observation establishes the baseline; only a later
+		// transition or observable change is worth emitting.
 		return previous != null && (previous.status() != Status.AVAILABLE
 			|| !locator.equals(previous.locator()) || !anchor.equals(previous.anchor()));
 	}

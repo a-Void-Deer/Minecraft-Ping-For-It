@@ -2,8 +2,6 @@ package nx.pingwheel.common.integration.sable.client;
 
 import java.util.Objects;
 import java.util.Optional;
-import java.util.HashSet;
-import java.util.Set;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -36,7 +34,8 @@ public final class SableClientProvider {
 	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard(PROVIDER_ID);
 	private static volatile SableClientCompanionAccess access;
 	private static volatile SableDiagnostics diagnostics = SableDiagnostics.global();
-	private static final Set<String> PRESENTATION_FAILURES = new HashSet<>();
+	private static final SablePresentationLogGate PRESENTATION_FAILURES =
+		new SablePresentationLogGate();
 
 	private SableClientProvider() {
 	}
@@ -203,9 +202,7 @@ public final class SableClientProvider {
 
 		try {
 			Optional<Vec3> result = getAccess().resolvePosition(level, target, partialTick);
-			if (result.isPresent()) {
-				clearPresentationFailure("resolve-position");
-			} else {
+			if (result.isEmpty()) {
 				logPresentationFailure("resolve-position", "provider-unavailable", "target", target);
 			}
 			return result;
@@ -251,9 +248,7 @@ public final class SableClientProvider {
 		try {
 			Optional<ExternalBlockPresentation> result =
 				getAccess().resolve(level, target, partialTick, collisionContext);
-			if (result.isPresent()) {
-				clearPresentationFailure("resolve-presentation");
-			} else {
+			if (result.isEmpty()) {
 				logPresentationFailure("resolve-presentation", "provider-unavailable", "target", target);
 			}
 			return result;
@@ -290,9 +285,7 @@ public final class SableClientProvider {
 
 		try {
 			Optional<Component> result = getAccess().resolveName(level, target);
-			if (result.isPresent()) {
-				clearPresentationFailure("resolve-name");
-			} else {
+			if (result.isEmpty()) {
 				logPresentationFailure("resolve-name", "provider-unavailable", "target", target);
 			}
 			return result;
@@ -384,36 +377,31 @@ public final class SableClientProvider {
 
 	static void setDiagnosticsForTests(SableDiagnostics replacement) {
 		diagnostics = Objects.requireNonNull(replacement, "replacement");
-		synchronized (PRESENTATION_FAILURES) {
-			PRESENTATION_FAILURES.clear();
-		}
+		PRESENTATION_FAILURES.clear();
 	}
 
 	private static Vec3 rayDirection(Vec3 rayStart, Vec3 rayEnd) {
 		return rayStart == null || rayEnd == null ? null : rayEnd.subtract(rayStart);
 	}
 
-	private static void logPresentationFailure(String operation, String reason, Object... fields) {
-		String key = operation + "|" + reason;
-		synchronized (PRESENTATION_FAILURES) {
-			if (!PRESENTATION_FAILURES.add(key)) {
-				return;
-			}
+	static void logPresentationFailure(String operation, String reason, Object... fields) {
+		String key = presentationFailureKey(operation, reason, null, fields);
+		if (!PRESENTATION_FAILURES.shouldLog(key)) {
+			return;
 		}
 
 		diagnostics.capture("presentation", reason, append(
 			new Object[] {"operation", operation}, fields));
 	}
 
-	private static void logPresentationException(
+	static void logPresentationException(
 		String operation, Throwable failure, Object... fields
 	) {
-		String key = operation + "|exception|" + failure.getClass().getName()
-			+ "|" + String.valueOf(failure.getMessage());
-		synchronized (PRESENTATION_FAILURES) {
-			if (!PRESENTATION_FAILURES.add(key)) {
-				return;
-			}
+		Objects.requireNonNull(failure, "failure");
+		String key = presentationFailureKey(
+			operation, "exception", failure.getClass().getName(), fields);
+		if (!PRESENTATION_FAILURES.shouldLog(key)) {
+			return;
 		}
 
 		diagnostics.captureException(
@@ -421,11 +409,31 @@ public final class SableClientProvider {
 			append(new Object[] {"operation", operation}, fields));
 	}
 
-	private static void clearPresentationFailure(String operation) {
-		String prefix = operation + "|";
-		synchronized (PRESENTATION_FAILURES) {
-			PRESENTATION_FAILURES.removeIf(key -> key.startsWith(prefix));
+	private static String presentationFailureKey(
+		String operation, String reason, String failureClass, Object[] fields
+	) {
+		String targetIdentity = "none";
+		for (int index = 0; index + 1 < fields.length; index += 2) {
+			if ("target".equals(fields[index])) {
+				targetIdentity = stableTargetIdentity(fields[index + 1]);
+				break;
+			}
 		}
+
+		return operation + "|" + reason + "|"
+			+ (failureClass == null ? "none" : failureClass) + "|" + targetIdentity;
+	}
+
+	private static String stableTargetIdentity(Object target) {
+		if (target instanceof Target.ExternalBlockTarget external) {
+			String stableId = external.stableTargetId();
+			String identity = stableId == null || stableId.isBlank()
+				? external.providerLocator()
+				: stableId;
+			return external.dimensionId() + "|" + external.providerId() + "|" + identity;
+		}
+
+		return target == null ? "null" : target.getClass().getName();
 	}
 
 	private static Object[] append(Object[] first, Object[] second) {

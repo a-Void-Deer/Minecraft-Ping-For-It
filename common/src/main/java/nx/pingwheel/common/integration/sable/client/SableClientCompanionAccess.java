@@ -373,7 +373,6 @@ final class SableClientCompanionAccess {
 			"local_block_pos", localPos,
 			"local_hit", best.localHit(),
 			"logical_world_hit", best.worldHit(),
-			"render_derived_world_hit", best.worldHit(),
 			"world_hit_source", "logicalPose",
 			"block_registry_id", best.registryId(),
 			"block_entity", best.hasBlockEntity(),
