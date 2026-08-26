@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
 
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 
 /**
@@ -17,12 +19,17 @@ import net.minecraft.world.entity.Entity;
  */
 public final class EntitySelectionBlacklist {
 
+	private static final ResourceLocation SIMULATED_HONEY_GLUE_ID =
+		ResourceLocation.fromNamespaceAndPath("simulated", "honey_glue");
+	private static final Predicate<Entity> DEFAULT_SIMULATED_HONEY_GLUE_RULE =
+		EntitySelectionBlacklist::isSimulatedHoneyGlue;
+
 	/** The global blacklist used by the client raycast. */
 	public static final EntitySelectionBlacklist INSTANCE = new EntitySelectionBlacklist();
 
 	private final Object lock = new Object();
 	private final List<Registration> registrations = new ArrayList<>();
-	private volatile List<Predicate<Entity>> snapshot = List.of();
+	private volatile List<Predicate<Entity>> snapshot = List.of(DEFAULT_SIMULATED_HONEY_GLUE_RULE);
 
 	/**
 	 * Registers one entity predicate.  A matching predicate excludes the entity
@@ -72,7 +79,18 @@ public final class EntitySelectionBlacklist {
 	}
 
 	private void publishSnapshot() {
-		snapshot = List.copyOf(registrations.stream().map(Registration::predicate).toList());
+		var predicates = new ArrayList<Predicate<Entity>>(registrations.size() + 1);
+		predicates.add(DEFAULT_SIMULATED_HONEY_GLUE_RULE);
+		predicates.addAll(registrations.stream().map(Registration::predicate).toList());
+		snapshot = List.copyOf(predicates);
+	}
+
+	static boolean isDefaultIgnoredEntityId(ResourceLocation entityTypeId) {
+		return SIMULATED_HONEY_GLUE_ID.equals(entityTypeId);
+	}
+
+	private static boolean isSimulatedHoneyGlue(Entity entity) {
+		return isDefaultIgnoredEntityId(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()));
 	}
 
 	/** Lifecycle handle for one exact predicate registration. */
