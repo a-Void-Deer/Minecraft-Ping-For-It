@@ -11,7 +11,9 @@ import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientMarkerTest {
 
@@ -42,6 +44,8 @@ class ClientMarkerTest {
 		assertEquals(100L, marker.arrivalTick());
 		assertEquals(300L, marker.expiresAtTick());
 		assertEquals(250L, marker.receivedAtLocalTick());
+		assertEquals(450L, marker.displayExpiresAtLocalTick());
+		assertEquals(ClientMarkerState.SYNCHRONIZED, marker.state());
 	}
 
 	@Test
@@ -53,6 +57,35 @@ class ClientMarkerTest {
 
 		// 50 + (110 - 10) + 10 = 160
 		assertEquals(160L, marker.fallbackExpiresAtLocalTick());
+		assertEquals(150L, marker.displayExpiresAtLocalTick());
+	}
+
+	@Test
+	void fromCanUseAnIndependentDisplayDuration() {
+		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
+		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 10L, 110L);
+
+		ClientMarker marker = ClientMarker.from(source, 50L, 10L, 5L);
+
+		assertEquals(160L, marker.fallbackExpiresAtLocalTick());
+		assertEquals(55L, marker.displayExpiresAtLocalTick());
+		assertTrue(marker.isVisuallyActiveAt(54L));
+		assertFalse(marker.isVisuallyActiveAt(55L));
+	}
+
+	@Test
+	void staleStatePreservesBothDeadlinesAndPayload() {
+		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
+		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 10L, 110L);
+		ClientMarker marker = ClientMarker.from(source, 50L, 10L, 200L);
+
+		ClientMarker stale = marker.asStale();
+
+		assertEquals(ClientMarkerState.STALE, stale.state());
+		assertTrue(stale.isStale());
+		assertEquals(marker.fallbackExpiresAtLocalTick(), stale.fallbackExpiresAtLocalTick());
+		assertEquals(marker.displayExpiresAtLocalTick(), stale.displayExpiresAtLocalTick());
+		assertEquals(marker.target(), stale.target());
 	}
 
 	@Test

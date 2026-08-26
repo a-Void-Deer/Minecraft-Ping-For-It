@@ -90,7 +90,10 @@ public final class MarkerOverlayState {
 			return;
 		}
 
-		List<ClientMarker> markers = store.allMarkers();
+		// The store retains hidden synchronized records and stale records for
+		// packet/lifecycle handling. Only records inside their independent
+		// display lifetime belong in the visual cache.
+		List<ClientMarker> markers = store.renderMarkers();
 		SyncPlan plan = syncPlan(views.keySet(), markers);
 
 		Map<MarkerId, ClientMarker> markersById = new LinkedHashMap<>();
