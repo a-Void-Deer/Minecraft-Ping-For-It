@@ -68,11 +68,27 @@ public final class ExternalBlockOutlineTransform {
 		Objects.requireNonNull(renderPose, "renderPose");
 		Objects.requireNonNull(localBlockPos, "localBlockPos");
 
+		return worldBlockOrigin(renderPose, localBlockPos, Vec3.ZERO);
+	}
+
+	/**
+	 * Transforms the local block corner plus a live vanilla model offset in
+	 * double precision. The offset is part of the local point before the
+	 * provider rotation/scale is applied, matching the position at which the
+	 * baked model appears in the sub-level.
+	 */
+	public static Vec3 worldBlockOrigin(
+		Matrix4d renderPose, BlockPos localBlockPos, Vec3 modelOffset
+	) {
+		Objects.requireNonNull(renderPose, "renderPose");
+		Objects.requireNonNull(localBlockPos, "localBlockPos");
+		Objects.requireNonNull(modelOffset, "modelOffset");
+
 		return transformPosition(
 			renderPose,
-			localBlockPos.getX(),
-			localBlockPos.getY(),
-			localBlockPos.getZ());
+			localBlockPos.getX() + modelOffset.x,
+			localBlockPos.getY() + modelOffset.y,
+			localBlockPos.getZ() + modelOffset.z);
 	}
 
 	/** Returns a camera-relative transformed shape vertex using double arithmetic. */

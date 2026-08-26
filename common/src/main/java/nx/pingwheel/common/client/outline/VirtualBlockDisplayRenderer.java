@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -22,15 +23,18 @@ import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Display;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.CollisionContext;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.mixin.DisplayBlockDisplayAccessor;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
+import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 
 import static nx.pingwheel.common.Global.LOGGER;
 
@@ -65,6 +69,10 @@ import static nx.pingwheel.common.Global.LOGGER;
  *       vanilla model offset ({@code getOffset}, computed once per frame after
  *       the current-state validation), so short-grass/flower/bamboo-style
  *       shifted models glow exactly where they appear in the world.</li>
+ *   <li>provider-owned Sable blocks use the same cached virtual display and
+ *       baked-model outline route when the live local state is a compatible
+ *       {@link RenderShape#MODEL}; unavailable, non-model, empty, and failed
+ *       attempts retain the native VoxelShape fallback.</li>
  * </ul>
  *
 	 * <p>Built-in BER/baked attempts write exclusively through an
@@ -173,6 +181,9 @@ public final class VirtualBlockDisplayRenderer {
 
 		String dimensionId = level.dimension().location().toString();
 		Vec3 cameraPosition = camera.getPosition();
+		Entity cameraEntity = camera.getEntity();
+		CollisionContext collisionContext = cameraEntity == null
+			? CollisionContext.empty() : CollisionContext.of(cameraEntity);
 		Minecraft minecraft = Minecraft.getInstance();
 		EntityRenderDispatcher entityDispatcher = minecraft.getEntityRenderDispatcher();
 		BlockEntityRenderDispatcher blockEntityDispatcher = minecraft.getBlockEntityRenderDispatcher();
@@ -220,6 +231,22 @@ public final class VirtualBlockDisplayRenderer {
 
 			if (success) {
 				frameState.addSuccess(blockKey);
+			}
+		}
+
+		for (Map.Entry<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> entry
+			: state.externalSnapshot().entrySet()) {
+			TargetKey.ExternalBlockKey blockKey = entry.getKey();
+			ExternalBlockOutlineSpec spec = entry.getValue();
+
+			if (!blockKey.dimensionId().equals(dimensionId)) {
+				continue;
+			}
+
+			if (renderExternalBlockModel(
+				level, cameraPosition, collisionContext, builtInPartialTick,
+				entityDispatcher, blockKey, spec) == EntityBlockGeometryOutcome.RENDERED) {
+				frameState.addExternalSuccess(blockKey);
 			}
 		}
 
@@ -271,6 +298,91 @@ public final class VirtualBlockDisplayRenderer {
 				Minecraft.getInstance().levelRenderer,
 				targetKey,
 				BlockModelOutlineState.INSTANCE.frameId()));
+	}
+
+	/**
+	 * Attempts the baked-model half of a provider-owned block outline. The
+	 * provider resolves a fresh local state and pose for this frame; no
+	 * BlockEntity instance is retained or looked up in the parent level. Both
+	 * ordinary {@code block} and {@code entity_block} targets use the same
+	 * whitelist/blacklist policy, but only a live {@code MODEL} state can enter
+	 * this cached virtual-display route.
+	 */
+	private EntityBlockGeometryOutcome renderExternalBlockModel(
+		ClientLevel level,
+		Vec3 cameraPosition,
+		CollisionContext collisionContext,
+		float partialTick,
+		EntityRenderDispatcher dispatcher,
+		TargetKey.ExternalBlockKey targetKey,
+		ExternalBlockOutlineSpec spec
+	) {
+		try {
+			var presentationResult = SableClientProvider.resolvePresentation(
+				level, spec.target(), partialTick, collisionContext);
+
+			if (presentationResult.isEmpty()) {
+				return EntityBlockGeometryOutcome.EMPTY;
+			}
+
+			var presentation = presentationResult.orElseThrow();
+			BlockState blockState = presentation.blockState();
+			var actualRegistryKey = BuiltInRegistries.BLOCK.getKey(blockState.getBlock());
+
+			// The provider performs the same check at its boundary. Keep the
+			// renderer-side comparison explicit so a changed/invalid presentation
+			// can never turn into a model success.
+			if (actualRegistryKey == null
+				|| !targetKey.expectedBlockRegistryId().equals(actualRegistryKey.toString())) {
+				return EntityBlockGeometryOutcome.EMPTY;
+			}
+
+			boolean nativeGlowMatches = ClientConfig.HANDLER.getConfig()
+				.getBlockDisplayPolicy()
+				.shouldUseNativeGlow(spec.targetTypeId(), blockState);
+			BlockModelOutlineRoute route = BlockModelOutlineRoute.routeExternal(
+				spec.targetTypeId(), nativeGlowMatches,
+				blockState.getRenderShape() == RenderShape.MODEL);
+
+			if (route != BlockModelOutlineRoute.BLOCK_DISPLAY) {
+				return EntityBlockGeometryOutcome.EMPTY;
+			}
+
+			BlockPos localBlockPos = presentation.localBlockPos();
+			return renderBlockDisplay(
+				level,
+				localBlockPos,
+				blockState,
+				dispatcher,
+				partialTick,
+				() -> LevelRenderer.getLightColor(presentation.localLevel(), localBlockPos),
+				spec.argbColor(),
+				actualRegistryKey.toString(),
+				targetKey,
+				() -> {
+					Vec3 modelOffset = blockState.getOffset(presentation.localLevel(), localBlockPos);
+					Vec3 worldBlockOrigin = presentation.worldBlockOrigin(modelOffset);
+					PoseStack poseStack = new PoseStack();
+					ExternalBlockOutlineTransform.apply(
+						poseStack,
+						worldBlockOrigin,
+						presentation.orientationScale(),
+						cameraPosition);
+					return new BlockDisplayRenderArguments(
+						poseStack, 0.0D, 0.0D, 0.0D, blockState.getSeed(localBlockPos));
+				});
+		} catch (Exception | LinkageError | AssertionError failure) {
+			recordFailure(
+				targetKey.expectedBlockRegistryId(),
+				null,
+				null,
+				targetKey,
+				Display.BlockDisplay.class,
+				FailureRoute.BLOCK_DISPLAY,
+				FailureStage.RENDER,
+				failure);
+			return EntityBlockGeometryOutcome.FAILED;
+		}
 	}
 
 	/**
@@ -373,12 +485,21 @@ public final class VirtualBlockDisplayRenderer {
 			pos,
 			blockState,
 			dispatcher,
-			cameraPosition,
 			partialTick,
 			() -> LevelRenderer.getLightColor(level, pos),
 			argbColor,
 			failureRegistryId,
-			targetKey);
+			targetKey,
+			() -> {
+				Vec3 renderPosition = BlockDisplayPlacement.cameraRelative(
+					pos, cameraPosition, blockState.getOffset(level, pos));
+				return new BlockDisplayRenderArguments(
+					new PoseStack(),
+					renderPosition.x,
+					renderPosition.y,
+					renderPosition.z,
+					blockState.getSeed(pos));
+			});
 	}
 
 	private EntityBlockGeometryOutcome renderBlockDisplay(
@@ -386,16 +507,19 @@ public final class VirtualBlockDisplayRenderer {
 		BlockPos pos,
 		BlockState blockState,
 		EntityRenderDispatcher dispatcher,
-		Vec3 cameraPosition,
 		float partialTick,
 		IntSupplier packedLightSupplier,
 		int argbColor,
 		String failureRegistryId,
-		TargetKey.BlockKey targetKey
+		TargetKey targetKey,
+		Supplier<BlockDisplayRenderArguments> argumentsSupplier
 	) {
 		if (dispatcher == null) {
 			return EntityBlockGeometryOutcome.EMPTY;
 		}
+
+		Objects.requireNonNull(packedLightSupplier, "packedLightSupplier");
+		Objects.requireNonNull(argumentsSupplier, "argumentsSupplier");
 
 		Display.BlockDisplay display = displayFor(level);
 
@@ -430,8 +554,6 @@ public final class VirtualBlockDisplayRenderer {
 			// registry/whitelist validation above; `setPos` stays at the
 			// integer MIN corner and no PoseStack translation applies the
 			// offset.
-			Vec3 renderPosition = BlockDisplayPlacement.cameraRelative(
-				pos, cameraPosition, blockState.getOffset(level, pos));
 
 			// The model render seed follows the live state and actual block
 			// position (BlockState#getSeed), exactly as the vanilla chunk
@@ -442,7 +564,7 @@ public final class VirtualBlockDisplayRenderer {
 			// seed inside the scope, and resolves to the vanilla seed outside
 			// it. The scope is restored before any failure reaches the
 			// fail-soft catch below.
-			long modelSeed = blockState.getSeed(pos);
+			BlockDisplayRenderArguments arguments = argumentsSupplier.get();
 
 			// This display is synthetic and must not participate in F3+B. The
 			// dispatcher would otherwise append RenderType.lines() hitbox
@@ -456,14 +578,14 @@ public final class VirtualBlockDisplayRenderer {
 			}
 
 			try {
-				BlockModelRenderSeed.runWithSeed(modelSeed, () -> dispatcher.render(
+				BlockModelRenderSeed.runWithSeed(arguments.modelSeed(), () -> dispatcher.render(
 					display,
-					renderPosition.x,
-					renderPosition.y,
-					renderPosition.z,
+					arguments.x(),
+					arguments.y(),
+					arguments.z(),
 					0.0F,
 					partialTick,
-					new PoseStack(),
+					arguments.poseStack(),
 					buffer,
 					packedLightSupplier.getAsInt()));
 			} finally {
@@ -505,12 +627,31 @@ public final class VirtualBlockDisplayRenderer {
 			context.blockPos(),
 			context.blockState(),
 			context.entityRenderDispatcher(),
-			context.cameraPosition(),
 			context.partialTick(),
 			() -> context.packedLight(),
 			context.argbColor(),
 			failureRegistryId(context),
-			context.targetKey());
+			context.targetKey(),
+			() -> {
+				Vec3 renderPosition = BlockDisplayPlacement.cameraRelative(
+					context.blockPos(),
+					context.cameraPosition(),
+					context.blockState().getOffset(context.level(), context.blockPos()));
+				return new BlockDisplayRenderArguments(
+					new PoseStack(),
+					renderPosition.x,
+					renderPosition.y,
+					renderPosition.z,
+					context.blockState().getSeed(context.blockPos()));
+			});
+	}
+
+	private record BlockDisplayRenderArguments(
+		PoseStack poseStack, double x, double y, double z, long modelSeed
+	) {
+		private BlockDisplayRenderArguments {
+			Objects.requireNonNull(poseStack, "poseStack");
+		}
 	}
 
 	/**
@@ -565,7 +706,7 @@ public final class VirtualBlockDisplayRenderer {
 		String registryId,
 		BlockPos position,
 		BlockState blockState,
-		TargetKey.BlockKey targetKey,
+		TargetKey targetKey,
 		Object sourceTarget,
 		FailureRoute route,
 		FailureStage stage,
@@ -586,7 +727,7 @@ public final class VirtualBlockDisplayRenderer {
 		String registryId,
 		BlockPos position,
 		BlockState blockState,
-		TargetKey.BlockKey targetKey,
+		TargetKey targetKey,
 		Object sourceTarget,
 		FailureRoute route,
 		FailureStage stage,
@@ -596,10 +737,7 @@ public final class VirtualBlockDisplayRenderer {
 			? "<null>" : blockState.getBlock().getClass().getName();
 		String sourceClass = sourceTarget == null ? "<null>"
 			: sourceTarget instanceof Class<?> type ? type.getName() : sourceTarget.getClass().getName();
-		String target = targetKey == null ? "<unknown>"
-			: "dimension=" + targetKey.dimensionId()
-				+ "; position=" + targetKey.x() + "," + targetKey.y() + "," + targetKey.z()
-				+ "; blockRegistryId=" + targetKey.blockRegistryId();
+		String target = targetDescription(targetKey);
 		String positionText = position == null
 			? "<null>"
 			: position.getX() + "," + position.getY() + "," + position.getZ();
@@ -613,6 +751,29 @@ public final class VirtualBlockDisplayRenderer {
 			+ "; blockClass=" + blockClass
 			+ "; exceptionClass=" + exceptionClass
 			+ "; voxelFallback=applied";
+	}
+
+	private static String targetDescription(TargetKey targetKey) {
+		if (targetKey == null) {
+			return "<unknown>";
+		}
+
+		return switch (targetKey) {
+			case TargetKey.BlockKey block ->
+				"dimension=" + block.dimensionId()
+					+ "; position=" + block.x() + "," + block.y() + "," + block.z()
+					+ "; blockRegistryId=" + block.blockRegistryId();
+			case TargetKey.ExternalBlockKey external ->
+				"dimension=" + external.dimensionId()
+					+ "; provider=" + external.providerId()
+					+ "; stableTargetId=" + external.stableTargetId()
+					+ "; expectedBlockRegistryId=" + external.expectedBlockRegistryId();
+			case TargetKey.EntityKey entity ->
+				"dimension=" + entity.dimensionId() + "; entity=" + entity.locator();
+			case TargetKey.LocationKey location ->
+				"dimension=" + location.dimensionId()
+					+ "; position=" + location.x() + "," + location.y() + "," + location.z();
+		};
 	}
 
 	private static String failureRegistryId(EntityBlockGeometryContext context) {

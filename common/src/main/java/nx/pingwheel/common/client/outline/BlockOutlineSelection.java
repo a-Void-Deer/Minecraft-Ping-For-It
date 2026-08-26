@@ -100,9 +100,10 @@ public final class BlockOutlineSelection {
 	}
 
 	/**
-	 * Selects provider-owned external block winners. External blocks do not use
-	 * the native model-glow routes: their renderer resolves the current native
-	 * state and transformed shape through the provider at render time.
+	 * Selects provider-owned external block winners. Their renderer resolves the
+	 * current native state, baked-model eligibility, and transformed shape
+	 * through the provider at render time; unsuccessful model attempts retain
+	 * the native VoxelShape fallback.
 	 */
 	public static Map<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> selectExternal(
 		Map<TargetKey, ClientMarker> visibleWinners,

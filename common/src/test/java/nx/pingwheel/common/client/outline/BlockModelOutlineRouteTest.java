@@ -30,6 +30,31 @@ class BlockModelOutlineRouteTest {
 	}
 
 	@Test
+	void externalBlockUsesTheSharedPolicyAndRequiresModelGeometry() {
+		for (String targetTypeId : new String[] {"block", "entity_block"}) {
+			assertEquals(
+				BLOCK_DISPLAY,
+				BlockModelOutlineRoute.routeExternal(targetTypeId, true, true));
+			assertEquals(
+				VOXEL,
+				BlockModelOutlineRoute.routeExternal(targetTypeId, false, true));
+			assertEquals(
+				VOXEL,
+				BlockModelOutlineRoute.routeExternal(targetTypeId, true, false));
+			assertEquals(
+				VOXEL,
+				BlockModelOutlineRoute.routeExternal(targetTypeId, false, false));
+		}
+	}
+
+	@Test
+	void externalUnknownTargetTypeNeverEntersTheModelRoute() {
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("unknown_type", true, true));
+	}
+
+	@Test
 	void nonBlockTargetTypesAlwaysRouteToVoxel() {
 		for (String targetTypeId : new String[] {"entity", "location", "dropped_item", "", "unknown_type"}) {
 			assertEquals(VOXEL, BlockModelOutlineRoute.route(targetTypeId, true), "should be voxel: '" + targetTypeId + "'");

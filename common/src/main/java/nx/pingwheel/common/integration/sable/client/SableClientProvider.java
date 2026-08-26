@@ -450,6 +450,7 @@ public final class SableClientProvider {
 		Vec3 worldCenter,
 		BlockPos localBlockPos,
 		net.minecraft.world.level.block.state.BlockState blockState,
+		ClientLevel localLevel,
 		VoxelShape shape,
 		Matrix4d renderPose
 	) {
@@ -457,6 +458,7 @@ public final class SableClientProvider {
 			Objects.requireNonNull(worldCenter, "worldCenter");
 			Objects.requireNonNull(localBlockPos, "localBlockPos");
 			Objects.requireNonNull(blockState, "blockState");
+			Objects.requireNonNull(localLevel, "localLevel");
 			Objects.requireNonNull(shape, "shape");
 			Objects.requireNonNull(renderPose, "renderPose");
 			renderPose = new Matrix4d(renderPose);
@@ -466,6 +468,12 @@ public final class SableClientProvider {
 		public Vec3 worldBlockOrigin() {
 			return ExternalBlockOutlineTransform.worldBlockOrigin(
 				renderPose, localBlockPos);
+		}
+
+		/** The transformed model origin, including the live local-state offset. */
+		public Vec3 worldBlockOrigin(Vec3 modelOffset) {
+			return ExternalBlockOutlineTransform.worldBlockOrigin(
+				renderPose, localBlockPos, modelOffset);
 		}
 
 		/** The pose's orientation and non-uniform scale, without translation. */

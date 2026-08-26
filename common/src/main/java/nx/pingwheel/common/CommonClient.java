@@ -473,15 +473,19 @@ public class CommonClient {
 			return;
 		}
 
-		if (BlockOutlineState.INSTANCE.externalSnapshot().isEmpty()
-			&& BlockOutlineState.INSTANCE.allCoveredBy(BlockModelOutlineState.INSTANCE.successKeys())) {
+		if (BlockOutlineState.INSTANCE.allCoveredBy(
+			BlockModelOutlineState.INSTANCE.successKeys(),
+			BlockModelOutlineState.INSTANCE.externalSuccessKeys())) {
 			return;
 		}
 
 		VertexConsumer lines = bufferSource.getBuffer(BlockOutlineRenderType.BLOCK_OUTLINE);
 		BlockOutlineRenderer.render(
 			game.level, camera, lines,
-			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE.successKeys(), partialTick);
+			BlockOutlineState.INSTANCE,
+			BlockModelOutlineState.INSTANCE.successKeys(),
+			BlockModelOutlineState.INSTANCE.externalSuccessKeys(),
+			partialTick);
 		bufferSource.endBatch(BlockOutlineRenderType.BLOCK_OUTLINE);
 	}
 

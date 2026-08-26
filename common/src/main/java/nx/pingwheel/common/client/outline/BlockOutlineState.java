@@ -133,9 +133,11 @@ public final class BlockOutlineState {
 	}
 
 	/**
-	 * Whether every key in the current snapshot is contained in
+	 * Whether every ordinary key in the current snapshot is contained in
 	 * {@code succeeded} — the per-frame set of keys whose model-outline pass
-	 * emitted geometry (see {@link BlockModelOutlineState}). When true, the
+	 * emitted geometry (see {@link BlockModelOutlineState}). This overload does
+	 * not cover provider-owned keys; use {@link #allCoveredBy(Set, Set)} when
+	 * both key kinds are present. When true for its covered keys, the
 	 * late VoxelShape pass has nothing to draw, so the caller can skip
 	 * acquiring and flushing the custom block outline batch entirely. An
 	 * empty snapshot counts as fully covered.
@@ -145,6 +147,33 @@ public final class BlockOutlineState {
 
 		for (TargetKey.BlockKey blockKey : specs.keySet()) {
 			if (!succeeded.contains(blockKey)) {
+				return false;
+			}
+		}
+
+		return externalSpecs.isEmpty();
+	}
+
+	/**
+	 * Whether every ordinary and provider-owned key in the current snapshot is
+	 * contained in the corresponding per-frame model-success set. Only keys
+	 * whose model pass actually emitted geometry count as covered.
+	 */
+	public boolean allCoveredBy(
+		Set<TargetKey.BlockKey> succeeded,
+		Set<TargetKey.ExternalBlockKey> externalSucceeded
+	) {
+		Objects.requireNonNull(succeeded, "succeeded");
+		Objects.requireNonNull(externalSucceeded, "externalSucceeded");
+
+		for (TargetKey.BlockKey blockKey : specs.keySet()) {
+			if (!succeeded.contains(blockKey)) {
+				return false;
+			}
+		}
+
+		for (TargetKey.ExternalBlockKey blockKey : externalSpecs.keySet()) {
+			if (!externalSucceeded.contains(blockKey)) {
 				return false;
 			}
 		}

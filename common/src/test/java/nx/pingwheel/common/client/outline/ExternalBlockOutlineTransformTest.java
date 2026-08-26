@@ -124,10 +124,48 @@ class ExternalBlockOutlineTransformTest {
 		}
 	}
 
+	@Test
+	void appliesLocalModelOffsetBeforeRotationAndScaleAtHugeCoordinates() {
+		BlockPos localBlockPos = new BlockPos(1_234_567, -234_567, 3_456_789);
+		Vec3 modelOffset = new Vec3(0.375, -0.125, 0.625);
+		Matrix4d renderPose = new Matrix4d()
+			.translation(40_000_000.375, 96.25, -40_000_000.625)
+			.translate(12.5, -3.25, 7.75)
+			.rotateY(Math.toRadians(37.0))
+			.rotateZ(Math.toRadians(-19.0))
+			.scale(1.25, 0.75, 1.5)
+			.translate(-12.5, 3.25, -7.75);
+		Vec3 worldOrigin = ExternalBlockOutlineTransform.worldBlockOrigin(
+			renderPose, localBlockPos, modelOffset);
+		Vec3 camera = worldOrigin.add(0.25, -0.5, 0.75);
+		Matrix4f orientationScale = ExternalBlockOutlineTransform.orientationScale(renderPose);
+		PoseStack stack = new PoseStack();
+
+		ExternalBlockOutlineTransform.apply(stack, worldOrigin, orientationScale, camera);
+
+		Vec3 localVertex = new Vec3(0.25, 0.5, 0.75);
+		Vector3f actual = stack.last().pose().transformPosition(new Vector3f(
+			(float) localVertex.x, (float) localVertex.y, (float) localVertex.z));
+		Vec3 expected = transform(
+			renderPose,
+			localBlockPos.getX() + modelOffset.x + localVertex.x,
+			localBlockPos.getY() + modelOffset.y + localVertex.y,
+			localBlockPos.getZ() + modelOffset.z + localVertex.z).subtract(camera);
+
+		assertEquals(expected.x, actual.x, 0.00001D);
+		assertEquals(expected.y, actual.y, 0.00001D);
+		assertEquals(expected.z, actual.z, 0.00001D);
+	}
+
 	private static Vec3 transform(Matrix4d matrix, BlockPos localBlockPos, Vec3 vertex) {
-		double x = localBlockPos.getX() + vertex.x;
-		double y = localBlockPos.getY() + vertex.y;
-		double z = localBlockPos.getZ() + vertex.z;
+		return transform(
+			matrix,
+			localBlockPos.getX() + vertex.x,
+			localBlockPos.getY() + vertex.y,
+			localBlockPos.getZ() + vertex.z);
+	}
+
+	private static Vec3 transform(Matrix4d matrix, double x, double y, double z) {
 		return new Vec3(
 			matrix.m00() * x + matrix.m10() * y + matrix.m20() * z + matrix.m30(),
 			matrix.m01() * x + matrix.m11() * y + matrix.m21() * z + matrix.m31(),

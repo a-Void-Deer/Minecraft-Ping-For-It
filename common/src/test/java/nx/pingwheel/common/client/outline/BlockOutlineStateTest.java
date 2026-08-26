@@ -3,6 +3,7 @@ package nx.pingwheel.common.client.outline;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -243,5 +245,31 @@ class BlockOutlineStateTest {
 			new Transition(1, 0, 0, 1),
 			new Transition(0, 1, 0, 0)
 		), transitions);
+	}
+
+	@Test
+	void externalCoverageRequiresAnEmittedExternalModelKey() {
+		BlockOutlineState state = installRecordingLogger();
+		Target.ExternalBlockTarget target = externalTarget();
+		TargetKey.ExternalBlockKey key = (TargetKey.ExternalBlockKey) TargetKey.from(target);
+		ClientMarkerStore store = new ClientMarkerStore(10L);
+		MarkerId markerId = new MarkerId(6L);
+
+		store.onCreated(
+			new MarkerSnapshot(
+				markerId,
+				OWNER,
+				target,
+				"entity_block",
+				"attention",
+				new MarkerAnchor(1, 2, 3),
+				1L,
+				100L),
+			0L);
+		store.onWinnerChanged(key, Optional.of(markerId));
+		state.prepare(store, OVERWORLD);
+
+		assertFalse(state.allCoveredBy(Set.of(), Set.of()));
+		assertTrue(state.allCoveredBy(Set.of(), Set.of(key)));
 	}
 }

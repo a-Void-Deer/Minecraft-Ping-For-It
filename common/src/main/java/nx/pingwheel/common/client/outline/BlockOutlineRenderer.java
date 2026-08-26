@@ -22,8 +22,8 @@ import nx.pingwheel.common.integration.sable.client.SableClientProvider;
  * Main-thread block outline render pass.
  *
  * <p>Draws the current native {@link VoxelShape} wireframe of every ordinary
- * and provider-owned block in the prepared {@link BlockOutlineState} snapshots
- * into the given line buffer.
+ * and provider-owned block whose model route did not emit geometry in the
+ * prepared {@link BlockOutlineState} snapshots into the given line buffer.
  * The pass is deliberately conservative and never mutates the level:
  * <ul>
  *   <li>specs whose dimension differs from the level's are skipped;</li>
@@ -62,7 +62,7 @@ public final class BlockOutlineRenderer {
 		BlockOutlineState state,
 		Set<TargetKey.BlockKey> modelOutlineKeys
 	) {
-		render(level, camera, lines, state, modelOutlineKeys, 1.0F);
+		render(level, camera, lines, state, modelOutlineKeys, Set.of(), 1.0F);
 	}
 
 	/**
@@ -78,11 +78,33 @@ public final class BlockOutlineRenderer {
 		Set<TargetKey.BlockKey> modelOutlineKeys,
 		float partialTick
 	) {
+		render(level, camera, lines, state, modelOutlineKeys, Set.of(), partialTick);
+	}
+
+	/**
+	 * Renders ordinary and provider-owned block outlines for one render frame.
+	 * Each success set is keyed in the same domain as its corresponding outline
+	 * snapshot, so a provider-owned baked-model success suppresses only that
+	 * external key's VoxelShape fallback.
+	 *
+	 * @param externalModelOutlineKeys the per-frame external keys whose model
+	 *                                 pass succeeded; those fallbacks are skipped
+	 */
+	public static void render(
+		ClientLevel level,
+		Camera camera,
+		VertexConsumer lines,
+		BlockOutlineState state,
+		Set<TargetKey.BlockKey> modelOutlineKeys,
+		Set<TargetKey.ExternalBlockKey> externalModelOutlineKeys,
+		float partialTick
+	) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(camera, "camera");
 		Objects.requireNonNull(lines, "lines");
 		Objects.requireNonNull(state, "state");
 		Objects.requireNonNull(modelOutlineKeys, "modelOutlineKeys");
+		Objects.requireNonNull(externalModelOutlineKeys, "externalModelOutlineKeys");
 
 		String dimensionId = level.dimension().location().toString();
 		Entity cameraEntity = camera.getEntity();
@@ -142,6 +164,10 @@ public final class BlockOutlineRenderer {
 			TargetKey.ExternalBlockKey blockKey = entry.getKey();
 
 			if (!blockKey.dimensionId().equals(dimensionId)) {
+				continue;
+			}
+
+			if (externalModelOutlineKeys.contains(blockKey)) {
 				continue;
 			}
 

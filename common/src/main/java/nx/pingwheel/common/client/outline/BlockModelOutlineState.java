@@ -11,10 +11,11 @@ import nx.pingwheel.common.marker.TargetKey;
  * Main-thread-confined, per-frame record of the block keys whose model-outline
  * pass successfully emitted geometry this world render frame.
  *
- * <p>The vanilla model glow routes ({@code entity_block} BlockEntity geometry
- * and whitelisted {@code block} BlockDisplay geometry) run before the vanilla
- * {@code OutlineBufferSource.endOutlineBatch()} call. Every key that produced
- * at least one outline vertex is recorded here; the late custom VoxelShape
+ * <p>The vanilla model glow routes ({@code entity_block} BlockEntity geometry,
+ * whitelisted {@code block} BlockDisplay geometry, and the compatible baked
+ * model route for provider-owned blocks) run before the vanilla {@code
+ * OutlineBufferSource.endOutlineBatch()} call. Every key that produced at
+ * least one outline vertex is recorded here; the late custom VoxelShape
  * fallback pass skips exactly those keys, so a successful glow pass is never
  * doubled by the 3.75 px line outline. Keys whose glow route was unavailable,
  * failed, or emitted zero vertices are simply absent, so they fall back to the
@@ -37,6 +38,7 @@ public final class BlockModelOutlineState {
 	public static final BlockModelOutlineState INSTANCE = new BlockModelOutlineState();
 
 	private Set<TargetKey.BlockKey> successKeys = Set.of();
+	private Set<TargetKey.ExternalBlockKey> externalSuccessKeys = Set.of();
 	private long frameId;
 
 	private BlockModelOutlineState() {}
@@ -48,6 +50,7 @@ public final class BlockModelOutlineState {
 	public void beginFrame() {
 		frameId++;
 		successKeys = Set.of();
+		externalSuccessKeys = Set.of();
 	}
 
 	/**
@@ -71,11 +74,23 @@ public final class BlockModelOutlineState {
 	}
 
 	/**
+	 * Records that a provider-owned external block emitted baked-model outline
+	 * geometry this frame, so its native VoxelShape fallback must skip it.
+	 */
+	public void addExternalSuccess(TargetKey.ExternalBlockKey blockKey) {
+		Objects.requireNonNull(blockKey, "blockKey");
+
+		Set<TargetKey.ExternalBlockKey> next = new LinkedHashSet<>(externalSuccessKeys);
+		next.add(blockKey);
+		externalSuccessKeys = Collections.unmodifiableSet(next);
+	}
+
+	/**
 	 * Whether at least one block emitted model-outline geometry this frame.
 	 * Drives the vanilla entity-outline post-process handoff.
 	 */
 	public boolean emitted() {
-		return !successKeys.isEmpty();
+		return !successKeys.isEmpty() || !externalSuccessKeys.isEmpty();
 	}
 
 	/**
@@ -84,6 +99,14 @@ public final class BlockModelOutlineState {
 	 */
 	public Set<TargetKey.BlockKey> successKeys() {
 		return successKeys;
+	}
+
+	/**
+	 * The immutable set of provider-owned external keys that emitted a
+	 * successful model glow this frame.
+	 */
+	public Set<TargetKey.ExternalBlockKey> externalSuccessKeys() {
+		return externalSuccessKeys;
 	}
 
 	/**

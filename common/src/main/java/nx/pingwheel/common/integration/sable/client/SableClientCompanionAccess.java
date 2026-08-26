@@ -465,7 +465,7 @@ final class SableClientCompanionAccess {
 		}
 
 		return Optional.of(new SableClientProvider.ExternalBlockPresentation(
-			worldCenter, locator.blockPos(), state, shape, poseMatrix));
+			worldCenter, locator.blockPos(), state, stateData.level(), shape, poseMatrix));
 	}
 
 	Optional<Vec3> resolvePosition(
