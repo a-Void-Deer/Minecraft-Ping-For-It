@@ -433,13 +433,15 @@ public final class VirtualBlockDisplayRenderer {
 					blockEntity, context.partialTick(), poseStack, buffer,
 					context.packedLight(), OverlayTexture.NO_OVERLAY);
 
-				if (buffer.vertexCount() == 0) {
-					return EntityBlockGeometryOutcome.EMPTY;
+				EntityBlockGeometryOutcome outcome =
+					EntityBlockGeometryOutcome.fromEmittedVertices(buffer.vertexCount());
+				if (outcome != EntityBlockGeometryOutcome.RENDERED) {
+					return outcome;
 				}
 
 				stage = FailureStage.FLUSH;
 				localSource.endBatch();
-				return EntityBlockGeometryOutcome.RENDERED;
+				return outcome;
 			}
 		} catch (Exception | LinkageError | AssertionError throwable) {
 			recordFailure(
@@ -578,6 +580,10 @@ public final class VirtualBlockDisplayRenderer {
 			}
 
 			try {
+				// For external BlockDisplays, x/y/z MUST remain zero: the
+				// precision-safe PoseStack already carries camera-relative
+				// translation, orientation, and scale; vanilla applies coordinates
+				// verbatim, so nonzero values would double-transform the display.
 				BlockModelRenderSeed.runWithSeed(arguments.modelSeed(), () -> dispatcher.render(
 					display,
 					arguments.x(),
@@ -594,13 +600,15 @@ public final class VirtualBlockDisplayRenderer {
 				}
 			}
 
-			if (buffer.vertexCount() == 0) {
-				return EntityBlockGeometryOutcome.EMPTY;
+			EntityBlockGeometryOutcome outcome =
+				EntityBlockGeometryOutcome.fromEmittedVertices(buffer.vertexCount());
+			if (outcome != EntityBlockGeometryOutcome.RENDERED) {
+				return outcome;
 			}
 
 			stage = FailureStage.FLUSH;
 			localSource.endBatch();
-			return EntityBlockGeometryOutcome.RENDERED;
+			return outcome;
 		} catch (Exception | LinkageError | AssertionError throwable) {
 			// Setup and render share one fail-soft path. A partially mutated
 			// virtual display must never be reused: drop the cache so the next

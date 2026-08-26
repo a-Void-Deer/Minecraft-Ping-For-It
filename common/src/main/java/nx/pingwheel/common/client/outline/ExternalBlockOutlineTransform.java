@@ -19,24 +19,6 @@ public final class ExternalBlockOutlineTransform {
 	}
 
 	/**
-	 * Applies {@code camera^-1 * renderPose * localBlockTranslation} to the
-	 * supplied pose stack. The render pose is copied by the provider before it
-	 * reaches this method, so no provider state is mutated.
-	 */
-	public static void apply(
-		PoseStack poseStack, Matrix4f renderPose, BlockPos localBlockPos, Vec3 cameraPosition
-	) {
-		Objects.requireNonNull(poseStack, "poseStack");
-		Objects.requireNonNull(renderPose, "renderPose");
-		Objects.requireNonNull(localBlockPos, "localBlockPos");
-		Objects.requireNonNull(cameraPosition, "cameraPosition");
-
-		poseStack.translate(-cameraPosition.x, -cameraPosition.y, -cameraPosition.z);
-		poseStack.mulPose(renderPose);
-		poseStack.translate(localBlockPos.getX(), localBlockPos.getY(), localBlockPos.getZ());
-	}
-
-	/**
 	 * Applies a Sable block transform after its absolute world translation has
 	 * already been evaluated in double precision.  Only the small camera
 	 * relative origin is translated on the pose stack; the supplied matrix must
@@ -110,12 +92,6 @@ public final class ExternalBlockOutlineTransform {
 				localVertex.y,
 				localVertex.z));
 		return transformedVertex.subtract(cameraPosition);
-	}
-
-	/** Copies only the linear part of a render pose for use by PoseStack. */
-	public static Matrix4f orientationScale(Matrix4f renderPose) {
-		Objects.requireNonNull(renderPose, "renderPose");
-		return new Matrix4f(renderPose).setTranslation(0.0F, 0.0F, 0.0F);
 	}
 
 	/**

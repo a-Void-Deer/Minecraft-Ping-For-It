@@ -48,40 +48,6 @@ public final class BlockOutlineRenderer {
 	private BlockOutlineRenderer() {}
 
 	/**
-	 * Renders the ordered block outline specs of {@code state} into
-	 * {@code lines} for the given camera. Runs on the client main thread
-	 * only, once per world render frame, after {@link BlockOutlineState#prepare}.
-	 *
-	 * @param modelOutlineKeys the per-frame set of keys whose model-outline
-	 *                         pass succeeded; those blocks are skipped here
-	 */
-	public static void render(
-		ClientLevel level,
-		Camera camera,
-		VertexConsumer lines,
-		BlockOutlineState state,
-		Set<TargetKey.BlockKey> modelOutlineKeys
-	) {
-		render(level, camera, lines, state, modelOutlineKeys, Set.of(), 1.0F);
-	}
-
-	/**
-	 * Renders ordinary and provider-owned block outlines for one render frame.
-	 * External targets resolve their current sub-level state and render pose here;
-	 * a missing provider observation is a no-op and never mutates marker state.
-	 */
-	public static void render(
-		ClientLevel level,
-		Camera camera,
-		VertexConsumer lines,
-		BlockOutlineState state,
-		Set<TargetKey.BlockKey> modelOutlineKeys,
-		float partialTick
-	) {
-		render(level, camera, lines, state, modelOutlineKeys, Set.of(), partialTick);
-	}
-
-	/**
 	 * Renders ordinary and provider-owned block outlines for one render frame.
 	 * Each success set is keyed in the same domain as its corresponding outline
 	 * snapshot, so a provider-owned baked-model success suppresses only that

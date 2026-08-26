@@ -248,8 +248,10 @@ class BlockOutlineStateTest {
 	}
 
 	@Test
-	void externalCoverageRequiresAnEmittedExternalModelKey() {
+	void externalCoverageRequiresNonzeroEmittedVerticesBeforeFallbackSuppression() {
 		BlockOutlineState state = installRecordingLogger();
+		BlockModelOutlineState modelState = BlockModelOutlineState.INSTANCE;
+		modelState.clear();
 		Target.ExternalBlockTarget target = externalTarget();
 		TargetKey.ExternalBlockKey key = (TargetKey.ExternalBlockKey) TargetKey.from(target);
 		ClientMarkerStore store = new ClientMarkerStore(10L);
@@ -269,7 +271,16 @@ class BlockOutlineStateTest {
 		store.onWinnerChanged(key, Optional.of(markerId));
 		state.prepare(store, OVERWORLD);
 
-		assertFalse(state.allCoveredBy(Set.of(), Set.of()));
-		assertTrue(state.allCoveredBy(Set.of(), Set.of(key)));
+		assertEquals(
+			EntityBlockGeometryOutcome.EMPTY,
+			EntityBlockGeometryOutcome.fromEmittedVertices(0));
+		assertFalse(state.allCoveredBy(Set.of(), modelState.externalSuccessKeys()));
+
+		assertEquals(
+			EntityBlockGeometryOutcome.RENDERED,
+			EntityBlockGeometryOutcome.fromEmittedVertices(1));
+		modelState.addExternalSuccess(key);
+		assertTrue(state.allCoveredBy(Set.of(), modelState.externalSuccessKeys()));
+		modelState.clear();
 	}
 }

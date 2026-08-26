@@ -13,5 +13,10 @@ public enum EntityBlockGeometryOutcome {
 	/** The source was applicable but submitted no geometry. */
 	EMPTY,
 	/** The source could not complete its attempt. */
-	FAILED
+	FAILED;
+
+	/** Converts an emitted outline vertex count into the source outcome. */
+	static EntityBlockGeometryOutcome fromEmittedVertices(int vertexCount) {
+		return vertexCount > 0 ? RENDERED : EMPTY;
+	}
 }
