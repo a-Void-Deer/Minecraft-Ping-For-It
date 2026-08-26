@@ -37,4 +37,36 @@ class FlywheelEnvironmentPolicyTest {
 			true, false, TARGET,
 			new Vec3i(TARGET.getX() + 2_000, TARGET.getY() + 1_000, TARGET.getZ() + 1_097)));
 	}
+
+	@Test
+	void transformedPlotCenterGuardCoversTheSquareCornerAndVerticalExtentAtTheExactLimit() {
+		int halfPlotSide = 64 * 16;
+		int verticalExtent = 2_048;
+
+		assertTrue(FlywheelEnvironmentPolicy.accepts(
+			true, false, TARGET,
+			new Vec3i(
+				TARGET.getX() + halfPlotSide,
+				TARGET.getY() + verticalExtent,
+				TARGET.getZ() + halfPlotSide)));
+		assertTrue(FlywheelEnvironmentPolicy.accepts(
+			true, false, TARGET,
+			new Vec3i(
+				TARGET.getX() - halfPlotSide,
+				TARGET.getY() - verticalExtent,
+				TARGET.getZ() - halfPlotSide)));
+
+		assertFalse(FlywheelEnvironmentPolicy.accepts(
+			true, false, TARGET,
+			new Vec3i(
+				TARGET.getX() + halfPlotSide,
+				TARGET.getY() + verticalExtent + 1,
+				TARGET.getZ() + halfPlotSide)));
+		assertFalse(FlywheelEnvironmentPolicy.accepts(
+			true, false, TARGET,
+			new Vec3i(
+				TARGET.getX() + halfPlotSide + 1,
+				TARGET.getY() + verticalExtent,
+				TARGET.getZ() + halfPlotSide)));
+	}
 }

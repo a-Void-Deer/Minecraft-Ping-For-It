@@ -144,6 +144,19 @@ class EntityBlockGeometryTransformTest {
 	}
 
 	@Test
+	void embeddedOriginSubtractsTheCameraBeforeNarrowingAtTwentyMillionBlocks() {
+		EntityBlockGeometryTransform transform =
+			new EntityBlockGeometryTransform(new Matrix4d());
+
+		Vector3f actual = transform.cameraRelativeEnvironmentVertex(
+			new Vector3d(0.375D, 0.0D, 0.0D),
+			new BlockPos(20_480_000, 0, 0),
+			new Vector3d(20_480_000.125D, 0.0D, 0.0D));
+
+		assertEquals(0.25F, actual.x(), EPSILON);
+	}
+
+	@Test
 	void sourceMatrixAndReturnedMatrixAreDefensivelyCopied() {
 		Matrix4d source = new Matrix4d().translation(5.0D, 6.0D, 7.0D);
 		EntityBlockGeometryTransform transform = new EntityBlockGeometryTransform(source);

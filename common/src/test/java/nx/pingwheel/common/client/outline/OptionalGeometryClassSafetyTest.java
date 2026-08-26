@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -22,6 +23,25 @@ class OptionalGeometryClassSafetyTest {
 			() -> Class.forName("com.simibubi.create.content.kinetics.base.RotatingInstance"));
 		assertDoesNotThrow(() -> Class.forName(EntityBlockGeometryContext.class.getName()));
 		assertDoesNotThrow(() -> Class.forName(FlywheelSilhouetteMask.class.getName()));
+	}
+
+	@Test
+	void commonSourceOutcomeContractRemainsIndependentOfOptionalClasses() {
+		assertEquals(
+			EntityBlockGeometryOutcome.EMPTY,
+			EntityBlockGeometryOutcome.fromEmittedVertices(0));
+		assertEquals(
+			EntityBlockGeometryOutcome.RENDERED,
+			EntityBlockGeometryOutcome.fromEmittedVertices(1));
+		assertEquals(
+			EntityBlockGeometryOutcome.RENDERED,
+			EntityBlockGeometryOutcome.fromEmittedVertices(Integer.MAX_VALUE));
+		assertEquals(
+			List.of(
+				EntityBlockGeometryOutcome.RENDERED,
+				EntityBlockGeometryOutcome.EMPTY,
+				EntityBlockGeometryOutcome.FAILED),
+			List.of(EntityBlockGeometryOutcome.values()));
 	}
 
 	@Test

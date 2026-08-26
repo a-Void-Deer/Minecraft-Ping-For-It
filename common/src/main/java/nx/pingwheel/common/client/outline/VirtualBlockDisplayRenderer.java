@@ -112,6 +112,7 @@ import static nx.pingwheel.common.Global.LOGGER;
 public final class VirtualBlockDisplayRenderer {
 	private enum FailureRoute {
 		BLOCK_ENTITY("block entity"),
+		ENTITY_BLOCK("entity-block"),
 		BLOCK_DISPLAY("block display");
 
 		private final String label;
@@ -123,6 +124,7 @@ public final class VirtualBlockDisplayRenderer {
 
 	private enum FailureStage {
 		RENDER("render"),
+		GEOMETRY_RUNNER("geometry-runner"),
 		FLUSH("flush");
 
 		private final String label;
@@ -323,6 +325,8 @@ public final class VirtualBlockDisplayRenderer {
 		TargetKey.ExternalBlockKey targetKey,
 		ExternalBlockOutlineSpec spec
 	) {
+		FailureRoute failureRoute = FailureRoute.BLOCK_DISPLAY;
+		FailureStage failureStage = FailureStage.RENDER;
 		try {
 			var presentationResult = SableClientProvider.resolvePresentation(
 				level, spec.target(), builtInPartialTick, collisionContext);
@@ -353,6 +357,8 @@ public final class VirtualBlockDisplayRenderer {
 			BlockPos localBlockPos = presentation.localBlockPos();
 
 			if (route == BlockModelOutlineRoute.ENTITY_BLOCK) {
+				failureRoute = FailureRoute.ENTITY_BLOCK;
+				failureStage = FailureStage.GEOMETRY_RUNNER;
 				EntityBlockRenderMode mode =
 					ClientConfig.HANDLER.getConfig().getEntityBlockRenderMode();
 				if (presentation.localLevel().getBlockEntity(localBlockPos) == null) {
@@ -425,8 +431,8 @@ public final class VirtualBlockDisplayRenderer {
 				null,
 				targetKey,
 				Display.BlockDisplay.class,
-				FailureRoute.BLOCK_DISPLAY,
-				FailureStage.RENDER,
+				failureRoute,
+				failureStage,
 				failure);
 			return EntityBlockGeometryOutcome.FAILED;
 		}
@@ -770,7 +776,8 @@ public final class VirtualBlockDisplayRenderer {
 	 * for the frame's debug log, and a single session-level warn per block
 	 * registry id (the id keys the warn-once bookkeeping only). The lazily
 	 * preformatted message includes the complete target, registry, position,
-	 * source/block class, failure stage ({@code render} or {@code flush}), and
+	 * source/block class, failure stage ({@code render}, {@code geometry-runner},
+	 * or {@code flush}), and
 	 * exception class; the original throwable is attached so its complete
 	 * causal/suppressed stack is retained. The session-level warning still
 	 * prevents per-frame warning spam.

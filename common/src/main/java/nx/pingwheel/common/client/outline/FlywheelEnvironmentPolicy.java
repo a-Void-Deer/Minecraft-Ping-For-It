@@ -10,7 +10,12 @@ import net.minecraft.core.Vec3i;
  * render origin without making this class depend on Flywheel. Main-world
  * instances are accepted only from the singleton global environment. An
  * externally transformed attempt may use a non-global environment only when
- * its integer render origin is plausibly the target plot position.</p>
+ * its integer render origin is plausibly the target plot position. External
+ * plot embeddings conventionally expose the plot center as that origin; a
+ * 4096-block Manhattan bound covers a 128-chunk square from center to corner
+ * (1024 blocks on each horizontal axis) plus a 2048-block vertical extent.
+ * This keeps the guard generic and does not depend on an optional integration
+ * type.</p>
  */
 public final class FlywheelEnvironmentPolicy {
 	public static final long MAX_RENDER_ORIGIN_MANHATTAN_DISTANCE = 4_096L;

@@ -132,6 +132,38 @@ class EntityBlockGeometryRunnerTest {
 	}
 
 	@Test
+	void onlyRenderedEmbeddedOutcomesSuppressTheVoxelFallback() {
+		for (EntityBlockGeometryOutcome outcome : new EntityBlockGeometryOutcome[] {
+			EntityBlockGeometryOutcome.EMPTY,
+			EntityBlockGeometryOutcome.FAILED
+		}) {
+			EntityBlockGeometrySourceRegistry registry = quietRegistry();
+			registry.register(EntityBlockGeometrySource.of(
+				"test:embedded", ignored -> outcome));
+			EntityBlockGeometryRunner runner = new EntityBlockGeometryRunner(
+				registry,
+				source("test:ber", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY),
+				source("test:baked", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY));
+
+			assertFalse(
+				runner.run(EntityBlockRenderMode.ALL, EntityBlockGeometryContext::empty),
+				"%s must leave the VoxelShape fallback available".formatted(outcome));
+		}
+
+		EntityBlockGeometrySourceRegistry renderedRegistry = quietRegistry();
+		renderedRegistry.register(EntityBlockGeometrySource.of(
+			"test:embedded", ignored -> EntityBlockGeometryOutcome.RENDERED));
+		EntityBlockGeometryRunner renderedRunner = new EntityBlockGeometryRunner(
+			renderedRegistry,
+			source("test:ber", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY),
+			source("test:baked", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY));
+
+		assertTrue(
+			renderedRunner.run(EntityBlockRenderMode.ALL, EntityBlockGeometryContext::empty),
+			"RENDERED must suppress the VoxelShape fallback");
+	}
+
+	@Test
 	void compatibleSkipsAllModdedSources() {
 		EntityBlockGeometrySourceRegistry registry = quietRegistry();
 		AtomicInteger moddedCalls = new AtomicInteger();
