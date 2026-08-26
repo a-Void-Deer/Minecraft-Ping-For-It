@@ -18,6 +18,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.integration.ExternalBlockServerProviders;
 import nx.pingwheel.common.marker.MinecraftServerEntityLookup;
 
 import static nx.pingwheel.common.Global.LOGGER;
@@ -124,8 +125,18 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 		return switch (normalizedTarget) {
 			case Target.EntityTarget entity -> resolveEntity(level, entity);
 			case Target.BlockTarget block -> resolveBlock(level, block);
+			case Target.ExternalBlockTarget external -> resolveExternalBlock(level, external);
 			case Target.LocationTarget ignored -> Resolution.of(TargetNameComposer.here());
 		};
+	}
+
+	private Resolution resolveExternalBlock(ServerLevel level, Target.ExternalBlockTarget target) {
+		return ExternalBlockServerProviders.registry().resolveName(level, target)
+			.map(name -> name.customName()
+				.map(custom -> TargetNameComposer.compose(custom, name.vanillaName()))
+				.orElse(name.vanillaName()))
+			.map(Resolution::of)
+			.orElseGet(() -> Resolution.unavailable(FallbackReason.BLOCK_UNAVAILABLE));
 	}
 
 	/**

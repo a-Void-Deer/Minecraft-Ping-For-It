@@ -15,7 +15,11 @@ import java.util.Optional;
  * chest or sign) so the {@code entity_block} target type can outrank the
  * generic {@code block} type. Neither value may ever be added to
  * {@link Target.EntityTarget} / {@link Target.BlockTarget} identity, and this
- * context must never be serialized or frozen into a {@link ResolvedTarget}.
+	 * context must never be serialized or frozen into a {@link ResolvedTarget}.
+
+	 * <p>External block targets also carry their provider-derived classification
+	 * so the built-in block matchers can distinguish {@code block} from
+	 * {@code entity_block} without depending on a provider class.
  *
  * <p>The {@link Optional}s themselves must not be null, and a present
  * {@code entityTypeId} must not be blank. Only JDK types are used here, so

@@ -98,6 +98,35 @@ class TargetSnapshotTest {
 	}
 
 	@Test
+	void externalBlockSnapshotCarriesOpaqueLocatorAndClassification() {
+		TargetSnapshot snapshot = TargetSnapshotFactory.externalBlockCandidate(
+			OVERWORLD, "provider:test", "minecraft:chest", "opaque-locator", true);
+
+		assertTrue(snapshot.target() instanceof Target.ExternalBlockTarget, "expected external block target");
+
+		Target.ExternalBlockTarget target = (Target.ExternalBlockTarget) snapshot.target();
+
+		assertEquals(TargetKind.BLOCK, target.kind());
+		assertEquals(OVERWORLD, target.dimensionId());
+		assertEquals("provider:test", target.providerId());
+		assertEquals("", target.stableTargetId());
+		assertEquals("minecraft:chest", target.expectedBlockRegistryId());
+		assertEquals("opaque-locator", target.providerLocator());
+		assertEquals(Optional.of(true), snapshot.matchContext().blockHasBlockEntity());
+	}
+
+	@Test
+	void externalBlockCommittedSnapshotKeepsStableIdentityAcrossLocatorUpdates() {
+		TargetSnapshot first = TargetSnapshotFactory.externalBlockCommitted(
+			OVERWORLD, "provider:test", "target-1", "minecraft:chest", "locator-a", true);
+		TargetSnapshot second = TargetSnapshotFactory.externalBlockCommitted(
+			OVERWORLD, "provider:test", "target-1", "minecraft:chest", "locator-b", false);
+
+		assertEquals(first.target(), second.target());
+		assertEquals(TargetKind.BLOCK, first.target().kind());
+	}
+
+	@Test
 	void locationSnapshotSemantics() {
 		TargetSnapshot snapshot = TargetSnapshotFactory.location(OVERWORLD, 1.5, 2.5, 3.5);
 

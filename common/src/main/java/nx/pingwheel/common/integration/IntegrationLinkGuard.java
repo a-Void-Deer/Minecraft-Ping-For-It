@@ -9,20 +9,20 @@ import static nx.pingwheel.common.Global.debugException;
  * once with the integration id, and debug-logs a bounded safe exception
  * report.
  */
-final class IntegrationLinkGuard {
+public final class IntegrationLinkGuard {
 	private final String integration;
 	private volatile boolean disabled;
 	private boolean warned;
 
-	IntegrationLinkGuard(String integration) {
+	public IntegrationLinkGuard(String integration) {
 		this.integration = integration;
 	}
 
-	boolean disabled() {
+	public boolean disabled() {
 		return disabled;
 	}
 
-	synchronized void disable(LinkageError error) {
+	public synchronized void disable(LinkageError error) {
 		disabled = true;
 
 		if (warned) {
@@ -32,5 +32,14 @@ final class IntegrationLinkGuard {
 		warned = true;
 		LOGGER.warn("{} integration disabled", integration);
 		debugException(integration + " integration link error", error);
+	}
+
+	/**
+	 * Disables an optional boundary without emitting an exception report. This
+	 * is used by privacy-sensitive reflective adapters whose invocation context
+	 * must never reach logs.
+	 */
+	public synchronized void disableSilently() {
+		disabled = true;
 	}
 }

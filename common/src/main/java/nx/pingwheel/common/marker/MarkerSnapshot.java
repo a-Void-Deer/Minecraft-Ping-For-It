@@ -35,6 +35,9 @@ public record MarkerSnapshot(
 		Objects.requireNonNull(anchor, "anchor");
 		requireNonBlankId("targetTypeId", targetTypeId);
 		requireNonBlankId("pingTypeId", pingTypeId);
+		// A snapshot is committed marker state. This also rejects an external
+		// candidate whose stable target id is intentionally still empty.
+		TargetKey.from(target);
 
 		if (arrivalTick < 0L) {
 			throw new IllegalArgumentException("arrivalTick must be non-negative: " + arrivalTick);

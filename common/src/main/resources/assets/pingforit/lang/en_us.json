@@ -1,6 +1,8 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Ping Location",
+	"key.pingforit.select_transparent_block": "Select Transparent Blocks",
+	"key.pingforit.allow_blacklisted_target": "Allow Blacklisted Targets",
 	"key.pingforit.open_settings": "Open Settings",
 	"subtitles.pingforit.ping": "Location Ping Alert",
 

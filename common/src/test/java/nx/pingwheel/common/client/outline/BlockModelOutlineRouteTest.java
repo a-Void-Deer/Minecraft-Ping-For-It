@@ -30,6 +30,45 @@ class BlockModelOutlineRouteTest {
 	}
 
 	@Test
+	void externalOrdinaryBlockKeepsTheSharedPolicyAndModelGate() {
+		assertEquals(
+			BLOCK_DISPLAY,
+			BlockModelOutlineRoute.routeExternal("block", true, true));
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("block", false, true));
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("block", true, false));
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("block", false, false));
+	}
+
+	@Test
+	void externalEntityBlockUsesTheRunnerEvenWithoutAStaticModel() {
+		assertEquals(
+			ENTITY_BLOCK,
+			BlockModelOutlineRoute.routeExternal("entity_block", true, true));
+		assertEquals(
+			ENTITY_BLOCK,
+			BlockModelOutlineRoute.routeExternal("entity_block", true, false));
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("entity_block", false, true));
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("entity_block", false, false));
+	}
+
+	@Test
+	void externalUnknownTargetTypeNeverEntersTheModelRoute() {
+		assertEquals(
+			VOXEL,
+			BlockModelOutlineRoute.routeExternal("unknown_type", true, true));
+	}
+
+	@Test
 	void nonBlockTargetTypesAlwaysRouteToVoxel() {
 		for (String targetTypeId : new String[] {"entity", "location", "dropped_item", "", "unknown_type"}) {
 			assertEquals(VOXEL, BlockModelOutlineRoute.route(targetTypeId, true), "should be voxel: '" + targetTypeId + "'");

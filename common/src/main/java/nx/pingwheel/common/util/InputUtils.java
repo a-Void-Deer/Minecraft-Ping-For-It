@@ -13,6 +13,16 @@ public class InputUtils {
 
 	private static final String SETTINGS_CATEGORY = LanguageUtils.keyOf("key.category", "name");
 	public static final KeyMapping KEY_BINDING_PING = new KeyMapping(LanguageUtils.keyOf("key", "ping_location"), InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_5, SETTINGS_CATEGORY);
+	public static final KeyMapping KEY_BINDING_SELECT_TRANSPARENT_BLOCK = new KeyMapping(
+		LanguageUtils.keyOf("key", "select_transparent_block"),
+		InputConstants.Type.KEYSYM,
+		GLFW.GLFW_KEY_LEFT_SHIFT,
+		SETTINGS_CATEGORY);
+	public static final KeyMapping KEY_BINDING_ALLOW_BLACKLISTED_TARGET = new KeyMapping(
+		LanguageUtils.keyOf("key", "allow_blacklisted_target"),
+		InputConstants.Type.KEYSYM,
+		GLFW.GLFW_KEY_LEFT_CONTROL,
+		SETTINGS_CATEGORY);
 	public static final KeyMapping KEY_BINDING_SETTINGS = new KeyMapping(LanguageUtils.keyOf("key", "open_settings"), InputConstants.Type.KEYSYM, -1, SETTINGS_CATEGORY);
 
 	/** The physical key and armed state of the current claimed hold. */

@@ -3,6 +3,7 @@ package nx.pingwheel.common.client.outline;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -55,6 +57,11 @@ class BlockOutlineStateTest {
 
 	private static TargetKey.BlockKey keyAt(int x, int y, int z) {
 		return new TargetKey.BlockKey(OVERWORLD, x, y, z, "minecraft:stone");
+	}
+
+	private static Target.ExternalBlockTarget externalTarget() {
+		return Target.ExternalBlockTarget.committed(
+			OVERWORLD, "provider:test", "tracking-id", "minecraft:chest", "locator", true);
 	}
 
 	private static MarkerSnapshot snapshot(long id, Target target, String pingTypeId) {
@@ -202,5 +209,78 @@ class BlockOutlineStateTest {
 			new Transition(1, 0, 0, 1),
 			new Transition(0, 1, 0, 0)
 		), transitions);
+	}
+
+	@Test
+	void prepareAndClearTracksExternalSnapshotSeparately() {
+		BlockOutlineState state = installRecordingLogger();
+		Target.ExternalBlockTarget target = externalTarget();
+		TargetKey key = TargetKey.from(target);
+		ClientMarkerStore store = new ClientMarkerStore(10L);
+		MarkerId markerId = new MarkerId(6L);
+
+		store.onCreated(
+			new MarkerSnapshot(
+				markerId,
+				OWNER,
+				target,
+				"entity_block",
+				"attention",
+				new MarkerAnchor(1, 2, 3),
+				1L,
+				100L),
+			0L);
+		store.onWinnerChanged(key, Optional.of(markerId));
+
+		state.prepare(store, OVERWORLD);
+
+		assertTrue(state.snapshot().isEmpty());
+		assertEquals(target, state.externalSnapshot().get(key).target());
+		assertEquals(markerId, state.externalSnapshot().get(key).markerId());
+
+		state.clear();
+
+		assertTrue(state.externalSnapshot().isEmpty());
+		assertEquals(List.of(
+			new Transition(1, 0, 0, 1),
+			new Transition(0, 1, 0, 0)
+		), transitions);
+	}
+
+	@Test
+	void externalCoverageRequiresNonzeroEmittedVerticesBeforeFallbackSuppression() {
+		BlockOutlineState state = installRecordingLogger();
+		BlockModelOutlineState modelState = BlockModelOutlineState.INSTANCE;
+		modelState.clear();
+		Target.ExternalBlockTarget target = externalTarget();
+		TargetKey.ExternalBlockKey key = (TargetKey.ExternalBlockKey) TargetKey.from(target);
+		ClientMarkerStore store = new ClientMarkerStore(10L);
+		MarkerId markerId = new MarkerId(6L);
+
+		store.onCreated(
+			new MarkerSnapshot(
+				markerId,
+				OWNER,
+				target,
+				"entity_block",
+				"attention",
+				new MarkerAnchor(1, 2, 3),
+				1L,
+				100L),
+			0L);
+		store.onWinnerChanged(key, Optional.of(markerId));
+		state.prepare(store, OVERWORLD);
+
+		assertEquals(
+			EntityBlockGeometryOutcome.EMPTY,
+			EntityBlockGeometryOutcome.fromEmittedVertices(0));
+		assertFalse(state.allCoveredBy(Set.of(), modelState.externalSuccessKeys()));
+
+		assertEquals(
+			EntityBlockGeometryOutcome.RENDERED,
+			EntityBlockGeometryOutcome.fromEmittedVertices(1));
+		modelState.addExternalSuccess(key);
+		assertTrue(state.allCoveredBy(Set.of(), modelState.externalSuccessKeys()));
+		modelState.clear();
 	}
 }

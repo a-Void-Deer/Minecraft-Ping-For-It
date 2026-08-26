@@ -17,6 +17,7 @@ import dev.engine_room.flywheel.backend.engine.InstanceHandleImpl;
 import dev.engine_room.flywheel.backend.engine.embed.GlobalEnvironment;
 import dev.engine_room.flywheel.backend.engine.indirect.IndirectInstancer;
 import dev.engine_room.flywheel.backend.mixin.LevelRendererAccessor;
+import dev.engine_room.flywheel.api.visualization.VisualizationContext;
 import dev.engine_room.flywheel.impl.visualization.VisualManagerImpl;
 import dev.engine_room.flywheel.impl.visualization.VisualizationManagerImpl;
 import dev.engine_room.flywheel.impl.visualization.storage.BlockEntityStorage;
@@ -42,6 +43,7 @@ import nx.pingwheel.common.client.outline.EntityBlockGeometryContext;
 import nx.pingwheel.common.client.outline.EntityBlockGeometryOutcome;
 import nx.pingwheel.common.client.outline.EntityBlockGeometrySource;
 import nx.pingwheel.common.client.outline.EntityBlockGeometrySourceRegistry;
+import nx.pingwheel.common.client.outline.FlywheelEnvironmentPolicy;
 import nx.pingwheel.common.client.outline.FlywheelDiagnosticReason;
 import nx.pingwheel.common.client.outline.FlywheelDiagnostics;
 import nx.pingwheel.common.client.outline.FlywheelMeshCache;
@@ -50,6 +52,7 @@ import nx.pingwheel.common.client.outline.FlywheelRenderClock;
 import nx.pingwheel.common.client.outline.FlywheelSilhouetteMask;
 import nx.pingwheel.common.client.outline.FlywheelTransformMath;
 import nx.pingwheel.common.util.WeakIdentityCache;
+import nx.pingwheel.common.marker.TargetKey;
 
 import com.simibubi.create.content.kinetics.base.RotatingInstance;
 import com.simibubi.create.content.processing.burner.ScrollInstance;
@@ -57,6 +60,8 @@ import com.simibubi.create.content.processing.burner.ScrollTransformedInstance;
 import com.simibubi.create.foundation.render.AllInstanceTypes;
 import org.joml.Matrix4fc;
 import org.joml.Quaternionfc;
+import org.joml.Vector3d;
+import org.joml.Vector3f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
@@ -217,13 +222,13 @@ public final class CreateFlywheelGeometryAdapter {
 			int resolutionFailureCount = 0;
 			for (Instance instance : instances) {
 				try {
-					LiveInstanceResolution resolution = resolveLiveInstance(instance);
+					LiveInstanceResolution resolution = resolveLiveInstance(instance, context);
 					if (resolution == null) {
 						nonLiveInstanceCount++;
 						continue;
 					}
 					liveInstances.add(new ResolvedInstance(
-						instance, resolution.instancer(), resolution.model()));
+						instance, resolution.instancer(), resolution.model(), resolution.environmentOrigin()));
 				} catch (Exception | LinkageError | AssertionError ignored) {
 					// A stale optional instance must not prevent valid sibling instances
 					// from contributing geometry. The state class is retained in the
@@ -252,29 +257,42 @@ public final class CreateFlywheelGeometryAdapter {
 					() -> "instanceCount=" + instanceCount + "; maxInstances=" + MAX_INSTANCES_PER_TARGET);
 			}
 
-			Vec3i renderOrigin;
-			try {
-				renderOrigin = manager.renderOrigin();
-			} catch (Exception | LinkageError | AssertionError failure) {
-				return failed(context, FlywheelDiagnosticReason.TRANSFORM_UNAVAILABLE,
-					manager, visual, instances, () -> "render origin lookup failed", failure);
-			}
-
 			Vec3 camera = context.cameraPosition();
-			if (renderOrigin == null || camera == null
+			float originX = 0.0F;
+			float originY = 0.0F;
+			float originZ = 0.0F;
+			if (context.transform() == null) {
+				Vec3i renderOrigin;
+				try {
+					renderOrigin = manager.renderOrigin();
+				} catch (Exception | LinkageError | AssertionError failure) {
+					return failed(context, FlywheelDiagnosticReason.TRANSFORM_UNAVAILABLE,
+						manager, visual, instances, () -> "render origin lookup failed", failure);
+				}
+
+				if (renderOrigin == null || camera == null
+					|| !Double.isFinite(camera.x()) || !Double.isFinite(camera.y())
+					|| !Double.isFinite(camera.z())) {
+					return empty(context, FlywheelDiagnosticReason.TRANSFORM_UNAVAILABLE,
+						manager, visual, instances,
+						() -> "camera/renderOrigin is unavailable or non-finite");
+				}
+
+				// Keep the main-world path's established float boundary and formula:
+				// instance position + manager/global render origin - camera.
+				originX = (float) (renderOrigin.getX() - camera.x());
+				originY = (float) (renderOrigin.getY() - camera.y());
+				originZ = (float) (renderOrigin.getZ() - camera.z());
+				if (!Float.isFinite(originX) || !Float.isFinite(originY) || !Float.isFinite(originZ)) {
+					return empty(context, FlywheelDiagnosticReason.TRANSFORM_UNAVAILABLE,
+						manager, visual, instances, () -> "camera-relative render origin is non-finite");
+				}
+			} else if (camera == null
 				|| !Double.isFinite(camera.x()) || !Double.isFinite(camera.y())
 				|| !Double.isFinite(camera.z())) {
 				return empty(context, FlywheelDiagnosticReason.TRANSFORM_UNAVAILABLE,
 					manager, visual, instances,
-					() -> "camera/renderOrigin is unavailable or non-finite");
-			}
-
-			float originX = (float) (renderOrigin.getX() - camera.x());
-			float originY = (float) (renderOrigin.getY() - camera.y());
-			float originZ = (float) (renderOrigin.getZ() - camera.z());
-			if (!Float.isFinite(originX) || !Float.isFinite(originY) || !Float.isFinite(originZ)) {
-				return empty(context, FlywheelDiagnosticReason.TRANSFORM_UNAVAILABLE,
-					manager, visual, instances, () -> "camera-relative render origin is non-finite");
+					() -> "camera is unavailable or non-finite");
 			}
 
 			int ticks;
@@ -325,7 +343,7 @@ public final class CreateFlywheelGeometryAdapter {
 							+ FlywheelModelBudget.MAX_TRIANGLES_PER_TARGET);
 				}
 
-				geometries.add(new InstanceGeometry(instance, geometry));
+				geometries.add(new InstanceGeometry(instance, geometry, resolved.environmentOrigin()));
 			}
 
 			if (triangleCount == 0L) {
@@ -335,7 +353,8 @@ public final class CreateFlywheelGeometryAdapter {
 
 			FlywheelSilhouetteMask.RenderPlan<ResourceLocation> plan;
 			try {
-				plan = buildPlan(geometries, originX, originY, originZ, renderTicks, renderSeconds);
+				plan = buildPlan(
+					geometries, originX, originY, originZ, renderTicks, renderSeconds, context);
 			} catch (GeometryFormatException failure) {
 				return failed(context, failure.reason(), manager, visual, instances,
 					() -> "current-frame plan construction=" + failure.getMessage(), failure);
@@ -447,13 +466,26 @@ public final class CreateFlywheelGeometryAdapter {
 		return IndirectInstancer.fromState(state);
 	}
 
-	private static LiveInstanceResolution resolveLiveInstance(Instance instance) {
+	private static LiveInstanceResolution resolveLiveInstance(
+		Instance instance,
+		EntityBlockGeometryContext context
+	) {
 		if (instance == null || !(instance.handle() instanceof InstanceHandleImpl<?> handle)) {
 			return null;
 		}
 
 		AbstractInstancer<?> instancer = resolveLiveInstancer(handle.state);
-		if (instancer == null || instancer.environment != GlobalEnvironment.INSTANCE) {
+		if (instancer == null) {
+			return null;
+		}
+
+		Vec3i environmentOrigin = environmentOrigin(instancer);
+		boolean hasExternalTransform = context != null && context.transform() != null;
+		if (!FlywheelEnvironmentPolicy.accepts(
+			hasExternalTransform,
+			instancer.environment == GlobalEnvironment.INSTANCE,
+			context == null ? null : context.blockPos(),
+			environmentOrigin)) {
 			return null;
 		}
 
@@ -474,7 +506,18 @@ public final class CreateFlywheelGeometryAdapter {
 			return null;
 		}
 
-		return new LiveInstanceResolution(instancer, model);
+		return new LiveInstanceResolution(
+			instancer, model, hasExternalTransform ? environmentOrigin : null);
+	}
+
+	private static Vec3i environmentOrigin(AbstractInstancer<?> instancer) {
+		if (instancer == null) {
+			return null;
+		}
+		if (instancer.environment instanceof VisualizationContext environment) {
+			return environment.renderOrigin();
+		}
+		return null;
 	}
 
 	private static boolean supportedInstanceType(Instance instance) {
@@ -493,7 +536,8 @@ public final class CreateFlywheelGeometryAdapter {
 		float originY,
 		float originZ,
 		float renderTicks,
-		float renderSeconds
+		float renderSeconds,
+		EntityBlockGeometryContext context
 	) throws GeometryFormatException {
 		Map<ResourceLocation, List<FlywheelSilhouetteMask.Triangle>> grouped = new LinkedHashMap<>();
 
@@ -512,9 +556,23 @@ public final class CreateFlywheelGeometryAdapter {
 						// this vertex. Other valid model triangles remain eligible.
 						continue;
 					}
-					float x = position.x() + originX;
-					float y = position.y() + originY;
-					float z = position.z() + originZ;
+					float x;
+					float y;
+					float z;
+					if (context.transform() == null) {
+						// This is intentionally the pre-existing main-world formula.
+						x = position.x() + originX;
+						y = position.y() + originY;
+						z = position.z() + originZ;
+					} else {
+						Vector3f cameraRelative = context.transform().cameraRelativeEnvironmentVertex(
+							new Vector3d(position.x(), position.y(), position.z()),
+							entry.environmentOrigin(),
+							context.cameraPosition());
+						x = cameraRelative.x();
+						y = cameraRelative.y();
+						z = cameraRelative.z();
+					}
 					float u = mesh.u(vertex);
 					float v = mesh.v(vertex);
 
@@ -762,9 +820,21 @@ public final class CreateFlywheelGeometryAdapter {
 			return "<unknown-target>";
 		}
 		var key = context.targetKey();
-		return "dimension=" + key.dimensionId() + "; position="
-			+ key.x() + "," + key.y() + "," + key.z()
-			+ "; blockRegistryId=" + key.blockRegistryId();
+		return switch (key) {
+			case TargetKey.BlockKey block ->
+				"dimension=" + block.dimensionId() + "; position="
+					+ block.x() + "," + block.y() + "," + block.z()
+					+ "; blockRegistryId=" + block.blockRegistryId();
+			case TargetKey.ExternalBlockKey external ->
+				"dimension=" + external.dimensionId() + "; provider=" + external.providerId()
+					+ "; stableTargetId=" + external.stableTargetId()
+					+ "; expectedBlockRegistryId=" + external.expectedBlockRegistryId();
+			case TargetKey.EntityKey entity ->
+				"dimension=" + entity.dimensionId() + "; entity=" + entity.locator();
+			case TargetKey.LocationKey location ->
+				"dimension=" + location.dimensionId() + "; position="
+					+ location.x() + "," + location.y() + "," + location.z();
+		};
 	}
 
 	private static String diagnosticDetails(
@@ -776,6 +846,9 @@ public final class CreateFlywheelGeometryAdapter {
 	) {
 		StringBuilder result = new StringBuilder();
 		result.append(targetDescription(context));
+		result.append("; transformMode=").append(transformMode(context));
+		result.append("; transformClass=").append(
+			context == null ? "<null-context>" : className(context.transform()));
 		result.append("; blockEntityClass=").append(
 			context == null ? "<null-context>" : className(context.blockEntity()));
 		result.append("; manager=").append(identity(manager));
@@ -790,9 +863,9 @@ public final class CreateFlywheelGeometryAdapter {
 			result.append("; instanceCount=").append(instances.size());
 			for (int index = 0; index < instances.size(); index++) {
 				result.append("; instance[").append(index).append("]=")
-					.append(instanceDetails(instances.get(index)));
+					.append(instanceDetails(instances.get(index), context));
 				result.append("; instance[").append(index).append("].model=")
-					.append(modelDetails(instances.get(index)));
+					.append(modelDetails(instances.get(index), context));
 			}
 		}
 		if (detail != null) {
@@ -804,7 +877,7 @@ public final class CreateFlywheelGeometryAdapter {
 		return result.toString();
 	}
 
-	private static String instanceDetails(Instance instance) {
+	private static String instanceDetails(Instance instance, EntityBlockGeometryContext context) {
 		if (instance == null) {
 			return "<null>";
 		}
@@ -815,17 +888,17 @@ public final class CreateFlywheelGeometryAdapter {
 			type = "<type-unavailable:" + failure + ">";
 		}
 		return className(instance) + "@" + Integer.toHexString(System.identityHashCode(instance))
-			+ "{type=" + type + "; " + instanceStateDetails(instance) + "}";
+			+ "{type=" + type + "; " + instanceStateDetails(instance, context) + "}";
 	}
 
-	private static String modelDetails(Instance instance) {
+	private static String modelDetails(Instance instance, EntityBlockGeometryContext context) {
 		if (instance == null) {
 			return "<null-instance>";
 		}
 		try {
-			LiveInstanceResolution resolution = resolveLiveInstance(instance);
+			LiveInstanceResolution resolution = resolveLiveInstance(instance, context);
 			if (resolution == null) {
-				return "<model-unavailable; " + instanceStateDetails(instance) + ">";
+				return "<model-unavailable; " + instanceStateDetails(instance, context) + ">";
 			}
 			Model model = resolution.model();
 			List<Model.ConfiguredMesh> meshes = model.meshes();
@@ -856,7 +929,7 @@ public final class CreateFlywheelGeometryAdapter {
 		}
 	}
 
-	private static String instanceStateDetails(Instance instance) {
+	private static String instanceStateDetails(Instance instance, EntityBlockGeometryContext context) {
 		if (instance == null) {
 			return "handleClass=<null>; backendStateClass=<null>; resolvedInstancerClass=<null>";
 		}
@@ -870,7 +943,10 @@ public final class CreateFlywheelGeometryAdapter {
 			AbstractInstancer<?> instancer = resolveLiveInstancer(state);
 			return "handleClass=" + className(handleValue)
 				+ "; backendStateClass=" + className(state)
-				+ "; resolvedInstancerClass=" + className(instancer);
+				+ "; resolvedInstancerClass=" + className(instancer)
+				+ "; environmentClass=" + className(instancer == null ? null : instancer.environment)
+				+ "; environmentOrigin=" + environmentOriginDetails(instancer)
+				+ "; transformMode=" + transformMode(context);
 		} catch (Exception | LinkageError | AssertionError failure) {
 			return "handleClass=<unavailable>; backendStateClass=<unavailable>; resolvedInstancerClass=<unavailable:"
 				+ failure + ">";
@@ -884,6 +960,24 @@ public final class CreateFlywheelGeometryAdapter {
 
 	private static String className(Object value) {
 		return value == null ? "<null>" : value.getClass().getName();
+	}
+
+	private static String environmentOriginDetails(AbstractInstancer<?> instancer) {
+		if (instancer == null || instancer.environment == null) {
+			return "<null>";
+		}
+		if (!(instancer.environment instanceof VisualizationContext environment)) {
+			return "<public-renderOrigin-unavailable>";
+		}
+		try {
+			return String.valueOf(environment.renderOrigin());
+		} catch (Exception | LinkageError | AssertionError failure) {
+			return "<unavailable: " + failure + ">";
+		}
+	}
+
+	private static String transformMode(EntityBlockGeometryContext context) {
+		return context != null && context.transform() != null ? "embedded" : "main";
 	}
 
 	private static String materialDetails(Material material, ResourceLocation texture) {
@@ -921,14 +1015,23 @@ public final class CreateFlywheelGeometryAdapter {
 		Supplier<String> details
 	) {}
 
-	private record InstanceGeometry(Instance instance, ModelGeometry model) {}
+	private record InstanceGeometry(
+		Instance instance,
+		ModelGeometry model,
+		Vec3i environmentOrigin
+	) {}
 
-	private record LiveInstanceResolution(AbstractInstancer<?> instancer, Model model) {}
+	private record LiveInstanceResolution(
+		AbstractInstancer<?> instancer,
+		Model model,
+		Vec3i environmentOrigin
+	) {}
 
 	private record ResolvedInstance(
 		Instance instance,
 		AbstractInstancer<?> instancer,
-		Model model
+		Model model,
+		Vec3i environmentOrigin
 	) {}
 
 	private static final class ModelGeometryCache {

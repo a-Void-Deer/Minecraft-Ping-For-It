@@ -2,12 +2,19 @@ package nx.pingwheel.common.client.outline;
 
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.marker.TargetKey;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4d;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -30,6 +37,70 @@ class EntityBlockGeometryRunnerTest {
 		assertEquals(1, berCalls.get());
 		assertEquals(1, bakedCalls.get());
 		assertEquals(2, moddedCalls.get());
+	}
+
+	@Test
+	void allPinsBuiltInOrderAndBuildsFreshExternalContextsWithBothTimings() {
+		EntityBlockGeometrySourceRegistry registry = quietRegistry();
+		List<String> order = new ArrayList<>();
+		List<EntityBlockGeometryContext> contexts = new ArrayList<>();
+		AtomicInteger liveBlockEntityLookups = new AtomicInteger();
+		TargetKey.ExternalBlockKey externalKey = new TargetKey.ExternalBlockKey(
+			"minecraft:overworld", "sable", "plot-1", "minecraft:chest");
+		EntityBlockGeometryTransform transform =
+			new EntityBlockGeometryTransform(new Matrix4d().translation(20_000_000.0D, 0.0D, 0.0D));
+
+		registry.register(EntityBlockGeometrySource.of("test:modded", context -> {
+			order.add("modded");
+			contexts.add(context);
+			return EntityBlockGeometryOutcome.EMPTY;
+		}));
+		EntityBlockGeometryRunner runner = new EntityBlockGeometryRunner(
+			registry,
+			EntityBlockGeometrySource.of("test:ber", context -> {
+				order.add("ber");
+				contexts.add(context);
+				return EntityBlockGeometryOutcome.EMPTY;
+			}),
+			EntityBlockGeometrySource.of("test:baked", context -> {
+				order.add("baked");
+				contexts.add(context);
+				return EntityBlockGeometryOutcome.EMPTY;
+			}));
+
+		assertFalse(runner.run(EntityBlockRenderMode.ALL, () -> {
+			liveBlockEntityLookups.incrementAndGet();
+			return new EntityBlockGeometryContext(
+				null,
+				new BlockPos(4, 5, 6),
+				null,
+				null,
+				0x00123456,
+				new Vec3(1.25D, 2.5D, 3.75D),
+				0.25F,
+				0.75F,
+				123,
+				null,
+				null,
+				null,
+				externalKey,
+				42L,
+				transform);
+		}));
+
+		assertEquals(List.of("ber", "baked", "modded"), order);
+		assertEquals(3, liveBlockEntityLookups.get());
+		assertEquals(3, contexts.size());
+		assertNotSame(contexts.get(0), contexts.get(1));
+		assertNotSame(contexts.get(1), contexts.get(2));
+		for (EntityBlockGeometryContext context : contexts) {
+			assertSame(externalKey, context.targetKey());
+			assertSame(transform, context.transform());
+			assertEquals(0.25F, context.partialTick());
+			assertEquals(0.75F, context.flywheelPartialTick());
+			assertEquals(123, context.packedLight());
+			assertEquals(42L, context.frameId());
+		}
 	}
 
 	@Test
@@ -58,6 +129,38 @@ class EntityBlockGeometryRunnerTest {
 
 		assertFalse(runner.run(EntityBlockRenderMode.ALL, EntityBlockGeometryContext::empty));
 		assertEquals(1, laterCalls.get());
+	}
+
+	@Test
+	void onlyRenderedEmbeddedOutcomesSuppressTheVoxelFallback() {
+		for (EntityBlockGeometryOutcome outcome : new EntityBlockGeometryOutcome[] {
+			EntityBlockGeometryOutcome.EMPTY,
+			EntityBlockGeometryOutcome.FAILED
+		}) {
+			EntityBlockGeometrySourceRegistry registry = quietRegistry();
+			registry.register(EntityBlockGeometrySource.of(
+				"test:embedded", ignored -> outcome));
+			EntityBlockGeometryRunner runner = new EntityBlockGeometryRunner(
+				registry,
+				source("test:ber", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY),
+				source("test:baked", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY));
+
+			assertFalse(
+				runner.run(EntityBlockRenderMode.ALL, EntityBlockGeometryContext::empty),
+				"%s must leave the VoxelShape fallback available".formatted(outcome));
+		}
+
+		EntityBlockGeometrySourceRegistry renderedRegistry = quietRegistry();
+		renderedRegistry.register(EntityBlockGeometrySource.of(
+			"test:embedded", ignored -> EntityBlockGeometryOutcome.RENDERED));
+		EntityBlockGeometryRunner renderedRunner = new EntityBlockGeometryRunner(
+			renderedRegistry,
+			source("test:ber", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY),
+			source("test:baked", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY));
+
+		assertTrue(
+			renderedRunner.run(EntityBlockRenderMode.ALL, EntityBlockGeometryContext::empty),
+			"RENDERED must suppress the VoxelShape fallback");
 	}
 
 	@Test

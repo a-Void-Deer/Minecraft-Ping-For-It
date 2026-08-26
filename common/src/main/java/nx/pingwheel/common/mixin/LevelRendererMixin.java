@@ -148,7 +148,10 @@ public abstract class LevelRendererMixin {
 	 */
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lorg/joml/Matrix4fStack;popMatrix()Lorg/joml/Matrix4fStack;", ordinal = 0))
 	private void onEndRenderLevel(DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
-		CommonClient.INSTANCE.renderBlockOutlines(camera, this.renderBuffers.bufferSource());
+		CommonClient.INSTANCE.renderBlockOutlines(
+			camera,
+			this.renderBuffers.bufferSource(),
+			deltaTracker.getGameTimeDeltaPartialTick(true));
 	}
 
 	/**

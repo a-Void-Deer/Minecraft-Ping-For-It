@@ -32,6 +32,7 @@ import nx.pingwheel.common.client.outline.EntityOutlineContext;
 import nx.pingwheel.common.client.outline.EntityOutlineSource;
 import nx.pingwheel.common.client.outline.EntityOutlineSourceRegistry;
 import nx.pingwheel.common.client.outline.OutlineOnlyBufferSource;
+import nx.pingwheel.common.math.EntitySelectionBlacklist;
 
 /**
  * NeoForge-only Create entity silhouette source.
@@ -56,6 +57,7 @@ public final class CreateEntityOutlineAdapter {
 	private static final BackendProbe BACKEND_PROBE = new BackendProbe();
 
 	private static EntityOutlineSourceRegistry.Registration registration;
+	private static EntitySelectionBlacklist.Registration selectionBlacklistRegistration;
 	private static CreateEntityOutlineSource source;
 
 	private CreateEntityOutlineAdapter() {}
@@ -67,12 +69,33 @@ public final class CreateEntityOutlineAdapter {
 		}
 
 		CreateEntityOutlineSource candidate = new CreateEntityOutlineSource();
-		EntityOutlineSourceRegistry.Registration handle =
-			EntityOutlineSourceRegistry.INSTANCE.register(candidate);
-		source = candidate;
-		registration = handle;
+		EntityOutlineSourceRegistry.Registration outlineHandle = null;
+		EntitySelectionBlacklist.Registration blacklistHandle = null;
+		try {
+			outlineHandle = EntityOutlineSourceRegistry.INSTANCE.register(candidate);
+			blacklistHandle = EntitySelectionBlacklist.INSTANCE.register(
+				entity -> entity instanceof SuperGlueEntity);
+			source = candidate;
+			registration = outlineHandle;
+			selectionBlacklistRegistration = blacklistHandle;
+		} catch (RuntimeException | Error failure) {
+			try {
+				if (blacklistHandle != null) {
+					blacklistHandle.close();
+				}
+			} finally {
+				try {
+					if (outlineHandle != null) {
+						outlineHandle.close();
+					}
+				} finally {
+					candidate.close();
+				}
+			}
+			throw failure;
+		}
 
-		if (handle.accepted()) {
+		if (outlineHandle.accepted()) {
 			Global.LOGGER.info("Create entity outline source registration succeeded: id={} handleState={}",
 				SOURCE_ID, registrationState());
 		} else {
@@ -83,18 +106,29 @@ public final class CreateEntityOutlineAdapter {
 
 	/** Called reflectively at client teardown; safe to call repeatedly. */
 	public static synchronized void close() {
+		EntitySelectionBlacklist.Registration retainedBlacklistRegistration = selectionBlacklistRegistration;
 		EntityOutlineSourceRegistry.Registration retainedRegistration = registration;
 		CreateEntityOutlineSource retainedSource = source;
 		try {
-			if (retainedRegistration != null) {
-				retainedRegistration.close();
+			if (retainedBlacklistRegistration != null) {
+				retainedBlacklistRegistration.close();
 			}
 		} finally {
-			if (retainedSource != null) {
-				retainedSource.close();
+			try {
+				if (retainedRegistration != null) {
+					retainedRegistration.close();
+				}
+			} finally {
+				try {
+					if (retainedSource != null) {
+						retainedSource.close();
+					}
+				} finally {
+					selectionBlacklistRegistration = null;
+					registration = null;
+					source = null;
+				}
 			}
-			registration = null;
-			source = null;
 		}
 		Global.LOGGER.info("Create entity outline source registration closed: id={} handleState=closed", SOURCE_ID);
 	}

@@ -16,12 +16,14 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 
 /**
  * Main-thread block outline render pass.
  *
- * <p>Draws the current native {@link VoxelShape} wireframe of every block in
- * the prepared {@link BlockOutlineState} snapshot into the given line buffer.
+ * <p>Draws the current native {@link VoxelShape} wireframe of every ordinary
+ * and provider-owned block whose model/geometry route did not emit geometry in the
+ * prepared {@link BlockOutlineState} snapshots into the given line buffer.
  * The pass is deliberately conservative and never mutates the level:
  * <ul>
  *   <li>specs whose dimension differs from the level's are skipped;</li>
@@ -46,25 +48,30 @@ public final class BlockOutlineRenderer {
 	private BlockOutlineRenderer() {}
 
 	/**
-	 * Renders the ordered block outline specs of {@code state} into
-	 * {@code lines} for the given camera. Runs on the client main thread
-	 * only, once per world render frame, after {@link BlockOutlineState#prepare}.
+	 * Renders ordinary and provider-owned block outlines for one render frame.
+	 * Each success set is keyed in the same domain as its corresponding outline
+	 * snapshot, so a provider-owned geometry success suppresses only that
+	 * external key's VoxelShape fallback.
 	 *
-	 * @param modelOutlineKeys the per-frame set of keys whose model-outline
-	 *                         pass succeeded; those blocks are skipped here
+	 * @param externalModelOutlineKeys the per-frame external keys whose model or
+	 *                                 entity geometry pass succeeded; fallbacks
+	 *                                 for those keys are skipped
 	 */
 	public static void render(
 		ClientLevel level,
 		Camera camera,
 		VertexConsumer lines,
 		BlockOutlineState state,
-		Set<TargetKey.BlockKey> modelOutlineKeys
+		Set<TargetKey.BlockKey> modelOutlineKeys,
+		Set<TargetKey.ExternalBlockKey> externalModelOutlineKeys,
+		float partialTick
 	) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(camera, "camera");
 		Objects.requireNonNull(lines, "lines");
 		Objects.requireNonNull(state, "state");
 		Objects.requireNonNull(modelOutlineKeys, "modelOutlineKeys");
+		Objects.requireNonNull(externalModelOutlineKeys, "externalModelOutlineKeys");
 
 		String dimensionId = level.dimension().location().toString();
 		Entity cameraEntity = camera.getEntity();
@@ -115,6 +122,45 @@ public final class BlockOutlineRenderer {
 
 			VoxelShapeRenderUtil.renderEdges(poseStack, lines, shape, 0.0, 0.0, 0.0, spec.argbColor());
 
+			poseStack.popPose();
+		}
+
+		for (Map.Entry<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> entry
+			: state.externalSnapshot().entrySet()) {
+			ExternalBlockOutlineSpec spec = entry.getValue();
+			TargetKey.ExternalBlockKey blockKey = entry.getKey();
+
+			if (!blockKey.dimensionId().equals(dimensionId)) {
+				continue;
+			}
+
+			if (externalModelOutlineKeys.contains(blockKey)) {
+				continue;
+			}
+
+			var presentation = SableClientProvider.resolvePresentation(
+				level,
+				spec.target(),
+				partialTick,
+				collisionContext);
+
+			if (presentation.isEmpty()) {
+				continue;
+			}
+
+			var resolved = presentation.get();
+			poseStack.pushPose();
+			// Resolve the integer corner in double precision before entering the
+			// PoseStack. Only the camera-relative origin and the small linear pose
+			// are allowed into float-backed render state; this avoids losing whole
+			// blocks when Sable plots are around twenty million coordinates.
+			ExternalBlockOutlineTransform.apply(
+				poseStack,
+				resolved.worldBlockOrigin(),
+				resolved.orientationScale(),
+				cameraPosition);
+			VoxelShapeRenderUtil.renderEdges(
+				poseStack, lines, resolved.shape(), 0.0, 0.0, 0.0, spec.argbColor());
 			poseStack.popPose();
 		}
 	}

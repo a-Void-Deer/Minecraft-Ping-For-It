@@ -41,8 +41,9 @@ public record EntityBlockGeometryContext(
 	EntityRenderDispatcher entityRenderDispatcher,
 	BlockEntityRenderDispatcher blockEntityRenderDispatcher,
 	LevelRenderer levelRenderer,
-	TargetKey.BlockKey targetKey,
-	long frameId
+	TargetKey targetKey,
+	long frameId,
+	EntityBlockGeometryTransform transform
 ) {
 	public EntityBlockGeometryContext {
 		cameraPosition = cameraPosition == null ? Vec3.ZERO : cameraPosition;
@@ -64,7 +65,29 @@ public record EntityBlockGeometryContext(
 	) {
 		this(level, blockPos, blockState, blockEntity, argbColor, cameraPosition,
 			partialTick, partialTick, packedLight, entityRenderDispatcher, blockEntityRenderDispatcher,
-			null, null, 0L);
+			null, null, 0L, null);
+	}
+
+	/** Compatibility constructor for callers that use the former full shape. */
+	public EntityBlockGeometryContext(
+		ClientLevel level,
+		BlockPos blockPos,
+		BlockState blockState,
+		BlockEntity blockEntity,
+		int argbColor,
+		Vec3 cameraPosition,
+		float partialTick,
+		float flywheelPartialTick,
+		int packedLight,
+		EntityRenderDispatcher entityRenderDispatcher,
+		BlockEntityRenderDispatcher blockEntityRenderDispatcher,
+		LevelRenderer levelRenderer,
+		TargetKey targetKey,
+		long frameId
+	) {
+		this(level, blockPos, blockState, blockEntity, argbColor, cameraPosition,
+			partialTick, flywheelPartialTick, packedLight, entityRenderDispatcher,
+			blockEntityRenderDispatcher, levelRenderer, targetKey, frameId, null);
 	}
 
 	/**
@@ -86,6 +109,7 @@ public record EntityBlockGeometryContext(
 			null,
 			null,
 			null,
-		0L);
+		0L,
+			null);
 	}
 }

@@ -1,6 +1,8 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "標記位置",
+	"key.pingforit.select_transparent_block": "選取透明方塊",
+	"key.pingforit.allow_blacklisted_target": "允許黑名單目標",
 	"key.pingforit.open_settings": "開啟設定",
 	"subtitles.pingforit.ping": "標記位置警報",
 

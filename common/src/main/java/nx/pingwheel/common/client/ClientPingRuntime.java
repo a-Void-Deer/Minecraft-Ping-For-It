@@ -56,6 +56,7 @@ import nx.pingwheel.common.client.LongPressCompatibilityController;
 import nx.pingwheel.common.integration.DistantHorizonsIntegration;
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.integration.SableIntegration;
+import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
@@ -72,6 +73,7 @@ import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
 import nx.pingwheel.common.util.InputUtils;
+import nx.pingwheel.common.math.RaycastPolicy;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
@@ -672,8 +674,11 @@ public final class ClientPingRuntime {
 			config.getRaycastDistance(),
 			config.getPingDistance());
 
+		RaycastPolicy raycastPolicy = RaycastPolicy.from(
+			InputUtils.KEY_BINDING_SELECT_TRANSPARENT_BLOCK.isDown(),
+			InputUtils.KEY_BINDING_ALLOW_BLACKLISTED_TARGET.isDown());
 		var hitResult = Raycast.traceDirectional(
-			rayOrigin, cameraDirection, distance, cameraEntity.isCrouching());
+			rayOrigin, cameraDirection, distance, raycastPolicy);
 
 		if (hitResult == null || hitResult.getType() == HitResult.Type.MISS) {
 			HitResult missHit = hitResult;
@@ -722,19 +727,42 @@ public final class ClientPingRuntime {
 			return;
 		}
 
-		if (ModContext.HasSable && hitResult.getType() == HitResult.Type.BLOCK) {
+		boolean sableCaptureAttempted = ModContext.HasSable && hitResult.getType() == HitResult.Type.BLOCK;
+
+		if (sableCaptureAttempted) {
+			Optional<TargetSnapshot> sableCandidate = SableClientProvider.capture(
+				level,
+				(BlockHitResult) hitResult,
+				rayOrigin,
+				rayOrigin.add(cameraDirection.scale(distance)));
+
+			if (sableCandidate.isPresent()) {
+				completeCapture(token, sableCandidate.get(), pressRay);
+				return;
+			}
+
 			var projected = SableIntegration.projectOutOfSubLevel(game.level, hitResult.getLocation());
 
-			// Preserve the Sable behavior: a block hit inside a sub-level is
-			// projected back out into the real level and captured as a pure
-			// location target.
+			// If the provider cannot positively resolve the local block, preserve
+			// the pre-existing projected-location fallback.
 			if (projected.isPresent()) {
 				var projectedPos = projected.get();
+				SableClientProvider.logCaptureFallback(
+					"PROJECTED_LOCATION", "external-capture-failed", "projection",
+					"hit_location", hitResult.getLocation(),
+					"projected_position", projectedPos);
 				completeCapture(token, TargetSnapshotFactory.location(
 					game.level.dimension().location().toString(),
 					projectedPos.x, projectedPos.y, projectedPos.z), pressRay);
 				return;
 			}
+		}
+
+		if (sableCaptureAttempted) {
+			SableClientProvider.logCaptureFallback(
+				"VANILLA_TARGET_FACTORY", "external-and-projected-capture-failed", "vanilla-target-factory",
+				"hit_location", hitResult.getLocation(),
+				"block_pos", hitResult instanceof BlockHitResult blockHit ? blockHit.getBlockPos() : null);
 		}
 
 		completeCapture(token, MinecraftTargetSnapshotFactory.from(game.level, hitResult), pressRay);
@@ -866,6 +894,20 @@ public final class ClientPingRuntime {
 				var topCenter = EntityMarkerPoint.forLiveEntity(entity, 1.0F);
 				return new WorldVector(topCenter.x, topCenter.y, topCenter.z);
 			}
+		} else if (target instanceof Target.ExternalBlockTarget external
+			&& Game != null && Game.level != null
+			&& currentDimension.equals(Game.level.dimension().location().toString())) {
+			Optional<Vec3> livePosition = SableClientProvider.resolvePosition(Game.level, external, 1.0F);
+
+			if (livePosition.isPresent()) {
+				Vec3 position = livePosition.get();
+				return new WorldVector(position.x, position.y, position.z);
+			}
+
+			// A provider miss is temporary presentation unavailability, not a
+			// local invalidation. Use the authoritative server fallback directly
+			// rather than retaining a stale sub-level render position.
+			return anchorPosition;
 		}
 
 		return MarkerCandidatePosition.resolve(
@@ -913,7 +955,7 @@ public final class ClientPingRuntime {
 		MarkerSnapshot snapshot = Objects.requireNonNull(packet.snapshot(), "snapshot");
 		TargetNameJson targetName = Objects.requireNonNull(packet.targetName(), "targetName");
 
-		boolean newlySeen = markerStore.marker(snapshot.id()).isEmpty();
+		boolean newlySeen = isNewMarkerReceipt(markerStore, snapshot.id());
 
 		markerStore.onCreated(snapshot, localTick);
 		nameStore.onCreated(snapshot.id(), targetName);
@@ -1157,10 +1199,21 @@ public final class ClientPingRuntime {
 		this.wheelSelection = Objects.requireNonNull(selection, "selection");
 	}
 
+	/**
+	 * The effect gate shared by created-marker handling: a same-id upsert is a
+	 * payload refresh, not a new sound/chat receipt.
+	 */
+	static boolean isNewMarkerReceipt(ClientMarkerStore store, MarkerId markerId) {
+		Objects.requireNonNull(store, "store");
+		Objects.requireNonNull(markerId, "markerId");
+		return store.marker(markerId).isEmpty();
+	}
+
 	private static TargetKind targetKindOf(TargetKey targetKey) {
 		return switch (targetKey) {
 			case TargetKey.EntityKey ignored -> TargetKind.ENTITY;
 			case TargetKey.BlockKey ignored -> TargetKind.BLOCK;
+			case TargetKey.ExternalBlockKey ignored -> TargetKind.BLOCK;
 			case TargetKey.LocationKey ignored -> TargetKind.LOCATION;
 		};
 	}

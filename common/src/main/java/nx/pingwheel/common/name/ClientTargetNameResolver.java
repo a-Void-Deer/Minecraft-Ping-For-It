@@ -20,6 +20,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 
 /**
  * Client-only presentation resolver for the target frozen in a ping
@@ -42,6 +43,14 @@ public final class ClientTargetNameResolver {
 		Optional<Component> entity(Target.EntityTarget target);
 
 		Optional<Component> block(Target.BlockTarget target);
+
+		/**
+		 * Optional generic seam for a later external-provider name adapter. The
+		 * default keeps this stage provider-free and fails soft to the unknown name.
+		 */
+		default Optional<Component> externalBlock(Target.ExternalBlockTarget target) {
+			return Optional.empty();
+		}
 	}
 
 	private final Lookup lookup;
@@ -77,6 +86,9 @@ public final class ClientTargetNameResolver {
 					.map(Objects::requireNonNull)
 					.orElseGet(TargetNameComposer::unknown);
 				case Target.BlockTarget block -> lookup.block(block)
+					.map(Objects::requireNonNull)
+					.orElseGet(TargetNameComposer::unknown);
+				case Target.ExternalBlockTarget external -> lookup.externalBlock(external)
 					.map(Objects::requireNonNull)
 					.orElseGet(TargetNameComposer::unknown);
 			};
@@ -160,6 +172,17 @@ public final class ClientTargetNameResolver {
 			}
 
 			return Optional.of(baseName);
+		}
+
+		@Override
+		public Optional<Component> externalBlock(Target.ExternalBlockTarget target) {
+			Minecraft game = CommonClient.Game;
+
+			if (game == null || game.level == null || !sameDimension(game.level, target.dimensionId())) {
+				return Optional.empty();
+			}
+
+			return SableClientProvider.resolveName(game.level, target);
 		}
 
 		private static boolean sameDimension(Level level, String targetDimensionId) {

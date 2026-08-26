@@ -88,6 +88,24 @@ class ClientMarkerStoreTest {
 	}
 
 	@Test
+	void externalSameIdUpsertReplacesLocatorWithoutChangingStableTargetKey() {
+		ClientMarkerStore store = newStore();
+		MarkerId id = new MarkerId(3L);
+		Target.ExternalBlockTarget first = Target.ExternalBlockTarget.committed(
+			OVERWORLD, "sable", "tracking-id", "minecraft:chest", "locator-a", true);
+		Target.ExternalBlockTarget second = Target.ExternalBlockTarget.committed(
+			OVERWORLD, "sable", "tracking-id", "minecraft:chest", "locator-b", true);
+
+		store.onCreated(snapshot(id, first, 10L, 110L), 50L);
+		TargetKey key = TargetKey.from(first);
+		store.onCreated(snapshot(id, second, 10L, 110L), 60L);
+
+		assertEquals(second, store.marker(id).orElseThrow().target());
+		assertEquals(key, store.marker(id).orElseThrow().targetKey());
+		assertEquals(1, store.allMarkers().size());
+	}
+
+	@Test
 	void createdRejectsNullSnapshotAndNegativeTick() {
 		ClientMarkerStore store = newStore();
 

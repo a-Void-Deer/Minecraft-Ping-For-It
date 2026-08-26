@@ -51,12 +51,21 @@ public final class BuiltInTargetMatchers {
 				(Target target, TargetMatchContext context) -> target instanceof Target.EntityTarget)
 			.bind("entity_block",
 				(Target target, TargetMatchContext context) ->
-					target instanceof Target.BlockTarget
-						&& context.blockHasBlockEntity().orElse(false))
+					isBlockTarget(target)
+						&& hasBlockEntityClassification(target, context))
 			.bind("block",
-				(Target target, TargetMatchContext context) -> target instanceof Target.BlockTarget)
+				(Target target, TargetMatchContext context) -> isBlockTarget(target))
 			.bind("location",
 				(Target target, TargetMatchContext context) -> target instanceof Target.LocationTarget)
 			.build();
+	}
+
+	private static boolean isBlockTarget(Target target) {
+		return target instanceof Target.BlockTarget || target instanceof Target.ExternalBlockTarget;
+	}
+
+	private static boolean hasBlockEntityClassification(Target target, TargetMatchContext context) {
+		return context.blockHasBlockEntity().orElseGet(() ->
+			target instanceof Target.ExternalBlockTarget external && external.hasBlockEntity());
 	}
 }

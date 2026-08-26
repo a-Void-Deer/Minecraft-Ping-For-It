@@ -79,4 +79,40 @@ public enum BlockModelOutlineRoute {
 
 		return VOXEL;
 	}
+
+	/**
+	 * Resolves the native model route for a provider-owned block.
+	 *
+	 * <p>The outer native-glow decision is still supplied by the same compiled
+	 * {@code BlockDisplayPolicy} used for ordinary blocks. Provider-owned
+	 * {@code entity_block} targets enter the shared entity-block geometry runner,
+	 * which resolves a fresh local BlockEntity for each source attempt and owns
+	 * both the direct renderer and baked-model routes. A non-model state may
+	 * still use the direct BlockEntityRenderer route, while the baked-model
+	 * source remains restricted to {@code MODEL} states. Ordinary provider-owned
+	 * {@code block} targets retain their virtual BlockDisplay route.</p>
+	 *
+	 * @param targetTypeId      authoritative target type id
+	 * @param nativeGlowMatches result of the shared block display policy
+	 * @param modelState        whether the live state has {@code MODEL} render
+	 *                          shape; this gate applies only to ordinary
+	 *                          {@code block} targets because an {@code entity_block}
+	 *                          may have dynamic renderer geometry without a model
+	 */
+	public static BlockModelOutlineRoute routeExternal(
+		String targetTypeId, boolean nativeGlowMatches, boolean modelState
+	) {
+		Objects.requireNonNull(targetTypeId, "targetTypeId");
+
+		if (!nativeGlowMatches) {
+			return VOXEL;
+		}
+
+		if (TARGET_TYPE_ENTITY_BLOCK.equals(targetTypeId)) {
+			return ENTITY_BLOCK;
+		}
+
+		return TARGET_TYPE_BLOCK.equals(targetTypeId) && modelState
+			? BLOCK_DISPLAY : VOXEL;
+	}
 }

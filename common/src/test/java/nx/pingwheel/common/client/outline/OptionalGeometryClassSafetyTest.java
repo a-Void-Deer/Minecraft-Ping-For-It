@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -25,6 +26,25 @@ class OptionalGeometryClassSafetyTest {
 	}
 
 	@Test
+	void commonSourceOutcomeContractRemainsIndependentOfOptionalClasses() {
+		assertEquals(
+			EntityBlockGeometryOutcome.EMPTY,
+			EntityBlockGeometryOutcome.fromEmittedVertices(0));
+		assertEquals(
+			EntityBlockGeometryOutcome.RENDERED,
+			EntityBlockGeometryOutcome.fromEmittedVertices(1));
+		assertEquals(
+			EntityBlockGeometryOutcome.RENDERED,
+			EntityBlockGeometryOutcome.fromEmittedVertices(Integer.MAX_VALUE));
+		assertEquals(
+			List.of(
+				EntityBlockGeometryOutcome.RENDERED,
+				EntityBlockGeometryOutcome.EMPTY,
+				EntityBlockGeometryOutcome.FAILED),
+			List.of(EntityBlockGeometryOutcome.values()));
+	}
+
+	@Test
 	void optionalAdapterUsesIndirectStateResolutionWithoutVisibilityMutation() throws IOException {
 		Path source = findRepositoryFile(Path.of(
 			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
@@ -37,6 +57,33 @@ class OptionalGeometryClassSafetyTest {
 		assertFalse(adapter.contains("isVisible("));
 		assertFalse(adapter.contains("setVisible("));
 		assertFalse(adapter.contains("setDeleted("));
+	}
+
+	@Test
+	void flywheelAdapterKeepsMainAndEmbeddedVertexContracts() throws IOException {
+		Path adapterPath = findRepositoryFile(Path.of(
+			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
+			"integration", "create", "CreateFlywheelGeometryAdapter.java"));
+		Path transformPath = findRepositoryFile(Path.of(
+			"common", "src", "main", "java", "nx", "pingwheel", "common", "client",
+			"outline", "EntityBlockGeometryTransform.java"));
+		String adapter = Files.readString(adapterPath, StandardCharsets.UTF_8);
+		String transform = Files.readString(transformPath, StandardCharsets.UTF_8);
+
+		assertTrue(adapter.contains("instancer.environment == GlobalEnvironment.INSTANCE"));
+		assertTrue(adapter.contains("manager.renderOrigin()"));
+		assertTrue(adapter.contains("position.x() + originX"));
+		assertTrue(adapter.contains("position.y() + originY"));
+		assertTrue(adapter.contains("position.z() + originZ"));
+		assertTrue(adapter.contains("context.transform().cameraRelativeEnvironmentVertex("));
+		assertTrue(adapter.contains("entry.environmentOrigin()"));
+		assertTrue(adapter.contains("FlywheelEnvironmentPolicy.accepts("));
+		assertFalse(adapter.contains("Sable"));
+
+		assertTrue(transform.contains("environmentOrigin.getX() + localVertex.x()"));
+		assertTrue(transform.contains("new Vector3f(\n\t\t\t(float) worldPosition.x"));
+		assertTrue(transform.contains("(float) worldPosition.y"));
+		assertTrue(transform.contains("(float) worldPosition.z"));
 	}
 
 	@Test

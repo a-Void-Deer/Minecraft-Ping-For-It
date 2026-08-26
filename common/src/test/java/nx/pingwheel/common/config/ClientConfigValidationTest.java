@@ -52,13 +52,13 @@ class ClientConfigValidationTest {
 	}
 
 	@Test
-	void entityBlockRenderModeDefaultsToCompatibleAndIsSerializedLocally() {
+	void entityBlockRenderModeDefaultsToAllAndIsSerializedLocally() {
 		ClientConfig config = new ClientConfig();
 
-		assertEquals(EntityBlockRenderMode.COMPATIBLE, config.getEntityBlockRenderMode());
+		assertEquals(EntityBlockRenderMode.ALL, config.getEntityBlockRenderMode());
 		assertEquals(EntityBlockRenderMode.ALL, EntityBlockRenderMode.get("all"));
 		assertEquals("voxel_shape_only", EntityBlockRenderMode.VOXEL_SHAPE_ONLY.toString());
-		assertTrue(new Gson().toJson(config).contains("\"entityBlockRenderMode\":\"COMPATIBLE\""));
+		assertTrue(new Gson().toJson(config).contains("\"entityBlockRenderMode\":\"ALL\""));
 
 		config.setEntityBlockRenderMode(EntityBlockRenderMode.ALL);
 		assertEquals(EntityBlockRenderMode.ALL, config.getEntityBlockRenderMode());
