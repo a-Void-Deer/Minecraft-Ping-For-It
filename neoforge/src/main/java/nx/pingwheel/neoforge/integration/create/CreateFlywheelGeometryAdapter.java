@@ -50,6 +50,7 @@ import nx.pingwheel.common.client.outline.FlywheelRenderClock;
 import nx.pingwheel.common.client.outline.FlywheelSilhouetteMask;
 import nx.pingwheel.common.client.outline.FlywheelTransformMath;
 import nx.pingwheel.common.util.WeakIdentityCache;
+import nx.pingwheel.common.marker.TargetKey;
 
 import com.simibubi.create.content.kinetics.base.RotatingInstance;
 import com.simibubi.create.content.processing.burner.ScrollInstance;
@@ -762,9 +763,21 @@ public final class CreateFlywheelGeometryAdapter {
 			return "<unknown-target>";
 		}
 		var key = context.targetKey();
-		return "dimension=" + key.dimensionId() + "; position="
-			+ key.x() + "," + key.y() + "," + key.z()
-			+ "; blockRegistryId=" + key.blockRegistryId();
+		return switch (key) {
+			case TargetKey.BlockKey block ->
+				"dimension=" + block.dimensionId() + "; position="
+					+ block.x() + "," + block.y() + "," + block.z()
+					+ "; blockRegistryId=" + block.blockRegistryId();
+			case TargetKey.ExternalBlockKey external ->
+				"dimension=" + external.dimensionId() + "; provider=" + external.providerId()
+					+ "; stableTargetId=" + external.stableTargetId()
+					+ "; expectedBlockRegistryId=" + external.expectedBlockRegistryId();
+			case TargetKey.EntityKey entity ->
+				"dimension=" + entity.dimensionId() + "; entity=" + entity.locator();
+			case TargetKey.LocationKey location ->
+				"dimension=" + location.dimensionId() + "; position="
+					+ location.x() + "," + location.y() + "," + location.z();
+		};
 	}
 
 	private static String diagnosticDetails(

@@ -297,7 +297,8 @@ public final class VirtualBlockDisplayRenderer {
 				blockEntityDispatcher,
 				Minecraft.getInstance().levelRenderer,
 				targetKey,
-				BlockModelOutlineState.INSTANCE.frameId()));
+				BlockModelOutlineState.INSTANCE.frameId(),
+				null));
 	}
 
 	/**
@@ -417,13 +418,19 @@ public final class VirtualBlockDisplayRenderer {
 				return EntityBlockGeometryOutcome.EMPTY;
 			}
 
-			poseStack = new PoseStack();
-			poseStack.pushPose();
-			posePushed = true;
-			poseStack.translate(
-				pos.getX() - context.cameraPosition().x,
-				pos.getY() - context.cameraPosition().y,
-				pos.getZ() - context.cameraPosition().z);
+			if (context.transform() == null) {
+				poseStack = new PoseStack();
+				poseStack.pushPose();
+				posePushed = true;
+				poseStack.translate(
+					pos.getX() - context.cameraPosition().x,
+					pos.getY() - context.cameraPosition().y,
+					pos.getZ() - context.cameraPosition().z);
+			} else {
+				// External geometry owns the local-to-world transform. The BER
+				// route deliberately receives no block-state model offset.
+				poseStack = context.transform().createPoseStack(pos, context.cameraPosition(), null);
+			}
 
 			try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
 				MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
@@ -641,6 +648,18 @@ public final class VirtualBlockDisplayRenderer {
 			failureRegistryId(context),
 			context.targetKey(),
 			() -> {
+				if (context.transform() != null) {
+					return new BlockDisplayRenderArguments(
+						context.transform().createPoseStack(
+							context.blockPos(),
+							context.cameraPosition(),
+							context.blockState().getOffset(context.level(), context.blockPos())),
+						0.0D,
+						0.0D,
+						0.0D,
+						context.blockState().getSeed(context.blockPos()));
+				}
+
 				Vec3 renderPosition = BlockDisplayPlacement.cameraRelative(
 					context.blockPos(),
 					context.cameraPosition(),
