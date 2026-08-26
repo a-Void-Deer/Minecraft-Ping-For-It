@@ -188,8 +188,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 					available.position().getZ() + 0.5),
 				available.subLevel());
 
+			// Discovery requires the generator's return type to be UUID. A different
+			// runtime value is contract drift; fail soft without pretending that an
+			// unidentifiable provider resource can be cleaned up by UUID.
 			if (!(generated instanceof UUID trackingId)) {
-				return new MaterializationResult.Invalid();
+				throw new IllegalStateException("tracking point generator violated its UUID return contract");
 			}
 			generatedId = trackingId;
 

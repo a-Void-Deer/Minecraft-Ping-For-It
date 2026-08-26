@@ -57,6 +57,11 @@ class BlockOutlineStateTest {
 		return new TargetKey.BlockKey(OVERWORLD, x, y, z, "minecraft:stone");
 	}
 
+	private static Target.ExternalBlockTarget externalTarget() {
+		return Target.ExternalBlockTarget.committed(
+			OVERWORLD, "provider:test", "tracking-id", "minecraft:chest", "locator", true);
+	}
+
 	private static MarkerSnapshot snapshot(long id, Target target, String pingTypeId) {
 		return new MarkerSnapshot(
 			new MarkerId(id),
@@ -198,6 +203,42 @@ class BlockOutlineStateTest {
 
 		assertNull(state.specFor(keyAt(1, 2, 3)));
 		assertTrue(state.snapshot().isEmpty());
+		assertEquals(List.of(
+			new Transition(1, 0, 0, 1),
+			new Transition(0, 1, 0, 0)
+		), transitions);
+	}
+
+	@Test
+	void prepareAndClearTracksExternalSnapshotSeparately() {
+		BlockOutlineState state = installRecordingLogger();
+		Target.ExternalBlockTarget target = externalTarget();
+		TargetKey key = TargetKey.from(target);
+		ClientMarkerStore store = new ClientMarkerStore(10L);
+		MarkerId markerId = new MarkerId(6L);
+
+		store.onCreated(
+			new MarkerSnapshot(
+				markerId,
+				OWNER,
+				target,
+				"entity_block",
+				"attention",
+				new MarkerAnchor(1, 2, 3),
+				1L,
+				100L),
+			0L);
+		store.onWinnerChanged(key, Optional.of(markerId));
+
+		state.prepare(store, OVERWORLD);
+
+		assertTrue(state.snapshot().isEmpty());
+		assertEquals(target, state.externalSnapshot().get(key).target());
+		assertEquals(markerId, state.externalSnapshot().get(key).markerId());
+
+		state.clear();
+
+		assertTrue(state.externalSnapshot().isEmpty());
 		assertEquals(List.of(
 			new Transition(1, 0, 0, 1),
 			new Transition(0, 1, 0, 0)

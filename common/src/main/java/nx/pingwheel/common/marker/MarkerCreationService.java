@@ -142,7 +142,7 @@ public final class MarkerCreationService {
 		long expiresAtTick,
 		List<UUID> recipients
 	) {
-		return create(null, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients);
+		return create(null, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients, null);
 	}
 
 	/**
@@ -158,6 +158,37 @@ public final class MarkerCreationService {
 		long arrivalTick,
 		long expiresAtTick,
 		List<UUID> recipients
+	) {
+		return create(level, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients, null);
+	}
+
+	/**
+	 * Test seam for the external materialization transaction. It keeps the
+	 * creation pipeline independent of a live Minecraft server while preserving
+	 * the production ordering and release rules.
+	 */
+	MarkerCreateOutcome createWithExternalTransaction(
+		ExternalBlockTransaction transaction,
+		UUID owner,
+		Target requestedTarget,
+		String pingTypeId,
+		long arrivalTick,
+		long expiresAtTick,
+		List<UUID> recipients
+	) {
+		return create(
+			null, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients, transaction);
+	}
+
+	private MarkerCreateOutcome create(
+		ServerLevel level,
+		UUID owner,
+		Target requestedTarget,
+		String pingTypeId,
+		long arrivalTick,
+		long expiresAtTick,
+		List<UUID> recipients,
+		ExternalBlockTransaction transaction
 	) {
 		if (owner == null || requestedTarget == null || pingTypeId == null || recipients == null) {
 			logger.debug("create rejected: null owner, target, ping type id, or recipients");
@@ -215,12 +246,15 @@ public final class MarkerCreationService {
 
 		if (requestedTarget instanceof Target.ExternalBlockTarget
 			|| resolvedTarget.target() instanceof Target.ExternalBlockTarget) {
-			if (!(resolvedTarget.target() instanceof Target.ExternalBlockTarget external) || level == null) {
+			if (!(resolvedTarget.target() instanceof Target.ExternalBlockTarget external)
+				|| (level == null && transaction == null)) {
 				return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
 			}
 
 			ExternalBlockServerProvider.MaterializationResult materialization =
-				externalProviders.materialize(level, external);
+				transaction == null
+					? externalProviders.materialize(level, external)
+					: transaction.materialize(external);
 
 			if (materialization instanceof ExternalBlockServerProvider.MaterializationResult.TemporarilyUnavailable) {
 				return MarkerCreateOutcome.rejected(MarkerRejectReason.TARGET_GONE);
@@ -239,14 +273,14 @@ public final class MarkerCreationService {
 				materialized.target(), materialized.matchContext());
 
 			if (reclassified.isEmpty()) {
-				releaseMaterialized(level, materializedTarget);
+				releaseMaterialized(level, materializedTarget, transaction);
 				return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
 			}
 
 			markerTargetType = reclassified.get().targetType();
 
 			if (!markerTargetType.pingTypes().contains(pingType)) {
-				releaseMaterialized(level, materializedTarget);
+				releaseMaterialized(level, materializedTarget, transaction);
 				return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_PING_TYPE);
 			}
 
@@ -270,7 +304,7 @@ public final class MarkerCreationService {
 			return MarkerCreateOutcome.accepted(creation, markerName);
 		} catch (RuntimeException e) {
 			if (materializedTarget != null) {
-				releaseMaterialized(level, materializedTarget);
+				releaseMaterialized(level, materializedTarget, transaction);
 			}
 
 			logger.debugException("create rejected: store contract failure", e);
@@ -291,8 +325,12 @@ public final class MarkerCreationService {
 		}
 	}
 
-	private void releaseMaterialized(ServerLevel level, Target.ExternalBlockTarget target) {
-		if (level != null) {
+	private void releaseMaterialized(
+		ServerLevel level, Target.ExternalBlockTarget target, ExternalBlockTransaction transaction
+	) {
+		if (transaction != null) {
+			transaction.release(target);
+		} else if (level != null) {
 			externalProviders.release(level.getServer(), target);
 		}
 	}
@@ -374,4 +412,12 @@ public final class MarkerCreationService {
 			return Optional.empty();
 		}
 	}
+}
+
+/** Package-private transaction seam used by the external-provider tests. */
+interface ExternalBlockTransaction {
+
+	ExternalBlockServerProvider.MaterializationResult materialize(Target.ExternalBlockTarget candidate);
+
+	void release(Target.ExternalBlockTarget committed);
 }

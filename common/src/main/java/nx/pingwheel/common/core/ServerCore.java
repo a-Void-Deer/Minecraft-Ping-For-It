@@ -18,6 +18,7 @@ import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.integration.ExternalBlockServerProviders;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
+import nx.pingwheel.common.integration.externalblock.ExternalBlockRefreshTriage;
 import nx.pingwheel.common.integration.TeamContextHandler;
 import nx.pingwheel.common.marker.MarkerCreationLogger;
 import nx.pingwheel.common.marker.MarkerCreationService;
@@ -574,10 +575,6 @@ public class ServerCore {
 
 			ExternalBlockServerProvider.RefreshResult result = registry.refresh(level, external);
 
-			if (result instanceof ExternalBlockServerProvider.RefreshResult.TemporarilyUnavailable) {
-				continue;
-			}
-
 			boolean sameTargetKey = false;
 			if (result instanceof ExternalBlockServerProvider.RefreshResult.Available available) {
 				try {
@@ -587,7 +584,14 @@ public class ServerCore {
 				}
 			}
 
-			if (result instanceof ExternalBlockServerProvider.RefreshResult.Available available && sameTargetKey) {
+			ExternalBlockRefreshTriage.Action action = ExternalBlockRefreshTriage.action(result, sameTargetKey);
+
+			if (action == ExternalBlockRefreshTriage.Action.RETAIN) {
+				continue;
+			}
+
+			if (action == ExternalBlockRefreshTriage.Action.UPDATE
+				&& result instanceof ExternalBlockServerProvider.RefreshResult.Available available) {
 				Target.ExternalBlockTarget refreshedTarget = available.target();
 				Target.ExternalBlockTarget previousTarget = (Target.ExternalBlockTarget) marker.target();
 				boolean changed = !previousTarget.providerLocator().equals(refreshedTarget.providerLocator())

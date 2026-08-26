@@ -1,5 +1,8 @@
 package nx.pingwheel.common.integration.sable.client;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -10,6 +13,7 @@ import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Position;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -80,7 +84,8 @@ final class SableClientCompanionAccess {
 			return Optional.empty();
 		}
 
-		SubLevelCandidate best = null;
+		UUID containingSubLevelId = containingSubLevelId(level, localHit);
+		List<SubLevelCandidate> candidates = new ArrayList<>();
 		BoundingBox3d rayBounds = new BoundingBox3d(rayStart, rayEnd);
 
 		for (SubLevelAccess access : companion.getAllIntersecting(level, rayBounds)) {
@@ -91,6 +96,14 @@ final class SableClientCompanionAccess {
 			UUID subLevelId = clientAccess.getUniqueId();
 
 			if (subLevelId == null) {
+				continue;
+			}
+
+			// Companion's containing lookup is a positive plot-grid identity check
+			// when it is available. It cannot distinguish an ordinary parent-world
+			// block occupying the same reserved plot, so the geometric checks below
+			// remain deliberately fail-soft rather than inventing an identity.
+			if (containingSubLevelId != null && !containingSubLevelId.equals(subLevelId)) {
 				continue;
 			}
 
@@ -108,28 +121,37 @@ final class SableClientCompanionAccess {
 				continue;
 			}
 
-			Vec3 worldHit = clientAccess.logicalPose().transformPosition(localHit);
+			Pose3dc logicalPose = clientAccess.logicalPose();
+
+			if (logicalPose == null) {
+				continue;
+			}
+
+			Vec3 worldHit = logicalPose.transformPosition(localHit);
 			RayPoint rayPoint = rayPoint(rayStart, ray, rayLengthSquared, worldHit);
 
 			if (rayPoint == null) {
 				continue;
 			}
 
-			SubLevelCandidate candidate = new SubLevelCandidate(
+			candidates.add(new SubLevelCandidate(
 				clientAccess,
 				resolved.get(),
 				subLevelId,
 				registryId,
-				rayPoint.distanceSquared());
-
-			if (best == null || candidate.distanceSquared() < best.distanceSquared()) {
-				best = candidate;
-			}
+				rayPoint,
+				worldHit));
 		}
 
-		if (best == null) {
+		candidates.sort(SUB_LEVEL_CANDIDATE_ORDER);
+
+		if (candidates.isEmpty()
+			|| (candidates.size() > 1
+				&& SUB_LEVEL_CANDIDATE_ORDER.compare(candidates.get(0), candidates.get(1)) == 0)) {
 			return Optional.empty();
 		}
+
+		SubLevelCandidate best = candidates.get(0);
 
 		SableExternalBlockLocator locator = new SableExternalBlockLocator(best.subLevelId(), localPos);
 		boolean hasBlockEntity = BlockEntityClassification.hasBlockEntity(best.resolved().state());
@@ -143,15 +165,16 @@ final class SableClientCompanionAccess {
 	}
 
 	Vec3 projectOutOfSubLevel(ClientLevel level, Vec3 hitPosition) {
-		// Companion's projection method returns the input position unchanged for
-		// a parent-level point. Preserve the old adapter's positive containment
-		// check so ordinary blocks never get downgraded to locations merely
-		// because Sable is present.
-		if (companion.getContainingClient(hitPosition) == null) {
+		// Only project a position that Companion identifies as belonging to a
+		// client sub-level plot. This is a plot lookup, not proof that an ordinary
+		// parent-world block in a reserved plot belongs to that sub-level.
+		Position position = hitPosition;
+
+		if (companion.getContainingClient(position) == null) {
 			return null;
 		}
 
-		return companion.projectOutOfSubLevel(level, hitPosition);
+		return companion.projectOutOfSubLevel(level, position);
 	}
 
 	Optional<SableClientProvider.ExternalBlockPresentation> resolve(
@@ -272,6 +295,15 @@ final class SableClientCompanionAccess {
 		return Optional.of(baseName);
 	}
 
+	private UUID containingSubLevelId(ClientLevel level, Position position) {
+		if (companion.getClientLevel() != level) {
+			return null;
+		}
+
+		ClientSubLevelAccess containing = companion.getContainingClient(position);
+		return containing == null ? null : containing.getUniqueId();
+	}
+
 	private static RayPoint rayPoint(Vec3 origin, Vec3 ray, double rayLengthSquared, Vec3 point) {
 		Vec3 fromOrigin = point.subtract(origin);
 		double normalizedDistance = fromOrigin.dot(ray) / rayLengthSquared;
@@ -284,22 +316,31 @@ final class SableClientCompanionAccess {
 		double distanceSquared = point.distanceToSqr(nearest);
 
 		return distanceSquared > RAY_EPSILON * RAY_EPSILON
-			? null : new RayPoint(origin.distanceToSqr(point));
+			? null : new RayPoint(normalizedDistance, distanceSquared);
 	}
 
 	private static boolean finite(Vec3 value) {
 		return Double.isFinite(value.x) && Double.isFinite(value.y) && Double.isFinite(value.z);
 	}
 
-	private record RayPoint(double distanceSquared) {
+	private record RayPoint(double projection, double perpendicularDistanceSquared) {
 	}
+
+	private static final Comparator<SubLevelCandidate> SUB_LEVEL_CANDIDATE_ORDER =
+		Comparator.comparingDouble((SubLevelCandidate candidate) -> candidate.rayPoint().projection())
+			.thenComparingDouble(candidate -> candidate.rayPoint().perpendicularDistanceSquared())
+			.thenComparingDouble(candidate -> candidate.worldHit().x)
+			.thenComparingDouble(candidate -> candidate.worldHit().y)
+			.thenComparingDouble(candidate -> candidate.worldHit().z)
+			.thenComparing(candidate -> candidate.registryId().toString());
 
 	private record SubLevelCandidate(
 		ClientSubLevelAccess access,
 		SableClientInternalAccess.ResolvedSubLevel resolved,
 		UUID subLevelId,
 		ResourceLocation registryId,
-		double distanceSquared
+		RayPoint rayPoint,
+		Vec3 worldHit
 	) {
 	}
 }

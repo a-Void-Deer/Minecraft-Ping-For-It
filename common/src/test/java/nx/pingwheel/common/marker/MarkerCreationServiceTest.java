@@ -2,6 +2,8 @@ package nx.pingwheel.common.marker;
 
 import org.junit.jupiter.api.Test;
 
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -15,10 +17,12 @@ import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.domain.TargetResolver;
 import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
+import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.name.TargetNameJson;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MarkerCreationServiceTest {
@@ -58,6 +62,16 @@ class MarkerCreationServiceTest {
 
 	private static Target locationTarget() {
 		return new Target.LocationTarget(OVERWORLD, 1.0, 2.0, 3.0);
+	}
+
+	private static Target.ExternalBlockTarget externalCandidate() {
+		return Target.ExternalBlockTarget.candidate(
+			OVERWORLD, "provider:test", "minecraft:chest", "candidate-locator", true);
+	}
+
+	private static Target.ExternalBlockTarget committedExternalTarget() {
+		return Target.ExternalBlockTarget.committed(
+			OVERWORLD, "provider:test", "tracking-id", "minecraft:chest", "committed-locator", true);
 	}
 
 	private static ValidatedMarkerTarget validated(Target normalized, TargetMatchContext context) {
@@ -334,6 +348,85 @@ class MarkerCreationServiceTest {
 		assertEquals(0, store.size());
 	}
 
+	// --- external materialization transaction ---------------------------------
+
+	@Test
+	void externalMaterializationWaitsForResolverAndPingMembership() {
+		newService();
+		Target.ExternalBlockTarget candidate = externalCandidate();
+		RecordingExternalProvider provider = new RecordingExternalProvider(
+			new ExternalBlockServerProvider.MaterializationResult.Invalid());
+		ExternalBlockTransaction transaction = transaction(provider);
+		validator.accepted(validated(candidate, TargetMatchContext.blockEntityBlock(true)));
+		resolver.resolves(candidate, targetType("entity_block"));
+
+		assertRejected(
+			service.createWithExternalTransaction(
+				transaction, OWNER, candidate, "does_not_exist", 10L, 110L, List.of(RECIPIENT)),
+			MarkerRejectReason.INVALID_PING_TYPE);
+		assertRejected(
+			service.createWithExternalTransaction(
+				transaction, OWNER, candidate, "go_to", 10L, 110L, List.of(RECIPIENT)),
+			MarkerRejectReason.INVALID_PING_TYPE);
+
+		assertEquals(0, provider.materializeCalls);
+		assertEquals(0, provider.releaseCalls);
+		assertEquals(0, store.size());
+	}
+
+	@Test
+	void externalMaterializationRejectionReleasesExactlyOnce() {
+		newService();
+		Target.ExternalBlockTarget candidate = externalCandidate();
+		RecordingExternalProvider provider = new RecordingExternalProvider(
+			new ExternalBlockServerProvider.MaterializationResult.Materialized(
+				new ExternalBlockServerProvider.MaterializedTarget(
+					committedExternalTarget(),
+					TargetMatchContext.blockEntityBlock(true),
+					ANCHOR)));
+		validator.accepted(validated(candidate, TargetMatchContext.blockEntityBlock(true)));
+		resolver.resolves(candidate, targetType("entity_block"));
+		resolver.returnNullAfterFirst();
+
+		assertRejected(
+			service.createWithExternalTransaction(
+				transaction(provider), OWNER, candidate, "attention", 10L, 110L, List.of(RECIPIENT)),
+			MarkerRejectReason.INVALID_REQUEST);
+
+		assertEquals(1, provider.materializeCalls);
+		assertEquals(1, provider.releaseCalls);
+		assertEquals(0, store.size());
+	}
+
+	@Test
+	void successfulExternalMaterializationRetainsCommittedTargetInStore() {
+		newService();
+		Target.ExternalBlockTarget candidate = externalCandidate();
+		Target.ExternalBlockTarget committed = committedExternalTarget();
+		RecordingExternalProvider provider = new RecordingExternalProvider(
+			new ExternalBlockServerProvider.MaterializationResult.Materialized(
+				new ExternalBlockServerProvider.MaterializedTarget(
+					committed,
+					TargetMatchContext.blockEntityBlock(true),
+					ANCHOR)));
+		validator.accepted(validated(candidate, TargetMatchContext.blockEntityBlock(true)));
+		resolver.resolves(candidate, targetType("entity_block"));
+
+		MarkerCreateOutcome outcome = service.createWithExternalTransaction(
+			transaction(provider), OWNER, candidate, "attention", 10L, 110L, List.of(RECIPIENT));
+
+		assertTrue(outcome.isAccepted());
+		assertEquals(1, provider.materializeCalls);
+		assertEquals(0, provider.releaseCalls);
+		assertEquals(1, store.size());
+
+		ServerMarker marker = outcome.creation().orElseThrow().marker();
+		assertEquals(committed, marker.target());
+		assertNotEquals(candidate, marker.target());
+		assertTrue(marker.target() instanceof Target.ExternalBlockTarget external && external.isCommitted());
+		assertEquals(committed, MarkerSnapshot.from(marker).target());
+	}
+
 	// --- resolver contract failures ----------------------------------------------
 
 	@Test
@@ -537,6 +630,7 @@ class MarkerCreationServiceTest {
 		private ResolvedTarget result;
 		private RuntimeException failure;
 		private boolean returnNull;
+		private boolean returnNullAfterFirst;
 
 		@Override
 		public ResolvedTarget resolve(Target target, TargetMatchContext context) {
@@ -548,7 +642,7 @@ class MarkerCreationServiceTest {
 				throw failure;
 			}
 
-			if (returnNull) {
+			if (returnNull || (returnNullAfterFirst && calls > 1)) {
 				return null;
 			}
 
@@ -565,6 +659,68 @@ class MarkerCreationServiceTest {
 
 		void returnNull() {
 			this.returnNull = true;
+		}
+
+		void returnNullAfterFirst() {
+			this.returnNullAfterFirst = true;
+		}
+	}
+
+	private static ExternalBlockTransaction transaction(RecordingExternalProvider provider) {
+		return new ExternalBlockTransaction() {
+			@Override
+			public ExternalBlockServerProvider.MaterializationResult materialize(
+				Target.ExternalBlockTarget candidate
+			) {
+				return provider.materialize(null, candidate);
+			}
+
+			@Override
+			public void release(Target.ExternalBlockTarget committed) {
+				provider.release(null, committed);
+			}
+		};
+	}
+
+	private static final class RecordingExternalProvider implements ExternalBlockServerProvider {
+
+		private final MaterializationResult result;
+		private int materializeCalls;
+		private int releaseCalls;
+
+		private RecordingExternalProvider(MaterializationResult result) {
+			this.result = result;
+		}
+
+		@Override
+		public String providerId() {
+			return "provider:test";
+		}
+
+		@Override
+		public ValidationResult validate(ServerLevel level, Target.ExternalBlockTarget candidate) {
+			return new ValidationResult.Invalid();
+		}
+
+		@Override
+		public MaterializationResult materialize(ServerLevel level, Target.ExternalBlockTarget candidate) {
+			materializeCalls++;
+			return result;
+		}
+
+		@Override
+		public RefreshResult refresh(ServerLevel level, Target.ExternalBlockTarget committed) {
+			return new RefreshResult.Invalid();
+		}
+
+		@Override
+		public Optional<ExternalBlockName> resolveName(ServerLevel level, Target.ExternalBlockTarget target) {
+			return Optional.empty();
+		}
+
+		@Override
+		public void release(MinecraftServer server, Target.ExternalBlockTarget committed) {
+			releaseCalls++;
 		}
 	}
 }
