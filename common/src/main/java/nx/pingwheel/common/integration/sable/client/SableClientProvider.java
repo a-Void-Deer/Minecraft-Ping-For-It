@@ -10,9 +10,11 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import org.joml.Matrix4d;
 import org.joml.Matrix4f;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.client.outline.ExternalBlockOutlineTransform;
 import nx.pingwheel.common.integration.IntegrationLinkGuard;
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
@@ -449,7 +451,7 @@ public final class SableClientProvider {
 		BlockPos localBlockPos,
 		net.minecraft.world.level.block.state.BlockState blockState,
 		VoxelShape shape,
-		Matrix4f renderPose
+		Matrix4d renderPose
 	) {
 		public ExternalBlockPresentation {
 			Objects.requireNonNull(worldCenter, "worldCenter");
@@ -457,7 +459,18 @@ public final class SableClientProvider {
 			Objects.requireNonNull(blockState, "blockState");
 			Objects.requireNonNull(shape, "shape");
 			Objects.requireNonNull(renderPose, "renderPose");
-			renderPose = new Matrix4f(renderPose);
+			renderPose = new Matrix4d(renderPose);
+		}
+
+		/** The transformed integer-corner origin, kept in double precision. */
+		public Vec3 worldBlockOrigin() {
+			return ExternalBlockOutlineTransform.worldBlockOrigin(
+				renderPose, localBlockPos);
+		}
+
+		/** The pose's orientation and non-uniform scale, without translation. */
+		public Matrix4f orientationScale() {
+			return ExternalBlockOutlineTransform.orientationScale(renderPose);
 		}
 	}
 }

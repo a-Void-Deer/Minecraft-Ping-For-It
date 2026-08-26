@@ -26,7 +26,6 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Matrix4d;
-import org.joml.Matrix4f;
 import org.joml.Vector3d;
 
 import nx.pingwheel.common.domain.Target;
@@ -459,7 +458,7 @@ final class SableClientCompanionAccess {
 			locator.x() + 0.5D, locator.y() + 0.5D, locator.z() + 0.5D);
 		Vec3 worldCenter = renderPose.transformPosition(localCenter);
 		VoxelShape shape = state.getShape(stateData.level(), locator.blockPos(), collisionContext);
-		Matrix4f poseMatrix = new Matrix4f(renderPose.bakeIntoMatrix(new Matrix4d()));
+		Matrix4d poseMatrix = renderPose.bakeIntoMatrix(new Matrix4d());
 
 		if (!finite(worldCenter)) {
 			return Optional.empty();

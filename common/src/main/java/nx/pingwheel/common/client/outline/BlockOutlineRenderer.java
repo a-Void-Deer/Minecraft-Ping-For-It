@@ -157,13 +157,15 @@ public final class BlockOutlineRenderer {
 
 			var resolved = presentation.get();
 			poseStack.pushPose();
-			// The active LevelRenderer model-view matrix is camera-relative. The
-			// provider pose maps the sub-level's local coordinates into parent
-			// world coordinates, so compose camera translation, pose, and the
-			// local block transform in that order.
-			BlockPos localPos = resolved.localBlockPos();
+			// Resolve the integer corner in double precision before entering the
+			// PoseStack. Only the camera-relative origin and the small linear pose
+			// are allowed into float-backed render state; this avoids losing whole
+			// blocks when Sable plots are around twenty million coordinates.
 			ExternalBlockOutlineTransform.apply(
-				poseStack, resolved.renderPose(), localPos, cameraPosition);
+				poseStack,
+				resolved.worldBlockOrigin(),
+				resolved.orientationScale(),
+				cameraPosition);
 			VoxelShapeRenderUtil.renderEdges(
 				poseStack, lines, resolved.shape(), 0.0, 0.0, 0.0, spec.argbColor());
 			poseStack.popPose();
