@@ -1,8 +1,9 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "标记坐标",
-	"key.pingforit.select_transparent_block": "选择透明方块",
-	"key.pingforit.allow_blacklisted_target": "允许黑名单目标",
+	"key.pingforit.toggle_pass_through_transparent_blocks": "切换穿透透明方块",
+	"key.pingforit.toggle_mark_blacklisted_targets": "切换标记黑名单目标",
+	"key.pingforit.toggle_mark_fluids": "切换标记流体",
 	"key.pingforit.open_settings": "打开设置",
 	"subtitles.pingforit.ping": "坐标标记提醒",
 
@@ -20,6 +21,9 @@
 	"settings.pingforit.ping_distance": "标记距离: %s",
 	"settings.pingforit.item_icon_visible": "物品图标",
 	"settings.pingforit.direction_indicator_visible": "方向指示器",
+	"settings.pingforit.pass_through_transparent_blocks": "穿透透明方块",
+	"settings.pingforit.mark_blacklisted_targets": "标记黑名单目标",
+	"settings.pingforit.mark_fluids": "标记流体",
 	"settings.pingforit.ping_size": "标记点尺寸: %s",
 	"settings.pingforit.wheel_inner_radius": "轮盘内半径: %s",
 	"settings.pingforit.wheel_outer_radius": "轮盘外半径: %s",

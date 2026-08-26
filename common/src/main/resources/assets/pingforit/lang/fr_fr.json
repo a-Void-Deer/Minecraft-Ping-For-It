@@ -1,8 +1,9 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Localisation du Ping",
-	"key.pingforit.select_transparent_block": "Sélectionner les blocs transparents",
-	"key.pingforit.allow_blacklisted_target": "Autoriser les cibles de la liste noire",
+	"key.pingforit.toggle_pass_through_transparent_blocks": "Traverser les blocs transparents",
+	"key.pingforit.toggle_mark_blacklisted_targets": "Marquer les cibles de la liste noire",
+	"key.pingforit.toggle_mark_fluids": "Marquer les fluides",
 	"key.pingforit.open_settings": "Ouvrir les Paramètres",
 	"subtitles.pingforit.ping": "Alerte Ping de Localisation",
 
@@ -20,6 +21,9 @@
 	"settings.pingforit.ping_distance": "Distance du Ping : %s",
 	"settings.pingforit.item_icon_visible": "Icônes d'Objets",
 	"settings.pingforit.direction_indicator_visible": "Indicateur de Direction",
+	"settings.pingforit.pass_through_transparent_blocks": "Traverser les blocs transparents",
+	"settings.pingforit.mark_blacklisted_targets": "Marquer les cibles de la liste noire",
+	"settings.pingforit.mark_fluids": "Marquer les fluides",
 	"settings.pingforit.ping_size": "Taille du Ping : %s",
 	"settings.pingforit.wheel_font_size": "Taille de police des options de la roue : %s",
 	"settings.pingforit.wheel_target_font_size": "Taille de police de la cible de la roue : %s",

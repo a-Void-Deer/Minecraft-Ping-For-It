@@ -3,44 +3,25 @@ package nx.pingwheel.common.math;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RaycastPolicyTest {
 
 	@Test
-	void noModifiersUseVisualWithoutFluidSelectionOrIgnoredEntities() {
-		RaycastPolicy policy = RaycastPolicy.from(false, false);
+	void allEightToggleCombinationsRemainIndependent() {
+		for (boolean passThrough : new boolean[] {false, true}) {
+			for (boolean markBlacklisted : new boolean[] {false, true}) {
+				for (boolean markFluids : new boolean[] {false, true}) {
+					RaycastPolicy policy = RaycastPolicy.from(passThrough, markBlacklisted, markFluids);
 
-		assertEquals(RaycastPolicy.BlockMode.VISUAL, policy.blockMode());
-		assertEquals(RaycastPolicy.FluidMode.NONE, policy.fluidMode());
-		assertFalse(policy.includeIgnoredEntities());
-	}
-
-	@Test
-	void shiftUsesOutlineWithoutFluidSelectionOrIgnoredEntities() {
-		RaycastPolicy policy = RaycastPolicy.from(true, false);
-
-		assertEquals(RaycastPolicy.BlockMode.OUTLINE, policy.blockMode());
-		assertEquals(RaycastPolicy.FluidMode.NONE, policy.fluidMode());
-		assertFalse(policy.includeIgnoredEntities());
-	}
-
-	@Test
-	void ctrlUsesVisualWithFluidSelectionAndIgnoredEntities() {
-		RaycastPolicy policy = RaycastPolicy.from(false, true);
-
-		assertEquals(RaycastPolicy.BlockMode.VISUAL, policy.blockMode());
-		assertEquals(RaycastPolicy.FluidMode.ANY, policy.fluidMode());
-		assertTrue(policy.includeIgnoredEntities());
-	}
-
-	@Test
-	void shiftAndCtrlUseOutlineWithFluidSelectionAndIgnoredEntities() {
-		RaycastPolicy policy = RaycastPolicy.from(true, true);
-
-		assertEquals(RaycastPolicy.BlockMode.OUTLINE, policy.blockMode());
-		assertEquals(RaycastPolicy.FluidMode.ANY, policy.fluidMode());
-		assertTrue(policy.includeIgnoredEntities());
+					assertEquals(
+						passThrough ? RaycastPolicy.BlockMode.VISUAL : RaycastPolicy.BlockMode.OUTLINE,
+						policy.blockMode());
+					assertEquals(
+						markFluids ? RaycastPolicy.FluidMode.ANY : RaycastPolicy.FluidMode.NONE,
+						policy.fluidMode());
+					assertEquals(markBlacklisted, policy.includeIgnoredEntities());
+				}
+			}
+		}
 	}
 }

@@ -83,8 +83,9 @@ public class CommonClient {
 		IPlatformClientEventService.INSTANCE.registerLeaveServerEvent(this::onLeaveServer);
 
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_PING);
-		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_SELECT_TRANSPARENT_BLOCK);
-		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_ALLOW_BLACKLISTED_TARGET);
+		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_PASS_THROUGH_TRANSPARENT_BLOCKS);
+		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_MARK_BLACKLISTED_TARGETS);
+		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_MARK_FLUIDS);
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
 
 		// The lazy global loggers only ever emit aggregate transition counts.
@@ -136,6 +137,7 @@ public class CommonClient {
 		// physical event timestamp, not the later tick/frame time.
 		long eventTimeMillis = INTERACTION_TIME_SOURCE.nowMillis();
 		Game = Minecraft.getInstance();
+		InputUtils.handleToggleClick(rawKey);
 
 		if (!InputUtils.claimPingClick(rawKey)) {
 			return;

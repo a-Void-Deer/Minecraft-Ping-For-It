@@ -1,8 +1,9 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "標記位置",
-	"key.pingforit.select_transparent_block": "選取透明方塊",
-	"key.pingforit.allow_blacklisted_target": "允許黑名單目標",
+	"key.pingforit.toggle_pass_through_transparent_blocks": "切換穿透透明方塊",
+	"key.pingforit.toggle_mark_blacklisted_targets": "切換標記黑名單目標",
+	"key.pingforit.toggle_mark_fluids": "切換標記流體",
 	"key.pingforit.open_settings": "開啟設定",
 	"subtitles.pingforit.ping": "標記位置警報",
 
@@ -20,6 +21,9 @@
 	"settings.pingforit.ping_distance": "標記距離：%s",
 	"settings.pingforit.item_icon_visible": "物品圖示",
 	"settings.pingforit.direction_indicator_visible": "方向指示器",
+	"settings.pingforit.pass_through_transparent_blocks": "穿透透明方塊",
+	"settings.pingforit.mark_blacklisted_targets": "標記黑名單目標",
+	"settings.pingforit.mark_fluids": "標記流體",
 	"settings.pingforit.ping_size": "標記大小：%s",
 	"settings.pingforit.wheel_font_size": "輪盤選項字型大小：%s",
 	"settings.pingforit.wheel_target_font_size": "輪盤目標字型大小：%s",

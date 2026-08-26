@@ -27,6 +27,9 @@ public class ClientConfig implements IConfig {
 	int pingDistance = 2048;
 	boolean itemIconVisible = true;
 	boolean directionIndicatorVisible = true;
+	boolean passThroughTransparentBlocks = false;
+	boolean markBlacklistedTargets = false;
+	boolean markFluids = false;
 	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
 	TeamColorMode teamColorMode = TeamColorMode.FULL;
 	EntityBlockRenderMode entityBlockRenderMode = EntityBlockRenderMode.ALL;

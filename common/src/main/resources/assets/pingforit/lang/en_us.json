@@ -1,8 +1,9 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Ping Location",
-	"key.pingforit.select_transparent_block": "Select Transparent Blocks",
-	"key.pingforit.allow_blacklisted_target": "Allow Blacklisted Targets",
+	"key.pingforit.toggle_pass_through_transparent_blocks": "Toggle Transparent Block Pass-Through",
+	"key.pingforit.toggle_mark_blacklisted_targets": "Toggle Marking Blacklisted Targets",
+	"key.pingforit.toggle_mark_fluids": "Toggle Marking Fluids",
 	"key.pingforit.open_settings": "Open Settings",
 	"subtitles.pingforit.ping": "Location Ping Alert",
 
@@ -20,6 +21,9 @@
 	"settings.pingforit.ping_distance": "Ping Distance: %s",
 	"settings.pingforit.item_icon_visible": "Item Icons",
 	"settings.pingforit.direction_indicator_visible": "Direction Indicator",
+	"settings.pingforit.pass_through_transparent_blocks": "Pass Through Transparent Blocks",
+	"settings.pingforit.mark_blacklisted_targets": "Mark Blacklisted Targets",
+	"settings.pingforit.mark_fluids": "Mark Fluids",
 	"settings.pingforit.player_info_mode": "Player Info",
 	"settings.pingforit.player_info_mode.hold.tooltip": "Player Info is shown when the \"%s\" (%s) Key Bind is held",
 	"settings.pingforit.team_color_mode": "Team Color",

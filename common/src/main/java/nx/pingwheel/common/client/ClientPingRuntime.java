@@ -675,8 +675,9 @@ public final class ClientPingRuntime {
 			config.getPingDistance());
 
 		RaycastPolicy raycastPolicy = RaycastPolicy.from(
-			InputUtils.KEY_BINDING_SELECT_TRANSPARENT_BLOCK.isDown(),
-			InputUtils.KEY_BINDING_ALLOW_BLACKLISTED_TARGET.isDown());
+			config.isPassThroughTransparentBlocks(),
+			config.isMarkBlacklistedTargets(),
+			config.isMarkFluids());
 		var hitResult = Raycast.traceDirectional(
 			rayOrigin, cameraDirection, distance, raycastPolicy);
 

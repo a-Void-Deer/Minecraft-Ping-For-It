@@ -1,8 +1,9 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Lokalizacja pingu",
-	"key.pingforit.select_transparent_block": "Wybieraj przezroczyste bloki",
-	"key.pingforit.allow_blacklisted_target": "Zezwalaj na cele z czarnej listy",
+	"key.pingforit.toggle_pass_through_transparent_blocks": "Przechodzenie przezroczystych bloków",
+	"key.pingforit.toggle_mark_blacklisted_targets": "Oznaczanie celów z czarnej listy",
+	"key.pingforit.toggle_mark_fluids": "Oznaczanie płynów",
 	"key.pingforit.open_settings": "Otwórz ustawienia",
 	"subtitles.pingforit.ping": "Alert lokalizacji pingu",
 
@@ -20,6 +21,9 @@
 	"settings.pingforit.ping_distance": "Zasięg pingu: %s",
 	"settings.pingforit.item_icon_visible": "Ikony itemów",
 	"settings.pingforit.direction_indicator_visible": "Wskaźnik kierunku",
+	"settings.pingforit.pass_through_transparent_blocks": "Przechodzenie przezroczystych bloków",
+	"settings.pingforit.mark_blacklisted_targets": "Oznaczanie celów z czarnej listy",
+	"settings.pingforit.mark_fluids": "Oznaczanie płynów",
 	"settings.pingforit.ping_size": "Rozmiar pingu: %s",
 	"settings.pingforit.wheel_font_size": "Rozmiar czcionki opcji koła: %s",
 	"settings.pingforit.wheel_target_font_size": "Rozmiar czcionki celu koła: %s",

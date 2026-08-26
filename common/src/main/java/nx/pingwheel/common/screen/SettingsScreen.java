@@ -130,6 +130,9 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		this.list.addSmall(getPingVolumeOption(), getPingDistanceOption());
 
+		this.list.addSmall(getPassThroughTransparentBlocksOption(), getMarkBlacklistedTargetsOption());
+		this.list.addSmall(getMarkFluidsOption(), null);
+
 		this.list.addSmall(getItemIconsVisibleOption(), getDirectionIndicatorVisibleOption());
 
 		this.list.addSmall(getPlayerInfoModeOption(), getTeamColorModeOption());
@@ -272,6 +275,30 @@ public class SettingsScreen extends OptionsSubScreen {
 			LanguageUtils.settings("item_icon_visible").getKey(),
 			config::isItemIconVisible,
 			config::setItemIconVisible
+		);
+	}
+
+	private OptionInstance<Boolean> getPassThroughTransparentBlocksOption() {
+		return OptionUtils.ofBool(
+			LanguageUtils.settings("pass_through_transparent_blocks").getKey(),
+			config::isPassThroughTransparentBlocks,
+			config::setPassThroughTransparentBlocks
+		);
+	}
+
+	private OptionInstance<Boolean> getMarkBlacklistedTargetsOption() {
+		return OptionUtils.ofBool(
+			LanguageUtils.settings("mark_blacklisted_targets").getKey(),
+			config::isMarkBlacklistedTargets,
+			config::setMarkBlacklistedTargets
+		);
+	}
+
+	private OptionInstance<Boolean> getMarkFluidsOption() {
+		return OptionUtils.ofBool(
+			LanguageUtils.settings("mark_fluids").getKey(),
+			config::isMarkFluids,
+			config::setMarkFluids
 		);
 	}
 

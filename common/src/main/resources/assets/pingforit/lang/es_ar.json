@@ -1,8 +1,9 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Marcar ubicación",
-	"key.pingforit.select_transparent_block": "Seleccionar bloques transparentes",
-	"key.pingforit.allow_blacklisted_target": "Permitir objetivos de la lista negra",
+	"key.pingforit.toggle_pass_through_transparent_blocks": "Atravesar bloques transparentes",
+	"key.pingforit.toggle_mark_blacklisted_targets": "Marcar objetivos de la lista negra",
+	"key.pingforit.toggle_mark_fluids": "Marcar fluidos",
 	"key.pingforit.open_settings": "Abrir configuración",
 	"subtitles.pingforit.ping": "Alerta de ubicación marcada",
 
@@ -20,6 +21,9 @@
 	"settings.pingforit.ping_distance": "Distancia del ping: %s",
 	"settings.pingforit.item_icon_visible": "Íconos de objetos",
 	"settings.pingforit.direction_indicator_visible": "Indicador de dirección",
+	"settings.pingforit.pass_through_transparent_blocks": "Atravesar bloques transparentes",
+	"settings.pingforit.mark_blacklisted_targets": "Marcar objetivos de la lista negra",
+	"settings.pingforit.mark_fluids": "Marcar fluidos",
 	"settings.pingforit.player_info_mode": "Información del jugador",
 	"settings.pingforit.player_info_mode.hold.tooltip": "La información del jugador se muestra cuando se mantiene la tecla \"%s\" (%s)",
 	"settings.pingforit.team_color_mode": "Color de equipo",
