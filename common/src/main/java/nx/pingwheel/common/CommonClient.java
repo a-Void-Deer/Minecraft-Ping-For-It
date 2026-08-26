@@ -83,6 +83,8 @@ public class CommonClient {
 		IPlatformClientEventService.INSTANCE.registerLeaveServerEvent(this::onLeaveServer);
 
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_PING);
+		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_SELECT_TRANSPARENT_BLOCK);
+		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_ALLOW_BLACKLISTED_TARGET);
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
 
 		// The lazy global loggers only ever emit aggregate transition counts.

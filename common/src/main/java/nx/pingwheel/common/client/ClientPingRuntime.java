@@ -73,6 +73,7 @@ import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
 import nx.pingwheel.common.util.InputUtils;
+import nx.pingwheel.common.math.RaycastPolicy;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
@@ -673,8 +674,11 @@ public final class ClientPingRuntime {
 			config.getRaycastDistance(),
 			config.getPingDistance());
 
+		RaycastPolicy raycastPolicy = RaycastPolicy.from(
+			InputUtils.KEY_BINDING_SELECT_TRANSPARENT_BLOCK.isDown(),
+			InputUtils.KEY_BINDING_ALLOW_BLACKLISTED_TARGET.isDown());
 		var hitResult = Raycast.traceDirectional(
-			rayOrigin, cameraDirection, distance, cameraEntity.isCrouching());
+			rayOrigin, cameraDirection, distance, raycastPolicy);
 
 		if (hitResult == null || hitResult.getType() == HitResult.Type.MISS) {
 			HitResult missHit = hitResult;

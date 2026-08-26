@@ -1,10 +1,11 @@
 package nx.pingwheel.common.math;
 
+import java.util.Objects;
+import java.util.function.Predicate;
+
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.*;
-
-import java.util.function.Predicate;
 
 import static nx.pingwheel.common.CommonClient.Game;
 
@@ -21,8 +22,30 @@ public class Raycast {
 		Vec3 rayStartVec,
 		Vec3 direction,
 		double maxDistance,
-		boolean hitTranslucent
+		boolean selectTransparentBlocks
 	) {
+		return traceDirectional(
+			rayStartVec,
+			direction,
+			maxDistance,
+			RaycastPolicy.from(selectTransparentBlocks, false));
+	}
+
+	/**
+	 * Traces using a press-time target-selection policy.  The policy is applied
+	 * before nearest-entity distance comparison, while spectator filtering is
+	 * retained for every mode.
+	 */
+	public static HitResult traceDirectional(
+		Vec3 rayStartVec,
+		Vec3 direction,
+		double maxDistance,
+		RaycastPolicy policy
+	) {
+		Objects.requireNonNull(rayStartVec, "rayStartVec");
+		Objects.requireNonNull(direction, "direction");
+		Objects.requireNonNull(policy, "policy");
+
 		var cameraEntity = Game.cameraEntity;
 
 		if (cameraEntity == null || cameraEntity.level() == null) {
@@ -34,13 +57,18 @@ public class Raycast {
 			.getBoundingBox()
 			.expandTowards(direction.scale(maxDistance))
 			.inflate(1.0, 1.0, 1.0);
+		var fluidMode = switch (policy.fluidMode()) {
+			case NONE -> ClipContext.Fluid.NONE;
+		};
 
 		var blockHitResult = cameraEntity.level().clip(
 			new ClipContext(
 				rayStartVec,
 				rayEndVec,
-				hitTranslucent ? ClipContext.Block.OUTLINE : ClipContext.Block.VISUAL,
-				hitTranslucent ? ClipContext.Fluid.ANY : ClipContext.Fluid.NONE,
+				policy.blockMode() == RaycastPolicy.BlockMode.OUTLINE
+					? ClipContext.Block.OUTLINE
+					: ClipContext.Block.VISUAL,
+				fluidMode,
 				cameraEntity)
 		);
 
@@ -49,7 +77,7 @@ public class Raycast {
 			rayStartVec,
 			rayEndVec,
 			boundingBox,
-			(targetEntity) -> !targetEntity.isSpectator());
+			policy);
 
 		if (entityHitResult == null) {
 			return blockHitResult;
@@ -66,9 +94,14 @@ public class Raycast {
 											   Vec3 min,
 											   Vec3 max,
 											   AABB box,
-											   Predicate<Entity> predicate) {
+											   RaycastPolicy policy) {
 		var minDist = min.distanceToSqr(max);
 		EntityHitResult minHitResult = null;
+
+		Predicate<Entity> predicate = targetEntity ->
+			!targetEntity.isSpectator()
+				&& (policy.includeIgnoredEntities()
+					|| !EntitySelectionBlacklist.INSTANCE.isBlacklisted(targetEntity));
 
 		for (var ent : entity.level().getEntities(entity, box, predicate)) {
 			var targetBoundingBox = ent.getBoundingBox()

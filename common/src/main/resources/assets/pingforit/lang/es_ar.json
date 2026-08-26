@@ -1,6 +1,8 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Marcar ubicación",
+	"key.pingforit.select_transparent_block": "Seleccionar bloques transparentes",
+	"key.pingforit.allow_blacklisted_target": "Permitir objetivos de la lista negra",
 	"key.pingforit.open_settings": "Abrir configuración",
 	"subtitles.pingforit.ping": "Alerta de ubicación marcada",
 

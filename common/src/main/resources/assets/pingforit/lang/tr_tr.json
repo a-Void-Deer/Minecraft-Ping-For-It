@@ -1,6 +1,8 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Konumu Pingle",
+	"key.pingforit.select_transparent_block": "Şeffaf Blokları Seç",
+	"key.pingforit.allow_blacklisted_target": "Kara Listedeki Hedeflere İzin Ver",
 	"key.pingforit.open_settings": "Ayarları Aç",
 	"subtitles.pingforit.ping": "Konum Pingi Uyarısı",
 
