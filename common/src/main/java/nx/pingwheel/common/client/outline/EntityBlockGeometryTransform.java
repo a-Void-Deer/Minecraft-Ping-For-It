@@ -132,6 +132,21 @@ public final class EntityBlockGeometryTransform {
 		Vec3i environmentOrigin,
 		Vector3dc cameraPosition
 	) {
+		return cameraRelativeEnvironmentVertex(localVertex, environmentOrigin, cameraPosition);
+	}
+
+	/**
+	 * Converts a Flywheel instance vertex relative to its environment origin to
+	 * the camera-relative world position used by the vanilla outline buffer.
+	 * The local vertex and integer origin are combined, transformed, and
+	 * camera-subtracted in double precision; only the final render components
+	 * are narrowed to float.
+	 */
+	public Vector3f cameraRelativeEnvironmentVertex(
+		Vector3dc localVertex,
+		Vec3i environmentOrigin,
+		Vector3dc cameraPosition
+	) {
 		Objects.requireNonNull(localVertex, "localVertex");
 		Objects.requireNonNull(environmentOrigin, "environmentOrigin");
 		Objects.requireNonNull(cameraPosition, "cameraPosition");
@@ -148,6 +163,33 @@ public final class EntityBlockGeometryTransform {
 			(float) worldPosition.z);
 	}
 
+	/** Minecraft camera-position convenience form of the embedded route. */
+	public Vector3f cameraRelativeEnvironmentVertex(
+		Vector3dc localVertex,
+		Vec3i environmentOrigin,
+		Vec3 cameraPosition
+	) {
+		Objects.requireNonNull(cameraPosition, "cameraPosition");
+		return cameraRelativeEnvironmentVertex(
+			localVertex,
+			environmentOrigin,
+			new Vector3d(cameraPosition.x, cameraPosition.y, cameraPosition.z));
+	}
+
+	/** Minecraft-vector convenience form of the embedded route. */
+	public Vector3f cameraRelativeEnvironmentVertex(
+		Vec3 localVertex,
+		Vec3i environmentOrigin,
+		Vec3 cameraPosition
+	) {
+		Objects.requireNonNull(localVertex, "localVertex");
+		Objects.requireNonNull(cameraPosition, "cameraPosition");
+		return cameraRelativeEnvironmentVertex(
+			new Vector3d(localVertex.x, localVertex.y, localVertex.z),
+			environmentOrigin,
+			new Vector3d(cameraPosition.x, cameraPosition.y, cameraPosition.z));
+	}
+
 	/** Convenience JOML-vector form with a Minecraft camera position. */
 	public Vector3f cameraRelativeVertex(
 		Vector3dc localVertex,
@@ -155,7 +197,7 @@ public final class EntityBlockGeometryTransform {
 		Vec3 cameraPosition
 	) {
 		Objects.requireNonNull(cameraPosition, "cameraPosition");
-		return cameraRelativeVertex(
+		return cameraRelativeEnvironmentVertex(
 			localVertex,
 			(Vec3i) environmentOrigin,
 			new Vector3d(cameraPosition.x, cameraPosition.y, cameraPosition.z));
@@ -168,7 +210,7 @@ public final class EntityBlockGeometryTransform {
 		Vec3 cameraPosition
 	) {
 		Objects.requireNonNull(cameraPosition, "cameraPosition");
-		return cameraRelativeVertex(
+		return cameraRelativeEnvironmentVertex(
 			localVertex,
 			environmentOrigin,
 			new Vector3d(cameraPosition.x, cameraPosition.y, cameraPosition.z));
@@ -182,7 +224,7 @@ public final class EntityBlockGeometryTransform {
 	) {
 		Objects.requireNonNull(localVertex, "localVertex");
 		Objects.requireNonNull(cameraPosition, "cameraPosition");
-		return cameraRelativeVertex(
+		return cameraRelativeEnvironmentVertex(
 			new Vector3d(localVertex.x, localVertex.y, localVertex.z),
 			environmentOrigin,
 			new Vector3d(cameraPosition.x, cameraPosition.y, cameraPosition.z));

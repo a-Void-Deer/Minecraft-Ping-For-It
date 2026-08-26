@@ -6,6 +6,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4d;
 import org.joml.Matrix4f;
 import org.joml.Matrix3f;
+import org.joml.Vector3d;
 import org.joml.Vector3f;
 import org.junit.jupiter.api.Test;
 
@@ -101,6 +102,48 @@ class EntityBlockGeometryTransformTest {
 	}
 
 	@Test
+	void embeddedVertexFormulaRetainsRotationPivotAndCameraPrecisionAtHugeCoordinates() {
+		BlockPos environmentOrigin = new BlockPos(20_480_000, 64, -20_480_000);
+		Vec3 localVertex = new Vec3(0.375D, -0.25D, 0.875D);
+		Vec3 camera = new Vec3(20_480_005.125D, 71.75D, -20_479_996.5D);
+		Matrix4d localToWorld = new Matrix4d()
+			.translation(20_480_000.5D, 72.0D, -20_479_999.25D)
+			.translate(0.5D, 0.25D, 0.75D)
+			.rotateY(Math.toRadians(37.0D))
+			.rotateZ(Math.toRadians(-19.0D))
+			.translate(-0.5D, -0.25D, -0.75D);
+		EntityBlockGeometryTransform transform = new EntityBlockGeometryTransform(localToWorld);
+
+		Vector3f actual = transform.cameraRelativeEnvironmentVertex(
+			new Vector3d(localVertex.x, localVertex.y, localVertex.z),
+			environmentOrigin,
+			camera);
+		Vector3d expectedWorld = transform(localToWorld,
+			environmentOrigin.getX() + localVertex.x,
+			environmentOrigin.getY() + localVertex.y,
+			environmentOrigin.getZ() + localVertex.z);
+		assertEquals((float) (expectedWorld.x - camera.x), actual.x(), EPSILON);
+		assertEquals((float) (expectedWorld.y - camera.y), actual.y(), EPSILON);
+		assertEquals((float) (expectedWorld.z - camera.z), actual.z(), EPSILON);
+
+		EntityBlockGeometryTransform identity =
+			new EntityBlockGeometryTransform(new Matrix4d());
+		Vector3f identityActual = identity.cameraRelativeEnvironmentVertex(
+			new Vector3d(localVertex.x, localVertex.y, localVertex.z),
+			environmentOrigin,
+			camera);
+		assertEquals(
+			(float) localVertex.x + (float) (environmentOrigin.getX() - camera.x),
+			identityActual.x(), EPSILON);
+		assertEquals(
+			(float) localVertex.y + (float) (environmentOrigin.getY() - camera.y),
+			identityActual.y(), EPSILON);
+		assertEquals(
+			(float) localVertex.z + (float) (environmentOrigin.getZ() - camera.z),
+			identityActual.z(), EPSILON);
+	}
+
+	@Test
 	void sourceMatrixAndReturnedMatrixAreDefensivelyCopied() {
 		Matrix4d source = new Matrix4d().translation(5.0D, 6.0D, 7.0D);
 		EntityBlockGeometryTransform transform = new EntityBlockGeometryTransform(source);
@@ -112,6 +155,13 @@ class EntityBlockGeometryTransformTest {
 		assertEquals(6.0F, pose.last().pose().m30(), EPSILON);
 		assertEquals(8.0F, pose.last().pose().m31(), EPSILON);
 		assertEquals(10.0F, pose.last().pose().m32(), EPSILON);
+	}
+
+	private static Vector3d transform(Matrix4d matrix, double x, double y, double z) {
+		return new Vector3d(
+			matrix.m00() * x + matrix.m10() * y + matrix.m20() * z + matrix.m30(),
+			matrix.m01() * x + matrix.m11() * y + matrix.m21() * z + matrix.m31(),
+			matrix.m02() * x + matrix.m12() * y + matrix.m22() * z + matrix.m32());
 	}
 
 	@Test

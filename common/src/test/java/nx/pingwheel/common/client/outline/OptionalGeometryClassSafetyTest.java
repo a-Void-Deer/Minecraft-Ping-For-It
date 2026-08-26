@@ -40,6 +40,33 @@ class OptionalGeometryClassSafetyTest {
 	}
 
 	@Test
+	void flywheelAdapterKeepsMainAndEmbeddedVertexContracts() throws IOException {
+		Path adapterPath = findRepositoryFile(Path.of(
+			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
+			"integration", "create", "CreateFlywheelGeometryAdapter.java"));
+		Path transformPath = findRepositoryFile(Path.of(
+			"common", "src", "main", "java", "nx", "pingwheel", "common", "client",
+			"outline", "EntityBlockGeometryTransform.java"));
+		String adapter = Files.readString(adapterPath, StandardCharsets.UTF_8);
+		String transform = Files.readString(transformPath, StandardCharsets.UTF_8);
+
+		assertTrue(adapter.contains("instancer.environment == GlobalEnvironment.INSTANCE"));
+		assertTrue(adapter.contains("manager.renderOrigin()"));
+		assertTrue(adapter.contains("position.x() + originX"));
+		assertTrue(adapter.contains("position.y() + originY"));
+		assertTrue(adapter.contains("position.z() + originZ"));
+		assertTrue(adapter.contains("context.transform().cameraRelativeEnvironmentVertex("));
+		assertTrue(adapter.contains("entry.environmentOrigin()"));
+		assertTrue(adapter.contains("FlywheelEnvironmentPolicy.accepts("));
+		assertFalse(adapter.contains("Sable"));
+
+		assertTrue(transform.contains("environmentOrigin.getX() + localVertex.x()"));
+		assertTrue(transform.contains("new Vector3f(\n\t\t\t(float) worldPosition.x"));
+		assertTrue(transform.contains("(float) worldPosition.y"));
+		assertTrue(transform.contains("(float) worldPosition.z"));
+	}
+
+	@Test
 	void createEntityAdapterIsReflectiveAndUsesTheCompleteFallbackRenderPass() throws IOException {
 		Path adapterPath = findRepositoryFile(Path.of(
 			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
