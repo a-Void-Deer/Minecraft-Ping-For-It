@@ -57,6 +57,8 @@
 	"settings.pingforit.ms_to_regenerate.tooltip": "恢复一次标记使用次数所需的毫秒数。",
 	"settings.pingforit.rate_limit": "频率限制",
 	"settings.pingforit.rate_limit.tooltip": "恢复时间窗口内允许的最大标记次数。",
+	"settings.pingforit.sync_duration": "同步持续时间（秒）",
+	"settings.pingforit.sync_duration.tooltip": "新创建的标记在服务器上保持激活的时间。",
 
 	"value.pingforit.auto": "自动",
 	"value.pingforit.disabled": "关闭",

@@ -26,6 +26,7 @@ public final class ServerSettingsModel {
 	private boolean playerTrackingEnabled;
 	private String msToRegenerate = "";
 	private String rateLimit = "";
+	private String syncDuration = "";
 	private int dirtyFields;
 
 	public ServerSettingsModel(boolean clientPermission) {
@@ -87,6 +88,10 @@ public final class ServerSettingsModel {
 
 	public String rateLimitText() {
 		return rateLimit;
+	}
+
+	public String syncDurationText() {
+		return syncDuration;
 	}
 
 	/**
@@ -231,9 +236,20 @@ public final class ServerSettingsModel {
 		recomputeDirtyFields();
 	}
 
+	public void setSyncDurationText(String value) {
+		if (!canEdit()) {
+			return;
+		}
+
+		syncDuration = value;
+		recomputeDirtyFields();
+	}
+
 	public boolean hasInvalidDraft() {
 		return dirty()
-			&& (parseNonNegative(msToRegenerate).isEmpty() || parseNonNegative(rateLimit).isEmpty());
+			&& (parseNonNegative(msToRegenerate).isEmpty()
+				|| parseNonNegative(rateLimit).isEmpty()
+				|| parseNonNegative(syncDuration).isEmpty());
 	}
 
 	public Optional<ServerConfigUpdate> updatePlan() {
@@ -246,7 +262,8 @@ public final class ServerSettingsModel {
 			defaultChannelMode,
 			playerTrackingEnabled,
 			parseNonNegative(msToRegenerate).orElseThrow(),
-			parseNonNegative(rateLimit).orElseThrow()));
+			parseNonNegative(rateLimit).orElseThrow(),
+			parseNonNegative(syncDuration).orElseThrow()));
 	}
 
 	public void markClean() {
@@ -258,6 +275,7 @@ public final class ServerSettingsModel {
 		playerTrackingEnabled = authoritative.playerTrackingEnabled();
 		msToRegenerate = Integer.toString(authoritative.msToRegenerate());
 		rateLimit = Integer.toString(authoritative.rateLimit());
+		syncDuration = Integer.toString(authoritative.syncDuration());
 	}
 
 	private void clearDraft() {
@@ -265,6 +283,7 @@ public final class ServerSettingsModel {
 		playerTrackingEnabled = false;
 		msToRegenerate = "";
 		rateLimit = "";
+		syncDuration = "";
 	}
 
 	private void recomputeDirtyFields() {
@@ -285,6 +304,9 @@ public final class ServerSettingsModel {
 		}
 		if (!matchesAuthoritative(rateLimit, authoritative.rateLimit())) {
 			fields |= ServerConfigUpdate.RATE_LIMIT;
+		}
+		if (!matchesAuthoritative(syncDuration, authoritative.syncDuration())) {
+			fields |= ServerConfigUpdate.SYNC_DURATION;
 		}
 		dirtyFields = fields;
 	}

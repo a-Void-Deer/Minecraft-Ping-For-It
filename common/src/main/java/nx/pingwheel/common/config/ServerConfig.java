@@ -1,5 +1,6 @@
 package nx.pingwheel.common.config;
 
+import com.google.gson.annotations.SerializedName;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
@@ -15,7 +16,8 @@ public class ServerConfig implements IConfig {
 	boolean playerTrackingEnabled = true;
 	int msToRegenerate = 1000;
 	int rateLimit = 5;
-	int pingDuration = 7;
+	@SerializedName(value = "syncDuration", alternate = {"pingDuration"})
+	int syncDuration = ServerConfigBounds.DEFAULT_SYNC_DURATION;
 	int pingDistance = 2048;
 
 	@Override
@@ -32,7 +34,7 @@ public class ServerConfig implements IConfig {
 			rateLimit = 0;
 		}
 
-		pingDuration = ServerConfigBounds.clampPingDuration(pingDuration);
+		syncDuration = ServerConfigBounds.clampSyncDuration(syncDuration);
 		pingDistance = ServerConfigBounds.clampPingDistance(pingDistance);
 	}
 
@@ -40,6 +42,7 @@ public class ServerConfig implements IConfig {
 	public void onUpdate() {
 		ServerCore.init();
 		ServerCore.broadcastRateLimitPolicy();
+		ServerCore.broadcastSyncDurationPolicy();
 	}
 
 	public static final ConfigHandler<ServerConfig> HANDLER = ConfigHandler.of(ServerConfig.class, ".server.json");

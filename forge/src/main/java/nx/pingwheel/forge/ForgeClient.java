@@ -18,6 +18,7 @@ import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
+import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
 import nx.pingwheel.common.screen.SettingsScreen;
@@ -32,6 +33,7 @@ import static nx.pingwheel.forge.ForgeMain.MARKER_WINNER_CHANGED_CHANNEL_S2C;
 import static nx.pingwheel.forge.ForgeMain.PING_LOCATION_CHANNEL_S2C;
 import static nx.pingwheel.forge.ForgeMain.RATE_LIMIT_POLICY_CHANNEL_S2C;
 import static nx.pingwheel.forge.ForgeMain.SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C;
+import static nx.pingwheel.forge.ForgeMain.SYNC_DURATION_POLICY_CHANNEL_S2C;
 
 public class ForgeClient {
 
@@ -47,6 +49,7 @@ public class ForgeClient {
 		registerPacketHandler(MARKER_REJECTED_CHANNEL_S2C, MarkerRejectedS2CPacket::readSafe, CommonClient.INSTANCE::onMarkerRejectedPacket);
 		registerPacketHandler(MARKER_WINNER_CHANGED_CHANNEL_S2C, MarkerWinnerChangedS2CPacket::readSafe, CommonClient.INSTANCE::onMarkerWinnerChangedPacket);
 		registerPacketHandler(RATE_LIMIT_POLICY_CHANNEL_S2C, RateLimitPolicyS2CPacket::readSafe, CommonClient.INSTANCE::onRateLimitPolicyPacket);
+		registerPacketHandler(SYNC_DURATION_POLICY_CHANNEL_S2C, SyncDurationPolicyS2CPacket::readSafe, CommonClient.INSTANCE::onSyncDurationPolicyPacket);
 		registerPacketHandler(SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C, ServerConfigSnapshotS2CPacket::readSafe, CommonClient.INSTANCE::onServerConfigSnapshotPacket);
 
 		// resource reload

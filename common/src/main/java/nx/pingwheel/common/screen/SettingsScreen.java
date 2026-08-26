@@ -610,6 +610,13 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.list.addSmall(
 			this.createServerLabel("rate_limit", "rate_limit.tooltip"),
 			serverRateLimitField);
+		final var serverSyncDurationField = this.createServerIntegerField(
+			this.serverSettings.syncDurationText(),
+			this.serverSettings::setSyncDurationText,
+			"sync_duration.tooltip");
+		this.list.addSmall(
+			this.createServerLabel("sync_duration", "sync_duration.tooltip"),
+			serverSyncDurationField);
 
 		if (this.serverValidationMessage != null) {
 			this.serverValidationWidget = this.createServerValidationLabel();
@@ -808,7 +815,8 @@ public class SettingsScreen extends OptionsSubScreen {
 			values.defaultChannelMode(),
 			values.playerTrackingEnabled(),
 			values.msToRegenerate(),
-			values.rateLimit()));
+			values.rateLimit(),
+			values.syncDuration()));
 		return true;
 	}
 

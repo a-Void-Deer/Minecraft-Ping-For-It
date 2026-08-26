@@ -46,6 +46,7 @@ import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
+import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
@@ -196,6 +197,9 @@ public class ServerCore {
 		IPlatformNetworkService.INSTANCE.sendToClient(
 			new RateLimitPolicyS2CPacket(SERVER_CONFIG.getRateLimit(), SERVER_CONFIG.getMsToRegenerate()),
 			player);
+		IPlatformNetworkService.INSTANCE.sendToClient(
+			new SyncDurationPolicyS2CPacket(SERVER_CONFIG.getSyncDuration()),
+			player);
 		LOGGER.debug("sent rate limit policy");
 	}
 
@@ -220,6 +224,27 @@ public class ServerCore {
 		}
 
 		LOGGER.debug("broadcast rate limit policy");
+	}
+
+	/**
+	 * Broadcasts the current marker-duration policy after an effective server
+	 * configuration update.  Marker expiry timestamps are still frozen when a
+	 * marker is created; this only updates the policy used by future markers and
+	 * the client-side policy mirror.
+	 */
+	public static void broadcastSyncDurationPolicy() {
+		MinecraftServer server = ACTIVE_SERVER;
+
+		if (server == null) {
+			return;
+		}
+
+		var packet = new SyncDurationPolicyS2CPacket(SERVER_CONFIG.getSyncDuration());
+		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+			IPlatformNetworkService.INSTANCE.sendToClient(packet, player);
+		}
+
+		LOGGER.debug("broadcast sync duration policy");
 	}
 
 	/**
@@ -282,6 +307,9 @@ public class ServerCore {
 		}
 		if ((update.changedFields() & ServerConfigUpdate.RATE_LIMIT) != 0) {
 			config.setRateLimit(update.rateLimit());
+		}
+		if ((update.changedFields() & ServerConfigUpdate.SYNC_DURATION) != 0) {
+			config.setSyncDuration(update.syncDuration());
 		}
 
 		config.validate();
@@ -410,7 +438,7 @@ public class ServerCore {
 		final var recipients = snapshotRecipients(playerList, player, channel, defaultChannelMode);
 
 		final long arrivalTick = server.getTickCount();
-		final long expiresAtTick = arrivalTick + SERVER_CONFIG.getPingDuration() * (long) TICKS_PER_SECOND;
+		final long expiresAtTick = arrivalTick + SERVER_CONFIG.getSyncDuration() * (long) TICKS_PER_SECOND;
 
 		final var outcome = markerService(server).create(
 			player.serverLevel(),

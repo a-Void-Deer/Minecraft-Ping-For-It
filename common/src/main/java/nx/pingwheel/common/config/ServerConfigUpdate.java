@@ -12,23 +12,37 @@ public record ServerConfigUpdate(
 	ChannelMode defaultChannelMode,
 	boolean playerTrackingEnabled,
 	int msToRegenerate,
-	int rateLimit
+	int rateLimit,
+	int syncDuration
 ) {
 	public static final int DEFAULT_CHANNEL_MODE = 1;
 	public static final int PLAYER_TRACKING_ENABLED = 1 << 1;
 	public static final int MS_TO_REGENERATE = 1 << 2;
 	public static final int RATE_LIMIT = 1 << 3;
+	public static final int SYNC_DURATION = 1 << 4;
 	public static final int ALL_FIELDS = DEFAULT_CHANNEL_MODE
 		| PLAYER_TRACKING_ENABLED
 		| MS_TO_REGENERATE
-		| RATE_LIMIT;
+		| RATE_LIMIT
+		| SYNC_DURATION;
+
+	public ServerConfigUpdate(
+		int changedFields,
+		ChannelMode defaultChannelMode,
+		boolean playerTrackingEnabled,
+		int msToRegenerate,
+		int rateLimit) {
+		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			ServerConfigBounds.DEFAULT_SYNC_DURATION);
+	}
 
 	public boolean isValid() {
 		return changedFields != 0
 			&& (changedFields & ~ALL_FIELDS) == 0
 			&& defaultChannelMode != null
 			&& msToRegenerate >= 0
-			&& rateLimit >= 0;
+			&& rateLimit >= 0
+			&& syncDuration >= 0;
 	}
 
 	public static Optional<ServerConfigUpdate> validated(
@@ -37,12 +51,24 @@ public record ServerConfigUpdate(
 		boolean playerTrackingEnabled,
 		int msToRegenerate,
 		int rateLimit) {
+		return validated(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			ServerConfigBounds.DEFAULT_SYNC_DURATION);
+	}
+
+	public static Optional<ServerConfigUpdate> validated(
+		int changedFields,
+		ChannelMode defaultChannelMode,
+		boolean playerTrackingEnabled,
+		int msToRegenerate,
+		int rateLimit,
+		int syncDuration) {
 		var update = new ServerConfigUpdate(
 			changedFields,
 			defaultChannelMode,
 			playerTrackingEnabled,
 			msToRegenerate,
-			rateLimit);
+			rateLimit,
+			syncDuration);
 		return update.isValid() ? Optional.of(update) : Optional.empty();
 	}
 
@@ -61,6 +87,9 @@ public record ServerConfigUpdate(
 			(changedFields & DEFAULT_CHANNEL_MODE) != 0 ? defaultChannelMode : current.defaultChannelMode(),
 			(changedFields & PLAYER_TRACKING_ENABLED) != 0 ? playerTrackingEnabled : current.playerTrackingEnabled(),
 			(changedFields & MS_TO_REGENERATE) != 0 ? msToRegenerate : current.msToRegenerate(),
-			(changedFields & RATE_LIMIT) != 0 ? rateLimit : current.rateLimit());
+			(changedFields & RATE_LIMIT) != 0 ? rateLimit : current.rateLimit(),
+			(changedFields & SYNC_DURATION) != 0
+				? ServerConfigBounds.clampSyncDuration(syncDuration)
+				: current.syncDuration());
 	}
 }

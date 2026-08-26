@@ -15,6 +15,7 @@ import java.util.Map;
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.client.SelectionToggleNoticeState;
+import nx.pingwheel.common.client.duration.ClientSyncDurationPolicy;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.client.outline.BlockModelOutlineState;
@@ -45,6 +46,7 @@ import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
+import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.platform.IPlatformContextService;
@@ -69,6 +71,7 @@ public class CommonClient {
 
 	private static ClientPingRuntime pingRuntime;
 	private static ClientRateLimitPolicy storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
+	private static ClientSyncDurationPolicy storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 	private static final InteractionTimeSource INTERACTION_TIME_SOURCE = InteractionTimeSource.system();
 
 	/** Runs the registered entity-outline sources over the production registry. */
@@ -102,6 +105,7 @@ public class CommonClient {
 		// already exists; otherwise onTickStart creates it lazily once the
 		// world is in.
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
+		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 		pingRuntime = createPingRuntimeIfInWorld();
 
 		IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(ClientConfig.HANDLER.getConfig().getChannel()));
@@ -114,6 +118,7 @@ public class CommonClient {
 
 		pingRuntime = null;
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
+		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 		MarkerOverlayState.INSTANCE.clear();
 		EntityOutlineState.INSTANCE.clear();
 		BlockOutlineState.INSTANCE.clear();
@@ -623,6 +628,19 @@ public class CommonClient {
 		}
 
 		LOGGER.debug("client rate limit policy changed");
+	}
+
+	/**
+	 * Applies the latest valid server duration policy to the connection-scoped
+	 * client model.  Display/lifecycle behavior intentionally remains governed
+	 * by the existing per-marker arrival/expiry payload in this stage.
+	 */
+	public void onSyncDurationPolicyPacket(SyncDurationPolicyS2CPacket packet) {
+		if (packet.isCorrupt()) {
+			return;
+		}
+
+		storedSyncDurationPolicy = new ClientSyncDurationPolicy(packet.syncDuration());
 	}
 
 	/**

@@ -45,5 +45,25 @@ class ServerConfigUpdateServiceTest {
 		assertTrue(result.snapshot().playerTrackingEnabled());
 		assertEquals(1000, result.snapshot().msToRegenerate());
 		assertEquals(99, result.snapshot().rateLimit());
+		assertEquals(7, result.snapshot().syncDuration());
+	}
+
+	@Test
+	void levelThreePermissionCanApplySyncDurationWithoutChangingOtherFields() {
+		var update = new ServerConfigUpdate(
+			ServerConfigUpdate.SYNC_DURATION,
+			ChannelMode.DISABLED,
+			false,
+			9999,
+			99,
+			23);
+
+		var result = ServerConfigUpdateService.apply(true, CURRENT, update);
+		assertTrue(result.applied());
+		assertEquals(23, result.snapshot().syncDuration());
+		assertEquals(ChannelMode.AUTO, result.snapshot().defaultChannelMode());
+		assertTrue(result.snapshot().playerTrackingEnabled());
+		assertEquals(1000, result.snapshot().msToRegenerate());
+		assertEquals(5, result.snapshot().rateLimit());
 	}
 }

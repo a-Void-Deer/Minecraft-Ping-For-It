@@ -38,12 +38,15 @@ class ServerSettingsModelTest {
 		assertTrue(model.canEdit());
 		model.cycleDefaultChannelMode();
 		model.setMsToRegenerateText("2500");
+		model.setSyncDurationText("23");
 
 		var plan = model.updatePlan().orElseThrow();
-		assertEquals(ServerConfigUpdate.DEFAULT_CHANNEL_MODE | ServerConfigUpdate.MS_TO_REGENERATE, plan.changedFields());
+		assertEquals(ServerConfigUpdate.DEFAULT_CHANNEL_MODE | ServerConfigUpdate.MS_TO_REGENERATE
+			| ServerConfigUpdate.SYNC_DURATION, plan.changedFields());
 		assertEquals(ChannelMode.DISABLED, plan.defaultChannelMode());
 		assertEquals(2500, plan.msToRegenerate());
 		assertEquals(5, plan.rateLimit());
+		assertEquals(23, plan.syncDuration());
 	}
 
 	@Test
@@ -120,6 +123,11 @@ class ServerSettingsModelTest {
 		assertTrue((model.dirtyFields() & ServerConfigUpdate.RATE_LIMIT) != 0);
 		model.setRateLimitText("5");
 		assertEquals(0, model.dirtyFields());
+
+		model.setSyncDurationText("23");
+		assertTrue((model.dirtyFields() & ServerConfigUpdate.SYNC_DURATION) != 0);
+		model.setSyncDurationText("7");
+		assertEquals(0, model.dirtyFields());
 	}
 
 	@Test
@@ -154,6 +162,7 @@ class ServerSettingsModelTest {
 		assertNull(model.authoritative());
 		assertEquals("", model.msToRegenerateText());
 		assertEquals("", model.rateLimitText());
+		assertEquals("", model.syncDurationText());
 		assertFalse(model.applySnapshot(requestId, EDITABLE));
 	}
 

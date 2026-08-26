@@ -57,6 +57,8 @@
 	"settings.pingforit.ms_to_regenerate.tooltip": "Milliseconds needed to regenerate one ping allowance.",
 	"settings.pingforit.rate_limit": "Rate Limit",
 	"settings.pingforit.rate_limit.tooltip": "Maximum ping allowances in the regeneration window.",
+	"settings.pingforit.sync_duration": "Sync Duration (seconds)",
+	"settings.pingforit.sync_duration.tooltip": "How long newly-created markers remain active on the server.",
 
 	"value.pingforit.vanilla_team": "Vanilla Team",
 	"value.pingforit.ftb_teams": "FTB Teams",
