@@ -170,7 +170,7 @@ final class SableClientCompanionAccess {
 		// parent-world block in a reserved plot belongs to that sub-level.
 		Position position = hitPosition;
 
-		if (companion.getContainingClient(position) == null) {
+		if (companion.getContaining(level, position) == null) {
 			return null;
 		}
 
@@ -296,11 +296,7 @@ final class SableClientCompanionAccess {
 	}
 
 	private UUID containingSubLevelId(ClientLevel level, Position position) {
-		if (companion.getClientLevel() != level) {
-			return null;
-		}
-
-		ClientSubLevelAccess containing = companion.getContainingClient(position);
+		SubLevelAccess containing = companion.getContaining(level, position);
 		return containing == null ? null : containing.getUniqueId();
 	}
 
