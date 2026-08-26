@@ -104,4 +104,10 @@
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Hızlı tıklamaları tek bir sanal uzun basma olarak algılar."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Uyumluluk zaman aralığı: %s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Uyumluluk modu etkinken ardışık tıklamalar arasındaki en uzun süre."
+  ,"notice.pingforit.pass_through_transparent_blocks": "Şeffaf bloklardan işaretle: "
+  ,"notice.pingforit.mark_blacklisted_targets": "Kara listedeki hedefleri işaretle: "
+  ,"notice.pingforit.mark_fluids": "Sıvıları işaretle: "
+  ,"notice.pingforit.on": "Açık"
+  ,"notice.pingforit.off": "Kapalı"
+  ,"settings.pingforit.configuration_notice_size": "Yapılandırma bildirimi boyutu: %s"
 }

@@ -112,4 +112,10 @@
 	"settings.pingforit.long_press_compatibility_mode.tooltip": "Reconoce clics rápidos como una sola pulsación larga virtual.",
 	"settings.pingforit.long_press_compatibility_slice_millis": "Intervalo de compatibilidad: %s",
 	"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Separación máxima entre clics consecutivos con el modo activado."
+  ,"notice.pingforit.pass_through_transparent_blocks": "Marcar a través de bloques transparentes: "
+  ,"notice.pingforit.mark_blacklisted_targets": "Marcar objetivos de la lista negra: "
+  ,"notice.pingforit.mark_fluids": "Marcar líquidos: "
+  ,"notice.pingforit.on": "Activado"
+  ,"notice.pingforit.off": "Desactivado"
+  ,"settings.pingforit.configuration_notice_size": "Tamaño del aviso de configuración: %s"
 }

@@ -119,4 +119,10 @@
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Recognize rapid clicks as one virtual long press."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Compatibility Time Slice: %s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Maximum gap between adjacent clicks when compatibility mode is enabled."
+  ,"notice.pingforit.pass_through_transparent_blocks": "Mark through transparent blocks: "
+  ,"notice.pingforit.mark_blacklisted_targets": "Mark blacklisted targets: "
+  ,"notice.pingforit.mark_fluids": "Mark fluids: "
+  ,"notice.pingforit.on": "On"
+  ,"notice.pingforit.off": "Off"
+  ,"settings.pingforit.configuration_notice_size": "Configuration notice size: %s"
 }

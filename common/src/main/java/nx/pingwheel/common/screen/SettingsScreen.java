@@ -138,6 +138,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.list.addSmall(getPlayerInfoModeOption(), getTeamColorModeOption());
 
 		this.list.addSmall(getPingSizeOption(), getWheelInnerRadiusOption());
+		this.list.addSmall(getConfigurationNoticeSizeOption(), null);
 
 		this.list.addSmall(getWheelOuterRadiusOption(), getWheelOpacityOption());
 
@@ -338,6 +339,20 @@ public class SettingsScreen extends OptionsSubScreen {
 			(mode) -> Component.empty(),
 			config::getTeamColorMode,
 			config::setTeamColorMode
+		);
+	}
+
+	private OptionInstance<Integer> getConfigurationNoticeSizeOption() {
+		final var text = LanguageUtils.settings("configuration_notice_size");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_CONFIGURATION_NOTICE_SIZE,
+			MAX_CONFIGURATION_NOTICE_SIZE,
+			CONFIGURATION_NOTICE_SIZE_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			config::getConfigurationNoticeSize,
+			config::setConfigurationNoticeSize
 		);
 	}
 

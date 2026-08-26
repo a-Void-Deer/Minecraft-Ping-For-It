@@ -114,4 +114,10 @@
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "将快速连续点击识别为一次虚拟长按。"
   ,"settings.pingforit.long_press_compatibility_slice_millis": "兼容时间片：%s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "启用兼容模式时相邻点击之间允许的最大间隔。"
+  ,"notice.pingforit.pass_through_transparent_blocks": "标记穿过透明方块: "
+  ,"notice.pingforit.mark_blacklisted_targets": "标记黑名单目标: "
+  ,"notice.pingforit.mark_fluids": "标记液体: "
+  ,"notice.pingforit.on": "开"
+  ,"notice.pingforit.off": "关"
+  ,"settings.pingforit.configuration_notice_size": "配置提示大小: %s"
 }

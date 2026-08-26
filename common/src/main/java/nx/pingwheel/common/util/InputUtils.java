@@ -3,6 +3,7 @@ package nx.pingwheel.common.util;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.world.phys.HitResult;
+import nx.pingwheel.common.client.SelectionToggleNoticeState;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.resource.LanguageUtils;
 import org.lwjgl.glfw.GLFW;
@@ -82,6 +83,11 @@ public class InputUtils {
 	 * physical key is remembered until its matching release edge is observed.
 	 */
 	public static void handleToggleClick(InputConstants.Key rawKey) {
+		handleToggleClick(rawKey, monotonicMillis());
+	}
+
+	/** Handles a toggle edge using the same client-monotonic timestamp as the input event. */
+	public static void handleToggleClick(InputConstants.Key rawKey, long eventTimeMillis) {
 		if (rawKey == null) {
 			return;
 		}
@@ -96,13 +102,13 @@ public class InputUtils {
 		}
 
 		if (passThroughBinding) {
-			togglePassThroughTransparentBlocks();
+			togglePassThroughTransparentBlocks(eventTimeMillis);
 		}
 		if (blacklistedBinding) {
-			toggleMarkBlacklistedTargets();
+			toggleMarkBlacklistedTargets(eventTimeMillis);
 		}
 		if (fluidsBinding) {
-			toggleMarkFluids();
+			toggleMarkFluids(eventTimeMillis);
 		}
 	}
 
@@ -114,22 +120,38 @@ public class InputUtils {
 		};
 	}
 
-	private static void togglePassThroughTransparentBlocks() {
+	private static void togglePassThroughTransparentBlocks(long eventTimeMillis) {
 		final ClientConfig config = ClientConfig.HANDLER.getConfig();
 		config.setPassThroughTransparentBlocks(!config.isPassThroughTransparentBlocks());
 		ClientConfig.HANDLER.saveSafely();
+		SelectionToggleNoticeState.INSTANCE.show(
+			SelectionToggleNoticeState.Kind.PASS_THROUGH_TRANSPARENT_BLOCKS,
+			config.isPassThroughTransparentBlocks(),
+			eventTimeMillis);
 	}
 
-	private static void toggleMarkBlacklistedTargets() {
+	private static void toggleMarkBlacklistedTargets(long eventTimeMillis) {
 		final ClientConfig config = ClientConfig.HANDLER.getConfig();
 		config.setMarkBlacklistedTargets(!config.isMarkBlacklistedTargets());
 		ClientConfig.HANDLER.saveSafely();
+		SelectionToggleNoticeState.INSTANCE.show(
+			SelectionToggleNoticeState.Kind.MARK_BLACKLISTED_TARGETS,
+			config.isMarkBlacklistedTargets(),
+			eventTimeMillis);
 	}
 
-	private static void toggleMarkFluids() {
+	private static void toggleMarkFluids(long eventTimeMillis) {
 		final ClientConfig config = ClientConfig.HANDLER.getConfig();
 		config.setMarkFluids(!config.isMarkFluids());
 		ClientConfig.HANDLER.saveSafely();
+		SelectionToggleNoticeState.INSTANCE.show(
+			SelectionToggleNoticeState.Kind.MARK_FLUIDS,
+			config.isMarkFluids(),
+			eventTimeMillis);
+	}
+
+	private static long monotonicMillis() {
+		return System.nanoTime() / 1_000_000L;
 	}
 
 	private static boolean isSharedPickEligible() {
