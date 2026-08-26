@@ -12,6 +12,11 @@ public final class ToggleInputState<K> {
 		return pressed.add(key);
 	}
 
+	/** Claims a press without toggling anything, such as while a screen is open. */
+	public boolean suppressPress(K key) {
+		return pressed.add(key);
+	}
+
 	/** Rearms a key without changing the associated setting. */
 	public void release(K key) {
 		pressed.remove(key);

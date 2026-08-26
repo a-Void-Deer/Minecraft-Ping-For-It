@@ -18,6 +18,17 @@ class ToggleInputStateTest {
 	}
 
 	@Test
+	void suppressedPressBlocksRepeatsUntilReleaseThenAllowsTheNextValidPress() {
+		ToggleInputState<String> state = new ToggleInputState<>();
+
+		assertTrue(state.suppressPress("shift"));
+		assertFalse(state.suppressPress("shift"));
+		assertFalse(state.claimPress("shift"));
+		state.release("shift");
+		assertTrue(state.claimPress("shift"));
+	}
+
+	@Test
 	void resetRearmsEveryPhysicalKeyWithoutChangingAnySetting() {
 		ToggleInputState<String> state = new ToggleInputState<>();
 

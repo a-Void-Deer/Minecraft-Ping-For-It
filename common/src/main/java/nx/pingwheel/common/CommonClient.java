@@ -147,7 +147,7 @@ public class CommonClient {
 		}
 
 		if (Game.screen != null) {
-			abortInteractionIfActive();
+			abortInteractionIfActive(false);
 			return;
 		}
 
@@ -188,7 +188,7 @@ public class CommonClient {
 	 * such as on focus loss. No default ping is produced.
 	 */
 	public void onInputReset() {
-		abortInteractionIfActive();
+		abortInteractionIfActive(true);
 	}
 
 	/**
@@ -203,16 +203,20 @@ public class CommonClient {
 			return;
 		}
 
-		abortInteractionIfActive();
+		abortInteractionIfActive(false);
 	}
 
-	private void abortInteractionIfActive() {
+	private void abortInteractionIfActive(boolean resetAllInputState) {
 		boolean claimedInput = InputUtils.isPingHotkeyDown();
 		boolean activeInteraction = pingRuntime != null
 			&& pingRuntime.phase() != PingInteractionPhase.IDLE;
 		boolean compatibilityState = pingRuntime != null && pingRuntime.hasCompatibilityState();
 
-		InputUtils.resetPingHold();
+		if (resetAllInputState) {
+			InputUtils.resetPingHold();
+		} else {
+			InputUtils.resetPingInteraction();
+		}
 		if (activeInteraction || claimedInput || compatibilityState) {
 			if (pingRuntime != null) {
 				pingRuntime.abort();

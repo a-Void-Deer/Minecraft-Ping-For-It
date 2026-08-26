@@ -96,8 +96,19 @@ public class InputUtils {
 		boolean passThroughBinding = matches(KEY_BINDING_TOGGLE_PASS_THROUGH_TRANSPARENT_BLOCKS, rawKey);
 		boolean blacklistedBinding = matches(KEY_BINDING_TOGGLE_MARK_BLACKLISTED_TARGETS, rawKey);
 		boolean fluidsBinding = matches(KEY_BINDING_TOGGLE_MARK_FLUIDS, rawKey);
-		if (!(passThroughBinding || blacklistedBinding || fluidsBinding)
-			|| !TOGGLE_INPUT_STATE.claimPress(key)) {
+		if (!(passThroughBinding || blacklistedBinding || fluidsBinding)) {
+			return;
+		}
+
+		// A press received by a screen is still claimed through its physical
+		// release. This prevents a GLFW repeat after the screen closes from
+		// becoming a fresh toggle edge.
+		if (Game != null && Game.screen != null) {
+			TOGGLE_INPUT_STATE.suppressPress(key);
+			return;
+		}
+
+		if (!TOGGLE_INPUT_STATE.claimPress(key)) {
 			return;
 		}
 
@@ -208,6 +219,11 @@ public class InputUtils {
 	public static void resetPingHold() {
 		PING_INPUT_STATE.reset();
 		TOGGLE_INPUT_STATE.reset();
+	}
+
+	/** Disarms only the ping interaction, preserving toggle claims across screens. */
+	public static void resetPingInteraction() {
+		PING_INPUT_STATE.reset();
 	}
 
 	/** Value identity avoids depending on loader-specific Key object interning. */
