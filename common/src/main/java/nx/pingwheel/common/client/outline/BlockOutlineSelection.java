@@ -98,4 +98,47 @@ public final class BlockOutlineSelection {
 
 		return Collections.unmodifiableMap(selected);
 	}
+
+	/**
+	 * Selects provider-owned external block winners. External blocks do not use
+	 * the native model-glow routes: their renderer resolves the current native
+	 * state and transformed shape through the provider at render time.
+	 */
+	public static Map<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> selectExternal(
+		Map<TargetKey, ClientMarker> visibleWinners,
+		PingTypeCatalog catalog
+	) {
+		Objects.requireNonNull(visibleWinners, "visibleWinners");
+		Objects.requireNonNull(catalog, "catalog");
+
+		List<Map.Entry<TargetKey, ClientMarker>> ordered = visibleWinners.entrySet().stream()
+			.sorted(Map.Entry.comparingByValue(Comparator.comparing(ClientMarker::id)))
+			.toList();
+
+		Map<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> selected = new LinkedHashMap<>();
+
+		for (Map.Entry<TargetKey, ClientMarker> entry : ordered) {
+			TargetKey key = entry.getKey();
+			ClientMarker marker = entry.getValue();
+
+			if (!(key instanceof TargetKey.ExternalBlockKey externalKey)
+				|| !(marker.target() instanceof Target.ExternalBlockTarget externalTarget)
+				|| !externalKey.equals(marker.targetKey())
+				|| !BlockModelOutlineRoute.acceptsForBlockRendering(marker.targetTypeId())) {
+				continue;
+			}
+
+			int argbColor = 0xFF000000 | catalog.findById(marker.pingTypeId())
+				.map(pingType -> pingType.outlineColor())
+				.orElse(0xFFFFFF);
+
+			selected.put(
+				externalKey,
+				new ExternalBlockOutlineSpec(
+					marker.id(), externalKey, externalTarget,
+					marker.targetTypeId(), marker.pingTypeId(), argbColor));
+		}
+
+		return Collections.unmodifiableMap(selected);
+	}
 }

@@ -279,7 +279,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				return new RefreshResult.Invalid();
 			}
 
-			ExternalBlockReferenceIndex.LocatorKey newKey = locatorKey(available);
+			// The expected registry identity freezes the target classification for
+			// the marker lifetime. A locator migration must not create a new
+			// winner/classification merely because a provider observation reports a
+			// different Java-side flag.
+			ExternalBlockReferenceIndex.LocatorKey newKey = locatorKey(available, committed.hasBlockEntity());
 			if (!state.references.migrate(trackingId.get().toString(), newKey)) {
 				return new RefreshResult.Invalid();
 			}
@@ -289,11 +293,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				available.locator(),
 				trackingId.get(),
 				available.registryId(),
-				available.hasBlockEntity());
+				committed.hasBlockEntity());
 
 			return new RefreshResult.Available(
 				target,
-				TargetMatchContext.blockEntityBlock(available.hasBlockEntity()),
+				TargetMatchContext.blockEntityBlock(committed.hasBlockEntity()),
 				available.anchor());
 		} catch (ReflectiveOperationException | RuntimeException ignored) {
 			return new RefreshResult.Invalid();
@@ -486,11 +490,17 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	}
 
 	private static ExternalBlockReferenceIndex.LocatorKey locatorKey(LiveResult.Available available) {
+		return locatorKey(available, available.hasBlockEntity());
+	}
+
+	private static ExternalBlockReferenceIndex.LocatorKey locatorKey(
+		LiveResult.Available available, boolean hasBlockEntity
+	) {
 		return new ExternalBlockReferenceIndex.LocatorKey(
 			PROVIDER_ID,
 			available.locator().encode(),
 			available.registryId().toString(),
-			available.hasBlockEntity());
+			hasBlockEntity);
 	}
 
 	private boolean isRemoved(Object subLevel) throws ReflectiveOperationException {

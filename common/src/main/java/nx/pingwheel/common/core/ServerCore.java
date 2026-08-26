@@ -591,7 +591,6 @@ public class ServerCore {
 				Target.ExternalBlockTarget refreshedTarget = available.target();
 				Target.ExternalBlockTarget previousTarget = (Target.ExternalBlockTarget) marker.target();
 				boolean changed = !previousTarget.providerLocator().equals(refreshedTarget.providerLocator())
-					|| previousTarget.hasBlockEntity() != refreshedTarget.hasBlockEntity()
 					|| !marker.anchor().equals(available.anchor());
 
 				if (!changed) {

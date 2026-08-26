@@ -14,6 +14,7 @@ import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.math.MathUtils;
 import nx.pingwheel.common.math.ScreenPos;
@@ -38,6 +39,9 @@ import static nx.pingwheel.common.CommonClient.Game;
  * <ul>
  *   <li>starts entity targets at the authoritative {@link MarkerAnchor} and
  *       remembers the latest live interpolated point;</li>
+ *   <li>for an external block target, resolves the provider-owned local
+ *       locator with its current smooth presentation pose and uses the
+ *       authoritative anchor only while that observation is unavailable;</li>
  *   <li>resolves the owner's {@link PlayerInfo} from the current connection;</li>
  *   <li>for an entity target, resolves the live entity in the current
  *       dimension via {@link GameContext#getEntity} and follows its current
@@ -196,6 +200,11 @@ public final class MarkerView {
 			this.pos = toVec3(this.entityPositionTracker.resolve(
 				toPosition(anchor),
 				livePosition == null ? null : toPosition(livePosition)));
+		} else if (target instanceof Target.ExternalBlockTarget external) {
+			this.pos = resolveExternalPosition(
+				anchor,
+				SableClientProvider.resolvePosition(Game.level, external, ctx.tickDelta));
+			this.entityPositionTracker.reset();
 		} else {
 			this.entityPositionTracker.reset();
 		}
@@ -259,6 +268,13 @@ public final class MarkerView {
 
 	private static Vec3 anchorPosition(MarkerAnchor anchor) {
 		return new Vec3(anchor.x(), anchor.y(), anchor.z());
+	}
+
+	/** Provider position wins while resolvable; the anchor is never invalidated. */
+	static Vec3 resolveExternalPosition(Vec3 anchor, Optional<Vec3> providerPosition) {
+		Objects.requireNonNull(anchor, "anchor");
+		Objects.requireNonNull(providerPosition, "providerPosition");
+		return providerPosition.orElse(anchor);
 	}
 
 	private static boolean sameEntityIdentity(Target first, Target second) {

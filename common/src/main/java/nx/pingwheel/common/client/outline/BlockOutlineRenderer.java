@@ -16,12 +16,14 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 
 /**
  * Main-thread block outline render pass.
  *
- * <p>Draws the current native {@link VoxelShape} wireframe of every block in
- * the prepared {@link BlockOutlineState} snapshot into the given line buffer.
+ * <p>Draws the current native {@link VoxelShape} wireframe of every ordinary
+ * and provider-owned block in the prepared {@link BlockOutlineState} snapshots
+ * into the given line buffer.
  * The pass is deliberately conservative and never mutates the level:
  * <ul>
  *   <li>specs whose dimension differs from the level's are skipped;</li>
@@ -59,6 +61,22 @@ public final class BlockOutlineRenderer {
 		VertexConsumer lines,
 		BlockOutlineState state,
 		Set<TargetKey.BlockKey> modelOutlineKeys
+	) {
+		render(level, camera, lines, state, modelOutlineKeys, 1.0F);
+	}
+
+	/**
+	 * Renders ordinary and provider-owned block outlines for one render frame.
+	 * External targets resolve their current sub-level state and render pose here;
+	 * a missing provider observation is a no-op and never mutates marker state.
+	 */
+	public static void render(
+		ClientLevel level,
+		Camera camera,
+		VertexConsumer lines,
+		BlockOutlineState state,
+		Set<TargetKey.BlockKey> modelOutlineKeys,
+		float partialTick
 	) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(camera, "camera");
@@ -115,6 +133,39 @@ public final class BlockOutlineRenderer {
 
 			VoxelShapeRenderUtil.renderEdges(poseStack, lines, shape, 0.0, 0.0, 0.0, spec.argbColor());
 
+			poseStack.popPose();
+		}
+
+		for (Map.Entry<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> entry
+			: state.externalSnapshot().entrySet()) {
+			ExternalBlockOutlineSpec spec = entry.getValue();
+			TargetKey.ExternalBlockKey blockKey = entry.getKey();
+
+			if (!blockKey.dimensionId().equals(dimensionId)) {
+				continue;
+			}
+
+			var presentation = SableClientProvider.resolvePresentation(
+				level,
+				spec.target(),
+				partialTick,
+				collisionContext);
+
+			if (presentation.isEmpty()) {
+				continue;
+			}
+
+			var resolved = presentation.get();
+			poseStack.pushPose();
+			// The active LevelRenderer model-view matrix is camera-relative. The
+			// provider pose maps the sub-level's local coordinates into parent
+			// world coordinates, so compose camera translation, pose, and the
+			// local block transform in that order.
+			BlockPos localPos = resolved.localBlockPos();
+			ExternalBlockOutlineTransform.apply(
+				poseStack, resolved.renderPose(), localPos, cameraPosition);
+			VoxelShapeRenderUtil.renderEdges(
+				poseStack, lines, resolved.shape(), 0.0, 0.0, 0.0, spec.argbColor());
 			poseStack.popPose();
 		}
 	}

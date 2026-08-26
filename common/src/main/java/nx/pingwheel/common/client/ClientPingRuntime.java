@@ -56,6 +56,7 @@ import nx.pingwheel.common.client.LongPressCompatibilityController;
 import nx.pingwheel.common.integration.DistantHorizonsIntegration;
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.integration.SableIntegration;
+import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
@@ -723,11 +724,21 @@ public final class ClientPingRuntime {
 		}
 
 		if (ModContext.HasSable && hitResult.getType() == HitResult.Type.BLOCK) {
+			Optional<TargetSnapshot> sableCandidate = SableClientProvider.capture(
+				level,
+				(BlockHitResult) hitResult,
+				rayOrigin,
+				rayOrigin.add(cameraDirection.scale(distance)));
+
+			if (sableCandidate.isPresent()) {
+				completeCapture(token, sableCandidate.get(), pressRay);
+				return;
+			}
+
 			var projected = SableIntegration.projectOutOfSubLevel(game.level, hitResult.getLocation());
 
-			// Preserve the Sable behavior: a block hit inside a sub-level is
-			// projected back out into the real level and captured as a pure
-			// location target.
+			// If the provider cannot positively resolve the local block, preserve
+			// the pre-existing projected-location fallback.
 			if (projected.isPresent()) {
 				var projectedPos = projected.get();
 				completeCapture(token, TargetSnapshotFactory.location(
@@ -866,6 +877,20 @@ public final class ClientPingRuntime {
 				var topCenter = EntityMarkerPoint.forLiveEntity(entity, 1.0F);
 				return new WorldVector(topCenter.x, topCenter.y, topCenter.z);
 			}
+		} else if (target instanceof Target.ExternalBlockTarget external
+			&& Game != null && Game.level != null
+			&& currentDimension.equals(Game.level.dimension().location().toString())) {
+			Optional<Vec3> livePosition = SableClientProvider.resolvePosition(Game.level, external, 1.0F);
+
+			if (livePosition.isPresent()) {
+				Vec3 position = livePosition.get();
+				return new WorldVector(position.x, position.y, position.z);
+			}
+
+			// A provider miss is temporary presentation unavailability, not a
+			// local invalidation. Use the authoritative server fallback directly
+			// rather than retaining a stale sub-level render position.
+			return anchorPosition;
 		}
 
 		return MarkerCandidatePosition.resolve(
@@ -913,7 +938,7 @@ public final class ClientPingRuntime {
 		MarkerSnapshot snapshot = Objects.requireNonNull(packet.snapshot(), "snapshot");
 		TargetNameJson targetName = Objects.requireNonNull(packet.targetName(), "targetName");
 
-		boolean newlySeen = markerStore.marker(snapshot.id()).isEmpty();
+		boolean newlySeen = isNewMarkerReceipt(markerStore, snapshot.id());
 
 		markerStore.onCreated(snapshot, localTick);
 		nameStore.onCreated(snapshot.id(), targetName);
@@ -1155,6 +1180,16 @@ public final class ClientPingRuntime {
 	 */
 	public void setWheelSelection(WheelSelection selection) {
 		this.wheelSelection = Objects.requireNonNull(selection, "selection");
+	}
+
+	/**
+	 * The effect gate shared by created-marker handling: a same-id upsert is a
+	 * payload refresh, not a new sound/chat receipt.
+	 */
+	static boolean isNewMarkerReceipt(ClientMarkerStore store, MarkerId markerId) {
+		Objects.requireNonNull(store, "store");
+		Objects.requireNonNull(markerId, "markerId");
+		return store.marker(markerId).isEmpty();
 	}
 
 	private static TargetKind targetKindOf(TargetKey targetKey) {

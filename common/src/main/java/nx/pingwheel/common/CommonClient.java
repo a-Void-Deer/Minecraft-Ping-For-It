@@ -453,6 +453,16 @@ public class CommonClient {
 	 * succeeded suppress only their VoxelShape geometry.
 	 */
 	public void renderBlockOutlines(Camera camera, MultiBufferSource.BufferSource bufferSource) {
+		renderBlockOutlines(camera, bufferSource, 1.0F);
+	}
+
+	/**
+	 * Draws block outlines using the current world partial tick. Provider-owned
+	 * Sable blocks need that value to obtain their smooth render pose.
+	 */
+	public void renderBlockOutlines(
+		Camera camera, MultiBufferSource.BufferSource bufferSource, float partialTick
+	) {
 		Minecraft game = Game;
 
 		if (game == null || game.level == null) {
@@ -463,14 +473,15 @@ public class CommonClient {
 			return;
 		}
 
-		if (BlockOutlineState.INSTANCE.allCoveredBy(BlockModelOutlineState.INSTANCE.successKeys())) {
+		if (BlockOutlineState.INSTANCE.externalSnapshot().isEmpty()
+			&& BlockOutlineState.INSTANCE.allCoveredBy(BlockModelOutlineState.INSTANCE.successKeys())) {
 			return;
 		}
 
 		VertexConsumer lines = bufferSource.getBuffer(BlockOutlineRenderType.BLOCK_OUTLINE);
 		BlockOutlineRenderer.render(
 			game.level, camera, lines,
-			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE.successKeys());
+			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE.successKeys(), partialTick);
 		bufferSource.endBatch(BlockOutlineRenderType.BLOCK_OUTLINE);
 	}
 

@@ -7,6 +7,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.UUID;
+
+import nx.pingwheel.common.integration.sable.client.SableClientProvider;
+import nx.pingwheel.common.domain.Target;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -28,6 +32,10 @@ class OptionalDependencySafetyTest {
 		"nx/pingwheel/common/integration/externalblock/ExternalBlockServerProvider",
 		"nx/pingwheel/common/integration/externalblock/ExternalBlockServerProviderRegistry",
 		"nx/pingwheel/common/integration/externalblock/ExternalBlockReferenceIndex",
+		"nx/pingwheel/common/integration/sable/client/SableClientProvider",
+		"nx/pingwheel/common/client/marker/MarkerView",
+		"nx/pingwheel/common/name/ClientTargetNameResolver",
+		"nx/pingwheel/common/client/outline/BlockOutlineRenderer",
 		"nx/pingwheel/common/client/ClientPingRuntime",
 		"nx/pingwheel/common/integration/TeamContextHandler",
 		"nx/pingwheel/common/resolve/DefaultTargetResolver",
@@ -77,6 +85,11 @@ class OptionalDependencySafetyTest {
 			// Each call must short-circuit before touching the optional jars.
 			assertFalse(DistantHorizonsIntegration.traceDistantAsync(Vec3.ZERO, Vec3.ZERO, ignored -> {}));
 			assertTrue(SableIntegration.projectOutOfSubLevel(null, Vec3.ZERO).isEmpty());
+			assertTrue(SableClientProvider.capture(null, null, null, null).isEmpty());
+			Target.ExternalBlockTarget corrupt = Target.ExternalBlockTarget.committed(
+				"minecraft:overworld", "sable", UUID.randomUUID().toString(),
+				"minecraft:stone", "not-a-sable-locator", false);
+			assertTrue(SableClientProvider.resolvePosition(null, corrupt, 0.0F).isEmpty());
 			assertTrue(VoiceChatWrapper.getGroupId(null).isEmpty());
 			assertTrue(VoiceChatWrapper.getSelfGroupId().isEmpty());
 			assertTrue(FTBTeamsWrapper.getTeamId(null).isEmpty());

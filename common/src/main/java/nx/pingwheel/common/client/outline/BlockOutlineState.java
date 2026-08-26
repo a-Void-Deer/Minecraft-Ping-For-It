@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.marker.TargetKey;
@@ -15,14 +16,14 @@ import nx.pingwheel.common.marker.TargetKey;
  * visible outline, prepared once per world render frame before the block
  * outline pass.
  *
- * <p>Every frame {@link #prepare} re-selects the block outline specs from the
- * authoritative {@link ClientMarkerStore} visible-winner map of the current
- * dimension and swaps the immutable block-key→spec snapshot, preserving
- * {@link BlockOutlineSelection#select}'s deterministic ascending marker-id
- * iteration order. The snapshot carries no live shape: a {@code BlockState}
- * change with the same block type keeps the same block identity, and the
- * block outline renderer resolves the current shape itself. A block type
- * replacement changes the key's registry id and therefore the identity.
+ * <p>Every frame {@link #prepare} re-selects ordinary and provider-owned block
+ * outline specs from the authoritative {@link ClientMarkerStore}
+ * visible-winner map of the current dimension and swaps immutable snapshots,
+ * preserving deterministic ascending marker-id iteration order. The
+ * snapshots carry no live shape: a {@code BlockState} change with the same
+ * block type keeps the same ordinary block identity, while an external
+ * provider refresh replaces only its opaque locator/anchor payload. The
+ * renderers resolve current state and shape themselves.
  *
  * <p>Logging: only snapshot transitions are debug logged — the aggregate
  * counts {@code added/removed/changed/total} — never any block position,
@@ -42,6 +43,7 @@ public final class BlockOutlineState {
 	private static volatile BlockOutlineLogger logger = BlockOutlineLogger.noop();
 
 	private Map<TargetKey.BlockKey, BlockOutlineSpec> specs = Map.of();
+	private Map<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> externalSpecs = Map.of();
 
 	private BlockOutlineState() {}
 
@@ -59,10 +61,14 @@ public final class BlockOutlineState {
 			return;
 		}
 
+		Map<TargetKey, ClientMarker> winners =
+			store.visibleWinnersInDimension(dimensionId);
 		Map<TargetKey.BlockKey, BlockOutlineSpec> next = BlockOutlineSelection.select(
-			store.visibleWinnersInDimension(dimensionId), BUILT_IN_CATALOG);
+			winners, BUILT_IN_CATALOG);
+		Map<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> nextExternal =
+			BlockOutlineSelection.selectExternal(winners, BUILT_IN_CATALOG);
 
-		if (next.equals(specs)) {
+		if (next.equals(specs) && nextExternal.equals(externalSpecs)) {
 			return;
 		}
 
@@ -87,8 +93,33 @@ public final class BlockOutlineState {
 			}
 		}
 
+		int externalAdded = 0;
+		int externalChanged = 0;
+		int externalRemoved = 0;
+
+		for (Map.Entry<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> entry : nextExternal.entrySet()) {
+			ExternalBlockOutlineSpec previous = externalSpecs.get(entry.getKey());
+
+			if (previous == null) {
+				externalAdded++;
+			} else if (!previous.equals(entry.getValue())) {
+				externalChanged++;
+			}
+		}
+
+		for (TargetKey.ExternalBlockKey key : externalSpecs.keySet()) {
+			if (!nextExternal.containsKey(key)) {
+				externalRemoved++;
+			}
+		}
+
 		specs = Collections.unmodifiableMap(new LinkedHashMap<>(next));
-		logger.transition(added, removed, changed, next.size());
+		externalSpecs = Collections.unmodifiableMap(new LinkedHashMap<>(nextExternal));
+		logger.transition(
+			added + externalAdded,
+			removed + externalRemoved,
+			changed + externalChanged,
+			next.size() + nextExternal.size());
 	}
 
 	/**
@@ -98,7 +129,7 @@ public final class BlockOutlineState {
 	 * flushes an empty batch.
 	 */
 	public boolean hasOutlines() {
-		return !specs.isEmpty();
+		return !specs.isEmpty() || !externalSpecs.isEmpty();
 	}
 
 	/**
@@ -152,18 +183,25 @@ public final class BlockOutlineState {
 		return specs;
 	}
 
+	/** The current provider-owned external block outline snapshot. */
+	public Map<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> externalSnapshot() {
+		return externalSpecs;
+	}
+
 	/**
 	 * Drops the whole snapshot; logs a single transition when it was
 	 * non-empty and does nothing (and logs nothing) otherwise.
 	 */
 	public void clear() {
-		if (specs.isEmpty()) {
+		if (specs.isEmpty() && externalSpecs.isEmpty()) {
 			return;
 		}
 
 		int removed = specs.size();
+		int externalRemoved = externalSpecs.size();
 		specs = Map.of();
-		logger.transition(0, removed, 0, 0);
+		externalSpecs = Map.of();
+		logger.transition(0, removed + externalRemoved, 0, 0);
 	}
 
 	/**
