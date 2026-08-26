@@ -101,8 +101,9 @@ $env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
 ## Beta status and attribution
 
 This is a beta release. Rendering, multiplayer synchronization, optional
-integration behavior, and hold/wheel interaction still need manual in-game
-validation on supported loaders; build checks do not replace that validation.
+integration behavior, and hold/wheel interaction still need more in-game
+validation on supported loaders; build checks do not replace that validation. 
+So do I and my friends.
 
 The fork retains attribution to LukenSkyne's original Ping Wheel work. It has
 its own identity and protocol, does not migrate the original protocol, does not
