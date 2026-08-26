@@ -5,9 +5,8 @@ import java.util.Objects;
 /**
  * Immutable press-time policy for target ray selection.
  *
- * <p>The fluid mode deliberately has only the safe, required value.  The
- * modifier for ignored entities is independent from block selection so Ctrl
- * cannot accidentally change the block or fluid raycast mode.</p>
+ * <p>Shift controls only the block clip mode. Ctrl independently includes
+ * blacklisted entities and fluids in the raycast.</p>
  */
 public record RaycastPolicy(
 	BlockMode blockMode,
@@ -27,7 +26,7 @@ public record RaycastPolicy(
 	) {
 		return new RaycastPolicy(
 			selectTransparentBlocks ? BlockMode.OUTLINE : BlockMode.VISUAL,
-			FluidMode.NONE,
+			includeIgnoredEntities ? FluidMode.ANY : FluidMode.NONE,
 			includeIgnoredEntities);
 	}
 
@@ -37,6 +36,7 @@ public record RaycastPolicy(
 	}
 
 	public enum FluidMode {
-		NONE
+		NONE,
+		ANY
 	}
 }

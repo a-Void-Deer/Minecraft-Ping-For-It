@@ -59,6 +59,7 @@ public class Raycast {
 			.inflate(1.0, 1.0, 1.0);
 		var fluidMode = switch (policy.fluidMode()) {
 			case NONE -> ClipContext.Fluid.NONE;
+			case ANY -> ClipContext.Fluid.ANY;
 		};
 
 		var blockHitResult = cameraEntity.level().clip(

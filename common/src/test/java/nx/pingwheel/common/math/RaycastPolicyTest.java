@@ -9,16 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RaycastPolicyTest {
 
 	@Test
-	void shiftSelectsOutlineWithoutFluidSelection() {
-		RaycastPolicy policy = RaycastPolicy.from(true, false);
-
-		assertEquals(RaycastPolicy.BlockMode.OUTLINE, policy.blockMode());
-		assertEquals(RaycastPolicy.FluidMode.NONE, policy.fluidMode());
-		assertFalse(policy.includeIgnoredEntities());
-	}
-
-	@Test
-	void defaultSelectionUsesVisualWithoutFluidSelection() {
+	void noModifiersUseVisualWithoutFluidSelectionOrIgnoredEntities() {
 		RaycastPolicy policy = RaycastPolicy.from(false, false);
 
 		assertEquals(RaycastPolicy.BlockMode.VISUAL, policy.blockMode());
@@ -27,13 +18,29 @@ class RaycastPolicyTest {
 	}
 
 	@Test
-	void ctrlOnlyChangesWhetherIgnoredEntitiesAreIncluded() {
-		RaycastPolicy withoutCtrl = RaycastPolicy.from(false, false);
-		RaycastPolicy withCtrl = RaycastPolicy.from(false, true);
+	void shiftUsesOutlineWithoutFluidSelectionOrIgnoredEntities() {
+		RaycastPolicy policy = RaycastPolicy.from(true, false);
 
-		assertEquals(withoutCtrl.blockMode(), withCtrl.blockMode());
-		assertEquals(withoutCtrl.fluidMode(), withCtrl.fluidMode());
-		assertFalse(withoutCtrl.includeIgnoredEntities());
-		assertTrue(withCtrl.includeIgnoredEntities());
+		assertEquals(RaycastPolicy.BlockMode.OUTLINE, policy.blockMode());
+		assertEquals(RaycastPolicy.FluidMode.NONE, policy.fluidMode());
+		assertFalse(policy.includeIgnoredEntities());
+	}
+
+	@Test
+	void ctrlUsesVisualWithFluidSelectionAndIgnoredEntities() {
+		RaycastPolicy policy = RaycastPolicy.from(false, true);
+
+		assertEquals(RaycastPolicy.BlockMode.VISUAL, policy.blockMode());
+		assertEquals(RaycastPolicy.FluidMode.ANY, policy.fluidMode());
+		assertTrue(policy.includeIgnoredEntities());
+	}
+
+	@Test
+	void shiftAndCtrlUseOutlineWithFluidSelectionAndIgnoredEntities() {
+		RaycastPolicy policy = RaycastPolicy.from(true, true);
+
+		assertEquals(RaycastPolicy.BlockMode.OUTLINE, policy.blockMode());
+		assertEquals(RaycastPolicy.FluidMode.ANY, policy.fluidMode());
+		assertTrue(policy.includeIgnoredEntities());
 	}
 }
