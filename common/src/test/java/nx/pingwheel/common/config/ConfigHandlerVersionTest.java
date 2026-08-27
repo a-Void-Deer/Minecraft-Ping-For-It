@@ -19,7 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConfigHandlerVersionTest {
-	private static final String CURRENT_VERSION = "2.0.0-pfi-beta1";
+	private static final String CURRENT_VERSION = "0.3.0-pfi-beta1";
+	private static final String GENERIC_OLDER_VERSION = "0.1.0-pfi-beta1";
 
     @Test
     void defaultClientAndServerSavesContainTheExactVersionKeyAndValue(@TempDir Path tempDir) throws IOException {
@@ -68,6 +69,28 @@ class ConfigHandlerVersionTest {
         JsonObject persisted = readRoot(configPath);
         assertEquals(23, persisted.get("syncDuration").getAsInt());
         assertFalse(persisted.has("pingDuration"));
+    }
+
+    @Test
+    void olderServerConfigMigratesLegacyDurationAndPreservesUnknownRootData(@TempDir Path tempDir) throws IOException {
+        Path configPath = tempDir.resolve("server.json");
+        Files.writeString(
+            configPath,
+            "{\"pingforit-version\":\"0.2.0-pfi-beta1\",\"rateLimit\":3,\"pingDistance\":512,\"pingDuration\":23,\"unknown\":{\"source\":\"legacy\"}}\n",
+            StandardCharsets.UTF_8);
+
+        ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+        handler.load();
+
+        assertEquals(23, handler.getConfig().getSyncDuration());
+        assertEquals(3, handler.getConfig().getRateLimit());
+        assertEquals(512, handler.getConfig().getPingDistance());
+        JsonObject persisted = readRoot(configPath);
+        assertEquals(CURRENT_VERSION, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
+        assertEquals(23, persisted.get("syncDuration").getAsInt());
+        assertFalse(persisted.has("pingDuration"));
+        assertEquals("legacy", persisted.get("unknown").getAsJsonObject().get("source").getAsString());
+        assertFalse(hasBrokenBackup(tempDir));
     }
 
     @Test
@@ -120,18 +143,27 @@ class ConfigHandlerVersionTest {
         Path configPath = tempDir.resolve("client.json");
         Files.writeString(
             configPath,
-			"{\"pingforit-version\":\"1.0.0-pfi-beta1\",\"pingVolume\":23,\"unknown\":\"ignored\"}\n",
+			"{\"pingforit-version\":\"0.2.0-pfi-beta1\",\"pingVolume\":23,\"pingDistance\":512,"
+                + "\"itemIconVisible\":false,\"unknown\":{\"source\":\"legacy\"}}\n",
             StandardCharsets.UTF_8);
 
         ConfigHandler<ClientConfig> handler = client(configPath);
         handler.load();
 
         assertEquals(23, handler.getConfig().getPingVolume());
+        assertEquals(512, handler.getConfig().getPingDistance());
+        assertFalse(handler.getConfig().isItemIconVisible());
         JsonObject persisted = readPayload(configPath);
         assertEquals(CURRENT_VERSION, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
         assertEquals(23, persisted.get("pingVolume").getAsInt());
-        assertTrue(persisted.has("unknown"));
-        assertEquals("ignored", persisted.get("unknown").getAsString());
+        assertEquals(512, persisted.get("pingDistance").getAsInt());
+        assertFalse(persisted.get("itemIconVisible").getAsBoolean());
+        assertFalse(persisted.get("passThroughTransparentBlocks").getAsBoolean());
+        assertFalse(persisted.get("markBlacklistedTargets").getAsBoolean());
+        assertFalse(persisted.get("markFluids").getAsBoolean());
+        assertEquals(100, persisted.get("configurationNoticeSize").getAsInt());
+        assertEquals(0, persisted.get("markerDisplayDuration").getAsInt());
+        assertEquals("legacy", persisted.get("unknown").getAsJsonObject().get("source").getAsString());
         assertFalse(hasBrokenBackup(tempDir));
     }
 
@@ -175,7 +207,8 @@ class ConfigHandlerVersionTest {
     void failedClientMigrationWriteRetainsOriginalBytesAndLoadedValuesUntilRetry(@TempDir Path tempDir)
         throws IOException {
         Path configPath = tempDir.resolve("client-migration-failure.json");
-        byte[] original = "{\"pingforit-version\":\"1.0.0-pfi-beta1\",\"pingVolume\":23,\"unknown\":true}\n"
+        byte[] original = ("{\"pingforit-version\":\"" + GENERIC_OLDER_VERSION
+            + "\",\"pingVolume\":23,\"unknown\":true}\n")
             .getBytes(StandardCharsets.UTF_8);
         Files.write(configPath, original);
         AtomicBoolean failWrite = new AtomicBoolean(true);
@@ -207,7 +240,8 @@ class ConfigHandlerVersionTest {
     void failedServerMigrationWriteRetainsOriginalBytesAndLoadedValuesUntilRetry(@TempDir Path tempDir)
         throws IOException {
         Path configPath = tempDir.resolve("server-migration-failure.json");
-        byte[] original = "{\"pingforit-version\":\"1.0.0-pfi-beta1\",\"rateLimit\":23,\"unknown\":true}\n"
+        byte[] original = ("{\"pingforit-version\":\"" + GENERIC_OLDER_VERSION
+            + "\",\"rateLimit\":23,\"unknown\":true}\n")
             .getBytes(StandardCharsets.UTF_8);
         Files.write(configPath, original);
         AtomicBoolean failWrite = new AtomicBoolean(true);
@@ -241,7 +275,7 @@ class ConfigHandlerVersionTest {
         Path configPath = tempDir.resolve("client-stale-pending.json");
         Files.writeString(
             configPath,
-            "{\"pingforit-version\":\"1.0.0-pfi-beta1\",\"pingVolume\":23}\n",
+            "{\"pingforit-version\":\"" + GENERIC_OLDER_VERSION + "\",\"pingVolume\":23}\n",
             StandardCharsets.UTF_8);
         byte[] futureBytes = "{\"pingforit-version\":\"3.0.0-pfi-beta1\",\"pingVolume\":99}\n"
             .getBytes(StandardCharsets.UTF_8);
@@ -271,7 +305,7 @@ class ConfigHandlerVersionTest {
         Path configPath = tempDir.resolve("server-stale-pending.json");
         Files.writeString(
             configPath,
-            "{\"pingforit-version\":\"1.0.0-pfi-beta1\",\"rateLimit\":23}\n",
+            "{\"pingforit-version\":\"" + GENERIC_OLDER_VERSION + "\",\"rateLimit\":23}\n",
             StandardCharsets.UTF_8);
         byte[] futureBytes = "{\"pingforit-version\":\"3.0.0-pfi-beta1\",\"rateLimit\":99}\n"
             .getBytes(StandardCharsets.UTF_8);
@@ -301,7 +335,7 @@ class ConfigHandlerVersionTest {
         Path configPath = tempDir.resolve("client-pending-reset.json");
         Files.writeString(
             configPath,
-            "{\"pingforit-version\":\"1.0.0-pfi-beta1\",\"pingVolume\":23,\"oldUnknown\":true}\n",
+            "{\"pingforit-version\":\"" + GENERIC_OLDER_VERSION + "\",\"pingVolume\":23,\"oldUnknown\":true}\n",
             StandardCharsets.UTF_8);
         AtomicBoolean failWrite = new AtomicBoolean(true);
         ConfigHandler<ClientConfig> handler = new ConfigHandler<>(
@@ -332,7 +366,7 @@ class ConfigHandlerVersionTest {
         Path configPath = tempDir.resolve("server-pending-reset.json");
         Files.writeString(
             configPath,
-            "{\"pingforit-version\":\"1.0.0-pfi-beta1\",\"rateLimit\":23,\"oldUnknown\":true}\n",
+            "{\"pingforit-version\":\"" + GENERIC_OLDER_VERSION + "\",\"rateLimit\":23,\"oldUnknown\":true}\n",
             StandardCharsets.UTF_8);
         AtomicBoolean failWrite = new AtomicBoolean(true);
         ConfigHandler<ServerConfig> handler = new ConfigHandler<>(
