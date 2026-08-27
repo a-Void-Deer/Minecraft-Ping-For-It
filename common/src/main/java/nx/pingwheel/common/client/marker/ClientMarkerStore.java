@@ -104,9 +104,9 @@ public final class ClientMarkerStore {
 	}
 
 	/**
-	 * Creates a store with a caller-supplied visual duration policy. This is a
-	 * deliberately small seam for a later client setting; no config/UI is
-	 * coupled to marker lifecycle state here.
+	 * Creates a store with a caller-supplied visual duration policy. The runtime
+	 * supplies the local setting through this seam while the store keeps each
+	 * marker's selected deadline independent from later setting changes.
 	 */
 	public ClientMarkerStore(long graceTicks, DisplayDurationPolicy displayDurationPolicy) {
 		if (graceTicks < 0L) {

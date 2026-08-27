@@ -61,6 +61,13 @@ public final class ClientConfigBounds {
 	public static final int MAX_CONFIGURATION_NOTICE_SIZE = 500;
 	public static final int CONFIGURATION_NOTICE_SIZE_STEP = 10;
 
+	/** Zero is the explicit persisted value for using the server duration. */
+	public static final int FOLLOW_SERVER_MARKER_DISPLAY_DURATION = 0;
+	public static final int DEFAULT_MARKER_DISPLAY_DURATION = FOLLOW_SERVER_MARKER_DISPLAY_DURATION;
+	public static final int MIN_MARKER_DISPLAY_DURATION = ServerConfigBounds.MIN_PING_DURATION;
+	public static final int MAX_MARKER_DISPLAY_DURATION = ServerConfigBounds.MAX_PING_DURATION;
+	public static final int MARKER_DISPLAY_DURATION_STEP = 1;
+
 	private ClientConfigBounds() {}
 
 	public record WheelRadii(int innerRadius, int outerRadius) {}
@@ -149,5 +156,16 @@ public final class ClientConfigBounds {
 
 	public static int clampConfigurationNoticeSize(int value) {
 		return Math.clamp(value, MIN_CONFIGURATION_NOTICE_SIZE, MAX_CONFIGURATION_NOTICE_SIZE);
+	}
+
+	/**
+	 * Clamps the local marker display duration, retaining zero as the explicit
+	 * follow-server sentinel and constraining custom values to one minute.
+	 */
+	public static int clampMarkerDisplayDuration(int value) {
+		return Math.clamp(
+			value,
+			FOLLOW_SERVER_MARKER_DISPLAY_DURATION,
+			MAX_MARKER_DISPLAY_DURATION);
 	}
 }

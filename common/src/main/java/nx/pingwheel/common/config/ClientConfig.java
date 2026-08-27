@@ -46,6 +46,8 @@ public class ClientConfig implements IConfig {
 	/** Kept as wheelFontSize in JSON: this is the radial option-label value. */
 	int wheelFontSize = ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE;
 	int wheelTargetFontSize = ClientConfigBounds.DEFAULT_WHEEL_TARGET_FONT_SIZE;
+	/** Zero means that each marker uses its frozen server-side duration. */
+	int markerDisplayDuration = ClientConfigBounds.DEFAULT_MARKER_DISPLAY_DURATION;
 	@Setter(AccessLevel.NONE)
 	List<String> blockDisplayWhitelist = List.of("*:*");
 	@Setter(AccessLevel.NONE)
@@ -127,6 +129,28 @@ public class ClientConfig implements IConfig {
 	}
 
 	/**
+	 * Returns the local marker display setting with its safe fallback even when
+	 * a caller supplied a value without invoking the setter or validation.
+	 */
+	public int getEffectiveMarkerDisplayDuration() {
+		return ClientConfigBounds.clampMarkerDisplayDuration(markerDisplayDuration);
+	}
+
+	/** Returns the runtime-safe persisted value, including its follow-server sentinel. */
+	public int getMarkerDisplayDuration() {
+		return getEffectiveMarkerDisplayDuration();
+	}
+
+	public boolean isFollowServerMarkerDisplayDuration() {
+		return getEffectiveMarkerDisplayDuration()
+			== ClientConfigBounds.FOLLOW_SERVER_MARKER_DISPLAY_DURATION;
+	}
+
+	public void setMarkerDisplayDuration(int markerDisplayDuration) {
+		this.markerDisplayDuration = ClientConfigBounds.clampMarkerDisplayDuration(markerDisplayDuration);
+	}
+
+	/**
 	 * Returns the local entity-block geometry mode with the safe fallback even
 	 * if an older deserializer or reflective path supplied {@code null}.
 	 */
@@ -195,6 +219,7 @@ public class ClientConfig implements IConfig {
 		final int suppliedWheelFontSize = wheelFontSize;
 		final int suppliedWheelTargetFontSize = wheelTargetFontSize;
 		final int suppliedConfigurationNoticeSize = configurationNoticeSize;
+		final int suppliedMarkerDisplayDuration = markerDisplayDuration;
 
 		wheelHoldMillis = ClientConfigBounds.clampWheelHoldMillis(wheelHoldMillis);
 		warnIfChanged(
@@ -247,6 +272,13 @@ public class ClientConfig implements IConfig {
 			"configurationNoticeSize",
 			suppliedConfigurationNoticeSize,
 			configurationNoticeSize);
+
+		markerDisplayDuration = ClientConfigBounds.clampMarkerDisplayDuration(markerDisplayDuration);
+		warnIfChanged(
+			warningSink,
+			"markerDisplayDuration",
+			suppliedMarkerDisplayDuration,
+			markerDisplayDuration);
 
 		if (channel.length() > MAX_CHANNEL_LENGTH) {
 			channel = channel.substring(0, MAX_CHANNEL_LENGTH);

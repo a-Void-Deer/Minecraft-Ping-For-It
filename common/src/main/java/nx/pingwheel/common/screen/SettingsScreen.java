@@ -130,6 +130,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		this.list.addSmall(getPingVolumeOption(), getPingDistanceOption());
 
+		this.list.addSmall(getMarkerDisplayDurationOption(), null);
 		this.list.addSmall(getPassThroughTransparentBlocksOption(), getMarkBlacklistedTargetsOption());
 		this.list.addSmall(getMarkFluidsOption(), null);
 
@@ -268,6 +269,23 @@ public class SettingsScreen extends OptionsSubScreen {
 			},
 			config::getPingDistance,
 			config::setPingDistance
+		);
+	}
+
+	private OptionInstance<Integer> getMarkerDisplayDurationOption() {
+		final var text = LanguageUtils.settings("marker_display_duration");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			FOLLOW_SERVER_MARKER_DISPLAY_DURATION,
+			MAX_MARKER_DISPLAY_DURATION,
+			MARKER_DISPLAY_DURATION_STEP,
+			(value) -> value == FOLLOW_SERVER_MARKER_DISPLAY_DURATION
+				? LanguageUtils.of("value", "follow_server").get()
+				: text.get(LanguageUtils.UNIT_SECONDS.get(value)),
+			() -> text.path("tooltip").get(),
+			config::getEffectiveMarkerDisplayDuration,
+			config::setMarkerDisplayDuration
 		);
 	}
 

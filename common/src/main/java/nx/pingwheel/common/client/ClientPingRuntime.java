@@ -21,6 +21,7 @@ import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.client.marker.EntityMarkerPoint;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
+import nx.pingwheel.common.client.duration.ClientMarkerDisplayDuration;
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.chat.PingChatBuilder;
@@ -241,13 +242,15 @@ public final class ClientPingRuntime {
 			packetSender,
 			rateLimitPolicy,
 			timeSource,
-			ClientMarker::serverDurationTicks);
+			snapshot -> ClientMarkerDisplayDuration.durationTicks(
+				ClientConfig.HANDLER.getConfig().getEffectiveMarkerDisplayDuration(),
+				snapshot));
 	}
 
 	/**
 	 * Creates a runtime with a caller-supplied client display-duration policy.
-	 * The default remains the frozen per-marker server lifetime; this overload is
-	 * the narrow seam for a later user-facing setting.
+	 * The normal runtime path resolves the local setting per received marker;
+	 * this overload remains a narrow seam for tests and alternate clients.
 	 */
 	public static ClientPingRuntime create(
 		ClientPingActionDispatcher.LocalErrorSink errorSink,

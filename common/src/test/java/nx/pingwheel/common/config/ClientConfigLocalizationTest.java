@@ -74,6 +74,11 @@ class ClientConfigLocalizationTest {
 		assertContainsKey(enUs, "settings.pingforit.wheel_opacity");
 		assertContainsKey(enUs, "settings.pingforit.wheel_font_size");
 		assertContainsKey(enUs, "settings.pingforit.wheel_target_font_size");
+		assertContainsKey(enUs, "settings.pingforit.marker_display_duration");
+		assertContainsKey(enUs, "settings.pingforit.marker_display_duration.tooltip");
+		assertContainsKey(enUs, "value.pingforit.follow_server");
+		assertTrue(readTranslation("en_us", "settings.pingforit.marker_display_duration").contains("%s"));
+		assertEquals("Follow server", readTranslation("en_us", "value.pingforit.follow_server"));
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_mode");
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_mode.tooltip");
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_slice_millis");
@@ -86,6 +91,8 @@ class ClientConfigLocalizationTest {
 		assertContainsKey(enUs, "settings.pingforit.reset_all.message");
 		assertContainsKey(enUs, "settings.pingforit.open_block_shape_blacklist_config");
 		assertContainsKey(enUs, "unit.pingforit.milliseconds");
+		assertContainsKey(enUs, "unit.pingforit.seconds");
+		assertEquals("%ss", readTranslation("en_us", "unit.pingforit.seconds"));
 		assertContainsKey(enUs, "unit.pingforit.degrees");
 		assertContainsKey(enUs, "unit.pingforit.pixels");
 	}
@@ -113,6 +120,8 @@ class ClientConfigLocalizationTest {
 				"settings.pingforit.mark_fluids",
 				"settings.pingforit.wheel_font_size",
 				"settings.pingforit.wheel_target_font_size",
+				"settings.pingforit.marker_display_duration",
+				"settings.pingforit.marker_display_duration.tooltip",
 				"settings.pingforit.long_press_compatibility_mode",
 				"settings.pingforit.long_press_compatibility_mode.tooltip",
 				"settings.pingforit.long_press_compatibility_slice_millis",
@@ -127,6 +136,8 @@ class ClientConfigLocalizationTest {
 				nonBlankTranslation(json, locale, key);
 			}
 			nonBlankTranslation(json, locale, "unit.pingforit.milliseconds");
+			nonBlankTranslation(json, locale, "unit.pingforit.seconds");
+			nonBlankTranslation(json, locale, "value.pingforit.follow_server");
 			assertTrue(
 				json.get("settings.pingforit.long_press_compatibility_slice_millis").getAsString().contains("%s"),
 				() -> "compatibility slice must be formatted: " + locale);

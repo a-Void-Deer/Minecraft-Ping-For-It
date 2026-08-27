@@ -16,6 +16,7 @@ public class LanguageUtils {
 	public static final LanguageUtils UNIT_METERS = LanguageUtils.of("unit", "meters");
 	public static final LanguageUtils UNIT_PERCENT = LanguageUtils.of("unit", "percent");
 	public static final LanguageUtils UNIT_MILLISECONDS = LanguageUtils.of("unit", "milliseconds");
+	public static final LanguageUtils UNIT_SECONDS = LanguageUtils.of("unit", "seconds");
 	public static final LanguageUtils UNIT_DEGREES = LanguageUtils.of("unit", "degrees");
 	public static final LanguageUtils UNIT_PIXELS = LanguageUtils.of("unit", "pixels");
 

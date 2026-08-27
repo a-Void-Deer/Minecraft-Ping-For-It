@@ -45,6 +45,9 @@ class ClientConfigValidationTest {
 		assertEquals(100, config.getWheelOpacity());
 		assertEquals(100, config.getWheelFontSize());
 		assertEquals(100, config.getWheelTargetFontSize());
+		assertEquals(0, config.getMarkerDisplayDuration());
+		assertEquals(0, config.getEffectiveMarkerDisplayDuration());
+		assertTrue(config.isFollowServerMarkerDisplayDuration());
 		assertEquals(List.of("*:*"), config.getBlockDisplayWhitelist());
 		assertEquals(List.of(), config.getBlockShapeBlacklist());
 		assertTrue(new Gson().toJson(config).contains("\"blockDisplayWhitelist\""));
@@ -99,6 +102,47 @@ class ClientConfigValidationTest {
 
 		assertEquals(List.of("*:*"), config.getBlockDisplayWhitelist());
 		assertEquals(List.of(), config.getBlockShapeBlacklist());
+	}
+
+	@Test
+	void oldJsonWithoutMarkerDisplayDurationUsesFollowServerDefault() {
+		ClientConfig config = new Gson().fromJson("{\"pingVolume\":42}", ClientConfig.class);
+
+		config.validate((key, suppliedValue, effectiveValue) -> {});
+
+		assertEquals(ClientConfigBounds.FOLLOW_SERVER_MARKER_DISPLAY_DURATION, config.getMarkerDisplayDuration());
+		assertTrue(config.isFollowServerMarkerDisplayDuration());
+		assertTrue(new Gson().toJson(config).contains("\"markerDisplayDuration\":0"));
+	}
+
+	@Test
+	void markerDisplayDurationSetterAndValidationKeepSentinelAndCustomBoundsSafe() {
+		ClientConfig config = new ClientConfig();
+
+		config.setMarkerDisplayDuration(-1);
+		assertEquals(0, config.getMarkerDisplayDuration());
+		config.setMarkerDisplayDuration(61);
+		assertEquals(60, config.getMarkerDisplayDuration());
+
+		config.markerDisplayDuration = Integer.MIN_VALUE;
+		List<ClampWarning> warnings = new ArrayList<>();
+		config.validate((key, suppliedValue, effectiveValue) ->
+			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
+
+		assertEquals(0, config.getMarkerDisplayDuration());
+		assertEquals(List.of(new ClampWarning("markerDisplayDuration", Integer.MIN_VALUE, 0)), warnings);
+	}
+
+	@Test
+	void markerDisplayDurationRoundTripsThroughJsonPersistence() {
+		ClientConfig original = new ClientConfig();
+		original.setMarkerDisplayDuration(23);
+
+		ClientConfig restored = new Gson().fromJson(new Gson().toJson(original), ClientConfig.class);
+		restored.validate((key, suppliedValue, effectiveValue) -> {});
+
+		assertEquals(23, restored.getMarkerDisplayDuration());
+		assertFalse(restored.isFollowServerMarkerDisplayDuration());
 	}
 
 	@Test

@@ -644,6 +644,15 @@ public class CommonClient {
 	}
 
 	/**
+	 * Returns the latest valid server duration policy for client-facing state.
+	 * Marker lifetimes in follow-server mode still use each marker snapshot's
+	 * frozen duration rather than this connection-level value.
+	 */
+	public ClientSyncDurationPolicy getSyncDurationPolicy() {
+		return storedSyncDurationPolicy;
+	}
+
+	/**
 	 * Routes server settings to the latest live settings session. No snapshot is
 	 * retained globally, so a later connection cannot inherit a previous
 	 * server's configuration; the session callback also works under a

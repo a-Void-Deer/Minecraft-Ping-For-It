@@ -4,8 +4,9 @@ import nx.pingwheel.common.config.ServerConfigBounds;
 
 /**
  * The last valid server-authoritative marker display duration received by a
- * client connection.  Client rendering/lifecycle behavior is deliberately
- * not derived from this value in this stage.
+ * client connection. Client rendering/lifecycle behavior in follow-server
+ * mode is derived from each marker snapshot; this value is retained for
+ * connection-scoped client policy/UI state.
  */
 public record ClientSyncDurationPolicy(int syncDuration) {
 	public static final ClientSyncDurationPolicy DEFAULT =
