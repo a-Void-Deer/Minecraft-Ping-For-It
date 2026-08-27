@@ -106,6 +106,8 @@
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "將快速連續點擊識別為一次虛擬長按。"
   ,"settings.pingforit.long_press_compatibility_slice_millis": "相容時間片：%s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "啟用相容模式時相鄰點擊之間允許的最大間隔。"
+  ,"settings.pingforit.sync_duration": "同步持續時間（秒）"
+  ,"settings.pingforit.sync_duration.tooltip": "新建立的標記在伺服器上保持啟用的時間。"
   ,"settings.pingforit.marker_display_duration": "標記顯示時間：%s"
   ,"settings.pingforit.marker_display_duration.tooltip": "標記在本機顯示的時間。「跟隨伺服器」會使用每個標記凍結的伺服器時間。"
   ,"value.pingforit.follow_server": "跟隨伺服器"

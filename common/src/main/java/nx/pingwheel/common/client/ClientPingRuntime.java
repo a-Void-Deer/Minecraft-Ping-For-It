@@ -983,6 +983,9 @@ public final class ClientPingRuntime {
 
 		MarkerSnapshot snapshot = Objects.requireNonNull(packet.snapshot(), "snapshot");
 		TargetNameJson targetName = Objects.requireNonNull(packet.targetName(), "targetName");
+		if (markerStore.isAuthoritativelyRemoved(snapshot.id())) {
+			return;
+		}
 
 		boolean newlySeen = isNewMarkerReceipt(markerStore, snapshot.id());
 

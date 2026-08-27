@@ -137,6 +137,54 @@ class ClientMarkerStoreTest {
 	}
 
 	@Test
+	void removalBeforeCreateBlocksLateCreateAndClearsUnknownWinnerSlot() {
+		ClientMarkerStore store = newStore();
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId id = new MarkerId(7L);
+
+		store.onWinnerChanged(key, Optional.of(id));
+		assertTrue(store.onRemoved(id, MarkerRemovalReason.EXPIRED, 10L).isEmpty());
+		assertTrue(store.winnerId(key).isEmpty());
+
+		store.onCreated(snapshot(id, target, 1L, 20L), 11L);
+
+		assertTrue(store.marker(id).isEmpty());
+		assertTrue(store.renderMarkers().isEmpty());
+		assertTrue(store.isAuthoritativelyRemoved(id));
+	}
+
+	@Test
+	void hardRemovalBeforeCreateClearsUnknownWinnerSlot() {
+		ClientMarkerStore store = newStore();
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId id = new MarkerId(7L);
+
+		store.onWinnerChanged(key, Optional.of(id));
+		assertTrue(store.onRemoved(id, MarkerRemovalReason.TARGET_INVALID, 10L).isEmpty());
+
+		assertTrue(store.winnerId(key).isEmpty());
+		assertTrue(store.isAuthoritativelyRemoved(id));
+	}
+
+	@Test
+	void expiredMarkerCannotBeResynchronizedByALateCreatePacket() {
+		ClientMarkerStore store = new ClientMarkerStore(10L, 100L);
+		Target target = locationTarget(OVERWORLD, 1);
+		MarkerId id = new MarkerId(8L);
+
+		store.onCreated(snapshot(id, target, 1L, 20L), 0L);
+		assertTrue(store.onRemoved(id, MarkerRemovalReason.EXPIRED, 10L).isEmpty());
+		assertTrue(store.marker(id).orElseThrow().isStale());
+
+		store.onCreated(snapshot(id, target, 1L, 20L), 11L);
+
+		assertTrue(store.marker(id).orElseThrow().isStale());
+		assertTrue(store.isAuthoritativelyRemoved(id));
+	}
+
+	@Test
 	void removedClearsWinnerSlotsPointingToRemovedMarker() {
 		ClientMarkerStore store = newStore();
 		Target target = locationTarget(OVERWORLD, 1);

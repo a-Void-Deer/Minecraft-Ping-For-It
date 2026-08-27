@@ -632,8 +632,9 @@ public class CommonClient {
 
 	/**
 	 * Applies the latest valid server duration policy to the connection-scoped
-	 * client model.  Display/lifecycle behavior intentionally remains governed
-	 * by the existing per-marker arrival/expiry payload in this stage.
+	 * client model. Follow-server display behavior still uses each marker's
+	 * frozen arrival/expiry payload, while custom local display durations are
+	 * selected when each marker is received.
 	 */
 	public void onSyncDurationPolicyPacket(SyncDurationPolicyS2CPacket packet) {
 		if (packet.isCorrupt()) {

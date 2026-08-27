@@ -37,11 +37,13 @@ import nx.pingwheel.common.marker.TargetKey;
  * <p>{@link #onCreated} is an idempotent upsert keyed by {@link MarkerId}:
  * re-applying an identical snapshot at the same client tick is a no-op, and a
  * retransmission of an identical snapshot at a later client tick keeps the
- * payload but refreshes the local fallback expiry; re-applying the same id
- * with a different snapshot deterministically replaces the stored marker with
- * the latest payload (the server is authoritative, so the newest received
- * snapshot for an id wins). The replacement does not move the marker within
- * the internal insertion order.
+ * payload but refreshes the local fallback expiry while the id has not been
+ * authoritatively removed; re-applying the same id with a different snapshot
+ * deterministically replaces the stored marker with the latest payload (the
+ * server is authoritative, so the newest received snapshot for an id wins).
+ * Authoritative removals are tombstoned for this connection, so a delayed
+ * create cannot resurrect a removed marker. The replacement does not move the
+ * marker within the internal insertion order.
  *
  * <h2>Winner slots</h2>
  *
@@ -92,6 +94,7 @@ public final class ClientMarkerStore {
 	private final DisplayDurationPolicy displayDurationPolicy;
 	private final Map<MarkerId, ClientMarker> markers = new LinkedHashMap<>();
 	private final Map<TargetKey, MarkerId> authoritativeWinnerByKey = new LinkedHashMap<>();
+	private final Set<MarkerId> authoritativeRemovedIds = new HashSet<>();
 	private long currentLocalTick;
 
 	/**
@@ -134,10 +137,12 @@ public final class ClientMarkerStore {
 	 * <p>Idempotent upsert: an identical snapshot at the same local tick
 	 * changes nothing; a retransmission of the same snapshot at a later local
 	 * tick refreshes the local fallback expiry; a different snapshot for the
-	 * same id replaces the stored marker with the latest payload. Winner slots
-	 * are not touched here — a winner already announced for this id only
-	 * becomes visible through the winner queries once the key matches, and a
-	 * missing winner announcement is filled in by the server.
+	 * same id replaces the stored marker with the latest payload. A marker id
+	 * already observed in an authoritative removal is ignored, preventing a
+	 * delayed create from resurrecting it. Winner slots are not touched here —
+	 * a winner already announced for this id only becomes visible through the
+	 * winner queries once the key matches, and a missing winner announcement is
+	 * filled in by the server.
 	 */
 	public List<ClientMarker> onCreated(MarkerSnapshot snapshot, long localTick) {
 		Objects.requireNonNull(snapshot, "snapshot");
@@ -147,6 +152,13 @@ public final class ClientMarkerStore {
 		}
 
 		observeLocalTick(localTick);
+		if (authoritativeRemovedIds.contains(snapshot.id())) {
+			// Marker ids are never reused within a server session. An authoritative
+			// removal may arrive before its create packet, so a delayed create must
+			// not resurrect that marker or replay its effects.
+			return List.of();
+		}
+
 		long appliedTick = currentLocalTick;
 		long displayDurationTicks = displayDurationPolicy.durationTicks(snapshot);
 
@@ -181,15 +193,17 @@ public final class ClientMarkerStore {
 	}
 
 	/**
-	 * Removes the marker with {@code id}, if known.
+	 * Removes the marker with {@code id}, if known, and remembers the
+	 * authoritative removal for this connection.
 	 *
-	 * <p>Removing an unknown id is a safe no-op. Every winner slot whose
-	 * stored id equals {@code id} is cleared, so a stale authoritative winner
-	 * can never outlive its marker.
+	 * <p>Removing an unknown id is otherwise a safe no-op. Every winner slot
+	 * whose stored id equals {@code id} is cleared, so a stale authoritative
+	 * winner can never outlive its marker.
 	 */
 	public void onRemoved(MarkerId id) {
 		Objects.requireNonNull(id, "id");
 
+		authoritativeRemovedIds.add(id);
 		removeMarker(id);
 	}
 
@@ -217,12 +231,17 @@ public final class ClientMarkerStore {
 		observeLocalTick(localTick);
 		ClientMarker marker = markers.get(id);
 		Set<TargetKey> removedWinnerKeys = new HashSet<>();
+		authoritativeRemovedIds.add(id);
 
 		if (reason != MarkerRemovalReason.EXPIRED) {
 			return removeMarker(id).stream().toList();
 		}
 
 		if (marker == null) {
+			// A winner announcement can precede both the create and removal
+			// packets. Once removal is authoritative, discard such an unknown
+			// slot so a later delayed create cannot make it observable.
+			authoritativeWinnerByKey.values().removeIf(id::equals);
 			return List.of();
 		}
 
@@ -259,6 +278,15 @@ public final class ClientMarkerStore {
 	}
 
 	/**
+	 * Whether an authoritative removal for {@code id} has already been
+	 * observed. This is used by the runtime to suppress sound/chat effects for
+	 * a delayed create packet that the store correctly ignores.
+	 */
+	public boolean isAuthoritativelyRemoved(MarkerId id) {
+		return authoritativeRemovedIds.contains(Objects.requireNonNull(id, "id"));
+	}
+
+	/**
 	 * Records the authoritative visible winner for {@code key}.
 	 *
 	 * <p>The id is stored even when the marker itself is not known yet, so a
@@ -279,6 +307,10 @@ public final class ClientMarkerStore {
 
 		MarkerId id = winnerId.get();
 		ClientMarker marker = markers.get(id);
+		if (marker == null && authoritativeRemovedIds.contains(id)) {
+			authoritativeWinnerByKey.remove(key);
+			return List.of();
+		}
 		List<ClientMarker> removed = marker != null
 			&& key.equals(marker.targetKey())
 			&& marker.isSynchronized()
@@ -290,9 +322,10 @@ public final class ClientMarkerStore {
 	}
 
 	/**
-	 * Drops every marker whose {@link ClientMarker#fallbackExpiresAtLocalTick()}
-	 * is less than or equal to {@code localTick} and returns the removed
-	 * markers.
+	 * Transitions synchronized markers whose
+	 * {@link ClientMarker#fallbackExpiresAtLocalTick()} is less than or equal to
+	 * {@code localTick} to stale, or removes records whose independent display
+	 * deadline has elapsed, and returns the records actually removed.
 	 *
 	 * <p>For every dropped marker, every winner slot whose stored id equals the
 	 * dropped marker's id is cleared, even when the slot's key differs from the
@@ -363,6 +396,7 @@ public final class ClientMarkerStore {
 	public void clear() {
 		markers.clear();
 		authoritativeWinnerByKey.clear();
+		authoritativeRemovedIds.clear();
 	}
 
 	/**
@@ -577,10 +611,7 @@ public final class ClientMarkerStore {
 
 	private Optional<ClientMarker> removeMarker(MarkerId id) {
 		ClientMarker removed = markers.remove(id);
-
-		if (removed != null) {
-			authoritativeWinnerByKey.values().removeIf(id::equals);
-		}
+		authoritativeWinnerByKey.values().removeIf(id::equals);
 
 		return Optional.ofNullable(removed);
 	}

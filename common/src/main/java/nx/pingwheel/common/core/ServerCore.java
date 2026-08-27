@@ -72,6 +72,7 @@ public class ServerCore {
 	private static final ServerConfig SERVER_CONFIG = ServerConfig.HANDLER.getConfig();
 	private static final HashMap<UUID, String> PLAYER_CHANNELS = new HashMap<>();
 	private static final HashMap<UUID, RateLimiter> PLAYER_RATES = new HashMap<>();
+	private static final SyncDurationPolicyTracker SYNC_DURATION_POLICY = new SyncDurationPolicyTracker();
 
 	/**
 	 * The shared, server-authoritative marker store. It is replaced on common
@@ -116,6 +117,7 @@ public class ServerCore {
 
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
 		ACTIVE_SERVER = null;
+		SYNC_DURATION_POLICY.reset();
 	}
 
 	/**
@@ -138,6 +140,7 @@ public class ServerCore {
 			releaseExternalMarkers(ACTIVE_SERVER, MARKER_STORE.allMarkers());
 			MARKER_STORE.clear();
 			ExternalBlockServerProviders.close(ACTIVE_SERVER);
+			SYNC_DURATION_POLICY.reset();
 		}
 
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
@@ -193,13 +196,18 @@ public class ServerCore {
 			return;
 		}
 
+		ensureMarkerStore(player.serverLevel().getServer());
 		updatePlayerChannel(player, packet.channel());
 		IPlatformNetworkService.INSTANCE.sendToClient(
 			new RateLimitPolicyS2CPacket(SERVER_CONFIG.getRateLimit(), SERVER_CONFIG.getMsToRegenerate()),
 			player);
-		IPlatformNetworkService.INSTANCE.sendToClient(
-			new SyncDurationPolicyS2CPacket(SERVER_CONFIG.getSyncDuration()),
-			player);
+		if (SYNC_DURATION_POLICY.claimInitialSync(player.getUUID())) {
+			int syncDuration = SERVER_CONFIG.getSyncDuration();
+			IPlatformNetworkService.INSTANCE.sendToClient(
+				new SyncDurationPolicyS2CPacket(syncDuration),
+				player);
+			SYNC_DURATION_POLICY.recordBroadcast(syncDuration);
+		}
 		LOGGER.debug("sent rate limit policy");
 	}
 
@@ -239,10 +247,16 @@ public class ServerCore {
 			return;
 		}
 
-		var packet = new SyncDurationPolicyS2CPacket(SERVER_CONFIG.getSyncDuration());
+		int syncDuration = SERVER_CONFIG.getSyncDuration();
+		if (!SYNC_DURATION_POLICY.needsBroadcast(syncDuration)) {
+			return;
+		}
+
+		var packet = new SyncDurationPolicyS2CPacket(syncDuration);
 		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
 			IPlatformNetworkService.INSTANCE.sendToClient(packet, player);
 		}
+		SYNC_DURATION_POLICY.recordBroadcast(syncDuration);
 
 		LOGGER.debug("broadcast sync duration policy");
 	}
@@ -578,6 +592,7 @@ public class ServerCore {
 
 		PLAYER_CHANNELS.remove(player.getUUID());
 		PLAYER_RATES.remove(player.getUUID());
+		SYNC_DURATION_POLICY.forget(player.getUUID());
 	}
 
 	/**

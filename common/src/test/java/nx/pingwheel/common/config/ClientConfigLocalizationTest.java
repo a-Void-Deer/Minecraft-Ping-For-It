@@ -46,7 +46,9 @@ class ClientConfigLocalizationTest {
 		"settings.pingforit.ms_to_regenerate",
 		"settings.pingforit.ms_to_regenerate.tooltip",
 		"settings.pingforit.rate_limit",
-		"settings.pingforit.rate_limit.tooltip");
+		"settings.pingforit.rate_limit.tooltip",
+		"settings.pingforit.sync_duration",
+		"settings.pingforit.sync_duration.tooltip");
 	private static final Map<String, String> EXTERNAL_LIST_RESTART_MARKERS = Map.of(
 		"de_de", "Neustart des Clients",
 		"en_us", "restarting the client",

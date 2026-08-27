@@ -104,6 +104,8 @@
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Hızlı tıklamaları tek bir sanal uzun basma olarak algılar."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Uyumluluk zaman aralığı: %s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Uyumluluk modu etkinken ardışık tıklamalar arasındaki en uzun süre."
+  ,"settings.pingforit.sync_duration": "Senkronizasyon Süresi (saniye)"
+  ,"settings.pingforit.sync_duration.tooltip": "Yeni oluşturulan işaretçilerin sunucuda ne kadar süre etkin kalacağını belirler."
   ,"settings.pingforit.marker_display_duration": "İşaretçi Görüntüleme Süresi: %s"
   ,"settings.pingforit.marker_display_duration.tooltip": "İşaretçilerin yerel olarak ne kadar süre görünür kalacağını belirler. Sunucuyu takip et, her işaretçinin dondurulmuş sunucu süresini kullanır."
   ,"value.pingforit.follow_server": "Sunucuyu takip et"
