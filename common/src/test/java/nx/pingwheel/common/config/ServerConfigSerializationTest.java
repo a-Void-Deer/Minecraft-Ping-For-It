@@ -1,6 +1,7 @@
 package nx.pingwheel.common.config;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,6 +20,17 @@ class ServerConfigSerializationTest {
 		String serialized = gson.toJson(config);
 		assertTrue(serialized.contains("\"syncDuration\":23"));
 		assertFalse(serialized.contains("\"pingDuration\""));
+	}
+
+	@Test
+	void explicitSyncDurationWinsWhenLegacyAndCurrentKeysArePresent() {
+		JsonObject root = new JsonObject();
+		root.addProperty("syncDuration", 41);
+		root.addProperty("pingDuration", 23);
+
+		assertTrue(ServerConfig.migrateLegacyDurationKey(root));
+		assertEquals(41, root.get("syncDuration").getAsInt());
+		assertFalse(root.has("pingDuration"));
 	}
 
 	@Test

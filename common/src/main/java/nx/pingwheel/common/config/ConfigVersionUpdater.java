@@ -9,9 +9,11 @@ import java.util.Objects;
 /**
  * Applies the ordered, common configuration-version update plan.
  *
- * <p>The plan intentionally has no field migrations yet. Keeping the marker
- * update here gives future migrations one explicit order and one failure
- * boundary without putting version fields in the configuration models.</p>
+ * <p>The common plan currently updates only the marker. Configuration-specific
+ * compatibility normalization is performed by the handler before this plan so
+ * it can also apply when the version marker is already current. Keeping the
+ * marker update here gives future common migrations one explicit order and one
+ * failure boundary without putting version fields in the configuration models.</p>
  */
 final class ConfigVersionUpdater {
 	static final String VERSION_KEY = "pingforit-version";
@@ -42,9 +44,9 @@ final class ConfigVersionUpdater {
 
 		List<String> updates = new ArrayList<>();
 
-		// Keep future field migrations here in their explicit execution order.
-		// There are currently no field migrations: the unmarked 0.1.0 format is
-		// intentionally handled as damaged rather than given a special migration.
+		// Keep future common field migrations here in their explicit execution order.
+		// There are currently no common field migrations: the unmarked 0.1.0 format
+		// is intentionally handled as damaged rather than given a special migration.
 		root.addProperty(VERSION_KEY, currentVersion.originalVersion());
 		updates.add(VERSION_KEY + ": " + oldVersion + " -> " + currentVersion);
 
