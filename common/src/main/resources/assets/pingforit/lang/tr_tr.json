@@ -1,8 +1,9 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Konumu Pingle",
-	"key.pingforit.select_transparent_block": "Şeffaf Blokları Seç",
-	"key.pingforit.allow_blacklisted_target": "Kara Listedeki Hedeflere İzin Ver",
+	"key.pingforit.toggle_pass_through_transparent_blocks": "Şeffaf Blokları Aş",
+	"key.pingforit.toggle_mark_blacklisted_targets": "Kara Listedeki Hedefleri İşaretle",
+	"key.pingforit.toggle_mark_fluids": "Sıvıları İşaretle",
 	"key.pingforit.open_settings": "Ayarları Aç",
 	"subtitles.pingforit.ping": "Konum Pingi Uyarısı",
 
@@ -20,6 +21,9 @@
 	"settings.pingforit.ping_distance": "Ping Mesafesi: %s",
 	"settings.pingforit.item_icon_visible": "Eşya Simgeleri",
 	"settings.pingforit.direction_indicator_visible": "Yön Göstergesi",
+	"settings.pingforit.pass_through_transparent_blocks": "Şeffaf Blokları Aş",
+	"settings.pingforit.mark_blacklisted_targets": "Kara Listedeki Hedefleri İşaretle",
+	"settings.pingforit.mark_fluids": "Sıvıları İşaretle",
 	"settings.pingforit.ping_size": "Ping Boyutu: %s",
 	"settings.pingforit.wheel_font_size": "Tekerlek Seçenek Yazı Boyutu: %s",
 	"settings.pingforit.wheel_target_font_size": "Tekerlek Hedef Yazı Boyutu: %s",
@@ -100,4 +104,10 @@
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Hızlı tıklamaları tek bir sanal uzun basma olarak algılar."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Uyumluluk zaman aralığı: %s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Uyumluluk modu etkinken ardışık tıklamalar arasındaki en uzun süre."
+  ,"notice.pingforit.pass_through_transparent_blocks": "Şeffaf bloklardan işaretle: "
+  ,"notice.pingforit.mark_blacklisted_targets": "Kara listedeki hedefleri işaretle: "
+  ,"notice.pingforit.mark_fluids": "Sıvıları işaretle: "
+  ,"notice.pingforit.on": "Açık"
+  ,"notice.pingforit.off": "Kapalı"
+  ,"settings.pingforit.configuration_notice_size": "Yapılandırma bildirimi boyutu: %s"
 }

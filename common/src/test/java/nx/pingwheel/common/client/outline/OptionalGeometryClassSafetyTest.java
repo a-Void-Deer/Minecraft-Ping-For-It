@@ -81,9 +81,16 @@ class OptionalGeometryClassSafetyTest {
 		assertFalse(adapter.contains("Sable"));
 
 		assertTrue(transform.contains("environmentOrigin.getX() + localVertex.x()"));
-		assertTrue(transform.contains("new Vector3f(\n\t\t\t(float) worldPosition.x"));
-		assertTrue(transform.contains("(float) worldPosition.y"));
-		assertTrue(transform.contains("(float) worldPosition.z"));
+		String normalizedTransform = normalizeJavaSource(transform);
+		int vectorConstructor = normalizedTransform.indexOf("new Vector3f(");
+		assertTrue(vectorConstructor >= 0, "transform must construct the output vector");
+		String firstArgument = normalizedTransform
+			.substring(vectorConstructor + "new Vector3f(".length())
+			.trim();
+		assertTrue(firstArgument.startsWith("(float) worldPosition.x"),
+			"worldPosition.x must be the first Vector3f argument");
+		assertTrue(normalizedTransform.contains("(float) worldPosition.y"));
+		assertTrue(normalizedTransform.contains("(float) worldPosition.z"));
 	}
 
 	@Test

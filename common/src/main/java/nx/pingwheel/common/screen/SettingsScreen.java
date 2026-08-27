@@ -130,11 +130,15 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		this.list.addSmall(getPingVolumeOption(), getPingDistanceOption());
 
+		this.list.addSmall(getPassThroughTransparentBlocksOption(), getMarkBlacklistedTargetsOption());
+		this.list.addSmall(getMarkFluidsOption(), null);
+
 		this.list.addSmall(getItemIconsVisibleOption(), getDirectionIndicatorVisibleOption());
 
 		this.list.addSmall(getPlayerInfoModeOption(), getTeamColorModeOption());
 
 		this.list.addSmall(getPingSizeOption(), getWheelInnerRadiusOption());
+		this.list.addSmall(getConfigurationNoticeSizeOption(), null);
 
 		this.list.addSmall(getWheelOuterRadiusOption(), getWheelOpacityOption());
 
@@ -275,6 +279,30 @@ public class SettingsScreen extends OptionsSubScreen {
 		);
 	}
 
+	private OptionInstance<Boolean> getPassThroughTransparentBlocksOption() {
+		return OptionUtils.ofBool(
+			LanguageUtils.settings("pass_through_transparent_blocks").getKey(),
+			config::isPassThroughTransparentBlocks,
+			config::setPassThroughTransparentBlocks
+		);
+	}
+
+	private OptionInstance<Boolean> getMarkBlacklistedTargetsOption() {
+		return OptionUtils.ofBool(
+			LanguageUtils.settings("mark_blacklisted_targets").getKey(),
+			config::isMarkBlacklistedTargets,
+			config::setMarkBlacklistedTargets
+		);
+	}
+
+	private OptionInstance<Boolean> getMarkFluidsOption() {
+		return OptionUtils.ofBool(
+			LanguageUtils.settings("mark_fluids").getKey(),
+			config::isMarkFluids,
+			config::setMarkFluids
+		);
+	}
+
 	private OptionInstance<Boolean> getDirectionIndicatorVisibleOption() {
 		return OptionUtils.ofBool(
 			LanguageUtils.settings("direction_indicator_visible").getKey(),
@@ -311,6 +339,20 @@ public class SettingsScreen extends OptionsSubScreen {
 			(mode) -> Component.empty(),
 			config::getTeamColorMode,
 			config::setTeamColorMode
+		);
+	}
+
+	private OptionInstance<Integer> getConfigurationNoticeSizeOption() {
+		final var text = LanguageUtils.settings("configuration_notice_size");
+
+		return OptionUtils.ofInt(
+			text.getKey(),
+			MIN_CONFIGURATION_NOTICE_SIZE,
+			MAX_CONFIGURATION_NOTICE_SIZE,
+			CONFIGURATION_NOTICE_SIZE_STEP,
+			(value) -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			config::getConfigurationNoticeSize,
+			config::setConfigurationNoticeSize
 		);
 	}
 

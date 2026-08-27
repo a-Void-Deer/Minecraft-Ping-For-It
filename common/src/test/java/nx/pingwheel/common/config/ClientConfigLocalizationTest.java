@@ -78,6 +78,9 @@ class ClientConfigLocalizationTest {
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_mode.tooltip");
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_slice_millis");
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_slice_millis.tooltip");
+		assertContainsKey(enUs, "settings.pingforit.pass_through_transparent_blocks");
+		assertContainsKey(enUs, "settings.pingforit.mark_blacklisted_targets");
+		assertContainsKey(enUs, "settings.pingforit.mark_fluids");
 		assertContainsKey(enUs, "settings.pingforit.reset_all");
 		assertContainsKey(enUs, "settings.pingforit.reset_all.title");
 		assertContainsKey(enUs, "settings.pingforit.reset_all.message");
@@ -99,6 +102,15 @@ class ClientConfigLocalizationTest {
 
 			var json = JsonParser.parseString(contents).getAsJsonObject();
 			for (String key : java.util.List.of(
+				"key.pingforit.toggle_pass_through_transparent_blocks",
+				"key.pingforit.toggle_mark_blacklisted_targets",
+				"key.pingforit.toggle_mark_fluids")) {
+				nonBlankTranslation(json, locale, key);
+			}
+			for (String key : java.util.List.of(
+				"settings.pingforit.pass_through_transparent_blocks",
+				"settings.pingforit.mark_blacklisted_targets",
+				"settings.pingforit.mark_fluids",
 				"settings.pingforit.wheel_font_size",
 				"settings.pingforit.wheel_target_font_size",
 				"settings.pingforit.long_press_compatibility_mode",

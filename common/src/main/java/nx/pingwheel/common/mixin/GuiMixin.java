@@ -23,4 +23,12 @@ public abstract class GuiMixin {
 
 		matrixStack.popPose();
 	}
+
+	@Inject(method = "render", at = @At("TAIL"))
+	public void renderSelectionToggleNotice(
+		GuiGraphics guiGraphics,
+		DeltaTracker deltaTracker,
+		CallbackInfo callbackInfo) {
+		CommonClient.INSTANCE.onRenderToggleNotice(guiGraphics);
+	}
 }

@@ -56,6 +56,11 @@ public final class ClientConfigBounds {
 	public static final int MAX_WHEEL_TARGET_FONT_SIZE = MAX_WHEEL_FONT_SIZE;
 	public static final int WHEEL_TARGET_FONT_SIZE_STEP = WHEEL_FONT_SIZE_STEP;
 
+	public static final int DEFAULT_CONFIGURATION_NOTICE_SIZE = 100;
+	public static final int MIN_CONFIGURATION_NOTICE_SIZE = 0;
+	public static final int MAX_CONFIGURATION_NOTICE_SIZE = 500;
+	public static final int CONFIGURATION_NOTICE_SIZE_STEP = 10;
+
 	private ClientConfigBounds() {}
 
 	public record WheelRadii(int innerRadius, int outerRadius) {}
@@ -140,5 +145,9 @@ public final class ClientConfigBounds {
 
 	public static int clampWheelTargetFontSize(int value) {
 		return Math.clamp(value, MIN_WHEEL_TARGET_FONT_SIZE, MAX_WHEEL_TARGET_FONT_SIZE);
+	}
+
+	public static int clampConfigurationNoticeSize(int value) {
+		return Math.clamp(value, MIN_CONFIGURATION_NOTICE_SIZE, MAX_CONFIGURATION_NOTICE_SIZE);
 	}
 }

@@ -1,8 +1,9 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Standort pingen",
-	"key.pingforit.select_transparent_block": "Transparente Blöcke auswählen",
-	"key.pingforit.allow_blacklisted_target": "Blacklist-Ziele zulassen",
+	"key.pingforit.toggle_pass_through_transparent_blocks": "Transparente Blöcke durchqueren",
+	"key.pingforit.toggle_mark_blacklisted_targets": "Blacklist-Ziele markieren",
+	"key.pingforit.toggle_mark_fluids": "Flüssigkeiten markieren",
 	"key.pingforit.open_settings": "Einstellungen öffnen",
 	"subtitles.pingforit.ping": "Ping-Markierung",
 
@@ -20,6 +21,9 @@
 	"settings.pingforit.ping_distance": "Ping-Entfernung: %s",
 	"settings.pingforit.item_icon_visible": "Gegenstands-Symbole",
 	"settings.pingforit.direction_indicator_visible": "Richtungsindikatoren",
+	"settings.pingforit.pass_through_transparent_blocks": "Transparente Blöcke durchqueren",
+	"settings.pingforit.mark_blacklisted_targets": "Blacklist-Ziele markieren",
+	"settings.pingforit.mark_fluids": "Flüssigkeiten markieren",
 	"settings.pingforit.player_info_mode": "Spieler Info",
 	"settings.pingforit.player_info_mode.hold.tooltip": "Die Spieler Info wird angezeigt, wenn ‚%s‘ (%s) Tastenbelegung gehalten wird",
 	"settings.pingforit.team_color_mode": "Team Farbe",
@@ -108,4 +112,10 @@
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Erkennt schnelle Klicks als einen virtuellen Langdruck."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Kompatibilitätszeitfenster: %s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Maximaler Abstand zwischen benachbarten Klicks im Kompatibilitätsmodus."
+  ,"notice.pingforit.pass_through_transparent_blocks": "Markierungen durch transparente Blöcke: "
+  ,"notice.pingforit.mark_blacklisted_targets": "Markierte Ziele auf der schwarzen Liste: "
+  ,"notice.pingforit.mark_fluids": "Flüssigkeiten markieren: "
+  ,"notice.pingforit.on": "An"
+  ,"notice.pingforit.off": "Aus"
+  ,"settings.pingforit.configuration_notice_size": "Größe der Konfigurationsmeldung: %s"
 }

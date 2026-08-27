@@ -5,9 +5,8 @@ import java.util.Objects;
 /**
  * Immutable press-time policy for target ray selection.
  *
- * <p>The fluid mode deliberately has only the safe, required value.  The
- * modifier for ignored entities is independent from block selection so Ctrl
- * cannot accidentally change the block or fluid raycast mode.</p>
+ * <p>Each target-selection toggle controls only its corresponding raycast
+ * concern. The immutable value is sampled when the ping interaction starts.</p>
  */
 public record RaycastPolicy(
 	BlockMode blockMode,
@@ -20,15 +19,16 @@ public record RaycastPolicy(
 		Objects.requireNonNull(fluidMode, "fluidMode");
 	}
 
-	/** Builds the policy sampled from the two target-selection hold mappings. */
+	/** Builds the policy sampled from the persistent target-selection toggles. */
 	public static RaycastPolicy from(
-		boolean selectTransparentBlocks,
-		boolean includeIgnoredEntities
+		boolean passThroughTransparentBlocks,
+		boolean markBlacklistedTargets,
+		boolean markFluids
 	) {
 		return new RaycastPolicy(
-			selectTransparentBlocks ? BlockMode.OUTLINE : BlockMode.VISUAL,
-			FluidMode.NONE,
-			includeIgnoredEntities);
+			passThroughTransparentBlocks ? BlockMode.VISUAL : BlockMode.OUTLINE,
+			markFluids ? FluidMode.ANY : FluidMode.NONE,
+			markBlacklistedTargets);
 	}
 
 	public enum BlockMode {
@@ -37,6 +37,7 @@ public record RaycastPolicy(
 	}
 
 	public enum FluidMode {
-		NONE
+		NONE,
+		ANY
 	}
 }

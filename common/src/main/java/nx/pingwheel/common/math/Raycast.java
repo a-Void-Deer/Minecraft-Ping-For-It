@@ -22,13 +22,13 @@ public class Raycast {
 		Vec3 rayStartVec,
 		Vec3 direction,
 		double maxDistance,
-		boolean selectTransparentBlocks
+		boolean passThroughTransparentBlocks
 	) {
 		return traceDirectional(
 			rayStartVec,
 			direction,
 			maxDistance,
-			RaycastPolicy.from(selectTransparentBlocks, false));
+			RaycastPolicy.from(passThroughTransparentBlocks, false, false));
 	}
 
 	/**
@@ -59,6 +59,7 @@ public class Raycast {
 			.inflate(1.0, 1.0, 1.0);
 		var fluidMode = switch (policy.fluidMode()) {
 			case NONE -> ClipContext.Fluid.NONE;
+			case ANY -> ClipContext.Fluid.ANY;
 		};
 
 		var blockHitResult = cameraEntity.level().clip(

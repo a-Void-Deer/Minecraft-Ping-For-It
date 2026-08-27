@@ -27,10 +27,14 @@ public class ClientConfig implements IConfig {
 	int pingDistance = 2048;
 	boolean itemIconVisible = true;
 	boolean directionIndicatorVisible = true;
+	boolean passThroughTransparentBlocks = false;
+	boolean markBlacklistedTargets = false;
+	boolean markFluids = false;
 	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
 	TeamColorMode teamColorMode = TeamColorMode.FULL;
 	EntityBlockRenderMode entityBlockRenderMode = EntityBlockRenderMode.ALL;
 	int pingSize = 100;
+	int configurationNoticeSize = ClientConfigBounds.DEFAULT_CONFIGURATION_NOTICE_SIZE;
 	int wheelHoldMillis = ClientConfigBounds.DEFAULT_WHEEL_HOLD_MILLIS;
 	boolean longPressCompatibilityMode = false;
 	int longPressCompatibilitySliceMillis = ClientConfigBounds.DEFAULT_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS;
@@ -138,6 +142,10 @@ public class ClientConfig implements IConfig {
 		this.entityBlockRenderMode = EntityBlockRenderMode.effective(mode);
 	}
 
+	public void setConfigurationNoticeSize(int configurationNoticeSize) {
+		this.configurationNoticeSize = ClientConfigBounds.clampConfigurationNoticeSize(configurationNoticeSize);
+	}
+
 	public void setBlockDisplayWhitelist(List<String> entries) {
 		List<String> copy = validatedEntries(entries, "blockDisplayWhitelist");
 		BlockDisplayPolicy nextPolicy = BlockDisplayPolicy.compile(copy, blockShapeBlacklist);
@@ -186,6 +194,7 @@ public class ClientConfig implements IConfig {
 		final int suppliedWheelOpacity = wheelOpacity;
 		final int suppliedWheelFontSize = wheelFontSize;
 		final int suppliedWheelTargetFontSize = wheelTargetFontSize;
+		final int suppliedConfigurationNoticeSize = configurationNoticeSize;
 
 		wheelHoldMillis = ClientConfigBounds.clampWheelHoldMillis(wheelHoldMillis);
 		warnIfChanged(
@@ -232,6 +241,13 @@ public class ClientConfig implements IConfig {
 		wheelTargetFontSize = ClientConfigBounds.clampWheelTargetFontSize(wheelTargetFontSize);
 		warnIfChanged(warningSink, "wheelTargetFontSize", suppliedWheelTargetFontSize, wheelTargetFontSize);
 
+		configurationNoticeSize = ClientConfigBounds.clampConfigurationNoticeSize(configurationNoticeSize);
+		warnIfChanged(
+			warningSink,
+			"configurationNoticeSize",
+			suppliedConfigurationNoticeSize,
+			configurationNoticeSize);
+
 		if (channel.length() > MAX_CHANNEL_LENGTH) {
 			channel = channel.substring(0, MAX_CHANNEL_LENGTH);
 		}
@@ -265,7 +281,7 @@ public class ClientConfig implements IConfig {
 	public void onUpdate() {
 		blockDisplayPolicy = BlockDisplayPolicy.compile(blockDisplayWhitelist, blockShapeBlacklist);
 		LOGGER.debug(
-			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, wheelTimeoutMillis=%d, cancelHalfConeAngleDegrees=%d, wheelInnerRadius=%d, wheelOuterRadius=%d, wheelOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d"
+			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, wheelTimeoutMillis=%d, cancelHalfConeAngleDegrees=%d, wheelInnerRadius=%d, wheelOuterRadius=%d, wheelOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d"
 				.formatted(
 					wheelHoldMillis,
 					longPressCompatibilityMode,
@@ -276,7 +292,8 @@ public class ClientConfig implements IConfig {
 					wheelOuterRadius,
 					wheelOpacity,
 					wheelFontSize,
-					wheelTargetFontSize));
+					wheelTargetFontSize,
+					configurationNoticeSize));
 
 		if (Game != null) {
 			IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(getChannel()));

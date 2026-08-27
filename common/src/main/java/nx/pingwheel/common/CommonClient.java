@@ -14,6 +14,7 @@ import java.util.Map;
 
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
+import nx.pingwheel.common.client.SelectionToggleNoticeState;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.client.outline.BlockModelOutlineState;
@@ -51,6 +52,7 @@ import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.render.OverlayRenderer;
+import nx.pingwheel.common.render.SelectionToggleNoticeRenderer;
 import nx.pingwheel.common.render.WheelOverlayRenderer;
 import nx.pingwheel.common.render.WorldRenderContext;
 import nx.pingwheel.common.screen.SettingsScreen;
@@ -83,8 +85,9 @@ public class CommonClient {
 		IPlatformClientEventService.INSTANCE.registerLeaveServerEvent(this::onLeaveServer);
 
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_PING);
-		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_SELECT_TRANSPARENT_BLOCK);
-		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_ALLOW_BLACKLISTED_TARGET);
+		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_PASS_THROUGH_TRANSPARENT_BLOCKS);
+		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_MARK_BLACKLISTED_TARGETS);
+		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_MARK_FLUIDS);
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
 
 		// The lazy global loggers only ever emit aggregate transition counts.
@@ -117,6 +120,7 @@ public class CommonClient {
 		BlockModelOutlineState.INSTANCE.clear();
 		EntityOutlineFrameState.INSTANCE.clear();
 		VirtualBlockDisplayRenderer.INSTANCE.clear();
+		SelectionToggleNoticeState.INSTANCE.clear();
 
 		// A disconnect while the ping key is still held must not leak the
 		// armed hold into the next connection.
@@ -136,13 +140,14 @@ public class CommonClient {
 		// physical event timestamp, not the later tick/frame time.
 		long eventTimeMillis = INTERACTION_TIME_SOURCE.nowMillis();
 		Game = Minecraft.getInstance();
+		InputUtils.handleToggleClick(rawKey, eventTimeMillis);
 
 		if (!InputUtils.claimPingClick(rawKey)) {
 			return;
 		}
 
 		if (Game.screen != null) {
-			abortInteractionIfActive();
+			abortInteractionIfActive(false);
 			return;
 		}
 
@@ -183,7 +188,7 @@ public class CommonClient {
 	 * such as on focus loss. No default ping is produced.
 	 */
 	public void onInputReset() {
-		abortInteractionIfActive();
+		abortInteractionIfActive(true);
 	}
 
 	/**
@@ -198,16 +203,20 @@ public class CommonClient {
 			return;
 		}
 
-		abortInteractionIfActive();
+		abortInteractionIfActive(false);
 	}
 
-	private void abortInteractionIfActive() {
+	private void abortInteractionIfActive(boolean resetAllInputState) {
 		boolean claimedInput = InputUtils.isPingHotkeyDown();
 		boolean activeInteraction = pingRuntime != null
 			&& pingRuntime.phase() != PingInteractionPhase.IDLE;
 		boolean compatibilityState = pingRuntime != null && pingRuntime.hasCompatibilityState();
 
-		InputUtils.resetPingHold();
+		if (resetAllInputState) {
+			InputUtils.resetPingHold();
+		} else {
+			InputUtils.resetPingInteraction();
+		}
 		if (activeInteraction || claimedInput || compatibilityState) {
 			if (pingRuntime != null) {
 				pingRuntime.abort();
@@ -494,6 +503,15 @@ public class CommonClient {
 	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
 		OverlayRenderer.draw(guiGraphics, tickDelta);
 		WheelOverlayRenderer.draw(guiGraphics, tickDelta);
+	}
+
+	/** Draws the latest toggle notice in a late HUD pass, after vanilla HUD layers. */
+	public void onRenderToggleNotice(GuiGraphics guiGraphics) {
+		SelectionToggleNoticeRenderer.draw(
+			guiGraphics,
+			SelectionToggleNoticeState.INSTANCE,
+			ClientConfig.HANDLER.getConfig().getConfigurationNoticeSize(),
+			INTERACTION_TIME_SOURCE.nowMillis());
 	}
 
 	/** Advances interaction timing once from the GameRenderer frame boundary. */

@@ -12,7 +12,8 @@ This update adds target-aware Sable support and hardens the optional Create/Flyw
 - **Target-aware Sable identity:** Server validation now materializes a stable TrackingPoint identity and expected block identity instead of treating a Sable hit as only a projected location. The provider seam supports authoritative validation, materialization, refresh, naming, and cleanup without exposing optional classes to common domain code.
 - **Sable outline presentation:** Added live Sable block and block-entity capture, position resolution, shape rendering, and marker presentation using the current sub-level state.
 - **Embedded geometry transforms:** Added reusable precision-safe transforms for external entity/block geometry, including camera-relative conversion from an embedded environment origin.
-- **Target-selection modifiers:** Added Left Shift (**Select Transparent Blocks**) for outline-based transparent-block selection and Left Ctrl (**Allow Blacklisted Targets**) to include otherwise blacklisted entities. Both keybinds are localized in all existing locale files: English, German, Spanish (Argentina), French, Polish, Turkish, Simplified Chinese, and Traditional Chinese.
+- **Target-selection modifiers:** Added three independent persistent toggles: Left Shift (**Select Transparent Blocks**) for transparent-block pass-through, Left Ctrl (**Allow Blacklisted Targets**) for blacklisted-target marking, and Left Alt (**Mark Fluids**) for fluid marking. All default to off, persist in client config, and are available in client settings.
+- **HUD notices:** Added latest-only notices with a 2-second display and 1-second fade. Notice size is configurable from 0% to 500%.
 - **Create entity-outline filtering:** Create SuperGlue entities are registered as blacklisted for normal target selection, with the Ctrl override available when they must be selected explicitly.
 - **Focused automated coverage:** Added tests for external target identity and codec behavior, Sable provider/reference lifecycles, capture contracts, diagnostics, large-coordinate transforms, geometry routing and modes, optional-class safety, selection modifiers, and SuperGlue filtering.
 
@@ -30,6 +31,7 @@ This update adds target-aware Sable support and hardens the optional Create/Flyw
 
 ### Fixed
 
+- **Toggle input:** Toggle presses are suppressed while screens are open and remain suppressed until release.
 - Sable containment and projection now use the level-aware Companion API (`getContaining(level, position)`), preventing the deprecated client-global lookup from selecting or projecting against the wrong level.
 - Sable candidate selection now positively checks containing sub-level identity, filters invalid observations, and applies deterministic hit ordering when multiple sub-level candidates overlap.
 - Sable outline transforms no longer narrow huge absolute plot coordinates into float state before subtracting the camera. Integer block origins are transformed in double precision; only the small camera-relative translation and linear orientation/scale enter float-backed rendering state.
@@ -39,9 +41,10 @@ This update adds target-aware Sable support and hardens the optional Create/Flyw
 
 - Sable server and client adapters are loaded only after the Sable mod is detected, with optional API discovery kept reflective and lazy. Missing classes, partial content, unavailable containers, and API drift fail soft; ordinary Ping For It targeting and fallback rendering continue to work.
 - Create/Flywheel integration remains optional. Create entity-outline registration is retained and closed during teardown, Flywheel probing and external geometry handling tolerate absent or unsupported backends, and the common outline remains the fallback route.
+- Aeronautics/Simulated `simulated:honey_glue` is ignored by default like Create SuperGlue and can be selected when blacklisted-target marking is enabled.
 - The marker codec's explicit block variant tag and external-target fields are an intentional change to this fork's wire format. This update adds no backward protocol compatibility with the original mod.
 
 ### Validation
 
-- Focused automated regression coverage is included for the domain, server lifecycle, codec, transform, geometry, diagnostics, optional-dependency, and input changes described above.
+- Focused automated regression coverage is included for the domain, server lifecycle, codec, transform, geometry, diagnostics, optional-dependency, and input changes described above, including the Windows CRLF-normalized geometry source check.
 - Without those mods or a supported backend, their optional routes are intentionally unavailable and the fail-soft fallbacks apply.
