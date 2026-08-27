@@ -16,6 +16,9 @@ This update adds target-aware Sable support and hardens the optional Create/Flyw
 - **HUD notices:** Added latest-only notices with a 2-second display and 1-second fade. Notice size is configurable from 0% to 500%.
 - **Create entity-outline filtering:** Create SuperGlue entities are registered as blacklisted for normal target selection, with the Ctrl override available when they must be selected explicitly.
 - **Focused automated coverage:** Added tests for external target identity and codec behavior, Sable provider/reference lifecycles, capture contracts, diagnostics, large-coordinate transforms, geometry routing and modes, optional-class safety, selection modifiers, and SuperGlue filtering.
+- **Client Marker Display Duration:** Added a client setting where `0` means **Follow server**, custom values range from 1 to 60 seconds, and each marker freezes its resolved display duration.
+- **Editable synchronization duration:** Added an editable server sync duration with safe legacy `pingDuration` to `syncDuration` migration.
+- **Sync-duration policy synchronization:** Added S2C policy synchronization on join, reconnect, and effective configuration changes across Fabric, Forge, and NeoForge.
 
 ### Changed
 
@@ -28,6 +31,8 @@ This update adds target-aware Sable support and hardens the optional Create/Flyw
 - **Geometry fallback accounting:** Model and geometry routes now suppress the VoxelShape pass only after committing vertices. Zero-emission or failed attempts retain the fallback, while a recoverable partial commit remains visible for the current frame and is retried on the next frame.
 - **Marker refresh receipts:** Same-ID marker updates caused by Sable locator/anchor refreshes are treated as updates rather than new marker receipts, avoiding duplicate local receipt effects.
 - **Detailed optional-integration diagnostics:** Sable capture, server validation/materialization, refresh, cleanup, and presentation diagnostics now use bounded, rate-controlled structured DEBUG reporting. Available target, position, registry, class, material/component/payload context, and original exception details are retained where available, without turning repeated frame/refresh failures into log storms.
+- **Separate marker deadlines:** Synchronization and display deadlines are tracked independently. `EXPIRED` markers remain stale visuals until the client display deadline, while all other removals hard-delete.
+- **Duration snapshots and stale replacement:** A same-target fresh synchronized marker supersedes a stale marker. Server configuration changes affect only new markers, and **Follow server** uses the marker's frozen duration snapshot.
 
 ### Fixed
 
@@ -36,6 +41,7 @@ This update adds target-aware Sable support and hardens the optional Create/Flyw
 - Sable candidate selection now positively checks containing sub-level identity, filters invalid observations, and applies deterministic hit ordering when multiple sub-level candidates overlap.
 - Sable outline transforms no longer narrow huge absolute plot coordinates into float state before subtracting the camera. Integer block origins are transformed in double precision; only the small camera-relative translation and linear orientation/scale enter float-backed rendering state.
 - Optional geometry routing is hardened so unsupported Create/Flywheel backends leave the common outline route in control, and source/registration failures remain recoverable without corrupting the next frame.
+- **Authoritative-removal tombstones:** Removal tombstones prevent delayed `MarkerCreated` packets from resurrecting markers or replaying side effects, and clear winner references.
 
 ### Compatibility
 
@@ -48,3 +54,4 @@ This update adds target-aware Sable support and hardens the optional Create/Flyw
 
 - Focused automated regression coverage is included for the domain, server lifecycle, codec, transform, geometry, diagnostics, optional-dependency, and input changes described above, including the Windows CRLF-normalized geometry source check.
 - Without those mods or a supported backend, their optional routes are intentionally unavailable and the fail-soft fallbacks apply.
+- **Duration lifecycle coverage:** Focused tests cover lifecycle, deadlines, winner and name cleanup, duration resolution, policy serialization and tracking, and configuration migration and settings.
