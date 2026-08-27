@@ -21,6 +21,7 @@ import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.client.marker.EntityMarkerPoint;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
+import nx.pingwheel.common.client.duration.ClientMarkerDisplayDuration;
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.chat.PingChatBuilder;
@@ -236,10 +237,33 @@ public final class ClientPingRuntime {
 		ClientRateLimitPolicy rateLimitPolicy,
 		InteractionTimeSource timeSource
 	) {
+		return create(
+			errorSink,
+			packetSender,
+			rateLimitPolicy,
+			timeSource,
+			snapshot -> ClientMarkerDisplayDuration.durationTicks(
+				ClientConfig.HANDLER.getConfig().getEffectiveMarkerDisplayDuration(),
+				snapshot));
+	}
+
+	/**
+	 * Creates a runtime with a caller-supplied client display-duration policy.
+	 * The normal runtime path resolves the local setting per received marker;
+	 * this overload remains a narrow seam for tests and alternate clients.
+	 */
+	public static ClientPingRuntime create(
+		ClientPingActionDispatcher.LocalErrorSink errorSink,
+		ClientPingActionDispatcher.PacketSender packetSender,
+		ClientRateLimitPolicy rateLimitPolicy,
+		InteractionTimeSource timeSource,
+		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy
+	) {
 		Objects.requireNonNull(errorSink, "errorSink");
 		Objects.requireNonNull(packetSender, "packetSender");
 		Objects.requireNonNull(timeSource, "timeSource");
 		Objects.requireNonNull(rateLimitPolicy, "rateLimitPolicy");
+		Objects.requireNonNull(displayDurationPolicy, "displayDurationPolicy");
 
 		ActiveInteraction activeInteraction = new ActiveInteraction();
 		PingInteractionLogger logger = PingInteractionLogger.global();
@@ -261,7 +285,7 @@ public final class ClientPingRuntime {
 			() -> ClientConfig.HANDLER.getConfig().getWheelTimeoutMillis());
 
 		return new ClientPingRuntime(
-			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS),
+			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDurationPolicy),
 			activeInteraction,
 			coordinator,
 			machine,
@@ -407,6 +431,9 @@ public final class ClientPingRuntime {
 	public void close() {
 		abort();
 		InputUtils.resetPingHold();
+		markerStore.clear();
+		nameStore.clear();
+		MarkerOverlayState.INSTANCE.clear();
 		observedLevel = null;
 		observedDimension = null;
 	}
@@ -924,13 +951,14 @@ public final class ClientPingRuntime {
 			return;
 		}
 
-		// Keep the name store in exact step: a fallback-expired marker's name
-		// goes away with the marker, matching the authoritative removal path.
+		// A fallback transition may only make a marker stale. Names remain until
+		// the independent display deadline causes the client record to be
+		// removed, so cleanup follows final record removal rather than sync loss.
 		for (ClientMarker marker : expired) {
 			nameStore.onRemoved(marker.id());
 		}
 
-		logger.debug("marker fallback expired: count={} ids={}",
+		logger.debug("marker client lifetime ended: count={} ids={}",
 			expired.size(),
 			expired.stream().map(marker -> Long.toString(marker.id().value())).toList());
 	}
@@ -955,10 +983,16 @@ public final class ClientPingRuntime {
 
 		MarkerSnapshot snapshot = Objects.requireNonNull(packet.snapshot(), "snapshot");
 		TargetNameJson targetName = Objects.requireNonNull(packet.targetName(), "targetName");
+		if (markerStore.isAuthoritativelyRemoved(snapshot.id())) {
+			return;
+		}
 
 		boolean newlySeen = isNewMarkerReceipt(markerStore, snapshot.id());
 
-		markerStore.onCreated(snapshot, localTick);
+		List<ClientMarker> superseded = markerStore.onCreated(snapshot, localTick);
+		for (ClientMarker marker : superseded) {
+			nameStore.onRemoved(marker.id());
+		}
 		nameStore.onCreated(snapshot.id(), targetName);
 
 		if (newlySeen) {
@@ -1054,15 +1088,25 @@ public final class ClientPingRuntime {
 	}
 
 	/**
-	 * Applies an authoritative marker removal on the main thread. The
-	 * marker's stored target name is removed with it.
+	 * Applies an authoritative marker removal on the main thread. Hard removals
+	 * and final display-lifetime removals clean their target names; an EXPIRED
+	 * marker that becomes stale retains its name with the retained record.
 	 */
 	public void applyRemoved(MarkerId markerId, MarkerRemovalReason reason) {
 		Objects.requireNonNull(markerId, "markerId");
 		Objects.requireNonNull(reason, "reason");
 
-		markerStore.onRemoved(markerId);
-		nameStore.onRemoved(markerId);
+		boolean knownBeforeRemoval = markerStore.marker(markerId).isPresent();
+		List<ClientMarker> removed = markerStore.onRemoved(markerId, reason, localTick);
+		boolean markerWasRemoved = removed.stream().anyMatch(marker -> marker.id().equals(markerId));
+
+		if (!knownBeforeRemoval && !markerWasRemoved) {
+			nameStore.onRemoved(markerId);
+		}
+
+		for (ClientMarker removedMarker : removed) {
+			nameStore.onRemoved(removedMarker.id());
+		}
 
 		logger.debug("marker removed applied: markerId={} reason={}", markerId.value(), reason);
 	}
@@ -1074,7 +1118,10 @@ public final class ClientPingRuntime {
 		Objects.requireNonNull(targetKey, "targetKey");
 		Objects.requireNonNull(winnerId, "winnerId");
 
-		markerStore.onWinnerChanged(targetKey, winnerId);
+		List<ClientMarker> superseded = markerStore.onWinnerChanged(targetKey, winnerId);
+		for (ClientMarker marker : superseded) {
+			nameStore.onRemoved(marker.id());
+		}
 
 		logger.debug("marker winner applied: kind={} winner={}",
 			targetKindOf(targetKey),

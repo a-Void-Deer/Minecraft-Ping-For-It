@@ -35,6 +35,11 @@ class ClientConfigBoundsTest {
 		assertEquals(10, ClientConfigBounds.MIN_WHEEL_TARGET_FONT_SIZE);
 		assertEquals(500, ClientConfigBounds.MAX_WHEEL_TARGET_FONT_SIZE);
 		assertEquals(10, ClientConfigBounds.WHEEL_TARGET_FONT_SIZE_STEP);
+		assertEquals(0, ClientConfigBounds.DEFAULT_MARKER_DISPLAY_DURATION);
+		assertEquals(0, ClientConfigBounds.FOLLOW_SERVER_MARKER_DISPLAY_DURATION);
+		assertEquals(1, ClientConfigBounds.MIN_MARKER_DISPLAY_DURATION);
+		assertEquals(60, ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION);
+		assertEquals(1, ClientConfigBounds.MARKER_DISPLAY_DURATION_STEP);
 	}
 
 	@Test
@@ -105,5 +110,14 @@ class ClientConfigBoundsTest {
 		assertEquals(500, ClientConfigBounds.clampWheelFontSize(Integer.MAX_VALUE));
 		assertEquals(10, ClientConfigBounds.clampWheelTargetFontSize(Integer.MIN_VALUE));
 		assertEquals(500, ClientConfigBounds.clampWheelTargetFontSize(Integer.MAX_VALUE));
+	}
+
+	@Test
+	void markerDisplayDurationKeepsFollowServerSentinelAndClampsCustomValues() {
+		assertEquals(0, ClientConfigBounds.clampMarkerDisplayDuration(Integer.MIN_VALUE));
+		assertEquals(0, ClientConfigBounds.clampMarkerDisplayDuration(0));
+		assertEquals(1, ClientConfigBounds.clampMarkerDisplayDuration(1));
+		assertEquals(60, ClientConfigBounds.clampMarkerDisplayDuration(60));
+		assertEquals(60, ClientConfigBounds.clampMarkerDisplayDuration(Integer.MAX_VALUE));
 	}
 }

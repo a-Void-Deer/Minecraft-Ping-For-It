@@ -10,6 +10,7 @@ import java.util.UUID;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
+import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 
@@ -133,6 +134,54 @@ class ClientMarkerStoreTest {
 		ClientMarkerStore store = newStore();
 
 		assertDoesNotThrow(() -> store.onRemoved(new MarkerId(99L)));
+	}
+
+	@Test
+	void removalBeforeCreateBlocksLateCreateAndClearsUnknownWinnerSlot() {
+		ClientMarkerStore store = newStore();
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId id = new MarkerId(7L);
+
+		store.onWinnerChanged(key, Optional.of(id));
+		assertTrue(store.onRemoved(id, MarkerRemovalReason.EXPIRED, 10L).isEmpty());
+		assertTrue(store.winnerId(key).isEmpty());
+
+		store.onCreated(snapshot(id, target, 1L, 20L), 11L);
+
+		assertTrue(store.marker(id).isEmpty());
+		assertTrue(store.renderMarkers().isEmpty());
+		assertTrue(store.isAuthoritativelyRemoved(id));
+	}
+
+	@Test
+	void hardRemovalBeforeCreateClearsUnknownWinnerSlot() {
+		ClientMarkerStore store = newStore();
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId id = new MarkerId(7L);
+
+		store.onWinnerChanged(key, Optional.of(id));
+		assertTrue(store.onRemoved(id, MarkerRemovalReason.TARGET_INVALID, 10L).isEmpty());
+
+		assertTrue(store.winnerId(key).isEmpty());
+		assertTrue(store.isAuthoritativelyRemoved(id));
+	}
+
+	@Test
+	void expiredMarkerCannotBeResynchronizedByALateCreatePacket() {
+		ClientMarkerStore store = new ClientMarkerStore(10L, 100L);
+		Target target = locationTarget(OVERWORLD, 1);
+		MarkerId id = new MarkerId(8L);
+
+		store.onCreated(snapshot(id, target, 1L, 20L), 0L);
+		assertTrue(store.onRemoved(id, MarkerRemovalReason.EXPIRED, 10L).isEmpty());
+		assertTrue(store.marker(id).orElseThrow().isStale());
+
+		store.onCreated(snapshot(id, target, 1L, 20L), 11L);
+
+		assertTrue(store.marker(id).orElseThrow().isStale());
+		assertTrue(store.isAuthoritativelyRemoved(id));
 	}
 
 	@Test
@@ -338,6 +387,119 @@ class ClientMarkerStoreTest {
 		ClientMarkerStore store = newStore();
 
 		assertThrows(NullPointerException.class, () -> store.visibleWinnersInDimension(null));
+	}
+
+	// --- independent synchronization and display lifetimes ---
+
+	@Test
+	void expiredMarksMarkerStaleButRetainsAVisualUntilDisplayDeadline() {
+		ClientMarkerStore store = new ClientMarkerStore(10L, 200L);
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId id = new MarkerId(1L);
+
+		store.onCreated(snapshot(id, target, 0L, 10L), 0L);
+		store.onWinnerChanged(key, Optional.of(id));
+
+		assertTrue(store.onRemoved(id, MarkerRemovalReason.EXPIRED, 10L).isEmpty());
+		assertTrue(store.marker(id).orElseThrow().isStale());
+		assertEquals(List.of(id), store.renderMarkers().stream().map(ClientMarker::id).toList());
+		assertEquals(id, store.winnerId(key).orElseThrow());
+	}
+
+	@Test
+	void expiredHardRemovesWhenTheDisplayDeadlineHasElapsed() {
+		ClientMarkerStore store = new ClientMarkerStore(10L, 5L);
+		Target target = locationTarget(OVERWORLD, 1);
+		MarkerId id = new MarkerId(1L);
+
+		store.onCreated(snapshot(id, target, 0L, 20L), 0L);
+
+		assertEquals(
+			List.of(id),
+			store.onRemoved(id, MarkerRemovalReason.EXPIRED, 5L)
+				.stream().map(ClientMarker::id).toList());
+		assertTrue(store.marker(id).isEmpty());
+		assertTrue(store.renderMarkers().isEmpty());
+	}
+
+	@Test
+	void everyNonExpiredReasonHardRemovesImmediately() {
+		long idValue = 1L;
+
+		for (MarkerRemovalReason reason : MarkerRemovalReason.values()) {
+			if (reason == MarkerRemovalReason.EXPIRED) {
+				continue;
+			}
+
+			ClientMarkerStore store = new ClientMarkerStore(10L, 200L);
+			MarkerId id = new MarkerId(idValue++);
+			store.onCreated(snapshot(id, locationTarget(OVERWORLD, idValue), 0L, 100L), 0L);
+
+			assertEquals(
+				List.of(id),
+				store.onRemoved(id, reason, 1L).stream().map(ClientMarker::id).toList(),
+				"reason=" + reason);
+			assertTrue(store.marker(id).isEmpty(), "reason=" + reason);
+		}
+	}
+
+	@Test
+	void displayExpiryHidesWithoutDroppingSyncStateOrAllowingResurrection() {
+		ClientMarkerStore store = new ClientMarkerStore(10L, 5L);
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId id = new MarkerId(1L);
+		MarkerSnapshot source = snapshot(id, target, 0L, 20L);
+
+		store.onCreated(source, 0L);
+		store.onWinnerChanged(key, Optional.of(id));
+		assertTrue(store.expireFallback(5L).isEmpty());
+
+		assertTrue(store.marker(id).orElseThrow().isSynchronized());
+		assertTrue(store.renderMarkers().isEmpty());
+		assertTrue(store.winnerId(key).isEmpty());
+
+		// A late/replayed create refreshes synchronization only. The frozen
+		// visual deadline remains elapsed, so the marker cannot resurrect.
+		store.onCreated(source, 6L);
+		assertTrue(store.marker(id).orElseThrow().isSynchronized());
+		assertTrue(store.renderMarkers().isEmpty());
+		assertEquals(5L, store.marker(id).orElseThrow().displayExpiresAtLocalTick());
+	}
+
+	@Test
+	void fallbackLossTransitionsToStaleAndEventuallyRemovesTheRecord() {
+		ClientMarkerStore store = new ClientMarkerStore(2L, 20L);
+		Target target = locationTarget(OVERWORLD, 1);
+		MarkerId id = new MarkerId(1L);
+
+		store.onCreated(snapshot(id, target, 0L, 4L), 0L);
+		assertTrue(store.expireFallback(6L).isEmpty());
+		assertTrue(store.marker(id).orElseThrow().isStale());
+		assertEquals(List.of(id), store.renderMarkers().stream().map(ClientMarker::id).toList());
+
+		assertEquals(List.of(id), store.expireFallback(20L).stream().map(ClientMarker::id).toList());
+		assertTrue(store.marker(id).isEmpty());
+		assertTrue(store.renderMarkers().isEmpty());
+	}
+
+	@Test
+	void synchronizedSameTargetCreateSupersedesStaleRecord() {
+		ClientMarkerStore store = new ClientMarkerStore(2L, 20L);
+		Target target = locationTarget(OVERWORLD, 1);
+		MarkerId staleId = new MarkerId(1L);
+		MarkerId currentId = new MarkerId(2L);
+
+		store.onCreated(snapshot(staleId, target, 0L, 4L), 0L);
+		store.expireFallback(6L);
+		assertTrue(store.marker(staleId).orElseThrow().isStale());
+
+		List<ClientMarker> removed = store.onCreated(snapshot(currentId, target, 7L, 20L), 7L);
+
+		assertEquals(List.of(staleId), removed.stream().map(ClientMarker::id).toList());
+		assertTrue(store.marker(staleId).isEmpty());
+		assertEquals(List.of(currentId), store.renderMarkers().stream().map(ClientMarker::id).toList());
 	}
 
 	// --- fallback expiry ---

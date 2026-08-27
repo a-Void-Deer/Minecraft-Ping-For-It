@@ -3,6 +3,7 @@ package nx.pingwheel.common.network;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.ServerConfigBounds;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import org.jetbrains.annotations.NotNull;
 
@@ -14,22 +15,35 @@ public record ServerConfigUpdateC2SPacket(
 	ChannelMode defaultChannelMode,
 	boolean playerTrackingEnabled,
 	int msToRegenerate,
-	int rateLimit
+	int rateLimit,
+	int syncDuration
 ) implements IPacket {
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		C2S_NAMESPACE,
 		"server-config-update");
 	public static final Type<ServerConfigUpdateC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
+	/** Compatibility constructor for callers that do not edit sync duration. */
+	public ServerConfigUpdateC2SPacket(
+		int changedFields,
+		ChannelMode defaultChannelMode,
+		boolean playerTrackingEnabled,
+		int msToRegenerate,
+		int rateLimit) {
+		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			ServerConfigBounds.DEFAULT_SYNC_DURATION);
+	}
+
 	public static final int DEFAULT_CHANNEL_MODE = ServerConfigUpdate.DEFAULT_CHANNEL_MODE;
 	public static final int PLAYER_TRACKING_ENABLED = ServerConfigUpdate.PLAYER_TRACKING_ENABLED;
 	public static final int MS_TO_REGENERATE = ServerConfigUpdate.MS_TO_REGENERATE;
 	public static final int RATE_LIMIT = ServerConfigUpdate.RATE_LIMIT;
+	public static final int SYNC_DURATION = ServerConfigUpdate.SYNC_DURATION;
 	public static final int ALL_FIELDS = ServerConfigUpdate.ALL_FIELDS;
 
 	/** Invalid values are used only by safe-decoding fallback. */
 	public ServerConfigUpdateC2SPacket() {
-		this(0, null, false, -1, -1);
+		this(0, null, false, -1, -1, -1);
 	}
 
 	public ServerConfigUpdateC2SPacket(FriendlyByteBuf buf) {
@@ -37,6 +51,7 @@ public record ServerConfigUpdateC2SPacket(
 			buf.readVarInt(),
 			ServerConfigSnapshotS2CPacket.readChannelMode(buf),
 			buf.readBoolean(),
+			buf.readVarInt(),
 			buf.readVarInt(),
 			buf.readVarInt());
 	}
@@ -48,6 +63,7 @@ public record ServerConfigUpdateC2SPacket(
 		buf.writeBoolean(playerTrackingEnabled);
 		buf.writeVarInt(msToRegenerate);
 		buf.writeVarInt(rateLimit);
+		buf.writeVarInt(syncDuration);
 	}
 
 	@Override
@@ -57,7 +73,8 @@ public record ServerConfigUpdateC2SPacket(
 			defaultChannelMode,
 			playerTrackingEnabled,
 			msToRegenerate,
-			rateLimit).isValid();
+			rateLimit,
+			syncDuration).isValid();
 	}
 
 	public ServerConfigUpdate update() {
@@ -66,7 +83,8 @@ public record ServerConfigUpdateC2SPacket(
 			defaultChannelMode,
 			playerTrackingEnabled,
 			msToRegenerate,
-			rateLimit);
+			rateLimit,
+			syncDuration);
 	}
 
 	public int changedMask() {

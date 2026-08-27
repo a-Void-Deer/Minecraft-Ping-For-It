@@ -57,6 +57,8 @@
 	"settings.pingforit.ms_to_regenerate.tooltip": "恢复一次标记使用次数所需的毫秒数。",
 	"settings.pingforit.rate_limit": "频率限制",
 	"settings.pingforit.rate_limit.tooltip": "恢复时间窗口内允许的最大标记次数。",
+	"settings.pingforit.sync_duration": "同步持续时间（秒）",
+	"settings.pingforit.sync_duration.tooltip": "新创建的标记在服务器上保持激活的时间。",
 
 	"value.pingforit.auto": "自动",
 	"value.pingforit.disabled": "关闭",
@@ -114,6 +116,10 @@
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "将快速连续点击识别为一次虚拟长按。"
   ,"settings.pingforit.long_press_compatibility_slice_millis": "兼容时间片：%s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "启用兼容模式时相邻点击之间允许的最大间隔。"
+  ,"settings.pingforit.marker_display_duration": "标记显示时长: %s"
+  ,"settings.pingforit.marker_display_duration.tooltip": "标记在本地显示的时长。“跟随服务器”使用每个标记冻结的服务器时长。"
+  ,"value.pingforit.follow_server": "跟随服务器"
+  ,"unit.pingforit.seconds": "%ss"
   ,"notice.pingforit.pass_through_transparent_blocks": "标记穿过透明方块: "
   ,"notice.pingforit.mark_blacklisted_targets": "标记黑名单目标: "
   ,"notice.pingforit.mark_fluids": "标记液体: "

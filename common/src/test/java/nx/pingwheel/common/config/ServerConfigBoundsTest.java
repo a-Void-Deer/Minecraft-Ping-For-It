@@ -22,6 +22,14 @@ class ServerConfigBoundsTest {
 	}
 
 	@Test
+	void clampSyncDurationUsesTheSameOneToSixtySecondBounds() {
+		assertEquals(1, ServerConfigBounds.clampSyncDuration(Integer.MIN_VALUE));
+		assertEquals(1, ServerConfigBounds.clampSyncDuration(0));
+		assertEquals(7, ServerConfigBounds.clampSyncDuration(7));
+		assertEquals(60, ServerConfigBounds.clampSyncDuration(Integer.MAX_VALUE));
+	}
+
+	@Test
 	void clampPingDurationEnforcesUpperBound() {
 		assertEquals(60, ServerConfigBounds.clampPingDuration(60));
 		assertEquals(60, ServerConfigBounds.clampPingDuration(61));

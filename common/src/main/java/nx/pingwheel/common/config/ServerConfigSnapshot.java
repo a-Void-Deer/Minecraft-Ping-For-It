@@ -2,16 +2,28 @@ package nx.pingwheel.common.config;
 
 /**
  * The small, server-authoritative view of the settings that are editable from
- * the client settings screen.  Ping duration and ping distance deliberately
- * do not belong to this snapshot: they remain JSON-only server settings.
+ * the client settings screen.  Ping distance deliberately remains a JSON-only
+ * server setting; sync duration is included because it is both editable and a
+ * server-authoritative client policy.
  */
 public record ServerConfigSnapshot(
 	boolean canEdit,
 	ChannelMode defaultChannelMode,
 	boolean playerTrackingEnabled,
 	int msToRegenerate,
-	int rateLimit
+	int rateLimit,
+	int syncDuration
 ) {
+	public ServerConfigSnapshot(
+		boolean canEdit,
+		ChannelMode defaultChannelMode,
+		boolean playerTrackingEnabled,
+		int msToRegenerate,
+		int rateLimit) {
+		this(canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			ServerConfigBounds.DEFAULT_SYNC_DURATION);
+	}
+
 	public ServerConfigSnapshot {
 		if (defaultChannelMode == null) {
 			defaultChannelMode = ChannelMode.AUTO;
@@ -24,7 +36,8 @@ public record ServerConfigSnapshot(
 			config.getDefaultChannelMode(),
 			config.isPlayerTrackingEnabled(),
 			safeNonNegative(config.getMsToRegenerate()),
-			safeNonNegative(config.getRateLimit()));
+			safeNonNegative(config.getRateLimit()),
+			ServerConfigBounds.clampSyncDuration(config.getSyncDuration()));
 	}
 
 	public ServerConfigSnapshot withCanEdit(boolean canEdit) {
@@ -33,11 +46,16 @@ public record ServerConfigSnapshot(
 			defaultChannelMode,
 			playerTrackingEnabled,
 			msToRegenerate,
-			rateLimit);
+			rateLimit,
+			syncDuration);
 	}
 
 	public boolean isSafe() {
-		return defaultChannelMode != null && msToRegenerate >= 0 && rateLimit >= 0;
+		return defaultChannelMode != null
+			&& msToRegenerate >= 0
+			&& rateLimit >= 0
+			&& syncDuration >= ServerConfigBounds.MIN_PING_DURATION
+			&& syncDuration <= ServerConfigBounds.MAX_PING_DURATION;
 	}
 
 	private static int safeNonNegative(int value) {

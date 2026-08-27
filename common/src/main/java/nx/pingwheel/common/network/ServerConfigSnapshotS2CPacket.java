@@ -3,6 +3,7 @@ package nx.pingwheel.common.network;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.ServerConfigBounds;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import org.jetbrains.annotations.NotNull;
 
@@ -16,16 +17,29 @@ public record ServerConfigSnapshotS2CPacket(
 	ChannelMode defaultChannelMode,
 	boolean playerTrackingEnabled,
 	int msToRegenerate,
-	int rateLimit
+	int rateLimit,
+	int syncDuration
 ) implements IPacket {
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		S2C_NAMESPACE,
 		"server-config-snapshot");
 	public static final Type<ServerConfigSnapshotS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
+	/** Compatibility constructor for snapshots from the pre-duration settings model. */
+	public ServerConfigSnapshotS2CPacket(
+		long requestId,
+		boolean canEdit,
+		ChannelMode defaultChannelMode,
+		boolean playerTrackingEnabled,
+		int msToRegenerate,
+		int rateLimit) {
+		this(requestId, canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			ServerConfigBounds.DEFAULT_SYNC_DURATION);
+	}
+
 	/** Invalid values are used only by safe-decoding fallback. */
 	public ServerConfigSnapshotS2CPacket() {
-		this(-1L, false, null, false, -1, -1);
+		this(-1L, false, null, false, -1, -1, -1);
 	}
 
 	/** Builds an expansion response with the request id echoed by the server. */
@@ -36,7 +50,8 @@ public record ServerConfigSnapshotS2CPacket(
 			snapshot.defaultChannelMode(),
 			snapshot.playerTrackingEnabled(),
 			snapshot.msToRegenerate(),
-			snapshot.rateLimit());
+			snapshot.rateLimit(),
+			snapshot.syncDuration());
 	}
 
 	public ServerConfigSnapshotS2CPacket(FriendlyByteBuf buf) {
@@ -45,6 +60,7 @@ public record ServerConfigSnapshotS2CPacket(
 			buf.readBoolean(),
 			readChannelMode(buf),
 			buf.readBoolean(),
+			buf.readVarInt(),
 			buf.readVarInt(),
 			buf.readVarInt());
 	}
@@ -57,11 +73,17 @@ public record ServerConfigSnapshotS2CPacket(
 		buf.writeBoolean(playerTrackingEnabled);
 		buf.writeVarInt(msToRegenerate);
 		buf.writeVarInt(rateLimit);
+		buf.writeVarInt(syncDuration);
 	}
 
 	@Override
 	public boolean isCorrupt() {
-		return requestId <= 0L || defaultChannelMode == null || msToRegenerate < 0 || rateLimit < 0;
+		return requestId <= 0L
+			|| defaultChannelMode == null
+			|| msToRegenerate < 0
+			|| rateLimit < 0
+			|| syncDuration < ServerConfigBounds.MIN_PING_DURATION
+			|| syncDuration > ServerConfigBounds.MAX_PING_DURATION;
 	}
 
 	public ServerConfigSnapshot snapshot() {
@@ -70,7 +92,8 @@ public record ServerConfigSnapshotS2CPacket(
 			defaultChannelMode,
 			playerTrackingEnabled,
 			msToRegenerate,
-			rateLimit);
+			rateLimit,
+			syncDuration);
 	}
 
 	public ResourceLocation getId() {

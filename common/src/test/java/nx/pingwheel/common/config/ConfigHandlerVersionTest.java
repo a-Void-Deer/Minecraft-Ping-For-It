@@ -54,6 +54,23 @@ class ConfigHandlerVersionTest {
     }
 
     @Test
+    void sameVersionServerConfigRenamesLegacyPingDurationOnDisk(@TempDir Path tempDir) throws IOException {
+        Path configPath = tempDir.resolve("server-legacy-duration.json");
+        Files.writeString(
+            configPath,
+            "{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"pingDuration\":23}\n",
+            StandardCharsets.UTF_8);
+
+        ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+        handler.load();
+
+        assertEquals(23, handler.getConfig().getSyncDuration());
+        JsonObject persisted = readRoot(configPath);
+        assertEquals(23, persisted.get("syncDuration").getAsInt());
+        assertFalse(persisted.has("pingDuration"));
+    }
+
+    @Test
     void missingNullNonStringAndNonObjectRootsUseClientRecovery(@TempDir Path tempDir) throws IOException {
         List<String> invalidRoots = List.of(
 			"{\"pingVolume\": 37}",

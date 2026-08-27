@@ -21,6 +21,7 @@ import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
+import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.forge.platform.PlatformNetworkServiceImpl;
 import org.apache.logging.log4j.util.TriConsumer;
@@ -37,6 +38,7 @@ public class ForgeMain {
 	public static final EventNetworkChannel UPDATE_CHANNEL_C2S = ChannelBuilder.named(UpdateChannelC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_CREATE_CHANNEL_C2S = ChannelBuilder.named(MarkerCreateC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel RATE_LIMIT_POLICY_CHANNEL_S2C = ChannelBuilder.named(RateLimitPolicyS2CPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel SYNC_DURATION_POLICY_CHANNEL_S2C = ChannelBuilder.named(SyncDurationPolicyS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel SERVER_CONFIG_REQUEST_CHANNEL_C2S = ChannelBuilder.named(ServerConfigRequestC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel SERVER_CONFIG_UPDATE_CHANNEL_C2S = ChannelBuilder.named(ServerConfigUpdateC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C = ChannelBuilder.named(ServerConfigSnapshotS2CPacket.PACKET_ID).optional().eventNetworkChannel();
@@ -57,6 +59,7 @@ public class ForgeMain {
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(UpdateChannelC2SPacket.PACKET_ID, UPDATE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerCreateC2SPacket.PACKET_ID, MARKER_CREATE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(RateLimitPolicyS2CPacket.PACKET_ID, RATE_LIMIT_POLICY_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(SyncDurationPolicyS2CPacket.PACKET_ID, SYNC_DURATION_POLICY_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigRequestC2SPacket.PACKET_ID, SERVER_CONFIG_REQUEST_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigUpdateC2SPacket.PACKET_ID, SERVER_CONFIG_UPDATE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigSnapshotS2CPacket.PACKET_ID, SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C);

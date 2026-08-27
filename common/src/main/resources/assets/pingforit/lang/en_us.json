@@ -57,6 +57,8 @@
 	"settings.pingforit.ms_to_regenerate.tooltip": "Milliseconds needed to regenerate one ping allowance.",
 	"settings.pingforit.rate_limit": "Rate Limit",
 	"settings.pingforit.rate_limit.tooltip": "Maximum ping allowances in the regeneration window.",
+	"settings.pingforit.sync_duration": "Sync Duration (seconds)",
+	"settings.pingforit.sync_duration.tooltip": "How long newly-created markers remain active on the server.",
 
 	"value.pingforit.vanilla_team": "Vanilla Team",
 	"value.pingforit.ftb_teams": "FTB Teams",
@@ -119,6 +121,10 @@
   ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Recognize rapid clicks as one virtual long press."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Compatibility Time Slice: %s"
   ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Maximum gap between adjacent clicks when compatibility mode is enabled."
+  ,"settings.pingforit.marker_display_duration": "Marker Display Duration: %s"
+  ,"settings.pingforit.marker_display_duration.tooltip": "How long markers remain visible locally. Follow server uses each marker's frozen server duration."
+  ,"value.pingforit.follow_server": "Follow server"
+  ,"unit.pingforit.seconds": "%ss"
   ,"notice.pingforit.pass_through_transparent_blocks": "Mark through transparent blocks: "
   ,"notice.pingforit.mark_blacklisted_targets": "Mark blacklisted targets: "
   ,"notice.pingforit.mark_fluids": "Mark fluids: "

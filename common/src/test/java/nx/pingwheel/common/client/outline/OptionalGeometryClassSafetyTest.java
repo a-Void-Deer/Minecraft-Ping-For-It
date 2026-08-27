@@ -68,7 +68,9 @@ class OptionalGeometryClassSafetyTest {
 			"common", "src", "main", "java", "nx", "pingwheel", "common", "client",
 			"outline", "EntityBlockGeometryTransform.java"));
 		String adapter = Files.readString(adapterPath, StandardCharsets.UTF_8);
-		String transform = Files.readString(transformPath, StandardCharsets.UTF_8);
+		String transform = Files.readString(transformPath, StandardCharsets.UTF_8)
+			.replace("\r\n", "\n")
+			.replace('\r', '\n');
 
 		assertTrue(adapter.contains("instancer.environment == GlobalEnvironment.INSTANCE"));
 		assertTrue(adapter.contains("manager.renderOrigin()"));

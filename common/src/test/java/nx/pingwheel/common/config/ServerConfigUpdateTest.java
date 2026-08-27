@@ -28,6 +28,30 @@ class ServerConfigUpdateTest {
 		assertTrue(merged.playerTrackingEnabled());
 		assertEquals(1000, merged.msToRegenerate());
 		assertEquals(12, merged.rateLimit());
+		assertEquals(7, merged.syncDuration());
+	}
+
+	@Test
+	void syncDurationIsADirtyServerSettingAndIsClampedToTheExistingBounds() {
+		var update = new ServerConfigUpdate(
+			ServerConfigUpdate.SYNC_DURATION,
+			ChannelMode.AUTO,
+			true,
+			1000,
+			5,
+			0);
+
+		var merged = update.applyTo(CURRENT);
+		assertEquals(ServerConfigBounds.MIN_PING_DURATION, merged.syncDuration());
+
+		var high = new ServerConfigUpdate(
+			ServerConfigUpdate.SYNC_DURATION,
+			ChannelMode.AUTO,
+			true,
+			1000,
+			5,
+			61);
+		assertEquals(ServerConfigBounds.MAX_PING_DURATION, high.applyTo(CURRENT).syncDuration());
 	}
 
 	@Test

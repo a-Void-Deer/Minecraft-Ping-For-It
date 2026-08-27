@@ -112,6 +112,12 @@
 	"settings.pingforit.long_press_compatibility_mode.tooltip": "Reconoce clics rápidos como una sola pulsación larga virtual.",
 	"settings.pingforit.long_press_compatibility_slice_millis": "Intervalo de compatibilidad: %s",
 	"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Separación máxima entre clics consecutivos con el modo activado."
+  ,"settings.pingforit.sync_duration": "Duración de sincronización (segundos)"
+  ,"settings.pingforit.sync_duration.tooltip": "Cuánto tiempo permanecen activos en el servidor los marcadores recién creados."
+  ,"settings.pingforit.marker_display_duration": "Duración de visualización del marcador: %s"
+  ,"settings.pingforit.marker_display_duration.tooltip": "Cuánto tiempo se muestran localmente los marcadores. Seguir al servidor usa la duración congelada de cada marcador."
+  ,"value.pingforit.follow_server": "Seguir al servidor"
+  ,"unit.pingforit.seconds": "%ss"
   ,"notice.pingforit.pass_through_transparent_blocks": "Marcar a través de bloques transparentes: "
   ,"notice.pingforit.mark_blacklisted_targets": "Marcar objetivos de la lista negra: "
   ,"notice.pingforit.mark_fluids": "Marcar líquidos: "
