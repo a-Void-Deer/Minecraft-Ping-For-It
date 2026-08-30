@@ -90,11 +90,18 @@ public final class ForgeWorldAwareBlockModelOutlineAdapter
 		BakedModel model = dispatcher.getBlockModel(state);
 		long seed = state.getSeed(pos);
 
-		ModelData modelData = level.getModelDataManager().getAt(pos);
+		ModelData modelData = ModelData.EMPTY;
+		var modelDataManager = level.getModelDataManager();
+		if (modelDataManager != null) {
+			modelData = modelDataManager.getAt(pos);
+		}
 		if (modelData == null) {
 			modelData = ModelData.EMPTY;
 		}
 		modelData = model.getModelData(level, pos, state, modelData);
+		if (modelData == null) {
+			modelData = ModelData.EMPTY;
+		}
 
 		RandomSource renderTypesRandom = RandomSource.create(seed);
 		for (RenderType originalRenderType : model.getRenderTypes(state, renderTypesRandom, modelData)) {

@@ -21,8 +21,11 @@ class ForgeWorldAwareBlockModelOutlineAdapterContractTest {
 	void backendUsesForgeModelDataAndOriginalRenderTypes() throws IOException {
 		String source = readSource(ADAPTER_SOURCE);
 
-		assertTrue(source.contains("level.getModelDataManager().getAt(pos)"));
-		assertTrue(source.contains("modelData == null"));
+		assertTrue(source.contains("ModelData modelData = ModelData.EMPTY"));
+		assertTrue(source.contains("var modelDataManager = level.getModelDataManager()"));
+		assertTrue(source.contains("modelDataManager != null"));
+		assertTrue(source.contains("modelData = modelDataManager.getAt(pos)"));
+		assertTrue(countOccurrences(source, "if (modelData == null)") >= 2);
 		assertTrue(source.contains("ModelData.EMPTY"));
 		assertTrue(source.contains("model.getModelData(level, pos, state, modelData)"));
 		assertTrue(source.contains("model.getRenderTypes(state, renderTypesRandom, modelData)"));
@@ -66,5 +69,15 @@ class ForgeWorldAwareBlockModelOutlineAdapterContractTest {
 		Path fromCommonProject = Path.of("..", source);
 		Path path = Files.exists(fromRoot) ? fromRoot : fromCommonProject;
 		return Files.readString(path, StandardCharsets.UTF_8);
+	}
+
+	private static int countOccurrences(String source, String value) {
+		int count = 0;
+		int offset = 0;
+		while ((offset = source.indexOf(value, offset)) >= 0) {
+			count++;
+			offset += value.length();
+		}
+		return count;
 	}
 }
