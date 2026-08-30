@@ -27,11 +27,12 @@ class FabricWorldAwareBlockModelOutlineAdapterContractTest {
 		assertTrue(source.contains("context.cameraPosition()"));
 		assertTrue(source.contains("context.transform()"));
 		assertTrue(source.contains("createPoseStack"));
-		assertTrue(source.contains("state.getOffset(level, pos)"));
-		assertTrue(countOccurrences(source, "state.getOffset(level, pos)") == 1);
+		assertTrue(source.contains("createPoseStack(pos, cameraPosition, null)"));
 		assertTrue(source.contains("renderBatched"));
 		assertTrue(source.contains("RandomSource.create(state.getSeed(pos))"));
 		assertTrue(source.contains("\n\t\t\tfalse,"));
+		assertFalse(source.contains(".getOffset("));
+		assertFalse(source.contains("modelOffset"));
 		assertFalse(source.contains("renderSingleBlock"));
 		assertFalse(source.contains("VirtualBlockDisplay"));
 		assertFalse(source.contains("VoxelShape"));
@@ -59,15 +60,5 @@ class FabricWorldAwareBlockModelOutlineAdapterContractTest {
 		Path fromCommonProject = Path.of("..", source);
 		Path path = Files.exists(fromRoot) ? fromRoot : fromCommonProject;
 		return Files.readString(path, StandardCharsets.UTF_8);
-	}
-
-	private static int countOccurrences(String source, String expected) {
-		int count = 0;
-		int offset = 0;
-		while ((offset = source.indexOf(expected, offset)) >= 0) {
-			count++;
-			offset += expected.length();
-		}
-		return count;
 	}
 }

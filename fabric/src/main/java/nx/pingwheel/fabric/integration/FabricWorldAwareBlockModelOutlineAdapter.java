@@ -90,8 +90,7 @@ public final class FabricWorldAwareBlockModelOutlineAdapter
 		BlockPos pos = context.blockPos();
 		BlockState state = context.blockState();
 		Vec3 cameraPosition = context.cameraPosition();
-		Vec3 modelOffset = state.getOffset(level, pos);
-		PoseStack poseStack = createPoseStack(context, pos, cameraPosition, modelOffset);
+		PoseStack poseStack = createPoseStack(context, pos, cameraPosition);
 		BlockRenderDispatcher dispatcher = Minecraft.getInstance().getBlockRenderer();
 		VertexConsumer consumer = buffer.getBuffer(RenderType.outline(TextureAtlas.LOCATION_BLOCKS));
 
@@ -108,14 +107,17 @@ public final class FabricWorldAwareBlockModelOutlineAdapter
 	private static PoseStack createPoseStack(
 		EntityBlockGeometryContext context,
 		BlockPos pos,
-		Vec3 cameraPosition,
-		Vec3 modelOffset
+		Vec3 cameraPosition
 	) {
 		EntityBlockGeometryTransform transform = context.transform();
 		if (transform != null) {
-			// The transform owns the local-to-world conversion and applies the
-			// state offset exactly once in local coordinates.
-			return transform.createPoseStack(pos, cameraPosition, modelOffset);
+			/*
+			 * Keep this pose at the transformed block origin.  The world-aware
+			 * tesselation appends BlockState#getOffset to the pose itself.  Since
+			 * PoseStack translation is post-multiplied, that later local
+			 * translation is evaluated under this transform exactly once.
+			 */
+			return transform.createPoseStack(pos, cameraPosition, null);
 		}
 
 		PoseStack poseStack = new PoseStack();
@@ -124,9 +126,7 @@ public final class FabricWorldAwareBlockModelOutlineAdapter
 			pos.getX() - cameraPosition.x,
 			pos.getY() - cameraPosition.y,
 			pos.getZ() - cameraPosition.z);
-		// Apply the live model offset exactly once; the world-aware tesselation
-		// receives the already-positioned pose and does not get another offset.
-		poseStack.translate(modelOffset.x, modelOffset.y, modelOffset.z);
+		// Do not apply BlockState#getOffset here: world-aware tesselation owns it.
 		return poseStack;
 	}
 }
