@@ -1,5 +1,10 @@
 package nx.pingwheel.common.client.outline;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.renderer.RenderStateShard;
@@ -8,8 +13,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Regression coverage for the through-wall native VoxelShape line route.
@@ -43,6 +50,40 @@ class BlockOutlineRenderTypeTest {
 		assertSame(VanillaShardAccess.noCull(), descriptor.cullState());
 		assertSame(VanillaShardAccess.colorWrite(), descriptor.writeMaskState());
 		assertSame(VanillaShardAccess.viewOffsetZLayering(), descriptor.layeringState());
+	}
+
+	@Test
+	void productionVoxelRouteUsesNativeEdgesAndLateCustomComposite() {
+		String renderer = readSource(
+			"common/src/main/java/nx/pingwheel/common/client/outline/BlockOutlineRenderer.java");
+		String edgeUtil = readSource(
+			"common/src/main/java/nx/pingwheel/common/client/outline/VoxelShapeRenderUtil.java");
+		String levelMixin = readSource(
+			"common/src/main/java/nx/pingwheel/common/mixin/LevelRendererMixin.java");
+
+		assertTrue(renderer.contains("VoxelShapeRenderUtil.renderEdges("));
+		assertTrue(renderer.contains(
+			"VoxelShape shape = blockState.getShape(level, pos, collisionContext);"));
+		assertTrue(edgeUtil.contains("shape.forAllEdges("));
+		assertFalse(edgeUtil.contains("shape.toAabbs("));
+		assertTrue(levelMixin.contains("CommonClient.INSTANCE.renderBlockOutlines("));
+		assertTrue(levelMixin.contains("Matrix4fStack;popMatrix()Lorg/joml/Matrix4fStack;"));
+	}
+
+	private static String readSource(String relativePath) {
+		for (Path candidate : new Path[] {Path.of(relativePath), Path.of("..", relativePath)}) {
+			if (!Files.isRegularFile(candidate)) {
+				continue;
+			}
+
+			try {
+				return Files.readString(candidate, StandardCharsets.UTF_8);
+			} catch (IOException failure) {
+				throw new AssertionError("Unable to read production source: " + candidate, failure);
+			}
+		}
+
+		throw new AssertionError("Production source not found: " + relativePath);
 	}
 
 	/**

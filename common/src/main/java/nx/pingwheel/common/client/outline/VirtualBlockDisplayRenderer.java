@@ -52,12 +52,14 @@ import static nx.pingwheel.common.Global.LOGGER;
  *       position is rendered through its real {@link BlockEntityRenderer}
  *       (dynamic geometry: chest lids, sign text, furnace flames), after
  *       validating the renderer exists and
- *       {@code BlockEntityType#isValid(currentState)} holds. The live baked
- *       model is independently attempted as a second route when the current
- *       state has {@link RenderShape#MODEL}; either route may provide the
- *       native glow. The renderer is invoked directly inside a try/catch
- *       (never through the dispatcher's crash-report path), with an identity
- *       {@link PoseStack} translated by {@code blockPos - cameraPos}.</li>
+ *       {@code BlockEntityType#isValid(currentState)} holds. When the current
+ *       state has {@link RenderShape#MODEL}, its live baked model is
+ *       independently attempted only through the loader-owned world-aware
+ *       adapter. There is no virtual-display substitute for this source;
+ *       either native geometry route may provide the glow. The renderer is
+ *       invoked directly inside a try/catch (never through the dispatcher's
+ *       crash-report path), with an identity {@link PoseStack} translated by
+ *       {@code blockPos - cameraPos}.</li>
  *   <li>{@code block} (whitelisted ordinary block) — a single cached, virtual
  *       {@code Display.BlockDisplay} that is <em>never added to or spawned
  *       into the level</em> is repositioned at the block MIN corner, its
@@ -523,14 +525,14 @@ public final class VirtualBlockDisplayRenderer {
 		}
 
 		return applyWorldAwareBakedModelOutcome(
-			renderWorldAwareBakedModel(context),
-			() -> renderBlockDisplay(context));
+			renderWorldAwareBakedModel(context));
 	}
 
 	/**
 	 * Attempts the loader-owned world-aware route in deterministic registration
-	 * order. A first claiming adapter owns the outcome; only no claim permits
-	 * the common virtual-display route.
+	 * order. The first claiming adapter owns the outcome; no claim leaves the
+	 * entity-block baked source empty because a virtual BlockDisplay is not a
+	 * world-aware model equivalent.
 	 */
 	private WorldAwareBlockModelOutlineOutcome renderWorldAwareBakedModel(
 		EntityBlockGeometryContext context
@@ -544,7 +546,7 @@ public final class VirtualBlockDisplayRenderer {
 	/**
 	 * Selects the first claiming adapter in registration order. A failure while
 	 * checking an adapter's claim is fail-soft and is treated exactly like an
-	 * unhandled adapter, so another adapter or the core route can still run.
+	 * unhandled adapter, so another adapter can still claim the target.
 	 */
 	static WorldAwareBlockModelOutlineOutcome attemptWorldAwareBakedModel(
 		List<WorldAwareBlockModelOutlineAdapter> adapters,
@@ -576,7 +578,7 @@ public final class VirtualBlockDisplayRenderer {
 
 	/**
 	 * Keeps buffer ownership and commit semantics in the common renderer. A
-	 * claimed adapter never reaches the virtual-display supplier, regardless of
+	 * claimed adapter never reaches a virtual display route, regardless of
 	 * whether it emits no vertices or fails during dispatch/commit.
 	 */
 	private WorldAwareBlockModelOutlineOutcome renderClaimedWorldAwareBakedModel(
@@ -602,23 +604,27 @@ public final class VirtualBlockDisplayRenderer {
 		} catch (Exception | LinkageError | AssertionError failure) {
 			recordFailure(
 				adapterId(adapter), context.blockPos(), context.blockState(), context.targetKey(),
-				adapter, FailureRoute.BLOCK_DISPLAY, stage, failure);
+				adapter, FailureRoute.ENTITY_BLOCK, stage, failure);
 			return WorldAwareBlockModelOutlineOutcome.FAILED;
 		}
 	}
 
-	/** Pure outcome gate kept separate so the fallback rule is easy to test. */
+	/**
+	 * Converts the world-aware adapter result to the built-in baked-source
+	 * result. An entity-block baked model has no virtual-display equivalent:
+	 * only a claimed adapter that actually emits geometry can render this
+	 * source. An unhandled target therefore remains empty so the runner can
+	 * continue with independent sources and, if none render, the late
+	 * VoxelShape route can take over.
+	 */
 	static EntityBlockGeometryOutcome applyWorldAwareBakedModelOutcome(
-		WorldAwareBlockModelOutlineOutcome outcome,
-		Supplier<EntityBlockGeometryOutcome> virtualDisplayAttempt
+		WorldAwareBlockModelOutlineOutcome outcome
 	) {
 		Objects.requireNonNull(outcome, "outcome");
-		Objects.requireNonNull(virtualDisplayAttempt, "virtualDisplayAttempt");
 
 		return switch (outcome) {
-			case UNHANDLED -> virtualDisplayAttempt.get();
+			case UNHANDLED, EMPTY -> EntityBlockGeometryOutcome.EMPTY;
 			case RENDERED -> EntityBlockGeometryOutcome.RENDERED;
-			case EMPTY -> EntityBlockGeometryOutcome.EMPTY;
 			case FAILED -> EntityBlockGeometryOutcome.FAILED;
 		};
 	}
@@ -779,50 +785,6 @@ public final class VirtualBlockDisplayRenderer {
 				FailureRoute.BLOCK_DISPLAY, stage, throwable);
 			return EntityBlockGeometryOutcome.FAILED;
 		}
-	}
-
-	private EntityBlockGeometryOutcome renderBlockDisplay(EntityBlockGeometryContext context) {
-		if (context.level() == null
-			|| context.blockPos() == null
-			|| context.blockState() == null
-			|| context.entityRenderDispatcher() == null) {
-			return EntityBlockGeometryOutcome.EMPTY;
-		}
-
-		return renderBlockDisplay(
-			context.level(),
-			context.blockPos(),
-			context.blockState(),
-			context.entityRenderDispatcher(),
-			context.partialTick(),
-			() -> context.packedLight(),
-			context.argbColor(),
-			failureRegistryId(context),
-			context.targetKey(),
-			() -> {
-				if (context.transform() != null) {
-					return new BlockDisplayRenderArguments(
-						context.transform().createPoseStack(
-							context.blockPos(),
-							context.cameraPosition(),
-							context.blockState().getOffset(context.level(), context.blockPos())),
-						0.0D,
-						0.0D,
-						0.0D,
-						context.blockState().getSeed(context.blockPos()));
-				}
-
-				Vec3 renderPosition = BlockDisplayPlacement.cameraRelative(
-					context.blockPos(),
-					context.cameraPosition(),
-					context.blockState().getOffset(context.level(), context.blockPos()));
-				return new BlockDisplayRenderArguments(
-					new PoseStack(),
-					renderPosition.x,
-					renderPosition.y,
-					renderPosition.z,
-					context.blockState().getSeed(context.blockPos()));
-			});
 	}
 
 	private record BlockDisplayRenderArguments(

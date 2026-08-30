@@ -3,10 +3,11 @@ package nx.pingwheel.common.client.outline;
 /**
  * Result of the world-aware baked-model outline seam.
  *
- * <p>{@link #UNHANDLED} means that no adapter claimed the target and the
- * common virtual {@code BlockDisplay} route may be used. The other results are
- * only returned after an adapter claimed the target; they must not fall back
- * to that route.</p>
+ * <p>{@link #UNHANDLED} means that no adapter claimed the target. The
+ * entity-block baked source has no common virtual {@code BlockDisplay}
+ * equivalent, so this result is an empty built-in source attempt. The other
+ * results are only returned after an adapter claimed the target and likewise
+ * never fall back to a virtual display.</p>
  */
 public enum WorldAwareBlockModelOutlineOutcome {
 	/** No registered adapter claimed this target. */

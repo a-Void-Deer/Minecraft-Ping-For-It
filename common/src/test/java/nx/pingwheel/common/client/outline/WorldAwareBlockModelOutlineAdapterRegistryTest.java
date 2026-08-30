@@ -55,27 +55,36 @@ class WorldAwareBlockModelOutlineAdapterRegistryTest {
 	}
 
 	@Test
-	void unhandledKeepsVirtualPathAndEveryClaimedOutcomeSkipsIt() {
+	void noClaimAndEveryClaimedOutcomeAvoidVirtualPath() {
 		for (WorldAwareBlockModelOutlineOutcome outcome : WorldAwareBlockModelOutlineOutcome.values()) {
-			AtomicBoolean virtualAttempted = new AtomicBoolean();
 			EntityBlockGeometryOutcome result =
 				VirtualBlockDisplayRenderer.applyWorldAwareBakedModelOutcome(
-					outcome,
-					() -> {
-						virtualAttempted.set(true);
-						return EntityBlockGeometryOutcome.RENDERED;
-					});
+					outcome);
 
-			if (outcome == WorldAwareBlockModelOutlineOutcome.UNHANDLED) {
-				assertTrue(virtualAttempted.get());
-				assertEquals(EntityBlockGeometryOutcome.RENDERED, result);
-			} else {
-				assertTrue(!virtualAttempted.get());
-				assertEquals(
-					EntityBlockGeometryOutcome.valueOf(outcome.name()),
-					result);
-			}
+			assertEquals(
+				outcome == WorldAwareBlockModelOutlineOutcome.UNHANDLED
+					|| outcome == WorldAwareBlockModelOutlineOutcome.EMPTY
+					? EntityBlockGeometryOutcome.EMPTY
+					: EntityBlockGeometryOutcome.valueOf(outcome.name()),
+				result);
 		}
+	}
+
+	@Test
+	void noAdapterLeavesBakedSourceEmptyWithoutACommonDisplayAttempt() {
+		AtomicBoolean virtualAttempted = new AtomicBoolean();
+		WorldAwareBlockModelOutlineOutcome selection =
+			VirtualBlockDisplayRenderer.attemptWorldAwareBakedModel(
+				List.of(), EntityBlockGeometryContext.empty(), ignored -> {
+					virtualAttempted.set(true);
+					return WorldAwareBlockModelOutlineOutcome.RENDERED;
+				});
+
+		assertEquals(WorldAwareBlockModelOutlineOutcome.UNHANDLED, selection);
+		assertEquals(
+			EntityBlockGeometryOutcome.EMPTY,
+			VirtualBlockDisplayRenderer.applyWorldAwareBakedModelOutcome(selection));
+		assertTrue(!virtualAttempted.get());
 	}
 
 	@Test
@@ -131,6 +140,9 @@ class WorldAwareBlockModelOutlineAdapterRegistryTest {
 
 		assertTrue(!attempted.get());
 		assertEquals(WorldAwareBlockModelOutlineOutcome.UNHANDLED, outcome);
+		assertEquals(
+			EntityBlockGeometryOutcome.EMPTY,
+			VirtualBlockDisplayRenderer.applyWorldAwareBakedModelOutcome(outcome));
 	}
 
 	private static WorldAwareBlockModelOutlineAdapter adapter(String id) {
