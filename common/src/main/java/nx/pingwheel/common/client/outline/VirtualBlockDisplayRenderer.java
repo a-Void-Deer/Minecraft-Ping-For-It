@@ -520,7 +520,88 @@ public final class VirtualBlockDisplayRenderer {
 			return EntityBlockGeometryOutcome.EMPTY;
 		}
 
-		return renderBlockDisplay(context);
+		return applyWorldAwareBakedModelOutcome(
+			renderWorldAwareBakedModel(context),
+			() -> renderBlockDisplay(context));
+	}
+
+	/**
+	 * Attempts the loader-owned world-aware route in deterministic registration
+	 * order. A first claiming adapter owns the outcome; only no claim permits
+	 * the common virtual-display route.
+	 */
+	private WorldAwareBlockModelOutlineOutcome renderWorldAwareBakedModel(
+		EntityBlockGeometryContext context
+	) {
+		for (WorldAwareBlockModelOutlineAdapter adapter
+			: WorldAwareBlockModelOutlineAdapterRegistry.INSTANCE.snapshot()) {
+			final boolean claims;
+			try {
+				claims = adapter.handles(context);
+			} catch (Exception | LinkageError | AssertionError failure) {
+				recordFailure(
+					adapterId(adapter), context.blockPos(), context.blockState(), context.targetKey(),
+					adapter, FailureRoute.BLOCK_DISPLAY, FailureStage.RENDER, failure);
+				return WorldAwareBlockModelOutlineOutcome.FAILED;
+			}
+
+			if (!claims) {
+				continue;
+			}
+
+			return renderClaimedWorldAwareBakedModel(adapter, context);
+		}
+
+		return WorldAwareBlockModelOutlineOutcome.UNHANDLED;
+	}
+
+	/**
+	 * Keeps buffer ownership and commit semantics in the common renderer. A
+	 * claimed adapter never reaches the virtual-display supplier, regardless of
+	 * whether it emits no vertices or fails during dispatch/commit.
+	 */
+	private WorldAwareBlockModelOutlineOutcome renderClaimedWorldAwareBakedModel(
+		WorldAwareBlockModelOutlineAdapter adapter,
+		EntityBlockGeometryContext context
+	) {
+		FailureStage stage = FailureStage.RENDER;
+		try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
+			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
+			OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, context.argbColor());
+
+			adapter.render(context, buffer);
+			WorldAwareBlockModelOutlineOutcome outcome = buffer.vertexCount() > 0
+				? WorldAwareBlockModelOutlineOutcome.RENDERED
+				: WorldAwareBlockModelOutlineOutcome.EMPTY;
+			if (outcome == WorldAwareBlockModelOutlineOutcome.EMPTY) {
+				return outcome;
+			}
+
+			stage = FailureStage.FLUSH;
+			localSource.endBatch();
+			return outcome;
+		} catch (Exception | LinkageError | AssertionError failure) {
+			recordFailure(
+				adapterId(adapter), context.blockPos(), context.blockState(), context.targetKey(),
+				adapter, FailureRoute.BLOCK_DISPLAY, stage, failure);
+			return WorldAwareBlockModelOutlineOutcome.FAILED;
+		}
+	}
+
+	/** Pure outcome gate kept separate so the fallback rule is easy to test. */
+	static EntityBlockGeometryOutcome applyWorldAwareBakedModelOutcome(
+		WorldAwareBlockModelOutlineOutcome outcome,
+		Supplier<EntityBlockGeometryOutcome> virtualDisplayAttempt
+	) {
+		Objects.requireNonNull(outcome, "outcome");
+		Objects.requireNonNull(virtualDisplayAttempt, "virtualDisplayAttempt");
+
+		return switch (outcome) {
+			case UNHANDLED -> virtualDisplayAttempt.get();
+			case RENDERED -> EntityBlockGeometryOutcome.RENDERED;
+			case EMPTY -> EntityBlockGeometryOutcome.EMPTY;
+			case FAILED -> EntityBlockGeometryOutcome.FAILED;
+		};
 	}
 
 	/**
@@ -863,5 +944,14 @@ public final class VirtualBlockDisplayRenderer {
 
 		var registryKey = BuiltInRegistries.BLOCK.getKey(context.blockState().getBlock());
 		return registryKey == null ? "<unknown>" : registryKey.toString();
+	}
+
+	private static String adapterId(WorldAwareBlockModelOutlineAdapter adapter) {
+		try {
+			String id = EntityBlockGeometrySourceIds.validate(adapter.id());
+			return id == null ? EntityBlockGeometrySourceIds.INVALID : id;
+		} catch (Exception | LinkageError | AssertionError failure) {
+			return EntityBlockGeometrySourceIds.UNAVAILABLE;
+		}
 	}
 }
