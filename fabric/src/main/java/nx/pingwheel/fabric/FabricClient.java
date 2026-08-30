@@ -25,7 +25,7 @@ import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
-import nx.pingwheel.fabric.integration.refinedstorage.RefinedStorageClient;
+import nx.pingwheel.fabric.integration.FabricWorldAwareBlockModelOutlineAdapter;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -41,7 +41,7 @@ public class FabricClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
-		RefinedStorageClient.initialize();
+		FabricWorldAwareBlockModelOutlineAdapter.register();
 		ClientPlayNetworking.registerGlobalReceiver(
 			RateLimitPolicyS2CPacket.PACKET_TYPE,
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onRateLimitPolicyPacket(packet)));
