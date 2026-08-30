@@ -14,6 +14,7 @@ import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
+import nx.pingwheel.neoforge.integration.NeoForgeWorldAwareBlockModelOutlineAdapter;
 
 import static nx.pingwheel.common.Global.LOGGER;
 
@@ -31,6 +32,7 @@ public class NeoClient {
 
 	public NeoClient(IEventBus modBus) {
 		CommonClient.INSTANCE.onInit();
+		NeoForgeWorldAwareBlockModelOutlineAdapter.register();
 		loadCreateAdapters();
 		IPlatformClientEventService.INSTANCE.registerJoinServerEvent(NeoClient::loadCreateAdapters);
 		IPlatformClientEventService.INSTANCE.registerLeaveServerEvent(NeoClient::closeCreateAdapters);
