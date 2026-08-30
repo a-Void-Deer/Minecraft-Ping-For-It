@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WorldAwareBlockModelOutlineAdapterRegistryTest {
@@ -29,6 +30,7 @@ class WorldAwareBlockModelOutlineAdapterRegistryTest {
 		rejected.close();
 		firstHandle.close();
 		firstHandle.close();
+		assertTrue(firstHandle.accepted());
 		assertEquals(List.of(second), registry.snapshot());
 
 		secondHandle.close();
@@ -76,10 +78,74 @@ class WorldAwareBlockModelOutlineAdapterRegistryTest {
 		}
 	}
 
+	@Test
+	void failedClaimCheckIsSkippedBeforeTheNextAdapterIsAsked() {
+		WorldAwareBlockModelOutlineAdapter failedFirst =
+			WorldAwareBlockModelOutlineAdapter.of(
+				"mod:failed-first",
+				ignored -> {
+					throw new IllegalStateException("claim check failed");
+				},
+				(ignoredContext, ignoredBuffer) -> {
+					throw new AssertionError("failed adapter must not render");
+				});
+		WorldAwareBlockModelOutlineAdapter second = claimingAdapter("mod:second");
+		AtomicBoolean attempted = new AtomicBoolean();
+
+		WorldAwareBlockModelOutlineOutcome outcome =
+			VirtualBlockDisplayRenderer.attemptWorldAwareBakedModel(
+				List.of(failedFirst, second),
+				EntityBlockGeometryContext.empty(),
+				claimed -> {
+					attempted.set(true);
+					assertSame(second, claimed);
+					return WorldAwareBlockModelOutlineOutcome.RENDERED;
+				});
+
+		assertTrue(attempted.get());
+		assertEquals(WorldAwareBlockModelOutlineOutcome.RENDERED, outcome);
+	}
+
+	@Test
+	void failedOrFalseClaimChecksLeaveTheSeamUnhandled() {
+		WorldAwareBlockModelOutlineAdapter failed =
+			WorldAwareBlockModelOutlineAdapter.of(
+				"mod:failed",
+				ignored -> {
+					throw new AssertionError("claim check failed");
+				},
+				(ignoredContext, ignoredBuffer) -> {
+					throw new AssertionError("failed adapter must not render");
+				});
+		WorldAwareBlockModelOutlineAdapter unhandled = adapter("mod:unhandled");
+		AtomicBoolean attempted = new AtomicBoolean();
+
+		WorldAwareBlockModelOutlineOutcome outcome =
+			VirtualBlockDisplayRenderer.attemptWorldAwareBakedModel(
+				List.of(failed, unhandled),
+				EntityBlockGeometryContext.empty(),
+				claimed -> {
+					attempted.set(true);
+					return WorldAwareBlockModelOutlineOutcome.RENDERED;
+				});
+
+		assertTrue(!attempted.get());
+		assertEquals(WorldAwareBlockModelOutlineOutcome.UNHANDLED, outcome);
+	}
+
 	private static WorldAwareBlockModelOutlineAdapter adapter(String id) {
 		return WorldAwareBlockModelOutlineAdapter.of(
 			id,
 			ignored -> false,
+			(ignoredContext, ignoredBuffer) -> {
+				// no-op
+			});
+	}
+
+	private static WorldAwareBlockModelOutlineAdapter claimingAdapter(String id) {
+		return WorldAwareBlockModelOutlineAdapter.of(
+			id,
+			ignored -> true,
 			(ignoredContext, ignoredBuffer) -> {
 				// no-op
 			});

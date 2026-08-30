@@ -114,7 +114,10 @@ public final class WorldAwareBlockModelOutlineAdapterRegistry {
 			return adapter;
 		}
 
-		/** Whether this handle owns an accepted registration. */
+		/**
+		 * Whether this registration was accepted when created. This remains true
+		 * after {@link #close()}; it is not an active-registration query.
+		 */
 		public boolean accepted() {
 			return registry != null;
 		}

@@ -2,9 +2,11 @@ package nx.pingwheel.common.client.outline;
 
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
@@ -533,23 +535,40 @@ public final class VirtualBlockDisplayRenderer {
 	private WorldAwareBlockModelOutlineOutcome renderWorldAwareBakedModel(
 		EntityBlockGeometryContext context
 	) {
-		for (WorldAwareBlockModelOutlineAdapter adapter
-			: WorldAwareBlockModelOutlineAdapterRegistry.INSTANCE.snapshot()) {
+		return attemptWorldAwareBakedModel(
+			WorldAwareBlockModelOutlineAdapterRegistry.INSTANCE.snapshot(),
+			context,
+			adapter -> renderClaimedWorldAwareBakedModel(adapter, context));
+	}
+
+	/**
+	 * Selects the first claiming adapter in registration order. A failure while
+	 * checking an adapter's claim is fail-soft and is treated exactly like an
+	 * unhandled adapter, so another adapter or the core route can still run.
+	 */
+	static WorldAwareBlockModelOutlineOutcome attemptWorldAwareBakedModel(
+		List<WorldAwareBlockModelOutlineAdapter> adapters,
+		EntityBlockGeometryContext context,
+		Function<WorldAwareBlockModelOutlineAdapter, WorldAwareBlockModelOutlineOutcome> claimedAttempt
+	) {
+		Objects.requireNonNull(adapters, "adapters");
+		Objects.requireNonNull(context, "context");
+		Objects.requireNonNull(claimedAttempt, "claimedAttempt");
+
+		for (WorldAwareBlockModelOutlineAdapter adapter : adapters) {
 			final boolean claims;
 			try {
 				claims = adapter.handles(context);
 			} catch (Exception | LinkageError | AssertionError failure) {
-				recordFailure(
-					adapterId(adapter), context.blockPos(), context.blockState(), context.targetKey(),
-					adapter, FailureRoute.BLOCK_DISPLAY, FailureStage.RENDER, failure);
-				return WorldAwareBlockModelOutlineOutcome.FAILED;
+				continue;
 			}
 
 			if (!claims) {
 				continue;
 			}
 
-			return renderClaimedWorldAwareBakedModel(adapter, context);
+			return Objects.requireNonNull(
+				claimedAttempt.apply(adapter), "claimedAttempt result");
 		}
 
 		return WorldAwareBlockModelOutlineOutcome.UNHANDLED;
