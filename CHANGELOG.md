@@ -11,4 +11,4 @@
 - Added client-side presentation-target resolution that separates marker identity from render subjects.
 - Added full two-block door and bed outlines with per-subject fallback.
 - Added Create large water-wheel structural-block redirection to the validated master.
-- Added simulated paired docking-connector redirection to the powered owner and its owner BER/fallback path.
+- Added Simulated Project paired docking-connector redirection to the powered owner and its owner BER/fallback path.
