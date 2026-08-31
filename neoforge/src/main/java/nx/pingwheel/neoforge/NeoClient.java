@@ -25,6 +25,8 @@ public class NeoClient {
 		"nx.pingwheel.neoforge.integration.create.CreateFlywheelGeometryAdapter";
 	private static final String CREATE_WATER_WHEEL_RESOLVER =
 		"nx.pingwheel.neoforge.integration.create.CreateLargeWaterWheelPresentationResolver";
+	private static final String SIMULATED_DOCKING_CONNECTOR_RESOLVER =
+		"nx.pingwheel.neoforge.integration.simulated.SimulatedDockingConnectorPresentationResolver";
 	private static Boolean lastCreateDetected;
 	private static Boolean lastFlywheelDetected;
 	private static String lastEntityAdapterState;
@@ -37,7 +39,11 @@ public class NeoClient {
 		CommonClient.INSTANCE.onInit();
 		NeoForgeWorldAwareBlockModelOutlineAdapter.register();
 		loadCreateAdapters();
-		IPlatformClientEventService.INSTANCE.registerJoinServerEvent(NeoClient::loadCreateAdapters);
+		loadSimulatedResolver();
+		IPlatformClientEventService.INSTANCE.registerJoinServerEvent(() -> {
+			loadCreateAdapters();
+			loadSimulatedResolver();
+		});
 		IPlatformClientEventService.INSTANCE.registerLeaveServerEvent(NeoClient::closeCreateAdapters);
 
 		NeoForge.EVENT_BUS.register(this);
@@ -106,6 +112,13 @@ public class NeoClient {
 				"optional adapter registration failed; adapter=" + adapterName
 					+ "; class=" + className + "; sourceHandleState=failed",
 				failure);
+		}
+	}
+
+	private static void loadSimulatedResolver() {
+		if (ModList.get().isLoaded("simulated")) {
+			registerOptionalResolver(
+				SIMULATED_DOCKING_CONNECTOR_RESOLVER, "simulated-docking-connector-presentation");
 		}
 	}
 
