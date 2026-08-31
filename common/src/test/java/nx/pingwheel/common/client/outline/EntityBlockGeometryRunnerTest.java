@@ -84,6 +84,7 @@ class EntityBlockGeometryRunnerTest {
 				null,
 				null,
 				externalKey,
+				"entity_block",
 				42L,
 				transform);
 		}));
@@ -95,6 +96,7 @@ class EntityBlockGeometryRunnerTest {
 		assertNotSame(contexts.get(1), contexts.get(2));
 		for (EntityBlockGeometryContext context : contexts) {
 			assertSame(externalKey, context.targetKey());
+			assertEquals("entity_block", context.renderTargetTypeId());
 			assertSame(transform, context.transform());
 			assertEquals(0.25F, context.partialTick());
 			assertEquals(0.75F, context.flywheelPartialTick());

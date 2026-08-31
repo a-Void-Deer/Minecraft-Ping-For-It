@@ -147,6 +147,17 @@ class BlockOutlineRenderTypeTest {
 			"nx/pingwheel/common/client/outline/BlockOutlineState",
 			"snapshot"),
 			"ordinary fallback must not reconstruct source entries");
+
+		List<MethodCall> modelRendererCalls = methodInvocations(
+			"nx.pingwheel.common.client.outline.VirtualBlockDisplayRenderer", "render");
+		assertTrue(invocationIndex(
+			rendererCalls,
+			"nx/pingwheel/common/client/outline/BlockPresentationSubjectValidation",
+			"isLoadedAndCurrent") >= 0);
+		assertTrue(invocationIndex(
+			modelRendererCalls,
+			"nx/pingwheel/common/client/outline/BlockPresentationSubjectValidation",
+			"isLoadedAndCurrent") >= 0);
 	}
 
 	private static List<MethodCall> methodInvocations(String className, String methodName) {

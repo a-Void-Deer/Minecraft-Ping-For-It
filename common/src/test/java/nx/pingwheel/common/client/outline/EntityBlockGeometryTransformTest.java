@@ -187,9 +187,10 @@ class EntityBlockGeometryTransformTest {
 			"minecraft:overworld", "test", "plot-1", "minecraft:stone");
 		EntityBlockGeometryContext context = new EntityBlockGeometryContext(
 			null, null, null, null, 0xFFFFFFFF, Vec3.ZERO, 0.0F, 0.0F, 0,
-			null, null, null, external, 1L, null);
+			null, null, null, external, "entity_block", 1L, null);
 		assertNotSame(empty, context);
 		assertEquals(external, context.targetKey());
+		assertEquals("entity_block", context.renderTargetTypeId());
 		assertNull(context.transform());
 	}
 }

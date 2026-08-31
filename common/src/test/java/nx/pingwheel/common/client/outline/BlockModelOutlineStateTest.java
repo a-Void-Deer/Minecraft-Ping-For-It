@@ -139,6 +139,27 @@ class BlockModelOutlineStateTest {
 	}
 
 	@Test
+	void clearSuccessesPreservesPresentationsButBeginFrameClearsBoth() {
+		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
+		BlockPresentation presentation = directPresentation(1, 2, 3, "direct");
+		BlockPresentationSuccessKey success =
+			presentation.renderSubjects().get(0).successKey(presentation.sourceSpec());
+		state.setPresentations(List.of(presentation));
+		state.addSuccess(success);
+
+		state.clearSuccesses();
+
+		assertEquals(List.of(presentation), state.presentations());
+		assertTrue(state.successKeys().isEmpty());
+		assertFalse(state.allPresentationsCovered());
+
+		state.beginFrame();
+
+		assertTrue(state.presentations().isEmpty());
+		assertTrue(state.successKeys().isEmpty());
+	}
+
+	@Test
 	void directAndEmptyPresentationsUseVacuousSubjectCoverage() {
 		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
 		BlockPresentation direct = directPresentation(1, 2, 3, "direct");

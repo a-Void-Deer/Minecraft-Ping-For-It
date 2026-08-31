@@ -210,18 +210,11 @@ public final class VirtualBlockDisplayRenderer {
 			for (BlockRenderSubject subject : presentation.renderSubjects()) {
 				BlockPos pos = subject.blockPos();
 
-				if (!level.hasChunkAt(pos)) {
+				if (!BlockPresentationSubjectValidation.isLoadedAndCurrent(level, subject)) {
 					continue;
 				}
 
 				BlockState blockState = subject.blockState();
-
-				var actualRegistryKey = BuiltInRegistries.BLOCK.getKey(blockState.getBlock());
-
-				if (actualRegistryKey == null
-					|| !subject.expectedBlockRegistryId().equals(actualRegistryKey.toString())) {
-					continue;
-				}
 
 				// The immutable policy is compiled by ClientConfig validation/load/set
 				// paths. This frame only evaluates the current subject state against
@@ -235,7 +228,8 @@ public final class VirtualBlockDisplayRenderer {
 					subject.renderTargetTypeId(), nativeGlowMatches)) {
 					case ENTITY_BLOCK -> renderEntityBlock(
 						level, pos, blockState, spec, blockEntityDispatcher, entityDispatcher,
-						cameraPosition, builtInPartialTick, flywheelPartialTick, blockKey);
+						cameraPosition, builtInPartialTick, flywheelPartialTick,
+						subject.renderTargetTypeId(), blockKey);
 					case BLOCK_DISPLAY -> renderBlockDisplay(
 						level, pos, blockState, entityDispatcher,
 						cameraPosition, builtInPartialTick,
@@ -291,6 +285,7 @@ public final class VirtualBlockDisplayRenderer {
 		Vec3 cameraPosition,
 		float builtInPartialTick,
 		float flywheelPartialTick,
+		String renderTargetTypeId,
 		TargetKey.BlockKey targetKey
 	) {
 		// Read the live local mode for every entity-block render attempt. It is
@@ -313,6 +308,7 @@ public final class VirtualBlockDisplayRenderer {
 				blockEntityDispatcher,
 				Minecraft.getInstance().levelRenderer,
 				targetKey,
+				renderTargetTypeId,
 				BlockModelOutlineState.INSTANCE.frameId(),
 				null));
 	}
@@ -400,6 +396,7 @@ public final class VirtualBlockDisplayRenderer {
 						blockEntityDispatcher,
 						Minecraft.getInstance().levelRenderer,
 						targetKey,
+						spec.targetTypeId(),
 						BlockModelOutlineState.INSTANCE.frameId(),
 						transform));
 				return rendered

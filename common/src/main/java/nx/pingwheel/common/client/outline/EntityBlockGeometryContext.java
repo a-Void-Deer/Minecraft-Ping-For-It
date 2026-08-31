@@ -19,7 +19,7 @@ import nx.pingwheel.common.marker.TargetKey;
  * target and render data such an adapter may need: level, position, state,
  * block entity when available, public outline color, camera/timing/light
  * values, the level renderer used for exact frame-time parity, the frozen
- * target key, the current frame id, and the vanilla render dispatchers. It deliberately contains no
+ * target key, render target type, current frame id, and the vanilla render dispatchers. It deliberately contains no
  * marker ownership, network, or other protocol state, and has no dependency
  * on Create, Flywheel, or another optional mod.</p>
  *
@@ -42,52 +42,16 @@ public record EntityBlockGeometryContext(
 	BlockEntityRenderDispatcher blockEntityRenderDispatcher,
 	LevelRenderer levelRenderer,
 	TargetKey targetKey,
+	String renderTargetTypeId,
 	long frameId,
 	EntityBlockGeometryTransform transform
 ) {
 	public EntityBlockGeometryContext {
 		cameraPosition = cameraPosition == null ? Vec3.ZERO : cameraPosition;
 		argbColor = 0xFF000000 | (argbColor & 0x00FFFFFF);
-	}
-
-	/** Compatibility constructor for fixed/built-in sources that do not defer lines. */
-	public EntityBlockGeometryContext(
-		ClientLevel level,
-		BlockPos blockPos,
-		BlockState blockState,
-		BlockEntity blockEntity,
-		int argbColor,
-		Vec3 cameraPosition,
-		float partialTick,
-		int packedLight,
-		EntityRenderDispatcher entityRenderDispatcher,
-		BlockEntityRenderDispatcher blockEntityRenderDispatcher
-	) {
-		this(level, blockPos, blockState, blockEntity, argbColor, cameraPosition,
-			partialTick, partialTick, packedLight, entityRenderDispatcher, blockEntityRenderDispatcher,
-			null, null, 0L, null);
-	}
-
-	/** Compatibility constructor for callers that use the former full shape. */
-	public EntityBlockGeometryContext(
-		ClientLevel level,
-		BlockPos blockPos,
-		BlockState blockState,
-		BlockEntity blockEntity,
-		int argbColor,
-		Vec3 cameraPosition,
-		float partialTick,
-		float flywheelPartialTick,
-		int packedLight,
-		EntityRenderDispatcher entityRenderDispatcher,
-		BlockEntityRenderDispatcher blockEntityRenderDispatcher,
-		LevelRenderer levelRenderer,
-		TargetKey targetKey,
-		long frameId
-	) {
-		this(level, blockPos, blockState, blockEntity, argbColor, cameraPosition,
-			partialTick, flywheelPartialTick, packedLight, entityRenderDispatcher,
-			blockEntityRenderDispatcher, levelRenderer, targetKey, frameId, null);
+		if (renderTargetTypeId != null && renderTargetTypeId.isBlank()) {
+			throw new IllegalArgumentException("renderTargetTypeId must not be blank");
+		}
 	}
 
 	/**
@@ -105,6 +69,7 @@ public record EntityBlockGeometryContext(
 		0.0F,
 		0.0F,
 		0,
+			null,
 			null,
 			null,
 			null,

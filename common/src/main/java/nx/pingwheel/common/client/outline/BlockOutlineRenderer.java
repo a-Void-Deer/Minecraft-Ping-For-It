@@ -96,18 +96,11 @@ public final class BlockOutlineRenderer {
 			for (BlockRenderSubject subject : presentation.renderSubjects()) {
 				BlockPos pos = subject.blockPos();
 
-				if (!level.hasChunkAt(pos)) {
+				if (!BlockPresentationSubjectValidation.isLoadedAndCurrent(level, subject)) {
 					continue;
 				}
 
 				BlockState blockState = subject.blockState();
-
-				var actualRegistryKey = BuiltInRegistries.BLOCK.getKey(blockState.getBlock());
-
-				if (actualRegistryKey == null
-					|| !subject.expectedBlockRegistryId().equals(actualRegistryKey.toString())) {
-					continue;
-				}
 
 				// Native/model success suppresses only VoxelShape generation. The
 				// optional Flywheel source writes its vanilla outline mask before the
