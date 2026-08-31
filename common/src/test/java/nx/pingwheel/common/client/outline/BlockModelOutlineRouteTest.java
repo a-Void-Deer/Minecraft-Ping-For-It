@@ -1,6 +1,17 @@
 package nx.pingwheel.common.client.outline;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
+
+import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.marker.TargetKey;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -14,6 +25,12 @@ import static nx.pingwheel.common.client.outline.BlockModelOutlineRoute.VOXEL;
  * Headless tests for the pure per-frame block outline route policy.
  */
 class BlockModelOutlineRouteTest {
+
+	@BeforeAll
+	static void bootstrapMinecraft() {
+		SharedConstants.tryDetectVersion();
+		Bootstrap.bootStrap();
+	}
 
 	// --- routing ---
 
@@ -92,5 +109,31 @@ class BlockModelOutlineRouteTest {
 	void nullTargetTypeIdIsRejected() {
 		assertThrows(NullPointerException.class, () -> BlockModelOutlineRoute.route(null, true));
 		assertThrows(NullPointerException.class, () -> BlockModelOutlineRoute.acceptsForBlockRendering(null));
+	}
+
+	@Test
+	void sourceBlockPresentationCanRouteItsSubjectAsEntityBlockAtSubjectPosition() {
+		BlockPos sourcePos = new BlockPos(1, 2, 3);
+		BlockPos subjectPos = new BlockPos(7, 8, 9);
+		BlockOutlineSpec source = new BlockOutlineSpec(
+			new MarkerId(1L),
+			new TargetKey.BlockKey(
+				"minecraft:overworld", sourcePos.getX(), sourcePos.getY(), sourcePos.getZ(),
+				"minecraft:stone"),
+			"block",
+			"attention",
+			0xFF123456);
+		BlockRenderSubject subject = new BlockRenderSubject(
+			"entity-subject",
+			subjectPos,
+			Blocks.STONE.defaultBlockState(),
+			"minecraft:stone",
+			"entity_block",
+			BlockPresentationRelation.PROXY_TO_OWNER);
+		BlockPresentation presentation = new BlockPresentation(source, List.of(subject));
+
+		assertEquals(ENTITY_BLOCK, BlockModelOutlineRoute.route(subject.renderTargetTypeId(), true));
+		assertEquals(subjectPos, presentation.renderSubjects().get(0).renderPos());
+		assertEquals("block", presentation.sourceSpec().targetTypeId());
 	}
 }

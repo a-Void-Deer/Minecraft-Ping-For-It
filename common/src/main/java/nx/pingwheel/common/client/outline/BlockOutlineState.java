@@ -2,6 +2,7 @@ package nx.pingwheel.common.client.outline;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -22,8 +23,9 @@ import nx.pingwheel.common.marker.TargetKey;
  * preserving deterministic ascending marker-id iteration order. The
  * snapshots carry no live shape: a {@code BlockState} change with the same
  * block type keeps the same ordinary block identity, while an external
- * provider refresh replaces only its opaque locator/anchor payload. The
- * renderers resolve current state and shape themselves.
+ * provider refresh replaces only its opaque locator/anchor payload. Ordinary
+ * specs are resolved into the immutable per-frame presentation snapshot held
+ * by {@link BlockModelOutlineState} before either block render pass runs.
  *
  * <p>Logging: only snapshot transitions are debug logged — the aggregate
  * counts {@code added/removed/changed/total} — never any block position,
@@ -133,42 +135,24 @@ public final class BlockOutlineState {
 	}
 
 	/**
-	 * Whether every ordinary key in the current snapshot is contained in
-	 * {@code succeeded} — the per-frame set of keys whose model-outline pass
-	 * emitted geometry (see {@link BlockModelOutlineState}). This overload does
-	 * not cover provider-owned keys; use {@link #allCoveredBy(Set, Set)} when
-	 * both key kinds are present. When true for its covered keys, the
-	 * late VoxelShape pass has nothing to draw, so the caller can skip
-	 * acquiring and flushing the custom block outline batch entirely. An
-	 * empty snapshot counts as fully covered.
-	 */
-	public boolean allCoveredBy(Set<TargetKey.BlockKey> succeeded) {
-		Objects.requireNonNull(succeeded, "succeeded");
-
-		for (TargetKey.BlockKey blockKey : specs.keySet()) {
-			if (!succeeded.contains(blockKey)) {
-				return false;
-			}
-		}
-
-		return externalSpecs.isEmpty();
-	}
-
-	/**
-	 * Whether every ordinary and provider-owned key in the current snapshot is
-	 * contained in the corresponding per-frame model-success set. Only keys
-	 * whose model pass actually emitted geometry count as covered.
+	 * Whether every ordinary presentation subject and provider-owned key is
+	 * covered by the corresponding model-pass success sets. Empty subject lists
+	 * are intentionally vacuously covered.
 	 */
 	public boolean allCoveredBy(
-		Set<TargetKey.BlockKey> succeeded,
+		List<BlockPresentation> presentations,
+		Set<BlockPresentationSuccessKey> succeeded,
 		Set<TargetKey.ExternalBlockKey> externalSucceeded
 	) {
+		Objects.requireNonNull(presentations, "presentations");
 		Objects.requireNonNull(succeeded, "succeeded");
 		Objects.requireNonNull(externalSucceeded, "externalSucceeded");
 
-		for (TargetKey.BlockKey blockKey : specs.keySet()) {
-			if (!succeeded.contains(blockKey)) {
-				return false;
+		for (BlockPresentation presentation : presentations) {
+			for (BlockRenderSubject subject : presentation.renderSubjects()) {
+				if (!succeeded.contains(subject.successKey(presentation.sourceSpec()))) {
+					return false;
+				}
 			}
 		}
 
@@ -204,9 +188,8 @@ public final class BlockOutlineState {
 	 * ascending {@link nx.pingwheel.common.domain.MarkerId} order produced by
 	 * {@link BlockOutlineSelection#select}.
 	 *
-	 * <p>Mainly a test seam: the renderer iterates the snapshot in this exact
-	 * order; production callers query per block via {@link #specFor} and
-	 * {@link #colorFor}.
+	 * <p>Mainly a test and presentation-resolution seam: production callers
+	 * query per block via {@link #specFor} and {@link #colorFor}.
 	 */
 	public Map<TargetKey.BlockKey, BlockOutlineSpec> snapshot() {
 		return specs;

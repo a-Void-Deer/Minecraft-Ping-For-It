@@ -274,13 +274,15 @@ class BlockOutlineStateTest {
 		assertEquals(
 			EntityBlockGeometryOutcome.EMPTY,
 			EntityBlockGeometryOutcome.fromEmittedVertices(0));
-		assertFalse(state.allCoveredBy(Set.of(), modelState.externalSuccessKeys()));
+		assertFalse(state.allCoveredBy(
+			modelState.presentations(), modelState.successKeys(), modelState.externalSuccessKeys()));
 
 		assertEquals(
 			EntityBlockGeometryOutcome.RENDERED,
 			EntityBlockGeometryOutcome.fromEmittedVertices(1));
 		modelState.addExternalSuccess(key);
-		assertTrue(state.allCoveredBy(Set.of(), modelState.externalSuccessKeys()));
+		assertTrue(state.allCoveredBy(
+			modelState.presentations(), modelState.successKeys(), modelState.externalSuccessKeys()));
 		modelState.clear();
 	}
 }

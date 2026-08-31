@@ -165,13 +165,15 @@ public final class VirtualBlockDisplayRenderer {
 	}
 
 	/**
-	 * Runs the model-outline pass for the prepared {@code state} snapshot.
+	 * Runs the model-outline pass for the prepared presentation and external
+	 * snapshots.
 	 *
-	 * <p>Specs whose dimension differs, whose chunk is unloaded, or whose
-	 * current block registry id no longer matches the frozen identity are
-	 * skipped silently (they keep their VoxelShape fallback). Successful keys
-	 * are recorded into {@code frameState} so the late VoxelShape pass skips
-	 * them. Main thread only.
+	 * <p>Presentations whose source dimension differs, whose subject chunk is
+	 * unloaded, or whose saved subject registry id no longer matches its
+	 * expected identity are skipped silently (they keep their VoxelShape
+	 * fallback). Successful source/subject keys are recorded into
+	 * {@code frameState} so the late VoxelShape pass skips only those exact
+	 * subjects. Main thread only.
 	 */
 	public void render(
 		ClientLevel level,
@@ -197,49 +199,54 @@ public final class VirtualBlockDisplayRenderer {
 		EntityRenderDispatcher entityDispatcher = minecraft.getEntityRenderDispatcher();
 		BlockEntityRenderDispatcher blockEntityDispatcher = minecraft.getBlockEntityRenderDispatcher();
 
-		for (Map.Entry<TargetKey.BlockKey, BlockOutlineSpec> entry : state.snapshot().entrySet()) {
-			TargetKey.BlockKey blockKey = entry.getKey();
-			BlockOutlineSpec spec = entry.getValue();
+		for (BlockPresentation presentation : frameState.presentations()) {
+			BlockOutlineSpec spec = presentation.sourceSpec();
+			TargetKey.BlockKey blockKey = spec.blockKey();
 
 			if (!blockKey.dimensionId().equals(dimensionId)) {
 				continue;
 			}
 
-			BlockPos pos = new BlockPos(blockKey.x(), blockKey.y(), blockKey.z());
+			for (BlockRenderSubject subject : presentation.renderSubjects()) {
+				BlockPos pos = subject.blockPos();
 
-			if (!level.hasChunkAt(pos)) {
-				continue;
-			}
+				if (!level.hasChunkAt(pos)) {
+					continue;
+				}
 
-			BlockState blockState = level.getBlockState(pos);
+				BlockState blockState = subject.blockState();
 
-			if (!blockKey.blockRegistryId()
-				.equals(BuiltInRegistries.BLOCK.getKey(blockState.getBlock()).toString())) {
-				continue;
-			}
+				var actualRegistryKey = BuiltInRegistries.BLOCK.getKey(blockState.getBlock());
 
-			// The immutable policy is compiled by ClientConfig validation/load/set
-			// paths. This frame only evaluates the current state against it; no
-			// configured string is reparsed here. Both block target types consult
-			// the whitelist and the blacklist, with target-safety gates in policy.
-			boolean nativeGlowMatches = ClientConfig.HANDLER.getConfig()
-				.getBlockDisplayPolicy()
-				.shouldUseNativeGlow(spec.targetTypeId(), blockState);
+				if (actualRegistryKey == null
+					|| !subject.expectedBlockRegistryId().equals(actualRegistryKey.toString())) {
+					continue;
+				}
 
-			boolean success = switch (BlockModelOutlineRoute.route(spec.targetTypeId(), nativeGlowMatches)) {
-				case ENTITY_BLOCK -> renderEntityBlock(
-					level, pos, blockState, spec, blockEntityDispatcher, entityDispatcher,
-					cameraPosition, builtInPartialTick, flywheelPartialTick, blockKey);
-				case BLOCK_DISPLAY -> renderBlockDisplay(
-					level, pos, blockState, entityDispatcher,
-					cameraPosition, builtInPartialTick,
-					spec.argbColor(), blockKey.blockRegistryId(), blockKey)
-					== EntityBlockGeometryOutcome.RENDERED;
-				case VOXEL -> false;
-			};
+				// The immutable policy is compiled by ClientConfig validation/load/set
+				// paths. This frame only evaluates the current subject state against
+				// it; no configured string is reparsed here. The subject target type,
+				// rather than the source type, controls the route.
+				boolean nativeGlowMatches = ClientConfig.HANDLER.getConfig()
+					.getBlockDisplayPolicy()
+					.shouldUseNativeGlow(subject.renderTargetTypeId(), blockState);
 
-			if (success) {
-				frameState.addSuccess(blockKey);
+				boolean success = switch (BlockModelOutlineRoute.route(
+					subject.renderTargetTypeId(), nativeGlowMatches)) {
+					case ENTITY_BLOCK -> renderEntityBlock(
+						level, pos, blockState, spec, blockEntityDispatcher, entityDispatcher,
+						cameraPosition, builtInPartialTick, flywheelPartialTick, blockKey);
+					case BLOCK_DISPLAY -> renderBlockDisplay(
+						level, pos, blockState, entityDispatcher,
+						cameraPosition, builtInPartialTick,
+						spec.argbColor(), subject.expectedBlockRegistryId(), blockKey)
+						== EntityBlockGeometryOutcome.RENDERED;
+					case VOXEL -> false;
+				};
+
+				if (success) {
+					frameState.addSuccess(subject.successKey(spec));
+				}
 			}
 		}
 

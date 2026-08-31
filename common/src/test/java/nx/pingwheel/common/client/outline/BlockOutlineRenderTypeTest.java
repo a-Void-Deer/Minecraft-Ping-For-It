@@ -121,6 +121,34 @@ class BlockOutlineRenderTypeTest {
 			"Lorg/joml/Matrix4fStack;popMatrix()Lorg/joml/Matrix4fStack;"));
 	}
 
+	@Test
+	void compiledFallbackConsumesThePresentationSubjectsInsteadOfSourceSnapshot() {
+		List<MethodCall> rendererCalls = methodInvocations(
+			"nx.pingwheel.common.client.outline.BlockOutlineRenderer", "render");
+
+		assertTrue(invocationIndex(
+			rendererCalls,
+			"nx/pingwheel/common/client/outline/BlockPresentation",
+			"sourceSpec") >= 0);
+		assertTrue(invocationIndex(
+			rendererCalls,
+			"nx/pingwheel/common/client/outline/BlockPresentation",
+			"renderSubjects") >= 0);
+		assertTrue(invocationIndex(
+			rendererCalls,
+			"nx/pingwheel/common/client/outline/BlockRenderSubject",
+			"blockPos") >= 0);
+		assertTrue(invocationIndex(
+			rendererCalls,
+			"nx/pingwheel/common/client/outline/BlockRenderSubject",
+			"blockState") >= 0);
+		assertEquals(-1, invocationIndex(
+			rendererCalls,
+			"nx/pingwheel/common/client/outline/BlockOutlineState",
+			"snapshot"),
+			"ordinary fallback must not reconstruct source entries");
+	}
+
 	private static List<MethodCall> methodInvocations(String className, String methodName) {
 		List<MethodCall> calls = new ArrayList<>();
 		readClass(className).accept(new ClassVisitor(Opcodes.ASM9) {

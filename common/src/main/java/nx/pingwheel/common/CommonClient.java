@@ -265,6 +265,7 @@ public class CommonClient {
 		// block-only frame can establish the shared outline pipeline too.
 		EntityOutlineFrameState.INSTANCE.beginFrame();
 		BlockModelOutlineState.INSTANCE.beginFrame();
+		prepareBlockPresentations();
 		requestEntityOutlineEffect();
 	}
 
@@ -306,6 +307,22 @@ public class CommonClient {
 	}
 
 	/**
+	 * Resolves ordinary block subjects once for this frame, after the source
+	 * outline snapshot and model-frame state have both been reset. The resulting
+	 * immutable list is shared by the model and late VoxelShape passes.
+	 */
+	private static void prepareBlockPresentations() {
+		Minecraft game = Game;
+
+		if (pingRuntime == null || game == null || game.level == null) {
+			return;
+		}
+
+		BlockModelOutlineState.INSTANCE.preparePresentations(
+			game.level, BlockOutlineState.INSTANCE);
+	}
+
+	/**
 	 * Invokes the cached reflection {@code requestOutlineEffect()} probe on the
 	 * current {@link LevelRenderer} once per frame, only while live entity
 	 * entity or block outlines exist. A missing method (the normal vanilla 1.21.1 case) records
@@ -343,8 +360,8 @@ public class CommonClient {
 	 * <p>The {@code LevelRendererMixin} gate ensures this only runs when the
 	 * vanilla entity-outline pipeline is available
 	 * ({@code shouldShowEntityOutlines()}); otherwise every block keeps its
-	 * VoxelShape fallback. Keys that emit at least one outline vertex are
-	 * recorded in {@link BlockModelOutlineState}, which the late
+	 * VoxelShape fallback. Presentation subjects that emit at least one outline
+	 * vertex are recorded in {@link BlockModelOutlineState}, which the late
 	 * {@link #renderBlockOutlines(Camera, MultiBufferSource.BufferSource)}
 	 * pass consults to avoid doubling.
 	 */
@@ -443,10 +460,11 @@ public class CommonClient {
 	 * Drops the per-frame outline success records (model and entity); used
 	 * when the outline pipeline turned out to be unavailable after all, so
 	 * every block falls back to the VoxelShape outline instead of silently
-	 * disappearing.
+	 * disappearing. The already-resolved presentation list is retained so the
+	 * late fallback can still render it when the post-process is unavailable.
 	 */
 	public void resetModelOutlinesForFrame() {
-		BlockModelOutlineState.INSTANCE.beginFrame();
+		BlockModelOutlineState.INSTANCE.clearSuccesses();
 		EntityOutlineFrameState.INSTANCE.beginFrame();
 	}
 
@@ -490,6 +508,7 @@ public class CommonClient {
 		}
 
 		if (BlockOutlineState.INSTANCE.allCoveredBy(
+			BlockModelOutlineState.INSTANCE.presentations(),
 			BlockModelOutlineState.INSTANCE.successKeys(),
 			BlockModelOutlineState.INSTANCE.externalSuccessKeys())) {
 			return;
@@ -499,6 +518,7 @@ public class CommonClient {
 		BlockOutlineRenderer.render(
 			game.level, camera, lines,
 			BlockOutlineState.INSTANCE,
+			BlockModelOutlineState.INSTANCE.presentations(),
 			BlockModelOutlineState.INSTANCE.successKeys(),
 			BlockModelOutlineState.INSTANCE.externalSuccessKeys(),
 			partialTick);
