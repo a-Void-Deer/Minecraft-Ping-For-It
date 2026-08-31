@@ -45,6 +45,9 @@ neoForge {
 
 sourceSets.main.resources { srcDir "src/generated/resources" }
 
+def compiledMinecraft = tasks.named('createMinecraftArtifacts', net.neoforged.nfrtgradle.CreateMinecraftArtifacts).flatMap { it.compiledArtifact }
+def compiledMinecraftResources = tasks.named('createMinecraftArtifacts', net.neoforged.nfrtgradle.CreateMinecraftArtifacts).flatMap { it.resourcesArtifact }
+
 jar {
     archiveClassifier = "${project.name}-${minecraft_version}"
 }
@@ -55,4 +58,18 @@ jar {
 dependencies {
     compileOnly "dev.engine-room.flywheel:flywheel-neoforge-1.21.1:${flywheel_version}"
     compileOnly "com.simibubi.create:create-1.21.1:${create_version}"
+
+    // Keep NeoForge resolver tests on the same Minecraft/JUnit test classpath
+    // used by the common behavioral tests. Simulated itself remains absent.
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testImplementation files(compiledMinecraft)
+    testRuntimeOnly files(compiledMinecraftResources)
+    testRuntimeOnly "net.neoforged:neoforge:${neoforge_version}"
+    testRuntimeOnly "net.neoforged.fancymodloader:loader:4.0.21"
+    testImplementation "net.neoforged:mergetool:2.0.3:api"
+    testImplementation "net.neoforged:minecraft-dependencies:1.21.1"
+}
+
+test {
+    useJUnitPlatform()
 }

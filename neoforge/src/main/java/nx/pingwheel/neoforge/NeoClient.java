@@ -14,6 +14,7 @@ import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
+import nx.pingwheel.neoforge.integration.NeoForgeWorldAwareBlockModelOutlineAdapter;
 
 import static nx.pingwheel.common.Global.LOGGER;
 
@@ -22,17 +23,28 @@ public class NeoClient {
 		"nx.pingwheel.neoforge.integration.create.CreateEntityOutlineAdapter";
 	private static final String CREATE_FLYWHEEL_ADAPTER =
 		"nx.pingwheel.neoforge.integration.create.CreateFlywheelGeometryAdapter";
+	private static final String CREATE_WATER_WHEEL_RESOLVER =
+		"nx.pingwheel.neoforge.integration.create.CreateLargeWaterWheelPresentationResolver";
+	private static final String SIMULATED_DOCKING_CONNECTOR_RESOLVER =
+		"nx.pingwheel.neoforge.integration.simulated.SimulatedDockingConnectorPresentationResolver";
 	private static Boolean lastCreateDetected;
 	private static Boolean lastFlywheelDetected;
 	private static String lastEntityAdapterState;
 	private static String lastFlywheelAdapterState;
+	private static String lastWaterWheelResolverState;
+	private static String lastSimulatedResolverState;
 	private static boolean entityAdapterResolved;
 	private static boolean flywheelAdapterResolved;
 
 	public NeoClient(IEventBus modBus) {
 		CommonClient.INSTANCE.onInit();
+		NeoForgeWorldAwareBlockModelOutlineAdapter.register();
 		loadCreateAdapters();
-		IPlatformClientEventService.INSTANCE.registerJoinServerEvent(NeoClient::loadCreateAdapters);
+		loadSimulatedResolver();
+		IPlatformClientEventService.INSTANCE.registerJoinServerEvent(() -> {
+			loadCreateAdapters();
+			loadSimulatedResolver();
+		});
 		IPlatformClientEventService.INSTANCE.registerLeaveServerEvent(NeoClient::closeCreateAdapters);
 
 		NeoForge.EVENT_BUS.register(this);
@@ -70,8 +82,10 @@ public class NeoClient {
 
 		if (createDetected) {
 			registerOptionalAdapter(CREATE_ENTITY_ADAPTER, "create-entity", true);
+			registerOptionalResolver(CREATE_WATER_WHEEL_RESOLVER, "create-water-wheel-presentation");
 		} else {
 			logAdapterState("create-entity", "not-detected");
+			logResolverState("create-water-wheel-presentation", "not-detected");
 		}
 
 		if (createDetected && flywheelDetected) {
@@ -98,6 +112,29 @@ public class NeoClient {
 			LOGGER.warn(
 				"optional adapter registration failed; adapter=" + adapterName
 					+ "; class=" + className + "; sourceHandleState=failed",
+				failure);
+		}
+	}
+
+	private static void loadSimulatedResolver() {
+		if (ModList.get().isLoaded("simulated")) {
+			registerOptionalResolver(
+				SIMULATED_DOCKING_CONNECTOR_RESOLVER, "simulated-docking-connector-presentation");
+		}
+	}
+
+	private static void registerOptionalResolver(String className, String resolverName) {
+		try {
+			LOGGER.debug("optional resolver reflection attempt: resolver={} class={}", resolverName, className);
+			Class<?> resolver = Class.forName(className, true, NeoClient.class.getClassLoader());
+			resolver.getMethod("register").invoke(null);
+			String state = String.valueOf(resolver.getMethod("registrationState").invoke(null));
+			logResolverState(resolverName, "reflection-success; registrationState=" + state);
+		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
+			logResolverState(resolverName, "reflection-failure; registrationState=failed");
+			LOGGER.warn(
+				"optional resolver registration failed; resolver=" + resolverName
+					+ "; class=" + className + "; registrationState=failed",
 				failure);
 		}
 	}
@@ -156,6 +193,21 @@ public class NeoClient {
 			adapterName, state,
 			lastCreateDetected == null ? false : lastCreateDetected,
 			lastFlywheelDetected == null ? false : lastFlywheelDetected);
+	}
+
+	private static void logResolverState(String resolverName, String state) {
+		boolean simulatedResolver = "simulated-docking-connector-presentation".equals(resolverName);
+		String previous = simulatedResolver ? lastSimulatedResolverState : lastWaterWheelResolverState;
+		if (state.equals(previous)) {
+			return;
+		}
+		if (simulatedResolver) {
+			lastSimulatedResolverState = state;
+		} else {
+			lastWaterWheelResolverState = state;
+		}
+		LOGGER.info("optional presentation resolver state transition: resolver={} state={} createDetected={}",
+			resolverName, state, lastCreateDetected == null ? false : lastCreateDetected);
 	}
 
 	@SubscribeEvent

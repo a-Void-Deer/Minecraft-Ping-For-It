@@ -22,6 +22,7 @@ import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
 import nx.pingwheel.common.screen.SettingsScreen;
+import nx.pingwheel.forge.integration.ForgeWorldAwareBlockModelOutlineAdapter;
 
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -39,6 +40,7 @@ public class ForgeClient {
 
 	public ForgeClient() {
 		CommonClient.INSTANCE.onInit();
+		ForgeWorldAwareBlockModelOutlineAdapter.register();
 
 		MinecraftForge.EVENT_BUS.register(this);
 

@@ -1,5 +1,6 @@
 package nx.pingwheel.common.client.outline;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -22,16 +23,16 @@ import nx.pingwheel.common.integration.sable.client.SableClientProvider;
  * Main-thread block outline render pass.
  *
  * <p>Draws the current native {@link VoxelShape} wireframe of every ordinary
- * and provider-owned block whose model/geometry route did not emit geometry in the
- * prepared {@link BlockOutlineState} snapshots into the given line buffer.
+ * and provider-owned block whose model/geometry route did not emit geometry in
+	 * the prepared presentation and external snapshots into the given line buffer.
  * The pass is deliberately conservative and never mutates the level:
  * <ul>
  *   <li>specs whose dimension differs from the level's are skipped;</li>
  *   <li>unloaded blocks are skipped;</li>
- *   <li>the current block state's registry id is compared exactly to the
-	 *       spec's frozen id, so a replaced block type drops the outline;</li>
-	 *   <li>a same-type {@code BlockState} change re-reads the current shape
- *       every frame instead of caching anything;</li>
+ *   <li>the subject state's registry id is compared exactly to its expected
+	 *       id, so a replaced subject type drops the outline;</li>
+	 *   <li>a same-type {@code BlockState} change is represented by the current
+	 *       frame presentation instead of a cached source reconstruction;</li>
  *   <li>null or empty shapes are skipped; no full-cube fallback exists.</li>
  * </ul>
  *
@@ -53,6 +54,8 @@ public final class BlockOutlineRenderer {
 	 * snapshot, so a provider-owned geometry success suppresses only that
 	 * external key's VoxelShape fallback.
 	 *
+	 * @param presentations             the immutable ordinary presentation
+	 *                                 snapshot resolved for this frame
 	 * @param externalModelOutlineKeys the per-frame external keys whose model or
 	 *                                 entity geometry pass succeeded; fallbacks
 	 *                                 for those keys are skipped
@@ -62,7 +65,8 @@ public final class BlockOutlineRenderer {
 		Camera camera,
 		VertexConsumer lines,
 		BlockOutlineState state,
-		Set<TargetKey.BlockKey> modelOutlineKeys,
+		List<BlockPresentation> presentations,
+		Set<BlockPresentationSuccessKey> modelOutlineKeys,
 		Set<TargetKey.ExternalBlockKey> externalModelOutlineKeys,
 		float partialTick
 	) {
@@ -70,6 +74,7 @@ public final class BlockOutlineRenderer {
 		Objects.requireNonNull(camera, "camera");
 		Objects.requireNonNull(lines, "lines");
 		Objects.requireNonNull(state, "state");
+		Objects.requireNonNull(presentations, "presentations");
 		Objects.requireNonNull(modelOutlineKeys, "modelOutlineKeys");
 		Objects.requireNonNull(externalModelOutlineKeys, "externalModelOutlineKeys");
 
@@ -80,49 +85,47 @@ public final class BlockOutlineRenderer {
 		Vec3 cameraPosition = camera.getPosition();
 		PoseStack poseStack = new PoseStack();
 
-		for (Map.Entry<TargetKey.BlockKey, BlockOutlineSpec> entry : state.snapshot().entrySet()) {
-			TargetKey.BlockKey blockKey = entry.getKey();
-			BlockOutlineSpec spec = entry.getValue();
+		for (BlockPresentation presentation : presentations) {
+			BlockOutlineSpec spec = presentation.sourceSpec();
+			TargetKey.BlockKey blockKey = spec.blockKey();
 
 			if (!blockKey.dimensionId().equals(dimensionId)) {
 				continue;
 			}
 
-			BlockPos pos = new BlockPos(blockKey.x(), blockKey.y(), blockKey.z());
+			for (BlockRenderSubject subject : presentation.renderSubjects()) {
+				BlockPos pos = subject.blockPos();
 
-			if (!level.hasChunkAt(pos)) {
-				continue;
+				if (!BlockPresentationSubjectValidation.isLoadedAndCurrent(level, subject)) {
+					continue;
+				}
+
+				BlockState blockState = subject.blockState();
+
+				// Native/model success suppresses only VoxelShape generation. The
+				// optional Flywheel source writes its vanilla outline mask before the
+				// entity-outline batch ends, so it needs no late line state here.
+				if (modelOutlineKeys.contains(subject.successKey(spec))) {
+					continue;
+				}
+
+				VoxelShape shape = blockState.getShape(level, pos, collisionContext);
+
+				if (shape == null || shape.isEmpty()) {
+					continue;
+				}
+
+				poseStack.pushPose();
+				poseStack.translate(
+					pos.getX() - cameraPosition.x,
+					pos.getY() - cameraPosition.y,
+					pos.getZ() - cameraPosition.z);
+
+				VoxelShapeRenderUtil.renderEdges(
+					poseStack, lines, shape, 0.0, 0.0, 0.0, spec.argbColor());
+
+				poseStack.popPose();
 			}
-
-			BlockState blockState = level.getBlockState(pos);
-
-			if (!blockKey.blockRegistryId()
-				.equals(BuiltInRegistries.BLOCK.getKey(blockState.getBlock()).toString())) {
-				continue;
-			}
-
-			// Native/model success suppresses only VoxelShape generation. The
-			// optional Flywheel source writes its vanilla outline mask before the
-			// entity-outline batch ends, so it needs no late line state here.
-			if (modelOutlineKeys.contains(blockKey)) {
-				continue;
-			}
-
-			VoxelShape shape = blockState.getShape(level, pos, collisionContext);
-
-			if (shape == null || shape.isEmpty()) {
-				continue;
-			}
-
-			poseStack.pushPose();
-			poseStack.translate(
-				pos.getX() - cameraPosition.x,
-				pos.getY() - cameraPosition.y,
-				pos.getZ() - cameraPosition.z);
-
-			VoxelShapeRenderUtil.renderEdges(poseStack, lines, shape, 0.0, 0.0, 0.0, spec.argbColor());
-
-			poseStack.popPose();
 		}
 
 		for (Map.Entry<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> entry
