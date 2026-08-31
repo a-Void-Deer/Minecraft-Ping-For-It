@@ -79,18 +79,19 @@ class BlockPresentationResolverTest {
 		assertTrue(presentation.renderSubjects().isEmpty());
 	}
 
-	@ParameterizedTest(name = "door {0}, open={1}, hinge={2}, source={3}")
+	@ParameterizedTest(name = "door {0}, open={1}, powered={2}, hinge={3}, source={4}")
 	@MethodSource("doorCases")
 	void resolvesDoorLowerThenUpperForAllStates(
 		Direction facing,
 		boolean open,
+		boolean powered,
 		DoorHingeSide hinge,
 		DoubleBlockHalf sourceHalf
 	) {
 		BlockPos lowerPos = new BlockPos(10, 70, 11);
 		BlockPos upperPos = lowerPos.above();
-		BlockState lower = doorState(DoubleBlockHalf.LOWER, facing, hinge, open, false);
-		BlockState upper = doorState(DoubleBlockHalf.UPPER, facing, hinge, open, false);
+		BlockState lower = doorState(DoubleBlockHalf.LOWER, facing, hinge, open, powered);
+		BlockState upper = doorState(DoubleBlockHalf.UPPER, facing, hinge, open, powered);
 		BlockPos sourcePos = sourceHalf == DoubleBlockHalf.LOWER ? lowerPos : upperPos;
 		BlockOutlineSpec source = sourceSpec(sourcePos, sourceHalf == DoubleBlockHalf.LOWER ? lower : upper, "block");
 
@@ -111,6 +112,27 @@ class BlockPresentationResolverTest {
 		assertEquals(BlockPresentationRelation.COMPOSITE, lowerSubject.relation());
 		assertEquals(BlockPresentationRelation.COMPOSITE, upperSubject.relation());
 		assertNotEquals(lowerSubject.blockState(), upperSubject.blockState());
+	}
+
+	@ParameterizedTest(name = "door invalid neighbor {0}")
+	@MethodSource("invalidDoorNeighborCases")
+	void invalidDoorNeighborFallsBackToDirect(DoorNeighborMismatch mismatch) {
+		BlockPos lowerPos = new BlockPos(11, 70, 12);
+		BlockPos upperPos = lowerPos.above();
+		BlockState lower = doorState(
+			DoubleBlockHalf.LOWER, Direction.NORTH, DoorHingeSide.LEFT, false, false);
+		BlockState invalidUpper = invalidDoorUpper(mismatch);
+		BlockOutlineSpec source = sourceSpec(lowerPos, lower, "block");
+
+		BlockPresentation presentation = new BlockPresentationResolverRegistry()
+			.resolve(world(Map.of(lowerPos, lower, upperPos, invalidUpper)), source);
+
+		assertEquals(1, presentation.renderSubjects().size());
+		BlockRenderSubject subject = presentation.renderSubjects().get(0);
+		assertEquals("direct", subject.subjectId());
+		assertEquals(lowerPos, subject.blockPos());
+		assertSame(lower, subject.blockState());
+		assertEquals(BlockPresentationRelation.DIRECT, subject.relation());
 	}
 
 	@Test
@@ -134,14 +156,16 @@ class BlockPresentationResolverTest {
 		assertEquals(BlockPresentationRelation.DIRECT, subject.relation());
 	}
 
-	@ParameterizedTest(name = "bed {0}")
+	@ParameterizedTest(name = "bed {0}, source={1}")
 	@MethodSource("bedFacings")
-	void resolvesBedFootThenHeadForAllFacings(Direction facing) {
+	void resolvesBedFootThenHeadForAllFacings(Direction facing, BedPart sourcePart) {
 		BlockPos footPos = new BlockPos(20, 70, 21);
 		BlockPos headPos = footPos.relative(facing);
 		BlockState foot = bedState(BedPart.FOOT, facing, false);
 		BlockState head = bedState(BedPart.HEAD, facing, true);
-		BlockOutlineSpec source = sourceSpec(footPos, foot, "block");
+		BlockPos sourcePos = sourcePart == BedPart.FOOT ? footPos : headPos;
+		BlockState sourceState = sourcePart == BedPart.FOOT ? foot : head;
+		BlockOutlineSpec source = sourceSpec(sourcePos, sourceState, "block");
 
 		BlockPresentation presentation = new BlockPresentationResolverRegistry()
 			.resolve(world(Map.of(footPos, foot, headPos, head)), source);
@@ -159,6 +183,26 @@ class BlockPresentationResolverTest {
 		assertEquals(BlockPresentationRelation.COMPOSITE, headSubject.relation());
 		assertFalse(footSubject.blockState().getValue(BedBlock.OCCUPIED));
 		assertTrue(headSubject.blockState().getValue(BedBlock.OCCUPIED));
+	}
+
+	@ParameterizedTest(name = "bed invalid neighbor {0}")
+	@MethodSource("invalidBedNeighborCases")
+	void invalidBedNeighborFallsBackToDirect(BedNeighborMismatch mismatch) {
+		BlockPos footPos = new BlockPos(23, 70, 24);
+		BlockPos headPos = footPos.relative(Direction.EAST);
+		BlockState foot = bedState(BedPart.FOOT, Direction.EAST, false);
+		BlockState invalidHead = invalidBedHead(mismatch);
+		BlockOutlineSpec source = sourceSpec(footPos, foot, "block");
+
+		BlockPresentation presentation = new BlockPresentationResolverRegistry()
+			.resolve(world(Map.of(footPos, foot, headPos, invalidHead)), source);
+
+		assertEquals(1, presentation.renderSubjects().size());
+		BlockRenderSubject subject = presentation.renderSubjects().get(0);
+		assertEquals("direct", subject.subjectId());
+		assertEquals(footPos, subject.blockPos());
+		assertSame(foot, subject.blockState());
+		assertEquals(BlockPresentationRelation.DIRECT, subject.relation());
 	}
 
 	@Test
@@ -216,6 +260,56 @@ class BlockPresentationResolverTest {
 	}
 
 	@Test
+	void unhandledResolverForwardsToLaterHandledResolver() {
+		BlockPresentationResolverRegistry registry = new BlockPresentationResolverRegistry(false);
+		BlockPos pos = new BlockPos(31, 70, 32);
+		BlockState state = Blocks.STONE.defaultBlockState();
+		int[] forwarded = {0};
+		registry.register(resolver("test:unhandled", context -> BlockPresentationResolution.UNHANDLED));
+		registry.register(resolver("test:later", context -> {
+			forwarded[0]++;
+			return BlockPresentationResolution.handled(subject("later", pos, state));
+		}));
+
+		BlockPresentation presentation = registry.resolve(world(Map.of(pos, state)), sourceSpec(pos, state, "block"));
+
+		assertEquals(1, forwarded[0]);
+		assertEquals("later", presentation.renderSubjects().get(0).subjectId());
+	}
+
+	@Test
+	void recoverableExceptionForwardsToLaterHandledResolver() {
+		BlockPresentationResolverRegistry registry = new BlockPresentationResolverRegistry(false);
+		BlockPos pos = new BlockPos(33, 70, 34);
+		BlockState state = Blocks.STONE.defaultBlockState();
+		registry.register(resolver("test:exception", context -> {
+			throw new IllegalStateException("recoverable");
+		}));
+		registry.register(resolver("test:later-exception", context ->
+			BlockPresentationResolution.handled(subject("after-exception", pos, state))));
+
+		BlockPresentation presentation = registry.resolve(world(Map.of(pos, state)), sourceSpec(pos, state, "block"));
+
+		assertEquals("after-exception", presentation.renderSubjects().get(0).subjectId());
+	}
+
+	@Test
+	void linkageErrorForwardsToLaterHandledResolver() {
+		BlockPresentationResolverRegistry registry = new BlockPresentationResolverRegistry(false);
+		BlockPos pos = new BlockPos(35, 70, 36);
+		BlockState state = Blocks.STONE.defaultBlockState();
+		registry.register(resolver("test:linkage", context -> {
+			throw new LinkageError("optional linkage failure");
+		}));
+		registry.register(resolver("test:later-linkage", context ->
+			BlockPresentationResolution.handled(subject("after-linkage", pos, state))));
+
+		BlockPresentation presentation = registry.resolve(world(Map.of(pos, state)), sourceSpec(pos, state, "block"));
+
+		assertEquals("after-linkage", presentation.renderSubjects().get(0).subjectId());
+	}
+
+	@Test
 	void handledEmptyDoesNotFallBackToDirect() {
 		BlockPresentationResolverRegistry registry = new BlockPresentationResolverRegistry(false);
 		BlockPos pos = new BlockPos(32, 70, 33);
@@ -244,6 +338,28 @@ class BlockPresentationResolverTest {
 		assertTrue(registry.snapshot().isEmpty());
 		assertEquals("direct", presentation.renderSubjects().get(0).subjectId());
 		assertTrue(handle.accepted());
+	}
+
+	@Test
+	void reRegistrationAfterIdempotentCloseIsAppended() {
+		BlockPresentationResolverRegistry registry = new BlockPresentationResolverRegistry(false);
+		BlockPos pos = new BlockPos(37, 70, 38);
+		BlockState state = Blocks.STONE.defaultBlockState();
+		BlockPresentationResolver first = resolver("test:reorder", context ->
+			BlockPresentationResolution.handled(subject("first", pos, state)));
+		BlockPresentationResolver second = resolver("test:stable", context ->
+			BlockPresentationResolution.handled(subject("second", pos, state)));
+		BlockPresentationResolver replacement = resolver("test:reorder", context ->
+			BlockPresentationResolution.handled(subject("replacement", pos, state)));
+		BlockPresentationResolverRegistry.Registration firstHandle = registry.register(first);
+		registry.register(second);
+
+		firstHandle.close();
+		firstHandle.close();
+		BlockPresentationResolverRegistry.Registration replacementHandle = registry.register(replacement);
+
+		assertTrue(replacementHandle.accepted());
+		assertEquals(List.of(second, replacement), registry.snapshot());
 	}
 
 	@Test
@@ -302,14 +418,66 @@ class BlockPresentationResolverTest {
 	private static Stream<Arguments> doorCases() {
 		return Stream.of(Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST)
 			.flatMap(facing -> Stream.of(false, true)
-				.flatMap(open -> Stream.of(DoorHingeSide.LEFT, DoorHingeSide.RIGHT)
-					.flatMap(hinge -> Stream.of(DoubleBlockHalf.LOWER, DoubleBlockHalf.UPPER)
-						.map(sourceHalf -> Arguments.of(facing, open, hinge, sourceHalf)))));
+				.flatMap(open -> Stream.of(false, true)
+					.flatMap(powered -> Stream.of(DoorHingeSide.LEFT, DoorHingeSide.RIGHT)
+						.flatMap(hinge -> Stream.of(DoubleBlockHalf.LOWER, DoubleBlockHalf.UPPER)
+							.map(sourceHalf -> Arguments.of(facing, open, powered, hinge, sourceHalf))))));
+	}
+
+	private static Stream<Arguments> invalidDoorNeighborCases() {
+		return Stream.of(DoorNeighborMismatch.values()).map(Arguments::of);
 	}
 
 	private static Stream<Arguments> bedFacings() {
 		return Stream.of(Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST)
-			.map(Arguments::of);
+			.flatMap(facing -> Stream.of(BedPart.FOOT, BedPart.HEAD)
+				.map(sourcePart -> Arguments.of(facing, sourcePart)));
+	}
+
+	private static Stream<Arguments> invalidBedNeighborCases() {
+		return Stream.of(BedNeighborMismatch.values()).map(Arguments::of);
+	}
+
+	private enum DoorNeighborMismatch {
+		HALF,
+		FACING,
+		HINGE,
+		OPEN,
+		POWERED,
+		DIFFERENT_BLOCK
+	}
+
+	private enum BedNeighborMismatch {
+		PART,
+		FACING,
+		DIFFERENT_BLOCK
+	}
+
+	private static BlockState invalidDoorUpper(DoorNeighborMismatch mismatch) {
+		return switch (mismatch) {
+			case HALF -> doorState(
+				DoubleBlockHalf.LOWER, Direction.NORTH, DoorHingeSide.LEFT, false, false);
+			case FACING -> doorState(
+				DoubleBlockHalf.UPPER, Direction.SOUTH, DoorHingeSide.LEFT, false, false);
+			case HINGE -> doorState(
+				DoubleBlockHalf.UPPER, Direction.NORTH, DoorHingeSide.RIGHT, false, false);
+			case OPEN -> doorState(
+				DoubleBlockHalf.UPPER, Direction.NORTH, DoorHingeSide.LEFT, true, false);
+			case POWERED -> doorState(
+				DoubleBlockHalf.UPPER, Direction.NORTH, DoorHingeSide.LEFT, false, true);
+			case DIFFERENT_BLOCK -> withDoorProperties(
+				Blocks.BIRCH_DOOR.defaultBlockState(),
+				DoubleBlockHalf.UPPER, Direction.NORTH, DoorHingeSide.LEFT, false, false);
+		};
+	}
+
+	private static BlockState invalidBedHead(BedNeighborMismatch mismatch) {
+		return switch (mismatch) {
+			case PART -> bedState(BedPart.FOOT, Direction.EAST, false);
+			case FACING -> bedState(BedPart.HEAD, Direction.WEST, false);
+			case DIFFERENT_BLOCK -> withBedProperties(
+				Blocks.WHITE_BED.defaultBlockState(), BedPart.HEAD, Direction.EAST, false);
+		};
 	}
 
 	private static BlockState doorState(
@@ -319,7 +487,19 @@ class BlockPresentationResolverTest {
 		boolean open,
 		boolean powered
 	) {
-		return Blocks.OAK_DOOR.defaultBlockState()
+		return withDoorProperties(
+			Blocks.OAK_DOOR.defaultBlockState(), half, facing, hinge, open, powered);
+	}
+
+	private static BlockState withDoorProperties(
+		BlockState state,
+		DoubleBlockHalf half,
+		Direction facing,
+		DoorHingeSide hinge,
+		boolean open,
+		boolean powered
+	) {
+		return state
 			.setValue(DoorBlock.HALF, half)
 			.setValue(DoorBlock.FACING, facing)
 			.setValue(DoorBlock.HINGE, hinge)
@@ -328,7 +508,16 @@ class BlockPresentationResolverTest {
 	}
 
 	private static BlockState bedState(BedPart part, Direction facing, boolean occupied) {
-		return Blocks.RED_BED.defaultBlockState()
+		return withBedProperties(Blocks.RED_BED.defaultBlockState(), part, facing, occupied);
+	}
+
+	private static BlockState withBedProperties(
+		BlockState state,
+		BedPart part,
+		Direction facing,
+		boolean occupied
+	) {
+		return state
 			.setValue(BedBlock.PART, part)
 			.setValue(BedBlock.FACING, facing)
 			.setValue(BedBlock.OCCUPIED, occupied);
