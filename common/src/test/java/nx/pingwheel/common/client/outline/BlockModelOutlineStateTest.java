@@ -2,6 +2,7 @@ package nx.pingwheel.common.client.outline;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -85,6 +86,46 @@ class BlockModelOutlineStateTest {
 		assertEquals(List.of(presentation), state.presentations());
 		assertThrows(UnsupportedOperationException.class,
 			() -> state.presentations().add(presentation));
+	}
+
+	@Test
+	void publishedSuccessSnapshotsStayStableAcrossAdditionsAndFrameReset() {
+		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
+		BlockPresentation first = directPresentation(1, 2, 3, "first");
+		BlockPresentation second = directPresentation(4, 5, 6, "second");
+		BlockPresentationSuccessKey firstKey =
+			first.renderSubjects().get(0).successKey(first.sourceSpec());
+		BlockPresentationSuccessKey secondKey =
+			second.renderSubjects().get(0).successKey(second.sourceSpec());
+		TargetKey.ExternalBlockKey firstExternal = new TargetKey.ExternalBlockKey(
+			DIMENSION, "sable", "first", "minecraft:stone");
+		TargetKey.ExternalBlockKey secondExternal = new TargetKey.ExternalBlockKey(
+			DIMENSION, "sable", "second", "minecraft:stone");
+
+		state.setPresentations(List.of(first, second));
+		state.addSuccess(firstKey);
+		Set<BlockPresentationSuccessKey> publishedSuccesses = state.successKeys();
+		state.addExternalSuccess(firstExternal);
+		Set<TargetKey.ExternalBlockKey> publishedExternalSuccesses = state.externalSuccessKeys();
+
+		assertFalse(state.allPresentationsCovered());
+		state.addSuccess(secondKey);
+		state.addExternalSuccess(secondExternal);
+
+		assertEquals(Set.of(firstKey), publishedSuccesses);
+		assertEquals(Set.of(firstExternal), publishedExternalSuccesses);
+		assertEquals(Set.of(firstKey, secondKey), state.successKeys());
+		assertEquals(Set.of(firstExternal, secondExternal), state.externalSuccessKeys());
+		assertTrue(state.allPresentationsCovered());
+
+		state.beginFrame();
+
+		assertEquals(Set.of(firstKey), publishedSuccesses);
+		assertEquals(Set.of(firstExternal), publishedExternalSuccesses);
+		assertTrue(state.successKeys().isEmpty());
+		assertTrue(state.externalSuccessKeys().isEmpty());
+		assertTrue(state.presentations().isEmpty());
+		assertTrue(state.allPresentationsCovered());
 	}
 
 	@Test

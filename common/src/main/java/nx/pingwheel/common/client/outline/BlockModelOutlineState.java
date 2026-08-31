@@ -30,8 +30,8 @@ import nx.pingwheel.common.marker.TargetKey;
  * <p>{@link #beginFrame()} must be called at the start of every
  * {@code renderLevel} pass (before the model pass runs) and {@link #clear()}
  * when leaving a server, so successes never leak across frames or worlds. The
- * snapshot is immutable and replaced per mutation; it is only ever read by the
- * main-thread render passes.
+ * render-thread accumulators are published as immutable snapshots only when
+ * queried, and are only ever read by the main-thread render passes.
  */
 public final class BlockModelOutlineState {
 	/*
@@ -43,8 +43,10 @@ public final class BlockModelOutlineState {
 
 	public static final BlockModelOutlineState INSTANCE = new BlockModelOutlineState();
 
-	private Set<BlockPresentationSuccessKey> successKeys = Set.of();
-	private Set<TargetKey.ExternalBlockKey> externalSuccessKeys = Set.of();
+	private final Set<BlockPresentationSuccessKey> successAccumulator = new LinkedHashSet<>();
+	private final Set<TargetKey.ExternalBlockKey> externalSuccessAccumulator = new LinkedHashSet<>();
+	private Set<BlockPresentationSuccessKey> successSnapshot = Set.of();
+	private Set<TargetKey.ExternalBlockKey> externalSuccessSnapshot = Set.of();
 	private List<BlockPresentation> presentations = List.of();
 	private boolean presentationsPrepared;
 	private long frameId;
@@ -58,8 +60,10 @@ public final class BlockModelOutlineState {
 	 */
 	public void beginFrame() {
 		frameId++;
-		successKeys = Set.of();
-		externalSuccessKeys = Set.of();
+		successAccumulator.clear();
+		externalSuccessAccumulator.clear();
+		successSnapshot = Set.of();
+		externalSuccessSnapshot = Set.of();
 		presentations = List.of();
 		presentationsPrepared = false;
 	}
@@ -80,9 +84,9 @@ public final class BlockModelOutlineState {
 	public void addSuccess(BlockPresentationSuccessKey successKey) {
 		Objects.requireNonNull(successKey, "successKey");
 
-		Set<BlockPresentationSuccessKey> next = new LinkedHashSet<>(successKeys);
-		next.add(successKey);
-		successKeys = Collections.unmodifiableSet(next);
+		if (successAccumulator.add(successKey)) {
+			successSnapshot = null;
+		}
 	}
 
 	/**
@@ -92,9 +96,9 @@ public final class BlockModelOutlineState {
 	public void addExternalSuccess(TargetKey.ExternalBlockKey blockKey) {
 		Objects.requireNonNull(blockKey, "blockKey");
 
-		Set<TargetKey.ExternalBlockKey> next = new LinkedHashSet<>(externalSuccessKeys);
-		next.add(blockKey);
-		externalSuccessKeys = Collections.unmodifiableSet(next);
+		if (externalSuccessAccumulator.add(blockKey)) {
+			externalSuccessSnapshot = null;
+		}
 	}
 
 	/**
@@ -102,7 +106,7 @@ public final class BlockModelOutlineState {
 	 * Drives the vanilla entity-outline post-process handoff.
 	 */
 	public boolean emitted() {
-		return !successKeys.isEmpty() || !externalSuccessKeys.isEmpty();
+		return !successAccumulator.isEmpty() || !externalSuccessAccumulator.isEmpty();
 	}
 
 	/**
@@ -110,7 +114,10 @@ public final class BlockModelOutlineState {
 	 * first-success order. Main-thread render passes only.
 	 */
 	public Set<BlockPresentationSuccessKey> successKeys() {
-		return successKeys;
+		if (successSnapshot == null) {
+			successSnapshot = immutableSnapshot(successAccumulator);
+		}
+		return successSnapshot;
 	}
 
 	/**
@@ -166,9 +173,10 @@ public final class BlockModelOutlineState {
 	 * intentionally vacuously covered.
 	 */
 	public boolean allPresentationsCovered() {
+		Set<BlockPresentationSuccessKey> succeeded = successKeys();
 		for (BlockPresentation presentation : presentations) {
 			for (BlockRenderSubject subject : presentation.renderSubjects()) {
-				if (!successKeys.contains(subject.successKey(presentation.sourceSpec()))) {
+				if (!succeeded.contains(subject.successKey(presentation.sourceSpec()))) {
 					return false;
 				}
 			}
@@ -183,7 +191,7 @@ public final class BlockModelOutlineState {
 	 */
 	public boolean allCoveredBy(BlockOutlineState outlineState) {
 		Objects.requireNonNull(outlineState, "outlineState");
-		return outlineState.allCoveredBy(presentations, successKeys, externalSuccessKeys);
+		return outlineState.allCoveredBy(presentations, successKeys(), externalSuccessKeys());
 	}
 
 	/**
@@ -192,8 +200,10 @@ public final class BlockModelOutlineState {
 	 * non-empty subjects must then reach the late native-shape pass.
 	 */
 	public void clearSuccesses() {
-		successKeys = Set.of();
-		externalSuccessKeys = Set.of();
+		successAccumulator.clear();
+		externalSuccessAccumulator.clear();
+		successSnapshot = Set.of();
+		externalSuccessSnapshot = Set.of();
 	}
 
 	/**
@@ -201,7 +211,14 @@ public final class BlockModelOutlineState {
 	 * successful model glow this frame.
 	 */
 	public Set<TargetKey.ExternalBlockKey> externalSuccessKeys() {
-		return externalSuccessKeys;
+		if (externalSuccessSnapshot == null) {
+			externalSuccessSnapshot = immutableSnapshot(externalSuccessAccumulator);
+		}
+		return externalSuccessSnapshot;
+	}
+
+	private static <T> Set<T> immutableSnapshot(Set<T> source) {
+		return Collections.unmodifiableSet(new LinkedHashSet<>(source));
 	}
 
 	/**

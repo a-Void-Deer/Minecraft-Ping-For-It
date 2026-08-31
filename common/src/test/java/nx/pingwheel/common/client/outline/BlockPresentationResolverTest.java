@@ -135,6 +135,27 @@ class BlockPresentationResolverTest {
 		assertEquals(BlockPresentationRelation.DIRECT, subject.relation());
 	}
 
+	@ParameterizedTest(name = "upper-source door invalid neighbor {0}")
+	@MethodSource("invalidDoorNeighborCases")
+	void invalidDoorNeighborFallsBackToDirectWhenSourceIsUpper(DoorNeighborMismatch mismatch) {
+		BlockPos lowerPos = new BlockPos(13, 70, 14);
+		BlockPos upperPos = lowerPos.above();
+		BlockState invalidLower = invalidDoorLower(mismatch);
+		BlockState upper = doorState(
+			DoubleBlockHalf.UPPER, Direction.NORTH, DoorHingeSide.LEFT, false, false);
+		BlockOutlineSpec source = sourceSpec(upperPos, upper, "block");
+
+		BlockPresentation presentation = new BlockPresentationResolverRegistry()
+			.resolve(world(Map.of(lowerPos, invalidLower, upperPos, upper)), source);
+
+		assertEquals(1, presentation.renderSubjects().size());
+		BlockRenderSubject subject = presentation.renderSubjects().get(0);
+		assertEquals("direct", subject.subjectId());
+		assertEquals(upperPos, subject.blockPos());
+		assertSame(upper, subject.blockState());
+		assertEquals(BlockPresentationRelation.DIRECT, subject.relation());
+	}
+
 	@Test
 	void damagedDoorFallsBackToDirectSourcePresentation() {
 		BlockPos lowerPos = new BlockPos(12, 70, 13);
@@ -202,6 +223,26 @@ class BlockPresentationResolverTest {
 		assertEquals("direct", subject.subjectId());
 		assertEquals(footPos, subject.blockPos());
 		assertSame(foot, subject.blockState());
+		assertEquals(BlockPresentationRelation.DIRECT, subject.relation());
+	}
+
+	@ParameterizedTest(name = "head-source bed invalid neighbor {0}")
+	@MethodSource("invalidBedNeighborCases")
+	void invalidBedNeighborFallsBackToDirectWhenSourceIsHead(BedNeighborMismatch mismatch) {
+		BlockPos footPos = new BlockPos(25, 70, 26);
+		BlockPos headPos = footPos.relative(Direction.EAST);
+		BlockState foot = invalidBedFoot(mismatch);
+		BlockState head = bedState(BedPart.HEAD, Direction.EAST, false);
+		BlockOutlineSpec source = sourceSpec(headPos, head, "block");
+
+		BlockPresentation presentation = new BlockPresentationResolverRegistry()
+			.resolve(world(Map.of(footPos, foot, headPos, head)), source);
+
+		assertEquals(1, presentation.renderSubjects().size());
+		BlockRenderSubject subject = presentation.renderSubjects().get(0);
+		assertEquals("direct", subject.subjectId());
+		assertEquals(headPos, subject.blockPos());
+		assertSame(head, subject.blockState());
 		assertEquals(BlockPresentationRelation.DIRECT, subject.relation());
 	}
 
@@ -471,12 +512,39 @@ class BlockPresentationResolverTest {
 		};
 	}
 
+	private static BlockState invalidDoorLower(DoorNeighborMismatch mismatch) {
+		return switch (mismatch) {
+			case HALF -> doorState(
+				DoubleBlockHalf.UPPER, Direction.NORTH, DoorHingeSide.LEFT, false, false);
+			case FACING -> doorState(
+				DoubleBlockHalf.LOWER, Direction.SOUTH, DoorHingeSide.LEFT, false, false);
+			case HINGE -> doorState(
+				DoubleBlockHalf.LOWER, Direction.NORTH, DoorHingeSide.RIGHT, false, false);
+			case OPEN -> doorState(
+				DoubleBlockHalf.LOWER, Direction.NORTH, DoorHingeSide.LEFT, true, false);
+			case POWERED -> doorState(
+				DoubleBlockHalf.LOWER, Direction.NORTH, DoorHingeSide.LEFT, false, true);
+			case DIFFERENT_BLOCK -> withDoorProperties(
+				Blocks.BIRCH_DOOR.defaultBlockState(),
+				DoubleBlockHalf.LOWER, Direction.NORTH, DoorHingeSide.LEFT, false, false);
+		};
+	}
+
 	private static BlockState invalidBedHead(BedNeighborMismatch mismatch) {
 		return switch (mismatch) {
 			case PART -> bedState(BedPart.FOOT, Direction.EAST, false);
 			case FACING -> bedState(BedPart.HEAD, Direction.WEST, false);
 			case DIFFERENT_BLOCK -> withBedProperties(
 				Blocks.WHITE_BED.defaultBlockState(), BedPart.HEAD, Direction.EAST, false);
+		};
+	}
+
+	private static BlockState invalidBedFoot(BedNeighborMismatch mismatch) {
+		return switch (mismatch) {
+			case PART -> bedState(BedPart.HEAD, Direction.EAST, false);
+			case FACING -> bedState(BedPart.FOOT, Direction.WEST, false);
+			case DIFFERENT_BLOCK -> withBedProperties(
+				Blocks.WHITE_BED.defaultBlockState(), BedPart.FOOT, Direction.EAST, false);
 		};
 	}
 
