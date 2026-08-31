@@ -1,14 +1,23 @@
 package nx.pingwheel.common.client.outline;
 
+import java.lang.reflect.Proxy;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BedPart;
 
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.TargetKey;
@@ -135,5 +144,109 @@ class BlockModelOutlineRouteTest {
 		assertEquals(ENTITY_BLOCK, BlockModelOutlineRoute.route(subject.renderTargetTypeId(), true));
 		assertEquals(subjectPos, presentation.renderSubjects().get(0).renderPos());
 		assertEquals("block", presentation.sourceSpec().targetTypeId());
+	}
+
+	@Test
+	void resolvedBedSubjectTypesDriveEntityAndOrdinaryRoutes() {
+		BlockPos footPos = new BlockPos(15, 64, 16);
+		BlockPos headPos = footPos.relative(Direction.EAST);
+		BlockState foot = bedState(BedPart.FOOT, Direction.EAST);
+		BlockState head = bedState(BedPart.HEAD, Direction.EAST);
+		BlockGetter world = world(Map.of(footPos, foot, headPos, head));
+
+		BlockPresentation entityBlockPresentation = new BlockPresentationResolverRegistry()
+			.resolve(world, sourceSpec(footPos, foot, "entity_block"));
+		assertEquals(2, entityBlockPresentation.renderSubjects().size());
+		for (BlockRenderSubject subject : entityBlockPresentation.renderSubjects()) {
+			assertEquals(ENTITY_BLOCK,
+				BlockModelOutlineRoute.route(subject.renderTargetTypeId(), true));
+			assertEquals(VOXEL,
+				BlockModelOutlineRoute.route(subject.renderTargetTypeId(), false));
+		}
+
+		BlockPresentation ordinaryPresentation = new BlockPresentationResolverRegistry()
+			.resolve(world, sourceSpec(footPos, foot, "block"));
+		assertEquals(2, ordinaryPresentation.renderSubjects().size());
+		for (BlockRenderSubject subject : ordinaryPresentation.renderSubjects()) {
+			assertEquals(BLOCK_DISPLAY,
+				BlockModelOutlineRoute.route(subject.renderTargetTypeId(), true));
+		}
+	}
+
+	private static BlockState bedState(BedPart part, Direction facing) {
+		return Blocks.RED_BED.defaultBlockState()
+			.setValue(BedBlock.PART, part)
+			.setValue(BedBlock.FACING, facing)
+			.setValue(BedBlock.OCCUPIED, false);
+	}
+
+	private static BlockOutlineSpec sourceSpec(BlockPos pos, BlockState state, String targetTypeId) {
+		return new BlockOutlineSpec(
+			new MarkerId(2L),
+			new TargetKey.BlockKey(
+				"minecraft:overworld", pos.getX(), pos.getY(), pos.getZ(), registryId(state)),
+			targetTypeId,
+			"attention",
+			0xFF123456);
+	}
+
+	private static String registryId(BlockState state) {
+		return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+	}
+
+	private static BlockGetter world(Map<BlockPos, BlockState> states) {
+		Map<BlockPos, BlockState> copy = new HashMap<>(states);
+		return (BlockGetter) Proxy.newProxyInstance(
+			BlockGetter.class.getClassLoader(),
+			new Class<?>[] {BlockGetter.class},
+			(proxy, method, arguments) -> {
+				switch (method.getName()) {
+					case "getBlockState":
+						return copy.getOrDefault((BlockPos) arguments[0], Blocks.AIR.defaultBlockState());
+					case "getBlockEntity":
+						return null;
+					case "hashCode":
+						return System.identityHashCode(proxy);
+					case "equals":
+						return proxy == arguments[0];
+					case "toString":
+						return "test-world";
+					default:
+						return defaultValue(method.getReturnType());
+				}
+			});
+	}
+
+	private static Object defaultValue(Class<?> type) {
+		if (!type.isPrimitive()) {
+			return null;
+		}
+
+		if (type == boolean.class) {
+			return false;
+		}
+		if (type == byte.class) {
+			return (byte) 0;
+		}
+		if (type == short.class) {
+			return (short) 0;
+		}
+		if (type == int.class) {
+			return 0;
+		}
+		if (type == long.class) {
+			return 0L;
+		}
+		if (type == float.class) {
+			return 0.0F;
+		}
+		if (type == double.class) {
+			return 0.0D;
+		}
+		if (type == char.class) {
+			return '\0';
+		}
+
+		return null;
 	}
 }

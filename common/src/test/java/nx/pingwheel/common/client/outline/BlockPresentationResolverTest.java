@@ -200,10 +200,28 @@ class BlockPresentationResolverTest {
 		assertEquals(headPos, headSubject.blockPos());
 		assertSame(foot, footSubject.blockState());
 		assertSame(head, headSubject.blockState());
+		assertEquals("block", footSubject.renderTargetTypeId());
+		assertEquals("block", headSubject.renderTargetTypeId());
 		assertEquals(BlockPresentationRelation.COMPOSITE, footSubject.relation());
 		assertEquals(BlockPresentationRelation.COMPOSITE, headSubject.relation());
 		assertFalse(footSubject.blockState().getValue(BedBlock.OCCUPIED));
 		assertTrue(headSubject.blockState().getValue(BedBlock.OCCUPIED));
+	}
+
+	@Test
+	void resolvesBedSubjectsWithEntityBlockSourceType() {
+		BlockPos footPos = new BlockPos(21, 70, 22);
+		BlockPos headPos = footPos.relative(Direction.NORTH);
+		BlockState foot = bedState(BedPart.FOOT, Direction.NORTH, false);
+		BlockState head = bedState(BedPart.HEAD, Direction.NORTH, false);
+		BlockOutlineSpec source = sourceSpec(footPos, foot, "entity_block");
+
+		BlockPresentation presentation = new BlockPresentationResolverRegistry()
+			.resolve(world(Map.of(footPos, foot, headPos, head)), source);
+
+		assertEquals(2, presentation.renderSubjects().size());
+		assertEquals("entity_block", presentation.renderSubjects().get(0).renderTargetTypeId());
+		assertEquals("entity_block", presentation.renderSubjects().get(1).renderTargetTypeId());
 	}
 
 	@ParameterizedTest(name = "bed invalid neighbor {0}")

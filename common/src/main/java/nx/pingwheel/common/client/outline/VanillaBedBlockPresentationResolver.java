@@ -44,12 +44,13 @@ public final class VanillaBedBlockPresentationResolver implements BlockPresentat
 		}
 
 		String expectedId = context.sourceSpec().blockKey().blockRegistryId();
+		String renderTargetTypeId = context.sourceSpec().targetTypeId();
 		return BlockPresentationResolution.handled(List.of(
 			new BlockRenderSubject(
-				"foot", footPos, foot, expectedId, "block",
+				"foot", footPos, foot, expectedId, renderTargetTypeId,
 				BlockPresentationRelation.COMPOSITE),
 			new BlockRenderSubject(
-				"head", headPos, head, expectedId, "block",
+				"head", headPos, head, expectedId, renderTargetTypeId,
 				BlockPresentationRelation.COMPOSITE)));
 	}
 
