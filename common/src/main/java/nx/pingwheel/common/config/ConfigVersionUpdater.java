@@ -50,10 +50,6 @@ final class ConfigVersionUpdater {
 		return update(root, configType, oldVersion, currentVersion, MIGRATION_STEPS);
 	}
 
-	static MigrationResult update(JsonObject root, PingForItVersion oldVersion, PingForItVersion currentVersion) {
-		return update(root, IConfig.class, oldVersion, currentVersion, MIGRATION_STEPS);
-	}
-
 	static MigrationResult update(
 		JsonObject root,
 		Class<? extends IConfig> configType,
