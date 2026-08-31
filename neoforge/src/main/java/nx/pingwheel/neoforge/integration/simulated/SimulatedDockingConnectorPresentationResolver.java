@@ -1,6 +1,7 @@
 package nx.pingwheel.neoforge.integration.simulated;
 
 import java.util.List;
+import java.util.Objects;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -36,10 +37,34 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 		ResourceLocation.parse("simulated:docking_connector");
 
 	private static BlockPresentationResolverRegistry.Registration registration;
+	private final RegistryEntries injectedEntries;
 
-	public SimulatedDockingConnectorPresentationResolver() {}
+	public SimulatedDockingConnectorPresentationResolver() {
+		injectedEntries = null;
+	}
 
-	/** Called reflectively after NeoForge has confirmed that Simulated is loaded. */
+	/**
+	 * Test-only seam for registered vanilla stand-ins. Production registration
+	 * uses the no-argument constructor and the optional registry lookups below.
+	 */
+	SimulatedDockingConnectorPresentationResolver(
+		Block pairedBlock,
+		Block ownerBlock,
+		BlockEntityType<?> ownerBlockEntityType
+	) {
+		this.injectedEntries = new RegistryEntries(
+			pairedBlock,
+			registeredBlockId(pairedBlock),
+			ownerBlock,
+			registeredBlockId(ownerBlock),
+			ownerBlockEntityType,
+			registeredBlockEntityId(ownerBlockEntityType));
+	}
+
+	/**
+	 * Called reflectively after NeoForge has confirmed that Simulated is loaded.
+	 * The stateless resolver retains this registration for the process lifetime.
+	 */
 	public static synchronized void register() {
 		if (registration != null) {
 			return;
@@ -72,11 +97,11 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 
 	@Override
 	public BlockPresentationResolution resolve(BlockPresentationContext context) {
+		RegistryEntries entries = injectedEntries == null ? lookupEntries() : injectedEntries;
 		BlockState pairedState = context.sourceState();
-		Block pairedBlock = lookupBlock(PAIRED_BLOCK_ID);
-		if (pairedState == null || pairedBlock == null
-			|| pairedState.getBlock() != pairedBlock
-			|| !PAIRED_BLOCK_ID.equals(BuiltInRegistries.BLOCK.getKey(pairedState.getBlock()))) {
+		if (pairedState == null || entries == null
+			|| pairedState.getBlock() != entries.pairedBlock()
+			|| !entries.pairedBlockId().equals(BuiltInRegistries.BLOCK.getKey(pairedState.getBlock()))) {
 			return BlockPresentationResolution.UNHANDLED;
 		}
 
@@ -88,11 +113,9 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 		BlockPos pairedPos = context.sourcePos();
 		BlockPos ownerPos = pairedPos.relative(towardOwner);
 		BlockState ownerState = context.world().getBlockState(ownerPos);
-		Block ownerBlock = lookupBlock(OWNER_BLOCK_ID);
-		BlockEntityType<?> ownerBlockEntityType = lookupBlockEntityType(OWNER_BLOCK_ENTITY_ID);
-		if (ownerState == null || ownerBlock == null || ownerBlockEntityType == null
-			|| ownerState.getBlock() != ownerBlock
-			|| !OWNER_BLOCK_ID.equals(BuiltInRegistries.BLOCK.getKey(ownerState.getBlock()))
+		if (ownerState == null || entries.ownerBlock() == null || entries.ownerBlockEntityType() == null
+			|| ownerState.getBlock() != entries.ownerBlock()
+			|| !entries.ownerBlockId().equals(BuiltInRegistries.BLOCK.getKey(ownerState.getBlock()))
 			|| !ownerState.hasProperty(BlockStateProperties.FACING)
 			|| ownerState.getValue(BlockStateProperties.FACING) != towardOwner.getOpposite()
 			|| !ownerState.hasProperty(BlockStateProperties.POWERED)
@@ -101,8 +124,8 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 		}
 
 		BlockEntity ownerBlockEntity = context.world().getBlockEntity(ownerPos);
-		if (ownerBlockEntity == null || ownerBlockEntity.getType() != ownerBlockEntityType
-			|| !OWNER_BLOCK_ENTITY_ID.equals(
+		if (ownerBlockEntity == null || ownerBlockEntity.getType() != entries.ownerBlockEntityType()
+			|| !entries.ownerBlockEntityId().equals(
 				BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(ownerBlockEntity.getType()))) {
 			return BlockPresentationResolution.handled(List.of());
 		}
@@ -111,10 +134,43 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 			"owner",
 			ownerPos,
 			ownerState,
-			OWNER_BLOCK_ID.toString(),
+			entries.ownerBlockId().toString(),
 			"entity_block",
 			BlockPresentationRelation.PROXY_TO_OWNER));
 	}
+
+	private static RegistryEntries lookupEntries() {
+		Block pairedBlock = lookupBlock(PAIRED_BLOCK_ID);
+		if (pairedBlock == null) {
+			return null;
+		}
+
+		return new RegistryEntries(
+			pairedBlock,
+			PAIRED_BLOCK_ID,
+			lookupBlock(OWNER_BLOCK_ID),
+			OWNER_BLOCK_ID,
+			lookupBlockEntityType(OWNER_BLOCK_ENTITY_ID),
+			OWNER_BLOCK_ENTITY_ID);
+	}
+
+	private static ResourceLocation registeredBlockId(Block block) {
+		return Objects.requireNonNull(BuiltInRegistries.BLOCK.getKey(block), "paired/owner block registry id");
+	}
+
+	private static ResourceLocation registeredBlockEntityId(BlockEntityType<?> blockEntityType) {
+		return Objects.requireNonNull(
+			BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntityType), "block entity registry id");
+	}
+
+	private record RegistryEntries(
+		Block pairedBlock,
+		ResourceLocation pairedBlockId,
+		Block ownerBlock,
+		ResourceLocation ownerBlockId,
+		BlockEntityType<?> ownerBlockEntityType,
+		ResourceLocation ownerBlockEntityId
+	) {}
 
 	private static Block lookupBlock(ResourceLocation id) {
 		try {

@@ -34,7 +34,7 @@ class SimulatedDockingConnectorPresentationResolverContractTest {
 		assertTrue(source.contains("towardOwner.getOpposite()"));
 		assertTrue(source.contains("BlockStateProperties.POWERED"));
 		assertTrue(source.contains("getBlockEntity(ownerPos)"));
-		assertTrue(source.contains("ownerBlockEntity.getType() != ownerBlockEntityType"));
+		assertTrue(source.contains("ownerBlockEntity.getType() != entries.ownerBlockEntityType()"));
 		assertTrue(source.contains("BlockPresentationRelation.PROXY_TO_OWNER"));
 		assertTrue(source.contains("\"entity_block\""));
 		assertTrue(source.contains("return BlockPresentationResolution.UNHANDLED"));
@@ -60,6 +60,8 @@ class SimulatedDockingConnectorPresentationResolverContractTest {
 		assertTrue(source.contains("ModList.get().isLoaded(\"simulated\")"));
 		assertTrue(source.contains("registerOptionalResolver("));
 		assertTrue(source.contains("Class.forName(className, true, NeoClient.class.getClassLoader())"));
+		assertTrue(source.contains("lastSimulatedResolverState"));
+		assertTrue(source.contains("simulatedResolver"));
 		assertFalse(source.contains(
 			"import nx.pingwheel.neoforge.integration.simulated.SimulatedDockingConnectorPresentationResolver"));
 		assertFalse(source.contains("Class<SimulatedDockingConnectorPresentationResolver>"));

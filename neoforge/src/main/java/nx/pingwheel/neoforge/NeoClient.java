@@ -32,6 +32,7 @@ public class NeoClient {
 	private static String lastEntityAdapterState;
 	private static String lastFlywheelAdapterState;
 	private static String lastWaterWheelResolverState;
+	private static String lastSimulatedResolverState;
 	private static boolean entityAdapterResolved;
 	private static boolean flywheelAdapterResolved;
 
@@ -195,10 +196,16 @@ public class NeoClient {
 	}
 
 	private static void logResolverState(String resolverName, String state) {
-		if (state.equals(lastWaterWheelResolverState)) {
+		boolean simulatedResolver = "simulated-docking-connector-presentation".equals(resolverName);
+		String previous = simulatedResolver ? lastSimulatedResolverState : lastWaterWheelResolverState;
+		if (state.equals(previous)) {
 			return;
 		}
-		lastWaterWheelResolverState = state;
+		if (simulatedResolver) {
+			lastSimulatedResolverState = state;
+		} else {
+			lastWaterWheelResolverState = state;
+		}
 		LOGGER.info("optional presentation resolver state transition: resolver={} state={} createDetected={}",
 			resolverName, state, lastCreateDetected == null ? false : lastCreateDetected);
 	}
