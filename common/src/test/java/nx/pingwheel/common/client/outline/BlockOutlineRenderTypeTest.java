@@ -102,23 +102,84 @@ class BlockOutlineRenderTypeTest {
 				"forAllEdges") >= 0,
 			"forEachEdge must invoke VoxelShape#forAllEdges");
 
-		List<MethodCall> lateMixinCalls = methodInvocations(
-			"nx.pingwheel.common.mixin.LevelRendererMixin", "onEndRenderLevel");
-		int bufferSourceIndex = invocationIndex(
-			lateMixinCalls, "net/minecraft/client/renderer/RenderBuffers", "bufferSource");
-		int blockOutlinesIndex = invocationIndex(
-			lateMixinCalls, "nx/pingwheel/common/CommonClient", "renderBlockOutlines");
-		assertTrue(bufferSourceIndex >= 0, "late mixin must acquire the render buffer source");
 		assertTrue(
-			blockOutlinesIndex > bufferSourceIndex,
-			"late mixin must render block outlines through the acquired buffer source");
+			invocationIndex(
+				methodInvocations("nx.pingwheel.common.mixin.LevelRendererMixin", "onStartRenderLevel"),
+				"nx/pingwheel/common/client/outline/BlockOutlineFrameState",
+				"capture") >= 0,
+				"world start hook must capture the applied frame transform");
+		assertEquals(
+			-1,
+			invocationIndex(
+				allMethodInvocations("nx.pingwheel.common.mixin.LevelRendererMixin"),
+				"nx/pingwheel/common/CommonClient",
+				"renderBlockOutlines"),
+			"LevelRenderer must not submit no-depth shape lines before return hooks/composites");
+		assertEquals(
+			-1,
+			methodNames("nx.pingwheel.common.mixin.LevelRendererMixin").indexOf("pingForItClearBlockOutlineFrame"),
+			"LevelRenderer RETURN must not discard the frame before GameRenderer consumes it");
+		assertEquals(
+			-1,
+			invocationIndex(
+				allMethodInvocations("nx.pingwheel.common.mixin.LevelRendererMixin"),
+				"nx/pingwheel/common/client/outline/BlockOutlineFrameState",
+				"clear"),
+			"LevelRenderer must not clear the frame before the post-world consumer");
 
-		List<String> injectionValues = annotationStringValues(
-			"nx.pingwheel.common.mixin.LevelRendererMixin", "onEndRenderLevel",
+		List<MethodCall> gameRendererCalls = methodInvocations(
+			"nx.pingwheel.common.mixin.GameRendererMixin", "pingforit$renderBlockOutlines");
+		int consumeIndex = invocationIndex(
+			gameRendererCalls,
+			"nx/pingwheel/common/client/outline/BlockOutlineFrameState",
+			"consume");
+		int blockOutlinesIndex = invocationIndex(
+			gameRendererCalls, "nx/pingwheel/common/CommonClient", "renderBlockOutlines");
+		assertTrue(
+			consumeIndex >= 0,
+			"post-world GameRenderer hook must consume, rather than retain, its frame transform");
+		assertEquals(
+			1,
+			invocationCount(
+				gameRendererCalls,
+				"nx/pingwheel/common/client/outline/BlockOutlineFrameState",
+				"consume"),
+			"post-world hook must consume exactly one frame snapshot");
+		assertTrue(
+			blockOutlinesIndex > consumeIndex,
+			"post-world GameRenderer hook must render only after it consumes the frame");
+		assertTrue(
+			invocationIndex(
+				methodInvocations("nx.pingwheel.common.CommonClient", "renderBlockOutlines"),
+				"nx/pingwheel/common/client/outline/BlockOutlineFrameState",
+				"renderWithFrame") >= 0,
+			"late VoxelShape batch must execute inside the captured transform scope");
+
+		List<Object> injectionValues = annotationValues(
+			"nx.pingwheel.common.mixin.GameRendererMixin", "pingforit$renderBlockOutlines",
 			"Lorg/spongepowered/asm/mixin/injection/Inject;");
-		assertTrue(injectionValues.contains("renderLevel"));
+		assertTrue(injectionValues.contains("renderLevel(Lnet/minecraft/client/DeltaTracker;)V"));
 		assertTrue(injectionValues.contains(
-			"Lorg/joml/Matrix4fStack;popMatrix()Lorg/joml/Matrix4fStack;"));
+			"Lnet/minecraft/client/renderer/LevelRenderer;renderLevel("
+				+ "Lnet/minecraft/client/DeltaTracker;ZLnet/minecraft/client/Camera;"
+				+ "Lnet/minecraft/client/renderer/GameRenderer;"
+				+ "Lnet/minecraft/client/renderer/LightTexture;"
+				+ "Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;)V"));
+		assertTrue(injectionValues.contains("AFTER"));
+		assertTrue(injectionValues.contains(1), "post-world injection must require its exact anchor");
+
+		List<MethodCall> clearCalls = methodInvocations(
+			"nx.pingwheel.common.mixin.GameRendererMixin", "pingforit$clearBlockOutlineFrame");
+		assertTrue(invocationIndex(
+			clearCalls,
+			"nx/pingwheel/common/client/outline/BlockOutlineFrameState",
+			"clear") >= 0,
+			"GameRenderer HEAD must discard an abandoned prior frame");
+		List<Object> clearInjectionValues = annotationValues(
+			"nx.pingwheel.common.mixin.GameRendererMixin", "pingforit$clearBlockOutlineFrame",
+			"Lorg/spongepowered/asm/mixin/injection/Inject;");
+		assertTrue(clearInjectionValues.contains("HEAD"));
+		assertTrue(clearInjectionValues.contains(1));
 	}
 
 	@Test
@@ -184,10 +245,44 @@ class BlockOutlineRenderTypeTest {
 		return calls;
 	}
 
-	private static List<String> annotationStringValues(
+	private static List<MethodCall> allMethodInvocations(String className) {
+		List<MethodCall> calls = new ArrayList<>();
+		readClass(className).accept(new ClassVisitor(Opcodes.ASM9) {
+			@Override
+			public MethodVisitor visitMethod(
+				int access, String name, String descriptor, String signature, String[] exceptions
+			) {
+				return new MethodVisitor(Opcodes.ASM9) {
+					@Override
+					public void visitMethodInsn(
+						int opcode, String owner, String name, String descriptor, boolean isInterface
+					) {
+						calls.add(new MethodCall(owner, name, descriptor));
+					}
+				};
+			}
+		}, 0);
+		return calls;
+	}
+
+	private static List<String> methodNames(String className) {
+		List<String> names = new ArrayList<>();
+		readClass(className).accept(new ClassVisitor(Opcodes.ASM9) {
+			@Override
+			public MethodVisitor visitMethod(
+				int access, String name, String descriptor, String signature, String[] exceptions
+			) {
+				names.add(name);
+				return null;
+			}
+		}, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+		return names;
+	}
+
+	private static List<Object> annotationValues(
 		String className, String methodName, String annotationDescriptor
 	) {
-		List<String> values = new ArrayList<>();
+		List<Object> values = new ArrayList<>();
 		readClass(className).accept(new ClassVisitor(Opcodes.ASM9) {
 			@Override
 			public MethodVisitor visitMethod(
@@ -201,7 +296,7 @@ class BlockOutlineRenderTypeTest {
 					@Override
 					public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
 						return annotationDescriptor.equals(descriptor)
-							? new StringValueAnnotationVisitor(values) : null;
+							? new AnnotationValueVisitor(values) : null;
 					}
 				};
 			}
@@ -219,6 +314,16 @@ class BlockOutlineRenderTypeTest {
 		return -1;
 	}
 
+	private static int invocationCount(List<MethodCall> calls, String owner, String name) {
+		int count = 0;
+		for (MethodCall call : calls) {
+			if (owner.equals(call.owner()) && name.equals(call.name())) {
+				count++;
+			}
+		}
+		return count;
+	}
+
 	private static ClassReader readClass(String className) {
 		String resourceName = className.replace('.', '/') + ".class";
 		try (InputStream stream = BlockOutlineRenderTypeTest.class
@@ -234,29 +339,32 @@ class BlockOutlineRenderTypeTest {
 
 	private record MethodCall(String owner, String name, String descriptor) {}
 
-	private static final class StringValueAnnotationVisitor extends AnnotationVisitor {
-		private final List<String> values;
+	private static final class AnnotationValueVisitor extends AnnotationVisitor {
+		private final List<Object> values;
 
-		private StringValueAnnotationVisitor(List<String> values) {
+		private AnnotationValueVisitor(List<Object> values) {
 			super(Opcodes.ASM9);
 			this.values = values;
 		}
 
 		@Override
 		public void visit(String name, Object value) {
-			if (value instanceof String string) {
-				values.add(string);
-			}
+			values.add(value);
+		}
+
+		@Override
+		public void visitEnum(String name, String descriptor, String value) {
+			values.add(value);
 		}
 
 		@Override
 		public AnnotationVisitor visitAnnotation(String name, String descriptor) {
-			return new StringValueAnnotationVisitor(values);
+			return new AnnotationValueVisitor(values);
 		}
 
 		@Override
 		public AnnotationVisitor visitArray(String name) {
-			return new StringValueAnnotationVisitor(values);
+			return new AnnotationValueVisitor(values);
 		}
 	}
 

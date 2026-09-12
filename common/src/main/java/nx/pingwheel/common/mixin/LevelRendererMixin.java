@@ -8,8 +8,10 @@ import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.PostChain;
 import net.minecraft.client.renderer.RenderBuffers;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.world.entity.Entity;
 import nx.pingwheel.common.CommonClient;
+import nx.pingwheel.common.client.outline.BlockOutlineFrameState;
 import nx.pingwheel.common.client.outline.EntityOutlineFrameState;
 import nx.pingwheel.common.client.outline.EntityOutlineRenderDecision;
 import nx.pingwheel.common.client.outline.EntityOutlineSourceRegistry;
@@ -60,6 +62,14 @@ public abstract class LevelRendererMixin {
 		// resets the per-frame model-outline processed flag and the model
 		// outline success record.
 		this.modelOutlinesProcessed = false;
+		// The late VoxelShape pass must use this exact applied world transform,
+		// not mutable camera or RenderSystem state from a later render hook.
+		BlockOutlineFrameState.INSTANCE.capture(
+			RenderSystem.getModelViewMatrix(),
+			RenderSystem.getProjectionMatrix(),
+			RenderSystem.getVertexSorting(),
+			camera.getPosition(),
+			deltaTracker.getGameTimeDeltaPartialTick(true));
 		CommonClient.INSTANCE.onRenderWorld(WorldRenderContext.of(modelViewMatrix, projectionMatrix, deltaTracker.getGameTimeDeltaPartialTick(true), camera));
 	}
 
@@ -134,24 +144,6 @@ public abstract class LevelRendererMixin {
 		if (!this.modelOutlinesProcessed) {
 			postChain.process(tickDelta);
 		}
-	}
-
-	/**
-	 * Draws and flushes the prepared block outlines at the very end of the
-	 * world render pass: after all 3D batches and composites have been
-	 * flushed, immediately before the world model-view matrix is popped.
-	 * The camera-relative model-view matrix is still applied at this point,
-	 * so the vertices can be camera-relative. The custom block outline
-	 * batch is acquired and flushed explicitly; the vanilla
-	 * {@code RenderType.lines()} batch and the entity outline redirects
-	 * above are untouched.
-	 */
-	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lorg/joml/Matrix4fStack;popMatrix()Lorg/joml/Matrix4fStack;", ordinal = 0))
-	private void onEndRenderLevel(DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
-		CommonClient.INSTANCE.renderBlockOutlines(
-			camera,
-			this.renderBuffers.bufferSource(),
-			deltaTracker.getGameTimeDeltaPartialTick(true));
 	}
 
 	/**
