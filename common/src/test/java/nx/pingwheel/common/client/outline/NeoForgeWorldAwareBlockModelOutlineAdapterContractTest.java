@@ -68,7 +68,7 @@ class NeoForgeWorldAwareBlockModelOutlineAdapterContractTest {
 			Path.of(relativePath),
 			Path.of("..", relativePath))) {
 			if (Files.isRegularFile(candidate)) {
-				return Files.readString(candidate);
+				return Files.readString(candidate).replace("\r\n", "\n");
 			}
 		}
 		throw new IOException("source file not found: " + relativePath);

@@ -19,6 +19,7 @@ import nx.pingwheel.common.client.duration.ClientSyncDurationPolicy;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.client.outline.BlockModelOutlineState;
+import nx.pingwheel.common.client.outline.BlockOutlineFrameState;
 import nx.pingwheel.common.client.outline.BlockOutlineLogger;
 import nx.pingwheel.common.client.outline.BlockOutlineRenderer;
 import nx.pingwheel.common.client.outline.BlockOutlineRenderType;
@@ -123,6 +124,7 @@ public class CommonClient {
 		EntityOutlineState.INSTANCE.clear();
 		BlockOutlineState.INSTANCE.clear();
 		BlockModelOutlineState.INSTANCE.clear();
+		BlockOutlineFrameState.INSTANCE.clear();
 		EntityOutlineFrameState.INSTANCE.clear();
 		VirtualBlockDisplayRenderer.INSTANCE.clear();
 		SelectionToggleNoticeState.INSTANCE.clear();
@@ -292,7 +294,8 @@ public class CommonClient {
 	 * current runtime store and level dimension; clears it when the runtime or
 	 * level is absent. Runs on every world render frame, right after
 	 * {@link #prepareEntityOutlines()} and before
-	 * {@link #renderBlockOutlines(Camera, MultiBufferSource.BufferSource)}.
+	 * {@link #renderBlockOutlines(Camera, MultiBufferSource.BufferSource,
+	 * BlockOutlineFrameState.FrameTransform)}.
 	 */
 	private static void prepareBlockOutlines() {
 		Minecraft game = Game;
@@ -362,7 +365,8 @@ public class CommonClient {
 	 * ({@code shouldShowEntityOutlines()}); otherwise every block keeps its
 	 * VoxelShape fallback. Presentation subjects that emit at least one outline
 	 * vertex are recorded in {@link BlockModelOutlineState}, which the late
-	 * {@link #renderBlockOutlines(Camera, MultiBufferSource.BufferSource)}
+	 * {@link #renderBlockOutlines(Camera, MultiBufferSource.BufferSource,
+	 * BlockOutlineFrameState.FrameTransform)}
 	 * pass consults to avoid doubling.
 	 */
 	public void renderModelOutlines(
@@ -470,14 +474,14 @@ public class CommonClient {
 
 	/**
 	 * Draws the prepared block outlines into the custom
-	 * {@link BlockOutlineRenderType#BLOCK_OUTLINE} buffer of the current
+	 * {@link BlockOutlineRenderType#BLOCK_OUTLINE} buffer of the captured current
 	 * frame and flushes that batch explicitly.
 	 *
-	 * <p>Called from {@code LevelRendererMixin} at the end of
-	 * {@code renderLevel}, right before the world model-view matrix is
-	 * popped (after all 3D batches and composites have been flushed), so
-	 * the camera-relative model-view matrix is still applied and the
-	 * vertices can be camera-relative. The batch is acquired only when
+	 * <p>Called from {@code GameRendererMixin} immediately after
+	 * {@code LevelRenderer.renderLevel} returns, including all world-renderer
+	 * return hooks and composites. The captured world transform is reapplied only
+	 * around this draw, so the vertices remain camera-relative after the normal
+	 * world matrices have been popped. The batch is acquired only when
 	 * {@link BlockOutlineState#hasOutlines()} is true, so a frame without
 	 * block outlines never creates or flushes an empty batch; and the frame
 	 * is skipped entirely when every current block outline is already
@@ -486,20 +490,14 @@ public class CommonClient {
 	 * {@code lines()} batch is never touched. Blocks whose model-outline pass
 	 * succeeded suppress only their VoxelShape geometry.
 	 */
-	public void renderBlockOutlines(Camera camera, MultiBufferSource.BufferSource bufferSource) {
-		renderBlockOutlines(camera, bufferSource, 1.0F);
-	}
-
-	/**
-	 * Draws block outlines using the current world partial tick. Provider-owned
-	 * Sable blocks need that value to obtain their smooth render pose.
-	 */
 	public void renderBlockOutlines(
-		Camera camera, MultiBufferSource.BufferSource bufferSource, float partialTick
+		Camera camera,
+		MultiBufferSource.BufferSource bufferSource,
+		BlockOutlineFrameState.FrameTransform frame
 	) {
 		Minecraft game = Game;
 
-		if (game == null || game.level == null) {
+		if (game == null || game.level == null || frame == null) {
 			return;
 		}
 
@@ -514,15 +512,17 @@ public class CommonClient {
 			return;
 		}
 
-		VertexConsumer lines = bufferSource.getBuffer(BlockOutlineRenderType.BLOCK_OUTLINE);
-		BlockOutlineRenderer.render(
-			game.level, camera, lines,
-			BlockOutlineState.INSTANCE,
-			BlockModelOutlineState.INSTANCE.presentations(),
-			BlockModelOutlineState.INSTANCE.successKeys(),
-			BlockModelOutlineState.INSTANCE.externalSuccessKeys(),
-			partialTick);
-		bufferSource.endBatch(BlockOutlineRenderType.BLOCK_OUTLINE);
+		BlockOutlineFrameState.renderWithFrame(frame, () -> {
+			VertexConsumer lines = bufferSource.getBuffer(BlockOutlineRenderType.BLOCK_OUTLINE);
+			BlockOutlineRenderer.render(
+				game.level, camera, frame.cameraPosition(), lines,
+				BlockOutlineState.INSTANCE,
+				BlockModelOutlineState.INSTANCE.presentations(),
+				BlockModelOutlineState.INSTANCE.successKeys(),
+				BlockModelOutlineState.INSTANCE.externalSuccessKeys(),
+				frame.partialTick());
+			bufferSource.endBatch(BlockOutlineRenderType.BLOCK_OUTLINE);
+		});
 	}
 
 	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {

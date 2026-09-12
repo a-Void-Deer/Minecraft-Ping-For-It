@@ -36,9 +36,10 @@ import nx.pingwheel.common.integration.sable.client.SableClientProvider;
  *   <li>null or empty shapes are skipped; no full-cube fallback exists.</li>
  * </ul>
  *
- * <p>The caller (the {@code LevelRendererMixin} anchor) already has the
- * camera-relative model-view matrix applied, so this pass builds camera-
- * relative vertices with its own identity {@link PoseStack} and writes them
+	 * <p>The caller reapplies the captured camera-relative world model-view
+	 * matrix only around this post-world-composite draw. This pass builds
+	 * camera-relative vertices from the supplied frame camera position with its
+	 * own identity {@link PoseStack} and writes them
  * into the caller-provided custom block outline buffer ({@link
  * BlockOutlineRenderType#BLOCK_OUTLINE}). Nothing is flushed here: the
  * caller flushes exactly that custom batch after the pass returns, and the
@@ -63,6 +64,7 @@ public final class BlockOutlineRenderer {
 	public static void render(
 		ClientLevel level,
 		Camera camera,
+		Vec3 cameraPosition,
 		VertexConsumer lines,
 		BlockOutlineState state,
 		List<BlockPresentation> presentations,
@@ -72,6 +74,7 @@ public final class BlockOutlineRenderer {
 	) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(camera, "camera");
+		Objects.requireNonNull(cameraPosition, "cameraPosition");
 		Objects.requireNonNull(lines, "lines");
 		Objects.requireNonNull(state, "state");
 		Objects.requireNonNull(presentations, "presentations");
@@ -82,7 +85,6 @@ public final class BlockOutlineRenderer {
 		Entity cameraEntity = camera.getEntity();
 		CollisionContext collisionContext =
 			cameraEntity == null ? CollisionContext.empty() : CollisionContext.of(cameraEntity);
-		Vec3 cameraPosition = camera.getPosition();
 		PoseStack poseStack = new PoseStack();
 
 		for (BlockPresentation presentation : presentations) {
