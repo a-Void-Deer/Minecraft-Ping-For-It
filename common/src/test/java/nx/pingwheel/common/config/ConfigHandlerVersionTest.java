@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConfigHandlerVersionTest {
-	private static final String CURRENT_VERSION = "0.3.0-pfi-beta1";
+	private static final String CURRENT_VERSION = "0.4.0-pfi-beta1";
 	private static final String GENERIC_OLDER_VERSION = "0.1.0-pfi-beta1";
 
     @Test
@@ -55,24 +55,22 @@ class ConfigHandlerVersionTest {
     }
 
     @Test
-    void sameVersionServerConfigRenamesLegacyPingDurationOnDisk(@TempDir Path tempDir) throws IOException {
-        Path configPath = tempDir.resolve("server-legacy-duration.json");
-        Files.writeString(
-            configPath,
-            "{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"pingDuration\":23}\n",
-            StandardCharsets.UTF_8);
+	void equalVersionServerConfigDoesNotRunLegacyMigrationAndPreservesBytes(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("server-legacy-duration.json");
+		byte[] original = ("{\"pingforit-version\":\"" + CURRENT_VERSION
+			+ "\",\"pingDuration\":23,\"unknown\":true}\n").getBytes(StandardCharsets.UTF_8);
+		Files.write(configPath, original);
 
-        ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
-        handler.load();
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
 
-        assertEquals(23, handler.getConfig().getSyncDuration());
-        JsonObject persisted = readRoot(configPath);
-        assertEquals(23, persisted.get("syncDuration").getAsInt());
-        assertFalse(persisted.has("pingDuration"));
-    }
+		assertArrayEquals(original, Files.readAllBytes(configPath));
+		assertEquals(ServerConfigBounds.DEFAULT_SYNC_DURATION, handler.getConfig().getSyncDuration());
+		assertFalse(hasBrokenBackup(tempDir));
+	}
 
     @Test
-    void olderServerConfigMigratesLegacyDurationAndPreservesUnknownRootData(@TempDir Path tempDir) throws IOException {
+	void olderServerConfigMigratesLegacyDurationAndPreservesUnknownRootData(@TempDir Path tempDir) throws IOException {
         Path configPath = tempDir.resolve("server.json");
         Files.writeString(
             configPath,
@@ -90,8 +88,45 @@ class ConfigHandlerVersionTest {
         assertEquals(23, persisted.get("syncDuration").getAsInt());
         assertFalse(persisted.has("pingDuration"));
         assertEquals("legacy", persisted.get("unknown").getAsJsonObject().get("source").getAsString());
-        assertFalse(hasBrokenBackup(tempDir));
-    }
+		assertFalse(hasBrokenBackup(tempDir));
+	}
+
+	@Test
+	void versionedZeroPointOneServerConfigTraversesTheDurationMigration(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("server-versioned-zero-point-one.json");
+		Files.writeString(
+			configPath,
+			"{\"pingforit-version\":\"0.1.0-pfi-beta1\",\"pingDuration\":23,\"unknown\":true}\n",
+			StandardCharsets.UTF_8);
+
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+
+		assertEquals(23, handler.getConfig().getSyncDuration());
+		JsonObject persisted = readRoot(configPath);
+		assertEquals(CURRENT_VERSION, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
+		assertEquals(23, persisted.get("syncDuration").getAsInt());
+		assertFalse(persisted.has("pingDuration"));
+		assertTrue(persisted.get("unknown").getAsBoolean());
+	}
+
+	@Test
+	void zeroPointThreeServerConfigDoesNotConsumeAReusedPingDurationKey(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("server-zero-point-three.json");
+		Files.writeString(
+			configPath,
+			"{\"pingforit-version\":\"0.3.0-pfi-beta1\",\"pingDuration\":23,\"unknown\":true}\n",
+			StandardCharsets.UTF_8);
+
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+
+		JsonObject persisted = readRoot(configPath);
+		assertEquals(CURRENT_VERSION, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
+		assertEquals(23, persisted.get("pingDuration").getAsInt());
+		assertTrue(persisted.get("unknown").getAsBoolean());
+		assertEquals(ServerConfigBounds.DEFAULT_SYNC_DURATION, handler.getConfig().getSyncDuration());
+	}
 
     @Test
     void missingNullNonStringAndNonObjectRootsUseClientRecovery(@TempDir Path tempDir) throws IOException {

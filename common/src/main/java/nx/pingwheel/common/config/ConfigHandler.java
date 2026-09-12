@@ -17,7 +17,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -339,17 +338,12 @@ public class ConfigHandler <T extends IConfig> {
 		}
 
 		var root = parsed.getAsJsonObject();
-		boolean legacyServerDurationMigrated = configType == ServerConfig.class
-			&& ServerConfig.migrateLegacyDurationKey(root);
 		String rawConfigVersion = ConfigVersionUpdater.requireVersion(root);
 		PingForItVersion configVersion = PingForItVersion.parse(rawConfigVersion);
 		int comparison = configVersion.compareTo(modVersion);
 		if (comparison == 0) {
-			List<String> updates = legacyServerDurationMigrated
-				? List.of("syncDuration: pingDuration -> syncDuration")
-				: List.of();
 			return new VersionedConfig(
-				root, configVersion, legacyServerDurationMigrated, false, updates, sourceBytes);
+				root, configVersion, false, false, List.of(), sourceBytes);
 		}
 
 		LOGGER.warn(
@@ -361,17 +355,13 @@ public class ConfigHandler <T extends IConfig> {
 		}
 
 		ConfigVersionUpdater.MigrationResult migration =
-			ConfigVersionUpdater.update(root, configVersion, modVersion);
-		List<String> updates = new ArrayList<>(migration.updates());
-		if (legacyServerDurationMigrated) {
-			updates.add("syncDuration: pingDuration -> syncDuration");
-		}
+			ConfigVersionUpdater.update(root, configType, configVersion, modVersion);
 		return new VersionedConfig(
 			migration.root(),
 			configVersion,
 			true,
 			false,
-			List.copyOf(updates),
+			migration.updates(),
 			sourceBytes);
 	}
 
