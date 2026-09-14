@@ -1,9 +1,5 @@
 # Ping For It Changelog
 
-## Unreleased
-
-_Current development version: **0.4.0-pfi-beta1** for Minecraft **1.21.1** on Fabric, Forge, and NeoForge._
-
 ### Block presentation and compatibility
 
 - Added Fabric render attachment support using the real level and block position for world-aware block-entity model glow.
@@ -19,6 +15,7 @@ _Current development version: **0.4.0-pfi-beta1** for Minecraft **1.21.1** on Fa
 - Resolved geometry success and VoxelShape fallback per stable render subject, preventing one emitted part from suppressing another part's outline.
 - Added deterministic, fail-soft presentation-resolver and world-aware-adapter registration so unavailable optional integrations do not disrupt ordinary block outlines.
 - Kept shape fallbacks tied to each subject's live native VoxelShape edges rather than using a full-cube approximation.
+- Fixed Create door being rendered as `Block` outline instead of `EntityBlock` outline, causing they always falling back to VoxelShape.
 
 ### Configuration migration
 
