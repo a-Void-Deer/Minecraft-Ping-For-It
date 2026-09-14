@@ -12,18 +12,38 @@ import java.util.Objects;
  */
 public final class BlockPresentationResolution {
 	public static final BlockPresentationResolution UNHANDLED =
-		new BlockPresentationResolution(false, List.of());
+		new BlockPresentationResolution(false, List.of(), List.of());
 
 	private final boolean handled;
 	private final List<BlockRenderSubject> subjects;
+	private final List<BlockPresentationCoverageRelation> coverageRelations;
 
-	private BlockPresentationResolution(boolean handled, List<BlockRenderSubject> subjects) {
+	private BlockPresentationResolution(
+		boolean handled,
+		List<BlockRenderSubject> subjects,
+		List<BlockPresentationCoverageRelation> coverageRelations
+	) {
 		this.handled = handled;
 		this.subjects = List.copyOf(subjects);
+		this.coverageRelations = BlockPresentationCoverageRelations.immutableAndValidated(
+			this.subjects, coverageRelations);
+		if (!handled && !this.coverageRelations.isEmpty()) {
+			throw new IllegalArgumentException("unhandled resolutions cannot declare coverage");
+		}
 	}
 
 	public static BlockPresentationResolution handled(List<BlockRenderSubject> subjects) {
-		return new BlockPresentationResolution(true, Objects.requireNonNull(subjects, "subjects"));
+		return handled(subjects, List.of());
+	}
+
+	public static BlockPresentationResolution handled(
+		List<BlockRenderSubject> subjects,
+		List<BlockPresentationCoverageRelation> coverageRelations
+	) {
+		return new BlockPresentationResolution(
+			true,
+			Objects.requireNonNull(subjects, "subjects"),
+			Objects.requireNonNull(coverageRelations, "coverageRelations"));
 	}
 
 	public static BlockPresentationResolution handled(BlockRenderSubject... subjects) {
@@ -51,6 +71,11 @@ public final class BlockPresentationResolution {
 		return subjects;
 	}
 
+	/** Source-conditioned coverage declarations for this handled result. */
+	public List<BlockPresentationCoverageRelation> coverageRelations() {
+		return coverageRelations;
+	}
+
 	@Override
 	public boolean equals(Object object) {
 		if (this == object) {
@@ -61,16 +86,19 @@ public final class BlockPresentationResolution {
 			return false;
 		}
 
-		return handled == other.handled && subjects.equals(other.subjects);
+		return handled == other.handled
+			&& subjects.equals(other.subjects)
+			&& coverageRelations.equals(other.coverageRelations);
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(handled, subjects);
+		return Objects.hash(handled, subjects, coverageRelations);
 	}
 
 	@Override
 	public String toString() {
-		return "BlockPresentationResolution[handled=%s, subjects=%s]".formatted(handled, subjects);
+		return "BlockPresentationResolution[handled=%s, subjects=%s, coverageRelations=%s]"
+			.formatted(handled, subjects, coverageRelations);
 	}
 }

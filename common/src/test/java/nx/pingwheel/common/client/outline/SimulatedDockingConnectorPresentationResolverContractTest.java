@@ -61,7 +61,8 @@ class SimulatedDockingConnectorPresentationResolverContractTest {
 		assertTrue(source.contains("registerOptionalResolver("));
 		assertTrue(source.contains("Class.forName(className, true, NeoClient.class.getClassLoader())"));
 		assertTrue(source.contains("lastSimulatedResolverState"));
-		assertTrue(source.contains("simulatedResolver"));
+		assertTrue(source.contains(
+			"case \"simulated-docking-connector-presentation\" -> previous = lastSimulatedResolverState"));
 		assertFalse(source.contains(
 			"import nx.pingwheel.neoforge.integration.simulated.SimulatedDockingConnectorPresentationResolver"));
 		assertFalse(source.contains("Class<SimulatedDockingConnectorPresentationResolver>"));

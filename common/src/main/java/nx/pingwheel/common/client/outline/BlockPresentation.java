@@ -11,14 +11,22 @@ import java.util.Objects;
  */
 public record BlockPresentation(
 	BlockOutlineSpec sourceSpec,
-	List<BlockRenderSubject> renderSubjects
+	List<BlockRenderSubject> renderSubjects,
+	List<BlockPresentationCoverageRelation> coverageRelations
 ) {
 
 	public BlockPresentation {
 		Objects.requireNonNull(sourceSpec, "sourceSpec");
 		Objects.requireNonNull(renderSubjects, "renderSubjects");
 		renderSubjects = List.copyOf(renderSubjects);
-}
+		coverageRelations = BlockPresentationCoverageRelations.immutableAndValidated(
+			renderSubjects, coverageRelations);
+	}
+
+	/** Creates a presentation without source-conditioned coverage declarations. */
+	public BlockPresentation(BlockOutlineSpec sourceSpec, List<BlockRenderSubject> renderSubjects) {
+		this(sourceSpec, renderSubjects, List.of());
+	}
 
 	/** Alias for the source name used by outline callers. */
 	public BlockOutlineSpec source() {

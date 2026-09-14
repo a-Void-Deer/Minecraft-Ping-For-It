@@ -46,28 +46,52 @@ public final class BlockPresentationResolverRegistry {
 	 * and duplicate registrations return a harmless rejected handle.
 	 */
 	public Registration register(BlockPresentationResolver resolver) {
-		if (resolver == null) {
-			return Registration.rejected();
-		}
-
-		final String id;
-		try {
-			id = EntityBlockGeometrySourceIds.validate(resolver.id());
-		} catch (Exception | LinkageError | AssertionError failure) {
-			return Registration.rejected();
-		}
-
-		if (id == null) {
+		ValidatedResolver validatedResolver = validate(resolver);
+		if (validatedResolver == null) {
 			return Registration.rejected();
 		}
 
 		synchronized (lock) {
-			if (registrations.containsKey(id)) {
+			if (registrations.containsKey(validatedResolver.id())) {
 				return Registration.rejected();
 			}
 
-			Registration registration = new Registration(this, id, resolver);
-			registrations.put(id, registration);
+			Registration registration = new Registration(
+				this, validatedResolver.id(), validatedResolver.resolver());
+			registrations.put(validatedResolver.id(), registration);
+			publishSnapshot();
+			return registration;
+		}
+	}
+
+	/**
+	 * Registers a specialization immediately before a known resolver while
+	 * preserving every other resolver's registration order.
+	 */
+	public Registration registerBefore(String anchorResolverId, BlockPresentationResolver resolver) {
+		ValidatedResolver validatedResolver = validate(resolver);
+		String anchorId = validateId(anchorResolverId);
+		if (validatedResolver == null || anchorId == null) {
+			return Registration.rejected();
+		}
+
+		synchronized (lock) {
+			if (!registrations.containsKey(anchorId)
+				|| registrations.containsKey(validatedResolver.id())) {
+				return Registration.rejected();
+			}
+
+			Registration registration = new Registration(
+				this, validatedResolver.id(), validatedResolver.resolver());
+			Map<String, Registration> reordered = new LinkedHashMap<>();
+			for (Map.Entry<String, Registration> entry : registrations.entrySet()) {
+				if (entry.getKey().equals(anchorId)) {
+					reordered.put(validatedResolver.id(), registration);
+				}
+				reordered.put(entry.getKey(), entry.getValue());
+			}
+			registrations.clear();
+			registrations.putAll(reordered);
 			publishSnapshot();
 			return registration;
 		}
@@ -105,7 +129,8 @@ public final class BlockPresentationResolverRegistry {
 			}
 
 			if (result != null && result.handled()) {
-				return new BlockPresentation(context.sourceSpec(), result.subjects());
+				return new BlockPresentation(
+					context.sourceSpec(), result.subjects(), result.coverageRelations());
 			}
 		}
 
@@ -147,6 +172,29 @@ public final class BlockPresentationResolverRegistry {
 		snapshot = List.copyOf(new ArrayList<>(
 			registrations.values().stream().map(Registration::resolver).toList()));
 	}
+
+	private static ValidatedResolver validate(BlockPresentationResolver resolver) {
+		if (resolver == null) {
+			return null;
+		}
+
+		try {
+			String id = validateId(resolver.id());
+			return id == null ? null : new ValidatedResolver(id, resolver);
+		} catch (Exception | LinkageError | AssertionError failure) {
+			return null;
+		}
+	}
+
+	private static String validateId(String id) {
+		try {
+			return EntityBlockGeometrySourceIds.validate(id);
+		} catch (Exception | LinkageError | AssertionError failure) {
+			return null;
+		}
+	}
+
+	private record ValidatedResolver(String id, BlockPresentationResolver resolver) {}
 
 	/** Lifecycle handle for one exact resolver registration. */
 	public static final class Registration implements AutoCloseable {

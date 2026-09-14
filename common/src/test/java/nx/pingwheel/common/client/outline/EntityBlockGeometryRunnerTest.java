@@ -180,6 +180,51 @@ class EntityBlockGeometryRunnerTest {
 	}
 
 	@Test
+	void observerReceivesFinalOutcomesInSourceOrderAndCannotStopLaterSources() {
+		EntityBlockGeometrySourceRegistry registry = quietRegistry();
+		registry.register(EntityBlockGeometrySource.of("test:optional", ignored ->
+			EntityBlockGeometryOutcome.FAILED));
+		EntityBlockGeometryRunner runner = new EntityBlockGeometryRunner(
+			registry,
+			EntityBlockGeometrySource.of("test:ber", ignored -> EntityBlockGeometryOutcome.RENDERED),
+			EntityBlockGeometrySource.of("test:baked", ignored -> EntityBlockGeometryOutcome.EMPTY));
+		List<String> observed = new ArrayList<>();
+
+		assertTrue(runner.run(EntityBlockRenderMode.ALL, EntityBlockGeometryContext::empty,
+			(sourceId, outcome) -> {
+				observed.add(sourceId + ":" + outcome);
+				if (sourceId.equals("test:ber")) {
+					throw new IllegalStateException("test observer failure");
+				}
+			}));
+
+		assertEquals(List.of(
+			"test:ber:RENDERED",
+			"test:baked:EMPTY",
+			"test:optional:FAILED"), observed);
+	}
+
+	@Test
+	void observerReceivesFailedForContextCreationFailuresAndNothingForVoxelOnly() {
+		EntityBlockGeometryRunner runner = new EntityBlockGeometryRunner(
+			quietRegistry(),
+			source("test:ber", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY),
+			source("test:baked", new AtomicInteger(), EntityBlockGeometryOutcome.EMPTY));
+		List<String> observed = new ArrayList<>();
+
+		assertFalse(runner.run(EntityBlockRenderMode.COMPATIBLE, () -> {
+			throw new IllegalStateException("test context failure");
+		}, (sourceId, outcome) -> observed.add(sourceId + ":" + outcome)));
+		assertEquals(List.of("test:ber:FAILED", "test:baked:FAILED"), observed);
+
+		observed.clear();
+		assertFalse(runner.run(EntityBlockRenderMode.VOXEL_SHAPE_ONLY,
+			EntityBlockGeometryContext::empty,
+			(sourceId, outcome) -> observed.add(sourceId + ":" + outcome)));
+		assertTrue(observed.isEmpty());
+	}
+
+	@Test
 	void voxelShapeOnlyInvokesNothingAndDoesNotConstructContext() {
 		EntityBlockGeometrySourceRegistry registry = quietRegistry();
 		AtomicInteger sourceCalls = new AtomicInteger();

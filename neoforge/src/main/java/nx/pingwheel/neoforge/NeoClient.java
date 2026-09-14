@@ -25,6 +25,8 @@ public class NeoClient {
 		"nx.pingwheel.neoforge.integration.create.CreateFlywheelGeometryAdapter";
 	private static final String CREATE_WATER_WHEEL_RESOLVER =
 		"nx.pingwheel.neoforge.integration.create.CreateLargeWaterWheelPresentationResolver";
+	private static final String CREATE_DOOR_RESOLVER =
+		"nx.pingwheel.neoforge.integration.create.CreateDoorPresentationResolver";
 	private static final String SIMULATED_DOCKING_CONNECTOR_RESOLVER =
 		"nx.pingwheel.neoforge.integration.simulated.SimulatedDockingConnectorPresentationResolver";
 	private static Boolean lastCreateDetected;
@@ -32,6 +34,7 @@ public class NeoClient {
 	private static String lastEntityAdapterState;
 	private static String lastFlywheelAdapterState;
 	private static String lastWaterWheelResolverState;
+	private static String lastCreateDoorResolverState;
 	private static String lastSimulatedResolverState;
 	private static boolean entityAdapterResolved;
 	private static boolean flywheelAdapterResolved;
@@ -83,9 +86,11 @@ public class NeoClient {
 		if (createDetected) {
 			registerOptionalAdapter(CREATE_ENTITY_ADAPTER, "create-entity", true);
 			registerOptionalResolver(CREATE_WATER_WHEEL_RESOLVER, "create-water-wheel-presentation");
+			registerOptionalResolver(CREATE_DOOR_RESOLVER, "create-door-presentation");
 		} else {
 			logAdapterState("create-entity", "not-detected");
 			logResolverState("create-water-wheel-presentation", "not-detected");
+			logResolverState("create-door-presentation", "not-detected");
 		}
 
 		if (createDetected && flywheelDetected) {
@@ -196,15 +201,19 @@ public class NeoClient {
 	}
 
 	private static void logResolverState(String resolverName, String state) {
-		boolean simulatedResolver = "simulated-docking-connector-presentation".equals(resolverName);
-		String previous = simulatedResolver ? lastSimulatedResolverState : lastWaterWheelResolverState;
+		String previous;
+		switch (resolverName) {
+			case "simulated-docking-connector-presentation" -> previous = lastSimulatedResolverState;
+			case "create-door-presentation" -> previous = lastCreateDoorResolverState;
+			default -> previous = lastWaterWheelResolverState;
+		}
 		if (state.equals(previous)) {
 			return;
 		}
-		if (simulatedResolver) {
-			lastSimulatedResolverState = state;
-		} else {
-			lastWaterWheelResolverState = state;
+		switch (resolverName) {
+			case "simulated-docking-connector-presentation" -> lastSimulatedResolverState = state;
+			case "create-door-presentation" -> lastCreateDoorResolverState = state;
+			default -> lastWaterWheelResolverState = state;
 		}
 		LOGGER.info("optional presentation resolver state transition: resolver={} state={} createDetected={}",
 			resolverName, state, lastCreateDetected == null ? false : lastCreateDetected);

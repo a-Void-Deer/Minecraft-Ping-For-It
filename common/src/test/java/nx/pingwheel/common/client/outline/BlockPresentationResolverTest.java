@@ -114,6 +114,22 @@ class BlockPresentationResolverTest {
 		assertNotEquals(lowerSubject.blockState(), upperSubject.blockState());
 	}
 
+	@Test
+	void doorPreservesEntityBlockTargetTypeForBothSubjects() {
+		BlockPos lowerPos = new BlockPos(10, 70, 11);
+		BlockPos upperPos = lowerPos.above();
+		BlockState lower = doorState(
+			DoubleBlockHalf.LOWER, Direction.NORTH, DoorHingeSide.LEFT, false, false);
+		BlockState upper = doorState(
+			DoubleBlockHalf.UPPER, Direction.NORTH, DoorHingeSide.LEFT, false, false);
+		BlockPresentation presentation = new BlockPresentationResolverRegistry().resolve(
+			world(Map.of(lowerPos, lower, upperPos, upper)),
+			sourceSpec(lowerPos, lower, "entity_block"));
+
+		assertEquals(List.of("entity_block", "entity_block"), presentation.renderSubjects().stream()
+			.map(BlockRenderSubject::renderTargetTypeId).toList());
+	}
+
 	@ParameterizedTest(name = "door invalid neighbor {0}")
 	@MethodSource("invalidDoorNeighborCases")
 	void invalidDoorNeighborFallsBackToDirect(DoorNeighborMismatch mismatch) {
@@ -316,6 +332,35 @@ class BlockPresentationResolverTest {
 		assertTrue(secondHandle.accepted());
 		assertEquals(List.of(first, second), registry.snapshot());
 		assertEquals("first", presentation.renderSubjects().get(0).subjectId());
+	}
+
+	@Test
+	void registerBeforeKeepsSpecializationsOrderedAndCloseRestoresAnchorOrder() {
+		BlockPresentationResolverRegistry registry = new BlockPresentationResolverRegistry(false);
+		BlockPresentationResolver anchor = resolver("test:anchor", context -> BlockPresentationResolution.UNHANDLED);
+		BlockPresentationResolver first = resolver("test:first", context -> BlockPresentationResolution.UNHANDLED);
+		BlockPresentationResolver second = resolver("test:second", context -> BlockPresentationResolution.UNHANDLED);
+		BlockPresentationResolverRegistry.Registration anchorHandle = registry.register(anchor);
+		BlockPresentationResolverRegistry.Registration firstHandle =
+			registry.registerBefore("test:anchor", first);
+		BlockPresentationResolverRegistry.Registration secondHandle =
+			registry.registerBefore("test:anchor", second);
+
+		assertTrue(anchorHandle.accepted());
+		assertTrue(firstHandle.accepted());
+		assertTrue(secondHandle.accepted());
+		assertEquals(List.of(first, second, anchor), registry.snapshot());
+		assertFalse(registry.registerBefore("test:unknown", resolver(
+			"test:unknown-specialization", context -> BlockPresentationResolution.UNHANDLED)).accepted());
+		assertFalse(registry.registerBefore("test:anchor", resolver(
+			"test:first", context -> BlockPresentationResolution.UNHANDLED)).accepted());
+
+		firstHandle.close();
+		assertEquals(List.of(second, anchor), registry.snapshot());
+		BlockPresentationResolverRegistry.Registration replacement = registry.registerBefore(
+			"test:anchor", resolver("test:first", context -> BlockPresentationResolution.UNHANDLED));
+		assertTrue(replacement.accepted());
+		assertEquals(3, registry.snapshot().size());
 	}
 
 	@Test

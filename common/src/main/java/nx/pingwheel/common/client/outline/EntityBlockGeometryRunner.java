@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
 import nx.pingwheel.common.Global;
@@ -79,6 +80,19 @@ public final class EntityBlockGeometryRunner {
 		EntityBlockRenderMode mode,
 		Supplier<EntityBlockGeometryContext> contextFactory
 	) {
+		return run(mode, contextFactory, (sourceId, outcome) -> {});
+	}
+
+	/**
+	 * Runs one mode-selected attempt and reports the final outcome of every
+	 * allowed source. Observer failures are intentionally fail-soft so optional
+	 * presentation bookkeeping cannot suppress later permitted sources.
+	 */
+	public boolean run(
+		EntityBlockRenderMode mode,
+		Supplier<EntityBlockGeometryContext> contextFactory,
+		BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver
+	) {
 		EntityBlockRenderMode effectiveMode = EntityBlockRenderMode.effective(mode);
 
 		if (effectiveMode == EntityBlockRenderMode.VOXEL_SHAPE_ONLY) {
@@ -93,31 +107,33 @@ public final class EntityBlockGeometryRunner {
 		}
 
 		Objects.requireNonNull(contextFactory, "contextFactory");
+		Objects.requireNonNull(outcomeObserver, "outcomeObserver");
 
 		boolean rendered = false;
 		for (EntityBlockGeometrySource source : allowedSources) {
+			String sourceId = safeSourceId(source);
 			EntityBlockGeometryContext context = null;
 			try {
 				// A fresh context is important: a source must observe one immutable
 				// attempt snapshot and must not retain live render state across calls.
 				context = contextFactory.get();
 			} catch (Exception | LinkageError | AssertionError failure) {
-				String sourceId = safeSourceId(source);
 				warnOnce(
 					"context-creation:" + sourceId,
 					() -> "entity block geometry attempt failed; id=" + sourceId
 						+ "; category=context-creation; context=<unavailable>",
 					failure);
+				reportOutcome(outcomeObserver, sourceId, EntityBlockGeometryOutcome.FAILED);
 				continue;
 			}
 
 			if (context == null) {
-				String sourceId = safeSourceId(source);
 				warnOnce(
 					"null-context:" + sourceId,
 					() -> "entity block geometry attempt failed; id=" + sourceId
 						+ "; category=null-context; context=null",
 					null);
+				reportOutcome(outcomeObserver, sourceId, EntityBlockGeometryOutcome.FAILED);
 				continue;
 			}
 
@@ -125,9 +141,23 @@ public final class EntityBlockGeometryRunner {
 			if (outcome == EntityBlockGeometryOutcome.RENDERED) {
 				rendered = true;
 			}
+			reportOutcome(outcomeObserver, sourceId, outcome);
 		}
 
 		return rendered;
+	}
+
+	private static void reportOutcome(
+		BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver,
+		String sourceId,
+		EntityBlockGeometryOutcome outcome
+	) {
+		try {
+			outcomeObserver.accept(sourceId, outcome);
+		} catch (Exception | LinkageError | AssertionError ignored) {
+			// Presentation observers are auxiliary bookkeeping. A recoverable
+			// observer fault must not alter source ordering or fallback behavior.
+		}
 	}
 
 	private EntityBlockGeometryOutcome attempt(
