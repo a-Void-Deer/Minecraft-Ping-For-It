@@ -101,7 +101,10 @@ public final class PingCaptureCoordinator {
 			return Optional.empty();
 		}
 
-		CapturedPingContext context = new CapturedPingContext(token, resolved, ray);
+		java.util.Optional<nx.pingwheel.common.domain.EntityLocalGeometryMetadata> localGeometryMetadata =
+			snapshot.entityLocalGeometryMetadata().filter(ignored -> isSameEntityTargetIdentity(
+				snapshot.target(), resolved.target()));
+		CapturedPingContext context = new CapturedPingContext(token, resolved, ray, localGeometryMetadata);
 
 		if (!activeInteraction.tryComplete(token, context)) {
 			logger.debug("capture reject: race/duplicate token={} kind={} dimension={}",
@@ -120,5 +123,14 @@ public final class PingCaptureCoordinator {
 			resolved.targetType().id());
 
 		return Optional.of(context);
+	}
+
+	private static boolean isSameEntityTargetIdentity(
+		nx.pingwheel.common.domain.Target captured,
+		nx.pingwheel.common.domain.Target resolved
+	) {
+		return captured instanceof nx.pingwheel.common.domain.Target.EntityTarget capturedEntity
+			&& resolved instanceof nx.pingwheel.common.domain.Target.EntityTarget resolvedEntity
+			&& capturedEntity.equals(resolvedEntity);
 	}
 }

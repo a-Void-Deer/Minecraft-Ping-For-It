@@ -2,6 +2,9 @@ package nx.pingwheel.common.interaction;
 
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.EntityCaptureMetadata;
+import nx.pingwheel.common.domain.EntityLocalGeometryMetadata;
+import nx.pingwheel.common.interaction.cancel.WorldVector;
+import nx.pingwheel.common.math.LocalGeometryKind;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -195,6 +198,26 @@ class TargetSnapshotTest {
 		assertSame(token, context.token());
 		assertSame(resolved, context.resolvedTarget());
 		assertSame(ray, context.ray());
+	}
+
+	@Test
+	void localGeometryMetadataUsesPlainImmutableValuesAndOldConstructorsRemainEmpty() {
+		EntityLocalGeometryMetadata metadata = new EntityLocalGeometryMetadata(
+			"test:owned_entity", LocalGeometryKind.FLUID, 4, 5, 6,
+			"minecraft:stone", Optional.of("minecraft:water"),
+			new WorldVector(1.25, 2.5, 3.75), new WorldVector(10.25, 20.5, 30.75));
+		Target target = new Target.EntityTarget(OVERWORLD, ENTITY_ID);
+		TargetSnapshot snapshot = new TargetSnapshot(
+			target, TargetMatchContext.none(), Optional.empty(), Optional.of(metadata));
+		ResolvedTarget resolved = new ResolvedTarget(
+			target, TargetTypeCatalog.builtIn().findById("entity").orElseThrow());
+		CapturedPingContext context = new CapturedPingContext(
+			new InteractionToken(7), resolved, CapturedRay.defaultRay(), Optional.of(metadata));
+
+		assertEquals(Optional.of(metadata), snapshot.entityLocalGeometryMetadata());
+		assertEquals(Optional.of(metadata), context.entityLocalGeometryMetadata());
+		assertTrue(new TargetSnapshot(target, TargetMatchContext.none()).entityLocalGeometryMetadata().isEmpty());
+		assertTrue(new CapturedPingContext(new InteractionToken(8), resolved).entityLocalGeometryMetadata().isEmpty());
 	}
 
 	@Test

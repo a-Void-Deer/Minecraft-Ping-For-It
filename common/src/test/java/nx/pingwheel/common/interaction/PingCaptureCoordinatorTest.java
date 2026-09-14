@@ -18,6 +18,9 @@ import nx.pingwheel.common.domain.ResolvedTarget;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetResolver;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
+import nx.pingwheel.common.domain.EntityLocalGeometryMetadata;
+import nx.pingwheel.common.interaction.cancel.WorldVector;
+import nx.pingwheel.common.math.LocalGeometryKind;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 
@@ -247,6 +250,37 @@ class PingCaptureCoordinatorTest {
 	}
 
 	@Test
+	void retainsLocalGeometryOnlyWhenResolverPreservesTheCapturedEntityIdentity() {
+		ActiveInteraction interaction = new ActiveInteraction();
+		TargetResolver identityResolver = (target, context) -> new ResolvedTarget(
+			target, TargetTypeCatalog.builtIn().findById("entity").orElseThrow());
+		PingCaptureCoordinator coordinator = new PingCaptureCoordinator(identityResolver, interaction, PingCaptureLogger.noop());
+		EntityLocalGeometryMetadata metadata = localGeometryMetadata();
+		Target entity = new Target.EntityTarget(OVERWORLD, UUID.randomUUID());
+		InteractionToken token = coordinator.begin();
+
+		CapturedPingContext retained = coordinator.complete(token,
+			new TargetSnapshot(entity, nx.pingwheel.common.domain.TargetMatchContext.none(), Optional.empty(), Optional.of(metadata)))
+			.orElseThrow();
+
+		assertEquals(Optional.of(metadata), retained.entityLocalGeometryMetadata());
+
+		ActiveInteraction replacementInteraction = new ActiveInteraction();
+		TargetResolver replacementResolver = (target, context) -> new ResolvedTarget(
+			new Target.EntityTarget(OVERWORLD, UUID.randomUUID()),
+			TargetTypeCatalog.builtIn().findById("entity").orElseThrow());
+		PingCaptureCoordinator replacementCoordinator = new PingCaptureCoordinator(
+			replacementResolver, replacementInteraction, PingCaptureLogger.noop());
+		InteractionToken replacementToken = replacementCoordinator.begin();
+
+		CapturedPingContext dropped = replacementCoordinator.complete(replacementToken,
+			new TargetSnapshot(entity, nx.pingwheel.common.domain.TargetMatchContext.none(), Optional.empty(), Optional.of(metadata)))
+			.orElseThrow();
+
+		assertTrue(dropped.entityLocalGeometryMetadata().isEmpty());
+	}
+
+	@Test
 	void completeRejectsNullArguments() {
 		ActiveInteraction interaction = new ActiveInteraction();
 		PingCaptureCoordinator coordinator = coordinator(interaction, new RecordingCaptureLogger());
@@ -294,6 +328,12 @@ class PingCaptureCoordinatorTest {
 	private static PingCaptureCoordinator coordinator(ActiveInteraction interaction, PingCaptureLogger logger) {
 		return new PingCaptureCoordinator(
 			DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()), interaction, logger);
+	}
+
+	private static EntityLocalGeometryMetadata localGeometryMetadata() {
+		return new EntityLocalGeometryMetadata(
+			"test:entity", LocalGeometryKind.BLOCK, 1, 2, 3, "minecraft:stone", Optional.empty(),
+			new WorldVector(1, 2, 3), new WorldVector(4, 5, 6));
 	}
 
 	private static void awaitLatch(CountDownLatch latch) {
