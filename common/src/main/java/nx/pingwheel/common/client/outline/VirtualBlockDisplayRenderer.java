@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
@@ -207,41 +208,17 @@ public final class VirtualBlockDisplayRenderer {
 				continue;
 			}
 
-			for (BlockRenderSubject subject : presentation.renderSubjects()) {
-				BlockPos pos = subject.blockPos();
-
-				if (!BlockPresentationSubjectValidation.isLoadedAndCurrent(level, subject)) {
-					continue;
-				}
-
-				BlockState blockState = subject.blockState();
-
-				// The immutable policy is compiled by ClientConfig validation/load/set
-				// paths. This frame only evaluates the current subject state against
-				// it; no configured string is reparsed here. The subject target type,
-				// rather than the source type, controls the route.
-				boolean nativeGlowMatches = ClientConfig.HANDLER.getConfig()
-					.getBlockDisplayPolicy()
-					.shouldUseNativeGlow(subject.renderTargetTypeId(), blockState);
-
-				boolean success = switch (BlockModelOutlineRoute.route(
-					subject.renderTargetTypeId(), nativeGlowMatches)) {
-					case ENTITY_BLOCK -> renderEntityBlock(
-						level, pos, blockState, spec, blockEntityDispatcher, entityDispatcher,
-						cameraPosition, builtInPartialTick, flywheelPartialTick,
-						subject.renderTargetTypeId(), blockKey);
-					case BLOCK_DISPLAY -> renderBlockDisplay(
-						level, pos, blockState, entityDispatcher,
-						cameraPosition, builtInPartialTick,
-						spec.argbColor(), subject.expectedBlockRegistryId(), blockKey)
-						== EntityBlockGeometryOutcome.RENDERED;
-					case VOXEL -> false;
-				};
-
-				if (success) {
-					frameState.addSuccess(subject.successKey(spec));
-				}
-			}
+			renderPresentationSubjects(
+				presentation,
+				level,
+				spec,
+				blockEntityDispatcher,
+				entityDispatcher,
+				cameraPosition,
+				builtInPartialTick,
+				flywheelPartialTick,
+				blockKey,
+				frameState);
 		}
 
 		for (Map.Entry<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> entry
@@ -268,6 +245,35 @@ public final class VirtualBlockDisplayRenderer {
 		}
 	}
 
+	private void renderPresentationSubjects(
+		BlockPresentation presentation,
+		ClientLevel level,
+		BlockOutlineSpec spec,
+		BlockEntityRenderDispatcher blockEntityDispatcher,
+		EntityRenderDispatcher entityDispatcher,
+		Vec3 cameraPosition,
+		float builtInPartialTick,
+		float flywheelPartialTick,
+		TargetKey.BlockKey blockKey,
+		BlockModelOutlineState frameState
+	) {
+		BlockPresentationSubjectDispatcher.dispatch(
+				presentation,
+				subject -> BlockPresentationSubjectValidation.isLoadedAndCurrent(level, subject),
+				subject -> frameState.addSuccess(subject.successKey(spec)),
+				(subject, outcomeObserver) -> renderOrdinarySubject(
+					level,
+					subject,
+					spec,
+					blockEntityDispatcher,
+					entityDispatcher,
+					cameraPosition,
+					builtInPartialTick,
+					flywheelPartialTick,
+					blockKey,
+					outcomeObserver));
+	}
+
 	/**
 	 * Attempts both native-glow routes for an {@code entity_block}. A block
 	 * entity may have dynamic renderer geometry and a static baked model, so a
@@ -286,14 +292,14 @@ public final class VirtualBlockDisplayRenderer {
 		float builtInPartialTick,
 		float flywheelPartialTick,
 		String renderTargetTypeId,
-		TargetKey.BlockKey targetKey
+		TargetKey.BlockKey targetKey,
+		BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver
 	) {
 		// Read the live local mode for every entity-block render attempt. It is
 		// intentionally absent from the ordinary `block` route above and is not
 		// cached by this renderer or by the per-frame outline state.
 		EntityBlockRenderMode mode = ClientConfig.HANDLER.getConfig().getEntityBlockRenderMode();
-		return entityBlockGeometryRunner.run(
-			mode,
+		java.util.function.Supplier<EntityBlockGeometryContext> contextFactory =
 			() -> new EntityBlockGeometryContext(
 				level,
 				pos,
@@ -310,7 +316,48 @@ public final class VirtualBlockDisplayRenderer {
 				targetKey,
 				renderTargetTypeId,
 				BlockModelOutlineState.INSTANCE.frameId(),
-				null));
+				null);
+		return outcomeObserver == null
+			? entityBlockGeometryRunner.run(mode, contextFactory)
+			: entityBlockGeometryRunner.run(mode, contextFactory, outcomeObserver);
+	}
+
+	private boolean renderOrdinarySubject(
+		ClientLevel level,
+		BlockRenderSubject subject,
+		BlockOutlineSpec spec,
+		BlockEntityRenderDispatcher blockEntityDispatcher,
+		EntityRenderDispatcher entityDispatcher,
+		Vec3 cameraPosition,
+		float builtInPartialTick,
+		float flywheelPartialTick,
+		TargetKey.BlockKey blockKey,
+		BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver
+	) {
+		BlockPos pos = subject.blockPos();
+		BlockState blockState = subject.blockState();
+
+		// The immutable policy is compiled by ClientConfig validation/load/set
+		// paths. This frame only evaluates the current subject state against it;
+		// no configured string is reparsed here. The subject target type, rather
+		// than the source type, controls the route.
+		boolean nativeGlowMatches = ClientConfig.HANDLER.getConfig()
+			.getBlockDisplayPolicy()
+			.shouldUseNativeGlow(subject.renderTargetTypeId(), blockState);
+
+		return switch (BlockModelOutlineRoute.route(
+			subject.renderTargetTypeId(), nativeGlowMatches)) {
+			case ENTITY_BLOCK -> renderEntityBlock(
+				level, pos, blockState, spec, blockEntityDispatcher, entityDispatcher,
+				cameraPosition, builtInPartialTick, flywheelPartialTick,
+				subject.renderTargetTypeId(), blockKey, outcomeObserver);
+			case BLOCK_DISPLAY -> renderBlockDisplay(
+				level, pos, blockState, entityDispatcher,
+				cameraPosition, builtInPartialTick,
+				spec.argbColor(), subject.expectedBlockRegistryId(), blockKey)
+				== EntityBlockGeometryOutcome.RENDERED;
+			case VOXEL -> false;
+		};
 	}
 
 	/**

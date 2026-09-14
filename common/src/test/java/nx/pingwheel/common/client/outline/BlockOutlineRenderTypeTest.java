@@ -12,6 +12,7 @@ import net.minecraft.server.Bootstrap;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.junit.jupiter.api.BeforeAll;
@@ -215,10 +216,83 @@ class BlockOutlineRenderTypeTest {
 			rendererCalls,
 			"nx/pingwheel/common/client/outline/BlockPresentationSubjectValidation",
 			"isLoadedAndCurrent") >= 0);
+
+		String virtualRenderer =
+			"nx/pingwheel/common/client/outline/VirtualBlockDisplayRenderer";
 		assertTrue(invocationIndex(
 			modelRendererCalls,
+			virtualRenderer,
+			"renderPresentationSubjects") >= 0,
+			"VirtualBlockDisplayRenderer.render must delegate ordinary presentations to its subject helper");
+
+		List<MethodCall> presentationCalls = methodInvocations(
+			"nx.pingwheel.common.client.outline.VirtualBlockDisplayRenderer",
+			"renderPresentationSubjects");
+		int dispatchIndex = invocationIndex(
+			presentationCalls,
+			"nx/pingwheel/common/client/outline/BlockPresentationSubjectDispatcher",
+			"dispatch",
+			"(Lnx/pingwheel/common/client/outline/BlockPresentation;"
+				+ "Ljava/util/function/Predicate;Ljava/util/function/Consumer;"
+				+ "Lnx/pingwheel/common/client/outline/BlockPresentationSubjectDispatcher$SubjectGeometryRenderer;)V");
+		assertTrue(dispatchIndex >= 0,
+			"renderPresentationSubjects must pass its live predicate and callbacks to the dispatcher");
+		assertEquals(-1, invocationIndex(
+			presentationCalls,
 			"nx/pingwheel/common/client/outline/BlockPresentationSubjectValidation",
-			"isLoadedAndCurrent") >= 0);
+			"isLoadedAndCurrent"),
+			"renderPresentationSubjects must not perform an ignored validation preflight");
+
+		List<LambdaBinding> predicateBindings = lambdaBindings(
+			"nx.pingwheel.common.client.outline.VirtualBlockDisplayRenderer",
+			"renderPresentationSubjects",
+			"Ljava/util/function/Predicate;");
+		assertEquals(1, predicateBindings.size(),
+			"renderPresentationSubjects must bind exactly one Predicate for dispatcher validation");
+		LambdaBinding validationBinding = predicateBindings.get(0);
+		assertEquals(
+			"(Lnet/minecraft/client/multiplayer/ClientLevel;)Ljava/util/function/Predicate;",
+			validationBinding.callSiteDescriptor());
+		assertEquals(virtualRenderer, validationBinding.implementation().owner());
+		assertEquals(
+			"(Lnet/minecraft/client/multiplayer/ClientLevel;"
+				+ "Lnx/pingwheel/common/client/outline/BlockRenderSubject;)Z",
+			validationBinding.implementation().descriptor());
+		assertTrue(invocationIndex(
+			methodInvocations(
+				"nx.pingwheel.common.client.outline.VirtualBlockDisplayRenderer",
+				validationBinding.implementation().name()),
+			"nx/pingwheel/common/client/outline/BlockPresentationSubjectValidation",
+			"isLoadedAndCurrent",
+			"(Lnet/minecraft/client/multiplayer/ClientLevel;"
+				+ "Lnx/pingwheel/common/client/outline/BlockRenderSubject;)Z") >= 0,
+			"the Predicate actually bound by renderPresentationSubjects must perform live subject validation");
+
+		List<MethodCall> dispatcherCalls = methodInvocations(
+			"nx.pingwheel.common.client.outline.BlockPresentationSubjectDispatcher", "dispatch");
+		int validationIndex = invocationIndex(
+			dispatcherCalls, "java/util/function/Predicate", "test");
+		int coverageIndex = invocationIndex(
+			dispatcherCalls,
+			"nx/pingwheel/common/client/outline/BlockPresentationCoverageTracker",
+			"covers");
+		int coveredSuccessIndex = invocationIndex(
+			dispatcherCalls, "java/util/function/Consumer", "accept");
+		int geometryIndex = invocationIndex(
+			dispatcherCalls,
+			"nx/pingwheel/common/client/outline/BlockPresentationSubjectDispatcher$SubjectGeometryRenderer",
+			"render");
+		int renderedSuccessIndex = invocationIndexAfter(
+			dispatcherCalls, "java/util/function/Consumer", "accept", coveredSuccessIndex + 1);
+		assertTrue(validationIndex >= 0, "dispatcher must test live validity for each subject");
+		assertTrue(coverageIndex > validationIndex,
+			"dispatcher must validate before source-conditioned coverage can record success");
+		assertTrue(coveredSuccessIndex > coverageIndex,
+			"covered subjects may record success only after live validation and coverage checks");
+		assertTrue(geometryIndex > validationIndex,
+			"dispatcher must validate before invoking the normal geometry callback");
+		assertTrue(renderedSuccessIndex > geometryIndex,
+			"normal subjects may record success only after their renderer reports success");
 	}
 
 	private static List<MethodCall> methodInvocations(String className, String methodName) {
@@ -265,6 +339,49 @@ class BlockOutlineRenderTypeTest {
 		return calls;
 	}
 
+	private static List<LambdaBinding> lambdaBindings(
+		String className, String methodName, String functionalInterfaceDescriptor
+	) {
+		List<LambdaBinding> bindings = new ArrayList<>();
+		readClass(className).accept(new ClassVisitor(Opcodes.ASM9) {
+			@Override
+			public MethodVisitor visitMethod(
+				int access, String name, String descriptor, String signature, String[] exceptions
+			) {
+				if (!methodName.equals(name)) {
+					return null;
+				}
+
+				return new MethodVisitor(Opcodes.ASM9) {
+					@Override
+					public void visitInvokeDynamicInsn(
+						String name,
+						String descriptor,
+						Handle bootstrapMethodHandle,
+						Object... bootstrapMethodArguments
+					) {
+						if (!descriptor.endsWith(functionalInterfaceDescriptor)
+							|| !"java/lang/invoke/LambdaMetafactory".equals(bootstrapMethodHandle.getOwner())) {
+							return;
+						}
+
+						for (Object argument : bootstrapMethodArguments) {
+							if (argument instanceof Handle implementation) {
+								bindings.add(new LambdaBinding(
+									descriptor,
+									new MethodHandleRef(
+										implementation.getOwner(),
+										implementation.getName(),
+										implementation.getDesc())));
+							}
+						}
+					}
+				};
+			}
+		}, 0);
+		return bindings;
+	}
+
 	private static List<String> methodNames(String className) {
 		List<String> names = new ArrayList<>();
 		readClass(className).accept(new ClassVisitor(Opcodes.ASM9) {
@@ -305,7 +422,27 @@ class BlockOutlineRenderTypeTest {
 	}
 
 	private static int invocationIndex(List<MethodCall> calls, String owner, String name) {
+		return invocationIndexAfter(calls, owner, name, 0);
+	}
+
+	private static int invocationIndex(
+		List<MethodCall> calls, String owner, String name, String descriptor
+	) {
 		for (int index = 0; index < calls.size(); index++) {
+			MethodCall call = calls.get(index);
+			if (owner.equals(call.owner())
+				&& name.equals(call.name())
+				&& descriptor.equals(call.descriptor())) {
+				return index;
+			}
+		}
+		return -1;
+	}
+
+	private static int invocationIndexAfter(
+		List<MethodCall> calls, String owner, String name, int startIndex
+	) {
+		for (int index = startIndex; index < calls.size(); index++) {
 			MethodCall call = calls.get(index);
 			if (owner.equals(call.owner()) && name.equals(call.name())) {
 				return index;
@@ -338,6 +475,8 @@ class BlockOutlineRenderTypeTest {
 	}
 
 	private record MethodCall(String owner, String name, String descriptor) {}
+	private record MethodHandleRef(String owner, String name, String descriptor) {}
+	private record LambdaBinding(String callSiteDescriptor, MethodHandleRef implementation) {}
 
 	private static final class AnnotationValueVisitor extends AnnotationVisitor {
 		private final List<Object> values;

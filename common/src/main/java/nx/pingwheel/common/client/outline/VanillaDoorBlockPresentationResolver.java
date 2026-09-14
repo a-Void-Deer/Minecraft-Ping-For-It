@@ -40,12 +40,13 @@ public final class VanillaDoorBlockPresentationResolver implements BlockPresenta
 		}
 
 		String expectedId = context.sourceSpec().blockKey().blockRegistryId();
+		String targetTypeId = context.sourceSpec().targetTypeId();
 		return BlockPresentationResolution.handled(List.of(
 			new BlockRenderSubject(
-				"lower", lowerPos, lower, expectedId, "block",
+				"lower", lowerPos, lower, expectedId, targetTypeId,
 				BlockPresentationRelation.COMPOSITE),
 			new BlockRenderSubject(
-				"upper", upperPos, upper, expectedId, "block",
+				"upper", upperPos, upper, expectedId, targetTypeId,
 				BlockPresentationRelation.COMPOSITE)));
 	}
 
