@@ -1,0 +1,136 @@
+name: Feature Request
+description: Suggest a new feature or improvement for Ping For It
+title: "[Feature]: "
+labels: "enhancement"
+
+body:
+  - type: checkboxes
+    attributes:
+      label: Preflight Checklist
+      description: Please ensure you've completed all of the following.
+      options:
+        - label: I have searched the [issue tracker](https://github.com/a-Void-Deer/Minecraft-Ping-For-It/issues?q=is%3Aissue) and could not find an existing request for the same feature.
+          required: true
+        - label: This is a feature request or improvement, not a bug report.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this feature solve?
+      description: |
+        Describe the problem, limitation, or use case behind your request.
+        Please explain why the feature would be useful instead of only describing what should be added.
+      placeholder: |
+        Example:
+        When playing on a technical server, the existing ping types do not ......
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: Describe how you would like Ping For It to solve the problem. It's okay if you don't have a solution in mind.
+      placeholder: Describe the behavior you would like to see.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Which part of Ping For It does this feature relate to?
+      multiple: true
+      options:
+        - Ping input / keybind
+        - Ping wheel
+        - Ping types
+        - Entity targeting
+        - Block targeting
+        - Location targeting
+        - Marker rendering
+        - Multiplayer / networking
+        - Ping channels
+        - Configuration
+        - Commands / permissions
+        - Localization
+        - Mod compatibility / integrations
+        - API / extensibility
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Who would benefit from this feature?
+      multiple: true
+      options:
+        - Players
+        - Server owners / administrators
+        - Modpack authors
+        - Other mod developers
+        - Everyone
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Where should this feature work?
+      description: Select the scope you think is appropriate. It's okay if you're not sure.
+      multiple: false
+      options:
+        - Client-side only
+        - Server-side only
+        - Both client and server
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example Usage
+      description: |
+        Give an example of how you would use this feature in-game.
+        A short user flow is especially helpful for interaction-related features.
+      placeholder: |
+        Example:
+        1. Look at a chest.
+        2. Open the ping wheel.
+        3. Select "Need Restock".
+        4. Only players in the same ping channel see the marker.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: |
+        Is there another way to achieve this currently?
+        Have you considered any alternative solutions or designs?
+        (Not required, but helpful for us to understand your request.)
+    validations:
+      required: false
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility / Integration
+      description: |
+        Does this feature depend on or interact with another mod, loader, API, or integration?
+        If applicable, include the mod name, version, and a link to it.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Information
+      description: |
+        Add any other context, screenshots, mockups, examples, or implementation ideas that may help explain the request.
+    validations:
+      required: false

@@ -1,20 +1,16 @@
 name: Bug Report
-description: Report a bug with Ping Wheel
+description: Report a bug of Ping For It
 title: "[Bug]: "
-labels: "bug :bug:"
+labels: "bug"
 body:
 - type: checkboxes
   attributes:
     label: Preflight Checklist
     description: Please ensure you've completed all of the following.
     options:
-      - label: After testing with only Ping Wheel installed, the issue still remains. Otherwise, [report an incompatibility](https://github.com/LukenSkyne/Minecraft-Ping-Wheel/issues/new?template=incompatibility_report.yml) instead.
+      - label: For multiplayer issues, I have confirmed that the client and server use compatible versions of Ping For It.
         required: true
-      - label: I am using the [latest version](https://github.com/LukenSkyne/Minecraft-Ping-Wheel/releases) of Ping Wheel for the corresponding mod loader.
-        required: true
-      - label: The server I am playing on has Ping Wheel installed.
-        required: true
-      - label: I have searched the [issue tracker](https://github.com/LukenSkyne/Minecraft-Ping-Wheel/issues?q=is%3Aissue) for a bug report that matches the one I want to file, without success.
+      - label: I have searched the [issue tracker](https://github.com/a-Void-Deer/Minecraft-Ping-For-It/issues?q=is%3Aissue) for a bug report that matches the one I want to file, without success.
         required: true
 
 - type: dropdown
@@ -31,31 +27,29 @@ body:
 - type: dropdown
   attributes:
     label: What versions of Minecraft have you experienced the issue in?
-    multiple: true
+    multiple: false
     options:
-      - 26.1–26.1.2
-      - 1.21.11
-      - 1.21.9–1.21.10
-      - 1.21.6–1.21.8
-      - 1.21.5
-      - 1.21.4
-      - 1.21.2–1.21.3
       - 1.21–1.21.1
-      - 1.20.5–1.20.6
-      - 1.20.3–1.20.4
-      - 1.20.2
-      - 1.20–1.20.1
-      - 1.19.4
-      - 1.19.3
-      - 1.19–1.19.2
-      - 1.18–1.18.2
   validations:
     required: true
 
-- type: textarea
+- type: dropdown
   attributes:
-    label: Expected Behavior
-    description: A clear and concise description of what you expected to happen.
+    label: Which world are you in?
+    multiple: false
+    options:
+      - Singleplayer
+      - LAN Server (Select this if you clicked `Open to LAN` for other players to join)
+      - Dedicated server, or connected to a dedicated server
+      - I'm not sure. (We may ask you for logs and other information to help us reproduce the issue.)
+  validations:
+    required: true
+
+- type: input
+  attributes:
+    label: Ping For It version
+    description: The exact version of Ping For It you are using.
+    placeholder: e.g. 0.3.0-pfi-beta1
   validations:
     required: true
 
@@ -66,15 +60,73 @@ body:
   validations:
     required: true
 
-- type: input
+- type: textarea
   attributes:
-    label: Logs URL
-    description: Please upload your latest log file to [mclo.gs](https://mclo.gs/) and put the URL here. You can find the log file in your instance folder at `.minecraft/logs/latest.log`.
-    placeholder: https://mclo.gs/...
+    label: Steps to reproduce
+    description: How to reproduce the circumstance you've filled in `Actual Behavior` part?
+  validations:
+    required: true
+
+- type: dropdown
+  attributes:
+    label: How frequently does the bug occur? Don't worry, if it doesn't happen every time, we still want to know about it.
+    multiple: false
+    options:
+      - EVERY TIME I reproduce
+      - most of the time
+      - Sometimes
+      - rarely happens
+      - I can't reproduce it, but it DID happen at least once.
+      - I'm not sure.
   validations:
     required: true
 
 - type: textarea
   attributes:
+    label: Expected Behavior
+    description: A clear and concise description of what you expected to happen.
+  validations:
+    required: true
+
+- type: dropdown
+  attributes:
+    label: Have you tried reproducing the issue with only Ping For It installed?
+    multiple: false
+    options:
+      - Yes, the issue still occurs.
+      - Yes, but I could not reproduce it.
+      - No, I haven't. (We may ask you for logs and other information to help us reproduce the issue.)
+  validations:
+    required: true
+
+- type: textarea
+  attributes:
+    label: Other mods
+    description: |
+      List any other mods that may be relevant.
+      If you are using a modpack, you can also provide its name and version.
+  validations:
+    required: false
+
+- type: checkboxes
+  attributes:
+    label: Privacy & security
+    description: Check your personal info & valuable info before uploading logs and opening issue.
+    options:
+      - label: I have removed any sensitive or personal information from the logs and this issue before submitting it, e.g. AI API Keys, personal information, etc.
+        required: true
+
+- type: input
+  attributes:
+    label: Logs URL
+    description: If possible, upload your log file to [mclo.gs](https://mclo.gs/) and put the URL here. Better to upload `latest.log`, `debug.log` (and if a crash happened,  `crash-report-<time>-<type>.txt`). You can find the log file in your instance folder at `.minecraft/logs/` or `.minecraft/versions/<game-instance-name>/logs/`.
+    placeholder: https://mclo.gs/...
+  validations:
+    required: false
+
+- type: textarea
+  attributes:
     label: Additional Information
-    description: If your problem needs further explanation, or if you can give instructions to reproduce the issue, please add more information here.
+    description: If your problem needs further explanation, please add more information here.
+  validations:
+    required: false
