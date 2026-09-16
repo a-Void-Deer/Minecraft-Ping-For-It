@@ -28,9 +28,21 @@ There is no GUI list editor. Both lists accept only:
 - global wildcard `*:*`;
 - block tag `#namespace:tag`.
 
-Entries have union semantics. Invalid entries, missing referenced content and
-unavailable optional-mod entries match false. A blacklist match overrides a
-whitelist match. These lists are not a datapack or server-sync system.
+Entries have union semantics, but matching and persisted-config validation are
+separate boundaries:
+
+- Within a supplied direct-matcher list, blank or grammatically malformed
+  entries are ignored, so those entries cannot match. A grammatically valid
+  entry whose block, tag or optional-mod content is unavailable also matches
+  false.
+- Persisted client lists are validated strictly when the configuration loads.
+  A `null` list, or a `null`, blank or grammatically malformed entry, makes the
+  persisted client configuration invalid; it is not accepted as a harmless
+  non-match. That case is owned by
+  [invalid-file recovery](#invalid-file-recovery-and-preservation-lock).
+
+A blacklist match overrides a whitelist match. These lists are not a datapack
+or server-sync system.
 Target-type/live-state conditions still apply after a list match; see
 [outline attempt eligibility](../rendering/outline.md).
 
@@ -56,8 +68,9 @@ effect after restart or an explicit reload.
 
 ## Invalid-file recovery and preservation lock
 
-If client config parsing is invalid, back up the original bytes **before** reset.
-A successful reset file begins with exactly these three one-line comments,
+If client config parsing or strict persisted-list validation is invalid, back up
+the original bytes **before** resetting the whole configuration to defaults. A
+successful reset file begins with exactly these three one-line comments,
 followed by defaults:
 
 ```text
@@ -69,6 +82,21 @@ followed by defaults:
 Sanitize the reason for a one-line comment. If backup fails, preserve the
 original on disk. Defaults may remain in memory, but neither reset nor normal
 saves can bypass the preservation lock. In-memory defaults remain disk-independent
-until restart/manual intervention. Clear the lock only after a later successful
-load or recovery. Coverage and the pending in-session/external-edit cases are
-tracked in [verification](../testing/verification.md).
+until restart/manual intervention. Clear this invalid-file lock only after a
+later successful load or recovery. Coverage and the pending
+in-session/external-edit cases are tracked in
+[verification](../testing/verification.md).
+
+### Future-version preservation
+
+Client and server configuration share a future-version boundary. When a file
+declares a version newer than the running code supports, keep its original bytes
+on disk and use defaults only in memory. `SaveProtection.FUTURE_VERSION` blocks
+every write path, including ordinary saves and reset, from replacing that file.
+
+This is distinct from invalid-file recovery: a future-version file is not backed
+up as broken and is not replaced with a reset/default file. A later load
+re-evaluates the current on-disk state. If the future-version file remains, its
+protection remains; if it has been removed or replaced, the existing
+initialization, loading or invalid-file recovery path applies. This contract
+does not define a new downgrade or migration path.

@@ -5,7 +5,7 @@ plugins {
     id "net.neoforged.moddev" version "${mod_dev_gradle_version}" apply false
 }
 
-// Aggregated identity verification (spec.md: AC-1).
+// Aggregated identity verification (docs/testing/verification.md#build-source-set-and-artifact-verification).
 // Adds no build dependencies and only inspects the final shippable jars, so
 // it works on any checkout that can produce the three loader jars. Loader
 // builds must never wire back into this task, or the task graph would cycle.

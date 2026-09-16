@@ -47,10 +47,10 @@ successful normal geometry from being overdrawn by a duplicate shape mask.
 ## Consequences
 
 Normal sources run first and report honest outcomes. Uncovered subjects retain
-shape fallback. Geometry acquisition and GPU rendering are documented
-separately but form one invariant: live native edges plus LINES,
-`rendertype_lines`, 3.75 px width, no depth test/`GL_ALWAYS`, color-only writes,
-and late composite submission.
+shape fallback. The [native VoxelShape geometry](../geometry/voxel_shape.md)
+and [VoxelShape GPU render invariant](../rendering/outline.md#voxelshape-gpu-render-invariant)
+document the live-edge acquisition and render-state/submission portions of one
+invariant.
 
 ## Related docs
 

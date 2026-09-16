@@ -43,6 +43,7 @@ choosing or dropping a requirement.
 | Change Create/Flywheel support | [Create integration](integrations/create.md) | [Create raycast supplement](integrations/create-contraption-raycast.md), local geometry and geometry sources |
 | Change Sable/external-target support | [Sable integration](integrations/sable.md) | Target identity, validation, winner selection and presentation |
 | Change loader, mod-ID or optional-content boundaries | [Compatibility](compatibility.md) | The affected integration and security |
+| Change build logic, source-set wiring, loader packaging or artifact identity verification | [Testing and verification](testing/verification.md#build-source-set-and-artifact-verification) | [Repository build instructions](../README.md#install-build-and-verify), compatibility and the affected loader build file |
 | Assess coverage or plan validation | [Testing and verification](testing/verification.md) | The changed topic and applicable decision |
 
 Every topic document is reachable from the table above or the decision index

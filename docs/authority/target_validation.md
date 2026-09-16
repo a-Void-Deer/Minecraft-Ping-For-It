@@ -34,6 +34,8 @@ Presentation in another dimension is skipped. See
 [target identity](../identity/target_model.md) and
 [Sable](../integrations/sable.md) for the lifecycle boundary; do not generalize
 the external-target exception into continuous ordinary-marker validation.
+Entity locator form and server canonicalization, including the Experience Orb
+runtime-ID exception, are defined by [target identity](../identity/target_model.md).
 
 A malformed block registry ID or invalid provider request is an invalid request.
 A gone/dead/cross-dimension entity, a missing or differently typed block, or a
@@ -60,7 +62,10 @@ The MarkerCreate packet does not authorize its channel or recipients. The
 server uses the sender's stored channel and channel/team policy, snapshots the
 recipient audience at creation, assigns server arrival and expiry state, and
 then synchronizes accepted state. Later channel switches do not rewrite that
-marker's audience.
+marker's audience. Disconnect cleanup is a lifecycle exception: the server
+removes markers owned by the disconnected player, removes that player from the
+remaining marker audiences, and removes a marker whose audience is then empty.
+This cleanup does not recalculate channel/team policy.
 
 ## Local pre-commit invalidation
 

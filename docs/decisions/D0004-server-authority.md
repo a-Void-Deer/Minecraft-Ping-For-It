@@ -25,8 +25,10 @@ exception; ordinary committed markers are not continuously revalidated.
 Client-supplied presentation, classification, ownership and timing are not
 authoritative in a multiplayer system. Server state is the common source of
 truth for target validity and permissions. Recipient-scoped winner calculation
-also respects the immutable audience captured at creation, while retaining
-losers permits deterministic recovery after removal or expiry.
+also respects the audience captured at creation. Later channel switches do not
+recalculate that audience; its disconnect lifecycle qualification is specified
+by [target validation](../authority/target_validation.md). Retaining losers
+permits deterministic recovery after removal or expiry.
 
 ## Why not other approaches
 

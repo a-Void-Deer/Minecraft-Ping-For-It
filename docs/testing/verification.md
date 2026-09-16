@@ -62,6 +62,36 @@ The current suite covers:
 - invalid client-config recovery; and
 - behavioral native-edge rendering.
 
+### Sable integration coverage
+
+The linked [Sable integration](../integrations/sable.md) topic remains the
+behavior owner for [client capture and presentation](../integrations/sable.md#client-capture-and-presentation),
+[server validation and materialization](../integrations/sable.md#server-validation-and-materialization),
+and [refresh lifecycle](../integrations/sable.md#refresh-lifecycle). The
+following focused seams provide limited structural, locator-codec and
+diagnostic evidence:
+
+- `SableClientCompanionAccessContractTest` statically parses the compiled
+  access-class constant pool, requires the exact
+  `SableCompanion.getContaining(Level, Position)` symbol, and excludes the
+  exact names `getClientLevel` and `getContainingClient`;
+- `SableExternalBlockLocatorTest` covers representative encode/parse
+  round-trips and selected malformed, noncanonical, and out-of-bounds cases;
+- `SableRefreshLogGateTest` checks decision state for tested locator or reason
+  changes and duplicates, rather than a refresh operation or log sink;
+- `SableDiagnosticsTest` and `SableServerDiagnosticsTest` check selected event
+  metadata and record fields, including same-throwable identity for a server
+  exception and constructed-invalid or `LinkageError` cases;
+- `SableClientDiagnosticsTest` checks an empty capture result when Sable is
+  absent and diagnostic presence from explicit `logCaptureFallback` calls with
+  a reason; and
+- `SablePresentationLogGateTest` checks cadence, capacity, repeated
+  failure-class key de-duplication, and throwable identity.
+
+These unit and bytecode seams do not load a Sable runtime or establish the
+provider, materialization, tracking-point reference, live-sublevel refresh,
+multiplayer, or in-game behavior described by those topic sections.
+
 ### Rate-policy courtesy behavior
 
 The current suite covers the create-only client token-bucket courtesy gate,
@@ -89,6 +119,24 @@ checks. Passing either side alone does not prove the other, and structural or
 behavioral tests do not by themselves prove actual visibility through occluders
 or from arbitrary in-game camera angles.
 
+## Build, source-set and artifact verification
+
+The included Gradle projects are `common`, `fabric`, `forge`, and `neoforge`.
+Their loader source sets receive common Java and resources through the shared
+loader wiring. Fabric retains the common mixin configuration and Loom-generated
+intermediary refmap; Forge and NeoForge use their loader-local official-Mojmap
+configuration instead. This routing identifies existing tasks and artifact
+purposes only. Execution and reporting rules remain owned by
+[AGENTS.md](../../AGENTS.md); the current root commands are listed in the
+[repository README](../../README.md#install-build-and-verify).
+
+| Module or artifact scope | Task | Purpose |
+| --- | --- | --- |
+| `common` test source set | `:common:test` | Runs the common JUnit Platform tests, including shared behavior and integration seams. |
+| `neoforge` test source set | `:neoforge:test` | Runs the NeoForge JUnit Platform tests, including NeoForge-specific resolver coverage. |
+| Affected loader source set | `:fabric:build`, `:forge:build`, or `:neoforge:build` | Builds the affected Fabric, Forge, or NeoForge source set and its loader jar. |
+| All shippable loader artifacts | `verifyModIdentity` | Depends on all three loader `build` tasks, then inspects the expected Fabric, Forge, and NeoForge jars in their loader `build/libs` directories for fork identity. |
+
 ## Known automated gaps
 
 The following gaps remain open until direct evidence closes them:
@@ -99,6 +147,22 @@ The following gaps remain open until direct evidence closes them:
 - server-side sanitization of negative rate-policy values; and
 - detailed diagnostic behavior in the private
   `CreateEntityOutlineAdapter.EntityDiagnostics` path.
+
+Sable-specific gaps remain for:
+
+- installed-Sable API compatibility and client capture/presentation against a
+  live sublevel, including the established
+  [logical-anchor/render-pose boundary](../integrations/sable.md#client-capture-and-presentation);
+- provider materialization, tracking-point reference counting, rollback and
+  release, including the existing empty-audience cleanup path documented under
+  [server validation and materialization](../integrations/sable.md#server-validation-and-materialization);
+- live-sublevel refresh through the documented available, temporarily
+  unavailable, and invalid outcomes in the
+  [refresh lifecycle](../integrations/sable.md#refresh-lifecycle); and
+- end-to-end server-authoritative names, fail-soft behavior, and multiplayer
+  marker synchronization at the boundaries owned by
+  [Sable](../integrations/sable.md#names-permissions-and-diagnostics) and
+  [target validation](../authority/target_validation.md).
 
 Coverage of Flywheel diagnostics or another adapter's diagnostic helper does
 not close the private `EntityDiagnostics` gap.
@@ -121,6 +185,7 @@ or because related automated tests exist.
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |
 | Optional content and rendering | Absent or partially present optional content; Create/Flywheel routes; occlusion and arbitrary camera angles; current shape, offset and seed. |
 | Create contraption raycast | Hollow, sparse and overlapping contraptions; world-wall ordering; all transparent/fluid policy combinations including waterlogging; moving/rotated, minecart-mounted, carriage and gantry forms; portal-hidden or loading data; held press-time target; Create-absent and delegate-unavailable paths; large-structure press cost. |
+| Sable external blocks | An installed-Sable client/server session covering [candidate capture and presentation](../integrations/sable.md#client-capture-and-presentation), [server materialization and release](../integrations/sable.md#server-validation-and-materialization) after removal, expiry, owner disconnect, and empty-audience cleanup, [live-sublevel refresh outcomes](../integrations/sable.md#refresh-lifecycle), names and fail-soft behavior, and multiplayer create, refresh, and removal. |
 
 ## Recording future evidence
 

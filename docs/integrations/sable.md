@@ -9,6 +9,18 @@ API shape drift, or a linkage failure disables this integration softly. Ordinary
 entity, block and location pings remain available. There is no cross-dimension
 entity tracking or Immersive Portals behavior here.
 
+## Client capture and presentation
+
+Client capture creates an external candidate only after positive Sable
+sub-level containment; otherwise it preserves the existing projected-position
+or location fallback. Server validation and materialization remain required
+before that candidate can become a Marker.
+
+The server uses Sable's logical pose for the authoritative external anchor.
+Client presentation separately applies the current render pose to live local
+block data. Those pose roles do not alter the candidate or committed identity
+defined below.
+
 ## Candidate and committed identity
 
 A client-side external candidate has an empty `stableTargetId`. It is not a
@@ -80,4 +92,4 @@ requires them; they do not become hard dependencies for unrelated pings.
 Related contracts: [target identity](../identity/target_model.md),
 [server validation](../authority/target_validation.md),
 [server authority decision](../decisions/D0004-server-authority.md), and
-[verification](../testing/verification.md).
+[Sable coverage and pending scenarios](../testing/verification.md#sable-integration-coverage).

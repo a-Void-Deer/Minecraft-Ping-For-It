@@ -3,7 +3,7 @@
 ## Deterministic authoritative ordering
 
 For each recipient, the server considers only active same-target markers whose
-immutable audience contains that recipient, then chooses the visible winner by:
+current audience contains that recipient, then chooses the visible winner by:
 
 1. latest **server arrival time**;
 2. larger Marker ID when arrival times are equal.
@@ -12,7 +12,9 @@ Marker IDs must support deterministic larger-ID comparison. Client timestamps,
 render order, unordered map traversal and receipt order on an individual client
 are not substitutes for this ordering. Concrete target grouping follows
 [stable identity](../identity/target_model.md), not render proxy positions or
-the local constituent hit on a whole entity.
+the local constituent hit on a whole entity. The server snapshots the audience
+at creation. Later channel switches do not recalculate it; disconnect cleanup
+can shrink it and is owned by [target validation](target_validation.md).
 
 ## Presentation and lifecycle
 
@@ -27,7 +29,7 @@ winner, its selected Ping Type supplies the visible color. Removal still require
 [ownership/active-status checks](target_validation.md).
 
 External locator/anchor refresh preserves marker ID, owner, Target/Ping Types,
-arrival time, expiry, target key and immutable audience, so it does not
+arrival time, expiry, target key and current audience, so it does not
 manufacture a new winner;
 see [Sable](../integrations/sable.md). The
 [verification matrix](../testing/verification.md) keeps multiplayer winner and tie cases

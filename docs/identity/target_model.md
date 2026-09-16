@@ -21,7 +21,11 @@ identity/presentation boundary.
 
 ## Ordinary identities and lifecycle
 
-Entity identity uses a stable entity UUID where available, plus dimension.
+Entity identity uses a server-canonical tagged locator plus dimension. The
+locator may be a UUID or a runtime ID. A runtime-ID request is valid only for an
+Experience Orb; a runtime-ID request for any other entity is rejected. After
+resolving the actual entity, the server normalizes its locator to the actual
+runtime ID for an Experience Orb and to the actual UUID for every other entity.
 Movement or same-dimension teleportation does not change identity. A dimension
 change, death, disappearance or absence at authoritative marker creation makes
 the target invalid.
@@ -70,6 +74,12 @@ committed target:
   256-character external-identifier limit. Provider-specific parsing is
   isolated in the provider.
 
+These are domain constraints. At the packet boundary, each encoded field must
+also fit its codec limit. In particular, `Target` and `TargetKey` encode
+`dimensionId` with `writeUtf(..., 256)`: this is a 256-character wire limit,
+not a byte limit. That transport limit does not make a dimension ID an external
+identifier or change its non-blank domain constraint.
+
 This is an existing external-target exception, not a Create constituent-block
 implementation or cross-dimension tracking feature.
 
@@ -82,7 +92,7 @@ larger-ID comparison. `targetTypeId`, including `entity_block`, survives marker
 codec round trips; entity-local hit detail does not change the packet shape.
 
 An external locator/anchor refresh rebuilds the stored marker with the same ID,
-owner, Target Type, Ping Type, arrival, expiry and immutable audience. It is an
+owner, Target Type, Ping Type, arrival, expiry and current audience. It is an
 update of the committed marker, not another receipt or a new winner candidate.
 This continuity within the fork does not imply original-mod protocol support.
 
