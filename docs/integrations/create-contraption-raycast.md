@@ -1,5 +1,12 @@
 # Create contraption ray targeting
 
+This supplement owns Create-specific transform, captured-view, shape-kernel,
+cost, limitation, and manual-scenario details. The shared owner snapshot and
+owned `HIT`/`MISS`/`UNAVAILABLE`/`FAILED` behavior is defined by
+[entity-local picking](../picking/local_geometry.md) and
+[D0006](../decisions/D0006-exact-owned-geometry.md). The integration overview is
+[Create](create.md).
+
 ## Scope
 
 On Minecraft 1.21.1, the NeoForge integration refines ping targeting for these Create entity types:
@@ -42,17 +49,13 @@ Only fluid state represented by captured contraption block states is available, 
 
 The coarse entity AABB is only a candidate bound. A ray through a hole must not select the surrounding contraption merely because it intersects that bound. Rejecting one candidate still allows another entity or a world block behind it to win. The final precise contraption hit remains an `EntityHitResult`, preserving the existing Sable/block and Distant Horizons/miss branching.
 
-The source ID is `pingforit:create_contraption_raycast`. Registrations are ordered explicitly by numeric priority and source ID. The registry snapshot is fixed for one ray.
-
-| Ownership/result | Candidate handling |
-| --- | --- |
-| No registered owner | Existing entity AABB selection |
-| Owned `HIT` | Use the precise surface hit |
-| Owned `MISS` | Skip the candidate |
-| Owned `UNAVAILABLE` | Skip the candidate |
-| Owned `FAILED` | Skip the candidate |
-
-An owned non-hit never falls back to the coarse AABB. Recoverable capture or scan failures invalidate the entire candidate attempt, including provisional hits. Other candidates remain eligible.
+The source ID is `pingforit:create_contraption_raycast`. Its registration
+participates in the common explicit numeric-priority/source-ID ordering, and one
+immutable registry snapshot is fixed for the complete ray. The shared handling
+of unowned candidates and the four owned outcomes is defined once in
+[entity-local picking](../picking/local_geometry.md). For this Create source, a
+recoverable capture or scan failure invalidates the complete candidate attempt,
+including any provisional hit; other candidates remain eligible.
 
 ## Local geometry and optional loading
 
