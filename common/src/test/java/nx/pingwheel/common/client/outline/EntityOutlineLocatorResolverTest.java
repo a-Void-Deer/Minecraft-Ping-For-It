@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ExperienceOrb;
+import nx.pingwheel.common.core.RenderEntityLookupCache;
 import nx.pingwheel.common.domain.EntityLocator;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -86,5 +87,51 @@ class EntityOutlineLocatorResolverTest {
 		assertSame(a, EntityOutlineLocatorResolver.resolve(EntityLocator.uuid(a.getUUID()), map::get));
 		assertSame(orb, EntityOutlineLocatorResolver.resolve(EntityLocator.runtimeId(orb.getId()), map::get));
 		assertNull(EntityOutlineLocatorResolver.resolve(EntityLocator.uuid(UUID.randomUUID()), map::get));
+	}
+
+	@Test
+	void renderCacheReturnsRawEntityAndResolverStillRejectsAMismatchedLocator() {
+		TestEntitySupport.TestEntity entity = TestEntitySupport.newEntity();
+		Map<Integer, Entity> liveEntities = new HashMap<>();
+		liveEntities.put(entity.getId(), entity);
+		RenderEntityLookupCache<Map<Integer, Entity>, Entity> cache =
+			new RenderEntityLookupCache<>(new RenderEntityLookupCache.Access<>() {
+				@Override
+				public Iterable<Entity> entitiesForRendering(Map<Integer, Entity> world) {
+					return world.values();
+				}
+
+				@Override
+				public Entity getById(Map<Integer, Entity> world, int id) {
+					return world.get(id);
+				}
+
+				@Override
+				public UUID uuid(Entity candidate) {
+					return candidate.getUUID();
+				}
+
+				@Override
+				public int id(Entity candidate) {
+					return candidate.getId();
+				}
+
+				@Override
+				public boolean removed(Entity candidate) {
+					return candidate.isRemoved();
+				}
+			});
+		EntityLocator liveLocator = EntityLocator.uuid(entity.getUUID());
+		EntityLocator staleLocator = EntityLocator.uuid(new UUID(0L, 99L));
+		cache.beginFrame(liveEntities);
+
+		assertSame(entity, EntityOutlineLocatorResolver.resolve(
+			liveLocator,
+			locator -> locator instanceof EntityLocator.UUID uuid
+				? cache.findUuid(liveEntities, uuid.value())
+				: null));
+		assertNull(EntityOutlineLocatorResolver.resolve(
+			staleLocator,
+			ignored -> cache.findUuid(liveEntities, entity.getUUID())));
 	}
 }
