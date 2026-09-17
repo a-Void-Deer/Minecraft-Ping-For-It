@@ -17,6 +17,65 @@ vanilla glowing, visibility, or scoreboard-team state, and do not clobber
 unrelated rendering state. Target names and chat remain required for block and
 entity pings regardless of outline route; see [names and chat](names_chat.md).
 
+### Render entity UUID lookup
+
+One world-render pass shares a render-only UUID lookup between HUD marker
+updates and optional entity-outline resolution. `onRenderWorld` begins its
+lookup epoch before marker preparation, so marker views prepared for the HUD
+and optional entity outlines use the same lookup work for that pass. Beginning
+this epoch is not a client-tick operation and is not coupled to an entity
+outline's success or reset state.
+
+Beginning an epoch does not scan entities. A live positive result requested in
+the immediately preceding pass can be reused in the next pass. Positives store
+only entities actually requested by UUID and record `lastUsedEpoch`; at the
+start of a pass, retain entries used by the preceding pass and prune older
+entries that were not used again. Thus a positive remains recent only while it
+continues to be requested across adjacent passes; the cache does not acquire a
+positive merely because an entity appeared in a scan. A change in the client
+world object by identity (`!=`), rather than a dimension identifier or string,
+clears this state. A null world and world leave clear it as well.
+
+Every returned entity, whether reached through a positive or an index, must be
+live for this request: it must not be removed, its current UUID must equal the
+requested UUID, and `currentWorld.getEntity(entityId)` must still be that same
+object. An invalid positive is unresolved rather than stale. If a pass has no
+UUID requests, or every request is a live warm positive, it performs no entity
+scan. The first unresolved request performs at most one traversal of the
+current world's renderable entities and creates a complete UUID index local to
+that pass. All later hits and misses in that pass share that index. If multiple
+live entities expose the same UUID, the first valid one in traversal order is
+the result. The temporary index is discarded for the next pass, and misses are
+not retained as an independent cross-pass negative cache.
+
+The cache stores raw entity objects only. Canonicalization and locator matching
+remain the resolver's responsibility, so dragon-parent handling, target
+identity, and source outcomes do not change. The XP locator remains a direct
+integer-ID lookup that accepts only an `ExperienceOrb`; it neither consults nor
+populates the UUID cache. Non-render `GameContext#getEntity` lookups for
+validation, names, and cancellation remain fresh immediate lookups, unaffected
+by a render-path miss. Render-time position, tick delta, and projection are
+still evaluated each frame, and the existing last-live fallback remains in
+place.
+
+An index represents what was available when it was built. An entity added or
+replaced after construction may not be visible until a later pass, while a removed
+or replaced cached object cannot be returned stale because of the live checks.
+An entity that becomes available before index construction can still be found
+in that same pass. Accordingly, a miss does not imply that every lookup must
+wait until the next frame; a later pass remains able to search again.
+
+When the optional entity-outline registry is empty, skip that entity's resolve
+and runner fragment. This does not change vanilla outline processing,
+block-model routes, frame flags, or post-processing.
+
+These costs describe lookup and scanning only, not total frame time, FPS, GPU
+work, or allocation volume. For `E` loaded renderable entities, `K` requested
+UUIDs, and `R` retained recent targets, warm lookup work is average `O(K)`;
+after a cold request builds the index it is `O(E + K)`; and pass-start pruning
+is `O(R)`. The temporary index uses `O(E)` space, while the positive cache is
+limited by recently requested targets rather than the full scanned population.
+
 ## Live block state and native-glow attempt eligibility
 
 Authoritative marker creation rejects a block that has already been replaced by

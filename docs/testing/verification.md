@@ -62,6 +62,29 @@ The current suite covers:
 - invalid client-config recovery; and
 - behavioral native-edge rendering.
 
+### Render entity lookup and locator resolver seams
+
+`RenderEntityLookupCacheTest` and focused locator-resolver unit seams cover the
+render-only lookup algorithm and locator resolver boundary. The cache tests
+exercise idle passes without scans; distinct,
+repeated-hit, and miss UUID requests sharing one cold index; first-valid
+duplicate selection; simulated HUD/outline warm reuse across passes; a different
+world object with the same dimension; removed or unloaded entries; runtime-ID
+reuse and UUID mutation; same-UUID replacement and a spawn after index creation
+becoming visible in a later pass; an invalid warm entry causing one scan and
+index build; pruning without touching an old entry during validation; clear/null-frame
+handling; and null-world and null-UUID safety.
+
+`EntityOutlineLocatorResolverTest` covers UUID and XP locators, runtime
+non-orb rejection, gone/null/mismatched entities, map lookup, and the raw-cache
+entity-mismatch seam. Neither this cache test nor these resolver tests are a
+dragon-renderer test or establish canonicalization integration beyond their
+stated seams. The cache fakes and access counters establish lookup-algorithm
+behavior only: they are not actual Minecraft frame hooks, HUD callers, or
+renderers, and they do not automatically cover the fresh non-render lookup
+bypass. Source inspection remains useful for those call-site boundaries but is
+not automated runtime coverage.
+
 ### Sable integration coverage
 
 The linked [Sable integration](../integrations/sable.md) topic remains the
@@ -148,6 +171,13 @@ The following gaps remain open until direct evidence closes them:
 - detailed diagnostic behavior in the private
   `CreateEntityOutlineAdapter.EntityDiagnostics` path.
 
+Render-entity lookup gaps remain for same-dimension world unload/rejoin and
+runtime-ID reuse in a game session, shared epochs between real HUD and outline
+callers, and integration proof that non-render callers bypass render-path cache
+results. No automated evidence currently establishes CPU frame cost or
+allocation behavior for one, ten, or fifty entity marks in a dense world at high
+frame rates.
+
 Sable-specific gaps remain for:
 
 - installed-Sable API compatibility and client capture/presentation against a
@@ -175,7 +205,7 @@ or because related automated tests exist.
 | Area | Pending scenarios |
 | --- | --- |
 | Block | Plain `block` versus `entity_block`; `ALL`/`COMPATIBLE`/`VOXEL_SHAPE_ONLY` modes and source fallback; whitelist native glow and fallback; a non-full native shape; same-type state change versus block-type replacement. |
-| Entity | Ordinary entity and dropped item; movement and same-dimension teleportation; death and disappearance. |
+| Entity | Ordinary entity and dropped item; movement and same-dimension teleportation; death and disappearance; same-dimension world unload/rejoin and runtime-ID reuse in a game session. |
 | Wheel | Short and long press; every sector and border color; 5000 ms timeout; frozen target; location fallback. |
 | Movement, death and replacement | Target movement while the wheel is open; entity death or dimension change; block state change or replacement while open. |
 | Naming and chat | Custom-name formatting; localized base names; item naming; phrase-only text color. |
@@ -184,6 +214,7 @@ or because related automated tests exist.
 | Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |
 | Optional content and rendering | Absent or partially present optional content; Create/Flywheel routes; occlusion and arbitrary camera angles; current shape, offset and seed. |
+| Render entity lookup | A real frame epoch shared by HUD marker updates and optional outlines; fresh non-render lookups after render misses; CPU-frame and allocation measurements for 1, 10, and 50 entity marks in a dense world at high FPS. |
 | Create contraption raycast | Hollow, sparse and overlapping contraptions; world-wall ordering; all transparent/fluid policy combinations including waterlogging; moving/rotated, minecart-mounted, carriage and gantry forms; portal-hidden or loading data; held press-time target; Create-absent and delegate-unavailable paths; large-structure press cost. |
 | Sable external blocks | An installed-Sable client/server session covering [candidate capture and presentation](../integrations/sable.md#client-capture-and-presentation), [server materialization and release](../integrations/sable.md#server-validation-and-materialization) after removal, expiry, owner disconnect, and empty-audience cleanup, [live-sublevel refresh outcomes](../integrations/sable.md#refresh-lifecycle), names and fail-soft behavior, and multiplayer create, refresh, and removal. |
 

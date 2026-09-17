@@ -68,6 +68,18 @@ reported `RENDERED`. The full contract is in
 [geometry sources](../geometry/geometry_sources.md), with rationale in
 [D0001](../decisions/D0001-separate-model-from-renderable.md).
 
+## Render entity lookup lifetime
+
+The render-pass UUID lookup is a shared raw-entity lookup accelerator for HUD
+marker updates and optional entity outlines. It is not canonical identity, a
+network target, a presentation owner, a geometry source, or evidence that a
+source reported `RENDERED`.
+
+Position evaluation and actual source submission remain per-frame work after a
+lookup result. The cache epoch, live-result validation, and negative-result
+lifetime are owned exclusively by [the render entity UUID lookup
+contract](../rendering/outline.md#render-entity-uuid-lookup).
+
 ## Geometry and GPU ownership
 
 Geometry documentation owns how source geometry is acquired and classified.
