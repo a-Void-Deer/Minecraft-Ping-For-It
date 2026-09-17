@@ -21,6 +21,8 @@ import static nx.pingwheel.common.Global.LOGGER;
 public class NeoClient {
 	private static final String CREATE_ENTITY_ADAPTER =
 		"nx.pingwheel.neoforge.integration.create.CreateEntityOutlineAdapter";
+	private static final String CREATE_CONTRAPTION_RAYCAST_ADAPTER =
+		"nx.pingwheel.neoforge.integration.create.CreateContraptionRaycastAdapter";
 	private static final String CREATE_FLYWHEEL_ADAPTER =
 		"nx.pingwheel.neoforge.integration.create.CreateFlywheelGeometryAdapter";
 	private static final String CREATE_WATER_WHEEL_RESOLVER =
@@ -32,11 +34,13 @@ public class NeoClient {
 	private static Boolean lastCreateDetected;
 	private static Boolean lastFlywheelDetected;
 	private static String lastEntityAdapterState;
+	private static String lastContraptionRaycastAdapterState;
 	private static String lastFlywheelAdapterState;
 	private static String lastWaterWheelResolverState;
 	private static String lastCreateDoorResolverState;
 	private static String lastSimulatedResolverState;
 	private static boolean entityAdapterResolved;
+	private static boolean contraptionRaycastAdapterResolved;
 	private static boolean flywheelAdapterResolved;
 
 	public NeoClient(IEventBus modBus) {
@@ -85,10 +89,12 @@ public class NeoClient {
 
 		if (createDetected) {
 			registerOptionalAdapter(CREATE_ENTITY_ADAPTER, "create-entity", true);
+			registerOptionalContraptionRaycastAdapter();
 			registerOptionalResolver(CREATE_WATER_WHEEL_RESOLVER, "create-water-wheel-presentation");
 			registerOptionalResolver(CREATE_DOOR_RESOLVER, "create-door-presentation");
 		} else {
 			logAdapterState("create-entity", "not-detected");
+			logAdapterState("create-contraption-raycast", "not-detected");
 			logResolverState("create-water-wheel-presentation", "not-detected");
 			logResolverState("create-door-presentation", "not-detected");
 		}
@@ -97,6 +103,30 @@ public class NeoClient {
 			registerOptionalAdapter(CREATE_FLYWHEEL_ADAPTER, "create-flywheel", false);
 		} else {
 			logAdapterState("create-flywheel", "not-detected");
+		}
+	}
+
+	/**
+	 * The contraption raycast owner intentionally has no Create symbols in its
+	 * shell class, but remains reflectively loaded under the Create check so an
+	 * absent optional mod never alters the ordinary client class-loading path.
+	 */
+	private static void registerOptionalContraptionRaycastAdapter() {
+		try {
+			LOGGER.debug("optional adapter reflection attempt: adapter=create-contraption-raycast class={}",
+				CREATE_CONTRAPTION_RAYCAST_ADAPTER);
+			Class<?> adapter = Class.forName(
+				CREATE_CONTRAPTION_RAYCAST_ADAPTER, true, NeoClient.class.getClassLoader());
+			contraptionRaycastAdapterResolved = true;
+			adapter.getMethod("register").invoke(null);
+			String state = String.valueOf(adapter.getMethod("registrationState").invoke(null));
+			logAdapterState("create-contraption-raycast", "reflection-success; sourceHandleState=" + state);
+		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
+			logAdapterState("create-contraption-raycast", "reflection-failure; sourceHandleState=failed");
+			LOGGER.warn(
+				"optional adapter registration failed; adapter=create-contraption-raycast"
+					+ "; class=" + CREATE_CONTRAPTION_RAYCAST_ADAPTER + "; sourceHandleState=failed",
+				failure);
 		}
 	}
 
@@ -154,10 +184,36 @@ public class NeoClient {
 			logAdapterState("create-entity", "not-detected");
 		}
 
+		if (createDetected || contraptionRaycastAdapterResolved) {
+			closeOptionalContraptionRaycastAdapter();
+		} else {
+			logAdapterState("create-contraption-raycast", "not-detected");
+		}
+
 		if ((createDetected && flywheelDetected) || flywheelAdapterResolved) {
 			closeOptionalAdapter(CREATE_FLYWHEEL_ADAPTER, "create-flywheel", false);
 		} else {
 			logAdapterState("create-flywheel", "not-detected");
+		}
+	}
+
+	private static void closeOptionalContraptionRaycastAdapter() {
+		try {
+			Class<?> adapter = Class.forName(
+				CREATE_CONTRAPTION_RAYCAST_ADAPTER, false, NeoClient.class.getClassLoader());
+			adapter.getMethod("close").invoke(null);
+			logAdapterState("create-contraption-raycast", "closed; sourceHandleState=closed");
+		} catch (ClassNotFoundException ignored) {
+			logAdapterState("create-contraption-raycast", "not-loaded");
+		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
+			logAdapterState("create-contraption-raycast", "close-failure; sourceHandleState=close-failure");
+			LOGGER.warn(
+				"optional adapter teardown failed; adapter=create-contraption-raycast"
+					+ "; class=" + CREATE_CONTRAPTION_RAYCAST_ADAPTER
+					+ "; sourceHandleState=close-failure",
+				failure);
+		} finally {
+			contraptionRaycastAdapterResolved = false;
 		}
 	}
 
@@ -184,15 +240,18 @@ public class NeoClient {
 	}
 
 	private static void logAdapterState(String adapterName, String state) {
-		String previous = "create-entity".equals(adapterName)
-			? lastEntityAdapterState : lastFlywheelAdapterState;
+		String previous = switch (adapterName) {
+			case "create-entity" -> lastEntityAdapterState;
+			case "create-contraption-raycast" -> lastContraptionRaycastAdapterState;
+			default -> lastFlywheelAdapterState;
+		};
 		if (state.equals(previous)) {
 			return;
 		}
-		if ("create-entity".equals(adapterName)) {
-			lastEntityAdapterState = state;
-		} else {
-			lastFlywheelAdapterState = state;
+		switch (adapterName) {
+			case "create-entity" -> lastEntityAdapterState = state;
+			case "create-contraption-raycast" -> lastContraptionRaycastAdapterState = state;
+			default -> lastFlywheelAdapterState = state;
 		}
 		LOGGER.info("optional source handle state transition: adapter={} state={} createDetected={} flywheelDetected={}",
 			adapterName, state,

@@ -135,6 +135,9 @@ bin/
 debug.ps1
 build_jar.ps1
 common/logs/
+neoforge/logs/
+forge/logs/
+fabric/logs/
 /net/
 /com/
 feedback_log/

@@ -705,8 +705,9 @@ public final class ClientPingRuntime {
 			config.isPassThroughTransparentBlocks(),
 			config.isMarkBlacklistedTargets(),
 			config.isMarkFluids());
-		var hitResult = Raycast.traceDirectional(
+		var raycastSelection = Raycast.traceDirectionalDetailed(
 			rayOrigin, cameraDirection, distance, raycastPolicy);
+		var hitResult = raycastSelection.map(nx.pingwheel.common.math.RaycastSelection::hitResult).orElse(null);
 
 		if (hitResult == null || hitResult.getType() == HitResult.Type.MISS) {
 			HitResult missHit = hitResult;
@@ -793,7 +794,9 @@ public final class ClientPingRuntime {
 				"block_pos", hitResult instanceof BlockHitResult blockHit ? blockHit.getBlockPos() : null);
 		}
 
-		completeCapture(token, MinecraftTargetSnapshotFactory.from(game.level, hitResult), pressRay);
+		completeCapture(token, raycastSelection
+			.map(selection -> MinecraftTargetSnapshotFactory.from(game.level, selection))
+			.orElseGet(() -> MinecraftTargetSnapshotFactory.from(game.level, hitResult)), pressRay);
 	}
 
 	/**

@@ -1,0 +1,200 @@
+# Testing and verification
+
+This document separates three kinds of evidence: automated coverage known to
+exist, gaps that remain, and manual/integration scenarios that are still
+pending. An inventory statement records established coverage scope; it is not a
+claim that a test, build or game session was run for the current change.
+
+When implementation code changes, run the relevant automated tests,
+lint/static-analysis/format checks, type or compile checks, and builds for every
+affected Fabric, Forge and NeoForge source set. The exact execution and reporting
+rules, including the Windows Gradle requirements, are owned by `AGENTS.md`.
+Never report rendering, multiplayer or interaction behavior as verified unless
+it was actually exercised or covered by an appropriate automated test.
+
+## Existing automated coverage inventory
+
+### Domain, identity and authority
+
+The current suite covers:
+
+- the fixed Target Type and Ping Type catalogs, including their values;
+- numeric-priority and declaration-order Target Type resolution;
+- optional-content fail-soft matching;
+- target identity and the captured-ray flow;
+- Marker ID and marker codec behavior;
+- `targetTypeId`, including `entity_block`, surviving marker codec round trips
+  without changing the protocol shape; and
+- same-target winner selection and recomputation.
+
+### Capture, wheel and cancellation
+
+The current suite covers short press, long press, pending/asynchronous capture,
+wheel state transitions, the actual wheel-open boundary and timeout behavior. It
+also covers cancellation filtering and nearest-candidate selection, frozen
+press-ray behavior, and interaction behavior at the pending-capture/wheel
+boundary.
+
+### Exact entity-local picking and Create raycast seams
+
+Focused coverage exercises:
+
+- an immutable entity-local-geometry owner snapshot;
+- owner resolution and `HIT`/`MISS`/`UNAVAILABLE`/`FAILED` candidate rules;
+- retention of entity-local metadata only for the matching resolved identity;
+- native local block/fluid shape policy and exact-tie behavior;
+- the common native local-shape scanner and candidate pipeline;
+- the Create-free contraption engine; and
+- lazy Create adapter/loading seams and delegate-unavailable behavior.
+
+These tests preserve whole-entity identity and exercise the non-optional engine
+boundaries. They do not constitute an in-game Create validation.
+
+### Presentation, chat, config and geometry outcomes
+
+The current suite covers:
+
+- chat template selection and Ping-Type-phrase-only coloring;
+- wheel sector colors;
+- block whitelist grammar and evaluation;
+- entity-block source modes and per-attempt `RENDERED`/`EMPTY`/`FAILED`
+  outcomes, including fallback consequences;
+- invalid client-config recovery; and
+- behavioral native-edge rendering.
+
+### Sable integration coverage
+
+The linked [Sable integration](../integrations/sable.md) topic remains the
+behavior owner for [client capture and presentation](../integrations/sable.md#client-capture-and-presentation),
+[server validation and materialization](../integrations/sable.md#server-validation-and-materialization),
+and [refresh lifecycle](../integrations/sable.md#refresh-lifecycle). The
+following focused seams provide limited structural, locator-codec and
+diagnostic evidence:
+
+- `SableClientCompanionAccessContractTest` statically parses the compiled
+  access-class constant pool, requires the exact
+  `SableCompanion.getContaining(Level, Position)` symbol, and excludes the
+  exact names `getClientLevel` and `getContainingClient`;
+- `SableExternalBlockLocatorTest` covers representative encode/parse
+  round-trips and selected malformed, noncanonical, and out-of-bounds cases;
+- `SableRefreshLogGateTest` checks decision state for tested locator or reason
+  changes and duplicates, rather than a refresh operation or log sink;
+- `SableDiagnosticsTest` and `SableServerDiagnosticsTest` check selected event
+  metadata and record fields, including same-throwable identity for a server
+  exception and constructed-invalid or `LinkageError` cases;
+- `SableClientDiagnosticsTest` checks an empty capture result when Sable is
+  absent and diagnostic presence from explicit `logCaptureFallback` calls with
+  a reason; and
+- `SablePresentationLogGateTest` checks cadence, capacity, repeated
+  failure-class key de-duplication, and throwable identity.
+
+These unit and bytecode seams do not load a Sable runtime or establish the
+provider, materialization, tracking-point reference, live-sublevel refresh,
+multiplayer, or in-game behavior described by those topic sections.
+
+### Rate-policy courtesy behavior
+
+The current suite covers the create-only client token-bucket courtesy gate,
+dropping throttled committed creates without queueing or dispatch tracking,
+`MarkerRemove` and channel-update bypass, and corrupt-policy handling. This
+client coverage does not close the server and end-to-end policy gaps below.
+
+### Focused native block-outline regression coverage
+
+The native VoxelShape route requires complementary checks rather than one broad
+"outline works" assertion:
+
+1. Production render-state coverage pins `BlockOutlineRenderType` to
+   `VertexFormat.Mode.LINES`, vanilla `rendertype_lines`, the fixed 3.75 px
+   width, `NO_DEPTH_TEST`/`GL_ALWAYS`, color-only writes and late composite
+   submission.
+2. Native geometry coverage pins the live
+   `BlockState#getShape`-to-`VoxelShape#forAllEdges` edge route so a full-cube,
+   polygon or shape-equivalent substitute cannot satisfy the regression.
+3. Render-frame snapshot coverage separately exercises late submission and
+   frame ownership.
+
+Native-glow whitelist/eligibility coverage is separate from these VoxelShape
+checks. Passing either side alone does not prove the other, and structural or
+behavioral tests do not by themselves prove actual visibility through occluders
+or from arbitrary in-game camera angles.
+
+## Build, source-set and artifact verification
+
+The included Gradle projects are `common`, `fabric`, `forge`, and `neoforge`.
+Their loader source sets receive common Java and resources through the shared
+loader wiring. Fabric retains the common mixin configuration and Loom-generated
+intermediary refmap; Forge and NeoForge use their loader-local official-Mojmap
+configuration instead. This routing identifies existing tasks and artifact
+purposes only. Execution and reporting rules remain owned by
+[AGENTS.md](../../AGENTS.md); the current root commands are listed in the
+[repository README](../../README.md#install-build-and-verify).
+
+| Module or artifact scope | Task | Purpose |
+| --- | --- | --- |
+| `common` test source set | `:common:test` | Runs the common JUnit Platform tests, including shared behavior and integration seams. |
+| `neoforge` test source set | `:neoforge:test` | Runs the NeoForge JUnit Platform tests, including NeoForge-specific resolver coverage. |
+| Affected loader source set | `:fabric:build`, `:forge:build`, or `:neoforge:build` | Builds the affected Fabric, Forge, or NeoForge source set and its loader jar. |
+| All shippable loader artifacts | `verifyModIdentity` | Depends on all three loader `build` tasks, then inspects the expected Fabric, Forge, and NeoForge jars in their loader `build/libs` directories for fork identity. |
+
+## Known automated gaps
+
+The following gaps remain open until direct evidence closes them:
+
+- the shared client/server `entity_block` classification path end to end;
+- application of synchronized rate policy on reconnect and on effective live
+  configuration change;
+- server-side sanitization of negative rate-policy values; and
+- detailed diagnostic behavior in the private
+  `CreateEntityOutlineAdapter.EntityDiagnostics` path.
+
+Sable-specific gaps remain for:
+
+- installed-Sable API compatibility and client capture/presentation against a
+  live sublevel, including the established
+  [logical-anchor/render-pose boundary](../integrations/sable.md#client-capture-and-presentation);
+- provider materialization, tracking-point reference counting, rollback and
+  release, including the existing empty-audience cleanup path documented under
+  [server validation and materialization](../integrations/sable.md#server-validation-and-materialization);
+- live-sublevel refresh through the documented available, temporarily
+  unavailable, and invalid outcomes in the
+  [refresh lifecycle](../integrations/sable.md#refresh-lifecycle); and
+- end-to-end server-authoritative names, fail-soft behavior, and multiplayer
+  marker synchronization at the boundaries owned by
+  [Sable](../integrations/sable.md#names-permissions-and-diagnostics) and
+  [target validation](../authority/target_validation.md).
+
+Coverage of Flywheel diagnostics or another adapter's diagnostic helper does
+not close the private `EntityDiagnostics` gap.
+
+## Pending manual and integration matrix
+
+No scenario in this matrix is recorded as performed merely because it is listed
+or because related automated tests exist.
+
+| Area | Pending scenarios |
+| --- | --- |
+| Block | Plain `block` versus `entity_block`; `ALL`/`COMPATIBLE`/`VOXEL_SHAPE_ONLY` modes and source fallback; whitelist native glow and fallback; a non-full native shape; same-type state change versus block-type replacement. |
+| Entity | Ordinary entity and dropped item; movement and same-dimension teleportation; death and disappearance. |
+| Wheel | Short and long press; every sector and border color; 5000 ms timeout; frozen target; location fallback. |
+| Movement, death and replacement | Target movement while the wheel is open; entity death or dimension change; block state change or replacement while open. |
+| Naming and chat | Custom-name formatting; localized base names; item naming; phrase-only text color. |
+| Cancellation | Cone and nearest-own-marker selection; inability to cancel another player's marker. |
+| Multiplayer | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry. |
+| Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock. |
+| Rate policy | Synchronization on reconnect and on effective live configuration change. |
+| Optional content and rendering | Absent or partially present optional content; Create/Flywheel routes; occlusion and arbitrary camera angles; current shape, offset and seed. |
+| Create contraption raycast | Hollow, sparse and overlapping contraptions; world-wall ordering; all transparent/fluid policy combinations including waterlogging; moving/rotated, minecart-mounted, carriage and gantry forms; portal-hidden or loading data; held press-time target; Create-absent and delegate-unavailable paths; large-structure press cost. |
+| Sable external blocks | An installed-Sable client/server session covering [candidate capture and presentation](../integrations/sable.md#client-capture-and-presentation), [server materialization and release](../integrations/sable.md#server-validation-and-materialization) after removal, expiry, owner disconnect, and empty-audience cleanup, [live-sublevel refresh outcomes](../integrations/sable.md#refresh-lifecycle), names and fail-soft behavior, and multiplayer create, refresh, and removal. |
+
+## Recording future evidence
+
+- Add or update focused tests in the same change as behavior where practical.
+- Record a gap as closed only when a named automated check or an actually
+  performed manual/integration scenario covers it.
+- Keep automated coverage, commands actually run, and manual observations as
+  separate claims in implementation reports.
+- Update the owning topic contract when expected behavior changes; changing a
+  test alone does not redefine the product.
+- Do not convert pending manual scenarios into completed validation based on
+  compilation, document review, optional-API loading or unit-test seams alone.

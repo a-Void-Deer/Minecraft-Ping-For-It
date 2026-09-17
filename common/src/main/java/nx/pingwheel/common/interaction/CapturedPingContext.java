@@ -3,6 +3,7 @@ package nx.pingwheel.common.interaction;
 import java.util.Objects;
 
 import nx.pingwheel.common.domain.ResolvedTarget;
+import nx.pingwheel.common.domain.EntityLocalGeometryMetadata;
 
 /**
  * The frozen outcome of one interaction: the {@link InteractionToken} that owns
@@ -18,13 +19,20 @@ import nx.pingwheel.common.domain.ResolvedTarget;
 public record CapturedPingContext(
 	InteractionToken token,
 	ResolvedTarget resolvedTarget,
-	CapturedRay ray
+	CapturedRay ray,
+	java.util.Optional<EntityLocalGeometryMetadata> entityLocalGeometryMetadata
 ) {
 
 	public CapturedPingContext {
 		Objects.requireNonNull(token, "token");
 		Objects.requireNonNull(resolvedTarget, "resolvedTarget");
 		Objects.requireNonNull(ray, "ray");
+		Objects.requireNonNull(entityLocalGeometryMetadata, "entityLocalGeometryMetadata");
+
+		if (entityLocalGeometryMetadata.isPresent()
+			&& !(resolvedTarget.target() instanceof nx.pingwheel.common.domain.Target.EntityTarget)) {
+			throw new IllegalArgumentException("only an entity target can retain local geometry metadata");
+		}
 	}
 
 	/**
@@ -32,7 +40,12 @@ public record CapturedPingContext(
 	 * press-ray field. Client capture uses the three-argument constructor.
 	 */
 	public CapturedPingContext(InteractionToken token, ResolvedTarget resolvedTarget) {
-		this(token, resolvedTarget, CapturedRay.defaultRay());
+		this(token, resolvedTarget, CapturedRay.defaultRay(), java.util.Optional.empty());
+	}
+
+	/** Compatibility constructor retained for callers that provide a press ray. */
+	public CapturedPingContext(InteractionToken token, ResolvedTarget resolvedTarget, CapturedRay ray) {
+		this(token, resolvedTarget, ray, java.util.Optional.empty());
 	}
 
 	/**

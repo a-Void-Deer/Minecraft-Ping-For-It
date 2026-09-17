@@ -1,6 +1,7 @@
 package nx.pingwheel.common.interaction;
 
 import java.util.Objects;
+import java.util.Optional;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.Level;
@@ -10,6 +11,10 @@ import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 
 import nx.pingwheel.common.resolve.BlockEntityClassification;
+import nx.pingwheel.common.domain.EntityLocalGeometryMetadata;
+import nx.pingwheel.common.interaction.cancel.WorldVector;
+import nx.pingwheel.common.math.EntityLocalHit;
+import nx.pingwheel.common.math.RaycastSelection;
 
 /**
  * Converts a vanilla {@link Level} + {@link HitResult} pair into a frozen
@@ -59,6 +64,64 @@ public final class MinecraftTargetSnapshotFactory {
 			case MISS -> locationSnapshot(
 				dimensionId, hitResult.getLocation().x, hitResult.getLocation().y, hitResult.getLocation().z);
 		};
+	}
+
+	/**
+	 * Converts a detailed raycast selection while retaining local geometry only
+	 * when its final entity hit is the same entity snapshot target.
+	 */
+	public static TargetSnapshot from(Level level, RaycastSelection selection) {
+		Objects.requireNonNull(selection, "selection");
+		TargetSnapshot snapshot = from(level, selection.hitResult());
+		return retainLocalGeometry(snapshot, selection);
+	}
+
+	/**
+	 * Package-private entity-only seam for focused tests of the detailed bridge
+	 * without constructing a mutable client level. The public level overload
+	 * uses the same retention function after creating its canonical snapshot.
+	 */
+	static TargetSnapshot fromEntitySelection(String dimensionId, RaycastSelection selection) {
+		Objects.requireNonNull(dimensionId, "dimensionId");
+		Objects.requireNonNull(selection, "selection");
+
+		if (!(selection.hitResult() instanceof EntityHitResult entityHitResult)) {
+			throw new IllegalArgumentException("an entity selection is required");
+		}
+
+		return retainLocalGeometry(entitySnapshot(dimensionId, entityHitResult), selection);
+	}
+
+	private static TargetSnapshot retainLocalGeometry(TargetSnapshot snapshot, RaycastSelection selection) {
+
+		if (selection.entityLocalHit().isEmpty()
+			|| !(selection.hitResult() instanceof EntityHitResult entityHitResult)
+			|| !(snapshot.target() instanceof nx.pingwheel.common.domain.Target.EntityTarget)) {
+			return snapshot;
+		}
+
+		EntityLocalHit localHit = selection.entityLocalHit().orElseThrow();
+
+		if (!localHit.belongsTo(entityHitResult.getEntity())) {
+			return snapshot;
+		}
+
+		var geometry = localHit.localGeometryHit();
+		EntityLocalGeometryMetadata metadata = new EntityLocalGeometryMetadata(
+			localHit.sourceId(),
+			geometry.kind(),
+			geometry.localPos().getX(),
+			geometry.localPos().getY(),
+			geometry.localPos().getZ(),
+			geometry.blockRegistryId(),
+			geometry.fluidRegistryId(),
+			new WorldVector(geometry.localPoint().x, geometry.localPoint().y, geometry.localPoint().z),
+			new WorldVector(selection.hitResult().getLocation().x,
+				selection.hitResult().getLocation().y,
+				selection.hitResult().getLocation().z));
+
+		return new TargetSnapshot(
+			snapshot.target(), snapshot.matchContext(), snapshot.entityCaptureMetadata(), Optional.of(metadata));
 	}
 
 	private static TargetSnapshot entitySnapshot(String dimensionId, EntityHitResult hitResult) {
