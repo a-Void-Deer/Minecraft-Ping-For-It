@@ -126,6 +126,7 @@ public class CommonClient {
 		BlockModelOutlineState.INSTANCE.clear();
 		BlockOutlineFrameState.INSTANCE.clear();
 		EntityOutlineFrameState.INSTANCE.clear();
+		GameContext.clearRenderEntityLookupCache();
 		VirtualBlockDisplayRenderer.INSTANCE.clear();
 		SelectionToggleNoticeState.INSTANCE.clear();
 
@@ -255,6 +256,7 @@ public class CommonClient {
 	}
 
 	public void onRenderWorld(WorldRenderContext ctx) {
+		GameContext.beginRenderEntityLookupFrame();
 		MarkerOverlayState.INSTANCE.prepare(
 			ctx,
 			pingRuntime == null ? null : pingRuntime.store(),
@@ -409,12 +411,15 @@ public class CommonClient {
 			|| !EntityOutlineState.INSTANCE.hasOutlines()) {
 			return;
 		}
+		if (EntityOutlineSourceRegistry.INSTANCE.snapshot().isEmpty()) {
+			return;
+		}
 
 		boolean emitted = false;
 
 		for (Map.Entry<EntityLocator, EntityOutlineSpec> entry
 			: EntityOutlineState.INSTANCE.snapshot().entrySet()) {
-			Entity entity = EntityOutlineLocatorResolver.resolve(entry.getKey(), GameContext::getEntity);
+			Entity entity = EntityOutlineLocatorResolver.resolve(entry.getKey(), GameContext::getEntityForRender);
 
 			if (entity == null) {
 				continue;
@@ -542,6 +547,10 @@ public class CommonClient {
 	/** Advances interaction timing once from the GameRenderer frame boundary. */
 	public void onRenderFrame() {
 		Game = Minecraft.getInstance();
+
+		if (Game.level == null) {
+			GameContext.clearRenderEntityLookupCache();
+		}
 
 		if (pingRuntime != null) {
 			pingRuntime.onRenderFrame(InputUtils.isPingHotkeyDown());

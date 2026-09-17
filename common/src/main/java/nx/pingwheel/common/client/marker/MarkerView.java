@@ -44,7 +44,7 @@ import static nx.pingwheel.common.CommonClient.Game;
  *       authoritative anchor only while that observation is unavailable;</li>
  *   <li>resolves the owner's {@link PlayerInfo} from the current connection;</li>
  *   <li>for an entity target, resolves the live entity in the current
- *       dimension via {@link GameContext#getEntity} and follows its current
+	 *       dimension via {@link GameContext#getEntityForRender(nx.pingwheel.common.domain.EntityLocator)} and follows its current
  *       position; a live {@link ItemEntity} copies its item stack while the
  *       item icon config is enabled;</li>
  *   <li>keeps the latest live point when the entity is absent, unloaded, or
@@ -186,7 +186,7 @@ public final class MarkerView {
 		final var target = this.marker.target();
 
 		if (target instanceof Target.EntityTarget entityTarget) {
-			final var entity = GameContext.getEntity(entityTarget.locator());
+			final var entity = GameContext.getEntityForRender(entityTarget.locator());
 			Vec3 livePosition = null;
 
 			if (entity != null && !entity.isRemoved()) {
