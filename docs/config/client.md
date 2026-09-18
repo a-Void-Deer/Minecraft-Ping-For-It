@@ -11,13 +11,18 @@ product values:
 | Maximum wheel-open duration | **5000 ms** | Starts only when wheel actually opens |
 | Cancellation cone half-angle | **5 degrees** | Press-ray cone, live own-marker candidates |
 | Long-press compatibility | **disabled** | Narrow pending-capture/deferred-press behavior |
+| Pass through transparent blocks (`passThroughTransparentBlocks`) | **disabled** | Persistent target-selection policy; see [selection policy](../picking/selection_policy.md) |
+| Mark blacklisted targets (`markBlacklistedTargets`) | **disabled** | Persistent entity-selection policy; see [selection policy](../picking/selection_policy.md) |
+| Mark fluids (`markFluids`) | **disabled** | Persistent target-selection policy; see [selection policy](../picking/selection_policy.md) |
 | Block display whitelist | exactly `*:*` | Client-local native-glow eligibility |
 | Block-shape blacklist | empty | Overrides whitelist match |
 | Entity-block geometry source mode | `ALL` | Client-local, read on every render attempt/frame |
 
 Detailed timing lives in [capture](../picking/capture.md) and
 [wheel](../picking/wheel.md). Existing range/lifetime/cooldown mechanics are
-preserved. Server send policy is separate: [rate limit](rate_limit.md).
+preserved. The client display-duration setting and marker state transitions are
+owned by [marker lifecycle](../authority/marker_lifecycle.md), not this settings
+table. Server send policy is separate: [rate limit](rate_limit.md).
 
 ## Whitelist and blacklist grammar
 
@@ -48,10 +53,11 @@ Target-type/live-state conditions still apply after a list match; see
 
 ## Entity-block mode persistence
 
-Allowed values are `ALL`, `COMPATIBLE` and `VOXEL_SHAPE_ONLY`. The default,
-reset/recovery value and missing persisted field all yield `ALL`. An explicit
-persisted `null` or unknown persisted value instead recovers to `COMPATIBLE`.
-Do not conflate a missing field with an invalid explicit value.
+Allowed values are `ALL`, `COMPATIBLE` and `VOXEL_SHAPE_ONLY`. The new
+configuration default is `ALL`, and a missing persisted field uses that default.
+An explicit persisted `null` or unknown persisted value recovers to `COMPATIBLE`;
+that recovery value is distinct from the new configuration default. Do not
+conflate default initialization with persisted-value recovery.
 
 The setting has no server synchronization or reconnect cache; read it each
 render attempt/frame. Ordinary `block` rendering does not read this mode.
@@ -68,35 +74,18 @@ effect after restart or an explicit reload.
 
 ## Invalid-file recovery and preservation lock
 
-If client config parsing or strict persisted-list validation is invalid, back up
-the original bytes **before** resetting the whole configuration to defaults. A
-successful reset file begins with exactly these three one-line comments,
-followed by defaults:
-
-```text
-// Previous config had an error.
-// Error reason: ...
-// Backup file: ...
-```
-
-Sanitize the reason for a one-line comment. If backup fails, preserve the
-original on disk. Defaults may remain in memory, but neither reset nor normal
-saves can bypass the preservation lock. In-memory defaults remain disk-independent
-until restart/manual intervention. Clear this invalid-file lock only after a
-later successful load or recovery. Coverage and the pending
-in-session/external-edit cases are tracked in
+The cross-client/server schema marker, migration, recovery, serialization and
+save-protection contract is owned by
+[configuration versioning](versioning.md). In particular, client strict-list
+validation participates in that document's client invalid-file recovery path;
+it is not a harmless per-entry non-match. The recovery header, backup-before-
+reset ordering and preservation-lock limits are defined there. Coverage and the
+pending in-session/external-edit cases remain tracked in
 [verification](../testing/verification.md).
 
 ### Future-version preservation
 
-Client and server configuration share a future-version boundary. When a file
-declares a version newer than the running code supports, keep its original bytes
-on disk and use defaults only in memory. `SaveProtection.FUTURE_VERSION` blocks
-every write path, including ordinary saves and reset, from replacing that file.
-
-This is distinct from invalid-file recovery: a future-version file is not backed
-up as broken and is not replaced with a reset/default file. A later load
-re-evaluates the current on-disk state. If the future-version file remains, its
-protection remains; if it has been removed or replaced, the existing
-initialization, loading or invalid-file recovery path applies. This contract
-does not define a new downgrade or migration path.
+Client and server future-version preservation is defined by
+[configuration versioning](versioning.md#future-version-protection). A client
+future-version file is not an invalid-file recovery input and does not define a
+downgrade or migration path.

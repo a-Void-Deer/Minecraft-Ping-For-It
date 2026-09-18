@@ -6,6 +6,9 @@ At the initial physical key press, capture the ray and start target resolution.
 An ordinary synchronous press immediately freezes ray, target and resolved
 Target Type. An asynchronous path, such as Distant Horizons, starts at that
 press edge and completes capture in a later callback, potentially after release.
+The target-selection values are copied into the ordinary ray's immutable policy
+at capture start; their defaults, toggles and raycast meanings are owned by
+[selection policy](selection_policy.md).
 
 When the snapshot is ready, evaluate every active matcher using the
 [catalog priority/declaration rules](../identity/catalogs.md). Freeze the resolved
@@ -36,11 +39,12 @@ and selection settings. Once the preceding real `CreatePing` action reaches the
 dispatch boundary, a new capture may start using that stored ray. If the first
 interaction ends without such an action, the deferred press is discarded.
 
-The deferred capture reads the then-current range and selection policy when it
-starts, and may complete synchronously or asynchronously. This is not a policy
-to defer every compatibility press. Rapid-click virtual-hold behavior remains
-owned by `LongPressCompatibilityController`; no separate synthetic duration
-policy is introduced.
+The deferred capture reads the then-current range and
+[selection policy](selection_policy.md) when it starts, and may complete
+synchronously or asynchronously. This is not a policy to defer every
+compatibility press. Rapid-click virtual-hold behavior remains owned by
+`LongPressCompatibilityController`; no separate synthetic duration policy is
+introduced.
 
 The capture queue above must not be confused with a queue of rate-throttled
 committed creates: [courtesy-throttled creates](../config/rate_limit.md) are

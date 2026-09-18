@@ -91,10 +91,12 @@ conditions are:
 
 - Ordinary `block`: no BlockEntity and live render shape `MODEL`; when
   eligible, attempt vanilla model glow through the ordinary-block route.
-- `entity_block`: a relevant live BlockEntity is required. Under the active
-  entity-block mode, independently attempt the actual BER source and, for a
-  `MODEL` state, the loader-aware baked-model source. Optional sources are
-  admitted only by that mode.
+- `entity_block`: under the active entity-block mode, independently attempt the
+  BER source when a relevant live BlockEntity and renderer exist, and attempt
+  the ordinary world-aware baked-model source when the live state has
+  `RenderShape.MODEL` and the loader adapter is available. The baked-model path
+  is not gated on a live BlockEntity. Optional sources are admitted only by
+  that mode and by their own provider gates.
 
 Here `W` is the target-type whitelist result and `B` is a blacklist match. The
 table describes **attempt eligibility**, never guaranteed geometry emission:
@@ -126,7 +128,14 @@ Only a `RENDERED` result under the common
 [source outcome contract](../geometry/geometry_sources.md) suppresses duplicate
 VoxelShape fallback for that subject and frame. `EMPTY`, `FAILED`, unavailable
 sources, and mere route eligibility preserve fallback. `VOXEL_SHAPE_ONLY`
-selects the shape route directly.
+selects the shape route directly. A marker's lifecycle and HUD data can remain
+active even when the current presentation has no subject; that is distinct
+from a subject whose sources are empty. In particular, when a block has been
+replaced by a different registry ID, presentation resolution returns no
+replacement subject, so neither the ordinary native block outline nor the
+VoxelShape fallback draws a replacement block. A same-registry-ID property/state
+change continues to use the current live state and its resolved presentation
+subject.
 
 ## VoxelShape GPU render invariant
 

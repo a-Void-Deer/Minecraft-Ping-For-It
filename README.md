@@ -45,7 +45,7 @@ rate policy as a courtesy; a throttled create is dropped rather than queued.
   shape. An `entity_block` has a `BlockEntity` and can use its renderer or
   live baked-model geometry before the VoxelShape fallback.
 - Entity-block geometry modes are `ALL`, `COMPATIBLE`, and
-  `VOXEL_SHAPE_ONLY`; the default is `COMPATIBLE`.
+  `VOXEL_SHAPE_ONLY`; the default is `ALL`.
 
 On NeoForge, optional Create `6.0.10` / Flywheel `1.0.6` support can render an
 entity-block silhouette mask in `ALL` mode. It supports direct instancing and

@@ -15,6 +15,16 @@ optional source such as Flywheel, or the native VoxelShape fallback. Minecraft
 A `BakedModel` is one concrete source, not a synonym for every object that can
 produce geometry.
 
+The layers remain separate. The loader adapter resolves a model and its render
+inputs, the renderer/dispatcher supplies the destination and live world
+context, and the model or renderer may or may not commit geometry. In
+particular, the NeoForge adapter replaces null model data with
+`ModelData.EMPTY`, then still enumerates render types and calls the batched
+renderer. Missing model data therefore does not itself determine the final
+outcome; `EMPTY` is determined by whether the permitted source commits any
+geometry. A missing live object or renderer can still make the BER source
+empty, and an unavailable adapter can make the baked-model source unavailable.
+
 For documentation purposes, a subject is renderable in the current frame only
 when an allowed source reports `RENDERED`: geometry was actually emitted and
 committed to the destination that will be submitted. Merely having a model,
@@ -38,10 +48,15 @@ are selected as follows:
 | `COMPATIBLE` | Built-in BER, then built-in loader-aware baked model; no optional-source snapshot |
 | `VOXEL_SHAPE_ONLY` | Construct no source context and attempt no normal source; select the native shape route |
 
-The BER requires a valid live BlockEntity and renderer. The baked source
-requires live render shape `MODEL` and an applicable world-aware loader adapter.
-The absence of an adapter, model data, renderer, live object, or usable geometry
-leaves that source empty; it does not authorize an approximate substitute.
+The BER requires a valid live BlockEntity and renderer. The ordinary baked
+source requires live render shape `MODEL` and an applicable world-aware loader
+adapter; it does not require a live BlockEntity merely because the subject's
+target type is `entity_block`. An entity-block subject may therefore enter the
+ordinary baked-model adapter even when its BlockEntity is null, while the BER
+attempt independently remains empty without its live object and renderer. The
+absence of an adapter, model, renderer, or usable committed geometry leaves the
+corresponding source unavailable or empty; it does not authorize an approximate
+substitute.
 
 All permitted sources run in order without short-circuiting. A dynamic BER and
 a static baked model may both contribute, so one successful source does not stop

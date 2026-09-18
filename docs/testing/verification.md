@@ -114,6 +114,12 @@ diagnostic evidence:
 These unit and bytecode seams do not load a Sable runtime or establish the
 provider, materialization, tracking-point reference, live-sublevel refresh,
 multiplayer, or in-game behavior described by those topic sections.
+The external model and fallback routes also resolve provider presentation
+independently; therefore this evidence cannot guarantee that provider-local
+multipart or subject-type decisions came from one immutable shared snapshot.
+That is an implementation-conformance and automated-coverage gap, not an
+external exception to the shared-subject contract in
+[presentation subjects](../rendering/presentation_subjects.md).
 
 ### Rate-policy courtesy behavior
 
@@ -149,9 +155,11 @@ Their loader source sets receive common Java and resources through the shared
 loader wiring. Fabric retains the common mixin configuration and Loom-generated
 intermediary refmap; Forge and NeoForge use their loader-local official-Mojmap
 configuration instead. This routing identifies existing tasks and artifact
-purposes only. Execution and reporting rules remain owned by
-[AGENTS.md](../../AGENTS.md); the current root commands are listed in the
-[repository README](../../README.md#install-build-and-verify).
+purposes only. Public build orientation and commands are listed in the
+[repository README](../../README.md#install-build-and-verify); the tracked
+[geometry pipeline](../architecture/geometry-pipeline.md) is the public
+architecture entry point. Local agent instructions, when present, are
+supplementary execution guidance rather than a public documentation prerequisite.
 
 | Module or artifact scope | Task | Purpose |
 | --- | --- | --- |
@@ -196,6 +204,61 @@ Sable-specific gaps remain for:
 
 Coverage of Flywheel diagnostics or another adapter's diagnostic helper does
 not close the private `EntityDiagnostics` gap.
+
+### Feedback-review evidence boundaries
+
+The following inventory records evidence identified during the documentation
+review. It is not a claim that these tests were run for the current change.
+
+- **G1 — marker lifecycle:** `ClientMarkerStoreTest` covers stable marker IDs,
+  same-ID updates that do not renew the display deadline, stale handling,
+  `EXPIRED` versus other removal reasons, hard deletion, tombstones and delayed
+  creates, and the distinction between `winnerId()` and `renderMarkers()`.
+  `ClientConfigBoundsTest` covers the display-duration sentinel and bounds;
+  `SyncDurationPolicyTrackerTest` and `ServerMarkerStoreTest` cover the
+  server-side duration/expiry seams. A live client/server session covering
+  synchronized lifetime, display lifetime, stale rendering and winner fallback
+  together remains a gap.
+- **G2 — selection policy:** focused input tests cover GUI suppression, physical
+  press de-duplication through `ToggleInputStateTest` and selection-policy
+  defaults/validation through `ClientConfigTargetSelectionTest`. Configuration
+  reset/persistence behavior is covered by `ConfigHandlerResetTest`, but the
+  code path can report a lock or save failure; this does not justify claiming
+  persistence is absolute. `EntitySelectionBlacklistTest` and
+  `EntitySelectionBlacklistDefaultRuleTest` cover the entity-selection
+  blacklist separately from the block-shape display blacklist, including
+  spectator filtering. A live callback/input session and cross-loader key-repeat
+  behavior remain pending.
+- **G3 — Simulated integration:**
+  `SimulatedDockingConnectorPresentationResolverTest` covers the stand-in
+  resolver's connector IDs, facing/opposite-facing relationship, powered owner,
+  owner block-entity type/registry identity, and handled-empty failure result.
+  This is a resolver seam, not a live Simulated-mod session; loader registration,
+  installed-mod behavior and in-game presentation remain unverified.
+- **G4 — configuration versioning:** focused versioning tests cover the required
+  non-empty `pingforit-version` marker, same-version loading, migration threshold,
+  `pingDuration` to `syncDuration` migration with the new key taking precedence,
+  client/server recovery differences, and protection of future-version files.
+  `ConfigVersionUpdaterTest` and `ConfigHandlerVersionTest` are existing
+  automated coverage inventory; no test command was run for this documentation
+  change.
+- **G5 — audience ownership:** `ServerCore` owns the complete creation gate and
+  recipient snapshot. The matrix is: an empty channel applies `AUTO`,
+  `TEAM_ONLY` or `GLOBAL` semantics (with `DISABLED` rejecting creation), while
+  a non-empty channel selects matching channel members without reapplying the
+  empty-channel team filter. `TeamContextHandler` resolves Voice Chat before
+  FTB Teams before vanilla team, with `NONE` when no context exists; its
+  same-context rule includes the no-team case. Existing marker-store and packet
+  tests cover recipient-scoped state, audience shrink/cleanup and channel-mode
+  data transport, but they do not provide a complete `ServerCore` branch matrix
+  or live Voice/FTB/vanilla context coverage. This is a coverage/verification
+  gap, not an absence of an implementation owner.
+- **G6 — names and chat:** `PingChatBuilderTest` covers the three required
+  placeholders (`playerName`, `pingType`, `targetName`), unknown or isolated
+  placeholders, `{{`/`}}` escaping, missing required tokens and direct legacy
+  fallback. Name-resolver coverage includes the plain ServerPlayer profile name
+  boundary. Localized names, custom-name combinations and every locale/resource
+  fallback boundary remain pending scenarios.
 
 ## Pending manual and integration matrix
 

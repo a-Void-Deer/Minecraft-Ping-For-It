@@ -21,6 +21,13 @@ Client presentation separately applies the current render pose to live local
 block data. Those pose roles do not alter the candidate or committed identity
 defined below.
 
+The current external model route and external fallback independently resolve
+provider presentation. The required shared-subject and subject-type contract,
+and the fact that a single immutable frame snapshot is not currently
+guaranteed for those provider-local decisions, are recorded in
+[presentation subjects](../rendering/presentation_subjects.md) and the
+[verification inventory](../testing/verification.md#sable-integration-coverage).
+
 ## Candidate and committed identity
 
 A client-side external candidate has an empty `stableTargetId`. It is not a
@@ -90,6 +97,7 @@ diagnostics with complete exception details where the diagnostics contract
 requires them; they do not become hard dependencies for unrelated pings.
 
 Related contracts: [target identity](../identity/target_model.md),
+[presentation subjects](../rendering/presentation_subjects.md),
 [server validation](../authority/target_validation.md),
 [server authority decision](../decisions/D0004-server-authority.md), and
 [Sable coverage and pending scenarios](../testing/verification.md#sable-integration-coverage).

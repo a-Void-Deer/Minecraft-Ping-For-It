@@ -14,6 +14,9 @@ Server-derived name data follows
 - `ItemEntity` uses its contained `ItemStack`. A custom stack name is shown as
   `Custom Name (localized base item name)`; otherwise show the localized base
   item name. An entity-level custom name must not replace this stack rule.
+- A `ServerPlayer` target uses the plain, unstyled
+  `GameProfile.getName()` profile name. It does not substitute a display/custom
+  name or inherit team or Ping-Type color.
 - An ordinary entity uses its localized entity-type name, and an ordinary block
   uses its localized block name. Do not hard-code English target names.
 
@@ -31,10 +34,23 @@ Templates use the named placeholders `{playerName}`, `{pingType}`, and
 locale's own active resource stack, not from a language view merged with
 fallback locales.
 
-After selecting the applicable common or override template, validate the whole
-selected template. A malformed template or one missing required placeholders
-falls directly to legacy `pingforit.chat.pingmsg`; do not try another modern
-template or a different locale first.
+Every one of those three placeholders must occur at least once; a valid
+placeholder may occur more than once. `{{` and `}}` emit literal `{` and `}`
+respectively. The parser accepts only the three exact placeholder names.
+
+| Template form | Result |
+| --- | --- |
+| `{playerName} requests {pingType} {targetName}` | Valid named template. |
+| `{{{playerName}}} requests {pingType} {targetName}` | Valid; the player name is surrounded by literal braces. |
+| `{playerName} {pingType}` | Invalid because `{targetName}` is missing. |
+| `{player} {pingType} {targetName}` | Invalid because `{player}` is unknown. |
+| `{playerName} {pingType} {targetName` or a lone `}` | Invalid because an opening or closing brace is unmatched. |
+
+After selecting the applicable common or override template, validate and build
+that selected template once. An unknown placeholder, unmatched/isolated brace,
+missing required placeholder, or any runtime construction failure falls directly
+to legacy `pingforit.chat.pingmsg`; do not try another modern template or a
+different locale first.
 
 ## Phrase-only color
 

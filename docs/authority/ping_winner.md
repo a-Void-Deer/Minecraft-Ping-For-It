@@ -16,6 +16,12 @@ the local constituent hit on a whole entity. The server snapshots the audience
 at creation. Later channel switches do not recalculate it; disconnect cleanup
 can shrink it and is owned by [target validation](target_validation.md).
 
+The complete creation-time audience matrix, including empty versus non-empty
+channels and `AUTO`/`DISABLED`/`GLOBAL`/`TEAM_ONLY`, is owned by
+[target validation](target_validation.md#audience-snapshot-at-create). Winner
+selection consumes that frozen recipient snapshot; it does not independently
+re-evaluate a player's later channel, group, or team.
+
 ## Presentation and lifecycle
 
 The winner's Ping Type drives the shared visible outline and outline-related
@@ -27,6 +33,14 @@ server recomputes each affected recipient's winner from the remaining active
 markers and synchronizes resulting state. If a previous non-winner becomes the
 winner, its selected Ping Type supplies the visible color. Removal still requires the
 [ownership/active-status checks](target_validation.md).
+
+Server expiry/removal reasons and the client distinction between synchronized,
+stale, and hard-deleted records are owned by
+[marker lifecycle](marker_lifecycle.md). On the client, an authoritative winner
+slot is distinct from the collection of locally display-active records.
+Loss-recovery recomputation can only be temporary and is overwritten by a later
+authoritative winner update; see
+[marker lifecycle](marker_lifecycle.md#winner-slots-are-not-the-render-marker-collection).
 
 External locator/anchor refresh preserves marker ID, owner, Target/Ping Types,
 arrival time, expiry, target key and current audience, so it does not

@@ -22,8 +22,10 @@ Shared future-version preservation is defined by
 [future-version preservation](client.md#future-version-preservation). This
 rate-policy contract does not redefine that configuration rule.
 
-`syncDuration` has its own synchronization policy and is not a third rate-policy
-field.
+`syncDuration` is not a third rate-policy field and does not feed the courtesy
+token bucket. Its server bounds, frozen marker-snapshot lifetime, and separate
+client display-duration relationship are owned by
+[marker lifecycle](../authority/marker_lifecycle.md).
 
 For a positive effective `rateLimit`, the server independently enforces its
 limit for **every client**, including malicious clients which skip the courtesy

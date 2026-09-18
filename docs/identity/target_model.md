@@ -47,6 +47,27 @@ Existing ping lifetime, range, cooldown and comparable mechanics are preserved
 unless an explicit product requirement changes them. Pre-commit validation and
 error messages are owned by [target validation](../authority/target_validation.md).
 
+## Marker data versus current presentation
+
+Canonical marker identity, lifecycle and HUD data are separate from the
+current-frame presentation. The committed marker retains its ID, owner,
+concrete target identity, Target/Ping Types and lifecycle state, together with
+the authoritative name data used by HUD and chat, until the normal marker
+lifecycle removes or expires it. Presentation resolution may nevertheless
+produce no current subject; that absence does not mean that the marker or its
+HUD data has been removed. The lifecycle rules are owned by
+[marker lifecycle](../authority/marker_lifecycle.md).
+
+For a committed ordinary block, a same-registry-ID BlockState or property
+change keeps the target valid and resolves presentation from the current live
+state. The normal sources and VoxelShape fallback then consume that current
+subject. If the block is replaced by a different registry ID, the committed
+marker data and lifetime are not removed solely by that replacement, but
+presentation resolution returns no replacement subject. Consequently neither
+the ordinary native block outline nor the VoxelShape fallback draws the
+replacement block. “No marker” and “no current outline/presentation” are
+therefore distinct outcomes.
+
 ## Entity-local capture metadata
 
 Entity-local geometry detail is capture metadata only. Retain it in the frozen

@@ -58,14 +58,59 @@ is not treated as a create-only operation. The
 immediately before MarkerCreate. Cancellation/expiry also drive
 [winner recomputation](ping_winner.md).
 
+## Audience snapshot at create
+
 The MarkerCreate packet does not authorize its channel or recipients. The
-server uses the sender's stored channel and channel/team policy, snapshots the
-recipient audience at creation, assigns server arrival and expiry state, and
-then synchronizes accepted state. Later channel switches do not rewrite that
-marker's audience. Disconnect cleanup is a lifecycle exception: the server
-removes markers owned by the disconnected player, removes that player from the
-remaining marker audiences, and removes a marker whose audience is then empty.
-This cleanup does not recalculate channel/team policy.
+server uses the sender's stored channel and the current server channel mode,
+then snapshots a non-empty recipient list at creation. The sender is included
+in every accepted snapshot; other recipients are online players selected by
+the following table. Normal target, Ping Type, range, and rate validation still
+applies before this channel/audience stage.
+
+| Sender's stored channel at create | Server `ChannelMode` | Creation gate | Audience snapshot |
+| --- | --- | --- | --- |
+| Non-empty channel `C` | `AUTO`, `DISABLED`, `GLOBAL`, or `TEAM_ONLY` | None from the default channel mode | Sender plus every online other player whose stored channel is exactly `C`. Team/context matching is not additionally applied. |
+| Empty channel | `DISABLED` | Reject creation | No marker or audience is created. |
+| Empty channel | `TEAM_ONLY` | Reject when the sender has no team context | When the sender has a context, include the sender plus online players in the same context. |
+| Empty channel | `AUTO` | No team-context admission gate | Include the sender plus online players in the same context, including the precise no-context equivalence below. |
+| Empty channel | `GLOBAL` | No team-context admission gate | Include the sender plus every online player whose stored channel is also empty; team/context is not additionally applied. |
+
+For empty-channel `AUTO` and permitted `TEAM_ONLY`, "same context" is the
+current `TeamContextHandler.inSameContext` predicate, not a broad statement
+that two players are both nominally teamed:
+
+1. Each player selects a Voice Chat group ID when one is available; otherwise
+   it selects an eligible FTB Teams ID. If the sender has such a selected ID,
+   the other player must have the same selected UUID. The comparison is UUID
+   equality; it does not add a source-kind check.
+2. If only the other player has a selected Voice/FTB ID, they are not in the
+   same context.
+3. If neither has a selected Voice/FTB ID, compare vanilla scoreboard-team
+   references directly. Equal team references match; two `null` references
+   therefore match. In particular, `NONE` versus `NONE` is equivalent for this
+   predicate when neither player has a Voice group, eligible FTB team, or
+   vanilla team.
+
+`TeamContextHandler.hasTeam`, used by the `TEAM_ONLY` admission gate, identifies
+the sender's context in this priority order: Voice Chat, FTB Teams, vanilla
+team, then `NONE`. FTB personal/player teams and unavailable or fail-soft
+optional integrations yield no selected FTB/Voice context. `GLOBAL` and a
+non-empty channel do not consult this predicate.
+
+The server assigns arrival/expiry state and synchronizes the accepted marker as
+described by [marker lifecycle](marker_lifecycle.md). Channel switches and
+team/group changes after creation do not rewrite its recipient snapshot.
+Disconnect cleanup is the only audience mutation: the server removes markers
+owned by the disconnected player, removes that player from remaining marker
+audiences, and drops a marker left with no recipients. It does not recalculate
+channel/team policy for remaining recipients.
+
+The store tests cover recipient-scoped winner isolation and disconnect audience
+shrink/empty-audience cleanup. The current focused evidence does not establish
+the full `ServerCore` admission and audience matrix above (empty-channel mode
+gates, exact non-empty-channel matching, or live Voice/FTB/vanilla priority).
+Those scenarios remain verification work rather than an inferred product
+change.
 
 ## Local pre-commit invalidation
 

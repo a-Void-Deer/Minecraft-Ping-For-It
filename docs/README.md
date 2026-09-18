@@ -8,16 +8,17 @@ require reading every document. These documents describe the existing Minecraft
 
 | Document kind | Responsibility |
 | --- | --- |
-| [spec.md](../spec.md) | Product direction, supported scope, non-goals, plan and high-level acceptance. |
-| [AGENTS.md](../AGENTS.md) | Agent operating rules, change discipline, verification execution and reporting. It does not define software behavior. |
+| [Repository README](../README.md) | Tracked public entry point for project orientation, supported build/source sets, and install/build/verify commands. |
 | Topic documents below | Normative, executable product contracts for their named subsystem. |
 | Architecture and decisions | Concepts, boundaries and rationale. They link to, but do not replace, the executable topic contracts. |
 | [Testing and verification](testing/verification.md) | Existing automated-coverage inventory, known gaps, evidence rules and pending manual/integration scenarios. |
 
-Read `spec.md`, this guide and the topic documents selected below. Consult a
-linked decision when changing the reasoned boundary, not for routine use of an
-unchanged contract. Investigate and report conflicts rather than silently
-choosing or dropping a requirement.
+Start with the tracked repository README, this guide and the topic documents
+selected below. Consult a linked decision when changing the reasoned boundary,
+not for routine use of an unchanged contract. Local maintainer or agent files,
+when present, are supplementary execution guidance rather than public
+documentation prerequisites or behavioral authority. Investigate and report
+conflicts rather than silently choosing or dropping a requirement.
 
 ## Select documents by task
 
@@ -25,14 +26,17 @@ choosing or dropping a requirement.
 | --- | --- | --- |
 | Understand the end-to-end data flow | [Architecture: geometry pipeline](architecture/geometry-pipeline.md) | Identity, capture, authority, presentation and geometry topics below |
 | Change Target/Marker identity or lifecycle | [Target model](identity/target_model.md) | [Validation](authority/target_validation.md), [winner selection](authority/ping_winner.md), Sable |
+| Change marker creation, removal, expiry or audience lifecycle | [Marker lifecycle](authority/marker_lifecycle.md) | [Target model](identity/target_model.md), validation and winner selection |
 | Change Target Types, Ping Types, priorities, defaults, keys or colors | [Catalogs](identity/catalogs.md) | Capture, names/chat and wheel |
-| Change press handling, asynchronous capture or target locking | [Capture](picking/capture.md) | [Wheel](picking/wheel.md), local geometry, rate policy |
+| Change press handling, asynchronous capture or target locking | [Capture](picking/capture.md) | [Selection policy](picking/selection_policy.md), [Wheel](picking/wheel.md), local geometry, rate policy |
+| Change target-selection toggles, block/fluid modes or entity-selection blacklist | [Selection policy](picking/selection_policy.md) | [Capture](picking/capture.md), Create raycast |
 | Change exact entity picking or geometry ownership | [Local geometry picking](picking/local_geometry.md) | Create raycast integration and D0006 |
 | Change wheel opening, timeout, selection or cancellation | [Wheel](picking/wheel.md) | Capture, client config and validation |
 | Change packets, target acceptance, removal or rejection feedback | [Target validation](authority/target_validation.md) | [Security](security.md), rate policy and identity |
 | Change which same-target ping is visible | [Ping winner](authority/ping_winner.md) | Identity, removal/expiry and external-target refresh |
 | Change trust boundaries, failure isolation or diagnostic detail | [Security](security.md) | Validation, rate policy and the affected provider/source contract |
-| Change client defaults, list syntax, reload or recovery | [Client config](config/client.md) | Capture, wheel, outline routing and geometry modes |
+| Change client defaults, list syntax, reload or recovery | [Client config](config/client.md) | [Config versioning](config/versioning.md), capture, wheel, outline routing and geometry modes |
+| Change config schema versions, preservation locks or migrations | [Config versioning](config/versioning.md) | [Client config](config/client.md), repository build entry |
 | Change send-rate synchronization or courtesy limiting | [Rate policy](config/rate_limit.md) | Validation and security |
 | Change source order, adapter outcomes, failure handling or registration | [Geometry sources](geometry/geometry_sources.md) | Presentation subjects and the affected integration |
 | Change native block-shape acquisition or edge generation | [VoxelShape geometry](geometry/voxel_shape.md) | Outline render state and D0002 |
@@ -42,14 +46,23 @@ choosing or dropping a requirement.
 | Change target names, chat templates or phrase emphasis | [Names and chat](rendering/names_chat.md) | Catalogs and authoritative validation |
 | Change Create/Flywheel support | [Create integration](integrations/create.md) | [Create raycast supplement](integrations/create-contraption-raycast.md), local geometry and geometry sources |
 | Change Sable/external-target support | [Sable integration](integrations/sable.md) | Target identity, validation, winner selection and presentation |
+| Change Simulated stand-in/optional-content support | [Simulated integration](integrations/simulated.md) | Selection policy, compatibility and testing/verification |
 | Change loader, mod-ID or optional-content boundaries | [Compatibility](compatibility.md) | The affected integration and security |
 | Change build logic, source-set wiring, loader packaging or artifact identity verification | [Testing and verification](testing/verification.md#build-source-set-and-artifact-verification) | [Repository build instructions](../README.md#install-build-and-verify), compatibility and the affected loader build file |
 | Assess coverage or plan validation | [Testing and verification](testing/verification.md) | The changed topic and applicable decision |
 
 Every topic document is reachable from the table above or the decision index
-below. The complete set is: architecture; identity; picking; authority; config;
-geometry; rendering; Create and Sable integrations; compatibility; security;
-testing/verification; and decisions D0001 through D0006.
+below. The complete set is: [architecture](architecture/geometry-pipeline.md);
+[identity](identity/target_model.md), [picking](picking/capture.md) and
+[selection policy](picking/selection_policy.md),
+[authority](authority/marker_lifecycle.md), [config](config/client.md) and
+[versioning](config/versioning.md), [geometry](geometry/geometry_sources.md),
+[rendering](rendering/outline.md), [Create](integrations/create.md),
+[Create raycast](integrations/create-contraption-raycast.md),
+[Sable](integrations/sable.md), [Simulated](integrations/simulated.md),
+[compatibility](compatibility.md), [security](security.md), and
+[testing/verification](testing/verification.md), plus decisions D0001 through
+D0006 in the index below.
 
 ## Decision records
 
