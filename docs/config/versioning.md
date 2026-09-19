@@ -7,16 +7,48 @@ behavior of the configuration handler, not a release-compatibility promise.
 ## Marker and serialization
 
 An existing configuration file must parse to a JSON object containing
-`"pingforit-version"` as a non-empty string. A missing marker, `null`, a
-non-string primitive, an object/array marker, or a blank string is invalid. The
-string must also parse as a Ping For It version. A missing configuration file is
-instead initialized with defaults and written through the normal serialization
-path.
+`"pingforit-version"` as a string. A missing marker, `null`, a non-string
+primitive, an object/array marker, or a blank string is invalid before version
+parsing begins. The string must then match the Ping For It version grammar. A
+missing configuration file is instead initialized with defaults and written
+through the normal serialization path.
 
 Whenever that path actually serializes a configuration—new defaults, an ordinary
 save, a reset/recovery write, or a migration write—it stamps
 `pingforit-version` with the running mod version. An unchanged current file is
 loaded and validated; it is not rewritten merely because it was loaded.
+
+## Version-string grammar and comparison
+
+The full-string grammar is:
+
+```text
+\A([0-9]+)\.([0-9]+)\.([0-9]+)-pfi-([A-Za-z0-9]+)\z
+```
+
+It has three nonnegative decimal digit sequences (each permits leading zeros and
+arbitrary width), the lowercase literal `-pfi-`, and a nonempty ASCII
+alphanumeric qualifier. There is no trimming: whitespace or any other extra
+character makes the string invalid. For example:
+
+| Valid | Invalid |
+| --- | --- |
+| `0.3.0-pfi-beta1` | `0.3.0` |
+|  | `0.3.0-beta1` |
+|  | `0.3.0-PFI-beta1` |
+|  | `0.3.0-pfi-beta.1` |
+
+The original spelling is retained. For comparison, the `pfi` namespace is
+removed and `major.minor.patch-qualifier` is compared with the repository's
+`MavenComparableVersion`; this is neither lexicographic comparison nor SemVer.
+For equal numeric cores, `beta2 < beta10`, `rc1 < final`, `final == release`,
+and `01.002.000-pfi-beta1 == 1.2.0-pfi-beta1`.
+
+An invalid grammar follows the invalid-file recovery path, not future-version
+protection. Only a successfully parsed valid version that compares newer than
+the running version installs future-version protection. The asymmetric client
+backup/default-reset and server default-save outcomes are defined in
+[invalid-file recovery](#invalid-file-recovery-differs-by-config-type).
 
 ## Load-result matrix
 

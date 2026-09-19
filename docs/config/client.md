@@ -10,6 +10,8 @@ product values:
 | Long-press threshold (`wheelHoldMillis`) | **300 ms**; 100–2000 ms, 10 ms UI step | Capture/wheel interaction |
 | Long-press compatibility slice (`longPressCompatibilitySliceMillis`) | **20 ms**; minimum 10 ms, maximum described below, 5 ms UI step | Compatibility rapid-click adjacency window; enabled behavior is owned by [capture](../picking/capture.md) |
 | Maximum wheel-open duration (`wheelTimeoutMillis`) | **5000 ms**; 1000–30000 ms, 200 ms UI step | Starts only when wheel actually opens |
+| Wheel inner radius (`wheelInnerRadius`) | **14 GUI px**; 6–120 GUI px, 1 GUI-px UI step | Center/cancellation boundary; see [wheel radial release](../picking/wheel.md#radial-release-result) |
+| Wheel outer radius (`wheelOuterRadius`) | **39 GUI px**; 20–300 GUI px, 1 GUI-px UI step | Ping Type sector boundary; see [wheel radial release](../picking/wheel.md#radial-release-result) |
 | Cancellation cone half-angle | **5 degrees** | Press-ray cone, live own-marker candidates |
 | Long-press compatibility (`longPressCompatibilityMode`) | **disabled** | Rapid-click virtual hold and pending-first-capture deferred fresh press; see [capture](../picking/capture.md) |
 | Pass through transparent blocks (`passThroughTransparentBlocks`) | **disabled** | Persistent target-selection policy; see [selection policy](../picking/selection_policy.md) |
@@ -28,6 +30,13 @@ the stored slice. Runtime compatibility independently applies that same clamp
 to supplier values. When the settings option is created, its upper bound is
 computed from the then-current threshold and exposed in five-millisecond steps;
 the option does not make compatibility enabled by itself.
+
+The wheel-radius pair is normalized together. First clamp the outer radius to
+its 20–300 GUI-px bounds; then clamp the inner radius to its own minimum and to
+`min(120, wheelOuterRadius - 8)`. This preserves at least an 8 GUI-px annulus.
+For example, `(wheelInnerRadius, wheelOuterRadius) = (120, 20)` normalizes to
+`(12, 20)`. Direct setters and persisted-config validation use the same paired
+bounds rather than validating either radius independently.
 
 At a baseline press, the interaction freezes the clamped long-press threshold.
 At actual wheel opening, it separately freezes the clamped wheel timeout. In

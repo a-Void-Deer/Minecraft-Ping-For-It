@@ -20,7 +20,8 @@ After the admission gates below have passed, `MarkerCreate` validates or derives
 
 - the sender-owned request and current server dimension;
 - target existence and live entity/block/provider state;
-- eye-to-authoritative-anchor range against the configured server ping range;
+- eye-to-authoritative validation-anchor range against the configured server ping
+  range;
 - the Target Type by re-running the server resolver on the normalized target;
 - that the requested Ping Type exists and belongs to that Target Type; and
 - the authoritative target name, owner, arrival, lifetime and audience data.
@@ -48,14 +49,23 @@ For a structurally valid packet, the effective first-return order is:
    `TEAM_ONLY` admission gate; a failure returns `CHANNEL_DISABLED`;
 3. recipient snapshot construction from that stored channel and current server
    context; then
-4. `MarkerCreationService` argument checking, authoritative target/range
-   validation, server reclassification, and requested Ping Type membership.
+4. `MarkerCreationService` argument checking, authoritative target/provider
+   validation and range checking, server reclassification, and requested Ping
+   Type membership.
 
 Thus target/range validation, Target Type resolution, and Ping Type validation
 do not run before the channel gate or recipient snapshot. Once the service is
 called, its target/range validation precedes reclassification, and
 reclassification precedes requested Ping Type lookup/membership. The first
 returning gate is the reported rejection; no later reason is inferred.
+
+For an explicit external target, nonallocating provider validation establishes a
+provider-derived validation anchor for that range check. Initial classification
+and Ping Type membership pass before provider materialization; the later
+materialization/reclassification transaction, including Sable's acquired
+tracking-reference release, is owned by
+[Sable](../integrations/sable.md#server-validation-and-materialization). It does
+not add a post-materialization range check.
 
 The server limiter is reached before channel, snapshot, target, range,
 classification, or Ping Type checks and is not rolled back when one of those
@@ -78,12 +88,15 @@ feedback rule in [server responses](#server-responses-and-silent-outcomes).
 | Entity | Stable identity in the requester's current dimension, present and alive, and authoritative entity anchor within range; movement/same-dimension teleport keeps identity | No continuous server revalidation; normal removal/expiry; unavailable entity may use last/authoritative anchor |
 | Block | Loaded position in the requester's current dimension, same block type, and block-center anchor within range; same-type state/property changes are valid | Replacement alone does not remove marker; renderer uses current render state |
 | Location | Finite captured coordinates in the requester's current dimension and exact location anchor within range | Preserve established location lifecycle |
-| Explicit external target | Provider-authoritative candidate validation/materialization and provider-derived anchor within range | Established periodic refresh/invalidation exception; see Sable |
+| Explicit external target | Provider validates a normalized candidate and provider-derived validation anchor, then range checks that anchor; see [Sable's two-phase materialization](../integrations/sable.md#server-validation-and-materialization) for the later committed target/anchor transaction | Established periodic refresh/invalidation exception; see Sable |
 
-Presentation in another dimension is skipped. See
-[target identity](../identity/target_model.md) and
-[Sable](../integrations/sable.md) for the lifecycle boundary; do not generalize
-the external-target exception into continuous ordinary-marker validation.
+World/HUD marker visuals are skipped when the target dimension differs from the
+local current dimension. That visual filter does not imply that every recipient
+notification is dimension-filtered; [new-marker feedback and dimensions](../rendering/names_chat.md#new-marker-feedback-and-dimension-behavior)
+owns the sound/chat distinction. See [target identity](../identity/target_model.md)
+and [Sable](../integrations/sable.md) for the lifecycle boundary; do not
+generalize the external-target exception into continuous ordinary-marker
+validation.
 Entity locator form and server canonicalization, including the Experience Orb
 runtime-ID exception, are defined by [target identity](../identity/target_model.md).
 

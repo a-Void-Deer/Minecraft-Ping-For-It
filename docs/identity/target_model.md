@@ -36,12 +36,16 @@ replacement by a different type is invalid. The state's properties are not a
 new target identity.
 
 After an ordinary entity or block marker is committed it is not continuously
-server-revalidated: it remains until normal removal or expiry. Presentation
-in another dimension is skipped. An unavailable entity may use its last or
-authoritative anchor. An ordinary committed block replacement does not itself
-remove the marker; the renderer uses the current block render state. Explicitly
-supported external-target markers retain their established periodic
-invalidation exception. Pure locations retain existing location-ping semantics.
+server-revalidated: it remains until normal removal or expiry. World/HUD marker
+visuals are skipped when the target is in another dimension. That visual filter
+does not remove the marker or by itself filter receipt chat; the sound/chat
+trigger and dimension distinction is owned by
+[names and chat](../rendering/names_chat.md#new-marker-feedback-and-dimension-behavior).
+An unavailable entity may use its last or authoritative anchor. An ordinary
+committed block replacement does not itself remove the marker; the renderer uses
+the current block render state. Explicitly supported external-target markers
+retain their established periodic invalidation exception. Pure locations retain
+existing location-ping semantics.
 
 Existing ping lifetime, range, cooldown and comparable mechanics are preserved
 unless an explicit product requirement changes them. Pre-commit validation and

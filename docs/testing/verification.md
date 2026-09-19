@@ -140,6 +140,15 @@ The current suite covers:
 legacy fallback seams. This does not close localized-name, custom-name, locale,
 or resource-fallback scenarios.
 
+`TargetNameComposerTest` covers custom color/italic stripping and base-component
+identity. Its event-named case does not construct click or hover event fixtures,
+so it is not event-specific regression coverage.
+
+`ClientPingRuntimeTest` covers only the current-local-store membership predicate
+before and after a same-ID external-locator upsert. It does not invoke
+`applyCreated` or cover corrupt/tombstone suppression, actual sound playback,
+GUI chat delivery, or cross-dimension execution.
+
 ### Server-settings snapshots and updates
 
 `ServerSettingsModelTest` covers request correlation, stale responses, denial,
@@ -275,6 +284,12 @@ The following gaps remain open until direct evidence closes them:
   the compatibility controller can currently launch it after a non-`CreatePing`
   result such as `TargetGone`, and no regression test proves that such a press
   is discarded;
+- limiter-refusal behavior at the real limiter/dispatcher/compatibility-controller
+  boundary for both rapid and deferred compatibility: the dispatcher unit seam
+  proves a courtesy-rejected create is dropped, untracked, and unsent, but the
+  controller's fake port has no dispatch outcome. Regression coverage remains
+  pending for a limiter refusal followed by a rapid capture and by a deferred
+  fresh press; action type alone must not stand in for successful dispatch;
 - live GUI/screen input callbacks and physical key-repeat behavior across
   Fabric, Forge, and NeoForge, beyond the input-state seams; and
 - the complete range pipeline across native, Distant Horizons, Create/Sable,

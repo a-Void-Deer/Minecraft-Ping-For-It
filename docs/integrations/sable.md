@@ -16,10 +16,10 @@ sub-level containment; otherwise it preserves the existing projected-position
 or location fallback. Server validation and materialization remain required
 before that candidate can become a Marker.
 
-The server uses Sable's logical pose for the authoritative external anchor.
-Client presentation separately applies the current render pose to live local
-block data. Those pose roles do not alter the candidate or committed identity
-defined below.
+During server validation, Sable uses its logical pose to derive the external
+validation anchor. Client presentation separately applies the current render
+pose to live local block data. The validation and render-pose roles do not alter
+the candidate or committed identity defined below.
 
 The current external model route and external fallback independently resolve
 provider presentation. The required shared-subject and subject-type contract,
@@ -53,17 +53,26 @@ model.
 
 ## Server validation and materialization
 
-The provider checks its provider ID, candidate status, current dimension,
-locator encoding, expected registry ID, live sublevel/container, local level,
-loaded local block, non-air state, matching block registry ID, logical pose and
-finite transformed anchor. The server then applies the normal authoritative
-range check and target-type/Ping-Type checks.
+Provider validation is the nonallocating first phase. It checks provider ID,
+candidate status, current dimension, locator encoding, expected registry ID,
+live sublevel/container, local level, loaded local block, non-air state,
+matching block registry ID, logical pose, and finite transformed validation
+anchor. The normal server range check uses that anchor. Validation allocates no
+tracking reference.
 
-Materialization creates or reuses a tracking point. References are counted:
-marker removal, expiry, owner disconnect, audience-empty cleanup and server
-shutdown release the reference, and the last reference retires the tracking
-point. A failed transaction is released or rolled back without committing an
-unidentifiable target.
+After validation, `MarkerCreationService` initially classifies the normalized
+target and checks the requested Ping Type's membership. Only then does provider
+materialization resolve live state again, create or reuse a tracking reference,
+and replace the target/anchor with committed values. The service reclassifies
+that committed target and repeats the requested Ping Type membership check. It
+does **not** range-check the replacement anchor a second time. If the acquired
+materialization later fails reclassification, fails the post-materialization
+Ping Type check, or fails marker storage, it releases that reference rather than
+committing the target.
+
+A successfully committed reference is counted: marker removal, expiry, owner
+disconnect, audience-empty cleanup, and server shutdown release it, and the last
+reference retires the tracking point.
 
 ## Refresh lifecycle
 

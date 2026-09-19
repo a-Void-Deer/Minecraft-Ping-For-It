@@ -66,9 +66,14 @@ from a client capture distance.
 
 For a large Create contraption this means a client may select a nearby exact
 surface but still be rejected if the whole entity's authoritative anchor is too
-far away. For Sable, provider materialization supplies the authoritative logical
-anchor before this same check. See [target validation](../authority/target_validation.md)
-for the full rejection and lifecycle contract.
+far away. For Sable, provider validation first supplies a normalized,
+nonallocating candidate/match context and logical-pose **validation anchor**;
+the server range-checks that anchor. Only later can materialization replace it
+with committed target/anchor values. There is no second range check on that
+replacement anchor. The two-phase provider transaction and its release handling
+are owned by [Sable server validation and materialization](../integrations/sable.md#server-validation-and-materialization).
+See [target validation](../authority/target_validation.md) for the admission and
+ordinary lifecycle contract.
 
 ## Integration matrix
 
@@ -78,7 +83,7 @@ for the full rejection and lifecycle contract.
 | Create contraption local shapes | Same finite segment passed through the common entity-candidate request and transformed locally | Reuses the native effective segment; no Create interaction-picker range | Exact whole-entity hit, or owned miss/unavailable/failure with no coarse-AABB revival |
 | Sable external candidate | Native block hit plus that same segment's frozen origin/end | Reuses native effective segment; point must project onto the segment | External candidate only after provider checks; otherwise existing projected/location or vanilla fallback |
 | Distant Horizons | Frozen origin/direction after native miss | Fixed 4096 API trace, independent of both client fields | Distant block hit or original native location miss |
-| Server validator | Current server player eye and authoritative target anchor | Server `pingDistance`, default 2048, clamp 1–2048 | Accept or `OUT_OF_RANGE`, independently of client capture |
+| Server validator | Current server player eye and authoritative validation anchor | Server `pingDistance`, default 2048, clamp 1–2048 | Accept or `OUT_OF_RANGE`, independently of client capture; an external candidate's provider validation anchor is checked before later materialization |
 
 ## Evidence and remaining verification
 

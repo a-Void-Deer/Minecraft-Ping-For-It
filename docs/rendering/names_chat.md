@@ -20,6 +20,15 @@ Server-derived name data follows
 - An ordinary entity uses its localized entity-type name, and an ordinary block
   uses its localized block name. Do not hard-code English target names.
 
+## Custom and base component composition
+
+For the custom-name forms above, the incoming custom component is deliberately
+flattened to `Component.literal(customName.getString())` before composition.
+Its text remains, but its incoming colors, styles (including italic), and events
+are not inherited. The trusted localized base component is appended unchanged,
+so any independent retained styling refers to that base component rather than
+to the flattened custom input.
+
 ## Translation keys and template selection
 
 | Purpose | Key |
@@ -56,9 +65,30 @@ different locale first.
 
 Only the Ping-Type-specific phrase receives that Ping Type's `textColor`.
 Player name, connective wording, and target name retain their normal/default
-chat color except for independent pre-existing styling. For example, only the
-equivalent of `ATTENTION` is emphasized in `Steve requests ATTENTION Zombie`.
+chat color except for independently retained styling on trusted components; this
+does not preserve styling carried by the flattened custom input. For example,
+only the equivalent of `ATTENTION` is emphasized in
+`Steve requests ATTENTION Zombie`.
 
 Exact phrase/display keys and color values are in the
 [fixed catalog](../identity/catalogs.md). Wheel sectors use outline colors under
 the [wheel contract](../picking/wheel.md), not this phrase-only text-color rule.
+
+## New-marker feedback and dimension behavior
+
+For a created-marker update, the client runtime first rejects corrupt input and
+authoritatively tombstoned marker IDs. For a remaining update, it determines
+whether the marker is newly seen from the marker's presence in the **current**
+local store before upserting it. Only a newly seen marker is eligible for the
+sound and chat hooks. An update to an ID that is still locally known—including
+an upsert that refreshes an external locator—does not repeat either hook.
+
+This is current local-store membership, not permanent once-per-ID history:
+local marker-record cleanup can end membership. A full store clear also removes
+retained tombstones, allowing a later receipt to be newly seen. While retained,
+an authoritative-removal tombstone separately suppresses a late create for that
+ID. The sound hook is eligible only when a game, level, and player are available
+and the marker target dimension matches the current level. The chat hook
+deliberately has no target-dimension filter, so a marker recipient can receive a
+cross-dimension line subject to the normal client presentation validity checks.
+Eligibility attempts do not guarantee an audible sound or a visible chat line.

@@ -27,6 +27,8 @@ A press received while any client screen is open is suppressed through its
 matching release and does not flip a setting. In particular, a repeat received
 after that screen closes cannot become a new press edge. The bindings in the
 table are defaults; the behavior follows the matching configured key mapping.
+This toggle-specific GUI suppression is separate from the active ping
+interaction's screen-transition abort rule in [capture](capture.md#interaction-lifecycle-aborts).
 
 After a claimed toggle, the client calls `saveSafely`. That is a persistence
 attempt, not an unconditional disk-write guarantee: an existing invalid-file or

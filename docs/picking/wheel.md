@@ -13,11 +13,37 @@ always **Cancel Marker**, including one-item Ping Type sets and the location
 fallback. Each sector has inner and outer borders/arcs in its Ping Type's
 outline color. The choices and default come from the resolved Target Type's
 [ordered catalog](../identity/catalogs.md).
+The wheel radii and their paired configuration bounds are owned by
+[client settings](../config/client.md#current-defaults-and-locality).
 
 Exceeding the configured timeout closes an actually open wheel with no ping,
 no cancellation and no timeout error. Timeout is measured from actual opening.
 If the wheel has not opened, releasing uses the default Ping Type rather than
 fabricating a wheel selection from elapsed duration.
+
+## Radial release result
+
+For a non-timeout release of an actually open wheel, let `r` be the pointer's
+radius from the wheel center in GUI pixels. The result is exactly:
+
+| Pointer radius | Release result |
+| --- | --- |
+| `r <= wheelInnerRadius` | `CENTER`: **Cancel Marker** |
+| `wheelInnerRadius < r <= wheelOuterRadius` | The corresponding frozen Ping Type sector |
+| `r > wheelOuterRadius` | `NONE` |
+
+If a computed sector is outside the frozen Ping Type list, it is normalized to
+`NONE`. `NONE` is a silent release result: it sends neither a create nor a
+cancellation request. This table applies only after actual opening; timeout
+remains the separate no-action close described above.
+
+## Mouse ownership
+
+The wheel releases mouse capture only while it is actually open and no client
+screen is open. It re-grabs the mouse only when that capture was released by the
+wheel and no screen is open. Live ownership synchronization defers while a
+screen is open, and disposal may relinquish pending wheel ownership rather than
+stealing the cursor from a screen or another owner.
 
 ## Cancel Marker selection
 
