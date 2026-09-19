@@ -53,19 +53,24 @@ is specified by [target validation](target_validation.md#audience-snapshot-at-cr
 Client bookkeeping is main-thread local and retains enough state to tolerate
 packet ordering and packet loss. `displayExpiresAtLocalTick` is visually active
 only while `localTick < displayExpiresAtLocalTick`; reaching the deadline does
-not by itself delete a synchronized record.
+not by itself delete a synchronized record. In fallback housekeeping, a
+`SYNCHRONIZED` record is considered for transition or deletion only once its
+own `fallbackExpiresAtLocalTick <= localTick`; before that point, an elapsed
+display deadline leaves the synchronized record stored.
 
 | From | Event / condition | Record result | Visual result |
 | --- | --- | --- | --- |
 | No record | A created-marker snapshot for an ID not tombstoned by an authoritative removal | Insert `SYNCHRONIZED`; derive fallback expiry and fix the display deadline. | It participates in `renderMarkers()` until its display deadline. |
 | `SYNCHRONIZED` or locally fallback-`STALE` | A later snapshot for the same non-tombstoned ID | Upsert the newest payload and refresh the synchronization fallback; the state becomes `SYNCHRONIZED`, but the existing display deadline is retained. | A deadline that has already elapsed is not extended by this upsert. |
-| `SYNCHRONIZED` | The local display deadline is reached | The synchronized stored record remains available for late authoritative packets. | It stops appearing in `renderMarkers()` and cannot be exposed by `winnerId`. |
-| `STALE` | Its local display deadline is reached and fallback housekeeping runs | Delete the stale record. | It is no longer renderable. |
+| `SYNCHRONIZED` | The local display deadline is reached before its synchronization fallback is due | The synchronized stored record remains available for late authoritative packets. | It stops appearing in `renderMarkers()` and cannot be exposed by `winnerId`. |
 | `SYNCHRONIZED` or `STALE` | Reason-aware authoritative removal `EXPIRED`, while the visual is active and no synchronized same-target sibling exists | Tombstone the ID and retain/change the record as `STALE`. | Keep the stale visual until its independent display deadline. This is the normal case where the server expires first but a longer client display duration remains. |
 | `SYNCHRONIZED` or `STALE` | Authoritative `EXPIRED` when the visual has already elapsed, or when a synchronized same-target sibling supersedes it | Tombstone and delete the record. | No stale visual is retained. |
 | `SYNCHRONIZED` or `STALE` | Authoritative `CANCELLED`, `TARGET_INVALID`, or `OWNER_DISCONNECTED` removal | Tombstone and hard-delete immediately. | The display deadline does not defer these reasons. |
-| `SYNCHRONIZED` | Fallback expiry is reached without an authoritative removal, the visual remains active, and no synchronized same-target sibling exists | Change to `STALE`. | Keep the visual to its fixed display deadline as loss recovery. |
-| `SYNCHRONIZED` or `STALE` | Fallback processing finds the visual already elapsed, or finds a synchronized same-target sibling | Delete the record. | It is no longer renderable. |
+| `SYNCHRONIZED` | Its fallback deadline is due; fallback housekeeping first removes stale same-target siblings, then finds either an elapsed visual deadline or another synchronized same-target record | Delete the synchronized record. | It is no longer renderable. |
+| `SYNCHRONIZED` | Its fallback deadline is due, its visual remains active, and no other synchronized same-target record exists | Remove stale same-target siblings, then change this record to `STALE`. | Keep this record's visual to its fixed display deadline as loss recovery. |
+| `STALE` | Its own fallback-housekeeping branch finds its visual deadline elapsed | Delete the stale record. | It is no longer renderable. |
+| `STALE` | Its own fallback-housekeeping branch finds its visual still active | Retain the stale record. Its already-past fallback deadline is not a second deletion condition. | It remains renderable. |
+| `STALE` | A synchronized same-target record reaches its own fallback deadline and is processed | Delete this stale record as a same-target sibling before the synchronized record's transition/deletion decision, even if this stale record's visual remains active. | It is no longer renderable. |
 | `STALE` | A newly synchronized marker for the same target but a different ID arrives | Delete stale same-target records before exposing the new synchronized record. | The fresh marker supersedes stale visuals for that target. |
 | `STALE` | An authoritative winner update names an already-known synchronized marker for the same target | Delete stale same-target records before the synchronized winner is exposed. | The synchronized marker supersedes stale visuals for that target. |
 | No record | An authoritative removal arrives before its created-marker snapshot | Tombstone the ID and clear any winner slot that named it. | A later delayed create is ignored, so it never becomes visible. |
@@ -81,6 +86,13 @@ there is no local tombstone for that deletion; a later same-ID create is
 currently treated as a new insertion and receives a new deadline. This final
 late-create case is a remaining contract/test gap, not an authoritative server
 resurrection.
+
+The fallback branches above are state-specific. A visually expired
+`SYNCHRONIZED` record remains stored until its own fallback deadline is due; at
+that due pass it is deleted rather than first becoming stale. A `STALE` record's
+own branch tests only visual activity, but it can also be removed as a stale
+same-target sibling while a due synchronized record is processed. `EXPIRED`
+remains an authoritative removal reason, never a client record state.
 
 ## Winner slots are not the render-marker collection
 

@@ -5,18 +5,47 @@
 These are current configurable defaults/settings, not unresolved or immutable
 product values:
 
-| Setting | Default | Application |
+| Setting | Default and bounds | Application |
 | --- | --- | --- |
-| Long-press threshold | **300 ms** | Capture/wheel interaction |
-| Maximum wheel-open duration | **5000 ms** | Starts only when wheel actually opens |
+| Long-press threshold (`wheelHoldMillis`) | **300 ms**; 100–2000 ms, 10 ms UI step | Capture/wheel interaction |
+| Long-press compatibility slice (`longPressCompatibilitySliceMillis`) | **20 ms**; minimum 10 ms, maximum described below, 5 ms UI step | Compatibility rapid-click adjacency window; enabled behavior is owned by [capture](../picking/capture.md) |
+| Maximum wheel-open duration (`wheelTimeoutMillis`) | **5000 ms**; 1000–30000 ms, 200 ms UI step | Starts only when wheel actually opens |
 | Cancellation cone half-angle | **5 degrees** | Press-ray cone, live own-marker candidates |
-| Long-press compatibility | **disabled** | Narrow pending-capture/deferred-press behavior |
+| Long-press compatibility (`longPressCompatibilityMode`) | **disabled** | Rapid-click virtual hold and pending-first-capture deferred fresh press; see [capture](../picking/capture.md) |
 | Pass through transparent blocks (`passThroughTransparentBlocks`) | **disabled** | Persistent target-selection policy; see [selection policy](../picking/selection_policy.md) |
 | Mark blacklisted targets (`markBlacklistedTargets`) | **disabled** | Persistent entity-selection policy; see [selection policy](../picking/selection_policy.md) |
 | Mark fluids (`markFluids`) | **disabled** | Persistent target-selection policy; see [selection policy](../picking/selection_policy.md) |
 | Block display whitelist | exactly `*:*` | Client-local native-glow eligibility |
 | Block-shape blacklist | empty | Overrides whitelist match |
 | Entity-block geometry source mode | `ALL` | Client-local, read on every render attempt/frame |
+
+The long-press threshold is clamped to **100–2000 ms**. The compatibility
+slice is clamped to **10 ms** through the lower of **300 ms** and the floored,
+five-millisecond-step half of the effective threshold; therefore the default
+300 ms threshold has a 150 ms maximum slice. JSON validation and direct setting
+mutations use the same clamp, and changing the threshold immediately reclamps
+the stored slice. Runtime compatibility independently applies that same clamp
+to supplier values. When the settings option is created, its upper bound is
+computed from the then-current threshold and exposed in five-millisecond steps;
+the option does not make compatibility enabled by itself.
+
+At a baseline press, the interaction freezes the clamped long-press threshold.
+At actual wheel opening, it separately freezes the clamped wheel timeout. In
+contrast, compatibility mode and its effective slice are observed at relevant
+raw edges and render frames; the slice's threshold-derived cap can therefore
+change while a rapid-click candidate remains alive. The interaction state,
+rather than elapsed threshold alone, decides whether a present frame actually
+opened a wheel. The two compatibility paths and the resulting release/abort
+rules are owned by [capture](../picking/capture.md).
+
+`pingDistance` is a client-local setting with default **2048** and a settings
+UI range of 0–2048 in 16-block steps (where 0 is shown as hidden and the maximum
+as infinite). It is not synchronized to the server. The client configuration
+validation path does not apply a `ClientConfigBounds` clamp to either this field
+or the hidden native ray-distance field; the UI range is therefore not a claim
+about arbitrary persisted values. Its capture role, optional integrations, and
+server authority are owned by [capture range](../picking/range.md); this table
+must not be read as a server acceptance guarantee.
 
 Detailed timing lives in [capture](../picking/capture.md) and
 [wheel](../picking/wheel.md). Existing range/lifetime/cooldown mechanics are

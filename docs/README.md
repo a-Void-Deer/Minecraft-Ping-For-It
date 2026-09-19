@@ -31,11 +31,14 @@ conflicts rather than silently choosing or dropping a requirement.
 | Change press handling, asynchronous capture or target locking | [Capture](picking/capture.md) | [Selection policy](picking/selection_policy.md), [Wheel](picking/wheel.md), local geometry, rate policy |
 | Change target-selection toggles, block/fluid modes or entity-selection blacklist | [Selection policy](picking/selection_policy.md) | [Capture](picking/capture.md), Create raycast |
 | Change exact entity picking or geometry ownership | [Local geometry picking](picking/local_geometry.md) | Create raycast integration and D0006 |
+| Change client capture distance, optional long-range traces or server range acceptance | [Range](picking/range.md) | [Capture](picking/capture.md), [Target validation](authority/target_validation.md), server settings and the affected integration |
 | Change wheel opening, timeout, selection or cancellation | [Wheel](picking/wheel.md) | Capture, client config and validation |
 | Change packets, target acceptance, removal or rejection feedback | [Target validation](authority/target_validation.md) | [Security](security.md), rate policy and identity |
+| Change registered marker/legacy packet ingress or client packet acceptance | [Network protocol](authority/network_protocol.md) | [Target validation](authority/target_validation.md), marker lifecycle and compatibility |
 | Change which same-target ping is visible | [Ping winner](authority/ping_winner.md) | Identity, removal/expiry and external-target refresh |
 | Change trust boundaries, failure isolation or diagnostic detail | [Security](security.md) | Validation, rate policy and the affected provider/source contract |
 | Change client defaults, list syntax, reload or recovery | [Client config](config/client.md) | [Config versioning](config/versioning.md), capture, wheel, outline routing and geometry modes |
+| Change the server-settings panel, snapshot correlation, drafts or partial updates | [Server settings](config/server_settings.md) | [Security](security.md), [Rate policy](config/rate_limit.md), marker lifecycle and config versioning |
 | Change config schema versions, preservation locks or migrations | [Config versioning](config/versioning.md) | [Client config](config/client.md), repository build entry |
 | Change send-rate synchronization or courtesy limiting | [Rate policy](config/rate_limit.md) | Validation and security |
 | Change source order, adapter outcomes, failure handling or registration | [Geometry sources](geometry/geometry_sources.md) | Presentation subjects and the affected integration |
@@ -52,17 +55,35 @@ conflicts rather than silently choosing or dropping a requirement.
 | Assess coverage or plan validation | [Testing and verification](testing/verification.md) | The changed topic and applicable decision |
 
 Every topic document is reachable from the table above or the decision index
-below. The complete set is: [architecture](architecture/geometry-pipeline.md);
-[identity](identity/target_model.md), [picking](picking/capture.md) and
-[selection policy](picking/selection_policy.md),
-[authority](authority/marker_lifecycle.md), [config](config/client.md) and
-[versioning](config/versioning.md), [geometry](geometry/geometry_sources.md),
-[rendering](rendering/outline.md), [Create](integrations/create.md),
-[Create raycast](integrations/create-contraption-raycast.md),
-[Sable](integrations/sable.md), [Simulated](integrations/simulated.md),
-[compatibility](compatibility.md), [security](security.md), and
-[testing/verification](testing/verification.md), plus decisions D0001 through
-D0006 in the index below.
+below. The complete topic set is:
+
+- [architecture](architecture/geometry-pipeline.md);
+- identity: [target model](identity/target_model.md) and
+  [catalogs](identity/catalogs.md);
+- picking: [capture](picking/capture.md),
+  [selection policy](picking/selection_policy.md),
+  [local geometry](picking/local_geometry.md), [range](picking/range.md), and
+  [wheel](picking/wheel.md);
+- authority: [marker lifecycle](authority/marker_lifecycle.md),
+  [target validation](authority/target_validation.md),
+  [network protocol](authority/network_protocol.md), and
+  [ping winner](authority/ping_winner.md);
+- configuration: [client config](config/client.md),
+  [server settings](config/server_settings.md),
+  [versioning](config/versioning.md), and [rate policy](config/rate_limit.md);
+- geometry: [geometry sources](geometry/geometry_sources.md) and
+  [VoxelShape geometry](geometry/voxel_shape.md);
+- rendering: [outline](rendering/outline.md),
+  [presentation subjects](rendering/presentation_subjects.md),
+  [model placement](rendering/model_placement.md), and
+  [names and chat](rendering/names_chat.md);
+- integrations: [Create](integrations/create.md),
+  [Create raycast](integrations/create-contraption-raycast.md),
+  [Sable](integrations/sable.md), and
+  [Simulated](integrations/simulated.md); and
+- [compatibility](compatibility.md), [security](security.md), and
+  [testing/verification](testing/verification.md), plus decisions D0001 through
+  D0006 in the index below.
 
 ## Decision records
 

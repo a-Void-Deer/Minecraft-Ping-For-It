@@ -3,10 +3,13 @@
 ## Target Type resolution and fixed order
 
 Target Types are code-defined matchers. When the captured snapshot becomes
-available, evaluate every active matcher. Lower numeric priority wins; equal
-priorities use earlier declaration order. Pure location is always the lowest-
-priority fallback. The resolved Target and Target Type are then frozen for the
-interaction; the server independently repeats classification from its own state.
+available, inspect the ordered catalog in ascending numeric-priority order,
+using earlier declaration order for equal priorities. A missing matcher binding
+is skipped; each bound matcher is evaluated once, and `INACTIVE` or `NO_MATCH`
+continues to the next entry. Resolution returns the first `MATCH` and does not
+invoke later matchers. Pure location is always the lowest-priority fallback.
+The resolved Target and Target Type are then frozen for the interaction; the
+server independently repeats classification from its own state.
 
 The following declaration order, ordered Ping Type sets and defaults are fixed:
 

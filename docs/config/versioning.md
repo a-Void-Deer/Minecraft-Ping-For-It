@@ -76,9 +76,12 @@ The reason is reduced to a safe one-line comment. If the backup cannot be made,
 the handler leaves defaults in memory and installs `INVALID_FILE` save
 protection without attempting the reset write. If the reset write fails after a
 successful backup, it also installs that protection. While it is installed,
-ordinary saves and reset requests are skipped; a later successful load is what
-can clear the protection. This client flow covers parsing and strict persisted
-block-list validation alike.
+`save` and `saveSafely` decline to write. `resetToDefaults` is not skipped
+wholesale: it replaces the in-memory config with a newly constructed default,
+then its forced persistence attempt is declined by the protection, leaving the
+protected disk source untouched. A later successful `load` path can clear the
+protection. This client flow covers parsing and strict persisted block-list
+validation alike.
 
 `ServerConfig` does not use that backup-and-lock flow for invalid input. It
 creates defaults and attempts a normal save, with no broken-file backup and no
@@ -90,9 +93,14 @@ lock.
 
 For either config type, a successfully parsed marker newer than the running
 version is not a malformed file. The handler keeps the file on disk, uses
-defaults in memory, and installs `FUTURE_VERSION` protection. That protection
-blocks every write path, including ordinary `save`, `saveSafely`, and
-`resetToDefaults`, so local defaults cannot overwrite a future schema.
+defaults in memory, and installs `FUTURE_VERSION` protection. `save` and
+`saveSafely` decline to write while it is installed. A normal
+`resetToDefaults` call still constructs fresh defaults in memory before its
+forced save is declined; future-version protection therefore prevents the disk
+write, rather than early-returning the entire reset operation. If a reset first
+discovers that a pending migration's source changed and that reload installs
+protection, it returns after restoring defaults and without attempting that
+forced save. Neither route supplies a downgrade write.
 
 A later `load` re-evaluates the file currently on disk. If it remains a future
 version, protection remains; if it has been replaced or removed, normal

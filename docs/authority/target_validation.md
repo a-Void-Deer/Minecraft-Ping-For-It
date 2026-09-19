@@ -1,14 +1,22 @@
 # Target validation, packets and rejection semantics
 
-## Authority at marker creation
+## Authority at `MarkerCreate`
 
-The server repeats classification from its own game state. It never trusts
-client-supplied classification, display names, colors, ownership or target
-validity when it can validate the underlying target or marker. Authoritative
-names follow [names and chat](../rendering/names_chat.md).
+`MarkerCreate` is the authoritative marker-creation ingress. Its packet carries
+captured stable target identity and a selected Ping Type ID, but no channel,
+audience, Target Type, name, color, owner, arrival time, or lifetime. For this
+packet, the server repeats classification from its own game state and does not
+trust client-supplied target validity or presentation/ownership data.
+Authoritative names follow [names and chat](../rendering/names_chat.md).
 
-`MarkerCreate` carries captured stable target identity and a selected Ping Type
-ID for a committed create. Before accepting it, the server validates or derives:
+These `MarkerCreate` guarantees do **not** describe the separately registered
+legacy `PingLocationC2SPacket`, whose payload still contains a channel and is
+forwarded through its legacy path. The distinction in registration, server side
+effects, and current client treatment is owned by
+[network protocol](network_protocol.md); it is not a compatibility promise for
+the original mod.
+
+After the admission gates below have passed, `MarkerCreate` validates or derives:
 
 - the sender-owned request and current server dimension;
 - target existence and live entity/block/provider state;
@@ -18,10 +26,52 @@ ID for a committed create. Before accepting it, the server validates or derives:
 - the authoritative target name, owner, arrival, lifetime and audience data.
 
 The server does not accept a client-provided Target Type, name, color, owner,
-arrival time, lifetime, channel or audience. Color is derived from the accepted
-server Ping Type definition. Whole-entity local-geometry captures remain
-whole-entity requests; the server validates the entity and its authoritative
-anchor, not a replay of the client's ray or a local constituent.
+arrival time, lifetime, channel or audience for `MarkerCreate`. Color is derived
+from the accepted server Ping Type definition. Whole-entity local-geometry
+captures remain whole-entity requests; the server validates the entity and its
+authoritative anchor, not a replay of the client's ray or a local constituent.
+
+## `MarkerCreate` admission and rejection order
+
+The loader route uses `MarkerCreateC2SPacket.readSafe`; a decode failure is
+represented by its corrupt fallback packet. `ServerCore.onMarkerCreate` then
+performs its packet structural check (`isCorrupt`) before it asks the rate
+limiter. A corrupt packet receives `INVALID_REQUEST` and returns without
+reaching the rate, channel, recipient, target, or marker-store creation stages.
+
+For a structurally valid packet, the effective first-return order is:
+
+1. when the configured server rate limit is positive, the existing server
+   `RateLimiter.checkExceeded()` call; an exceeded check returns
+   `RATE_LIMITED`;
+2. the sender's server-stored channel and the empty-channel `DISABLED` or
+   `TEAM_ONLY` admission gate; a failure returns `CHANNEL_DISABLED`;
+3. recipient snapshot construction from that stored channel and current server
+   context; then
+4. `MarkerCreationService` argument checking, authoritative target/range
+   validation, server reclassification, and requested Ping Type membership.
+
+Thus target/range validation, Target Type resolution, and Ping Type validation
+do not run before the channel gate or recipient snapshot. Once the service is
+called, its target/range validation precedes reclassification, and
+reclassification precedes requested Ping Type lookup/membership. The first
+returning gate is the reported rejection; no later reason is inferred.
+
+The server limiter is reached before channel, snapshot, target, range,
+classification, or Ping Type checks and is not rolled back when one of those
+later stages rejects. With a positive configured limit, the first structurally
+valid request initializes the limiter and proceeds; later permitted checks
+advance its limiter state, while an exceeded check returns `RATE_LIMITED`
+without running a later stage. A corrupt packet never reaches that call, and a
+configured limit of zero skips it. This is server enforcement, not the
+client-side courtesy token bucket described by [rate policy](../config/rate_limit.md).
+
+For example, a structurally valid request with an empty stored channel while
+the mode is `DISABLED` receives `CHANNEL_DISABLED` even if its requested target
+has disappeared: target validation is not reached. A valid, rate-permitted
+request that passes the channel gate and then finds a dead or unavailable target
+receives `TARGET_GONE`. Only the latter is eligible for the narrowly gated local
+feedback rule in [server responses](#server-responses-and-silent-outcomes).
 
 | Target | Creation-time validity | Ordinary post-commit behavior |
 | --- | --- | --- |
@@ -64,15 +114,22 @@ The MarkerCreate packet does not authorize its channel or recipients. The
 server uses the sender's stored channel and the current server channel mode,
 then snapshots a non-empty recipient list at creation. The sender is included
 in every accepted snapshot; other recipients are online players selected by
-the following table. Normal target, Ping Type, range, and rate validation still
-applies before this channel/audience stage.
+the following table. Target/range, Target Type, and Ping Type validation occur
+after the channel gate and snapshot, while rate enforcement occurs before them.
+
+For every online candidate, snapshot construction first requires exact equality
+between the candidate's stored channel and the creator's stored channel. This
+applies to empty channels too. Only after that equality check does an empty,
+non-`GLOBAL` channel require `TeamContextHandler.inSameContext`. The creator is
+added separately before this candidate loop and is retained once for every
+accepted creation; the final snapshot de-duplicates the list.
 
 | Sender's stored channel at create | Server `ChannelMode` | Creation gate | Audience snapshot |
 | --- | --- | --- | --- |
 | Non-empty channel `C` | `AUTO`, `DISABLED`, `GLOBAL`, or `TEAM_ONLY` | None from the default channel mode | Sender plus every online other player whose stored channel is exactly `C`. Team/context matching is not additionally applied. |
 | Empty channel | `DISABLED` | Reject creation | No marker or audience is created. |
-| Empty channel | `TEAM_ONLY` | Reject when the sender has no team context | When the sender has a context, include the sender plus online players in the same context. |
-| Empty channel | `AUTO` | No team-context admission gate | Include the sender plus online players in the same context, including the precise no-context equivalence below. |
+| Empty channel | `TEAM_ONLY` | Reject when the sender has no team context | When the sender has a context, include the sender plus online other players whose stored channel is also empty and who are in the same context. |
+| Empty channel | `AUTO` | No team-context admission gate | Include the sender plus online other players whose stored channel is also empty and who are in the same context, including the precise no-context equivalence below. |
 | Empty channel | `GLOBAL` | No team-context admission gate | Include the sender plus every online player whose stored channel is also empty; team/context is not additionally applied. |
 
 For empty-channel `AUTO` and permitted `TEAM_ONLY`, "same context" is the

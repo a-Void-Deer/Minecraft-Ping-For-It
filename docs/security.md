@@ -2,10 +2,19 @@
 
 ## Trust boundaries
 
-Captured client intent is a request. The server derives/verifies target
-classification, existence, dimension, block/entity state, range, allowed Ping
-Type, names, colors, ownership, channel, audience and lifecycle data from
-authoritative state where possible.
+For authoritative `MarkerCreate`, captured client intent is a request. The
+server derives/verifies target classification, existence, dimension,
+block/entity state, range, allowed Ping Type, names, colors, ownership,
+channel, audience and lifecycle data from authoritative state where possible.
+That packet has no client-provided channel or audience field; the server uses
+its stored channel state when it applies the marker-creation policy.
+
+This channel/audience guarantee is specific to `MarkerCreate`. It must not be
+extended to the registered legacy `PingLocationC2SPacket`, which retains an
+in-packet channel and legacy forwarding path. See
+[network protocol](authority/network_protocol.md) for the deliberately narrow
+legacy-versus-authoritative boundary.
+
 Clients cannot authorize marker removal or select a server winner by sending
 presentation values. Detailed packet and invalidation timing lives in
 [target validation](authority/target_validation.md); deterministic winner
@@ -20,10 +29,12 @@ see [Sable](integrations/sable.md).
 ## Server-setting permission
 
 Requesting the server-settings snapshot is not itself an edit authorization.
-The snapshot's `canEdit` value is only a server-provided UI capability hint.
-The server independently checks `player.hasPermissions(3)` for every settings
-update on the server thread and rejects updates below that permission level.
-No client-provided permission or editable display state is authoritative.
+The snapshot's `canEdit` value is only a server-provided UI capability hint. The
+server independently checks `player.hasPermissions(3)` for every settings
+update on the server thread and rejects updates below that permission level. No
+client-provided permission or editable display state is authoritative. The
+settings request/update protocol and partial-update semantics are owned by
+[server settings](config/server_settings.md).
 
 This permission gate is specific to server-configuration editing. Ordinary
 MarkerCreate is not OP-gated; it is governed by packet validity, rate and
@@ -41,9 +52,11 @@ courtesy immediately before creates.
 Throttled committed creates are dropped, not queued or tracked as dispatched;
 remove/channel operations retain their behavior.
 
-Only the latest dispatched create's `TARGET_GONE` response may show the local
-invalid-target error. Older/unknown responses, other reasons, invalid removals
-and empty cancellations follow their explicit silent/debug-only contracts.
+Only a `TARGET_GONE` response for the latest actually dispatched create may
+show the local invalid-target error. Older or unknown responses, and every
+other rejection reason—including `RATE_LIMITED` and `CHANNEL_DISABLED`—do not
+gain that message from this rule; invalid removals and empty cancellations keep
+their explicit silent/debug-only contracts.
 
 ## Isolation and resource lifetime
 
