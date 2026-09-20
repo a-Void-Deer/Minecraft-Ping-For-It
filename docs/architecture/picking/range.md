@@ -73,7 +73,7 @@ the server range-checks that anchor. Only later can materialization replace it
 with committed target/anchor values. There is no second range check on that
 replacement anchor. The two-phase provider transaction and its release handling
 are owned by [Sable server validation and materialization](../integrations/sable.md#server-validation-and-materialization).
-See [target validation](../authority/target_validation.md) for the admission and
+See [target validation](../architecture/authority/target_validation.md) for the admission and
 ordinary lifecycle contract.
 
 ## Integration matrix

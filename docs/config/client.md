@@ -17,7 +17,7 @@ Every setting below is client-local. It can affect local input, capture, or
 presentation but cannot grant server range acceptance or alter server marker
 lifetime. A chosen channel is notified to the server when applicable, but the
 server remains authoritative for its own channel acceptance and marker state;
-see [target validation](../authority/target_validation.md).
+see [target validation](../architecture/authority/target_validation.md).
 
 Current implementation defaults, validation metadata, and widget definitions
 are intentionally not mirrored here. Consult
@@ -42,7 +42,7 @@ above.
 | `directionIndicatorVisible` | boolean | Whether the off-screen direction indicator is visible. |
 | `pingSize` | number | Local visual scale for marker and direction-indicator presentation. |
 | `configurationNoticeSize` | number | Local visual size for target-selection toggle notices. |
-| `markerDisplayDuration` | number | Local marker-display-duration preference. Serialized `0` means each marker follows its frozen server-side duration, rather than a literal zero-duration display; [marker lifecycle](../authority/marker_lifecycle.md) owns the resulting state behavior. |
+| `markerDisplayDuration` | number | Local marker-display-duration preference. Serialized `0` means each marker follows its frozen server-side duration, rather than a literal zero-duration display; [marker lifecycle](../architecture/authority/marker_lifecycle.md) owns the resulting state behavior. |
 | `raycastDistance` | number | Native local raycast cap; [range](../picking/range.md) owns capture-range composition. Its current screen exposure is owned by the [settings screen](../UI/settings-screen.md). |
 
 ### Press, wheel, and cancellation interaction

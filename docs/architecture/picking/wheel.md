@@ -70,5 +70,5 @@ The selected stored candidate does not authorize a new target-selection ray or
 make it server-cancellable. A stale, expired, missing, or unauthorized nearest
 candidate can be rejected by the server; that rejection does not make the client
 retry the action with a farther candidate. Such removals are silent
-no-ops/rejections under [target validation](../authority/target_validation.md).
-Removing a valid winner triggers [server winner recomputation](../authority/ping_winner.md).
+no-ops/rejections under [target validation](../architecture/authority/target_validation.md).
+Removing a valid winner triggers [server winner recomputation](../architecture/authority/ping_winner.md).

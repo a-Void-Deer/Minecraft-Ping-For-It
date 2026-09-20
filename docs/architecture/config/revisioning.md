@@ -143,4 +143,4 @@ The client configuration entry point is
 [client configuration](../../config/client.md). The settings-screen workflow is
 [settings screen](../../UI/settings-screen.md). Server timing values and marker
 lifetime behavior are owned separately by
-[marker lifecycle](../../authority/marker_lifecycle.md).
+[marker lifecycle](../authority/marker_lifecycle.md).

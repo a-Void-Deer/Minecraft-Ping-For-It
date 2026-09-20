@@ -22,7 +22,7 @@ separate range contract is [range](../picking/range.md). The timing and
 client-courtesy meanings of `msToRegenerate` and `rateLimit` remain owned by
 [rate policy](rate_limit.md), and the frozen marker-lifetime meaning of
 `syncDuration` remains owned by
-[marker lifecycle](../authority/marker_lifecycle.md). Persisted server-config
+[marker lifecycle](../architecture/authority/marker_lifecycle.md). Persisted server-config
 versioning, migration, and recovery are owned by
 [configuration revisioning](../architecture/config/revisioning.md).
 

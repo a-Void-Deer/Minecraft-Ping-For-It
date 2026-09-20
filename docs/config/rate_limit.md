@@ -25,7 +25,7 @@ rate-policy contract does not redefine that configuration rule.
 `syncDuration` is not a third rate-policy field and does not feed the courtesy
 token bucket. Its server bounds, frozen marker-snapshot lifetime, and separate
 client display-duration relationship are owned by
-[marker lifecycle](../authority/marker_lifecycle.md).
+[marker lifecycle](../architecture/authority/marker_lifecycle.md).
 
 For a positive effective `rateLimit`, the server independently enforces its
 limit for **every client**, including malicious clients which skip the courtesy
@@ -52,7 +52,7 @@ pending-capture input sequence is defined in
 Do not add toast or action-bar feedback. Rate-controlled diagnostics may include
 complete target, position, registry, class, material, component, payload and
 exception details; do not redact those details. This policy does not suppress
-the [local pre-commit invalid-target message](../authority/target_validation.md).
+the [local pre-commit invalid-target message](../architecture/authority/target_validation.md).
 Only actually dispatched creates participate in the latest-request
 `TARGET_GONE` response rule.
 

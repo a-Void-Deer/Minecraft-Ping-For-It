@@ -25,19 +25,19 @@ conflicts rather than silently choosing or dropping a requirement.
 | Task | Start with | Also consult when relevant |
 | --- | --- | --- |
 | Understand the end-to-end data flow | [Architecture: geometry pipeline](architecture/geometry-pipeline.md) | Identity, capture, authority, presentation and geometry topics below |
-| Change Target/Marker identity or lifecycle | [Target model](identity/target_model.md) | [Validation](authority/target_validation.md), [winner selection](authority/ping_winner.md), Sable |
-| Change marker creation, removal, expiry or audience lifecycle | [Marker lifecycle](authority/marker_lifecycle.md) | [Target model](identity/target_model.md), validation and winner selection |
+| Change Target/Marker identity or lifecycle | [Target model](identity/target_model.md) | [Validation](architecture/authority/target_validation.md), [winner selection](architecture/authority/ping_winner.md), Sable |
+| Change marker creation, removal, expiry or audience lifecycle | [Marker lifecycle](architecture/authority/marker_lifecycle.md) | [Target model](identity/target_model.md), validation and winner selection |
 | Change Target Types, Ping Types, priorities, defaults, keys or colors | [Catalogs](identity/catalogs.md) | Capture, names/chat and wheel |
 | Change press handling, asynchronous capture or target locking | [Capture](picking/capture.md) | [Long-press timing](architecture/input/long-press.md), [Long-press compatibility](architecture/input/long-press-compatibility.md), [Selection policy](picking/selection_policy.md), [Wheel](picking/wheel.md), local geometry, rate policy |
 | Change long-press threshold/slice timing | [Long-press timing](architecture/input/long-press.md) | Capture, wheel, client configuration, and compatibility when enabled |
 | Change rapid-click or deferred long-press compatibility | [Long-press compatibility](architecture/input/long-press-compatibility.md) | Capture, long-press timing, wheel, rate policy, and verification |
 | Change target-selection toggles, block/fluid modes or entity-selection blacklist | [Selection policy](picking/selection_policy.md) | [Capture](picking/capture.md), Create raycast |
 | Change exact entity picking or geometry ownership | [Local geometry picking](picking/local_geometry.md) | Create raycast integration and D0006 |
-| Change client capture distance, optional long-range traces or server range acceptance | [Range](picking/range.md) | [Capture](picking/capture.md), [Target validation](authority/target_validation.md), server settings and the affected integration |
+| Change client capture distance, optional long-range traces or server range acceptance | [Range](picking/range.md) | [Capture](picking/capture.md), [Target validation](architecture/authority/target_validation.md), server settings and the affected integration |
 | Change wheel opening, timeout, selection or cancellation | [Wheel](picking/wheel.md) | Capture, client config and validation |
-| Change packets, target acceptance, removal or rejection feedback | [Target validation](authority/target_validation.md) | [Security](security.md), rate policy and identity |
-| Change registered marker/legacy packet ingress or client packet acceptance | [Network protocol](authority/network_protocol.md) | [Target validation](authority/target_validation.md), marker lifecycle and compatibility |
-| Change which same-target ping is visible | [Ping winner](authority/ping_winner.md) | Identity, removal/expiry and external-target refresh |
+| Change packets, target acceptance, removal or rejection feedback | [Target validation](architecture/authority/target_validation.md) | [Security](security.md), rate policy and identity |
+| Change registered marker/legacy packet ingress or client packet acceptance | [Network protocol](architecture/authority/network_protocol.md) | [Target validation](architecture/authority/target_validation.md), marker lifecycle and compatibility |
+| Change which same-target ping is visible | [Ping winner](architecture/authority/ping_winner.md) | Identity, removal/expiry and external-target refresh |
 | Change trust boundaries, failure isolation or diagnostic detail | [Security](security.md) | Validation, rate policy and the affected provider/source contract |
 | Change the complete client file/key catalogue, list syntax, locality, or format examples | [Client configuration](config/client.md) | Revisioning, capture, wheel, outline routing, and geometry modes |
 | Change client settings-screen workflow, file action, reset, or screen exposure | [Settings screen](UI/settings-screen.md) | Client configuration, server settings, revisioning, and verification |
@@ -70,10 +70,10 @@ below. The complete topic set is:
   [selection policy](picking/selection_policy.md),
   [local geometry](picking/local_geometry.md), [range](picking/range.md), and
   [wheel](picking/wheel.md);
-- authority: [marker lifecycle](authority/marker_lifecycle.md),
-  [target validation](authority/target_validation.md),
-  [network protocol](authority/network_protocol.md), and
-  [ping winner](authority/ping_winner.md);
+- authority: [marker lifecycle](architecture/authority/marker_lifecycle.md),
+  [target validation](architecture/authority/target_validation.md),
+  [network protocol](architecture/authority/network_protocol.md), and
+  [ping winner](architecture/authority/ping_winner.md);
 - configuration: [client configuration](config/client.md),
   [settings screen](UI/settings-screen.md), [server settings](config/server_settings.md),
   and [rate policy](config/rate_limit.md);

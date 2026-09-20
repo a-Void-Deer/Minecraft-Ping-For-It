@@ -333,7 +333,7 @@ Sable-specific gaps remain for:
 - end-to-end server-authoritative names, fail-soft behavior, and multiplayer
   marker synchronization at the boundaries owned by
   [Sable](../integrations/sable.md#names-permissions-and-diagnostics) and
-  [target validation](../authority/target_validation.md).
+  [target validation](../architecture/authority/target_validation.md).
 
 Coverage of Flywheel diagnostics or another adapter's diagnostic helper does
 not close the private `EntityDiagnostics` gap.

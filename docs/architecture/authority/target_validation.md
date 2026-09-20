@@ -7,7 +7,7 @@ captured stable target identity and a selected Ping Type ID, but no channel,
 audience, Target Type, name, color, owner, arrival time, or lifetime. For this
 packet, the server repeats classification from its own game state and does not
 trust client-supplied target validity or presentation/ownership data.
-Authoritative names follow [names and chat](../rendering/names_chat.md).
+Authoritative names follow [names and chat](../../rendering/names_chat.md).
 
 These `MarkerCreate` guarantees do **not** describe the separately registered
 legacy `PingLocationC2SPacket`, whose payload still contains a channel and is
@@ -64,7 +64,7 @@ provider-derived validation anchor for that range check. Initial classification
 and Ping Type membership pass before provider materialization; the later
 materialization/reclassification transaction, including Sable's acquired
 tracking-reference release, is owned by
-[Sable](../integrations/sable.md#server-validation-and-materialization). It does
+[Sable](../../integrations/sable.md#server-validation-and-materialization). It does
 not add a post-materialization range check.
 
 The server limiter is reached before channel, snapshot, target, range,
@@ -74,7 +74,7 @@ valid request initializes the limiter and proceeds; later permitted checks
 advance its limiter state, while an exceeded check returns `RATE_LIMITED`
 without running a later stage. A corrupt packet never reaches that call, and a
 configured limit of zero skips it. This is server enforcement, not the
-client-side courtesy token bucket described by [rate policy](../config/rate_limit.md).
+client-side courtesy token bucket described by [rate policy](../../config/rate_limit.md).
 
 For example, a structurally valid request with an empty stored channel while
 the mode is `DISABLED` receives `CHANNEL_DISABLED` even if its requested target
@@ -88,17 +88,17 @@ feedback rule in [server responses](#server-responses-and-silent-outcomes).
 | Entity | Stable identity in the requester's current dimension, present and alive, and authoritative entity anchor within range; movement/same-dimension teleport keeps identity | No continuous server revalidation; normal removal/expiry; unavailable entity may use last/authoritative anchor |
 | Block | Loaded position in the requester's current dimension, same block type, and block-center anchor within range; same-type state/property changes are valid | Replacement alone does not remove marker; renderer uses current render state |
 | Location | Finite captured coordinates in the requester's current dimension and exact location anchor within range | Preserve established location lifecycle |
-| Explicit external target | Provider validates a normalized candidate and provider-derived validation anchor, then range checks that anchor; see [Sable's two-phase materialization](../integrations/sable.md#server-validation-and-materialization) for the later committed target/anchor transaction | Established periodic refresh/invalidation exception; see Sable |
+| Explicit external target | Provider validates a normalized candidate and provider-derived validation anchor, then range checks that anchor; see [Sable's two-phase materialization](../../integrations/sable.md#server-validation-and-materialization) for the later committed target/anchor transaction | Established periodic refresh/invalidation exception; see Sable |
 
 World/HUD marker visuals are skipped when the target dimension differs from the
 local current dimension. That visual filter does not imply that every recipient
-notification is dimension-filtered; [new-marker feedback and dimensions](../rendering/names_chat.md#new-marker-feedback-and-dimension-behavior)
-owns the sound/chat distinction. See [target identity](../identity/target_model.md)
-and [Sable](../integrations/sable.md) for the lifecycle boundary; do not
+notification is dimension-filtered; [new-marker feedback and dimensions](../../rendering/names_chat.md#new-marker-feedback-and-dimension-behavior)
+owns the sound/chat distinction. See [target identity](../../identity/target_model.md)
+and [Sable](../../integrations/sable.md) for the lifecycle boundary; do not
 generalize the external-target exception into continuous ordinary-marker
 validation.
 Entity locator form and server canonicalization, including the Experience Orb
-runtime-ID exception, are defined by [target identity](../identity/target_model.md).
+runtime-ID exception, are defined by [target identity](../../identity/target_model.md).
 
 A malformed block registry ID or invalid provider request is an invalid request.
 A gone/dead/cross-dimension entity, a missing or differently typed block, or a
@@ -117,7 +117,7 @@ cannot be cancelled even if a modified client requests it.
 
 Existing channel-update behavior, including policy updates, remains intact; it
 is not treated as a create-only operation. The
-[rate limiter](../config/rate_limit.md) applies its client courtesy gate only
+[rate limiter](../../config/rate_limit.md) applies its client courtesy gate only
 immediately before MarkerCreate. Cancellation/expiry also drive
 [winner recomputation](ping_winner.md).
 
@@ -203,6 +203,6 @@ feedback. This does not suppress the local pre-commit invalidation message.
 
 Wheel timeout, cancel with no eligible own marker, stale removal and unauthorized
 removal are silent no-ops/rejections. Recoverable geometry uses its separate
-[source outcome contract](../geometry/geometry_sources.md); fatal JVM/resource
-errors must not be swallowed. See [security](../security.md) and
-[D0004](../decisions/D0004-server-authority.md).
+[source outcome contract](../../geometry/geometry_sources.md); fatal JVM/resource
+errors must not be swallowed. See [security](../../security.md) and
+[D0004](../../decisions/D0004-server-authority.md).

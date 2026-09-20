@@ -6,7 +6,7 @@ Names and chat are required for block and entity pings regardless of whether an
 outline uses BER, baked-model, optional geometry, or VoxelShape fallback. A
 render route may fail or change without removing the authoritative target name.
 Server-derived name data follows
-[authoritative validation](../authority/target_validation.md).
+[authoritative validation](../architecture/authority/target_validation.md).
 
 - A custom-named ordinary entity or block entity is shown as
   `Custom Name (Vanilla Name)`. Without a custom name, show only the localized

@@ -8,7 +8,7 @@ Native shape acquisition and edge enumeration are specified separately in
 
 Every pingable entity, including ordinary entities and dropped items, can
 receive a local ping outline. The active
-[same-target winner](../authority/ping_winner.md) supplies its outline color,
+[same-target winner](../architecture/authority/ping_winner.md) supplies its outline color,
 and movement within the same dimension keeps the outline attached to the same
 entity identity.
 

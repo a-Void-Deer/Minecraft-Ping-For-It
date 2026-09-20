@@ -107,6 +107,6 @@ requires them; they do not become hard dependencies for unrelated pings.
 
 Related contracts: [target identity](../identity/target_model.md),
 [presentation subjects](../rendering/presentation_subjects.md),
-[server validation](../authority/target_validation.md),
+[server validation](../architecture/authority/target_validation.md),
 [server authority decision](../decisions/D0004-server-authority.md), and
 [Sable coverage and pending scenarios](../testing/verification.md#sable-integration-coverage).

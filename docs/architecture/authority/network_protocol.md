@@ -4,7 +4,7 @@ This topic owns the narrow protocol boundary relevant to marker authority. It
 records current registered routes, their server effects, and what the current
 client accepts for presentation. It is not a wire-format catalogue and does not
 promise interoperability with the original mod; the product's explicit
-no-compatibility boundary remains in [the specification](../../spec.md).
+no-compatibility boundary remains in [the specification](../../../spec.md).
 
 ## Registered ingress and current effects
 
@@ -53,6 +53,6 @@ sets. The cited common tests therefore do not establish a live cross-loader
 network session, complete loader registration behavior, or a runtime assertion
 that a valid legacy S2C packet leaves every presentation-state object untouched.
 Existing automated-coverage inventory and remaining integration gaps are owned
-by [testing and verification](../testing/verification.md); this statement is an
+by [testing and verification](../../testing/verification.md); this statement is an
 evidence boundary, not a claim that those tests ran for this documentation
 change.

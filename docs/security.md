@@ -12,13 +12,13 @@ its stored channel state when it applies the marker-creation policy.
 This channel/audience guarantee is specific to `MarkerCreate`. It must not be
 extended to the registered legacy `PingLocationC2SPacket`, which retains an
 in-packet channel and legacy forwarding path. See
-[network protocol](authority/network_protocol.md) for the deliberately narrow
+[network protocol](architecture/authority/network_protocol.md) for the deliberately narrow
 legacy-versus-authoritative boundary.
 
 Clients cannot authorize marker removal or select a server winner by sending
 presentation values. Detailed packet and invalidation timing lives in
-[target validation](authority/target_validation.md); deterministic winner
-selection lives in [ping winner](authority/ping_winner.md).
+[target validation](architecture/authority/target_validation.md); deterministic winner
+selection lives in [ping winner](architecture/authority/ping_winner.md).
 
 Entity-local geometry is client capture metadata. Whole-entity identity and
 anchor-based validation survive precise surface hits; the server does not

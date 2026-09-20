@@ -81,5 +81,5 @@ integration paths, are owned by [capture range](range.md).
 
 Captured local detail is copied metadata attached only to its matching entity.
 It is not a server-authoritative constituent identity. Creation still obeys
-[target validation](../authority/target_validation.md). The rationale for these
+[target validation](../architecture/authority/target_validation.md). The rationale for these
 timing boundaries is [D0005](../decisions/D0005-press-time-capture.md).
