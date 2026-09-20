@@ -15,16 +15,18 @@ hold the ping key when a choice is needed, and show friends what you mean.
 
 ## Pinging
 
-The target and ray result are captured on the initial key press. The captured
-entity, block, or pure location fallback is not retargeted while the
-interaction is in progress. Entity identity follows the same-dimension entity;
-block identity keeps its dimension, position, and block type.
+The target and ray result are captured on the initial key press and are not
+retargeted while the interaction is in progress. Entity identity follows the
+same-dimension entity; block identity keeps its dimension, position, and block
+type. The complete press-time capture and freezing contract is owned by
+[Capture](docs/architecture/picking/capture.md).
 
 There are seven predefined ping types: **Attention**, **Danger**, **Go To**,
 **Loot**, **Destroy**, **Take**, and **Request**. A short press uses the
 captured target type's default. Holding the key opens a wheel for that target's
-available types; the center cancels the nearest eligible marker owned by you.
-The wheel can also time out without taking an action.
+available types; the center cancels the nearest eligible marker owned by you;
+the wheel can also time out without acting. The authoritative type catalogue is
+owned by [Catalogs](docs/architecture/identity/catalogs.md).
 
 Markers, target validation, ownership, shared-target winner selection, and rate
 limiting are server-authoritative. The client only mirrors the server's create
@@ -32,26 +34,19 @@ rate policy as a courtesy; a throttled create is dropped rather than queued.
 
 ## Rendering
 
-- Entity markers outline ordinary entities and dropped items using the selected
-  ping color.
-- Non-whitelisted blocks use their current native `VoxelShape`, including
-  non-full-cube geometry, with a through-wall outline.
-- The client block display whitelist defaults to `*:*`; the shape blacklist is
-  empty by default. A blacklist match always overrides a whitelist match.
-- Entries are strict `namespace:block`, `namespace:*`, `*:*`, or
-  `#namespace:tag` patterns with union semantics. Invalid or missing entries
-  fail closed.
-- A whitelisted ordinary `block` needs no `BlockEntity` and a `MODEL` render
-  shape. An `entity_block` has a `BlockEntity` and can use its renderer or
-  live baked-model geometry before the VoxelShape fallback.
-- Entity-block geometry modes are `ALL`, `COMPATIBLE`, and
-  `VOXEL_SHAPE_ONLY`; the default is `ALL`.
+Entity markers outline ordinary entities and dropped items in the selected ping
+color. Block outlines use the block's native shape, including non-full-cube
+geometry, with a through-wall outline. A client-configurable display whitelist
+and shape blacklist control which blocks are outlined; the exact selector
+grammar, list defaults, and entity-block geometry modes are owned by the
+[client configuration](docs/config/client.md) and
+[VoxelShape geometry](docs/architecture/geometry/voxel_shape.md) contracts.
 
-On NeoForge, optional Create `6.0.10` / Flywheel `1.0.6` support can render an
-entity-block silhouette mask in `ALL` mode. It supports direct instancing and
-indirect backends, loads lazily, and is a soft compile-only integration. It is
-beta functionality; missing Create or Flywheel does not disable ordinary
-pings.
+On NeoForge, optional Create support can render an entity-block silhouette mask.
+It loads lazily and is a soft, compile-only integration; missing Create or
+Flywheel does not disable ordinary pings. Current optional-version gates and
+routes are owned by the [Create integration](docs/integrations/create.md) and
+[compatibility](docs/compatibility.md).
 
 ## Languages
 
@@ -71,19 +66,21 @@ wheel. The wheel center is the cancel action, not another ping type.
 
 - `/pingforit` or `/pingforit help` shows command help.
 - `/pingforit config` opens the settings GUI. Its server section is available
-  to permission-level-3 players and edits authoritative server settings.
+  to players with the required server permission and edits authoritative server
+  settings; the exact edit authority and required permission are owned by
+  [Server configuration authority](docs/architecture/authority/server-config.md).
 - `/pingforit channel` reads or changes the player's ping channel.
 
 ## Configuration
 
-The client file is `config/pingforit.json`; the server file is
-`config/pingforit.server.json`. The settings GUI includes client controls and,
-when permitted, the server section. It has no GUI list editor: its block-list
-action saves and closes the screen before opening the client file.
-
-Edit `blockDisplayWhitelist` and `blockShapeBlacklist` in the client file.
-External list edits take effect after restarting the client; reopening settings
-in the same session does not reload those files.
+The client and server settings are stored in configurable JSON files under
+`config/`. The settings GUI includes client controls and, when permitted, the
+server section; it has no GUI list editor, and its block-list action saves and
+closes the screen before opening the client file. Exact filenames, keys, list
+syntax, close/save behavior, external-edit reload timing, and reset semantics
+are owned by the [client configuration](docs/config/client.md),
+[server configuration](docs/config/server.md), and
+[configuration UI](docs/UI/config.md) contracts.
 
 ## Install, build, and verify
 
