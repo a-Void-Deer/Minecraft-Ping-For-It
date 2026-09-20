@@ -4,7 +4,7 @@ This document owns the common geometry-source contract. Optional integrations
 may describe when they register or claim work, but they do not redefine source
 ordering, outcomes, fallback, or recoverable-failure semantics. The end-to-end
 stage boundaries are summarized in the
-[geometry pipeline](../architecture/geometry-pipeline.md).
+[geometry pipeline](../geometry-pipeline.md).
 
 ## Model eligibility is not renderability
 
@@ -30,14 +30,14 @@ when an allowed source reports `RENDERED`: geometry was actually emitted and
 committed to the destination that will be submitted. Merely having a model,
 claiming a subject, entering a source, or owning multipart presentation does not
 establish that result. This distinction is recorded in
-[D0001](../decisions/D0001-separate-model-from-renderable.md).
+[D0001](../../decisions/D0001-separate-model-from-renderable.md).
 
 ## Entity-block mode and source order
 
 `entity_block` source selection is client-local and read for every render
 attempt/frame, without server synchronization or reconnect caching. Ordinary
 `block` rendering does not read this mode. Persistence defaults and recovery
-are specified in [client settings](../config/client.md).
+are specified in [client settings](../../config/client.md).
 
 After the outer [native-glow gate](../rendering/outline.md) is eligible, sources
 are selected as follows:
@@ -115,5 +115,5 @@ suppress only its declared duplicate subject and only after the required source
 reports `RENDERED`. `EMPTY`, `FAILED`, unavailable sources, and unrelated
 rendered sources cannot claim that coverage.
 
-[Create integration](../integrations/create.md) supplies optional sources and
+[Create integration](../../integrations/create.md) supplies optional sources and
 presentation resolvers while remaining subject to this common contract.

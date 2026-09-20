@@ -8,7 +8,7 @@ Native shape acquisition and edge enumeration are specified separately in
 
 Every pingable entity, including ordinary entities and dropped items, can
 receive a local ping outline. The active
-[same-target winner](../architecture/authority/ping_winner.md) supplies its outline color,
+[same-target winner](../authority/ping_winner.md) supplies its outline color,
 and movement within the same dimension keeps the outline attached to the same
 entity identity.
 
@@ -85,7 +85,7 @@ the live model or shape. Replacing an ordinary committed block does not by
 itself remove the marker, although the current renderer will not claim a stale
 presentation subject as a successful native route.
 
-The client [whitelist and blacklist](../config/client.md) gate native-glow
+The client [whitelist and blacklist](../../config/client.md) gate native-glow
 attempts. A blacklist match overrides a whitelist match. Additional route
 conditions are:
 
@@ -122,7 +122,7 @@ silhouette and is not expected to reproduce dynamic BER details or arbitrary
 rendered meshes. Native glow therefore remains preferred, while the shape route
 provides a deterministic outline when normal geometry is ineligible or fails.
 The decision and rejected alternatives are recorded in
-[D0002](../decisions/D0002-voxel-shape-fallback.md).
+[D0002](../../decisions/D0002-voxel-shape-fallback.md).
 
 Only a `RENDERED` result under the common
 [source outcome contract](../geometry/geometry_sources.md) suppresses duplicate
@@ -166,6 +166,6 @@ from this VoxelShape invariant.
 
 Model offset and seed placement are specified in
 [model placement](model_placement.md). The optional
-[Create entity-outline adapter](../integrations/create.md) has a distinct
+[Create entity-outline adapter](../../integrations/create.md) has a distinct
 entity claim and dispatcher contract and must not be conflated with the
 Create/Flywheel entity-block source.

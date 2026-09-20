@@ -64,7 +64,7 @@ inventing a different owner.
 
 ## Related docs
 
-[Presentation subjects](../rendering/presentation_subjects.md),
+[Presentation subjects](../architecture/rendering/presentation_subjects.md),
 [geometry pipeline](../architecture/geometry-pipeline.md),
-[geometry sources](../geometry/geometry_sources.md), and
+[geometry sources](../architecture/geometry/geometry_sources.md), and
 [Create integration](../integrations/create.md).

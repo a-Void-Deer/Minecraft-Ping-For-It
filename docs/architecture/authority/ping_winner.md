@@ -11,7 +11,7 @@ current audience contains that recipient, then chooses the visible winner by:
 Marker IDs must support deterministic larger-ID comparison. Client timestamps,
 render order, unordered map traversal and receipt order on an individual client
 are not substitutes for this ordering. Concrete target grouping follows
-[stable identity](../../identity/target_model.md), not render proxy positions or
+[stable identity](../identity/target_model.md), not render proxy positions or
 the local constituent hit on a whole entity. The server snapshots the audience
 at creation. Later channel switches do not recalculate it; disconnect cleanup
 can shrink it and is owned by [target validation](target_validation.md).

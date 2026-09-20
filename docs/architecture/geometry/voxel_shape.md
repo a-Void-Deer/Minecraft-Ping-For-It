@@ -40,7 +40,7 @@ Entity-local picking may decompose a selected native shape with
 That is a targeting kernel, not an outline renderer. It does not replace or
 relax the live `getShape` to `forAllEdges` presentation route described here.
 The shared distinction is summarized in
-[D0006](../decisions/D0006-exact-owned-geometry.md).
+[D0006](../../decisions/D0006-exact-owned-geometry.md).
 
 ## Combined invariant
 
@@ -52,6 +52,6 @@ A conforming VoxelShape outline therefore requires both:
 
 Native-glow eligibility is tested separately from this combined invariant. The
 rationale for preserving normal geometry before shape fallback is recorded in
-[D0002](../decisions/D0002-voxel-shape-fallback.md). Automated structure or
+[D0002](../../decisions/D0002-voxel-shape-fallback.md). Automated structure or
 behavioral coverage does not by itself prove in-game visibility from every
 camera angle; verification reporting is maintained separately.

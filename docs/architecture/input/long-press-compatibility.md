@@ -17,13 +17,13 @@ Compatibility mode and effective slice are observed at relevant raw edges and
 render frames. An observed enabled-to-disabled transition aborts the baseline
 interaction and compatibility sequence. Enabling does not abort an interaction.
 General reset, screen, world, and token-abort rules remain owned by
-[capture](../../picking/capture.md#interaction-lifecycle-aborts).
+[capture](../picking/capture.md#interaction-lifecycle-aborts).
 
 Both paths require a successful local dispatch outcome for the preceding default
 `CreatePing`: it passed the courtesy limiter, was recorded as dispatched, and
 was handed to the sender. This is not server acceptance. A courtesy-dropped
 request is never queued, retried, or replayed; see
-[rate policy](../../config/rate_limit.md#create-only-dispatch-boundary).
+[rate policy](../config/rate-limit.md#create-only-dispatch-boundary).
 
 ## Rapid-click virtual hold
 
@@ -38,10 +38,10 @@ the dispatch boundary.
 
 The baseline begins with that first timestamp and second ray. It samples range
 and selection policy when its capture starts, then follows ordinary
-[capture](../../picking/capture.md). A later raw edge or frame strictly beyond
+[capture](../picking/capture.md). A later raw edge or frame strictly beyond
 the slice ends adjacency; equality remains eligible. At termination, a wheel
 that actually opened and remains open follows ordinary
-[wheel release](../../picking/wheel.md#radial-release-result). If it never
+[wheel release](../picking/wheel.md#radial-release-result). If it never
 opened, the still-pressed baseline aborts; if it already closed, the candidate
 is discarded. Neither outcome emits another default tap. Timeout, lifecycle
 abort, or observed disabling can end the sequence sooner.
@@ -59,5 +59,5 @@ remembered release is applied to that new interaction. A missing ray, or a first
 interaction ending without a qualifying dispatched create, discards the deferred
 press. The new capture reads current range and selection policy when it starts
 and may complete synchronously or asynchronously under
-[capture](../../picking/capture.md). Compatibility does not defer every press,
+[capture](../picking/capture.md). Compatibility does not defer every press,
 replay a throttled create, or synthesize a separate duration policy.

@@ -25,7 +25,7 @@ The current external model route and external fallback independently resolve
 provider presentation. The required shared-subject and subject-type contract,
 and the fact that a single immutable frame snapshot is not currently
 guaranteed for those provider-local decisions, are recorded in
-[presentation subjects](../rendering/presentation_subjects.md) and the
+[presentation subjects](../architecture/rendering/presentation_subjects.md) and the
 [verification inventory](../testing/verification.md#sable-integration-coverage).
 
 ## Candidate and committed identity
@@ -99,14 +99,14 @@ MarkerCreate still requires an authenticated sender and passes server
 rate/channel policy, range, provider validation/materialization and allowed
 Ping-Type checks. MarkerRemove still requires ownership of the active marker.
 Server-settings editing remains the separate permission-level-3 operation documented in
-[security](../security.md).
+[security](../architecture/security.md).
 
 Reflection and provider failures are logged through bounded, rate-controlled
 diagnostics with complete exception details where the diagnostics contract
 requires them; they do not become hard dependencies for unrelated pings.
 
-Related contracts: [target identity](../identity/target_model.md),
-[presentation subjects](../rendering/presentation_subjects.md),
+Related contracts: [target identity](../architecture/identity/target_model.md),
+[presentation subjects](../architecture/rendering/presentation_subjects.md),
 [server validation](../architecture/authority/target_validation.md),
 [server authority decision](../decisions/D0004-server-authority.md), and
 [Sable coverage and pending scenarios](../testing/verification.md#sable-integration-coverage).

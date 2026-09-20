@@ -114,7 +114,7 @@ authoritative winner packet replaces it. It does not change the server rule in
 Fallback, stale visibility, and a locally elapsed display deadline are client
 bookkeeping only. They do not grant cancellation authority or extend the
 server-active lifetime. The wheel's local own-marker candidate rule is owned by
-[wheel interaction](../../picking/wheel.md); any resulting removal request still
+[wheel interaction](../picking/wheel.md); any resulting removal request still
 passes the server's active-status and ownership check. A server-side stale or
 unauthorized removal is therefore a silent no-op/rejection under
 [target validation](target_validation.md), rather than a local lifecycle

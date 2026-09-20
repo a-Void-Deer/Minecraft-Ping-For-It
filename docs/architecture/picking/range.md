@@ -9,8 +9,8 @@ client's trace.
 
 | Field / value | Sampling and owner |
 | --- | --- |
-| Client `pingDistance` | Read at ordinary capture start; local only, not synchronized to a server. Its persisted-file catalogue is [client configuration](../config/client.md). |
-| Client `raycastDistance` | Read at ordinary capture start; native vanilla/Create trace cap. Its persisted-file catalogue is [client configuration](../config/client.md). |
+| Client `pingDistance` | Read at ordinary capture start; local only, not synchronized to a server. Its persisted-file catalogue is [client configuration](../../config/client.md). |
+| Client `raycastDistance` | Read at ordinary capture start; native vanilla/Create trace cap. Its persisted-file catalogue is [client configuration](../../config/client.md). |
 | Effective native trace distance | `min(raycastDistance, pingDistance)`: one finite frozen segment for vanilla world/entity selection and Create candidate refinement. |
 | Distant Horizons trace range | Fixed integration range, independent of either client field; started only after the native trace misses using the press origin/direction. |
 | Server `pingDistance` | Constructed into each authoritative validator; separate from the client field and not sent to clients as a capture setting. |
@@ -48,7 +48,7 @@ uses the original native miss/location fallback. The eventual target still faces
 the independent server acceptance check below.
 
 The deferred and rapid-click compatibility captures described in
-[long-press compatibility](../architecture/input/long-press-compatibility.md)
+[long-press compatibility](../input/long-press-compatibility.md)
 retain a ray rather than a target. When their
 new baseline capture actually starts, it reads the current range fields and
 then follows this same pipeline. They do not freeze range at the raw deferred
@@ -72,8 +72,8 @@ nonallocating candidate/match context and logical-pose **validation anchor**;
 the server range-checks that anchor. Only later can materialization replace it
 with committed target/anchor values. There is no second range check on that
 replacement anchor. The two-phase provider transaction and its release handling
-are owned by [Sable server validation and materialization](../integrations/sable.md#server-validation-and-materialization).
-See [target validation](../architecture/authority/target_validation.md) for the admission and
+are owned by [Sable server validation and materialization](../../integrations/sable.md#server-validation-and-materialization).
+See [target validation](../authority/target_validation.md) for the admission and
 ordinary lifecycle contract.
 
 ## Integration matrix

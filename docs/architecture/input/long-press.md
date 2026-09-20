@@ -12,8 +12,8 @@ the threshold revalidates the dependent slice so this relationship remains true.
 
 Sampling the hold threshold during an interaction and determining actual wheel
 opening are owned by the
-[press-time capture contract](../../picking/capture.md#baseline-release-and-actual-wheel-opening).
-Timeout behavior is owned by [wheel](../../picking/wheel.md);
+[press-time capture contract](../picking/capture.md#baseline-release-and-actual-wheel-opening).
+Timeout behavior is owned by [wheel](../picking/wheel.md);
 [long-press compatibility](long-press-compatibility.md) owns the rapid and
 deferred sequences. These local settings neither grant server acceptance nor
 alter authoritative marker lifetime.

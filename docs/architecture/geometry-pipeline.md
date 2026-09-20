@@ -48,7 +48,7 @@ These values must not be substituted for one another:
 - A source that claims or runs is not automatically `RENDERED`.
 - A fallback shape does not reclassify an `entity_block` as `block`.
 
-See [presentation subjects](../rendering/presentation_subjects.md) and
+See [presentation subjects](rendering/presentation_subjects.md) and
 [D0003](../decisions/D0003-multipart-presentation-types.md).
 
 ## Model, source, and current-frame renderability
@@ -65,7 +65,7 @@ Other sources, including BER, direct entity dispatch, and VoxelShape edges, can
 produce geometry without being baked models. Consequently, **renderable in the
 current frame** means that an allowed source emitted and committed geometry and
 reported `RENDERED`. The full contract is in
-[geometry sources](../geometry/geometry_sources.md), with rationale in
+[geometry sources](geometry/geometry_sources.md), with rationale in
 [D0001](../decisions/D0001-separate-model-from-renderable.md).
 
 ## Render entity lookup lifetime
@@ -78,7 +78,7 @@ source reported `RENDERED`.
 Position evaluation and actual source submission remain per-frame work after a
 lookup result. The cache epoch, live-result validation, and negative-result
 lifetime are owned exclusively by [the render entity UUID lookup
-contract](../rendering/outline.md#render-entity-uuid-lookup).
+contract](rendering/outline.md#render-entity-uuid-lookup).
 
 ## Geometry and GPU ownership
 
@@ -88,8 +88,8 @@ and `VoxelShape#forAllEdges` extraction. Rendering documentation owns GPU
 primitive mode, shader, depth state, write mask, line width, and submission
 order. A valid VoxelShape presentation requires both halves:
 
-- [native VoxelShape geometry](../geometry/voxel_shape.md); and
-- [outline GPU rendering](../rendering/outline.md).
+- [native VoxelShape geometry](geometry/voxel_shape.md); and
+- [outline GPU rendering](rendering/outline.md).
 
 Optional integrations may register resolvers or sources, but they remain
 subject to these common contracts. [Create integration](../integrations/create.md)

@@ -3,7 +3,7 @@
 This supplement owns Create-specific transform, captured-view, shape-kernel,
 cost, limitation, and manual-scenario details. The shared owner snapshot and
 owned `HIT`/`MISS`/`UNAVAILABLE`/`FAILED` behavior is defined by
-[entity-local picking](../picking/local_geometry.md) and
+[entity-local picking](../architecture/picking/local_geometry.md) and
 [D0006](../decisions/D0006-exact-owned-geometry.md). The integration overview is
 [Create](create.md).
 
@@ -27,14 +27,14 @@ A successful hit still creates a marker for the exact contraption entity. It doe
 For an immediate capture, one finite world-space ray and the current selection
 policy are sampled at the press edge. The same immutable policy controls world
 picking and the selected native shapes inside a contraption. This immediate
-capture boundary is part of [press-time capture](../picking/capture.md).
+capture boundary is part of [press-time capture](../architecture/picking/capture.md).
 
 The [narrow deferred compatibility path](../architecture/input/long-press-compatibility.md)
 is different. While a first capture is
 pending, a second physical press freezes only its origin and direction; it does
 not yet select a target or freeze range and selection settings. When the actual
 deferred capture starts after the preceding real `CreatePing` dispatch
-boundary, it reads the then-current range and [selection policy](../picking/selection_policy.md).
+boundary, it reads the then-current range and [selection policy](../architecture/picking/selection_policy.md).
 It may then complete synchronously or asynchronously under the ordinary capture
 contract.
 
@@ -65,7 +65,7 @@ The source ID is `pingforit:create_contraption_raycast`. Its registration
 participates in the common explicit numeric-priority/source-ID ordering, and one
 immutable registry snapshot is fixed for the complete ray. The shared handling
 of unowned candidates and the four owned outcomes is defined once in
-[entity-local picking](../picking/local_geometry.md). For this Create source, a
+[entity-local picking](../architecture/picking/local_geometry.md). For this Create source, a
 recoverable capture or scan failure invalidates the complete candidate attempt,
 including any provisional hit; other candidates remain eligible.
 

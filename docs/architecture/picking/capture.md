@@ -23,7 +23,7 @@ timeout do not initiate a new selection ray.
 ## Baseline release and actual wheel opening
 
 At the baseline press, freeze the effective long-press threshold. Its timing
-relationship is owned by [long-press timing](../architecture/input/long-press.md).
+relationship is owned by [long-press timing](../input/long-press.md).
 Release and wheel-open outcomes are:
 
 | Interaction state at the release/present boundary | Outcome |
@@ -63,23 +63,23 @@ virtual-held rules, then invokes this ordinary capture contract. It therefore
 does not replace immutable ray/target/type capture, actual-wheel readiness, or
 lifecycle token ownership. Rapid and deferred paths, the qualifying local-dispatch
 boundary, and compatibility-specific transition behavior are owned by
-[long-press compatibility](../architecture/input/long-press-compatibility.md).
+[long-press compatibility](../input/long-press-compatibility.md).
 
 Focused state-machine seams cover lifecycle abort and stale capture-token
 handling. They do not exercise the real focus-loss hook, screen-transition
 callback, or loader/gameplay input lifecycle; those remain distinct integration
-evidence boundaries in [verification](../testing/verification.md).
+evidence boundaries in [verification](../../testing/verification.md).
 
 ## Integration and authority boundaries
 
 Each ray uses one immutable [entity-local geometry](local_geometry.md) owner
 snapshot. Exact Create results remain `EntityHitResult`, preserving the existing
 Sable/block and Distant Horizons/miss branching. Sable's external-block capture
-is described in [its integration contract](../integrations/sable.md). The
+is described in [its integration contract](../../integrations/sable.md). The
 separate capture and server-acceptance limits, including native and optional
 integration paths, are owned by [capture range](range.md).
 
 Captured local detail is copied metadata attached only to its matching entity.
 It is not a server-authoritative constituent identity. Creation still obeys
-[target validation](../architecture/authority/target_validation.md). The rationale for these
-timing boundaries is [D0005](../decisions/D0005-press-time-capture.md).
+[target validation](../authority/target_validation.md). The rationale for these
+timing boundaries is [D0005](../../decisions/D0005-press-time-capture.md).

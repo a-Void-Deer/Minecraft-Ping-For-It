@@ -13,12 +13,12 @@ not define block-outline or native-glow display eligibility.
 | Mark fluids | Left Alt | Select fluids with `ClipContext.Fluid.NONE` when false and `ClipContext.Fluid.ANY` when true. |
 
 The persisted JSON-key catalogue is owned by
-[client configuration](../config/client.md#target-selection-and-entity-block-presentation).
+[client configuration](../../config/client.md#target-selection-and-entity-block-presentation).
 
 The names describe the established UI intent, not a general opacity classifier:
 `VISUAL` and `OUTLINE` are Minecraft shape strategies. The exact native
 block/fluid competition and represented-state rules for Create contraptions are
-owned by the [Create target-selection table](../integrations/create-contraption-raycast.md#existing-target-selection-settings).
+owned by the [Create target-selection table](../../integrations/create-contraption-raycast.md#existing-target-selection-settings).
 
 ## Toggle input and attempted persistence
 
@@ -36,7 +36,7 @@ interaction's screen-transition abort rule in [capture](capture.md#interaction-l
 After a claimed toggle, the client attempts `saveSafely`. The in-memory value
 has already changed, so this is not a guarantee of durable persistence. Handler
 versioning, recovery, and save-protection behavior are owned by
-[configuration revisioning](../architecture/config/revisioning.md).
+[configuration revisioning](../config/revisioning.md).
 
 ## Raycast use and blacklist boundary
 
@@ -46,7 +46,7 @@ decides whether ignored entity candidates join nearest-hit competition. The
 ordinary press-time sampling boundary is owned by [capture](capture.md). A
 deferred compatibility press stores only its ray and reads this policy when its
 later capture starts; that sequence is owned by
-[long-press compatibility](../architecture/input/long-press-compatibility.md).
+[long-press compatibility](../input/long-press-compatibility.md).
 
 Spectator entities are always excluded, including when
 `markBlacklistedTargets` is true. The shared entity blacklist starts with a

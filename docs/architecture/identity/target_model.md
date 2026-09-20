@@ -5,7 +5,7 @@
 - A `Target` is the concrete entity, block or pure location resolved by the
   capture associated with the initial ping-key press. Capture may complete
   asynchronously or start through the narrow deferred-compatible path in
-  [long-press compatibility](../architecture/input/long-press-compatibility.md).
+  [long-press compatibility](../input/long-press-compatibility.md).
 - A `Target Type` is a code-defined matcher; a `Resolved Target` is the captured
   target plus the winning Target Type.
 - A `Ping Type` is a predefined semantic choice for chat, outline color, text
@@ -15,8 +15,8 @@
 
 These stable concepts are separate from live renderable geometry and
 [presentation subjects](../rendering/presentation_subjects.md). The
-[geometry pipeline](../architecture/geometry-pipeline.md) describes their data
-flow; [D0003](../decisions/D0003-multipart-presentation-types.md) explains the
+[geometry pipeline](../geometry-pipeline.md) describes their data
+flow; [D0003](../../decisions/D0003-multipart-presentation-types.md) explains the
 identity/presentation boundary.
 
 ## Ordinary identities and lifecycle
@@ -49,7 +49,7 @@ existing location-ping semantics.
 
 Existing ping lifetime, range, cooldown and comparable mechanics are preserved
 unless an explicit product requirement changes them. Pre-commit validation and
-error messages are owned by [target validation](../architecture/authority/target_validation.md).
+error messages are owned by [target validation](../authority/target_validation.md).
 
 ## Marker data versus current presentation
 
@@ -60,7 +60,7 @@ the authoritative name data used by HUD and chat, until the normal marker
 lifecycle removes or expires it. Presentation resolution may nevertheless
 produce no current subject; that absence does not mean that the marker or its
 HUD data has been removed. The lifecycle rules are owned by
-[marker lifecycle](../architecture/authority/marker_lifecycle.md).
+[marker lifecycle](../authority/marker_lifecycle.md).
 
 For a committed ordinary block, a same-registry-ID BlockState or property
 change keeps the target valid and resolves presentation from the current live
@@ -83,7 +83,7 @@ validating a local constituent. See [local geometry](../picking/local_geometry.m
 ## External-block identity
 
 The common external-block model, currently used by
-[Sable](../integrations/sable.md), distinguishes a create candidate from a
+[Sable](../../integrations/sable.md), distinguishes a create candidate from a
 committed target:
 
 - An uncommitted candidate has an empty stable target ID. It cannot become a
@@ -121,6 +121,6 @@ owner, Target Type, Ping Type, arrival, expiry and current audience. It is an
 update of the committed marker, not another receipt or a new winner candidate.
 This continuity within the fork does not imply original-mod protocol support.
 
-Packet roles are specified in [target validation](../architecture/authority/target_validation.md);
+Packet roles are specified in [target validation](../authority/target_validation.md);
 the server's selection of visible same-target state is specified in
-[ping winner](../architecture/authority/ping_winner.md).
+[ping winner](../authority/ping_winner.md).

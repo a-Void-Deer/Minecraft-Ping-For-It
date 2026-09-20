@@ -22,7 +22,7 @@ The complete transform, immutable local-view, represented-fluid, native-shape
 kernel, capture metadata, cost, limitation, and manual scenario contract is
 retained in [Create contraption ray targeting](create-contraption-raycast.md).
 The generic owner-result rules and rejected coarse-bound alternative are in
-[entity-local picking](../picking/local_geometry.md) and
+[entity-local picking](../architecture/picking/local_geometry.md) and
 [D0006](../decisions/D0006-exact-owned-geometry.md).
 
 ## Create entity-outline source
@@ -63,7 +63,7 @@ texture, and the exact opaque ping color. This direct mask remains independent
 of Flywheel visualization support.
 
 The adapter follows the common
-[source outcome contract](../geometry/geometry_sources.md). Normal zero output
+[source outcome contract](../architecture/geometry/geometry_sources.md). Normal zero output
 is `EMPTY`; a recoverable exception with no committed vertex is `FAILED`; a
 recoverable exception after shared-buffer vertices have been committed is
 `RENDERED` for that frame with a partial-emission diagnostic. The integration
@@ -131,7 +131,7 @@ subject is covered only after the lower subject's exact BER source reports
 `RENDERED`. A baked-model or Flywheel success, an attempted BER, ownership,
 `EMPTY`, `FAILED`, or unavailable geometry cannot claim that coverage. Until
 then, upper-subject sources and fallback remain eligible. The generic coverage
-contract is in [presentation subjects](../rendering/presentation_subjects.md).
+contract is in [presentation subjects](../architecture/rendering/presentation_subjects.md).
 
 ### Large water-wheel master proxy
 

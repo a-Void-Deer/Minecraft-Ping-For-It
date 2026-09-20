@@ -52,10 +52,10 @@ ignored or abandon its exact interaction without affecting a newer one.
 
 ## Related docs
 
-[Capture](../picking/capture.md),
+[Capture](../architecture/picking/capture.md),
 [long-press timing](../architecture/input/long-press.md),
 [long-press compatibility](../architecture/input/long-press-compatibility.md),
-[wheel](../picking/wheel.md), [target model](../identity/target_model.md), and
+[wheel](../architecture/picking/wheel.md), [target model](../architecture/identity/target_model.md), and
 [server authority](D0004-server-authority.md).
 
 Focused tests named by the current coverage include

@@ -40,7 +40,7 @@ never be an `entity_block`.
 
 Absent optional registrations are ignored; partially present content continues
 to match, while a group with no valid concrete content is inactive and
-non-matching. See [compatibility](../compatibility.md) and
+non-matching. See [compatibility](../../compatibility.md) and
 [presentation subjects](../rendering/presentation_subjects.md) for the distinct
 render-target classification of owner/master subjects.
 

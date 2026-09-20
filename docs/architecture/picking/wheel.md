@@ -9,7 +9,7 @@ fallback. Each sector has inner and outer borders/arcs in its Ping Type's
 outline color. The choices and default come from the resolved Target Type's
 [ordered catalog](../identity/catalogs.md).
 The wheel interaction settings and their qualitative relationships are catalogued
-in [client configuration](../config/client.md#press-wheel-and-cancellation-interaction).
+in [client configuration](../../config/client.md#press-wheel-and-cancellation-interaction).
 
 Exceeding the configured timeout closes an actually open wheel with no ping,
 no cancellation and no timeout error. Timeout is measured from actual opening.
@@ -70,5 +70,5 @@ The selected stored candidate does not authorize a new target-selection ray or
 make it server-cancellable. A stale, expired, missing, or unauthorized nearest
 candidate can be rejected by the server; that rejection does not make the client
 retry the action with a farther candidate. Such removals are silent
-no-ops/rejections under [target validation](../architecture/authority/target_validation.md).
-Removing a valid winner triggers [server winner recomputation](../architecture/authority/ping_winner.md).
+no-ops/rejections under [target validation](../authority/target_validation.md).
+Removing a valid winner triggers [server winner recomputation](../authority/ping_winner.md).

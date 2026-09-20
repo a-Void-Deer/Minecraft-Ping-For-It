@@ -60,7 +60,7 @@ replay the client-local ray.
 
 ## Related docs
 
-[Entity-local picking](../picking/local_geometry.md),
-[native VoxelShape distinction](../geometry/voxel_shape.md),
+[Entity-local picking](../architecture/picking/local_geometry.md),
+[native VoxelShape distinction](../architecture/geometry/voxel_shape.md),
 [Create integration](../integrations/create.md), and
 [Create contraption ray targeting](../integrations/create-contraption-raycast.md).

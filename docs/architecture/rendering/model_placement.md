@@ -28,7 +28,7 @@ zero and cannot double-transform the display.
 This rule applies to the established provider-owned presentation route; it is
 not a claim that every possible moving or external renderer shares one generic
 model representation. Stable marker identity and live provider presentation
-remain separate; see [Sable](../integrations/sable.md).
+remain separate; see [Sable](../../integrations/sable.md).
 
 ## Entity-block geometry
 

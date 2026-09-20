@@ -75,7 +75,7 @@ boundary otherwise have focused test coverage.
 
 ### Selection-policy and input-state seams
 
-The [selection policy](../picking/selection_policy.md) has focused unit and
+The [selection policy](../architecture/picking/selection_policy.md) has focused unit and
 state-seam evidence, rather than live input-callback evidence:
 
 - `ToggleInputStateTest` covers physical-press de-duplication until release,
@@ -214,7 +214,7 @@ independently; therefore this evidence cannot guarantee that provider-local
 multipart or subject-type decisions came from one immutable shared snapshot.
 That is an implementation-conformance and automated-coverage gap, not an
 external exception to the shared-subject contract in
-[presentation subjects](../rendering/presentation_subjects.md).
+[presentation subjects](../architecture/rendering/presentation_subjects.md).
 
 ### Rate-policy courtesy behavior
 

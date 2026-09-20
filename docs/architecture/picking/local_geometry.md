@@ -32,7 +32,7 @@ block/fluid tie. Equal-distance local child hits use deterministic local-positio
 ordering. The scanner intersects the finite segment with exact boxes emitted
 by native `VoxelShape.forAllBoxes`, including shapes extending outside their
 owning cells. These are native shape decompositions, not unit-cube approximations.
-The [Create supplement](../integrations/create-contraption-raycast.md) specifies
+The [Create supplement](../../integrations/create-contraption-raycast.md) specifies
 the kernel, collision context, policy and cache limitations.
 
 This forAllBoxes route is for picking only. The
@@ -53,6 +53,6 @@ entity. The server validates identity, liveness, classification and range from
 the entity anchor; it does not replay the local ray or validate a constituent.
 
 For Create's exact IDs, lazy owner shell and unavailable-delegate handling see
-[Create](../integrations/create.md). The rejected coarse-bound and alternative
+[Create](../../integrations/create.md). The rejected coarse-bound and alternative
 kernel approaches are explained in
-[D0006](../decisions/D0006-exact-owned-geometry.md).
+[D0006](../../decisions/D0006-exact-owned-geometry.md).

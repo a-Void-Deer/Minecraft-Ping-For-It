@@ -53,8 +53,11 @@ provider state needs explicit materialization and refresh handling.
 ## Related docs
 
 [Target validation](../architecture/authority/target_validation.md),
-[ping winner](../architecture/authority/ping_winner.md), [security](../security.md),
-[rate policy](../config/rate_limit.md), and [Sable](../integrations/sable.md).
+[ping winner](../architecture/authority/ping_winner.md),
+[security](../architecture/security.md),
+[server configuration authority](../architecture/authority/server-config.md),
+[rate policy](../architecture/config/rate-limit.md), and
+[Sable](../integrations/sable.md).
 
 Focused tests named by the current coverage include
 `AuthoritativeTargetValidationTest`, `MarkerCreationServiceTest`,
