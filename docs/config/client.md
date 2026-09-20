@@ -42,8 +42,8 @@ above.
 | `directionIndicatorVisible` | boolean | Whether the off-screen direction indicator is visible. |
 | `pingSize` | number | Local visual scale for marker and direction-indicator presentation. |
 | `configurationNoticeSize` | number | Local visual size for target-selection toggle notices. |
-| `markerDisplayDuration` | number | Local marker-display-duration preference. Serialized `0` means each marker follows its frozen server-side duration, rather than a literal zero-duration display; [marker lifecycle](../architecture/authority/marker_lifecycle.md) owns the resulting state behavior. |
-| `raycastDistance` | number | Native local raycast cap; [range](../architecture/picking/range.md) owns capture-range composition. Its current screen exposure is owned by the [configuration UI](../UI/config.md). |
+| `markerDisplayDuration` | number | Local marker-display-duration preference. Serialized `0` means each marker follows its frozen server-side duration, rather than a literal zero-duration display; [client marker state](../architecture/markers/client-state.md) owns the resulting state behavior. |
+| `raycastDistance` | number | Native local raycast cap; [range](../architecture/picking/range.md) owns capture-range composition. Its current screen exposure is owned by the [configuration UI](../UI/settings-screen.md). |
 
 ### Press, wheel, and cancellation interaction
 
@@ -98,7 +98,7 @@ by `markBlacklistedTargets`; see
 | `safeZoneTop` | number, GUI-scaled inset | Top screen inset for off-screen direction-indicator placement. |
 | `safeZoneBottom` | number, GUI-scaled inset | Bottom inset, measured from screen height. |
 
-The [configuration UI](../UI/config.md) owns which file fields have
+The [configuration UI](../UI/settings-screen.md) owns which file fields have
 interactive controls. `blockDisplayPolicy` is derived transient state, not a
 persisted key.
 

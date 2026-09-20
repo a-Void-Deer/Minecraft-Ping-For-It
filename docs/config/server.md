@@ -3,7 +3,7 @@
 This topic owns the complete persisted catalogue of the server-authoritative
 configuration file. It does not own the client configuration file
 ([client configuration](client.md)), the settings UI
-([configuration UI](../UI/config.md)), the remote change transaction
+([configuration UI](../UI/settings-screen.md)), the remote change transaction
 ([changing server configuration](../architecture/config/changing-server-config.md)),
 configuration revisioning ([revisioning](../architecture/config/revisioning.md)),
 or the marker admission rules that consume these values.

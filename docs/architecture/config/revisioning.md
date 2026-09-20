@@ -141,6 +141,6 @@ There is no implicit downgrade path.
 
 The client configuration entry point is
 [client configuration](../../config/client.md). The configuration-UI workflow is
-[configuration UI](../../UI/config.md). Server timing values and marker
+[configuration UI](../../UI/settings-screen.md). Server timing values and marker
 lifetime behavior are owned separately by
 [marker lifecycle](../authority/marker_lifecycle.md).

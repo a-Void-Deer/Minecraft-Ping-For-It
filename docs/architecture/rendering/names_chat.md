@@ -79,7 +79,8 @@ the [wheel contract](../picking/wheel.md), not this phrase-only text-color rule.
 For a created-marker update, the client runtime first rejects corrupt input and
 authoritatively tombstoned marker IDs. For a remaining update, it determines
 whether the marker is newly seen from the marker's presence in the **current**
-local store before upserting it. Only a newly seen marker is eligible for the
+local store (see [client marker state](../markers/client-state.md)) before
+upserting it. Only a newly seen marker is eligible for the
 sound and chat hooks. An update to an ID that is still locally known—including
 an upsert that refreshes an external locator—does not repeat either hook.
 

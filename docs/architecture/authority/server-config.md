@@ -22,10 +22,8 @@ authority. Their protocol meaning is owned by
 [security](../security.md#server-configuration-update-enforcement) owns how the
 server derives and enforces the trusted check.
 
-## Not OP-gated by this rule
+## Scope of this gate
 
-This authority gate is specific to server-configuration editing. Ordinary
-`MarkerCreate` is not OP-gated; it is governed by packet validity, rate and
-channel/team policy, target validation, and allowed Ping Type. `MarkerRemove`
-is also not OP-gated, but it succeeds only for an active marker owned by the
-requester. Administrator status does not replace that ownership contract.
+This authority gate is specific to server-configuration editing. Ordinary marker
+creation and removal eligibility are owned by
+[target validation](target_validation.md).

@@ -3,16 +3,18 @@
 ## Trust boundaries
 
 For authoritative `MarkerCreate`, captured client intent is a request. The
-server derives/verifies target classification, existence, dimension,
+server derives and verifies target classification, existence, dimension,
 block/entity state, range, allowed Ping Type, names, colors, ownership,
-channel, audience and lifecycle data from authoritative state where possible.
-That packet has no client-provided channel or audience field; the server uses
-its stored channel state when it applies the marker-creation policy.
+channel, audience, and lifecycle data from authoritative server state where
+possible, applying its stored channel state when it applies the
+marker-creation policy. The request field boundary is owned by
+[network protocol](network/protocol.md), and the admission stages and outcomes
+are owned by [target validation](authority/target_validation.md).
 
-This channel/audience guarantee is specific to `MarkerCreate`. It must not be
+This trusted-state guarantee is specific to `MarkerCreate`. It must not be
 extended to the registered legacy `PingLocationC2SPacket`, which retains an
 in-packet channel and legacy forwarding path. See
-[network protocol](authority/network_protocol.md) for the deliberately narrow
+[network protocol](network/protocol.md) for the deliberately narrow
 legacy-versus-authoritative boundary.
 
 Clients cannot authorize marker removal or select a server winner by sending
@@ -50,7 +52,7 @@ handling are defined there.
 
 Which rejection response may show the local invalid-target error, and the
 silent/debug-only outcomes for other responses, are owned by
-[target validation](authority/target_validation.md).
+[ping feedback](../UI/ping-feedback.md).
 
 ## Isolation and resource lifetime
 
@@ -76,7 +78,7 @@ details without redaction. Frequency limits must not be replaced by deleting
 the information needed to diagnose a failed optional integration.
 
 Do not add toast or action-bar feedback for rate or integration failures. The
-required light-red local invalid-target message is separately specified in
-target validation. These are established product boundaries, not evidence of a
-completed security audit; coverage limitations remain in
-[verification](../testing/verification.md).
+required local invalid-target message, including its color and chat output, is
+separately specified in [ping feedback](../UI/ping-feedback.md). These are
+established product boundaries, not evidence of a completed security audit;
+coverage limitations remain in [verification](../testing/verification.md).

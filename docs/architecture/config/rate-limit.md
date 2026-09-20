@@ -7,7 +7,8 @@ create-only client courtesy boundary. It does not own the persisted server
 field catalogue ([server configuration](../../config/server.md)), the marker
 admission order that reports `RATE_LIMITED`
 ([target validation](../authority/target_validation.md)), the server-side trust
-and feedback boundary ([security](../security.md)), or the marker
+and feedback boundary ([security](../security.md)), the client feedback
+presentation ([ping feedback](../../UI/ping-feedback.md)), or the marker
 synchronization lifetime
 ([marker lifecycle](../authority/marker_lifecycle.md)).
 
@@ -86,7 +87,8 @@ The separate pending-capture input sequence is defined in
 
 Rejection feedback, rate-controlled diagnostic detail, and user-visible
 feedback boundaries are owned by [security](../security.md). Client processing
-of rejection responses is owned by
+of rejection responses and the local invalid-target presentation are owned by
+[ping feedback](../../UI/ping-feedback.md), with rejection outcomes owned by
 [target validation](../authority/target_validation.md).
 
 Automated evidence and remaining reconnect, live-update, and sanitization

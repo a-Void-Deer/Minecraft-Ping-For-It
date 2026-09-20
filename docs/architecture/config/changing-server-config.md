@@ -6,7 +6,7 @@ that changes server configuration. The persisted field catalogue is
 [server configuration authority](../authority/server-config.md); trusted
 server-side identity and enforcement are [security](../security.md); the client
 screen that plans and edits drafts is
-[configuration UI](../../UI/config.md). Persistence and recovery are owned by
+[configuration UI](../../UI/settings-screen.md). Persistence and recovery are owned by
 [configuration revisioning](revisioning.md). This contract does not duplicate
 the UI widget workflow, the rate algorithm ([rate policy](rate-limit.md)), or
 the marker lifetime that consumes `syncDuration`
@@ -31,7 +31,7 @@ selection identifies which of the five fields the sender changed; it is not a
 partial snapshot. A missing, zero, unknown, or malformed selection, or an
 otherwise invalid update, performs no mutation. Which fields become dirty and
 when a plan is produced are UI planning details owned by
-[configuration UI](../../UI/config.md).
+[configuration UI](../../UI/settings-screen.md).
 
 ## Snapshot request and correlation
 
@@ -54,7 +54,7 @@ An accepted snapshot initializes the client's authoritative values and its
 draft. Authoritative values, draft, and pending correlation are
 connection-scoped: a disconnect clears all three, and permission loss
 invalidates editability. Collapse, discard, and screen cleanup behavior are
-owned by [configuration UI](../../UI/config.md).
+owned by [configuration UI](../../UI/settings-screen.md).
 
 ## Merge semantics
 

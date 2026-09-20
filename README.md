@@ -80,7 +80,7 @@ closes the screen before opening the client file. Exact filenames, keys, list
 syntax, close/save behavior, external-edit reload timing, and reset semantics
 are owned by the [client configuration](docs/config/client.md),
 [server configuration](docs/config/server.md), and
-[configuration UI](docs/UI/config.md) contracts.
+[configuration UI](docs/UI/settings-screen.md) contracts.
 
 ## Install, build, and verify
 

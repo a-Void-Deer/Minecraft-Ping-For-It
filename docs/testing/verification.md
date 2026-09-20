@@ -293,14 +293,28 @@ The following gaps remain open until direct evidence closes them:
 - live server-settings UI, permission, request/response, update, and persistence
   behavior;
 - direct runtime proof that valid legacy S2C locations are presentation no-ops,
-  plus live loader registration/network transport; and
+  plus live loader registration/network transport;
 - the complete `ServerCore` operation ordering and channel/admission matrix in
   an end-to-end server path;
+- same-ID marker creation after local record deletion, where current behavior
+  treats the late create as a new insertion with a new visual deadline;
+- rendered color and literal text of the local invalid-target chat line, which
+  focused tests cover only through the constant and a fake sink;
 - application of synchronized rate policy on reconnect and on effective live
   configuration change;
 - server-side sanitization of negative rate-policy values; and
 - detailed diagnostic behavior in the private
   `CreateEntityOutlineAdapter.EntityDiagnostics` path.
+
+### Pending localization
+
+The local invalid-target message is currently a hardcoded literal
+(`PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE`) with no language key.
+Migrating it to a language key while preserving both trigger paths (local
+pre-commit target loss and the eligible server `TARGET_GONE` response), the
+`#FF5555` product color, and the chat output channel is pending. This
+documentation-only task records the gap and does not modify implementation or
+language resources.
 
 Render-entity lookup gaps remain for same-dimension world unload/rejoin and
 runtime-ID reuse in a game session, shared epochs between real HUD and outline
