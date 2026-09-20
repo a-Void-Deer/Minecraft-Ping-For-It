@@ -2,24 +2,19 @@
 
 ## Opening, selection and timeout
 
-The current configurable defaults are a 300 ms long-press threshold, 5000 ms
-maximum wheel-open duration and 5-degree cancellation cone half-angle. Their
-configuration owner is [client settings](../config/client.md); these are defaults,
-not unresolved or immutable product constants.
-
 Opening follows [capture readiness and the present-frame boundary](capture.md).
 Every subsequent action operates on the captured context. The wheel center is
 always **Cancel Marker**, including one-item Ping Type sets and the location
 fallback. Each sector has inner and outer borders/arcs in its Ping Type's
 outline color. The choices and default come from the resolved Target Type's
 [ordered catalog](../identity/catalogs.md).
-The wheel radii and their paired configuration bounds are owned by
-[client settings](../config/client.md#current-defaults-and-locality).
+The wheel interaction settings and their qualitative relationships are catalogued
+in [client configuration](../config/client.md#press-wheel-and-cancellation-interaction).
 
 Exceeding the configured timeout closes an actually open wheel with no ping,
 no cancellation and no timeout error. Timeout is measured from actual opening.
-If the wheel has not opened, releasing uses the default Ping Type rather than
-fabricating a wheel selection from elapsed duration.
+The timeout value is frozen at that actual-open boundary.
+Pre-open release behavior is owned by [capture](capture.md#baseline-release-and-actual-wheel-opening).
 
 ## Radial release result
 
@@ -57,8 +52,8 @@ collection is only a selection aid and is not an assertion that the marker is
 still server-active or removable.
 
 1. Keep the cone origin and direction from the press-time ray. Candidates must
-   be within the configured half-angle (5 degrees by default, including the
-   boundary); a zero-distance candidate is eligible.
+   be within the configured half-angle, including the boundary; a zero-distance
+   candidate is eligible.
 2. Resolve each candidate's current position without starting a new target ray:
    a live entity uses its current rendered top-center; an external block uses a
    currently resolved provider position or its authoritative anchor; other

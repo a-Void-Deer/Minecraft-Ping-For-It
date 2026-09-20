@@ -9,8 +9,8 @@ require reading every document. These documents describe the existing Minecraft
 | Document kind | Responsibility |
 | --- | --- |
 | [Repository README](../README.md) | Tracked public entry point for project orientation, supported build/source sets, and install/build/verify commands. |
-| Topic documents below | Normative, executable product contracts for their named subsystem. |
-| Architecture and decisions | Concepts, boundaries and rationale. They link to, but do not replace, the executable topic contracts. |
+| Topic documents and focused architecture contracts below | Normative, executable product contracts for their named subsystem. |
+| [Geometry-pipeline overview](architecture/geometry-pipeline.md) and decisions | Explanatory concepts, boundaries, and rationale. They link to, but do not replace, executable topic contracts. |
 | [Testing and verification](testing/verification.md) | Existing automated-coverage inventory, known gaps, evidence rules and pending manual/integration scenarios. |
 
 Start with the tracked repository README, this guide and the topic documents
@@ -28,7 +28,9 @@ conflicts rather than silently choosing or dropping a requirement.
 | Change Target/Marker identity or lifecycle | [Target model](identity/target_model.md) | [Validation](authority/target_validation.md), [winner selection](authority/ping_winner.md), Sable |
 | Change marker creation, removal, expiry or audience lifecycle | [Marker lifecycle](authority/marker_lifecycle.md) | [Target model](identity/target_model.md), validation and winner selection |
 | Change Target Types, Ping Types, priorities, defaults, keys or colors | [Catalogs](identity/catalogs.md) | Capture, names/chat and wheel |
-| Change press handling, asynchronous capture or target locking | [Capture](picking/capture.md) | [Selection policy](picking/selection_policy.md), [Wheel](picking/wheel.md), local geometry, rate policy |
+| Change press handling, asynchronous capture or target locking | [Capture](picking/capture.md) | [Long-press timing](architecture/input/long-press.md), [Long-press compatibility](architecture/input/long-press-compatibility.md), [Selection policy](picking/selection_policy.md), [Wheel](picking/wheel.md), local geometry, rate policy |
+| Change long-press threshold/slice timing | [Long-press timing](architecture/input/long-press.md) | Capture, wheel, client configuration, and compatibility when enabled |
+| Change rapid-click or deferred long-press compatibility | [Long-press compatibility](architecture/input/long-press-compatibility.md) | Capture, long-press timing, wheel, rate policy, and verification |
 | Change target-selection toggles, block/fluid modes or entity-selection blacklist | [Selection policy](picking/selection_policy.md) | [Capture](picking/capture.md), Create raycast |
 | Change exact entity picking or geometry ownership | [Local geometry picking](picking/local_geometry.md) | Create raycast integration and D0006 |
 | Change client capture distance, optional long-range traces or server range acceptance | [Range](picking/range.md) | [Capture](picking/capture.md), [Target validation](authority/target_validation.md), server settings and the affected integration |
@@ -37,9 +39,10 @@ conflicts rather than silently choosing or dropping a requirement.
 | Change registered marker/legacy packet ingress or client packet acceptance | [Network protocol](authority/network_protocol.md) | [Target validation](authority/target_validation.md), marker lifecycle and compatibility |
 | Change which same-target ping is visible | [Ping winner](authority/ping_winner.md) | Identity, removal/expiry and external-target refresh |
 | Change trust boundaries, failure isolation or diagnostic detail | [Security](security.md) | Validation, rate policy and the affected provider/source contract |
-| Change client defaults, list syntax, reload or recovery | [Client config](config/client.md) | [Config versioning](config/versioning.md), capture, wheel, outline routing and geometry modes |
-| Change the server-settings panel, snapshot correlation, drafts or partial updates | [Server settings](config/server_settings.md) | [Security](security.md), [Rate policy](config/rate_limit.md), marker lifecycle and config versioning |
-| Change config schema versions, preservation locks or migrations | [Config versioning](config/versioning.md) | [Client config](config/client.md), repository build entry |
+| Change the complete client file/key catalogue, list syntax, locality, or format examples | [Client configuration](config/client.md) | Revisioning, capture, wheel, outline routing, and geometry modes |
+| Change client settings-screen workflow, file action, reset, or screen exposure | [Settings screen](UI/settings-screen.md) | Client configuration, server settings, revisioning, and verification |
+| Change the server-settings panel, snapshot correlation, drafts or partial updates | [Server settings](config/server_settings.md) | [Security](security.md), [Rate policy](config/rate_limit.md), marker lifecycle, and revisioning |
+| Change config schema versions, preservation locks or migrations | [Configuration revisioning](architecture/config/revisioning.md) | [Client configuration](config/client.md), settings screen, repository build entry |
 | Change send-rate synchronization or courtesy limiting | [Rate policy](config/rate_limit.md) | Validation and security |
 | Change source order, adapter outcomes, failure handling or registration | [Geometry sources](geometry/geometry_sources.md) | Presentation subjects and the affected integration |
 | Change native block-shape acquisition or edge generation | [VoxelShape geometry](geometry/voxel_shape.md) | Outline render state and D0002 |
@@ -57,7 +60,10 @@ conflicts rather than silently choosing or dropping a requirement.
 Every topic document is reachable from the table above or the decision index
 below. The complete topic set is:
 
-- [architecture](architecture/geometry-pipeline.md);
+- architecture: explanatory [geometry pipeline](architecture/geometry-pipeline.md),
+  normative [long-press timing](architecture/input/long-press.md),
+  [long-press compatibility](architecture/input/long-press-compatibility.md), and
+  [configuration revisioning](architecture/config/revisioning.md);
 - identity: [target model](identity/target_model.md) and
   [catalogs](identity/catalogs.md);
 - picking: [capture](picking/capture.md),
@@ -68,9 +74,9 @@ below. The complete topic set is:
   [target validation](authority/target_validation.md),
   [network protocol](authority/network_protocol.md), and
   [ping winner](authority/ping_winner.md);
-- configuration: [client config](config/client.md),
-  [server settings](config/server_settings.md),
-  [versioning](config/versioning.md), and [rate policy](config/rate_limit.md);
+- configuration: [client configuration](config/client.md),
+  [settings screen](UI/settings-screen.md), [server settings](config/server_settings.md),
+  and [rate policy](config/rate_limit.md);
 - geometry: [geometry sources](geometry/geometry_sources.md) and
   [VoxelShape geometry](geometry/voxel_shape.md);
 - rendering: [outline](rendering/outline.md),
@@ -101,25 +107,30 @@ duplicate the exact constants, algorithms or error cases owned by topic docs.
 
 ## Documentation maintenance
 
-1. Give every executable contract one primary topic owner. Other documents link
-   to it instead of copying its table, constant set or failure matrix.
+1. Give every substantive executable fact one primary topic owner. Other
+   documents retain necessary interface semantics and a link rather than copying
+   its catalogue, constant set, algorithm, or failure matrix.
 2. Put product direction and scope in `spec.md`, Agent procedure in `AGENTS.md`,
    and software behavior in topic docs. Do not move product rules into
    `AGENTS.md` as an enforcement shortcut.
 3. Update the owning topic for new behavior, the applicable decision only when
    rationale or a boundary changes, and verification when coverage, gaps or
    pending scenarios change.
-4. Architecture describes stages, data, lifetimes and boundaries. It is not a
-   Java file, class or line-number tour.
+4. The geometry-pipeline architecture page describes stages, data, lifetimes,
+   and boundaries. Focused architecture contracts are normative for their named
+   behavior. Neither form is a Java file, class, or line-number tour.
 5. Integration docs contain mod-specific gates and implementations. Generic
    picking-owner, geometry-source, outcome, lifecycle and failure contracts stay
    in their picking, geometry, authority or security owners.
 6. Keep distinct terms distinct: model eligibility is not emitted geometry;
    picking `forAllBoxes` is not outline `forAllEdges`; canonical identity is not
    presentation ownership; existing coverage is not a test run.
-7. Preserve exact defaults, IDs, ordering, keys, colors, validation timing,
-   fallback behavior, recoverable failure classes and optional-mod boundaries.
-   Label inferred rationale and never invent historical evidence.
+7. Preserve product IDs, ordering, keys, canonical vocabularies, validation
+   timing, fallback behavior, recoverable failure classes, and optional-mod
+   boundaries. Do not mirror implementation numeric defaults, bounds, UI steps,
+   or clamp formulas across normative pages; link the actual implementation
+   reference when live tuning metadata is needed. Label inferred rationale and
+   never invent historical evidence.
 8. Check links, headings, fences and the relevant coverage inventory after a
    documentation change. Do not claim runtime or manual validation from document
    review alone.

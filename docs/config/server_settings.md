@@ -24,7 +24,7 @@ client-courtesy meanings of `msToRegenerate` and `rateLimit` remain owned by
 `syncDuration` remains owned by
 [marker lifecycle](../authority/marker_lifecycle.md). Persisted server-config
 versioning, migration, and recovery are owned by
-[configuration versioning](versioning.md).
+[configuration revisioning](../architecture/config/revisioning.md).
 
 ## Opening, snapshots, and stale responses
 

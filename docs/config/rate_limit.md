@@ -19,7 +19,7 @@ rejection; `msToRegenerate = 0` is therefore not an unconditional server-side
 unlimited guarantee.
 
 Shared future-version preservation is defined by
-[future-version preservation](client.md#future-version-preservation). This
+[future-version preservation](../architecture/config/revisioning.md#future-version-protection). This
 rate-policy contract does not redefine that configuration rule.
 
 `syncDuration` is not a third rate-policy field and does not feed the courtesy
@@ -43,9 +43,9 @@ committed create:
 - do not record it as dispatched.
 
 `MarkerRemove` and channel-update behavior, including policy updates, remain
-unchanged. Do not apply a create-only limiter to them. The pending-capture
-compatibility queue in [capture](../picking/capture.md) is a separate input
-mechanism, not permission to queue throttled creates.
+unchanged. Do not apply a create-only limiter to them. The separate
+pending-capture input sequence is defined in
+[long-press compatibility](../architecture/input/long-press-compatibility.md).
 
 ## Feedback, diagnostics and evidence
 

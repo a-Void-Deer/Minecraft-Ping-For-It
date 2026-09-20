@@ -4,13 +4,16 @@ This topic owns the three persistent client settings that determine how a
 press-time ray selects blocks, fluids, and ignored entity candidates. It does
 not define block-outline or native-glow display eligibility.
 
-## Stored values and default bindings
+## Selection controls and bindings
 
-| JSON key | Default | Default key binding | Selection effect |
-| --- | ---: | --- | --- |
-| `passThroughTransparentBlocks` | `false` | Left Shift | Select block shapes with `ClipContext.Block.OUTLINE` when false and `ClipContext.Block.VISUAL` when true. |
-| `markBlacklistedTargets` | `false` | Left Control | Exclude or include candidates matched by the entity-selection blacklist. |
-| `markFluids` | `false` | Left Alt | Select fluids with `ClipContext.Fluid.NONE` when false and `ClipContext.Fluid.ANY` when true. |
+| Control | Default key binding | Selection effect |
+| --- | --- | --- |
+| Pass through transparent blocks | Left Shift | Select block shapes with `ClipContext.Block.OUTLINE` when false and `ClipContext.Block.VISUAL` when true. |
+| Mark blacklisted targets | Left Control | Exclude or include candidates matched by the entity-selection blacklist. |
+| Mark fluids | Left Alt | Select fluids with `ClipContext.Fluid.NONE` when false and `ClipContext.Fluid.ANY` when true. |
+
+The persisted JSON-key catalogue is owned by
+[client configuration](../config/client.md#target-selection-and-entity-block-presentation).
 
 The names describe the established UI intent, not a general opacity classifier:
 `VISUAL` and `OUTLINE` are Minecraft shape strategies. The exact native
@@ -30,20 +33,20 @@ table are defaults; the behavior follows the matching configured key mapping.
 This toggle-specific GUI suppression is separate from the active ping
 interaction's screen-transition abort rule in [capture](capture.md#interaction-lifecycle-aborts).
 
-After a claimed toggle, the client calls `saveSafely`. That is a persistence
-attempt, not an unconditional disk-write guarantee: an existing invalid-file or
-future-version preservation lock can skip it, and serialization or I/O can fail.
-The in-memory value has already changed in either case, so this behavior must
-not be documented as a guaranteed durable save.
+After a claimed toggle, the client attempts `saveSafely`. The in-memory value
+has already changed, so this is not a guarantee of durable persistence. Handler
+versioning, recovery, and save-protection behavior are owned by
+[configuration revisioning](../architecture/config/revisioning.md).
 
 ## Raycast use and blacklist boundary
 
 At ordinary capture start, the three values are copied into one immutable
 raycast policy. That policy selects the block and fluid modes in the table and
 decides whether ignored entity candidates join nearest-hit competition. The
-ordinary press-time and narrow deferred-capture sampling boundaries are owned by
-[capture](capture.md): a deferred compatibility press stores only its ray and
-reads this policy when its later capture actually starts.
+ordinary press-time sampling boundary is owned by [capture](capture.md). A
+deferred compatibility press stores only its ray and reads this policy when its
+later capture starts; that sequence is owned by
+[long-press compatibility](../architecture/input/long-press-compatibility.md).
 
 Spectator entities are always excluded, including when
 `markBlacklistedTargets` is true. The shared entity blacklist starts with a

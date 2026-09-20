@@ -1,129 +1,131 @@
-# Client settings and recovery
+# Client configuration
 
-## Current defaults and locality
+This topic owns the complete persisted client-file catalogue, file grammar, and
+local authority boundary. It does not define server configuration, server
+acceptance, marker-lifetime authority, configuration recovery, or settings-screen
+workflow.
 
-These are current configurable defaults/settings, not unresolved or immutable
-product values:
+## File, metadata, and locality
 
-| Setting | Default and bounds | Application |
+The client configuration file is `pingforit.json`. Its persisted fields are the
+fields of [`ClientConfig`](../../common/src/main/java/nx/pingwheel/common/config/ClientConfig.java).
+`pingforit-version` is an additional handler-owned metadata key rather than a
+`ClientConfig` field; its grammar, migrations, and recovery behavior belong to
+[configuration revisioning](../architecture/config/revisioning.md).
+
+Every setting below is client-local. It can affect local input, capture, or
+presentation but cannot grant server range acceptance or alter server marker
+lifetime. A chosen channel is notified to the server when applicable, but the
+server remains authoritative for its own channel acceptance and marker state;
+see [target validation](../authority/target_validation.md).
+
+Current implementation defaults, validation metadata, and widget definitions
+are intentionally not mirrored here. Consult
+[`ClientConfig`](../../common/src/main/java/nx/pingwheel/common/config/ClientConfig.java),
+[`ClientConfigBounds`](../../common/src/main/java/nx/pingwheel/common/config/ClientConfigBounds.java),
+and [`SettingsScreen`](../../common/src/main/java/nx/pingwheel/common/screen/SettingsScreen.java)
+when that implementation metadata is needed.
+
+## Persisted field catalogue
+
+Numbers use JSON numeric form. Units are stated where they are meaningful to the
+field; implementation defaults and numeric bounds remain in the source links
+above.
+
+### Sound, reach, and local presentation
+
+| Key | JSON form | Local meaning |
 | --- | --- | --- |
-| Long-press threshold (`wheelHoldMillis`) | **300 ms**; 100–2000 ms, 10 ms UI step | Capture/wheel interaction |
-| Long-press compatibility slice (`longPressCompatibilitySliceMillis`) | **20 ms**; minimum 10 ms, maximum described below, 5 ms UI step | Compatibility rapid-click adjacency window; enabled behavior is owned by [capture](../picking/capture.md) |
-| Maximum wheel-open duration (`wheelTimeoutMillis`) | **5000 ms**; 1000–30000 ms, 200 ms UI step | Starts only when wheel actually opens |
-| Wheel inner radius (`wheelInnerRadius`) | **14 GUI px**; 6–120 GUI px, 1 GUI-px UI step | Center/cancellation boundary; see [wheel radial release](../picking/wheel.md#radial-release-result) |
-| Wheel outer radius (`wheelOuterRadius`) | **39 GUI px**; 20–300 GUI px, 1 GUI-px UI step | Ping Type sector boundary; see [wheel radial release](../picking/wheel.md#radial-release-result) |
-| Cancellation cone half-angle | **5 degrees** | Press-ray cone, live own-marker candidates |
-| Long-press compatibility (`longPressCompatibilityMode`) | **disabled** | Rapid-click virtual hold and pending-first-capture deferred fresh press; see [capture](../picking/capture.md) |
-| Pass through transparent blocks (`passThroughTransparentBlocks`) | **disabled** | Persistent target-selection policy; see [selection policy](../picking/selection_policy.md) |
-| Mark blacklisted targets (`markBlacklistedTargets`) | **disabled** | Persistent entity-selection policy; see [selection policy](../picking/selection_policy.md) |
-| Mark fluids (`markFluids`) | **disabled** | Persistent target-selection policy; see [selection policy](../picking/selection_policy.md) |
-| Block display whitelist | exactly `*:*` | Client-local native-glow eligibility |
-| Block-shape blacklist | empty | Overrides whitelist match |
-| Entity-block geometry source mode | `ALL` | Client-local, read on every render attempt/frame |
+| `pingVolume` | number | Local ping-sound volume. |
+| `pingDistance` | number | Local capture-distance preference. [Range](../picking/range.md) owns its interaction with native and server limits. |
+| `itemIconVisible` | boolean | Whether item-icon presentation is visible. |
+| `directionIndicatorVisible` | boolean | Whether the off-screen direction indicator is visible. |
+| `pingSize` | number | Local visual scale for marker and direction-indicator presentation. |
+| `configurationNoticeSize` | number | Local visual size for target-selection toggle notices. |
+| `markerDisplayDuration` | number | Local marker-display-duration preference. Serialized `0` means each marker follows its frozen server-side duration, rather than a literal zero-duration display; [marker lifecycle](../authority/marker_lifecycle.md) owns the resulting state behavior. |
+| `raycastDistance` | number | Native local raycast cap; [range](../picking/range.md) owns capture-range composition. Its current screen exposure is owned by the [settings screen](../UI/settings-screen.md). |
 
-The long-press threshold is clamped to **100–2000 ms**. The compatibility
-slice is clamped to **10 ms** through the lower of **300 ms** and the floored,
-five-millisecond-step half of the effective threshold; therefore the default
-300 ms threshold has a 150 ms maximum slice. JSON validation and direct setting
-mutations use the same clamp, and changing the threshold immediately reclamps
-the stored slice. Runtime compatibility independently applies that same clamp
-to supplier values. When the settings option is created, its upper bound is
-computed from the then-current threshold and exposed in five-millisecond steps;
-the option does not make compatibility enabled by itself.
+### Press, wheel, and cancellation interaction
 
-The wheel-radius pair is normalized together. First clamp the outer radius to
-its 20–300 GUI-px bounds; then clamp the inner radius to its own minimum and to
-`min(120, wheelOuterRadius - 8)`. This preserves at least an 8 GUI-px annulus.
-For example, `(wheelInnerRadius, wheelOuterRadius) = (120, 20)` normalizes to
-`(12, 20)`. Direct setters and persisted-config validation use the same paired
-bounds rather than validating either radius independently.
+| Key | JSON form | Local meaning |
+| --- | --- | --- |
+| `wheelHoldMillis` | number, milliseconds | Long-press threshold; [timing relationships](../architecture/input/long-press.md) and [capture-time consumption](../picking/capture.md#baseline-release-and-actual-wheel-opening) own its behavior. |
+| `longPressCompatibilityMode` | boolean | Enables the narrow rapid/deferred compatibility sequence; [long-press compatibility](../architecture/input/long-press-compatibility.md) owns its behavior. |
+| `longPressCompatibilitySliceMillis` | number, milliseconds | Compatibility adjacency slice. [Long-press timing](../architecture/input/long-press.md) owns its relation to the effective hold threshold. |
+| `wheelTimeoutMillis` | number, milliseconds | Maximum duration of an actually open wheel; [wheel](../picking/wheel.md) owns actual-open snapshot and timeout behavior. |
+| `cancelHalfConeAngleDegrees` | number, degrees | Half-angle for local own-marker cancellation; [wheel](../picking/wheel.md#cancel-marker-selection) owns candidate selection. |
+| `wheelInnerRadius` | number, GUI pixels | Center/cancellation boundary. It must remain less than `wheelOuterRadius`. |
+| `wheelOuterRadius` | number, GUI pixels | Outer sector boundary. It must remain greater than `wheelInnerRadius`. |
+| `wheelOpacity` | number | Local wheel visual opacity. |
+| `wheelFontSize` | number | Local wheel-label text size. |
+| `wheelTargetFontSize` | number | Local target-label text size. |
 
-At a baseline press, the interaction freezes the clamped long-press threshold.
-At actual wheel opening, it separately freezes the clamped wheel timeout. In
-contrast, compatibility mode and its effective slice are observed at relevant
-raw edges and render frames; the slice's threshold-derived cap can therefore
-change while a rapid-click candidate remains alive. The interaction state,
-rather than elapsed threshold alone, decides whether a present frame actually
-opened a wheel. The two compatibility paths and the resulting release/abort
-rules are owned by [capture](../picking/capture.md).
+### Target selection and entity-block presentation
 
-`pingDistance` is a client-local setting with default **2048** and a settings
-UI range of 0–2048 in 16-block steps (where 0 is shown as hidden and the maximum
-as infinite). It is not synchronized to the server. The client configuration
-validation path does not apply a `ClientConfigBounds` clamp to either this field
-or the hidden native ray-distance field; the UI range is therefore not a claim
-about arbitrary persisted values. Its capture role, optional integrations, and
-server authority are owned by [capture range](../picking/range.md); this table
-must not be read as a server acceptance guarantee.
+| Key | JSON form | Local meaning |
+| --- | --- | --- |
+| `passThroughTransparentBlocks` | boolean | Persistent block-shape selection policy; see [selection policy](../picking/selection_policy.md). |
+| `markBlacklistedTargets` | boolean | Persistent entity-selection-blacklist policy; see [selection policy](../picking/selection_policy.md). |
+| `markFluids` | boolean | Persistent fluid-selection policy; see [selection policy](../picking/selection_policy.md). |
+| `playerInfoMode` | `HOLD`, `DISABLED`, `ALWAYS`, or `COMPACT` | Player-author presentation: `HOLD` shows verbose information while the player-list key is held; `ALWAYS` keeps it verbose; `COMPACT` puts the author in the distance label; `DISABLED` omits it. |
+| `teamColorMode` | `FULL`, `DISABLED`, `PING_ONLY`, or `LABELS_ONLY` | Whether team coloring applies to both ping and labels, neither, only the ping, or only labels. |
+| `entityBlockRenderMode` | `ALL`, `COMPATIBLE`, or `VOXEL_SHAPE_ONLY` | Local entity-block geometry route. [Geometry sources](../geometry/geometry_sources.md) owns route and outcome semantics. When decoding persisted input, an explicit `null` or unknown value normalizes to `COMPATIBLE`; a missing field is initialized by the config model. |
 
-Detailed timing lives in [capture](../picking/capture.md) and
-[wheel](../picking/wheel.md). Existing range/lifetime/cooldown mechanics are
-preserved. The client display-duration setting and marker state transitions are
-owned by [marker lifecycle](../authority/marker_lifecycle.md), not this settings
-table. Server send policy is separate: [rate limit](rate_limit.md).
+### Block display lists
 
-## Whitelist and blacklist grammar
+| Key | JSON form | Local meaning |
+| --- | --- | --- |
+| `blockDisplayWhitelist` | array of strings | Enables matching blocks for client-local native-glow/outline attempts. |
+| `blockShapeBlacklist` | array of strings | Excludes matching blocks from those attempts. A blacklist match takes precedence over a whitelist match. |
 
-There is no GUI list editor. Both lists accept only:
+These display lists are separate from the entity-selection blacklist controlled
+by `markBlacklistedTargets`; see
+[the blacklist boundary](../picking/selection_policy.md#raycast-use-and-blacklist-boundary).
 
-- exact `namespace:block`;
-- namespace wildcard `namespace:*`;
-- global wildcard `*:*`;
-- block tag `#namespace:tag`.
+### Channel preferences
 
-Entries have union semantics, but matching and persisted-config validation are
-separate boundaries:
+| Key | JSON form | Local meaning |
+| --- | --- | --- |
+| `channel` | string | Current local preference and fallback while disconnected. It is not server configuration. |
+| `serverChannels` | object mapping raw server-address strings to strings | Remembered preference keyed by the current server's raw address string. It is a managed client record, not server configuration. |
 
-- Within a supplied direct-matcher list, blank or grammatically malformed
-  entries are ignored, so those entries cannot match. A grammatically valid
-  entry whose block, tag or optional-mod content is unavailable also matches
-  false.
-- Persisted client lists are validated strictly when the configuration loads.
-  A `null` list, or a `null`, blank or grammatically malformed entry, makes the
-  persisted client configuration invalid; it is not accepted as a harmless
-  non-match. That case is owned by
-  [invalid-file recovery](#invalid-file-recovery-and-preservation-lock).
+### Direction-indicator safe area
 
-A blacklist match overrides a whitelist match. These lists are not a datapack
-or server-sync system.
-Target-type/live-state conditions still apply after a list match; see
-[outline attempt eligibility](../rendering/outline.md).
+| Key | JSON form | Local meaning |
+| --- | --- | --- |
+| `safeZoneLeft` | number, GUI-scaled inset | Left screen inset for off-screen direction-indicator placement. |
+| `safeZoneRight` | number, GUI-scaled inset | Right inset, measured from screen width. |
+| `safeZoneTop` | number, GUI-scaled inset | Top screen inset for off-screen direction-indicator placement. |
+| `safeZoneBottom` | number, GUI-scaled inset | Bottom inset, measured from screen height. |
 
-## Entity-block mode persistence
+The [settings screen](../UI/settings-screen.md) owns which file fields have
+interactive controls. `blockDisplayPolicy` is derived transient state, not a
+persisted key.
 
-Allowed values are `ALL`, `COMPATIBLE` and `VOXEL_SHAPE_ONLY`. The new
-configuration default is `ALL`, and a missing persisted field uses that default.
-An explicit persisted `null` or unknown persisted value recovers to `COMPATIBLE`;
-that recovery value is distinct from the new configuration default. Do not
-conflate default initialization with persisted-value recovery.
+## Block-list grammar and file decoding
 
-The setting has no server synchronization or reconnect cache; read it each
-render attempt/frame. Ordinary `block` rendering does not read this mode.
-[Geometry sources](../geometry/geometry_sources.md) owns the ordered execution
-and outcome semantics.
+Each block-display list accepts exactly these entry forms:
 
-## Initialization, editing and reload
+- exact block ID: `namespace:block`;
+- namespace wildcard: `namespace:*`;
+- global wildcard: `*:*`; and
+- block tag: `#namespace:tag`.
 
-Load config during client initialization. Opening or reopening a
-`SettingsScreen` in the same session does not reload an externally edited file.
-The config action saves and closes the settings screen before opening the
-client config file with the platform file opener. External list edits take
-effect after restart or an explicit reload.
+For example, `minecraft:stone`, `minecraft:*`, `*:*`, and
+`#minecraft:planks` are valid. Entries within one list have union semantics. A
+grammatically valid entry whose block, tag, or optional-mod content is absent
+does not match.
 
-## Invalid-file recovery and preservation lock
+A list match is only client-local display eligibility. Target-type and live-state
+conditions remain owned by [outline attempt eligibility](../rendering/outline.md).
 
-The cross-client/server schema marker, migration, recovery, serialization and
-save-protection contract is owned by
-[configuration versioning](versioning.md). In particular, client strict-list
-validation participates in that document's client invalid-file recovery path;
-it is not a harmless per-entry non-match. The recovery header, backup-before-
-reset ordering and preservation-lock limits are defined there. Coverage and the
-pending in-session/external-edit cases remain tracked in
-[verification](../testing/verification.md).
+Direct matcher input ignores blank or malformed entries. Persisted-file decoding
+is stricter: each persisted entry must decode to a non-null, nonblank,
+grammatically valid block selector. A null list or a null, blank, or malformed
+decoded entry makes the file invalid; only
+[configuration revisioning](../architecture/config/revisioning.md#invalid-file-recovery-differs-by-config-type)
+owns the resulting handler behavior. The lists are neither a datapack system nor
+a server-synchronized policy.
 
-### Future-version preservation
-
-Client and server future-version preservation is defined by
-[configuration versioning](versioning.md#future-version-protection). A client
-future-version file is not an invalid-file recovery input and does not define a
-downgrade or migration path.
+Canonical enum spellings are the uppercase values shown in the catalogue. No
+claim is made here about accepting alternative JSON casing.

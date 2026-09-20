@@ -5,7 +5,7 @@
 - A `Target` is the concrete entity, block or pure location resolved by the
   capture associated with the initial ping-key press. Capture may complete
   asynchronously or start through the narrow deferred-compatible path in
-  [capture](../picking/capture.md).
+  [long-press compatibility](../architecture/input/long-press-compatibility.md).
 - A `Target Type` is a code-defined matcher; a `Resolved Target` is the captured
   target plus the winning Target Type.
 - A `Ping Type` is a predefined semantic choice for chat, outline color, text

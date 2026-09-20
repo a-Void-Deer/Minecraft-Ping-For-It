@@ -71,7 +71,7 @@ For geometry source attempts, only `Exception`, `LinkageError` and
 recoverable emission follows the exact
 [source outcome contract](geometry/geometry_sources.md), not a blanket catch or
 duplicate fallback render. Config recovery must preserve original bytes under
-the [backup-failure lock](config/client.md).
+[client invalid-file recovery](architecture/config/revisioning.md#invalid-file-recovery-differs-by-config-type).
 
 ## Diagnostic detail and user feedback
 

@@ -5,17 +5,17 @@ boundaries. A capture limit only controls what a client can select; it is never
 authority to create a marker. Conversely, the server check does not extend a
 client's trace.
 
-## Fields, defaults, and bounds
+## Fields and ownership
 
-| Field / value | Default | Bounds or UI | Sampling and owner |
-| --- | ---: | --- | --- |
-| Client `pingDistance` | **2048 blocks** | Settings UI 0–2048 in steps of 16; 0 is displayed as hidden and 2048 as infinite. No `ClientConfigBounds` validation clamp is applied to arbitrary persisted values. | Read at ordinary capture start; local only, not synchronized to a server |
-| Client hidden `raycastDistance` | **1024 blocks** | No settings-screen editor or `ClientConfigBounds` validation clamp | Read at ordinary capture start; native vanilla/Create trace cap |
-| Effective native trace distance | — | `min(raycastDistance, pingDistance)` | One finite frozen segment for vanilla world/entity selection and Create candidate refinement |
-| Distant Horizons trace range | **4096 blocks** | Fixed integration constant, not derived from either client field | Started only after the native trace misses, using the press origin/direction |
-| Server `pingDistance` | **2048 blocks** | Validated/clamped to **1–2048** | Constructed into each server-side authoritative validator; not sent to clients as a capture setting |
+| Field / value | Sampling and owner |
+| --- | --- |
+| Client `pingDistance` | Read at ordinary capture start; local only, not synchronized to a server. Its persisted-file catalogue is [client configuration](../config/client.md). |
+| Client `raycastDistance` | Read at ordinary capture start; native vanilla/Create trace cap. Its persisted-file catalogue is [client configuration](../config/client.md). |
+| Effective native trace distance | `min(raycastDistance, pingDistance)`: one finite frozen segment for vanilla world/entity selection and Create candidate refinement. |
+| Distant Horizons trace range | Fixed integration range, independent of either client field; started only after the native trace misses using the press origin/direction. |
+| Server `pingDistance` | Constructed into each authoritative validator; separate from the client field and not sent to clients as a capture setting. |
 
-The client field and the server field share a name and default but are separate
+The client field and the server field share a name but are separate
 configuration objects. The client setter/UI does not synchronize a server
 setting, and server configuration is not a promise that a native client trace
 will reach that far. Server-settings editing and its permission/UI boundary are
@@ -39,16 +39,17 @@ lie on that segment, with only the integration's small projection epsilon. It
 therefore has no independent range expansion.
 
 After a native miss, Distant Horizons is a separate optional asynchronous route.
-It receives the frozen press origin and direction but calls its API with a fixed
-4096-block range. This route is **not clipped by client `pingDistance` or the
-current hidden `raycastDistance` value/effective native segment; `1024` is the
-default only**. A distant hit replaces the native location-miss
+It receives the frozen press origin and direction but calls its API with an
+integration-specific fixed range. This route is not clipped by client
+`pingDistance` or the current hidden `raycastDistance` value/effective native
+segment. A distant hit replaces the native location-miss
 snapshot; a no-hit, failure, unavailable integration, or scheduling failure
 uses the original native miss/location fallback. The eventual target still faces
 the independent server acceptance check below.
 
 The deferred and rapid-click compatibility captures described in
-[press-time capture](capture.md) retain a ray rather than a target. When their
+[long-press compatibility](../architecture/input/long-press-compatibility.md)
+retain a ray rather than a target. When their
 new baseline capture actually starts, it reads the current range fields and
 then follows this same pipeline. They do not freeze range at the raw deferred
 press edge.
@@ -82,8 +83,8 @@ ordinary lifecycle contract.
 | Vanilla blocks, fluids, entities | Frozen finite press segment | `min(client raycastDistance, client pingDistance)` | Native hit or location miss |
 | Create contraption local shapes | Same finite segment passed through the common entity-candidate request and transformed locally | Reuses the native effective segment; no Create interaction-picker range | Exact whole-entity hit, or owned miss/unavailable/failure with no coarse-AABB revival |
 | Sable external candidate | Native block hit plus that same segment's frozen origin/end | Reuses native effective segment; point must project onto the segment | External candidate only after provider checks; otherwise existing projected/location or vanilla fallback |
-| Distant Horizons | Frozen origin/direction after native miss | Fixed 4096 API trace, independent of both client fields | Distant block hit or original native location miss |
-| Server validator | Current server player eye and authoritative validation anchor | Server `pingDistance`, default 2048, clamp 1–2048 | Accept or `OUT_OF_RANGE`, independently of client capture; an external candidate's provider validation anchor is checked before later materialization |
+| Distant Horizons | Frozen origin/direction after native miss | Integration-specific fixed API trace, independent of both client fields | Distant block hit or original native location miss |
+| Server validator | Current server player eye and authoritative validation anchor | Server `pingDistance` | Accept or `OUT_OF_RANGE`, independently of client capture; an external candidate's provider validation anchor is checked before later materialization |
 
 ## Evidence and remaining verification
 
@@ -97,7 +98,7 @@ Existing focused tests include server-distance clamp boundaries
 (`ServerConfigBoundsTest`), native candidate/raycast seams
 (`RaycastCandidateFlowTest`), and absent-optional-integration safety
 (`OptionalDependencySafetyTest`). They do not establish a live client/server
-session proving every range combination, a live Distant Horizons 4096-block
+session proving every range combination, a live long-distance Distant Horizons
 target, installed Sable behavior, or in-game Create selection plus server-anchor
 rejection. Those remain manual/integration evidence gaps rather than implied
 completion.

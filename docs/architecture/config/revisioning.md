@@ -1,4 +1,4 @@
-# Configuration schema versioning and recovery
+# Configuration schema revisioning and recovery
 
 This topic owns the JSON schema marker, version comparison, migration and
 recovery behavior shared by `ClientConfig` and `ServerConfig`. It describes the
@@ -139,6 +139,8 @@ version, protection remains; if it has been replaced or removed, normal
 initialization, version handling, or the appropriate invalid-file path applies.
 There is no implicit downgrade path.
 
-The client settings entry point is [client settings and recovery](client.md).
-Server timing values and marker lifetime behavior are owned separately by
-[marker lifecycle](../authority/marker_lifecycle.md).
+The client configuration entry point is
+[client configuration](../../config/client.md). The settings-screen workflow is
+[settings screen](../../UI/settings-screen.md). Server timing values and marker
+lifetime behavior are owned separately by
+[marker lifecycle](../../authority/marker_lifecycle.md).

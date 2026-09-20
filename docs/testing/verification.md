@@ -114,10 +114,9 @@ boundaries. They do not constitute an in-game Create validation.
 
 Focused tests cover server range clamps, native candidate/raycast seams, and
 absent optional-integration safety. Source and focused seam evidence establish
-the native `min(raycastDistance, pingDistance)` limit (normally 1024 versus the
-2048 client default), Distant Horizons' independent 4096 trace, the server's
-default 2048 acceptance range, and Create/Sable reuse of the finite native
-segment. No automated end-to-end test exercises that entire client capture,
+the native `min(raycastDistance, pingDistance)` limit, Distant Horizons'
+independent trace, the server acceptance range, and Create/Sable reuse of the
+finite native segment. No automated end-to-end test exercises that entire client capture,
 optional-provider, packet, and authoritative server-acceptance pipeline.
 
 ### Presentation, chat, config and geometry outcomes
@@ -280,16 +279,13 @@ The following gaps remain open until direct evidence closes them:
   no local fallback;
 - real input-callback and render-frame behavior for rapid/deferred long-press
   compatibility;
-- conformance of a deferred fresh press to the create-only dispatch boundary:
-  the compatibility controller can currently launch it after a non-`CreatePing`
-  result such as `TargetGone`, and no regression test proves that such a press
-  is discarded;
-- limiter-refusal behavior at the real limiter/dispatcher/compatibility-controller
-  boundary for both rapid and deferred compatibility: the dispatcher unit seam
-  proves a courtesy-rejected create is dropped, untracked, and unsent, but the
-  controller's fake port has no dispatch outcome. Regression coverage remains
-  pending for a limiter refusal followed by a rapid capture and by a deferred
-  fresh press; action type alone must not stand in for successful dispatch;
+- compatibility create-only dispatch conformance: the controller currently
+  receives an action result rather than an explicit successful-dispatch outcome.
+  A courtesy-rejected `CreatePing` can therefore still look qualifying even
+  though the limiter/dispatcher did not track or hand it to the sender; the
+  deferred path can also launch after a non-`CreatePing` result such as
+  `TargetGone`. This action-versus-dispatch defect is not intended behavior;
+  the pending regression matrix below specifies the required checks;
 - live GUI/screen input callbacks and physical key-repeat behavior across
   Fabric, Forge, and NeoForge, beyond the input-state seams; and
 - the complete range pipeline across native, Distant Horizons, Create/Sable,
@@ -312,6 +308,16 @@ callers, and integration proof that non-render callers bypass render-path cache
 results. No automated evidence currently establishes CPU frame cost or
 allocation behavior for one, ten, or fifty entity marks in a dense world at high
 frame rates.
+
+### Pending long-press compatibility regression matrix
+
+| Scenario | Required regression assertion |
+| --- | --- |
+| Courtesy limiter rejects the first default `CreatePing`, then a rapid second press occurs | No rapid candidate or virtual capture begins; the dropped request is not queued, retried, or replayed. |
+| Courtesy limiter rejects the first default `CreatePing`, then a deferred fresh press is present | No deferred capture begins; the dropped request is not queued, retried, or replayed. |
+| A first result is `TargetGone` or another non-`CreatePing` while a deferred fresh press is present | The deferred press is discarded and no ordinary capture starts. |
+
+### Sable-specific gaps
 
 Sable-specific gaps remain for:
 
@@ -341,14 +347,14 @@ or because related automated tests exist.
 | --- | --- |
 | Block | Plain `block` versus `entity_block`; `ALL`/`COMPATIBLE`/`VOXEL_SHAPE_ONLY` modes and source fallback; whitelist native glow and fallback; a non-full native shape; same-type state change versus block-type replacement. |
 | Entity | Ordinary entity and dropped item; movement and same-dimension teleportation; death and disappearance; same-dimension world unload/rejoin and runtime-ID reuse in a game session. |
-| Wheel | Short and long press; every sector and border color; 5000 ms timeout; frozen target; location fallback. |
+| Wheel | Short and long press; every sector and border color; configured timeout; frozen target; location fallback. |
 | Selection policy and input | Live GUI/screen callbacks for selection gating; physical key-repeat behavior on Fabric, Forge, and NeoForge; selection toggles, entity blacklist/default `simulated:honey_glue` rule, and spectator exclusion in a game session. |
 | Movement, death and replacement | Target movement while the wheel is open; entity death or dimension change; block state change or replacement while open. |
 | Naming and chat | Custom-name formatting; localized base names; item naming; phrase-only text color. |
 | Cancellation | Cone and nearest-own-marker selection; inability to cancel another player's marker; stale/display-hidden candidate followed by server rejection with no local fallback. |
 | Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location. |
 | Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live server-settings open/correlation/permission/edit/update/persistence flow. |
-| Range | Native minimum, Distant Horizons 4096 route, Create/Sable finite-segment reuse, and server 2048 acceptance in one client/server pipeline. |
+| Range | Native minimum, Distant Horizons route, Create/Sable finite-segment reuse, and server acceptance in one client/server pipeline. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |
 | Optional content and rendering | Absent or partially present optional content; Create/Flywheel routes; occlusion and arbitrary camera angles; current shape, offset and seed. |
 | Render entity lookup | A real frame epoch shared by HUD marker updates and optional outlines; fresh non-render lookups after render misses; CPU-frame and allocation measurements for 1, 10, and 50 entity marks in a dense world at high FPS. |

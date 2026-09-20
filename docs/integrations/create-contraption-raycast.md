@@ -29,7 +29,8 @@ policy are sampled at the press edge. The same immutable policy controls world
 picking and the selected native shapes inside a contraption. This immediate
 capture boundary is part of [press-time capture](../picking/capture.md).
 
-The narrow deferred compatibility path is different. While a first capture is
+The [narrow deferred compatibility path](../architecture/input/long-press-compatibility.md)
+is different. While a first capture is
 pending, a second physical press freezes only its origin and direction; it does
 not yet select a target or freeze range and selection settings. When the actual
 deferred capture starts after the preceding real `CreatePing` dispatch
@@ -50,7 +51,7 @@ Only fluid state represented by captured contraption block states is available, 
 
 ## Selection pipeline
 
-1. For an immediate capture, capture one finite world-space ray and its selection policy at the press edge. A deferred compatibility capture uses the stored origin and direction and samples range and selection policy only when that capture actually starts.
+1. For an immediate capture, capture one finite world-space ray and its selection policy at the press edge. A deferred compatibility capture uses the stored origin and direction and samples range and selection policy only when that capture actually starts; its sequence is owned by [long-press compatibility](../architecture/input/long-press-compatibility.md).
 2. Keep the existing world clip and broad-phase entity query.
 3. Resolve an exact entity-type geometry owner before admitting a candidate into nearest-hit selection.
 4. For an owned Create candidate, transform the captured segment into contraption-local coordinates using Create's native transform at partial tick `1.0`.
