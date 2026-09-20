@@ -1,8 +1,9 @@
 # Configuration schema revisioning and recovery
 
 This topic owns the JSON schema marker, version comparison, migration and
-recovery behavior shared by `ClientConfig` and `ServerConfig`. It describes the
-behavior of the configuration handler, not a release-compatibility promise.
+recovery behavior shared by the client and server configuration files. It
+describes the behavior of the configuration handler, not a release-compatibility
+promise.
 
 ## Marker and serialization
 
@@ -39,10 +40,11 @@ character makes the string invalid. For example:
 |  | `0.3.0-pfi-beta.1` |
 
 The original spelling is retained. For comparison, the `pfi` namespace is
-removed and `major.minor.patch-qualifier` is compared with the repository's
-`MavenComparableVersion`; this is neither lexicographic comparison nor SemVer.
-For equal numeric cores, `beta2 < beta10`, `rc1 < final`, `final == release`,
-and `01.002.000-pfi-beta1 == 1.2.0-pfi-beta1`.
+removed and `major.minor.patch-qualifier` is compared using the repository's
+[Maven-compatible version comparison](../../../common/src/main/java/nx/pingwheel/common/config/MavenComparableVersion.java);
+this is neither lexicographic comparison nor SemVer. For equal numeric cores,
+`beta2 < beta10`, `rc1 < final`, `final == release`, and
+`01.002.000-pfi-beta1 == 1.2.0-pfi-beta1`.
 
 An invalid grammar follows the invalid-file recovery path, not future-version
 protection. Only a successfully parsed valid version that compares newer than
@@ -93,8 +95,8 @@ pending for a later save attempt; it is not converted into invalid-file recovery
 
 ## Invalid-file recovery differs by config type
 
-`ClientConfig` opts into recovery. For an invalid client source, the handler
-backs up the original bytes before it attempts to reset defaults. When that
+The client configuration opts into recovery. For an invalid client source, the
+handler backs up the original bytes before it attempts to reset defaults. When that
 backup and reset write succeed, the replacement begins with exactly these three
 one-line comments followed by the serialized defaults:
 
@@ -108,33 +110,34 @@ The reason is reduced to a safe one-line comment. If the backup cannot be made,
 the handler leaves defaults in memory and installs `INVALID_FILE` save
 protection without attempting the reset write. If the reset write fails after a
 successful backup, it also installs that protection. While it is installed,
-`save` and `saveSafely` decline to write. `resetToDefaults` is not skipped
-wholesale: it replaces the in-memory config with a newly constructed default,
-then its forced persistence attempt is declined by the protection, leaving the
-protected disk source untouched. A later successful `load` path can clear the
-protection. This client flow covers parsing and strict persisted block-list
-validation alike.
+ordinary saves and guarded saves decline to write. A reset to defaults is not
+skipped wholesale: it replaces the in-memory config with a newly constructed
+default, then its forced persistence attempt is declined by the protection,
+leaving the protected disk source untouched. A later successful load can clear
+the protection. On a later client load, the recognized generated recovery
+header is removed before the replacement file is parsed. This client flow
+covers parsing and strict persisted block-list validation alike.
 
-`ServerConfig` does not use that backup-and-lock flow for invalid input. It
-creates defaults and attempts a normal save, with no broken-file backup and no
-`INVALID_FILE` protection. A server save failure is reported by the normal save
-path and leaves defaults in memory; it does not acquire the client's preservation
-lock.
+The server configuration does not use that backup-and-lock flow for invalid
+input. It creates defaults and attempts a normal save, with no broken-file
+backup and no `INVALID_FILE` protection. A server save failure is reported by
+the normal save path and leaves defaults in memory; it does not acquire the
+client's preservation lock.
 
 ## Future-version protection
 
 For either config type, a successfully parsed marker newer than the running
 version is not a malformed file. The handler keeps the file on disk, uses
-defaults in memory, and installs `FUTURE_VERSION` protection. `save` and
-`saveSafely` decline to write while it is installed. A normal
-`resetToDefaults` call still constructs fresh defaults in memory before its
-forced save is declined; future-version protection therefore prevents the disk
-write, rather than early-returning the entire reset operation. If a reset first
+defaults in memory, and installs `FUTURE_VERSION` protection. Ordinary saves and
+guarded saves decline to write while it is installed. A normal reset to defaults
+still constructs fresh defaults in memory before its forced save is declined;
+future-version protection therefore prevents the disk write, rather than
+early-returning the entire reset operation. If a reset first
 discovers that a pending migration's source changed and that reload installs
 protection, it returns after restoring defaults and without attempting that
 forced save. Neither route supplies a downgrade write.
 
-A later `load` re-evaluates the file currently on disk. If it remains a future
+A later load re-evaluates the file currently on disk. If it remains a future
 version, protection remains; if it has been replaced or removed, normal
 initialization, version handling, or the appropriate invalid-file path applies.
 There is no implicit downgrade path.

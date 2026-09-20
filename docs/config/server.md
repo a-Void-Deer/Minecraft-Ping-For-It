@@ -18,12 +18,9 @@ independently configure server behavior. The client file has a separate
 match.
 
 [`ServerConfig`](../../common/src/main/java/nx/pingwheel/common/config/ServerConfig.java)
-is the typed persisted schema and the `ServerConfig.HANDLER` implementation
-entry that binds the class and suffix.
-[`ServerConfigBounds`](../../common/src/main/java/nx/pingwheel/common/config/ServerConfigBounds.java)
-holds the boundary helpers that validation delegates to. The exact numeric
-bounds and fallbacks live in that implementation metadata and are deliberately
-not mirrored here.
+is the typed persisted schema; its live validation and the numeric bounds and
+fallbacks it applies are defined in that implementation and are deliberately not
+mirrored here.
 
 The five fields other than `pingDistance` can also be changed over the
 client/server connection through

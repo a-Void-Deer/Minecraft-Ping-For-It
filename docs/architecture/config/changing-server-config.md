@@ -50,11 +50,11 @@ authority is owned by the
 enforcement is owned by
 [server enforcement](../security.md#server-configuration-update-enforcement).
 
-An accepted snapshot initializes the client's authoritative values and its
-draft. Authoritative values, draft, and pending correlation are
-connection-scoped: a disconnect clears all three, and permission loss
-invalidates editability. Collapse, discard, and screen cleanup behavior are
-owned by [configuration UI](../../UI/settings-screen.md).
+An accepted response supplies the authoritative values used by the client's
+server-settings state. Draft initialization and the connection, screen, and
+permission lifecycle are owned by
+[configuration UI](../../UI/settings-screen.md); the correlation and
+stale-response rules above continue to govern when a response is accepted.
 
 ## Merge semantics
 

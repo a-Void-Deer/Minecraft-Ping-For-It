@@ -89,18 +89,10 @@ negative numeric draft remains dirty but makes the update plan unavailable. A
 draft that returns every edited value to its authoritative value has no dirty
 bits and produces no update plan. Thus no-change and invalid-draft states do not
 dispatch a settings update merely because the section is open. The field-masked
-merge and no-acknowledgement behavior are owned by
-[changing server configuration](../architecture/config/changing-server-config.md);
-for the user, a clean draft is not proof of server acceptance or durable
-persistence.
+merge and the no-update-result consequence are owned by
+[changing server configuration](../architecture/config/changing-server-config.md#no-update-result).
 
 ## Evidence boundary
 
-`ServerSettingsModelTest` covers request correlation, stale close/reopen and
-disconnect responses, denial state, draft invalidity, dirty-bit restoration,
-and update-plan construction. `ServerConfigUpdateServiceTest` covers denied
-merge non-mutation and selected-field preservation for rate-limit and
-synchronization-duration updates. This names focused unit seams, not a claim
-that a client/server session or this documentation change ran them. Broader
-coverage inventory and pending integration scenarios are maintained in
-[testing and verification](../testing/verification.md).
+The evidence for the server-settings snapshot and update seams is maintained in
+[testing and verification](../testing/verification.md#server-settings-snapshots-and-updates).

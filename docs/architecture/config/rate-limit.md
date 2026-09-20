@@ -47,8 +47,6 @@ update. The client token bucket is a courtesy mirror, not a second authority.
 - On the client, the courtesy gate is disabled when either synchronized value
   is zero, so the local gate permits the committed create rather than rejecting
   it.
-- Negative or corrupt synchronized policy values are ignored client-side,
-  retaining the current policy.
 
 ## Server enforcement and client courtesy
 
@@ -60,10 +58,6 @@ classification, or Ping Type stages; its admission ordering and rejection
 reporting are owned by [target validation](../authority/target_validation.md).
 A permitted or exceeded check is not rolled back by a later rejection.
 
-`MarkerRemove` and channel-update behavior, including policy updates, remain
-unchanged. The courtesy gate is never applied to them; it exists only
-immediately before a `MarkerCreate` dispatch.
-
 `syncDuration` is not a rate-policy field and does not feed the courtesy token
 bucket. Its persisted catalogue entry is
 [server configuration](../../config/server.md) and its lifetime behavior is
@@ -72,8 +66,10 @@ owned by [marker lifecycle](../authority/marker_lifecycle.md).
 ## Create-only dispatch boundary
 
 Immediately before sending `MarkerCreate`, the client mirrors the synchronized
-policy with a token bucket as a courtesy gate only. If that gate rejects a
-committed create:
+policy with a token bucket as a courtesy gate only. The gate exists only for
+that dispatch: `MarkerRemove` and channel-update behavior, including
+server-policy updates, remain unchanged and are never gated. If the gate
+rejects a committed create:
 
 - drop it;
 - do not queue it for later;
