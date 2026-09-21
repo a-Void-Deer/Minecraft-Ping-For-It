@@ -37,19 +37,13 @@ expected block registry ID, opaque provider locator and block-entity
 classification metadata.
 
 Materialization generates or reuses a provider tracking UUID and produces a
-committed target. Its stable identity is exactly:
-
-```text
-dimension + providerId + stableTargetId + expectedBlockRegistryId
-```
-
-The provider locator, current anchor and block-entity classification are not
-identity. Locator or anchor refresh therefore does not manufacture a new target
-or winner. `providerId`, non-empty `stableTargetId` and
-`expectedBlockRegistryId` are each limited to 256 characters. The opaque
-`providerLocator` is limited to 32767 characters. `dimensionId` must be
-non-blank, but has no 256-character external-identifier limit in the common
-model.
+committed target. The committed stable identity and its common
+provider-independent domain constraints, including the identity quartet, the
+non-identity status of the locator/anchor/classification fields, and the field
+bounds, are owned by the
+[target model](../architecture/identity/target_model.md#external-block-identity).
+The provider-owned candidate fields listed above remain part of this
+integration.
 
 ## Server validation and materialization
 

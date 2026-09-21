@@ -24,9 +24,9 @@ The following declaration order, ordered Ping Type sets and defaults are fixed:
 Definitions and lookup may use maps, but resolution and presentation must use
 explicit ordered lists, never unordered map iteration, accidental registration
 order or loader-specific ordering. Adding a code definition must not require
-ad-hoc changes throughout input, networking, rendering or chat. Target/Ping
-Types have no config/datapack/user-definition system or public plugin/scripting
-layer in this iteration.
+ad-hoc changes throughout input, networking, rendering or chat. The absence of
+a config/datapack/user-definition system or public plugin/scripting layer is
+owned by [compatibility](../../compatibility.md).
 
 ## Block classification
 
@@ -38,9 +38,8 @@ renderer. Unknown or absent registry/classification data fails soft to generic
 `block`. The virtual `minecraft:block_display` is an entity target and can
 never be an `entity_block`.
 
-Absent optional registrations are ignored; partially present content continues
-to match, while a group with no valid concrete content is inactive and
-non-matching. See [compatibility](../../compatibility.md) and
+Absent optional registration handling is owned by
+[compatibility](../../compatibility.md). See
 [presentation subjects](../rendering/presentation_subjects.md) for the distinct
 render-target classification of owner/master subjects.
 

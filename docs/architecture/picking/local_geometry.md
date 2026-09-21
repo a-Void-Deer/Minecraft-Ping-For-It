@@ -35,9 +35,10 @@ owning cells. These are native shape decompositions, not unit-cube approximation
 The [Create supplement](../../integrations/create-contraption-raycast.md) specifies
 the kernel, collision context, policy and cache limitations.
 
-This forAllBoxes route is for picking only. The
-[native outline route](../geometry/voxel_shape.md) must use live
-`VoxelShape#forAllEdges`, LINES and its required render state.
+This forAllBoxes route is for picking only; the presentation
+`VoxelShape#forAllEdges` outline route and its render state are owned by the
+[native outline route](../geometry/voxel_shape.md) and its
+[GPU contract](../rendering/outline.md).
 
 ## Frozen metadata and whole-entity identity
 

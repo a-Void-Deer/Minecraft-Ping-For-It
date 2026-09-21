@@ -75,9 +75,8 @@ transitive nor inferred from multipart relation alone.
 
 For a supported Create door, the lower subject's BER may cover the upper subject
 only after that exact BER source reports `RENDERED`. Lower baked-model success,
-optional-source success, source invocation, ownership, `EMPTY`, `FAILED`, or
-unavailable geometry does not cover the upper subject. Until covered, the upper
-subject runs all of its permitted sources and remains eligible for fallback.
+optional-source success, source invocation, ownership, or any other source
+result does not cover the upper subject.
 
 Within every uncovered subject, sources remain non-short-circuiting. Successful
 coverage or geometry suppresses only the declared duplicate work for the

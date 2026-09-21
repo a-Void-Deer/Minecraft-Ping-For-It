@@ -77,11 +77,10 @@ therefore distinct outcomes.
 
 ## Entity-local capture metadata
 
-Entity-local geometry detail is capture metadata only. Retain it in the frozen
-context only if it belongs to the matching resolved entity identity. It does
-not rewrite the whole-entity Target, marker identity or packet shape. The
-server validates the whole entity rather than replaying a client-local ray or
-validating a local constituent. See [local geometry](../picking/local_geometry.md).
+Entity-local geometry detail is capture metadata only; retain it in the frozen
+context only if it belongs to the matching resolved entity identity, and it
+does not rewrite the whole-entity Target, marker identity or packet shape. See
+[local geometry](../picking/local_geometry.md).
 
 ## External-block identity
 
@@ -102,11 +101,10 @@ committed target:
   256-character external-identifier limit. Provider-specific parsing is
   isolated in the provider.
 
-These are domain constraints. At the packet boundary, each encoded field must
-also fit its codec limit. In particular, `Target` and `TargetKey` encode
-`dimensionId` with `writeUtf(..., 256)`: this is a 256-character wire limit,
-not a byte limit. That transport limit does not make a dimension ID an external
-identifier or change its non-blank domain constraint.
+These are domain constraints. Encoded identity constraints at the packet
+boundary, including the dimension wire limit and its distinction from the
+non-blank domain constraint, are owned by the
+[network protocol](../network/protocol.md#encoded-identity-constraints).
 
 This is an existing external-target exception, not a Create constituent-block
 implementation or cross-dimension tracking feature.
@@ -116,13 +114,16 @@ implementation or cross-dimension tracking feature.
 Marker data must carry or derive stable Marker ID, owner, concrete target
 identity and kind, dimension, Target Type ID, Ping Type ID, authoritative name
 data and creation/arrival/lifetime state. Marker IDs support deterministic
-larger-ID comparison. `targetTypeId`, including `entity_block`, survives marker
-codec round trips; entity-local hit detail does not change the packet shape.
+larger-ID comparison. Entity-local hit detail does not change the packet shape.
+Encoded identity constraints, including Target Type ID survival across codec
+round trips, are owned by the
+[network protocol](../network/protocol.md#encoded-identity-constraints).
 
-An external locator/anchor refresh rebuilds the stored marker with the same ID,
-owner, Target Type, Ping Type, arrival, expiry and current audience. It is an
-update of the committed marker, not another receipt or a new winner candidate.
-This continuity within the fork does not imply original-mod protocol support.
+External locator/anchor refresh continuity, including the preserved marker
+fields, is owned by
+[marker lifecycle](../authority/marker_lifecycle.md) and the
+[Sable integration](../../integrations/sable.md#refresh-lifecycle). This
+continuity within the fork does not imply original-mod protocol support.
 
 Packet roles are specified in [network protocol](../network/protocol.md); the
 server's selection of visible same-target state is specified in

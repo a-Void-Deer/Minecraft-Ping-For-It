@@ -78,12 +78,11 @@ limited by recently requested targets rather than the full scanned population.
 
 ## Live block state and native-glow attempt eligibility
 
-Authoritative marker creation rejects a block that has already been replaced by
-a different block type. After acceptance, presentation uses the current live
-BlockState. A same-type state/property change preserves the target and updates
-the live model or shape. Replacing an ordinary committed block does not by
-itself remove the marker, although the current renderer will not claim a stale
-presentation subject as a successful native route.
+Committed block lifetime, block replacement, and same-type state/property
+behavior are owned by [the target model](../identity/target_model.md). After
+acceptance, presentation uses the current live BlockState, and the current
+renderer will not claim a stale presentation subject as a successful native
+route.
 
 The client [whitelist and blacklist](../../config/client.md) gate native-glow
 attempts. A blacklist match overrides a whitelist match. Additional route
@@ -91,12 +90,9 @@ conditions are:
 
 - Ordinary `block`: no BlockEntity and live render shape `MODEL`; when
   eligible, attempt vanilla model glow through the ordinary-block route.
-- `entity_block`: under the active entity-block mode, independently attempt the
-  BER source when a relevant live BlockEntity and renderer exist, and attempt
-  the ordinary world-aware baked-model source when the live state has
-  `RenderShape.MODEL` and the loader adapter is available. The baked-model path
-  is not gated on a live BlockEntity. Optional sources are admitted only by
-  that mode and by their own provider gates.
+- `entity_block`: under the active entity-block mode, the permitted BER and
+  loader-aware baked-model preconditions, and optional-source admission, are
+  owned by the [source outcome contract](../geometry/geometry_sources.md).
 
 Here `W` is the target-type whitelist result and `B` is a blacklist match. The
 table describes **attempt eligibility**, never guaranteed geometry emission:
@@ -124,18 +120,13 @@ provides a deterministic outline when normal geometry is ineligible or fails.
 The decision and rejected alternatives are recorded in
 [D0002](../../decisions/D0002-voxel-shape-fallback.md).
 
-Only a `RENDERED` result under the common
-[source outcome contract](../geometry/geometry_sources.md) suppresses duplicate
-VoxelShape fallback for that subject and frame. `EMPTY`, `FAILED`, unavailable
-sources, and mere route eligibility preserve fallback. `VOXEL_SHAPE_ONLY`
-selects the shape route directly. A marker's lifecycle and HUD data can remain
+Source outcomes, fallback suppression, and direct shape-route selection are
+owned by the [source outcome contract](../geometry/geometry_sources.md). A
+marker's lifecycle and HUD data can remain
 active even when the current presentation has no subject; that is distinct
-from a subject whose sources are empty. In particular, when a block has been
-replaced by a different registry ID, presentation resolution returns no
-replacement subject, so neither the ordinary native block outline nor the
-VoxelShape fallback draws a replacement block. A same-registry-ID property/state
-change continues to use the current live state and its resolved presentation
-subject.
+from a subject whose sources are empty. The replacement and same-registry
+live-state presentation consequences are owned by
+[the target model](../identity/target_model.md).
 
 ## VoxelShape GPU render invariant
 

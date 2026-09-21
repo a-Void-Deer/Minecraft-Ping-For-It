@@ -17,13 +17,11 @@ produce geometry.
 
 The layers remain separate. The loader adapter resolves a model and its render
 inputs, the renderer/dispatcher supplies the destination and live world
-context, and the model or renderer may or may not commit geometry. In
-particular, the NeoForge adapter replaces null model data with
-`ModelData.EMPTY`, then still enumerates render types and calls the batched
-renderer. Missing model data therefore does not itself determine the final
-outcome; `EMPTY` is determined by whether the permitted source commits any
-geometry. A missing live object or renderer can still make the BER source
-empty, and an unavailable adapter can make the baked-model source unavailable.
+context, and the model or renderer may or may not commit geometry. Missing
+model data does not itself determine the final outcome; the result is
+determined by whether the permitted source commits any geometry. A missing
+live object or renderer can still make the BER source empty, and an
+unavailable adapter can make the baked-model source unavailable.
 
 For documentation purposes, a subject is renderable in the current frame only
 when an allowed source reports `RENDERED`: geometry was actually emitted and
@@ -110,10 +108,9 @@ priority/declaration order of [Target Types](../identity/catalogs.md).
 
 BER, loader-aware baked-model, optional geometry, and fallback routes consume
 the same resolved [presentation subjects](../rendering/presentation_subjects.md),
-including each subject's render-target type. Source-conditioned coverage may
-suppress only its declared duplicate subject and only after the required source
-reports `RENDERED`. `EMPTY`, `FAILED`, unavailable sources, and unrelated
-rendered sources cannot claim that coverage.
+including each subject's render-target type. Coverage semantics, including
+source-conditioned coverage suppression, are owned by that presentation
+contract; this document retains only the source interface to it.
 
 [Create integration](../../integrations/create.md) supplies optional sources and
 presentation resolvers while remaining subject to this common contract.

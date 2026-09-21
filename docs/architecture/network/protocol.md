@@ -42,6 +42,21 @@ Rejection presentation and the eligible-message rule are owned by
 [ping feedback](../../UI/ping-feedback.md). Legacy valid location packets have no
 marker presentation path to which that rule could apply.
 
+## Encoded identity constraints
+
+This section records only the encoded identity constraints that the wire
+boundary imposes on an otherwise domain-owned identity; it remains part of the
+logical protocol description and is not a complete wire-format catalogue.
+
+- `Target` and `TargetKey` encode `dimensionId` with a 256-character `writeUtf`
+  limit. This is a wire character limit, not a domain external-identifier limit
+  or a byte limit; the domain requires only that `dimensionId` is non-blank.
+- `targetTypeId`, including `entity_block`, survives marker codec round trips.
+
+The identity variants, provider-independent external identity constraints, and
+the non-blank dimension requirement are owned by the
+[target model](../identity/target_model.md#external-block-identity).
+
 ## Evidence
 
 Existing coverage inventory and remaining integration gaps are owned by
