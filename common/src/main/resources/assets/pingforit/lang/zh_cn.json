@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "打开设置",
 	"subtitles.pingforit.ping": "坐标标记提醒",
 
-	"settings.pingforit.title": "Ping For It 设置",
-	"settings.pingforit.client_settings": "客户端设置",
-	"settings.pingforit.server_settings": "服务器设置",
+	"settings.pingforit.title": "Ping For It 配置",
+	"settings.pingforit.client_settings": "客户端",
+	"settings.pingforit.server_settings": "服务端",
 	"settings.pingforit.server_settings.loading": "（正在加载…）",
 	"settings.pingforit.server_settings.locked": "（已锁定）",
 	"settings.pingforit.server_settings.validation": "请修正非负整数，或收起并放弃服务器更改。",
@@ -128,7 +128,6 @@
   ,"notice.pingforit.on": "开"
   ,"notice.pingforit.off": "关"
   ,"settings.pingforit.configuration_notice_size": "配置提示大小: %s"
-  ,"settings.pingforit.category_title": "%s — %s"
   ,"settings.pingforit.category.display": "标记显示"
   ,"settings.pingforit.category.display.button": "标记显示..."
   ,"settings.pingforit.category.selection": "目标选择"

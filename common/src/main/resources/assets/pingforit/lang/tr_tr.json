@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "Ayarları Aç",
 	"subtitles.pingforit.ping": "Konum Pingi Uyarısı",
 
-	"settings.pingforit.title": "Ping For It Ayarları",
-	"settings.pingforit.client_settings": "İstemci Ayarları",
-	"settings.pingforit.server_settings": "Sunucu Ayarları",
+	"settings.pingforit.title": "Ping For It Yapılandırması",
+	"settings.pingforit.client_settings": "İstemci",
+	"settings.pingforit.server_settings": "Sunucu",
 	"settings.pingforit.server_settings.loading": "(Yükleniyor…)",
 	"settings.pingforit.server_settings.locked": "(Kilitli)",
 	"settings.pingforit.server_settings.validation": "Negatif olmayan tam sayıları düzeltin veya sunucu değişikliklerini atmak için bölümü daraltın.",
@@ -118,7 +118,6 @@
   ,"notice.pingforit.on": "Açık"
   ,"notice.pingforit.off": "Kapalı"
   ,"settings.pingforit.configuration_notice_size": "Yapılandırma bildirimi boyutu: %s"
-  ,"settings.pingforit.category_title": "%s — %s"
   ,"settings.pingforit.category.display": "İşaretçi Görünümü"
   ,"settings.pingforit.category.display.button": "İşaretçi Görünümü..."
   ,"settings.pingforit.category.selection": "Hedef Seçimi"

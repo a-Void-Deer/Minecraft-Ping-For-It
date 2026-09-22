@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "Open Settings",
 	"subtitles.pingforit.ping": "Location Ping Alert",
 
-	"settings.pingforit.title": "Ping For It Settings",
-	"settings.pingforit.client_settings": "Client Settings",
-	"settings.pingforit.server_settings": "Server Settings",
+	"settings.pingforit.title": "Ping For It Configuration",
+	"settings.pingforit.client_settings": "Client",
+	"settings.pingforit.server_settings": "Server",
 	"settings.pingforit.server_settings.loading": "(Loading…)",
 	"settings.pingforit.server_settings.locked": "(Locked)",
 	"settings.pingforit.server_settings.validation": "Fix the nonnegative whole numbers, or collapse and discard the server changes.",
@@ -133,7 +133,6 @@
   ,"notice.pingforit.on": "On"
   ,"notice.pingforit.off": "Off"
   ,"settings.pingforit.configuration_notice_size": "Configuration notice size: %s"
-  ,"settings.pingforit.category_title": "%s — %s"
   ,"settings.pingforit.category.display": "Marker Display"
   ,"settings.pingforit.category.display.button": "Marker Display..."
   ,"settings.pingforit.category.selection": "Target Selection"

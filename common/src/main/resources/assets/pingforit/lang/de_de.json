@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "Einstellungen öffnen",
 	"subtitles.pingforit.ping": "Ping-Markierung",
 
-	"settings.pingforit.title": "Ping For It Einstellungen",
-	"settings.pingforit.client_settings": "Client-Einstellungen",
-	"settings.pingforit.server_settings": "Server-Einstellungen",
+	"settings.pingforit.title": "Ping For It Konfiguration",
+	"settings.pingforit.client_settings": "Client",
+	"settings.pingforit.server_settings": "Server",
 	"settings.pingforit.server_settings.loading": "(Wird geladen …)",
 	"settings.pingforit.server_settings.locked": "(Gesperrt)",
 	"settings.pingforit.server_settings.validation": "Gib nichtnegative ganze Zahlen ein oder klappe den Bereich ein, um die Serveränderungen zu verwerfen.",
@@ -126,7 +126,6 @@
   ,"notice.pingforit.on": "An"
   ,"notice.pingforit.off": "Aus"
   ,"settings.pingforit.configuration_notice_size": "Größe der Konfigurationsmeldung: %s"
-  ,"settings.pingforit.category_title": "%s — %s"
   ,"settings.pingforit.category.display": "Marker-Anzeige"
   ,"settings.pingforit.category.display.button": "Marker-Anzeige..."
   ,"settings.pingforit.category.selection": "Zielauswahl"

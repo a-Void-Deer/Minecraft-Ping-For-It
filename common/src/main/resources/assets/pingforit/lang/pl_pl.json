@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "Otwórz ustawienia",
 	"subtitles.pingforit.ping": "Alert lokalizacji pingu",
 
-	"settings.pingforit.title": "Ustawienia Ping For It",
-	"settings.pingforit.client_settings": "Ustawienia klienta",
-	"settings.pingforit.server_settings": "Ustawienia serwera",
+	"settings.pingforit.title": "Konfiguracja Ping For It",
+	"settings.pingforit.client_settings": "Klient",
+	"settings.pingforit.server_settings": "Serwer",
 	"settings.pingforit.server_settings.loading": "(Wczytywanie…)",
 	"settings.pingforit.server_settings.locked": "(Zablokowane)",
 	"settings.pingforit.server_settings.validation": "Popraw nieujemne liczby całkowite albo zwiń sekcję, aby odrzucić zmiany serwera.",
@@ -118,7 +118,6 @@
   ,"notice.pingforit.on": "Włączone"
   ,"notice.pingforit.off": "Wyłączone"
   ,"settings.pingforit.configuration_notice_size": "Rozmiar powiadomienia konfiguracji: %s"
-  ,"settings.pingforit.category_title": "%s — %s"
   ,"settings.pingforit.category.display": "Wyświetlanie znaczników"
   ,"settings.pingforit.category.display.button": "Wyświetlanie znaczników..."
   ,"settings.pingforit.category.selection": "Wybór celu"

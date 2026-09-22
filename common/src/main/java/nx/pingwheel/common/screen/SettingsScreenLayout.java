@@ -22,8 +22,21 @@ public record SettingsScreenLayout(
 	public static final int SMALL_WIDGET_WIDTH = 150;
 	public static final int LARGE_WIDGET_WIDTH = 310;
 	public static final int ROW_HEIGHT = 20;
+	public static final int TITLE_BOTTOM_MARGIN = 4;
 
 	private static final int RESET_TOP_MARGIN = 2;
+
+	/**
+	 * Reserves enough fixed-header height for the measured title block, keeping
+	 * the established single-line header minimums on root and leaf pages.
+	 */
+	public static int headerHeightFor(boolean leafPage, int titleTop, int titleBlockHeight) {
+		final int baseHeight = leafPage ? LEAF_HEADER_HEIGHT : ROOT_HEADER_HEIGHT;
+		final int titleBottom = Math.max(0, titleTop)
+			+ Math.max(0, titleBlockHeight)
+			+ TITLE_BOTTOM_MARGIN;
+		return Math.max(baseHeight, titleBottom);
+	}
 
 	/**
 	 * Keeps the requested footer inside the area below the screen header.  The

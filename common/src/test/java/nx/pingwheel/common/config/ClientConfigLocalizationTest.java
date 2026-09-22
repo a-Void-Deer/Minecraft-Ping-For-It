@@ -53,7 +53,7 @@ class ClientConfigLocalizationTest {
 		"settings.pingforit.sync_duration",
 		"settings.pingforit.sync_duration.tooltip");
 	private static final List<String> SETTINGS_NAVIGATION_KEYS = List.of(
-		"settings.pingforit.category_title",
+		"settings.pingforit.title",
 		"settings.pingforit.group.marker_display",
 		"settings.pingforit.group.input_timing",
 		"settings.pingforit.group.channel",
@@ -192,10 +192,44 @@ class ClientConfigLocalizationTest {
 				assertTrue(button.endsWith("..."),
 					() -> "category entrance must advertise navigation: " + locale + ":" + category);
 			}
-			assertEquals(2, countOccurrences(
-				nonBlankTranslation(json, locale, "settings.pingforit.category_title"), "%s"),
-				() -> "category title must format scope and category: " + locale);
 		}
+	}
+
+	@Test
+	void titleSemanticSegmentsAreLocalizedForEveryBundledLocale() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			String base = nonBlankTranslation(json, locale, "settings.pingforit.title");
+			String client = nonBlankTranslation(json, locale, "settings.pingforit.client_settings");
+			String server = nonBlankTranslation(json, locale, "settings.pingforit.server_settings");
+
+			assertTrue(base.contains("Ping For It"),
+				() -> "the base title must keep the mod brand: " + locale);
+			assertFalse(base.equals(client),
+				() -> "base and client scope must stay distinct: " + locale);
+			assertFalse(base.equals(server),
+				() -> "base and server scope must stay distinct: " + locale);
+			assertFalse(client.equals(server),
+				() -> "client and server scopes must stay distinct: " + locale);
+			assertFalse(base.contains("%s"),
+				() -> "the base title is a literal segment: " + locale);
+			assertFalse(client.contains("%s"),
+				() -> "the client scope is a literal segment: " + locale);
+			assertFalse(server.contains("%s"),
+				() -> "the server scope is a literal segment: " + locale);
+			assertFalse(json.has("settings.pingforit.category_title"),
+				() -> "the unused two-argument category title format must be removed: " + locale);
+		}
+
+		assertEquals("Ping For It Configuration", readTranslation("en_us", "settings.pingforit.title"));
+		assertEquals("Client", readTranslation("en_us", "settings.pingforit.client_settings"));
+		assertEquals("Server", readTranslation("en_us", "settings.pingforit.server_settings"));
+		assertEquals("Ping For It 配置", readTranslation("zh_cn", "settings.pingforit.title"));
+		assertEquals("客户端", readTranslation("zh_cn", "settings.pingforit.client_settings"));
+		assertEquals("服务端", readTranslation("zh_cn", "settings.pingforit.server_settings"));
+		assertEquals("Ping For It 設定", readTranslation("zh_tw", "settings.pingforit.title"));
+		assertEquals("用戶端", readTranslation("zh_tw", "settings.pingforit.client_settings"));
+		assertEquals("伺服器", readTranslation("zh_tw", "settings.pingforit.server_settings"));
 	}
 
 	@Test

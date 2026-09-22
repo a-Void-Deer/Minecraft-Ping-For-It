@@ -72,7 +72,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	private EditBox serverMsToRegenerateField;
 	private EditBox serverRateLimitField;
 	private EditBox serverSyncDurationField;
-	private StringWidget pageTitle;
+	private SettingsTitleWidget pageTitle;
 	private StringWidget serverStatusWidget;
 	private AbstractWidget pendingHalfWidth;
 	private boolean serverRequestDeferred;
@@ -127,13 +127,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addRenderableWidget(this.scopeTabBar);
 		this.tabBarRegistered = true;
 
-		this.pageTitle = new StringWidget(
-			0,
-			0,
-			this.width,
-			SettingsScreenLayout.ROW_HEIGHT,
-			this.currentPageTitle(),
-			this.font).alignCenter();
+		this.pageTitle = new SettingsTitleWidget(this.font);
+		this.pageTitle.setMessage(this.currentPageTitle());
 		this.addRenderableOnly(this.pageTitle);
 
 		this.settingsList = new SettingsOptionsList(this.minecraft, this.width, this);
@@ -244,17 +239,9 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public void repositionElements() {
-		if (this.settingsList == null) {
+		if (this.settingsList == null || this.pageTitle == null) {
 			return;
 		}
-
-		this.layout.setHeaderHeight(navigation.isLeaf()
-			? SettingsScreenLayout.LEAF_HEADER_HEIGHT
-			: SettingsScreenLayout.ROOT_HEADER_HEIGHT);
-		this.layout.setFooterHeight(SettingsScreenLayout.footerHeightFor(
-			this.height,
-			this.layout.getHeaderHeight(),
-			navigation.isLeaf()));
 
 		if (this.scopeTabBar != null) {
 			this.scopeTabBar.setWidth(this.width);
@@ -264,7 +251,19 @@ public class SettingsScreen extends OptionsSubScreen {
 		final int titleY = navigation.isOverview()
 			? (this.scopeTabBar == null ? 4 : this.scopeTabBar.getRectangle().bottom() + 3)
 			: 6;
-		this.pageTitle.setRectangle(0, titleY, this.width, SettingsScreenLayout.ROW_HEIGHT);
+		final int titleHeight = this.pageTitle.layout(
+			this.width,
+			titleY,
+			this.font.lineHeight,
+			this.font::width);
+		this.layout.setHeaderHeight(SettingsScreenLayout.headerHeightFor(
+			navigation.isLeaf(),
+			titleY,
+			titleHeight));
+		this.layout.setFooterHeight(SettingsScreenLayout.footerHeightFor(
+			this.height,
+			this.layout.getHeaderHeight(),
+			navigation.isLeaf()));
 
 		this.settingsList.updateSizeAndPosition(
 			this.width,
@@ -681,12 +680,18 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private MutableComponent currentPageTitle() {
+		final MutableComponent base = LanguageUtils.settings("title").get();
 		if (navigation.isOverview()) {
-			return LanguageUtils.settings(navigation.scope() == Scope.CLIENT ? "client_settings" : "server_settings").get();
+			return SettingsTitleWidget.composeTitle(base, null, null);
 		}
-		return LanguageUtils.settings("category_title").get(
-			LanguageUtils.settings(navigation.scope() == Scope.CLIENT ? "client_settings" : "server_settings").get(),
+		return SettingsTitleWidget.composeTitle(
+			base,
+			scopeTitle(navigation.scope()),
 			LanguageUtils.settings("category").path(navigation.current().category().orElseThrow().id()).get());
+	}
+
+	private static MutableComponent scopeTitle(Scope scope) {
+		return LanguageUtils.settings(scope == Scope.CLIENT ? "client_settings" : "server_settings").get();
 	}
 
 	private Component primaryButtonText() {
@@ -1285,16 +1290,16 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 	}
 
-	private final class ScopeTab implements Tab {
+	static final class ScopeTab implements Tab {
 		private final Scope scope;
 
-		private ScopeTab(Scope scope) {
+		ScopeTab(Scope scope) {
 			this.scope = scope;
 		}
 
 		@Override
 		public Component getTabTitle() {
-			return LanguageUtils.settings(scope == Scope.CLIENT ? "client_settings" : "server_settings").get();
+			return scopeTitle(this.scope);
 		}
 
 		@Override

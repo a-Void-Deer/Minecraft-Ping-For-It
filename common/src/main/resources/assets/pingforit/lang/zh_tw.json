@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "開啟設定",
 	"subtitles.pingforit.ping": "標記位置警報",
 
-	"settings.pingforit.title": "標記圓環設定",
-	"settings.pingforit.client_settings": "用戶端設定",
-	"settings.pingforit.server_settings": "伺服器設定",
+	"settings.pingforit.title": "Ping For It 設定",
+	"settings.pingforit.client_settings": "用戶端",
+	"settings.pingforit.server_settings": "伺服器",
 	"settings.pingforit.server_settings.loading": "（載入中…）",
 	"settings.pingforit.server_settings.locked": "（已鎖定）",
 	"settings.pingforit.server_settings.validation": "請修正非負整數，或收起並放棄伺服器變更。",
@@ -120,7 +120,6 @@
   ,"notice.pingforit.on": "開"
   ,"notice.pingforit.off": "關"
   ,"settings.pingforit.configuration_notice_size": "設定提示大小: %s"
-  ,"settings.pingforit.category_title": "%s — %s"
   ,"settings.pingforit.category.display": "標記顯示"
   ,"settings.pingforit.category.display.button": "標記顯示..."
   ,"settings.pingforit.category.selection": "目標選擇"
