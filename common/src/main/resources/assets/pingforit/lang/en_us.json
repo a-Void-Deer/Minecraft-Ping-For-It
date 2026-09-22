@@ -99,6 +99,8 @@
 	"pingforit.chat.go_to.template.override": "{playerName} requests {pingType} {targetName}",
 	"pingforit.chat.take.template.override": "{playerName} requests {pingType} in {targetName}",
 	"pingforit.chat.request.template.override": "{playerName} {pingType}s {targetName}",
+	"pingforit.chat.local_error.prefix": "[ping for it] ",
+	"pingforit.chat.target_gone": "Target disappeared or died",
 
 	"pingforit.ping_type.attention": "Attention",
 	"pingforit.ping_type.attention.phrase": "ATTENTION",

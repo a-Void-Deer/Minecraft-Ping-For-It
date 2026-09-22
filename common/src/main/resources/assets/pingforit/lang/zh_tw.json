@@ -84,6 +84,8 @@
 	"pingforit.chat.pingmsg.template": "{playerName}：請求 {pingType} {targetName}",
 	"pingforit.chat.danger.template.override": "{playerName}：{pingType} {targetName}！",
 	"pingforit.chat.request.template.override": "{playerName} {pingType} {targetName}",
+	"pingforit.chat.local_error.prefix": "[ping for it] ",
+	"pingforit.chat.target_gone": "目標消失或死亡",
 
 	"pingforit.ping_type.attention": "注意",
 	"pingforit.ping_type.attention.phrase": "注意",

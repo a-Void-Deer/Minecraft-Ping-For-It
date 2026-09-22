@@ -16,6 +16,9 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
+import nx.pingwheel.common.client.MinecraftLocalErrorSink;
+import nx.pingwheel.common.interaction.state.PingInteractionAction;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -262,6 +265,22 @@ class ClientConfigLocalizationTest {
 		assertTranslationAbsent("en_us", "pingforit.chat." + "request.template");
 		assertTranslationAbsent("zh_cn", "pingforit.chat." + "request");
 		assertTranslationAbsent("zh_cn", "pingforit.chat." + "request.template");
+	}
+
+	@Test
+	void everyBundledLocaleContainsTheLocalizedTargetGoneFeedback() throws IOException {
+		String prefixKey = MinecraftLocalErrorSink.PREFIX_KEY;
+		String messageKey = PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE_KEY;
+
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			assertEquals("[ping for it] ", nonBlankTranslation(json, locale, prefixKey),
+				() -> "the local feedback prefix must be the exact marker resource: " + locale);
+			nonBlankTranslation(json, locale, messageKey);
+		}
+
+		assertEquals("Target disappeared or died", readTranslation("en_us", messageKey));
+		assertEquals("目标消失或死亡", readTranslation("zh_cn", messageKey));
 	}
 
 	private JsonObject readLocaleJson(String locale) throws IOException {

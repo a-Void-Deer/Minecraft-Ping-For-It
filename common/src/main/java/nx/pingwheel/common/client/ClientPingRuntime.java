@@ -1146,7 +1146,7 @@ public final class ClientPingRuntime {
 		if (reason == MarkerRejectReason.TARGET_GONE) {
 			if (createRequestTracker.isLatest(requestId)) {
 				errorSink.showLocalError(
-					PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE,
+					PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE_KEY,
 					PingInteractionAction.TargetGone.TARGET_GONE_COLOR);
 				logger.debug("marker rejected target gone: requestId={} requestKind={}",
 					requestId, requestKind);

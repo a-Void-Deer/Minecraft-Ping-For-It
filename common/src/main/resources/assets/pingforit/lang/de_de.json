@@ -90,6 +90,8 @@
 	"pingforit.chat.destroy.template.override": "{playerName} will {targetName} {pingType}",
 	"pingforit.chat.take.template.override": "{playerName} will {targetName} {pingType}",
 	"pingforit.chat.request.template.override": "{playerName} {pingType}: {targetName}",
+	"pingforit.chat.local_error.prefix": "[ping for it] ",
+	"pingforit.chat.target_gone": "Ziel verschwunden oder gestorben",
 
 	"pingforit.ping_type.attention": "Achtung",
 	"pingforit.ping_type.attention.phrase": "ACHTUNG",

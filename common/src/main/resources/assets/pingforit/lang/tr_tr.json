@@ -82,6 +82,8 @@
 	"command.pingforit.channel.set.reject": "Kanal adı uzunlukları %s ile sınırlı",
 	"pingforit.chat.pingmsg": "%s: %s: %s",
 	"pingforit.chat.pingmsg.template": "{playerName}: {pingType}: {targetName}",
+	"pingforit.chat.local_error.prefix": "[ping for it] ",
+	"pingforit.chat.target_gone": "Hedef kayboldu veya öldü",
 
 	"pingforit.ping_type.attention": "Dikkat",
 	"pingforit.ping_type.attention.phrase": "DİKKAT",

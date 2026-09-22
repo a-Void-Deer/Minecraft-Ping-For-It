@@ -648,8 +648,8 @@ class PingInteractionStateMachineTest {
 	}
 
 	@Test
-	void targetGoneMessageAndColorAreExact() {
-		assertEquals("\u76EE\u6807\u6D88\u5931\u6216\u6B7B\u4EA1", PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE);
+	void targetGoneMessageKeyAndColorAreExact() {
+		assertEquals("pingforit.chat.target_gone", PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE_KEY);
 		assertEquals(0xFF5555, PingInteractionAction.TargetGone.TARGET_GONE_COLOR);
 	}
 

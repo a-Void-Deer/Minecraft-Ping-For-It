@@ -15,8 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class PingInteractionActionTest {
 
 	@Test
-	void targetGoneMessageIsTheExactChineseFallback() {
-		assertEquals("\u76EE\u6807\u6D88\u5931\u6216\u6B7B\u4EA1", PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE);
+	void targetGoneMessageKeyIsTheStableChatResourceKey() {
+		assertEquals("pingforit.chat.target_gone", PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE_KEY);
 	}
 
 	@Test

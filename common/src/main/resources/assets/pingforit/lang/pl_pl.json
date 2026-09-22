@@ -82,6 +82,8 @@
 	"command.pingforit.channel.set.reject": "Nazwy kanałów są ograniczone do %s znaków",
 	"pingforit.chat.pingmsg": "%s: %s: %s",
 	"pingforit.chat.pingmsg.template": "{playerName}: {pingType}: {targetName}",
+	"pingforit.chat.local_error.prefix": "[ping for it] ",
+	"pingforit.chat.target_gone": "Cel zniknął lub zginął",
 
 	"pingforit.ping_type.attention": "Uwaga",
 	"pingforit.ping_type.attention.phrase": "UWAGA",
