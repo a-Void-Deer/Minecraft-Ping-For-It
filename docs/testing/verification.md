@@ -252,8 +252,10 @@ The native VoxelShape route requires complementary checks rather than one broad
 "outline works" assertion:
 
 1. Production render-state coverage pins `BlockOutlineRenderType` to
-   `VertexFormat.Mode.LINES`, vanilla `rendertype_lines`, the fixed 3.75 px
-   width, `NO_DEPTH_TEST`/`GL_ALWAYS`, color-only writes and late composite
+   `VertexFormat.Mode.LINES`, vanilla `rendertype_lines`, a fixed width wider
+   than vanilla selection lines
+   ([`BlockOutlineRenderType.LINE_WIDTH`](../../common/src/main/java/nx/pingwheel/common/client/outline/BlockOutlineRenderType.java)),
+   `NO_DEPTH_TEST`/`GL_ALWAYS`, color-only writes and late composite
    submission.
 2. Native geometry coverage pins the live
    `BlockState#getShape`-to-`VoxelShape#forAllEdges` edge route so a full-cube,
@@ -275,7 +277,7 @@ intermediary refmap; Forge and NeoForge use their loader-local official-Mojmap
 configuration instead. This routing identifies existing tasks and artifact
 purposes only. Public build orientation and commands are listed in the
 [repository README](../../README.md#install-build-and-verify); the tracked
-[geometry pipeline](../architecture/geometry-pipeline.md) is the public
+[geometry pipeline](../architecture/geometry/geometry-pipeline.md) is the public
 architecture entry point. Local agent instructions, when present, are
 supplementary execution guidance rather than a public documentation prerequisite.
 
@@ -323,7 +325,12 @@ The following gaps remain open until direct evidence closes them:
   focused tests cover only through the constant and a fake sink;
 - application of synchronized rate policy on reconnect and on effective live
   configuration change;
-- server-side sanitization of negative rate-policy values; and
+- server-side sanitization of negative rate-policy values;
+- the local `ModelBlockRendererMixin` position-seed guard:
+  `@ModifyConstant(method = "*", require = 2)` counts the minimum number of
+  matching class-wide `42L` constants, including an unused local, so it does not
+  prove that both `RandomSource#setSeed` call sites remain covered; this is a
+  coverage/guard limitation, not a product behavior change; and
 - detailed diagnostic behavior in the private
   `CreateEntityOutlineAdapter.EntityDiagnostics` path.
 

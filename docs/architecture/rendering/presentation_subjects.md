@@ -25,11 +25,8 @@ from presentation, and normal sources plus VoxelShape fallback use the same
 resolved subject list and subject-level type decisions. There is no external
 integration exemption from that contract.
 
-For the current Sable external path, the external model route and the external
-fallback independently resolve provider presentation. The current
-implementation does not guarantee that provider-local multipart or subject
-type decisions for those routes come from one shared immutable frame snapshot.
-That is an open conformance and verification gap, not a product exception; see
+For the current Sable external path, conformance with that contract remains an
+open verification gap rather than a product exception; see
 [Sable coverage and pending scenarios](../../testing/verification.md#sable-integration-coverage).
 
 ## Render-target type rules

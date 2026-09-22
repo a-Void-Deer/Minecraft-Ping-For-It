@@ -15,7 +15,7 @@
 
 These stable concepts are separate from live renderable geometry and
 [presentation subjects](../rendering/presentation_subjects.md). The
-[geometry pipeline](../geometry-pipeline.md) describes their data
+[geometry pipeline](../geometry/geometry-pipeline.md) describes their data
 flow; [D0003](../../decisions/D0003-multipart-presentation-types.md) explains the
 identity/presentation boundary.
 

@@ -4,7 +4,7 @@ This document owns the common geometry-source contract. Optional integrations
 may describe when they register or claim work, but they do not redefine source
 ordering, outcomes, fallback, or recoverable-failure semantics. The end-to-end
 stage boundaries are summarized in the
-[geometry pipeline](../geometry-pipeline.md).
+[geometry pipeline](geometry-pipeline.md).
 
 ## Model eligibility is not renderability
 
@@ -86,10 +86,11 @@ are intentionally different diagnostic outcomes but have the same fallback
 effect. A source result must not be inferred from configuration, ownership, or
 an invocation attempt.
 
-Recover only `Exception`, `LinkageError`, and `AssertionError`. Fatal JVM and
-resource errors propagate. Detailed diagnostics remain lazy, bounded, and
-rate-controlled while retaining complete target, component, payload, and
-exception details; see [security](../security.md).
+Shared geometry-source failure isolation follows the
+[security owner](../security.md), including which failures are recoverable and
+which fatal JVM/resource errors propagate. Detailed diagnostics remain lazy,
+bounded, and rate-controlled while retaining complete target, component,
+payload, and exception details.
 
 ## Internal optional-source registry
 

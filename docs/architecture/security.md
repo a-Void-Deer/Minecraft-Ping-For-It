@@ -2,14 +2,12 @@
 
 ## Trust boundaries
 
-For authoritative `MarkerCreate`, captured client intent is a request. The
-server derives and verifies target classification, existence, dimension,
-block/entity state, range, allowed Ping Type, names, colors, ownership,
-channel, audience, and lifecycle data from authoritative server state where
-possible, applying its stored channel state when it applies the
-marker-creation policy. The request field boundary is owned by
-[network protocol](network/protocol.md), and the admission stages and outcomes
-are owned by [target validation](authority/target_validation.md).
+For authoritative `MarkerCreate`, captured client intent is untrusted request
+data. Authoritative admission and removal are adjudicated from trusted server
+state. The request field boundary is owned by
+[network protocol](network/protocol.md); the admission stages and outcomes,
+including removal adjudication, are owned by
+[target validation](authority/target_validation.md).
 
 This trusted-state guarantee is specific to `MarkerCreate`. It must not be
 extended to the registered legacy `PingLocationC2SPacket`, which retains an
@@ -22,11 +20,13 @@ presentation values. Detailed packet and invalidation timing lives in
 [target validation](authority/target_validation.md); deterministic winner
 selection lives in [ping winner](authority/ping_winner.md).
 
-Entity-local geometry is client capture metadata. Whole-entity identity and
-anchor-based validation survive precise surface hits; the server does not
-claim to replay a client ray. External provider candidates and opaque locators
-must pass provider validation/materialization before gaining committed identity;
-see [Sable](../integrations/sable.md).
+Entity-local geometry remains client capture metadata, while whole-entity
+identity and anchor validation are a server boundary; the server does not claim
+to replay a client ray. Exact geometry and whole-entity rules are owned by
+[local geometry picking](picking/local_geometry.md#frozen-metadata-and-whole-entity-identity).
+External provider candidates and opaque locators must pass provider
+validation/materialization before gaining committed identity; see
+[Sable](../integrations/sable.md).
 
 ## Server configuration update enforcement
 
@@ -63,8 +63,10 @@ state, not persistent vanilla glowing/team mutations. Flywheel adapters must
 not revive or mutate stale/hidden/deleted/foreign handles.
 
 For geometry source attempts, only `Exception`, `LinkageError` and
-`AssertionError` are recoverable. Fatal JVM/resource errors propagate. A partial
-recoverable emission follows the exact
+`AssertionError` are recoverable. Fatal JVM/resource errors propagate. This
+enumeration scopes only the shared geometry-source attempt; it is not a general
+optional-integration or registry catch policy. A partial recoverable emission
+follows the exact
 [source outcome contract](geometry/geometry_sources.md), not a blanket catch or
 duplicate fallback render. Config recovery must preserve original bytes under
 [client invalid-file recovery](config/revisioning.md#invalid-file-recovery-differs-by-config-type).

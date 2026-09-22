@@ -8,4 +8,4 @@ Unreleased changes accumulated since `76da69e40d4d2b55688ee0dee46d01b07a9ad3d7`.
 
 ## Documentation
 
-- Refined some documentations for the respondary for easier understanding and maintenance. AI helped about docs, and have been reviewed.
+- Refined documentations of the respondary for easier understanding and maintenance. AI helped about docs, and have been reviewed.

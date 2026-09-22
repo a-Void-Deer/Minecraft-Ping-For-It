@@ -23,9 +23,9 @@ Server-derived name data follows
 ## Custom and base component composition
 
 For the custom-name forms above, the incoming custom component is deliberately
-flattened to `Component.literal(customName.getString())` before composition.
-Its text remains, but its incoming colors, styles (including italic), and events
-are not inherited. The trusted localized base component is appended unchanged,
+flattened to its plain text before composition. Its text remains, but its
+incoming colors, styles (including italic), and events are not inherited. The
+trusted localized base component is appended unchanged,
 so any independent retained styling refers to that base component rather than
 to the flattened custom input.
 
@@ -35,7 +35,6 @@ to the flattened custom input.
 | --- | --- |
 | Common chat template | `pingforit.chat.pingmsg.template` |
 | Per-Ping-Type override | `pingforit.chat.<id>.template.override` |
-| Ping-Type phrase only | `pingforit.ping_type.<id>.phrase` |
 | Legacy fallback | `pingforit.chat.pingmsg` |
 
 Templates use the named placeholders `{playerName}`, `{pingType}`, and

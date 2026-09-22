@@ -66,7 +66,7 @@ unbounded synonym.
 
 ## Related docs
 
-[Geometry pipeline](../architecture/geometry-pipeline.md),
+[Geometry pipeline](../architecture/geometry/geometry-pipeline.md),
 [geometry sources](../architecture/geometry/geometry_sources.md),
 [outline rendering](../architecture/rendering/outline.md), and
 [model placement](../architecture/rendering/model_placement.md).

@@ -10,12 +10,12 @@ require reading every document. These documents describe the existing Minecraft
 | --- | --- |
 | [Repository README](../README.md) | Tracked public entry point for project orientation, supported build/source sets, and install/build/verify commands. |
 | Topic documents and focused architecture contracts below | Normative, executable product contracts for their named subsystem. |
-| [Geometry-pipeline overview](architecture/geometry-pipeline.md) and decisions | Explanatory concepts, boundaries, and rationale. They link to, but do not replace, executable topic contracts. |
+| [Geometry-pipeline overview](architecture/geometry/geometry-pipeline.md) and decisions | Explanatory concepts, boundaries, and rationale. They link to, but do not replace, executable topic contracts. |
 | [Testing and verification](testing/verification.md) | Existing automated-coverage inventory, known gaps, evidence rules and pending manual/integration scenarios. |
 
 Focused architecture contracts are normative for their named subsystem
 throughout input, picking, identity, authority, configuration, geometry, and
-rendering; the [geometry-pipeline overview](architecture/geometry-pipeline.md)
+rendering; the [geometry-pipeline overview](architecture/geometry/geometry-pipeline.md)
 and the decision records remain explanatory. Ownership follows change
 responsibility: each substantive fact has exactly one primary owner, but one
 feature or change commonly affects several independent contracts and updates
@@ -41,12 +41,12 @@ conflicts rather than silently choosing or dropping a requirement.
 
 | Task | Start with | Also consult when relevant |
 | --- | --- | --- |
-| Understand the end-to-end data flow | [Architecture: geometry pipeline](architecture/geometry-pipeline.md) | Identity, capture, authority, presentation and geometry topics below |
+| Understand the end-to-end data flow | [Architecture: geometry pipeline](architecture/geometry/geometry-pipeline.md) | Identity, capture, authority, presentation and geometry topics below |
 | Change Target/Marker identity or lifecycle | [Target model](architecture/identity/target_model.md) | [Validation](architecture/authority/target_validation.md), [winner selection](architecture/authority/ping_winner.md), Sable |
 | Change server marker creation, removal, expiry or audience lifetime | [Marker lifecycle](architecture/authority/marker_lifecycle.md) | [Target model](architecture/identity/target_model.md), validation and winner selection |
 | Change client marker synchronization, display deadlines or fallback | [Client marker state](architecture/markers/client-state.md) | [Marker lifecycle](architecture/authority/marker_lifecycle.md), [client configuration](config/client.md) and [names and chat](architecture/rendering/names_chat.md) |
 | Change Target Types, Ping Types, priorities, defaults, keys or colors | [Catalogs](architecture/identity/catalogs.md) | Capture, names/chat and wheel |
-| Change press handling, asynchronous capture, target locking, or the actual wheel-open eligibility/freezing boundary | [Capture](architecture/picking/capture.md) | [Long-press timing](architecture/input/long-press.md), [Long-press compatibility](architecture/input/long-press-compatibility.md), [Selection policy](architecture/picking/selection_policy.md), [Wheel](architecture/picking/wheel.md), local geometry, rate policy |
+| Change press handling, asynchronous capture, target locking, or the actual wheel-open eligibility/freezing boundary | [Capture](architecture/picking/capture.md) | [Long-press timing](architecture/input/long-press.md), [Long-press compatibility](architecture/input/long-press-compatibility.md), [Selection policy](architecture/picking/selection_policy.md), [Wheel](architecture/picking/wheel.md), [D0005 — Press-time capture](decisions/D0005-press-time-capture.md), local geometry, rate policy |
 | Change long-press threshold/slice timing | [Long-press timing](architecture/input/long-press.md) | Capture, wheel, client configuration, and compatibility when enabled |
 | Change rapid-click or deferred long-press compatibility | [Long-press compatibility](architecture/input/long-press-compatibility.md) | Capture, long-press timing, wheel, rate policy, and verification |
 | Change target-selection toggles, block/fluid modes or entity-selection blacklist | [Selection policy](architecture/picking/selection_policy.md) | [Capture](architecture/picking/capture.md), Create raycast |
@@ -67,10 +67,10 @@ conflicts rather than silently choosing or dropping a requirement.
 | Change send-rate synchronization, enforcement or courtesy limiting | [Rate policy](architecture/config/rate-limit.md) | Validation, security and the server config catalogue |
 | Change source order, adapter outcomes, failure handling or registration | [Geometry sources](architecture/geometry/geometry_sources.md) | Presentation subjects and the affected integration |
 | Change native block-shape acquisition or edge generation | [VoxelShape geometry](architecture/geometry/voxel_shape.md) | Outline render state and D0002 |
-| Change GPU outline routing or production render state | [Outline rendering](architecture/rendering/outline.md) | VoxelShape geometry, source outcomes and model placement |
+| Change GPU outline routing, shared render-entity lookup, or production render state | [Outline rendering](architecture/rendering/outline.md) | VoxelShape geometry, source outcomes and model placement |
 | Change multipart owner/master resolution, beds or doors | [Presentation subjects](architecture/rendering/presentation_subjects.md) | Geometry sources, D0003 and the affected integration |
 | Change model offset, placement or seeded variants | [Model placement](architecture/rendering/model_placement.md) | Outline routing and verification limitations |
-| Change target names, chat templates or phrase emphasis | [Names and chat](architecture/rendering/names_chat.md) | Catalogs and authoritative validation |
+| Change target names, marker receipt feedback, chat templates or phrase emphasis | [Names and chat](architecture/rendering/names_chat.md) | Catalogs and authoritative validation |
 | Change Create/Flywheel support | [Create integration](integrations/create.md) | [Create raycast supplement](integrations/create-contraption-raycast.md), local geometry and geometry sources |
 | Change Sable/external-target support | [Sable integration](integrations/sable.md) | Target identity, validation, winner selection and presentation |
 | Change Simulated stand-in/optional-content support | [Simulated integration](integrations/simulated.md) | Selection policy, compatibility and testing/verification |
@@ -103,9 +103,9 @@ duplicate the exact constants, algorithms or error cases owned by topic docs.
 2. Update the owning topic for new behavior, the applicable decision only when
    rationale or a boundary changes, and verification when coverage, gaps or
    pending scenarios change.
-3. The geometry-pipeline architecture page describes stages, data, lifetimes,
-   and boundaries. Focused architecture contracts are normative for their named
-   behavior. Neither form is a Java file, class, or line-number tour.
+3. The geometry-pipeline architecture page describes stages, boundaries and
+   owner navigation. Focused architecture contracts are normative for their
+   named behavior. Neither form is a Java file, class, or line-number tour.
 4. Integration docs contain mod-specific gates and implementations. Generic
    picking-owner, geometry-source, outcome, lifecycle and failure contracts stay
    in their picking, geometry, authority or security owners.

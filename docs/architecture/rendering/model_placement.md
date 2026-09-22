@@ -52,14 +52,6 @@ route scopes its override only around that display render dispatch and restores
 vanilla random behavior outside the scope. Loader-aware baked adapters consume
 the same position-derived seed through their native world-aware model path.
 
-The local virtual-display mixin matches class-wide `42L` constants using
-`@ModifyConstant(method = "*", require = 2)`. The minimum counts matching
-constants, including an unused local; it does not prove that both
-`RandomSource#setSeed` call sites remain covered. Fewer than two matches fail
-mixin application, while drift of one actual seed site may still pass. Preserve
-this verification limitation rather than treating the annotation as a semantic
-proof.
-
 ## Native shape placement
 
 The VoxelShape route uses the live native shape, which may already contain its
