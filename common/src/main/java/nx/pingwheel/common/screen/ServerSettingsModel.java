@@ -245,11 +245,33 @@ public final class ServerSettingsModel {
 		recomputeDirtyFields();
 	}
 
+	/**
+	 * Bitmask of the dirty numeric draft fields that do not parse as a
+	 * non-negative integer, or zero when no dirty numeric field is invalid.  The
+	 * mask reuses the {@link ServerConfigUpdate} field constants so validation
+	 * routing can identify the owning category and field without re-parsing the
+	 * draft.
+	 */
+	public int invalidFieldMask() {
+		if (!dirty()) {
+			return 0;
+		}
+
+		int fields = 0;
+		if (parseNonNegative(msToRegenerate).isEmpty()) {
+			fields |= ServerConfigUpdate.MS_TO_REGENERATE;
+		}
+		if (parseNonNegative(rateLimit).isEmpty()) {
+			fields |= ServerConfigUpdate.RATE_LIMIT;
+		}
+		if (parseNonNegative(syncDuration).isEmpty()) {
+			fields |= ServerConfigUpdate.SYNC_DURATION;
+		}
+		return fields;
+	}
+
 	public boolean hasInvalidDraft() {
-		return dirty()
-			&& (parseNonNegative(msToRegenerate).isEmpty()
-				|| parseNonNegative(rateLimit).isEmpty()
-				|| parseNonNegative(syncDuration).isEmpty());
+		return invalidFieldMask() != 0;
 	}
 
 	public Optional<ServerConfigUpdate> updatePlan() {
