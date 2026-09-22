@@ -31,7 +31,19 @@ class ClientMarkerStoreTest {
 	}
 
 	private static MarkerSnapshot snapshot(MarkerId id, Target target, long arrival, long expires) {
-		return new MarkerSnapshot(id, OWNER, target, "entity", "attention", new MarkerAnchor(0, 0, 0), arrival, expires);
+		return snapshot(id, OWNER, target, arrival, expires);
+	}
+
+	private static MarkerSnapshot snapshot(MarkerId id, UUID owner, Target target, long arrival, long expires) {
+		return new MarkerSnapshot(id, owner, target, "entity", "attention", new MarkerAnchor(0, 0, 0), arrival, expires);
+	}
+
+	private static List<MarkerId> hudIds(ClientMarkerStore store) {
+		return store.hudRenderMarkers().stream().map(ClientMarker::id).toList();
+	}
+
+	private static List<MarkerId> renderIds(ClientMarkerStore store) {
+		return store.renderMarkers().stream().map(ClientMarker::id).toList();
 	}
 
 	private static Target entityTarget(String dimension, UUID entity) {
@@ -714,6 +726,178 @@ class ClientMarkerStoreTest {
 		assertEquals(List.of(id), store.expireFallback(Long.MAX_VALUE).stream().map(ClientMarker::id).toList());
 	}
 
+	// --- HUD render selection ---
+
+	@Test
+	void hudRenderMarkersSelectsTheAnnouncedWinnerOverANewerSameTargetRecord() {
+		ClientMarkerStore store = newStore();
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId winner = new MarkerId(1L);
+		MarkerId newer = new MarkerId(2L);
+
+		store.onCreated(snapshot(winner, target, 10L, 110L), 50L);
+		store.onCreated(snapshot(newer, target, 20L, 120L), 50L);
+		store.onWinnerChanged(key, Optional.of(winner));
+
+		assertEquals(List.of(winner), hudIds(store));
+		// The generic renderable-record projection still carries every
+		// visually active record, including the non-selected one.
+		assertEquals(List.of(winner, newer), renderIds(store));
+	}
+
+	@Test
+	void hudRenderMarkersPrefersTheWinnerAcrossSenders() {
+		ClientMarkerStore store = newStore();
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId winner = new MarkerId(1L);
+		MarkerId later = new MarkerId(2L);
+
+		store.onCreated(snapshot(winner, OWNER, target, 10L, 110L), 50L);
+		store.onCreated(snapshot(later, STRANGER, target, 20L, 120L), 50L);
+		store.onWinnerChanged(key, Optional.of(winner));
+
+		assertEquals(List.of(winner), hudIds(store));
+	}
+
+	@Test
+	void hudRenderMarkersFallsBackToLatestArrivalWhileTheWinnerIsNotYetKnown() {
+		ClientMarkerStore store = newStore();
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId older = new MarkerId(1L);
+		MarkerId newer = new MarkerId(2L);
+
+		store.onCreated(snapshot(older, target, 10L, 110L), 50L);
+		store.onCreated(snapshot(newer, target, 20L, 120L), 50L);
+		store.onWinnerChanged(key, Optional.of(new MarkerId(9L)));
+
+		assertEquals(List.of(newer), hudIds(store));
+	}
+
+	@Test
+	void hudRenderMarkersFallbackTieBreakPrefersTheLargerMarkerId() {
+		ClientMarkerStore store = newStore();
+		Target target = locationTarget(OVERWORLD, 1);
+		MarkerId smaller = new MarkerId(1L);
+		MarkerId larger = new MarkerId(2L);
+
+		store.onCreated(snapshot(smaller, target, 10L, 110L), 50L);
+		store.onCreated(snapshot(larger, target, 10L, 110L), 50L);
+
+		assertEquals(List.of(larger), hudIds(store));
+	}
+
+	@Test
+	void hudRenderMarkersFallsBackAfterTheWinnerVisualDeadlineWithoutResettingIt() {
+		ClientMarkerStore store = new ClientMarkerStore(100L, snapshot -> snapshot.id().value() == 1L ? 5L : 200L);
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId expiredWinner = new MarkerId(1L);
+		MarkerId older = new MarkerId(2L);
+		MarkerId newer = new MarkerId(3L);
+
+		store.onCreated(snapshot(expiredWinner, target, 10L, 110L), 0L);
+		store.onCreated(snapshot(older, target, 5L, 105L), 0L);
+		store.onCreated(snapshot(newer, target, 20L, 120L), 0L);
+		store.onWinnerChanged(key, Optional.of(expiredWinner));
+
+		// Observing tick 5 elapses the winner's visual deadline while its
+		// fallback deadline stays far in the future, so the record is retained.
+		assertTrue(store.expireFallback(5L).isEmpty());
+
+		assertEquals(List.of(newer), hudIds(store));
+		assertEquals(List.of(older, newer), renderIds(store));
+
+		// The fallback selection neither resurrects nor extends the visual.
+		ClientMarker retained = store.marker(expiredWinner).orElseThrow();
+		assertTrue(retained.isSynchronized());
+		assertEquals(5L, retained.displayExpiresAtLocalTick());
+	}
+
+	@Test
+	void hudRenderMarkersUsesTheWinnerAnnouncedBeforeTheRecordArrives() {
+		ClientMarkerStore store = newStore();
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId winner = new MarkerId(1L);
+		MarkerId newer = new MarkerId(2L);
+
+		store.onWinnerChanged(key, Optional.of(winner));
+		assertTrue(store.hudRenderMarkers().isEmpty());
+
+		store.onCreated(snapshot(winner, target, 10L, 110L), 50L);
+		store.onCreated(snapshot(newer, target, 20L, 120L), 50L);
+
+		assertEquals(List.of(winner), hudIds(store));
+	}
+
+	@Test
+	void hudRenderMarkersSwitchesToTheWinnerAnnouncedAfterTheRecordsArrive() {
+		ClientMarkerStore store = newStore();
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId winner = new MarkerId(1L);
+		MarkerId newer = new MarkerId(2L);
+
+		store.onCreated(snapshot(winner, target, 10L, 110L), 50L);
+		store.onCreated(snapshot(newer, target, 20L, 120L), 50L);
+
+		// Before the announcement the latest same-target record is selected.
+		assertEquals(List.of(newer), hudIds(store));
+
+		store.onWinnerChanged(key, Optional.of(winner));
+
+		assertEquals(List.of(winner), hudIds(store));
+	}
+
+	@Test
+	void hudRenderMarkersKeepsDistinctTargetsAndDimensionsSeparate() {
+		ClientMarkerStore store = newStore();
+		MarkerId third = new MarkerId(3L);
+		MarkerId first = new MarkerId(1L);
+		MarkerId second = new MarkerId(2L);
+
+		store.onCreated(snapshot(third, locationTarget(OVERWORLD, 3), 10L, 110L), 50L);
+		store.onCreated(snapshot(first, locationTarget(OVERWORLD, 1), 10L, 110L), 50L);
+		store.onCreated(snapshot(second, locationTarget(NETHER, 1), 10L, 110L), 50L);
+
+		assertEquals(List.of(first, second, third), hudIds(store));
+	}
+
+	@Test
+	void hudRenderMarkersKeepsAStaleWinnerWhileItsVisualIsActive() {
+		ClientMarkerStore store = new ClientMarkerStore(10L, 200L);
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId winner = new MarkerId(1L);
+
+		store.onCreated(snapshot(winner, target, 0L, 20L), 0L);
+		store.onWinnerChanged(key, Optional.of(winner));
+		assertTrue(store.onRemoved(winner, MarkerRemovalReason.EXPIRED, 1L).isEmpty());
+		assertTrue(store.marker(winner).orElseThrow().isStale());
+
+		assertEquals(List.of(winner), hudIds(store));
+	}
+
+	@Test
+	void hudRenderMarkersFallsBackAfterTheWinnerRecordIsHardRemoved() {
+		ClientMarkerStore store = newStore();
+		Target target = locationTarget(OVERWORLD, 1);
+		TargetKey key = TargetKey.from(target);
+		MarkerId winner = new MarkerId(1L);
+		MarkerId remaining = new MarkerId(2L);
+
+		store.onCreated(snapshot(winner, target, 10L, 110L), 50L);
+		store.onCreated(snapshot(remaining, target, 20L, 120L), 50L);
+		store.onWinnerChanged(key, Optional.of(winner));
+		store.onRemoved(winner, MarkerRemovalReason.TARGET_INVALID, 51L);
+
+		assertTrue(store.winnerId(key).isEmpty());
+		assertEquals(List.of(remaining), hudIds(store));
+	}
+
 	// --- clear / immutability / deterministic ordering ---
 
 	@Test
@@ -768,6 +952,7 @@ class ClientMarkerStoreTest {
 
 		assertThrows(UnsupportedOperationException.class, () -> store.allMarkers().add(null));
 		assertThrows(UnsupportedOperationException.class, () -> store.markersInDimension(OVERWORLD).clear());
+		assertThrows(UnsupportedOperationException.class, () -> store.hudRenderMarkers().add(null));
 		assertThrows(
 			UnsupportedOperationException.class,
 			() -> store.expireFallback(20L).remove(0));

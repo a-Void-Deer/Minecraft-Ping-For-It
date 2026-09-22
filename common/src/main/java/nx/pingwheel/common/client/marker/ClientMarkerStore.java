@@ -22,9 +22,10 @@ import nx.pingwheel.common.marker.TargetKey;
  *
  * <p>Responsibilities: idempotent application of authoritative marker
  * snapshots, safe removal (including of never-seen ids), authoritative
- * same-target winner slots that may reference not-yet-known markers, and
- * separate synchronization/display lifetime housekeeping for packet loss and
- * client-side visual expiry.
+ * same-target winner slots that may reference not-yet-known markers, separate
+ * synchronization/display lifetime housekeeping for packet loss and
+ * client-side visual expiry, and the one-record-per-target HUD render
+ * selection that leaves the underlying records and winner slots untouched.
  *
  * <p>Thread safety: this store is <strong>main-thread-confined</strong>. Every
  * method must be called from the client main thread (the same thread the S2C
@@ -55,6 +56,16 @@ import nx.pingwheel.common.marker.TargetKey;
  * when a marker with that id actually exists <em>and</em> its target key
  * matches the slot key, so a slot that briefly references a marker of a
  * different target is never observable.
+ *
+ * <h2>HUD selection</h2>
+ *
+ * <p>{@link #hudRenderMarkers} collapses the visually active records to at
+ * most one record per canonical {@link TargetKey} for the world overlay. It
+ * prefers the exposed authoritative winner and otherwise falls back to the
+ * same-target record with the latest arrival and then the larger marker id.
+ * The selection is a read-only projection: {@link #renderMarkers()} still
+ * returns every visually active record, and no record or winner slot is
+ * changed by selecting it.
  *
  * <h2>Loss recovery</h2>
  *
@@ -427,6 +438,39 @@ public final class ClientMarkerStore {
 	public List<ClientMarker> renderMarkers() {
 		return markers.values().stream()
 			.filter(marker -> marker.isVisuallyActiveAt(currentLocalTick))
+			.sorted(Comparator.comparing(ClientMarker::id))
+			.toList();
+	}
+
+	/**
+	 * The world-HUD render selection: at most one visually active record per
+	 * canonical {@link TargetKey}.
+	 *
+	 * <p>The exposed authoritative winner is preferred while its record is
+	 * known, has the matching key, and is still inside its independent visual
+	 * deadline. When the winner has not been received yet or its visual
+	 * deadline has elapsed, the same-target record with the latest
+	 * {@code arrivalTick} and then the larger {@link MarkerId} is selected
+	 * instead, matching the loss-recovery ordering. The selection is a
+	 * read-only projection: it does not alter {@link #renderMarkers()}, the
+	 * winner slots, or any stored record, so a merely non-selected record
+	 * stays stored with its visual deadline and can be selected later.
+	 *
+	 * <p>The result is immutable and sorted by ascending {@link MarkerId}.
+	 */
+	public List<ClientMarker> hudRenderMarkers() {
+		Map<TargetKey, ClientMarker> selected = new LinkedHashMap<>();
+
+		for (ClientMarker marker : renderMarkers()) {
+			selected.merge(marker.targetKey(), marker, (current, candidate) ->
+				ARRIVAL_THEN_ID.compare(candidate, current) > 0 ? candidate : current);
+		}
+
+		for (Map.Entry<TargetKey, ClientMarker> entry : selected.entrySet()) {
+			winnerMarker(entry.getKey()).ifPresent(entry::setValue);
+		}
+
+		return selected.values().stream()
 			.sorted(Comparator.comparing(ClientMarker::id))
 			.toList();
 	}
