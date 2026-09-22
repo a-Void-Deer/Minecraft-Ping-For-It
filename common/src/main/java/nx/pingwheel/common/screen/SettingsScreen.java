@@ -281,7 +281,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			MAX_MARKER_DISPLAY_DURATION,
 			MARKER_DISPLAY_DURATION_STEP,
 			(value) -> value == FOLLOW_SERVER_MARKER_DISPLAY_DURATION
-				? LanguageUtils.of("value", "follow_server").get()
+				? text.get(LanguageUtils.of("value", "follow_server").get())
 				: text.get(LanguageUtils.UNIT_SECONDS.get(value)),
 			() -> text.path("tooltip").get(),
 			config::getEffectiveMarkerDisplayDuration,
