@@ -1,10 +1,6 @@
 package nx.pingwheel.common.screen;
 
-/**
- * Screen-space layout for the scrolling settings list and the two footer
- * actions.  The channel field is part of the list now; the footer contains
- * only Reset and the inherited Done button.
- */
+/** Screen-space layout for the scrolling settings page and its fixed footer. */
 public record SettingsScreenLayout(
 	int listTop,
 	int listBottom,
@@ -15,11 +11,14 @@ public record SettingsScreenLayout(
 	int doneX,
 	int doneY
 ) {
-	public static final int FOOTER_HEIGHT = 70;
+	public static final int ROOT_HEADER_HEIGHT = 57;
+	public static final int LEAF_HEADER_HEIGHT = 33;
+	public static final int ROOT_FOOTER_HEIGHT = 70;
+	public static final int LEAF_FOOTER_HEIGHT = 33;
 	public static final int RESET_BUTTON_WIDTH = 100;
 	public static final int RESET_BUTTON_HEIGHT = 20;
-	public static final int DONE_BUTTON_WIDTH = 200;
-	public static final int DONE_BUTTON_HEIGHT = 20;
+	public static final int PRIMARY_BUTTON_WIDTH = 200;
+	public static final int PRIMARY_BUTTON_HEIGHT = 20;
 	public static final int SMALL_WIDGET_WIDTH = 150;
 	public static final int LARGE_WIDGET_WIDTH = 310;
 	public static final int ROW_HEIGHT = 20;
@@ -31,10 +30,11 @@ public record SettingsScreenLayout(
 	 * clamp also prevents a negative OptionsList viewport on unusually short
 	 * screens.
 	 */
-	public static int footerHeightFor(int screenHeight, int headerHeight) {
+	public static int footerHeightFor(int screenHeight, int headerHeight, boolean leafPage) {
 		final int safeScreenHeight = Math.max(0, screenHeight);
 		final int safeHeaderHeight = clamp(headerHeight, 0, safeScreenHeight);
-		return Math.min(FOOTER_HEIGHT, safeScreenHeight - safeHeaderHeight);
+		final int requestedHeight = leafPage ? LEAF_FOOTER_HEIGHT : ROOT_FOOTER_HEIGHT;
+		return Math.min(requestedHeight, safeScreenHeight - safeHeaderHeight);
 	}
 
 	/**
@@ -58,11 +58,11 @@ public record SettingsScreenLayout(
 			footerTop + RESET_TOP_MARGIN,
 			footerTop,
 			Math.max(footerTop, footerBottom - RESET_BUTTON_HEIGHT));
-		final int doneX = Math.max(0, (safeScreenWidth - DONE_BUTTON_WIDTH) / 2);
+		final int doneX = Math.max(0, (safeScreenWidth - PRIMARY_BUTTON_WIDTH) / 2);
 		final int doneY = clamp(
-			footerTop + Math.max(0, (safeFooterHeight - DONE_BUTTON_HEIGHT) / 2),
+			footerTop + Math.max(0, (safeFooterHeight - PRIMARY_BUTTON_HEIGHT) / 2),
 			footerTop,
-			Math.max(footerTop, footerBottom - DONE_BUTTON_HEIGHT));
+			Math.max(footerTop, footerBottom - PRIMARY_BUTTON_HEIGHT));
 
 		return new SettingsScreenLayout(
 			listTop,

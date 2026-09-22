@@ -50,6 +50,20 @@ class ServerSettingsModelTest {
 	}
 
 	@Test
+	void enteringTheSharedSessionDoesNotReplaceLoadedOrInflightState() {
+		var model = new ServerSettingsModel(true);
+		long requestId = model.beginSessionIfNeeded();
+		assertTrue(requestId > 0L);
+		assertEquals(-1L, model.beginSessionIfNeeded());
+
+		assertTrue(model.applySnapshot(requestId, EDITABLE));
+		model.setRateLimitText("99");
+		assertEquals(-1L, model.beginSessionIfNeeded());
+		assertEquals("99", model.rateLimitText());
+		assertTrue(model.dirty());
+	}
+
+	@Test
 	void invalidNumericDraftDoesNotProduceAnUpdate() {
 		var model = new ServerSettingsModel(true);
 		long requestId = model.beginExpansion();

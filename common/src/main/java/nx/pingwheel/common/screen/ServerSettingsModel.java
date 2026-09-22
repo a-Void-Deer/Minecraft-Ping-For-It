@@ -95,9 +95,8 @@ public final class ServerSettingsModel {
 	}
 
 	/**
-	 * Allocates and returns the positive request id for a newly clicked header,
-	 * or the no-pending sentinel when the header cannot start an expansion
-	 * request.
+	 * Allocates and returns the positive request id for a newly entered server
+	 * settings session, or the no-pending sentinel when a request cannot start.
 	 */
 	public long beginExpansion() {
 		if (!clientPermission || authoritativeAccessDenied || expanded) {
@@ -112,8 +111,20 @@ public final class ServerSettingsModel {
 	}
 
 	/**
-	 * Applies a snapshot only as the response to the currently loading
-	 * expansion and only when its request id exactly matches the pending id.  A
+	 * Starts the shared server-settings session if it has neither a loaded nor an
+	 * in-flight snapshot.  The expansion method remains the primitive used by
+	 * focused model tests and by this session-oriented entry point.
+	 */
+	public long beginSessionIfNeeded() {
+		if (loaded() || loading) {
+			return NO_PENDING_REQUEST;
+		}
+		return beginExpansion();
+	}
+
+	/**
+	 * Applies a snapshot only as the response to the currently loading session
+	 * and only when its request id exactly matches the pending id.  A
 	 * response that arrives after cancellation, disconnect, permission
 	 * revocation, or a later expansion is stale and must not reopen the section.
 	 */

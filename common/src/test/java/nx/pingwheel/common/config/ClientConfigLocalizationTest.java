@@ -52,6 +52,24 @@ class ClientConfigLocalizationTest {
 		"settings.pingforit.rate_limit.tooltip",
 		"settings.pingforit.sync_duration",
 		"settings.pingforit.sync_duration.tooltip");
+	private static final List<String> SETTINGS_NAVIGATION_KEYS = List.of(
+		"settings.pingforit.category_title",
+		"settings.pingforit.group.marker_display",
+		"settings.pingforit.group.input_timing",
+		"settings.pingforit.group.channel",
+		"settings.pingforit.group.geometry",
+		"settings.pingforit.group.client_config_file",
+		"settings.pingforit.group.channel_players",
+		"settings.pingforit.group.send_rate",
+		"settings.pingforit.group.marker_duration",
+		"settings.pingforit.server_status.loading",
+		"settings.pingforit.server_status.permission",
+		"settings.pingforit.server_status.unavailable",
+		"settings.pingforit.server_status.ready",
+		"settings.pingforit.server_status.draft",
+		"settings.pingforit.reset_all.server_draft_warning",
+		"settings.pingforit.open_client_config",
+		"settings.pingforit.open_client_config.tooltip");
 	private static final Map<String, String> EXTERNAL_LIST_RESTART_MARKERS = Map.of(
 		"de_de", "Neustart des Clients",
 		"en_us", "restarting the client",
@@ -146,6 +164,37 @@ class ClientConfigLocalizationTest {
 			assertTrue(
 				json.get("settings.pingforit.long_press_compatibility_slice_millis").getAsString().contains("%s"),
 				() -> "compatibility slice must be formatted: " + locale);
+		}
+	}
+
+	@Test
+	void everyBundledLocaleContainsTheCategorizedSettingsNavigation() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			for (String key : SETTINGS_NAVIGATION_KEYS) {
+				nonBlankTranslation(json, locale, key);
+			}
+			for (String category : List.of(
+				"display",
+				"selection",
+				"wheel_appearance",
+				"input",
+				"channel_notices",
+				"geometry_config",
+				"channel_players",
+				"send_rate",
+				"marker_duration")) {
+				nonBlankTranslation(json, locale, "settings.pingforit.category." + category);
+				String button = nonBlankTranslation(
+					json,
+					locale,
+					"settings.pingforit.category." + category + ".button");
+				assertTrue(button.endsWith("..."),
+					() -> "category entrance must advertise navigation: " + locale + ":" + category);
+			}
+			assertEquals(2, countOccurrences(
+				nonBlankTranslation(json, locale, "settings.pingforit.category_title"), "%s"),
+				() -> "category title must format scope and category: " + locale);
 		}
 	}
 
