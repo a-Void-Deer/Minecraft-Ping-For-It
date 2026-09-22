@@ -52,13 +52,8 @@ The invalid-target feedback is a local **chat** line. It is not an action-bar
 message, an on-screen overlay, or a toast.
 
 The confirmed product color is RGB `#FF5555` (the production raw integer is
-`0xFF5555`). The text is currently a hardcoded literal with no localization key.
-It is identified by `PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE`, whose
-definition can be located in
-[`PingInteractionAction.java`](../../common/src/main/java/nx/pingwheel/common/interaction/state/PingInteractionAction.java).
-This identifier is named only to locate the temporary constant; the page does
-not restate the literal text, invent a translation key, or claim that the
-message is localized.
+`0xFF5555`).
 
-The pending localization task is tracked in
-[pending localization](../testing/verification.md#pending-localization).
+Its visible text begins with the exact marker `[ping for it]`, and that
+marker is also supplied as a language resource.
+

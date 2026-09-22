@@ -321,8 +321,20 @@ The following gaps remain open until direct evidence closes them:
   an end-to-end server path;
 - same-ID marker creation after local record deletion, where current behavior
   treats the late create as a new insertion with a new visual deadline;
-- rendered color and literal text of the local invalid-target chat line, which
-  focused tests cover only through the constant and a fake sink;
+- rendered color and language-resource text of the local invalid-target chat
+  line, which focused tests currently cover only through the hardcoded constant
+  and a fake sink;
+- repeated-ping HUD compositing for one target: existing tests cover winner
+  selection and independent visual lifetimes, but no test checks whether several
+  display-active same-target records change the displayed HUD alpha; the
+  invariant is owned by
+  [client marker state](../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection);
+- the assembled settings-screen label for the local marker display duration
+  option: `ClientConfigLocalizationTest` checks resource keys, values, and the
+  `%s` placeholder, and `SettingsScreenLayoutTest` checks layout, but neither
+  checks the complete localized `<setting name>: <value>` label for the Follow
+  server sentinel or an explicit duration; the label form is owned by
+  [configuration UI](../UI/settings-screen.md#marker-display-duration-option);
 - application of synchronized rate policy on reconnect and on effective live
   configuration change;
 - server-side sanitization of negative rate-policy values;
@@ -336,13 +348,15 @@ The following gaps remain open until direct evidence closes them:
 
 ### Pending localization
 
-The local invalid-target message is currently a hardcoded literal
-(`PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE`) with no language key.
-Migrating it to a language key while preserving both trigger paths (local
-pre-commit target loss and the eligible server `TARGET_GONE` response), the
-`#FF5555` product color, and the chat output channel is pending. This
-documentation-only task records the gap and does not modify implementation or
-language resources.
+The confirmed requirement is owned by
+[ping feedback presentation](../UI/ping-feedback.md#presentation): the
+invalid-target message is language-resource-localized, and its visible leading
+marker `[ping for it]` is also supplied as a language resource. The current
+implementation is a hardcoded literal
+(`PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE`), and existing tests pin
+that literal text, so the requirement remains unsatisfied; no test validates
+language-resource text or the prefix. This documentation-only task records the
+gap and does not modify implementation or language resources.
 
 Render-entity lookup gaps remain for same-dimension world unload/rejoin and
 runtime-ID reuse in a game session, shared epochs between real HUD and outline
@@ -393,9 +407,11 @@ or because related automated tests exist.
 | Selection policy and input | Live GUI/screen callbacks for selection gating; focus-loss `KeyMapping.releaseAll`, screen-transition and level-instance/dimension discontinuity aborts with late asynchronous completion; loader/gameplay input lifecycle and physical key-repeat behavior on Fabric, Forge, and NeoForge; selection toggles, entity blacklist/default `simulated:honey_glue` rule, and spectator exclusion in a game session. |
 | Movement, death and replacement | Target movement while the wheel is open; entity death or dimension change; block state change or replacement while open. |
 | Naming and chat | Custom-name formatting; localized base names; item naming; phrase-only text color. |
+| Invalid-target feedback | Localized invalid-target message with the `[ping for it]` leading marker on both feedback paths, local pre-commit target loss and the correlated server `TARGET_GONE` rejection; the displayed text and marker come from language resources ([presentation owner](../UI/ping-feedback.md#presentation)). |
 | Cancellation | Cone and nearest-own-marker selection; inability to cancel another player's marker; stale/display-hidden candidate followed by server rejection with no local fallback. |
 | Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location. |
-| Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live server-settings open/correlation/permission/edit/update/persistence flow. |
+| Marker HUD | Repeated same-target pings from one sender and from several senders while same-target records remain display-active: the target's displayed HUD alpha does not accumulate with the number of same-target records ([invariant owner](../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection)). |
+| Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live server-settings open/correlation/permission/edit/update/persistence flow; the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)). |
 | Range | Client/server range combinations in one live pipeline: native minimum, a live long-distance Distant Horizons target, Create/Sable finite-segment reuse and server acceptance, including exact Create surface selection followed by whole-entity server-anchor range rejection. Installed-Sable scenarios are listed below. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |
 | Optional content and rendering | Absent or partially present optional content; Create/Flywheel routes; occlusion and arbitrary camera angles; current shape, offset and seed. |

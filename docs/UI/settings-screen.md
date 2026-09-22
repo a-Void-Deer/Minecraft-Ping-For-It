@@ -25,6 +25,17 @@ a later server-draft commit fails. The snapshot-request, correlation, and
 field-mask transaction is owned by
 [changing server configuration](../architecture/config/changing-server-config.md).
 
+## Option display
+
+All options displays the complete label
+`<setting name>: <value>`. Both the setting name and the current value are
+localized, both when the option holds an explicit number and when it uses a string. The value semantics are owned
+by [client configuration](../config/client.md); this page owns only the displayed
+label.
+
+This label contract covers that option; it does not define a general label rule
+for other client options or for the server-settings fields.
+
 ## File action and reset
 
 The configuration-file action is not a GUI list editor. It first runs the

@@ -97,6 +97,27 @@ matching key, and is still visually active. Thus a renderable record need not
 have an exposed winner yet, and a winner slot is not a list of renderable
 markers. These are distinct projections.
 
+The marker HUD applies a further per-target selection over that projection: it
+presents at most one record per canonical target key, so several visually active
+same-target pings, whether from one sender or several, do not accumulate their
+displayed alpha. The HUD prefers the target's exposed winner slot. When no winner
+slot is currently exposed for the target — because no authoritative winner has
+arrived yet, or the winner record is unknown, mismatched, or its visual deadline
+has elapsed — while other same-target records remain visually active, the HUD
+instead presents the record selected by the authoritative ordering defined in
+[ping winner](../authority/ping_winner.md#deterministic-authoritative-ordering):
+latest server arrival time, then larger Marker ID on an equal arrival. A target
+with no visually active record contributes nothing to the HUD.
+
+This selection is presentation-only. It does not modify authoritative winner
+slots, stored records, synchronization state, or visual deadlines, and it neither
+resurrects an expired record nor resets a display duration. Outline rendering
+still consumes the exposed winner slot and is unaffected. The HUD fallback is
+also not the fallback-cleanup case described under
+[Temporary local winner](#temporary-local-winner): selecting which stored record
+the HUD presents performs no record deletion, staleness transition, or
+winner-slot mutation.
+
 ## Temporary local winner
 
 When fallback cleanup has to remove an announced winner, the client may choose a
