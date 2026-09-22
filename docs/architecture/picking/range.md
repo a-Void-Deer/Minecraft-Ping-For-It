@@ -23,10 +23,10 @@ owned elsewhere; this document records only the range used for acceptance.
 
 ## Capture pipeline application
 
-At ordinary capture start, `ClientPingRuntime` captures one ray and reads the
-current client fields once. It builds the native finite segment with
+At ordinary capture start, the client captures one ray and reads the current
+client fields once. It builds the native finite segment with
 `min(hidden raycastDistance, client pingDistance)` and gives that exact segment
-to `Raycast.traceDirectionalDetailed`. The native trace selects Minecraft world
+to the native raycast. The native trace selects Minecraft world
 blocks/fluids and entity candidates, while a claimed Create candidate receives
 the same segment through the common raycast request. Create transforms that
 already-bounded segment into its local space and scans its frozen local shapes;
@@ -56,8 +56,8 @@ press edge.
 
 ## Server acceptance
 
-For every create request, the server constructs `MinecraftAuthoritativeTargetValidator`
-with server `pingDistance`. It measures the requesting player's current eye
+For every create request, the server uses its own `pingDistance` to validate
+range. It measures the requesting player's current eye
 against the authoritative anchor and rejects a squared distance strictly greater
 than range squared as `OUT_OF_RANGE`; equality is accepted. The relevant anchor
 is the live entity position, block center, exact location, or provider-derived
@@ -88,17 +88,5 @@ ordinary lifecycle contract.
 
 ## Evidence and remaining verification
 
-Source evidence for the native minimum and the Distant Horizons split is
-`ClientPingRuntime` capture flow and `DistantHorizonsIntegration`'s fixed
-`RAYCAST_RANGE`; Create's reuse is in the common `Raycast` request and the
-Create delegate/engine; Sable's segment projection is in its companion access;
-and server comparison is in `MinecraftAuthoritativeTargetValidator`.
-
-Existing focused tests include server-distance clamp boundaries
-(`ServerConfigBoundsTest`), native candidate/raycast seams
-(`RaycastCandidateFlowTest`), and absent-optional-integration safety
-(`OptionalDependencySafetyTest`). They do not establish a live client/server
-session proving every range combination, a live long-distance Distant Horizons
-target, installed Sable behavior, or in-game Create selection plus server-anchor
-rejection. Those remain manual/integration evidence gaps rather than implied
-completion.
+Automated coverage and remaining end-to-end scenarios are owned by
+[verification](../../testing/verification.md#capture-and-acceptance-range).

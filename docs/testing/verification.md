@@ -59,12 +59,26 @@ no direct automated test that a valid legacy location S2C packet is ignored by
 
 ### Capture, wheel and cancellation
 
-The current suite covers short press, long press, pending/asynchronous capture,
-wheel state transitions, the actual wheel-open boundary and timeout behavior.
+`PingInteractionStateMachineTest` covers short press, long press,
+pending/asynchronous capture, wheel state transitions, lifecycle abort, the
+actual wheel-open boundary and timeout behavior. `PingCaptureCoordinatorTest`
+covers capture tokens, rejection of stale superseded completions, completion
+races, first-completion ownership and identity-preserving metadata retention.
+`TargetSnapshotTest` covers snapshot identity, copied capture metadata and frozen
+context construction; `TargetSnapshotBlockClassificationTest` covers explicit
+and absent block-entity classification metadata; and
+`MinecraftTargetSnapshotFactoryDetailedTest` covers retaining local detail only
+for the matching entity-hit owner.
+
 `LongPressCompatibilityControllerTest` covers the ordinary rapid-click and
 asynchronous deferred-compatibility paths, with focused bounds coverage supplied
 by the applicable config-bounds tests. These are controller/config slices, not
-real input callbacks or render-frame integration.
+real input callbacks or render-frame integration. They do not exercise the real
+focus-loss `KeyMapping.releaseAll` hook, screen-transition callbacks,
+level-instance/dimension discontinuity detection or loader/gameplay input
+lifecycle. The abort-before-ownership-clear order is source-confirmed; the
+state-machine abort and coordinator stale-token cases do not directly test an
+abort followed by a late asynchronous completion.
 
 `CancelCandidatePickerTest` covers press-ray cone filtering and nearest-candidate
 selection, while `ClientMarkerStoreTest` covers owner/dimension retrieval.
@@ -102,7 +116,7 @@ Focused coverage exercises:
 - an immutable entity-local-geometry owner snapshot;
 - owner resolution and `HIT`/`MISS`/`UNAVAILABLE`/`FAILED` candidate rules;
 - retention of entity-local metadata only for the matching resolved identity;
-- native local block/fluid shape policy and exact-tie behavior;
+- native local block/fluid shape policy and the exact block/fluid kind tie;
 - the common native local-shape scanner and candidate pipeline;
 - the Create-free contraption engine; and
 - lazy Create adapter/loading seams and delegate-unavailable behavior.
@@ -112,8 +126,10 @@ boundaries. They do not constitute an in-game Create validation.
 
 ### Capture and acceptance range
 
-Focused tests cover server range clamps, native candidate/raycast seams, and
-absent optional-integration safety. Source and focused seam evidence establish
+`ServerConfigBoundsTest` covers server range clamps,
+`RaycastCandidateFlowTest` covers native candidate/raycast seams, and
+`OptionalDependencySafetyTest` covers absent optional-integration safety.
+Source and focused seam evidence establish
 the native `min(raycastDistance, pingDistance)` limit, Distant Horizons'
 independent trace, the server acceptance range, and Create/Sable reuse of the
 finite native segment. No automated end-to-end test exercises that entire client capture,
@@ -279,6 +295,8 @@ The following gaps remain open until direct evidence closes them:
   no local fallback;
 - real input-callback and render-frame behavior for rapid/deferred long-press
   compatibility;
+- asynchronous completion after lifecycle abort, including the token
+  invalidation/ownership-clear boundary;
 - compatibility create-only dispatch conformance: the controller currently
   receives an action result rather than an explicit successful-dispatch outcome.
   A courtesy-rejected `CreatePing` can therefore still look qualifying even
@@ -290,6 +308,9 @@ The following gaps remain open until direct evidence closes them:
   Fabric, Forge, and NeoForge, beyond the input-state seams; and
 - the complete range pipeline across native, Distant Horizons, Create/Sable,
   packet transport, and authoritative acceptance;
+- deterministic local-position ordering of equal-distance, same-kind local
+  child hits: the x/y/z comparator is source-confirmed, but no test exercises
+  position ordering; the focused exact-tie case pins only block versus fluid;
 - live server-settings UI, permission, request/response, update, and persistence
   behavior;
 - direct runtime proof that valid legacy S2C locations are presentation no-ops,
@@ -362,17 +383,17 @@ or because related automated tests exist.
 | Block | Plain `block` versus `entity_block`; `ALL`/`COMPATIBLE`/`VOXEL_SHAPE_ONLY` modes and source fallback; whitelist native glow and fallback; a non-full native shape; same-type state change versus block-type replacement. |
 | Entity | Ordinary entity and dropped item; movement and same-dimension teleportation; death and disappearance; same-dimension world unload/rejoin and runtime-ID reuse in a game session. |
 | Wheel | Short and long press; every sector and border color; configured timeout; frozen target; location fallback. |
-| Selection policy and input | Live GUI/screen callbacks for selection gating; physical key-repeat behavior on Fabric, Forge, and NeoForge; selection toggles, entity blacklist/default `simulated:honey_glue` rule, and spectator exclusion in a game session. |
+| Selection policy and input | Live GUI/screen callbacks for selection gating; focus-loss `KeyMapping.releaseAll`, screen-transition and level-instance/dimension discontinuity aborts with late asynchronous completion; loader/gameplay input lifecycle and physical key-repeat behavior on Fabric, Forge, and NeoForge; selection toggles, entity blacklist/default `simulated:honey_glue` rule, and spectator exclusion in a game session. |
 | Movement, death and replacement | Target movement while the wheel is open; entity death or dimension change; block state change or replacement while open. |
 | Naming and chat | Custom-name formatting; localized base names; item naming; phrase-only text color. |
 | Cancellation | Cone and nearest-own-marker selection; inability to cancel another player's marker; stale/display-hidden candidate followed by server rejection with no local fallback. |
 | Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location. |
 | Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live server-settings open/correlation/permission/edit/update/persistence flow. |
-| Range | Native minimum, Distant Horizons route, Create/Sable finite-segment reuse, and server acceptance in one client/server pipeline. |
+| Range | Client/server range combinations in one live pipeline: native minimum, a live long-distance Distant Horizons target, Create/Sable finite-segment reuse and server acceptance, including exact Create surface selection followed by whole-entity server-anchor range rejection. Installed-Sable scenarios are listed below. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |
 | Optional content and rendering | Absent or partially present optional content; Create/Flywheel routes; occlusion and arbitrary camera angles; current shape, offset and seed. |
 | Render entity lookup | A real frame epoch shared by HUD marker updates and optional outlines; fresh non-render lookups after render misses; CPU-frame and allocation measurements for 1, 10, and 50 entity marks in a dense world at high FPS. |
-| Create contraption raycast | Hollow, sparse and overlapping contraptions; world-wall ordering; all transparent/fluid policy combinations including waterlogging; moving/rotated, minecart-mounted, carriage and gantry forms; portal-hidden or loading data; held press-time target; Create-absent and delegate-unavailable paths; large-structure press cost. |
+| Create contraption raycast | Hollow, L-shaped, sparse and non-full-block structures: hit occupied surfaces and pass through holes; front empty AABBs, overlapping structures and intervening world walls: select the nearest actual target; all four transparent/fluid policy combinations including represented waterlogging and partial fluid shapes; controlled rotations, moving and minecart-mounted structures, pitched carriages and gantry forms; current-dimension portal-hidden portions and client-loading data availability; long rays starting inside only broad bounds versus an actual selected shape; hold the key while the camera or structure moves and retain the press-time target; Create-absent, delegate-unavailable, client-reconnect and different Flywheel/outline backend paths; measure large-structure press-edge targeting cost. |
 | Sable external blocks | An installed-Sable client/server session covering [candidate capture and presentation](../integrations/sable.md#client-capture-and-presentation), [server materialization and release](../integrations/sable.md#server-validation-and-materialization) after removal, expiry, owner disconnect, and empty-audience cleanup, [live-sublevel refresh outcomes](../integrations/sable.md#refresh-lifecycle), names and fail-soft behavior, and multiplayer create, refresh, and removal. |
 
 ## Recording future evidence

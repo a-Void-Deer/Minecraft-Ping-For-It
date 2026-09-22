@@ -16,9 +16,12 @@ The persisted JSON-key catalogue is owned by
 [client configuration](../../config/client.md#target-selection-and-entity-block-presentation).
 
 The names describe the established UI intent, not a general opacity classifier:
-`VISUAL` and `OUTLINE` are Minecraft shape strategies. The exact native
-block/fluid competition and represented-state rules for Create contraptions are
-owned by the [Create target-selection table](../../integrations/create-contraption-raycast.md#existing-target-selection-settings).
+`VISUAL` and `OUTLINE` are Minecraft shape strategies. `VISUAL` follows each
+block's implementation rather than making every translucent model pass-through;
+`OUTLINE` can select decorations with an empty collision shape. Native
+block/fluid competition is owned by [local geometry](local_geometry.md#distance-and-native-local-shapes).
+Create's represented block/fluid-state rules are owned by the
+[Create supplement](../../integrations/create-contraption-raycast.md#existing-target-selection-settings).
 
 ## Toggle input and attempted persistence
 
@@ -33,7 +36,7 @@ table are defaults; the behavior follows the matching configured key mapping.
 This toggle-specific GUI suppression is separate from the active ping
 interaction's screen-transition abort rule in [capture](capture.md#interaction-lifecycle-aborts).
 
-After a claimed toggle, the client attempts `saveSafely`. The in-memory value
+After a claimed toggle, the client attempts a guarded save. The in-memory value
 has already changed, so this is not a guarantee of durable persistence. Handler
 versioning, recovery, and save-protection behavior are owned by
 [configuration revisioning](../config/revisioning.md).

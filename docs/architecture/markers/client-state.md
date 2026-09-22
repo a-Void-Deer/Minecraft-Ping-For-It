@@ -18,10 +18,10 @@ only `SYNCHRONIZED` and `STALE`; `EXPIRED` is an authoritative removal reason,
 not a third client state. Client bookkeeping is main-thread local and retains
 enough state to tolerate packet ordering and packet loss.
 
-- `displayExpiresAtLocalTick` is the record's independent visual deadline. A
-  record is visually active only while `localTick < displayExpiresAtLocalTick`;
+- The record has an independent visual deadline. It is visually active only
+  while local time is strictly before that deadline;
   reaching the deadline does not by itself delete a synchronized record.
-- `fallbackExpiresAtLocalTick` is the record's synchronization fallback. It is a
+- The synchronization fallback deadline is a
   per-record derived value, not a user display setting. It is loss recovery for
   a missing authoritative removal and governs a possible transition to `STALE`,
   not the independently selected visual deadline.
@@ -33,7 +33,7 @@ elapsed visual deadline leaves the synchronized record stored.
 ## Visual deadline fixing
 
 The display-duration policy is sampled for the first successful insertion of an
-ID and fixes that record's `displayExpiresAtLocalTick`. The
+ID and fixes that record's visual deadline. The
 `markerDisplayDuration` configuration key, its follow-server sentinel, and its
 legal values are catalogued in [client configuration](../../config/client.md).
 
@@ -76,9 +76,8 @@ A merely local fallback-`STALE` record has no authoritative-removal tombstone
 and can recover to `SYNCHRONIZED` if a later same-ID snapshot arrives; while the
 record remains stored, that recovery still does not change its existing visual
 deadline. Once local housekeeping has finally deleted a record after its visual
-deadline, a later same-ID create is currently treated as a new insertion and
-receives a new deadline. That final late-create behavior and its unresolved
-contract and coverage status remain a known gap tracked in
+deadline, a later same-ID create is treated as a new insertion and receives a
+new visual deadline. Automated coverage of this behavior remains a gap tracked in
 [verification](../../testing/verification.md).
 
 The fallback branches above are state-specific. A visually expired

@@ -21,8 +21,8 @@ General reset, screen, world, and token-abort rules remain owned by
 
 Both paths require a successful local dispatch outcome for the preceding default
 `CreatePing`: it passed the courtesy limiter, was recorded as dispatched, and
-was handed to the sender. This is not server acceptance. A courtesy-dropped
-request is never queued, retried, or replayed; see
+was handed to the sender. This is not server acceptance. The create-only gate
+and its rejected-request consequences are owned by
 [rate policy](../config/rate-limit.md#create-only-dispatch-boundary).
 
 ## Rapid-click virtual hold
@@ -59,5 +59,5 @@ remembered release is applied to that new interaction. A missing ray, or a first
 interaction ending without a qualifying dispatched create, discards the deferred
 press. The new capture reads current range and selection policy when it starts
 and may complete synchronously or asynchronously under
-[capture](../picking/capture.md). Compatibility does not defer every press,
-replay a throttled create, or synthesize a separate duration policy.
+[capture](../picking/capture.md). Compatibility does not defer every press or
+synthesize a separate duration policy.

@@ -45,8 +45,9 @@ stealing the cursor from a screen or another owner.
 The client-side candidate collection and the server's active cancellable set are
 deliberately different. On a wheel release that can select the center action,
 the client collects every **stored** marker whose owner is the local player and
-whose target dimension is the current dimension. `markersOwnedInDimension` does
-not filter for visual activity or for `SYNCHRONIZED` versus `STALE`; a stored
+whose target dimension is the current dimension. This query does not filter for
+visual activity or for `SYNCHRONIZED` versus `STALE` under the
+[client-state contract](../markers/client-state.md); a stored
 candidate can therefore be stale or past its local display deadline. This local
 collection is only a selection aid and is not an assertion that the marker is
 still server-active or removable.

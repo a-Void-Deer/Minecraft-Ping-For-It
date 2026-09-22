@@ -10,13 +10,10 @@ The target-selection values are copied into the ordinary ray's immutable policy
 at capture start; their toggles and raycast meanings are owned by
 [selection policy](selection_policy.md).
 
-When the snapshot is ready, evaluate matchers sequentially in the catalog's
-ascending numeric-priority order, retaining declaration order for equal
-priorities. Skip an absent binding or inactive matcher; the **first** `MATCH`
-ends evaluation and supplies the frozen Target Type. This is not an
-all-active-match evaluation. The [catalog priority/declaration rules](../identity/catalogs.md)
-own the catalog itself. Freeze the resolved Target and Target Type for the rest
-of the interaction. Camera motion, target motion, and another entity entering
+When the snapshot is ready, resolve its Target Type under the
+[catalog matching rules](../identity/catalogs.md). Freeze the resolved Target
+and Target Type for the rest of the interaction. Camera motion, target motion,
+and another entity entering
 the crosshair must not retarget or change the wheel. Release, selection, and
 timeout do not initiate a new selection ray.
 
@@ -65,10 +62,8 @@ lifecycle token ownership. Rapid and deferred paths, the qualifying local-dispat
 boundary, and compatibility-specific transition behavior are owned by
 [long-press compatibility](../input/long-press-compatibility.md).
 
-Focused state-machine seams cover lifecycle abort and stale capture-token
-handling. They do not exercise the real focus-loss hook, screen-transition
-callback, or loader/gameplay input lifecycle; those remain distinct integration
-evidence boundaries in [verification](../../testing/verification.md).
+Coverage and remaining input-lifecycle scenarios are inventoried in
+[verification](../../testing/verification.md#capture-wheel-and-cancellation).
 
 ## Integration and authority boundaries
 

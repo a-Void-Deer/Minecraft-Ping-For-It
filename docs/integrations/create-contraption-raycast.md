@@ -1,11 +1,10 @@
 # Create contraption ray targeting
 
-This supplement owns Create-specific transform, captured-view, shape-kernel,
-cost, limitation, and manual-scenario details. The shared owner snapshot and
-owned `HIT`/`MISS`/`UNAVAILABLE`/`FAILED` behavior is defined by
-[entity-local picking](../architecture/picking/local_geometry.md) and
-[D0006](../decisions/D0006-exact-owned-geometry.md). The integration overview is
-[Create](create.md).
+This supplement owns Create-specific transforms, captured views, optional
+loading, cost and limitations. Shared geometry ownership and the native picking
+kernel are owned by [entity-local picking](../architecture/picking/local_geometry.md);
+[D0006](../decisions/D0006-exact-owned-geometry.md) explains that boundary.
+The integration overview is [Create](create.md).
 
 ## Scope
 
@@ -24,89 +23,78 @@ A successful hit still creates a marker for the exact contraption entity. It doe
 
 ## Existing target-selection settings
 
-For an immediate capture, one finite world-space ray and the current selection
-policy are sampled at the press edge. The same immutable policy controls world
-picking and the selected native shapes inside a contraption. This immediate
-capture boundary is part of [press-time capture](../architecture/picking/capture.md).
+Contraption picking consumes the same frozen ray and immutable
+[selection policy](../architecture/picking/selection_policy.md) as world picking.
+Sampling is owned by [press-time capture](../architecture/picking/capture.md),
+including the [deferred compatibility boundary](../architecture/input/long-press-compatibility.md).
+The integration adds no separate block/fluid toggle or capture range; native
+shape selection and competition follow [local geometry](../architecture/picking/local_geometry.md).
 
-The [narrow deferred compatibility path](../architecture/input/long-press-compatibility.md)
-is different. While a first capture is
-pending, a second physical press freezes only its origin and direction; it does
-not yet select a target or freeze range and selection settings. When the actual
-deferred capture starts after the preceding real `CreatePing` dispatch
-boundary, it reads the then-current range and [selection policy](../architecture/picking/selection_policy.md).
-It may then complete synchronously or asynchronously under the ordinary capture
-contract.
-
-| Setting | Disabled | Enabled |
-| --- | --- | --- |
-| Pass through transparent blocks | `ClipContext.Block.OUTLINE` | `ClipContext.Block.VISUAL` |
-| Mark fluids | `ClipContext.Fluid.NONE` | `ClipContext.Fluid.ANY` |
-
-These are native shape strategies, not opacity tests or a hard-coded transparent-block list. `VISUAL` follows each block's implementation; it does not imply that every translucent model is pass-through. `OUTLINE` can select visible decorations whose collision shape is empty.
-
-When fluids are enabled, the block and fluid shapes compete by distance. A block wins an exact block/fluid tie. Fluid hits retain the hosting block's registry ID and the fluid's registry ID separately.
+Fluid hits retain the hosting block's registry ID and the fluid's registry ID
+separately.
 
 Only fluid state represented by captured contraption block states is available, including represented waterlogged states or fluid blocks. The integration does not invent missing fluid cells, change Create assembly/disassembly, or alter Minecraft fluid-shape caches. Neighbor-sensitive fluid queries use the captured local view. Native `getHeight` and cached `getShape` may differ after a canonical fluid state has already had its shape computed; targeting follows the native shape returned for the request.
 
 ## Selection pipeline
 
-1. For an immediate capture, capture one finite world-space ray and its selection policy at the press edge. A deferred compatibility capture uses the stored origin and direction and samples range and selection policy only when that capture actually starts; its sequence is owned by [long-press compatibility](../architecture/input/long-press-compatibility.md).
-2. Keep the existing world clip and broad-phase entity query.
-3. Resolve an exact entity-type geometry owner before admitting a candidate into nearest-hit selection.
-4. For an owned Create candidate, transform the captured segment into contraption-local coordinates using Create's native transform at partial tick `1.0`.
-5. Capture local block states, represented fluid states, portal-hidden positions, and available existing client block entities for the synchronous attempt.
-6. Evaluate eligible native block/fluid shapes at their actual local positions and select the nearest real surface.
-7. Compare that result against other entities and the world hit using the existing strict nearest-hit rules.
+The source ID is `pingforit:create_contraption_raycast`. It participates in the
+existing world clip and broad-phase entity query under the owner-snapshot,
+admission, ordering and failure rules of
+[entity-local picking](../architecture/picking/local_geometry.md).
 
-The coarse entity AABB is only a candidate bound. A ray through a hole must not select the surrounding contraption merely because it intersects that bound. Rejecting one candidate still allows another entity or a world block behind it to win. The final precise contraption hit remains an `EntityHitResult`, preserving the existing Sable/block and Distant Horizons/miss branching.
+For an owned Create candidate:
 
-The source ID is `pingforit:create_contraption_raycast`. Its registration
-participates in the common explicit numeric-priority/source-ID ordering, and one
-immutable registry snapshot is fixed for the complete ray. The shared handling
-of unowned candidates and the four owned outcomes is defined once in
-[entity-local picking](../architecture/picking/local_geometry.md). For this Create source, a
-recoverable capture or scan failure invalidates the complete candidate attempt,
-including any provisional hit; other candidates remain eligible.
+1. Transform the captured finite segment into contraption-local coordinates
+   using Create's native transform at partial tick `1.0`.
+2. Capture local block states, represented fluid states, portal-hidden positions
+   and available existing client block entities for the synchronous attempt.
+3. Supply those native shapes at their actual local positions to the common
+   picking kernel, then return the precise whole-entity hit to common nearest-hit
+   competition.
+
+The returned hit's interaction with Sable and Distant Horizons is owned by
+[capture](../architecture/picking/capture.md#integration-and-authority-boundaries).
 
 ## Local geometry and optional loading
 
-`CreateContraptionRaycastAdapter` is a Create-free ownership shell. It is registered after the Create mod-ID check and lazily loads `CreateContraptionRaycastDelegate`. Ownership of the known IDs survives delegate unavailability, preventing an AABB fallback after an optional linkage failure. Its registration is closed on client-session teardown and reset for re-registration. Detailed failure diagnostics are bounded; targeting does not add toast or action-bar feedback.
+The Create-free ownership shell is registered after the Create mod-ID check and
+lazily loads the Create-dependent delegate. Ownership of the known IDs survives
+delegate unavailability, preserving the common owned-candidate contract after an
+optional linkage failure. Its registration is closed on client-session teardown
+and reset for re-registration. Detailed failure diagnostics are bounded;
+targeting does not add toast or action-bar feedback.
 
-`CreateContraptionRaycastEngine` supplies the snapshot-local `BlockGetter` and collision context to the common `NativeLocalShapeRaycaster`. Missing or portal-hidden local positions are air. Fluid state is derived from captured block state. Block entities come only from already-existing Create client state; ordinary-world lookups at local coordinates are not used.
+The integration supplies the snapshot-local block view and collision context to
+the common scanner. Missing or portal-hidden local positions are air. Fluid
+state is derived from captured block state. Block entities come only from
+already-existing Create client state; ordinary-world lookups at local
+coordinates are not used.
 
-Positional collision-context checks use the camera's transformed local feet. Non-positional context behavior is delegated. No live entity, world, block state, fluid state, or shape is retained in the locked domain metadata.
-
-The common scanner uses `ClipContext.getBlockShape` and `getFluidShape`, then intersects the finite segment with boxes emitted by native `VoxelShape.forAllBoxes`. Those boxes are the selected native shape's exact decomposition; they are not unit-cube approximations. All candidate positions are considered, including shapes extending outside their owning block cell. Exact equal-distance child hits use deterministic local-position ordering.
-
-Create's interaction picker is not reused: it selects outline shapes and its traversal has a roughly 201-step limit. Native `VoxelShape.clip` is also not used for the precise kernel because its interior probe is proportional to the complete segment length (`delta * 0.001`). The segment kernel handles origin containment and boundaries without that length-scaled probe. Existing entity endpoint exclusion and global block/entity tie rules are retained.
+Positional collision-context checks use the camera's transformed local feet.
+Non-positional context behavior is delegated. The common native-shape algorithm
+is owned by [local geometry](../architecture/picking/local_geometry.md#distance-and-native-local-shapes).
+The reasons for using it instead of Create's interaction picker or native
+`VoxelShape.clip` are recorded in [D0006](../decisions/D0006-exact-owned-geometry.md#alternatives-considered).
 
 ## Captured detail and future constituent markers
 
-The detailed raycast result carries transient data bound to the exact selected entity. `MinecraftTargetSnapshotFactory` rejects mismatched owner detail, and `PingCaptureCoordinator` retains detail only if resolution preserves the same entity target.
-
-`EntityLocalGeometryMetadata` reaches `CapturedPingContext` with copied values: source ID, block/fluid kind, local block position, expected block/fluid registry identities, and local/world hit points. Release, wheel selection, timeout, and camera or contraption movement do not trigger another selection ray.
+Create contributes entity-local capture metadata under the common
+[identity-retention contract](../architecture/picking/local_geometry.md#frozen-metadata-and-whole-entity-identity).
+Its result remains subject to [target locking](../architecture/picking/capture.md).
 
 A future whole-versus-constituent option can derive its target from this frozen hit. A moving constituent must not be identified by an ordinary world `BlockTarget`. A future provider would need the dimension, exact contraption owner UUID, local block position, and expected registry identity, together with authoritative validation and lifecycle handling. Existing external-block provider facilities are a possible foundation, not an implemented Create constituent provider.
 
-Current packets and whole-entity server authority are unchanged: the server validates identity, liveness, classification, and range from the entity anchor. It does not replay the client's original ray or validate its precise geometry. A near surface on a very large contraption can still be outside the accepted whole-entity anchor range.
+Whole-entity requests retain the [common authority boundary](../architecture/picking/local_geometry.md#frozen-metadata-and-whole-entity-identity).
+The exact-surface versus server-anchor distance distinction is owned by
+[range acceptance](../architecture/picking/range.md#server-acceptance).
 
 ## Cost and validation boundaries
 
-Snapshotting and scanning are approximately linear in captured entries plus native shape boxes, once per ping capture rather than every rendered frame. There is no fixed 201-cell cap, persistent shape index, or global geometry cache in this integration. Very large overlapping contraptions require performance measurement; no latency guarantee is made.
+Snapshotting and scanning are approximately linear in captured entries plus native shape boxes, once per ping capture rather than every rendered frame. There is no fixed traversal-cell cap, persistent shape index, or global geometry cache in this integration. Very large overlapping contraptions require performance measurement; no latency guarantee is made.
 
 Discovery still depends on Create's entity bounds. Native selection shapes and Create transforms do not promise pixel-perfect agreement with GPU-rendered meshes or every render-only minecart correction.
 
-Automated regression coverage targets the common candidate pipeline, native shape/policy scanner, immutable capture bridge, and Create-free engine/loading seams. These tests and optional-API compilation do not constitute an in-game Create validation.
-
-Manual validation checklist:
-
-- Hollow, L-shaped, sparse, and non-full-block structures: hit occupied surfaces and pass through holes.
-- Front empty AABBs, overlapping structures, and intervening world walls: select the nearest actual target.
-- All four transparent-block/fluid-setting combinations, including represented waterlogged blocks and partial fluid shapes.
-- Controlled rotations, moving and minecart-mounted structures, pitched carriages, and gantry structures.
-- Current-dimension portal-hidden portions and data availability during client loading.
-- Long rays, starting inside only the broad bounds, and starting inside an actual selected shape.
-- Hold the ping key while the camera or structure moves: retain the press-time target.
-- Create absent, delegate unavailable, client reconnect, and different Flywheel/outline backends.
-- Large structures: measure press-edge targeting time.
+Automated coverage is inventoried in
+[verification](../testing/verification.md#exact-entity-local-picking-and-create-raycast-seams);
+the [pending manual matrix](../testing/verification.md#pending-manual-and-integration-matrix)
+owns the Create gameplay and performance scenarios.

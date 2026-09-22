@@ -76,19 +76,19 @@ the [wheel contract](../picking/wheel.md), not this phrase-only text-color rule.
 
 ## New-marker feedback and dimension behavior
 
-For a created-marker update, the client runtime first rejects corrupt input and
-authoritatively tombstoned marker IDs. For a remaining update, it determines
-whether the marker is newly seen from the marker's presence in the **current**
-local store (see [client marker state](../markers/client-state.md)) before
-upserting it. Only a newly seen marker is eligible for the
+Only created-marker updates accepted under both
+[network protocol](../network/protocol.md) and
+[client marker state](../markers/client-state.md) reach receipt evaluation.
+Before upserting an accepted update, the client checks whether its ID is absent
+from the **current** local store. Only such a newly seen marker is eligible for the
 sound and chat hooks. An update to an ID that is still locally known—including
 an upsert that refreshes an external locator—does not repeat either hook.
 
 This is current local-store membership, not permanent once-per-ID history:
-local marker-record cleanup can end membership. A full store clear also removes
-retained tombstones, allowing a later receipt to be newly seen. While retained,
-an authoritative-removal tombstone separately suppresses a late create for that
-ID. The sound hook is eligible only when a game, level, and player are available
+local marker-record cleanup can end membership, and a store clear can allow a
+later accepted receipt to be newly seen. Record retention, tombstones and clear
+behavior are owned by [client marker state](../markers/client-state.md).
+The sound hook is eligible only when a game, level, and player are available
 and the marker target dimension matches the current level. The chat hook
 deliberately has no target-dimension filter, so a marker recipient can receive a
 cross-dimension line subject to the normal client presentation validity checks.
