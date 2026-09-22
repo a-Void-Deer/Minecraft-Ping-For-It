@@ -20,21 +20,18 @@ entity pings regardless of outline route; see [names and chat](names_chat.md).
 ### Render entity UUID lookup
 
 One world-render pass shares a render-only UUID lookup between HUD marker
-updates and optional entity-outline resolution. `onRenderWorld` begins its
-lookup epoch before marker preparation, so marker views prepared for the HUD
-and optional entity outlines use the same lookup work for that pass. Beginning
-this epoch is not a client-tick operation and is not coupled to an entity
-outline's success or reset state.
+updates and optional entity-outline resolution, so marker views prepared for the
+HUD and optional entity outlines use the same lookup work for that pass.
+Beginning this shared lookup is not a client-tick operation and is not coupled
+to an entity outline's success or reset state.
 
-Beginning an epoch does not scan entities. A live positive result requested in
-the immediately preceding pass can be reused in the next pass. Positives store
-only entities actually requested by UUID and record `lastUsedEpoch`; at the
-start of a pass, retain entries used by the preceding pass and prune older
-entries that were not used again. Thus a positive remains recent only while it
-continues to be requested across adjacent passes; the cache does not acquire a
-positive merely because an entity appeared in a scan. A change in the client
-world object by identity (`!=`), rather than a dimension identifier or string,
-clears this state. A null world and world leave clear it as well.
+Beginning it does not scan entities. A live positive result requested in the
+immediately preceding pass can be reused in the next pass, and a positive
+remains reusable only while it continues to be requested across adjacent
+passes; the cache does not acquire a positive merely because an entity appeared
+in a scan. A change in the client world object by identity (`!=`), rather than a
+dimension identifier or string, clears this state. A null world and world leave
+clear it as well.
 
 Every returned entity, whether reached through a positive or an index, must be
 live for this request: it must not be removed, its current UUID must equal the
@@ -56,7 +53,8 @@ populates the UUID cache. Non-render `GameContext#getEntity` lookups for
 validation, names, and cancellation remain fresh immediate lookups, unaffected
 by a render-path miss. Render-time position, tick delta, and projection are
 still evaluated each frame, and the existing last-live fallback remains in
-place.
+place. The lookup-algorithm and locator-resolver seams are inventoried in
+[testing and verification](../../testing/verification.md#render-entity-lookup-and-locator-resolver-seams).
 
 An index represents what was available when it was built. An entity added or
 replaced after construction may not be visible until a later pass, while a removed
@@ -69,32 +67,23 @@ When the optional entity-outline registry is empty, skip that entity's resolve
 and runner fragment. This does not change vanilla outline processing,
 block-model routes, frame flags, or post-processing.
 
-These costs describe lookup and scanning only, not total frame time, FPS, GPU
-work, or allocation volume. For `E` loaded renderable entities, `K` requested
-UUIDs, and `R` retained recent targets, warm lookup work is average `O(K)`;
-after a cold request builds the index it is `O(E + K)`; and pass-start pruning
-is `O(R)`. The temporary index uses `O(E)` space, while the positive cache is
-limited by recently requested targets rather than the full scanned population.
-
 ## Live block state and native-glow attempt eligibility
 
-Authoritative marker creation rejects a block that has already been replaced by
-a different block type. After acceptance, presentation uses the current live
-BlockState. A same-type state/property change preserves the target and updates
-the live model or shape. Replacing an ordinary committed block does not by
-itself remove the marker, although the current renderer will not claim a stale
-presentation subject as a successful native route.
+Committed block lifetime, block replacement, and same-type state/property
+behavior are owned by [the target model](../identity/target_model.md). After
+acceptance, presentation uses the current live BlockState, and the current
+renderer will not claim a stale presentation subject as a successful native
+route.
 
-The client [whitelist and blacklist](../config/client.md) gate native-glow
+The client [whitelist and blacklist](../../config/client.md) gate native-glow
 attempts. A blacklist match overrides a whitelist match. Additional route
 conditions are:
 
 - Ordinary `block`: no BlockEntity and live render shape `MODEL`; when
   eligible, attempt vanilla model glow through the ordinary-block route.
-- `entity_block`: a relevant live BlockEntity is required. Under the active
-  entity-block mode, independently attempt the actual BER source and, for a
-  `MODEL` state, the loader-aware baked-model source. Optional sources are
-  admitted only by that mode.
+- `entity_block`: under the active entity-block mode, the permitted BER and
+  loader-aware baked-model preconditions, and optional-source admission, are
+  owned by the [source outcome contract](../geometry/geometry_sources.md).
 
 Here `W` is the target-type whitelist result and `B` is a blacklist match. The
 table describes **attempt eligibility**, never guaranteed geometry emission:
@@ -113,20 +102,18 @@ absent, unsupported, zero-emitting, or failed source into a rendered result.
 
 ## Why native glow remains preferred
 
-When eligible and successful, BER, baked-model, or optional geometry follows the
-target's established rendering form more closely than a shape-only outline.
-The VoxelShape route outlines the native selection shape; it is not a model
-silhouette and is not expected to reproduce dynamic BER details or arbitrary
-rendered meshes. Native glow therefore remains preferred, while the shape route
-provides a deterministic outline when normal geometry is ineligible or fails.
-The decision and rejected alternatives are recorded in
-[D0002](../decisions/D0002-voxel-shape-fallback.md).
+When eligible and successful, normal BER, baked-model, or optional geometry
+follows the target's established rendering form more closely than a shape-only
+outline. The rationale and rejected alternatives are recorded in
+[D0002](../../decisions/D0002-voxel-shape-fallback.md).
 
-Only a `RENDERED` result under the common
-[source outcome contract](../geometry/geometry_sources.md) suppresses duplicate
-VoxelShape fallback for that subject and frame. `EMPTY`, `FAILED`, unavailable
-sources, and mere route eligibility preserve fallback. `VOXEL_SHAPE_ONLY`
-selects the shape route directly.
+Source outcomes, fallback suppression, and direct shape-route selection are
+owned by the [source outcome contract](../geometry/geometry_sources.md). A
+marker's lifecycle and HUD data can remain
+active even when the current presentation has no subject; that is distinct
+from a subject whose sources are empty. The replacement and same-registry
+live-state presentation consequences are owned by
+[the target model](../identity/target_model.md).
 
 ## VoxelShape GPU render invariant
 
@@ -138,7 +125,7 @@ state below:
 | --- | --- |
 | Primitive mode | `VertexFormat.Mode.LINES` |
 | Shader | Vanilla `rendertype_lines` |
-| Width | Fixed **3.75 px**, approximately 1.5 times the roughly 2.5 px vanilla selection width |
+| Width | Fixed and wider than vanilla selection lines; the live value is owned by [`BlockOutlineRenderType.LINE_WIDTH`](../../../common/src/main/java/nx/pingwheel/common/client/outline/BlockOutlineRenderType.java) |
 | Depth | `NO_DEPTH_TEST`, with the effective comparison `GL_ALWAYS` |
 | Writes | `COLOR_WRITE` only; do not write depth |
 | Submission | Late composite submission, after normal outline-source success is known |
@@ -157,6 +144,6 @@ from this VoxelShape invariant.
 
 Model offset and seed placement are specified in
 [model placement](model_placement.md). The optional
-[Create entity-outline adapter](../integrations/create.md) has a distinct
+[Create entity-outline adapter](../../integrations/create.md) has a distinct
 entity claim and dispatcher contract and must not be conflated with the
 Create/Flywheel entity-block source.

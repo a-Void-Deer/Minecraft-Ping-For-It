@@ -6,21 +6,16 @@ Confirmed product decision represented by the linked topic contracts.
 
 ## Decision
 
-At the initial physical press, freeze the ray and start capture. The resolved
-target and Target Type become frozen when the capture snapshot is ready. Async
-completion, including Distant Horizons, completes that press-time capture and
-does not sample the release camera. A short release creates the captured target
-with its default Ping Type once capture is ready.
+Preserve press-time intent across synchronous and asynchronous completion.
+[Capture](../architecture/picking/capture.md) owns the sampling, target locking,
+release outcomes and actual-wheel-open boundary;
+[wheel interaction](../architecture/picking/wheel.md) owns an opened wheel's
+timeout and selection behavior.
 
-The wheel opens only after capture is ready and a present/render frame observes
-the key still held. Its timeout begins at actual opening. If it never actually
-opens, release uses the default Ping Type even when the threshold elapsed.
-
-With long-press compatibility enabled, only a second press occurring while the
-first capture is pending may be deferred. That press freezes only origin and
-direction. After the first real `CreatePing` crosses the dispatch boundary, the
-new capture starts and reads current range and selection policy. A deferred
-press is not a queue of throttled creates.
+Allow only the established narrow deferred-capture exception under
+[long-press compatibility](../architecture/input/long-press-compatibility.md).
+Its sequencing and qualifying-dispatch rules preserve single interaction
+ownership rather than introducing a queue of creates.
 
 ## Rationale
 
@@ -52,13 +47,11 @@ ignored or abandon its exact interaction without affecting a newer one.
 
 ## Related docs
 
-[Capture](../picking/capture.md), [wheel](../picking/wheel.md),
-[target model](../identity/target_model.md), and [server authority](D0004-server-authority.md).
+[Capture](../architecture/picking/capture.md),
+[long-press timing](../architecture/input/long-press.md),
+[long-press compatibility](../architecture/input/long-press-compatibility.md),
+[wheel](../architecture/picking/wheel.md), [target model](../architecture/identity/target_model.md), and
+[server authority](D0004-server-authority.md).
 
-Focused tests named by the current coverage include
-`LongPressCompatibilityControllerTest`, `PingInteractionStateMachineTest`,
-`PingCaptureCoordinatorTest`, `TargetSnapshotTest`,
-`TargetSnapshotBlockClassificationTest`, and
-`MinecraftTargetSnapshotFactoryDetailedTest`. They document deferred-ray,
-capture-token, actual-wheel-open and frozen-context boundaries. Test existence
-and a test run remain separate evidence claims.
+Coverage and pending integration evidence are owned by
+[verification](../testing/verification.md#capture-wheel-and-cancellation).

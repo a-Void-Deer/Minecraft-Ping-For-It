@@ -47,14 +47,14 @@ successful normal geometry from being overdrawn by a duplicate shape mask.
 ## Consequences
 
 Normal sources run first and report honest outcomes. Uncovered subjects retain
-shape fallback. The [native VoxelShape geometry](../geometry/voxel_shape.md)
-and [VoxelShape GPU render invariant](../rendering/outline.md#voxelshape-gpu-render-invariant)
+shape fallback. The [native VoxelShape geometry](../architecture/geometry/voxel_shape.md)
+and [VoxelShape GPU render invariant](../architecture/rendering/outline.md#voxelshape-gpu-render-invariant)
 document the live-edge acquisition and render-state/submission portions of one
 invariant.
 
 ## Related docs
 
-[Geometry sources](../geometry/geometry_sources.md),
-[native VoxelShape](../geometry/voxel_shape.md),
-[outline rendering](../rendering/outline.md), and
-[presentation subjects](../rendering/presentation_subjects.md).
+[Geometry sources](../architecture/geometry/geometry_sources.md),
+[native VoxelShape](../architecture/geometry/voxel_shape.md),
+[outline rendering](../architecture/rendering/outline.md), and
+[presentation subjects](../architecture/rendering/presentation_subjects.md).

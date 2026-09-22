@@ -6,21 +6,15 @@ Confirmed product decision represented by the linked topic contracts.
 
 ## Decision
 
-When an immutable entity-local geometry registry snapshot identifies an owner
-for an entity candidate, admit that candidate into nearest-hit selection only
-on an exact local-geometry `HIT`. Owned `MISS`, `UNAVAILABLE`, and `FAILED`
-results reject the candidate and never fall back to its coarse entity AABB.
+Treat a geometry owner's exact result as the selection boundary rather than
+recovering an owned non-hit through a coarse bound. Unowned entities retain
+their existing selection path. The executable owner/result, competition and
+native-shape kernel rules are owned by
+[entity-local picking](../architecture/picking/local_geometry.md).
 
-An entity with no registered geometry owner retains the existing inflated-AABB
-candidate behavior. Rejecting one owned candidate does not reject the ray: other
-entities and the world hit remain eligible under the existing strict nearest
-surface rules.
-
-For native local block/fluid shapes, intersect a finite transformed segment with
-the exact boxes produced by the selected shape's `VoxelShape#forAllBoxes`.
-Preserve deterministic local-position ordering and the documented block/fluid
-tie rule. This targeting decomposition is distinct from outline presentation,
-which uses live `VoxelShape#forAllEdges`.
+Keep exact picking separate from outline presentation. Their native geometry
+contracts are linked from that picking owner and
+[VoxelShape presentation](../architecture/geometry/voxel_shape.md).
 
 ## Rationale
 
@@ -39,7 +33,7 @@ local hit detail is capture metadata, not a constituent target.
 - **Fall back to AABB after an owned non-hit.** Rejected because it selects
   hollow or sparse entities that the exact source explicitly did not hit.
 - **Use Create's interaction picker.** Rejected because it fixes outline-shape
-  behavior and has a roughly 201-step traversal limit unsuitable for this
+  behavior and has a fixed traversal limit unsuitable for this
   captured-ray contract.
 - **Use `VoxelShape.clip` as the precise kernel.** Rejected because its interior
   probe scales with the complete segment length; the finite kernel handles
@@ -60,7 +54,7 @@ replay the client-local ray.
 
 ## Related docs
 
-[Entity-local picking](../picking/local_geometry.md),
-[native VoxelShape distinction](../geometry/voxel_shape.md),
+[Entity-local picking](../architecture/picking/local_geometry.md),
+[native VoxelShape distinction](../architecture/geometry/voxel_shape.md),
 [Create integration](../integrations/create.md), and
 [Create contraption ray targeting](../integrations/create-contraption-raycast.md).

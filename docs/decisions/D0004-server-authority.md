@@ -27,7 +27,7 @@ authoritative in a multiplayer system. Server state is the common source of
 truth for target validity and permissions. Recipient-scoped winner calculation
 also respects the audience captured at creation. Later channel switches do not
 recalculate that audience; its disconnect lifecycle qualification is specified
-by [target validation](../authority/target_validation.md). Retaining losers
+by [target validation](../architecture/authority/target_validation.md). Retaining losers
 permits deterministic recovery after removal or expiry.
 
 ## Why not other approaches
@@ -52,9 +52,12 @@ provider state needs explicit materialization and refresh handling.
 
 ## Related docs
 
-[Target validation](../authority/target_validation.md),
-[ping winner](../authority/ping_winner.md), [security](../security.md),
-[rate policy](../config/rate_limit.md), and [Sable](../integrations/sable.md).
+[Target validation](../architecture/authority/target_validation.md),
+[ping winner](../architecture/authority/ping_winner.md),
+[security](../architecture/security.md),
+[server configuration authority](../architecture/authority/server-config.md),
+[rate policy](../architecture/config/rate-limit.md), and
+[Sable](../integrations/sable.md).
 
 Focused tests named by the current coverage include
 `AuthoritativeTargetValidationTest`, `MarkerCreationServiceTest`,

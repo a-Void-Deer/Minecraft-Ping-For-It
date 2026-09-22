@@ -18,12 +18,13 @@ Flywheel and both outline backends. An owned candidate is accepted only after
 an exact local-shape `HIT`; owned non-hits never recover through the coarse
 entity AABB.
 
-The complete transform, immutable local-view, represented-fluid, native-shape
-kernel, capture metadata, cost, limitation, and manual scenario contract is
-retained in [Create contraption ray targeting](create-contraption-raycast.md).
-The generic owner-result rules and rejected coarse-bound alternative are in
-[entity-local picking](../picking/local_geometry.md) and
-[D0006](../decisions/D0006-exact-owned-geometry.md).
+The transform, immutable local-view, represented-fluid, cost and limitation
+contract is retained in [Create contraption ray targeting](create-contraption-raycast.md).
+The generic owner-result rules, native kernel and capture metadata are owned by
+[entity-local picking](../architecture/picking/local_geometry.md) and
+the rejected coarse-bound alternative is explained by
+[D0006](../decisions/D0006-exact-owned-geometry.md). Manual scenarios are owned by
+[verification](../testing/verification.md#pending-manual-and-integration-matrix).
 
 ## Create entity-outline source
 
@@ -63,7 +64,7 @@ texture, and the exact opaque ping color. This direct mask remains independent
 of Flywheel visualization support.
 
 The adapter follows the common
-[source outcome contract](../geometry/geometry_sources.md). Normal zero output
+[source outcome contract](../architecture/geometry/geometry_sources.md). Normal zero output
 is `EMPTY`; a recoverable exception with no committed vertex is `FAILED`; a
 recoverable exception after shared-buffer vertices have been committed is
 `RENDERED` for that frame with a partial-emission diagnostic. The integration
@@ -131,7 +132,7 @@ subject is covered only after the lower subject's exact BER source reports
 `RENDERED`. A baked-model or Flywheel success, an attempted BER, ownership,
 `EMPTY`, `FAILED`, or unavailable geometry cannot claim that coverage. Until
 then, upper-subject sources and fallback remain eligible. The generic coverage
-contract is in [presentation subjects](../rendering/presentation_subjects.md).
+contract is in [presentation subjects](../architecture/rendering/presentation_subjects.md).
 
 ### Large water-wheel master proxy
 
@@ -146,7 +147,6 @@ target; only presentation selects the master rendering form.
 
 ## Verification boundary
 
-Optional API compilation, structural source checks, and headless outcome tests
-do not constitute in-game Create validation. Create-specific kernel and motion
-scenarios remain listed in the contraption raycast supplement; shared build,
-test, and manual status is reported by the repository's verification document.
+Build and automated-coverage evidence is owned by
+[verification](../testing/verification.md), including the
+[pending Create gameplay and performance scenarios](../testing/verification.md#pending-manual-and-integration-matrix).

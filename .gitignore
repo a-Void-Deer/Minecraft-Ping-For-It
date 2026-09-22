@@ -119,7 +119,7 @@ runs/
 !gradle-wrapper.jar
 
 # AI related files
-AGENTS.md
+/AGENTS.md
 plan.md
 spec.md
 

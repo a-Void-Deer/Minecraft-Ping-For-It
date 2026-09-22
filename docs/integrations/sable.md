@@ -16,10 +16,17 @@ sub-level containment; otherwise it preserves the existing projected-position
 or location fallback. Server validation and materialization remain required
 before that candidate can become a Marker.
 
-The server uses Sable's logical pose for the authoritative external anchor.
-Client presentation separately applies the current render pose to live local
-block data. Those pose roles do not alter the candidate or committed identity
-defined below.
+During server validation, Sable uses its logical pose to derive the external
+validation anchor. Client presentation separately applies the current render
+pose to live local block data. The validation and render-pose roles do not alter
+the candidate or committed identity defined below.
+
+The current external model route and external fallback independently resolve
+provider presentation. The required shared-subject and subject-type contract,
+and the fact that a single immutable frame snapshot is not currently
+guaranteed for those provider-local decisions, are recorded in
+[presentation subjects](../architecture/rendering/presentation_subjects.md) and the
+[verification inventory](../testing/verification.md#sable-integration-coverage).
 
 ## Candidate and committed identity
 
@@ -30,33 +37,36 @@ expected block registry ID, opaque provider locator and block-entity
 classification metadata.
 
 Materialization generates or reuses a provider tracking UUID and produces a
-committed target. Its stable identity is exactly:
-
-```text
-dimension + providerId + stableTargetId + expectedBlockRegistryId
-```
-
-The provider locator, current anchor and block-entity classification are not
-identity. Locator or anchor refresh therefore does not manufacture a new target
-or winner. `providerId`, non-empty `stableTargetId` and
-`expectedBlockRegistryId` are each limited to 256 characters. The opaque
-`providerLocator` is limited to 32767 characters. `dimensionId` must be
-non-blank, but has no 256-character external-identifier limit in the common
-model.
+committed target. The committed stable identity and its common
+provider-independent domain constraints, including the identity quartet, the
+non-identity status of the locator/anchor/classification fields, and the field
+bounds, are owned by the
+[target model](../architecture/identity/target_model.md#external-block-identity).
+The provider-owned candidate fields listed above remain part of this
+integration.
 
 ## Server validation and materialization
 
-The provider checks its provider ID, candidate status, current dimension,
-locator encoding, expected registry ID, live sublevel/container, local level,
-loaded local block, non-air state, matching block registry ID, logical pose and
-finite transformed anchor. The server then applies the normal authoritative
-range check and target-type/Ping-Type checks.
+Provider validation is the nonallocating first phase. It checks provider ID,
+candidate status, current dimension, locator encoding, expected registry ID,
+live sublevel/container, local level, loaded local block, non-air state,
+matching block registry ID, logical pose, and finite transformed validation
+anchor. The normal server range check uses that anchor. Validation allocates no
+tracking reference.
 
-Materialization creates or reuses a tracking point. References are counted:
-marker removal, expiry, owner disconnect, audience-empty cleanup and server
-shutdown release the reference, and the last reference retires the tracking
-point. A failed transaction is released or rolled back without committing an
-unidentifiable target.
+After validation, `MarkerCreationService` initially classifies the normalized
+target and checks the requested Ping Type's membership. Only then does provider
+materialization resolve live state again, create or reuse a tracking reference,
+and replace the target/anchor with committed values. The service reclassifies
+that committed target and repeats the requested Ping Type membership check. It
+does **not** range-check the replacement anchor a second time. If the acquired
+materialization later fails reclassification, fails the post-materialization
+Ping Type check, or fails marker storage, it releases that reference rather than
+committing the target.
+
+A successfully committed reference is counted: marker removal, expiry, owner
+disconnect, audience-empty cleanup, and server shutdown release it, and the last
+reference retires the tracking point.
 
 ## Refresh lifecycle
 
@@ -83,13 +93,14 @@ MarkerCreate still requires an authenticated sender and passes server
 rate/channel policy, range, provider validation/materialization and allowed
 Ping-Type checks. MarkerRemove still requires ownership of the active marker.
 Server-settings editing remains the separate permission-level-3 operation documented in
-[security](../security.md).
+[security](../architecture/security.md).
 
 Reflection and provider failures are logged through bounded, rate-controlled
 diagnostics with complete exception details where the diagnostics contract
 requires them; they do not become hard dependencies for unrelated pings.
 
-Related contracts: [target identity](../identity/target_model.md),
-[server validation](../authority/target_validation.md),
+Related contracts: [target identity](../architecture/identity/target_model.md),
+[presentation subjects](../architecture/rendering/presentation_subjects.md),
+[server validation](../architecture/authority/target_validation.md),
 [server authority decision](../decisions/D0004-server-authority.md), and
 [Sable coverage and pending scenarios](../testing/verification.md#sable-integration-coverage).

@@ -7,17 +7,11 @@ VoxelShape route is selected.
 
 ## When the route is selected
 
-VoxelShape is a fallback, never the default substitute for an eligible existing
-glow path. It is selected for an ordinary block when native glow is ineligible
-or does not emit, and for an `entity_block` when all permitted normal geometry
-sources are empty, failed, or unavailable. `VOXEL_SHAPE_ONLY` selects it
-directly without constructing a normal-source context.
-
-Selection follows the [source outcome contract](geometry_sources.md) and the
-resolved [presentation subjects](../rendering/presentation_subjects.md).
-Multipart structure alone is not a reason to coerce a subject to ordinary
-`block`: an eligible bed still attempts its `entity_block` sources before
-fallback.
+Route selection, source ordering, and failure handling are owned by the
+[source outcome contract](geometry_sources.md) and the resolved
+[presentation subjects](../rendering/presentation_subjects.md). VoxelShape is
+always a fallback or explicit `VOXEL_SHAPE_ONLY` route, never the default
+substitute for an eligible existing glow path.
 
 ## Live native shape and edges
 
@@ -40,18 +34,15 @@ Entity-local picking may decompose a selected native shape with
 That is a targeting kernel, not an outline renderer. It does not replace or
 relax the live `getShape` to `forAllEdges` presentation route described here.
 The shared distinction is summarized in
-[D0006](../decisions/D0006-exact-owned-geometry.md).
+[D0006](../../decisions/D0006-exact-owned-geometry.md).
 
 ## Combined invariant
 
-A conforming VoxelShape outline therefore requires both:
-
-1. the live native shape and edge route in this document; and
-2. the complete no-depth line-render and late-submission contract in
-   [outline rendering](../rendering/outline.md).
-
+A conforming VoxelShape outline requires both the live native shape and edge
+route in this document and the GPU contract in
+[outline rendering](../rendering/outline.md); neither half is complete alone.
 Native-glow eligibility is tested separately from this combined invariant. The
 rationale for preserving normal geometry before shape fallback is recorded in
-[D0002](../decisions/D0002-voxel-shape-fallback.md). Automated structure or
+[D0002](../../decisions/D0002-voxel-shape-fallback.md). Automated structure or
 behavioral coverage does not by itself prove in-game visibility from every
 camera angle; verification reporting is maintained separately.

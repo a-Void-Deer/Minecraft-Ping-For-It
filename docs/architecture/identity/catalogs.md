@@ -3,10 +3,13 @@
 ## Target Type resolution and fixed order
 
 Target Types are code-defined matchers. When the captured snapshot becomes
-available, evaluate every active matcher. Lower numeric priority wins; equal
-priorities use earlier declaration order. Pure location is always the lowest-
-priority fallback. The resolved Target and Target Type are then frozen for the
-interaction; the server independently repeats classification from its own state.
+available, inspect the ordered catalog in ascending numeric-priority order,
+using earlier declaration order for equal priorities. A missing matcher binding
+is skipped; each bound matcher is evaluated once, and `INACTIVE` or `NO_MATCH`
+continues to the next entry. Resolution returns the first `MATCH` and does not
+invoke later matchers. Pure location is always the lowest-priority fallback.
+The resolved Target and Target Type are then frozen for the interaction; the
+server independently repeats classification from its own state.
 
 The following declaration order, ordered Ping Type sets and defaults are fixed:
 
@@ -21,9 +24,9 @@ The following declaration order, ordered Ping Type sets and defaults are fixed:
 Definitions and lookup may use maps, but resolution and presentation must use
 explicit ordered lists, never unordered map iteration, accidental registration
 order or loader-specific ordering. Adding a code definition must not require
-ad-hoc changes throughout input, networking, rendering or chat. Target/Ping
-Types have no config/datapack/user-definition system or public plugin/scripting
-layer in this iteration.
+ad-hoc changes throughout input, networking, rendering or chat. The absence of
+a config/datapack/user-definition system or public plugin/scripting layer is
+owned by [compatibility](../../compatibility.md).
 
 ## Block classification
 
@@ -35,9 +38,8 @@ renderer. Unknown or absent registry/classification data fails soft to generic
 `block`. The virtual `minecraft:block_display` is an entity target and can
 never be an `entity_block`.
 
-Absent optional registrations are ignored; partially present content continues
-to match, while a group with no valid concrete content is inactive and
-non-matching. See [compatibility](../compatibility.md) and
+Absent optional registration handling is owned by
+[compatibility](../../compatibility.md). See
 [presentation subjects](../rendering/presentation_subjects.md) for the distinct
 render-target classification of owner/master subjects.
 

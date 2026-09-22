@@ -28,7 +28,7 @@ zero and cannot double-transform the display.
 This rule applies to the established provider-owned presentation route; it is
 not a claim that every possible moving or external renderer shares one generic
 model representation. Stable marker identity and live provider presentation
-remain separate; see [Sable](../integrations/sable.md).
+remain separate; see [Sable](../../integrations/sable.md).
 
 ## Entity-block geometry
 
@@ -51,14 +51,6 @@ validated live state and actual subject position. The ordinary virtual-display
 route scopes its override only around that display render dispatch and restores
 vanilla random behavior outside the scope. Loader-aware baked adapters consume
 the same position-derived seed through their native world-aware model path.
-
-The local virtual-display mixin matches class-wide `42L` constants using
-`@ModifyConstant(method = "*", require = 2)`. The minimum counts matching
-constants, including an unused local; it does not prove that both
-`RandomSource#setSeed` call sites remain covered. Fewer than two matches fail
-mixin application, while drift of one actual seed site may still pass. Preserve
-this verification limitation rather than treating the annotation as a semantic
-proof.
 
 ## Native shape placement
 

@@ -4,7 +4,7 @@ This document owns the common geometry-source contract. Optional integrations
 may describe when they register or claim work, but they do not redefine source
 ordering, outcomes, fallback, or recoverable-failure semantics. The end-to-end
 stage boundaries are summarized in the
-[geometry pipeline](../architecture/geometry-pipeline.md).
+[geometry pipeline](geometry-pipeline.md).
 
 ## Model eligibility is not renderability
 
@@ -15,19 +15,27 @@ optional source such as Flywheel, or the native VoxelShape fallback. Minecraft
 A `BakedModel` is one concrete source, not a synonym for every object that can
 produce geometry.
 
+The layers remain separate. The loader adapter resolves a model and its render
+inputs, the renderer/dispatcher supplies the destination and live world
+context, and the model or renderer may or may not commit geometry. Missing
+model data does not itself determine the final outcome; the result is
+determined by whether the permitted source commits any geometry. A missing
+live object or renderer can still make the BER source empty, and an
+unavailable adapter can make the baked-model source unavailable.
+
 For documentation purposes, a subject is renderable in the current frame only
 when an allowed source reports `RENDERED`: geometry was actually emitted and
 committed to the destination that will be submitted. Merely having a model,
 claiming a subject, entering a source, or owning multipart presentation does not
 establish that result. This distinction is recorded in
-[D0001](../decisions/D0001-separate-model-from-renderable.md).
+[D0001](../../decisions/D0001-separate-model-from-renderable.md).
 
 ## Entity-block mode and source order
 
 `entity_block` source selection is client-local and read for every render
 attempt/frame, without server synchronization or reconnect caching. Ordinary
 `block` rendering does not read this mode. Persistence defaults and recovery
-are specified in [client settings](../config/client.md).
+are specified in [client settings](../../config/client.md).
 
 After the outer [native-glow gate](../rendering/outline.md) is eligible, sources
 are selected as follows:
@@ -38,10 +46,15 @@ are selected as follows:
 | `COMPATIBLE` | Built-in BER, then built-in loader-aware baked model; no optional-source snapshot |
 | `VOXEL_SHAPE_ONLY` | Construct no source context and attempt no normal source; select the native shape route |
 
-The BER requires a valid live BlockEntity and renderer. The baked source
-requires live render shape `MODEL` and an applicable world-aware loader adapter.
-The absence of an adapter, model data, renderer, live object, or usable geometry
-leaves that source empty; it does not authorize an approximate substitute.
+The BER requires a valid live BlockEntity and renderer. The ordinary baked
+source requires live render shape `MODEL` and an applicable world-aware loader
+adapter; it does not require a live BlockEntity merely because the subject's
+target type is `entity_block`. An entity-block subject may therefore enter the
+ordinary baked-model adapter even when its BlockEntity is null, while the BER
+attempt independently remains empty without its live object and renderer. The
+absence of an adapter, model, renderer, or usable committed geometry leaves the
+corresponding source unavailable or empty; it does not authorize an approximate
+substitute.
 
 All permitted sources run in order without short-circuiting. A dynamic BER and
 a static baked model may both contribute, so one successful source does not stop
@@ -73,10 +86,11 @@ are intentionally different diagnostic outcomes but have the same fallback
 effect. A source result must not be inferred from configuration, ownership, or
 an invocation attempt.
 
-Recover only `Exception`, `LinkageError`, and `AssertionError`. Fatal JVM and
-resource errors propagate. Detailed diagnostics remain lazy, bounded, and
-rate-controlled while retaining complete target, component, payload, and
-exception details; see [security](../security.md).
+Shared geometry-source failure isolation follows the
+[security owner](../security.md), including which failures are recoverable and
+which fatal JVM/resource errors propagate. Detailed diagnostics remain lazy,
+bounded, and rate-controlled while retaining complete target, component,
+payload, and exception details.
 
 ## Internal optional-source registry
 
@@ -95,10 +109,9 @@ priority/declaration order of [Target Types](../identity/catalogs.md).
 
 BER, loader-aware baked-model, optional geometry, and fallback routes consume
 the same resolved [presentation subjects](../rendering/presentation_subjects.md),
-including each subject's render-target type. Source-conditioned coverage may
-suppress only its declared duplicate subject and only after the required source
-reports `RENDERED`. `EMPTY`, `FAILED`, unavailable sources, and unrelated
-rendered sources cannot claim that coverage.
+including each subject's render-target type. Coverage semantics, including
+source-conditioned coverage suppression, are owned by that presentation
+contract; this document retains only the source interface to it.
 
-[Create integration](../integrations/create.md) supplies optional sources and
+[Create integration](../../integrations/create.md) supplies optional sources and
 presentation resolvers while remaining subject to this common contract.
