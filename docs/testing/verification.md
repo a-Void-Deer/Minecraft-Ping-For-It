@@ -167,11 +167,54 @@ GUI chat delivery, or cross-dimension execution.
 ### Server-settings snapshots and updates
 
 `ServerSettingsModelTest` covers request correlation, stale responses, denial,
-draft state, and update planning. `ServerConfigUpdateTest`,
+draft state, and update planning. It also covers the per-field invalid numeric
+draft mask and its repair, clearing that mask on permission revocation,
+disconnect, and an explicit clean mark that preserves draft text, the shared
+once-per-session request that does not replace a loaded or in-flight snapshot,
+denial lock with the false-to-true permission retry transition, and
+connection-scoped disconnect reset. `ServerConfigUpdateTest`,
 `ServerConfigUpdateServiceTest`, and the focused server-config packet tests cover
-field-masked partial merge and codec/handler seams. They do not establish the
-live settings UI, permission changes over a connection, actual packet exchange,
-or persistence behavior in a running client/server session.
+field-masked partial merge and codec/handler seams. These model and packet seams
+do not establish the live settings UI, permission changes over a connection,
+actual packet exchange, or persistence behavior in a running client/server
+session.
+
+### Settings-screen navigation, catalog, layout and localization
+
+The [configuration UI](../UI/settings-screen.md) scope, category, and page
+behavior has model, catalog, geometry, and resource seams rather than live
+screen evidence:
+
+- `SettingsNavigationModelTest` covers the initial client overview, per-scope
+  overview selection, each category opening its own leaf page within its scope,
+  the immutable six-category client and three-category server order, rejection
+  of a foreign-scope category without navigating, Back to the owning overview
+  with a root that reports itself as not closable, per-page scroll and focus
+  retention across back, scope switching and forced routing, clamping of
+  negative scroll, routing an invalid server draft mask to the category that
+  owns its first invalid field, and retaining a shared `ServerSettingsModel`
+  draft across navigation;
+- `SettingsCategoryCatalogTest` covers each category's exact setting membership
+  and order for all 25 client and 5 server controls, exactly-once placement of
+  every catalog setting across categories, and immutable per-category lists; it
+  does not cover full-width layout flags;
+- `SettingsScreenLayoutTest` covers computed root and leaf header, footer, list
+  viewport, and button geometry at representative compact, standard, and large
+  GUI sizes and clamped tiny-size viewports without negative space; it does not
+  establish row reachability or actual widget placement;
+- `DeferredActionCoordinatorTest` covers the structural seam that runs a queued
+  action after the native dispatch returns, waits for the outermost nested
+  dispatch while keeping only the latest transition, and drops the transition
+  when the dispatch or a nested dispatch fails; and
+- `ClientConfigLocalizationTest` covers the eight bundled locale files and the
+  settings, category-navigation, server-status, entity-block-mode, and
+  target-gone resource keys, their required format placeholders, the category
+  entrance ellipsis, the exact local feedback prefix, and the restart-required
+  external-list tooltips; it does not render or assemble screen labels.
+
+The production screen routes native widget input through the deferred-action
+coordinator, but these tests exercise the model, catalog, geometry, and resource
+seams rather than native widget containers, mouse dispatch, or live focus lists.
 
 ### Render entity lookup and locator resolver seams
 
@@ -321,9 +364,10 @@ The following gaps remain open until direct evidence closes them:
   an end-to-end server path;
 - same-ID marker creation after local record deletion, where current behavior
   treats the late create as a new insertion with a new visual deadline;
-- rendered color and language-resource text of the local invalid-target chat
-  line, which focused tests currently cover only through the hardcoded constant
-  and a fake sink;
+- the live local invalid-target chat path: focused tests cover the composed
+  translatable prefix and message component, its color, and the bundled resource
+  text, but no test exercises the Minecraft chat overlay or the client trigger
+  paths that show the line;
 - repeated-ping HUD compositing for one target: existing tests cover winner
   selection and independent visual lifetimes, but no test checks whether several
   display-active same-target records change the displayed HUD alpha; the
@@ -345,18 +389,6 @@ The following gaps remain open until direct evidence closes them:
   coverage/guard limitation, not a product behavior change; and
 - detailed diagnostic behavior in the private
   `CreateEntityOutlineAdapter.EntityDiagnostics` path.
-
-### Pending localization
-
-The confirmed requirement is owned by
-[ping feedback presentation](../UI/ping-feedback.md#presentation): the
-invalid-target message is language-resource-localized, and its visible leading
-marker `[ping for it]` is also supplied as a language resource. The current
-implementation is a hardcoded literal
-(`PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE`), and existing tests pin
-that literal text, so the requirement remains unsatisfied; no test validates
-language-resource text or the prefix. This documentation-only task records the
-gap and does not modify implementation or language resources.
 
 Render-entity lookup gaps remain for same-dimension world unload/rejoin and
 runtime-ID reuse in a game session, shared epochs between real HUD and outline
@@ -411,7 +443,7 @@ or because related automated tests exist.
 | Cancellation | Cone and nearest-own-marker selection; inability to cancel another player's marker; stale/display-hidden candidate followed by server rejection with no local fallback. |
 | Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location. |
 | Marker HUD | Repeated same-target pings from one sender and from several senders while same-target records remain display-active: the target's displayed HUD alpha does not accumulate with the number of same-target records ([invariant owner](../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection)). |
-| Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live server-settings open/correlation/permission/edit/update/persistence flow; the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)). |
+| Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live scope-tab and category navigation with leaf Back/Escape and root Done/Escape, a fixed footer with non-covering scrolled content, and per-page scroll/focus retention across back navigation and GUI resize, native widget input dispatch and focus-list traversal after a deferred page transition, and root and leaf pages at small GUI sizes and with long localized labels; one shared server session with a single correlated snapshot request retained across category and scope navigation, loading/permission/unavailable status, and denial clearing; live permission revocation, permission-loss return to the server overview, and reconnect draft behavior; invalid-draft close blocking with routing to the offending category and field; the client configuration file action and confirmation-dialog flows, including the reset warning when a server draft exists; and the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)). |
 | Range | Client/server range combinations in one live pipeline: native minimum, a live long-distance Distant Horizons target, Create/Sable finite-segment reuse and server acceptance, including exact Create surface selection followed by whole-entity server-anchor range rejection. Installed-Sable scenarios are listed below. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |
 | Optional content and rendering | Absent or partially present optional content; Create/Flywheel routes; occlusion and arbitrary camera angles; current shape, offset and seed. |

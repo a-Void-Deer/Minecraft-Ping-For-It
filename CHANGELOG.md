@@ -4,7 +4,11 @@ Unreleased changes accumulated since `76da69e40d4d2b55688ee0dee46d01b07a9ad3d7`.
 
 ## UI Update
 
-[TODO]
+- Updated config settings screen UI, including the layout of the client and server scopes, category navigation, and option presentation. The settings screen now features native vanilla-style scope tabs, improved category layouts, and enhanced option widgets for better user experience.
+
+## Config Updates
+
+- Changed some upper & lower bounds and defaults of some config options.
 
 ## Bug fixes
 
