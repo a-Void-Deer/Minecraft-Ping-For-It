@@ -20,7 +20,7 @@ public final class ServerConfigBounds {
 	/**
 	 * The largest supported server-authoritative ping duration, in seconds.
 	 */
-	public static final int MAX_PING_DURATION = 60;
+	public static final int MAX_PING_DURATION = 3600;
 
 	/** The default synchronized marker duration, in seconds. */
 	public static final int DEFAULT_SYNC_DURATION = 7;
