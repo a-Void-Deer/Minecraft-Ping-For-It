@@ -7,6 +7,7 @@ import nx.pingwheel.common.core.ServerCore;
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
@@ -51,11 +52,15 @@ public class CommonServer {
 	}
 
 	public void onMarkerCreatePacket(MinecraftServer server, ServerPlayer player, MarkerCreateC2SPacket packet) {
-		ServerCore.onMarkerCreate(server, player, packet);
+		// New authoritative marker requests require the negotiated v2 session.
 	}
 
 	public void onMarkerRemovePacket(MinecraftServer server, ServerPlayer player, MarkerRemoveC2SPacket packet) {
-		ServerCore.onMarkerRemove(server, player, packet);
+		// New authoritative marker requests require the negotiated v2 session.
+	}
+
+	public void onPresentationPacket(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet) {
+		ServerCore.onPresentationPacket(server, player, packet);
 	}
 
 	public void onServerConfigRequestPacket(MinecraftServer server, ServerPlayer player, ServerConfigRequestC2SPacket packet) {

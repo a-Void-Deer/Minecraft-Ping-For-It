@@ -18,6 +18,8 @@ import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
@@ -45,6 +47,8 @@ public class NeoMain {
 	private static final StreamCodec<FriendlyByteBuf, ServerConfigRequestC2SPacket> SERVER_CONFIG_REQUEST_C2S_CODEC = StreamCodec.ofMember(ServerConfigRequestC2SPacket::write, ServerConfigRequestC2SPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, ServerConfigUpdateC2SPacket> SERVER_CONFIG_UPDATE_C2S_CODEC = StreamCodec.ofMember(ServerConfigUpdateC2SPacket::write, ServerConfigUpdateC2SPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, ServerConfigSnapshotS2CPacket> SERVER_CONFIG_SNAPSHOT_S2C_CODEC = StreamCodec.ofMember(ServerConfigSnapshotS2CPacket::write, ServerConfigSnapshotS2CPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, PresentationC2SPacket> PRESENTATION_C2S_CODEC = StreamCodec.ofMember(PresentationC2SPacket::write, PresentationC2SPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, PresentationS2CPacket> PRESENTATION_S2C_CODEC = StreamCodec.ofMember(PresentationS2CPacket::write, PresentationS2CPacket::readSafe);
 
 	public NeoMain(IEventBus modBus) {
 		CommonServer.INSTANCE.onInit();
@@ -113,6 +117,14 @@ public class NeoMain {
 
 		registrar.playToClient(ServerConfigSnapshotS2CPacket.PACKET_TYPE, SERVER_CONFIG_SNAPSHOT_S2C_CODEC, (payload, context) -> {
 			context.enqueueWork(() -> CommonClient.INSTANCE.onServerConfigSnapshotPacket(payload));
+		});
+
+		registrar.playToServer(PresentationC2SPacket.PACKET_TYPE, PRESENTATION_C2S_CODEC, (payload, context) -> {
+			context.enqueueWork(() -> CommonServer.INSTANCE.onPresentationPacket(context.player().getServer(), (ServerPlayer) context.player(), payload));
+		});
+
+		registrar.playToClient(PresentationS2CPacket.PACKET_TYPE, PRESENTATION_S2C_CODEC, (payload, context) -> {
+			context.enqueueWork(() -> CommonClient.INSTANCE.onPresentationPacket(payload));
 		});
 	}
 }

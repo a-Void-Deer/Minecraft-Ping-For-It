@@ -2,13 +2,14 @@ package nx.pingwheel.common.client.marker;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.List;
 
 import lombok.Getter;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
@@ -20,6 +21,8 @@ import nx.pingwheel.common.math.MathUtils;
 import nx.pingwheel.common.math.ScreenPos;
 import nx.pingwheel.common.name.TargetNameComposer;
 import nx.pingwheel.common.render.WorldRenderContext;
+import nx.pingwheel.common.presentation.client.PresentationView;
+import nx.pingwheel.common.presentation.PresentationValue;
 import org.jetbrains.annotations.Nullable;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -45,8 +48,8 @@ import static nx.pingwheel.common.CommonClient.Game;
  *   <li>resolves the owner's {@link PlayerInfo} from the current connection;</li>
  *   <li>for an entity target, resolves the live entity in the current
 	 *       dimension via {@link GameContext#getEntityForRender(nx.pingwheel.common.domain.EntityLocator)} and follows its current
- *       position; a live {@link ItemEntity} copies its item stack while the
- *       item icon config is enabled;</li>
+	 *       position; the item icon, when enabled and authorized, is built
+	 *       from the presentation projection rather than a live entity;</li>
  *   <li>keeps the latest live point when the entity is absent, unloaded, or
  *       removed, using the anchor only until the entity first resolves live;</li>
  *   <li>recomputes the screen position, distance, and scale render fields
@@ -104,6 +107,8 @@ public final class MarkerView {
 	 * {@link MarkerOverlayState}; the unknown fallback until then.
 	 */
 	private Component targetName = TargetNameComposer.unknown();
+	private PresentationView presentation = PresentationView.empty();
+	private List<String> presentationLabels = List.of();
 
 	MarkerView(ClientMarker marker) {
 		this.marker = Objects.requireNonNull(marker, "marker");
@@ -164,6 +169,22 @@ public final class MarkerView {
 		this.targetName = Objects.requireNonNull(targetName, "targetName");
 	}
 
+	void replacePresentation(PresentationView presentation) {
+		this.presentation = Objects.requireNonNull(presentation, "presentation");
+	}
+
+	void replacePresentationLabels(List<String> labels) {
+		this.presentationLabels = List.copyOf(labels);
+	}
+
+	public PresentationView getPresentation() {
+		return presentation;
+	}
+
+	public List<String> getPresentationLabels() {
+		return presentationLabels;
+	}
+
 	/**
 	 * Recomputes the render state for this frame from the backing marker and
 	 * the live world.
@@ -190,11 +211,22 @@ public final class MarkerView {
 			Vec3 livePosition = null;
 
 			if (entity != null && !entity.isRemoved()) {
-				if (entity.getType() == EntityType.ITEM && config.isItemIconVisible()) {
-					this.itemStack = ((ItemEntity)entity).getItem().copy();
-				}
-
 				livePosition = EntityMarkerPoint.forLiveEntity(entity, ctx.tickDelta);
+			}
+			// Dynamic icon semantics must come from the authorized projection, never
+			// from the locally visible ItemEntity (which may have newer/denied data).
+			if (config.isItemIconVisible()
+				&& presentation.field("minecraft:basic", "minecraft:item.icon") instanceof PresentationValue.Flag flag
+				&& flag.value()
+				&& presentation.field("minecraft:basic", "minecraft:item.id") instanceof PresentationValue.Text itemId) {
+				ResourceLocation id = ResourceLocation.tryParse(itemId.value());
+				if (id != null && BuiltInRegistries.ITEM.containsKey(id)) {
+					int count = 1;
+					if (presentation.field("minecraft:basic", "minecraft:item.count") instanceof PresentationValue.NumberValue amount) {
+						count = (int) Math.clamp(amount.value(), 1, 64);
+					}
+					this.itemStack = new ItemStack(BuiltInRegistries.ITEM.get(id), count);
+				}
 			}
 
 			this.pos = toVec3(this.entityPositionTracker.resolve(

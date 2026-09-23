@@ -45,6 +45,7 @@ import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
@@ -257,10 +258,12 @@ public class CommonClient {
 
 	public void onRenderWorld(WorldRenderContext ctx) {
 		GameContext.beginRenderEntityLookupFrame();
+		if (pingRuntime != null) pingRuntime.refreshPresentationDisplay();
 		MarkerOverlayState.INSTANCE.prepare(
 			ctx,
 			pingRuntime == null ? null : pingRuntime.store(),
-			pingRuntime == null ? null : pingRuntime.nameStore());
+			pingRuntime == null ? null : pingRuntime.nameStore(),
+			pingRuntime == null ? null : pingRuntime.presentation());
 		prepareEntityOutlines();
 		prepareBlockOutlines();
 
@@ -600,35 +603,23 @@ public class CommonClient {
 	 * rate control.
 	 */
 	public void onMarkerCreatedPacket(MarkerCreatedS2CPacket packet) {
-		if (packet.isCorrupt() || pingRuntime == null) {
-			return;
-		}
-
-		pingRuntime.applyCreated(packet);
+		// Old packet IDs cannot supply the negotiated epoch/Basic name policy.
 	}
 
 	public void onMarkerRemovedPacket(MarkerRemovedS2CPacket packet) {
-		if (packet.isCorrupt() || pingRuntime == null) {
-			return;
-		}
-
-		pingRuntime.applyRemoved(packet.markerId(), packet.reason());
+		// Legacy marker route is disabled in the upgraded protocol.
 	}
 
 	public void onMarkerRejectedPacket(MarkerRejectedS2CPacket packet) {
-		if (packet.isCorrupt() || pingRuntime == null) {
-			return;
-		}
-
-		pingRuntime.handleRejected(packet.requestId(), packet.requestKind(), packet.reason());
+		// Legacy marker route is disabled in the upgraded protocol.
 	}
 
 	public void onMarkerWinnerChangedPacket(MarkerWinnerChangedS2CPacket packet) {
-		if (packet.isCorrupt() || pingRuntime == null) {
-			return;
-		}
+		// Legacy marker route is disabled in the upgraded protocol.
+	}
 
-		pingRuntime.applyWinnerChanged(packet.targetKey(), packet.winnerId());
+	public void onPresentationPacket(PresentationS2CPacket packet) {
+		if (pingRuntime != null) pingRuntime.onPresentationPacket(packet);
 	}
 
 	/**
@@ -715,6 +706,7 @@ public class CommonClient {
 			new MinecraftLocalErrorSink(),
 			IPlatformNetworkService.INSTANCE::sendToServer,
 			storedRateLimitPolicy,
-			INTERACTION_TIME_SOURCE);
+			INTERACTION_TIME_SOURCE,
+			true);
 	}
 }

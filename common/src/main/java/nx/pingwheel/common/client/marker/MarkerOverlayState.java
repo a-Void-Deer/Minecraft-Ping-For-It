@@ -20,6 +20,7 @@ import nx.pingwheel.common.name.ClientTargetNameStore;
 import nx.pingwheel.common.name.TargetNameComposer;
 import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.render.WorldRenderContext;
+import nx.pingwheel.common.presentation.client.ClientPresentation;
 import org.jetbrains.annotations.Nullable;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -87,6 +88,15 @@ public final class MarkerOverlayState {
 		@Nullable ClientMarkerStore store,
 		@Nullable ClientTargetNameStore nameStore
 	) {
+		prepare(ctx, store, nameStore, null);
+	}
+
+	public void prepare(
+		@Nullable WorldRenderContext ctx,
+		@Nullable ClientMarkerStore store,
+		@Nullable ClientTargetNameStore nameStore,
+		@Nullable ClientPresentation presentation
+	) {
 		Minecraft game = Game;
 
 		if (ctx == null || store == null || nameStore == null || game == null || game.level == null) {
@@ -122,8 +132,14 @@ public final class MarkerOverlayState {
 
 		String currentDimension = game.level.dimension().location().toString();
 
-		for (MarkerView view : views.values()) {
+		for (Map.Entry<MarkerId, MarkerView> entry : views.entrySet()) {
+			MarkerView view = entry.getValue();
 			if (view.getDimension().equals(currentDimension)) {
+				var projection = presentation == null
+					? nx.pingwheel.common.presentation.client.PresentationView.empty()
+					: presentation.view(entry.getKey());
+				view.replacePresentation(projection);
+				view.replacePresentationLabels(presentation == null ? List.of() : presentation.labels(projection));
 				view.update(ctx);
 			}
 		}

@@ -10,6 +10,7 @@ import nx.pingwheel.common.client.outline.BlockDisplayWhitelist;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.presentation.PresentationSettings;
 
 import java.util.HashMap;
 import java.util.List;
@@ -52,6 +53,11 @@ public class ClientConfig implements IConfig {
 	List<String> blockDisplayWhitelist = List.of("*:*");
 	@Setter(AccessLevel.NONE)
 	List<String> blockShapeBlacklist = List.of();
+	/** Independent local subscription/retention and UI visibility policies. */
+	@Setter(AccessLevel.NONE)
+	PresentationSettings presentationReceive = PresentationSettings.clientDefaults();
+	@Setter(AccessLevel.NONE)
+	PresentationSettings presentationDisplay = PresentationSettings.clientDefaults();
 
 	@ToString.Exclude
 	@EqualsAndHashCode.Exclude
@@ -188,6 +194,14 @@ public class ClientConfig implements IConfig {
 		return blockDisplayPolicy;
 	}
 
+	public PresentationSettings getPresentationReceive() {
+		return presentationReceive;
+	}
+
+	public PresentationSettings getPresentationDisplay() {
+		return presentationDisplay;
+	}
+
 	private static List<String> validatedEntries(List<String> entries, String fieldName) {
 		BlockDisplayWhitelist.validateEntries(entries, fieldName);
 		return List.copyOf(entries);
@@ -205,6 +219,10 @@ public class ClientConfig implements IConfig {
 	}
 
 	void validate(ClampWarningSink warningSink) {
+		if (presentationReceive == null) presentationReceive = PresentationSettings.clientDefaults();
+		if (presentationDisplay == null) presentationDisplay = PresentationSettings.clientDefaults();
+		presentationReceive.validate();
+		presentationDisplay.validate();
 		// Gson maps unknown enum names to null. Recover them locally so malformed
 		// client data never selects a new geometry route accidentally.
 		entityBlockRenderMode = EntityBlockRenderMode.effective(entityBlockRenderMode);

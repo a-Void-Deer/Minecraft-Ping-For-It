@@ -1,0 +1,31 @@
+package nx.pingwheel.common.presentation;
+
+import java.util.List;
+
+/**
+	 * Extension SPI. The version bridge resolves a world object to a detached handle, and
+	 * supplies a bounded collector for that handle. The client only needs the manifest;
+	 * no UI is required to decode fields. Implementations may return unavailable rather
+	 * than force-loading a source.
+	 */
+public interface PresentationAdapter {
+	String adapterId();
+	String modId();
+	int schema();
+	int minUpdateIntervalTicks();
+	List<PresentationField> fields();
+
+	/** Only fields in demand may be read. Null means temporarily unavailable. */
+	PresentationSection collect(DetachedTarget target, java.util.Set<String> demand, CaptureBudget budget);
+
+	record DetachedTarget(String dimension, String kind, String registryId, int x, int y, int z,
+		String locator) {}
+
+	/** A hard upper bound on source scans even if few distinct values result. */
+	final class CaptureBudget {
+		private int remaining;
+		public CaptureBudget(int scans) { remaining = Math.max(0, scans); }
+		public boolean scan() { if (remaining == 0) return false; --remaining; return true; }
+		public int remaining() { return remaining; }
+	}
+}

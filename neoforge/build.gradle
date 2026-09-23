@@ -58,6 +58,8 @@ jar {
 dependencies {
     compileOnly "dev.engine-room.flywheel:flywheel-neoforge-1.21.1:${flywheel_version}"
     compileOnly "com.simibubi.create:create-1.21.1:${create_version}"
+    // Required only to complete Create's SmartBlockEntity hierarchy at compile time.
+    compileOnly "net.createmod.ponder:ponder-neoforge:${ponder_version}"
 
     // Keep NeoForge resolver tests on the same Minecraft/JUnit test classpath
     // used by the common behavioral tests. Simulated itself remains absent.
@@ -68,6 +70,10 @@ dependencies {
     testRuntimeOnly "net.neoforged.fancymodloader:loader:4.0.21"
     testImplementation "net.neoforged:mergetool:2.0.3:api"
     testImplementation "net.neoforged:minecraft-dependencies:1.21.1"
+    // Compile the mixin-plugin test seam against the Mixin/ASM versions the
+    // NeoForge compile classpath already resolves.
+    testImplementation "net.fabricmc:sponge-mixin:0.14.0+mixin.0.8.6"
+    testImplementation "org.ow2.asm:asm-tree:9.5"
 }
 
 test {

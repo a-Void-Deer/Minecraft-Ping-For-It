@@ -21,6 +21,8 @@ import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.client.marker.EntityMarkerPoint;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
+import nx.pingwheel.common.presentation.client.ClientPresentation;
+import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.client.duration.ClientMarkerDisplayDuration;
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
@@ -70,6 +72,7 @@ import nx.pingwheel.common.name.ClientTargetNameDecoder;
 import nx.pingwheel.common.name.TargetNameComposer;
 import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
+import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
@@ -139,6 +142,7 @@ public final class ClientPingRuntime {
 	private final WheelMouseCapture wheelMouseCapture;
 	private final CreateRequestTracker createRequestTracker;
 	private final ClientCreateRateLimiter createRateLimiter;
+	private final ClientPresentation presentation;
 	private final InteractionTimeSource timeSource;
 	private final LongPressCompatibilityController compatibilityController;
 	private final SelectedLocaleTranslationKeyCache selectedLocaleTranslationKeys =
@@ -174,7 +178,8 @@ public final class ClientPingRuntime {
 		WheelMouseCapture wheelMouseCapture,
 		CreateRequestTracker createRequestTracker,
 		ClientCreateRateLimiter createRateLimiter,
-		InteractionTimeSource timeSource
+		InteractionTimeSource timeSource,
+		ClientPresentation presentation
 	) {
 		this.markerStore = Objects.requireNonNull(markerStore, "markerStore");
 		this.activeInteraction = Objects.requireNonNull(activeInteraction, "activeInteraction");
@@ -186,6 +191,7 @@ public final class ClientPingRuntime {
 		this.wheelMouseCapture = Objects.requireNonNull(wheelMouseCapture, "wheelMouseCapture");
 		this.createRequestTracker = Objects.requireNonNull(createRequestTracker, "createRequestTracker");
 		this.createRateLimiter = Objects.requireNonNull(createRateLimiter, "createRateLimiter");
+		this.presentation = presentation;
 		this.timeSource = Objects.requireNonNull(timeSource, "timeSource");
 		this.compatibilityController = new LongPressCompatibilityController(
 			new RuntimeInteractionPort(),
@@ -237,6 +243,17 @@ public final class ClientPingRuntime {
 		ClientRateLimitPolicy rateLimitPolicy,
 		InteractionTimeSource timeSource
 	) {
+		return create(errorSink, packetSender, rateLimitPolicy, timeSource, false);
+	}
+
+	/** The production connection uses the versioned presentation transport exclusively. */
+	public static ClientPingRuntime create(
+		ClientPingActionDispatcher.LocalErrorSink errorSink,
+		ClientPingActionDispatcher.PacketSender packetSender,
+		ClientRateLimitPolicy rateLimitPolicy,
+		InteractionTimeSource timeSource,
+		boolean negotiatePresentation
+	) {
 		return create(
 			errorSink,
 			packetSender,
@@ -244,7 +261,8 @@ public final class ClientPingRuntime {
 			timeSource,
 			snapshot -> ClientMarkerDisplayDuration.durationTicks(
 				ClientConfig.HANDLER.getConfig().getEffectiveMarkerDisplayDuration(),
-				snapshot));
+				snapshot),
+			negotiatePresentation);
 	}
 
 	/**
@@ -258,6 +276,17 @@ public final class ClientPingRuntime {
 		ClientRateLimitPolicy rateLimitPolicy,
 		InteractionTimeSource timeSource,
 		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy
+	) {
+		return create(errorSink, packetSender, rateLimitPolicy, timeSource, displayDurationPolicy, false);
+	}
+
+	private static ClientPingRuntime create(
+		ClientPingActionDispatcher.LocalErrorSink errorSink,
+		ClientPingActionDispatcher.PacketSender packetSender,
+		ClientRateLimitPolicy rateLimitPolicy,
+		InteractionTimeSource timeSource,
+		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy,
+		boolean negotiatePresentation
 	) {
 		Objects.requireNonNull(errorSink, "errorSink");
 		Objects.requireNonNull(packetSender, "packetSender");
@@ -283,6 +312,11 @@ public final class ClientPingRuntime {
 			logger,
 			() -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis(),
 			() -> ClientConfig.HANDLER.getConfig().getWheelTimeoutMillis());
+		ClientPresentation presentation = negotiatePresentation
+			? new ClientPresentation(packetSender::sendToServer,
+				() -> ClientConfig.HANDLER.getConfig().getPresentationReceive(),
+				() -> ClientConfig.HANDLER.getConfig().getPresentationDisplay())
+			: null;
 
 		return new ClientPingRuntime(
 			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDurationPolicy),
@@ -294,13 +328,15 @@ public final class ClientPingRuntime {
 				errorSink,
 				logger,
 				createRequestTracker,
-				createRateLimiter),
+				createRateLimiter,
+				presentation),
 			errorSink,
 			logger,
 			new WheelMouseCapture(logger),
 			createRequestTracker,
 			createRateLimiter,
-			timeSource);
+			timeSource,
+			presentation);
 	}
 
 	/**
@@ -339,6 +375,10 @@ public final class ClientPingRuntime {
 
 		observeWorldContinuity(game);
 
+		if (presentation != null) {
+			presentation.tick(game.getConnection() != null);
+			syncPresentationNames();
+		}
 		localTick++;
 		expireFallbackMarkers();
 	}
@@ -432,6 +472,7 @@ public final class ClientPingRuntime {
 		abort();
 		InputUtils.resetPingHold();
 		markerStore.clear();
+		if (presentation != null) presentation.close();
 		nameStore.clear();
 		MarkerOverlayState.INSTANCE.clear();
 		observedLevel = null;
@@ -959,6 +1000,7 @@ public final class ClientPingRuntime {
 		// removed, so cleanup follows final record removal rather than sync loss.
 		for (ClientMarker marker : expired) {
 			nameStore.onRemoved(marker.id());
+			if (presentation != null) presentation.evict(marker.id());
 		}
 
 		logger.debug("marker client lifetime ended: count={} ids={}",
@@ -995,6 +1037,7 @@ public final class ClientPingRuntime {
 		List<ClientMarker> superseded = markerStore.onCreated(snapshot, localTick);
 		for (ClientMarker marker : superseded) {
 			nameStore.onRemoved(marker.id());
+			if (presentation != null) presentation.evict(marker.id());
 		}
 		nameStore.onCreated(snapshot.id(), targetName);
 
@@ -1008,6 +1051,100 @@ public final class ClientPingRuntime {
 			snapshot.target().kind(),
 			snapshot.targetTypeId(),
 			snapshot.pingTypeId());
+	}
+
+	/** Sole production S2C path for versioned marker and presentation messages. */
+	public void onPresentationPacket(PresentationS2CPacket packet) {
+		if (presentation == null || packet == null || packet.isCorrupt()) return;
+		switch (packet.kind()) {
+			case OFFER -> presentation.offer(packet);
+			case RESET -> {
+				if (presentation.reset(packet)) syncPresentationNames();
+			}
+			case CREATED -> {
+				if (!presentation.current(packet) || markerStore.isAuthoritativelyRemoved(packet.markerId())) return;
+				boolean alreadyPresent = markerStore.marker(packet.markerId()).isPresent();
+				if (!presentation.initial(packet)) return;
+				updatePresentationName(packet.markerId());
+				if (!alreadyPresent) applyPresentationCreated(packet.snapshot(), packet.ownerName());
+			}
+			case SECTION -> {
+				// A store tombstone is also "known". Do not decode a section for
+				// a marker absent from the marker runtime.
+				if (!presentation.current(packet) || packet.markerId() == null
+					|| markerStore.marker(packet.markerId()).isEmpty()) return;
+				if (presentation.section(packet)) {
+					updatePresentationName(packet.markerId());
+				}
+			}
+			case REMOVED -> {
+				if (!presentation.current(packet)) return;
+				presentation.removed(packet.markerId(), packet.revision(),
+					packet.removalReason() == MarkerRemovalReason.EXPIRED);
+				applyRemoved(packet.markerId(), packet.removalReason());
+				if (markerStore.marker(packet.markerId()).isEmpty()) presentation.evict(packet.markerId());
+			}
+			case WINNER -> {
+				if (presentation.current(packet)) applyWinnerChanged(packet.targetKey(), packet.winnerId());
+			}
+			case REJECT -> {
+				if (presentation.current(packet))
+					handleRejected(packet.requestId(), packet.requestKind(), packet.rejectReason());
+			}
+		}
+	}
+
+	/** Read-only UI entry point; negotiation and raw values remain runtime-private. */
+	public ClientPresentation presentation() {
+		return presentation;
+	}
+
+	/** Keep the legacy name-render facade synchronized before each world frame. */
+	public void refreshPresentationDisplay() {
+		if (presentation != null) syncPresentationNames();
+	}
+
+	private void applyPresentationCreated(MarkerSnapshot snapshot, String ownerName) {
+		if (snapshot == null || ownerName == null || markerStore.isAuthoritativelyRemoved(snapshot.id())) return;
+		boolean newlySeen = isNewMarkerReceipt(markerStore, snapshot.id());
+		List<ClientMarker> superseded = markerStore.onCreated(snapshot, localTick);
+		for (ClientMarker marker : superseded) {
+			nameStore.onRemoved(marker.id());
+			presentation.evict(marker.id());
+		}
+		if (newlySeen) {
+			playCreatedSoundOnce(snapshot);
+			sendCreatedChat(ownerName, snapshot, presentationTargetName(snapshot.id()));
+		}
+	}
+
+	private Component presentationTargetName(MarkerId id) {
+		var value = presentation.view(id).field(ClientPresentation.BASIC, ClientPresentation.NAME);
+		if (!(value instanceof PresentationValue.Text text) || Game == null || Game.level == null) {
+			return TargetNameComposer.unknown();
+		}
+		try {
+			return ClientTargetNameDecoder.decode(id, new TargetNameJson(text.value()), Game.level.registryAccess());
+		} catch (IllegalArgumentException invalid) {
+			return TargetNameComposer.unknown();
+		}
+	}
+
+	private void updatePresentationName(MarkerId id) {
+		var value = presentation.view(id).field(ClientPresentation.BASIC, ClientPresentation.NAME);
+		if (value instanceof PresentationValue.Text text) {
+			try {
+				nameStore.onCreated(id, new TargetNameJson(text.value()));
+				return;
+			} catch (IllegalArgumentException invalid) {
+				// A malformed name is never displayed or kept after a policy change.
+			}
+		}
+		nameStore.onRemoved(id);
+	}
+
+	private void syncPresentationNames() {
+		for (ClientMarker marker : markerStore.allMarkers()) updatePresentationName(marker.id());
 	}
 
 	/**
@@ -1045,6 +1182,14 @@ public final class ClientPingRuntime {
 		MarkerCreatedS2CPacket packet, MarkerSnapshot snapshot, TargetNameJson targetName
 	) {
 		Minecraft game = Game;
+		Component resolvedTargetName = game == null || game.level == null
+			? TargetNameComposer.unknown()
+			: ClientTargetNameDecoder.decode(snapshot.id(), targetName, game.level.registryAccess());
+		sendCreatedChat(packet.ownerName(), snapshot, resolvedTargetName);
+	}
+
+	private void sendCreatedChat(String ownerName, MarkerSnapshot snapshot, Component resolvedTargetName) {
+		Minecraft game = Game;
 
 		if (game == null || game.player == null) {
 			return;
@@ -1063,9 +1208,6 @@ public final class ClientPingRuntime {
 				return;
 			}
 
-			Component resolvedTargetName = game.level == null
-				? TargetNameComposer.unknown()
-				: ClientTargetNameDecoder.decode(snapshot.id(), targetName, game.level.registryAccess());
 			String template;
 
 			try {
@@ -1083,7 +1225,7 @@ public final class ClientPingRuntime {
 			}
 
 			Component message = PingChatBuilder.build(
-				template, packet.ownerName(), pingType.get(), resolvedTargetName);
+				template, ownerName, pingType.get(), resolvedTargetName);
 			game.player.displayClientMessage(message, false);
 		} catch (RuntimeException exception) {
 			logger.debugException("marker chat display failed: malformed server payload", exception);
@@ -1109,6 +1251,7 @@ public final class ClientPingRuntime {
 
 		for (ClientMarker removedMarker : removed) {
 			nameStore.onRemoved(removedMarker.id());
+			if (presentation != null) presentation.evict(removedMarker.id());
 		}
 
 		logger.debug("marker removed applied: markerId={} reason={}", markerId.value(), reason);
@@ -1124,6 +1267,7 @@ public final class ClientPingRuntime {
 		List<ClientMarker> superseded = markerStore.onWinnerChanged(targetKey, winnerId);
 		for (ClientMarker marker : superseded) {
 			nameStore.onRemoved(marker.id());
+			if (presentation != null) presentation.evict(marker.id());
 		}
 
 		logger.debug("marker winner applied: kind={} winner={}",

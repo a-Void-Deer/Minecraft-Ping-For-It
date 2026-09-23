@@ -1,0 +1,13 @@
+{
+	"required": false,
+	"minVersion": "0.8",
+	"package": "nx.pingwheel.neoforge.mixin.presentation",
+	"compatibilityLevel": "JAVA_17",
+	"plugin": "nx.pingwheel.neoforge.mixin.presentation.CreatePresentationMixinPlugin",
+	"mixins": [
+		"KineticCachedNetworkMixin"
+	],
+	"injectors": {
+		"defaultRequire": 0
+	}
+}

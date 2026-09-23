@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 import nx.pingwheel.common.core.ServerCore;
+import nx.pingwheel.common.presentation.PresentationSettings;
 
 @Getter
 @Setter
@@ -19,9 +20,17 @@ public class ServerConfig implements IConfig {
 	@SerializedName("syncDuration")
 	int syncDuration = ServerConfigBounds.DEFAULT_SYNC_DURATION;
 	int pingDistance = 2048;
+	/** Server-authoritative Basic/extension allow lists, sampling limits and permissions. */
+	PresentationSettings presentation = PresentationSettings.serverDefaults();
+
+	public PresentationSettings getPresentation() {
+		return presentation;
+	}
 
 	@Override
 	public void validate() {
+		if (presentation == null) presentation = PresentationSettings.serverDefaults();
+		presentation.validate();
 		if (defaultChannelMode == null) {
 			defaultChannelMode = ChannelMode.AUTO;
 		}

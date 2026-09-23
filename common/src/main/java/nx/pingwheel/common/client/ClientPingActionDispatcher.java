@@ -10,6 +10,8 @@ import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.presentation.client.ClientPresentation;
 
 /**
  * The pure, phase-7 client dispatcher between {@link PingInteractionAction}s
@@ -59,6 +61,7 @@ public final class ClientPingActionDispatcher {
 	private final PingInteractionLogger logger;
 	private final CreateRequestTracker createRequestTracker;
 	private final ClientCreateRateLimiter createRateLimiter;
+	private final ClientPresentation presentation;
 
 	public ClientPingActionDispatcher(
 		PacketSender packetSender,
@@ -67,11 +70,24 @@ public final class ClientPingActionDispatcher {
 		CreateRequestTracker createRequestTracker,
 		ClientCreateRateLimiter createRateLimiter
 	) {
+		this(packetSender, errorSink, logger, createRequestTracker, createRateLimiter, null);
+	}
+
+	/** The production route requires a negotiated presentation session. */
+	public ClientPingActionDispatcher(
+		PacketSender packetSender,
+		LocalErrorSink errorSink,
+		PingInteractionLogger logger,
+		CreateRequestTracker createRequestTracker,
+		ClientCreateRateLimiter createRateLimiter,
+		ClientPresentation presentation
+	) {
 		this.packetSender = Objects.requireNonNull(packetSender, "packetSender");
 		this.errorSink = Objects.requireNonNull(errorSink, "errorSink");
 		this.logger = Objects.requireNonNull(logger, "logger");
 		this.createRequestTracker = Objects.requireNonNull(createRequestTracker, "createRequestTracker");
 		this.createRateLimiter = Objects.requireNonNull(createRateLimiter, "createRateLimiter");
+		this.presentation = presentation;
 	}
 
 	/**
@@ -105,6 +121,9 @@ public final class ClientPingActionDispatcher {
 	}
 
 	private void dispatchCreate(PingInteractionAction.CreatePing create) {
+		if (presentation != null && !presentation.ready()) {
+			return;
+		}
 		long requestId = create.context().token().sequence();
 		var target = create.context().resolvedTarget().target();
 		var policy = createRateLimiter.policy();
@@ -116,16 +135,23 @@ public final class ClientPingActionDispatcher {
 
 		createRequestTracker.onCreateDispatched(requestId);
 
-		packetSender.sendToServer(new MarkerCreateC2SPacket(requestId, target, create.pingType().id()));
+		packetSender.sendToServer(presentation == null
+			? new MarkerCreateC2SPacket(requestId, target, create.pingType().id())
+			: PresentationC2SPacket.create(presentation.epoch(), requestId, target, create.pingType().id()));
 
 		logger.debug("dispatch create: requestId={} kind={} pingType={}",
 			requestId, target.kind(), create.pingType().id());
 	}
 
 	private void dispatchCancel(PingInteractionAction.CancelMarker cancel) {
+		if (presentation != null && !presentation.ready()) {
+			return;
+		}
 		MarkerId markerId = cancel.markerId();
 
-		packetSender.sendToServer(new MarkerRemoveC2SPacket(markerId));
+		packetSender.sendToServer(presentation == null
+			? new MarkerRemoveC2SPacket(markerId)
+			: PresentationC2SPacket.remove(presentation.epoch(), markerId));
 
 		logger.debug("dispatch cancel: markerId={}", markerId.value());
 	}
