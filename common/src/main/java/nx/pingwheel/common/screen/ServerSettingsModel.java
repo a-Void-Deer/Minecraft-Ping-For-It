@@ -58,6 +58,19 @@ public final class ServerSettingsModel {
 		return authoritative != null && !loading;
 	}
 
+	/**
+	 * True when a safe authoritative snapshot is retained for display.  A
+	 * read-only snapshot is viewable even though this viewer cannot edit it.
+	 */
+	public boolean canView() {
+		return authoritative != null;
+	}
+
+	/**
+	 * True when the retained snapshot may be edited.  Local permission is an
+	 * edit capability only: a viewer below the required level still receives and
+	 * renders the authoritative values.
+	 */
 	public boolean canEdit() {
 		return clientPermission && !authoritativeAccessDenied && loaded() && authoritative.canEdit();
 	}
@@ -97,9 +110,11 @@ public final class ServerSettingsModel {
 	/**
 	 * Allocates and returns the positive request id for a newly entered server
 	 * settings session, or the no-pending sentinel when a request cannot start.
+	 * Any connected player may request the snapshot; the response's edit hint
+	 * decides whether the retained view is editable.
 	 */
 	public long beginExpansion() {
-		if (!clientPermission || authoritativeAccessDenied || expanded) {
+		if (authoritativeAccessDenied || expanded) {
 			return NO_PENDING_REQUEST;
 		}
 
@@ -127,12 +142,14 @@ public final class ServerSettingsModel {
 	 * and only when its request id exactly matches the pending id.  A
 	 * response that arrives after cancellation, disconnect, permission
 	 * revocation, or a later expansion is stale and must not reopen the section.
+	 * A safe {@code canEdit=false} response is retained as the read-only
+	 * authoritative view instead of being discarded; for a locally privileged
+	 * requester it is also recorded as a denial.
 	 */
 	public boolean applySnapshot(long requestId, ServerConfigSnapshot snapshot) {
 		if (snapshot == null
 			|| !snapshot.isSafe()
 			|| requestId <= 0L
-			|| !clientPermission
 			|| !expanded
 			|| !loading) {
 			return false;
@@ -142,27 +159,21 @@ public final class ServerSettingsModel {
 		}
 
 		pendingRequestId = NO_PENDING_REQUEST;
-		if (!snapshot.canEdit()) {
-			authoritative = null;
-			authoritativeAccessDenied = true;
-			permissionRevokedAfterDenial = false;
-			collapseAndDiscard();
-			clearDraft();
-			return true;
-		}
-
-		authoritative = snapshot;
-		expanded = true;
 		loading = false;
+		expanded = true;
 		dirtyFields = 0;
+		authoritative = snapshot;
+		authoritativeAccessDenied = !snapshot.canEdit() && clientPermission;
+		permissionRevokedAfterDenial = false;
 		copyAuthoritativeToDraft();
 		return true;
 	}
 
 	/**
-	 * A client-side permission revocation immediately closes the editable
-	 * section and drops its draft.  The server still checks permission for every
-	 * packet, so this is only a UI safety and responsiveness measure.
+	 * A client-side permission revocation immediately removes the ability to
+	 * commit or edit and drops the draft, while a retained safe snapshot stays
+	 * viewable read-only.  The server still checks permission for every packet,
+	 * so this is only a UI safety and responsiveness measure.
 	 */
 	public void setClientPermission(boolean permission) {
 		if (clientPermission == permission) {
@@ -175,14 +186,23 @@ public final class ServerSettingsModel {
 				permissionRevokedAfterDenial = true;
 			}
 			collapseAndDiscard();
-			authoritative = null;
-			clearDraft();
 		} else if (authoritativeAccessDenied && permissionRevokedAfterDenial) {
 			// A stale local level can remain elevated after the server denied the
 			// request.  Require an observed false -> true transition before
 			// allowing a fresh expansion attempt.
 			authoritativeAccessDenied = false;
 			permissionRevokedAfterDenial = false;
+			clearAuthoritative();
+		} else if (authoritative != null && !authoritative.canEdit()) {
+			// Promotion from a read-only viewer to an editor: the retained hint
+			// was issued for the lower level, so a fresh request is required.
+			clearAuthoritative();
+		} else if (authoritative != null) {
+			// An editable snapshot retained through the revocation is current
+			// again; reopen the session with the draft reset to its values.
+			expanded = true;
+			dirtyFields = 0;
+			copyAuthoritativeToDraft();
 		}
 	}
 
@@ -194,6 +214,15 @@ public final class ServerSettingsModel {
 		if (authoritative != null) {
 			copyAuthoritativeToDraft();
 		}
+	}
+
+	private void clearAuthoritative() {
+		authoritative = null;
+		expanded = false;
+		loading = false;
+		pendingRequestId = NO_PENDING_REQUEST;
+		dirtyFields = 0;
+		clearDraft();
 	}
 
 	/** Clears all connection-scoped server state after leaving a world. */

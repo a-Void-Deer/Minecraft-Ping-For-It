@@ -48,8 +48,12 @@ import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
 import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
+import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Operation;
+import nx.pingwheel.common.presentation.client.ServerPresentationPolicyState;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.platform.IPlatformContextService;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
@@ -75,6 +79,10 @@ public class CommonClient {
 	private static ClientRateLimitPolicy storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 	private static ClientSyncDurationPolicy storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 	private static final InteractionTimeSource INTERACTION_TIME_SOURCE = InteractionTimeSource.system();
+	private static final ServerPresentationPolicyState SERVER_PRESENTATION_POLICY_STATE =
+		new ServerPresentationPolicyState(
+			INTERACTION_TIME_SOURCE::nowMillis,
+			ServerPresentationPolicyState.DEFAULT_REQUEST_TIMEOUT_MILLIS);
 
 	/** Runs the registered entity-outline sources over the production registry. */
 	private static final EntityOutlineRunner ENTITY_OUTLINE_RUNNER =
@@ -110,6 +118,14 @@ public class CommonClient {
 		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 		pingRuntime = createPingRuntimeIfInWorld();
 
+		// A fresh connection-scoped policy view starts unknown and asks the
+		// server for an authoritative read. A server without the versioned route
+		// silently skips the send, so the view stays unknown instead of empty.
+		long policyRequestId = SERVER_PRESENTATION_POLICY_STATE.beginConnection();
+		if (policyRequestId != ServerPresentationPolicyState.NO_PENDING_REQUEST) {
+			IPlatformNetworkService.INSTANCE.sendToServer(ServerPresentationPolicyC2SPacket.read(policyRequestId));
+		}
+
 		IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(ClientConfig.HANDLER.getConfig().getChannel()));
 	}
 
@@ -121,6 +137,7 @@ public class CommonClient {
 		pingRuntime = null;
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
+		SERVER_PRESENTATION_POLICY_STATE.resetForDisconnect();
 		MarkerOverlayState.INSTANCE.clear();
 		EntityOutlineState.INSTANCE.clear();
 		BlockOutlineState.INSTANCE.clear();
@@ -236,6 +253,10 @@ public class CommonClient {
 	public void onTickStart() {
 		Game = Minecraft.getInstance();
 		GameContext.updateDimension();
+
+		// Expire a presentation policy request that outlived the bounded timeout
+		// so the settings UI can retry instead of waiting forever.
+		SERVER_PRESENTATION_POLICY_STATE.tick();
 
 		if (pingRuntime == null) {
 			pingRuntime = createPingRuntimeIfInWorld();
@@ -686,6 +707,73 @@ public class CommonClient {
 
 		Game = Minecraft.getInstance();
 		SettingsScreen.notifyServerConfigSnapshot(packet.requestId(), packet.snapshot());
+	}
+
+	/**
+	 * Applies one server presentation policy snapshot on the client thread. The
+	 * connection-scoped state rejects stale request ids, error snapshots, and
+	 * unsolicited revisions that do not extend the known view, so a missing
+	 * route leaves the view unknown instead of an authoritative empty rule view.
+	 */
+	public void onServerPresentationPolicyPacket(ServerPresentationPolicyS2CPacket packet) {
+		if (packet == null || packet.isCorrupt()) {
+			LOGGER.warn("received invalid server presentation policy from server");
+			return;
+		}
+
+		SERVER_PRESENTATION_POLICY_STATE.applySnapshot(
+			packet.requestId(),
+			packet.revision(),
+			packet.status(),
+			packet.canEdit(),
+			packet.white(),
+			packet.black(),
+			packet.whitelistOnly());
+	}
+
+	/**
+	 * The connection-scoped presentation policy view for UI call sites. The
+	 * view is unknown until the server answers, so callers must gate on
+	 * {@link ServerPresentationPolicyState#isKnown()} before rendering its
+	 * selector lists as authoritative.
+	 */
+	public ServerPresentationPolicyState getServerPresentationPolicyState() {
+		return SERVER_PRESENTATION_POLICY_STATE;
+	}
+
+	/**
+	 * Requests a fresh authoritative policy read and returns the correlated
+	 * request id, or {@link ServerPresentationPolicyState#NO_PENDING_REQUEST}
+	 * while disconnected. Used on join and by the settings UI.
+	 */
+	public long requestPresentationPolicyRead() {
+		long requestId = SERVER_PRESENTATION_POLICY_STATE.beginReadRequest();
+
+		if (requestId != ServerPresentationPolicyState.NO_PENDING_REQUEST) {
+			IPlatformNetworkService.INSTANCE.sendToServer(ServerPresentationPolicyC2SPacket.read(requestId));
+		}
+
+		return requestId;
+	}
+
+	/**
+	 * Sends one presentation policy mutation only when the last authoritative
+	 * snapshot granted edit; the server independently authorizes every
+	 * operation, so a false client hint can never bypass the permission check.
+	 */
+	public boolean requestPresentationPolicyMutation(
+		Operation operation,
+		String selector,
+		boolean whitelistOnly
+	) {
+		var packet = SERVER_PRESENTATION_POLICY_STATE.beginMutation(operation, selector, whitelistOnly);
+
+		if (packet.isEmpty()) {
+			return false;
+		}
+
+		IPlatformNetworkService.INSTANCE.sendToServer(packet.get());
+		return true;
 	}
 
 	/**

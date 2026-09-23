@@ -23,6 +23,8 @@ import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
 import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.forge.platform.PlatformNetworkServiceImpl;
@@ -44,6 +46,8 @@ public class ForgeMain {
 	public static final EventNetworkChannel SERVER_CONFIG_REQUEST_CHANNEL_C2S = ChannelBuilder.named(ServerConfigRequestC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel SERVER_CONFIG_UPDATE_CHANNEL_C2S = ChannelBuilder.named(ServerConfigUpdateC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C = ChannelBuilder.named(ServerConfigSnapshotS2CPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel SERVER_PRESENTATION_POLICY_CHANNEL_C2S = ChannelBuilder.named(ServerPresentationPolicyC2SPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel SERVER_PRESENTATION_POLICY_CHANNEL_S2C = ChannelBuilder.named(ServerPresentationPolicyS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_REMOVE_CHANNEL_C2S = ChannelBuilder.named(MarkerRemoveC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_CREATED_CHANNEL_S2C = ChannelBuilder.named(MarkerCreatedS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_REMOVED_CHANNEL_S2C = ChannelBuilder.named(MarkerRemovedS2CPacket.PACKET_ID).optional().eventNetworkChannel();
@@ -67,6 +71,8 @@ public class ForgeMain {
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigRequestC2SPacket.PACKET_ID, SERVER_CONFIG_REQUEST_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigUpdateC2SPacket.PACKET_ID, SERVER_CONFIG_UPDATE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigSnapshotS2CPacket.PACKET_ID, SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerPresentationPolicyC2SPacket.PACKET_ID, SERVER_PRESENTATION_POLICY_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerPresentationPolicyS2CPacket.PACKET_ID, SERVER_PRESENTATION_POLICY_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerRemoveC2SPacket.PACKET_ID, MARKER_REMOVE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerCreatedS2CPacket.PACKET_ID, MARKER_CREATED_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerRemovedS2CPacket.PACKET_ID, MARKER_REMOVED_CHANNEL_S2C);
@@ -80,6 +86,7 @@ public class ForgeMain {
 		registerPacketHandler(MARKER_REMOVE_CHANNEL_C2S, MarkerRemoveC2SPacket::readSafe, CommonServer.INSTANCE::onMarkerRemovePacket);
 		registerPacketHandler(SERVER_CONFIG_REQUEST_CHANNEL_C2S, ServerConfigRequestC2SPacket::readSafe, CommonServer.INSTANCE::onServerConfigRequestPacket);
 		registerPacketHandler(SERVER_CONFIG_UPDATE_CHANNEL_C2S, ServerConfigUpdateC2SPacket::readSafe, CommonServer.INSTANCE::onServerConfigUpdatePacket);
+		registerPacketHandler(SERVER_PRESENTATION_POLICY_CHANNEL_C2S, ServerPresentationPolicyC2SPacket::readSafe, CommonServer.INSTANCE::onServerPresentationPolicyPacket);
 		registerPacketHandler(PRESENTATION_CHANNEL_C2S, PresentationC2SPacket::readSafe, CommonServer.INSTANCE::onPresentationPacket);
 	}
 

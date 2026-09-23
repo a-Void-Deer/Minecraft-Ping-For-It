@@ -73,10 +73,17 @@ class SettingsNavigationModelTest {
 		var client = SettingsNavigationModel.categories(Scope.CLIENT);
 		var server = SettingsNavigationModel.categories(Scope.SERVER);
 
-		assertEquals(6, client.size());
+		assertEquals(7, client.size());
 		assertEquals(3, server.size());
 		assertEquals(
-			List.of("display", "selection", "wheel_appearance", "input", "channel_notices", "geometry_config"),
+			List.of(
+				"display",
+				"selection",
+				"wheel_appearance",
+				"input",
+				"channel_notices",
+				"geometry_config",
+				"presentation"),
 			client.stream().map(Category::id).toList());
 		assertEquals(
 			List.of("channel_players", "send_rate", "marker_duration"),
@@ -106,6 +113,18 @@ class SettingsNavigationModelTest {
 				.count());
 		assertEquals(Page.CLIENT_OVERVIEW, Page.overview(Scope.CLIENT));
 		assertEquals(Page.SERVER_OVERVIEW, Page.overview(Scope.SERVER));
+	}
+
+	@Test
+	void presentationCategoryIsClientScopedAndReachableWithoutServerPermission() {
+		var navigation = new SettingsNavigationModel();
+
+		assertEquals(Scope.CLIENT, Category.PRESENTATION.scope());
+		assertTrue(navigation.openCategory(Category.PRESENTATION));
+		assertEquals(Page.CLIENT_PRESENTATION, navigation.current());
+		assertEquals(Category.PRESENTATION, navigation.current().category().orElseThrow());
+		assertTrue(navigation.back());
+		assertEquals(Page.CLIENT_OVERVIEW, navigation.current());
 	}
 
 	@Test
@@ -237,5 +256,33 @@ class SettingsNavigationModelTest {
 		serverSettings.setRateLimitText("");
 		assertTrue(navigation.routeToInvalidServerDraft(serverSettings.invalidFieldMask()));
 		assertEquals(Page.SERVER_SEND_RATE, navigation.current());
+	}
+
+	@Test
+	void serverPermissionRevocationKeepsTheLeafWhenTheSnapshotIsStillViewable() {
+		var navigation = new SettingsNavigationModel();
+		navigation.selectScope(Scope.SERVER);
+		navigation.openCategory(Category.SEND_RATE);
+
+		assertFalse(navigation.onServerViewAccessLost(true));
+		assertEquals(Page.SERVER_SEND_RATE, navigation.current());
+		assertTrue(navigation.isLeaf());
+	}
+
+	@Test
+	void serverPermissionRevocationForcesTheOverviewWithoutAViewableSnapshot() {
+		var navigation = new SettingsNavigationModel();
+		navigation.selectScope(Scope.SERVER);
+		navigation.openCategory(Category.CHANNEL_PLAYERS);
+
+		assertTrue(navigation.onServerViewAccessLost(false));
+		assertEquals(Page.SERVER_OVERVIEW, navigation.current());
+		assertTrue(navigation.isOverview());
+
+		// The seam never touches a client page.
+		navigation.selectScope(Scope.CLIENT);
+		navigation.openCategory(Category.MARKER_DISPLAY);
+		assertFalse(navigation.onServerViewAccessLost(false));
+		assertEquals(Page.CLIENT_MARKER_DISPLAY, navigation.current());
 	}
 }

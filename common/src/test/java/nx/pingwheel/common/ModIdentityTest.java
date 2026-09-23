@@ -21,6 +21,8 @@ import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.resource.ResourceConstants;
 
@@ -59,7 +61,7 @@ class ModIdentityTest {
 	}
 
 	@Test
-	void allThirteenPacketIdsUseNewNamespaces() {
+	void allFifteenPacketIdsUseNewNamespaces() {
 		assertEquals(Set.of(
 			"pingforit-c2s:marker-create",
 			"pingforit-c2s:marker-remove",
@@ -67,12 +69,14 @@ class ModIdentityTest {
 			"pingforit-c2s:update-channel",
 			"pingforit-c2s:server-config-request",
 			"pingforit-c2s:server-config-update",
+			"pingforit-c2s:server-presentation-policy-v1",
 			"pingforit-s2c:marker-created",
 			"pingforit-s2c:marker-removed",
 			"pingforit-s2c:marker-rejected",
 			"pingforit-s2c:marker-winner-changed",
 			"pingforit-s2c:rate-limit-policy",
 			"pingforit-s2c:server-config-snapshot",
+			"pingforit-s2c:server-presentation-policy-v1",
 			"pingforit-s2c:ping-location"
 		), Set.of(
 			MarkerCreateC2SPacket.PACKET_ID.toString(),
@@ -81,12 +85,14 @@ class ModIdentityTest {
 			UpdateChannelC2SPacket.PACKET_ID.toString(),
 			ServerConfigRequestC2SPacket.PACKET_ID.toString(),
 			ServerConfigUpdateC2SPacket.PACKET_ID.toString(),
+			ServerPresentationPolicyC2SPacket.PACKET_ID.toString(),
 			MarkerCreatedS2CPacket.PACKET_ID.toString(),
 			MarkerRemovedS2CPacket.PACKET_ID.toString(),
 			MarkerRejectedS2CPacket.PACKET_ID.toString(),
 			MarkerWinnerChangedS2CPacket.PACKET_ID.toString(),
 			RateLimitPolicyS2CPacket.PACKET_ID.toString(),
 			ServerConfigSnapshotS2CPacket.PACKET_ID.toString(),
+			ServerPresentationPolicyS2CPacket.PACKET_ID.toString(),
 			PingLocationS2CPacket.PACKET_ID.toString()
 		));
 	}

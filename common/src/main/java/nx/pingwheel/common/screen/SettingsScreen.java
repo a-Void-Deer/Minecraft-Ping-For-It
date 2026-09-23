@@ -20,6 +20,7 @@ import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.config.PlayerInfoMode;
@@ -31,6 +32,10 @@ import nx.pingwheel.common.integration.TeamContextHandler;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.presentation.PresentationSettings;
+import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Operation;
+import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Status;
+import nx.pingwheel.common.presentation.client.ServerPresentationPolicyState;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.screen.SettingsCategoryCatalog.Setting;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
@@ -82,6 +87,18 @@ public class SettingsScreen extends OptionsSubScreen {
 	private boolean suppressSaveOnClose;
 	private MutableComponent serverValidationMessage;
 
+	private final ServerPresentationPolicyState.ChangeListener presentationPolicyListener =
+		this::onPresentationPolicyChanged;
+	private final PresentationSelectorDraftModel presentationDrafts = new PresentationSelectorDraftModel();
+	private final Map<PresentationSelectorDraftModel.Slot, StringWidget> presentationSlotFeedbackWidgets =
+		new EnumMap<>(PresentationSelectorDraftModel.Slot.class);
+	private final Map<PresentationSelectorDraftModel.Slot, PresentationSelectorEditBox> presentationSelectorFields =
+		new EnumMap<>(PresentationSelectorDraftModel.Slot.class);
+	private ServerPresentationPolicyState presentationPolicyState;
+	private Operation presentationPendingOperation;
+	private MutableComponent presentationGeneralFeedback;
+	private StringWidget presentationGeneralFeedbackWidget;
+
 	private static void registerCurrent(SettingsScreen screen) {
 		currentSettingsScreen = new WeakReference<>(screen);
 	}
@@ -122,6 +139,8 @@ public class SettingsScreen extends OptionsSubScreen {
 	@Override
 	protected void init() {
 		registerCurrent(this);
+		this.presentationPolicyState = CommonClient.INSTANCE.getServerPresentationPolicyState();
+		this.presentationPolicyState.addListener(this.presentationPolicyListener);
 		this.updatePermissionState(false);
 		this.createScopeTabs();
 		this.addRenderableWidget(this.scopeTabBar);
@@ -233,6 +252,9 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public void removed() {
+		if (this.presentationPolicyState != null) {
+			this.presentationPolicyState.removeListener(this.presentationPolicyListener);
+		}
 		// ClientConfig owns persistence.  Do not invoke OptionsSubScreen's vanilla
 		// options save for this custom screen.
 	}
@@ -364,6 +386,9 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.saveCurrentViewState();
 		}
 		this.flushOptionWidgets();
+		// Capture the live caret/selection before the widgets are cleared; the
+		// pure draft model owns the values until the fields are recreated.
+		this.savePresentationSelectorSelections();
 
 		this.clearFocus();
 		this.settingsList.setFocused((GuiEventListener) null);
@@ -374,6 +399,9 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.serverRateLimitField = null;
 		this.serverSyncDurationField = null;
 		this.serverStatusWidget = null;
+		this.presentationGeneralFeedbackWidget = null;
+		this.presentationSlotFeedbackWidgets.clear();
+		this.presentationSelectorFields.clear();
 		this.pendingHalfWidth = null;
 		if (navigation.scope() == Scope.SERVER && !this.serverRequestDeferred) {
 			this.requestServerSettingsIfNeeded();
@@ -434,9 +462,14 @@ public class SettingsScreen extends OptionsSubScreen {
 	private void addCategoryPage(Category category) {
 		if (category.scope() == Scope.SERVER) {
 			this.addServerStatus();
-			if (!serverSettings.canEdit()) {
+			if (!serverSettings.canView()) {
 				return;
 			}
+		}
+
+		if (category == Category.PRESENTATION) {
+			this.addPresentationPage();
+			return;
 		}
 
 		if (category == Category.MARKER_DISPLAY) {
@@ -535,16 +568,731 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void addSubgroup(String key) {
+		this.addHeading(LanguageUtils.settings("group").path(key).get());
+	}
+
+	private void addHeading(MutableComponent text) {
 		this.flushPendingHalfWidthRow();
 		final var heading = new StringWidget(
 			0,
 			0,
 			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
-			LanguageUtils.settings("group").path(key).get().withStyle(ChatFormatting.BOLD),
+			text.withStyle(ChatFormatting.BOLD),
 			this.font).alignLeft();
 		heading.active = false;
 		this.settingsList.addSmall(heading, null);
+	}
+
+	private void addPresentationPage() {
+		this.addHeading(LanguageUtils.settings("presentation").path("receive").get());
+		this.addPresentationLocalPanel(config.getPresentationReceive(), "receive");
+		this.addPresentationServerReadOnly("receive");
+
+		this.addHeading(LanguageUtils.settings("presentation").path("display").get());
+		this.addPresentationLocalPanel(config.getPresentationDisplay(), "display");
+		this.addPresentationServerReadOnly("display");
+
+		this.addHeading(LanguageUtils.settings("presentation").path("server", "title").get());
+		this.addPresentationServerPanel();
+	}
+
+	private void addPresentationLocalPanel(PresentationSettings settings, String panelKey) {
+		final var whitelistOnlyText = LanguageUtils.settings("presentation").path("whitelist_only");
+		this.addPresentationBooleanRow(
+			panelKey + "_whitelist_only",
+			whitelistOnlyText,
+			settings::isWhitelistOnly,
+			settings::setWhitelistOnly);
+		this.addPresentationLocalList(panelKey, settings, true);
+		this.addPresentationLocalList(panelKey, settings, false);
+	}
+
+	private void addPresentationBooleanRow(
+		String key,
+		LanguageUtils text,
+		Supplier<Boolean> getter,
+		Consumer<Boolean> setter
+	) {
+		final var option = OptionUtils.ofBool(
+			text.getKey(),
+			getter,
+			setter,
+			() -> text.path("tooltip").get());
+		final AbstractWidget widget = option.createButton(
+			Game.options,
+			0,
+			0,
+			SettingsScreenLayout.LARGE_WIDGET_WIDTH);
+		this.addFullWidth(key, widget);
+	}
+
+	private void addPresentationLocalList(String panelKey, PresentationSettings settings, boolean toWhite) {
+		final String listKey = panelKey + (toWhite ? "_white" : "_black");
+		final PresentationSelectorDraftModel.Slot slot =
+			PresentationSelectorDraftModel.Slot.local(panelKey, toWhite);
+		this.addHeading(LanguageUtils.settings("presentation").path(toWhite ? "white" : "black").get());
+
+		final List<String> selectors = PresentationSelectorListModel.copyOf(
+			toWhite ? settings.getWhite() : settings.getBlack());
+		if (selectors.isEmpty()) {
+			this.addPresentationEmptyRow(listKey);
+		}
+		for (String selector : selectors) {
+			this.addHalfWidth(listKey + "_label_" + selector, this.createPresentationSelectorLabel(selector));
+			final var remove = Button.builder(
+				LanguageUtils.settings("presentation").path("remove").get(),
+				ignored -> this.removeLocalPresentationSelector(settings, slot, toWhite, selector))
+				.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+				.build();
+			this.addHalfWidth(listKey + "_remove_" + selector, remove);
+		}
+
+		final PresentationSelectorEditBox field = this.createPresentationSelectorField(slot);
+		final var add = Button.builder(
+			LanguageUtils.settings("presentation").path("add").get(),
+			ignored -> this.addLocalPresentationSelector(settings, slot, toWhite, field))
+			.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+			.build();
+		this.restorePresentationSelectorSelection(slot, field);
+		this.addHalfWidth(listKey + "_field", field);
+		this.addHalfWidth(listKey + "_add", add);
+		this.addPresentationSlotFeedbackRow(listKey, slot);
+	}
+
+	/**
+	 * Builds one selector input restored from its stable draft slot. The initial
+	 * value is applied before the responder is attached, so restoring a draft
+	 * never records it as a fresh edit or clears the slot's feedback. The
+	 * caret/selection is applied by the caller once the field's final
+	 * editable state is known.
+	 */
+	private PresentationSelectorEditBox createPresentationSelectorField(PresentationSelectorDraftModel.Slot slot) {
+		final var narration = LanguageUtils.settings("presentation").path("selector").get();
+		final PresentationSelectorEditBox field = new PresentationSelectorEditBox(
+			this.font,
+			-1,
+			-1,
+			SettingsScreenLayout.SMALL_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			narration);
+		field.setMaxLength(PresentationSelectorListModel.MAX_SELECTOR_LENGTH);
+		field.setHint(narration);
+		field.setValue(this.presentationDrafts.draft(slot));
+		this.presentationSelectorFields.put(slot, field);
+		field.setResponder(text -> {
+			this.presentationDrafts.setDraft(slot, text);
+			this.setPresentationSlotFeedback(slot, null);
+		});
+		return field;
+	}
+
+	private StringWidget createPresentationSelectorLabel(String selector) {
+		final String display = this.font.plainSubstrByWidth(
+			selector,
+			SettingsScreenLayout.SMALL_WIDGET_WIDTH - 8);
+		final boolean truncated = display.length() < selector.length();
+		final var label = new StringWidget(
+			0,
+			0,
+			SettingsScreenLayout.SMALL_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			Component.literal(truncated ? display + "..." : display),
+			this.font).alignLeft();
+		label.active = false;
+		if (truncated) {
+			label.setTooltip(Tooltip.create(Component.literal(selector)));
+		}
+		return label;
+	}
+
+	private void addPresentationEmptyRow(String key) {
+		this.addFullWidth(key + "_empty", this.createPresentationReadOnlyRow(
+			LanguageUtils.settings("presentation").path("empty").get()));
+	}
+
+	private StringWidget createPresentationReadOnlyRow(MutableComponent text) {
+		final var row = new StringWidget(
+			0,
+			0,
+			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			text.copy().withStyle(ChatFormatting.GRAY),
+			this.font).alignLeft();
+		row.active = false;
+		return row;
+	}
+
+	private void addPresentationServerReadOnly(String panelKey) {
+		final String keyPrefix = panelKey + "_server_read_only";
+		this.addHeading(LanguageUtils.settings("presentation").path("server", "title").get());
+		this.addFullWidth(keyPrefix, this.createPresentationReadOnlyRow(
+			LanguageUtils.settings("presentation").path("server", "read_only").get()));
+		this.addPresentationServerStatusRows();
+		if (!this.isPresentationPolicyKnown()) {
+			this.addPresentationServerUnavailableRow(keyPrefix);
+			return;
+		}
+		this.addPresentationServerSelectorLabels(keyPrefix, true);
+		this.addPresentationServerSelectorLabels(keyPrefix, false);
+		this.addFullWidth(keyPrefix + "_whitelist_only", this.createPresentationReadOnlyRow(
+			this.presentationServerWhitelistOnlyText()));
+	}
+
+	private boolean isPresentationPolicyKnown() {
+		final var state = this.presentationPolicyState;
+		return state != null && state.isKnown();
+	}
+
+	/**
+	 * The shared placeholder for a list whose authoritative state is not known
+	 * yet. A known empty list is rendered as "(none)" by the caller; a missing
+	 * route, a pending read, a timeout, and an error each keep their own wording
+	 * instead of masquerading as an empty authoritative list.
+	 */
+	private void addPresentationServerUnavailableRow(String key) {
+		this.addFullWidth(key + "_unavailable", this.createPresentationReadOnlyRow(
+			this.presentationServerListStateText()));
+	}
+
+	private MutableComponent presentationServerListStateText() {
+		final var state = this.presentationPolicyState;
+		final var serverText = LanguageUtils.settings("presentation").path("server");
+		if (state == null) {
+			return serverText.path("unsupported").get();
+		}
+		return switch (state.viewStatus()) {
+			case DISCONNECTED -> serverText.path("unsupported").get();
+			case UNAVAILABLE -> serverText.path("unknown").get();
+			case PENDING -> serverText.path(state.isKnown() ? "pending" : "loading").get();
+			case TIMED_OUT -> serverText.path("timeout").get();
+			case FAILED -> serverText.path("error").get();
+			case READY -> serverText.path("ready").get();
+		};
+	}
+
+	private void addPresentationServerSelectorLabels(String keyPrefix, boolean white) {
+		final String listKey = keyPrefix + (white ? "_white" : "_black");
+		this.addHeading(LanguageUtils.settings("presentation").path(white ? "white" : "black").get());
+		final List<String> selectors = PresentationSelectorListModel.copyOf(
+			white ? this.presentationPolicyState.white() : this.presentationPolicyState.black());
+		if (selectors.isEmpty()) {
+			this.addPresentationEmptyRow(listKey);
+			return;
+		}
+		for (String selector : selectors) {
+			this.addFullWidth(listKey + "_" + selector, this.createPresentationSelectorLabel(selector));
+		}
+	}
+
+	private void addPresentationServerPanel() {
+		this.addPresentationServerStatusRows();
+		final var state = this.presentationPolicyState;
+		if (state != null && state.isKnown() && !state.canEdit()) {
+			this.addFullWidth("presentation_server_panel_read_only", this.createPresentationReadOnlyRow(
+				LanguageUtils.settings("presentation").path("server", "read_only").get()));
+		}
+
+		this.addPresentationServerEditableList(true);
+		this.addPresentationServerEditableList(false);
+
+		final var whitelistOnlyButton = Button.builder(
+			this.presentationServerWhitelistOnlyText(),
+			ignored -> this.setServerWhitelistOnly(state != null && !state.whitelistOnly()))
+			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+			.build();
+		whitelistOnlyButton.active = this.canMutateServerPresentation();
+		this.addFullWidth("presentation_server_whitelist_only", whitelistOnlyButton);
+
+		final var refresh = Button.builder(
+			LanguageUtils.settings("presentation").path("refresh").get(),
+			ignored -> this.refreshPresentationPolicy())
+			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+			.build();
+		refresh.active = state != null
+			&& state.isConnected()
+			&& state.pendingRequestId() == ServerPresentationPolicyState.NO_PENDING_REQUEST;
+		this.addFullWidth("presentation_server_refresh", refresh);
+	}
+
+	private void addPresentationServerEditableList(boolean white) {
+		final String listKey = "server_" + (white ? "white" : "black");
+		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(white);
+		this.addHeading(LanguageUtils.settings("presentation").path(white ? "white" : "black").get());
+
+		final var state = this.presentationPolicyState;
+		if (!this.isPresentationPolicyKnown()) {
+			// An unknown route is not an empty authoritative list; a known list
+			// stays visible through pending and error states, labelled above.
+			this.addPresentationServerUnavailableRow(listKey);
+		} else {
+			final List<String> selectors = PresentationSelectorListModel.copyOf(
+				white ? state.white() : state.black());
+			if (selectors.isEmpty()) {
+				this.addPresentationEmptyRow(listKey);
+			}
+
+			final boolean editable = this.canMutateServerPresentation();
+			for (String selector : selectors) {
+				this.addHalfWidth(listKey + "_label_" + selector, this.createPresentationSelectorLabel(selector));
+				final var remove = Button.builder(
+					LanguageUtils.settings("presentation").path("remove").get(),
+					ignored -> this.removeServerPresentationSelector(white, selector))
+					.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+					.build();
+				remove.active = editable;
+				this.addHalfWidth(listKey + "_remove_" + selector, remove);
+			}
+		}
+
+		final boolean editable = this.canMutateServerPresentation();
+		final PresentationSelectorEditBox field = this.createPresentationSelectorField(slot);
+		// A below-permission or pending viewer must never get an editable field,
+		// matching the disabled Add/Remove buttons; the handler still re-checks
+		// the policy state before sending a mutation.
+		field.setEditable(editable);
+		field.active = editable;
+		this.restorePresentationSelectorSelection(slot, field);
+		final var add = Button.builder(
+			LanguageUtils.settings("presentation").path("add").get(),
+			ignored -> this.addServerPresentationSelector(white, field))
+			.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+			.build();
+		add.active = editable;
+		this.addHalfWidth(listKey + "_field", field);
+		this.addHalfWidth(listKey + "_add", add);
+		this.addPresentationSlotFeedbackRow(listKey, slot);
+	}
+
+	private void addPresentationServerStatusRows() {
+		this.flushPendingHalfWidthRow();
+		final var status = new StringWidget(
+			0,
+			0,
+			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			this.presentationServerStatusText().copy().withStyle(ChatFormatting.GRAY),
+			this.font).alignCenter();
+		status.active = false;
+		this.settingsList.addSmall(status, null);
+
+		final MutableComponent permission = this.presentationServerPermissionText();
+		if (permission != null) {
+			final var permissionRow = new StringWidget(
+				0,
+				0,
+				SettingsScreenLayout.LARGE_WIDGET_WIDTH,
+				SettingsScreenLayout.ROW_HEIGHT,
+				permission.copy().withStyle(ChatFormatting.YELLOW),
+				this.font).alignCenter();
+			permissionRow.active = false;
+			this.settingsList.addSmall(permissionRow, null);
+		}
+
+		// Group-level feedback for the whitelist toggle and the refresh request;
+		// per-list feedback lives directly next to each list's input.
+		this.presentationGeneralFeedbackWidget = new StringWidget(
+			0,
+			0,
+			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			this.presentationGeneralFeedbackText(),
+			this.font).alignCenter();
+		this.presentationGeneralFeedbackWidget.active = false;
+		this.settingsList.addSmall(this.presentationGeneralFeedbackWidget, null);
+	}
+
+	private void addPresentationSlotFeedbackRow(String key, PresentationSelectorDraftModel.Slot slot) {
+		this.flushPendingHalfWidthRow();
+		final var row = new StringWidget(
+			0,
+			0,
+			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			this.presentationSlotFeedbackText(slot),
+			this.font).alignLeft();
+		row.active = false;
+		this.presentationSlotFeedbackWidgets.put(slot, row);
+		this.settingsList.addSmall(row, null);
+	}
+
+	private MutableComponent presentationGeneralFeedbackText() {
+		return this.presentationGeneralFeedback == null
+			? Component.empty()
+			: this.presentationGeneralFeedback.copy().withStyle(ChatFormatting.RED);
+	}
+
+	private void setPresentationGeneralFeedback(MutableComponent message) {
+		this.presentationGeneralFeedback = message;
+		if (this.presentationGeneralFeedbackWidget != null) {
+			this.presentationGeneralFeedbackWidget.setMessage(this.presentationGeneralFeedbackText());
+		}
+	}
+
+	private MutableComponent presentationSlotFeedbackText(PresentationSelectorDraftModel.Slot slot) {
+		final var feedback = this.presentationDrafts.feedback(slot);
+		if (feedback == null) {
+			return Component.empty();
+		}
+		final var text = this.presentationFeedbackText(feedback);
+		return text.copy().withStyle(feedback == PresentationSelectorDraftModel.Feedback.PENDING
+			? ChatFormatting.GRAY
+			: ChatFormatting.RED);
+	}
+
+	private void setPresentationSlotFeedback(
+		PresentationSelectorDraftModel.Slot slot,
+		PresentationSelectorDraftModel.Feedback feedback
+	) {
+		this.presentationDrafts.setFeedback(slot, feedback);
+		final StringWidget widget = this.presentationSlotFeedbackWidgets.get(slot);
+		if (widget != null) {
+			widget.setMessage(this.presentationSlotFeedbackText(slot));
+		}
+	}
+
+	/**
+	 * Captures the live cursor and selection of every mounted selector field
+	 * before a rebuild clears the widgets. The pure draft model owns the values,
+	 * so they survive the reconstruction and are clamped when applied again.
+	 */
+	private void savePresentationSelectorSelections() {
+		for (var entry : this.presentationSelectorFields.entrySet()) {
+			final PresentationSelectorEditBox field = entry.getValue();
+			if (field != null) {
+				this.presentationDrafts.setCaret(
+					entry.getKey(), field.trackedCursor(), field.trackedHighlight());
+			}
+		}
+	}
+
+	/**
+	 * Restores a recorded caret/selection only while the recreated field is
+	 * still active and editable; a disabled field keeps its text but never
+	 * receives a caret. The model clamps both ends to the restored text.
+	 */
+	private void restorePresentationSelectorSelection(
+		PresentationSelectorDraftModel.Slot slot,
+		PresentationSelectorEditBox field
+	) {
+		if (!field.active) {
+			return;
+		}
+		final var caret = this.presentationDrafts.caretFor(slot, field.getValue().length());
+		if (caret != null) {
+			field.restoreSelection(caret.cursor(), caret.highlight());
+		}
+	}
+
+	/**
+	 * The existing generic focus restore must never focus a selector field that
+	 * a pending request, a server revocation, or a read-only view disabled;
+	 * every other widget keeps the existing focus behavior.
+	 */
+	private boolean canRestoreFocus(AbstractWidget target) {
+		for (PresentationSelectorEditBox field : this.presentationSelectorFields.values()) {
+			if (field == target) {
+				return field.active;
+			}
+		}
+		return true;
+	}
+
+	private MutableComponent presentationFeedbackText(PresentationSelectorDraftModel.Feedback feedback) {
+		return switch (feedback) {
+			case EMPTY -> this.presentationFeedback("empty");
+			case INVALID -> this.presentationFeedback("invalid");
+			case DUPLICATE -> this.presentationFeedback("duplicate");
+			case LIST_FULL -> this.presentationFeedback("list_full");
+			case NOT_FOUND -> this.presentationFeedback("not_found");
+			case DENIED -> this.presentationFeedback("denied");
+			case ERROR -> this.presentationFeedback("error");
+			case PENDING -> LanguageUtils.settings("presentation").path("server", "pending").get();
+			case TIMEOUT -> this.presentationFeedback("timeout");
+		};
+	}
+
+	private MutableComponent presentationServerStatusText() {
+		final var state = this.presentationPolicyState;
+		final var serverText = LanguageUtils.settings("presentation").path("server");
+		if (state == null) {
+			return serverText.path("unsupported").get();
+		}
+		return switch (state.viewStatus()) {
+			case DISCONNECTED -> serverText.path("unsupported").get();
+			case UNAVAILABLE -> serverText.path("unknown").get();
+			case PENDING -> serverText.path(state.isKnown() ? "pending" : "loading").get();
+			case TIMED_OUT -> serverText.path("timeout").get();
+			case FAILED -> serverText.path("error").get();
+			case READY -> serverText.path("ready").get();
+		};
+	}
+
+	private MutableComponent presentationServerPermissionText() {
+		final var state = this.presentationPolicyState;
+		if (state == null || !state.isReady()) {
+			return null;
+		}
+		return LanguageUtils.settings("presentation").path("server", state.canEdit() ? "can_edit" : "cannot_edit").get();
+	}
+
+	private MutableComponent presentationServerWhitelistOnlyText() {
+		final var state = this.presentationPolicyState;
+		final MutableComponent label = LanguageUtils.settings("presentation").path("whitelist_only").get();
+		if (state == null || !state.isReady()) {
+			// Never present a value the server has not confirmed yet.
+			return label;
+		}
+		return Component.empty()
+			.append(label)
+			.append(": ")
+			.append(LanguageUtils.of("value", state.whitelistOnly() ? "enabled" : "disabled").get());
+	}
+
+	private MutableComponent presentationFeedback(String key) {
+		return LanguageUtils.settings("presentation").path("feedback", key).get();
+	}
+
+	/** Maps a correlated wire status to the compact feedback the UI shows. */
+	private PresentationSelectorDraftModel.Feedback feedbackForStatus(Status status) {
+		if (status == null) {
+			return PresentationSelectorDraftModel.Feedback.ERROR;
+		}
+		return switch (status) {
+			case OK -> null;
+			case INVALID -> PresentationSelectorDraftModel.Feedback.INVALID;
+			case DUPLICATE -> PresentationSelectorDraftModel.Feedback.DUPLICATE;
+			case LIST_FULL -> PresentationSelectorDraftModel.Feedback.LIST_FULL;
+			case NOT_FOUND -> PresentationSelectorDraftModel.Feedback.NOT_FOUND;
+			case DENIED -> PresentationSelectorDraftModel.Feedback.DENIED;
+			case FAILED -> PresentationSelectorDraftModel.Feedback.ERROR;
+		};
+	}
+
+	/**
+	 * The feedback for an edit control that cannot currently submit: denied when
+	 * the server revoked edit, a timeout hint when an earlier mutation is
+	 * ambiguous, and pending while another request is still in flight.
+	 */
+	private PresentationSelectorDraftModel.Feedback unavailableServerFeedback(ServerPresentationPolicyState state) {
+		if (state == null || !state.canEdit()) {
+			return PresentationSelectorDraftModel.Feedback.DENIED;
+		}
+		return state.lastRequestTimedOut()
+			? PresentationSelectorDraftModel.Feedback.TIMEOUT
+			: PresentationSelectorDraftModel.Feedback.PENDING;
+	}
+
+	private boolean canMutateServerPresentation() {
+		final var state = this.presentationPolicyState;
+		return state != null && state.canMutate();
+	}
+
+	private void addLocalPresentationSelector(
+		PresentationSettings settings,
+		PresentationSelectorDraftModel.Slot slot,
+		boolean toWhite,
+		EditBox field
+	) {
+		final var outcome = PresentationSelectorListModel.add(
+			toWhite ? settings.getWhite() : settings.getBlack(),
+			field.getValue());
+		switch (outcome.result()) {
+			case EMPTY -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.EMPTY);
+			case INVALID -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.INVALID);
+			case DUPLICATE -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.DUPLICATE);
+			case LIST_FULL -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.LIST_FULL);
+			case ADDED -> {
+				if (toWhite) {
+					settings.setWhite(outcome.selectors());
+				} else {
+					settings.setBlack(outcome.selectors());
+				}
+				this.presentationDrafts.clearDraft(slot);
+				this.presentationDrafts.clearFeedback(slot);
+				this.rebuildPage(true);
+			}
+		}
+	}
+
+	private void removeLocalPresentationSelector(
+		PresentationSettings settings,
+		PresentationSelectorDraftModel.Slot slot,
+		boolean fromWhite,
+		String selector
+	) {
+		final var outcome = PresentationSelectorListModel.remove(
+			fromWhite ? settings.getWhite() : settings.getBlack(),
+			selector);
+		if (!outcome.removed()) {
+			this.setPresentationSlotFeedback(slot,
+				outcome.result() == PresentationSelectorListModel.RemoveResult.INVALID
+					? PresentationSelectorDraftModel.Feedback.INVALID
+					: PresentationSelectorDraftModel.Feedback.NOT_FOUND);
+			return;
+		}
+		if (fromWhite) {
+			settings.setWhite(outcome.selectors());
+		} else {
+			settings.setBlack(outcome.selectors());
+		}
+		this.presentationDrafts.clearFeedback(slot);
+		this.rebuildPage(true);
+	}
+
+	private void addServerPresentationSelector(boolean toWhite, EditBox field) {
+		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(toWhite);
+		final var state = this.presentationPolicyState;
+		if (state == null || !state.isKnown()) {
+			this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.ERROR);
+			return;
+		}
+
+		final var outcome = PresentationSelectorListModel.add(
+			toWhite ? state.white() : state.black(),
+			field.getValue());
+		switch (outcome.result()) {
+			case EMPTY -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.EMPTY);
+			case INVALID -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.INVALID);
+			case DUPLICATE -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.DUPLICATE);
+			case LIST_FULL -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.LIST_FULL);
+			case ADDED -> {
+				if (!this.canMutateServerPresentation()) {
+					this.setPresentationSlotFeedback(slot, this.unavailableServerFeedback(state));
+					return;
+				}
+
+				// Capture the exact submitted text before the request: a
+				// synchronous state notification may rebuild the page, and the
+				// draft must only be cleared by a matching accepted response.
+				final String rawValue = field.getValue();
+				final String selector = PresentationSelectorListModel.normalize(rawValue);
+				final Operation operation = toWhite ? Operation.ADD_WHITE : Operation.ADD_BLACK;
+				if (!this.presentationDrafts.beginSubmission(slot, rawValue)) {
+					this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.PENDING);
+					return;
+				}
+				this.presentationPendingOperation = operation;
+				if (!CommonClient.INSTANCE.requestPresentationPolicyMutation(operation, selector, false)) {
+					this.presentationPendingOperation = null;
+					this.presentationDrafts.abandonSubmission(slot);
+					this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.ERROR);
+					return;
+				}
+				this.presentationDrafts.clearFeedback(slot);
+				this.rebuildPage(true);
+			}
+		}
+	}
+
+	private void removeServerPresentationSelector(boolean fromWhite, String selector) {
+		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(fromWhite);
+		if (!this.canMutateServerPresentation()) {
+			this.setPresentationSlotFeedback(slot, this.unavailableServerFeedback(this.presentationPolicyState));
+			return;
+		}
+		final Operation operation = fromWhite ? Operation.REMOVE_WHITE : Operation.REMOVE_BLACK;
+		if (!CommonClient.INSTANCE.requestPresentationPolicyMutation(operation, selector, false)) {
+			this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.ERROR);
+			return;
+		}
+		this.presentationPendingOperation = operation;
+		this.presentationDrafts.clearFeedback(slot);
+		this.rebuildPage(true);
+	}
+
+	private void setServerWhitelistOnly(boolean value) {
+		if (!this.canMutateServerPresentation()) {
+			this.setPresentationGeneralFeedback(this.presentationFeedbackText(
+				this.unavailableServerFeedback(this.presentationPolicyState)));
+			return;
+		}
+		if (!CommonClient.INSTANCE.requestPresentationPolicyMutation(Operation.SET_WHITELIST_ONLY, "", value)) {
+			this.setPresentationGeneralFeedback(this.presentationFeedbackText(
+				PresentationSelectorDraftModel.Feedback.ERROR));
+			return;
+		}
+		this.presentationPendingOperation = Operation.SET_WHITELIST_ONLY;
+		this.setPresentationGeneralFeedback(null);
+		this.rebuildPage(true);
+	}
+
+	private void refreshPresentationPolicy() {
+		final var state = this.presentationPolicyState;
+		if (state == null || !state.isConnected()) {
+			this.setPresentationGeneralFeedback(LanguageUtils.settings("presentation").path("server", "unsupported").get());
+			return;
+		}
+		if (state.pendingRequestId() != ServerPresentationPolicyState.NO_PENDING_REQUEST) {
+			this.setPresentationGeneralFeedback(LanguageUtils.settings("presentation").path("server", "pending").get());
+			return;
+		}
+		if (CommonClient.INSTANCE.requestPresentationPolicyRead() == ServerPresentationPolicyState.NO_PENDING_REQUEST) {
+			this.setPresentationGeneralFeedback(this.presentationFeedbackText(
+				PresentationSelectorDraftModel.Feedback.ERROR));
+			return;
+		}
+		this.presentationPendingOperation = null;
+		this.setPresentationGeneralFeedback(null);
+		this.rebuildPage(true);
+	}
+
+	private void onPresentationPolicyChanged(ServerPresentationPolicyState state) {
+		if (this.settingsList == null) {
+			return;
+		}
+
+		if (this.presentationPendingOperation != null
+			&& state.pendingRequestId() == ServerPresentationPolicyState.NO_PENDING_REQUEST) {
+			this.completePendingPresentationOperation(state);
+		}
+
+		if (this.navigation.current() == Page.CLIENT_PRESENTATION) {
+			this.rebuildPage(true);
+		}
+	}
+
+	/**
+	 * Resolves the one outstanding server command against the state transition
+	 * that completed it. A matching accepted response clears only the submitted
+	 * draft; a denial, failure, or timeout keeps the text for correction and
+	 * records the reason next to its list (or in the group feedback for the
+	 * whitelist toggle).
+	 */
+	private void completePendingPresentationOperation(ServerPresentationPolicyState state) {
+		final Operation operation = this.presentationPendingOperation;
+		this.presentationPendingOperation = null;
+
+		if (!state.isConnected()) {
+			this.presentationDrafts.resetSubmission();
+			this.presentationDrafts.clearAllFeedback();
+			this.presentationGeneralFeedback = null;
+			return;
+		}
+
+		if (operation == Operation.SET_WHITELIST_ONLY) {
+			if (state.lastStatus() == Status.OK && !state.lastRequestTimedOut()) {
+				this.presentationGeneralFeedback = null;
+			} else {
+				this.presentationGeneralFeedback = this.presentationFeedbackText(
+					state.lastRequestTimedOut()
+						? PresentationSelectorDraftModel.Feedback.TIMEOUT
+						: this.feedbackForStatus(state.lastStatus()));
+			}
+			return;
+		}
+
+		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(
+			operation == Operation.ADD_WHITE || operation == Operation.REMOVE_WHITE);
+		if (state.lastStatus() == Status.OK && !state.lastRequestTimedOut()) {
+			this.presentationDrafts.completeSubmission(slot, true);
+			this.presentationDrafts.clearFeedback(slot);
+		} else {
+			this.presentationDrafts.abandonSubmission(slot);
+			this.presentationDrafts.setFeedback(slot, state.lastRequestTimedOut()
+				? PresentationSelectorDraftModel.Feedback.TIMEOUT
+				: this.feedbackForStatus(state.lastStatus()));
+		}
 	}
 
 	private void addChannelRow() {
@@ -590,6 +1338,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			"default_channel_mode",
 			() -> LanguageUtils.of("value", this.serverSettings.defaultChannelMode().toString()).get(),
 			this.serverSettings::cycleDefaultChannelMode);
+		button.active = this.serverSettings.canEdit();
 		this.addFullWidth(Setting.DEFAULT_CHANNEL_MODE.id(), button);
 	}
 
@@ -600,6 +1349,7 @@ public class SettingsScreen extends OptionsSubScreen {
 				"value",
 				this.serverSettings.playerTrackingEnabled() ? "enabled" : "disabled").get(),
 			this.serverSettings::togglePlayerTracking);
+		button.active = this.serverSettings.canEdit();
 		this.addFullWidth(Setting.PLAYER_TRACKING_ENABLED.id(), button);
 	}
 
@@ -636,6 +1386,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.settingsList.addSmall(label, null);
 
 		final var field = this.createServerIntegerField(value, responder, tooltipKey, key);
+		field.setEditable(this.serverSettings.canEdit());
+		field.active = this.serverSettings.canEdit();
 		this.addFullWidth(key, field);
 		switch (setting) {
 			case MS_TO_REGENERATE -> this.serverMsToRegenerateField = field;
@@ -663,16 +1415,19 @@ public class SettingsScreen extends OptionsSubScreen {
 		if (!this.hasLiveServerConnection()) {
 			return LanguageUtils.settings("server_status").path("unavailable").get();
 		}
-		if (!this.serverSettings.clientPermission()
-			|| this.serverSettings.accessDenied()
-			|| (this.serverSettings.authoritative() != null && !this.serverSettings.authoritative().canEdit())) {
-			return LanguageUtils.settings("server_status").path("permission").get();
-		}
 		if (this.serverSettings.loading()) {
 			return LanguageUtils.settings("server_status").path("loading").get();
 		}
-		if (!this.serverSettings.loaded()) {
+		if (!this.serverSettings.canView()) {
 			return LanguageUtils.settings("server_status").path("unavailable").get();
+		}
+		if (!this.serverSettings.canEdit()) {
+			// A viewer below the edit permission sees the authoritative values
+			// read-only; a locally privileged requester that the server denied
+			// gets the permission wording instead.
+			return this.serverSettings.accessDenied()
+				? LanguageUtils.settings("server_status").path("permission").get()
+				: LanguageUtils.settings("server_status").path("read_only").get();
 		}
 		return this.serverSettings.dirty()
 			? LanguageUtils.settings("server_status").path("draft").get()
@@ -735,7 +1490,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	private void restoreCurrentViewState() {
 		this.settingsList.setClampedScrollAmount(navigation.scrollAmount());
 		final AbstractWidget target = this.keyedWidgets.get(navigation.focusKey());
-		if (target == null) {
+		if (target == null || !this.canRestoreFocus(target)) {
 			return;
 		}
 		this.clearFocus();
@@ -829,7 +1584,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void requestServerSettingsIfNeeded() {
-		if (!this.serverSettings.clientPermission()
+		if (!this.hasLiveServerConnection()
 			|| this.serverSettings.accessDenied()
 			|| this.serverSettings.loaded()
 			|| this.serverSettings.loading()) {
@@ -853,13 +1608,11 @@ public class SettingsScreen extends OptionsSubScreen {
 		final boolean wasDenied = this.serverSettings.accessDenied();
 		this.serverSettings.setClientPermission(permission);
 		this.serverValidationMessage = null;
-		final boolean forcedToOverview = !permission
-			&& navigation.scope() == Scope.SERVER
-			&& navigation.isLeaf();
-		if (forcedToOverview) {
-			this.saveCurrentViewState();
-			navigation.forcePage(Page.SERVER_OVERVIEW);
-		}
+		// A retained safe snapshot keeps the current server leaf open as a
+		// read-only page with disabled values; only a lost view forces the
+		// server scope overview.
+		this.saveCurrentViewState();
+		final boolean forcedToOverview = this.navigation.onServerViewAccessLost(this.serverSettings.canView());
 		if (permission && navigation.scope() == Scope.SERVER) {
 			if (wasDenied) {
 				this.serverRequestDeferred = true;
@@ -877,26 +1630,18 @@ public class SettingsScreen extends OptionsSubScreen {
 			return;
 		}
 		this.serverValidationMessage = null;
-		final boolean forcedToOverview = !this.serverSettings.canEdit()
-			&& navigation.scope() == Scope.SERVER
-			&& navigation.isLeaf();
-		if (forcedToOverview) {
-			this.saveCurrentViewState();
-			navigation.forcePage(Page.SERVER_OVERVIEW);
-		}
+		// A read-only or denied snapshot keeps the leaf page open and renders
+		// its retained values without editable widgets.
 		if (navigation.scope() == Scope.SERVER) {
-			this.rebuildPage(!forcedToOverview);
+			this.rebuildPage(true);
 		}
 	}
 
 	public void onServerDisconnected() {
 		this.serverSettings.resetForDisconnect();
 		this.serverValidationMessage = null;
-		final boolean forcedToOverview = navigation.scope() == Scope.SERVER && navigation.isLeaf();
-		if (forcedToOverview) {
-			this.saveCurrentViewState();
-			navigation.forcePage(Page.SERVER_OVERVIEW);
-		}
+		this.saveCurrentViewState();
+		final boolean forcedToOverview = this.navigation.onServerViewAccessLost(false);
 		if (navigation.scope() == Scope.SERVER) {
 			this.rebuildPage(!forcedToOverview);
 		}

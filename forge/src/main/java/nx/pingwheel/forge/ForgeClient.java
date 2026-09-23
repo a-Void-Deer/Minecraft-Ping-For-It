@@ -19,6 +19,7 @@ import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
 import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
@@ -36,6 +37,7 @@ import static nx.pingwheel.forge.ForgeMain.PING_LOCATION_CHANNEL_S2C;
 import static nx.pingwheel.forge.ForgeMain.PRESENTATION_CHANNEL_S2C;
 import static nx.pingwheel.forge.ForgeMain.RATE_LIMIT_POLICY_CHANNEL_S2C;
 import static nx.pingwheel.forge.ForgeMain.SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C;
+import static nx.pingwheel.forge.ForgeMain.SERVER_PRESENTATION_POLICY_CHANNEL_S2C;
 import static nx.pingwheel.forge.ForgeMain.SYNC_DURATION_POLICY_CHANNEL_S2C;
 
 public class ForgeClient {
@@ -55,6 +57,7 @@ public class ForgeClient {
 		registerPacketHandler(RATE_LIMIT_POLICY_CHANNEL_S2C, RateLimitPolicyS2CPacket::readSafe, CommonClient.INSTANCE::onRateLimitPolicyPacket);
 		registerPacketHandler(SYNC_DURATION_POLICY_CHANNEL_S2C, SyncDurationPolicyS2CPacket::readSafe, CommonClient.INSTANCE::onSyncDurationPolicyPacket);
 		registerPacketHandler(SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C, ServerConfigSnapshotS2CPacket::readSafe, CommonClient.INSTANCE::onServerConfigSnapshotPacket);
+		registerPacketHandler(SERVER_PRESENTATION_POLICY_CHANNEL_S2C, ServerPresentationPolicyS2CPacket::readSafe, CommonClient.INSTANCE::onServerPresentationPolicyPacket);
 		registerPacketHandler(PRESENTATION_CHANNEL_S2C, PresentationS2CPacket::readSafe, CommonClient.INSTANCE::onPresentationPacket);
 
 		// resource reload

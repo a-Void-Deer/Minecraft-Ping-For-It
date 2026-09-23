@@ -51,6 +51,11 @@ class SettingsCategoryCatalogTest {
 			Setting.MS_TO_REGENERATE,
 			Setting.RATE_LIMIT), SettingsCategoryCatalog.settings(Category.SEND_RATE));
 		assertEquals(List.of(Setting.SYNC_DURATION), SettingsCategoryCatalog.settings(Category.MARKER_DURATION));
+		assertEquals(List.of(
+			Setting.PRESENTATION_RECEIVE,
+			Setting.PRESENTATION_DISPLAY,
+			Setting.PRESENTATION_SERVER_POLICY),
+			SettingsCategoryCatalog.settings(Category.PRESENTATION));
 
 		var all = EnumSet.noneOf(Setting.class);
 		for (Category category : Category.values()) {

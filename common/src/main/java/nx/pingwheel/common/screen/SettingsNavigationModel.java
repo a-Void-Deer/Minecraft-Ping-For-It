@@ -31,6 +31,7 @@ public final class SettingsNavigationModel {
 		INPUT_INTERACTION(Scope.CLIENT, "input"),
 		CHANNEL_NOTICES(Scope.CLIENT, "channel_notices"),
 		GEOMETRY_CONFIG(Scope.CLIENT, "geometry_config"),
+		PRESENTATION(Scope.CLIENT, "presentation"),
 		CHANNEL_PLAYERS(Scope.SERVER, "channel_players"),
 		SEND_RATE(Scope.SERVER, "send_rate"),
 		MARKER_DURATION(Scope.SERVER, "marker_duration");
@@ -69,6 +70,7 @@ public final class SettingsNavigationModel {
 		CLIENT_INPUT_INTERACTION(Scope.CLIENT, Category.INPUT_INTERACTION),
 		CLIENT_CHANNEL_NOTICES(Scope.CLIENT, Category.CHANNEL_NOTICES),
 		CLIENT_GEOMETRY_CONFIG(Scope.CLIENT, Category.GEOMETRY_CONFIG),
+		CLIENT_PRESENTATION(Scope.CLIENT, Category.PRESENTATION),
 		SERVER_OVERVIEW(Scope.SERVER, null),
 		SERVER_CHANNEL_PLAYERS(Scope.SERVER, Category.CHANNEL_PLAYERS),
 		SERVER_SEND_RATE(Scope.SERVER, Category.SEND_RATE),
@@ -124,7 +126,8 @@ public final class SettingsNavigationModel {
 			Category.WHEEL_APPEARANCE,
 			Category.INPUT_INTERACTION,
 			Category.CHANNEL_NOTICES,
-			Category.GEOMETRY_CONFIG),
+			Category.GEOMETRY_CONFIG,
+			Category.PRESENTATION),
 		Scope.SERVER,
 		List.of(
 			Category.CHANNEL_PLAYERS,
@@ -217,6 +220,22 @@ public final class SettingsNavigationModel {
 	/** Forces the page for a validation or permission consequence. */
 	public void forcePage(Page page) {
 		current = page;
+	}
+
+	/**
+	 * Applies the consequence of losing the local server edit permission. A
+	 * retained, still-viewable authoritative snapshot keeps the current server
+	 * leaf open as a read-only page; without one the server leaf cannot render
+	 * any values and its scope overview is forced. Reports whether the page
+	 * changed.
+	 */
+	public boolean onServerViewAccessLost(boolean canViewRetainedSnapshot) {
+		if (canViewRetainedSnapshot || current.scope() != Scope.SERVER || !current.isLeaf()) {
+			return false;
+		}
+
+		current = Page.SERVER_OVERVIEW;
+		return true;
 	}
 
 	/**

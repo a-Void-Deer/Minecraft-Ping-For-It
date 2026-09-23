@@ -43,7 +43,10 @@ public final class SettingsCategoryCatalog {
 		PLAYER_TRACKING_ENABLED("player_tracking_enabled"),
 		MS_TO_REGENERATE("ms_to_regenerate"),
 		RATE_LIMIT("rate_limit"),
-		SYNC_DURATION("sync_duration");
+		SYNC_DURATION("sync_duration"),
+		PRESENTATION_RECEIVE("presentation_receive"),
+		PRESENTATION_DISPLAY("presentation_display"),
+		PRESENTATION_SERVER_POLICY("presentation_server_policy");
 
 		private final String id;
 
@@ -106,6 +109,10 @@ public final class SettingsCategoryCatalog {
 			Setting.MS_TO_REGENERATE,
 			Setting.RATE_LIMIT));
 		settings.put(Category.MARKER_DURATION, List.of(Setting.SYNC_DURATION));
+		settings.put(Category.PRESENTATION, List.of(
+			Setting.PRESENTATION_RECEIVE,
+			Setting.PRESENTATION_DISPLAY,
+			Setting.PRESENTATION_SERVER_POLICY));
 		return Map.copyOf(settings);
 	}
 }

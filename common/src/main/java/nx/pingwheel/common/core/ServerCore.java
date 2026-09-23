@@ -44,6 +44,11 @@ import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
+import nx.pingwheel.common.presentation.PresentationPolicy;
+import nx.pingwheel.common.presentation.PresentationSettings;
+import nx.pingwheel.common.presentation.ServerPresentationPolicyService;
 import nx.pingwheel.common.presentation.minecraft.PresentationServer;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
@@ -60,6 +65,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static nx.pingwheel.common.Global.CLIENT_COMMAND_ROOT;
 import static nx.pingwheel.common.Global.LOGGER;
@@ -76,6 +82,13 @@ public class ServerCore {
 	private static final HashMap<UUID, String> PLAYER_CHANNELS = new HashMap<>();
 	private static final HashMap<UUID, RateLimiter> PLAYER_RATES = new HashMap<>();
 	private static final SyncDurationPolicyTracker SYNC_DURATION_POLICY = new SyncDurationPolicyTracker();
+
+	/**
+	 * Monotonic in-memory revision of the presentation policy rule view. It
+	 * advances once per applied mutation and resets with the server instance, so
+	 * a client can order rule-view snapshots within one connection.
+	 */
+	private static final AtomicLong PRESENTATION_POLICY_REVISION = new AtomicLong();
 
 	/**
 	 * The shared, server-authoritative marker store. It is replaced on common
@@ -122,6 +135,7 @@ public class ServerCore {
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
 		ACTIVE_SERVER = null;
 		SYNC_DURATION_POLICY.reset();
+		PRESENTATION_POLICY_REVISION.set(0L);
 	}
 
 	/**
@@ -145,6 +159,7 @@ public class ServerCore {
 			MARKER_STORE.clear();
 			ExternalBlockServerProviders.close(ACTIVE_SERVER);
 			SYNC_DURATION_POLICY.reset();
+			PRESENTATION_POLICY_REVISION.set(0L);
 		}
 
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
@@ -340,6 +355,141 @@ public class ServerCore {
 			new ServerConfigSnapshotS2CPacket(
 				requestId,
 				ServerConfigSnapshot.from(ServerConfig.HANDLER.getConfig(), canEdit)),
+			player);
+	}
+
+	/**
+	 * Handles one presentation policy rule-view read or mutation. Reads are
+	 * allowed for every authenticated player and disclose only the three
+	 * presentation selector values. Every mutation rechecks inherent permission
+	 * level 3 on the server thread immediately before the atomic service
+	 * mutation.
+	 *
+	 * <p>The mutation is transactional: the service runs against a detached
+	 * exact-field copy, the live config object is only replaced after the
+	 * candidate was validated and persisted, and a failed persistence rolls the
+	 * previous settings object back before answering. An applied change
+	 * advances the in-memory revision exactly once and is sent to the requester
+	 * and to every other connected route-capable peer; a no-op or rejected
+	 * request never rewrites the config, advances the revision, or broadcasts.
+	 * Peers without the versioned route receive nothing, because every platform
+	 * send service checks route presence before sending.
+	 */
+	public static void onServerPresentationPolicy(
+		MinecraftServer server,
+		ServerPlayer player,
+		ServerPresentationPolicyC2SPacket packet) {
+		if (packet == null || packet.isCorrupt()) {
+			LOGGER.debug("presentation policy request rejected: invalid packet");
+			return;
+		}
+
+		final ServerConfig config = ServerConfig.HANDLER.getConfig();
+		final PresentationSettings settings = config == null ? null : config.getPresentation();
+		final boolean canEdit = player.hasPermissions(3);
+
+		if (packet.operation() == ServerPresentationPolicyService.Operation.READ) {
+			sendPresentationPolicySnapshot(
+				player,
+				packet.requestId(),
+				ServerPresentationPolicyService.Status.OK,
+				canEdit,
+				ServerPresentationPolicyService.read(settings),
+				PRESENTATION_POLICY_REVISION.get());
+			return;
+		}
+
+		if (settings == null) {
+			sendPresentationPolicySnapshot(
+				player,
+				packet.requestId(),
+				ServerPresentationPolicyService.Status.INVALID,
+				canEdit,
+				ServerPresentationPolicyService.read(null),
+				PRESENTATION_POLICY_REVISION.get());
+			return;
+		}
+
+		final PresentationSettings candidate = ServerPresentationPolicyService.detachedCopy(settings);
+		final var result = ServerPresentationPolicyService.mutate(
+			canEdit, candidate, packet.operation(), packet.selector(), packet.whitelistOnly());
+
+		if (!result.applied()) {
+			// Denied, invalid, duplicate, missing, full, and no-op requests never
+			// touch the persisted config, the revision, or other clients.
+			sendPresentationPolicySnapshot(
+				player,
+				packet.requestId(),
+				result.status(),
+				canEdit,
+				result.policy(),
+				PRESENTATION_POLICY_REVISION.get());
+			return;
+		}
+
+		// Transactional swap: the original settings object is only replaced after
+		// the validated candidate is persisted, so a failed save restores the
+		// exact previous rule view instead of leaving a half-applied state.
+		config.setPresentation(candidate);
+		boolean saved;
+
+		try {
+			config.validate();
+			saved = ServerConfig.HANDLER.saveSafely();
+		} catch (RuntimeException ex) {
+			LOGGER.debug(() -> "presentation policy save failed: %s".formatted(ex.getClass().getSimpleName()));
+			saved = false;
+		}
+
+		if (!saved) {
+			config.setPresentation(settings);
+			sendPresentationPolicySnapshot(
+				player,
+				packet.requestId(),
+				ServerPresentationPolicyService.Status.FAILED,
+				canEdit,
+				settings.policy(),
+				PRESENTATION_POLICY_REVISION.get());
+			return;
+		}
+
+		final long revision = PRESENTATION_POLICY_REVISION.incrementAndGet();
+		final PresentationPolicy appliedPolicy = candidate.policy();
+
+		sendPresentationPolicySnapshot(
+			player, packet.requestId(), result.status(), canEdit, appliedPolicy, revision);
+
+		for (ServerPlayer recipient : server.getPlayerList().getPlayers()) {
+			if (recipient == player) {
+				continue;
+			}
+
+			sendPresentationPolicySnapshot(
+				recipient,
+				0L,
+				ServerPresentationPolicyService.Status.OK,
+				recipient.hasPermissions(3),
+				appliedPolicy,
+				revision);
+		}
+	}
+
+	private static void sendPresentationPolicySnapshot(
+		ServerPlayer player,
+		long requestId,
+		ServerPresentationPolicyService.Status status,
+		boolean canEdit,
+		PresentationPolicy policy,
+		long revision) {
+		IPlatformNetworkService.INSTANCE.sendToClient(
+			new ServerPresentationPolicyS2CPacket(
+				requestId,
+				revision,
+				status,
+				canEdit,
+				policy.white(),
+				policy.black(),
+				policy.whitelistOnly()),
 			player);
 	}
 

@@ -18,12 +18,67 @@ class ServerSettingsModelTest {
 		true,
 		1000,
 		5);
+	private static final ServerConfigSnapshot READ_ONLY = EDITABLE.withCanEdit(false);
 
 	@Test
-	void lockedModelCannotExpand() {
+	void readOnlySnapshotIsAcceptedAndRenderedForViewerBelowPermission() {
 		var model = new ServerSettingsModel(false);
-		assertEquals(-1L, model.beginExpansion());
-		assertFalse(model.expanded());
+		long requestId = model.beginExpansion();
+		assertTrue(requestId > 0L);
+		assertFalse(model.canView());
+
+		assertTrue(model.applySnapshot(requestId, READ_ONLY));
+
+		assertTrue(model.canView());
+		assertFalse(model.canEdit());
+		assertFalse(model.accessDenied());
+		assertFalse(model.loading());
+		assertEquals(ChannelMode.AUTO, model.defaultChannelMode());
+		assertTrue(model.playerTrackingEnabled());
+		assertEquals("1000", model.msToRegenerateText());
+		assertEquals("5", model.rateLimitText());
+		assertEquals(Integer.toString(READ_ONLY.syncDuration()), model.syncDurationText());
+		assertFalse(model.dirty());
+		assertTrue(model.updatePlan().isEmpty());
+		assertEquals(-1L, model.beginSessionIfNeeded());
+	}
+
+	@Test
+	void readOnlyViewerCannotChangeTheDraftOrBuildAnUpdate() {
+		var model = new ServerSettingsModel(false);
+		long requestId = model.beginExpansion();
+		assertTrue(model.applySnapshot(requestId, READ_ONLY));
+
+		model.cycleDefaultChannelMode();
+		model.togglePlayerTracking();
+		model.setMsToRegenerateText("2500");
+		model.setRateLimitText("99");
+		model.setSyncDurationText("23");
+
+		assertEquals(ChannelMode.AUTO, model.defaultChannelMode());
+		assertTrue(model.playerTrackingEnabled());
+		assertEquals("1000", model.msToRegenerateText());
+		assertEquals("5", model.rateLimitText());
+		assertEquals(Integer.toString(READ_ONLY.syncDuration()), model.syncDurationText());
+		assertFalse(model.dirty());
+		assertEquals(0, model.invalidFieldMask());
+		assertTrue(model.updatePlan().isEmpty());
+	}
+
+	@Test
+	void unsafeOrUncorrelatedSnapshotIsNeverViewable() {
+		var model = new ServerSettingsModel(false);
+		long requestId = model.beginExpansion();
+
+		assertFalse(model.applySnapshot(requestId, new ServerConfigSnapshot(
+			false,
+			ChannelMode.AUTO,
+			true,
+			1000,
+			5,
+			-1)));
+		assertFalse(model.applySnapshot(requestId + 1L, READ_ONLY));
+		assertFalse(model.canView());
 	}
 
 	@Test
@@ -132,8 +187,7 @@ class ServerSettingsModelTest {
 		assertFalse(model.hasInvalidDraft());
 
 		model.setClientPermission(true);
-		requestId = model.beginExpansion();
-		model.applySnapshot(requestId, EDITABLE);
+		assertTrue(model.canEdit());
 		model.setMsToRegenerateText("");
 		assertEquals(ServerConfigUpdate.MS_TO_REGENERATE, model.invalidFieldMask());
 
@@ -160,7 +214,7 @@ class ServerSettingsModelTest {
 	}
 
 	@Test
-	void permissionRevocationCollapsesAndDiscardsDraft() {
+	void permissionRevocationRetainsTheReadOnlyViewAndDropsEdits() {
 		var model = new ServerSettingsModel(true);
 		long requestId = model.beginExpansion();
 		model.applySnapshot(requestId, EDITABLE);
@@ -170,6 +224,39 @@ class ServerSettingsModelTest {
 		assertFalse(model.expanded());
 		assertFalse(model.dirty());
 		assertFalse(model.canEdit());
+		assertTrue(model.canView());
+		assertEquals("5", model.rateLimitText());
+		assertTrue(model.updatePlan().isEmpty());
+	}
+
+	@Test
+	void permissionReturnRestoresTheEditableSessionForARetainedEditableSnapshot() {
+		var model = new ServerSettingsModel(true);
+		long requestId = model.beginExpansion();
+		model.applySnapshot(requestId, EDITABLE);
+		model.setClientPermission(false);
+		model.setClientPermission(true);
+
+		assertTrue(model.canEdit());
+		assertTrue(model.updatePlan().isEmpty());
+		model.setRateLimitText("99");
+		assertEquals(ServerConfigUpdate.RATE_LIMIT, model.updatePlan().orElseThrow().changedFields());
+	}
+
+	@Test
+	void promotionToEditorDropsTheReadOnlyViewAndRequestsAFreshSnapshot() {
+		var model = new ServerSettingsModel(false);
+		long requestId = model.beginExpansion();
+		assertTrue(model.applySnapshot(requestId, READ_ONLY));
+
+		model.setClientPermission(true);
+
+		assertFalse(model.canView());
+		assertFalse(model.accessDenied());
+		long freshRequestId = model.beginSessionIfNeeded();
+		assertTrue(freshRequestId > 0L);
+		assertTrue(model.applySnapshot(freshRequestId, EDITABLE));
+		assertTrue(model.canEdit());
 	}
 
 	@Test
@@ -266,20 +353,18 @@ class ServerSettingsModelTest {
 	}
 
 	@Test
-	void authoritativeDenialLocksWhileLocalPermissionRemainsTrue() {
+	void authoritativeDenialKeepsTheSnapshotViewableButNotEditable() {
 		var model = new ServerSettingsModel(true);
 		long deniedRequestId = model.beginExpansion();
-		assertTrue(model.applySnapshot(deniedRequestId, new ServerConfigSnapshot(
-			false,
-			ChannelMode.AUTO,
-			true,
-			1000,
-			5)));
-		assertFalse(model.expanded());
-		assertNull(model.authoritative());
+		assertTrue(model.applySnapshot(deniedRequestId, READ_ONLY));
+
+		assertTrue(model.expanded());
+		assertTrue(model.canView());
+		assertFalse(model.canEdit());
 		assertTrue(model.accessDenied());
 		assertFalse(model.loading());
 		assertEquals(-1L, model.pendingRequestId());
+		assertEquals("1000", model.msToRegenerateText());
 		assertEquals(-1L, model.beginExpansion());
 		model.setClientPermission(true);
 		assertTrue(model.accessDenied());

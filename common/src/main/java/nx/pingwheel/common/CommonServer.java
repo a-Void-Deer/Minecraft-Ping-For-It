@@ -11,6 +11,7 @@ import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformServerEventService;
 
@@ -69,6 +70,10 @@ public class CommonServer {
 
 	public void onServerConfigUpdatePacket(MinecraftServer server, ServerPlayer player, ServerConfigUpdateC2SPacket packet) {
 		ServerCore.onServerConfigUpdate(server, player, packet);
+	}
+
+	public void onServerPresentationPolicyPacket(MinecraftServer server, ServerPlayer player, ServerPresentationPolicyC2SPacket packet) {
+		ServerCore.onServerPresentationPolicy(server, player, packet);
 	}
 
 	public void onServerTick(MinecraftServer server) {
