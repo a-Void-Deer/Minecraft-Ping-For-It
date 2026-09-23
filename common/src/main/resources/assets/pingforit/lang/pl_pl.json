@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "Otwórz ustawienia",
 	"subtitles.pingforit.ping": "Alert lokalizacji pingu",
 
-	"settings.pingforit.title": "Ustawienia Ping For It",
-	"settings.pingforit.client_settings": "Ustawienia klienta",
-	"settings.pingforit.server_settings": "Ustawienia serwera",
+	"settings.pingforit.title": "Konfiguracja Ping For It",
+	"settings.pingforit.client_settings": "Klient",
+	"settings.pingforit.server_settings": "Serwer",
 	"settings.pingforit.server_settings.loading": "(Wczytywanie…)",
 	"settings.pingforit.server_settings.locked": "(Zablokowane)",
 	"settings.pingforit.server_settings.validation": "Popraw nieujemne liczby całkowite albo zwiń sekcję, aby odrzucić zmiany serwera.",
@@ -82,6 +82,8 @@
 	"command.pingforit.channel.set.reject": "Nazwy kanałów są ograniczone do %s znaków",
 	"pingforit.chat.pingmsg": "%s: %s: %s",
 	"pingforit.chat.pingmsg.template": "{playerName}: {pingType}: {targetName}",
+	"pingforit.chat.local_error.prefix": "[ping for it] ",
+	"pingforit.chat.target_gone": "Cel zniknął lub zginął",
 
 	"pingforit.ping_type.attention": "Uwaga",
 	"pingforit.ping_type.attention.phrase": "UWAGA",
@@ -116,4 +118,38 @@
   ,"notice.pingforit.on": "Włączone"
   ,"notice.pingforit.off": "Wyłączone"
   ,"settings.pingforit.configuration_notice_size": "Rozmiar powiadomienia konfiguracji: %s"
+  ,"settings.pingforit.category.display": "Wyświetlanie znaczników"
+  ,"settings.pingforit.category.display.button": "Wyświetlanie znaczników..."
+  ,"settings.pingforit.category.selection": "Wybór celu"
+  ,"settings.pingforit.category.selection.button": "Wybór celu..."
+  ,"settings.pingforit.category.wheel_appearance": "Wygląd koła"
+  ,"settings.pingforit.category.wheel_appearance.button": "Wygląd koła..."
+  ,"settings.pingforit.category.input": "Obsługa wejścia"
+  ,"settings.pingforit.category.input.button": "Obsługa wejścia..."
+  ,"settings.pingforit.category.channel_notices": "Kanał i powiadomienia"
+  ,"settings.pingforit.category.channel_notices.button": "Kanał i powiadomienia..."
+  ,"settings.pingforit.category.geometry_config": "Renderowanie i konfiguracja"
+  ,"settings.pingforit.category.geometry_config.button": "Renderowanie i konfiguracja..."
+  ,"settings.pingforit.category.channel_players": "Kanał i gracze"
+  ,"settings.pingforit.category.channel_players.button": "Kanał i gracze..."
+  ,"settings.pingforit.category.send_rate": "Tempo wysyłania"
+  ,"settings.pingforit.category.send_rate.button": "Tempo wysyłania..."
+  ,"settings.pingforit.category.marker_duration": "Czas trwania znacznika"
+  ,"settings.pingforit.category.marker_duration.button": "Czas trwania znacznika..."
+  ,"settings.pingforit.group.marker_display": "Prezentacja znaczników"
+  ,"settings.pingforit.group.input_timing": "Naciśnięcie, limit czasu i anulowanie"
+  ,"settings.pingforit.group.channel": "Kanał"
+  ,"settings.pingforit.group.geometry": "Renderowanie bloków encji"
+  ,"settings.pingforit.group.client_config_file": "Plik konfiguracji klienta"
+  ,"settings.pingforit.group.channel_players": "Kanał i gracze serwera"
+  ,"settings.pingforit.group.send_rate": "Zasady wysyłania serwera"
+  ,"settings.pingforit.group.marker_duration": "Czas życia znaczników serwera"
+  ,"settings.pingforit.server_status.loading": "Wczytywanie ustawień serwera..."
+  ,"settings.pingforit.server_status.permission": "Nie masz uprawnień do edycji ustawień serwera."
+  ,"settings.pingforit.server_status.unavailable": "Ustawienia serwera są niedostępne."
+  ,"settings.pingforit.server_status.ready": "Ustawienia serwera wczytane. Zmiany zostaną wysłane przy wyjściu."
+  ,"settings.pingforit.server_status.draft": "Niezapisane zmiany serwera są zachowywane między kategoriami."
+  ,"settings.pingforit.reset_all.server_draft_warning": "Spowoduje to także odrzucenie niezapisanego szkicu ustawień serwera."
+  ,"settings.pingforit.open_client_config": "Zapisz, zamknij i otwórz konfigurację klienta..."
+  ,"settings.pingforit.open_client_config.tooltip": "Zapisuje i zamyka ustawienia przed otwarciem pełnego pliku konfiguracji klienta. Zmiany zewnętrzne zaczną działać po ponownym uruchomieniu klienta."
 }

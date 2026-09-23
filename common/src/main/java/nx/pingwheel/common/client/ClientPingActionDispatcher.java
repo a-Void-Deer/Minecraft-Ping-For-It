@@ -44,13 +44,14 @@ public final class ClientPingActionDispatcher {
 	/**
 	 * Shows a purely local error to the local player.
 	 *
-	 * <p>The exact message and 24-bit color are supplied by the dispatcher;
-	 * implementations must not reword or re-theme them.
+	 * <p>The language-resource key of the exact message and the 24-bit color
+	 * are supplied by the dispatcher; implementations must resolve the key and
+	 * must not reword or re-theme the result.
 	 */
 	@FunctionalInterface
 	public interface LocalErrorSink {
 
-		void showLocalError(String message, int color);
+		void showLocalError(String messageKey, int color);
 	}
 
 	private final PacketSender packetSender;
@@ -131,7 +132,7 @@ public final class ClientPingActionDispatcher {
 
 	private void dispatchTargetGone(PingInteractionAction.TargetGone gone) {
 		errorSink.showLocalError(
-			PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE,
+			PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE_KEY,
 			PingInteractionAction.TargetGone.TARGET_GONE_COLOR);
 
 		logger.debug("dispatch target gone: kind={} reason={}",

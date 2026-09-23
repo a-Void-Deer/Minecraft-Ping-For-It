@@ -16,6 +16,9 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
+import nx.pingwheel.common.client.MinecraftLocalErrorSink;
+import nx.pingwheel.common.interaction.state.PingInteractionAction;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -49,6 +52,24 @@ class ClientConfigLocalizationTest {
 		"settings.pingforit.rate_limit.tooltip",
 		"settings.pingforit.sync_duration",
 		"settings.pingforit.sync_duration.tooltip");
+	private static final List<String> SETTINGS_NAVIGATION_KEYS = List.of(
+		"settings.pingforit.title",
+		"settings.pingforit.group.marker_display",
+		"settings.pingforit.group.input_timing",
+		"settings.pingforit.group.channel",
+		"settings.pingforit.group.geometry",
+		"settings.pingforit.group.client_config_file",
+		"settings.pingforit.group.channel_players",
+		"settings.pingforit.group.send_rate",
+		"settings.pingforit.group.marker_duration",
+		"settings.pingforit.server_status.loading",
+		"settings.pingforit.server_status.permission",
+		"settings.pingforit.server_status.unavailable",
+		"settings.pingforit.server_status.ready",
+		"settings.pingforit.server_status.draft",
+		"settings.pingforit.reset_all.server_draft_warning",
+		"settings.pingforit.open_client_config",
+		"settings.pingforit.open_client_config.tooltip");
 	private static final Map<String, String> EXTERNAL_LIST_RESTART_MARKERS = Map.of(
 		"de_de", "Neustart des Clients",
 		"en_us", "restarting the client",
@@ -144,6 +165,71 @@ class ClientConfigLocalizationTest {
 				json.get("settings.pingforit.long_press_compatibility_slice_millis").getAsString().contains("%s"),
 				() -> "compatibility slice must be formatted: " + locale);
 		}
+	}
+
+	@Test
+	void everyBundledLocaleContainsTheCategorizedSettingsNavigation() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			for (String key : SETTINGS_NAVIGATION_KEYS) {
+				nonBlankTranslation(json, locale, key);
+			}
+			for (String category : List.of(
+				"display",
+				"selection",
+				"wheel_appearance",
+				"input",
+				"channel_notices",
+				"geometry_config",
+				"channel_players",
+				"send_rate",
+				"marker_duration")) {
+				nonBlankTranslation(json, locale, "settings.pingforit.category." + category);
+				String button = nonBlankTranslation(
+					json,
+					locale,
+					"settings.pingforit.category." + category + ".button");
+				assertTrue(button.endsWith("..."),
+					() -> "category entrance must advertise navigation: " + locale + ":" + category);
+			}
+		}
+	}
+
+	@Test
+	void titleSemanticSegmentsAreLocalizedForEveryBundledLocale() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			String base = nonBlankTranslation(json, locale, "settings.pingforit.title");
+			String client = nonBlankTranslation(json, locale, "settings.pingforit.client_settings");
+			String server = nonBlankTranslation(json, locale, "settings.pingforit.server_settings");
+
+			assertTrue(base.contains("Ping For It"),
+				() -> "the base title must keep the mod brand: " + locale);
+			assertFalse(base.equals(client),
+				() -> "base and client scope must stay distinct: " + locale);
+			assertFalse(base.equals(server),
+				() -> "base and server scope must stay distinct: " + locale);
+			assertFalse(client.equals(server),
+				() -> "client and server scopes must stay distinct: " + locale);
+			assertFalse(base.contains("%s"),
+				() -> "the base title is a literal segment: " + locale);
+			assertFalse(client.contains("%s"),
+				() -> "the client scope is a literal segment: " + locale);
+			assertFalse(server.contains("%s"),
+				() -> "the server scope is a literal segment: " + locale);
+			assertFalse(json.has("settings.pingforit.category_title"),
+				() -> "the unused two-argument category title format must be removed: " + locale);
+		}
+
+		assertEquals("Ping For It Configuration", readTranslation("en_us", "settings.pingforit.title"));
+		assertEquals("Client", readTranslation("en_us", "settings.pingforit.client_settings"));
+		assertEquals("Server", readTranslation("en_us", "settings.pingforit.server_settings"));
+		assertEquals("Ping For It 配置", readTranslation("zh_cn", "settings.pingforit.title"));
+		assertEquals("客户端", readTranslation("zh_cn", "settings.pingforit.client_settings"));
+		assertEquals("服务端", readTranslation("zh_cn", "settings.pingforit.server_settings"));
+		assertEquals("Ping For It 設定", readTranslation("zh_tw", "settings.pingforit.title"));
+		assertEquals("用戶端", readTranslation("zh_tw", "settings.pingforit.client_settings"));
+		assertEquals("伺服器", readTranslation("zh_tw", "settings.pingforit.server_settings"));
 	}
 
 	@Test
@@ -262,6 +348,22 @@ class ClientConfigLocalizationTest {
 		assertTranslationAbsent("en_us", "pingforit.chat." + "request.template");
 		assertTranslationAbsent("zh_cn", "pingforit.chat." + "request");
 		assertTranslationAbsent("zh_cn", "pingforit.chat." + "request.template");
+	}
+
+	@Test
+	void everyBundledLocaleContainsTheLocalizedTargetGoneFeedback() throws IOException {
+		String prefixKey = MinecraftLocalErrorSink.PREFIX_KEY;
+		String messageKey = PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE_KEY;
+
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			assertEquals("[ping for it] ", nonBlankTranslation(json, locale, prefixKey),
+				() -> "the local feedback prefix must be the exact marker resource: " + locale);
+			nonBlankTranslation(json, locale, messageKey);
+		}
+
+		assertEquals("Target disappeared or died", readTranslation("en_us", messageKey));
+		assertEquals("目标消失或死亡", readTranslation("zh_cn", messageKey));
 	}
 
 	private JsonObject readLocaleJson(String locale) throws IOException {

@@ -95,9 +95,8 @@ public final class ServerSettingsModel {
 	}
 
 	/**
-	 * Allocates and returns the positive request id for a newly clicked header,
-	 * or the no-pending sentinel when the header cannot start an expansion
-	 * request.
+	 * Allocates and returns the positive request id for a newly entered server
+	 * settings session, or the no-pending sentinel when a request cannot start.
 	 */
 	public long beginExpansion() {
 		if (!clientPermission || authoritativeAccessDenied || expanded) {
@@ -112,8 +111,20 @@ public final class ServerSettingsModel {
 	}
 
 	/**
-	 * Applies a snapshot only as the response to the currently loading
-	 * expansion and only when its request id exactly matches the pending id.  A
+	 * Starts the shared server-settings session if it has neither a loaded nor an
+	 * in-flight snapshot.  The expansion method remains the primitive used by
+	 * focused model tests and by this session-oriented entry point.
+	 */
+	public long beginSessionIfNeeded() {
+		if (loaded() || loading) {
+			return NO_PENDING_REQUEST;
+		}
+		return beginExpansion();
+	}
+
+	/**
+	 * Applies a snapshot only as the response to the currently loading session
+	 * and only when its request id exactly matches the pending id.  A
 	 * response that arrives after cancellation, disconnect, permission
 	 * revocation, or a later expansion is stale and must not reopen the section.
 	 */
@@ -245,11 +256,33 @@ public final class ServerSettingsModel {
 		recomputeDirtyFields();
 	}
 
+	/**
+	 * Bitmask of the dirty numeric draft fields that do not parse as a
+	 * non-negative integer, or zero when no dirty numeric field is invalid.  The
+	 * mask reuses the {@link ServerConfigUpdate} field constants so validation
+	 * routing can identify the owning category and field without re-parsing the
+	 * draft.
+	 */
+	public int invalidFieldMask() {
+		if (!dirty()) {
+			return 0;
+		}
+
+		int fields = 0;
+		if (parseNonNegative(msToRegenerate).isEmpty()) {
+			fields |= ServerConfigUpdate.MS_TO_REGENERATE;
+		}
+		if (parseNonNegative(rateLimit).isEmpty()) {
+			fields |= ServerConfigUpdate.RATE_LIMIT;
+		}
+		if (parseNonNegative(syncDuration).isEmpty()) {
+			fields |= ServerConfigUpdate.SYNC_DURATION;
+		}
+		return fields;
+	}
+
 	public boolean hasInvalidDraft() {
-		return dirty()
-			&& (parseNonNegative(msToRegenerate).isEmpty()
-				|| parseNonNegative(rateLimit).isEmpty()
-				|| parseNonNegative(syncDuration).isEmpty());
+		return invalidFieldMask() != 0;
 	}
 
 	public Optional<ServerConfigUpdate> updatePlan() {

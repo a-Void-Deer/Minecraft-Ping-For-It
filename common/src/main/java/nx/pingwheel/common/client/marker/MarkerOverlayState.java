@@ -47,8 +47,12 @@ import static nx.pingwheel.common.CommonClient.Game;
  *       in place never resets its displayed name;</li>
  *   <li>only views whose target dimension is the current dimension are
  *       updated (the renderers skip other dimensions anyway);</li>
- *   <li>the exposed render list is immutable and sorted by descending
- *       distance, exactly like the legacy ping repository.</li>
+ *   <li>the exposed render list carries at most one view per canonical target
+ *       key — the store's HUD selection, which prefers the exposed
+ *       authoritative winner and otherwise the latest same-target fallback —
+ *       and is immutable and sorted by descending distance, exactly like the
+ *       legacy ping repository. Non-selected views stay cached for name and
+ *       presentation-position continuity but are not exported.</li>
  * </ul>
  *
  * <p>Calling {@link #prepare} with a missing world or a {@code null} store or
@@ -124,7 +128,23 @@ public final class MarkerOverlayState {
 			}
 		}
 
-		List<MarkerView> sorted = new ArrayList<>(views.values());
+		// The HUD draws at most one view per canonical target. Every view above
+		// stays cached so names and presentation positions survive a selection
+		// change; only the store's selection is exported for this frame.
+		Set<MarkerId> hudIds = new HashSet<>();
+
+		for (ClientMarker marker : store.hudRenderMarkers()) {
+			hudIds.add(marker.id());
+		}
+
+		List<MarkerView> sorted = new ArrayList<>();
+
+		for (Map.Entry<MarkerId, MarkerView> entry : views.entrySet()) {
+			if (hudIds.contains(entry.getKey())) {
+				sorted.add(entry.getValue());
+			}
+		}
+
 		sorted.sort((left, right) -> Double.compare(right.getDistance(), left.getDistance()));
 
 		renderViews = List.copyOf(sorted);

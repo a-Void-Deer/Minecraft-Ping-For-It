@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "Ouvrir les Paramètres",
 	"subtitles.pingforit.ping": "Alerte Ping de Localisation",
 
-	"settings.pingforit.title": "Paramètres du Ping For It",
-	"settings.pingforit.client_settings": "Paramètres client",
-	"settings.pingforit.server_settings": "Paramètres serveur",
+	"settings.pingforit.title": "Configuration de Ping For It",
+	"settings.pingforit.client_settings": "Client",
+	"settings.pingforit.server_settings": "Serveur",
 	"settings.pingforit.server_settings.loading": "(Chargement…)",
 	"settings.pingforit.server_settings.locked": "(Verrouillé)",
 	"settings.pingforit.server_settings.validation": "Corrigez les nombres entiers non négatifs ou réduisez la section pour abandonner les modifications du serveur.",
@@ -87,6 +87,8 @@
 	"pingforit.chat.destroy.template.override": "{playerName} demande de {pingType} {targetName}",
 	"pingforit.chat.take.template.override": "{playerName} demande de {pingType} {targetName}",
 	"pingforit.chat.request.template.override": "{playerName} {pingType} : {targetName}",
+	"pingforit.chat.local_error.prefix": "[ping for it] ",
+	"pingforit.chat.target_gone": "Cible disparue ou morte",
 
 	"pingforit.ping_type.attention": "Attention",
 	"pingforit.ping_type.attention.phrase": "ATTENTION",
@@ -121,4 +123,38 @@
   ,"notice.pingforit.on": "Activé"
   ,"notice.pingforit.off": "Désactivé"
   ,"settings.pingforit.configuration_notice_size": "Taille de l’avis de configuration : %s"
+  ,"settings.pingforit.category.display": "Affichage des marqueurs"
+  ,"settings.pingforit.category.display.button": "Affichage des marqueurs..."
+  ,"settings.pingforit.category.selection": "Sélection des cibles"
+  ,"settings.pingforit.category.selection.button": "Sélection des cibles..."
+  ,"settings.pingforit.category.wheel_appearance": "Apparence de la roue"
+  ,"settings.pingforit.category.wheel_appearance.button": "Apparence de la roue..."
+  ,"settings.pingforit.category.input": "Interaction d’entrée"
+  ,"settings.pingforit.category.input.button": "Interaction d’entrée..."
+  ,"settings.pingforit.category.channel_notices": "Canal et notifications"
+  ,"settings.pingforit.category.channel_notices.button": "Canal et notifications..."
+  ,"settings.pingforit.category.geometry_config": "Rendu et configuration"
+  ,"settings.pingforit.category.geometry_config.button": "Rendu et configuration..."
+  ,"settings.pingforit.category.channel_players": "Canal et joueurs"
+  ,"settings.pingforit.category.channel_players.button": "Canal et joueurs..."
+  ,"settings.pingforit.category.send_rate": "Débit d’envoi"
+  ,"settings.pingforit.category.send_rate.button": "Débit d’envoi..."
+  ,"settings.pingforit.category.marker_duration": "Durée des marqueurs"
+  ,"settings.pingforit.category.marker_duration.button": "Durée des marqueurs..."
+  ,"settings.pingforit.group.marker_display": "Présentation des marqueurs"
+  ,"settings.pingforit.group.input_timing": "Appui, délai et annulation"
+  ,"settings.pingforit.group.channel": "Canal"
+  ,"settings.pingforit.group.geometry": "Rendu des blocs-entités"
+  ,"settings.pingforit.group.client_config_file": "Fichier de configuration client"
+  ,"settings.pingforit.group.channel_players": "Canal et joueurs du serveur"
+  ,"settings.pingforit.group.send_rate": "Politique d’envoi du serveur"
+  ,"settings.pingforit.group.marker_duration": "Durée de vie des marqueurs du serveur"
+  ,"settings.pingforit.server_status.loading": "Chargement des paramètres du serveur..."
+  ,"settings.pingforit.server_status.permission": "Vous n’avez pas la permission de modifier les paramètres du serveur."
+  ,"settings.pingforit.server_status.unavailable": "Les paramètres du serveur sont indisponibles."
+  ,"settings.pingforit.server_status.ready": "Paramètres du serveur chargés. Les modifications seront envoyées en quittant."
+  ,"settings.pingforit.server_status.draft": "Les modifications serveur non enregistrées sont conservées entre les catégories."
+  ,"settings.pingforit.reset_all.server_draft_warning": "Cela supprimera aussi le brouillon serveur non enregistré."
+  ,"settings.pingforit.open_client_config": "Enregistrer, fermer et ouvrir la configuration client..."
+  ,"settings.pingforit.open_client_config.tooltip": "Enregistre et ferme les paramètres avant d’ouvrir le fichier complet de configuration client. Les modifications externes prennent effet après le redémarrage du client."
 }

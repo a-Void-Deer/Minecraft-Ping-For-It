@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "Open Settings",
 	"subtitles.pingforit.ping": "Location Ping Alert",
 
-	"settings.pingforit.title": "Ping For It Settings",
-	"settings.pingforit.client_settings": "Client Settings",
-	"settings.pingforit.server_settings": "Server Settings",
+	"settings.pingforit.title": "Ping For It Configuration",
+	"settings.pingforit.client_settings": "Client",
+	"settings.pingforit.server_settings": "Server",
 	"settings.pingforit.server_settings.loading": "(Loading…)",
 	"settings.pingforit.server_settings.locked": "(Locked)",
 	"settings.pingforit.server_settings.validation": "Fix the nonnegative whole numbers, or collapse and discard the server changes.",
@@ -99,6 +99,8 @@
 	"pingforit.chat.go_to.template.override": "{playerName} requests {pingType} {targetName}",
 	"pingforit.chat.take.template.override": "{playerName} requests {pingType} in {targetName}",
 	"pingforit.chat.request.template.override": "{playerName} {pingType}s {targetName}",
+	"pingforit.chat.local_error.prefix": "[ping for it] ",
+	"pingforit.chat.target_gone": "Target disappeared or died",
 
 	"pingforit.ping_type.attention": "Attention",
 	"pingforit.ping_type.attention.phrase": "ATTENTION",
@@ -131,4 +133,38 @@
   ,"notice.pingforit.on": "On"
   ,"notice.pingforit.off": "Off"
   ,"settings.pingforit.configuration_notice_size": "Configuration notice size: %s"
+  ,"settings.pingforit.category.display": "Marker Display"
+  ,"settings.pingforit.category.display.button": "Marker Display..."
+  ,"settings.pingforit.category.selection": "Target Selection"
+  ,"settings.pingforit.category.selection.button": "Target Selection..."
+  ,"settings.pingforit.category.wheel_appearance": "Wheel Appearance"
+  ,"settings.pingforit.category.wheel_appearance.button": "Wheel Appearance..."
+  ,"settings.pingforit.category.input": "Input Interaction"
+  ,"settings.pingforit.category.input.button": "Input Interaction..."
+  ,"settings.pingforit.category.channel_notices": "Channel & Notices"
+  ,"settings.pingforit.category.channel_notices.button": "Channel & Notices..."
+  ,"settings.pingforit.category.geometry_config": "Rendering & Config"
+  ,"settings.pingforit.category.geometry_config.button": "Rendering & Config..."
+  ,"settings.pingforit.category.channel_players": "Channel & Players"
+  ,"settings.pingforit.category.channel_players.button": "Channel & Players..."
+  ,"settings.pingforit.category.send_rate": "Send Rate"
+  ,"settings.pingforit.category.send_rate.button": "Send Rate..."
+  ,"settings.pingforit.category.marker_duration": "Marker Duration"
+  ,"settings.pingforit.category.marker_duration.button": "Marker Duration..."
+  ,"settings.pingforit.group.marker_display": "Marker presentation"
+  ,"settings.pingforit.group.input_timing": "Press, timeout & cancellation"
+  ,"settings.pingforit.group.channel": "Channel"
+  ,"settings.pingforit.group.geometry": "Entity-block rendering"
+  ,"settings.pingforit.group.client_config_file": "Client configuration file"
+  ,"settings.pingforit.group.channel_players": "Server channel & player behavior"
+  ,"settings.pingforit.group.send_rate": "Server send-rate policy"
+  ,"settings.pingforit.group.marker_duration": "Server marker lifetime"
+  ,"settings.pingforit.server_status.loading": "Loading server settings..."
+  ,"settings.pingforit.server_status.permission": "You do not have permission to edit server settings."
+  ,"settings.pingforit.server_status.unavailable": "Server settings are unavailable."
+  ,"settings.pingforit.server_status.ready": "Server settings loaded. Changes are sent when you leave Settings."
+  ,"settings.pingforit.server_status.draft": "Unsaved server changes are retained across categories."
+  ,"settings.pingforit.reset_all.server_draft_warning": "This also discards the unsaved server-settings draft."
+  ,"settings.pingforit.open_client_config": "Save, Close & Open Client Config..."
+  ,"settings.pingforit.open_client_config.tooltip": "Saves and closes Settings before opening the complete client configuration file. External edits take effect after restarting the client."
 }

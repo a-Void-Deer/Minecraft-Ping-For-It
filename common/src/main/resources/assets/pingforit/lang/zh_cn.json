@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "打开设置",
 	"subtitles.pingforit.ping": "坐标标记提醒",
 
-	"settings.pingforit.title": "Ping For It 设置",
-	"settings.pingforit.client_settings": "客户端设置",
-	"settings.pingforit.server_settings": "服务器设置",
+	"settings.pingforit.title": "Ping For It 配置",
+	"settings.pingforit.client_settings": "客户端",
+	"settings.pingforit.server_settings": "服务端",
 	"settings.pingforit.server_settings.loading": "（正在加载…）",
 	"settings.pingforit.server_settings.locked": "（已锁定）",
 	"settings.pingforit.server_settings.validation": "请修正非负整数，或收起并放弃服务器更改。",
@@ -94,6 +94,8 @@
 	"pingforit.chat.pingmsg.template": "{playerName}: 请求 {pingType} {targetName}",
 	"pingforit.chat.danger.template.override": "{playerName}: {pingType} {targetName} !",
 	"pingforit.chat.request.template.override": "{playerName}: {pingType} {targetName}",
+	"pingforit.chat.local_error.prefix": "[ping for it] ",
+	"pingforit.chat.target_gone": "目标消失或死亡",
 
 	"pingforit.ping_type.attention": "注意",
 	"pingforit.ping_type.attention.phrase": "注意",
@@ -126,4 +128,38 @@
   ,"notice.pingforit.on": "开"
   ,"notice.pingforit.off": "关"
   ,"settings.pingforit.configuration_notice_size": "配置提示大小: %s"
+  ,"settings.pingforit.category.display": "标记显示"
+  ,"settings.pingforit.category.display.button": "标记显示..."
+  ,"settings.pingforit.category.selection": "目标选择"
+  ,"settings.pingforit.category.selection.button": "目标选择..."
+  ,"settings.pingforit.category.wheel_appearance": "轮盘外观"
+  ,"settings.pingforit.category.wheel_appearance.button": "轮盘外观..."
+  ,"settings.pingforit.category.input": "输入交互"
+  ,"settings.pingforit.category.input.button": "输入交互..."
+  ,"settings.pingforit.category.channel_notices": "频道与提示"
+  ,"settings.pingforit.category.channel_notices.button": "频道与提示..."
+  ,"settings.pingforit.category.geometry_config": "渲染与配置"
+  ,"settings.pingforit.category.geometry_config.button": "渲染与配置..."
+  ,"settings.pingforit.category.channel_players": "频道与玩家"
+  ,"settings.pingforit.category.channel_players.button": "频道与玩家..."
+  ,"settings.pingforit.category.send_rate": "发送速率"
+  ,"settings.pingforit.category.send_rate.button": "发送速率..."
+  ,"settings.pingforit.category.marker_duration": "标记持续时间"
+  ,"settings.pingforit.category.marker_duration.button": "标记持续时间..."
+  ,"settings.pingforit.group.marker_display": "标记呈现"
+  ,"settings.pingforit.group.input_timing": "按键、超时与取消"
+  ,"settings.pingforit.group.channel": "频道"
+  ,"settings.pingforit.group.geometry": "实体方块渲染"
+  ,"settings.pingforit.group.client_config_file": "客户端配置文件"
+  ,"settings.pingforit.group.channel_players": "服务器频道与玩家行为"
+  ,"settings.pingforit.group.send_rate": "服务器发送速率策略"
+  ,"settings.pingforit.group.marker_duration": "服务器标记生命周期"
+  ,"settings.pingforit.server_status.loading": "正在加载服务器设置..."
+  ,"settings.pingforit.server_status.permission": "你没有编辑服务器设置的权限。"
+  ,"settings.pingforit.server_status.unavailable": "服务器设置不可用。"
+  ,"settings.pingforit.server_status.ready": "服务器设置已加载。离开设置时会发送更改。"
+  ,"settings.pingforit.server_status.draft": "未保存的服务器更改会在分类之间保留。"
+  ,"settings.pingforit.reset_all.server_draft_warning": "这也会丢弃未保存的服务器设置草稿。"
+  ,"settings.pingforit.open_client_config": "保存、关闭并打开客户端配置..."
+  ,"settings.pingforit.open_client_config.tooltip": "保存并关闭设置，然后打开完整的客户端配置文件。外部编辑将在重启客户端后生效。"
 }

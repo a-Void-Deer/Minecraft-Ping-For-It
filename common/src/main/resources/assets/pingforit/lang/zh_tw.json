@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "開啟設定",
 	"subtitles.pingforit.ping": "標記位置警報",
 
-	"settings.pingforit.title": "標記圓環設定",
-	"settings.pingforit.client_settings": "用戶端設定",
-	"settings.pingforit.server_settings": "伺服器設定",
+	"settings.pingforit.title": "Ping For It 設定",
+	"settings.pingforit.client_settings": "用戶端",
+	"settings.pingforit.server_settings": "伺服器",
 	"settings.pingforit.server_settings.loading": "（載入中…）",
 	"settings.pingforit.server_settings.locked": "（已鎖定）",
 	"settings.pingforit.server_settings.validation": "請修正非負整數，或收起並放棄伺服器變更。",
@@ -84,6 +84,8 @@
 	"pingforit.chat.pingmsg.template": "{playerName}：請求 {pingType} {targetName}",
 	"pingforit.chat.danger.template.override": "{playerName}：{pingType} {targetName}！",
 	"pingforit.chat.request.template.override": "{playerName} {pingType} {targetName}",
+	"pingforit.chat.local_error.prefix": "[ping for it] ",
+	"pingforit.chat.target_gone": "目標消失或死亡",
 
 	"pingforit.ping_type.attention": "注意",
 	"pingforit.ping_type.attention.phrase": "注意",
@@ -118,4 +120,38 @@
   ,"notice.pingforit.on": "開"
   ,"notice.pingforit.off": "關"
   ,"settings.pingforit.configuration_notice_size": "設定提示大小: %s"
+  ,"settings.pingforit.category.display": "標記顯示"
+  ,"settings.pingforit.category.display.button": "標記顯示..."
+  ,"settings.pingforit.category.selection": "目標選擇"
+  ,"settings.pingforit.category.selection.button": "目標選擇..."
+  ,"settings.pingforit.category.wheel_appearance": "轉盤外觀"
+  ,"settings.pingforit.category.wheel_appearance.button": "轉盤外觀..."
+  ,"settings.pingforit.category.input": "輸入互動"
+  ,"settings.pingforit.category.input.button": "輸入互動..."
+  ,"settings.pingforit.category.channel_notices": "頻道與提示"
+  ,"settings.pingforit.category.channel_notices.button": "頻道與提示..."
+  ,"settings.pingforit.category.geometry_config": "算繪與設定"
+  ,"settings.pingforit.category.geometry_config.button": "算繪與設定..."
+  ,"settings.pingforit.category.channel_players": "頻道與玩家"
+  ,"settings.pingforit.category.channel_players.button": "頻道與玩家..."
+  ,"settings.pingforit.category.send_rate": "傳送速率"
+  ,"settings.pingforit.category.send_rate.button": "傳送速率..."
+  ,"settings.pingforit.category.marker_duration": "標記持續時間"
+  ,"settings.pingforit.category.marker_duration.button": "標記持續時間..."
+  ,"settings.pingforit.group.marker_display": "標記呈現"
+  ,"settings.pingforit.group.input_timing": "按鍵、逾時與取消"
+  ,"settings.pingforit.group.channel": "頻道"
+  ,"settings.pingforit.group.geometry": "實體方塊算繪"
+  ,"settings.pingforit.group.client_config_file": "用戶端設定檔"
+  ,"settings.pingforit.group.channel_players": "伺服器頻道與玩家行為"
+  ,"settings.pingforit.group.send_rate": "伺服器傳送速率策略"
+  ,"settings.pingforit.group.marker_duration": "伺服器標記生命週期"
+  ,"settings.pingforit.server_status.loading": "正在載入伺服器設定..."
+  ,"settings.pingforit.server_status.permission": "你沒有編輯伺服器設定的權限。"
+  ,"settings.pingforit.server_status.unavailable": "伺服器設定無法使用。"
+  ,"settings.pingforit.server_status.ready": "伺服器設定已載入。離開設定時會傳送變更。"
+  ,"settings.pingforit.server_status.draft": "未儲存的伺服器變更會在分類之間保留。"
+  ,"settings.pingforit.reset_all.server_draft_warning": "這也會捨棄未儲存的伺服器設定草稿。"
+  ,"settings.pingforit.open_client_config": "儲存、關閉並開啟用戶端設定..."
+  ,"settings.pingforit.open_client_config.tooltip": "儲存並關閉設定，然後開啟完整的用戶端設定檔。外部編輯會在重新啟動用戶端後生效。"
 }

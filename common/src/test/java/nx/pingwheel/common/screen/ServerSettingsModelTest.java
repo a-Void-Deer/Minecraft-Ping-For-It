@@ -50,6 +50,20 @@ class ServerSettingsModelTest {
 	}
 
 	@Test
+	void enteringTheSharedSessionDoesNotReplaceLoadedOrInflightState() {
+		var model = new ServerSettingsModel(true);
+		long requestId = model.beginSessionIfNeeded();
+		assertTrue(requestId > 0L);
+		assertEquals(-1L, model.beginSessionIfNeeded());
+
+		assertTrue(model.applySnapshot(requestId, EDITABLE));
+		model.setRateLimitText("99");
+		assertEquals(-1L, model.beginSessionIfNeeded());
+		assertEquals("99", model.rateLimitText());
+		assertTrue(model.dirty());
+	}
+
+	@Test
 	void invalidNumericDraftDoesNotProduceAnUpdate() {
 		var model = new ServerSettingsModel(true);
 		long requestId = model.beginExpansion();
@@ -57,6 +71,91 @@ class ServerSettingsModelTest {
 		model.setRateLimitText("");
 
 		assertTrue(model.hasInvalidDraft());
+		assertTrue(model.updatePlan().isEmpty());
+	}
+
+	@Test
+	void invalidFieldMaskIdentifiesEachInvalidNumericFieldIndependently() {
+		var model = new ServerSettingsModel(true);
+		long requestId = model.beginExpansion();
+		model.applySnapshot(requestId, EDITABLE);
+
+		model.setMsToRegenerateText("");
+		assertEquals(ServerConfigUpdate.MS_TO_REGENERATE, model.invalidFieldMask());
+		assertTrue(model.hasInvalidDraft());
+		model.setMsToRegenerateText(Integer.toString(EDITABLE.msToRegenerate()));
+		assertEquals(0, model.invalidFieldMask());
+
+		model.setRateLimitText("not-a-number");
+		assertEquals(ServerConfigUpdate.RATE_LIMIT, model.invalidFieldMask());
+		model.setRateLimitText(Integer.toString(EDITABLE.rateLimit()));
+		assertEquals(0, model.invalidFieldMask());
+
+		model.setSyncDurationText("-1");
+		assertEquals(ServerConfigUpdate.SYNC_DURATION, model.invalidFieldMask());
+		assertTrue(model.hasInvalidDraft());
+		model.setSyncDurationText(Integer.toString(EDITABLE.syncDuration()));
+		assertEquals(0, model.invalidFieldMask());
+		assertFalse(model.hasInvalidDraft());
+	}
+
+	@Test
+	void invalidFieldMaskReportsOnlyInvalidEditedFields() {
+		var model = new ServerSettingsModel(true);
+		long requestId = model.beginExpansion();
+		model.applySnapshot(requestId, EDITABLE);
+
+		model.setMsToRegenerateText(Integer.toString(EDITABLE.msToRegenerate() + 1));
+		assertTrue(model.dirty());
+		assertEquals(0, model.invalidFieldMask());
+
+		model.setSyncDurationText("");
+		assertEquals(ServerConfigUpdate.SYNC_DURATION, model.invalidFieldMask());
+		assertTrue(model.updatePlan().isEmpty());
+
+		model.setMsToRegenerateText("");
+		assertEquals(
+			ServerConfigUpdate.MS_TO_REGENERATE | ServerConfigUpdate.SYNC_DURATION,
+			model.invalidFieldMask());
+	}
+
+	@Test
+	void invalidFieldMaskClearsOnPermissionRevocationAndDisconnect() {
+		var model = new ServerSettingsModel(true);
+		long requestId = model.beginExpansion();
+		model.applySnapshot(requestId, EDITABLE);
+		model.setRateLimitText("");
+		assertEquals(ServerConfigUpdate.RATE_LIMIT, model.invalidFieldMask());
+
+		model.setClientPermission(false);
+		assertEquals(0, model.invalidFieldMask());
+		assertFalse(model.hasInvalidDraft());
+
+		model.setClientPermission(true);
+		requestId = model.beginExpansion();
+		model.applySnapshot(requestId, EDITABLE);
+		model.setMsToRegenerateText("");
+		assertEquals(ServerConfigUpdate.MS_TO_REGENERATE, model.invalidFieldMask());
+
+		model.resetForDisconnect();
+		assertEquals(0, model.invalidFieldMask());
+		assertFalse(model.hasInvalidDraft());
+	}
+
+	@Test
+	void markCleanPreservesTheDraftTextAndClearsTheInvalidMask() {
+		var model = new ServerSettingsModel(true);
+		long requestId = model.beginExpansion();
+		model.applySnapshot(requestId, EDITABLE);
+		model.setMsToRegenerateText("2500");
+		model.setSyncDurationText("");
+
+		model.markClean();
+
+		assertEquals(0, model.invalidFieldMask());
+		assertFalse(model.hasInvalidDraft());
+		assertEquals("2500", model.msToRegenerateText());
+		assertEquals("", model.syncDurationText());
 		assertTrue(model.updatePlan().isEmpty());
 	}
 

@@ -7,9 +7,9 @@
 	"key.pingforit.open_settings": "Einstellungen öffnen",
 	"subtitles.pingforit.ping": "Ping-Markierung",
 
-	"settings.pingforit.title": "Ping For It Einstellungen",
-	"settings.pingforit.client_settings": "Client-Einstellungen",
-	"settings.pingforit.server_settings": "Server-Einstellungen",
+	"settings.pingforit.title": "Ping For It Konfiguration",
+	"settings.pingforit.client_settings": "Client",
+	"settings.pingforit.server_settings": "Server",
 	"settings.pingforit.server_settings.loading": "(Wird geladen …)",
 	"settings.pingforit.server_settings.locked": "(Gesperrt)",
 	"settings.pingforit.server_settings.validation": "Gib nichtnegative ganze Zahlen ein oder klappe den Bereich ein, um die Serveränderungen zu verwerfen.",
@@ -90,6 +90,8 @@
 	"pingforit.chat.destroy.template.override": "{playerName} will {targetName} {pingType}",
 	"pingforit.chat.take.template.override": "{playerName} will {targetName} {pingType}",
 	"pingforit.chat.request.template.override": "{playerName} {pingType}: {targetName}",
+	"pingforit.chat.local_error.prefix": "[ping for it] ",
+	"pingforit.chat.target_gone": "Ziel verschwunden oder gestorben",
 
 	"pingforit.ping_type.attention": "Achtung",
 	"pingforit.ping_type.attention.phrase": "ACHTUNG",
@@ -124,4 +126,38 @@
   ,"notice.pingforit.on": "An"
   ,"notice.pingforit.off": "Aus"
   ,"settings.pingforit.configuration_notice_size": "Größe der Konfigurationsmeldung: %s"
+  ,"settings.pingforit.category.display": "Marker-Anzeige"
+  ,"settings.pingforit.category.display.button": "Marker-Anzeige..."
+  ,"settings.pingforit.category.selection": "Zielauswahl"
+  ,"settings.pingforit.category.selection.button": "Zielauswahl..."
+  ,"settings.pingforit.category.wheel_appearance": "Rad-Darstellung"
+  ,"settings.pingforit.category.wheel_appearance.button": "Rad-Darstellung..."
+  ,"settings.pingforit.category.input": "Eingabeinteraktion"
+  ,"settings.pingforit.category.input.button": "Eingabeinteraktion..."
+  ,"settings.pingforit.category.channel_notices": "Kanal & Hinweise"
+  ,"settings.pingforit.category.channel_notices.button": "Kanal & Hinweise..."
+  ,"settings.pingforit.category.geometry_config": "Darstellung & Konfiguration"
+  ,"settings.pingforit.category.geometry_config.button": "Darstellung & Konfiguration..."
+  ,"settings.pingforit.category.channel_players": "Kanal & Spieler"
+  ,"settings.pingforit.category.channel_players.button": "Kanal & Spieler..."
+  ,"settings.pingforit.category.send_rate": "Senderate"
+  ,"settings.pingforit.category.send_rate.button": "Senderate..."
+  ,"settings.pingforit.category.marker_duration": "Marker-Dauer"
+  ,"settings.pingforit.category.marker_duration.button": "Marker-Dauer..."
+  ,"settings.pingforit.group.marker_display": "Marker-Darstellung"
+  ,"settings.pingforit.group.input_timing": "Drücken, Zeitlimit & Abbruch"
+  ,"settings.pingforit.group.channel": "Kanal"
+  ,"settings.pingforit.group.geometry": "Entity-Block-Darstellung"
+  ,"settings.pingforit.group.client_config_file": "Client-Konfigurationsdatei"
+  ,"settings.pingforit.group.channel_players": "Serverkanal & Spielerverhalten"
+  ,"settings.pingforit.group.send_rate": "Server-Senderatenrichtlinie"
+  ,"settings.pingforit.group.marker_duration": "Server-Marker-Lebensdauer"
+  ,"settings.pingforit.server_status.loading": "Servereinstellungen werden geladen..."
+  ,"settings.pingforit.server_status.permission": "Du hast keine Berechtigung, Servereinstellungen zu bearbeiten."
+  ,"settings.pingforit.server_status.unavailable": "Servereinstellungen sind nicht verfügbar."
+  ,"settings.pingforit.server_status.ready": "Servereinstellungen geladen. Änderungen werden beim Verlassen gesendet."
+  ,"settings.pingforit.server_status.draft": "Ungespeicherte Serveränderungen bleiben zwischen Kategorien erhalten."
+  ,"settings.pingforit.reset_all.server_draft_warning": "Dadurch wird auch der ungespeicherte Serverentwurf verworfen."
+  ,"settings.pingforit.open_client_config": "Speichern, schließen & Client-Konfiguration öffnen..."
+  ,"settings.pingforit.open_client_config.tooltip": "Speichert und schließt die Einstellungen und öffnet dann die vollständige Client-Konfigurationsdatei. Externe Änderungen werden nach einem Neustart des Clients wirksam."
 }

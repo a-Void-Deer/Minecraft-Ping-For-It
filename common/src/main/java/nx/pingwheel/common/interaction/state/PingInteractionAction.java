@@ -44,13 +44,13 @@ public sealed interface PingInteractionAction {
 	record TargetGone(CapturedPingContext context, TargetGoneReason reason) implements PingInteractionAction {
 
 		/**
-		 * The exact localized fallback message shown to the local player when a
-		 * captured target disappears, dies, changes dimension, or is replaced.
-		 *
-		 * <p>Written with ASCII Unicode escapes only, so the source file is
-		 * ASCII-clean while the runtime value is {@code 目标消失或死亡}.
+		 * The language-resource key of the localized message shown to the local
+		 * player when a captured target disappears, dies, changes dimension, or
+		 * is replaced. The Minecraft chat boundary resolves it after the
+		 * resource-supplied {@code [ping for it]} marker, so these interaction
+		 * records stay free of text components.
 		 */
-		public static final String TARGET_GONE_MESSAGE = "\u76EE\u6807\u6D88\u5931\u6216\u6B7B\u4EA1";
+		public static final String TARGET_GONE_MESSAGE_KEY = "pingforit.chat.target_gone";
 
 		/**
 		 * The light-red 24-bit RGB color used for the target-gone error.

@@ -20,6 +20,17 @@ following the public ownership policy in [README.md](README.md). Other documents
 retain only the necessary interface semantics, an ownership pointer, and a link;
 they do not copy catalogues, constants, algorithms, or tuning values.
 
+### Modification
+
+Before modifying documentation or tests, ask: would this file still need to change
+if the bug had never existed and the implementation had always been correct? If no,
+normally do not modify it. If modifying it is necessary, explain reasons and ask
+the user for permission & advice.
+
+Do not turn normative documentation into a changelog. Never add statements such as
+“X is now…”, “X is no longer…”, or “X currently uses…” merely because this task fixed
+that implementation. Update docs only when the enduring contract itself changed.
+
 ### Numerical and tuning detail
 
 Keep implementation numeric defaults, bounds, UI steps, and clamp formulas in
@@ -30,10 +41,11 @@ needed, and do not create another numeric catalogue.
 This restriction covers tuning values, not every exact fact. Relationship
 invariants remain normative, as do the meaning of numeric sentinels, permission
 policy, and protocol IDs or grammar/format values where they define behavior.
+
 Config client and server documents own their complete filenames, keys, formats,
 legal enum values and selectors, their meanings, helpful examples, relations,
 locality, authority, and references. Keep config grammar examples and their
-actual tokens in the config owner, not repeated here.
+actual tokens in the config owner.
 
 ## Subagents
 

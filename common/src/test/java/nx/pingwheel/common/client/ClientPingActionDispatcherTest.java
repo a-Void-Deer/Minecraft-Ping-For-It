@@ -234,7 +234,7 @@ class ClientPingActionDispatcherTest {
 	}
 
 	@Test
-	void targetGoneShowsTheExactLocalErrorAndSendsNothing() {
+	void targetGoneShowsTheLocalizedFeedbackKeyAndSendsNothing() {
 		Harness h = harness();
 		ActiveInteraction interaction = new ActiveInteraction();
 		CapturedPingContext context = capture(
@@ -244,7 +244,7 @@ class ClientPingActionDispatcherTest {
 
 		assertTrue(h.sender.sent.isEmpty());
 		assertEquals(1, h.sink.messages.size());
-		assertEquals(PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE, h.sink.messages.get(0));
+		assertEquals(PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE_KEY, h.sink.messages.get(0));
 		assertEquals(Integer.valueOf(PingInteractionAction.TargetGone.TARGET_GONE_COLOR), h.sink.colors.get(0));
 	}
 
