@@ -2,6 +2,7 @@ package nx.pingwheel.common.screen;
 
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,13 @@ import java.util.Map;
  * or instantiating Minecraft widgets.
  */
 public final class SettingsCategoryCatalog {
+	public enum PresentationSection {
+		CLIENT_RECEIVE,
+		CLIENT_DISPLAY,
+		SERVER_REFERENCE,
+		SERVER_EDITOR
+	}
+
 	public enum Setting {
 		PING_DISTANCE("ping_distance"),
 		MARKER_DISPLAY_DURATION("marker_display_duration"),
@@ -69,6 +77,27 @@ public final class SettingsCategoryCatalog {
 		return SETTINGS.get(category);
 	}
 
+	/**
+	 * Returns the presentation panels rendered for the category. The editable
+	 * server policy remains owned by its server setting; the client page appends
+	 * exactly one shared read-only reference after both local editors.
+	 */
+	public static List<PresentationSection> presentationSections(Category category) {
+		var sections = new ArrayList<PresentationSection>();
+		for (Setting setting : settings(category)) {
+			switch (setting) {
+				case PRESENTATION_RECEIVE -> sections.add(PresentationSection.CLIENT_RECEIVE);
+				case PRESENTATION_DISPLAY -> sections.add(PresentationSection.CLIENT_DISPLAY);
+				case PRESENTATION_SERVER_POLICY -> sections.add(PresentationSection.SERVER_EDITOR);
+				default -> throw new IllegalArgumentException("not a presentation category: " + category);
+			}
+		}
+		if (category == Category.PRESENTATION) {
+			sections.add(PresentationSection.SERVER_REFERENCE);
+		}
+		return List.copyOf(sections);
+	}
+
 	private static Map<Category, List<Setting>> createSettings() {
 		var settings = new EnumMap<Category, List<Setting>>(Category.class);
 		settings.put(Category.MARKER_DISPLAY, List.of(
@@ -111,8 +140,8 @@ public final class SettingsCategoryCatalog {
 		settings.put(Category.MARKER_DURATION, List.of(Setting.SYNC_DURATION));
 		settings.put(Category.PRESENTATION, List.of(
 			Setting.PRESENTATION_RECEIVE,
-			Setting.PRESENTATION_DISPLAY,
-			Setting.PRESENTATION_SERVER_POLICY));
+			Setting.PRESENTATION_DISPLAY));
+		settings.put(Category.SERVER_PRESENTATION, List.of(Setting.PRESENTATION_SERVER_POLICY));
 		return Map.copyOf(settings);
 	}
 }

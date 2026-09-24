@@ -11,6 +11,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Nameable;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import nx.pingwheel.common.config.ServerConfig;
@@ -27,6 +28,7 @@ import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.presentation.*;
 
 import java.util.*;
+import java.util.function.Function;
 
 /** Server-thread, world-lifetime presentation leases. Cached values never hold world objects. */
 public final class PresentationServer {
@@ -344,22 +346,8 @@ public final class PresentationServer {
 		if (target instanceof Target.EntityTarget entityTarget) {
 			var lookup = MinecraftServerEntityLookup.find(level, entityTarget.locator());
 			if (!lookup.accepted()) return null;
-			var entity = lookup.entity();
-			put(fields, demand, PresentationBasic.ENTITY_TYPE, new PresentationValue.Text(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString()));
-			if (entity instanceof LivingEntity living) {
-				put(fields, demand, PresentationBasic.HEALTH, new PresentationValue.NumberValue(living.getHealth()));
-				put(fields, demand, PresentationBasic.MAX_HEALTH, new PresentationValue.NumberValue(living.getMaxHealth()));
-			}
-			if (entity instanceof ItemEntity item) {
-				var stack = item.getItem();
-				put(fields, demand, PresentationBasic.ITEM_ID, new PresentationValue.Text(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString()));
-				put(fields, demand, PresentationBasic.ITEM_COUNT, new PresentationValue.NumberValue(stack.getCount()));
-				put(fields, demand, PresentationBasic.ITEM_ICON, new PresentationValue.Flag(true));
-				if (demand.contains(PresentationBasic.NAME)) name = TargetNameComposer.compose(stack.get(DataComponents.CUSTOM_NAME), Component.translatable(stack.getDescriptionId()));
-			} else if (demand.contains(PresentationBasic.NAME)) {
-				name = entity instanceof ServerPlayer player ? Component.literal(player.getGameProfile().getName())
-					: TargetNameComposer.compose(entity.getCustomName(), entity.getType().getDescription());
-			}
+			return basicEntity(demand, lookup.entity(),
+				component -> TargetNameJsonCodec.encode(component, server.registryAccess()).value());
 		} else if (target instanceof Target.BlockTarget block) {
 			BlockPos pos = new BlockPos(block.x(), block.y(), block.z());
 			if (!level.hasChunkAt(pos)) return null;
@@ -387,6 +375,46 @@ public final class PresentationServer {
 		}
 		return new PresentationSection(PresentationBasic.ID, 1, fields, false);
 	}
+
+	/**
+	 * World-free assembly of the Basic fields for one live entity target. The
+	 * caller resolves the level, looks the entity up, and supplies the
+	 * registry-bound name encoder; keeping this routine detached makes the
+	 * name and value rules regression-tested without a running server.
+	 */
+	static PresentationSection basicEntity(Set<String> demand, Entity entity, Function<Component, String> encodeName) {
+		Map<String, PresentationValue> fields = new LinkedHashMap<>();
+		put(fields, demand, PresentationBasic.ENTITY_TYPE, new PresentationValue.Text(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString()));
+		if (entity instanceof LivingEntity living) {
+			put(fields, demand, PresentationBasic.HEALTH, new PresentationValue.NumberValue(living.getHealth()));
+			put(fields, demand, PresentationBasic.MAX_HEALTH, new PresentationValue.NumberValue(living.getMaxHealth()));
+		}
+		Component name = null;
+		if (entity instanceof ItemEntity item) {
+			var stack = item.getItem();
+			put(fields, demand, PresentationBasic.ITEM_ID, new PresentationValue.Text(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString()));
+			put(fields, demand, PresentationBasic.ITEM_COUNT, new PresentationValue.NumberValue(stack.getCount()));
+			put(fields, demand, PresentationBasic.ITEM_ICON, new PresentationValue.Flag(true));
+			if (demand.contains(PresentationBasic.NAME)) name = optionalName(stack.get(DataComponents.CUSTOM_NAME), Component.translatable(stack.getDescriptionId()));
+		} else if (demand.contains(PresentationBasic.NAME)) {
+			name = entity instanceof ServerPlayer player ? Component.literal(player.getGameProfile().getName())
+				: optionalName(entity.getCustomName(), entity.getType().getDescription());
+		}
+		if (name != null) put(fields, demand, PresentationBasic.NAME, new PresentationValue.Text(encodeName.apply(name)));
+		return new PresentationSection(PresentationBasic.ID, 1, fields, false);
+	}
+
+	/**
+	 * The optional-custom-name rule shared by every Basic name source: an
+	 * absent custom name means the target is unnamed and keeps the trusted
+	 * localized base component; only a present custom name is composed as
+	 * {@code Custom (Base)}. Mirrors {@link MinecraftTargetNameResolver} and
+	 * must never apply the strict composition to a possibly-absent name.
+	 */
+	static Component optionalName(Component customName, Component baseName) {
+		return customName != null ? TargetNameComposer.compose(customName, baseName) : baseName;
+	}
+
 	private static void put(Map<String, PresentationValue> fields, Set<String> demand, String id, PresentationValue value) {
 		if (!demand.contains(id)) return;
 		try { PresentationLimits.validate(value); fields.put(id, value); } catch (IllegalArgumentException ignored) { }

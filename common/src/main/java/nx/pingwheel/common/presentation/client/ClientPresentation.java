@@ -20,6 +20,7 @@ import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.PresentationCodec;
 import nx.pingwheel.common.presentation.PresentationField;
+import nx.pingwheel.common.presentation.PresentationIds;
 import nx.pingwheel.common.presentation.PresentationPolicy;
 import nx.pingwheel.common.presentation.PresentationRegistry;
 import nx.pingwheel.common.presentation.PresentationSection;
@@ -43,6 +44,7 @@ public final class ClientPresentation {
 	private final Supplier<PresentationSettings> receiveSettings;
 	private final Supplier<PresentationSettings> displaySettings;
 	private final Map<String, Map<String, PresentationField>> compatible = new LinkedHashMap<>();
+	private final Map<String, Map<String, PresentationField>> acceptedServerCatalog = new LinkedHashMap<>();
 	private final Map<String, PresentationUiProvider> providers = new LinkedHashMap<>();
 	private String providerId = "default";
 	private String receiveFingerprint;
@@ -50,6 +52,7 @@ public final class ClientPresentation {
 	private long subscription;
 	private long view;
 	private long ticks;
+	private long catalogRevision;
 	private int helloAttempts;
 	private boolean offered;
 	private boolean ready;
@@ -66,14 +69,69 @@ public final class ClientPresentation {
 	}
 
 	private void registerOptionalCreate() {
+		PresentationAdapter present = createOptionalAdapter();
+		if (present != null) registry.register(present);
+	}
+
+	/**
+	 * Resolves the optional Create client adapter without constructing a
+	 * connection runtime, so the settings UI can show the local preview while
+	 * offline. The NeoForge factory tests mod presence and the supported Create
+	 * version; no Create class is linked by common, Fabric or Forge when absent.
+	 */
+	private static PresentationAdapter createOptionalAdapter() {
 		try {
-			// The NeoForge factory tests mod presence and the supported Create version.
-			// No Create class is linked by common, Fabric or Forge when absent.
 			Object adapter = Class.forName(CREATE_FACTORY).getMethod("client").invoke(null);
-			if (adapter instanceof PresentationAdapter present) registry.register(present);
+			return adapter instanceof PresentationAdapter present ? present : null;
 		} catch (ReflectiveOperationException | LinkageError | IllegalArgumentException ignored) {
 			// Basic remains independently usable.
+			return null;
 		}
+	}
+
+	/** The local registered manifest, immutable; never a store or world value. */
+	public List<PresentationAdapter> manifest() {
+		return List.copyOf(registry.all());
+	}
+
+	/**
+	 * The local Basic plus optional Create manifest without a connection
+	 * runtime, for the offline settings preview. No packet, store, or runtime is
+	 * created.
+	 */
+	public static List<PresentationAdapter> localManifest() {
+		List<PresentationAdapter> adapters = new ArrayList<>();
+		adapters.add(new BasicDescriptor());
+		PresentationAdapter create = createOptionalAdapter();
+		if (create != null) adapters.add(create);
+		return List.copyOf(adapters);
+	}
+
+	/**
+	 * The server-advertised fields accepted from the first valid offer, with the
+	 * server's own default and label metadata after the local id/kind
+	 * compatibility check. Empty before an offer and after {@link #close()};
+	 * never exposes the retained value store.
+	 */
+	public PresentationFieldCatalog acceptedCatalog() {
+		if (acceptedServerCatalog.isEmpty()) return PresentationFieldCatalog.empty();
+		Map<String, List<PresentationField>> advertised = new LinkedHashMap<>();
+		acceptedServerCatalog.forEach((adapter, fields) -> advertised.put(adapter, List.copyOf(fields.values())));
+		return PresentationFieldCatalog.ofAccepted(advertised);
+	}
+
+	/** Monotonic stamp of accepted-catalog changes; cheap UI change detection. */
+	public long catalogRevision() {
+		return catalogRevision;
+	}
+
+	/**
+	 * True after the first valid offer established this connection's catalog,
+	 * even when that offer contained no compatible field. The UI must not show
+	 * an accepted empty catalog as an authoritative empty list before an offer.
+	 */
+	public boolean catalogOffered() {
+		return offered;
 	}
 
 	public void tick(boolean connected) {
@@ -99,6 +157,8 @@ public final class ClientPresentation {
 	public void close() {
 		store.reset(0);
 		compatible.clear();
+		acceptedServerCatalog.clear();
+		catalogRevision++;
 		epoch = subscription = view = 0;
 		offered = ready = false;
 	}
@@ -112,7 +172,12 @@ public final class ClientPresentation {
 	public boolean offer(PresentationS2CPacket packet) {
 		if (packet == null || packet.isCorrupt() || packet.kind() != PresentationS2CPacket.Kind.OFFER || offered
 			|| helloAttempts == 0) return false;
-		compatible.clear();
+		// A directly constructed packet bypasses the wire decoder's bounds; a
+		// malformed manifest is rejected as a whole before any state changes.
+		if (!validOfferStructure(packet)) return false;
+
+		Map<String, Map<String, PresentationField>> nextCompatible = new LinkedHashMap<>();
+		Map<String, Map<String, PresentationField>> nextAccepted = new LinkedHashMap<>();
 		for (PresentationAdapter adapter : registry.all()) {
 			if (!Objects.equals(packet.schemas().get(adapter.adapterId()), adapter.schema())) continue;
 			List<PresentationField> advertised = packet.manifest().get(adapter.adapterId());
@@ -120,20 +185,68 @@ public final class ClientPresentation {
 			Map<String, PresentationField> local = new HashMap<>();
 			for (PresentationField field : adapter.fields()) local.put(field.id(), field);
 			Map<String, PresentationField> accepted = new LinkedHashMap<>();
-			Set<String> seen = new HashSet<>();
+			Map<String, PresentationField> serverAdvertised = new LinkedHashMap<>();
 			for (PresentationField field : advertised) {
-				if (!seen.add(field.id())) { accepted.clear(); break; }
 				PresentationField ours = local.get(field.id());
-				if (ours != null && ours.kind() == field.kind()) accepted.put(field.id(), ours);
+				if (ours != null && ours.kind() == field.kind()) {
+					// Subscription/security keeps the local descriptor; the UI
+					// catalogue keeps the server's advertised default and label.
+					accepted.put(field.id(), ours);
+					serverAdvertised.put(field.id(), field);
+				}
 			}
-			compatible.put(adapter.adapterId(), Map.copyOf(accepted));
+			nextCompatible.put(adapter.adapterId(), Map.copyOf(accepted));
+			if (!serverAdvertised.isEmpty()) {
+				nextAccepted.put(adapter.adapterId(), Map.copyOf(serverAdvertised));
+			}
 		}
 		// Without compatible Basic an initial cannot be decoded or presented.
-		if (!compatible.containsKey(BASIC)) return false;
+		if (!nextCompatible.containsKey(BASIC)) return false;
+
+		// Publish the compatible descriptors and the server metadata atomically.
+		compatible.clear();
+		compatible.putAll(nextCompatible);
+		acceptedServerCatalog.clear();
+		acceptedServerCatalog.putAll(nextAccepted);
 		epoch = packet.epoch();
 		store.reset(epoch);
 		offered = true;
+		catalogRevision++;
 		subscribe();
+		return true;
+	}
+
+	/**
+	 * Mirrors the wire decoder's offer bounds so a directly constructed packet
+	 * cannot publish a partial catalog. Duplicate adapter ids cannot exist in a
+	 * map; a duplicate field id inside one adapter and a manifest/schema key
+	 * mismatch are malformed and reject the whole offer. A structurally valid
+	 * offer that merely lacks a compatible Basic adapter is ignored by the
+	 * caller, not published.
+	 */
+	private static boolean validOfferStructure(PresentationS2CPacket packet) {
+		Map<String, List<PresentationField>> manifest = packet.manifest();
+		Map<String, Integer> schemas = packet.schemas();
+		if (manifest.size() > PresentationC2SPacket.MAX_ADAPTERS) return false;
+		if (!schemas.keySet().equals(manifest.keySet())) return false;
+		int total = 0;
+		for (var entry : manifest.entrySet()) {
+			try {
+				PresentationIds.validate(entry.getKey());
+			} catch (RuntimeException invalid) {
+				return false;
+			}
+			Integer schema = schemas.get(entry.getKey());
+			if (schema == null || schema < 1 || schema > 255) return false;
+			List<PresentationField> fields = entry.getValue();
+			if (fields == null || fields.size() > PresentationCodec.MAX_FIELDS) return false;
+			total += fields.size();
+			if (total > PresentationC2SPacket.MAX_FIELDS) return false;
+			Set<String> seen = new HashSet<>();
+			for (PresentationField field : fields) {
+				if (field == null || !seen.add(field.id())) return false;
+			}
+		}
 		return true;
 	}
 
@@ -285,7 +398,8 @@ public final class ClientPresentation {
 		}
 	}
 
-	private static List<String> defaultLabels(PresentationView view) {
+	/** Package-private verification seam for the built-in label projection. */
+	static List<String> defaultLabels(PresentationView view) {
 		List<String> labels = new ArrayList<>();
 		var health = view.field(BASIC, "minecraft:entity.health");
 		var maximum = view.field(BASIC, "minecraft:entity.max_health");

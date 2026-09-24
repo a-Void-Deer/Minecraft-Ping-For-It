@@ -53,9 +53,17 @@ class SettingsCategoryCatalogTest {
 		assertEquals(List.of(Setting.SYNC_DURATION), SettingsCategoryCatalog.settings(Category.MARKER_DURATION));
 		assertEquals(List.of(
 			Setting.PRESENTATION_RECEIVE,
-			Setting.PRESENTATION_DISPLAY,
-			Setting.PRESENTATION_SERVER_POLICY),
+			Setting.PRESENTATION_DISPLAY),
 			SettingsCategoryCatalog.settings(Category.PRESENTATION));
+		assertEquals(List.of(Setting.PRESENTATION_SERVER_POLICY),
+			SettingsCategoryCatalog.settings(Category.SERVER_PRESENTATION));
+		assertEquals(List.of(
+			SettingsCategoryCatalog.PresentationSection.CLIENT_RECEIVE,
+			SettingsCategoryCatalog.PresentationSection.CLIENT_DISPLAY,
+			SettingsCategoryCatalog.PresentationSection.SERVER_REFERENCE),
+			SettingsCategoryCatalog.presentationSections(Category.PRESENTATION));
+		assertEquals(List.of(SettingsCategoryCatalog.PresentationSection.SERVER_EDITOR),
+			SettingsCategoryCatalog.presentationSections(Category.SERVER_PRESENTATION));
 
 		var all = EnumSet.noneOf(Setting.class);
 		for (Category category : Category.values()) {

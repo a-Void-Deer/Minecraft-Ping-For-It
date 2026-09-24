@@ -32,6 +32,7 @@ public final class SettingsNavigationModel {
 		CHANNEL_NOTICES(Scope.CLIENT, "channel_notices"),
 		GEOMETRY_CONFIG(Scope.CLIENT, "geometry_config"),
 		PRESENTATION(Scope.CLIENT, "presentation"),
+		SERVER_PRESENTATION(Scope.SERVER, "server_presentation"),
 		CHANNEL_PLAYERS(Scope.SERVER, "channel_players"),
 		SEND_RATE(Scope.SERVER, "send_rate"),
 		MARKER_DURATION(Scope.SERVER, "marker_duration");
@@ -72,6 +73,7 @@ public final class SettingsNavigationModel {
 		CLIENT_GEOMETRY_CONFIG(Scope.CLIENT, Category.GEOMETRY_CONFIG),
 		CLIENT_PRESENTATION(Scope.CLIENT, Category.PRESENTATION),
 		SERVER_OVERVIEW(Scope.SERVER, null),
+		SERVER_PRESENTATION(Scope.SERVER, Category.SERVER_PRESENTATION),
 		SERVER_CHANNEL_PLAYERS(Scope.SERVER, Category.CHANNEL_PLAYERS),
 		SERVER_SEND_RATE(Scope.SERVER, Category.SEND_RATE),
 		SERVER_MARKER_DURATION(Scope.SERVER, Category.MARKER_DURATION);
@@ -132,7 +134,8 @@ public final class SettingsNavigationModel {
 		List.of(
 			Category.CHANNEL_PLAYERS,
 			Category.SEND_RATE,
-			Category.MARKER_DURATION));
+			Category.MARKER_DURATION,
+			Category.SERVER_PRESENTATION));
 
 	private static final PageViewState EMPTY_VIEW_STATE = new PageViewState(0, null);
 
@@ -230,7 +233,25 @@ public final class SettingsNavigationModel {
 	 * changed.
 	 */
 	public boolean onServerViewAccessLost(boolean canViewRetainedSnapshot) {
-		if (canViewRetainedSnapshot || current.scope() != Scope.SERVER || !current.isLeaf()) {
+		return this.onServerViewAccessLost(canViewRetainedSnapshot, canViewRetainedSnapshot);
+	}
+
+	/**
+	 * Applies a view-access change using the capability owned by the current leaf.
+	 * Ordinary server configuration and presentation policy are independent views.
+	 */
+	public boolean onServerViewAccessLost(
+		boolean canViewRetainedServerSettings,
+		boolean canViewRetainedPresentationPolicy
+	) {
+		if (current.scope() != Scope.SERVER || !current.isLeaf()) {
+			return false;
+		}
+
+		final boolean canViewCurrentLeaf = current == Page.SERVER_PRESENTATION
+			? canViewRetainedPresentationPolicy
+			: canViewRetainedServerSettings;
+		if (canViewCurrentLeaf) {
 			return false;
 		}
 

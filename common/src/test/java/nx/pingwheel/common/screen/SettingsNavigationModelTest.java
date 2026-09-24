@@ -74,7 +74,7 @@ class SettingsNavigationModelTest {
 		var server = SettingsNavigationModel.categories(Scope.SERVER);
 
 		assertEquals(7, client.size());
-		assertEquals(3, server.size());
+		assertEquals(4, server.size());
 		assertEquals(
 			List.of(
 				"display",
@@ -86,7 +86,7 @@ class SettingsNavigationModelTest {
 				"presentation"),
 			client.stream().map(Category::id).toList());
 		assertEquals(
-			List.of("channel_players", "send_rate", "marker_duration"),
+			List.of("channel_players", "send_rate", "marker_duration", "server_presentation"),
 			server.stream().map(Category::id).toList());
 		assertThrows(UnsupportedOperationException.class, () -> client.add(Category.MARKER_DISPLAY));
 
@@ -125,6 +125,40 @@ class SettingsNavigationModelTest {
 		assertEquals(Category.PRESENTATION, navigation.current().category().orElseThrow());
 		assertTrue(navigation.back());
 		assertEquals(Page.CLIENT_OVERVIEW, navigation.current());
+	}
+
+	@Test
+	void serverPresentationIsIndependentFromOrdinaryServerViewAccess() {
+		var navigation = new SettingsNavigationModel();
+		navigation.selectScope(Scope.SERVER);
+		assertTrue(navigation.openCategory(Category.SERVER_PRESENTATION));
+		assertEquals(Page.SERVER_PRESENTATION, navigation.current());
+		assertTrue(navigation.onServerViewAccessLost(true, false));
+		assertEquals(Page.SERVER_OVERVIEW, navigation.current());
+
+		navigation.openCategory(Category.SERVER_PRESENTATION);
+		assertFalse(navigation.onServerViewAccessLost(false, true));
+		assertEquals(Page.SERVER_PRESENTATION, navigation.current());
+	}
+
+	@Test
+	void clientAndServerPresentationLeavesRetainIndependentViewports() {
+		var navigation = new SettingsNavigationModel();
+		navigation.openCategory(Category.PRESENTATION);
+		navigation.saveViewStateBeforeNavigation(11, "receive_white_field");
+
+		navigation.selectScope(Scope.SERVER);
+		navigation.openCategory(Category.SERVER_PRESENTATION);
+		navigation.saveViewStateBeforeNavigation(22, "server_black_field");
+		assertEquals(22, navigation.scrollAmount());
+		assertEquals("server_black_field", navigation.focusKey());
+
+		navigation.forcePage(Page.CLIENT_PRESENTATION);
+		assertEquals(11, navigation.scrollAmount());
+		assertEquals("receive_white_field", navigation.focusKey());
+		navigation.forcePage(Page.SERVER_PRESENTATION);
+		assertEquals(22, navigation.scrollAmount());
+		assertEquals("server_black_field", navigation.focusKey());
 	}
 
 	@Test

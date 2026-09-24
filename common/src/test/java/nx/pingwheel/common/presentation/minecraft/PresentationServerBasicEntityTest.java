@@ -1,0 +1,212 @@
+package nx.pingwheel.common.presentation.minecraft;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import net.minecraft.SharedConstants;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.PlainTextContents;
+import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+import nx.pingwheel.common.name.TargetNameComposer;
+import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.name.TargetNameJsonCodec;
+import nx.pingwheel.common.presentation.PresentationBasic;
+import nx.pingwheel.common.presentation.PresentationSection;
+import nx.pingwheel.common.presentation.PresentationValue;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Headless regression coverage for {@link PresentationServer#basicEntity}, the
+ * production Basic assembly for a live entity or dropped item. The world
+ * lookup and registry-bound encoding stay in {@code basic}; this seam pins the
+ * value and name rules, especially that an absent custom name keeps the
+ * trusted localized base name instead of failing the whole Basic section.
+ */
+class PresentationServerBasicEntityTest {
+
+	@BeforeAll
+	static void bootStrap() {
+		SharedConstants.tryDetectVersion();
+		Bootstrap.bootStrap();
+	}
+
+	private static PresentationSection basicEntity(Set<String> demand, Entity entity) {
+		return PresentationServer.basicEntity(demand, entity,
+			name -> TargetNameJsonCodec.encode(name, RegistryAccess.EMPTY).value());
+	}
+
+	private static Component decodeName(PresentationValue value) {
+		assertTrue(value instanceof PresentationValue.Text,
+			() -> "expected a text name value, got: " + value);
+		return TargetNameJsonCodec.decode(
+			new TargetNameJson(((PresentationValue.Text) value).value()), RegistryAccess.EMPTY);
+	}
+
+	private static String literalText(Component component) {
+		assertTrue(component.getContents() instanceof PlainTextContents.LiteralContents,
+			() -> "expected literal contents, got: " + component.getContents().getClass());
+		return ((PlainTextContents.LiteralContents) component.getContents()).text();
+	}
+
+	private static String translatableKey(Component component) {
+		assertTrue(component.getContents() instanceof TranslatableContents, "expected a translatable component");
+		return ((TranslatableContents) component.getContents()).getKey();
+	}
+
+	@Test
+	void unnamedLivingEntityKeepsBaseNameHealthAndMaxHealth() {
+		LivingEntity pig = new TestLivingEntity();
+		pig.setHealth(7.5F);
+
+		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME,
+			PresentationBasic.ENTITY_TYPE, PresentationBasic.HEALTH, PresentationBasic.MAX_HEALTH), pig);
+
+		Map<String, PresentationValue> fields = section.fields();
+		assertEquals(PresentationBasic.ID, section.adapterId());
+		assertFalse(section.stale());
+		assertEquals(new PresentationValue.Text("minecraft:pig"), fields.get(PresentationBasic.ENTITY_TYPE));
+		assertEquals(new PresentationValue.NumberValue(pig.getHealth()), fields.get(PresentationBasic.HEALTH));
+		assertEquals(new PresentationValue.NumberValue(pig.getMaxHealth()), fields.get(PresentationBasic.MAX_HEALTH));
+
+		Component name = decodeName(fields.get(PresentationBasic.NAME));
+		assertEquals("entity.minecraft.pig", translatableKey(name));
+		assertTrue(name.getSiblings().isEmpty(), "an unnamed target must keep the bare base name");
+	}
+
+	@Test
+	void unnamedItemEntityKeepsBaseNameItemIdCountAndIcon() {
+		ItemEntity item = new ItemEntity(EntityType.ITEM, null);
+		item.setItem(new ItemStack(Items.DIAMOND, 3));
+
+		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME, PresentationBasic.ENTITY_TYPE,
+			PresentationBasic.ITEM_ID, PresentationBasic.ITEM_COUNT, PresentationBasic.ITEM_ICON), item);
+
+		Map<String, PresentationValue> fields = section.fields();
+		assertEquals(new PresentationValue.Text("minecraft:item"), fields.get(PresentationBasic.ENTITY_TYPE));
+		assertEquals(new PresentationValue.Text("minecraft:diamond"), fields.get(PresentationBasic.ITEM_ID));
+		assertEquals(new PresentationValue.NumberValue(3), fields.get(PresentationBasic.ITEM_COUNT));
+		assertEquals(new PresentationValue.Flag(true), fields.get(PresentationBasic.ITEM_ICON));
+
+		Component name = decodeName(fields.get(PresentationBasic.NAME));
+		assertEquals("item.minecraft.diamond", translatableKey(name));
+		assertTrue(name.getSiblings().isEmpty(), "an unnamed dropped item must keep the bare base name");
+	}
+
+	@Test
+	void customNamedEntityKeepsComposedCustomBaseFormat() {
+		LivingEntity pig = new TestLivingEntity();
+		pig.setCustomName(Component.literal("Bob").withColor(0xFF0000).withStyle(style -> style.withItalic(true)));
+
+		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME, PresentationBasic.ENTITY_TYPE), pig);
+
+		Component name = decodeName(section.fields().get(PresentationBasic.NAME));
+		assertEquals(TargetNameComposer.compose(Component.literal("Bob"), pig.getType().getDescription()), name);
+		assertEquals(pig.getType().getDescription(), name.getSiblings().get(1));
+		assertEquals("Bob", literalText(name));
+		assertEquals(" (", literalText(name.getSiblings().get(0)));
+		assertEquals(")", literalText(name.getSiblings().get(2)));
+		assertTrue(name.getStyle().isEmpty(), "the composed root text must stay unstyled");
+	}
+
+	@Test
+	void customNamedItemKeepsComposedCustomBaseFormat() {
+		ItemEntity item = new ItemEntity(EntityType.ITEM, null);
+		ItemStack stack = new ItemStack(Items.DIAMOND, 3);
+		stack.set(DataComponents.CUSTOM_NAME, Component.literal("Shiny"));
+		item.setItem(stack);
+
+		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME, PresentationBasic.ITEM_ID,
+			PresentationBasic.ITEM_COUNT, PresentationBasic.ITEM_ICON), item);
+
+		Component name = decodeName(section.fields().get(PresentationBasic.NAME));
+		assertEquals(TargetNameComposer.compose(Component.literal("Shiny"),
+			Component.translatable(stack.getDescriptionId())), name);
+		assertEquals("item.minecraft.diamond", translatableKey(name.getSiblings().get(1)));
+	}
+
+	@Test
+	void undemandedNameBuildsNoNameFieldAndSkipsTheEncoder() {
+		LivingEntity pig = new TestLivingEntity();
+		boolean[] encoded = {false};
+
+		PresentationSection section = PresentationServer.basicEntity(
+			Set.of(PresentationBasic.ENTITY_TYPE, PresentationBasic.HEALTH, PresentationBasic.MAX_HEALTH), pig,
+			name -> { encoded[0] = true; return "unused"; });
+
+		assertFalse(section.fields().containsKey(PresentationBasic.NAME));
+		assertEquals(new PresentationValue.Text("minecraft:pig"), section.fields().get(PresentationBasic.ENTITY_TYPE));
+		assertEquals(new PresentationValue.NumberValue(pig.getMaxHealth()), section.fields().get(PresentationBasic.MAX_HEALTH));
+		assertFalse(encoded[0], "the name encoder must not run when the name field is not demanded");
+	}
+
+	@Test
+	void optionalNameKeepsBaseForAbsentCustomNameAndComposesPresent() {
+		Component base = Component.translatable("minecraft.zombie");
+
+		assertSame(base, PresentationServer.optionalName(null, base));
+		assertEquals(TargetNameComposer.compose(Component.literal("Bob"), base),
+			PresentationServer.optionalName(Component.literal("Bob"), base));
+	}
+
+	/**
+	 * Minimal headless {@link LivingEntity} reusing the registered pig type;
+	 * a vanilla {@code Pig} cannot be built without a level because
+	 * {@code Mob} touches the level in its constructor.
+	 */
+	private static final class TestLivingEntity extends LivingEntity {
+
+		TestLivingEntity() {
+			super(EntityType.PIG, null);
+		}
+
+		@Override
+		public void readAdditionalSaveData(CompoundTag tag) {
+			// intentionally empty
+		}
+
+		@Override
+		public void addAdditionalSaveData(CompoundTag tag) {
+			// intentionally empty
+		}
+
+		@Override
+		public Iterable<ItemStack> getArmorSlots() {
+			return List.of();
+		}
+
+		@Override
+		public ItemStack getItemBySlot(EquipmentSlot slot) {
+			return ItemStack.EMPTY;
+		}
+
+		@Override
+		public void setItemSlot(EquipmentSlot slot, ItemStack stack) {
+			// intentionally empty
+		}
+
+		@Override
+		public HumanoidArm getMainArm() {
+			return HumanoidArm.RIGHT;
+		}
+	}
+}

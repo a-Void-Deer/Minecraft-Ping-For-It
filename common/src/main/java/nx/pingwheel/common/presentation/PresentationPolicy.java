@@ -36,6 +36,23 @@ public final class PresentationPolicy {
 		return !whitelistOnly && manifestDefault;
 	}
 
+	/**
+	 * The persisted selectors of one list that match a field id, in list order.
+	 * Read-only diagnostics for truthful rule explanations; evaluation itself
+	 * stays in {@link #allows(String, boolean)}.
+	 */
+	public List<String> matchingSelectors(String id, boolean white) {
+		PresentationIds.validate(id);
+		int colon = id.indexOf(':');
+		List<Selector> selectors = white ? whiteSelectors : blackSelectors;
+		List<String> persisted = white ? this.white : this.black;
+		List<String> matches = new ArrayList<>();
+		for (int i = 0; i < selectors.size(); i++) {
+			if (selectors.get(i).matches(id, colon)) matches.add(persisted.get(i));
+		}
+		return List.copyOf(matches);
+	}
+
 	private static List<Selector> compile(List<String> selectors) {
 		var result = new ArrayList<Selector>(selectors.size());
 		for (String selector : selectors) {

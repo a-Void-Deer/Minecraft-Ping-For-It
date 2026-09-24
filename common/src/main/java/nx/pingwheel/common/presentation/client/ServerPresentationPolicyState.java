@@ -385,6 +385,22 @@ public final class ServerPresentationPolicyState {
 		return whitelistOnly;
 	}
 
+	/**
+	 * The compiled known rule view, or {@code null} while unknown. UI consumers
+	 * use this read-only policy for truthful rule explanations; it never
+	 * replaces the raw correlated lists for mutation requests.
+	 */
+	public PresentationPolicy policy() {
+		if (!isKnown()) {
+			return null;
+		}
+		try {
+			return new PresentationPolicy(white, black, whitelistOnly);
+		} catch (RuntimeException invalid) {
+			return null;
+		}
+	}
+
 	/** The last correlated status, or null before any response. */
 	public Status lastStatus() {
 		return lastStatus;
