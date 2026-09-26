@@ -7,8 +7,10 @@ local winner projection. The server's authoritative record lifetime is owned by
 [marker lifecycle](../authority/marker_lifecycle.md); recipient-scoped
 authoritative winner selection is owned by
 [ping winner](../authority/ping_winner.md). State-message acceptance is owned by
-[network protocol](../network/protocol.md), and new-marker receipt notifications
-are owned by [names and chat](../rendering/names_chat.md).
+[network protocol](../network/protocol.md); the receive/display policy and
+retention of the presentation values delivered with a record are owned by
+[presentation snapshot](../presentation/presentation_snapshot.md), and new-marker
+receipt notifications are owned by [names and chat](../rendering/names_chat.md).
 
 ## Record states and lifetimes
 

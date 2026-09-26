@@ -20,6 +20,15 @@ presentation values. Detailed packet and invalidation timing lives in
 [target validation](authority/target_validation.md); deterministic winner
 selection lives in [ping winner](authority/ping_winner.md).
 
+Presentation snapshot values are projected per recipient from trusted server
+state: a field is captured and sent only when that recipient's negotiated
+manifest, subscription, field policy, and permission all allow it, and the
+replaceable permission provider fails closed on a missing or throwing provider.
+A client cannot widen its own projection, permission level, or retained values
+by sending presentation data. Negotiation, selector policy, and the client
+store boundaries are owned by
+[presentation snapshot](presentation/presentation_snapshot.md).
+
 Entity-local geometry remains client capture metadata, while whole-entity
 identity and anchor validation are a server boundary; the server does not claim
 to replay a client ray. Exact geometry and whole-entity rules are owned by
@@ -33,10 +42,17 @@ validation/materialization before gaining committed identity; see
 The server derives the requester's identity and permission from trusted
 server-side state, checks the current editing authority for every configuration
 update before mutation, and rejects corrupt or unauthorized updates without
-changing configuration state. Who may edit is owned by
+changing configuration state. The presentation policy mutation route is
+enforced by the same mechanism: every mutation derives the connected player's
+permission from trusted server-side state and rechecks the current editing
+authority before any persisted state can change, and an unauthorized, corrupt,
+or invalid mutation never changes configuration state. Neither a client-provided
+edit hint nor a request identifier is an authorization credential. Who may read
+or edit is owned by
 [server configuration authority](authority/server-config.md); the
-request/correlation and merge transaction is owned by
-[changing server configuration](config/changing-server-config.md).
+request/correlation, merge, and rule-view transaction is owned by
+[changing server configuration](config/changing-server-config.md) and
+[presentation snapshot](presentation/presentation_snapshot.md).
 
 The operations covered by this settings authority, including the boundaries of
 ordinary `MarkerCreate` and `MarkerRemove`, are owned by

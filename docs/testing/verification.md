@@ -51,11 +51,124 @@ The current suite covers:
 Marker-store, packet, and update tests provide recipient-scoped state and
 channel-mode transport seams, but do not establish the complete `ServerCore`
 ordering and channel/admission matrix in a live client/server path. Loader
-registration of the legacy and authoritative routes is confirmed by source
-inspection for Fabric, Forge, and NeoForge. `MarkerPacketsTest` and
-`PacketHandlerTest` cover authoritative packet codec/safety seams, but there is
-no direct automated test that a valid legacy location S2C packet is ignored by
+registration of the legacy, presentation-v2, presentation-policy, and
+superseded marker routes is confirmed by source inspection for Fabric, Forge,
+and NeoForge.
+`MarkerPacketsTest` and `PacketHandlerTest` cover authoritative packet
+codec/safety seams, but there is no direct automated test that a valid legacy
+location S2C packet or a superseded marker S2C packet is ignored by
 `CommonClient`, nor a live cross-loader network test.
+
+### Presentation snapshot negotiation, policy and adapters
+
+Focused common tests cover the versioned presentation contract at model and
+codec seams:
+
+- `PresentationCoreTest` covers allow/deny selector wildcard semantics with
+  allow-before-deny precedence, fail-closed selector construction and value
+  limits, session-generation store behavior (frozen snapshots after expiry,
+  per-adapter revisioned clears, tombstone/eviction resurrection guards, and
+  bounded-history fail-closed behavior), the framed codec's skip-denied,
+  duplicate, depth, and oversize rejection, and bounding oversized semantically
+  valid Basic field content to an empty stale section before initial delivery
+  while fitting sections pass through unchanged; the server-side `sendInitial`
+  ordering that applies this bound before delivery is source/compile covered
+  rather than directly exercised;
+- `PresentationServerBasicEntityTest` covers the world-free production
+  `basicEntity` assembly seam used by live Basic capture: an unnamed living
+  entity keeps its entity type, current and maximum health, and localized base
+  name; an unnamed dropped item keeps its entity type, item ID, count, icon,
+  and localized base name; a present custom name composes as custom-plus-base
+  for both an entity and an item stack; an undemanded name builds no name field
+  and skips the registry-bound encoder; and an absent custom name keeps the
+  trusted base component instead of strict composition. It runs headless
+  against real entity and item instances with builtin registries and component
+  JSON name encoding; the surrounding live path (server-level and registry
+  dimension lookup, entity lookup acceptance, capture scheduling, projection,
+  packet delivery, and rendering) remains unexercised;
+- `ClientPresentationTest` covers the accepted `HELLO`/offer path with
+  mandatory Basic, subscription filtering under a local deny list, reset gating
+  by epoch/generation/view, whole-section replacement, receive-tightening
+  pruning of already-retained frozen values with re-subscription, display-policy
+  and UI provider projection that sends no network traffic, and incompatible
+  field kinds never being subscribed or retained. It also covers default health
+  and maximum-health subscription and the default health-line projection with no
+  explicit rule; a display denial of one health field removing the health line;
+  a missing maximum never producing a partial line; the default provider
+  projecting a Create RPM line only from the receive/display-filtered view; the
+  accepted server catalogue keeping the advertised default and label and
+  clearing on close; a compatible-empty accepted offer marking the catalogue
+  known; the offline local manifest being available without sending a packet; a
+  structurally malformed offer (duplicate field IDs inside one adapter,
+  manifest/schema mismatch, invalid schema, or adapter/field bounds) rejecting
+  the whole offer atomically while a later valid offer is still accepted; an
+  unknown advertised adapter being ignored and never published; and a
+  structurally valid offer without a compatible Basic adapter being ignored
+  without publishing connection state; and
+- `PresentationFieldCatalogTest` covers namespace grouping by field ID rather
+  than the owning adapter, exact field IDs, first-occurrence de-duplication,
+  immutability, retained server-advertised default and label over local
+  metadata, adapter lookup from a bridging adapter, and the bundled
+  namespace-heading key pattern; it does not construct the settings screen or
+  render rows; and
+- `PresentationConfigTest` covers missing-key defaults without migration,
+  partial nested policy objects not elevating allow lists, JSON round trips,
+  bounded/clamped invalid server overrides denying access, fingerprint change,
+  and the replaceable permission provider's vanilla default and fail-closed
+  behavior;
+- `ServerPresentationPolicyServiceTest` covers the rule-view read disclosing only
+  the three selector values, missing-settings fail-closed reads, denial without
+  mutation, atomic white/black add and remove, duplicate/invalid/full/missing
+  rejection without a durable deny-all, whitelist-only set and no-op, and the
+  detached-copy isolation used by the transactional server apply;
+- `ServerPresentationPolicyPacketsTest` covers C2S read/mutation codec round
+  trips, request-id and selector corruption rules, safe-decode draining of
+  unknown operations and oversized fields, and the S2C rule-view round trip,
+  unsolicited zero-request id, defensive list copies, and fail-closed
+  encode/decode at the capacity, selector-length, and encoded-byte bounds;
+- `ServerPresentationPolicyStateTest` covers the unknown initial state, the
+  correlated OK readiness transition, error snapshots never publishing a view,
+  mismatched and stale response rejection, unsolicited-revision gating, the
+  disconnect clear with late-packet rejection, mutation allocation gated on
+  known, granted, and no-pending state, the precedence-ordered disconnected,
+  unavailable, pending, timed-out, failed, and ready view status, the bounded
+  read timeout with its late response ignored, a timed-out mutation keeping the
+  known view as uncertain until a confirming read, one outstanding command with
+  read retries never replacing an in-flight mutation, and a newer broadcast
+  retained when its correlated response or an equal-revision acknowledgement
+  arrives; and
+- `PresentationSelectorDraftModelTest` covers stable per-panel and per-list
+  slots, independent per-slot drafts and feedback, a single outstanding
+  submission, an accepted submission clearing only the unchanged submitted
+  draft, a post-submission edit never discarded by a late success, a failed
+  submission retaining its text, completion for another slot being ignored,
+  reset keeping every draft, forward and backward selection direction
+  preserved, negative and out-of-range caret positions clamped after shortened
+  or cleared text, and independent per-slot caret state surviving
+  reconstruction; this is a pure editing-state seam and does not exercise
+  actual widget or disabled-control focus; and
+- `PresentationSelectorListModelTest` covers selector normalization, grammar
+  validation, empty-versus-invalid outcomes, the shared capacity and length
+  caps, case-sensitive duplicate rejection, not-found and invalid removal, and
+  immutable non-mutating results.
+
+NeoForge Create adapter seams cover the optional summary route:
+`CreatePresentationAdapterTest` (server/client manifest parity, demand gating,
+per-field projection, unavailable-versus-partial summary distinction, and
+cadence override), `CreatePresentationRegistrationTest` (idempotent
+once-per-registry registration and absent-adapter rejection),
+`CreatePresentationCollectorBudgetTest` (shape/work/version gates),
+`BoundedCreateSummaryTest` (registry-ID aggregation and scan/work/output
+limits), and `CreatePresentationMixinPluginTest` (version gate and constructed
+ASM node field-shape gate for the cached network accessor).
+
+These are model, codec, registration, and assembly seams. They do not establish
+live client/server negotiation, session reset over a real connection, transport
+registration in a running game, live permission projection, a live policy
+rule-view read/mutation/broadcast, the live settings-screen draft,
+field-catalogue rendering, feedback, caret, or list-capacity behavior, a
+persistence fault during a policy mutation, chat/HUD delivery, or in-game
+Create sampling.
 
 ### Capture, wheel and cancellation
 
@@ -167,12 +280,18 @@ GUI chat delivery, or cross-dimension execution.
 ### Server-settings snapshots and updates
 
 `ServerSettingsModelTest` covers request correlation, stale responses, denial,
-draft state, and update planning. It also covers the per-field invalid numeric
-draft mask and its repair, clearing that mask on permission revocation,
-disconnect, and an explicit clean mark that preserves draft text, the shared
-once-per-session request that does not replace a loaded or in-flight snapshot,
-denial lock with the false-to-true permission retry transition, and
-connection-scoped disconnect reset. `ServerConfigUpdateTest`,
+draft state, and update planning. It also covers a safe non-editable snapshot
+being accepted and rendered for a viewer below the required level without
+enabling edits or an update plan, unsafe or uncorrelated snapshots never
+becoming viewable, retaining a read-only view through permission revocation,
+restoring an editable session for a retained editable snapshot, dropping a
+retained read-only view and requiring a fresh request after promotion to editor,
+an authoritative denial keeping the snapshot viewable but not editable, the
+per-field invalid numeric draft mask and its repair, clearing that mask on
+permission revocation, disconnect, and an explicit clean mark that preserves
+draft text, the shared once-per-session request that does not replace a loaded
+or in-flight snapshot, denial lock with the false-to-true permission retry
+transition, and connection-scoped disconnect reset. `ServerConfigUpdateTest`,
 `ServerConfigUpdateServiceTest`, and the focused server-config packet tests cover
 field-masked partial merge and codec/handler seams. These model and packet seams
 do not establish the live settings UI, permission changes over a connection,
@@ -187,17 +306,46 @@ screen evidence:
 
 - `SettingsNavigationModelTest` covers the initial client overview, per-scope
   overview selection, each category opening its own leaf page within its scope,
-  the immutable six-category client and three-category server order, rejection
-  of a foreign-scope category without navigating, Back to the owning overview
-  with a root that reports itself as not closable, per-page scroll and focus
-  retention across back, scope switching and forced routing, clamping of
-  negative scroll, routing an invalid server draft mask to the category that
-  owns its first invalid field, and retaining a shared `ServerSettingsModel`
-  draft across navigation;
+  the immutable seven-category client and four-category server order, the
+  client-scoped Presentation category opening without server permission, the
+  separate Server Presentation leaf, independent ordinary-server and
+  presentation-policy view access, and independent per-page viewport and focus
+  retention for the two presentation leaves; it also covers rejection of a
+  foreign-scope category without navigating, Back to the owning overview with a
+  root that reports itself as not closable, per-page scroll and focus retention
+  across back, scope switching and forced routing, clamping of negative scroll,
+  routing an invalid server draft mask to the category that owns its first
+  invalid field, retaining a shared `ServerSettingsModel` draft across
+  navigation, and keeping a server leaf open when a permission revocation
+  retains a viewable snapshot while forcing the scope overview without one;
 - `SettingsCategoryCatalogTest` covers each category's exact setting membership
-  and order for all 25 client and 5 server controls, exactly-once placement of
-  every catalog setting across categories, and immutable per-category lists; it
-  does not cover full-width layout flags;
+  and order, including the client Presentation category's receive and display
+  settings, its one shared read-only server reference, and the server
+  Presentation category's sole server-policy setting, exactly-once placement of
+  every catalog setting across categories, the production section composition
+  used by both presentation pages, and immutable per-category lists; it does
+  not cover full-width layout flags or actual widget placement;
+- `PresentationFieldOutcomeTest` covers the client roles always using the
+  server-authorized default while the server role uses the advertised manifest
+  default, exact and wildcard allow rules winning over block rules, one exact
+  field-ID list operation per membership toggle, whitelist-only blocking
+  unmatched fields while honoring allow rules, block rules beating the default
+  while keeping unknown selectors visible, a null policy never fabricating
+  membership or an empty authoritative view, and the server rule controls
+  following the pending, uncertain, and permission gate; it is a pure decision
+  model and does not construct the settings screen or exercise widget state;
+- `PresentationClientFieldControlTest` covers the ordinary client field
+  control's exact-allow-only mutation: enabling adds exactly one exact allow
+  selector and leaves the block list, whitelist-only mode, wildcard and other
+  selectors, and pre-existing duplicates untouched, including when an exact
+  block rule must be preserved while the allow wins; an already-present exact
+  entry, a full list, an unknown or malformed field id, and a missing policy
+  each change nothing and fabricate no allow list; hiding removes every exact
+  allow duplicate, preserves every other selector's order, and reports whether
+  default settings or a remaining group allow selector keeps the field allowed,
+  while whitelist-only or a matching block leaves it actually hidden; and both
+  client roles share the same truthful outcome; it is a pure decision model and
+  does not construct the settings screen or exercise widget state;
 - `SettingsScreenLayoutTest` covers computed root and leaf header, footer, list
   viewport, and button geometry at representative compact, standard, and large
   GUI sizes and clamped tiny-size viewports without negative space; it does not
@@ -206,11 +354,27 @@ screen evidence:
   action after the native dispatch returns, waits for the outermost nested
   dispatch while keeping only the latest transition, and drops the transition
   when the dispatch or a nested dispatch fails; and
+- `SettingsScreenFocusKeyTest` covers the shared focus-key lookup helper before
+  an options list exists, resolution of a focused list's focused child,
+  retention of a directly focused widget's key without a list-child lookup,
+  and the independent `isFocused` fallback when nothing is focused; it pins
+  the regression that a null focused widget with a null list never calls the
+  list-child supplier. This is headless coverage of the production focus-key
+  helper, not a constructed `SettingsScreen`, live focus-list traversal, or
+  in-game focus validation; and
 - `ClientConfigLocalizationTest` covers the eight bundled locale files and the
   settings, category-navigation, server-status, entity-block-mode, and
   target-gone resource keys, their required format placeholders, the category
   entrance ellipsis, the exact local feedback prefix, and the restart-required
-  external-list tooltips; it does not render or assemble screen labels.
+  external-list tooltips; it does not render or assemble screen labels; and
+- `PresentationSettingsLocalizationTest` covers the eight bundled locale files,
+  every presentation key present with an identical key set across them, the
+  approved English presentation labels, the ordinary client field On/Hidden
+  labels, tooltip action hints, and fallback notices, localized names and
+  descriptions for every builtin and Create field in every locale, bundled
+  translations for the recognized namespace headings, both client and server
+  Presentation category registrations, and the read-only server status wording
+  in every bundled locale; it does not render or assemble screen labels.
 
 The production screen routes native widget input through the deferred-action
 coordinator, but these tests exercise the model, catalog, geometry, and resource
@@ -356,10 +520,19 @@ The following gaps remain open until direct evidence closes them:
 - deterministic local-position ordering of equal-distance, same-kind local
   child hits: the x/y/z comparator is source-confirmed, but no test exercises
   position ordering; the focused exact-tie case pins only block versus fluid;
-- live server-settings UI, permission, request/response, update, and persistence
-  behavior;
-- direct runtime proof that valid legacy S2C locations are presentation no-ops,
-  plus live loader registration/network transport;
+- live server-settings UI, permission, read-only viewing below the required
+  level, request/response, update, and persistence behavior;
+- live presentation policy rule-view read, selector add/remove, whitelist-only
+  change, refresh, feedback, and unsolicited broadcast behavior;
+- direct runtime proof that valid legacy S2C locations and superseded marker S2C
+  packets are presentation no-ops, plus live loader registration/network
+  transport for the presentation snapshot and policy routes;
+- a live two-sided presentation session: negotiation and reset over a real
+  connection, per-recipient permission projection, policy changes advancing the
+  view, and delivery of Basic/adapter values across the loader transport;
+- installed-Create presentation sampling and display: verified vault/tank
+  structure capture, bounded summaries, the cached network stress/capacity
+  accessor, and the resulting HUD label lines with no in-game evidence yet;
 - the complete `ServerCore` operation ordering and channel/admission matrix in
   an end-to-end server path;
 - same-ID marker creation after local record deletion, where current behavior
@@ -443,7 +616,8 @@ or because related automated tests exist.
 | Cancellation | Cone and nearest-own-marker selection; inability to cancel another player's marker; stale/display-hidden candidate followed by server rejection with no local fallback. |
 | Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location. |
 | Marker HUD | Repeated same-target pings from one sender and from several senders while same-target records remain display-active: the target's displayed HUD alpha does not accumulate with the number of same-target records ([invariant owner](../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection)). |
-| Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live scope-tab and category navigation with leaf Back/Escape and root Done/Escape, a fixed footer with non-covering scrolled content, and per-page scroll/focus retention across back navigation and GUI resize, native widget input dispatch and focus-list traversal after a deferred page transition, and root and leaf pages at small GUI sizes and with long localized labels; one shared server session with a single correlated snapshot request retained across category and scope navigation, loading/permission/unavailable status, and denial clearing; live permission revocation, permission-loss return to the server overview, and reconnect draft behavior; invalid-draft close blocking with routing to the offending category and field; the client configuration file action and confirmation-dialog flows, including the reset warning when a server draft exists; and the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)). |
+| Presentation snapshot | Live negotiation, re-subscription, and reset on Fabric, Forge, and NeoForge; local receive-tightening removing retained and frozen values; permission-gated and policy-gated projection for two recipients of one marker; display-policy and provider HUD lines; the policy rule-view read and mutation route over a real connection, including the permission-3 mutation gate, rule-view revision ordering, and unsolicited broadcast to a second client; superseded marker C2S/S2C routes mutating nothing; installed-Create kinetic and vault/tank summaries including the cached stress/capacity accessor path and an untested-version fallback. |
+| Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live scope-tab and category navigation with leaf Back/Escape and root Done/Escape, a fixed footer with non-covering scrolled content, and per-page scroll/focus retention across back navigation and GUI resize, native widget input dispatch and focus-list traversal after a deferred page transition, and root and leaf pages at small GUI sizes and with long localized labels; one shared server session with a single correlated snapshot request retained across category and scope navigation, loading/permission/unavailable status, and a non-editable snapshot rendering read-only for a viewer below the required level; live permission revocation retaining a read-only leaf view, permission-return draft reset, promotion requesting a fresh snapshot, and reconnect draft behavior; invalid-draft close blocking with routing to the offending category and field; the client configuration file action and confirmation-dialog flows, including the reset warning when a server draft exists; the Presentation category's local field-catalogue rows and their On/Hidden controls with default and group fallback notices, advanced list editing, and its server rule view shown read-only below the required level, with the server rows' paired allow/block toggles and editable add/remove, whitelist-only changes, refresh, feedback, and broadcast to another client when permitted, including bounded no-response timeout retry, list-capacity feedback, caret and field focus, and a persistence fault during a mutation; and the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)). |
 | Range | Client/server range combinations in one live pipeline: native minimum, a live long-distance Distant Horizons target, Create/Sable finite-segment reuse and server acceptance, including exact Create surface selection followed by whole-entity server-anchor range rejection. Installed-Sable scenarios are listed below. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |
 | Optional content and rendering | Absent or partially present optional content; Create/Flywheel routes; occlusion and arbitrary camera angles; current shape, offset and seed. |

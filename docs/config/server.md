@@ -22,10 +22,16 @@ is the typed persisted schema; its live validation and the numeric bounds and
 fallbacks it applies are defined in that implementation and are deliberately not
 mirrored here.
 
-The five fields other than `pingDistance` can also be changed over the
-client/server connection through
-[changing server configuration](../architecture/config/changing-server-config.md);
-`pingDistance` is a JSON-only server setting.
+The five fields other than `pingDistance` and `presentation` can also be changed
+over the client/server connection through
+[changing server configuration](../architecture/config/changing-server-config.md).
+Within the `presentation` object, `white`, `black`, and `whitelistOnly` are
+changed through the dedicated presentation policy route owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md);
+its `minUpdateIntervalTicks`, `scanBudget`, `permissionLevels`, and
+`updateIntervals` members, like `pingDistance`, are configured only by editing
+the file. The [configuration UI](../UI/settings-screen.md#presentation-category)
+exposes the remote settings and the presentation policy controls.
 
 ## Persisted fields
 
@@ -37,6 +43,44 @@ client/server connection through
 | `rateLimit` | number | Send-rate allowance used by the server's per-player create limiter and published to clients as a courtesy policy. | Server-authoritative. Rate semantics are owned by [rate policy](../architecture/config/rate-limit.md). |
 | `syncDuration` | number, seconds | Server-held marker synchronization lifetime used for an accepted create's frozen expiry. | Server-authoritative. A valid positive duration after validation; it has no zero sentinel. Lifetime behavior is owned by [marker lifecycle](../architecture/authority/marker_lifecycle.md). |
 | `pingDistance` | number, blocks | Server acceptance range measured from the requester's eye to the authoritative target anchor. | Server-authoritative acceptance setting. It is not a client advertised capture cap; capture composition and acceptance are owned by [range](../architecture/picking/range.md). |
+| `presentation` | object | Per-recipient presentation field policy, sampling limits, and permission/interval overrides for the versioned presentation snapshot. | Server-authoritative. Projection, authorization, and demand-driven capture are owned by [presentation snapshot](../architecture/presentation/presentation_snapshot.md); the nested shape is catalogued below. |
+
+## Presentation policy object
+
+The `presentation` object and the client `presentationReceive` /
+`presentationDisplay` objects share one persisted shape. Numeric bounds and
+defaults are applied by the implementation and are deliberately not mirrored
+here.
+
+| Member | JSON form | Meaning |
+| --- | --- | --- |
+| `white` | array of selector strings | Allow selectors. An empty list grants nothing by itself; an advertised field's manifest default still applies unless whitelist-only mode denies it. |
+| `black` | array of selector strings | Deny selectors; a matching field is denied unless an allow selector also matches, because an allow match wins. |
+| `whitelistOnly` | boolean | When true, a field that matches neither list is denied even when its manifest default is enabled. |
+| `minUpdateIntervalTicks` | number, ticks | Global minimum sampling interval; an adapter is never polled faster than this or its declared minimum. |
+| `scanBudget` | number | Per-capture source-scan allowance; `0` disables capture. |
+| `permissionLevels` | object mapping field ID to a vanilla level `0`–`4` | Per-field replacement of the manifest's required permission level. |
+| `updateIntervals` | object mapping adapter ID to ticks | Per-adapter override that can only raise an adapter's declared sampling interval, not lower it. |
+
+A selector is a field-ID pattern written as `namespace:path`; it matches field
+IDs only, so naming an adapter ID such as `create:presentation` does not select
+that adapter's fields. Adapter-wide interval overrides use the separate
+`updateIntervals` adapter-ID key instead. Each selector part accepts lowercase
+letters, digits, `_`, `-`, `.`, and `*`; the path part may also contain `/`. A
+`*` matches zero or more characters within its part and never crosses the `:`
+separator. For example, `create:kinetic.*`, `*:target.name`, and `*:*` are valid
+selectors.
+
+Allow selectors that fail validation are skipped, while an invalid deny
+selector, an invalid permission override, or an over-capacity allow/deny or
+permission-override collection denies every field instead of widening access;
+the resulting deny-all state is persisted durably. Invalid `updateIntervals`
+entries are skipped; an invalid `updateIntervals` collection removes all
+per-adapter overrides, so each adapter uses its declared interval subject to the
+global minimum rather than denying fields. Out-of-range numeric
+members are clamped. Evaluation order, permission checking, and the client
+receive/display consequences are owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md).
 
 ## Version marker
 
@@ -56,7 +100,14 @@ Illustrative shape only; the values are samples, not defaults:
   "msToRegenerate": 250,
   "rateLimit": 10,
   "syncDuration": 15,
-  "pingDistance": 128
+  "pingDistance": 128,
+  "presentation": {
+    "white": ["create:kinetic.*"],
+    "black": ["create:inventory.summary"],
+    "whitelistOnly": false,
+    "scanBudget": 64,
+    "permissionLevels": {"create:fluid.summary": 2}
+  }
 }
 ```
 

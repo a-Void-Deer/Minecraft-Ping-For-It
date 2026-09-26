@@ -82,6 +82,24 @@ These display lists are separate from the entity-selection blacklist controlled
 by `markBlacklistedTargets`; see
 [the blacklist boundary](../architecture/picking/selection_policy.md#raycast-use-and-blacklist-boundary).
 
+### Presentation field policies
+
+| Key | JSON form | Local meaning |
+| --- | --- | --- |
+| `presentationReceive` | object | Local receive policy for versioned presentation fields: which advertised fields this client subscribes to, decodes, and retains. |
+| `presentationDisplay` | object | Local display policy: which receive-authorized retained fields a UI consumer may present. |
+
+Both keys use the shared presentation policy object shape catalogued in
+[server configuration](server.md#presentation-policy-object). The allow, deny,
+and whitelist-only members are the client-effective ones; the sampling and
+override members apply to server capture. A local deny beats a
+server-authorized compatible field. Policy application, fail-closed validation,
+and the client value store are owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md).
+The [configuration UI](../UI/settings-screen.md#presentation-category) exposes
+interactive list editing for both keys and presents the server rule view
+read-only for comparison.
+
 ### Channel preferences
 
 | Key | JSON form | Local meaning |

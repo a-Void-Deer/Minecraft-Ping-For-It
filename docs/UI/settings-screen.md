@@ -6,6 +6,8 @@ client file catalogue ([client configuration](../config/client.md)), the
 persisted server file catalogue
 ([server configuration](../config/server.md)), the remote change transaction
 ([changing server configuration](../architecture/config/changing-server-config.md)),
+the presentation policy rule-view route and selector semantics
+([presentation snapshot](../architecture/presentation/presentation_snapshot.md)),
 the permission requirement for editing
 ([server configuration authority](../architecture/authority/server-config.md)),
 server-side enforcement ([security](../architecture/security.md)), or handler
@@ -39,7 +41,7 @@ does not discard the session or a draft.
 
 ## Category layout
 
-The client scope has six categories:
+The client scope has seven categories:
 
 - **Marker Display**: Ping Distance, Marker Display Duration, Ping Size, Item
   Icons, Direction Indicator, Player Info, and Team Color.
@@ -53,21 +55,97 @@ The client scope has six categories:
   Size.
 - **Rendering & Config**: Entity Block Geometry and the configuration-file
   action.
+- **Presentation**: Client Receive, Client Display, and one shared read-only
+  server-policy reference.
 
-The server scope has three categories:
+The server scope has four categories:
 
 - **Channel & Players**: Default Channel Mode and Player Tracking.
 - **Send Rate**: Regeneration Time and Rate Limit.
 - **Marker Duration**: Sync Duration.
+- **Server Presentation**: Server Policy.
 
-The category structure supports later server categories; it defines no server
+The category structure supports later categories; it defines no configuration
 field of its own. Each option's value semantics and persisted form remain owned
 by the configuration catalogues, and this page owns only which options are
-exposed under which category.
+exposed under which category and whether a group edits local or server policy.
 
 The screen exposes no controls for the hidden native raycast cap or the four
 direction-indicator safe-area insets; their file semantics remain in the client
 catalogue. There is no user-facing reload control.
+
+## Presentation category
+
+The client scope's Presentation category is reachable without server permission
+and contains two local policy editors: Client Receive and Client Display. Each
+panel lists the locally known fields grouped by the namespace of the field ID;
+a bundled namespace name is localized, while an unknown namespace keeps its raw
+ID instead of an invented name. Each row carries a localized field name and
+description, and the raw field ID and its own default appear in the row tooltip
+rather than requiring textual entry.
+
+Each field row offers one On/Hidden control over that panel's local client
+presentation policy. Turning it On adds exactly one exact allow selector for
+that field ID; turning it Hidden removes only that field ID's exact allow
+selector entries, including every duplicate, and leaves the block list, the
+whitelist-only mode, wildcard and other broad selectors, and every other field
+untouched. The displayed state is the field's effective outcome under the
+panel's policy evaluated with the server-authorized default rather than its
+exact allow-list membership, so a field still allowed by a remaining allow
+selector or by default settings reads On. When hiding removes the exact allow
+entry but the field nonetheless remains allowed by default settings, or by a
+remaining group allow selector, the panel reports that outcome as a non-error
+notice instead of claiming the field was hidden. The row tooltip carries the raw
+field ID, its own default, the effective policy source — allowed by an allow
+rule, allowed by default, allow-rule priority, blocked by a block rule, blocked
+by whitelist-only, disabled by default, or waiting for server rules — and any
+matching selectors. That label describes the configured rule outcome only; it
+does not guarantee that target data, timing, or permission will produce a value.
+The client panels evaluate against the server-authorized default, so a field
+with no matching rule reads as accepting server-authorized fields or showing
+received fields instead of inheriting that field's server-side disabled default.
+
+Each panel collapses its raw selector lists and its whitelist-only toggle behind
+an advanced section that starts collapsed and carries the current allow and
+block counts. The advanced section keeps the existing white-list and black-list
+editors with their Remove action and validated Add entry, so unknown custom
+patterns remain editable and visible. Each list keeps its own draft and its own
+feedback: text typed in one list survives page rebuilds, navigation, and server
+events, and a successful server add clears only that list's unchanged draft,
+while a failed, denied, or timed-out add keeps its text for correction. The
+field control never owns a draft slot; its success, failure, or fallback notice
+is reported in a per-panel feedback row that stays visible while the advanced
+section is collapsed. Below both client editors, one shared server rule view is
+shown as a read-only reference.
+
+The server scope has a separate Server Presentation category containing only the
+Server Policy editor. Its field list is the fields advertised by the connection's
+accepted offer after the local ID/kind compatibility check, so it shows only
+compatible fields and is unknown — not an authoritative empty list — until a
+valid offer is accepted. The offline local preview that the client panels can
+show is the locally registered manifest rather than server truth. The policy
+snapshot and status are independent of the ordinary server-settings view, so
+that view does not gate entry to or viewability of this policy page. The shared
+server rule view has no authoritative values before the first successful
+snapshot: until then the status line presents the unsupported, unknown, loading,
+timed-out, or errored state instead of a selector list, and a silent or
+timed-out request is never reported as an unsupported route. Once a view is
+known, its field outcome labels and retained selectors remain visible with their
+state while a request is pending or the last response failed; only a known empty
+list is rendered as empty. When the viewer may edit, the server field rows keep
+their paired allow and block toggles, and the advanced lists offer Add and
+Remove and a whitelist-only control; otherwise those controls are inert.
+Refresh asks the server for a fresh correlated rule view and is available again
+for retry after a bounded no-response timeout.
+
+The rule-view route, its disclosure, correlation, revision, and pending
+lifecycle are owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md),
+which also owns the accepted field-catalog metadata and the outcome evaluation
+these rows display. The mutation permission threshold is owned by
+[server configuration authority](../architecture/authority/server-config.md).
+Selector grammar and the shared list shape are owned by the configuration
+catalogues.
 
 ## Marker display duration option
 
@@ -100,26 +178,32 @@ so the screen does not promise that the server applied or persisted an update.
 
 ## Server settings session
 
-The server settings are one shared session within the screen, not a
-per-category or per-visit section. Entering the server scope shows its overview
-and requests the current server configuration when the client is eligible and
-the session holds no loaded or in-flight snapshot. The loaded snapshot, the
-draft, and any in-flight request are retained across scope-tab switches and
-category navigation; entering a server category does not request another
-snapshot.
+The ordinary five-field server settings are one shared session within the
+screen, not a per-category or per-visit section. This session covers the
+Channel & Players, Send Rate, and Marker Duration categories. Entering the
+server scope shows its overview and requests the current server configuration
+when the client holds a live connection and the session holds no loaded or
+in-flight snapshot. The loaded snapshot, the draft, and any in-flight request
+are retained across scope-tab switches and category navigation; entering an
+ordinary server category does not request another snapshot. The separate Server
+Presentation category is not part of this session; its policy snapshot and
+status follow the independent workflow described in [Presentation category](#presentation-category).
 
-The scope overview and the server leaf pages show the session status: loading
-while a request is pending, a permission state when the client cannot edit, and
-an unavailable state when no authoritative snapshot exists. A denied response
-clears the authoritative server state and the draft; it is not presented as a
-read-only snapshot.
+The ordinary server scope overview and its three ordinary server leaf pages show
+the session status: loading while a request is pending, a permission state when
+a snapshot is viewable but not editable, and an unavailable state when no
+authoritative snapshot exists. A snapshot the server marks non-editable is
+retained as the read-only authoritative view rather than being discarded; for a
+locally privileged requester it also records a denial, which is never presented
+as an editable snapshot.
 
-An editable accepted snapshot becomes the authoritative screen state,
-populates the visible options, initializes the draft from the snapshot, and
-starts clean. `canEdit` is a UI availability condition: local client
-permission, no recorded denial, a loaded snapshot, and that snapshot's editable
-hint must all hold. It is a UI hint rather than the server authorization
-boundary, which
+An accepted snapshot becomes the authoritative screen state, populates the
+visible options, initializes the draft from the snapshot, and starts clean. A
+read-only accepted snapshot renders those authoritative values without an
+editable draft. `canView` holds while a safe authoritative snapshot is retained.
+`canEdit` is a UI availability condition: local client permission, no recorded
+denial, a loaded snapshot, and that snapshot's editable hint must all hold. It
+is a UI hint rather than the server authorization boundary, which
 [server configuration authority](../architecture/authority/server-config.md)
 and [security](../architecture/security.md) own.
 
@@ -141,13 +225,16 @@ snapshot continues to obey the request correlation owned by
 [changing server configuration](../architecture/config/changing-server-config.md)
 even when the player has navigated elsewhere or a confirmation dialog is open.
 
-Disconnecting clears all connection-scoped permission, denial, snapshot,
-pending-request, dirty, and draft state. Losing the local permission state also
-clears the same connection-scoped state. If a server leaf page is open when
-that state clears, the screen returns to the server overview and explains why
-the page is no longer editable. An observed false-to-true local permission
-transition is required before a previously recorded server denial can be
-retried. The permission requirement itself is owned by
+Disconnecting clears all connection-scoped ordinary-server permission, denial,
+snapshot, pending-request, dirty, and draft state. Losing the local permission
+state removes edit ability and drops the ordinary-server draft but retains a
+safe authoritative view, and an open ordinary server leaf page keeps rendering
+its retained values read-only instead of returning to the overview. A retained
+editable snapshot reopens with the draft reset to its values when permission
+returns; a retained read-only snapshot requires a fresh request after promotion
+to editor. An observed false-to-true local permission transition is required
+before a previously recorded server denial can be retried. The permission
+requirement itself is owned by
 [server configuration authority](../architecture/authority/server-config.md).
 
 ## File action and reset

@@ -6,9 +6,10 @@ live state, or rejected registrations must fail soft without breaking ordinary
 entity, block, or location pings. Common registries and outcome contracts remain
 free of Create and Flywheel dependencies.
 
-The integration has three separate primary routes--contraption press-time
-picking, entity outlines, and Flywheel entity-block geometry--plus narrow block
-presentation resolvers. Their gates and lifecycles are independent.
+The integration has three separate primary rendering routes--contraption
+press-time picking, entity outlines, and Flywheel entity-block geometry--plus
+narrow block presentation resolvers and a server-side presentation summary
+adapter. Their gates and lifecycles are independent.
 
 ## Contraption press-time picking
 
@@ -109,6 +110,60 @@ more vertices is `RENDERED` for that frame, while pre-commit plan failures are
 `FAILED` or `EMPTY` according to the observed result. Retain and close the
 registration handle, and keep full detailed diagnostics lazy, bounded, and
 rate-controlled.
+
+## Create presentation summary adapter
+
+A fourth, rendering-independent route registers adapter `create:presentation`
+(schema 1) in the versioned presentation snapshot. The client registers a
+manifest-only instance and never loads Create classes; the server registers a
+lazy, server-thread sampling source. The generic negotiation, demand-driven
+capture, policy, and projection contracts are owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md).
+
+The manifest declares kinetic speed (`create:kinetic.speed`, a record of
+effective/theoretical signed RPM and a moving flag), `create:kinetic.has_network`,
+`create:kinetic.overstressed`, `create:kinetic.stress`, and
+`create:kinetic.capacity` as enabled by default, and the item-vault
+(`create:inventory.summary`) and fluid-tank (`create:fluid.summary`) registry-ID
+summaries as disabled by default. The kinetic fields are default-enabled, so an
+unmatched kinetic field passes the recipient's policy unless a block rule
+matches or whitelist-only mode is on; the client UI shows RPM as allowed by
+default, and no explicit allow rule is required for the line to appear when the
+target and captured value are available. The disabled summaries stay disabled
+until explicitly allowed. Selector evaluation and the outcome labels are owned
+by [presentation snapshot](../architecture/presentation/presentation_snapshot.md#field-selection-policy).
+Sampling is requested only for demanded
+fields and only for a whole-block target whose live registry ID still matches
+the captured target; opaque locators, other target kinds, unloaded chunks, and
+dirty world state are unavailable rather than asserted. A server interval
+override can only raise the adapter's declared minimum sampling cadence.
+
+Kinetic reads use Create's public speed, network, and overstress getters. Cached
+network stress and capacity additionally require a signature-gated accessor.
+The tested Create version is `6.0.10` (`6.0.10-281` artifact); the dedicated
+mixin applies only when the runtime Create mod metadata reports a tested
+version and an ASM shape check confirms `KineticBlockEntity` still has the
+protected instance `float` fields the accessor shadows. A version or shape
+mismatch disables only the cached stress/capacity route; speed, network, and
+overstress continue through the public getters, and the adapter stays optional.
+
+Inventory and fluid sampling verify the whole controller structure before
+asking a capability: item vaults are read from the verified controller's block
+item-handler capability, and fluid tanks from the verified controller's block
+fluid-handler capability. Creative tanks, an active boiler's input-only water
+handler, removed parts, mismatched controllers, or incomplete verification are
+unavailable rather than reported as empty. Amounts are detached and aggregated
+by registry ID only; fluid amounts use NeoForge 1.21.1 millibuckets. Summaries
+carry explicit `partial` and `scanned` markers, bound scan work independently of
+output cardinality, and never retain block entities, handlers, stacks, or
+components.
+
+The route fails soft: absent, untested, drifted, or throwing Create state yields
+no Create adapter or an unavailable/stale section, and Basic plus unrelated
+pings keep working. Loader registration, version gates, and the cached-accessor
+shape gate have unit and ASM-node seam coverage only; no installed-Create
+in-game presentation scenario has run yet, as recorded in
+[verification](../testing/verification.md).
 
 ## Create block presentation resolvers
 

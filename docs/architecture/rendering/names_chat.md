@@ -6,7 +6,12 @@ Names and chat are required for block and entity pings regardless of whether an
 outline uses BER, baked-model, optional geometry, or VoxelShape fallback. A
 render route may fail or change without removing the authoritative target name.
 Server-derived name data follows
-[authoritative validation](../authority/target_validation.md).
+[authoritative validation](../authority/target_validation.md). On the
+negotiated presentation route the name travels as the Basic
+`minecraft:target.name` value of the atomic initial; its retention and receive
+policy are owned by
+[presentation snapshot](../presentation/presentation_snapshot.md), while the
+composition rules below remain the name contract.
 
 - A custom-named ordinary entity or block entity is shown as
   `Custom Name (Vanilla Name)`. Without a custom name, show only the localized
@@ -75,9 +80,13 @@ the [wheel contract](../picking/wheel.md), not this phrase-only text-color rule.
 
 ## New-marker feedback and dimension behavior
 
-Only created-marker updates accepted under both
-[network protocol](../network/protocol.md) and
-[client marker state](../markers/client-state.md) reach receipt evaluation.
+Only created-marker updates accepted under
+[network protocol](../network/protocol.md), the negotiated
+[presentation snapshot](../presentation/presentation_snapshot.md) receive
+policy, and [client marker state](../markers/client-state.md) reach receipt
+evaluation. The chat target name is that marker's receive-authorized Basic name;
+an absent or denied name uses the unknown-name form instead of any superseded
+marker packet.
 Before upserting an accepted update, the client checks whether its ID is absent
 from the **current** local store. Only such a newly seen marker is eligible for the
 sound and chat hooks. An update to an ID that is still locally known—including

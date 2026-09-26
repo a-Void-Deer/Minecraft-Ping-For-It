@@ -33,19 +33,33 @@ otherwise invalid update, performs no mutation. Which fields become dirty and
 when a plan is produced are UI planning details owned by
 [configuration UI](../../UI/settings-screen.md).
 
+## Separate policy selector route
+
+The presentation field selection policy is read and changed through its own
+versioned route, not through this five-field transaction. The selector route
+never travels on the request or update packet ids above and does not extend or
+replace the update surface. Its rule-view disclosure, correlation, revision,
+and mutation semantics are owned by
+[presentation snapshot](../presentation/presentation_snapshot.md); who may read
+or mutate is owned by
+[server configuration authority](../authority/server-config.md).
+
 ## Snapshot request and correlation
 
 A snapshot request carries a positive request identifier and asks for the
-server's current authoritative values; it is not an edit. The response is bound
-to that identifier. A response is accepted only while the initiating request is
-still pending on the same connection, the snapshot is non-null and safe, and
+server's current authoritative values; it is not an edit, and any connected
+player may send one. The response is bound to that identifier. A response is
+accepted only while the initiating request is still pending on the same
+connection, the snapshot is non-null and safe, and
 the response's positive identifier exactly matches that pending identifier. A
 response that arrives after closing, disconnecting, permission revocation, or a
 later opening is stale and is rejected in full.
 
 The response's `canEdit` value is a UI hint on the returned snapshot, and the
-request identifier correlates that response with its request. What grants edit
-authority is owned by the
+request identifier correlates that response with its request. A response whose
+hint is false is still an authoritative snapshot: it may be displayed
+read-only, but it never enables editing. What grants edit authority is owned by
+the
 [editing authority](../authority/server-config.md); trusted server-side
 enforcement is owned by
 [server enforcement](../security.md#server-configuration-update-enforcement).
@@ -92,9 +106,12 @@ synchronization-duration field is owned by
 There is no update-result or acknowledgement packet. Before dispatching a valid
 plan, the client marks its draft clean and sends the update through a void send;
 it does not wait for a success response, reload a snapshot, or retry a send
-that could not be delivered. A clean client state therefore means only that the
-client stopped tracking the local draft as dirty; it is not evidence that the
-server accepted, applied, or persisted the update.
+that could not be delivered. The separate policy selector route has its own
+correlated response, owned by
+[presentation snapshot](../presentation/presentation_snapshot.md). A clean
+client state therefore means only that the client stopped tracking the local
+draft as dirty; it is not evidence that the server accepted, applied, or
+persisted the update.
 
 Applying an update can also trigger the handler's update notification
 (reinitializing server-side state and re-broadcasting rate and
