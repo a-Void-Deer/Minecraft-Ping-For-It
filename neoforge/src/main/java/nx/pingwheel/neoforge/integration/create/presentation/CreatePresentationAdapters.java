@@ -12,6 +12,9 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 
 import nx.pingwheel.common.presentation.PresentationAdapter;
+import nx.pingwheel.common.integration.ExternalBlockServerProviders;
+import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
+import nx.pingwheel.common.domain.Target;
 
 /**
  * NeoForge registration hook. The loader checks the Create mod ID before
@@ -43,6 +46,63 @@ public final class CreatePresentationAdapters {
 		return CreatePresentationAvailability.available() ? new CreatePresentationAdapter() : null;
 	}
 
+	record SourceWorld(Object value, String dimensionId) {
+	}
+
+	interface SourceAccess {
+		boolean serverThread();
+		boolean available();
+		SourceWorld resolveWorld(String dimensionId);
+		ExternalBlockServerProvider.ObservationResult observeExternal(
+			SourceWorld world, Target.ExternalBlockTarget target);
+		boolean matchesOrdinary(SourceWorld world, BlockPos position, String expectedRegistryId);
+		CreatePresentationAdapter.Observation collect(SourceWorld world, BlockPos position,
+			Set<String> demand, PresentationAdapter.CaptureBudget budget);
+	}
+
+	static boolean validExternalMetadata(PresentationAdapter.DetachedTarget target,
+		Target.ExternalBlockTarget external) {
+		return target != null && external != null && external.isCommitted()
+			&& "block".equals(target.kind())
+			&& target.locator() != null && target.locator().isEmpty()
+			&& target.x() == 0 && target.y() == 0 && target.z() == 0
+			&& external.dimensionId().equals(target.dimension())
+			&& external.expectedBlockRegistryId().equals(target.registryId());
+	}
+
+	static CreatePresentationAdapter.Observation observeSource(
+		PresentationAdapter.DetachedTarget target, Set<String> demand,
+		PresentationAdapter.CaptureBudget budget, SourceAccess access) {
+		if (target == null || demand == null || budget == null || access == null
+			|| budget.remaining() < 1 || !access.serverThread()) return null;
+		Target.ExternalBlockTarget external = target.externalBlock();
+		if (external != null && !validExternalMetadata(target, external)) return null;
+		if (target.dimension() == null || target.dimension().length() > 193
+			|| target.dimension().isBlank() || target.registryId() == null
+			|| target.registryId().length() > 193 || target.registryId().isBlank()
+			|| (external == null && target.locator() != null && !target.locator().isEmpty())
+			|| (external == null && !"block".equals(target.kind())
+				&& !"entity_block".equals(target.kind()))) return null;
+		if (!access.available()) return null;
+		ResourceLocation dimension = ResourceLocation.tryParse(target.dimension());
+		ResourceLocation expectedBlock = ResourceLocation.tryParse(target.registryId());
+		if (dimension == null || expectedBlock == null || budget.remaining() < 2 || !budget.scan()) return null;
+		SourceWorld world = access.resolveWorld(dimension.toString());
+		if (world == null) return null;
+		BlockPos position;
+		if (external != null) {
+			ExternalBlockServerProvider.ObservationResult observed = access.observeExternal(world, external);
+			if (!(observed instanceof ExternalBlockServerProvider.ObservationResult.Available available)) {
+				return null;
+			}
+			position = available.observation().position();
+		} else {
+			position = new BlockPos(target.x(), target.y(), target.z());
+			if (!access.matchesOrdinary(world, position, expectedBlock.toString())) return null;
+		}
+		return access.collect(world, position, Set.copyOf(demand), budget);
+	}
+
 	private static final class ServerSource implements CreatePresentationAdapter.Source {
 		private final MinecraftServer server;
 
@@ -53,41 +113,49 @@ public final class CreatePresentationAdapters {
 		@Override
 		public CreatePresentationAdapter.Observation observe(PresentationAdapter.DetachedTarget target,
 			Set<String> demand, PresentationAdapter.CaptureBudget budget) {
-			// No world lookup or optional-mod resolution on an ineligible request.
-			if (budget.remaining() < 1 || !server.isSameThread()
-				|| (target.locator() != null && !target.locator().isEmpty())) {
-				return null;
-			}
-			if (target.dimension() == null || target.dimension().length() > 193
-				|| target.registryId() == null || target.registryId().length() > 193) {
-				return null;
-			}
-			if (!CreatePresentationAvailability.available()) {
-				return null;
-			}
-			ResourceLocation dimension = ResourceLocation.tryParse(target.dimension());
-			ResourceLocation expectedBlock = ResourceLocation.tryParse(target.registryId());
-			if (dimension == null || expectedBlock == null) {
-				return null;
-			}
-			// Account for target resolution and its state read, separately from
-			// the collector's structural and handler work. The remaining budget
-			// bounds every scan performed by the collector.
-			if (budget.remaining() < 2 || !budget.scan()) {
-				return null;
-			}
-			// A whole-block snapshot, not a contraption or other opaque locator.
-			ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
-			if (level == null) {
-				return null;
-			}
-			BlockPos pos = new BlockPos(target.x(), target.y(), target.z());
-			if (pos.getY() < level.getMinBuildHeight() || pos.getY() >= level.getMaxBuildHeight()
-				|| !level.hasChunkAt(pos)
-				|| !expectedBlock.equals(BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()))) {
-				return null;
-			}
-			int maxWork = Math.min(budget.remaining(), CreatePresentationCollector.DEFAULT_LIMITS.maxWork());
+			return observeSource(target, demand, budget, new SourceAccess() {
+				@Override
+				public boolean serverThread() { return server.isSameThread(); }
+
+				@Override
+				public boolean available() { return CreatePresentationAvailability.available(); }
+
+				@Override
+				public SourceWorld resolveWorld(String dimensionId) {
+					ResourceLocation dimension = ResourceLocation.tryParse(dimensionId);
+					if (dimension == null) return null;
+					ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
+					return level == null ? null : new SourceWorld(level, dimensionId);
+				}
+
+				@Override
+				public ExternalBlockServerProvider.ObservationResult observeExternal(
+					SourceWorld world, Target.ExternalBlockTarget target) {
+					return ExternalBlockServerProviders.registry().observeBlock(server,
+						(ServerLevel) world.value(), target);
+				}
+
+				@Override
+				public boolean matchesOrdinary(SourceWorld world, BlockPos position, String expectedRegistryId) {
+					ServerLevel level = (ServerLevel) world.value();
+					return position.getY() >= level.getMinBuildHeight()
+						&& position.getY() < level.getMaxBuildHeight()
+						&& level.hasChunkAt(position)
+						&& expectedRegistryId.equals(BuiltInRegistries.BLOCK.getKey(
+							level.getBlockState(position).getBlock()).toString());
+				}
+
+				@Override
+				public CreatePresentationAdapter.Observation collect(SourceWorld world, BlockPos position,
+					Set<String> demand, PresentationAdapter.CaptureBudget budget) {
+					return collectAt((ServerLevel) world.value(), position, demand, budget);
+				}
+			});
+		}
+
+		private CreatePresentationAdapter.Observation collectAt(ServerLevel level, BlockPos pos,
+			Set<String> demand, PresentationAdapter.CaptureBudget budget) {
+		int maxWork = Math.min(budget.remaining(), CreatePresentationCollector.DEFAULT_LIMITS.maxWork());
 			CreateSamplingLimits defaults = CreatePresentationCollector.DEFAULT_LIMITS;
 			CreateSamplingLimits limits = new CreateSamplingLimits(defaults.maxStructureBlocks(),
 				defaults.maxSlots(), defaults.maxTanks(), defaults.maxRegistryIds(), maxWork,
@@ -105,9 +173,11 @@ public final class CreatePresentationAdapters {
 					return null;
 				}
 			}
-			if (!sampled.sourcePresent()) {
-				return null;
-			}
+			return observation(sampled);
+		}
+
+		private CreatePresentationAdapter.Observation observation(CreatePresentationCollector.Sample sampled) {
+			if (!sampled.sourcePresent()) return null;
 			CreatePresentationCollector.Kinetic kinetic = sampled.kinetic();
 			CreatePresentationAdapter.Speed speed = kinetic.effectiveSpeed() != null
 				&& kinetic.theoreticalSpeed() != null && kinetic.moving() != null

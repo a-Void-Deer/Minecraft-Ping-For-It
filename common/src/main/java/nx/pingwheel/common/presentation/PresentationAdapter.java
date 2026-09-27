@@ -2,6 +2,8 @@ package nx.pingwheel.common.presentation;
 
 import java.util.List;
 
+import nx.pingwheel.common.domain.Target;
+
 /**
 	 * Extension SPI. The version bridge resolves a world object to a detached handle, and
 	 * supplies a bounded collector for that handle. The client only needs the manifest;
@@ -19,7 +21,12 @@ public interface PresentationAdapter {
 	PresentationSection collect(DetachedTarget target, java.util.Set<String> demand, CaptureBudget budget);
 
 	record DetachedTarget(String dimension, String kind, String registryId, int x, int y, int z,
-		String locator) {}
+		String locator, Target.ExternalBlockTarget externalBlock) {
+		public DetachedTarget(String dimension, String kind, String registryId, int x, int y, int z,
+			String locator) {
+			this(dimension, kind, registryId, x, y, z, locator, null);
+		}
+	}
 
 	/** A hard upper bound on source scans even if few distinct values result. */
 	final class CaptureBudget {

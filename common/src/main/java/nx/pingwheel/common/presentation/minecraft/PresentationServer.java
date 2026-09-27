@@ -14,9 +14,12 @@ import net.minecraft.world.Nameable;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.integration.ExternalBlockServerProviders;
+import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.marker.*;
 import nx.pingwheel.common.name.MinecraftTargetNameResolver;
 import nx.pingwheel.common.name.TargetNameComposer;
@@ -251,16 +254,27 @@ public final class PresentationServer {
 					value = adapter.collect(detached(lease.marker.target()), Set.copyOf(demand), budget);
 					for (int used = allowance - budget.remaining(); used > 0; used--) work.scan();
 				}
-				if (value != null && (!adapter.adapterId().equals(value.adapterId()) || adapter.schema() != value.schema())) value = null;
+			if (value != null && (!adapter.adapterId().equals(value.adapterId()) || adapter.schema() != value.schema())) value = null;
 			} catch (RuntimeException | LinkageError ignored) { value = null; }
-			if (value == null) {
-				Map<String, PresentationValue> retained = new LinkedHashMap<>();
-				source.value.fields().forEach((id, previous) -> { if (demand.contains(id)) retained.put(id, previous); });
-				source.value = new PresentationSection(adapter.adapterId(), adapter.schema(), retained, true);
-			} else source.value = value;
+			source.value = transition(adapter.adapterId(), adapter.schema(), source.value, demand, value);
 			source.demand = Set.copyOf(demand);
 		}
 		return captures;
+	}
+
+	static PresentationSection retainStale(String adapterId, int schema,
+		PresentationSection previous, Set<String> demand) {
+		Map<String, PresentationValue> retained = new LinkedHashMap<>();
+		previous.fields().forEach((id, value) -> { if (demand.contains(id)) retained.put(id, value); });
+		return new PresentationSection(adapterId, schema, retained, true);
+	}
+
+	static PresentationSection transition(String adapterId, int schema,
+		PresentationSection previous, Set<String> demand, PresentationSection captured) {
+		if (captured != null && adapterId.equals(captured.adapterId()) && schema == captured.schema()) {
+			return captured;
+		}
+		return retainStale(adapterId, schema, previous, demand);
 	}
 
 	private static Set<String> allowed(ServerPlayer player, Session session, PresentationAdapter adapter) {
@@ -353,16 +367,16 @@ public final class PresentationServer {
 			if (!level.hasChunkAt(pos)) return null;
 			var state = level.getBlockState(pos);
 			if (!BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(block.blockRegistryId())) return null;
-			if (demand.contains(PresentationBasic.BLOCK_STATE)) {
-				Map<String, PresentationValue> properties = new LinkedHashMap<>();
-				state.getValues().forEach((property, value) -> properties.put(property.getName(), new PresentationValue.Text(value.toString())));
-				fields.put(PresentationBasic.BLOCK_STATE, new PresentationValue.RecordValue(properties));
-			}
+			if (demand.contains(PresentationBasic.BLOCK_STATE)) put(fields, demand, PresentationBasic.BLOCK_STATE, blockState(state));
 			if (demand.contains(PresentationBasic.NAME)) {
 				name = state.getBlock().getName();
 				var blockEntity = level.getBlockEntity(pos);
 				if (blockEntity instanceof Nameable named && named.hasCustomName()) name = TargetNameComposer.compose(named.getCustomName(), name);
 			}
+		} else if (target instanceof Target.ExternalBlockTarget external) {
+			return basicExternal(demand,
+				() -> ExternalBlockServerProviders.registry().observeBlock(server, level, external),
+				() -> new MinecraftTargetNameResolver(server).resolveName(marker.owner(), external));
 		} else if (target instanceof Target.LocationTarget) {
 			if (demand.contains(PresentationBasic.NAME)) name = TargetNameComposer.here();
 		} else if (demand.contains(PresentationBasic.NAME)) {
@@ -374,6 +388,35 @@ public final class PresentationServer {
 			put(fields, demand, PresentationBasic.NAME, new PresentationValue.Text(json.value()));
 		}
 		return new PresentationSection(PresentationBasic.ID, 1, fields, false);
+	}
+
+	static PresentationSection basicExternal(Set<String> demand,
+		java.util.function.Supplier<ExternalBlockServerProvider.ObservationResult> observe,
+		java.util.function.Supplier<TargetNameJson> resolveName) {
+		BlockState state = null;
+		if (demand.contains(PresentationBasic.BLOCK_STATE)) {
+			ExternalBlockServerProvider.ObservationResult result = observe.get();
+			if (!(result instanceof ExternalBlockServerProvider.ObservationResult.Available available)) return null;
+			state = available.observation().state();
+		}
+		TargetNameJson name = demand.contains(PresentationBasic.NAME) ? resolveName.get() : null;
+		return assembleExternalBasic(demand, state, name);
+	}
+
+	static PresentationSection assembleExternalBasic(Set<String> demand, BlockState state,
+		TargetNameJson resolved) {
+		if (demand.contains(PresentationBasic.BLOCK_STATE) && state == null) return null;
+		Map<String, PresentationValue> fields = new LinkedHashMap<>();
+		if (state != null) put(fields, demand, PresentationBasic.BLOCK_STATE, blockState(state));
+		if (demand.contains(PresentationBasic.NAME) && resolved != null)
+			put(fields, demand, PresentationBasic.NAME, new PresentationValue.Text(resolved.value()));
+		return new PresentationSection(PresentationBasic.ID, 1, fields, false);
+	}
+
+	private static PresentationValue.RecordValue blockState(net.minecraft.world.level.block.state.BlockState state) {
+		Map<String, PresentationValue> properties = new LinkedHashMap<>();
+		state.getValues().forEach((property, value) -> properties.put(property.getName(), new PresentationValue.Text(value.toString())));
+		return new PresentationValue.RecordValue(properties);
 	}
 
 	/**
@@ -419,8 +462,10 @@ public final class PresentationServer {
 		if (!demand.contains(id)) return;
 		try { PresentationLimits.validate(value); fields.put(id, value); } catch (IllegalArgumentException ignored) { }
 	}
-	private static PresentationAdapter.DetachedTarget detached(Target target) {
+	static PresentationAdapter.DetachedTarget detached(Target target) {
 		if (target instanceof Target.BlockTarget block) return new PresentationAdapter.DetachedTarget(block.dimensionId(), "block", block.blockRegistryId(), block.x(), block.y(), block.z(), "");
+		if (target instanceof Target.ExternalBlockTarget external) return new PresentationAdapter.DetachedTarget(
+			external.dimensionId(), "block", external.expectedBlockRegistryId(), 0, 0, 0, "", external);
 		return new PresentationAdapter.DetachedTarget(target.dimensionId(), target.kind().name().toLowerCase(Locale.ROOT), "", 0, 0, 0, "");
 	}
 	private static final class BasicManifest implements PresentationAdapter {

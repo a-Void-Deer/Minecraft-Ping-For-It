@@ -596,6 +596,94 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	}
 
 	@Override
+	public synchronized ObservationResult observeBlock(ServerLevel level, Target.ExternalBlockTarget committed) {
+		if (!usable() || level == null || committed == null || !committed.isCommitted()
+			|| !PROVIDER_ID.equals(committed.providerId()) || !dimensionMatches(level, committed.dimensionId())) {
+			return new ObservationResult.Invalid();
+		}
+		Optional<UUID> trackingId = parseUuid(committed.stableTargetId());
+		Optional<ResourceLocation> expectedId = parseBlockId(committed.expectedBlockRegistryId());
+		if (trackingId.isEmpty() || expectedId.isEmpty()) return new ObservationResult.Invalid();
+		ServerState state = serverState(level);
+		if (state == null || state.references.references(trackingId.get().toString()) <= 0) {
+			return new ObservationResult.Invalid();
+		}
+		Entry entry = state.entries.get(trackingId.get().toString());
+		if (entry == null) return new ObservationResult.Invalid();
+		try {
+			Object trackingPoint = invoke(api.getTrackingPoint, entry.data(), trackingId.get());
+			if (trackingPoint == null) {
+				return new ObservationResult.Invalid();
+			}
+			Object inSubLevel = invoke(api.inSubLevel(), trackingPoint);
+			Object subLevelIdValue = invoke(api.subLevelId(), trackingPoint);
+			Object pointValue = invoke(api.point(), trackingPoint);
+			LiveResult live = observeStableEntry(
+				committed, state.entries,
+				stableId -> state.references.references(stableId), entry, inSubLevel, subLevelIdValue, pointValue,
+				(currentSubLevelId, currentPosition) -> {
+					Object currentContainer = invoke(api.getContainer, null, level);
+					if (currentContainer == null) return new LiveResult.TemporarilyUnavailable("sublevel-container-unavailable");
+					Object currentSubLevel = invoke(api.getSubLevel, currentContainer, currentSubLevelId);
+					if (currentSubLevel == null || isRemoved(currentSubLevel))
+						return new LiveResult.TemporarilyUnavailable("sublevel-unresolved-or-removed");
+					return resolveLive(level, currentSubLevel, currentSubLevelId, currentPosition,
+						expectedId.get(), false);
+				});
+			if (!(live instanceof LiveResult.Available available)) {
+				return new ObservationResult.TemporarilyUnavailable();
+			}
+			return new ObservationResult.Available(new BlockObservation(
+				available.level(), available.position(), available.state()));
+		} catch (ReflectiveOperationException | RuntimeException failure) {
+			return new ObservationResult.TemporarilyUnavailable();
+		} catch (LinkageError failure) {
+			linkGuard.disableSilently();
+			return new ObservationResult.TemporarilyUnavailable();
+		}
+	}
+
+	static TrackingPosition currentTrackingPosition(String committedStableId, int references,
+		UUID entryTrackingId, Object inSubLevel, Object subLevelId, Object point) {
+		Optional<UUID> committedId = parseUuid(committedStableId);
+		if (committedId.isEmpty() || references <= 0 || !committedId.get().equals(entryTrackingId)
+			|| !Boolean.TRUE.equals(inSubLevel) || !(subLevelId instanceof UUID currentSubLevelId)
+			|| !(point instanceof Vector3dc currentPoint) || !finite(currentPoint)) return null;
+		return new TrackingPosition(currentSubLevelId,
+			BlockPos.containing(currentPoint.x(), currentPoint.y(), currentPoint.z()));
+	}
+
+	interface StableEntryView {
+		UUID trackingId();
+	}
+
+	@FunctionalInterface
+	interface ReferenceCount {
+		int references(String stableId);
+	}
+
+	@FunctionalInterface
+	interface CurrentLiveResolver<T> {
+		T resolve(UUID subLevelId, BlockPos position) throws ReflectiveOperationException;
+	}
+
+	static <T> T observeStableEntry(Target.ExternalBlockTarget committed,
+		Map<String, ? extends StableEntryView> entries, ReferenceCount references,
+		StableEntryView observedEntry, Object inSubLevel, Object subLevelId, Object point,
+		CurrentLiveResolver<T> liveResolver) throws ReflectiveOperationException {
+		if (committed == null || !committed.isCommitted() || entries == null || references == null
+			|| observedEntry == null || liveResolver == null
+			|| entries.get(committed.stableTargetId()) != observedEntry
+			|| references.references(committed.stableTargetId()) <= 0) return null;
+		TrackingPosition current = currentTrackingPosition(committed.stableTargetId(), references.references(committed.stableTargetId()),
+			observedEntry.trackingId(), inSubLevel, subLevelId, point);
+		return current == null ? null : liveResolver.resolve(current.subLevelId(), current.position());
+	}
+
+	record TrackingPosition(UUID subLevelId, BlockPos position) {
+	}
+
+	@Override
 	public synchronized Optional<ExternalBlockName> resolveName(
 		ServerLevel level, Target.ExternalBlockTarget target
 	) {
@@ -1229,7 +1317,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		}
 	}
 
-	private static final class Entry {
+	private static final class Entry implements StableEntryView {
 		private final UUID trackingId;
 		private final Object data;
 
@@ -1238,7 +1326,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			this.data = data;
 		}
 
-		private UUID trackingId() {
+		@Override
+		public UUID trackingId() {
 			return trackingId;
 		}
 

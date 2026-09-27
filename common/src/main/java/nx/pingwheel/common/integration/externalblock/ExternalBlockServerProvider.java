@@ -3,6 +3,8 @@ package nx.pingwheel.common.integration.externalblock;
 import java.util.Optional;
 
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import nx.pingwheel.common.domain.Target;
@@ -39,6 +41,14 @@ public interface ExternalBlockServerProvider {
 	 * invalid target so callers can retain the marker during provider loading.
 	 */
 	RefreshResult refresh(ServerLevel level, Target.ExternalBlockTarget committed);
+
+	/**
+	 * Observes the current authoritative local block for a committed target
+	 * without acquiring, releasing, or migrating provider state.
+	 */
+	default ObservationResult observeBlock(ServerLevel level, Target.ExternalBlockTarget committed) {
+		return new ObservationResult.TemporarilyUnavailable();
+	}
 
 	/** Resolves a current server-side name for a candidate or committed target. */
 	Optional<ExternalBlockName> resolveName(ServerLevel level, Target.ExternalBlockTarget target);
@@ -152,6 +162,29 @@ public interface ExternalBlockServerProvider {
 		}
 
 		record Invalid() implements RefreshResult {
+		}
+	}
+
+	record BlockObservation(Object level, BlockPos position, BlockState state) {
+		public BlockObservation {
+			java.util.Objects.requireNonNull(level, "level");
+			java.util.Objects.requireNonNull(position, "position");
+			java.util.Objects.requireNonNull(state, "state");
+		}
+	}
+
+	sealed interface ObservationResult permits ObservationResult.Available,
+		ObservationResult.TemporarilyUnavailable, ObservationResult.Invalid {
+		record Available(BlockObservation observation) implements ObservationResult {
+			public Available {
+				java.util.Objects.requireNonNull(observation, "observation");
+			}
+		}
+
+		record TemporarilyUnavailable() implements ObservationResult {
+		}
+
+		record Invalid() implements ObservationResult {
 		}
 	}
 }
