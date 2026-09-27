@@ -106,6 +106,8 @@ public class SettingsScreen extends OptionsSubScreen {
 	private StringWidget presentationGeneralFeedbackWidget;
 	private final Set<String> presentationAdvancedExpanded = new HashSet<>();
 	private final Map<String, MutableComponent> presentationQuickFeedback = new HashMap<>();
+	/** Non-error explanations for an action that left the effective state unchanged. */
+	private final Map<String, MutableComponent> presentationQuickNotices = new HashMap<>();
 	private PresentationQuickAction presentationPendingQuickAction;
 	private long presentationCatalogStamp = -1L;
 
@@ -698,6 +700,11 @@ public class SettingsScreen extends OptionsSubScreen {
 		final PresentationFieldOutcome.Outcome outcome = PresentationFieldOutcome.evaluate(
 			role, policy, fieldId, entry.field().enabledByDefault());
 
+		if (!serverPolicy) {
+			this.addPresentationClientFieldControl(panelKey, role, localSettings, entry, outcome);
+			return;
+		}
+
 		// The tooltip owns the complete name, outcome, and rule detail; the row
 		// itself truncates like every other long settings label.
 		final String fullText = this.friendlyFieldName(entry).getString()
@@ -716,13 +723,12 @@ public class SettingsScreen extends OptionsSubScreen {
 		label.setTooltip(Tooltip.create(this.fieldTooltip(entry, outcome, role)));
 		this.addFullWidth(key + "_label", label);
 
-		final boolean editable = !serverPolicy
-			|| PresentationFieldOutcome.canEditServerPolicy(this.presentationPolicyState);
+		final boolean editable = PresentationFieldOutcome.canEditServerPolicy(this.presentationPolicyState);
 
 		final Button allow = Button.builder(
 			this.fieldRuleButtonText(true, outcome.allowOn()),
-			ignored -> this.togglePresentationFieldRule(
-				panelKey, role, localSettings, fieldId, true, outcome.allowOn()))
+			ignored -> this.toggleServerFieldRule(
+				panelKey, fieldId, true, outcome.allowOn()))
 			.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
 		allow.active = editable;
@@ -731,8 +737,8 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		final Button block = Button.builder(
 			this.fieldRuleButtonText(false, outcome.blockOn()),
-			ignored -> this.togglePresentationFieldRule(
-				panelKey, role, localSettings, fieldId, false, outcome.blockOn()))
+			ignored -> this.toggleServerFieldRule(
+				panelKey, fieldId, false, outcome.blockOn()))
 			.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
 		block.active = editable;
@@ -740,71 +746,90 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addHalfWidth(key + "_block", block);
 	}
 
-	private void togglePresentationFieldRule(
+	/**
+	 * The ordinary client row: one full-width control whose label carries the
+	 * friendly field name and the truthful effective state. The field id,
+	 * default, and rule diagnostics stay in the tooltip.
+	 */
+	private void addPresentationClientFieldControl(
 		String panelKey,
 		PresentationFieldOutcome.Role role,
-		PresentationSettings localSettings,
-		String fieldId,
-		boolean white,
-		boolean on
+		PresentationSettings settings,
+		PresentationFieldCatalog.Entry entry,
+		PresentationFieldOutcome.Outcome outcome
 	) {
-		if (role == PresentationFieldOutcome.Role.SERVER_POLICY) {
-			this.toggleServerFieldRule(panelKey, fieldId, white, on);
-		} else {
-			this.toggleLocalFieldRule(panelKey, localSettings, fieldId, white, on);
-		}
+		final String fieldId = entry.field().id();
+		final String key = panelKey + "_field_" + entry.translationSuffix();
+		final boolean allowed = outcome.allowed();
+		final var control = Button.builder(
+			this.clientFieldControlText(entry, allowed),
+			ignored -> this.pressClientFieldControl(panelKey, settings, fieldId, allowed))
+			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+			.build();
+		control.setTooltip(Tooltip.create(this.clientFieldTooltip(entry, outcome, role, allowed)));
+		this.addFullWidth(key + "_control", control);
 	}
 
-	/** One exact field-id membership toggle; existing wildcard rules stay untouched. */
-	private void toggleLocalFieldRule(
+	private MutableComponent clientFieldControlText(PresentationFieldCatalog.Entry entry, boolean allowed) {
+		return Component.empty()
+			.append(this.friendlyFieldName(entry))
+			.append(": ")
+			.append(LanguageUtils.settings("presentation")
+				.path("field", allowed ? "on" : "client_hidden").get());
+	}
+
+	private Component clientFieldTooltip(
+		PresentationFieldCatalog.Entry entry,
+		PresentationFieldOutcome.Outcome outcome,
+		PresentationFieldOutcome.Role role,
+		boolean allowed
+	) {
+		return Component.empty()
+			.append(this.fieldTooltip(entry, outcome, role))
+			.append("\n")
+			.append(LanguageUtils.settings("presentation")
+				.path("field", allowed ? "client_tooltip_hide" : "client_tooltip_allow").get());
+	}
+
+	/**
+	 * One client field control action. The requested action is the inverse of
+	 * the control's truthful effective state; only the exact allow selector
+	 * changes, and a field that a default or remaining group allow rule keeps
+	 * enabled reports that in the panel's feedback row instead of claiming it
+	 * was hidden.
+	 */
+	private void pressClientFieldControl(
 		String panelKey,
 		PresentationSettings settings,
 		String fieldId,
-		boolean white,
-		boolean on
+		boolean allowed
 	) {
-		if (on) {
-			final var outcome = PresentationSelectorListModel.remove(
-				white ? settings.getWhite() : settings.getBlack(), fieldId);
-			if (!outcome.removed()) {
-				this.setPresentationQuickFeedback(panelKey, PresentationSelectorDraftModel.Feedback.NOT_FOUND);
-				this.rebuildPage(true);
-				return;
-			}
-			if (white) {
-				settings.setWhite(outcome.selectors());
-			} else {
-				settings.setBlack(outcome.selectors());
-			}
-		} else {
-			final var outcome = PresentationSelectorListModel.add(
-				white ? settings.getWhite() : settings.getBlack(), fieldId);
-			switch (outcome.result()) {
-				case ADDED -> {
-					if (white) {
-						settings.setWhite(outcome.selectors());
-					} else {
-						settings.setBlack(outcome.selectors());
-					}
-				}
-				case LIST_FULL -> {
-					this.setPresentationQuickFeedback(panelKey, PresentationSelectorDraftModel.Feedback.LIST_FULL);
-					this.rebuildPage(true);
-					return;
-				}
-				case DUPLICATE -> {
-					this.setPresentationQuickFeedback(panelKey, PresentationSelectorDraftModel.Feedback.DUPLICATE);
-					this.rebuildPage(true);
-					return;
-				}
-				case EMPTY, INVALID -> {
-					this.setPresentationQuickFeedback(panelKey, PresentationSelectorDraftModel.Feedback.INVALID);
-					this.rebuildPage(true);
-					return;
-				}
-			}
-		}
+		final var decision = PresentationClientFieldControl.apply(settings.policy(), fieldId, !allowed);
 		this.setPresentationQuickFeedback(panelKey, null);
+		this.setPresentationQuickNotice(panelKey, null);
+		switch (decision.result()) {
+			case ENABLED, REMOVED, ALREADY_ENABLED -> {
+			}
+			case REMOVED_DEFAULT_STILL_ALLOWED -> this.setPresentationQuickNotice(panelKey,
+				LanguageUtils.settings("presentation").path("field", "client_removed_default").get());
+			case REMOVED_GROUP_STILL_ALLOWED -> this.setPresentationQuickNotice(panelKey,
+				LanguageUtils.settings("presentation").path("field", "client_group_keeps").get());
+			case NO_EXACT_ALLOW -> {
+				if (decision.effectiveAllowed()) {
+					this.setPresentationQuickNotice(panelKey,
+						LanguageUtils.settings("presentation").path("field", "client_default_keeps").get());
+				}
+			}
+			case NO_EXACT_ALLOW_GROUP -> this.setPresentationQuickNotice(panelKey,
+				LanguageUtils.settings("presentation").path("field", "client_group_keeps").get());
+			case LIST_FULL -> this.setPresentationQuickFeedback(
+				panelKey, PresentationSelectorDraftModel.Feedback.LIST_FULL);
+			case INVALID_FIELD, MISSING_POLICY -> this.setPresentationQuickFeedback(
+				panelKey, PresentationSelectorDraftModel.Feedback.INVALID);
+		}
+		if (decision.changed()) {
+			settings.setWhite(decision.white());
+		}
 		this.rebuildPage(true);
 	}
 
@@ -919,13 +944,22 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private void addPresentationQuickFeedbackRow(String panelKey) {
 		this.flushPendingHalfWidthRow();
-		final MutableComponent feedback = this.presentationQuickFeedback.get(panelKey);
+		final MutableComponent error = this.presentationQuickFeedback.get(panelKey);
+		final MutableComponent notice = this.presentationQuickNotices.get(panelKey);
+		final MutableComponent message;
+		if (error != null) {
+			message = error.copy().withStyle(ChatFormatting.RED);
+		} else if (notice != null) {
+			message = notice.copy().withStyle(ChatFormatting.YELLOW);
+		} else {
+			message = Component.empty();
+		}
 		final var row = new StringWidget(
 			0,
 			0,
 			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
-			feedback == null ? Component.empty() : feedback.copy().withStyle(ChatFormatting.RED),
+			message,
 			this.font).alignLeft();
 		row.active = false;
 		this.addFullWidth(panelKey + "_quick_feedback", row);
@@ -936,6 +970,17 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.presentationQuickFeedback.remove(panelKey);
 		} else {
 			this.presentationQuickFeedback.put(panelKey, this.presentationFeedbackText(feedback));
+			this.presentationQuickNotices.remove(panelKey);
+		}
+	}
+
+	/** A truthful, non-error explanation of an action whose effective state did not change. */
+	private void setPresentationQuickNotice(String panelKey, MutableComponent notice) {
+		if (notice == null) {
+			this.presentationQuickNotices.remove(panelKey);
+		} else {
+			this.presentationQuickNotices.put(panelKey, notice);
+			this.presentationQuickFeedback.remove(panelKey);
 		}
 	}
 
@@ -2089,6 +2134,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.serverValidationMessage = null;
 		this.presentationPendingQuickAction = null;
 		this.presentationQuickFeedback.clear();
+		this.presentationQuickNotices.clear();
 		this.saveCurrentViewState();
 		final boolean forcedToOverview = this.navigation.onServerViewAccessLost(false, false);
 		if (navigation.scope() == Scope.SERVER) {

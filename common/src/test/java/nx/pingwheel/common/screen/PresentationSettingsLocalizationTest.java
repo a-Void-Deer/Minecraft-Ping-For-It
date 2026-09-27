@@ -94,6 +94,12 @@ class PresentationSettingsLocalizationTest {
 		"settings.pingforit.presentation.field.block",
 		"settings.pingforit.presentation.field.on",
 		"settings.pingforit.presentation.field.off",
+		"settings.pingforit.presentation.field.client_hidden",
+		"settings.pingforit.presentation.field.client_tooltip_allow",
+		"settings.pingforit.presentation.field.client_tooltip_hide",
+		"settings.pingforit.presentation.field.client_removed_default",
+		"settings.pingforit.presentation.field.client_group_keeps",
+		"settings.pingforit.presentation.field.client_default_keeps",
 		"settings.pingforit.presentation.field.id",
 		"settings.pingforit.presentation.field.default",
 		"settings.pingforit.presentation.field.now",
@@ -185,6 +191,8 @@ class PresentationSettingsLocalizationTest {
 			.contains("no allow rule"), "Create RPM must explain that no explicit enable is needed");
 		assertTrue(json.get("settings.pingforit.presentation.whitelist_only.tooltip").getAsString()
 			.contains("White"));
+		assertEquals("Hidden",
+			json.get("settings.pingforit.presentation.field.client_hidden").getAsString());
 	}
 
 	@Test
