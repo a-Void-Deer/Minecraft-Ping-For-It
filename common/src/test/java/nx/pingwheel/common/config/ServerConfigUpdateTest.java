@@ -12,7 +12,8 @@ class ServerConfigUpdateTest {
 		ChannelMode.AUTO,
 		true,
 		1000,
-		5);
+		5,
+		23);
 
 	@Test
 	void onlyDirtyFieldsAreMergedIntoTheAuthoritativeSnapshot() {
@@ -28,11 +29,11 @@ class ServerConfigUpdateTest {
 		assertTrue(merged.playerTrackingEnabled());
 		assertEquals(1000, merged.msToRegenerate());
 		assertEquals(12, merged.rateLimit());
-		assertEquals(7, merged.syncDuration());
+		assertEquals(CURRENT.syncDuration(), merged.syncDuration());
 	}
 
 	@Test
-	void syncDurationIsADirtyServerSettingAndIsClampedToTheExistingBounds() {
+	void syncDurationIsADirtyServerSettingAndIsClampedToTheSharedBounds() {
 		var update = new ServerConfigUpdate(
 			ServerConfigUpdate.SYNC_DURATION,
 			ChannelMode.AUTO,
@@ -50,8 +51,17 @@ class ServerConfigUpdateTest {
 			true,
 			1000,
 			5,
-			61);
+			ServerConfigBounds.MAX_PING_DURATION + 1);
 		assertEquals(ServerConfigBounds.MAX_PING_DURATION, high.applyTo(CURRENT).syncDuration());
+
+		var inRange = new ServerConfigUpdate(
+			ServerConfigUpdate.SYNC_DURATION,
+			ChannelMode.AUTO,
+			true,
+			1000,
+			5,
+			42);
+		assertEquals(42, inRange.applyTo(CURRENT).syncDuration());
 	}
 
 	@Test

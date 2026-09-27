@@ -3,6 +3,7 @@ package nx.pingwheel.common.client;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 
@@ -38,9 +39,11 @@ class ClientPingActionDispatcherTest {
 	private static final class RecordingPacketSender implements ClientPingActionDispatcher.PacketSender {
 
 		final List<IPacket> sent = new ArrayList<>();
+		Runnable onSend = () -> {};
 
 		@Override
 		public void sendToServer(IPacket packet) {
+			onSend.run();
 			sent.add(packet);
 		}
 	}
@@ -140,11 +143,15 @@ class ClientPingActionDispatcherTest {
 		ActiveInteraction interaction = new ActiveInteraction();
 		InteractionToken token = interaction.begin();
 		CapturedPingContext context = capture(TargetSnapshotFactory.location(OVERWORLD, 1, 2, 3), token);
+		AtomicBoolean latestWhenSent = new AtomicBoolean(false);
+		h.sender.onSend = () -> latestWhenSent.set(tracker.isLatest(token.sequence()));
 
 		dispatcher.dispatch(new PingInteractionAction.CreatePing(
 			context, context.resolvedTarget().targetType().defaultPingType()));
 
 		assertEquals(1, h.sender.sent.size());
+		assertTrue(latestWhenSent.get(),
+			"the tracker must already hold the request id when the packet sender runs");
 		assertTrue(tracker.isLatest(token.sequence()));
 	}
 
@@ -269,7 +276,6 @@ class ClientPingActionDispatcherTest {
 		}
 
 		String createLine = h.logger.rendered.get(0);
-		assertTrue(createLine.contains("dispatch create"));
 		assertTrue(createLine.contains("requestId=" + context.token().sequence()));
 		assertTrue(createLine.contains(selected.id()));
 

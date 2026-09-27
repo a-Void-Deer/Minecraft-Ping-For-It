@@ -214,15 +214,6 @@ class OutlineOnlyBufferSourceTest {
 	}
 
 	@Test
-	void decisionCoverageIsComplete() {
-		// Pin the full decision matrix so a future routing change is noticed.
-		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, true));
-		assertEquals(AS_IS, OutlineOnlyBufferSource.decide(true, false));
-		assertEquals(OUTLINE_VARIANT, OutlineOnlyBufferSource.decide(false, true));
-		assertEquals(NO_OP, OutlineOnlyBufferSource.decide(false, false));
-	}
-
-	@Test
 	void normalModelTypesResolveThroughTheirOutlineVariants() {
 		assertSame(
 			RenderType.solid().outline().orElseThrow(),

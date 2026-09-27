@@ -196,7 +196,10 @@ class ConfigHandlerVersionTest {
         assertFalse(persisted.get("passThroughTransparentBlocks").getAsBoolean());
         assertFalse(persisted.get("markBlacklistedTargets").getAsBoolean());
         assertFalse(persisted.get("markFluids").getAsBoolean());
-        assertEquals(100, persisted.get("configurationNoticeSize").getAsInt());
+        assertEquals(new ClientConfig().getConfigurationNoticeSize(),
+            handler.getConfig().getConfigurationNoticeSize());
+        assertEquals(handler.getConfig().getConfigurationNoticeSize(),
+            persisted.get("configurationNoticeSize").getAsInt());
         assertEquals(0, persisted.get("markerDisplayDuration").getAsInt());
         assertEquals("legacy", persisted.get("unknown").getAsJsonObject().get("source").getAsString());
         assertFalse(hasBrokenBackup(tempDir));
@@ -391,7 +394,7 @@ class ConfigHandlerVersionTest {
 
         JsonObject persisted = readRoot(configPath);
         assertEquals(CURRENT_VERSION, persisted.get("pingforit-version").getAsString());
-        assertEquals(100, persisted.get("pingVolume").getAsInt());
+        assertEquals(new ClientConfig().getPingVolume(), persisted.get("pingVolume").getAsInt());
         assertFalse(persisted.has("oldUnknown"));
     }
 
@@ -422,7 +425,7 @@ class ConfigHandlerVersionTest {
 
         JsonObject persisted = readRoot(configPath);
         assertEquals(CURRENT_VERSION, persisted.get("pingforit-version").getAsString());
-        assertEquals(5, persisted.get("rateLimit").getAsInt());
+        assertEquals(new ServerConfig().getRateLimit(), persisted.get("rateLimit").getAsInt());
         assertFalse(persisted.has("oldUnknown"));
     }
 

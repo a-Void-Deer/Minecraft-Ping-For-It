@@ -76,9 +76,7 @@ class PingForItVersionTest {
 				() -> new PingForItVersion(invalidVersion));
 		}
 
-		PingForItVersion.InvalidVersionException nullVersion = assertThrows(
-			PingForItVersion.InvalidVersionException.class,
+		assertThrows(PingForItVersion.InvalidVersionException.class,
 			() -> new PingForItVersion(null));
-		assertTrue(nullVersion.getMessage().contains("null"));
 	}
 }

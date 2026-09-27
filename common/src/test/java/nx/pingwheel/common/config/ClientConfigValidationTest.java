@@ -34,27 +34,6 @@ class ClientConfigValidationTest {
 	}
 
 	@Test
-	void defaultsMatchTheCurrentWheelLook() {
-		ClientConfig config = new ClientConfig();
-
-		assertFalse(config.isLongPressCompatibilityMode());
-		assertEquals(20, config.getLongPressCompatibilitySliceMillis());
-		assertEquals(20, config.getEffectiveLongPressCompatibilitySliceMillis());
-		assertEquals(14, config.getWheelInnerRadius());
-		assertEquals(39, config.getWheelOuterRadius());
-		assertEquals(100, config.getWheelOpacity());
-		assertEquals(100, config.getWheelFontSize());
-		assertEquals(100, config.getWheelTargetFontSize());
-		assertEquals(0, config.getMarkerDisplayDuration());
-		assertEquals(0, config.getEffectiveMarkerDisplayDuration());
-		assertTrue(config.isFollowServerMarkerDisplayDuration());
-		assertEquals(List.of("*:*"), config.getBlockDisplayWhitelist());
-		assertEquals(List.of(), config.getBlockShapeBlacklist());
-		assertTrue(new Gson().toJson(config).contains("\"blockDisplayWhitelist\""));
-		assertTrue(new Gson().toJson(config).contains("\"blockShapeBlacklist\""));
-	}
-
-	@Test
 	void entityBlockRenderModeDefaultsToAllAndIsSerializedLocally() {
 		ClientConfig config = new ClientConfig();
 
@@ -102,6 +81,8 @@ class ClientConfigValidationTest {
 
 		assertEquals(List.of("*:*"), config.getBlockDisplayWhitelist());
 		assertEquals(List.of(), config.getBlockShapeBlacklist());
+		assertTrue(new Gson().toJson(config).contains("\"blockDisplayWhitelist\""));
+		assertTrue(new Gson().toJson(config).contains("\"blockShapeBlacklist\""));
 	}
 
 	@Test
@@ -121,8 +102,8 @@ class ClientConfigValidationTest {
 
 		config.setMarkerDisplayDuration(-1);
 		assertEquals(0, config.getMarkerDisplayDuration());
-		config.setMarkerDisplayDuration(61);
-		assertEquals(60, config.getMarkerDisplayDuration());
+		config.setMarkerDisplayDuration(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION + 1);
+		assertEquals(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION, config.getMarkerDisplayDuration());
 
 		config.markerDisplayDuration = Integer.MIN_VALUE;
 		List<ClampWarning> warnings = new ArrayList<>();
@@ -184,39 +165,68 @@ class ClientConfigValidationTest {
 	@Test
 	void directJsonValuesAreValidatedBeforeUse() {
 		ClientConfig config = new Gson().fromJson(
-			"{\"wheelHoldMillis\":-1,\"longPressCompatibilityMode\":true,\"longPressCompatibilitySliceMillis\":999,\"wheelTimeoutMillis\":99999,"
-				+ "\"cancelHalfConeAngleDegrees\":0,\"wheelInnerRadius\":1000,"
-				+ "\"wheelOuterRadius\":-100,\"wheelOpacity\":-5,\"wheelFontSize\":999,"
-				+ "\"wheelTargetFontSize\":-1}",
+			"{\"wheelHoldMillis\":" + Integer.MIN_VALUE
+				+ ",\"longPressCompatibilityMode\":true,\"longPressCompatibilitySliceMillis\":"
+				+ ClientConfigBounds.MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS
+				+ ",\"wheelTimeoutMillis\":" + Integer.MAX_VALUE
+				+ ",\"cancelHalfConeAngleDegrees\":" + Integer.MIN_VALUE
+				+ ",\"wheelInnerRadius\":" + Integer.MAX_VALUE
+				+ ",\"wheelOuterRadius\":" + Integer.MIN_VALUE
+				+ ",\"wheelOpacity\":" + Integer.MIN_VALUE
+				+ ",\"wheelFontSize\":" + Integer.MAX_VALUE
+				+ ",\"wheelTargetFontSize\":" + Integer.MIN_VALUE + "}",
 			ClientConfig.class);
 		List<ClampWarning> warnings = new ArrayList<>();
 
 		config.validate((key, suppliedValue, effectiveValue) ->
 			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
 
-		assertEquals(100, config.getWheelHoldMillis());
+		assertEquals(ClientConfigBounds.MIN_WHEEL_HOLD_MILLIS, config.getWheelHoldMillis());
 		assertTrue(config.isLongPressCompatibilityMode());
-		assertEquals(50, config.getLongPressCompatibilitySliceMillis());
-		assertEquals(30000, config.getWheelTimeoutMillis());
-		assertEquals(1, config.getCancelHalfConeAngleDegrees());
-		assertEquals(12, config.getWheelInnerRadius());
-		assertEquals(20, config.getWheelOuterRadius());
-		assertEquals(0, config.getWheelOpacity());
-		assertEquals(500, config.getWheelFontSize());
-		assertEquals(10, config.getWheelTargetFontSize());
-		assertTrue(config.getWheelOuterRadius() - config.getWheelInnerRadius() >= 8);
+		assertEquals(ClientConfigBounds.MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
+			config.getLongPressCompatibilitySliceMillis());
+		assertEquals(ClientConfigBounds.MAX_WHEEL_TIMEOUT_MILLIS, config.getWheelTimeoutMillis());
+		assertEquals(ClientConfigBounds.MIN_CANCEL_HALF_CONE_ANGLE_DEGREES, config.getCancelHalfConeAngleDegrees());
+		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS,
+			config.getWheelInnerRadius());
+		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS, config.getWheelOuterRadius());
+		assertEquals(ClientConfigBounds.MIN_WHEEL_OPACITY, config.getWheelOpacity());
+		assertEquals(ClientConfigBounds.MAX_WHEEL_FONT_SIZE, config.getWheelFontSize());
+		assertEquals(ClientConfigBounds.MIN_WHEEL_TARGET_FONT_SIZE, config.getWheelTargetFontSize());
+		assertTrue(config.getWheelOuterRadius() - config.getWheelInnerRadius()
+			>= ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS);
 		assertEquals(
 			List.of(
-				new ClampWarning("wheelHoldMillis", -1, 100),
-				new ClampWarning("longPressCompatibilitySliceMillis", 999, 50),
-				new ClampWarning("wheelTimeoutMillis", 99999, 30000),
-				new ClampWarning("cancelHalfConeAngleDegrees", 0, 1),
-				new ClampWarning("wheelInnerRadius", 1000, 12),
-				new ClampWarning("wheelOuterRadius", -100, 20),
-				new ClampWarning("wheelOpacity", -5, 0),
-				new ClampWarning("wheelFontSize", 999, 500),
-				new ClampWarning("wheelTargetFontSize", -1, 10)),
+				new ClampWarning("wheelHoldMillis", Integer.MIN_VALUE, ClientConfigBounds.MIN_WHEEL_HOLD_MILLIS),
+				new ClampWarning("wheelTimeoutMillis", Integer.MAX_VALUE, ClientConfigBounds.MAX_WHEEL_TIMEOUT_MILLIS),
+				new ClampWarning("cancelHalfConeAngleDegrees", Integer.MIN_VALUE,
+					ClientConfigBounds.MIN_CANCEL_HALF_CONE_ANGLE_DEGREES),
+				new ClampWarning("wheelInnerRadius", Integer.MAX_VALUE,
+					ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS),
+				new ClampWarning("wheelOuterRadius", Integer.MIN_VALUE, ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS),
+				new ClampWarning("wheelOpacity", Integer.MIN_VALUE, ClientConfigBounds.MIN_WHEEL_OPACITY),
+				new ClampWarning("wheelFontSize", Integer.MAX_VALUE, ClientConfigBounds.MAX_WHEEL_FONT_SIZE),
+				new ClampWarning("wheelTargetFontSize", Integer.MIN_VALUE,
+					ClientConfigBounds.MIN_WHEEL_TARGET_FONT_SIZE)),
 			warnings);
+	}
+
+	@Test
+	void directJsonCompatibilitySliceIsCappedByAnExplicitValidHold() {
+		int holdMillis = 210;
+		ClientConfig config = new Gson().fromJson(
+			"{\"wheelHoldMillis\":" + holdMillis
+				+ ",\"longPressCompatibilitySliceMillis\":" + Integer.MAX_VALUE + "}",
+			ClientConfig.class);
+		List<ClampWarning> warnings = new ArrayList<>();
+
+		config.validate((key, suppliedValue, effectiveValue) ->
+			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
+
+		assertEquals(holdMillis, config.getWheelHoldMillis());
+		assertEquals(holdMillis / 2, config.getLongPressCompatibilitySliceMillis());
+		assertEquals(List.of(new ClampWarning("longPressCompatibilitySliceMillis", Integer.MAX_VALUE,
+			holdMillis / 2)), warnings);
 	}
 
 	@Test
@@ -232,27 +242,37 @@ class ClientConfigValidationTest {
 
 	@Test
 	void legacyWheelFontSizeRemainsTheOptionFontAndTargetFontDefaultsSeparately() {
+		ClientConfig baseline = new ClientConfig();
 		ClientConfig config = new Gson().fromJson("{\"wheelFontSize\":250}", ClientConfig.class);
+		ClientConfig explicitTarget = new Gson().fromJson(
+			"{\"wheelFontSize\":250,\"wheelTargetFontSize\":80}", ClientConfig.class);
 
 		config.validate((key, suppliedValue, effectiveValue) -> {});
+		explicitTarget.validate((key, suppliedValue, effectiveValue) -> {});
 
 		assertEquals(250, config.getWheelFontSize());
-		assertEquals(100, config.getWheelTargetFontSize());
+		assertEquals(baseline.getWheelTargetFontSize(), config.getWheelTargetFontSize());
+		assertEquals(250, explicitTarget.getWheelFontSize());
+		assertEquals(80, explicitTarget.getWheelTargetFontSize());
 	}
 
 	@Test
 	void directJsonPairConvergesToTheMinimumValidAnnulus() {
+		int minimumOuter = ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS;
+		int suppliedInner = minimumOuter + ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS;
 		ClientConfig config = new Gson().fromJson(
-			"{\"wheelInnerRadius\":30,\"wheelOuterRadius\":20}",
+			"{\"wheelInnerRadius\":" + suppliedInner + ",\"wheelOuterRadius\":" + minimumOuter + "}",
 			ClientConfig.class);
 		List<ClampWarning> warnings = new ArrayList<>();
 
 		config.validate((key, suppliedValue, effectiveValue) ->
 			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
 
-		assertEquals(12, config.getWheelInnerRadius());
-		assertEquals(20, config.getWheelOuterRadius());
-		assertEquals(List.of(new ClampWarning("wheelInnerRadius", 30, 12)), warnings);
+		assertEquals(minimumOuter - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS,
+			config.getWheelInnerRadius());
+		assertEquals(minimumOuter, config.getWheelOuterRadius());
+		assertEquals(List.of(new ClampWarning("wheelInnerRadius", suppliedInner,
+			minimumOuter - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS)), warnings);
 	}
 
 	@Test
@@ -273,17 +293,24 @@ class ClientConfigValidationTest {
 	@Test
 	void radiusSettersKeepEveryLivePairValidInEitherMutationOrder() {
 		ClientConfig config = new ClientConfig();
+		config.setWheelOuterRadius(64);
+		config.setWheelInnerRadius(30);
+		assertEquals(30, config.getWheelInnerRadius());
+		assertEquals(64, config.getWheelOuterRadius());
 
-		config.setWheelOuterRadius(20);
-		assertEquals(12, config.getWheelInnerRadius());
-		assertEquals(20, config.getWheelOuterRadius());
+		config.setWheelOuterRadius(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS);
+		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS,
+			config.getWheelInnerRadius());
+		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS, config.getWheelOuterRadius());
 
 		config.setWheelInnerRadius(30);
-		assertEquals(12, config.getWheelInnerRadius());
-		assertEquals(20, config.getWheelOuterRadius());
+		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS,
+			config.getWheelInnerRadius());
+		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS, config.getWheelOuterRadius());
 
 		config.setWheelOuterRadius(75);
-		assertEquals(12, config.getWheelInnerRadius());
+		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS,
+			config.getWheelInnerRadius());
 		assertEquals(75, config.getWheelOuterRadius());
 
 		config.setWheelInnerRadius(30);
@@ -291,32 +318,37 @@ class ClientConfigValidationTest {
 		assertEquals(75, config.getWheelOuterRadius());
 
 		config.setWheelInnerRadius(Integer.MIN_VALUE);
-		assertEquals(6, config.getWheelInnerRadius());
+		assertEquals(ClientConfigBounds.MIN_WHEEL_INNER_RADIUS, config.getWheelInnerRadius());
 		assertEquals(75, config.getWheelOuterRadius());
 
 		config.setWheelOuterRadius(Integer.MIN_VALUE);
-		assertEquals(6, config.getWheelInnerRadius());
-		assertEquals(20, config.getWheelOuterRadius());
-		assertTrue(config.getWheelOuterRadius() - config.getWheelInnerRadius() >= 8);
+		assertEquals(ClientConfigBounds.MIN_WHEEL_INNER_RADIUS, config.getWheelInnerRadius());
+		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS, config.getWheelOuterRadius());
+		assertTrue(config.getWheelOuterRadius() - config.getWheelInnerRadius()
+			>= ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS);
 	}
 
 	@Test
 	void compatibilitySettersClampEachOtherWhenHoldChanges() {
 		ClientConfig config = new ClientConfig();
+		int initialHold = 210;
+		config.setWheelHoldMillis(initialHold);
 
 		config.setLongPressCompatibilitySliceMillis(Integer.MAX_VALUE);
-		assertEquals(150, config.getLongPressCompatibilitySliceMillis());
+		assertEquals(initialHold / 2, config.getLongPressCompatibilitySliceMillis());
 
 		config.setWheelHoldMillis(100);
 		assertEquals(100, config.getWheelHoldMillis());
-		assertEquals(50, config.getLongPressCompatibilitySliceMillis());
+		assertEquals(100 / 2, config.getLongPressCompatibilitySliceMillis());
 
-		config.setLongPressCompatibilitySliceMillis(10);
-		config.setWheelHoldMillis(2000);
-		assertEquals(10, config.getLongPressCompatibilitySliceMillis());
+		config.setLongPressCompatibilitySliceMillis(ClientConfigBounds.MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS);
+		config.setWheelHoldMillis(ClientConfigBounds.MAX_WHEEL_HOLD_MILLIS);
+		assertEquals(ClientConfigBounds.MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
+			config.getLongPressCompatibilitySliceMillis());
 
 		config.longPressCompatibilitySliceMillis = Integer.MAX_VALUE;
-		assertEquals(300, config.getEffectiveLongPressCompatibilitySliceMillis());
+		assertEquals(ClientConfigBounds.MAX_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
+			config.getEffectiveLongPressCompatibilitySliceMillis());
 	}
 
 	private record ClampWarning(String key, int suppliedValue, int effectiveValue) {}

@@ -2,6 +2,7 @@ package nx.pingwheel.common.name;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -120,12 +121,17 @@ class ClientTargetNameStoreTest {
 		store.onCreated(new MarkerId(2L), name("b"));
 		store.onCreated(new MarkerId(7L), name("c"));
 
+		Map<MarkerId, TargetNameJson> snapshot = store.snapshot();
+
+		assertEquals(
+			List.of(new MarkerId(2L), new MarkerId(7L), new MarkerId(9L)),
+			List.copyOf(snapshot.keySet()));
 		assertEquals(
 			Map.of(
 				new MarkerId(2L), name("b"),
 				new MarkerId(7L), name("c"),
 				new MarkerId(9L), name("a")),
-			store.snapshot());
+			snapshot);
 	}
 
 	@Test

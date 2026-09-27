@@ -54,10 +54,11 @@ ordering and channel/admission matrix in a live client/server path. Loader
 registration of the legacy, presentation-v2, presentation-policy, and
 superseded marker routes is confirmed by source inspection for Fabric, Forge,
 and NeoForge.
-`MarkerPacketsTest` and `PacketHandlerTest` cover authoritative packet
-codec/safety seams, but there is no direct automated test that a valid legacy
-location S2C packet or a superseded marker S2C packet is ignored by
-`CommonClient`, nor a live cross-loader network test.
+Focused packet tests cover the permitted create/remove request fields, exact
+consumption of their encoded payloads, and safe decoding. These checks do not
+establish server authority. There is no direct automated test that a valid
+legacy location S2C packet or a superseded marker S2C packet is ignored by the
+client, nor a live cross-loader network test.
 
 ### Presentation snapshot negotiation, policy and adapters
 
@@ -448,10 +449,27 @@ client coverage does not close the server and end-to-end policy gaps below.
 
 ### Simulated integration coverage
 
-`SimulatedDockingConnectorPresentationResolverTest` covers the stand-in
-resolver's connector IDs, facing relationship, powered owner, owner block-entity
-identity, and handled-empty result. It does not establish loader registration,
-an installed Simulated runtime, or in-game presentation.
+Executable stand-in resolver tests cover paired-owner resolution, the facing
+relationship, powered owner, owner block-entity identity, and handled-empty
+results. Separate static guards cover the production registry identities and
+optional registration wiring. The stand-ins do not exercise real registry
+lookup, and the static guards do not establish a running loader lifecycle, an
+installed Simulated runtime, or in-game presentation.
+
+### Optional rendering structural coverage
+
+Executable common tests cover class loading with optional dependencies absent
+and the distinction between empty and positive geometry output. Separate
+coordinate-transform and environment-policy tests cover their own common
+behavioral seams.
+
+Static guards cover optional reflective registration, loader-specific host API
+bindings, integration wiring, and the optional visualization mixin's target and
+injection signature. They do not establish large-water-wheel master-resolution
+outcomes, once-only dispatcher execution, nested mask-scope cleanup, or live
+world-aware model-data flow, culling, pose restoration, and geometry emission.
+Those execution boundaries remain automated verification gaps; source presence
+and successful compilation are not substitutes for exercising them.
 
 ### Focused native block-outline regression coverage
 
@@ -460,8 +478,7 @@ The native VoxelShape route requires complementary checks rather than one broad
 
 1. Production render-state coverage pins `BlockOutlineRenderType` to
    `VertexFormat.Mode.LINES`, vanilla `rendertype_lines`, a fixed width wider
-   than vanilla selection lines
-   ([`BlockOutlineRenderType.LINE_WIDTH`](../../common/src/main/java/nx/pingwheel/common/client/outline/BlockOutlineRenderType.java)),
+   than vanilla selection lines,
    `NO_DEPTH_TEST`/`GL_ALWAYS`, color-only writes and late composite
    submission.
 2. Native geometry coverage pins the live

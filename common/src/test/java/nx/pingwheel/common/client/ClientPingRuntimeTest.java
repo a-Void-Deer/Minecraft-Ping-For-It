@@ -16,7 +16,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ClientPingRuntimeTest {
 
 	@Test
-	void sameIdLocatorUpsertIsNotASecondSoundOrChatReceipt() {
+	void isNewMarkerReceiptReflectsStoreAbsenceBeforeUpsert() {
+		// The predicate reports only whether the marker id is currently absent
+		// from the store; it does not exercise sound or chat side effects.
 		ClientMarkerStore store = new ClientMarkerStore(10L);
 		MarkerId markerId = new MarkerId(7L);
 		Target.ExternalBlockTarget first = Target.ExternalBlockTarget.committed(

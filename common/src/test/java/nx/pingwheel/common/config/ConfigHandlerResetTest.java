@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConfigHandlerResetTest {
 	private static final String CURRENT_VERSION = "1.0.0-pfi-beta1";
+	private static final String MALFORMED_SELECTOR = "minecraft:stone:*";
 
 	@Test
 	void saveRecreatesADeletedConfigEvenWhenTheInMemoryConfigIsUnchanged(@TempDir Path tempDir) throws IOException {
@@ -86,9 +87,12 @@ class ConfigHandlerResetTest {
 		String[] lines = reset.split("\\R", 4);
 		assertTrue(lines.length >= 4);
 		assertEquals("// Previous config had an error.", lines[0]);
-		assertEquals(
-			"// Error reason: validation: blockDisplayWhitelist entry 0 entry has invalid block matcher grammar",
-			lines[1]);
+		assertTrue(lines[1].startsWith("// Error reason: validation: "),
+			() -> "the recovery reason must keep the safe validation category: " + lines[1]);
+		assertFalse(lines[1].contains(MALFORMED_SELECTOR),
+			() -> "the recovery reason must not echo the malformed config payload: " + lines[1]);
+		assertFalse(lines[1].chars().anyMatch(Character::isISOControl),
+			() -> "the recovery reason must stay a sanitized one-line comment: " + lines[1]);
 		assertTrue(lines[2].startsWith("// Backup file: "));
 		assertFalse(lines[0].contains("\n"));
 		assertFalse(lines[1].contains("\n"));
@@ -102,6 +106,18 @@ class ConfigHandlerResetTest {
 		// The recovery header is accepted on a later normal load.
 		handler.load();
 		assertEquals(defaults, handler.getConfig());
+
+		// The safe reason summarizes the structural failure, not the untrusted
+		// entry: the identical invalid grammar with an oversized selector must
+		// produce the same bounded comment line instead of echoing the payload.
+		Path oversizedPath = tempDir.resolve("client-oversized.json");
+		Files.write(oversizedPath, invalidConfig(MALFORMED_SELECTOR + "x".repeat(4096)));
+		ConfigHandler<ClientConfig> oversizedHandler =
+			new ConfigHandler<>(ClientConfig.class, oversizedPath, CURRENT_VERSION);
+		oversizedHandler.load();
+		String[] oversizedLines = Files.readString(oversizedPath, StandardCharsets.UTF_8).split("\\R", 4);
+		assertEquals(lines[1], oversizedLines[1],
+			() -> "the recovery reason must not depend on the malformed payload: " + oversizedLines[1]);
 	}
 
 	@Test
@@ -185,8 +201,12 @@ class ConfigHandlerResetTest {
 	}
 
 	private static byte[] invalidConfig() {
+		return invalidConfig(MALFORMED_SELECTOR);
+	}
+
+	private static byte[] invalidConfig(String selector) {
 		return ("{\n  \"pingforit-version\": \"" + CURRENT_VERSION + "\",\n"
-			+ "  \"blockDisplayWhitelist\": [\"minecraft:stone:*\"]\n}\n")
+			+ "  \"blockDisplayWhitelist\": [\"" + selector + "\"]\n}\n")
 			.getBytes(StandardCharsets.UTF_8);
 	}
 }

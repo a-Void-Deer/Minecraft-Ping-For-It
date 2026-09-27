@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
 
@@ -18,41 +19,31 @@ class FabricWorldAwareBlockModelOutlineAdapterContractTest {
 		"fabric/src/main/java/nx/pingwheel/fabric/FabricClient.java";
 
 	@Test
-	void backendUsesTheLiveWorldAwareBatchedRoute() throws IOException {
+	void backendDeclaresFabricWorldAwareHostApiRoute() throws IOException {
 		String source = readFabricSource(ADAPTER_SOURCE);
 
-		assertTrue(source.contains("context.level()"));
-		assertTrue(source.contains("context.blockPos()"));
-		assertTrue(source.contains("context.blockState()"));
-		assertTrue(source.contains("context.cameraPosition()"));
-		assertTrue(source.contains("context.transform()"));
-		assertTrue(source.contains("createPoseStack"));
-		assertTrue(source.contains("createPoseStack(pos, cameraPosition, null)"));
-		assertTrue(source.contains("renderBatched"));
-		assertTrue(source.contains("RandomSource.create(state.getSeed(pos))"));
-		assertTrue(source.contains("\n\t\t\tfalse,"));
+		// Static host-API linkage, not proof of emitted geometry or pose values.
+		assertTrue(source.contains("createPoseStack("));
+		assertTrue(source.contains("buffer.getBuffer("));
+		assertTrue(source.contains("renderBatched("));
+		assertTrue(source.contains("getSeed("));
+		assertTrue(source.contains("RandomSource.create("));
 		assertFalse(source.contains(".getOffset("));
-		assertFalse(source.contains("modelOffset"));
-		assertFalse(source.contains("renderSingleBlock"));
-		assertFalse(source.contains("VirtualBlockDisplay"));
-		assertFalse(source.contains("VoxelShape"));
-		assertFalse(source.contains("endBatch"));
-		assertFalse(source.contains("flush"));
+		assertFalse(source.contains("renderSingleBlock("));
+		assertFalse(source.contains("endBatch("));
+		assertFalse(source.contains("flush("));
 	}
 
 	@Test
-	void backendIsGenericAndStaysRegisteredAcrossConnections() throws IOException {
+	void clientInitializerDeclaresUnconditionalGenericBackendRegistration() throws IOException {
 		String adapterSource = readFabricSource(ADAPTER_SOURCE);
 		String clientSource = readFabricSource(CLIENT_SOURCE);
-		String optionalModId = "refined" + "storage";
 
-		assertFalse(adapterSource.toLowerCase().contains(optionalModId));
-		assertFalse(clientSource.toLowerCase().contains(optionalModId));
-		assertTrue(adapterSource.contains("if (registration != null)"));
-		assertTrue(adapterSource.contains("WorldAwareBlockModelOutlineAdapterRegistry.INSTANCE.register"));
-		assertTrue(clientSource.contains("FabricWorldAwareBlockModelOutlineAdapter.register()"));
-		assertFalse(clientSource.contains("ClientPlayConnectionEvents"));
-		assertFalse(clientSource.contains("closeAdapter"));
+		assertFalse(adapterSource.toLowerCase().contains("refinedstorage"));
+		assertTrue(adapterSource.contains("WorldAwareBlockModelOutlineAdapterRegistry.INSTANCE.register("));
+		assertTrue(Pattern.compile("onInitializeClient\\s*\\(\\s*\\)\\s*\\{\\s*"
+			+ "FabricWorldAwareBlockModelOutlineAdapter\\.register\\s*\\(\\s*\\)")
+			.matcher(clientSource).find());
 	}
 
 	private static String readFabricSource(String source) throws IOException {

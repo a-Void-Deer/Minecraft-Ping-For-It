@@ -15,63 +15,60 @@ class ServerConfigBoundsTest {
 
 	@Test
 	void clampPingDurationEnforcesLowerBound() {
-		assertEquals(1, ServerConfigBounds.clampPingDuration(Integer.MIN_VALUE));
-		assertEquals(1, ServerConfigBounds.clampPingDuration(-1000));
-		assertEquals(1, ServerConfigBounds.clampPingDuration(0));
-		assertEquals(1, ServerConfigBounds.clampPingDuration(1));
+		assertEquals(ServerConfigBounds.MIN_PING_DURATION, ServerConfigBounds.clampPingDuration(Integer.MIN_VALUE));
+		assertEquals(ServerConfigBounds.MIN_PING_DURATION,
+			ServerConfigBounds.clampPingDuration(ServerConfigBounds.MIN_PING_DURATION - 1));
+		assertEquals(ServerConfigBounds.MIN_PING_DURATION,
+			ServerConfigBounds.clampPingDuration(ServerConfigBounds.MIN_PING_DURATION));
 	}
 
 	@Test
-	void clampSyncDurationUsesTheSameOneToSixtySecondBounds() {
-		assertEquals(1, ServerConfigBounds.clampSyncDuration(Integer.MIN_VALUE));
-		assertEquals(1, ServerConfigBounds.clampSyncDuration(0));
-		assertEquals(7, ServerConfigBounds.clampSyncDuration(7));
-		assertEquals(60, ServerConfigBounds.clampSyncDuration(Integer.MAX_VALUE));
+	void clampSyncDurationUsesTheSharedDurationBounds() {
+		assertEquals(ServerConfigBounds.MIN_PING_DURATION, ServerConfigBounds.clampSyncDuration(Integer.MIN_VALUE));
+		assertEquals(23, ServerConfigBounds.clampSyncDuration(23));
+		assertEquals(ServerConfigBounds.MAX_PING_DURATION, ServerConfigBounds.clampSyncDuration(Integer.MAX_VALUE));
 	}
 
 	@Test
 	void clampPingDurationEnforcesUpperBound() {
-		assertEquals(60, ServerConfigBounds.clampPingDuration(60));
-		assertEquals(60, ServerConfigBounds.clampPingDuration(61));
-		assertEquals(60, ServerConfigBounds.clampPingDuration(1000));
-		assertEquals(60, ServerConfigBounds.clampPingDuration(Integer.MAX_VALUE));
+		assertEquals(ServerConfigBounds.MAX_PING_DURATION,
+			ServerConfigBounds.clampPingDuration(ServerConfigBounds.MAX_PING_DURATION));
+		assertEquals(ServerConfigBounds.MAX_PING_DURATION,
+			ServerConfigBounds.clampPingDuration(ServerConfigBounds.MAX_PING_DURATION + 1));
+		assertEquals(ServerConfigBounds.MAX_PING_DURATION, ServerConfigBounds.clampPingDuration(Integer.MAX_VALUE));
 	}
 
 	@Test
 	void clampPingDurationPreservesInRangeValues() {
 		assertEquals(2, ServerConfigBounds.clampPingDuration(2));
 		assertEquals(7, ServerConfigBounds.clampPingDuration(7));
-		assertEquals(59, ServerConfigBounds.clampPingDuration(59));
+		int nearMaximum = ServerConfigBounds.MAX_PING_DURATION - 1;
+		assertEquals(nearMaximum, ServerConfigBounds.clampPingDuration(nearMaximum));
 	}
 
 	@Test
 	void clampPingDistanceEnforcesLowerBound() {
-		assertEquals(1, ServerConfigBounds.clampPingDistance(Integer.MIN_VALUE));
-		assertEquals(1, ServerConfigBounds.clampPingDistance(-1000));
-		assertEquals(1, ServerConfigBounds.clampPingDistance(0));
-		assertEquals(1, ServerConfigBounds.clampPingDistance(1));
+		assertEquals(ServerConfigBounds.MIN_PING_DISTANCE, ServerConfigBounds.clampPingDistance(Integer.MIN_VALUE));
+		assertEquals(ServerConfigBounds.MIN_PING_DISTANCE,
+			ServerConfigBounds.clampPingDistance(ServerConfigBounds.MIN_PING_DISTANCE - 1));
+		assertEquals(ServerConfigBounds.MIN_PING_DISTANCE,
+			ServerConfigBounds.clampPingDistance(ServerConfigBounds.MIN_PING_DISTANCE));
 	}
 
 	@Test
 	void clampPingDistanceEnforcesUpperBound() {
-		assertEquals(2048, ServerConfigBounds.clampPingDistance(2048));
-		assertEquals(2048, ServerConfigBounds.clampPingDistance(2049));
-		assertEquals(2048, ServerConfigBounds.clampPingDistance(10000));
-		assertEquals(2048, ServerConfigBounds.clampPingDistance(Integer.MAX_VALUE));
+		assertEquals(ServerConfigBounds.MAX_PING_DISTANCE,
+			ServerConfigBounds.clampPingDistance(ServerConfigBounds.MAX_PING_DISTANCE));
+		assertEquals(ServerConfigBounds.MAX_PING_DISTANCE,
+			ServerConfigBounds.clampPingDistance(ServerConfigBounds.MAX_PING_DISTANCE + 1));
+		assertEquals(ServerConfigBounds.MAX_PING_DISTANCE, ServerConfigBounds.clampPingDistance(Integer.MAX_VALUE));
 	}
 
 	@Test
 	void clampPingDistancePreservesInRangeValues() {
 		assertEquals(2, ServerConfigBounds.clampPingDistance(2));
 		assertEquals(1000, ServerConfigBounds.clampPingDistance(1000));
-		assertEquals(2047, ServerConfigBounds.clampPingDistance(2047));
-	}
-
-	@Test
-	void boundaryConstantsAreConsistent() {
-		assertEquals(1, ServerConfigBounds.MIN_PING_DURATION);
-		assertEquals(60, ServerConfigBounds.MAX_PING_DURATION);
-		assertEquals(1, ServerConfigBounds.MIN_PING_DISTANCE);
-		assertEquals(2048, ServerConfigBounds.MAX_PING_DISTANCE);
+		int nearMaximum = ServerConfigBounds.MAX_PING_DISTANCE - 1;
+		assertEquals(nearMaximum, ServerConfigBounds.clampPingDistance(nearMaximum));
 	}
 }

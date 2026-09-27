@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
 
@@ -21,46 +23,64 @@ class NeoForgeWorldAwareBlockModelOutlineAdapterContractTest {
 	void genericBackendHasNoOptionalModOrRs2Gate() throws IOException {
 		String source = readSource(ADAPTER_SOURCE);
 
-		assertTrue(source.contains("public static final String SOURCE_ID = "
-			+ "\"pingforit:neoforge_world_baked_model\""));
 		assertFalse(source.contains("ModList"));
 		assertFalse(source.contains("isLoaded(\"create\")"));
 		assertFalse(source.toLowerCase().contains("refinedstorage"));
 		assertFalse(source.toLowerCase().contains("rs2"));
-		assertFalse(source.contains("getOffset"));
+		assertFalse(source.contains("getOffset("));
 	}
 
 	@Test
-	void worldModelDataAndRenderTypeContractIsPreserved() throws IOException {
+	void backendDeclaresNeoForgeWorldModelDataAndRenderTypeHostApis() throws IOException {
 		String source = readSource(ADAPTER_SOURCE);
 
-		assertTrue(source.contains("ModelData modelData = level.getModelData(pos);"));
-		assertTrue(source.contains("modelData = ModelData.EMPTY;"));
-		assertTrue(source.contains("modelData = model.getModelData(level, pos, state, modelData);"));
-		assertTrue(source.contains("model.getRenderTypes(state, renderTypesRandom, modelData)"));
-		assertTrue(source.contains("VertexConsumer consumer = buffer.getBuffer(originalRenderType);"));
-		assertTrue(source.contains("modelData,\n\t\t\t\t\toriginalRenderType"));
-		assertTrue(source.contains("\t\t\t\t\tfalse,"));
-		assertTrue(source.contains("poseStack.pushPose();"));
-		assertTrue(source.contains("} finally {\n\t\t\t\tposeStack.popPose();"));
-		assertFalse(source.contains("renderSingleBlock"));
-		assertFalse(source.contains("flush"));
-		assertFalse(source.contains("endBatch"));
+		// Unlike Forge's manager.getAt, NeoForge gets model data from the level.
+		assertTrue(source.contains("level.getModelData("));
+		assertTrue(source.contains("ModelData.EMPTY"));
+		assertTrue(source.contains("model.getModelData("));
+		assertTrue(source.contains("model.getRenderTypes("));
+		assertTrue(source.contains("buffer.getBuffer("));
+		assertTrue(source.contains("renderBatched("));
+		assertTrue(source.contains("getSeed("));
+		assertTrue(source.contains("RandomSource.create("));
+		assertFalse(source.contains("renderSingleBlock("));
+		assertFalse(source.contains("flush("));
+		assertFalse(source.contains("endBatch("));
 	}
 
 	@Test
-	void genericRegistrationIsNotOwnedByCreateSessionTeardown() throws IOException {
+	void neoClientDeclaresGenericRegistrationOutsideCreateSessionHandlers() throws IOException {
 		String source = readSource(NEO_CLIENT_SOURCE);
-		int genericRegistration = source.indexOf(
-			"NeoForgeWorldAwareBlockModelOutlineAdapter.register();");
-		int createLoading = source.indexOf("loadCreateAdapters();");
-		int createTeardown = source.indexOf("closeCreateAdapters");
+		String constructor = methodBody(source, "public\\s+NeoClient\\s*\\(");
+		String createLoader = methodBody(source, "private\\s+static\\s+void\\s+loadCreateAdapters\\s*\\(");
+		String teardown = methodBody(source, "private\\s+static\\s+void\\s+closeCreateAdapters\\s*\\(");
 
-		assertTrue(genericRegistration >= 0);
-		assertTrue(createLoading > genericRegistration);
-		assertTrue(createTeardown >= 0);
-		String teardown = source.substring(createTeardown);
+		assertFalse(constructor.isEmpty());
+		assertFalse(createLoader.isEmpty());
+		assertFalse(teardown.isEmpty());
+		assertTrue(constructor.contains("NeoForgeWorldAwareBlockModelOutlineAdapter.register()"));
+		assertFalse(createLoader.contains("NeoForgeWorldAwareBlockModelOutlineAdapter"));
 		assertFalse(teardown.contains("NeoForgeWorldAwareBlockModelOutlineAdapter"));
+	}
+
+	private static String methodBody(String source, String declarationPattern) {
+		Matcher declaration = Pattern.compile(declarationPattern).matcher(source);
+		if (!declaration.find()) {
+			return "";
+		}
+		int openingBrace = source.indexOf('{', declaration.end());
+		if (openingBrace < 0) {
+			return "";
+		}
+		int depth = 0;
+		for (int index = openingBrace; index < source.length(); index++) {
+			if (source.charAt(index) == '{') {
+				depth++;
+			} else if (source.charAt(index) == '}' && --depth == 0) {
+				return source.substring(openingBrace, index + 1);
+			}
+		}
+		return "";
 	}
 
 	private static String readSource(String relativePath) throws IOException {

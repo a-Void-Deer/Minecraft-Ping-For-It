@@ -4,7 +4,6 @@ import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.RecordComponent;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
@@ -23,7 +22,6 @@ import nx.pingwheel.common.name.TargetNameJson;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MarkerPacketsTest {
@@ -89,6 +87,20 @@ class MarkerPacketsTest {
 	}
 
 	@Test
+	void createPacketWireIsExactlyRequestIdTargetAndPingTypeId() {
+		var packet = new MarkerCreateC2SPacket(42L, locationTarget(), "go_to");
+
+		var buf = buffer();
+		packet.write(buf);
+
+		assertEquals(42L, buf.readLong());
+		assertEquals(locationTarget(), MarkerPacketCodec.readTarget(buf));
+		assertEquals("go_to", buf.readUtf(MarkerPacketCodec.MAX_ID_LENGTH));
+		assertEquals(0, buf.readableBytes(),
+			"the C2S create payload must end after requestId, target, and pingTypeId");
+	}
+
+	@Test
 	void createPacketRejectsNegativeRequestId() {
 		var negative = new MarkerCreateC2SPacket(-5L, locationTarget(), "go_to");
 		assertTrue(negative.isCorrupt());
@@ -138,6 +150,18 @@ class MarkerPacketsTest {
 		packet.write(buf);
 
 		assertEquals(packet, MarkerRemoveC2SPacket.readSafe(buf));
+	}
+
+	@Test
+	void removePacketWireIsExactlyTheMarkerId() {
+		var packet = new MarkerRemoveC2SPacket(new MarkerId(99L));
+
+		var buf = buffer();
+		packet.write(buf);
+
+		assertEquals(99L, buf.readLong());
+		assertEquals(0, buf.readableBytes(),
+			"the C2S remove payload must end after the marker id");
 	}
 
 	@Test
@@ -360,18 +384,6 @@ class MarkerPacketsTest {
 	}
 
 	@Test
-	void createdPacketCarriesNameButCreatePacketDoesNot() {
-		// The C2S create packet must never gain a name field: names are
-		// server-produced only.
-		for (RecordComponent component : MarkerCreateC2SPacket.class.getRecordComponents()) {
-			assertFalse(component.getName().equals("targetName")
-					|| component.getName().equals("name")
-					|| component.getName().equals("displayName"),
-				() -> "MarkerCreateC2SPacket must not carry a name field: " + component.getName());
-		}
-	}
-
-	@Test
 	void truncatedBuffersBecomeCorruptThroughReadSafe() {
 		// create packet with request id only, missing target + ping type
 		var truncatedCreate = buffer();
@@ -419,21 +431,6 @@ class MarkerPacketsTest {
 			"pingforit-s2c:marker-winner-changed",
 			"pingforit-s2c:rate-limit-policy"
 		), Set.copyOf(ids));
-	}
-
-	@Test
-	void clientPacketsDoNotCarryServerAuthoritativeFields() {
-		Set<String> forbidden = Set.of(
-			"owner", "ownerId", "author", "targetType", "targetTypeId",
-			"outlineColor", "textColor", "color", "displayName", "channel", "recipients"
-		);
-
-		for (Class<?> packetClass : List.of(MarkerCreateC2SPacket.class, MarkerRemoveC2SPacket.class)) {
-			for (RecordComponent component : packetClass.getRecordComponents()) {
-				assertFalse(forbidden.contains(component.getName()),
-					() -> packetClass.getSimpleName() + " must not carry client-supplied field '" + component.getName() + "'");
-			}
-		}
 	}
 
 	private static FriendlyByteBuf bufferRoundTrip(IPacket packet) {

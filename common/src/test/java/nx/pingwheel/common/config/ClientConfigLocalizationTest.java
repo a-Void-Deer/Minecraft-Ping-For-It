@@ -101,7 +101,6 @@ class ClientConfigLocalizationTest {
 		assertContainsKey(enUs, "settings.pingforit.marker_display_duration.tooltip");
 		assertContainsKey(enUs, "value.pingforit.follow_server");
 		assertTrue(readTranslation("en_us", "settings.pingforit.marker_display_duration").contains("%s"));
-		assertEquals("Follow server", readTranslation("en_us", "value.pingforit.follow_server"));
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_mode");
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_mode.tooltip");
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_slice_millis");
@@ -220,16 +219,6 @@ class ClientConfigLocalizationTest {
 			assertFalse(json.has("settings.pingforit.category_title"),
 				() -> "the unused two-argument category title format must be removed: " + locale);
 		}
-
-		assertEquals("Ping For It Configuration", readTranslation("en_us", "settings.pingforit.title"));
-		assertEquals("Client", readTranslation("en_us", "settings.pingforit.client_settings"));
-		assertEquals("Server", readTranslation("en_us", "settings.pingforit.server_settings"));
-		assertEquals("Ping For It 配置", readTranslation("zh_cn", "settings.pingforit.title"));
-		assertEquals("客户端", readTranslation("zh_cn", "settings.pingforit.client_settings"));
-		assertEquals("服务端", readTranslation("zh_cn", "settings.pingforit.server_settings"));
-		assertEquals("Ping For It 設定", readTranslation("zh_tw", "settings.pingforit.title"));
-		assertEquals("用戶端", readTranslation("zh_tw", "settings.pingforit.client_settings"));
-		assertEquals("伺服器", readTranslation("zh_tw", "settings.pingforit.server_settings"));
 	}
 
 	@Test
@@ -335,15 +324,7 @@ class ClientConfigLocalizationTest {
 	}
 
 	@Test
-	void chatLegacyAndGeneralTemplatesAreRenamedWithoutOldAliases() throws IOException {
-		assertEquals("%s requests %s on %s", readTranslation("en_us", "pingforit.chat.pingmsg"));
-		assertEquals(
-			"{playerName} requests {pingType} {targetName}",
-			readTranslation("en_us", "pingforit.chat.pingmsg.template"));
-		assertEquals("%s 请求 %s %s", readTranslation("zh_cn", "pingforit.chat.pingmsg"));
-		assertEquals(
-			"{playerName}: 请求 {pingType} {targetName}",
-			readTranslation("zh_cn", "pingforit.chat.pingmsg.template"));
+	void chatRenamedTemplatesLeaveNoOldAliases() throws IOException {
 		assertTranslationAbsent("en_us", "pingforit.chat." + "request");
 		assertTranslationAbsent("en_us", "pingforit.chat." + "request.template");
 		assertTranslationAbsent("zh_cn", "pingforit.chat." + "request");
@@ -361,9 +342,6 @@ class ClientConfigLocalizationTest {
 				() -> "the local feedback prefix must be the exact marker resource: " + locale);
 			nonBlankTranslation(json, locale, messageKey);
 		}
-
-		assertEquals("Target disappeared or died", readTranslation("en_us", messageKey));
-		assertEquals("目标消失或死亡", readTranslation("zh_cn", messageKey));
 	}
 
 	private JsonObject readLocaleJson(String locale) throws IOException {

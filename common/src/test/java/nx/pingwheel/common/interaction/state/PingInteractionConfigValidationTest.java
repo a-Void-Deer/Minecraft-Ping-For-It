@@ -4,6 +4,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
 
+import nx.pingwheel.common.config.ClientConfigBounds;
 import nx.pingwheel.common.interaction.ActiveInteraction;
 import nx.pingwheel.common.interaction.PingCaptureCoordinator;
 import nx.pingwheel.common.interaction.PingCaptureLogger;
@@ -22,7 +23,7 @@ class PingInteractionConfigValidationTest {
 			DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()),
 			interaction,
 			PingCaptureLogger.noop());
-		AtomicLong holdMillis = new AtomicLong(99L);
+		AtomicLong holdMillis = new AtomicLong(ClientConfigBounds.MIN_WHEEL_HOLD_MILLIS - 1L);
 
 		PingInteractionStateMachine machine = new PingInteractionStateMachine(
 			coordinator,
@@ -34,6 +35,8 @@ class PingInteractionConfigValidationTest {
 			holdMillis::get,
 			() -> 1000L);
 
+		assertThrows(IllegalArgumentException.class, machine::press);
+		holdMillis.set(ClientConfigBounds.MAX_WHEEL_HOLD_MILLIS + 1L);
 		assertThrows(IllegalArgumentException.class, machine::press);
 	}
 }

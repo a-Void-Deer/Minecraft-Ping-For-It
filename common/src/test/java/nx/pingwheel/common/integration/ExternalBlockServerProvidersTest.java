@@ -31,7 +31,9 @@ class ExternalBlockServerProvidersTest {
 	}
 
 	@Test
-	void disabledOptionalIntegrationDoesNotRegisterOrLoadAProvider() {
+	void disabledOptionalIntegrationDoesNotRegisterAProvider() {
+		// Only registration is observable here; this test makes no claim about
+		// whether the optional provider class was loaded.
 		ModContext.HasSable = false;
 		ExternalBlockServerProviders.configure(false);
 
