@@ -726,9 +726,7 @@ public class CommonClient {
 			packet.revision(),
 			packet.status(),
 			packet.canEdit(),
-			packet.white(),
-			packet.black(),
-			packet.whitelistOnly());
+			packet.rules());
 	}
 
 	/**
@@ -762,11 +760,12 @@ public class CommonClient {
 	 * operation, so a false client hint can never bypass the permission check.
 	 */
 	public boolean requestPresentationPolicyMutation(
+		String targetTypeId,
 		Operation operation,
 		String selector,
 		boolean whitelistOnly
 	) {
-		var packet = SERVER_PRESENTATION_POLICY_STATE.beginMutation(operation, selector, whitelistOnly);
+		var packet = SERVER_PRESENTATION_POLICY_STATE.beginMutation(targetTypeId, operation, selector, whitelistOnly);
 
 		if (packet.isEmpty()) {
 			return false;

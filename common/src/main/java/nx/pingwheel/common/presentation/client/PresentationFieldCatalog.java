@@ -14,12 +14,11 @@ import java.util.Set;
 /**
  * Immutable, namespace-grouped field catalogue for the presentation settings UI.
  *
- * <p>Two sources produce the same read-only shape: the locally registered
- * client manifest (offline preview and local receive/display editors) and the
- * server-advertised fields accepted from an offer (the server policy page and
- * the shared read-only reference). Entries carry the authoritative metadata of
- * their source; the local manifest's defaults are never substituted for the
- * server's advertised metadata. Grouping follows the namespace of each field
+ * <p>Two metadata sources produce this read-only shape: registered adapter
+ * descriptors and server-advertised fields accepted from an offer (the server
+ * policy page). No retained world values enter either catalogue.
+ * Entries carry the authoritative metadata of their source; the local
+ * manifest's defaults never substitute for server metadata. Grouping follows the namespace of each field
  * id, not the owning adapter's mod id, so a bridge or wrapper adapter still
  * groups each field under the namespace a player sees. A field id that occurs
  * more than once is rendered once, keeping the first adapter in registration

@@ -13,6 +13,8 @@ import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationPropertySelection;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -62,6 +64,32 @@ class ServerMarkerStoreTest {
 		return store.create(
 			owner, target, entityType(), attentionPingType(), new MarkerAnchor(0, 0, 0), arrival, expires,
 			List.of(recipients));
+	}
+
+	@Test
+	void externalRefreshAndRecipientCleanupPreserveImmutableSelectionsAndWinnerIdentity() {
+		ServerMarkerStore store = newStore();
+		var before = Target.ExternalBlockTarget.committed(OVERWORLD, "provider:test", "tracking-id",
+			"minecraft:chest", "locator-a", true);
+		var after = Target.ExternalBlockTarget.committed(OVERWORLD, "provider:test", "tracking-id",
+			"minecraft:chest", "locator-b", true);
+		var selections = List.of(PresentationPropertySelection.of(
+			PresentationPropertyRef.root("minecraft:basic", "minecraft:block.state"), "attention"));
+		var type = TARGET_TYPES.findById("entity_block").orElseThrow();
+		MarkerCreation created = store.create(OWNER, before, type, attentionPingType(), new MarkerAnchor(0, 0, 0),
+			10L, 100L, List.of(RECIPIENT_A, RECIPIENT_B), selections);
+		assertEquals(2, created.winnerChanges().size());
+		var refreshed = store.updateExternalTarget(created.marker().id(), after, new MarkerAnchor(1, 0, 0)).orElseThrow();
+		assertEquals(created.marker().id(), refreshed.id());
+		assertEquals(created.marker().targetKey(), refreshed.targetKey());
+		assertEquals(selections, refreshed.properties());
+		assertEquals(10L, refreshed.arrivalTick());
+		assertEquals(100L, refreshed.expiresAtTick());
+		store.forgetRecipient(RECIPIENT_A);
+		var retained = store.find(created.marker().id()).orElseThrow();
+		assertEquals(selections, retained.properties());
+		assertEquals(List.of(RECIPIENT_B), retained.recipients());
+		assertEquals(created.marker().id(), store.winnerFor(retained.targetKey(), RECIPIENT_B).orElseThrow().id());
 	}
 
 	@Test

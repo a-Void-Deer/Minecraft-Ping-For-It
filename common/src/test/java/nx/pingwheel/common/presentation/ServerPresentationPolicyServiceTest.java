@@ -5,232 +5,134 @@ import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Status;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Map;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ServerPresentationPolicyServiceTest {
 
 	@Test
-	void readDisclosesOnlyPresentationSelectors() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
-		settings.setWhite(List.of("minecraft:basic", "create:*"));
-		settings.setBlack(List.of("minecraft:entity.health"));
-		settings.setWhitelistOnly(true);
+	void readAllDisclosesEveryTargetTypeInCatalogOrder() {
+		var settings = PresentationSettings.serverDefaults();
+		settings.setRules("block", new PresentationSettings.RuleSet(List.of("minecraft:basic"),
+			List.of("minecraft:entity.health"), true));
 
-		PresentationPolicy policy = ServerPresentationPolicyService.read(settings);
+		var views = ServerPresentationPolicyService.readAll(settings);
 
-		assertEquals(List.of("minecraft:basic", "create:*"), policy.white());
-		assertEquals(List.of("minecraft:entity.health"), policy.black());
-		assertTrue(policy.whitelistOnly());
+		// Independent of the settings constant: the confirmed protocol catalog and its order.
+		assertEquals(List.of("dropped_item", "entity", "entity_block", "block", "location"),
+			List.copyOf(views.keySet()));
+		assertEquals(List.of("minecraft:basic"), views.get("block").white());
+		assertEquals(List.of("minecraft:entity.health"), views.get("block").black());
+		assertTrue(views.get("block").whitelistOnly());
+		assertEquals(List.of(), views.get("entity").white());
 	}
 
 	@Test
-	void readOfMissingSettingsFailsClosed() {
-		PresentationPolicy policy = ServerPresentationPolicyService.read(null);
-
-		assertTrue(policy.whitelistOnly());
-		assertEquals(List.of("*:*"), policy.black());
+	void readOfMissingSettingsOrUnknownTypeFailsClosed() {
+		var view = ServerPresentationPolicyService.read(null, "entity");
+		assertTrue(view.whitelistOnly());
+		assertEquals(List.of("*:*"), view.black());
+		assertTrue(ServerPresentationPolicyService.read(PresentationSettings.serverDefaults(), "unknown").whitelistOnly());
 	}
 
 	@Test
-	void mutateWithoutPermissionIsDeniedWithoutChangingSettings() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
-		settings.setWhite(List.of("minecraft:basic"));
+	void mutationWithoutPermissionIsDeniedWithoutChangingAnyType() {
+		var settings = PresentationSettings.serverDefaults();
+		settings.setRules("entity", new PresentationSettings.RuleSet(List.of("minecraft:basic"), List.of(), false));
 
-		var result = ServerPresentationPolicyService.mutate(
-			false, settings, Operation.ADD_WHITE, "create:*", false);
+		var result = ServerPresentationPolicyService.mutateSelectedRules(false, settings, "entity",
+			Operation.ADD_WHITE, "create:*", false);
 
 		assertFalse(result.applied());
 		assertEquals(Status.DENIED, result.status());
-		assertEquals(List.of("minecraft:basic"), settings.getWhite());
-		assertEquals(List.of("minecraft:basic"), result.policy().white());
+		assertEquals(List.of("minecraft:basic"), settings.rulesFor("entity").getWhite());
 	}
 
 	@Test
-	void mutateWithPermissionAddsAndRemovesAtomically() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
-		settings.setWhite(List.of("minecraft:basic"));
+	void mutationAddsAndRemovesOnlyTheSelectedTargetType() {
+		var settings = PresentationSettings.serverDefaults();
 
-		var added = ServerPresentationPolicyService.mutate(
-			true, settings, Operation.ADD_WHITE, "create:*", false);
+		var added = ServerPresentationPolicyService.mutateSelectedRules(true, settings, "block",
+			Operation.ADD_WHITE, "create:*", false);
 		assertTrue(added.applied());
 		assertEquals(Status.OK, added.status());
-		assertEquals(List.of("minecraft:basic", "create:*"), settings.getWhite());
+		assertEquals(List.of("create:*"), settings.rulesFor("block").getWhite());
+		assertEquals(List.of(), settings.rulesFor("entity").getWhite());
 
-		var removed = ServerPresentationPolicyService.mutate(
-			true, settings, Operation.REMOVE_WHITE, "minecraft:basic", false);
+		var removed = ServerPresentationPolicyService.mutateSelectedRules(true, settings, "block",
+			Operation.REMOVE_WHITE, "create:*", false);
 		assertTrue(removed.applied());
-		assertEquals(List.of("create:*"), settings.getWhite());
+		assertEquals(List.of(), settings.rulesFor("block").getWhite());
 	}
 
 	@Test
-	void duplicateAddIsRejectedWithoutMutation() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
-		settings.setWhite(List.of("minecraft:basic"));
+	void duplicateMissingInvalidAndUnknownTypeRequestsNeverChangeState() {
+		var settings = PresentationSettings.serverDefaults();
+		ServerPresentationPolicyService.mutateSelectedRules(true, settings, "entity",
+			Operation.ADD_BLACK, "create:*", false);
 
-		var result = ServerPresentationPolicyService.mutate(
-			true, settings, Operation.ADD_WHITE, "minecraft:basic", false);
-
-		assertFalse(result.applied());
-		assertEquals(Status.DUPLICATE, result.status());
-		assertEquals(List.of("minecraft:basic"), settings.getWhite());
+		assertEquals(Status.DUPLICATE, ServerPresentationPolicyService.mutateSelectedRules(true, settings,
+			"entity", Operation.ADD_BLACK, "create:*", false).status());
+		assertEquals(Status.NOT_FOUND, ServerPresentationPolicyService.mutateSelectedRules(true, settings,
+			"entity", Operation.REMOVE_BLACK, "minecraft:*", false).status());
+		assertEquals(Status.INVALID, ServerPresentationPolicyService.mutateSelectedRules(true, settings,
+			"entity", Operation.ADD_WHITE, "bad selector", false).status());
+		assertEquals(Status.INVALID, ServerPresentationPolicyService.mutateSelectedRules(true, settings,
+			"unknown", Operation.ADD_WHITE, "create:*", false).status());
+		assertEquals(List.of("create:*"), settings.rulesFor("entity").getBlack());
 	}
 
 	@Test
-	void invalidSelectorIsRejectedWithoutDurableDenyAll() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
-		settings.setWhite(List.of("minecraft:basic"));
-
-		var result = ServerPresentationPolicyService.mutate(
-			true, settings, Operation.ADD_BLACK, "Not A Selector", false);
-
-		assertFalse(result.applied());
-		assertEquals(Status.INVALID, result.status());
-		assertEquals(List.of("minecraft:basic"), settings.getWhite());
-		assertEquals(List.of(), settings.getBlack());
-		assertFalse(settings.isWhitelistOnly());
-		assertFalse(settings.policy().whitelistOnly());
-	}
-
-	@Test
-	void fullListAddIsRejectedWithoutMutation() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
-		List<String> full = IntStream.range(0, ServerPresentationPolicyService.MAX_SELECTORS)
-			.mapToObj(index -> "test:field" + index)
+	void overCapacityAndNoOpRequestsLeaveTheRuleViewUnchanged() {
+		var settings = PresentationSettings.serverDefaults();
+		var full = IntStream.range(0, ServerPresentationPolicyService.MAX_SELECTORS)
+			.mapToObj(i -> "create:" + i)
 			.toList();
-		settings.setWhite(full);
+		for (String selector : full) {
+			assertTrue(ServerPresentationPolicyService.mutateSelectedRules(true, settings, "entity",
+				Operation.ADD_WHITE, selector, false).applied());
+		}
 
-		var result = ServerPresentationPolicyService.mutate(
-			true, settings, Operation.ADD_WHITE, "test:extra", false);
+		var overflow = ServerPresentationPolicyService.mutateSelectedRules(true, settings, "entity",
+			Operation.ADD_WHITE, "forge:extra", false);
+		assertFalse(overflow.applied());
+		assertEquals(Status.LIST_FULL, overflow.status());
 
-		assertFalse(result.applied());
-		assertEquals(Status.LIST_FULL, result.status());
-		assertEquals(full, settings.getWhite());
+		var noOp = ServerPresentationPolicyService.mutateSelectedRules(true, settings, "entity",
+			Operation.SET_WHITELIST_ONLY, "", false);
+		assertFalse(noOp.applied());
+		assertEquals(Status.OK, noOp.status());
+		assertEquals(ServerPresentationPolicyService.MAX_SELECTORS, settings.rulesFor("entity").getWhite().size());
+		assertEquals(List.of(), settings.rulesFor("block").getWhite());
 	}
 
 	@Test
-	void removeMissingSelectorIsRejectedWithoutMutation() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
+	void whitelistOnlyAssignmentIsSelectedTypeOnly() {
+		var settings = PresentationSettings.serverDefaults();
 
-		var result = ServerPresentationPolicyService.mutate(
-			true, settings, Operation.REMOVE_BLACK, "minecraft:*", false);
+		var applied = ServerPresentationPolicyService.mutateSelectedRules(true, settings, "location",
+			Operation.SET_WHITELIST_ONLY, "", true);
 
-		assertFalse(result.applied());
-		assertEquals(Status.NOT_FOUND, result.status());
-		assertEquals(List.of(), settings.getBlack());
+		assertTrue(applied.applied());
+		assertTrue(settings.policyFor("location").whitelistOnly());
+		assertFalse(settings.policyFor("block").whitelistOnly());
 	}
 
 	@Test
-	void blackListAddAndRemoveApply() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
+	void detachedCopyIsIndependentAndMissingFailsClosed() {
+		var settings = PresentationSettings.serverDefaults();
+		settings.setRules("entity", new PresentationSettings.RuleSet(List.of("minecraft:basic"),
+			List.of("minecraft:entity"), true));
 
-		var added = ServerPresentationPolicyService.mutate(
-			true, settings, Operation.ADD_BLACK, "minecraft:*", false);
-		assertTrue(added.applied());
-		assertEquals(List.of("minecraft:*"), settings.getBlack());
+		var copy = ServerPresentationPolicyService.detachedCopy(settings);
+		copy.setRules("entity", PresentationSettings.RuleSet.allowByDefault());
 
-		var removed = ServerPresentationPolicyService.mutate(
-			true, settings, Operation.REMOVE_BLACK, "minecraft:*", false);
-		assertTrue(removed.applied());
-		assertEquals(List.of(), settings.getBlack());
-	}
-
-	@Test
-	void whitelistOnlySetAppliesBothValues() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
-		settings.setWhite(List.of("minecraft:basic"));
-
-		var enabled = ServerPresentationPolicyService.mutate(
-			true, settings, Operation.SET_WHITELIST_ONLY, "", true);
-		assertTrue(enabled.applied());
-		assertTrue(settings.isWhitelistOnly());
-		assertTrue(settings.policy().whitelistOnly());
-
-		var disabled = ServerPresentationPolicyService.mutate(
-			true, settings, Operation.SET_WHITELIST_ONLY, "", false);
-		assertTrue(disabled.applied());
-		assertFalse(settings.isWhitelistOnly());
-	}
-
-	@Test
-	void noOpWhitelistOnlySetIsReportedWithoutMutation() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
-		settings.setWhitelistOnly(true);
-
-		var result = ServerPresentationPolicyService.mutate(
-			true, settings, Operation.SET_WHITELIST_ONLY, "", true);
-
-		assertFalse(result.applied());
-		assertEquals(Status.OK, result.status());
-		assertTrue(settings.isWhitelistOnly());
-	}
-
-	@Test
-	void detachedCopyCarriesExactFieldsAndIsolatesMutations() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
-		settings.setWhite(List.of("minecraft:basic"));
-		settings.setBlack(List.of("minecraft:entity"));
-		settings.setWhitelistOnly(true);
-		settings.setMinUpdateIntervalTicks(40);
-		settings.setScanBudget(64);
-		settings.setPermissionLevels(Map.of("minecraft:basic", 2));
-		settings.setUpdateIntervals(Map.of("minecraft:basic", 30));
-
-		PresentationSettings copy = ServerPresentationPolicyService.detachedCopy(settings);
-
-		assertNotSame(settings, copy);
-		assertEquals(settings.getWhite(), copy.getWhite());
-		assertEquals(settings.getBlack(), copy.getBlack());
-		assertEquals(settings.isWhitelistOnly(), copy.isWhitelistOnly());
-		assertEquals(settings.getMinUpdateIntervalTicks(), copy.getMinUpdateIntervalTicks());
-		assertEquals(settings.getScanBudget(), copy.getScanBudget());
-		assertEquals(settings.getPermissionLevels(), copy.getPermissionLevels());
-		assertEquals(settings.getUpdateIntervals(), copy.getUpdateIntervals());
-
-		var result = ServerPresentationPolicyService.mutate(
-			true, copy, Operation.ADD_WHITE, "create:field", false);
-
-		assertTrue(result.applied());
-		assertEquals(List.of("minecraft:basic", "create:field"), copy.getWhite());
-		assertEquals(List.of("minecraft:basic"), settings.getWhite());
-		assertEquals(List.of("minecraft:entity"), settings.getBlack());
-	}
-
-	@Test
-	void invalidMutationOnDetachedCopyLeavesOriginalUntouched() {
-		PresentationSettings settings = PresentationSettings.serverDefaults();
-		settings.setWhite(List.of("minecraft:basic"));
-
-		PresentationSettings copy = ServerPresentationPolicyService.detachedCopy(settings);
-		var result = ServerPresentationPolicyService.mutate(
-			true, copy, Operation.ADD_BLACK, "Not A Selector", false);
-
-		assertFalse(result.applied());
-		assertEquals(Status.INVALID, result.status());
-		assertEquals(List.of("minecraft:basic"), settings.getWhite());
-		assertEquals(List.of(), settings.getBlack());
-		assertFalse(settings.isWhitelistOnly());
-	}
-
-	@Test
-	void detachedCopyOfMissingSettingsIsNull() {
+		assertTrue(settings.rulesFor("entity").isWhitelistOnly());
+		assertFalse(copy.rulesFor("entity").isWhitelistOnly());
 		assertNull(ServerPresentationPolicyService.detachedCopy(null));
-	}
-
-	@Test
-	void isValidSelectorMatchesPolicyGrammar() {
-		assertTrue(ServerPresentationPolicyService.isValidSelector("minecraft:basic"));
-		assertTrue(ServerPresentationPolicyService.isValidSelector("create:*"));
-		assertFalse(ServerPresentationPolicyService.isValidSelector(null));
-		assertFalse(ServerPresentationPolicyService.isValidSelector(""));
-		assertFalse(ServerPresentationPolicyService.isValidSelector("Not A Selector"));
-		assertFalse(ServerPresentationPolicyService.isValidSelector(
-			"a:" + "b".repeat(ServerPresentationPolicyService.MAX_SELECTOR_LENGTH)));
 	}
 }

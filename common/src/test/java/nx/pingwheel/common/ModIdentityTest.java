@@ -17,6 +17,8 @@ import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
@@ -69,14 +71,14 @@ class ModIdentityTest {
 			"pingforit-c2s:update-channel",
 			"pingforit-c2s:server-config-request",
 			"pingforit-c2s:server-config-update",
-			"pingforit-c2s:server-presentation-policy-v1",
+			"pingforit-c2s:server-presentation-policy-v2",
 			"pingforit-s2c:marker-created",
 			"pingforit-s2c:marker-removed",
 			"pingforit-s2c:marker-rejected",
 			"pingforit-s2c:marker-winner-changed",
 			"pingforit-s2c:rate-limit-policy",
 			"pingforit-s2c:server-config-snapshot",
-			"pingforit-s2c:server-presentation-policy-v1",
+			"pingforit-s2c:server-presentation-policy-v2",
 			"pingforit-s2c:ping-location"
 		), Set.of(
 			MarkerCreateC2SPacket.PACKET_ID.toString(),
@@ -95,6 +97,12 @@ class ModIdentityTest {
 			ServerPresentationPolicyS2CPacket.PACKET_ID.toString(),
 			PingLocationS2CPacket.PACKET_ID.toString()
 		));
+	}
+
+	@Test
+	void presentationRoutesUseVersionedV3Ids() {
+		assertEquals("pingforit-c2s:presentation-v3", PresentationC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:presentation-v3", PresentationS2CPacket.PACKET_ID.toString());
 	}
 
 	@Test

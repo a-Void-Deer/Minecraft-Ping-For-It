@@ -1,6 +1,7 @@
 package nx.pingwheel.common.marker;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,6 +20,9 @@ import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry;
 import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
 import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.presentation.PresentationPropertyIntent;
+import nx.pingwheel.common.presentation.PresentationPropertySelection;
+import nx.pingwheel.common.presentation.PresentationSection;
 
 /**
  * Server-side orchestration for marker creation and removal.
@@ -42,6 +46,9 @@ import nx.pingwheel.common.name.TargetNameJson;
  *   <li><b>Ping type lookup:</b> the requested id must exist in the catalog
  *       and be a member of the resolved target type's ping type set; otherwise
  *       {@code INVALID_PING_TYPE}.</li>
+ *   <li><b>Property admission:</b> when observations were supplied, an injected
+ *       authority callback checks the final committed target before storage.
+ *       Failure leaves the store untouched and releases acquired provider state.</li>
  *   <li><b>Store:</b> the marker is created with the resolved target and target
  *       type, the catalog ping type, the validator's anchor, and the
  *       caller-supplied owner, arrival/expiry ticks, and recipients. A store
@@ -67,6 +74,28 @@ import nx.pingwheel.common.name.TargetNameJson;
  * player names, colors, and registry lookups are never logged.
  */
 public final class MarkerCreationService {
+	@FunctionalInterface
+	public interface PropertyAdmission {
+		AdmissionResult admit(Target committedTarget, String targetTypeId, UUID owner,
+			List<UUID> recipients, List<PresentationPropertyIntent> intents);
+	}
+
+	public record AdmissionResult(MarkerRejectReason rejection, List<PresentationPropertySelection> selections,
+		Map<String, PresentationSection> sourceSeeds) {
+		public AdmissionResult {
+			selections = List.copyOf(selections);
+			sourceSeeds = Map.copyOf(sourceSeeds);
+			if (rejection != null && (!selections.isEmpty() || !sourceSeeds.isEmpty()))
+				throw new IllegalArgumentException("rejected admission cannot contain accepted state");
+		}
+		public static AdmissionResult accepted(List<PresentationPropertySelection> selections,
+			Map<String, PresentationSection> sourceSeeds) {
+			return new AdmissionResult(null, selections, sourceSeeds);
+		}
+		public static AdmissionResult rejected(MarkerRejectReason reason) {
+			return new AdmissionResult(Objects.requireNonNull(reason), List.of(), Map.of());
+		}
+	}
 
 	private final ServerMarkerStore store;
 	private final TargetResolver resolver;
@@ -142,7 +171,8 @@ public final class MarkerCreationService {
 		long expiresAtTick,
 		List<UUID> recipients
 	) {
-		return create(null, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients, null);
+		return create(null, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients,
+			List.of(), null, null);
 	}
 
 	/**
@@ -159,7 +189,15 @@ public final class MarkerCreationService {
 		long expiresAtTick,
 		List<UUID> recipients
 	) {
-		return create(level, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients, null);
+		return create(level, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients,
+			List.of(), null, null);
+	}
+
+	public MarkerCreateOutcome create(ServerLevel level, UUID owner, Target requestedTarget,
+		String pingTypeId, long arrivalTick, long expiresAtTick, List<UUID> recipients,
+		List<PresentationPropertyIntent> intents, PropertyAdmission admission) {
+		return create(level, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick,
+			recipients, intents, admission, null);
 	}
 
 	/**
@@ -176,8 +214,15 @@ public final class MarkerCreationService {
 		long expiresAtTick,
 		List<UUID> recipients
 	) {
-		return create(
-			null, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients, transaction);
+		return create(null, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients,
+			List.of(), null, transaction);
+	}
+
+	MarkerCreateOutcome createWithExternalTransaction(ExternalBlockTransaction transaction,
+		UUID owner, Target requestedTarget, String pingTypeId, long arrivalTick, long expiresAtTick,
+		List<UUID> recipients, List<PresentationPropertyIntent> intents, PropertyAdmission admission) {
+		return create(null, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick,
+			recipients, intents, admission, transaction);
 	}
 
 	private MarkerCreateOutcome create(
@@ -188,9 +233,11 @@ public final class MarkerCreationService {
 		long arrivalTick,
 		long expiresAtTick,
 		List<UUID> recipients,
+		List<PresentationPropertyIntent> intents,
+		PropertyAdmission admission,
 		ExternalBlockTransaction transaction
 	) {
-		if (owner == null || requestedTarget == null || pingTypeId == null || recipients == null) {
+		if (owner == null || requestedTarget == null || pingTypeId == null || recipients == null || intents == null) {
 			logger.debug("create rejected: null owner, target, ping type id, or recipients");
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}
@@ -287,8 +334,25 @@ public final class MarkerCreationService {
 			markerName = resolveName(owner, markerTarget, markerName);
 		}
 
+		AdmissionResult admitted;
 		try {
-			MarkerCreation creation = store.create(
+			admitted = intents.isEmpty() ? AdmissionResult.accepted(List.of(), Map.of())
+				: admission == null ? AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST)
+				: admission.admit(markerTarget, markerTargetType.id(), owner, List.copyOf(recipients), List.copyOf(intents));
+			if (admitted == null) throw new IllegalArgumentException("property admission returned null");
+		} catch (RuntimeException | LinkageError failure) {
+			if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
+			logger.debug("create rejected: property admission failed");
+			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
+		}
+		if (admitted.rejection() != null) {
+			if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
+			return MarkerCreateOutcome.rejected(admitted.rejection());
+		}
+
+		MarkerCreation creation;
+		try {
+			creation = store.create(
 				owner,
 				markerTarget,
 				markerTargetType,
@@ -296,13 +360,8 @@ public final class MarkerCreationService {
 				markerAnchor,
 				arrivalTick,
 				expiresAtTick,
-				recipients);
-
-			logger.debug("create accepted: id={} targetType={} pingType={}",
-				creation.marker().id(), markerTargetType.id(), pingType.id());
-
-			return MarkerCreateOutcome.accepted(creation, markerName);
-		} catch (RuntimeException e) {
+				recipients, admitted.selections());
+		} catch (RuntimeException | LinkageError e) {
 			if (materializedTarget != null) {
 				releaseMaterialized(level, materializedTarget, transaction);
 			}
@@ -310,6 +369,9 @@ public final class MarkerCreationService {
 			logger.debugException("create rejected: store contract failure", e);
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}
+		logger.debug("create accepted: id={} targetType={} pingType={}",
+			creation.marker().id(), markerTargetType.id(), pingType.id());
+		return MarkerCreateOutcome.accepted(creation, markerName, admitted.sourceSeeds());
 	}
 
 	private TargetNameJson resolveName(UUID owner, Target target, TargetNameJson fallback) {
@@ -320,7 +382,7 @@ public final class MarkerCreationService {
 		try {
 			TargetNameJson resolved = nameResolver.resolveName(owner, target);
 			return resolved == null ? fallback : resolved;
-		} catch (RuntimeException ignored) {
+		} catch (RuntimeException | LinkageError ignored) {
 			return fallback;
 		}
 	}
@@ -379,7 +441,7 @@ public final class MarkerCreationService {
 			}
 
 			return result;
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | LinkageError e) {
 			logger.debugException("create rejected: validator contract failure", e);
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}

@@ -26,70 +26,72 @@ class PresentationConfigTest {
 
 	@Test
 	void missingKeysDoNotRequireASchemaMigration() {
-		ClientConfig client = gson.fromJson("{\"pingVolume\":42}", ClientConfig.class);
 		ServerConfig server = gson.fromJson("{\"rateLimit\":5}", ServerConfig.class);
-		client.validate((key, supplied, effective) -> {});
 		server.validate();
 
-		assertTrue(client.getPresentationReceive().policy().allows("create:inventory", true));
-		assertTrue(client.getPresentationDisplay().policy().allows("create:inventory", true));
-		assertTrue(server.getPresentation().policy().allows("create:kinetic/speed", true));
-		assertFalse(server.getPresentation().policy().allows("create:inventory", false));
-		assertTrue(gson.toJson(client).contains("\"presentationReceive\""));
-		assertTrue(gson.toJson(server).contains("\"presentation\""));
+		assertTrue(server.getPresentation().policyFor("entity").allows("create:kinetic/speed", true));
+		assertFalse(server.getPresentation().policyFor("entity").allows("create:inventory", false));
+		assertTrue(gson.toJson(server).contains("\"targetTypes\""));
 	}
 
 	@Test
 	void partialNestedObjectsDoNotSilentlyElevateAllowLists() {
-		ClientConfig client = gson.fromJson("{\"presentationReceive\":{\"scanBudget\":4}}", ClientConfig.class);
 		ServerConfig server = gson.fromJson("{\"presentation\":{\"scanBudget\":4}}", ServerConfig.class);
-		client.validate((key, supplied, effective) -> {});
 		server.validate();
-		assertFalse(client.getPresentationReceive().policy().allows("create:inventory", false));
-		assertFalse(server.getPresentation().policy().allows("create:inventory", false));
+
+		for (String type : PresentationSettings.TARGET_TYPE_IDS) {
+			assertFalse(server.getPresentation().policyFor(type).allows("create:inventory", true));
+		}
 	}
 
 	@Test
-	void independentLocalListsAndWhiteOverBlackSurviveJsonRoundTrip() {
-		ClientConfig client = new ClientConfig();
-		client.getPresentationReceive().setWhite(List.of("create:kinetic/*"));
-		client.getPresentationReceive().setBlack(List.of("create:kinetic/speed", "create:inventory"));
-		client.getPresentationDisplay().setWhite(List.of());
-		client.getPresentationDisplay().setWhitelistOnly(true);
+	void independentTargetTypePoliciesSurviveJsonRoundTrip() {
+		ServerConfig server = new ServerConfig();
+		server.getPresentation().setRules("dropped_item",
+			new PresentationSettings.RuleSet(List.of("minecraft:item.id"), List.of(), true));
+		server.getPresentation().setRules("block",
+			new PresentationSettings.RuleSet(List.of(), List.of("create:*"), false));
 
-		ClientConfig reloaded = gson.fromJson(gson.toJson(client), ClientConfig.class);
-		reloaded.validate((key, supplied, effective) -> {});
+		ServerConfig reloaded = gson.fromJson(gson.toJson(server), ServerConfig.class);
+		reloaded.validate();
 
-		assertTrue(reloaded.getPresentationReceive().policy().allows("create:kinetic/speed", false));
-		assertFalse(reloaded.getPresentationReceive().policy().allows("create:inventory", true));
-		assertFalse(reloaded.getPresentationDisplay().policy().allows("create:kinetic/speed", true));
+		assertTrue(reloaded.getPresentation().policyFor("dropped_item").allows("minecraft:item.id", false));
+		assertFalse(reloaded.getPresentation().policyFor("dropped_item").allows("minecraft:block.state", true));
+		assertFalse(reloaded.getPresentation().policyFor("block").allows("create:gear", true));
+		assertTrue(reloaded.getPresentation().policyFor("block").allows("minecraft:basic", true));
+		assertTrue(reloaded.getPresentation().policyFor("entity").allows("minecraft:basic", true));
 	}
 
 	@Test
 	void serverOverridesAreBoundedAndUnknownSelectorsNeverGrantAccess() {
-		ServerConfig server = gson.fromJson("{\"presentation\":{\"white\":[\"create:inventory\"],"
-			+ "\"black\":[\"bad selector\"],\"scanBudget\":999999,"
-			+ "\"minUpdateIntervalTicks\":0,\"permissionLevels\":{\"create:inventory\":99}}}",
-			ServerConfig.class);
+		// The scoped contract needs an explicitly configured sibling type: a missing
+		// target type now fails closed by design, so it cannot prove scoping.
+		ServerConfig server = gson.fromJson("{\"presentation\":{\"targetTypes\":{"
+			+ "\"entity\":{\"white\":[],\"black\":[],\"whitelistOnly\":false},"
+			+ "\"block\":{\"white\":[\"create:inventory\"],\"black\":[\"bad selector\"],\"whitelistOnly\":false}},"
+			+ "\"scanBudget\":999999,\"minUpdateIntervalTicks\":0,"
+			+ "\"permissionLevels\":{\"create:inventory\":99}}}", ServerConfig.class);
 		server.validate();
 
-		assertFalse(server.getPresentation().policy().allows("create:inventory", true));
-		assertEquals(0, server.getPresentation().scanBudget());
-		assertEquals(5, server.getPresentation().permission("create:inventory", 0));
+		assertFalse(server.getPresentation().policyFor("block").allows("create:inventory", true));
+		assertTrue(server.getPresentation().policyFor("entity").allows("minecraft:basic", true));
+		assertEquals(4, server.getPresentation().permission("create:inventory", 0));
+
 		ServerConfig reloaded = gson.fromJson(gson.toJson(server), ServerConfig.class);
 		reloaded.validate();
-		assertFalse(reloaded.getPresentation().policy().allows("create:inventory", true));
+		assertFalse(reloaded.getPresentation().policyFor("block").allows("create:inventory", true));
+		assertTrue(reloaded.getPresentation().policyFor("entity").allows("minecraft:basic", true));
 	}
 
 	@Test
 	void whitelistOnlyAndArbitraryPositionWildcardsAreIndependentOfPermissions() {
 		PresentationSettings settings = PresentationSettings.serverDefaults();
-		settings.setWhitelistOnly(true);
-		settings.setBlack(List.of("create:kinetic/*"));
-		settings.setWhite(List.of("cre*te:kin*/speed"));
-		assertTrue(settings.policy().allows("create:kinetic/speed", false));
-		assertFalse(settings.policy().allows("create:kinetic/stress", true));
-		assertFalse(settings.policy().allows("minecraft:health", true));
+		settings.setRules("block", new PresentationSettings.RuleSet(
+			List.of("cre*te:kin*/speed"), List.of("create:kinetic/*"), true));
+
+		assertTrue(settings.policyFor("block").allows("create:kinetic/speed", false));
+		assertFalse(settings.policyFor("block").allows("create:kinetic/stress", true));
+		assertFalse(settings.policyFor("block").allows("minecraft:health", true));
 	}
 
 	@Test
@@ -98,8 +100,10 @@ class PresentationConfigTest {
 		String before = settings.fingerprint();
 		settings.setPermissionLevels(Map.of("create:inventory", 2));
 		settings.setUpdateIntervals(Map.of("create:kinetic", 12));
+
 		assertNotEquals(before, settings.fingerprint());
-		assertEquals(settings.fingerprint(), gson.fromJson(gson.toJson(settings), PresentationSettings.class).fingerprint());
+		assertEquals(settings.fingerprint(),
+			gson.fromJson(gson.toJson(settings), PresentationSettings.class).fingerprint());
 		assertEquals(2, settings.permission("create:inventory", 0));
 		assertEquals(3, settings.permission("create:kinetic/speed", 3));
 		assertEquals(15, settings.interval("create:kinetic", 15));

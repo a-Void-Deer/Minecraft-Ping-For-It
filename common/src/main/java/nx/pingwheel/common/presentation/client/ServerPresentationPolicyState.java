@@ -2,12 +2,15 @@ package nx.pingwheel.common.presentation.client;
 
 import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
 import nx.pingwheel.common.presentation.PresentationPolicy;
+import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService;
+import nx.pingwheel.common.presentation.ServerPresentationPolicyService.RulesView;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Operation;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Status;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.LongSupplier;
 
@@ -78,9 +81,7 @@ public final class ServerPresentationPolicyState {
 	private boolean known;
 	private boolean canEdit;
 	private long revision = -1L;
-	private List<String> white = List.of();
-	private List<String> black = List.of();
-	private boolean whitelistOnly;
+	private Map<String, RulesView> rules = Map.of();
 	private long pendingRequestId = NO_PENDING_REQUEST;
 	private Operation pendingOperation;
 	private long pendingSinceMillis = -1L;
@@ -111,9 +112,7 @@ public final class ServerPresentationPolicyState {
 		known = false;
 		canEdit = false;
 		revision = -1L;
-		white = List.of();
-		black = List.of();
-		whitelistOnly = false;
+		rules = Map.of();
 		lastStatus = null;
 		pendingOperation = null;
 		pendingRequestId = nextRequestId();
@@ -148,11 +147,13 @@ public final class ServerPresentationPolicyState {
 	 * operation independently for every request.
 	 */
 	public Optional<ServerPresentationPolicyC2SPacket> beginMutation(
+		String targetTypeId,
 		Operation operation,
 		String selector,
 		boolean whitelistOnly
 	) {
-		if (!canMutate() || operation == null || operation == Operation.READ) {
+		if (!canMutate() || !PresentationSettings.isKnownTargetType(targetTypeId)
+			|| operation == null || operation == Operation.READ) {
 			return Optional.empty();
 		}
 
@@ -166,7 +167,7 @@ public final class ServerPresentationPolicyState {
 		pendingSinceMillis = clock.getAsLong();
 		lastRequestTimedOut = false;
 		return Optional.of(new ServerPresentationPolicyC2SPacket(
-			requestId, operation, selector == null ? "" : selector, whitelistOnly));
+			requestId, operation, targetTypeId, selector == null ? "" : selector, whitelistOnly));
 	}
 
 	/**
@@ -210,11 +211,22 @@ public final class ServerPresentationPolicyState {
 		long revision,
 		Status status,
 		boolean canEdit,
-		List<String> white,
-		List<String> black,
-		boolean whitelistOnly
+		Map<String, RulesView> rules
 	) {
 		if (!connected || status == null || revision < 0L) {
+			return false;
+		}
+		if (status == Status.OK && !completeRuleMap(rules)) {
+			// A malformed success must not clear an uncertain write or publish
+			// an invented empty policy for a missing target type.
+			if (requestId > 0 && requestId == pendingRequestId) {
+				if (pendingOperation != null) mutationOutcomeUncertain = true;
+				pendingRequestId = NO_PENDING_REQUEST;
+				pendingOperation = null;
+				pendingSinceMillis = -1L;
+				lastStatus = Status.FAILED;
+				notifyListeners();
+			}
 			return false;
 		}
 
@@ -223,13 +235,14 @@ public final class ServerPresentationPolicyState {
 				return false;
 			}
 
-			return applyKnown(status, revision, canEdit, white, black, whitelistOnly);
+			return applyKnown(status, revision, canEdit, rules);
 		}
 
 		if (requestId < 0L || requestId != pendingRequestId) {
 			return false;
 		}
 
+		boolean completedRead = pendingOperation == null;
 		pendingRequestId = NO_PENDING_REQUEST;
 		pendingOperation = null;
 		pendingSinceMillis = -1L;
@@ -244,43 +257,42 @@ public final class ServerPresentationPolicyState {
 			return false;
 		}
 
-		mutationOutcomeUncertain = false;
-		lastStatus = status;
-
 		if (known && revision < this.revision) {
 			// A newer broadcast already published a later revision. Keep those
 			// values, but the correlated request is still complete, so the UI
 			// must be told that no request is in flight any more.
+			if (completedRead) mutationOutcomeUncertain = false;
+			lastStatus = status;
 			notifyListeners();
 			return false;
 		}
 
-		return applyKnown(status, revision, canEdit, white, black, whitelistOnly);
+		if (completedRead) mutationOutcomeUncertain = false;
+		lastStatus = status;
+		return applyKnown(status, revision, canEdit, rules);
 	}
 	private boolean applyKnown(
 		Status status,
 		long revision,
 		boolean canEdit,
-		List<String> white,
-		List<String> black,
-		boolean whitelistOnly
+		Map<String, RulesView> rules
 	) {
-		final PresentationPolicy candidate;
-
-		try {
-			candidate = new PresentationPolicy(white, black, whitelistOnly);
-		} catch (RuntimeException ex) {
-			return false;
-		}
+		if (!completeRuleMap(rules)) return false;
 
 		this.known = true;
 		this.revision = revision;
 		this.canEdit = canEdit;
-		this.white = candidate.white();
-		this.black = candidate.black();
-		this.whitelistOnly = candidate.whitelistOnly();
+		this.rules = Map.copyOf(rules);
 		this.lastStatus = status;
 		notifyListeners();
+		return true;
+	}
+
+	private static boolean completeRuleMap(Map<String, RulesView> rules) {
+		if (rules == null || rules.size() != PresentationSettings.TARGET_TYPE_IDS.size()
+			|| !rules.keySet().containsAll(PresentationSettings.TARGET_TYPE_IDS)) return false;
+		for (String type : PresentationSettings.TARGET_TYPE_IDS)
+			if (rules.get(type) == null) return false;
 		return true;
 	}
 
@@ -296,9 +308,7 @@ public final class ServerPresentationPolicyState {
 		known = false;
 		canEdit = false;
 		revision = -1L;
-		white = List.of();
-		black = List.of();
-		whitelistOnly = false;
+		rules = Map.of();
 		pendingRequestId = NO_PENDING_REQUEST;
 		pendingOperation = null;
 		pendingSinceMillis = -1L;
@@ -372,33 +382,21 @@ public final class ServerPresentationPolicyState {
 	}
 
 	/** The known allow selectors; empty while unknown, authoritative when known. */
-	public List<String> white() {
-		return white;
-	}
-
-	/** The known deny selectors; empty while unknown, authoritative when known. */
-	public List<String> black() {
-		return black;
-	}
-
-	public boolean whitelistOnly() {
-		return whitelistOnly;
-	}
+	public Map<String, RulesView> rules() { return isKnown() ? rules : Map.of(); }
+	/** A missing or unknown type never yields a fabricated empty allow view. */
+	public RulesView rulesFor(String type) { return isKnown() ? rules.get(type) : null; }
 
 	/**
 	 * The compiled known rule view, or {@code null} while unknown. UI consumers
 	 * use this read-only policy for truthful rule explanations; it never
 	 * replaces the raw correlated lists for mutation requests.
 	 */
-	public PresentationPolicy policy() {
-		if (!isKnown()) {
+	public PresentationPolicy policyFor(String targetTypeId) {
+		RulesView selected = rulesFor(targetTypeId);
+		if (selected == null) {
 			return null;
 		}
-		try {
-			return new PresentationPolicy(white, black, whitelistOnly);
-		} catch (RuntimeException invalid) {
-			return null;
-		}
+		return selected.policy();
 	}
 
 	/** The last correlated status, or null before any response. */

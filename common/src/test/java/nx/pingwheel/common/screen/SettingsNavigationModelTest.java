@@ -73,7 +73,7 @@ class SettingsNavigationModelTest {
 		var client = SettingsNavigationModel.categories(Scope.CLIENT);
 		var server = SettingsNavigationModel.categories(Scope.SERVER);
 
-		assertEquals(7, client.size());
+		assertEquals(6, client.size());
 		assertEquals(4, server.size());
 		assertEquals(
 			List.of(
@@ -82,8 +82,7 @@ class SettingsNavigationModelTest {
 				"wheel_appearance",
 				"input",
 				"channel_notices",
-				"geometry_config",
-				"presentation"),
+				"geometry_config"),
 			client.stream().map(Category::id).toList());
 		assertEquals(
 			List.of("channel_players", "send_rate", "marker_duration", "server_presentation"),
@@ -116,18 +115,6 @@ class SettingsNavigationModelTest {
 	}
 
 	@Test
-	void presentationCategoryIsClientScopedAndReachableWithoutServerPermission() {
-		var navigation = new SettingsNavigationModel();
-
-		assertEquals(Scope.CLIENT, Category.PRESENTATION.scope());
-		assertTrue(navigation.openCategory(Category.PRESENTATION));
-		assertEquals(Page.CLIENT_PRESENTATION, navigation.current());
-		assertEquals(Category.PRESENTATION, navigation.current().category().orElseThrow());
-		assertTrue(navigation.back());
-		assertEquals(Page.CLIENT_OVERVIEW, navigation.current());
-	}
-
-	@Test
 	void serverPresentationIsIndependentFromOrdinaryServerViewAccess() {
 		var navigation = new SettingsNavigationModel();
 		navigation.selectScope(Scope.SERVER);
@@ -142,20 +129,16 @@ class SettingsNavigationModelTest {
 	}
 
 	@Test
-	void clientAndServerPresentationLeavesRetainIndependentViewports() {
+	void serverPresentationRetainsViewportAcrossScopeSwitches() {
 		var navigation = new SettingsNavigationModel();
-		navigation.openCategory(Category.PRESENTATION);
-		navigation.saveViewStateBeforeNavigation(11, "receive_white_field");
-
 		navigation.selectScope(Scope.SERVER);
 		navigation.openCategory(Category.SERVER_PRESENTATION);
 		navigation.saveViewStateBeforeNavigation(22, "server_black_field");
 		assertEquals(22, navigation.scrollAmount());
 		assertEquals("server_black_field", navigation.focusKey());
 
-		navigation.forcePage(Page.CLIENT_PRESENTATION);
-		assertEquals(11, navigation.scrollAmount());
-		assertEquals("receive_white_field", navigation.focusKey());
+		navigation.selectScope(Scope.CLIENT);
+		navigation.openCategory(Category.MARKER_DISPLAY);
 		navigation.forcePage(Page.SERVER_PRESENTATION);
 		assertEquals(22, navigation.scrollAmount());
 		assertEquals("server_black_field", navigation.focusKey());

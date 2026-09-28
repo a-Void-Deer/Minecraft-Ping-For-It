@@ -11,16 +11,10 @@ import java.util.List;
  * under a compiled policy, the exact allow/block membership of the field id,
  * and the matching rule diagnostics the UI may show.
  *
- * <p>The evaluation mirrors the runtime call sites: client receive and display
- * always pass the server-authorized default, so a local policy can only add
- * allow rules, add deny rules, or switch to whitelist-only; the server policy
- * passes the field's manifest default, which is the server-advertised default
- * for an accepted offer.
+	 * <p>Evaluates a server-advertised manifest field for the selected target type.
  */
 public final class PresentationFieldOutcome {
 	public enum Role {
-		CLIENT_RECEIVE,
-		CLIENT_DISPLAY,
 		SERVER_POLICY
 	}
 
@@ -75,8 +69,7 @@ public final class PresentationFieldOutcome {
 		List<String> blackMatches = policy.matchingSelectors(fieldId, false);
 		boolean allowOn = policy.white().contains(fieldId);
 		boolean blockOn = policy.black().contains(fieldId);
-		boolean effectiveDefault = role == Role.SERVER_POLICY ? manifestDefault : true;
-		boolean allowed = policy.allows(fieldId, effectiveDefault);
+		boolean allowed = policy.allows(fieldId, manifestDefault);
 
 		Effective effective;
 		if (!whiteMatches.isEmpty() && !blackMatches.isEmpty()) {
@@ -87,8 +80,6 @@ public final class PresentationFieldOutcome {
 			effective = Effective.BLOCKED_BY_RULE;
 		} else if (policy.whitelistOnly()) {
 			effective = Effective.BLOCKED_BY_WHITELIST_ONLY;
-		} else if (role != Role.SERVER_POLICY) {
-			effective = Effective.ALLOWED_BY_DEFAULT;
 		} else {
 			effective = manifestDefault ? Effective.ALLOWED_BY_DEFAULT : Effective.DISABLED_BY_DEFAULT;
 		}

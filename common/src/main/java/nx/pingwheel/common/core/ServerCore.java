@@ -46,7 +46,7 @@ import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
-import nx.pingwheel.common.presentation.PresentationPolicy;
+import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService;
 import nx.pingwheel.common.presentation.minecraft.PresentationServer;
@@ -64,6 +64,7 @@ import nx.pingwheel.common.util.RateLimiter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -394,7 +395,7 @@ public class ServerCore {
 				packet.requestId(),
 				ServerPresentationPolicyService.Status.OK,
 				canEdit,
-				ServerPresentationPolicyService.read(settings),
+				ServerPresentationPolicyService.readAll(settings),
 				PRESENTATION_POLICY_REVISION.get());
 			return;
 		}
@@ -405,14 +406,14 @@ public class ServerCore {
 				packet.requestId(),
 				ServerPresentationPolicyService.Status.INVALID,
 				canEdit,
-				ServerPresentationPolicyService.read(null),
+				ServerPresentationPolicyService.readAll(null),
 				PRESENTATION_POLICY_REVISION.get());
 			return;
 		}
 
 		final PresentationSettings candidate = ServerPresentationPolicyService.detachedCopy(settings);
-		final var result = ServerPresentationPolicyService.mutate(
-			canEdit, candidate, packet.operation(), packet.selector(), packet.whitelistOnly());
+		final var result = ServerPresentationPolicyService.mutateSelectedRules(
+			canEdit, candidate, packet.targetTypeId(), packet.operation(), packet.selector(), packet.whitelistOnly());
 
 		if (!result.applied()) {
 			// Denied, invalid, duplicate, missing, full, and no-op requests never
@@ -422,7 +423,7 @@ public class ServerCore {
 				packet.requestId(),
 				result.status(),
 				canEdit,
-				result.policy(),
+				ServerPresentationPolicyService.readAll(settings),
 				PRESENTATION_POLICY_REVISION.get());
 			return;
 		}
@@ -448,16 +449,17 @@ public class ServerCore {
 				packet.requestId(),
 				ServerPresentationPolicyService.Status.FAILED,
 				canEdit,
-				settings.policy(),
+				ServerPresentationPolicyService.readAll(settings),
 				PRESENTATION_POLICY_REVISION.get());
 			return;
 		}
 
 		final long revision = PRESENTATION_POLICY_REVISION.incrementAndGet();
-		final PresentationPolicy appliedPolicy = candidate.policy();
+		final Map<String, ServerPresentationPolicyService.RulesView> appliedRules =
+			ServerPresentationPolicyService.readAll(candidate);
 
 		sendPresentationPolicySnapshot(
-			player, packet.requestId(), result.status(), canEdit, appliedPolicy, revision);
+			player, packet.requestId(), result.status(), canEdit, appliedRules, revision);
 
 		for (ServerPlayer recipient : server.getPlayerList().getPlayers()) {
 			if (recipient == player) {
@@ -469,7 +471,7 @@ public class ServerCore {
 				0L,
 				ServerPresentationPolicyService.Status.OK,
 				recipient.hasPermissions(3),
-				appliedPolicy,
+				appliedRules,
 				revision);
 		}
 	}
@@ -479,7 +481,7 @@ public class ServerCore {
 		long requestId,
 		ServerPresentationPolicyService.Status status,
 		boolean canEdit,
-		PresentationPolicy policy,
+		Map<String, ServerPresentationPolicyService.RulesView> rules,
 		long revision) {
 		IPlatformNetworkService.INSTANCE.sendToClient(
 			new ServerPresentationPolicyS2CPacket(
@@ -487,9 +489,7 @@ public class ServerCore {
 				revision,
 				status,
 				canEdit,
-				policy.white(),
-				policy.black(),
-				policy.whitelistOnly()),
+				rules),
 			player);
 	}
 
@@ -575,21 +575,20 @@ public class ServerCore {
 	public static void onPresentationPacket(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet) {
 		PresentationServer.activate(server);
 		if (packet == null || packet.isCorrupt()) return;
-		if (packet.kind() == PresentationC2SPacket.Kind.HELLO
-			|| packet.kind() == PresentationC2SPacket.Kind.SUBSCRIBE) {
+		if (packet.kind() == PresentationC2SPacket.Kind.HELLO) {
 			PresentationServer.negotiate(server, player, packet);
 			return;
 		}
 		if (!PresentationServer.accepts(player, packet)) return;
 		switch (packet.kind()) {
-			case CREATE -> onMarkerCreate(server, player, packet.requestId(), packet.target(), packet.pingType());
+			case CREATE -> onMarkerCreate(server, player, packet.requestId(), packet.target(), packet.pingType(), packet.properties());
 			case REMOVE -> onMarkerRemove(server, player, packet.markerId());
 			default -> { }
 		}
 	}
 
 	private static void onMarkerCreate(MinecraftServer server, ServerPlayer player, long requestId,
-		Target requestedTarget, String requestedPingType) {
+		Target requestedTarget, String requestedPingType, List<PresentationPropertyIntent> properties) {
 		ensureMarkerStore(server);
 
 		if (requestedTarget == null || requestedPingType == null || requestedPingType.isBlank() || requestId < 0L) {
@@ -630,7 +629,9 @@ public class ServerCore {
 
 		final var outcome = markerService(server).create(
 			player.serverLevel(),
-			player.getUUID(), requestedTarget, requestedPingType, arrivalTick, expiresAtTick, recipients);
+			player.getUUID(), requestedTarget, requestedPingType, arrivalTick, expiresAtTick, recipients,
+			properties, (committed, finalType, audienceOwner, audience, intents) ->
+				PresentationServer.admit(server, player, committed, finalType, audience, intents));
 
 		if (!outcome.isAccepted()) {
 			final var reason = outcome.rejectReason().orElseThrow();
@@ -652,7 +653,8 @@ public class ServerCore {
 			marker.recipients().size()));
 
 		// Basic name and details are projected independently for every negotiated recipient.
-		PresentationServer.created(server, marker, outcome.targetName().orElseThrow(), player.getGameProfile().getName());
+		PresentationServer.created(server, marker, outcome.targetName().orElseThrow(),
+			player.getGameProfile().getName(), outcome.sourceSeeds());
 		sendPresentationWinnerChanges(playerList, creation.winnerChanges(), null);
 	}
 

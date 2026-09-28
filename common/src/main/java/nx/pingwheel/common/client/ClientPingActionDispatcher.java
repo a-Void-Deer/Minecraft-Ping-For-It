@@ -1,5 +1,6 @@
 package nx.pingwheel.common.client;
 
+import java.util.List;
 import java.util.Objects;
 
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
@@ -12,6 +13,7 @@ import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
+import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 
 /**
  * The pure, phase-7 client dispatcher between {@link PingInteractionAction}s
@@ -111,16 +113,22 @@ public final class ClientPingActionDispatcher {
 	 * Maps one interaction outcome onto its side effects.
 	 */
 	public void dispatch(PingInteractionAction action) {
+		dispatch(action, List.of());
+	}
+
+	/** Programmatic property-ping entry point; the ordinary wheel supplies no properties. */
+	public void dispatch(PingInteractionAction action, List<PresentationPropertyIntent> properties) {
 		Objects.requireNonNull(action, "action");
+		List<PresentationPropertyIntent> requested = List.copyOf(properties);
 
 		switch (action) {
-			case PingInteractionAction.CreatePing create -> dispatchCreate(create);
+			case PingInteractionAction.CreatePing create -> dispatchCreate(create, requested);
 			case PingInteractionAction.CancelMarker cancel -> dispatchCancel(cancel);
 			case PingInteractionAction.TargetGone gone -> dispatchTargetGone(gone);
 		}
 	}
 
-	private void dispatchCreate(PingInteractionAction.CreatePing create) {
+	private void dispatchCreate(PingInteractionAction.CreatePing create, List<PresentationPropertyIntent> properties) {
 		if (presentation != null && !presentation.ready()) {
 			return;
 		}
@@ -137,7 +145,7 @@ public final class ClientPingActionDispatcher {
 
 		packetSender.sendToServer(presentation == null
 			? new MarkerCreateC2SPacket(requestId, target, create.pingType().id())
-			: PresentationC2SPacket.create(presentation.epoch(), requestId, target, create.pingType().id()));
+			: PresentationC2SPacket.create(presentation.epoch(), requestId, target, create.pingType().id(), properties));
 
 		logger.debug("dispatch create: requestId={} kind={} pingType={}",
 			requestId, target.kind(), create.pingType().id());

@@ -16,6 +16,7 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetType;
+import nx.pingwheel.common.presentation.PresentationPropertySelection;
 
 /**
  * Server-authoritative bookkeeping for active {@link ServerMarker}s.
@@ -77,6 +78,13 @@ public final class ServerMarkerStore {
 		long expiresAtTick,
 		List<UUID> recipients
 	) {
+		return create(owner, target, targetType, pingType, anchor, arrivalTick, expiresAtTick, recipients, List.of());
+	}
+
+	public synchronized MarkerCreation create(
+		UUID owner, Target target, TargetType targetType, PingType pingType, MarkerAnchor anchor,
+		long arrivalTick, long expiresAtTick, List<UUID> recipients, List<PresentationPropertySelection> properties
+	) {
 		ServerMarker marker = new ServerMarker(
 			idSource.nextId(),
 			owner,
@@ -86,7 +94,7 @@ public final class ServerMarkerStore {
 			anchor,
 			arrivalTick,
 			expiresAtTick,
-			recipients);
+			recipients, properties);
 
 		List<MarkerWinnerChange> winnerChanges = creationChanges(marker);
 
@@ -257,7 +265,7 @@ public final class ServerMarkerStore {
 			anchor,
 			current.arrivalTick(),
 			current.expiresAtTick(),
-			current.recipients());
+			current.recipients(), current.properties());
 
 		markers.put(id, updated);
 		return Optional.of(updated);
@@ -444,7 +452,7 @@ public final class ServerMarkerStore {
 			marker.anchor(),
 			marker.arrivalTick(),
 			marker.expiresAtTick(),
-			recipients);
+			recipients, marker.properties());
 	}
 
 	/**

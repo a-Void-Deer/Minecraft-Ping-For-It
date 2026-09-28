@@ -2,16 +2,20 @@ package nx.pingwheel.common.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonIOException;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import lombok.Getter;
 import lombok.SneakyThrows;
+import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.util.SafeExceptionReport;
 import nx.pingwheel.common.platform.IPlatformContextService;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -314,6 +318,10 @@ public class ConfigHandler <T extends IConfig> {
 			throw new IllegalStateException("serialized config root is not an object");
 		}
 
+		if (configType == ClientConfig.class) {
+			removeKeys(serialized.getAsJsonObject(), REMOVED_CLIENT_PRESENTATION_KEYS);
+		}
+
 		if (rootToPreserve != null) {
 			if (!rootToPreserve.isJsonObject()) {
 				throw new IllegalStateException("migration root is not an object");
@@ -342,8 +350,14 @@ public class ConfigHandler <T extends IConfig> {
 		PingForItVersion configVersion = PingForItVersion.parse(rawConfigVersion);
 		int comparison = configVersion.compareTo(modVersion);
 		if (comparison == 0) {
+			String shapeUpdate = normalizeRawShape(root);
 			return new VersionedConfig(
-				root, configVersion, false, false, List.of(), sourceBytes);
+				root,
+				configVersion,
+				shapeUpdate != null,
+				false,
+				shapeUpdate == null ? List.of() : List.of(shapeUpdate),
+				sourceBytes);
 		}
 
 		LOGGER.warn(
@@ -356,13 +370,263 @@ public class ConfigHandler <T extends IConfig> {
 
 		ConfigVersionUpdater.MigrationResult migration =
 			ConfigVersionUpdater.update(root, configType, configVersion, modVersion);
+		String shapeUpdate = normalizeRawShape(migration.root());
+		List<String> updates = shapeUpdate == null
+			? migration.updates()
+			: appendedUpdate(migration.updates(), shapeUpdate);
 		return new VersionedConfig(
 			migration.root(),
 			configVersion,
 			true,
 			false,
-			migration.updates(),
+			updates,
 			sourceBytes);
+	}
+
+	private static final List<String> REMOVED_CLIENT_PRESENTATION_KEYS =
+		List.of("presentationReceive", "presentationDisplay");
+	private static final List<String> LEGACY_FLAT_PRESENTATION_KEYS =
+		List.of("white", "black", "whitelistOnly");
+
+	/**
+	 * Same-version raw-shape normalization. Only exact obsolete shapes are
+	 * rewritten: the legacy flat server policy is copied to every target type
+	 * when the new map is absent, the new map wins and drops the flat keys when
+	 * present, and the removed client presentation keys are stripped. A future or
+	 * unrecognized shape is preserved for the version guard, and no unrelated
+	 * user data is touched. Returns a non-null description only when the raw root
+	 * changed, so an untouched file is never rewritten.
+	 */
+	private String normalizeRawShape(JsonObject root) {
+		if (configType == ServerConfig.class) {
+			return normalizeServerPresentationShape(root);
+		}
+
+		if (configType == ClientConfig.class) {
+			return removeKeys(root, REMOVED_CLIENT_PRESENTATION_KEYS)
+				? "presentation: obsolete client field policy keys removed"
+				: null;
+		}
+
+		return null;
+	}
+
+	private static String normalizeServerPresentationShape(JsonObject root) {
+		JsonElement presentationElement = root.get("presentation");
+		if (presentationElement == null) {
+			return null;
+		}
+
+		if (!presentationElement.isJsonObject()) {
+			// A malformed security-sensitive policy object must fail closed instead of
+			// failing the whole config into a reset that allows every field. The new
+			// deny state wins over any legacy shape because the whole object is replaced.
+			root.add("presentation", failClosedPresentation());
+			return "presentation: malformed policy object replaced with deny-all target types";
+		}
+
+		JsonObject presentation = presentationElement.getAsJsonObject();
+		boolean changed = false;
+		boolean globalDeny = false;
+
+		JsonElement targetTypesElement = presentation.get("targetTypes");
+		if (targetTypesElement != null) {
+			if (targetTypesElement.isJsonObject()) {
+				JsonObject normalized = normalizeTargetTypeRules(targetTypesElement.getAsJsonObject());
+				if (!normalized.equals(targetTypesElement)) {
+					presentation.add("targetTypes", normalized);
+					changed = true;
+				}
+			} else {
+				// The malformed new map is authoritative over the legacy flat keys: it is
+				// replaced by an explicit deny-all map for every existing target type so a
+				// same-version and an older-version load both stay fail closed.
+				presentation.add("targetTypes", failClosedTargetTypes());
+				changed = true;
+			}
+			changed |= removeKeys(presentation, LEGACY_FLAT_PRESENTATION_KEYS);
+		} else if (presentation.has("white") || presentation.has("black") || presentation.has("whitelistOnly")) {
+			presentation.add("targetTypes", validFlatRuleShape(presentation)
+				? flatRuleCopies(presentation)
+				: failClosedTargetTypes());
+			removeKeys(presentation, LEGACY_FLAT_PRESENTATION_KEYS);
+			changed = true;
+		}
+
+		JsonElement permissionElement = presentation.get("permissionLevels");
+		if (permissionElement != null) {
+			if (permissionElement.isJsonObject()) {
+				JsonObject sanitized = sanitizeIntegralMap(permissionElement.getAsJsonObject());
+				if (!sanitized.equals(permissionElement)) {
+					presentation.add("permissionLevels", sanitized);
+					changed = true;
+					globalDeny = true;
+				}
+			} else {
+				// A malformed global permission structure denies every target type
+				// durably instead of reaching the reset-to-allow recovery path.
+				presentation.remove("permissionLevels");
+				changed = true;
+				globalDeny = true;
+			}
+		}
+
+		JsonElement intervalsElement = presentation.get("updateIntervals");
+		if (intervalsElement != null) {
+			if (intervalsElement.isJsonObject()) {
+				JsonObject sanitized = sanitizeIntegralMap(intervalsElement.getAsJsonObject());
+				if (!sanitized.equals(intervalsElement)) {
+					presentation.add("updateIntervals", sanitized);
+					changed = true;
+				}
+			} else {
+				// Interval overrides are non-security: a malformed shape degrades to
+				// "no overrides" through the existing skip/default validation.
+				presentation.remove("updateIntervals");
+				changed = true;
+			}
+		}
+
+		changed |= removeNonIntegral(presentation, "minUpdateIntervalTicks");
+		changed |= removeNonIntegral(presentation, "scanBudget");
+
+		if (globalDeny) {
+			presentation.add("targetTypes", failClosedTargetTypes());
+			changed = true;
+		}
+
+		return changed ? "presentation: security-sensitive shapes normalized fail closed" : null;
+	}
+
+	private static JsonObject normalizeTargetTypeRules(JsonObject raw) {
+		JsonObject normalized = new JsonObject();
+		for (String id : PresentationSettings.TARGET_TYPE_IDS) {
+			JsonElement entry = raw.get(id);
+			if (entry == null || !entry.isJsonObject() || !validRuleShape(entry.getAsJsonObject())) {
+				// A missing, non-object, or partially mistyped type rule fails closed
+				// instead of silently becoming the allow-by-default rule shape.
+				normalized.add(id, denyAllRule());
+				continue;
+			}
+			normalized.add(id, entry.deepCopy());
+		}
+		return normalized;
+	}
+
+	private static JsonObject flatRuleCopies(JsonObject presentation) {
+		JsonObject targetTypes = new JsonObject();
+		for (String id : PresentationSettings.TARGET_TYPE_IDS) {
+			JsonObject rules = new JsonObject();
+			copyIfPresent(presentation, "white", rules);
+			copyIfPresent(presentation, "black", rules);
+			copyIfPresent(presentation, "whitelistOnly", rules);
+			targetTypes.add(id, rules);
+		}
+		return targetTypes;
+	}
+
+	private static boolean validFlatRuleShape(JsonObject presentation) {
+		return validStringArrayMember(presentation, "white")
+			&& validStringArrayMember(presentation, "black")
+			&& validBooleanMember(presentation, "whitelistOnly");
+	}
+
+	private static boolean validRuleShape(JsonObject rule) {
+		return validStringArrayMember(rule, "white")
+			&& validStringArrayMember(rule, "black")
+			&& validBooleanMember(rule, "whitelistOnly");
+	}
+
+	/** A present member must have the exact JSON type; a missing member keeps the documented default. */
+	private static boolean validStringArrayMember(JsonObject object, String key) {
+		JsonElement value = object.get(key);
+		if (value == null) return true;
+		if (!value.isJsonArray()) return false;
+		for (JsonElement element : value.getAsJsonArray()) {
+			if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) return false;
+		}
+		return true;
+	}
+
+	private static boolean validBooleanMember(JsonObject object, String key) {
+		JsonElement value = object.get(key);
+		if (value == null) return true;
+		return value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean();
+	}
+
+	/** Keeps only entries whose value deserializes to an int without coercion or overflow. */
+	private static JsonObject sanitizeIntegralMap(JsonObject raw) {
+		JsonObject sanitized = new JsonObject();
+		for (var entry : raw.entrySet()) {
+			if (isIntegralNumber(entry.getValue())) sanitized.add(entry.getKey(), entry.getValue());
+		}
+		return sanitized;
+	}
+
+	private static boolean removeNonIntegral(JsonObject object, String key) {
+		JsonElement value = object.get(key);
+		if (value == null) return false;
+		if (isIntegralNumber(value)) return false;
+		object.remove(key);
+		return true;
+	}
+
+	private static boolean isIntegralNumber(JsonElement element) {
+		if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) return false;
+		BigDecimal value;
+		try {
+			value = element.getAsBigDecimal();
+		} catch (RuntimeException ex) {
+			return false;
+		}
+		return value.stripTrailingZeros().scale() <= 0
+			&& value.compareTo(BigDecimal.valueOf(Integer.MIN_VALUE)) >= 0
+			&& value.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) <= 0;
+	}
+
+	private static JsonObject failClosedPresentation() {
+		JsonObject presentation = new JsonObject();
+		presentation.add("targetTypes", failClosedTargetTypes());
+		return presentation;
+	}
+
+	private static JsonObject failClosedTargetTypes() {
+		JsonObject targetTypes = new JsonObject();
+		for (String id : PresentationSettings.TARGET_TYPE_IDS) {
+			targetTypes.add(id, denyAllRule());
+		}
+		return targetTypes;
+	}
+
+	private static JsonObject denyAllRule() {
+		JsonObject rules = new JsonObject();
+		rules.add("white", new JsonArray());
+		JsonArray black = new JsonArray();
+		black.add("*:*");
+		rules.add("black", black);
+		rules.addProperty("whitelistOnly", true);
+		return rules;
+	}
+
+	private static void copyIfPresent(JsonObject source, String key, JsonObject target) {
+		JsonElement value = source.get(key);
+		if (value != null) {
+			target.add(key, value.deepCopy());
+		}
+	}
+
+	private static boolean removeKeys(JsonObject root, List<String> keys) {
+		boolean removed = false;
+		for (String key : keys) {
+			removed |= root.remove(key) != null;
+		}
+		return removed;
+	}
+
+	private static List<String> appendedUpdate(List<String> updates, String update) {
+		List<String> merged = new java.util.ArrayList<>(updates);
+		merged.add(update);
+		return List.copyOf(merged);
 	}
 
 	private void rejectFutureConfig(PingForItVersion configVersion) {

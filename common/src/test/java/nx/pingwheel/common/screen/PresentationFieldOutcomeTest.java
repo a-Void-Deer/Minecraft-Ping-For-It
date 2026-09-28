@@ -17,18 +17,6 @@ class PresentationFieldOutcomeTest {
 	private static final String OTHER = "create:inventory.summary";
 
 	@Test
-	void clientRolesAlwaysUseTheServerAuthorizedDefault() {
-		PresentationPolicy empty = PresentationPolicy.acceptAll();
-
-		assertEquals(PresentationFieldOutcome.Effective.ALLOWED_BY_DEFAULT,
-			PresentationFieldOutcome.evaluate(
-				PresentationFieldOutcome.Role.CLIENT_RECEIVE, empty, FIELD, false).effective());
-		assertEquals(PresentationFieldOutcome.Effective.ALLOWED_BY_DEFAULT,
-			PresentationFieldOutcome.evaluate(
-				PresentationFieldOutcome.Role.CLIENT_DISPLAY, empty, FIELD, false).effective());
-	}
-
-	@Test
 	void serverRoleUsesTheAdvertisedManifestDefault() {
 		PresentationPolicy empty = PresentationPolicy.acceptAll();
 
@@ -68,13 +56,13 @@ class PresentationFieldOutcomeTest {
 	void whitelistOnlyBlocksUnmatchedFieldsButStillHonorsAllowRules() {
 		PresentationPolicy blocked = new PresentationPolicy(List.of(), List.of(), true);
 		PresentationFieldOutcome.Outcome blockedOutcome = PresentationFieldOutcome.evaluate(
-			PresentationFieldOutcome.Role.CLIENT_RECEIVE, blocked, FIELD, true);
+			PresentationFieldOutcome.Role.SERVER_POLICY, blocked, FIELD, true);
 		assertEquals(PresentationFieldOutcome.Effective.BLOCKED_BY_WHITELIST_ONLY, blockedOutcome.effective());
 		assertFalse(blockedOutcome.allowed());
 
 		PresentationPolicy allowed = new PresentationPolicy(List.of(FIELD), List.of(), true);
 		PresentationFieldOutcome.Outcome allowedOutcome = PresentationFieldOutcome.evaluate(
-			PresentationFieldOutcome.Role.CLIENT_RECEIVE, allowed, FIELD, true);
+			PresentationFieldOutcome.Role.SERVER_POLICY, allowed, FIELD, true);
 		assertEquals(PresentationFieldOutcome.Effective.ALLOWED_BY_RULE, allowedOutcome.effective());
 		assertTrue(allowedOutcome.allowed());
 	}
@@ -115,10 +103,11 @@ class PresentationFieldOutcomeTest {
 		long requestId = state.beginConnection();
 		assertFalse(PresentationFieldOutcome.canEditServerPolicy(state), "a pending read is not editable");
 
-		assertTrue(state.applySnapshot(requestId, 1, Status.OK, true, List.of(), List.of(), false));
+		assertTrue(state.applySnapshot(requestId, 1, Status.OK, true,
+			nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket.defaultRules()));
 		assertTrue(PresentationFieldOutcome.canEditServerPolicy(state));
 
-		state.beginMutation(Operation.ADD_WHITE, FIELD, false);
+		state.beginMutation("entity", Operation.ADD_WHITE, FIELD, false);
 		assertFalse(PresentationFieldOutcome.canEditServerPolicy(state), "an in-flight mutation disables the controls");
 
 		now[0] = 200L;
@@ -128,7 +117,8 @@ class PresentationFieldOutcomeTest {
 
 		long deniedRequest = state.beginReadRequest();
 		assertTrue(deniedRequest > 0L);
-		state.applySnapshot(deniedRequest, 2, Status.DENIED, false, List.of(), List.of(), false);
+		state.applySnapshot(deniedRequest, 2, Status.DENIED, false,
+			nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket.defaultRules());
 		assertFalse(PresentationFieldOutcome.canEditServerPolicy(state), "a denied read revokes the edit hint");
 	}
 }

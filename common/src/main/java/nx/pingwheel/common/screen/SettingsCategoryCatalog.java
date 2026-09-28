@@ -2,7 +2,6 @@ package nx.pingwheel.common.screen;
 
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 
-import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -15,9 +14,6 @@ import java.util.Map;
  */
 public final class SettingsCategoryCatalog {
 	public enum PresentationSection {
-		CLIENT_RECEIVE,
-		CLIENT_DISPLAY,
-		SERVER_REFERENCE,
 		SERVER_EDITOR
 	}
 
@@ -52,8 +48,6 @@ public final class SettingsCategoryCatalog {
 		MS_TO_REGENERATE("ms_to_regenerate"),
 		RATE_LIMIT("rate_limit"),
 		SYNC_DURATION("sync_duration"),
-		PRESENTATION_RECEIVE("presentation_receive"),
-		PRESENTATION_DISPLAY("presentation_display"),
 		PRESENTATION_SERVER_POLICY("presentation_server_policy");
 
 		private final String id;
@@ -83,19 +77,8 @@ public final class SettingsCategoryCatalog {
 	 * exactly one shared read-only reference after both local editors.
 	 */
 	public static List<PresentationSection> presentationSections(Category category) {
-		var sections = new ArrayList<PresentationSection>();
-		for (Setting setting : settings(category)) {
-			switch (setting) {
-				case PRESENTATION_RECEIVE -> sections.add(PresentationSection.CLIENT_RECEIVE);
-				case PRESENTATION_DISPLAY -> sections.add(PresentationSection.CLIENT_DISPLAY);
-				case PRESENTATION_SERVER_POLICY -> sections.add(PresentationSection.SERVER_EDITOR);
-				default -> throw new IllegalArgumentException("not a presentation category: " + category);
-			}
-		}
-		if (category == Category.PRESENTATION) {
-			sections.add(PresentationSection.SERVER_REFERENCE);
-		}
-		return List.copyOf(sections);
+		if (category != Category.SERVER_PRESENTATION) throw new IllegalArgumentException("not a presentation category: " + category);
+		return List.of(PresentationSection.SERVER_EDITOR);
 	}
 
 	private static Map<Category, List<Setting>> createSettings() {
@@ -138,9 +121,6 @@ public final class SettingsCategoryCatalog {
 			Setting.MS_TO_REGENERATE,
 			Setting.RATE_LIMIT));
 		settings.put(Category.MARKER_DURATION, List.of(Setting.SYNC_DURATION));
-		settings.put(Category.PRESENTATION, List.of(
-			Setting.PRESENTATION_RECEIVE,
-			Setting.PRESENTATION_DISPLAY));
 		settings.put(Category.SERVER_PRESENTATION, List.of(Setting.PRESENTATION_SERVER_POLICY));
 		return Map.copyOf(settings);
 	}

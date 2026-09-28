@@ -23,6 +23,16 @@ import nx.pingwheel.common.interaction.state.TargetGoneReason;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.presentation.PresentationField;
+import nx.pingwheel.common.presentation.PresentationPropertyIntent;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.client.ClientPresentation;
+import net.minecraft.network.FriendlyByteBuf;
+import io.netty.buffer.Unpooled;
+import java.util.Map;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 
@@ -307,6 +317,39 @@ class ClientPingActionDispatcherTest {
 		CapturedPingContext context = capture(TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0), token);
 		return new PingInteractionAction.CreatePing(
 			context, context.resolvedTarget().targetType().defaultPingType());
+	}
+
+	@Test
+	void programmaticPropertyCreateUsesFrozenTargetAndActualTypedWire() {
+		Harness h = harness();
+		ClientPresentation presentation = new ClientPresentation(h.sender::sendToServer);
+		presentation.tick(true);
+		assertTrue(presentation.offer(PresentationS2CPacket.offer(31L,
+			Map.of(ClientPresentation.BASIC, List.of(new PresentationField(
+				"minecraft:entity.health", PresentationField.Kind.NUMBER, true, 0, "Health"))),
+			Map.of(ClientPresentation.BASIC, 1))));
+		assertTrue(presentation.reset(PresentationS2CPacket.reset(31L, 1L, Map.of())));
+		var dispatcher = new ClientPingActionDispatcher(h.sender, h.sink, h.logger,
+			new CreateRequestTracker(), new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(0, 0)),
+			presentation);
+		var action = createAction(new ActiveInteraction().begin());
+		var ref = new PresentationPropertyRef("create:presentation", "create:inventory.summary",
+			List.of("counts", "minecraft:cobblestone"));
+		var property = PresentationPropertyIntent.of(ref, new PresentationValue.NumberValue(64), "request");
+		dispatcher.dispatch(action, List.of(property));
+		PresentationC2SPacket sent = assertInstanceOf(PresentationC2SPacket.class, h.sender.sent.get(1));
+		FriendlyByteBuf bytes = new FriendlyByteBuf(Unpooled.buffer());
+		try {
+			sent.write(bytes);
+			var decoded = PresentationC2SPacket.readSafe(bytes);
+			assertFalse(decoded.isCorrupt());
+			assertEquals(action.context().resolvedTarget().target(), decoded.target());
+			assertEquals(action.pingType().id(), decoded.pingType());
+			assertEquals(List.of(property), decoded.properties());
+			assertEquals(0, bytes.readableBytes());
+		} finally { bytes.release(); }
+		dispatcher.dispatch(action);
+		assertEquals(List.of(), ((PresentationC2SPacket) h.sender.sent.get(2)).properties());
 	}
 
 	private static final class ManualTime implements InteractionTimeSource {

@@ -8,6 +8,8 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetType;
+import nx.pingwheel.common.presentation.PresentationPropertySelection;
+import nx.pingwheel.common.presentation.PresentationCodec;
 
 /**
  * An immutable, server-authoritative active ping.
@@ -28,8 +30,13 @@ public record ServerMarker(
 	MarkerAnchor anchor,
 	long arrivalTick,
 	long expiresAtTick,
-	List<UUID> recipients
+	List<UUID> recipients,
+	List<PresentationPropertySelection> properties
 ) {
+	public ServerMarker(MarkerId id, UUID owner, Target target, TargetType targetType, PingType pingType,
+		MarkerAnchor anchor, long arrivalTick, long expiresAtTick, List<UUID> recipients) {
+		this(id, owner, target, targetType, pingType, anchor, arrivalTick, expiresAtTick, recipients, List.of());
+	}
 
 	public ServerMarker {
 		Objects.requireNonNull(id, "id");
@@ -66,6 +73,10 @@ public record ServerMarker(
 		}
 
 		recipients = normalizeRecipients(Objects.requireNonNull(recipients, "recipients"));
+		properties = List.copyOf(Objects.requireNonNull(properties, "properties"));
+		if (properties.size() > PresentationCodec.MAX_PROPERTIES
+			|| properties.stream().map(PresentationPropertySelection::ref).distinct().count() != properties.size())
+			throw new IllegalArgumentException("duplicate or excessive property selections");
 	}
 
 	/**

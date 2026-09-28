@@ -37,7 +37,6 @@ import nx.pingwheel.common.presentation.PresentationPolicy;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Operation;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Status;
-import nx.pingwheel.common.presentation.client.ClientPresentation;
 import nx.pingwheel.common.presentation.client.PresentationFieldCatalog;
 import nx.pingwheel.common.presentation.client.ServerPresentationPolicyState;
 import nx.pingwheel.common.resource.LanguageUtils;
@@ -97,17 +96,18 @@ public class SettingsScreen extends OptionsSubScreen {
 		this::onPresentationPolicyChanged;
 	private final PresentationSelectorDraftModel presentationDrafts = new PresentationSelectorDraftModel();
 	private final Map<PresentationSelectorDraftModel.Slot, StringWidget> presentationSlotFeedbackWidgets =
-		new EnumMap<>(PresentationSelectorDraftModel.Slot.class);
+		new HashMap<>();
 	private final Map<PresentationSelectorDraftModel.Slot, PresentationSelectorEditBox> presentationSelectorFields =
-		new EnumMap<>(PresentationSelectorDraftModel.Slot.class);
+		new HashMap<>();
+	private String selectedPresentationTargetType = PresentationSettings.TARGET_TYPE_IDS.get(0);
 	private ServerPresentationPolicyState presentationPolicyState;
 	private Operation presentationPendingOperation;
+	private String presentationPendingTargetType;
 	private MutableComponent presentationGeneralFeedback;
+	private final Map<String, MutableComponent> presentationWhitelistFeedback = new HashMap<>();
 	private StringWidget presentationGeneralFeedbackWidget;
 	private final Set<String> presentationAdvancedExpanded = new HashSet<>();
 	private final Map<String, MutableComponent> presentationQuickFeedback = new HashMap<>();
-	/** Non-error explanations for an action that left the effective state unchanged. */
-	private final Map<String, MutableComponent> presentationQuickNotices = new HashMap<>();
 	private PresentationQuickAction presentationPendingQuickAction;
 	private long presentationCatalogStamp = -1L;
 
@@ -482,7 +482,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void addCategoryPage(Category category) {
-		if (category == Category.PRESENTATION || category == Category.SERVER_PRESENTATION) {
+		if (category == Category.SERVER_PRESENTATION) {
 			this.addPresentationPage(category);
 			return;
 		}
@@ -606,74 +606,28 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void addPresentationPage(Category category) {
-		for (var section : SettingsCategoryCatalog.presentationSections(category)) {
-			switch (section) {
-				case CLIENT_RECEIVE -> {
-					this.addHeading(LanguageUtils.settings("presentation").path("receive").get());
-					this.addPresentationLocalPanel(config.getPresentationReceive(), "receive");
-				}
-				case CLIENT_DISPLAY -> {
-					this.addHeading(LanguageUtils.settings("presentation").path("display").get());
-					this.addPresentationLocalPanel(config.getPresentationDisplay(), "display");
-				}
-				case SERVER_REFERENCE -> this.addPresentationServerReadOnly("client_server_read_only");
-				case SERVER_EDITOR -> {
-					this.addHeading(LanguageUtils.settings("presentation").path("server", "title").get());
-					this.addPresentationServerPanel();
-				}
-			}
-		}
-	}
-
-	private void addPresentationLocalPanel(PresentationSettings settings, String panelKey) {
-		final var role = "receive".equals(panelKey)
-			? PresentationFieldOutcome.Role.CLIENT_RECEIVE
-			: PresentationFieldOutcome.Role.CLIENT_DISPLAY;
-		this.addPresentationFieldCatalog(panelKey, role, settings.policy(), settings, false);
-		this.addPresentationAdvancedToggle(panelKey, settings.policy());
-		if (!this.presentationAdvancedExpanded.contains(panelKey)) {
-			return;
-		}
-
-		final var whitelistOnlyText = LanguageUtils.settings("presentation").path("whitelist_only");
-		this.addPresentationBooleanRow(
-			panelKey + "_whitelist_only",
-			whitelistOnlyText,
-			settings::isWhitelistOnly,
-			settings::setWhitelistOnly);
-		this.addPresentationLocalList(panelKey, settings, true);
-		this.addPresentationLocalList(panelKey, settings, false);
+		SettingsCategoryCatalog.presentationSections(category);
+		this.addHeading(LanguageUtils.settings("presentation").path("server", "title").get());
+		this.addPresentationServerPanel();
 	}
 
 	/**
-	 * Renders the known-field chooser grouped by namespace. The local editors
-	 * use the registered client manifest (or its offline preview); the server
-	 * editor uses only the fields the accepted offer advertised.
+	 * Renders only fields advertised by the accepted server offer.
 	 */
-	private void addPresentationFieldCatalog(
-		String panelKey,
-		PresentationFieldOutcome.Role role,
-		PresentationPolicy policy,
-		PresentationSettings localSettings,
-		boolean serverPolicy
-	) {
-		final PresentationFieldCatalog catalog = serverPolicy ? this.acceptedCatalog() : this.localCatalog();
-		if (!serverPolicy && CommonClient.INSTANCE.getPingRuntime() == null) {
-			this.addFullWidth(panelKey + "_local_preview", this.createPresentationReadOnlyRow(
-				LanguageUtils.settings("presentation").path("fields", "local_preview").get()));
-		}
+	private void addPresentationFieldCatalog(String panelKey, PresentationPolicy policy) {
+		final PresentationFieldCatalog catalog = this.acceptedCatalog();
 
 		if (catalog.isEmpty()) {
 			// An accepted offer with no compatible field is a known empty list;
 			// before any offer the same emptiness is unknown, not authoritative.
-			final boolean unknown = serverPolicy && !this.serverCatalogOffered();
+			final boolean unknown = !this.serverCatalogOffered();
 			this.addFullWidth(panelKey + "_catalog_state", this.createPresentationReadOnlyRow(
 				LanguageUtils.settings("presentation").path("fields", unknown ? "unknown" : "empty").get()));
 			this.addPresentationQuickFeedbackRow(panelKey);
 			return;
 		}
 
-		if (serverPolicy && !this.isPresentationPolicyKnown()) {
+		if (!this.isPresentationPolicyKnown()) {
 			this.addFullWidth(panelKey + "_catalog_unknown", this.createPresentationReadOnlyRow(
 				LanguageUtils.settings("presentation").path("fields", "unknown").get()));
 		}
@@ -681,7 +635,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		for (PresentationFieldCatalog.Namespace namespace : catalog.namespaces()) {
 			this.addPresentationNamespaceHeading(namespace);
 			for (PresentationFieldCatalog.Entry entry : namespace.entries()) {
-				this.addPresentationFieldRow(panelKey, role, policy, localSettings, entry, serverPolicy);
+				this.addPresentationFieldRow(panelKey, policy, entry);
 			}
 		}
 		this.addPresentationQuickFeedbackRow(panelKey);
@@ -689,26 +643,18 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private void addPresentationFieldRow(
 		String panelKey,
-		PresentationFieldOutcome.Role role,
 		PresentationPolicy policy,
-		PresentationSettings localSettings,
-		PresentationFieldCatalog.Entry entry,
-		boolean serverPolicy
+		PresentationFieldCatalog.Entry entry
 	) {
 		final String fieldId = entry.field().id();
 		final String key = panelKey + "_field_" + entry.translationSuffix();
 		final PresentationFieldOutcome.Outcome outcome = PresentationFieldOutcome.evaluate(
-			role, policy, fieldId, entry.field().enabledByDefault());
-
-		if (!serverPolicy) {
-			this.addPresentationClientFieldControl(panelKey, role, localSettings, entry, outcome);
-			return;
-		}
+			PresentationFieldOutcome.Role.SERVER_POLICY, policy, fieldId, entry.field().enabledByDefault());
 
 		// The tooltip owns the complete name, outcome, and rule detail; the row
 		// itself truncates like every other long settings label.
 		final String fullText = this.friendlyFieldName(entry).getString()
-			+ ": " + this.outcomeText(outcome.effective(), role).getString();
+			+ ": " + this.outcomeText(outcome.effective()).getString();
 		final String display = this.font.plainSubstrByWidth(
 			fullText,
 			SettingsScreenLayout.LARGE_WIDGET_WIDTH - 8);
@@ -720,120 +666,34 @@ public class SettingsScreen extends OptionsSubScreen {
 			Component.literal(display.length() < fullText.length() ? display + "..." : display),
 			this.font).alignLeft();
 		label.active = false;
-		label.setTooltip(Tooltip.create(this.fieldTooltip(entry, outcome, role)));
+		label.setTooltip(Tooltip.create(this.fieldTooltip(entry, outcome)));
 		this.addFullWidth(key + "_label", label);
 
 		final boolean editable = PresentationFieldOutcome.canEditServerPolicy(this.presentationPolicyState);
+		final String fieldTargetType = selectedPresentationTargetType;
 
 		final Button allow = Button.builder(
 			this.fieldRuleButtonText(true, outcome.allowOn()),
 			ignored -> this.toggleServerFieldRule(
-				panelKey, fieldId, true, outcome.allowOn()))
+				fieldTargetType, panelKey, fieldId, true, outcome.allowOn()))
 			.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
 		allow.active = editable;
-		allow.setTooltip(Tooltip.create(this.fieldRuleTooltip(true, outcome, role)));
+		allow.setTooltip(Tooltip.create(this.fieldRuleTooltip(true, outcome)));
 		this.addHalfWidth(key + "_allow", allow);
 
 		final Button block = Button.builder(
 			this.fieldRuleButtonText(false, outcome.blockOn()),
 			ignored -> this.toggleServerFieldRule(
-				panelKey, fieldId, false, outcome.blockOn()))
+				fieldTargetType, panelKey, fieldId, false, outcome.blockOn()))
 			.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
 		block.active = editable;
-		block.setTooltip(Tooltip.create(this.fieldRuleTooltip(false, outcome, role)));
+		block.setTooltip(Tooltip.create(this.fieldRuleTooltip(false, outcome)));
 		this.addHalfWidth(key + "_block", block);
 	}
 
-	/**
-	 * The ordinary client row: one full-width control whose label carries the
-	 * friendly field name and the truthful effective state. The field id,
-	 * default, and rule diagnostics stay in the tooltip.
-	 */
-	private void addPresentationClientFieldControl(
-		String panelKey,
-		PresentationFieldOutcome.Role role,
-		PresentationSettings settings,
-		PresentationFieldCatalog.Entry entry,
-		PresentationFieldOutcome.Outcome outcome
-	) {
-		final String fieldId = entry.field().id();
-		final String key = panelKey + "_field_" + entry.translationSuffix();
-		final boolean allowed = outcome.allowed();
-		final var control = Button.builder(
-			this.clientFieldControlText(entry, allowed),
-			ignored -> this.pressClientFieldControl(panelKey, settings, fieldId, allowed))
-			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
-			.build();
-		control.setTooltip(Tooltip.create(this.clientFieldTooltip(entry, outcome, role, allowed)));
-		this.addFullWidth(key + "_control", control);
-	}
-
-	private MutableComponent clientFieldControlText(PresentationFieldCatalog.Entry entry, boolean allowed) {
-		return Component.empty()
-			.append(this.friendlyFieldName(entry))
-			.append(": ")
-			.append(LanguageUtils.settings("presentation")
-				.path("field", allowed ? "on" : "client_hidden").get());
-	}
-
-	private Component clientFieldTooltip(
-		PresentationFieldCatalog.Entry entry,
-		PresentationFieldOutcome.Outcome outcome,
-		PresentationFieldOutcome.Role role,
-		boolean allowed
-	) {
-		return Component.empty()
-			.append(this.fieldTooltip(entry, outcome, role))
-			.append("\n")
-			.append(LanguageUtils.settings("presentation")
-				.path("field", allowed ? "client_tooltip_hide" : "client_tooltip_allow").get());
-	}
-
-	/**
-	 * One client field control action. The requested action is the inverse of
-	 * the control's truthful effective state; only the exact allow selector
-	 * changes, and a field that a default or remaining group allow rule keeps
-	 * enabled reports that in the panel's feedback row instead of claiming it
-	 * was hidden.
-	 */
-	private void pressClientFieldControl(
-		String panelKey,
-		PresentationSettings settings,
-		String fieldId,
-		boolean allowed
-	) {
-		final var decision = PresentationClientFieldControl.apply(settings.policy(), fieldId, !allowed);
-		this.setPresentationQuickFeedback(panelKey, null);
-		this.setPresentationQuickNotice(panelKey, null);
-		switch (decision.result()) {
-			case ENABLED, REMOVED, ALREADY_ENABLED -> {
-			}
-			case REMOVED_DEFAULT_STILL_ALLOWED -> this.setPresentationQuickNotice(panelKey,
-				LanguageUtils.settings("presentation").path("field", "client_removed_default").get());
-			case REMOVED_GROUP_STILL_ALLOWED -> this.setPresentationQuickNotice(panelKey,
-				LanguageUtils.settings("presentation").path("field", "client_group_keeps").get());
-			case NO_EXACT_ALLOW -> {
-				if (decision.effectiveAllowed()) {
-					this.setPresentationQuickNotice(panelKey,
-						LanguageUtils.settings("presentation").path("field", "client_default_keeps").get());
-				}
-			}
-			case NO_EXACT_ALLOW_GROUP -> this.setPresentationQuickNotice(panelKey,
-				LanguageUtils.settings("presentation").path("field", "client_group_keeps").get());
-			case LIST_FULL -> this.setPresentationQuickFeedback(
-				panelKey, PresentationSelectorDraftModel.Feedback.LIST_FULL);
-			case INVALID_FIELD, MISSING_POLICY -> this.setPresentationQuickFeedback(
-				panelKey, PresentationSelectorDraftModel.Feedback.INVALID);
-		}
-		if (decision.changed()) {
-			settings.setWhite(decision.white());
-		}
-		this.rebuildPage(true);
-	}
-
-	private void toggleServerFieldRule(String panelKey, String fieldId, boolean white, boolean on) {
+	private void toggleServerFieldRule(String type, String panelKey, String fieldId, boolean white, boolean on) {
 		final var state = this.presentationPolicyState;
 		if (!PresentationFieldOutcome.canEditServerPolicy(state)) {
 			this.setPresentationQuickFeedback(panelKey, this.unavailableServerFeedback(state));
@@ -847,15 +707,18 @@ public class SettingsScreen extends OptionsSubScreen {
 		// Begin the pending correlation before the send: a synchronous state
 		// notification may rebuild the page during the call.
 		this.presentationPendingOperation = operation;
+		this.presentationPendingTargetType = type;
 		this.presentationPendingQuickAction = new PresentationQuickAction(panelKey);
-		if (!CommonClient.INSTANCE.requestPresentationPolicyMutation(operation, fieldId, false)) {
-			this.presentationPendingOperation = null;
-			this.presentationPendingQuickAction = null;
-			this.setPresentationQuickFeedback(panelKey, PresentationSelectorDraftModel.Feedback.ERROR);
+		if (!CommonClient.INSTANCE.requestPresentationPolicyMutation(type, operation, fieldId, false)) {
+			if (this.presentationPendingOperation != null) {
+				this.presentationPendingOperation = null;
+				this.presentationPendingQuickAction = null;
+				this.setPresentationQuickFeedback(panelKey, PresentationSelectorDraftModel.Feedback.ERROR);
+			}
 			this.rebuildPage(true);
 			return;
 		}
-		this.setPresentationQuickFeedback(panelKey, null);
+		if (this.presentationPendingOperation != null) this.setPresentationQuickFeedback(panelKey, null);
 		this.rebuildPage(true);
 	}
 
@@ -865,18 +728,15 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private MutableComponent friendlyFieldName(PresentationFieldCatalog.Entry entry) {
-		return LanguageUtils.settings("presentation").path("field", entry.translationSuffix(), "name").get();
+		final var localized = LanguageUtils.settings("presentation").path("field", entry.translationSuffix(), "name");
+		return I18n.exists(localized.getKey()) ? localized.get() : Component.literal(entry.field().label());
 	}
 
-	private MutableComponent outcomeText(PresentationFieldOutcome.Effective effective, PresentationFieldOutcome.Role role) {
+	private MutableComponent outcomeText(PresentationFieldOutcome.Effective effective) {
 		final var text = LanguageUtils.settings("presentation").path("outcome");
 		return switch (effective) {
 			case ALLOWED_BY_RULE -> text.path("allowed_rule").get();
-			case ALLOWED_BY_DEFAULT -> switch (role) {
-				case CLIENT_RECEIVE -> text.path("client_receive").get();
-				case CLIENT_DISPLAY -> text.path("client_display").get();
-				case SERVER_POLICY -> text.path("allowed_default").get();
-			};
+			case ALLOWED_BY_DEFAULT -> text.path("allowed_default").get();
 			case ALLOW_RULE_PRIORITY -> text.path("allow_priority").get();
 			case BLOCKED_BY_RULE -> text.path("blocked_rule").get();
 			case BLOCKED_BY_WHITELIST_ONLY -> text.path("blocked_whitelist").get();
@@ -887,18 +747,18 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private Component fieldTooltip(
 		PresentationFieldCatalog.Entry entry,
-		PresentationFieldOutcome.Outcome outcome,
-		PresentationFieldOutcome.Role role
+		PresentationFieldOutcome.Outcome outcome
 	) {
 		final var text = LanguageUtils.settings("presentation");
+		final var description = text.path("field", entry.translationSuffix(), "description");
 		final MutableComponent tooltip = Component.empty()
-			.append(text.path("field", entry.translationSuffix(), "description").get())
+			.append(I18n.exists(description.getKey()) ? description.get() : this.friendlyFieldName(entry))
 			.append("\n")
 			.append(text.path("field", "id").get(Component.literal(entry.field().id())))
 			.append("\n")
-			.append(text.path("field", "default").get(this.fieldDefaultText(entry, role)))
+			.append(text.path("field", "default").get(this.fieldDefaultText(entry)))
 			.append("\n")
-			.append(text.path("field", "now").get(this.outcomeText(outcome.effective(), role)));
+			.append(text.path("field", "now").get(this.outcomeText(outcome.effective())));
 		if (!outcome.matchingWhite().isEmpty()) {
 			tooltip.append("\n").append(text.path("field", "matching_white")
 				.get(Component.literal(String.join(", ", outcome.matchingWhite()))));
@@ -910,26 +770,19 @@ public class SettingsScreen extends OptionsSubScreen {
 		return tooltip;
 	}
 
-	private Component fieldDefaultText(PresentationFieldCatalog.Entry entry, PresentationFieldOutcome.Role role) {
-		if (role == PresentationFieldOutcome.Role.CLIENT_RECEIVE) {
-			return LanguageUtils.settings("presentation").path("outcome", "client_receive").get();
-		}
-		if (role == PresentationFieldOutcome.Role.CLIENT_DISPLAY) {
-			return LanguageUtils.settings("presentation").path("outcome", "client_display").get();
-		}
-		return LanguageUtils.of("value", entry.field().enabledByDefault() ? "enabled" : "disabled").get();
+	private Component fieldDefaultText(PresentationFieldCatalog.Entry entry) {
+		return LanguageUtils.settings("presentation").path("field", entry.field().enabledByDefault() ? "on" : "off").get();
 	}
 
 	private Component fieldRuleTooltip(
 		boolean white,
-		PresentationFieldOutcome.Outcome outcome,
-		PresentationFieldOutcome.Role role
+		PresentationFieldOutcome.Outcome outcome
 	) {
 		return Component.empty()
 			.append(LanguageUtils.settings("presentation").path("rule", white ? "allow" : "block", "tooltip").get())
 			.append("\n")
 			.append(LanguageUtils.settings("presentation").path("field", "now")
-				.get(this.outcomeText(outcome.effective(), role)));
+				.get(this.outcomeText(outcome.effective())));
 	}
 
 	private void addPresentationNamespaceHeading(PresentationFieldCatalog.Namespace namespace) {
@@ -945,15 +798,8 @@ public class SettingsScreen extends OptionsSubScreen {
 	private void addPresentationQuickFeedbackRow(String panelKey) {
 		this.flushPendingHalfWidthRow();
 		final MutableComponent error = this.presentationQuickFeedback.get(panelKey);
-		final MutableComponent notice = this.presentationQuickNotices.get(panelKey);
-		final MutableComponent message;
-		if (error != null) {
-			message = error.copy().withStyle(ChatFormatting.RED);
-		} else if (notice != null) {
-			message = notice.copy().withStyle(ChatFormatting.YELLOW);
-		} else {
-			message = Component.empty();
-		}
+		final MutableComponent message = error == null ? Component.empty()
+			: error.copy().withStyle(ChatFormatting.RED);
 		final var row = new StringWidget(
 			0,
 			0,
@@ -970,17 +816,6 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.presentationQuickFeedback.remove(panelKey);
 		} else {
 			this.presentationQuickFeedback.put(panelKey, this.presentationFeedbackText(feedback));
-			this.presentationQuickNotices.remove(panelKey);
-		}
-	}
-
-	/** A truthful, non-error explanation of an action whose effective state did not change. */
-	private void setPresentationQuickNotice(String panelKey, MutableComponent notice) {
-		if (notice == null) {
-			this.presentationQuickNotices.remove(panelKey);
-		} else {
-			this.presentationQuickNotices.put(panelKey, notice);
-			this.presentationQuickFeedback.remove(panelKey);
 		}
 	}
 
@@ -1002,13 +837,6 @@ public class SettingsScreen extends OptionsSubScreen {
 			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
 		this.addFullWidth(panelKey + "_advanced", button);
-	}
-
-	private PresentationFieldCatalog localCatalog() {
-		final var runtime = CommonClient.INSTANCE.getPingRuntime();
-		final var presentation = runtime == null ? null : runtime.presentation();
-		return PresentationFieldCatalog.ofAdapters(
-			presentation == null ? ClientPresentation.localManifest() : presentation.manifest());
 	}
 
 	private PresentationFieldCatalog acceptedCatalog() {
@@ -1034,8 +862,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			return;
 		}
 		this.presentationCatalogStamp = stamp;
-		if (this.navigation.current() == Page.CLIENT_PRESENTATION
-			|| this.navigation.current() == Page.SERVER_PRESENTATION) {
+		if (this.navigation.current() == Page.SERVER_PRESENTATION) {
 			this.rebuildPage(true);
 		}
 	}
@@ -1044,58 +871,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		final var runtime = CommonClient.INSTANCE.getPingRuntime();
 		final var presentation = runtime == null ? null : runtime.presentation();
 		return presentation == null ? 0L : 1L + presentation.catalogRevision();
-	}
-
-	private void addPresentationBooleanRow(
-		String key,
-		LanguageUtils text,
-		Supplier<Boolean> getter,
-		Consumer<Boolean> setter
-	) {
-		final var option = OptionUtils.ofBool(
-			text.getKey(),
-			getter,
-			setter,
-			() -> text.path("tooltip").get());
-		final AbstractWidget widget = option.createButton(
-			Game.options,
-			0,
-			0,
-			SettingsScreenLayout.LARGE_WIDGET_WIDTH);
-		this.addFullWidth(key, widget);
-	}
-
-	private void addPresentationLocalList(String panelKey, PresentationSettings settings, boolean toWhite) {
-		final String listKey = panelKey + (toWhite ? "_white" : "_black");
-		final PresentationSelectorDraftModel.Slot slot =
-			PresentationSelectorDraftModel.Slot.local(panelKey, toWhite);
-		this.addHeading(LanguageUtils.settings("presentation").path(toWhite ? "white" : "black").get());
-
-		final List<String> selectors = PresentationSelectorListModel.copyOf(
-			toWhite ? settings.getWhite() : settings.getBlack());
-		if (selectors.isEmpty()) {
-			this.addPresentationEmptyRow(listKey);
-		}
-		for (String selector : selectors) {
-			this.addHalfWidth(listKey + "_label_" + selector, this.createPresentationSelectorLabel(selector));
-			final var remove = Button.builder(
-				LanguageUtils.settings("presentation").path("remove").get(),
-				ignored -> this.removeLocalPresentationSelector(settings, slot, toWhite, selector))
-				.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
-				.build();
-			this.addHalfWidth(listKey + "_remove_" + selector, remove);
-		}
-
-		final PresentationSelectorEditBox field = this.createPresentationSelectorField(slot);
-		final var add = Button.builder(
-			LanguageUtils.settings("presentation").path("add").get(),
-			ignored -> this.addLocalPresentationSelector(settings, slot, toWhite, field))
-			.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
-			.build();
-		this.restorePresentationSelectorSelection(slot, field);
-		this.addHalfWidth(listKey + "_field", field);
-		this.addHalfWidth(listKey + "_add", add);
-		this.addPresentationSlotFeedbackRow(listKey, slot);
 	}
 
 	/**
@@ -1161,22 +936,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		return row;
 	}
 
-	private void addPresentationServerReadOnly(String panelKey) {
-		final String keyPrefix = panelKey + "_server_read_only";
-		this.addHeading(LanguageUtils.settings("presentation").path("server", "title").get());
-		this.addFullWidth(keyPrefix, this.createPresentationReadOnlyRow(
-			LanguageUtils.settings("presentation").path("server", "read_only").get()));
-		this.addPresentationServerStatusRows();
-		if (!this.isPresentationPolicyKnown()) {
-			this.addPresentationServerUnavailableRow(keyPrefix);
-			return;
-		}
-		this.addPresentationServerSelectorLabels(keyPrefix, true);
-		this.addPresentationServerSelectorLabels(keyPrefix, false);
-		this.addFullWidth(keyPrefix + "_whitelist_only", this.createPresentationReadOnlyRow(
-			this.presentationServerWhitelistOnlyText()));
-	}
-
 	private boolean isPresentationPolicyKnown() {
 		final var state = this.presentationPolicyState;
 		return state != null && state.isKnown();
@@ -1209,30 +968,24 @@ public class SettingsScreen extends OptionsSubScreen {
 		};
 	}
 
-	private void addPresentationServerSelectorLabels(String keyPrefix, boolean white) {
-		final String listKey = keyPrefix + (white ? "_white" : "_black");
-		this.addHeading(LanguageUtils.settings("presentation").path(white ? "white" : "black").get());
-		final List<String> selectors = PresentationSelectorListModel.copyOf(
-			white ? this.presentationPolicyState.white() : this.presentationPolicyState.black());
-		if (selectors.isEmpty()) {
-			this.addPresentationEmptyRow(listKey);
-			return;
-		}
-		for (String selector : selectors) {
-			this.addFullWidth(listKey + "_" + selector, this.createPresentationSelectorLabel(selector));
-		}
-	}
-
 	private void addPresentationServerPanel() {
 		this.addPresentationServerStatusRows();
 		final var state = this.presentationPolicyState;
+		final var typeButton = Button.builder(
+			LanguageUtils.settings("presentation").path("target_type", selectedPresentationTargetType).get(),
+			ignored -> {
+				int index = PresentationSettings.TARGET_TYPE_IDS.indexOf(selectedPresentationTargetType);
+				selectedPresentationTargetType = PresentationSettings.TARGET_TYPE_IDS.get(
+					(index + 1) % PresentationSettings.TARGET_TYPE_IDS.size());
+				this.rebuildPage(true);
+			})
+			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+			.build();
+		this.addFullWidth("presentation_target_type", typeButton);
 		this.addHeading(LanguageUtils.settings("presentation").path("fields", "title").get());
 		this.addPresentationFieldCatalog(
-			"server",
-			PresentationFieldOutcome.Role.SERVER_POLICY,
-			state == null ? null : state.policy(),
-			null,
-			true);
+			"server_" + selectedPresentationTargetType,
+			state == null ? null : state.policyFor(selectedPresentationTargetType));
 		this.addFullWidth("presentation_server_catalog_note", this.createPresentationReadOnlyRow(
 			LanguageUtils.settings("presentation").path("fields", "note").get()));
 
@@ -1246,8 +999,10 @@ public class SettingsScreen extends OptionsSubScreen {
 			&& state.pendingRequestId() == ServerPresentationPolicyState.NO_PENDING_REQUEST;
 		this.addFullWidth("presentation_server_refresh", refresh);
 
-		this.addPresentationAdvancedToggle("server", state == null || !state.isKnown() ? null : state.policy());
-		if (!this.presentationAdvancedExpanded.contains("server")) {
+		String panelKey = "server_" + selectedPresentationTargetType;
+		this.addPresentationAdvancedToggle(panelKey,
+			state == null ? null : state.policyFor(selectedPresentationTargetType));
+		if (!this.presentationAdvancedExpanded.contains(panelKey)) {
 			return;
 		}
 
@@ -1259,18 +1014,20 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addPresentationServerEditableList(true);
 		this.addPresentationServerEditableList(false);
 
+		final String whitelistTargetType = selectedPresentationTargetType;
 		final var whitelistOnlyButton = Button.builder(
 			this.presentationServerWhitelistOnlyText(),
-			ignored -> this.setServerWhitelistOnly(state != null && !state.whitelistOnly()))
+			ignored -> this.setServerWhitelistOnly(whitelistTargetType,
+				state != null && !state.rulesFor(whitelistTargetType).whitelistOnly()))
 			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
 		whitelistOnlyButton.active = this.canMutateServerPresentation();
-		this.addFullWidth("presentation_server_whitelist_only", whitelistOnlyButton);
+		this.addFullWidth(panelKey + "_whitelist_only", whitelistOnlyButton);
 	}
 
 	private void addPresentationServerEditableList(boolean white) {
-		final String listKey = "server_" + (white ? "white" : "black");
-		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(white);
+		final String listKey = "server_" + selectedPresentationTargetType + "_" + (white ? "white" : "black");
+		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(selectedPresentationTargetType, white);
 		this.addHeading(LanguageUtils.settings("presentation").path(white ? "white" : "black").get());
 
 		final var state = this.presentationPolicyState;
@@ -1279,8 +1036,9 @@ public class SettingsScreen extends OptionsSubScreen {
 			// stays visible through pending and error states, labelled above.
 			this.addPresentationServerUnavailableRow(listKey);
 		} else {
+			final var rules = state.rulesFor(selectedPresentationTargetType);
 			final List<String> selectors = PresentationSelectorListModel.copyOf(
-				white ? state.white() : state.black());
+				white ? rules.white() : rules.black());
 			if (selectors.isEmpty()) {
 				this.addPresentationEmptyRow(listKey);
 			}
@@ -1288,9 +1046,10 @@ public class SettingsScreen extends OptionsSubScreen {
 			final boolean editable = this.canMutateServerPresentation();
 			for (String selector : selectors) {
 				this.addHalfWidth(listKey + "_label_" + selector, this.createPresentationSelectorLabel(selector));
+				final String mutationTargetType = selectedPresentationTargetType;
 				final var remove = Button.builder(
 					LanguageUtils.settings("presentation").path("remove").get(),
-					ignored -> this.removeServerPresentationSelector(white, selector))
+					ignored -> this.removeServerPresentationSelector(mutationTargetType, white, selector))
 					.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 					.build();
 				remove.active = editable;
@@ -1308,7 +1067,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.restorePresentationSelectorSelection(slot, field);
 		final var add = Button.builder(
 			LanguageUtils.settings("presentation").path("add").get(),
-			ignored -> this.addServerPresentationSelector(white, field))
+			ignored -> this.addServerPresentationSelector(slot.targetTypeId(), white, field))
 			.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
 		add.active = editable;
@@ -1370,13 +1129,24 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private MutableComponent presentationGeneralFeedbackText() {
-		return this.presentationGeneralFeedback == null
+		final MutableComponent message = this.presentationGeneralFeedback == null
+			? this.presentationWhitelistFeedback.get(selectedPresentationTargetType)
+			: this.presentationGeneralFeedback;
+		return message == null
 			? Component.empty()
-			: this.presentationGeneralFeedback.copy().withStyle(ChatFormatting.RED);
+			: message.copy().withStyle(ChatFormatting.RED);
 	}
 
 	private void setPresentationGeneralFeedback(MutableComponent message) {
 		this.presentationGeneralFeedback = message;
+		if (this.presentationGeneralFeedbackWidget != null) {
+			this.presentationGeneralFeedbackWidget.setMessage(this.presentationGeneralFeedbackText());
+		}
+	}
+
+	private void setPresentationWhitelistFeedback(String type, MutableComponent message) {
+		if (message == null) this.presentationWhitelistFeedback.remove(type);
+		else this.presentationWhitelistFeedback.put(type, message);
 		if (this.presentationGeneralFeedbackWidget != null) {
 			this.presentationGeneralFeedbackWidget.setMessage(this.presentationGeneralFeedbackText());
 		}
@@ -1499,7 +1269,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		return Component.empty()
 			.append(label)
 			.append(": ")
-			.append(LanguageUtils.of("value", state.whitelistOnly() ? "enabled" : "disabled").get());
+			.append(LanguageUtils.settings("presentation").path("field",
+				state.rulesFor(selectedPresentationTargetType).whitelistOnly() ? "on" : "off").get());
 	}
 
 	private MutableComponent presentationFeedback(String key) {
@@ -1541,68 +1312,17 @@ public class SettingsScreen extends OptionsSubScreen {
 		return state != null && state.canMutate();
 	}
 
-	private void addLocalPresentationSelector(
-		PresentationSettings settings,
-		PresentationSelectorDraftModel.Slot slot,
-		boolean toWhite,
-		EditBox field
-	) {
-		final var outcome = PresentationSelectorListModel.add(
-			toWhite ? settings.getWhite() : settings.getBlack(),
-			field.getValue());
-		switch (outcome.result()) {
-			case EMPTY -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.EMPTY);
-			case INVALID -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.INVALID);
-			case DUPLICATE -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.DUPLICATE);
-			case LIST_FULL -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.LIST_FULL);
-			case ADDED -> {
-				if (toWhite) {
-					settings.setWhite(outcome.selectors());
-				} else {
-					settings.setBlack(outcome.selectors());
-				}
-				this.presentationDrafts.clearDraft(slot);
-				this.presentationDrafts.clearFeedback(slot);
-				this.rebuildPage(true);
-			}
-		}
-	}
-
-	private void removeLocalPresentationSelector(
-		PresentationSettings settings,
-		PresentationSelectorDraftModel.Slot slot,
-		boolean fromWhite,
-		String selector
-	) {
-		final var outcome = PresentationSelectorListModel.remove(
-			fromWhite ? settings.getWhite() : settings.getBlack(),
-			selector);
-		if (!outcome.removed()) {
-			this.setPresentationSlotFeedback(slot,
-				outcome.result() == PresentationSelectorListModel.RemoveResult.INVALID
-					? PresentationSelectorDraftModel.Feedback.INVALID
-					: PresentationSelectorDraftModel.Feedback.NOT_FOUND);
-			return;
-		}
-		if (fromWhite) {
-			settings.setWhite(outcome.selectors());
-		} else {
-			settings.setBlack(outcome.selectors());
-		}
-		this.presentationDrafts.clearFeedback(slot);
-		this.rebuildPage(true);
-	}
-
-	private void addServerPresentationSelector(boolean toWhite, EditBox field) {
-		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(toWhite);
+	private void addServerPresentationSelector(String type, boolean toWhite, EditBox field) {
+		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(type, toWhite);
 		final var state = this.presentationPolicyState;
 		if (state == null || !state.isKnown()) {
 			this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.ERROR);
 			return;
 		}
 
+		final var rules = state.rulesFor(type);
 		final var outcome = PresentationSelectorListModel.add(
-			toWhite ? state.white() : state.black(),
+			toWhite ? rules.white() : rules.black(),
 			field.getValue());
 		switch (outcome.result()) {
 			case EMPTY -> this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.EMPTY);
@@ -1626,47 +1346,58 @@ public class SettingsScreen extends OptionsSubScreen {
 					return;
 				}
 				this.presentationPendingOperation = operation;
-				if (!CommonClient.INSTANCE.requestPresentationPolicyMutation(operation, selector, false)) {
-					this.presentationPendingOperation = null;
-					this.presentationDrafts.abandonSubmission(slot);
-					this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.ERROR);
+				this.presentationPendingTargetType = type;
+				if (!CommonClient.INSTANCE.requestPresentationPolicyMutation(type, operation, selector, false)) {
+					if (this.presentationPendingOperation != null) {
+						this.presentationPendingOperation = null;
+						this.presentationDrafts.abandonSubmission(slot);
+						this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.ERROR);
+					}
 					return;
 				}
-				this.presentationDrafts.clearFeedback(slot);
+				if (this.presentationPendingOperation != null) this.presentationDrafts.clearFeedback(slot);
 				this.rebuildPage(true);
 			}
 		}
 	}
 
-	private void removeServerPresentationSelector(boolean fromWhite, String selector) {
-		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(fromWhite);
+	private void removeServerPresentationSelector(String type, boolean fromWhite, String selector) {
+		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(type, fromWhite);
 		if (!this.canMutateServerPresentation()) {
 			this.setPresentationSlotFeedback(slot, this.unavailableServerFeedback(this.presentationPolicyState));
 			return;
 		}
 		final Operation operation = fromWhite ? Operation.REMOVE_WHITE : Operation.REMOVE_BLACK;
-		if (!CommonClient.INSTANCE.requestPresentationPolicyMutation(operation, selector, false)) {
-			this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.ERROR);
+		this.presentationPendingOperation = operation;
+		this.presentationPendingTargetType = type;
+		if (!CommonClient.INSTANCE.requestPresentationPolicyMutation(type, operation, selector, false)) {
+			if (this.presentationPendingOperation != null) {
+				this.presentationPendingOperation = null;
+				this.setPresentationSlotFeedback(slot, PresentationSelectorDraftModel.Feedback.ERROR);
+			}
 			return;
 		}
-		this.presentationPendingOperation = operation;
-		this.presentationDrafts.clearFeedback(slot);
+		if (this.presentationPendingOperation != null) this.presentationDrafts.clearFeedback(slot);
 		this.rebuildPage(true);
 	}
 
-	private void setServerWhitelistOnly(boolean value) {
+	private void setServerWhitelistOnly(String type, boolean value) {
 		if (!this.canMutateServerPresentation()) {
-			this.setPresentationGeneralFeedback(this.presentationFeedbackText(
+			this.setPresentationWhitelistFeedback(type, this.presentationFeedbackText(
 				this.unavailableServerFeedback(this.presentationPolicyState)));
 			return;
 		}
-		if (!CommonClient.INSTANCE.requestPresentationPolicyMutation(Operation.SET_WHITELIST_ONLY, "", value)) {
-			this.setPresentationGeneralFeedback(this.presentationFeedbackText(
-				PresentationSelectorDraftModel.Feedback.ERROR));
+		this.presentationPendingOperation = Operation.SET_WHITELIST_ONLY;
+		this.presentationPendingTargetType = type;
+		if (!CommonClient.INSTANCE.requestPresentationPolicyMutation(type, Operation.SET_WHITELIST_ONLY, "", value)) {
+			if (this.presentationPendingOperation != null) {
+				this.presentationPendingOperation = null;
+				this.setPresentationWhitelistFeedback(type, this.presentationFeedbackText(
+					PresentationSelectorDraftModel.Feedback.ERROR));
+			}
 			return;
 		}
-		this.presentationPendingOperation = Operation.SET_WHITELIST_ONLY;
-		this.setPresentationGeneralFeedback(null);
+		if (this.presentationPendingOperation != null) this.setPresentationWhitelistFeedback(type, null);
 		this.rebuildPage(true);
 	}
 
@@ -1686,6 +1417,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			return;
 		}
 		this.presentationPendingOperation = null;
+		this.presentationPendingTargetType = null;
 		this.setPresentationGeneralFeedback(null);
 		this.rebuildPage(true);
 	}
@@ -1700,8 +1432,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.completePendingPresentationOperation(state);
 		}
 
-		if (this.navigation.current() == Page.CLIENT_PRESENTATION
-			|| this.navigation.current() == Page.SERVER_PRESENTATION) {
+		if (this.navigation.current() == Page.SERVER_PRESENTATION) {
 			this.rebuildPage(true);
 		}
 	}
@@ -1715,14 +1446,17 @@ public class SettingsScreen extends OptionsSubScreen {
 	 */
 	private void completePendingPresentationOperation(ServerPresentationPolicyState state) {
 		final Operation operation = this.presentationPendingOperation;
+		final String pendingTargetType = this.presentationPendingTargetType;
 		final PresentationQuickAction quickAction = this.presentationPendingQuickAction;
 		this.presentationPendingOperation = null;
+		this.presentationPendingTargetType = null;
 		this.presentationPendingQuickAction = null;
 
 		if (!state.isConnected()) {
 			this.presentationDrafts.resetSubmission();
 			this.presentationDrafts.clearAllFeedback();
 			this.presentationGeneralFeedback = null;
+			this.presentationWhitelistFeedback.clear();
 			if (quickAction != null) {
 				this.presentationQuickFeedback.remove(quickAction.panelKey());
 			}
@@ -1744,17 +1478,17 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		if (operation == Operation.SET_WHITELIST_ONLY) {
 			if (state.lastStatus() == Status.OK && !state.lastRequestTimedOut()) {
-				this.presentationGeneralFeedback = null;
+				this.setPresentationWhitelistFeedback(pendingTargetType, null);
 			} else {
-				this.presentationGeneralFeedback = this.presentationFeedbackText(
+				this.setPresentationWhitelistFeedback(pendingTargetType, this.presentationFeedbackText(
 					state.lastRequestTimedOut()
 						? PresentationSelectorDraftModel.Feedback.TIMEOUT
-						: this.feedbackForStatus(state.lastStatus()));
+						: this.feedbackForStatus(state.lastStatus())));
 			}
 			return;
 		}
 
-		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(
+		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(pendingTargetType,
 			operation == Operation.ADD_WHITE || operation == Operation.REMOVE_WHITE);
 		if (state.lastStatus() == Status.OK && !state.lastRequestTimedOut()) {
 			this.presentationDrafts.completeSubmission(slot, true);
@@ -2133,8 +1867,12 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.serverSettings.resetForDisconnect();
 		this.serverValidationMessage = null;
 		this.presentationPendingQuickAction = null;
+		this.presentationPendingOperation = null;
 		this.presentationQuickFeedback.clear();
-		this.presentationQuickNotices.clear();
+		this.presentationWhitelistFeedback.clear();
+		this.presentationPendingTargetType = null;
+		this.presentationDrafts.resetSubmission();
+		this.presentationDrafts.clearAllFeedback();
 		this.saveCurrentViewState();
 		final boolean forcedToOverview = this.navigation.onServerViewAccessLost(false, false);
 		if (navigation.scope() == Scope.SERVER) {

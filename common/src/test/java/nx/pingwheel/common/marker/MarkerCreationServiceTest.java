@@ -6,6 +6,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,6 +20,11 @@ import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.presentation.PresentationPropertyIntent;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationPropertySelection;
+import nx.pingwheel.common.presentation.PresentationSection;
+import nx.pingwheel.common.presentation.PresentationValue;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -425,6 +431,91 @@ class MarkerCreationServiceTest {
 		assertNotEquals(candidate, marker.target());
 		assertTrue(marker.target() instanceof Target.ExternalBlockTarget external && external.isCommitted());
 		assertEquals(committed, MarkerSnapshot.from(marker).target());
+	}
+
+	@Test
+	void admissionRejectsAfterExternalMaterializationAndReleasesReferenceWithoutStoring() {
+		newService();
+		Target.ExternalBlockTarget candidate = externalCandidate();
+		Target.ExternalBlockTarget committed = committedExternalTarget();
+		RecordingExternalProvider provider = new RecordingExternalProvider(
+			new ExternalBlockServerProvider.MaterializationResult.Materialized(
+				new ExternalBlockServerProvider.MaterializedTarget(committed,
+					TargetMatchContext.blockEntityBlock(true), ANCHOR)));
+		validator.accepted(validated(candidate, TargetMatchContext.blockEntityBlock(true)));
+		resolver.resolves(candidate, targetType("entity_block"));
+		var ref = PresentationPropertyRef.root("minecraft:basic", "minecraft:block.state");
+		var intent = PresentationPropertyIntent.observed(ref,
+			new PresentationValue.RecordValue(Map.of("facing", new PresentationValue.Text("north"))));
+		Target[] actual = {null};
+		MarkerCreateOutcome rejected = service.createWithExternalTransaction(transaction(provider), OWNER, candidate,
+			"attention", 10L, 110L, List.of(RECIPIENT), List.of(intent),
+			(target, type, owner, recipients, intents) -> {
+				actual[0] = target;
+				assertEquals("entity_block", type);
+				assertEquals(OWNER, owner);
+				assertEquals(List.of(RECIPIENT), recipients);
+				assertEquals(List.of(intent), intents);
+				return MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST);
+			});
+		assertRejected(rejected, MarkerRejectReason.INVALID_REQUEST);
+		assertEquals(committed, actual[0], "admission must see the materialized target, never its candidate");
+		assertEquals(1, provider.materializeCalls);
+		assertEquals(1, provider.releaseCalls);
+		assertEquals(0, store.size());
+	}
+
+	@Test
+	void admissionTypeRejectionAndCaptureFailureBothReleaseMaterializedReference() {
+		newService();
+		Target.ExternalBlockTarget candidate = externalCandidate();
+		Target.ExternalBlockTarget committed = committedExternalTarget();
+		RecordingExternalProvider provider = new RecordingExternalProvider(
+			new ExternalBlockServerProvider.MaterializationResult.Materialized(
+				new ExternalBlockServerProvider.MaterializedTarget(committed,
+					TargetMatchContext.blockEntityBlock(true), ANCHOR)));
+		validator.accepted(validated(candidate, TargetMatchContext.blockEntityBlock(true)));
+		resolver.resolves(candidate, targetType("entity_block"));
+		var intent = PresentationPropertyIntent.of(PresentationPropertyRef.root("minecraft:basic", "minecraft:block.state"),
+			new PresentationValue.RecordValue(Map.of()), "request");
+		var transaction = transaction(provider);
+		assertRejected(service.createWithExternalTransaction(transaction, OWNER, candidate, "attention", 10L,
+			110L, List.of(RECIPIENT), List.of(intent),
+			(target, type, owner, recipients, intents) ->
+				MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_PING_TYPE)),
+			MarkerRejectReason.INVALID_PING_TYPE);
+		assertRejected(service.createWithExternalTransaction(transaction, OWNER, candidate, "attention", 10L,
+			110L, List.of(RECIPIENT), List.of(intent),
+			(target, type, owner, recipients, intents) -> { throw new IllegalStateException("source unavailable"); }),
+			MarkerRejectReason.INVALID_REQUEST);
+		assertEquals(2, provider.releaseCalls);
+		assertEquals(0, store.size());
+	}
+
+	@Test
+	void acceptedAdmissionSeedsActualValueWithoutChangingLifetimeOrWinnerAndSurvivesAudienceChange() {
+		newService();
+		Target requested = blockTarget();
+		validator.accepted(validated(requested, TargetMatchContext.none()));
+		resolver.resolves(requested, targetType("block"));
+		var ref = PresentationPropertyRef.root("minecraft:basic", "minecraft:target.name");
+		var intent = PresentationPropertyIntent.of(ref, new PresentationValue.Text("client claim"), "attention");
+		var section = new PresentationSection("minecraft:basic", 1,
+			Map.of(ref.fieldId(), new PresentationValue.Text("server truth")), false);
+		MarkerCreateOutcome accepted = service.create(null, OWNER, requested, "attention", 21L, 121L,
+			List.of(RECIPIENT, OWNER), List.of(intent), (target, type, owner, recipients, intents) ->
+				MarkerCreationService.AdmissionResult.accepted(List.of(PresentationPropertySelection.of(ref, "attention")),
+					Map.of(section.adapterId(), section)));
+		assertTrue(accepted.isAccepted());
+		ServerMarker marker = accepted.creation().orElseThrow().marker();
+		assertEquals(List.of(PresentationPropertySelection.of(ref, "attention")), marker.properties());
+		assertEquals("server truth", ((PresentationValue.Text) accepted.sourceSeeds().get(section.adapterId())
+			.fields().get(ref.fieldId())).value());
+		assertEquals(21L, marker.arrivalTick());
+		assertEquals(121L, marker.expiresAtTick());
+		assertEquals(2, accepted.creation().orElseThrow().winnerChanges().size());
+		store.forgetRecipient(RECIPIENT);
+		assertEquals(marker.properties(), store.find(marker.id()).orElseThrow().properties());
 	}
 
 	// --- resolver contract failures ----------------------------------------------

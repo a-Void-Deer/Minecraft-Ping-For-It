@@ -2,14 +2,15 @@ package nx.pingwheel.common.network;
 
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
-import nx.pingwheel.common.presentation.ServerPresentationPolicyService;
+import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Operation;
+import nx.pingwheel.common.presentation.ServerPresentationPolicyService.RulesView;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Status;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.stream.IntStream;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -21,228 +22,158 @@ class ServerPresentationPolicyPacketsTest {
 		return new FriendlyByteBuf(Unpooled.buffer());
 	}
 
-	@Test
-	void c2sRoundTripsEveryOperation() {
-		for (Operation operation : Operation.values()) {
-			var packet = new ServerPresentationPolicyC2SPacket(
-				42L,
-				operation,
-				operation.requiresSelector() ? "minecraft:*" : "",
-				operation == Operation.SET_WHITELIST_ONLY);
-			FriendlyByteBuf buf = buffer();
-			packet.write(buf);
+	private static Map<String, RulesView> fullRules() {
+		Map<String, RulesView> rules = new LinkedHashMap<>();
+		for (String id : PresentationSettings.TARGET_TYPE_IDS) rules.put(id, new RulesView(List.of(), List.of(), false));
+		rules.put("block", new RulesView(List.of("minecraft:basic"), List.of("create:*"), true));
+		return rules;
+	}
 
+	@Test
+	void routeIsVersionTwo() {
+		assertEquals(2, ServerPresentationPolicyC2SPacket.VERSION);
+		assertEquals(2, ServerPresentationPolicyS2CPacket.VERSION);
+		assertEquals("pingforit-c2s:server-presentation-policy-v2", ServerPresentationPolicyC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:server-presentation-policy-v2", ServerPresentationPolicyS2CPacket.PACKET_ID.toString());
+	}
+
+	@Test
+	void c2sReadNeedsNoTargetTypeAndRoundTrips() {
+		FriendlyByteBuf buf = buffer();
+		try {
+			ServerPresentationPolicyC2SPacket.read(42L).write(buf);
 			var decoded = ServerPresentationPolicyC2SPacket.readSafe(buf);
 
 			assertFalse(decoded.isCorrupt());
-			assertEquals(42L, decoded.requestId());
-			assertEquals(operation, decoded.operation());
-			assertEquals(packet.selector(), decoded.selector());
-			assertEquals(packet.whitelistOnly(), decoded.whitelistOnly());
+			assertEquals(Operation.READ, decoded.operation());
+			assertEquals("", decoded.targetTypeId());
 			assertEquals(0, buf.readableBytes());
+		} finally {
+			buf.release();
 		}
 	}
 
 	@Test
-	void c2sZeroOrNegativeRequestIdIsCorrupt() {
-		assertTrue(new ServerPresentationPolicyC2SPacket(0L, Operation.READ, "", false).isCorrupt());
-		assertTrue(new ServerPresentationPolicyC2SPacket(-1L, Operation.READ, "", false).isCorrupt());
+	void c2sMutationsRoundTripWithASelectedTargetType() {
+		for (Operation operation : Operation.values()) {
+			if (operation == Operation.READ) continue;
+			FriendlyByteBuf buf = buffer();
+			try {
+				var packet = ServerPresentationPolicyC2SPacket.mutation(42L, "block", operation,
+					operation.requiresSelector() ? "minecraft:*" : "",
+					operation == Operation.SET_WHITELIST_ONLY);
+				packet.write(buf);
+				var decoded = ServerPresentationPolicyC2SPacket.readSafe(buf);
+
+				assertFalse(decoded.isCorrupt());
+				assertEquals(operation, decoded.operation());
+				assertEquals("block", decoded.targetTypeId());
+				assertEquals(packet.selector(), decoded.selector());
+				assertEquals(0, buf.readableBytes());
+			} finally {
+				buf.release();
+			}
+		}
 	}
 
 	@Test
-	void c2sMutationWithoutSelectorIsCorrupt() {
-		assertTrue(new ServerPresentationPolicyC2SPacket(1L, Operation.ADD_WHITE, "", false).isCorrupt());
-		assertTrue(new ServerPresentationPolicyC2SPacket(1L, Operation.ADD_WHITE, null, false).isCorrupt());
+	void c2sMutationWithoutKnownTargetTypeOrSelectorIsCorrupt() {
+		assertTrue(ServerPresentationPolicyC2SPacket.mutation(1L, "", Operation.ADD_WHITE, "minecraft:*", false).isCorrupt());
+		assertTrue(ServerPresentationPolicyC2SPacket.mutation(1L, "unknown", Operation.ADD_WHITE, "minecraft:*", false).isCorrupt());
+		assertTrue(ServerPresentationPolicyC2SPacket.mutation(1L, "block", Operation.ADD_WHITE, "", false).isCorrupt());
+		assertTrue(new ServerPresentationPolicyC2SPacket(0L, Operation.READ, "", "", false).isCorrupt());
 	}
 
 	@Test
-	void c2sMutationWithInvalidSelectorGrammarIsCorrupt() {
-		assertTrue(new ServerPresentationPolicyC2SPacket(1L, Operation.ADD_WHITE, "Not A Selector", false).isCorrupt());
-		assertTrue(new ServerPresentationPolicyC2SPacket(1L, Operation.ADD_WHITE, "missingcolon", false).isCorrupt());
-	}
-
-	@Test
-	void c2sSafeDecodeRejectsUnknownOperationAndDrains() {
+	void s2cCarriesEveryTargetTypeAndRoundTrips() {
 		FriendlyByteBuf buf = buffer();
-		buf.writeVarLong(7L);
-		buf.writeVarInt(Operation.values().length + 5);
-		buf.writeUtf("minecraft:*");
-		buf.writeBoolean(false);
-		buf.writeByte(0x7F);
+		try {
+			var packet = new ServerPresentationPolicyS2CPacket(42L, 7L, Status.OK, true, fullRules());
+			packet.write(buf);
+			var decoded = ServerPresentationPolicyS2CPacket.readSafe(buf);
 
-		var decoded = ServerPresentationPolicyC2SPacket.readSafe(buf);
-
-		assertTrue(decoded.isCorrupt());
-		assertEquals(0, buf.readableBytes());
+			assertFalse(decoded.isCorrupt());
+			assertEquals(42L, decoded.requestId());
+			assertEquals(7L, decoded.revision());
+			assertEquals(Status.OK, decoded.status());
+			assertTrue(decoded.canEdit());
+			assertEquals(fullRules(), decoded.rules());
+			assertEquals(0, buf.readableBytes());
+		} finally {
+			buf.release();
+		}
 	}
 
 	@Test
-	void c2sSafeDecodeRejectsOversizedSelectorAndDrains() {
+	void s2cDefaultFallbackCarriesAllFiveEmptyAllowViewsButIsCorrupt() {
+		var fallback = new ServerPresentationPolicyS2CPacket();
+
+		assertEquals(PresentationSettings.TARGET_TYPE_IDS, List.copyOf(fallback.rules().keySet()));
+		assertTrue(fallback.rules().values().stream()
+			.allMatch(view -> view.white().isEmpty() && view.black().isEmpty() && !view.whitelistOnly()));
+		assertTrue(fallback.isCorrupt());
+		assertThrows(IllegalArgumentException.class, () -> fallback.write(buffer()));
+	}
+
+	@Test
+	void s2cPartialOrUnknownRuleMapIsRejected() {
+		Map<String, RulesView> partial = Map.of("block", new RulesView(List.of(), List.of(), false));
+		assertThrows(IllegalArgumentException.class,
+			() -> new ServerPresentationPolicyS2CPacket(42L, 7L, Status.OK, true, partial));
+
+		Map<String, RulesView> unknown = new LinkedHashMap<>(fullRules());
+		unknown.remove("location");
+		unknown.put("something_else", new RulesView(List.of(), List.of(), false));
+		assertThrows(IllegalArgumentException.class,
+			() -> new ServerPresentationPolicyS2CPacket(42L, 7L, Status.OK, true, unknown));
+	}
+
+	@Test
+	void s2cDecodeOfAMissingTargetTypeYieldsAFailClosedFallback() {
 		FriendlyByteBuf buf = buffer();
-		buf.writeVarLong(7L);
-		buf.writeVarInt(Operation.ADD_WHITE.ordinal());
-		buf.writeUtf("a".repeat(ServerPresentationPolicyService.MAX_SELECTOR_LENGTH + 1));
-		buf.writeBoolean(false);
+		try {
+			buf.writeVarLong(1L);
+			buf.writeVarLong(1L);
+			buf.writeVarInt(Status.OK.ordinal());
+			buf.writeBoolean(false);
+			buf.writeVarInt(PresentationSettings.TARGET_TYPE_IDS.size() - 1);
 
-		var decoded = ServerPresentationPolicyC2SPacket.readSafe(buf);
+			var decoded = ServerPresentationPolicyS2CPacket.readSafe(buf);
 
-		assertTrue(decoded.isCorrupt());
-		assertEquals(0, buf.readableBytes());
+			assertTrue(decoded.isCorrupt());
+		} finally {
+			buf.release();
+		}
 	}
 
 	@Test
-	void s2cRoundTripsRuleView() {
-		var packet = new ServerPresentationPolicyS2CPacket(
-			5L,
-			3L,
-			Status.OK,
-			true,
-			List.of("minecraft:basic", "create:*"),
-			List.of("minecraft:entity.health"),
-			true);
-		FriendlyByteBuf buf = buffer();
-		packet.write(buf);
+	void trailingBytesYieldTheCorruptFallbackInsteadOfAnException() {
+		FriendlyByteBuf readBuf = buffer();
+		try {
+			ServerPresentationPolicyC2SPacket.read(42L).write(readBuf);
+			readBuf.writeByte(1);
+			assertTrue(ServerPresentationPolicyC2SPacket.readSafe(readBuf).isCorrupt());
+			assertEquals(0, readBuf.readableBytes());
+		} finally {
+			readBuf.release();
+		}
 
-		var decoded = ServerPresentationPolicyS2CPacket.readSafe(buf);
+		FriendlyByteBuf mutationBuf = buffer();
+		try {
+			ServerPresentationPolicyC2SPacket.mutation(42L, "block", Operation.ADD_WHITE, "minecraft:*", false).write(mutationBuf);
+			mutationBuf.writeByte(1);
+			assertTrue(ServerPresentationPolicyC2SPacket.readSafe(mutationBuf).isCorrupt());
+		} finally {
+			mutationBuf.release();
+		}
 
-		assertFalse(decoded.isCorrupt());
-		assertEquals(packet, decoded);
-		assertEquals(0, buf.readableBytes());
-	}
-
-	@Test
-	void s2cAllowsUnsolicitedZeroRequestId() {
-		var packet = new ServerPresentationPolicyS2CPacket(
-			0L, 1L, Status.OK, false, List.of(), List.of(), false);
-
-		assertFalse(packet.isCorrupt());
-	}
-
-	@Test
-	void s2cSafeDecodeRejectsOversizedSelectorCountAndDrains() {
-		FriendlyByteBuf buf = buffer();
-		buf.writeVarLong(1L);
-		buf.writeVarLong(1L);
-		buf.writeVarInt(Status.OK.ordinal());
-		buf.writeBoolean(false);
-		buf.writeVarInt(ServerPresentationPolicyService.MAX_SELECTORS + 1);
-		buf.writeByte(0x7F);
-
-		var decoded = ServerPresentationPolicyS2CPacket.readSafe(buf);
-
-		assertTrue(decoded.isCorrupt());
-		assertEquals(0, buf.readableBytes());
-	}
-
-	@Test
-	void s2cSafeDecodeRejectsOversizedSelectorStringAndDrains() {
-		FriendlyByteBuf buf = buffer();
-		buf.writeVarLong(1L);
-		buf.writeVarLong(1L);
-		buf.writeVarInt(Status.OK.ordinal());
-		buf.writeBoolean(false);
-		buf.writeVarInt(1);
-		buf.writeUtf("a".repeat(ServerPresentationPolicyService.MAX_SELECTOR_LENGTH + 1));
-
-		var decoded = ServerPresentationPolicyS2CPacket.readSafe(buf);
-
-		assertTrue(decoded.isCorrupt());
-		assertEquals(0, buf.readableBytes());
-	}
-
-	@Test
-	void s2cInvalidSelectorFailsClosed() {
-		var packet = new ServerPresentationPolicyS2CPacket(
-			1L, 1L, Status.OK, true, List.of("NOT VALID"), List.of(), false);
-
-		assertTrue(packet.isCorrupt());
-	}
-
-	@Test
-	void s2cCanonicalConstructorCopiesListsDefensively() {
-		List<String> white = new ArrayList<>(List.of("minecraft:basic"));
-		List<String> black = new ArrayList<>(List.of("create:*"));
-		var packet = new ServerPresentationPolicyS2CPacket(
-			1L, 1L, Status.OK, false, white, black, false);
-
-		white.add("create:*");
-		black.clear();
-
-		assertEquals(List.of("minecraft:basic"), packet.white());
-		assertEquals(List.of("create:*"), packet.black());
-	}
-
-	@Test
-	void s2cRejectsOversizedSelectorCountOnEncode() {
-		List<String> tooMany = IntStream.range(0, ServerPresentationPolicyService.MAX_SELECTORS + 1)
-			.mapToObj(index -> "test:field" + index)
-			.toList();
-		var packet = new ServerPresentationPolicyS2CPacket(
-			1L, 1L, Status.OK, false, tooMany, List.of(), false);
-
-		assertTrue(packet.isCorrupt());
-		assertThrows(IllegalArgumentException.class, () -> packet.write(buffer()));
-	}
-
-	@Test
-	void s2cRejectsOversizedSelectorLengthOnEncode() {
-		String tooLong = "a:" + "b".repeat(ServerPresentationPolicyService.MAX_SELECTOR_LENGTH);
-		var packet = new ServerPresentationPolicyS2CPacket(
-			1L, 1L, Status.OK, false, List.of(tooLong), List.of(), false);
-
-		assertTrue(packet.isCorrupt());
-		assertThrows(IllegalArgumentException.class, () -> packet.write(buffer()));
-	}
-
-	@Test
-	void s2cRejectsSelectorPayloadOverEncodedByteBoundOnEncode() {
-		String multibyte = "é".repeat(ServerPresentationPolicyService.MAX_SELECTOR_LENGTH);
-		List<String> overBound = IntStream.range(0, ServerPresentationPolicyService.MAX_SELECTORS)
-			.mapToObj(index -> multibyte)
-			.toList();
-		var packet = new ServerPresentationPolicyS2CPacket(
-			1L, 1L, Status.OK, false, overBound, overBound, false);
-
-		assertTrue(packet.isCorrupt());
-		assertThrows(IllegalArgumentException.class, () -> packet.write(buffer()));
-	}
-
-	@Test
-	void s2cMaximumValidRuleViewFitsTheEncodedByteBound() {
-		String selector = "a:" + "b".repeat(ServerPresentationPolicyService.MAX_SELECTOR_LENGTH - 2);
-		List<String> full = IntStream.range(0, ServerPresentationPolicyService.MAX_SELECTORS)
-			.mapToObj(index -> selector)
-			.toList();
-		var packet = new ServerPresentationPolicyS2CPacket(
-			1L, 1L, Status.OK, false, full, full, false);
-
-		assertFalse(packet.isCorrupt());
-
-		FriendlyByteBuf buf = buffer();
-		packet.write(buf);
-
-		assertTrue(buf.readableBytes() <= ServerPresentationPolicyS2CPacket.MAX_ENCODED_PAYLOAD_BYTES);
-	}
-
-	@Test
-	void s2cEncodeRejectsCorruptSentinel() {
-		assertThrows(IllegalArgumentException.class, () -> new ServerPresentationPolicyS2CPacket().write(buffer()));
-	}
-
-	@Test
-	void s2cUnknownStatusFallsBackToCorrupt() {
-		FriendlyByteBuf buf = buffer();
-		buf.writeVarLong(1L);
-		buf.writeVarLong(1L);
-		buf.writeVarInt(Status.values().length + 5);
-		buf.writeBoolean(false);
-		buf.writeVarInt(0);
-		buf.writeVarInt(0);
-		buf.writeBoolean(false);
-
-		var decoded = ServerPresentationPolicyS2CPacket.readSafe(buf);
-
-		assertTrue(decoded.isCorrupt());
-		assertEquals(0, buf.readableBytes());
+		FriendlyByteBuf responseBuf = buffer();
+		try {
+			new ServerPresentationPolicyS2CPacket(42L, 7L, Status.OK, true, fullRules()).write(responseBuf);
+			responseBuf.writeByte(1);
+			assertTrue(ServerPresentationPolicyS2CPacket.readSafe(responseBuf).isCorrupt());
+		} finally {
+			responseBuf.release();
+		}
 	}
 }

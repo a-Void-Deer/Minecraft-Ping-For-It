@@ -23,6 +23,7 @@ import nx.pingwheel.common.client.marker.EntityMarkerPoint;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.client.duration.ClientMarkerDisplayDuration;
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
@@ -313,9 +314,7 @@ public final class ClientPingRuntime {
 			() -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis(),
 			() -> ClientConfig.HANDLER.getConfig().getWheelTimeoutMillis());
 		ClientPresentation presentation = negotiatePresentation
-			? new ClientPresentation(packetSender::sendToServer,
-				() -> ClientConfig.HANDLER.getConfig().getPresentationReceive(),
-				() -> ClientConfig.HANDLER.getConfig().getPresentationDisplay())
+			? new ClientPresentation(packetSender::sendToServer)
 			: null;
 
 		return new ClientPingRuntime(
@@ -1097,6 +1096,12 @@ public final class ClientPingRuntime {
 	/** Read-only UI entry point; negotiation and raw values remain runtime-private. */
 	public ClientPresentation presentation() {
 		return presentation;
+	}
+
+	/** Caller supplies already-observed typed values; this method never samples the world. */
+	public void dispatchPropertyPing(PingInteractionAction.CreatePing frozenAction,
+		List<PresentationPropertyIntent> properties) {
+		dispatcher.dispatch(frozenAction, properties);
 	}
 
 	/** Keep the legacy name-render facade synchronized before each world frame. */

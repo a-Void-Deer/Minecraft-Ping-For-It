@@ -1,7 +1,9 @@
 package nx.pingwheel.common.screen;
 
-import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+import nx.pingwheel.common.presentation.PresentationSettings;
 
 /**
  * Screen-owned editing state for the presentation selector inputs.
@@ -22,36 +24,13 @@ import java.util.Map;
  */
 public final class PresentationSelectorDraftModel {
 
-	/** The six stable presentation selector input slots. */
-	public enum Slot {
-		RECEIVE_WHITE,
-		RECEIVE_BLACK,
-		DISPLAY_WHITE,
-		DISPLAY_BLACK,
-		SERVER_WHITE,
-		SERVER_BLACK;
-
-		/** The stable slot of one local receive/display list. */
-		public static Slot local(String panelKey, boolean white) {
-			return switch (panelKey) {
-				case "receive" -> white ? RECEIVE_WHITE : RECEIVE_BLACK;
-				case "display" -> white ? DISPLAY_WHITE : DISPLAY_BLACK;
-				default -> throw new IllegalArgumentException("unknown local presentation panel: " + panelKey);
-			};
+	/** Stable independent drafts and carets for all five server target types. */
+	public record Slot(String targetTypeId, boolean isWhite) {
+		public Slot {
+			if (!PresentationSettings.isKnownTargetType(targetTypeId))
+				throw new IllegalArgumentException("unknown target type");
 		}
-
-		/** The stable slot of one server-managed list. */
-		public static Slot server(boolean white) {
-			return white ? SERVER_WHITE : SERVER_BLACK;
-		}
-
-		public boolean isServer() {
-			return this == SERVER_WHITE || this == SERVER_BLACK;
-		}
-
-		public boolean isWhite() {
-			return this == RECEIVE_WHITE || this == DISPLAY_WHITE || this == SERVER_WHITE;
-		}
+		public static Slot server(String type, boolean white) { return new Slot(type, white); }
 	}
 
 	/** The compact per-slot feedback kinds the screen translates to text. */
@@ -91,9 +70,9 @@ public final class PresentationSelectorDraftModel {
 		}
 	}
 
-	private final Map<Slot, String> drafts = new EnumMap<>(Slot.class);
-	private final Map<Slot, Feedback> feedback = new EnumMap<>(Slot.class);
-	private final Map<Slot, Caret> carets = new EnumMap<>(Slot.class);
+	private final Map<Slot, String> drafts = new HashMap<>();
+	private final Map<Slot, Feedback> feedback = new HashMap<>();
+	private final Map<Slot, Caret> carets = new HashMap<>();
 	private Slot submittedSlot;
 	private String submittedValue;
 
@@ -221,7 +200,7 @@ public final class PresentationSelectorDraftModel {
 	 * discarded. Reports whether the draft was cleared.
 	 */
 	public boolean completeSubmission(Slot slot, boolean accepted) {
-		if (slot == null || slot != submittedSlot) {
+		if (slot == null || !Objects.equals(slot, submittedSlot)) {
 			return false;
 		}
 
@@ -239,7 +218,7 @@ public final class PresentationSelectorDraftModel {
 	 * timed-out add keeps its text for correction.
 	 */
 	public boolean abandonSubmission(Slot slot) {
-		if (slot == null || slot != submittedSlot) {
+		if (slot == null || !Objects.equals(slot, submittedSlot)) {
 			return false;
 		}
 		submittedSlot = null;

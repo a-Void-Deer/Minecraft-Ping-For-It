@@ -2,8 +2,10 @@ package nx.pingwheel.common.marker;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Map;
 
 import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.presentation.PresentationSection;
 
 /**
  * The immutable outcome of a marker creation attempt against
@@ -27,14 +29,17 @@ public final class MarkerCreateOutcome {
 	private final MarkerCreation creation;
 	private final TargetNameJson targetName;
 	private final MarkerRejectReason rejectReason;
+	private final Map<String, PresentationSection> sourceSeeds;
 
 	private MarkerCreateOutcome(
-		boolean accepted, MarkerCreation creation, TargetNameJson targetName, MarkerRejectReason rejectReason
+		boolean accepted, MarkerCreation creation, TargetNameJson targetName, MarkerRejectReason rejectReason,
+		Map<String, PresentationSection> sourceSeeds
 	) {
 		this.accepted = accepted;
 		this.creation = creation;
 		this.targetName = targetName;
 		this.rejectReason = rejectReason;
+		this.sourceSeeds = Map.copyOf(sourceSeeds);
 	}
 
 	/**
@@ -44,7 +49,14 @@ public final class MarkerCreateOutcome {
 	public static MarkerCreateOutcome accepted(MarkerCreation creation, TargetNameJson targetName) {
 		Objects.requireNonNull(creation, "creation");
 		Objects.requireNonNull(targetName, "targetName");
-		return new MarkerCreateOutcome(true, creation, targetName, null);
+		return accepted(creation, targetName, Map.of());
+	}
+
+	public static MarkerCreateOutcome accepted(MarkerCreation creation, TargetNameJson targetName,
+		Map<String, PresentationSection> sourceSeeds) {
+		Objects.requireNonNull(creation, "creation");
+		Objects.requireNonNull(targetName, "targetName");
+		return new MarkerCreateOutcome(true, creation, targetName, null, sourceSeeds);
 	}
 
 	/**
@@ -53,7 +65,7 @@ public final class MarkerCreateOutcome {
 	 */
 	public static MarkerCreateOutcome rejected(MarkerRejectReason reason) {
 		Objects.requireNonNull(reason, "reason");
-		return new MarkerCreateOutcome(false, null, null, reason);
+		return new MarkerCreateOutcome(false, null, null, reason, Map.of());
 	}
 
 	/**
@@ -85,6 +97,8 @@ public final class MarkerCreateOutcome {
 		return accepted ? Optional.empty() : Optional.of(rejectReason);
 	}
 
+	public Map<String, PresentationSection> sourceSeeds() { return sourceSeeds; }
+
 	@Override
 	public boolean equals(Object obj) {
 		if (this == obj) {
@@ -98,6 +112,7 @@ public final class MarkerCreateOutcome {
 		return accepted == other.accepted
 			&& Objects.equals(creation, other.creation)
 			&& Objects.equals(targetName, other.targetName)
+			&& sourceSeeds.equals(other.sourceSeeds)
 			&& rejectReason == other.rejectReason;
 	}
 
@@ -106,6 +121,7 @@ public final class MarkerCreateOutcome {
 		int result = Boolean.hashCode(accepted);
 		result = 31 * result + (creation == null ? 0 : creation.hashCode());
 		result = 31 * result + (targetName == null ? 0 : targetName.hashCode());
+		result = 31 * result + sourceSeeds.hashCode();
 		return 31 * result + (rejectReason == null ? 0 : rejectReason.hashCode());
 	}
 

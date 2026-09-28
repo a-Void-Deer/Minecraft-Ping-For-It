@@ -1,18 +1,20 @@
 package nx.pingwheel.common.presentation;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * Pure authority and validation seam for the server presentation policy rule
- * view. Reads disclose only the three presentation selector values. Mutations
- * are atomic add/remove or set-to-value operations: the candidate policy is
- * fully validated before any setter runs, so a malformed, duplicate, or
- * over-capacity request leaves the persisted settings unchanged and never
- * triggers the durable deny-all state. A request whose candidate equals the
- * current rule view is a no-op reported as {@code applied=false} with
- * {@link Status#OK}. Permission is supplied by the authenticated server-side
- * caller; the service never treats a client flag as authority.
+ * Pure authority and validation seam for the versioned server presentation
+ * policy rule view. A read discloses the complete per-target-type rule view; a
+ * mutation selects exactly one existing target type and changes only that
+ * type's allow/deny/whitelist-only lists. The candidate is fully validated
+ * before any persisted value changes, so a malformed, duplicate, missing,
+ * over-capacity, or no-op request leaves the stored policy untouched.
+ * Permission is supplied by the authenticated server-side caller; the service
+ * never treats a client flag as authority.
  */
 public final class ServerPresentationPolicyService {
 	private ServerPresentationPolicyService() {}
@@ -52,47 +54,65 @@ public final class ServerPresentationPolicyService {
 		FAILED
 	}
 
-	public record Result(boolean applied, Status status, PresentationPolicy policy) {}
+	/** One target type's disclosed rule view; construction validates the selector grammar. */
+	public record RulesView(List<String> white, List<String> black, boolean whitelistOnly) {
+		public RulesView {
+			white = white == null ? List.of() : List.copyOf(white);
+			black = black == null ? List.of() : List.copyOf(black);
+			new PresentationPolicy(white, black, whitelistOnly);
+		}
 
-	/** The current compiled rule view; a missing settings object fails closed. */
-	public static PresentationPolicy read(PresentationSettings settings) {
-		return settings == null ? denyAll() : settings.policy();
+		public static RulesView of(PresentationPolicy policy) {
+			return new RulesView(policy.white(), policy.black(), policy.whitelistOnly());
+		}
+
+		public static RulesView denyAll() {
+			return new RulesView(List.of(), List.of("*:*"), true);
+		}
+
+		public PresentationPolicy policy() {
+			return new PresentationPolicy(white, black, whitelistOnly);
+		}
+	}
+
+	public record Result(boolean applied, Status status, RulesView rules) {}
+
+	/** The complete rule view for every existing target type, in catalog order. */
+	public static Map<String, RulesView> readAll(PresentationSettings settings) {
+		Map<String, RulesView> views = new LinkedHashMap<>();
+		for (String id : PresentationSettings.TARGET_TYPE_IDS) views.put(id, read(settings, id));
+		return Collections.unmodifiableMap(views);
+	}
+
+	/** The selected rule view; a missing settings object or unknown type fails closed. */
+	public static RulesView read(PresentationSettings settings, String targetTypeId) {
+		if (settings == null || !PresentationSettings.isKnownTargetType(targetTypeId)) return RulesView.denyAll();
+		return RulesView.of(settings.policyFor(targetTypeId));
+	}
+
+	/** A detached copy of every persisted presentation field. */
+	public static PresentationSettings detachedCopy(PresentationSettings settings) {
+		return settings == null ? null : settings.deepCopy();
 	}
 
 	/**
-	 * Creates a detached copy of {@code settings} carrying the exact persisted
-	 * presentation fields. Callers mutate the copy and only swap it into the
-	 * live config after persistence succeeds, so a rejected edit or a failed
-	 * save leaves the original settings object untouched.
+	 * Applies one bounded selector or whitelist-only mutation to exactly one
+	 * existing target type. The candidate is validated before installation, so
+	 * a rejected edit cannot persist and other target types never change.
 	 */
-	public static PresentationSettings detachedCopy(PresentationSettings settings) {
-		if (settings == null) {
-			return null;
-		}
-
-		PresentationSettings copy = PresentationSettings.serverDefaults();
-		copy.setWhite(settings.getWhite());
-		copy.setBlack(settings.getBlack());
-		copy.setWhitelistOnly(settings.isWhitelistOnly());
-		copy.setMinUpdateIntervalTicks(settings.getMinUpdateIntervalTicks());
-		copy.setScanBudget(settings.getScanBudget());
-		copy.setPermissionLevels(settings.getPermissionLevels());
-		copy.setUpdateIntervals(settings.getUpdateIntervals());
-		return copy;
-	}
-
-	public static Result mutate(
+	public static Result mutateSelectedRules(
 		boolean hasPermission,
 		PresentationSettings settings,
+		String selectedTargetTypeId,
 		Operation operation,
 		String selector,
 		boolean whitelistOnly
 	) {
-		if (settings == null) {
-			return new Result(false, Status.INVALID, denyAll());
+		if (settings == null || !PresentationSettings.isKnownTargetType(selectedTargetTypeId)) {
+			return new Result(false, Status.INVALID, RulesView.denyAll());
 		}
 
-		final PresentationPolicy current = settings.policy();
+		final RulesView current = read(settings, selectedTargetTypeId);
 
 		if (!hasPermission) {
 			return new Result(false, Status.DENIED, current);
@@ -103,18 +123,19 @@ public final class ServerPresentationPolicyService {
 		}
 
 		return switch (operation) {
-			case ADD_WHITE -> add(settings, current, selector, true);
-			case REMOVE_WHITE -> remove(settings, current, selector, true);
-			case ADD_BLACK -> add(settings, current, selector, false);
-			case REMOVE_BLACK -> remove(settings, current, selector, false);
-			case SET_WHITELIST_ONLY -> apply(settings, current.white(), current.black(), whitelistOnly);
+			case ADD_WHITE -> add(settings, selectedTargetTypeId, current, selector, true);
+			case REMOVE_WHITE -> remove(settings, selectedTargetTypeId, current, selector, true);
+			case ADD_BLACK -> add(settings, selectedTargetTypeId, current, selector, false);
+			case REMOVE_BLACK -> remove(settings, selectedTargetTypeId, current, selector, false);
+			case SET_WHITELIST_ONLY -> apply(settings, selectedTargetTypeId, current.white(), current.black(), whitelistOnly);
 			case READ -> new Result(false, Status.OK, current);
 		};
 	}
 
 	private static Result add(
 		PresentationSettings settings,
-		PresentationPolicy current,
+		String targetTypeId,
+		RulesView current,
 		String selector,
 		boolean toWhite
 	) {
@@ -136,6 +157,7 @@ public final class ServerPresentationPolicyService {
 
 		return apply(
 			settings,
+			targetTypeId,
 			toWhite ? candidate : current.white(),
 			toWhite ? current.black() : candidate,
 			current.whitelistOnly());
@@ -143,7 +165,8 @@ public final class ServerPresentationPolicyService {
 
 	private static Result remove(
 		PresentationSettings settings,
-		PresentationPolicy current,
+		String targetTypeId,
+		RulesView current,
 		String selector,
 		boolean fromWhite
 	) {
@@ -162,19 +185,21 @@ public final class ServerPresentationPolicyService {
 
 		return apply(
 			settings,
+			targetTypeId,
 			fromWhite ? candidate : current.white(),
 			fromWhite ? current.black() : candidate,
 			current.whitelistOnly());
 	}
 
-	/** Validates the complete candidate before any setter runs, so a rejected edit cannot persist. */
+	/** Validates the complete candidate before installation, so a rejected edit cannot persist. */
 	private static Result apply(
 		PresentationSettings settings,
+		String targetTypeId,
 		List<String> white,
 		List<String> black,
 		boolean whitelistOnly
 	) {
-		final PresentationPolicy current = settings.policy();
+		final RulesView current = read(settings, targetTypeId);
 		final PresentationPolicy candidate;
 
 		try {
@@ -183,18 +208,16 @@ public final class ServerPresentationPolicyService {
 			return new Result(false, Status.INVALID, current);
 		}
 
-		if (candidate.equals(current)) {
+		if (candidate.equals(current.policy())) {
 			// A request that does not change the effective rule view is reported
 			// as a no-op so callers never rewrite the config, advance the
 			// revision, or broadcast unchanged state.
 			return new Result(false, Status.OK, current);
 		}
 
-		settings.setWhite(candidate.white());
-		settings.setBlack(candidate.black());
-		settings.setWhitelistOnly(candidate.whitelistOnly());
+		settings.setRules(targetTypeId, new PresentationSettings.RuleSet(candidate.white(), candidate.black(), candidate.whitelistOnly()));
 
-		return new Result(true, Status.OK, settings.policy());
+		return new Result(true, Status.OK, read(settings, targetTypeId));
 	}
 
 	/** Whether {@code selector} is non-empty, within the length cap, and grammar-valid. */
@@ -209,9 +232,5 @@ public final class ServerPresentationPolicyService {
 		} catch (RuntimeException ex) {
 			return false;
 		}
-	}
-
-	private static PresentationPolicy denyAll() {
-		return new PresentationPolicy(List.of(), List.of("*:*"), true);
 	}
 }

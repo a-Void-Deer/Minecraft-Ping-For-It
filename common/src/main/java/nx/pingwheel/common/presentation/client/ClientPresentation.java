@@ -5,13 +5,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.network.IPacket;
@@ -21,14 +19,13 @@ import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.PresentationCodec;
 import nx.pingwheel.common.presentation.PresentationField;
 import nx.pingwheel.common.presentation.PresentationIds;
-import nx.pingwheel.common.presentation.PresentationPolicy;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationRegistry;
 import nx.pingwheel.common.presentation.PresentationSection;
-import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.PresentationStore;
 import nx.pingwheel.common.presentation.PresentationValue;
 
-/** One client connection's negotiated capabilities, retained values and local UI projection. */
+/** One client connection's negotiated capabilities, server mask and retained presentation. */
 public final class ClientPresentation {
 	public static final String BASIC = "minecraft:basic";
 	public static final String NAME = "minecraft:target.name";
@@ -41,15 +38,12 @@ public final class ClientPresentation {
 	private final PresentationRegistry registry = new PresentationRegistry();
 	private final PresentationStore store = new PresentationStore();
 	private final Consumer<IPacket> sender;
-	private final Supplier<PresentationSettings> receiveSettings;
-	private final Supplier<PresentationSettings> displaySettings;
+	private Map<String, Map<String, Set<String>>> mask = Map.of();
 	private final Map<String, Map<String, PresentationField>> compatible = new LinkedHashMap<>();
 	private final Map<String, Map<String, PresentationField>> acceptedServerCatalog = new LinkedHashMap<>();
 	private final Map<String, PresentationUiProvider> providers = new LinkedHashMap<>();
 	private String providerId = "default";
-	private String receiveFingerprint;
 	private long epoch;
-	private long subscription;
 	private long view;
 	private long ticks;
 	private long catalogRevision;
@@ -57,15 +51,11 @@ public final class ClientPresentation {
 	private boolean offered;
 	private boolean ready;
 
-	public ClientPresentation(Consumer<IPacket> sender, Supplier<PresentationSettings> receiveSettings,
-		Supplier<PresentationSettings> displaySettings) {
+	public ClientPresentation(Consumer<IPacket> sender) {
 		this.sender = Objects.requireNonNull(sender, "sender");
-		this.receiveSettings = Objects.requireNonNull(receiveSettings, "receiveSettings");
-		this.displaySettings = Objects.requireNonNull(displaySettings, "displaySettings");
 		registry.register(new BasicDescriptor());
 		registerOptionalCreate();
 		registerProvider("default", ClientPresentation::defaultLabels);
-		receiveFingerprint = receive().fingerprint();
 	}
 
 	private void registerOptionalCreate() {
@@ -73,12 +63,7 @@ public final class ClientPresentation {
 		if (present != null) registry.register(present);
 	}
 
-	/**
-	 * Resolves the optional Create client adapter without constructing a
-	 * connection runtime, so the settings UI can show the local preview while
-	 * offline. The NeoForge factory tests mod presence and the supported Create
-	 * version; no Create class is linked by common, Fabric or Forge when absent.
-	 */
+	/** Optional NeoForge adapter loading is lazy; Basic works when Create is absent. */
 	private static PresentationAdapter createOptionalAdapter() {
 		try {
 			Object adapter = Class.forName(CREATE_FACTORY).getMethod("client").invoke(null);
@@ -92,19 +77,6 @@ public final class ClientPresentation {
 	/** The local registered manifest, immutable; never a store or world value. */
 	public List<PresentationAdapter> manifest() {
 		return List.copyOf(registry.all());
-	}
-
-	/**
-	 * The local Basic plus optional Create manifest without a connection
-	 * runtime, for the offline settings preview. No packet, store, or runtime is
-	 * created.
-	 */
-	public static List<PresentationAdapter> localManifest() {
-		List<PresentationAdapter> adapters = new ArrayList<>();
-		adapters.add(new BasicDescriptor());
-		PresentationAdapter create = createOptionalAdapter();
-		if (create != null) adapters.add(create);
-		return List.copyOf(adapters);
 	}
 
 	/**
@@ -137,14 +109,6 @@ public final class ClientPresentation {
 	public void tick(boolean connected) {
 		if (!connected) return;
 		ticks++;
-		String next = receive().fingerprint();
-		if (!next.equals(receiveFingerprint)) {
-			receiveFingerprint = next;
-			// Immediately delete denied fields even from frozen snapshots. A later
-			// loosening cannot restore values that were deleted after server expiry.
-			store.restrict((adapter, id) -> allowedToReceive(adapter, id));
-			if (offered) subscribe();
-		}
 		if (!offered && helloAttempts < MAX_HELLO_ATTEMPTS
 			&& (helloAttempts == 0 || ticks % HELLO_RETRY_TICKS == 0)) {
 			Map<String, Integer> schemas = new LinkedHashMap<>();
@@ -157,9 +121,12 @@ public final class ClientPresentation {
 	public void close() {
 		store.reset(0);
 		compatible.clear();
+		mask = Map.of();
 		acceptedServerCatalog.clear();
 		catalogRevision++;
-		epoch = subscription = view = 0;
+		epoch = view = 0;
+		ticks = 0;
+		helloAttempts = 0;
 		offered = ready = false;
 	}
 
@@ -189,8 +156,8 @@ public final class ClientPresentation {
 			for (PresentationField field : advertised) {
 				PresentationField ours = local.get(field.id());
 				if (ours != null && ours.kind() == field.kind()) {
-					// Subscription/security keeps the local descriptor; the UI
-					// catalogue keeps the server's advertised default and label.
+					// The local descriptor enforces kind compatibility. The UI
+					// catalogue keeps the server's advertised metadata.
 					accepted.put(field.id(), ours);
 					serverAdvertised.put(field.id(), field);
 				}
@@ -212,7 +179,6 @@ public final class ClientPresentation {
 		store.reset(epoch);
 		offered = true;
 		catalogRevision++;
-		subscribe();
 		return true;
 	}
 
@@ -250,23 +216,17 @@ public final class ClientPresentation {
 		return true;
 	}
 
-	private void subscribe() {
-		if (subscription == Long.MAX_VALUE) { ready = false; return; }
-		ready = false;
-		subscription++;
-		Set<String> fields = new LinkedHashSet<>();
-		compatible.forEach((adapter, descriptors) -> descriptors.keySet().forEach(id -> {
-			if (allowedToReceive(adapter, id)) fields.add(id);
-		}));
-		sender.accept(PresentationC2SPacket.subscribe(epoch, subscription, fields));
-	}
-
 	/** A reset is the only transition that enables intents and the new view. */
 	public boolean reset(PresentationS2CPacket packet) {
 		if (!offered || packet == null || packet.isCorrupt()
 			|| packet.kind() != PresentationS2CPacket.Kind.RESET || packet.epoch() != epoch
-			|| packet.subscription() != subscription || packet.view() < view) return false;
-		store.generation(epoch, subscription, packet.view());
+			|| packet.view() < view || (ready && packet.view() == view)) return false;
+		// A structurally valid but incomplete mask is deny-all for missing types.
+		Map<String, Map<String, Set<String>>> nextMask = packet.mask();
+		if (nextMask == null) nextMask = Map.of();
+		mask = compatibleMask(nextMask);
+		store.restrict(mask);
+		store.generation(epoch, packet.view());
 		view = packet.view();
 		ready = true;
 		return true;
@@ -274,7 +234,7 @@ public final class ClientPresentation {
 
 	public boolean current(PresentationS2CPacket packet) {
 		return ready && packet != null && !packet.isCorrupt()
-			&& packet.epoch() == epoch && packet.subscription() == subscription
+			&& packet.epoch() == epoch
 			&& packet.view() == view;
 	}
 
@@ -283,25 +243,30 @@ public final class ClientPresentation {
 		if (!current(packet) || packet.kind() != PresentationS2CPacket.Kind.CREATED
 			|| packet.snapshot() == null || packet.markerId() == null
 			|| !packet.markerId().equals(packet.snapshot().id())) return false;
-		PresentationSection basic = decode(packet.sectionBytes(), BASIC);
+		PresentationSection basic = decode(packet.sectionBytes(), BASIC, packet.snapshot().targetTypeId());
 		if (basic == null) return false;
 		long id = packet.markerId().value();
 		if (!store.isKnown(id)) {
-			store.initial(epoch, subscription, view, id, basic);
+			if (!nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(packet.snapshot().targetTypeId())
+				|| packet.defaultRef() == null) return false;
+			store.initial(epoch, view, id, packet.snapshot().targetTypeId(), packet.defaultRef(),
+				project(basic, packet.snapshot().targetTypeId()));
 			return store.isKnown(id);
 		}
-		if (store.isFrozen(id)) return false;
+		if (store.isFrozen(id) || store.targetTypeId(id) == null) return false;
 		// Same-id baseline after a generation change updates only the presentation;
 		// the caller must not re-apply the marker or renew its visual deadline.
-		return store.replace(epoch, subscription, view, id, Math.max(1, packet.revision()), basic);
+		return store.replace(epoch, view, id, Math.max(1, packet.revision()),
+			project(basic, store.targetTypeId(id)));
 	}
 
 	public boolean section(PresentationS2CPacket packet) {
 		if (!current(packet) || packet.kind() != PresentationS2CPacket.Kind.SECTION || packet.markerId() == null
-			|| !store.isKnown(packet.markerId().value())) return false;
-		PresentationSection section = decode(packet.sectionBytes(), null);
+			|| store.targetTypeId(packet.markerId().value()) == null) return false;
+		PresentationSection section = decode(packet.sectionBytes(), null, store.targetTypeId(packet.markerId().value()));
 		if (section == null) return false;
-		return store.replace(epoch, subscription, view, packet.markerId().value(), packet.revision(), section);
+		return store.replace(epoch, view, packet.markerId().value(), packet.revision(),
+			project(section, store.targetTypeId(packet.markerId().value())));
 	}
 
 	public void removed(MarkerId id, long revision, boolean expired) {
@@ -310,7 +275,7 @@ public final class ClientPresentation {
 
 	public void evict(MarkerId id) { store.evict(id.value()); }
 
-	private PresentationSection decode(byte[] bytes, String expectedAdapter) {
+	private PresentationSection decode(byte[] bytes, String expectedAdapter, String targetTypeId) {
 		if (bytes == null || bytes.length == 0 || bytes.length > PresentationCodec.MAX_SECTION_BYTES + 5) return null;
 		FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(bytes));
 		try {
@@ -324,14 +289,19 @@ public final class ClientPresentation {
 			if (local == null || local.schema() != schema || !compatible.containsKey(adapter)) return null;
 			buf.readerIndex(start);
 			Map<String, PresentationField> fields = compatible.get(adapter);
+			Set<String> allowed = mask.getOrDefault(targetTypeId, Map.of()).getOrDefault(adapter, Set.of());
 			PresentationSection decoded = PresentationCodec.read(buf,
-				id -> fields.containsKey(id) && allowedToReceive(adapter, id));
+				id -> fields.containsKey(id) && allowed.contains(id));
 			if (buf.isReadable()) return null;
 			Map<String, PresentationValue> checked = new LinkedHashMap<>();
 			decoded.fields().forEach((id, value) -> {
 				if (fields.get(id).accepts(value)) checked.put(id, value);
 			});
-			return new PresentationSection(adapter, schema, checked, decoded.stale());
+			Map<PresentationPropertyRef, String> annotations = new LinkedHashMap<>();
+			decoded.annotations().forEach((ref, ping) -> {
+				if (checked.containsKey(ref.fieldId())) annotations.put(ref, ping);
+			});
+			return new PresentationSection(adapter, schema, checked, decoded.stale(), annotations);
 		} catch (RuntimeException invalid) {
 			return null;
 		} finally {
@@ -339,35 +309,54 @@ public final class ClientPresentation {
 		}
 	}
 
-	private boolean allowedToReceive(String adapter, String id) {
-		Map<String, PresentationField> fields = compatible.get(adapter);
-		return fields != null && fields.containsKey(id) && receive().policy().allows(id, true);
+	private PresentationSection project(PresentationSection section, String targetTypeId) {
+		Set<String> allowed = mask.getOrDefault(targetTypeId, Map.of())
+			.getOrDefault(section.adapterId(), Set.of());
+		Map<String, PresentationValue> fields = new LinkedHashMap<>();
+		section.fields().forEach((id, value) -> {
+			if (allowed.contains(id)) fields.put(id, value);
+		});
+		Map<PresentationPropertyRef, String> annotations = new LinkedHashMap<>();
+		section.annotations().forEach((ref, ping) -> {
+			if (fields.containsKey(ref.fieldId())) annotations.put(ref, ping);
+		});
+		return new PresentationSection(section.adapterId(), section.schema(), fields, section.stale(), annotations);
 	}
 
-	private PresentationSettings receive() {
-		PresentationSettings settings = receiveSettings.get();
-		return settings == null ? PresentationSettings.clientDefaults() : settings;
+	/** Never promote a mask entry that the accepted offer could not decode. */
+	private Map<String, Map<String, Set<String>>> compatibleMask(
+		Map<String, Map<String, Set<String>>> received) {
+		Map<String, Map<String, Set<String>>> result = new LinkedHashMap<>();
+		received.forEach((type, adapters) -> {
+			Map<String, Set<String>> allowed = new LinkedHashMap<>();
+			adapters.forEach((adapter, fields) -> {
+				Map<String, PresentationField> descriptors = compatible.get(adapter);
+				if (descriptors != null) {
+					Set<String> accepted = new HashSet<>(fields);
+					accepted.retainAll(descriptors.keySet());
+					allowed.put(adapter, Set.copyOf(accepted));
+				}
+			});
+			result.put(type, Map.copyOf(allowed));
+		});
+		return Map.copyOf(result);
 	}
 
-	private PresentationSettings display() {
-		PresentationSettings settings = displaySettings.get();
-		return settings == null ? PresentationSettings.clientDefaults() : settings;
-	}
-
-	/** Apply display rules on each access, including local edits before the next tick. */
+	/** Only values authorized by the latest server mask may reach a UI provider. */
 	public PresentationView view(MarkerId id) {
 		if (id == null || !store.isKnown(id.value())) return PresentationView.empty();
-		PresentationPolicy policy = display().policy();
 		Map<String, PresentationSection> shown = new LinkedHashMap<>();
 		store.sections(id.value()).forEach((adapter, entry) -> {
-			Map<String, PresentationValue> fields = new LinkedHashMap<>();
-			entry.section().fields().forEach((field, value) -> {
-				if (allowedToReceive(adapter, field) && policy.allows(field, true)) fields.put(field, value);
-			});
-			if (!fields.isEmpty()) shown.put(adapter, new PresentationSection(adapter,
-				entry.section().schema(), fields, entry.section().stale()));
+			PresentationSection authorized = project(entry.section(), store.targetTypeId(id.value()));
+			if (!authorized.fields().isEmpty()) shown.put(adapter, authorized);
 		});
-		return shown.isEmpty() ? PresentationView.empty() : new PresentationView(shown);
+		Map<String, Map<String, String>> labels = new LinkedHashMap<>();
+		acceptedServerCatalog.forEach((adapter, descriptors) -> {
+			Map<String, String> names = new LinkedHashMap<>();
+			descriptors.forEach((fieldId, descriptor) -> names.put(fieldId, descriptor.label()));
+			labels.put(adapter, names);
+		});
+		return new PresentationView(store.targetTypeId(id.value()), store.defaultRef(id.value()), shown, labels);
 	}
 
 	/** Provider changes affect presentation only: no packets or source work. */
@@ -400,28 +389,7 @@ public final class ClientPresentation {
 
 	/** Package-private verification seam for the built-in label projection. */
 	static List<String> defaultLabels(PresentationView view) {
-		List<String> labels = new ArrayList<>();
-		var health = view.field(BASIC, "minecraft:entity.health");
-		var maximum = view.field(BASIC, "minecraft:entity.max_health");
-		if (health instanceof PresentationValue.NumberValue hp
-			&& maximum instanceof PresentationValue.NumberValue max) {
-			labels.add("HP %.1f / %.1f".formatted(hp.value(), max.value()));
-		}
-		var speed = view.field("create:presentation", "create:kinetic.speed");
-		if (speed instanceof PresentationValue.RecordValue record
-			&& record.values().get("effective_rpm") instanceof PresentationValue.NumberValue rpm) {
-			labels.add("%.1f RPM".formatted(rpm.value()));
-		}
-		for (String field : List.of("create:inventory.summary", "create:fluid.summary")) {
-			var summary = view.field("create:presentation", field);
-			if (summary instanceof PresentationValue.RecordValue record
-				&& record.values().get("counts") instanceof PresentationValue.RecordValue counts) {
-				labels.add((field.contains("inventory") ? "Items: " : "Fluids: ")
-					+ counts.values().size() + " types"
-					+ (record.values().get("partial") instanceof PresentationValue.Flag flag && flag.value() ? " (partial)" : ""));
-			}
-		}
-		return labels;
+		return PresentationPropertyFormatter.labels(view);
 	}
 
 	/** Manifest-only Basic descriptor; no client world sampling is possible. */

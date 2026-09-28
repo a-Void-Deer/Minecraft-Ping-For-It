@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -18,6 +19,16 @@ class PresentationCoreTest {
 
 	private static PresentationSection section(String adapter, String key) {
 		return new PresentationSection(adapter, 1, Map.of(key, new PresentationValue.Text("value")), false);
+	}
+
+	private static final String TARGET_TYPE = "block";
+
+	private static PresentationPropertyRef defaultRef() {
+		return PresentationPropertyRef.root(BASIC, "pingforit:name");
+	}
+
+	private static void initial(PresentationStore store, long epoch, long view, long markerId, PresentationSection basic) {
+		store.initial(epoch, view, markerId, TARGET_TYPE, defaultRef(), basic);
 	}
 
 	@Test
@@ -81,41 +92,42 @@ class PresentationCoreTest {
 	void generationClearsOnlyActiveSectionsAndPreservesKnownMarkersAndFrozenSnapshots() {
 		var store = new PresentationStore();
 		store.reset(7);
-		store.initial(7, 0, 0, 10, section(BASIC, "pingforit:first"));
-		store.initial(7, 0, 0, 11, section(BASIC, "pingforit:first"));
-		assertTrue(store.replace(7, 0, 0, 10, 1, section(EXTRA, "create:contents")));
+		initial(store, 7, 0, 10, section(BASIC, "pingforit:first"));
+		initial(store, 7, 0, 11, section(BASIC, "pingforit:first"));
+		assertTrue(store.replace(7, 0, 10, 1, section(EXTRA, "create:contents")));
 		store.clear(7, 10, 2, true);
 		assertTrue(store.isFrozen(10));
-		assertFalse(store.replace(7, 0, 0, 10, 20, section(EXTRA, "create:new")));
-		assertFalse(store.clearSection(7, 0, 0, 10, EXTRA, 20));
-		store.generation(7, 1, 1);
+		assertFalse(store.replace(7, 0, 10, 20, section(EXTRA, "create:new")));
+		assertFalse(store.clearSection(7, 0, 10, EXTRA, 20));
+		store.generation(7, 1);
 		assertEquals(2, store.sections(10).size());
 		assertEquals(Map.of(), store.sections(11));
 		assertTrue(store.isKnown(11));
-		store.initial(7, 1, 1, 11, section(BASIC, "pingforit:late"));
+		initial(store, 7, 1, 11, section(BASIC, "pingforit:late"));
 		assertTrue(store.sections(11).isEmpty());
-		assertTrue(store.replace(7, 1, 1, 11, 1, section(EXTRA, "create:contents")));
-		assertFalse(store.replace(7, 0, 0, 11, 9, section(EXTRA, "create:old")));
-		assertEquals(1, store.subscriptionGeneration());
+		assertTrue(store.replace(7, 1, 11, 1, section(EXTRA, "create:contents")));
+		assertFalse(store.replace(7, 0, 11, 9, section(EXTRA, "create:old")));
 		assertEquals(1, store.viewGeneration());
-		store.generation(7, 0, 2); // older subscription cannot roll back the store
-		assertEquals(1, store.subscriptionGeneration());
+		store.generation(7, 0); // a regressing view cannot roll the store back
+		assertEquals(1, store.viewGeneration());
+		store.generation(8, 5); // a mismatched epoch is ignored
+		assertEquals(1, store.viewGeneration());
 	}
 
 	@Test
 	void sectionClearsAreRevisionedPerAdapterAndDoNotDeleteMarker() {
 		var store = new PresentationStore();
 		store.reset(1);
-		store.initial(1, 0, 0, 8, section(BASIC, "pingforit:title"));
-		assertTrue(store.replace(1, 0, 0, 8, 3, section(EXTRA, "create:value")));
-		assertFalse(store.clearSection(1, 0, 0, 8, EXTRA, 3));
-		assertTrue(store.clearSection(1, 0, 0, 8, EXTRA, 4));
+		initial(store, 1, 0, 8, section(BASIC, "pingforit:title"));
+		assertTrue(store.replace(1, 0, 8, 3, section(EXTRA, "create:value")));
+		assertFalse(store.clearSection(1, 0, 8, EXTRA, 3));
+		assertTrue(store.clearSection(1, 0, 8, EXTRA, 4));
 		assertTrue(store.sections(8).containsKey(BASIC));
 		assertFalse(store.sections(8).containsKey(EXTRA));
-		assertFalse(store.replace(1, 0, 0, 8, 4, section(EXTRA, "create:old")));
-		assertFalse(store.clearSection(1, 0, 0, 8, EXTRA, 4));
-		assertFalse(store.clearSection(1, 1, 0, 8, EXTRA, 100));
-		assertTrue(store.replace(1, 0, 0, 8, 5, section(EXTRA, "create:fresh")));
+		assertFalse(store.replace(1, 0, 8, 4, section(EXTRA, "create:old")));
+		assertFalse(store.clearSection(1, 0, 8, EXTRA, 4));
+		assertFalse(store.clearSection(1, 1, 8, EXTRA, 100)); // stale view
+		assertTrue(store.replace(1, 0, 8, 5, section(EXTRA, "create:fresh")));
 		assertEquals(5, store.sections(8).get(EXTRA).revision());
 		assertThrows(UnsupportedOperationException.class, () -> store.sections(8).clear());
 	}
@@ -125,35 +137,55 @@ class PresentationCoreTest {
 		var store = new PresentationStore();
 		store.reset(1);
 		store.clear(1, 20, 1, false); // removal before initial
-		store.initial(1, 0, 0, 20, section(BASIC, "pingforit:late"));
+		initial(store, 1, 0, 20, section(BASIC, "pingforit:late"));
 		assertTrue(store.isKnown(20));
 		assertTrue(store.sections(20).isEmpty());
-		store.initial(1, 0, 0, 21, section(BASIC, "pingforit:value"));
+		initial(store, 1, 0, 21, section(BASIC, "pingforit:value"));
 		store.clear(1, 21, 2, true);
-		store.restrict((adapter, field) -> false);
+		store.restrict(Map.of(TARGET_TYPE, Map.of(BASIC, Set.of())));
 		assertTrue(store.sections(21).get(BASIC).section().fields().isEmpty());
-		assertFalse(store.replace(1, 0, 0, 21, 99, section(EXTRA, "create:more")));
+		assertFalse(store.replace(1, 0, 21, 99, section(EXTRA, "create:more")));
 		store.evict(21);
-		store.initial(1, 0, 0, 21, section(BASIC, "pingforit:late"));
+		initial(store, 1, 0, 21, section(BASIC, "pingforit:late"));
 		assertTrue(store.isKnown(21));
 		assertFalse(store.isFrozen(21));
 		assertTrue(store.sections(21).isEmpty());
-		assertFalse(store.replace(1, 0, 0, 21, 100, section(EXTRA, "create:more")));
+		assertFalse(store.replace(1, 0, 21, 100, section(EXTRA, "create:more")));
 		store.reset(2);
 		assertFalse(store.isKnown(21));
-		store.initial(2, 0, 0, 21, section(BASIC, "pingforit:fresh"));
+		initial(store, 2, 0, 21, section(BASIC, "pingforit:fresh"));
 		assertEquals(1, store.sections(21).size());
+	}
+
+	@Test
+	void serverMaskPrunesToAllowedFieldsAndKeepsMarkerIdentity() {
+		var store = new PresentationStore();
+		store.reset(3);
+		var basic = new PresentationSection(BASIC, 1, Map.of(
+			"pingforit:name", new PresentationValue.Text("Chest"),
+			"pingforit:extra", new PresentationValue.Flag(true)), false);
+		initial(store, 3, 0, 5, basic);
+
+		assertEquals(TARGET_TYPE, store.targetTypeId(5));
+		assertEquals(defaultRef(), store.defaultRef(5));
+
+		store.restrict(Map.of(TARGET_TYPE, Map.of(BASIC, Set.of("pingforit:name"))));
+		assertEquals(Set.of("pingforit:name"), store.sections(5).get(BASIC).section().fields().keySet());
+
+		store.restrict(Map.of());
+		assertTrue(store.sections(5).get(BASIC).section().fields().isEmpty());
+		assertTrue(store.isKnown(5));
 	}
 
 	@Test
 	void boundedStoreFailsClosedInsteadOfDroppingOldRemovalHistory() {
 		var store = new PresentationStore();
 		store.reset(1);
-		store.initial(1, 0, 0, 1, section(BASIC, "pingforit:saved"));
+		initial(store, 1, 0, 1, section(BASIC, "pingforit:saved"));
 		for (long i = 2; i < 8200; i++) store.clear(1, i, 1, false);
-		store.initial(1, 0, 0, 8200, section(BASIC, "pingforit:new"));
+		initial(store, 1, 0, 8200, section(BASIC, "pingforit:new"));
 		assertTrue(store.sections(8200).isEmpty());
-		store.initial(1, 0, 0, 2, section(BASIC, "pingforit:late"));
+		initial(store, 1, 0, 2, section(BASIC, "pingforit:late"));
 		assertTrue(store.sections(2).isEmpty());
 		assertEquals(1, store.sections(1).size());
 	}
@@ -214,9 +246,10 @@ class PresentationCoreTest {
 			frame.writeVarInt(ids.length);
 			for (int i = 0; i < ids.length; i++) {
 				frame.writeUtf(ids[i], 193);
-				frame.writeVarInt(tags[i] == 3 ? 2 : 1);
+				// v3: the typed value is followed by a nullable annotation bit.
+				frame.writeVarInt(tags[i] == 3 ? 3 : 1);
 				frame.writeByte(tags[i]);
-				if (tags[i] == 3) frame.writeBoolean(true);
+				if (tags[i] == 3) { frame.writeBoolean(true); frame.writeBoolean(false); }
 			}
 			out.writeVarInt(frame.readableBytes());
 			out.writeBytes(frame);
