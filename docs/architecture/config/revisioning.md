@@ -40,9 +40,8 @@ character makes the string invalid. For example:
 |  | `0.3.0-pfi-beta.1` |
 
 The original spelling is retained. For comparison, the `pfi` namespace is
-removed and `major.minor.patch-qualifier` is compared using the repository's
-[Maven-compatible version comparison](../../../common/src/main/java/nx/pingwheel/common/config/MavenComparableVersion.java);
-this is neither lexicographic comparison nor SemVer. For equal numeric cores,
+removed and `major.minor.patch-qualifier` is compared with Maven-compatible
+version ordering; this is neither lexicographic comparison nor SemVer. For equal numeric cores,
 `beta2 < beta10`, `rc1 < final`, `final == release`, and
 `01.002.000-pfi-beta1 == 1.2.0-pfi-beta1`.
 
@@ -92,6 +91,32 @@ known configuration fields replace their corresponding entries, other retained
 raw entries survive, and the current marker is stamped again. If that write
 fails, the valid loaded configuration remains in memory and the migration stays
 pending for a later save attempt; it is not converted into invalid-file recovery.
+
+## Same-version shape normalization
+
+Object-shape normalization is separate from ordered version migration and also
+runs for a same-version or older load, composed after the ordered steps and
+before typed deserialization. It reconciles only the persisted presentation
+shape and fails closed on a malformed shape:
+
+- A server document whose `presentation.targetTypes` map is present keeps that
+  map and drops the obsolete flat `presentation.white`, `presentation.black`,
+  and `presentation.whitelistOnly` members. When the map is absent, the flat
+  members' values are copied to every one of the five target-type rule sets and
+  the flat members are removed.
+- A malformed `presentation` object or malformed `targetTypes` map normalizes to
+  a deny-all rule for every target type. A malformed individual rule object
+  denies only its own target type. A malformed global permission override
+  normalizes to a global deny-all policy.
+- Unrelated server settings and every well-formed target-type rule survive
+  normalization; an existing new-shape map wins over the obsolete flat members.
+- A client document drops the obsolete `presentationReceive` and
+  `presentationDisplay` keys.
+
+A document with none of the obsolete or malformed shape is not rewritten for
+normalization alone. Future-version protection and the changed-source
+pending-migration guard are unchanged; normalization shares the same guarded
+writeback.
 
 ## Invalid-file recovery differs by config type
 

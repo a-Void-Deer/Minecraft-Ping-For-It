@@ -7,10 +7,10 @@ workflow.
 
 ## File, metadata, and locality
 
-The client configuration file is `pingforit.json`. Its persisted fields are the
-fields of [`ClientConfig`](../../common/src/main/java/nx/pingwheel/common/config/ClientConfig.java).
-`pingforit-version` is an additional handler-owned metadata key rather than a
-`ClientConfig` field; its grammar, migrations, and recovery behavior belong to
+The client configuration file is `pingforit.json`. Its persisted fields are
+catalogued below. `pingforit-version` is an additional handler-owned metadata
+key rather than a catalogued field; its grammar, migrations, and recovery
+behavior belong to
 [configuration revisioning](../architecture/config/revisioning.md).
 
 Every setting below is client-local. It can affect local input, capture, or
@@ -20,17 +20,14 @@ server remains authoritative for its own channel acceptance and marker state;
 see [target validation](../architecture/authority/target_validation.md).
 
 Current implementation defaults, validation metadata, and widget definitions
-are intentionally not mirrored here. Consult
-[`ClientConfig`](../../common/src/main/java/nx/pingwheel/common/config/ClientConfig.java),
-[`ClientConfigBounds`](../../common/src/main/java/nx/pingwheel/common/config/ClientConfigBounds.java),
-and [`SettingsScreen`](../../common/src/main/java/nx/pingwheel/common/screen/SettingsScreen.java)
-when that implementation metadata is needed.
+are intentionally not mirrored here; the
+[configuration UI](../UI/settings-screen.md) owns which controls are exposed.
 
 ## Persisted field catalogue
 
 Numbers use JSON numeric form. Units are stated where they are meaningful to the
-field; implementation defaults and numeric bounds remain in the source links
-above.
+field; implementation defaults and numeric bounds are deliberately not mirrored
+here.
 
 ### Sound, reach, and local presentation
 
@@ -82,23 +79,15 @@ These display lists are separate from the entity-selection blacklist controlled
 by `markBlacklistedTargets`; see
 [the blacklist boundary](../architecture/picking/selection_policy.md#raycast-use-and-blacklist-boundary).
 
-### Presentation field policies
+### Obsolete presentation policy keys
 
-| Key | JSON form | Local meaning |
-| --- | --- | --- |
-| `presentationReceive` | object | Local receive policy for versioned presentation fields: which advertised fields this client subscribes to, decodes, and retains. |
-| `presentationDisplay` | object | Local display policy: which receive-authorized retained fields a UI consumer may present. |
-
-Both keys use the shared presentation policy object shape catalogued in
-[server configuration](server.md#presentation-policy-object). The allow, deny,
-and whitelist-only members are the client-effective ones; the sampling and
-override members apply to server capture. A local deny beats a
-server-authorized compatible field. Policy application, fail-closed validation,
-and the client value store are owned by
-[presentation snapshot](../architecture/presentation/presentation_snapshot.md).
-The [configuration UI](../UI/settings-screen.md#presentation-category) exposes
-interactive list editing for both keys and presents the server rule view
-read-only for comparison.
+`presentationReceive` and `presentationDisplay` are obsolete keys with no
+persisted meaning. The handler removes them from a loaded or serialized
+document rather than retaining them, so no client-local receive or display
+policy exists. The removal and recovery behavior is owned by
+[configuration revisioning](../architecture/config/revisioning.md). The
+versioned presentation field policy is server-owned; its persisted shape is
+catalogued in [server configuration](server.md#presentation-policy-object).
 
 ### Channel preferences
 

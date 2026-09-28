@@ -85,6 +85,28 @@ not create a new classification or winner. Refresh and materialization are
 provider lifecycle operations; ordinary entity/block markers do not acquire this
 continuous revalidation behavior.
 
+## Server information sampling
+
+Server presentation may observe a committed Sable target through the generic
+[external-block Basic sampling contract](../architecture/presentation/presentation_snapshot.md#external-block-basic-sampling).
+This observation is read-only: it follows the committed stable tracking ID,
+requires an active existing reference, and resolves the tracking point's current
+Sable sublevel and local block position. It does not use a stale provider
+locator or the logical-pose world anchor as a substitute for the current local
+position.
+
+The resolved Sable sublevel must expose the same `ServerLevel` as the marker's
+parent server level. Its local coordinates remain distinct from the logical-pose
+world anchor used for authoritative validation. A removed, unloaded, mismatched,
+unregistered, or released source is unavailable, and observation never force-
+loads a chunk or sublevel.
+
+Observation cannot materialize a target, acquire, release, migrate an index,
+persist, or create provider tracking state, and it cannot create a new target
+from a sample. Provider failures remain fail-soft. The generic Basic capture,
+demand, atomic failure, and stale-retention rules remain owned by the linked
+presentation snapshot contract.
+
 ## Names, permissions and diagnostics
 
 Sable names are resolved from authoritative live block state and, when present,

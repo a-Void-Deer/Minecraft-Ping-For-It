@@ -22,7 +22,7 @@ selection lives in [ping winner](authority/ping_winner.md).
 
 Presentation snapshot values are projected per recipient from trusted server
 state: a field is captured and sent only when that recipient's negotiated
-manifest, subscription, field policy, and permission all allow it, and the
+manifest, server-selected mask, field policy, and permission all allow it, and the
 replaceable permission provider fails closed on a missing or throwing provider.
 A client cannot widen its own projection, permission level, or retained values
 by sending presentation data. Negotiation, selector policy, and the client

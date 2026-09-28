@@ -64,3 +64,9 @@ the established default icon and tint behavior. Ping Type controls chat,
 outline color, text emphasis, wheel presentation and optional icon; exact
 [chat composition](../rendering/names_chat.md) and
 [wheel behavior](../picking/wheel.md) remain separate contracts.
+
+The whole-marker Ping Type list above is independent of the code-defined
+property Ping Type policy used for individual presentation properties. That
+separate policy and its target-selector grammar are owned by
+[presentation snapshot](../presentation/presentation_snapshot.md#property-ping);
+it defines no new whole-marker Ping Type.

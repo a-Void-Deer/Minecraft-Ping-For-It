@@ -126,17 +126,31 @@ effective/theoretical signed RPM and a moving flag), `create:kinetic.has_network
 `create:kinetic.capacity` as enabled by default, and the item-vault
 (`create:inventory.summary`) and fluid-tank (`create:fluid.summary`) registry-ID
 summaries as disabled by default. The kinetic fields are default-enabled, so an
-unmatched kinetic field passes the recipient's policy unless a block rule
-matches or whitelist-only mode is on; the client UI shows RPM as allowed by
-default, and no explicit allow rule is required for the line to appear when the
-target and captured value are available. The disabled summaries stay disabled
-until explicitly allowed. Selector evaluation and the outcome labels are owned
-by [presentation snapshot](../architecture/presentation/presentation_snapshot.md#field-selection-policy).
-Sampling is requested only for demanded
-fields and only for a whole-block target whose live registry ID still matches
-the captured target; opaque locators, other target kinds, unloaded chunks, and
-dirty world state are unavailable rather than asserted. A server interval
-override can only raise the adapter's declared minimum sampling cadence.
+unmatched kinetic field is authorized for capture and projection under the
+recipient's policy unless a block rule matches or whitelist-only mode is on,
+and the server policy page's outcome label reflects that default. Default
+authorization is not display: the RPM HUD line appears only when the default
+display reference selects it or a create carries a non-null property Ping
+annotation naming it, and no target type's default reference currently selects
+RPM. The disabled summaries stay disabled until explicitly allowed. Item and
+fluid summaries are record values keyed by registry ID; an uploaded property
+selection may address one nested registry-ID entry of such a summary. The property reference, recapture, authority, and
+display contract is owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md#property-ping).
+Selector evaluation and the outcome labels are owned
+by [presentation snapshot](../architecture/presentation/presentation_snapshot.md#per-target-type-field-policy).
+Sampling is requested only for demanded fields and for a supported whole-block
+input. This includes an ordinary whole block and a committed, validated Sable
+external-block target, provided the current provider registry identity still
+matches the committed expected identity. The
+resolved external block uses the provider's current position for the same
+whole-block collector path; it does not make the detached placeholder
+coordinates or opaque locator a sampling position. Arbitrary opaque locators,
+unrecognized providers, uncommitted targets, wrong dimensions, unloaded chunks,
+and mismatched or dirty state are unavailable rather than asserted. Entity,
+contraption-constituent, partial-geometry, and generic foreign-provider targets
+are not thereby added to this route. A server interval override can only raise
+the adapter's declared minimum sampling cadence.
 
 Kinetic reads use Create's public speed, network, and overstress getters. Cached
 network stress and capacity additionally require a signature-gated accessor.

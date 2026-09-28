@@ -35,7 +35,7 @@ when a plan is produced are UI planning details owned by
 
 ## Separate policy selector route
 
-The presentation field selection policy is read and changed through its own
+The per-target-type presentation field policy is read and changed through its own
 versioned route, not through this five-field transaction. The selector route
 never travels on the request or update packet ids above and does not extend or
 replace the update surface. Its rule-view disclosure, correlation, revision,

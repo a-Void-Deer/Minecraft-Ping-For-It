@@ -12,6 +12,7 @@ security, and compatibility facts needed to understand the design. Exclude
 developer- or maintainer-only material such as class locations, line numbers,
 widget-specific tuning, and reference-implementation walkthroughs. Developer
 readership is not a reason to remove internal facts that the design requires.
+Therefore, NO links to code files or line numbers.
 
 ### Ownership
 
