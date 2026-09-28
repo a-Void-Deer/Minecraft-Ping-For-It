@@ -65,6 +65,11 @@ public final class PresentationStore {
 
 	public void initial(long epoch, long view, long markerId, String targetTypeId,
 		PresentationPropertyRef defaultRef, PresentationSection basic) {
+		initial(epoch, view, markerId, targetTypeId, defaultRef, basic, 0);
+	}
+
+	public void initial(long epoch, long view, long markerId, String targetTypeId,
+		PresentationPropertyRef defaultRef, PresentationSection basic, long revision) {
 		if (!current(epoch, view) || isKnown(markerId) || markerHistoryFull
 			|| !PresentationSettings.isKnownTargetType(targetTypeId) || defaultRef == null) return;
 		if (markers.size() + tombstones.size() >= MAX_MARKER_HISTORY) {
@@ -74,7 +79,7 @@ public final class PresentationStore {
 		MarkerState marker = new MarkerState();
 		marker.targetTypeId = targetTypeId;
 		marker.defaultRef = defaultRef;
-		marker.sections.put(basic.adapterId(), new Entry(0, basic));
+		marker.sections.put(basic.adapterId(), new Entry(revision, basic));
 		markers.put(markerId, marker);
 	}
 

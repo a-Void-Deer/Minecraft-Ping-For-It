@@ -796,7 +796,6 @@ public class ServerCore {
 		final var store = markerStore();
 		final var registry = ExternalBlockServerProviders.registry();
 		final var playerList = server.getPlayerList();
-		final var nameResolver = new MinecraftTargetNameResolver(server);
 
 		for (final ServerMarker marker : store.allMarkers()) {
 			if (!(marker.target() instanceof Target.ExternalBlockTarget external)) {
@@ -843,10 +842,7 @@ public class ServerCore {
 					continue;
 				}
 
-				ServerPlayer owner = playerList.getPlayer(updated.owner());
-				if (owner != null) {
-					PresentationServer.updated(server, updated, nameResolver.resolveName(updated.owner(), updated.target()), owner.getGameProfile().getName());
-				}
+				PresentationServer.updated(server, updated);
 
 				continue;
 			}

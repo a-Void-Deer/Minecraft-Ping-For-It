@@ -242,7 +242,7 @@ public final class ClientPresentation {
 	public boolean initial(PresentationS2CPacket packet) {
 		if (!current(packet) || packet.kind() != PresentationS2CPacket.Kind.CREATED
 			|| packet.snapshot() == null || packet.markerId() == null
-			|| !packet.markerId().equals(packet.snapshot().id())) return false;
+			|| !packet.markerId().equals(packet.snapshot().id()) || packet.revision() < 1) return false;
 		PresentationSection basic = decode(packet.sectionBytes(), BASIC, packet.snapshot().targetTypeId());
 		if (basic == null) return false;
 		long id = packet.markerId().value();
@@ -250,13 +250,13 @@ public final class ClientPresentation {
 			if (!nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(packet.snapshot().targetTypeId())
 				|| packet.defaultRef() == null) return false;
 			store.initial(epoch, view, id, packet.snapshot().targetTypeId(), packet.defaultRef(),
-				project(basic, packet.snapshot().targetTypeId()));
+				project(basic, packet.snapshot().targetTypeId()), packet.revision());
 			return store.isKnown(id);
 		}
-		if (store.isFrozen(id) || store.targetTypeId(id) == null) return false;
-		// Same-id baseline after a generation change updates only the presentation;
-		// the caller must not re-apply the marker or renew its visual deadline.
-		return store.replace(epoch, view, id, Math.max(1, packet.revision()),
+		if (store.isFrozen(id) || !packet.snapshot().targetTypeId().equals(store.targetTypeId(id))
+			|| !packet.defaultRef().equals(store.defaultRef(id))) return false;
+		// Only a newer atomic Basic initial may update this marker's payload.
+		return store.replace(epoch, view, id, packet.revision(),
 			project(basic, store.targetTypeId(id)));
 	}
 

@@ -144,6 +144,13 @@ public final class ClientPingRuntime {
 	private final CreateRequestTracker createRequestTracker;
 	private final ClientCreateRateLimiter createRateLimiter;
 	private final ClientPresentation presentation;
+	private final PresentationReceiptFeedback presentationReceiptFeedback;
+
+	/** Narrow receipt-effect port: a metadata upsert must never invoke either callback. */
+	interface PresentationReceiptFeedback {
+		void play(MarkerSnapshot snapshot);
+		void chat(String ownerName, MarkerSnapshot snapshot, Component targetName);
+	}
 	private final InteractionTimeSource timeSource;
 	private final LongPressCompatibilityController compatibilityController;
 	private final SelectedLocaleTranslationKeyCache selectedLocaleTranslationKeys =
@@ -180,7 +187,8 @@ public final class ClientPingRuntime {
 		CreateRequestTracker createRequestTracker,
 		ClientCreateRateLimiter createRateLimiter,
 		InteractionTimeSource timeSource,
-		ClientPresentation presentation
+		ClientPresentation presentation,
+		PresentationReceiptFeedback presentationReceiptFeedback
 	) {
 		this.markerStore = Objects.requireNonNull(markerStore, "markerStore");
 		this.activeInteraction = Objects.requireNonNull(activeInteraction, "activeInteraction");
@@ -193,6 +201,12 @@ public final class ClientPingRuntime {
 		this.createRequestTracker = Objects.requireNonNull(createRequestTracker, "createRequestTracker");
 		this.createRateLimiter = Objects.requireNonNull(createRateLimiter, "createRateLimiter");
 		this.presentation = presentation;
+		this.presentationReceiptFeedback = presentationReceiptFeedback == null ? new PresentationReceiptFeedback() {
+			@Override public void play(MarkerSnapshot snapshot) { playCreatedSoundOnce(snapshot); }
+			@Override public void chat(String ownerName, MarkerSnapshot snapshot, Component targetName) {
+				sendCreatedChat(ownerName, snapshot, targetName);
+			}
+		} : presentationReceiptFeedback;
 		this.timeSource = Objects.requireNonNull(timeSource, "timeSource");
 		this.compatibilityController = new LongPressCompatibilityController(
 			new RuntimeInteractionPort(),
@@ -289,6 +303,19 @@ public final class ClientPingRuntime {
 		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy,
 		boolean negotiatePresentation
 	) {
+		return create(errorSink, packetSender, rateLimitPolicy, timeSource, displayDurationPolicy,
+			negotiatePresentation, null);
+	}
+
+	static ClientPingRuntime create(
+		ClientPingActionDispatcher.LocalErrorSink errorSink,
+		ClientPingActionDispatcher.PacketSender packetSender,
+		ClientRateLimitPolicy rateLimitPolicy,
+		InteractionTimeSource timeSource,
+		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy,
+		boolean negotiatePresentation,
+		PresentationReceiptFeedback feedback
+	) {
 		Objects.requireNonNull(errorSink, "errorSink");
 		Objects.requireNonNull(packetSender, "packetSender");
 		Objects.requireNonNull(timeSource, "timeSource");
@@ -335,7 +362,8 @@ public final class ClientPingRuntime {
 			createRequestTracker,
 			createRateLimiter,
 			timeSource,
-			presentation);
+			presentation,
+			feedback);
 	}
 
 	/**
@@ -1061,11 +1089,11 @@ public final class ClientPingRuntime {
 				if (presentation.reset(packet)) syncPresentationNames();
 			}
 			case CREATED -> {
-				if (!presentation.current(packet) || markerStore.isAuthoritativelyRemoved(packet.markerId())) return;
-				boolean alreadyPresent = markerStore.marker(packet.markerId()).isPresent();
+				if (!presentation.current(packet) || packet.markerId() == null
+					|| markerStore.isAuthoritativelyRemoved(packet.markerId())) return;
 				if (!presentation.initial(packet)) return;
 				updatePresentationName(packet.markerId());
-				if (!alreadyPresent) applyPresentationCreated(packet.snapshot(), packet.ownerName());
+				applyPresentationCreated(packet.snapshot(), packet.ownerName());
 			}
 			case SECTION -> {
 				// A store tombstone is also "known". Do not decode a section for
@@ -1118,8 +1146,8 @@ public final class ClientPingRuntime {
 			presentation.evict(marker.id());
 		}
 		if (newlySeen) {
-			playCreatedSoundOnce(snapshot);
-			sendCreatedChat(ownerName, snapshot, presentationTargetName(snapshot.id()));
+			presentationReceiptFeedback.play(snapshot);
+			presentationReceiptFeedback.chat(ownerName, snapshot, presentationTargetName(snapshot.id()));
 		}
 	}
 

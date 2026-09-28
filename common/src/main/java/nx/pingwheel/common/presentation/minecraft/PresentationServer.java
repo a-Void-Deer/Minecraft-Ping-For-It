@@ -50,11 +50,11 @@ public final class PresentationServer {
 
 	private PresentationServer() {}
 
-	private static final class Session {
+	static final class Session {
 		final long epoch;
 		final Map<String, Integer> schemas;
 		final Map<String, List<PresentationField>> manifest;
-		final Map<Long, Map<String, PresentationSection>> sent = new HashMap<>();
+		final Map<Long, SentMarker> sent = new HashMap<>();
 		Map<String, Map<String, Set<String>>> mask = Map.of();
 		long view;
 		long revision;
@@ -63,13 +63,19 @@ public final class PresentationServer {
 			this.epoch = epoch; this.schemas = Map.copyOf(schemas); this.manifest = Map.copyOf(manifest);
 		}
 	}
-	private static final class Source {
+	/** Per-recipient, already-delivered state; no world objects or source-reading lease. */
+	static final class SentMarker {
+		final String ownerName;
+		final Map<String, PresentationSection> sections = new HashMap<>();
+		SentMarker(String ownerName) { this.ownerName = ownerName; }
+	}
+	static final class Source {
 		PresentationSection value;
 		Set<String> demand = Set.of();
 		long nextSample;
 		Source(String id, int schema) { value = PresentationSection.empty(id, schema); }
 	}
-	private static final class Lease {
+	static final class Lease {
 		ServerMarker marker;
 		String ownerName;
 		final Map<String, Source> sources = new LinkedHashMap<>();
@@ -138,12 +144,18 @@ public final class PresentationServer {
 		session.ready = true;
 		session.sent.clear();
 		send(player, PresentationS2CPacket.reset(session.epoch, session.view, session.mask));
-		// A newly negotiated client sees only already cached sources; this path performs no world scans.
-		for (Lease lease : LEASES.values()) {
-			if (lease.marker.expiresAtTick() > activeServer.getTickCount() && lease.marker.recipients().contains(player.getUUID())) {
-				sendInitial(player, session, lease);
-				publish(player, session, lease);
-			}
+		cachedBaseline(LEASES.values(), activeServer.getTickCount(), player.getUUID(), lease -> {
+			sendInitial(player, session, lease);
+			publish(player, session, lease);
+		});
+	}
+
+	/** The negotiated baseline replays retained values; it never enters the source sampler. */
+	static void cachedBaseline(Collection<Lease> leases, long tick, UUID recipient,
+		java.util.function.Consumer<Lease> delivery) {
+		for (Lease lease : leases) {
+			if (lease.marker.expiresAtTick() > tick && lease.marker.recipients().contains(recipient))
+				delivery.accept(lease);
 		}
 	}
 
@@ -158,7 +170,7 @@ public final class PresentationServer {
 		boolean first = lease == null;
 		if (first) {
 			lease = new Lease(marker, ownerName);
-			if (LEASES.size() < MAX_LEASES) LEASES.put(marker.id().value(), lease);
+			rememberLease(LEASES, lease);
 		} else { lease.marker = marker; lease.ownerName = ownerName; }
 		if (first) {
 			long tick = server.getTickCount();
@@ -184,19 +196,56 @@ public final class PresentationServer {
 		}
 	}
 
-	public static void updated(MinecraftServer server, ServerMarker marker, TargetNameJson name, String ownerName) {
-		Lease lease = LEASES.get(marker.id().value());
-		if (lease == null) {
-			created(server, marker, name, ownerName);
-			return;
+	/** The sampling cache is bounded; initial delivery does not require admission to it. */
+	static boolean rememberLease(Map<Long, Lease> leases, Lease lease) {
+		if (leases.size() >= MAX_LEASES) return false;
+		leases.put(lease.marker.id().value(), lease);
+		return true;
+	}
+
+	public static void updated(MinecraftServer server, ServerMarker marker) {
+		PresentationAdapter basic = registry.get(PresentationBasic.ID);
+		refreshMarker(marker, LEASES, basic, server.getTickCount(), SESSIONS,
+			recipient -> server.getPlayerList().getPlayer(recipient) != null,
+			recipient -> allowed(server.getPlayerList().getPlayer(recipient), SESSIONS.get(recipient),
+				basic, marker.targetType().id()),
+			(recipient, packet) -> send(server.getPlayerList().getPlayer(recipient), packet));
+	}
+
+	/** Metadata-only refresh, including markers that exceeded the bounded sampling cache. */
+	static void refreshMarker(ServerMarker marker, Map<Long, Lease> leases, PresentationAdapter basic, long tick,
+		Map<UUID, Session> sessions, java.util.function.Predicate<UUID> online,
+		Function<UUID, Set<String>> allowed,
+		java.util.function.BiConsumer<UUID, PresentationS2CPacket> delivery) {
+		Lease lease = leases.get(marker.id().value());
+		if (lease != null) {
+			updateLease(lease, marker, tick, sessions, online, recipient ->
+				sendInitial(sessions.get(recipient), lease, basic, allowed.apply(recipient),
+					packet -> delivery.accept(recipient, packet)));
+		} else {
+			deliverKnownRefresh(marker, tick, sessions, online, (recipient, sent) ->
+				sendCachedInitial(sessions.get(recipient), marker, sent.ownerName, basic,
+					sent.sections.get(PresentationBasic.ID), allowed.apply(recipient),
+					packet -> delivery.accept(recipient, packet)));
 		}
+	}
+
+	/** Refreshes only recipients that have this marker's initial snapshot in the current view. */
+	static void updateLease(Lease lease, ServerMarker marker, long tick, Map<UUID, Session> sessions,
+		java.util.function.Predicate<UUID> online, java.util.function.Consumer<UUID> delivery) {
+		if (marker.expiresAtTick() <= tick) return;
 		lease.marker = marker;
-		lease.ownerName = ownerName;
+		deliverKnownRefresh(marker, tick, sessions, online, (recipient, sent) -> delivery.accept(recipient));
+	}
+
+	private static void deliverKnownRefresh(ServerMarker marker, long tick, Map<UUID, Session> sessions,
+		java.util.function.Predicate<UUID> online, java.util.function.BiConsumer<UUID, SentMarker> delivery) {
+		if (marker.expiresAtTick() <= tick) return;
 		for (UUID recipient : marker.recipients()) {
-			Session session = SESSIONS.get(recipient);
-			if (session != null && session.ready && session.sent.containsKey(marker.id().value())) {
-				Source source = lease.sources.get(PresentationBasic.ID);
-				if (source != null && source.nextSample > server.getTickCount()) source.nextSample = server.getTickCount();
+			Session session = sessions.get(recipient);
+			if (session != null && session.ready && online.test(recipient)) {
+				SentMarker sent = session.sent.get(marker.id().value());
+				if (sent != null) delivery.accept(recipient, sent);
 			}
 		}
 	}
@@ -215,12 +264,28 @@ public final class PresentationServer {
 			if (!policyChanged && effective.equals(session.mask)) continue;
 			session.mask = effective;
 			session.view++;
+			Map<Long, SentMarker> previouslySent = new HashMap<>(session.sent);
 			session.sent.clear();
 			send(player, PresentationS2CPacket.reset(session.epoch, session.view, effective));
-			for (Lease lease : LEASES.values()) {
-				if (lease.marker.expiresAtTick() <= server.getTickCount() || !lease.marker.recipients().contains(player.getUUID())) continue;
+			cachedBaseline(LEASES.values(), server.getTickCount(), player.getUUID(), lease -> {
 				sendInitial(player, session, lease);
 				publish(player, session, lease);
+			});
+			// The sampling cap does not remove an already-delivered marker from the
+			// authoritative audience: re-baseline its own cached projection after reset.
+			for (ServerMarker marker : markers) {
+				SentMarker old = previouslySent.get(marker.id().value());
+				if (old == null || LEASES.containsKey(marker.id().value())
+					|| marker.expiresAtTick() <= server.getTickCount()
+					|| !marker.recipients().contains(player.getUUID())) continue;
+				PresentationAdapter basic = registry.get(PresentationBasic.ID);
+				sendCachedInitial(session, marker, old.ownerName, basic, old.sections.get(PresentationBasic.ID),
+					allowed(player, session, basic, marker.targetType().id()), packet -> send(player, packet));
+				for (PresentationAdapter adapter : registry.all()) {
+					if (adapter.adapterId().equals(PresentationBasic.ID) || !session.schemas.containsKey(adapter.adapterId())) continue;
+					PresentationSection cached = old.sections.get(adapter.adapterId());
+					if (cached != null) publishCached(player, session, marker, adapter, cached);
+				}
 			}
 		}
 		Set<Long> active = new HashSet<>();
@@ -255,26 +320,41 @@ public final class PresentationServer {
 
 	private static int capture(MinecraftServer server, Lease lease, PresentationAdapter.CaptureBudget work,
 		int remainingCaptures, boolean initial) {
+		return captureSources(lease, registry, settings(), server.getTickCount(), work, remainingCaptures, initial,
+			adapter -> {
+				Set<String> demand = new HashSet<>();
+				for (UUID recipient : lease.marker.recipients()) {
+					Session session = SESSIONS.get(recipient);
+					ServerPlayer player = server.getPlayerList().getPlayer(recipient);
+					if (session != null && session.ready && player != null)
+						demand.addAll(allowed(player, session, adapter, lease.marker.targetType().id()));
+				}
+				return demand;
+			}, demand -> basic(server, lease.marker, demand));
+	}
+
+	/** Production sampler with detached demand and Basic observation ports for headless regression checks. */
+	static int captureSources(Lease lease, PresentationRegistry adapters, PresentationSettings policy, long tick,
+		PresentationAdapter.CaptureBudget work, int remainingCaptures, boolean initial,
+		Function<PresentationAdapter, Set<String>> demands,
+		Function<Set<String>, PresentationSection> basicCapture) {
 		int captures = 0;
-		for (PresentationAdapter adapter : registry.all()) {
+		for (PresentationAdapter adapter : adapters.all()) {
 			if (initial && !adapter.adapterId().equals(PresentationBasic.ID)) continue;
-			Set<String> demand = new HashSet<>();
-			for (UUID recipient : lease.marker.recipients()) {
-				Session session = SESSIONS.get(recipient); ServerPlayer player = server.getPlayerList().getPlayer(recipient);
-				if (session != null && session.ready && player != null)
-					demand.addAll(allowed(player, session, adapter, lease.marker.targetType().id()));
-			}
+			Set<String> demand = demands.apply(adapter);
 			Source source = lease.sources.computeIfAbsent(adapter.adapterId(), id -> new Source(id, adapter.schema()));
 			if (demand.isEmpty()) { source.value = PresentationSection.empty(adapter.adapterId(), adapter.schema()); source.demand = Set.of(); continue; }
-			long tick = server.getTickCount();
-			if (captures >= remainingCaptures || tick < source.nextSample || !work.scan()) continue;
+			// Insufficient work or disabled capture is a deferral, not an unavailable observation.
+			if (captures >= remainingCaptures || tick < source.nextSample || policy.scanBudget() == 0
+				|| work.remaining() == 0 || (!adapter.adapterId().equals(PresentationBasic.ID) && work.remaining() < 2)) continue;
+			work.scan();
 			captures++;
-			source.nextSample = tick + settings().interval(adapter.adapterId(), adapter.minUpdateIntervalTicks());
+			source.nextSample = tick + policy.interval(adapter.adapterId(), adapter.minUpdateIntervalTicks());
 			PresentationSection value = null;
 			try {
-				if (adapter.adapterId().equals(PresentationBasic.ID)) value = basic(server, lease.marker, demand);
+				if (adapter.adapterId().equals(PresentationBasic.ID)) value = basicCapture.apply(demand);
 				else {
-					int allowance = Math.min(settings().scanBudget(), work.remaining());
+					int allowance = Math.min(policy.scanBudget(), work.remaining());
 					PresentationAdapter.CaptureBudget budget = new PresentationAdapter.CaptureBudget(allowance);
 					value = adapter.collect(detached(lease.marker.target()), Set.copyOf(demand), budget);
 					for (int used = allowance - budget.remaining(); used > 0; used--) work.scan();
@@ -378,34 +458,66 @@ public final class PresentationServer {
 
 	private static void sendInitial(ServerPlayer player, Session session, Lease lease) {
 		PresentationAdapter basic = registry.get(PresentationBasic.ID);
-		// A semantically valid Basic capture may still exceed the encoded field bounds;
-		// degrade to the established empty stale section instead of throwing here.
-		PresentationPropertyRef defaultRef = PresentationDefaults.forTargetType(lease.marker.targetType().id())
+		sendInitial(session, lease, basic,
+			allowed(player, session, basic, lease.marker.targetType().id()), packet -> send(player, packet));
+	}
+
+	/** Project and deliver cached Basic atomically with the marker, without a source observation. */
+	static void sendInitial(Session session, Lease lease, PresentationAdapter basic, Set<String> allowed,
+		java.util.function.Consumer<PresentationS2CPacket> delivery) {
+		Source source = lease.sources.get(basic.adapterId());
+		sendCachedInitial(session, lease.marker, lease.ownerName, basic,
+			source == null ? null : source.value, allowed, delivery);
+	}
+
+	private static void sendCachedInitial(Session session, ServerMarker marker, String ownerName,
+		PresentationAdapter basic, PresentationSection cached, Set<String> allowed,
+		java.util.function.Consumer<PresentationS2CPacket> delivery) {
+		PresentationPropertyRef defaultRef = PresentationDefaults.forTargetType(marker.targetType().id())
 			.orElse(null);
 		if (defaultRef == null) return;
-		PresentationSection projected = PresentationCodec.bounded(project(player, session, basic, lease));
-		send(player, PresentationS2CPacket.created(session.epoch, session.view,
-			++session.revision, MarkerSnapshot.from(lease.marker), lease.ownerName, defaultRef, projected));
-		session.sent.computeIfAbsent(lease.marker.id().value(), id -> new HashMap<>()).put(PresentationBasic.ID, projected);
+		// A semantically valid Basic capture may exceed the encoded field bounds;
+		// degrade to the established empty stale section instead of throwing here.
+		PresentationSection projected = PresentationCodec.bounded(project(basic,
+			cached, allowed, marker.properties()));
+		delivery.accept(PresentationS2CPacket.created(session.epoch, session.view,
+			++session.revision, MarkerSnapshot.from(marker), ownerName, defaultRef, projected));
+		session.sent.computeIfAbsent(marker.id().value(), id -> new SentMarker(ownerName))
+			.sections.put(PresentationBasic.ID, projected);
 	}
 
 	private static void publish(ServerPlayer player, Session session, Lease lease) {
-		Map<String, PresentationSection> sent = session.sent.get(lease.marker.id().value());
+		SentMarker marker = session.sent.get(lease.marker.id().value());
+		Map<String, PresentationSection> sent = marker == null ? null : marker.sections;
 		if (sent == null) return; // Never backfill another connection's initial marker.
 		for (PresentationAdapter adapter : registry.all()) {
 			if (!session.schemas.containsKey(adapter.adapterId())) continue;
 			PresentationSection projected = project(player, session, adapter, lease);
 			if (projected.equals(sent.get(adapter.adapterId()))) continue;
-			try {
-				send(player, PresentationS2CPacket.section(session.epoch, session.view,
-					++session.revision, lease.marker.id(), projected));
-				sent.put(adapter.adapterId(), projected);
-			} catch (RuntimeException oversized) {
-				PresentationSection empty = new PresentationSection(adapter.adapterId(), adapter.schema(), Map.of(), true);
-				send(player, PresentationS2CPacket.section(session.epoch, session.view,
-					++session.revision, lease.marker.id(), empty));
-				sent.put(adapter.adapterId(), empty);
-			}
+			sendProjectedSection(player, session, lease.marker.id(), adapter, projected, sent);
+		}
+	}
+
+	private static void publishCached(ServerPlayer player, Session session, ServerMarker marker,
+		PresentationAdapter adapter, PresentationSection cached) {
+		SentMarker known = session.sent.get(marker.id().value());
+		if (known == null) return;
+		PresentationSection projected = project(adapter, cached,
+			allowed(player, session, adapter, marker.targetType().id()), marker.properties());
+		sendProjectedSection(player, session, marker.id(), adapter, projected, known.sections);
+	}
+
+	private static void sendProjectedSection(ServerPlayer player, Session session, MarkerId markerId,
+		PresentationAdapter adapter, PresentationSection projected, Map<String, PresentationSection> sent) {
+		try {
+			send(player, PresentationS2CPacket.section(session.epoch, session.view,
+				++session.revision, markerId, projected));
+			sent.put(adapter.adapterId(), projected);
+		} catch (RuntimeException oversized) {
+			PresentationSection empty = new PresentationSection(adapter.adapterId(), adapter.schema(), Map.of(), true);
+			send(player, PresentationS2CPacket.section(session.epoch, session.view,
+				++session.revision, markerId, empty));
+			sent.put(adapter.adapterId(), empty);
 		}
 	}
 
