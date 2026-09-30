@@ -456,6 +456,27 @@ stable-cursor and stable-version capabilities are declared and tested
 independently. This is a contract seam only: no real Minecraft provider, world
 read, integrated server runtime, transport, or sync publication exercises it.
 
+### Headless spatial radial menu
+
+`SpatialControllerTest` covers the headless radial menu session: a centre
+release inside the deadzone abandons and release is single-use; a focused leaf
+commits exactly one action while reserved, disabled, navigation and
+actionless-branch entries never commit; sector starts are inclusive of the
+following half-open sector including the 0/360 wrap; outside sectors without
+crossing the deadzone report an outside no-action; a disabled branch focuses
+but is never entered by dwell; a focused branch is entered by dwell and a
+focused Back dwell pops exactly one level when hover is disabled; a pop arms a
+fresh-stroke requirement so a stationary pointer cannot re-enter until a new
+full stroke plus dwell; hover return pops one level and reports delegated
+progress without cascading; hover mode suppresses the ordinary Back dwell;
+physical deltas accumulate and rebase starts a fresh trail; cancel clears the
+session idempotently; an externally composed submenu is pushed at a given
+origin with a rebased pointer and gains one automatic Back entry; and an
+explicit Back is centred on the parent bearing with equal non-root sibling
+spans that tile. It is a standalone model seam: no native screen, renderer,
+input callback, configuration, or world-candidate source is exercised, and
+qualified-turn, retrace and inventory-list behavior are not implemented.
+
 ### Server-settings snapshots and updates
 
 `ServerSettingsModelTest` covers request correlation, stale responses, denial,
@@ -869,7 +890,7 @@ or because related automated tests exist.
 | --- | --- |
 | Block | Plain `block` versus `entity_block`; `ALL`/`COMPATIBLE`/`VOXEL_SHAPE_ONLY` modes and source fallback; whitelist native glow and fallback; a non-full native shape; same-type state change versus block-type replacement. |
 | Entity | Ordinary entity and dropped item; movement and same-dimension teleportation; death and disappearance; same-dimension world unload/rejoin and runtime-ID reuse in a game session. |
-| Wheel | Short and long press; every sector and border color; configured timeout; frozen target; location fallback; Back-hover dwell, one-level return, and leave/re-entry re-arm under real input. |
+| Wheel | Short and long press; every sector and border color; configured timeout; frozen target; location fallback; Back-hover dwell, one-level return, and leave/re-entry re-arm under real input; radial root caller geometry, non-root Back centring, dwell entry and fresh-stroke re-arm under real input. |
 | Selection policy and input | Live GUI/screen callbacks for selection gating; focus-loss `KeyMapping.releaseAll`, screen-transition and level-instance/dimension discontinuity aborts with late asynchronous completion; loader/gameplay input lifecycle and physical key-repeat behavior on Fabric, Forge, and NeoForge; selection toggles, entity blacklist/default `simulated:honey_glue` rule, and spectator exclusion in a game session. |
 | Movement, death and replacement | Target movement while the wheel is open; entity death or dimension change; block state change or replacement while open. |
 | Naming and chat | Custom-name formatting; localized base names; item naming; phrase-only text color. |

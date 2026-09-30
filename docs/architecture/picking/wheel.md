@@ -102,3 +102,46 @@ The preference keys and their local authority are owned by
 their numeric range, step, and default remain implementation values. Native
 screen integration, input routing, rendering of the progress affordance, and
 game-feel validation remain pending.
+
+## Headless spatial menu model
+
+The planned native target workflow is prototyped as a standalone, headless
+radial-menu model; its behavior is owned here. It is not the live wheel: the
+current production wheel above still owns opening, selection and cancellation,
+and its renderer and centre action stay unchanged until a separate integration
+migrates them. The model does not implement the full prototype: qualified
+turns, retrace, inventory-list expansion, and world-candidate acquisition are
+known pending work and must not be claimed as prototype parity.
+
+The model starts at the root centre. Root entries carry caller-fixed sector
+geometry — the caller supplies each bearing and span, for example the
+eight-way cardinal-55 / diagonal-35 layout — so a root menu never derives its
+own geometry. Every non-root menu instead computes equal sectors from its
+actual entry count, including its Back entry. An explicit Back entry stays
+centred on the bearing from the child origin back to its parent origin, and an
+automatically appended Back takes that same parent-centred position; siblings
+keep their declared order and tile with equal spans. Bearings are degrees,
+zero is up and positive is clockwise, and sectors are half-open, so an exact
+sector start belongs to the following sector.
+
+The virtual pointer is the only pointer state; physical mouse deltas are added
+to it, and the bounded trail is what a renderer draws. Inside the centre
+deadzone there is no focus and release abandons the session; release is the
+only operation that commits an action. A focused leaf commits its action once
+and the session ends; a reserved, disabled, navigation or actionless branch
+entry reports its reason and never commits. A focused branch is entered only
+by a stationary dwell after the dwell threshold, requiring prior pointer
+travel beyond the stroke distance plus an additional minimum travel; a focused
+Back uses the same dwell when hover is disabled and the
+[Back-hover](#back-hover-return-state) state when hover is enabled. A pop arms
+a fresh-stroke requirement so a stationary pointer cannot re-enter the same
+submenu immediately; a new stroke plus dwell is required. Cancel ends the
+session without an action and is idempotent. An externally composed submenu
+can be pushed at a caller-computed origin, which rebases the virtual pointer
+and starts a fresh trail.
+
+The model is headless: it owns no clock, renderer, configuration or Minecraft
+input, and the caller supplies monotonic timestamps, deltas and tuning. Native
+screen integration, the rectangular square/straight renderer, qualified-turn
+and retrace behavior, inventory-list and world-candidate sources remain
+pending.
