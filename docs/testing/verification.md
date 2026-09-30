@@ -64,7 +64,7 @@ client, nor a live cross-loader network test.
 ### Presentation snapshot negotiation, policy and adapters
 
 Focused common tests cover the versioned presentation contract at model,
-property, codec, and admission seams:
+property, codec, admission, and lease-refresh/capture-budget seams:
 
 - `PresentationCoreTest` covers allow/deny selector wildcard semantics with
   allow-before-deny precedence, fail-closed selector construction and value
@@ -86,14 +86,17 @@ property, codec, and admission seams:
   trusted base component instead of strict composition. It runs headless
   against real entity and item instances with builtin registries and component
   JSON name encoding; the surrounding live path (server-level and registry
-  dimension lookup, entity lookup acceptance, capture scheduling, projection,
-  packet delivery, and rendering) remains unexercised;
+  dimension lookup, entity lookup acceptance, world-backed projection, packet
+  delivery, and rendering) remains unexercised. Capture scheduling, lease
+  admission and budget handling are covered separately and headlessly by
+  `PresentationServerRefreshTest` below;
 - `PresentationServerExternalBlockTest` covers the production detached
   external-target boundary, demanded-versus-undemanded Basic state observation,
   the name-only path without state observation, null-name omission, failed fresh
   capture, and the transition that retains only still-demanded fields as stale.
-  These are pure assembly and transition seams; the complete server capture,
-  projection, network, HUD, and live-provider path remains unexercised;
+  These are pure assembly and transition seams; the complete world-backed
+  server capture, live-provider, network, HUD, and rendering path remains
+  unexercised;
 - `PresentationPropertyCoreTest` covers the property-reference model: root and
   nested literal record-key resolution, invalid-id/depth/key rejection,
   deterministic ref ordering, annotation requirements (section adapter, an
@@ -135,6 +138,30 @@ property, codec, and admission seams:
   revoking on permission and provider changes without client selections. The
   capture context and providers are fakes; the real server world, live
   provider, and end-to-end transport remain unexercised;
+- `PresentationServerRefreshTest` covers the production server lease, refresh
+  and capture-budget seams headlessly: a same-id external refresh delivers a
+  CREATED snapshot with the updated locator/anchor to a known online recipient,
+  preserving marker ID, arrival, expiry and the previously delivered owner name
+  without a source observation or an owner profile lookup — a defensive seam
+  verified independently of owner presence, since an owner disconnect removes
+  the owner's records in ordinary play — never backfilling an unbaselined
+  recipient and skipping expired leases or offline recipients; refresh
+  re-projects the cached value against each recipient's current allowed fields
+  and revokes cached fields and annotations per recipient without mutating the
+  server cache; a marker beyond the bounded sampling cache refreshes its known
+  recipient from the already-delivered Basic section with no new lease
+  allocation and no source read; a negotiated baseline across many entirely due
+  cached leases replays CREATED snapshots without re-entering source capture or
+  advancing `nextSample`; positive per-capture allowances cannot reset the
+  shared per-tick capture quota across leases; refreshed metadata does not
+  advance the effective sampling interval; a zero `scanBudget` defers Basic and
+  optional observations without mutating cached values or their stale flag, and
+  empty demand still clears a previously sampled optional section; and
+  exhausted shared work defers an optional observation without a fake failure
+  while unused per-call allowance does not drain shared tick work. Its sessions,
+  demand and Basic observation ports are in-memory or recording; the live
+  server world, registry lookups, real providers, packet transport and
+  rendering remain unexercised;
 - `ClientPresentationTest` covers the v3 client session: `HELLO`/`OFFER`/`RESET`
   epoch and view guards without any client preference, a tighter reset mask
   pruning frozen fields and annotations without resurrection, accepted metadata
@@ -230,14 +257,16 @@ observation, and unavailable or mismatched inputs stopping before collection.
 Its recording `SourceAccess` does not exercise a real Create collector or
 handler, the Create mixin/accessor, or a live Sable API.
 
-These are model, property, codec, and admission seams. They do not establish
-live client/server negotiation, session reset or mask pruning over a real
-connection, transport registration in a running game, live permission
-projection, a live policy rule-view read/mutation/broadcast, property upload
-admission against a real world or provider, rendered property/chat/HUD lines,
-the live settings-screen draft, field-catalogue rendering, feedback, caret, or
-list-capacity behavior, a persistence fault during a policy mutation, or
-in-game Create/Sable sampling.
+These are model, property, codec, admission, and lease-refresh/capture-budget
+seams. The refresh tests invoke production delivery, refresh and sampling
+methods through in-memory sessions and recording observation ports. They do not
+establish live client/server negotiation, session reset or mask pruning over a
+real connection, transport registration in a running game, a real world or
+provider observation, live permission projection, a live policy rule-view
+read/mutation/broadcast, property upload admission against a real world,
+rendered property/chat/HUD lines, the live settings-screen draft,
+field-catalogue rendering, feedback, caret, or list-capacity behavior, a
+persistence fault during a policy mutation, or in-game Create/Sable sampling.
 
 ### Capture, wheel and cancellation
 
@@ -341,10 +370,23 @@ or resource-fallback scenarios.
 identity. Its event-named case does not construct click or hover event fixtures,
 so it is not event-specific regression coverage.
 
-`ClientPingRuntimeTest` covers only the current-local-store membership predicate
-before and after a same-ID external-locator upsert. It does not invoke
-`applyCreated` or cover corrupt/tombstone suppression, actual sound playback,
-GUI chat delivery, or cross-dimension execution.
+`ClientPingRuntimeTest` covers the current-local-store membership predicate
+before and after a same-ID external-locator upsert. Through a recording receipt
+port it also drives the packet-dispatched CREATED path into the presentation
+store and client marker store: a same-ID newer initial upserts the changed
+locator/anchor while preserving ID, arrival, expiry, local visual deadline,
+target/Ping Type and any winner slot; older and equal-revision initials cannot
+roll back the authoritative payload; feedback fires once for a newly seen
+marker rather than on refresh; an elapsed visual on a still-stored record is not
+re-shown and a preserved winner slot does not expose it; an authoritatively
+expired or hard-removed marker is not resurrected by a later initial, while a
+create after local housekeeping deleted the record remains the separate same-ID
+gap below; and a refreshed active winner
+keeps its slot and visual deadline. These are headless store/port assertions:
+they do not exercise a live world, network transport, Sable locator resolution,
+actual sound playback or GUI chat delivery, packet ordering over a connection,
+or client rendering. The public entry wiring of this path is source-inspected,
+not runtime-verified.
 
 ### Server-settings snapshots and updates
 
@@ -617,6 +659,11 @@ The following gaps remain open until direct evidence closes them:
 - a live two-sided presentation session: negotiation and reset over a real
   connection, per-recipient permission projection, policy changes advancing the
   view, and delivery of Basic/adapter values across the loader transport;
+- external-refresh and client-receipt behavior under live conditions: those
+  seams are headless, so no automated test exercises a real Minecraft or Sable
+  world (logical anchor or render pose), a loaded sublevel, world-backed
+  projection, source sampling cost, packet-level ordering or an authorization
+  change between snapshot and delivery, or the rendered client marker;
 - a live property-upload admission round trip: the admission, recapture,
   override, and creation-rollback seams use fakes, in-memory state, or
   recording references, so no real server world, live provider, external
@@ -719,9 +766,9 @@ or because related automated tests exist.
 | Naming and chat | Custom-name formatting; localized base names; item naming; phrase-only text color. |
 | Invalid-target feedback | Localized invalid-target message with the `[ping for it]` leading marker on both feedback paths, local pre-commit target loss and the correlated server `TARGET_GONE` rejection; the displayed text and marker come from language resources ([presentation owner](../UI/ping-feedback.md#presentation)). |
 | Cancellation | Cone and nearest-own-marker selection; inability to cancel another player's marker; stale/display-hidden candidate followed by server rejection with no local fallback. |
-| Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location. |
+| Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location; an owner-online refresh that changes the locator or the anchor; a marker beyond the bounded sampling cache synchronizing its known recipients without a new lease; an older or equal-revision initial arriving after a newer one without rolling back the stored payload; a legitimate policy change between cached projection and delivery; and a legitimate later packet arriving after the refresh. |
 | Marker HUD | Repeated same-target pings from one sender and from several senders while same-target records remain display-active: the target's displayed HUD alpha does not accumulate with the number of same-target records ([invariant owner](../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection)). |
-| Presentation snapshot | Live v3 negotiation, offer and reset-mask pruning, and reset on Fabric, Forge, and NeoForge; the server-selected mask removing retained and frozen values; permission-gated and per-target-type-policy-gated projection for two recipients of one marker; live property uploads through the intended programmatic/harness create path (there is no in-game property-entry GUI by design) recaptured against authoritative world state with whole-create rejection on a wrong-kind, unknown, forbidden, or unavailable selection; rendered default display reference and property HUD lines; live property Ping Type override resolution and tag/registry selector matching against actual block, item, and entity tags; the policy rule-view read and per-target-type mutation route over a real connection, including the permission-3 mutation gate, rule-view revision ordering, and unsolicited broadcast to a second client; the server per-target-type policy page with no property-entry editor; superseded marker C2S/S2C routes mutating nothing; installed-Create kinetic and vault/tank summaries including nested count property selections and the cached stress/capacity accessor path and an untested-version fallback; and a live validated Sable external-block input through the Create route with unavailable and stale outcomes. |
+| Presentation snapshot | Live v3 negotiation, offer and reset-mask pruning, and reset on Fabric, Forge, and NeoForge; the server-selected mask removing retained and frozen values; permission-gated and per-target-type-policy-gated projection for two recipients of one marker; live property uploads through the intended programmatic/harness create path (there is no in-game property-entry GUI by design) recaptured against authoritative world state with whole-create rejection on a wrong-kind, unknown, forbidden, or unavailable selection; rendered default display reference and property HUD lines; live property Ping Type override resolution and tag/registry selector matching against actual block, item, and entity tags; the policy rule-view read and per-target-type mutation route over a real connection, including the permission-3 mutation gate, rule-view revision ordering, and unsolicited broadcast to a second client; the server per-target-type policy page with no property-entry editor; superseded marker C2S/S2C routes mutating nothing; installed-Create kinetic and vault/tank summaries including nested count property selections and the cached stress/capacity accessor path and an untested-version fallback; and a live validated Sable external-block input through the Create route with unavailable and stale outcomes; and a zero server `scanBudget` under live demand with captures deferred while cached values and staleness semantics are retained. |
 | Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live scope-tab and category navigation with leaf Back/Escape and root Done/Escape, a fixed footer with non-covering scrolled content, and per-page scroll/focus retention across back navigation and GUI resize, native widget input dispatch and focus-list traversal after a deferred page transition, and root and leaf pages at small GUI sizes and with long localized labels; one shared server session with a single correlated snapshot request retained across category and scope navigation, loading/permission/unavailable status, and a non-editable snapshot rendering read-only for a viewer below the required level; live permission revocation retaining a read-only leaf view, permission-return draft reset, promotion requesting a fresh snapshot, and reconnect draft behavior; invalid-draft close blocking with routing to the offending category and field; the client configuration file action and confirmation-dialog flows, including the reset warning when a server draft exists; the server Presentation category's per-target-type policy rows with their paired allow/block toggles and editable add/remove, whitelist-only changes, refresh, feedback, and broadcast to another client when permitted, including bounded no-response timeout retry, list-capacity feedback, caret and field focus, and a persistence fault during a mutation; and the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)). |
 | Range | Client/server range combinations in one live pipeline: native minimum, a live long-distance Distant Horizons target, Create/Sable finite-segment reuse and server acceptance, including exact Create surface selection followed by whole-entity server-anchor range rejection. Installed-Sable scenarios are listed below. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |

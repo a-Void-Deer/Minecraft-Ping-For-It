@@ -96,6 +96,7 @@ duplicate the exact constants, algorithms or error cases owned by topic docs.
 | [D0005 — Press-time capture](decisions/D0005-press-time-capture.md) | Press-ray locking, asynchronous completion, the actual-open boundary and narrow deferred compatibility. |
 | [D0006 — Exact owned geometry](decisions/D0006-exact-owned-geometry.md) | Why an owned non-hit cannot recover to a coarse AABB and how exact local shapes participate in picking. |
 | [D0007 — No meaningless tests](decisions/D0007-no-meaningless-tests.md) | Why tuning snapshots, inherited fixture defaults, source-shape assertions and fixed prose locks do not justify tests, and which static, protocol or deterministic boundaries remain legitimate. |
+| [D0008 — Inventory source recovery](decisions/D0008-inventory-source-recovery.md) | Why inventory tracking keeps the live Ping and original target identity instead of a source-instance generation, and how invalidation, per-recipient baselines and a hard tracking deadline fence stale data without changing marker lifetime or external leases. |
 
 ## Documentation maintenance
 
