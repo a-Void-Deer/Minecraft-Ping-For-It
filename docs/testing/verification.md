@@ -441,6 +441,21 @@ are inert, and the hover parameters are frozen at session start. It is a
 standalone model seam: no native screen, input route, renderer, or in-game
 timing is exercised.
 
+### Shared source access contract
+
+`SourceAccessTest` covers the server-side access boundary headlessly:
+resolution returns an available descriptor for a compatible scope while
+ordinary unavailability and unsupported targets are values rather than
+exceptions; a budget-denied open defers without performing any source read and
+without charging the ledger; an admitted handle reports its descriptor and
+frozen demand, captures one complete eventual (non-atomic) result with a keyed
+fragment, then defers without further reads while charging exactly one unit;
+closing is idempotent; an authorized demand set is copied, immutable and
+compatibility-checked against the descriptor's read scope; and one-shot,
+stable-cursor and stable-version capabilities are declared and tested
+independently. This is a contract seam only: no real Minecraft provider, world
+read, integrated server runtime, transport, or sync publication exercises it.
+
 ### Server-settings snapshots and updates
 
 `ServerSettingsModelTest` covers request correlation, stale responses, denial,
@@ -696,11 +711,12 @@ supplementary execution guidance rather than a public documentation prerequisite
 
 The following gaps remain open until direct evidence closes them:
 
-- the shared source mechanism is partly implemented: the cost-ledger seam and
-  the detached source-key and capture-result models are covered (see the
-  coverage notes below), while source access, provider wiring, sync publication
-  and the inventory preview/tracking domain remain adopted contracts with no
-  runtime implementation or automated coverage; every statement in
+- the shared source mechanism is partly implemented: the cost-ledger seam, the
+  detached source-key and capture-result models, and the source-access boundary
+  contract are covered (see the coverage notes below), while real provider
+  implementations, an integrated server runtime, sync publication and the
+  inventory preview/tracking domain remain adopted contracts with no runtime
+  implementation or automated coverage; every statement in
   [shared source capture and sync](../architecture/presentation/shared_sources.md)
   and [inventory preview and tracking](../architecture/presentation/inventory.md)
   that is not backed by those notes is a confirmed contract pending
@@ -716,10 +732,11 @@ The following gaps remain open until direct evidence closes them:
   settings-UI exposure, scheduler consumption, and native selector integration
   remain unexercised;
 - the shared source result and publication runtime paths without coverage:
-  driving a real source step, provider reads, one-physical-read and
-  one-logical-progress charging across consumers, receiver-isolated
-  publication, and the ledger's integrated admission path; the model-level
-  identity and result validation is covered by the identity/capture note;
+  real Minecraft provider implementation, world reads through an integrated
+  server runtime, one-physical-read and one-logical-progress charging across
+  consumers, receiver-isolated publication, and the ledger's integrated
+  admission path; the model-level identity, result and access-contract
+  validation is covered by the identity/capture and access notes;
 - the shared client/server `entity_block` classification path end to end;
 - stale or display-hidden cancellation followed by authoritative rejection with
   no local fallback;
