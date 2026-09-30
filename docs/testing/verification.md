@@ -552,6 +552,21 @@ That is an implementation-conformance and automated-coverage gap, not an
 external exception to the shared-subject contract in
 [presentation subjects](../architecture/rendering/presentation_subjects.md).
 
+### Shared source cost ledger
+
+`CostLedgerTest` covers the pure-JVM bounded cost-ledger seam of the shared
+source mechanism headlessly: admission reserves before measured use; an
+all-or-nothing multi-counter reservation deducts nothing when any counter is
+insufficient; the exact limit is admitted and one more defers; a measured
+commit charges only the measured subset and refunds omitted counters across
+distinct units; closing an uncommitted reservation refunds everything and
+repeated close is idempotent; over-commit, unknown counters, negative amounts,
+blank scopes and negative limits are rejected before any counter moves;
+`Long.MAX_VALUE` limits do not overflow remaining accounting; and caller maps
+are copied so later caller mutation cannot move the ledger. This is a model
+seam only: no integrated scheduler, provider, real read admission, retained
+memory or wire lifetime, or running server path exercises the ledger.
+
 ### Rate-policy courtesy behavior
 
 The current suite covers the create-only client token-bucket courtesy gate,
@@ -628,22 +643,26 @@ supplementary execution guidance rather than a public documentation prerequisite
 
 The following gaps remain open until direct evidence closes them:
 
-- the shared source capture/sync mechanism and the inventory preview/tracking
-  domain are adopted contracts with no implementation and no automated coverage
-  yet; every statement in
+- the shared source mechanism is partly implemented: the cost-ledger seam is
+  covered (see the cost-ledger coverage note below), while source access,
+  capture results and sync publication, and the inventory preview/tracking
+  domain, remain adopted contracts with no implementation or automated
+  coverage; every statement in
   [shared source capture and sync](../architecture/presentation/shared_sources.md)
   and [inventory preview and tracking](../architecture/presentation/inventory.md)
-  is a confirmed contract pending implementation rather than existing behavior;
+  that is not backed by that note is a confirmed contract pending implementation
+  rather than existing behavior;
 - inventory boundaries without coverage: preview ordering and freeze rules,
   selected-item zero versus unknown, per-item revisioning, per-Ping+recipient
   baseline and resynchronization isolation, unknown-baseline expiry versus
   admitted fragment-baseline progress, component-too-long all-variant folding,
   per-client period snapshot byte accounting across targets, heartbeat zero
   semantics, variant identity and quotas, and the hard stop at Ping expiry;
-- the shared source result/ledger boundaries without coverage: independent
-  availability, completeness and consistency, direct versus absence-inferred
-  zero, pre-admission accounting, one-physical-read/one-logical-progress
-  charging, and receiver-isolated publication;
+- the shared source result and publication boundaries without coverage:
+  independent availability, completeness and consistency, direct versus
+  absence-inferred zero, one-physical-read/one-logical-progress charging, and
+  receiver-isolated publication; the ledger's integrated admission path is also
+  unexercised (its covered model seams are listed in the cost-ledger note);
 - the shared client/server `entity_block` classification path end to end;
 - stale or display-hidden cancellation followed by authoritative rejection with
   no local fallback;
