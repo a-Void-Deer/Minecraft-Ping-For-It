@@ -410,6 +410,24 @@ spatial-selector keys defaulting and clamping. These are model and persistence
 seams only: no server-administration path, remote change route, settings-UI
 exposure, scheduler consumption or native selector integration exercises them.
 
+### Shared source identity and capture results
+
+`SourceKeyCaptureResultTest` covers the detached identity and result models as
+headless seams: equal provider identity plus equal compatible read scope is the
+same source while a different read scope is a different source, identity tokens
+are non-blank and byte-bounded, snapshot and keyed-fragment payload maps are
+copied and immutable, an explicit zero stays explicit while a missing key is
+never synthesized to zero, an absent payload is distinct from an empty
+snapshot, unavailable and invalid results reject a payload, a complete
+eventual sweep may carry a directly observed zero, coverage rejects blank
+stamps and negative counts, a known zero expected count is distinct from an
+unknown expected count, the keyed-fragment page bound is independent of the
+existing record-value entry bound, snapshot records reuse the existing
+presentation field and value bounds, and opaque evidence and cursor tokens are
+bounded and detached. These are model seams only: no real source step,
+provider read, shared-consumer accounting, transport or running server path
+exercises them.
+
 ### Server-settings snapshots and updates
 
 `ServerSettingsModelTest` covers request correlation, stale responses, denial,
@@ -665,15 +683,15 @@ supplementary execution guidance rather than a public documentation prerequisite
 
 The following gaps remain open until direct evidence closes them:
 
-- the shared source mechanism is partly implemented: the cost-ledger seam is
-  covered (see the cost-ledger coverage note below), while source access,
-  capture results and sync publication, and the inventory preview/tracking
-  domain, remain adopted contracts with no implementation or automated
-  coverage; every statement in
+- the shared source mechanism is partly implemented: the cost-ledger seam and
+  the detached source-key and capture-result models are covered (see the
+  coverage notes below), while source access, provider wiring, sync publication
+  and the inventory preview/tracking domain remain adopted contracts with no
+  runtime implementation or automated coverage; every statement in
   [shared source capture and sync](../architecture/presentation/shared_sources.md)
   and [inventory preview and tracking](../architecture/presentation/inventory.md)
-  that is not backed by that note is a confirmed contract pending implementation
-  rather than existing behavior;
+  that is not backed by those notes is a confirmed contract pending
+  implementation rather than existing behavior;
 - inventory boundaries without coverage: preview ordering and freeze rules,
   selected-item zero versus unknown, per-item revisioning, per-Ping+recipient
   baseline and resynchronization isolation, unknown-baseline expiry versus
@@ -684,11 +702,11 @@ The following gaps remain open until direct evidence closes them:
   persistence seams: the server administration path, remote change route,
   settings-UI exposure, scheduler consumption, and native selector integration
   remain unexercised;
-- the shared source result and publication boundaries without coverage:
-  independent availability, completeness and consistency, direct versus
-  absence-inferred zero, one-physical-read/one-logical-progress charging, and
-  receiver-isolated publication; the ledger's integrated admission path is also
-  unexercised (its covered model seams are listed in the cost-ledger note);
+- the shared source result and publication runtime paths without coverage:
+  driving a real source step, provider reads, one-physical-read and
+  one-logical-progress charging across consumers, receiver-isolated
+  publication, and the ledger's integrated admission path; the model-level
+  identity and result validation is covered by the identity/capture note;
 - the shared client/server `entity_block` classification path end to end;
 - stale or display-hidden cancellation followed by authoritative rejection with
   no local fallback;

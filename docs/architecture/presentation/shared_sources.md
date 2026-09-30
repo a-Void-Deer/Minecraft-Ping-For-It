@@ -2,9 +2,11 @@
 
 This topic owns the generic, domain-neutral mechanism shared by presentation
 sources: source access, capture results, cost accounting, and sync publication.
-It is the adopted contract for the approved shared-source mechanism. It
-describes the intended mechanism rather than current production behavior: the
-existing one-shot adapter capture path, the per-marker cache, and whole-section
+It is the adopted contract for the approved shared-source mechanism. The cost
+ledger and the detached source identity and capture-result models are
+implemented as headless seams; source access, provider wiring, capture stepping
+and sync publication are not yet implemented. The existing one-shot adapter
+capture path, the per-marker cache, and whole-section
 replacement keep their present semantics until an implementation migrates or
 wraps them, and this adoption does not rewrite those routes.
 
