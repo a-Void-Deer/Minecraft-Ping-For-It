@@ -22,6 +22,8 @@ public class ServerConfig implements IConfig {
 	int pingDistance = 2048;
 	/** Server-authoritative Basic/extension allow lists, sampling limits and permissions. */
 	PresentationSettings presentation = PresentationSettings.serverDefaults();
+	/** Server-authoritative inventory preview/tracking budgets; additive object with defaults. */
+	InventorySettings inventory = InventorySettings.serverDefaults();
 
 	public PresentationSettings getPresentation() {
 		return presentation;
@@ -31,6 +33,8 @@ public class ServerConfig implements IConfig {
 	public void validate() {
 		if (presentation == null) presentation = PresentationSettings.serverDefaults();
 		presentation.validate();
+		if (inventory == null) inventory = InventorySettings.serverDefaults();
+		inventory.validate();
 		if (defaultChannelMode == null) {
 			defaultChannelMode = ChannelMode.AUTO;
 		}

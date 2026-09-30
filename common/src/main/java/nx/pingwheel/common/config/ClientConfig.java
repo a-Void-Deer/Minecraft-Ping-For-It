@@ -33,6 +33,8 @@ public class ClientConfig implements IConfig {
 	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
 	TeamColorMode teamColorMode = TeamColorMode.FULL;
 	EntityBlockRenderMode entityBlockRenderMode = EntityBlockRenderMode.ALL;
+	/** Client-local target-list glide and Back-hover preference; additive with defaults. */
+	SpatialSelectorSettings spatialSelector = new SpatialSelectorSettings();
 	int pingSize = 100;
 	int configurationNoticeSize = ClientConfigBounds.DEFAULT_CONFIGURATION_NOTICE_SIZE;
 	int wheelHoldMillis = ClientConfigBounds.DEFAULT_WHEEL_HOLD_MILLIS;
@@ -208,6 +210,9 @@ public class ClientConfig implements IConfig {
 		// Gson maps unknown enum names to null. Recover them locally so malformed
 		// client data never selects a new geometry route accidentally.
 		entityBlockRenderMode = EntityBlockRenderMode.effective(entityBlockRenderMode);
+
+		if (spatialSelector == null) spatialSelector = new SpatialSelectorSettings();
+		spatialSelector.validate();
 
 		final int suppliedWheelHoldMillis = wheelHoldMillis;
 		final int suppliedLongPressCompatibilitySliceMillis = longPressCompatibilitySliceMillis;

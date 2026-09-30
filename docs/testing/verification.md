@@ -388,6 +388,28 @@ actual sound playback or GUI chat delivery, packet ordering over a connection,
 or client rendering. The public entry wiring of this path is source-inspected,
 not runtime-verified.
 
+### Inventory and spatial-selector configuration
+
+`InventorySettingsTest` covers the authoritative inventory budget model:
+explicit unlimited caps keep their finite value and use the caller-owned finite
+guard, finite caps clamp to positive instead of a disable sentinel, confirmed
+finite boundaries clamp, zero heartbeat disables only the periodic cadence, the
+two multiplier grids normalize piecewise values, the five byte multipliers
+stay independent and control only their own scope, the snapshot fragment and
+per-client period scopes stay equal, unlimited byte multipliers stay finite,
+the step helpers cross boundaries and saturate, pending-memory steps follow the
+piecewise grid, and independent defaults do not alias.
+`SpatialSelectorSettingsTest` covers glide and hover clamping and the opt-in
+default of Back-hover. `InventorySettingsPersistenceTest` covers additive
+defaults without rewriting a current-version file, older-version migration
+writing the nested inventory object while preserving user data, explicit
+unlimited round trips, out-of-range values clamping without resetting
+unrelated fields or producing a broken backup, the future-version guard
+leaving defaults in memory and refusing to save, and the client
+spatial-selector keys defaulting and clamping. These are model and persistence
+seams only: no server-administration path, remote change route, settings-UI
+exposure, scheduler consumption or native selector integration exercises them.
+
 ### Server-settings snapshots and updates
 
 `ServerSettingsModelTest` covers request correlation, stale responses, denial,
@@ -658,6 +680,10 @@ The following gaps remain open until direct evidence closes them:
   admitted fragment-baseline progress, component-too-long all-variant folding,
   per-client period snapshot byte accounting across targets, heartbeat zero
   semantics, variant identity and quotas, and the hard stop at Ping expiry;
+- inventory budget and spatial-selector configuration have only model and
+  persistence seams: the server administration path, remote change route,
+  settings-UI exposure, scheduler consumption, and native selector integration
+  remain unexercised;
 - the shared source result and publication boundaries without coverage:
   independent availability, completeness and consistency, direct versus
   absence-inferred zero, one-physical-read/one-logical-progress charging, and

@@ -68,6 +68,20 @@ here.
 | `teamColorMode` | `FULL`, `DISABLED`, `PING_ONLY`, or `LABELS_ONLY` | Whether team coloring applies to both ping and labels, neither, only the ping, or only labels. |
 | `entityBlockRenderMode` | `ALL`, `COMPATIBLE`, or `VOXEL_SHAPE_ONLY` | Local entity-block geometry route. [Geometry sources](../architecture/geometry/geometry_sources.md) owns route and outcome semantics. When decoding persisted input, an explicit `null` or unknown value normalizes to `COMPATIBLE`; a missing field is initialized by the config model. |
 
+### Spatial selector interaction
+
+| Key | JSON form | Local meaning |
+| --- | --- | --- |
+| `spatialSelector` | object | Client-local target-list glide and Back-hover preference; it is never sent to the server and cannot alter server policy. |
+| `spatialSelector.targetGlide` | number | Target-list glide factor. The frozen press result and glide application are owned by [wheel](../architecture/picking/wheel.md); its range and reset value are implementation values. |
+| `spatialSelector.hoverEnabled` | boolean | Whether Back-hover target return is enabled. Back-hover is opt-in and stays inactive until the user enables it. |
+| `spatialSelector.hoverMillis` | number, milliseconds | Dwell threshold before Back-hover returns one level. Its range and step are implementation values. |
+
+No other spatial-selector prototype tuning, such as dead zone or stroke, is
+persisted. The return-state contract — one level, leaving before re-entry to
+re-arm, and a frozen press start — is owned by
+[wheel](../architecture/picking/wheel.md).
+
 ### Block display lists
 
 | Key | JSON form | Local meaning |

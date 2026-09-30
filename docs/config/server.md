@@ -21,8 +21,8 @@ The server configuration object is the typed persisted schema. It applies live
 validation, numeric bounds, and fallbacks; those implementation values are
 deliberately not mirrored here.
 
-The five fields other than `pingDistance` and `presentation` can also be changed
-over the client/server connection through
+The five fields other than `pingDistance`, `presentation` and `inventory` can
+also be changed over the client/server connection through
 [changing server configuration](../architecture/config/changing-server-config.md).
 Within the `presentation` object, the per-target-type `white`, `black`, and
 `whitelistOnly` rules are changed through the dedicated presentation policy
@@ -30,7 +30,8 @@ route owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md);
 its `minUpdateIntervalTicks`, `scanBudget`, `permissionLevels`, and
 `updateIntervals` members, like `pingDistance`, are configured only by editing
-the file. The
+the file. The `inventory` object is configured only by editing the file; it has
+no remote change route and no settings-UI controls. The
 [configuration UI](../UI/settings-screen.md#server-presentation-category)
 exposes the remote settings and the presentation policy controls.
 
@@ -45,6 +46,7 @@ exposes the remote settings and the presentation policy controls.
 | `syncDuration` | number, seconds | Server-held marker synchronization lifetime used for an accepted create's frozen expiry. | Server-authoritative. A valid positive duration after validation; it has no zero sentinel. Lifetime behavior is owned by [marker lifecycle](../architecture/authority/marker_lifecycle.md). |
 | `pingDistance` | number, blocks | Server acceptance range measured from the requester's eye to the authoritative target anchor. | Server-authoritative acceptance setting. It is not a client advertised capture cap; capture composition and acceptance are owned by [range](../architecture/picking/range.md). |
 | `presentation` | object | Per-target-type presentation field policy, sampling limits, and permission/interval overrides for the versioned presentation snapshot. | Server-authoritative. Projection, authorization, and demand-driven capture are owned by [presentation snapshot](../architecture/presentation/presentation_snapshot.md); the nested shape is catalogued below. |
+| `inventory` | object | Server-authoritative inventory preview and tracking budgets, caps, and independent send-byte multipliers. | Server-authoritative. Budget, unlimited-mode, multiplier, and tracking-deadline semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md); the nested shape is catalogued below. |
 
 ## Presentation policy object
 
@@ -96,6 +98,67 @@ members are not part of this shape; their migration to the per-target-type map
 is owned by
 [configuration revisioning](../architecture/config/revisioning.md#same-version-shape-normalization).
 
+## Inventory policy object
+
+The `inventory` object persists the shared physical scan allowance, the single
+pending-memory bound, and the separate preview and tracking budgets. Every cap
+is either a positive finite value or an explicit unlimited mode; periods,
+resynchronization cooldown, pending memory and heartbeat have no unlimited
+mode. There is no tracking-duration member: the tracking deadline follows the
+Ping's own marker lifetime, owned by
+[inventory preview and tracking](../architecture/presentation/inventory.md).
+
+Numeric bounds, grids and defaults are applied by the implementation and are
+deliberately not mirrored here. A finite cap is always positive; zero is not a
+disable sentinel, except for the heartbeat member where zero is the explicit
+"periodic heartbeat disabled" value and other repair and status paths remain
+active.
+
+An unlimited cap or multiplier is persisted explicitly as
+`{"unlimited": true, "value": <finite number>}`. The finite value is retained
+for the UI toggle, and the consuming runtime substitutes its own finite guard
+instead of treating unlimited as a numeric sentinel, an overflow, an unbounded
+array or an unbounded work loop.
+
+| Member | JSON form | Meaning |
+| --- | --- | --- |
+| `physicalSlotsPerTick` | limit object | Shared physical source-scan allowance per tick. Unlimited removes only the configurable cap; the finite internal work and memory guards and both logical quotas remain in force. |
+| `pendingMemoryMiB` | number, MiB | Single finite server-wide pending-memory bound covering preview and tracking together. It is not a per-queue bound and has no unlimited mode. |
+| `preview` | object | Preview accounting; the members below. |
+| `preview.periodTicks` | number, ticks | Preview accounting period. |
+| `preview.maxVariantsPerClientPeriod` | limit object | Per-client variant-category quota. |
+| `preview.maxSlotsPerClient` | limit object | Per-client slot quota. |
+| `preview.maxSlotsServer` | limit object | Server-wide preview slot quota. |
+| `preview.maxTargetsPerClient` | limit object | Simultaneous preview targets per client. |
+| `preview.clientByteMultiplier` | multiplier object | Preview per-client period byte allowance on the client multiplier grid. |
+| `preview.globalByteMultiplier` | multiplier object | Preview global period byte allowance on the global multiplier grid. |
+| `tracking` | object | Tracking accounting; the members below. |
+| `tracking.periodTicks` | number, ticks | Tracking accounting period. |
+| `tracking.maxVariantsPerTarget` | limit object | Per-target variant-category quota. |
+| `tracking.maxSlotsPerTarget` | limit object | Per-target tracking slot quota. |
+| `tracking.maxSlotsServer` | limit object | Server-wide tracking slot quota. |
+| `tracking.streamByteMultiplier` | multiplier object | Tracking stream byte allowance per client+target period on the client multiplier grid. |
+| `tracking.snapshotByteMultiplier` | multiplier object | Tracking snapshot byte allowance on the client multiplier grid; it bounds both one fragment and the client period total across all targets. |
+| `tracking.globalByteMultiplier` | multiplier object | Tracking global period byte allowance on the global multiplier grid. |
+| `tracking.resyncMinPeriods` | number, periods | Bounded abnormal-resynchronization cooldown; positive and with no unlimited mode. |
+| `tracking.heartbeatPeriods` | number, periods | Periodic checksum heartbeat cadence. `0` disables only the periodic heartbeat and is not an unlimited value; other repair and status paths remain active. |
+| `tracking.gracePeriods` | number, periods | Bounded grace window for an unknown-baseline stream. |
+
+A limit object has the stable JSON form
+`{"unlimited": boolean, "value": number}`; a multiplier object has the form
+`{"unlimited": boolean, "value": decimal number}`. The five send-byte
+multipliers are independent: the preview client and global multipliers and the
+tracking stream, snapshot and global multipliers each control only their own
+scope, and a multiplier is a server-authoritative accounting scale rather than
+a client display preference. The snapshot multiplier is the single multiplier
+behind both the per-fragment cap and the per-client period total.
+
+Missing nested objects and missing members receive model defaults. Finite
+values are clamped into their confirmed ranges; multipliers are normalized
+onto their quantized piecewise grids with exact arithmetic so no off-grid value
+or byte drift is persisted. Out-of-range persisted values clamp without
+resetting unrelated fields, and the additive object needs no version migration.
+
 ## Version marker
 
 The file also carries the `pingforit-version` metadata marker. Its presence,
@@ -130,6 +193,18 @@ Illustrative shape only; the values are samples, not defaults:
     },
     "scanBudget": 64,
     "permissionLevels": {"create:fluid.summary": 2}
+  },
+  "inventory": {
+    "physicalSlotsPerTick": {"unlimited": false, "value": 512},
+    "pendingMemoryMiB": 8,
+    "preview": {
+      "clientByteMultiplier": {"unlimited": false, "value": 0.5},
+      "globalByteMultiplier": {"unlimited": true, "value": 1}
+    },
+    "tracking": {
+      "streamByteMultiplier": {"unlimited": false, "value": 0.25},
+      "heartbeatPeriods": 0
+    }
   }
 }
 ```
