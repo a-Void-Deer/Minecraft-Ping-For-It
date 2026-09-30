@@ -6,9 +6,12 @@ Confirmed product decision for planned inventory tracking. This record explains
 the intended boundary; it does not implement inventory tracking and does not
 assert that the current presentation-v3 route or any existing subsystem already
 carries inventory status, revision or baseline behavior. Execution and behavior
-contract updates, and coverage evidence, are tasks of implementation, and the
-existing owner topics keep their current meaning until one of them adopts the
-inventory contract.
+contract updates, and coverage evidence, are tasks of implementation. The
+confirmed boundaries are now adopted by
+[inventory preview and tracking](../architecture/presentation/inventory.md),
+and the generic shared capture and sync mechanics are owned by
+[shared source capture and sync](../architecture/presentation/shared_sources.md);
+this record remains the reason and boundary record.
 
 ## Decision
 
@@ -28,9 +31,10 @@ valid state, and sends the invalidation state to recipients. This status is
 separate from the Ping's normal marker lifetime; invalidation and recovery never
 remove, shorten or extend the ordinary marker record, whose existing lifecycle
 is owned by [marker lifecycle](../architecture/authority/marker_lifecycle.md).
-While the same Ping remains alive and within its hard tracking duration, a
-same-type container at the same coordinates may recover, even when it is a
-different world object or container instance. A trusted scan of a present
+While the same Ping remains alive and within its hard tracking duration — the
+Ping's ordinary marker lifetime, ending exactly at its expiry — a same-type
+container at the same coordinates may recover, even when it is a different
+world object or container instance. A trusted scan of a present
 container may legitimately report zero for a tracked item: a selected item
 absent from a complete, successful, authoritative scan is a zero even when the
 container holds other items, and an empty container is one such observation.
@@ -54,17 +58,20 @@ Status revisions, baselines and invalidation remain required fences: they keep
 queued or in-flight valid data from before an invalidation from resurrecting the
 invalid state, and data from before a recovery baseline from overwriting the
 recovered state. Their detailed execution contract — inventory statuses, wire
-messages, baseline and revision mechanics, and numeric bounds — belongs to the
-future inventory topic and its network owner during implementation; this record
-deliberately does not specify that algorithm or catalogue.
+messages, baseline and revision mechanics, and numeric bounds — belongs to
+[inventory preview and tracking](../architecture/presentation/inventory.md)
+and its network owner during implementation; this record deliberately does not
+specify that algorithm or catalogue.
 
-The inventory tracking duration ends in a hard stop. At that boundary tracking
-stops scanning and stops recovery probing, and the ping remains in its grey
-invalid state for the remainder of its ordinary life; it never recovers
-afterward. Normal Ping expiry or removal is unchanged and is not extended by
-tracking, invalidation or recovery, and an expired or removed Ping never
-recovers. A fresh ping after the old one is a new lifetime with its own identity
-and baselines.
+The inventory tracking duration ends in a hard stop. The hard deadline follows
+the Ping's own marker lifetime exactly: there is no independent inventory
+tracking-duration setting and no earlier tracking-only grey interval. At that
+boundary, tracking stops scanning and stops recovery probing, and the source
+never recovers afterward. Only a source invalidated before that boundary is
+shown as grey; normal Ping expiry or removal removes the marker record as
+usual and is not extended by tracking, invalidation or recovery. An expired or
+removed Ping never recovers, and a fresh ping after the old one is a new
+lifetime with its own identity and baselines.
 
 External providers keep their established stable target IDs, leases and removal
 rules. Ordinary-block replacement tolerance does not extend or revive an expired
@@ -137,6 +144,8 @@ implementation, not by this decision.
 [marker lifecycle](../architecture/authority/marker_lifecycle.md),
 [client marker state](../architecture/markers/client-state.md),
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md),
+[shared source capture and sync](../architecture/presentation/shared_sources.md),
+[inventory preview and tracking](../architecture/presentation/inventory.md),
 [network protocol](../architecture/network/protocol.md),
 [Sable integration](../integrations/sable.md), and
 [testing and verification](../testing/verification.md).

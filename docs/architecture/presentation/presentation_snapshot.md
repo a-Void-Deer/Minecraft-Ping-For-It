@@ -12,7 +12,11 @@ deadlines, and winner slots remain owned by
 [client marker state](../markers/client-state.md). Persisted keys live in
 [client configuration](../../config/client.md) and
 [server configuration](../../config/server.md); mod-specific adapters are owned
-by [Create integration](../../integrations/create.md).
+by [Create integration](../../integrations/create.md). Generic source access,
+capture results, cost accounting and sync publication are owned by
+[shared source capture and sync](shared_sources.md), and the inventory preview
+and tracking domain is owned by [inventory](inventory.md); this topic retains
+negotiation, field policy, adapters and the session value store.
 
 ## Route and negotiated session
 
