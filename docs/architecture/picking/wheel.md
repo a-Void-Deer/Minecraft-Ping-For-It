@@ -73,3 +73,32 @@ candidate can be rejected by the server; that rejection does not make the client
 retry the action with a farther candidate. Such removals are silent
 no-ops/rejections under [target validation](../authority/target_validation.md).
 Removing a valid winner triggers [server winner recomputation](../authority/ping_winner.md).
+
+## Back-hover return state
+
+The planned native target workflow adds a Back affordance whose sustained focus
+can return one level without a click. Its behavior is owned here. The current
+wheel's center **Cancel Marker** behavior above is unchanged: the root-centre
+replacement is a planned migration and is not part of this contract.
+
+The return state machine is a standalone, headless client model; no native
+screen, renderer, or input route consumes it yet. A session freezes whether
+Back-hover is enabled and the required dwell at its start, so a later
+preference change cannot alter a running interaction. While a Back affordance
+is focused, sustained focus accumulates dwell and reports a progress value in
+`[0, 1]` that a renderer can paint as square progress. At the dwell threshold
+the model reports one return trigger and then blocks the same held focus, so a
+single sustained focus never cascades through several levels — even when the
+menu changes to the parent and the focus stays in the Back direction. The
+block is released when the Back focus is lost, and a deliberate leave and
+re-entry arms exactly one new return. Switching the focused menu restarts the
+dwell clock. A rewound clock keeps its original baseline and reports the
+minimum instead of restarting. Ending the interaction clears the timer and the
+block, and a new session always starts unblocked. When the hover preference is
+disabled, the session stays inert and never triggers.
+
+The preference keys and their local authority are owned by
+[client configuration](../../config/client.md#spatial-selector-interaction);
+their numeric range, step, and default remain implementation values. Native
+screen integration, input routing, rendering of the progress affordance, and
+game-feel validation remain pending.

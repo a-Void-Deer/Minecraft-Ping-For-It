@@ -80,7 +80,7 @@ here.
 No other spatial-selector prototype tuning, such as dead zone or stroke, is
 persisted. The return-state contract — one level, leaving before re-entry to
 re-arm, and a frozen press start — is owned by
-[wheel](../architecture/picking/wheel.md).
+[wheel](../architecture/picking/wheel.md#back-hover-return-state).
 
 ### Block display lists
 

@@ -428,6 +428,19 @@ bounded and detached. These are model seams only: no real source step,
 provider read, shared-consumer accounting, transport or running server path
 exercises them.
 
+### Back-hover return state
+
+`BackHoverControllerTest` covers the headless Back-hover timing model: progress
+before the threshold never triggers, the threshold triggers exactly once and a
+held focus never repeats, leaving and re-entering restarts the clock, a parent
+Back stays blocked while held and re-arms only after focus loss, switching the
+focused menu restarts the clock, a rewound clock clamps instead of resetting
+the baseline, `end` clears the timer and block idempotently and a fresh session
+is unblocked, a disabled session never arms or triggers, updates before start
+are inert, and the hover parameters are frozen at session start. It is a
+standalone model seam: no native screen, input route, renderer, or in-game
+timing is exercised.
+
 ### Server-settings snapshots and updates
 
 `ServerSettingsModelTest` covers request correlation, stale responses, denial,
@@ -839,7 +852,7 @@ or because related automated tests exist.
 | --- | --- |
 | Block | Plain `block` versus `entity_block`; `ALL`/`COMPATIBLE`/`VOXEL_SHAPE_ONLY` modes and source fallback; whitelist native glow and fallback; a non-full native shape; same-type state change versus block-type replacement. |
 | Entity | Ordinary entity and dropped item; movement and same-dimension teleportation; death and disappearance; same-dimension world unload/rejoin and runtime-ID reuse in a game session. |
-| Wheel | Short and long press; every sector and border color; configured timeout; frozen target; location fallback. |
+| Wheel | Short and long press; every sector and border color; configured timeout; frozen target; location fallback; Back-hover dwell, one-level return, and leave/re-entry re-arm under real input. |
 | Selection policy and input | Live GUI/screen callbacks for selection gating; focus-loss `KeyMapping.releaseAll`, screen-transition and level-instance/dimension discontinuity aborts with late asynchronous completion; loader/gameplay input lifecycle and physical key-repeat behavior on Fabric, Forge, and NeoForge; selection toggles, entity blacklist/default `simulated:honey_glue` rule, and spectator exclusion in a game session. |
 | Movement, death and replacement | Target movement while the wheel is open; entity death or dimension change; block state change or replacement while open. |
 | Naming and chat | Custom-name formatting; localized base names; item naming; phrase-only text color. |
