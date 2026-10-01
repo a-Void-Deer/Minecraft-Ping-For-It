@@ -456,6 +456,19 @@ stable-cursor and stable-version capabilities are declared and tested
 independently. This is a contract seam only: no real Minecraft provider, world
 read, integrated server runtime, transport, or sync publication exercises it.
 
+### Shared source sync publication contract
+
+`SyncPublisherTest` covers the publication boundary declaration with a fake
+seam implementation: a per-key absolute publication merges without resetting
+absent keys and respects the frozen authorized projection; a state-fence rebase
+and a cancel are isolated per consumer and do not discard another consumer's
+delivered values; a budget defer keeps the observation valid and publishes
+nothing; an unavailable control result is accepted as status and never deferred
+or turned into data or a fake zero; and the context and projection bounds are
+validated and frozen. The fake is not a transport or production implementer: no
+wire send, client receipt, integrated runtime, or inventory delivery exercises
+this boundary.
+
 ### Headless spatial radial menu
 
 `SpatialControllerTest` covers the headless radial menu session: a centre
@@ -476,6 +489,32 @@ explicit Back is centred on the parent bearing with equal non-root sibling
 spans that tile. It is a standalone model seam: no native screen, renderer,
 input callback, configuration, or world-candidate source is exercised, and
 qualified-turn, retrace and inventory-list behavior are not implemented.
+
+### Inventory preview and tracking foundation
+
+The inventory foundation has headless coverage for the preview route and its
+supporting models. `InventoryC2SPacketTest` and `InventoryS2CPacketTest` cover
+request and response codec round trips, bounded text and frame limits,
+corruption rejection, part-range and duplicate-key rejection, and the status
+values. `InventoryChecksumsTest` covers the entry checksum model.
+`InventoryScannerTest`, `InventoryScanBrokerTest` and `InventoryWireWindowTest`
+cover bounded scanning, the shared-read broker, the wire window, and
+incomplete/unavailable outcomes. `InventoryPreviewServerTest` covers preview
+session negotiation, request binding, bounded budget admission, invalidation,
+close, and the ignored forged `SELECT`. `InventoryPresentationTest`,
+`DedicatedDeliveryBoundaryTest` and `ClientDedicatedDeliveryTest` cover the
+dedicated-delivery boundary: the inventory adapter is negotiated and
+policy-catalogued but never sampled, masked, published or rendered by the
+section machinery. `InventoryItemCodecTest` and `VanillaInventorySourceTest`
+cover the ordinary-block item codec and source. `InventoryClientStoreTest` and
+`ClientInventoryTest` cover the client connection session, preview projection
+and its accepted barrier across every part, byte bound and fence, baseline
+assembly, unknown-baseline buffer, checksum comparison and resync scheduling;
+the tracking closed-watermark barrier remains pending.
+`PlatformInventoryServiceContractTest` covers the loader service contract. `InventoryGestureTest`, `InventoryListModelTest` and
+`SpatialOverlayRendererTimingTest` cover the client gesture, list and renderer
+timing models. These are headless runtime and model seams: no manual world,
+renderer, transport or multiplayer behavior is verified.
 
 ### Server-settings snapshots and updates
 
@@ -733,15 +772,29 @@ supplementary execution guidance rather than a public documentation prerequisite
 The following gaps remain open until direct evidence closes them:
 
 - the shared source mechanism is partly implemented: the cost-ledger seam, the
-  detached source-key and capture-result models, and the source-access boundary
-  contract are covered (see the coverage notes below), while real provider
-  implementations, an integrated server runtime, sync publication and the
-  inventory preview/tracking domain remain adopted contracts with no runtime
-  implementation or automated coverage; every statement in
+  detached source-key and capture-result models, the source-access boundary
+  contract, the sync-publisher declaration, and the ordinary-block inventory
+  preview foundation are covered (see the coverage notes below). The preview
+  foundation does not yet run through the generic source-access, capture-result
+  or cost-ledger seams, and sync publication has no production implementer;
+  tracking delivery, the remaining provider contexts and native UI integration
+  remain adopted contracts with no runtime implementation or automated
+  coverage; every statement in
   [shared source capture and sync](../architecture/presentation/shared_sources.md)
   and [inventory preview and tracking](../architecture/presentation/inventory.md)
   that is not backed by those notes is a confirmed contract pending
   implementation rather than existing behavior;
+- the inventory foundation is preview-only: `SELECT` and tracking delivery are
+  not implemented (the server ignores both), no native input or HUD facade
+  consumes the client session, entity/private/external provider contexts report
+  unavailable, no manual world, renderer, transport or multiplayer behavior is
+  verified, and no loader build or source-set verification is recorded for
+  these units; the preview foundation charges logical slot progress per preview
+  request instead of once per the confirmed client/target quota identity, which
+  is an implementation gap against the confirmed quota rule, not an open
+  product decision; client preview accepted-barrier coverage now exercises all
+  parts, byte bounds and fences, while the tracking closed-watermark barrier
+  remains pending;
 - inventory boundaries without coverage: preview ordering and freeze rules,
   selected-item zero versus unknown, per-item revisioning, per-Ping+recipient
   baseline and resynchronization isolation, unknown-baseline expiry versus
@@ -752,12 +805,12 @@ The following gaps remain open until direct evidence closes them:
   persistence seams: the server administration path, remote change route,
   settings-UI exposure, scheduler consumption, and native selector integration
   remain unexercised;
-- the shared source result and publication runtime paths without coverage:
-  real Minecraft provider implementation, world reads through an integrated
-  server runtime, one-physical-read and one-logical-progress charging across
-  consumers, receiver-isolated publication, and the ledger's integrated
-  admission path; the model-level identity, result and access-contract
-  validation is covered by the identity/capture and access notes;
+- the shared source runtime paths without coverage: production sync
+  publication, cross-consumer physical and logical charging beyond the
+  foundation seams, receiver-isolated runtime publication, and the ledger's
+  integrated admission path; the model-level identity, result, access-contract,
+  sync-publication declaration and preview-foundation validation is covered by
+  their notes;
 - the shared client/server `entity_block` classification path end to end;
 - stale or display-hidden cancellation followed by authoritative rejection with
   no local fallback;

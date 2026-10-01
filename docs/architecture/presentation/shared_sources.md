@@ -2,11 +2,15 @@
 
 This topic owns the generic, domain-neutral mechanism shared by presentation
 sources: source access, capture results, cost accounting, and sync publication.
-It is the adopted contract for the approved shared-source mechanism. The cost
-ledger, the detached source identity and capture-result models, and the
-server-side access boundary contract are implemented as headless seams;
-provider implementations, real capture stepping, an integrated server runtime
-and sync publication are not yet implemented. The existing one-shot adapter
+It is the adopted contract for the approved shared-source mechanism. All four
+boundaries now have headless declarations with model coverage: the server-side
+source-access contract, the detached source-key and capture-result models, the
+cost ledger, and the sync-publisher declaration. The ordinary-block inventory
+preview foundation does not yet run through those seams: it reads through its
+own source key and scanner/broker path, so runtime migration to the declared
+boundaries is pending. Sync publication has no production implementer, and the
+remaining provider contexts and native input/UI integration are not
+implemented. The existing one-shot adapter
 capture path, the per-marker cache, and whole-section
 replacement keep their present semantics until an implementation migrates or
 wraps them, and this adoption does not rewrite those routes.
