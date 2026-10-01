@@ -9,6 +9,8 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.network.ChannelBuilder;
 import net.minecraftforge.network.EventNetworkChannel;
 import nx.pingwheel.common.CommonServer;
+import nx.pingwheel.common.network.InventoryC2SPacket;
+import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
@@ -55,6 +57,8 @@ public class ForgeMain {
 	public static final EventNetworkChannel MARKER_WINNER_CHANGED_CHANNEL_S2C = ChannelBuilder.named(MarkerWinnerChangedS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel PRESENTATION_CHANNEL_C2S = ChannelBuilder.named(PresentationC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel PRESENTATION_CHANNEL_S2C = ChannelBuilder.named(PresentationS2CPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel INVENTORY_CHANNEL_C2S = ChannelBuilder.named(InventoryC2SPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel INVENTORY_CHANNEL_S2C = ChannelBuilder.named(InventoryS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 
 	@SuppressWarnings({"java:S1118", "the public constructor is required by forge"})
 	public ForgeMain() {
@@ -80,6 +84,8 @@ public class ForgeMain {
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerWinnerChangedS2CPacket.PACKET_ID, MARKER_WINNER_CHANGED_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationC2SPacket.PACKET_ID, PRESENTATION_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationS2CPacket.PACKET_ID, PRESENTATION_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(InventoryC2SPacket.PACKET_ID, INVENTORY_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(InventoryS2CPacket.PACKET_ID, INVENTORY_CHANNEL_S2C);
 		registerPacketHandler(PING_LOCATION_CHANNEL_C2S, PingLocationC2SPacket::readSafe, CommonServer.INSTANCE::onPingLocationPacket);
 		registerPacketHandler(UPDATE_CHANNEL_C2S, UpdateChannelC2SPacket::readSafe, CommonServer.INSTANCE::onChannelUpdatePacket);
 		registerPacketHandler(MARKER_CREATE_CHANNEL_C2S, MarkerCreateC2SPacket::readSafe, CommonServer.INSTANCE::onMarkerCreatePacket);
@@ -88,6 +94,7 @@ public class ForgeMain {
 		registerPacketHandler(SERVER_CONFIG_UPDATE_CHANNEL_C2S, ServerConfigUpdateC2SPacket::readSafe, CommonServer.INSTANCE::onServerConfigUpdatePacket);
 		registerPacketHandler(SERVER_PRESENTATION_POLICY_CHANNEL_C2S, ServerPresentationPolicyC2SPacket::readSafe, CommonServer.INSTANCE::onServerPresentationPolicyPacket);
 		registerPacketHandler(PRESENTATION_CHANNEL_C2S, PresentationC2SPacket::readSafe, CommonServer.INSTANCE::onPresentationPacket);
+		registerPacketHandler(INVENTORY_CHANNEL_C2S, InventoryC2SPacket::readSafe, CommonServer.INSTANCE::onInventoryPacket);
 	}
 
 	public static <T> void registerPacketHandler(EventNetworkChannel channel, Function<FriendlyByteBuf, T> packetReader, TriConsumer<MinecraftServer, ServerPlayer, T> packetHandler) {

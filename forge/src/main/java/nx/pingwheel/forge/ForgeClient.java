@@ -11,6 +11,7 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.EventNetworkChannel;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.command.ClientCommandBuilder;
+import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
@@ -29,6 +30,7 @@ import nx.pingwheel.forge.integration.ForgeWorldAwareBlockModelOutlineAdapter;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import static nx.pingwheel.forge.ForgeMain.INVENTORY_CHANNEL_S2C;
 import static nx.pingwheel.forge.ForgeMain.MARKER_CREATED_CHANNEL_S2C;
 import static nx.pingwheel.forge.ForgeMain.MARKER_REJECTED_CHANNEL_S2C;
 import static nx.pingwheel.forge.ForgeMain.MARKER_REMOVED_CHANNEL_S2C;
@@ -59,6 +61,7 @@ public class ForgeClient {
 		registerPacketHandler(SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C, ServerConfigSnapshotS2CPacket::readSafe, CommonClient.INSTANCE::onServerConfigSnapshotPacket);
 		registerPacketHandler(SERVER_PRESENTATION_POLICY_CHANNEL_S2C, ServerPresentationPolicyS2CPacket::readSafe, CommonClient.INSTANCE::onServerPresentationPolicyPacket);
 		registerPacketHandler(PRESENTATION_CHANNEL_S2C, PresentationS2CPacket::readSafe, CommonClient.INSTANCE::onPresentationPacket);
+		registerPacketHandler(INVENTORY_CHANNEL_S2C, InventoryS2CPacket::readSafe, CommonClient.INSTANCE::onInventoryPacket);
 
 		// resource reload
 		FMLJavaModLoadingContext

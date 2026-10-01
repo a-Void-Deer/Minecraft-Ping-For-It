@@ -9,16 +9,21 @@ keeps the live Ping and original target identity instead of a source-instance
 generation is recorded in
 [D0008](../../decisions/D0008-inventory-source-recovery.md).
 
-This is the adopted contract for the confirmed inventory design; it describes
-the intended behavior, not current production behavior. Until implementation
-migrates a route, the existing one-shot capture and whole-section presentation
-paths keep their present semantics, and no inventory route, message or
-configuration key is implied to exist yet. Wire routes and message families
-will be owned by [network protocol](../network/protocol.md); persisted keys,
-bounds and defaults will be owned by the configuration topics. Marker lifetime
-remains owned by [marker lifecycle](../authority/marker_lifecycle.md), target
-identity by [target model](../identity/target_model.md), and mod-specific
-providers by [Create integration](../../integrations/create.md).
+This is the adopted contract for the confirmed inventory design. The
+ordinary-block preview foundation is implemented on the server and client as
+headless runtime and model seams: the dedicated route and its configurable
+budgets exist, and the server can open bounded preview sessions for accepted
+ordinary-block targets. Tracking delivery (`SELECT`), the native input and HUD
+facade, and the remaining provider contexts are not implemented; the contract
+below stays normative for that work. Until a route is integrated, the existing
+one-shot capture and whole-section presentation paths keep their present
+semantics, and the existing server gates for permission, range, lock state and
+safe reads are unchanged. Wire routes and message families are owned by
+[network protocol](../network/protocol.md); persisted keys, bounds and defaults
+are owned by the configuration topics. Marker lifetime remains owned by
+[marker lifecycle](../authority/marker_lifecycle.md), target identity by
+[target model](../identity/target_model.md), and mod-specific providers by
+[Create integration](../../integrations/create.md).
 
 ## Source identity, invalidation and recovery
 
@@ -60,12 +65,23 @@ Entity and private-inventory contexts require their own owning contract.
 
 ## Preview
 
+Inventory preview and tracking are enabled by default; no separate user
+opt-in switch gates them. Each request still passes the existing server gates:
+target and field permission, range acceptance, lock state, and safe-read
+validation. The foundation preview currently resolves accepted ordinary-block
+targets only; entity, private-inventory, and external-provider contexts report
+unavailable until their owning contracts exist.
+
 Holding the ping key starts a bounded initial inventory preview on a new
 request path; it does not reuse the legacy subscription route. A preview may
 begin before the Ping exists and therefore has its own request and session
 identity, which must not be equated with a Ping or with the inventory snapshot
-identity. The authoritative handoff from preview to tracking is defined by the
-owning implementation contract; no preview Ping is invented.
+identity. A preview request binds to one bounded server target at open time and
+never changes that target; the authoritative target is derived server-side, and
+no player identity or client-selected item count travels on the request. The
+server assigns bounded opaque entry keys scoped to the request, not item IDs.
+The authoritative handoff from preview to tracking is defined by the owning
+implementation contract; no preview Ping is invented.
 
 The first batch is sorted by count immediately rather than after the scan
 finishes. Newly discovered batches may reorder entries only before the user has

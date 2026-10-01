@@ -35,6 +35,7 @@ import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.marker.ServerMarkerStore;
 import nx.pingwheel.common.name.MinecraftTargetNameResolver;
 import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
@@ -50,6 +51,7 @@ import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService;
 import nx.pingwheel.common.presentation.minecraft.PresentationServer;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryServer;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
@@ -127,6 +129,7 @@ public class ServerCore {
 	 */
 	public static synchronized void initMarkers() {
 		PresentationServer.reset();
+		InventoryServer.reset();
 		if (ACTIVE_SERVER != null && MARKER_STORE != null) {
 			releaseExternalMarkers(ACTIVE_SERVER, MARKER_STORE.allMarkers());
 			MARKER_STORE.clear();
@@ -166,6 +169,7 @@ public class ServerCore {
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
 		ACTIVE_SERVER = server;
 		PresentationServer.activate(server);
+		InventoryServer.activate(server);
 
 		LOGGER.debug(() -> "marker store initialized for server instance 0x%s".formatted(
 			Integer.toHexString(System.identityHashCode(server))));
@@ -572,6 +576,12 @@ public class ServerCore {
 		// Marker creation now requires the new negotiated route and session epoch.
 	}
 
+	public static void onInventoryPacket(MinecraftServer server, ServerPlayer player, InventoryC2SPacket packet) {
+		if (server == null || player == null || !server.isSameThread() || player.serverLevel().getServer() != server) return;
+		ensureMarkerStore(server);
+		InventoryServer.handle(server, player, packet);
+	}
+
 	public static void onPresentationPacket(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet) {
 		PresentationServer.activate(server);
 		if (packet == null || packet.isCorrupt()) return;
@@ -739,6 +749,7 @@ public class ServerCore {
 		if (server.getTickCount() % EXTERNAL_REFRESH_INTERVAL_TICKS == 0) {
 			refreshExternalMarkers(server);
 		}
+		InventoryServer.tick(server);
 	}
 
 	/**
@@ -785,6 +796,7 @@ public class ServerCore {
 		PLAYER_RATES.remove(player.getUUID());
 		SYNC_DURATION_POLICY.forget(player.getUUID());
 		PresentationServer.disconnect(player.getUUID());
+		InventoryServer.disconnect(player.getUUID());
 	}
 
 	/**

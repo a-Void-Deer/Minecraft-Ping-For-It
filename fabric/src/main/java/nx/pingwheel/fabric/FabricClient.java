@@ -15,6 +15,7 @@ import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.ProfilerFiller;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.command.ClientCommandBuilder;
+import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
@@ -99,6 +100,9 @@ public class FabricClient implements ClientModInitializer {
 		ClientPlayNetworking.registerGlobalReceiver(
 			PresentationS2CPacket.PACKET_TYPE,
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onPresentationPacket(packet)));
+		ClientPlayNetworking.registerGlobalReceiver(
+			InventoryS2CPacket.PACKET_TYPE,
+			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onInventoryPacket(packet)));
 
 		// resource reload
 		ResourceManagerHelper.get(PackType.CLIENT_RESOURCES)

@@ -5,6 +5,7 @@ import net.minecraft.server.level.ServerPlayer;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.core.ServerCore;
 import nx.pingwheel.common.integration.ModContext;
+import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
@@ -62,6 +63,10 @@ public class CommonServer {
 
 	public void onPresentationPacket(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet) {
 		ServerCore.onPresentationPacket(server, player, packet);
+	}
+
+	public void onInventoryPacket(MinecraftServer server, ServerPlayer player, InventoryC2SPacket packet) {
+		ServerCore.onInventoryPacket(server, player, packet);
 	}
 
 	public void onServerConfigRequestPacket(MinecraftServer server, ServerPlayer player, ServerConfigRequestC2SPacket packet) {

@@ -5,7 +5,11 @@ current client packet acceptance for marker authority. It records packet
 semantics and the boundary between the authoritative marker family and the
 legacy location family; the versioned presentation snapshot and presentation
 policy routes it registers are owned by
-[presentation snapshot](../presentation/presentation_snapshot.md).
+[presentation snapshot](../presentation/presentation_snapshot.md). The
+dedicated inventory preview/tracking route recorded below is registered here as
+well; its route grammar and acceptance belong to this topic, while inventory
+status, zero, baseline and budget semantics are owned by
+[inventory](../presentation/inventory.md).
 It is not a wire-format catalogue and does not promise interoperability with the
 original mod. The supported loader set and the original-mod compatibility policy
 are owned by [compatibility](../../compatibility.md).
@@ -30,6 +34,51 @@ protocol, and registering a superseded route does not re-enable its effect.
 | Presentation `PresentationS2CPacket` (S2C): `OFFER`, `RESET`, `CREATED`, `SECTION`, `REMOVED`, `WINNER`, `REJECT` | Fabric, Forge, and NeoForge common client handler. | Accepted marker creation, removal, and winner changes are projected per recipient; a rejection is sent only to its requester. | Accepted only for the negotiated session epoch/view. The atomic Basic initial, default display reference, retained values, mask pruning, and legacy-name boundary are owned by [presentation snapshot](../presentation/presentation_snapshot.md); marker record state and visual lifetime are owned by [client marker state](../markers/client-state.md); rejection presentation remains owned by [ping feedback](../../UI/ping-feedback.md). Corrupt packets, or packets received without a runtime, are safely dropped. |
 | Presentation policy `ServerPresentationPolicyC2SPacket` (C2S): `READ`, `ADD_WHITE`, `REMOVE_WHITE`, `ADD_BLACK`, `REMOVE_BLACK`, `SET_WHITELIST_ONLY` | Fabric, Forge, and NeoForge common server handler. | The versioned route carries the correlated read of all five per-target-type rule views and the bounded selector and whitelist-only mutations for a selected target type. Disclosure, revision, transaction, and broadcast semantics are owned by [presentation snapshot](../presentation/presentation_snapshot.md); authority and server-side enforcement are owned by [server configuration authority](../authority/server-config.md) and [security](../security.md#server-configuration-update-enforcement). | Not applicable on C2S. |
 | Presentation policy `ServerPresentationPolicyS2CPacket` (S2C) | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped rule-view mirror under the correlation and revision rules owned by [presentation snapshot](../presentation/presentation_snapshot.md); it does not mutate marker state, overlay/outline state, or presentation field values. |
+| Inventory `InventoryC2SPacket` (C2S): `HELLO`, `OPEN`, `CLOSE`, `RESYNC`, `SELECT` | Fabric, Forge, and NeoForge common server handler. | `HELLO` creates or renews the per-player preview session and answers with an offer of server-selected periods; `OPEN`/`CLOSE` bind and release one bounded preview request against a server-validated target; `RESYNC` schedules a corrective resend for the request, while a marker-bound `RESYNC` and `SELECT` have no runtime effect because tracking delivery is not implemented. The request carries no player identity and no client count. Inventory domain semantics are owned by [inventory](../presentation/inventory.md). | Not applicable on C2S. |
+| Inventory `InventoryS2CPacket` (S2C): `OFFER`, `PREVIEW`, `SNAPSHOT`, `STREAM`, `STATUS`, `HEARTBEAT` | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped inventory session under the negotiated epoch: `OFFER` establishes the epoch and periods, `PREVIEW` updates the preview projection, and tracking messages apply to model state only. No native input or HUD facade consumes the session yet, and no world or render behavior is verified. |
+
+## Inventory preview/tracking route (`inventory-v1`)
+
+The dedicated inventory route carries preview (and future tracking) requests
+and responses, parallel to `presentation-v3` and
+`server-presentation-policy-v2`. Every frame declares protocol version one.
+`HELLO` is the epoch-zero handshake; every other request runs under the
+negotiated nonzero epoch and a non-negative request id.
+
+Client requests: `HELLO` is empty. `OPEN(epoch, requestId, target)` binds a
+preview request to one bounded server target; it is ignored for an existing
+request id, and a request id never changes its target. `CLOSE(epoch,
+requestId)` releases that request. `RESYNC(epoch, requestId[, markerId])`
+schedules a corrective resend for the request; a marker id selects a tracked
+Ping and is not yet handled. `SELECT(epoch, requestId, entryKey, itemId,
+pingType)` carries one bounded preview entry reference whose authoritative
+target and count the server must derive itself.
+
+Server messages: `OFFER(epoch, previewPeriodTicks, trackingPeriodTicks,
+resyncMinPeriods, heartbeatPeriods)` establishes the epoch and the
+server-selected periods, where an explicit zero heartbeat period disables the
+periodic heartbeat. `PREVIEW`, `SNAPSHOT` and `STREAM` each carry one fragment
+under an independent `(epoch, requestId, markerId, baselineId)` identity plus
+`statusRevision`, `watermark`, `partIndex`/`partCount`, `completeScan`, a
+status, a checksum, and a bounded entry list; `markerId` is required for
+`SNAPSHOT`/`STREAM` and absent for `PREVIEW`. `STATUS` carries the same state
+fields without entries. `HEARTBEAT` carries state and checksum without items
+and never resends values. Entry fields are `key`, `itemId`, `label`, optional
+`displayJson`, `count`, `itemRevision`, `fallback`, and an optional per-entry
+`quality` status; duplicate keys, negative counts, unknown kinds or statuses,
+invalid part ranges, oversized frames and trailing bytes are rejected. Status
+values are `UPDATING`, `READY`, `UNCERTAIN`, `INCOMPLETE`, `UNAVAILABLE`,
+`INVALID`, `EXPIRED` and `COMPONENT_TOO_LONG`.
+
+Byte accounting on this route counts the whole encoded inventory frame —
+including its header, kind and entry framing — and excludes compression and the
+underlying Minecraft transport. The frame and per-entry bounds are enforced
+during encoding and rejected during decoding before any large allocation.
+Route registration and grammar remain owned here; the dedicated adapter's
+delivery boundary is owned by
+[presentation snapshot](../presentation/presentation_snapshot.md#dedicated-delivery-adapters),
+and inventory status, zero/fallback, baseline and budget semantics are owned by
+[inventory](../presentation/inventory.md).
 
 ## Route effects and channel establishment
 

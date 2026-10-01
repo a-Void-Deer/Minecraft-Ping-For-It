@@ -10,6 +10,8 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.CommonServer;
+import nx.pingwheel.common.network.InventoryC2SPacket;
+import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
@@ -53,6 +55,8 @@ public class NeoMain {
 	private static final StreamCodec<FriendlyByteBuf, ServerPresentationPolicyS2CPacket> SERVER_PRESENTATION_POLICY_S2C_CODEC = StreamCodec.ofMember(ServerPresentationPolicyS2CPacket::write, ServerPresentationPolicyS2CPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, PresentationC2SPacket> PRESENTATION_C2S_CODEC = StreamCodec.ofMember(PresentationC2SPacket::write, PresentationC2SPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, PresentationS2CPacket> PRESENTATION_S2C_CODEC = StreamCodec.ofMember(PresentationS2CPacket::write, PresentationS2CPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, InventoryC2SPacket> INVENTORY_C2S_CODEC = StreamCodec.ofMember(InventoryC2SPacket::write, InventoryC2SPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, InventoryS2CPacket> INVENTORY_S2C_CODEC = StreamCodec.ofMember(InventoryS2CPacket::write, InventoryS2CPacket::readSafe);
 
 	public NeoMain(IEventBus modBus) {
 		CommonServer.INSTANCE.onInit();
@@ -137,6 +141,14 @@ public class NeoMain {
 
 		registrar.playToClient(PresentationS2CPacket.PACKET_TYPE, PRESENTATION_S2C_CODEC, (payload, context) -> {
 			context.enqueueWork(() -> CommonClient.INSTANCE.onPresentationPacket(payload));
+		});
+
+		registrar.playToServer(InventoryC2SPacket.PACKET_TYPE, INVENTORY_C2S_CODEC, (payload, context) -> {
+			context.enqueueWork(() -> CommonServer.INSTANCE.onInventoryPacket(context.player().getServer(), (ServerPlayer) context.player(), payload));
+		});
+
+		registrar.playToClient(InventoryS2CPacket.PACKET_TYPE, INVENTORY_S2C_CODEC, (payload, context) -> {
+			context.enqueueWork(() -> CommonClient.INSTANCE.onInventoryPacket(payload));
 		});
 	}
 }

@@ -6,6 +6,8 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import nx.pingwheel.common.CommonServer;
+import nx.pingwheel.common.network.InventoryC2SPacket;
+import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
@@ -45,6 +47,8 @@ public class FabricMain implements ModInitializer {
 	private static final StreamCodec<FriendlyByteBuf, ServerPresentationPolicyS2CPacket> SERVER_PRESENTATION_POLICY_S2C_CODEC = StreamCodec.ofMember(ServerPresentationPolicyS2CPacket::write, ServerPresentationPolicyS2CPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, PresentationC2SPacket> PRESENTATION_C2S_CODEC = StreamCodec.ofMember(PresentationC2SPacket::write, PresentationC2SPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, PresentationS2CPacket> PRESENTATION_S2C_CODEC = StreamCodec.ofMember(PresentationS2CPacket::write, PresentationS2CPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, InventoryC2SPacket> INVENTORY_C2S_CODEC = StreamCodec.ofMember(InventoryC2SPacket::write, InventoryC2SPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, InventoryS2CPacket> INVENTORY_S2C_CODEC = StreamCodec.ofMember(InventoryS2CPacket::write, InventoryS2CPacket::readSafe);
 
 	@Override
 	public void onInitialize() {
@@ -68,6 +72,8 @@ public class FabricMain implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(ServerPresentationPolicyS2CPacket.PACKET_TYPE, SERVER_PRESENTATION_POLICY_S2C_CODEC);
 		PayloadTypeRegistry.playC2S().register(PresentationC2SPacket.PACKET_TYPE, PRESENTATION_C2S_CODEC);
 		PayloadTypeRegistry.playS2C().register(PresentationS2CPacket.PACKET_TYPE, PRESENTATION_S2C_CODEC);
+		PayloadTypeRegistry.playC2S().register(InventoryC2SPacket.PACKET_TYPE, INVENTORY_C2S_CODEC);
+		PayloadTypeRegistry.playS2C().register(InventoryS2CPacket.PACKET_TYPE, INVENTORY_S2C_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(
 			PingLocationC2SPacket.PACKET_TYPE,
@@ -131,6 +137,14 @@ public class FabricMain implements ModInitializer {
 				final var player = context.player();
 				final var server = context.server();
 				server.execute(() -> CommonServer.INSTANCE.onPresentationPacket(server, player, packet));
+			}
+		);
+		ServerPlayNetworking.registerGlobalReceiver(
+			InventoryC2SPacket.PACKET_TYPE,
+			(packet, context) -> {
+				final var player = context.player();
+				final var server = context.server();
+				server.execute(() -> CommonServer.INSTANCE.onInventoryPacket(server, player, packet));
 			}
 		);
 	}

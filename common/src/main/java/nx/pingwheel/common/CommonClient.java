@@ -40,6 +40,7 @@ import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.interaction.MinecraftEntityTargetAdapter;
 import nx.pingwheel.common.name.ClientTargetNameDecoder;
+import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
@@ -54,6 +55,7 @@ import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Operation;
 import nx.pingwheel.common.presentation.client.ServerPresentationPolicyState;
+import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.platform.IPlatformContextService;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
@@ -83,6 +85,13 @@ public class CommonClient {
 		new ServerPresentationPolicyState(
 			INTERACTION_TIME_SOURCE::nowMillis,
 			ServerPresentationPolicyState.DEFAULT_REQUEST_TIMEOUT_MILLIS);
+
+	/**
+	 * Connection-scoped inventory preview/tracking session. Created on join and
+	 * dropped on leave so no channel, entry metadata or unknown-baseline buffer
+	 * can leak across connections; null while not connected.
+	 */
+	private static ClientInventory inventory;
 
 	/** Runs the registered entity-outline sources over the production registry. */
 	private static final EntityOutlineRunner ENTITY_OUTLINE_RUNNER =
@@ -117,6 +126,7 @@ public class CommonClient {
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 		pingRuntime = createPingRuntimeIfInWorld();
+		inventory = new ClientInventory(IPlatformNetworkService.INSTANCE::sendToServer);
 
 		// A fresh connection-scoped policy view starts unknown and asks the
 		// server for an authoritative read. A server without the versioned route
@@ -137,6 +147,10 @@ public class CommonClient {
 		pingRuntime = null;
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
+		if (inventory != null) {
+			inventory.reset();
+			inventory = null;
+		}
 		SERVER_PRESENTATION_POLICY_STATE.resetForDisconnect();
 		MarkerOverlayState.INSTANCE.clear();
 		EntityOutlineState.INSTANCE.clear();
@@ -257,6 +271,12 @@ public class CommonClient {
 		// Expire a presentation policy request that outlived the bounded timeout
 		// so the settings UI can retry instead of waiting forever.
 		SERVER_PRESENTATION_POLICY_STATE.tick();
+
+		// Drive HELLO negotiation and the inventory resync/unknown-baseline
+		// timers; the session exists only between join and leave.
+		if (inventory != null) {
+			inventory.tick(true);
+		}
 
 		if (pingRuntime == null) {
 			pingRuntime = createPingRuntimeIfInWorld();
@@ -641,6 +661,24 @@ public class CommonClient {
 
 	public void onPresentationPacket(PresentationS2CPacket packet) {
 		if (pingRuntime != null) pingRuntime.onPresentationPacket(packet);
+	}
+
+	/**
+	 * Inventory S2C delegate: routes one decoded response into the
+	 * connection-scoped session. Corrupt or epoch-mismatched packets are
+	 * counted and dropped inside the session; no world or UI state is touched.
+	 */
+	public void onInventoryPacket(InventoryS2CPacket packet) {
+		if (inventory != null) inventory.accept(packet);
+	}
+
+	/**
+	 * The nullable connection-scoped inventory session for UI call sites; null
+	 * while disconnected, so callers gate on a non-null session before
+	 * {@code open}, {@code select}, {@code preview} or {@code tracking}.
+	 */
+	public ClientInventory getInventory() {
+		return inventory;
 	}
 
 	/**
