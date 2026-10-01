@@ -24,6 +24,7 @@ import nx.pingwheel.common.presentation.PresentationRegistry;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationStore;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 
 /** One client connection's negotiated capabilities, server mask and retained presentation. */
 public final class ClientPresentation {
@@ -54,6 +55,7 @@ public final class ClientPresentation {
 	public ClientPresentation(Consumer<IPacket> sender) {
 		this.sender = Objects.requireNonNull(sender, "sender");
 		registry.register(new BasicDescriptor());
+		registry.register(InventoryPresentation.INSTANCE);
 		registerOptionalCreate();
 		registerProvider("default", ClientPresentation::defaultLabels);
 	}
@@ -286,7 +288,9 @@ public final class ClientPresentation {
 			int schema = buf.readVarInt();
 			if (expectedAdapter != null && !expectedAdapter.equals(adapter)) return null;
 			PresentationAdapter local = registry.get(adapter);
-			if (local == null || local.schema() != schema || !compatible.containsKey(adapter)) return null;
+			if (local == null || local.schema() != schema
+				|| local.deliveryMode() != PresentationAdapter.DeliveryMode.SECTION
+				|| !compatible.containsKey(adapter)) return null;
 			buf.readerIndex(start);
 			Map<String, PresentationField> fields = compatible.get(adapter);
 			Set<String> allowed = mask.getOrDefault(targetTypeId, Map.of()).getOrDefault(adapter, Set.of());
@@ -330,6 +334,8 @@ public final class ClientPresentation {
 		received.forEach((type, adapters) -> {
 			Map<String, Set<String>> allowed = new LinkedHashMap<>();
 			adapters.forEach((adapter, fields) -> {
+				PresentationAdapter local = registry.get(adapter);
+				if (local == null || local.deliveryMode() != PresentationAdapter.DeliveryMode.SECTION) return;
 				Map<String, PresentationField> descriptors = compatible.get(adapter);
 				if (descriptors != null) {
 					Set<String> accepted = new HashSet<>(fields);

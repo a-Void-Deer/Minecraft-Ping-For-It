@@ -102,6 +102,22 @@ message and no protocol version. There is no client-local receive or display
 field policy and no property-entry editor; per-target-type selector editing
 belongs to the server policy page.
 
+## Dedicated delivery adapters
+
+An adapter's delivery mode is either the legacy framed `SECTION` route or
+`DEDICATED`. The manifest negotiates and the policy catalogue lists both modes;
+a dedicated adapter owns its own request, collection and publication path and
+is never sampled, masked, published or rendered by the section machinery — it
+is not charged or sent as an empty section, and its collector is never reached
+from that route. The inventory adapter (`pingforit:inventory`, schema 1) is the
+first dedicated adapter: it declares one record field,
+`pingforit:inventory.items`, enabled by default at permission level zero, and
+its values travel only on the dedicated inventory route owned by
+[network protocol](../network/protocol.md). Dedicated adapters share the same
+per-field authorization rule as section fields: the target type's selector
+policy decides the manifest default, then the recipient permission callback
+decides the effective level; a missing setting, field or target type denies.
+
 ## Basic target fields
 
 Basic (`minecraft:basic`, schema 1) is the stable common field set:

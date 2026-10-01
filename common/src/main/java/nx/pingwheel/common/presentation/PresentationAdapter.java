@@ -20,6 +20,17 @@ public interface PresentationAdapter {
 	/** Only fields in demand may be read. Null means temporarily unavailable. */
 	PresentationSection collect(DetachedTarget target, java.util.Set<String> demand, CaptureBudget budget);
 
+	/**
+	 * How this adapter's values reach a client. The legacy framed SECTION route
+	 * only ever samples, masks, publishes and renders {@link DeliveryMode#SECTION}
+	 * adapters; a dedicated adapter owns its own request, collection and
+	 * publication path and must never be charged or sent as an empty section.
+	 */
+	enum DeliveryMode { SECTION, DEDICATED }
+
+	/** Existing adapters stay on the legacy framed SECTION route. */
+	default DeliveryMode deliveryMode() { return DeliveryMode.SECTION; }
+
 	record DetachedTarget(String dimension, String kind, String registryId, int x, int y, int z,
 		String locator, Target.ExternalBlockTarget externalBlock) {
 		public DetachedTarget(String dimension, String kind, String registryId, int x, int y, int z,

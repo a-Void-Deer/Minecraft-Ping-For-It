@@ -31,6 +31,7 @@ import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.presentation.*;
+import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 
 import java.util.*;
 import java.util.function.Function;
@@ -88,6 +89,7 @@ public final class PresentationServer {
 		activeServer = server;
 		registry = new PresentationRegistry();
 		registry.register(new BasicManifest());
+		registry.register(InventoryPresentation.INSTANCE);
 		try {
 			Class<?> factory = Class.forName("nx.pingwheel.neoforge.integration.create.presentation.CreatePresentationAdapters");
 			Object adapter = factory.getMethod("server", MinecraftServer.class).invoke(null, server);
@@ -176,7 +178,8 @@ public final class PresentationServer {
 			long tick = server.getTickCount();
 			for (var seed : sourceSeeds.entrySet()) {
 				PresentationAdapter adapter = registry.get(seed.getKey());
-				if (adapter == null || seed.getValue() == null) continue;
+				if (adapter == null || adapter.deliveryMode() != PresentationAdapter.DeliveryMode.SECTION
+					|| seed.getValue() == null) continue;
 				PresentationSection neutral = sanitize(adapter, seed.getValue(), seed.getValue().fields().keySet());
 				if (neutral == null || neutral.stale()) continue;
 				Source source = lease.sources.computeIfAbsent(adapter.adapterId(), id -> new Source(id, adapter.schema()));
@@ -281,7 +284,7 @@ public final class PresentationServer {
 				PresentationAdapter basic = registry.get(PresentationBasic.ID);
 				sendCachedInitial(session, marker, old.ownerName, basic, old.sections.get(PresentationBasic.ID),
 					allowed(player, session, basic, marker.targetType().id()), packet -> send(player, packet));
-				for (PresentationAdapter adapter : registry.all()) {
+				for (PresentationAdapter adapter : registry.sectionAdapters()) {
 					if (adapter.adapterId().equals(PresentationBasic.ID) || !session.schemas.containsKey(adapter.adapterId())) continue;
 					PresentationSection cached = old.sections.get(adapter.adapterId());
 					if (cached != null) publishCached(player, session, marker, adapter, cached);
@@ -339,7 +342,7 @@ public final class PresentationServer {
 		Function<PresentationAdapter, Set<String>> demands,
 		Function<Set<String>, PresentationSection> basicCapture) {
 		int captures = 0;
-		for (PresentationAdapter adapter : adapters.all()) {
+		for (PresentationAdapter adapter : adapters.sectionAdapters()) {
 			if (initial && !adapter.adapterId().equals(PresentationBasic.ID)) continue;
 			Set<String> demand = demands.apply(adapter);
 			Source source = lease.sources.computeIfAbsent(adapter.adapterId(), id -> new Source(id, adapter.schema()));
@@ -394,7 +397,7 @@ public final class PresentationServer {
 		Map<String, Map<String, Set<String>>> result = new LinkedHashMap<>();
 		for (String type : PresentationSettings.TARGET_TYPE_IDS) {
 			Map<String, Set<String>> perAdapter = new LinkedHashMap<>();
-			for (PresentationAdapter adapter : adapters.all()) {
+			for (PresentationAdapter adapter : adapters.sectionAdapters()) {
 				if (!Objects.equals(schemas.get(adapter.adapterId()), adapter.schema())) continue;
 				Set<String> fields = allowedFields(settings, recipient, level, adapter, type);
 				if (!fields.isEmpty()) perAdapter.put(adapter.adapterId(), fields);
@@ -413,11 +416,10 @@ public final class PresentationServer {
 
 	static Set<String> allowedFields(PresentationSettings settings, UUID recipient, int level,
 		PresentationAdapter adapter, String targetTypeId) {
-		PresentationPolicy policy = settings.policyFor(targetTypeId);
 		Set<String> result = new LinkedHashSet<>();
 		for (PresentationField field : adapter.fields()) {
-			if (policy.allows(field.id(), field.enabledByDefault())
-				&& PresentationAuthorization.canSee(recipient, field, level, settings.permission(field.id(), field.permissionLevel()))) result.add(field.id());
+			if (PresentationAuthorization.fieldAllowed(settings, recipient, level, field, targetTypeId))
+				result.add(field.id());
 		}
 		return Set.copyOf(result);
 	}
@@ -490,7 +492,7 @@ public final class PresentationServer {
 		SentMarker marker = session.sent.get(lease.marker.id().value());
 		Map<String, PresentationSection> sent = marker == null ? null : marker.sections;
 		if (sent == null) return; // Never backfill another connection's initial marker.
-		for (PresentationAdapter adapter : registry.all()) {
+		for (PresentationAdapter adapter : registry.sectionAdapters()) {
 			if (!session.schemas.containsKey(adapter.adapterId())) continue;
 			PresentationSection projected = project(player, session, adapter, lease);
 			if (projected.equals(sent.get(adapter.adapterId()))) continue;

@@ -19,4 +19,15 @@ public final class PresentationRegistry {
 
 	public synchronized PresentationAdapter get(String id) { return adapters.get(id); }
 	public synchronized List<PresentationAdapter> all() { return List.copyOf(adapters.values()); }
+
+	/**
+	 * The registration-order view used by every legacy framed SECTION stage:
+	 * masks, demand capture, cached publication and rendering. Dedicated
+	 * adapters are negotiated by {@link #all()} but never enter this view.
+	 */
+	public synchronized List<PresentationAdapter> sectionAdapters() {
+		return adapters.values().stream()
+			.filter(adapter -> adapter.deliveryMode() == PresentationAdapter.DeliveryMode.SECTION)
+			.toList();
+	}
 }
