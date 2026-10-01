@@ -205,7 +205,7 @@ class SpatialControllerTest {
 		assertNull(controller.snapshot().focusId(), "child menu starts inside its deadzone");
 
 		SpatialController.Point contentOrigin = activeOrigin(controller);
-		moveToBearing(controller, contentOrigin, 270.0, 130.0, 220L);
+		moveToBearing(controller, contentOrigin, 282.0, 130.0, 220L);
 		assertEquals("content:back", controller.snapshot().focusId());
 
 		controller.tick(419L);
@@ -218,7 +218,7 @@ class SpatialControllerTest {
 	@Test
 	void freshStrokeAfterPopPreventsStationaryReentryUntilNewStroke() {
 		SpatialController controller = enteredContent(false, 500L, 200L, 210L);
-		moveToBearing(controller, activeOrigin(controller), 270.0, 130.0, 220L);
+		moveToBearing(controller, activeOrigin(controller), 282.0, 130.0, 220L);
 		controller.tick(420L);
 		assertEquals(1, controller.snapshot().menus().size());
 
@@ -358,10 +358,123 @@ class SpatialControllerTest {
 		assertEquals(120.0, starts.get(1), 1.0e-9);
 		assertEquals(240.0, starts.get(2), 1.0e-9, "equal sibling spans must tile without overlap");
 
-		controller.movePhysical(0.0, 150.0, 220L);
-		assertEquals("gate:back", controller.snapshot().focusId(), "parent direction selects the explicit Back");
+		moveToBearing(controller, gateView.origin(), 192.0, 150.0, 220L);
+		assertEquals("gate:back", controller.snapshot().focusId(), "parent-direction sector selects the explicit Back");
 
 		controller.tick(420L);
 		assertEquals(1, controller.snapshot().menus().size(), "the explicit Back dwell still pops one level");
+	}
+
+	@Test
+	void qualifiedTurnEntersBranchAtCornerWithoutDwell() {
+		SpatialController controller = new SpatialController(root(), tuning(200L, false, 500L));
+		controller.start(0L);
+		moveToBearing(controller, controller.snapshot().pointer(), 90.0, 200.0, 10L);
+		assertEquals("content", controller.snapshot().focusId());
+
+		controller.movePhysical(100.0, 0.0, 50L);
+		controller.movePhysical(0.0, -100.0, 60L);
+
+		assertEquals(2, controller.snapshot().menus().size(), "a qualified turn enters without waiting for dwell");
+		SpatialController.Point childOrigin = activeOrigin(controller);
+		assertEquals(200.0, childOrigin.x(), DELTA);
+		assertEquals(0.0, childOrigin.y(), DELTA, "the child opens at the corner");
+	}
+
+	@Test
+	void disabledBranchCannotEnterByTurn() {
+		SpatialMenu deep = SpatialMenu.of("gate:off:sub", SpatialMenu.Choice.leaf("gate:off:x", "x", "a:x"));
+		SpatialMenu gate = SpatialMenu.of(
+			"gate",
+			new SpatialMenu.Choice("gate:off", "off", "ping:danger", deep, false, true, false, null, null),
+			SpatialMenu.Choice.leaf("gate:on", "on", "ping:attention"));
+		SpatialMenu turnRoot = SpatialMenu.of(
+			"turn-root",
+			SpatialMenu.Choice.branch("gate", "gate", gate).withSector(0.0, 360.0));
+
+		SpatialController controller = new SpatialController(turnRoot, tuning(200L, false, 500L));
+		controller.start(0L);
+		moveToBearing(controller, controller.snapshot().pointer(), 0.0, 200.0, 10L);
+		controller.tick(210L);
+		assertEquals(2, controller.snapshot().menus().size());
+
+		moveToBearing(controller, activeOrigin(controller), 300.0, 120.0, 220L);
+		assertEquals("gate:off", controller.snapshot().focusId());
+
+		moveToBearing(controller, activeOrigin(controller), 300.0, 240.0, 260L);
+		moveToBearing(controller, activeOrigin(controller), 60.0, 240.0, 270L);
+
+		assertEquals(2, controller.snapshot().menus().size(), "a disabled branch must not be entered by turn");
+	}
+
+	@Test
+	void hoverModeBackQualifiedTurnDoesNotPop() {
+		SpatialController controller = enteredContent(true, 5000L, 200L, 210L);
+		SpatialController.Point contentOrigin = activeOrigin(controller);
+
+		moveToBearing(controller, contentOrigin, 270.0, 130.0, 220L);
+		assertEquals("content:back", controller.snapshot().focusId());
+
+		moveToBearing(controller, contentOrigin, 270.0, 260.0, 260L);
+		moveToBearing(controller, contentOrigin, 180.0, 260.0, 270L);
+
+		assertEquals(2, controller.snapshot().menus().size(), "hover mode must not pop a Back by turn");
+	}
+
+	@Test
+	void reverseStrokeRetracePopsOneLevelWhenHoverOff() {
+		SpatialController controller = enteredContent(false, 500L, 200L, 210L);
+
+		controller.movePhysical(-50.0, 0.0, 220L);
+		assertEquals(2, controller.snapshot().menus().size(), "half the corridor is not enough");
+
+		controller.movePhysical(-20.0, 0.0, 230L);
+		assertEquals(1, controller.snapshot().menus().size(), "the reverse stroke pops exactly one level");
+	}
+
+	@Test
+	void rowAnchoredExternalMenuDoesNotRetrace() {
+		SpatialController controller = new SpatialController(root(), tuning(200L, false, 500L));
+		controller.start(0L);
+		controller.movePhysical(200.0, 0.0, 10L);
+
+		SpatialMenu external = SpatialMenu.of(
+			"external",
+			SpatialMenu.Choice.leaf("external:up", "up", "a:up"));
+		controller.enterExternal(external, 400.0, 300.0, 20L);
+
+		controller.movePhysical(-120.0, -90.0, 30L);
+
+		assertEquals(2, controller.snapshot().menus().size(), "row-anchored menus must not use the reverse-stroke shortcut");
+	}
+
+	@Test
+	void rebaseClearsPendingTurnCandidate() {
+		SpatialMenu deep = SpatialMenu.of("deep", SpatialMenu.Choice.leaf("deep:leaf", "leaf", "a:leaf"));
+		SpatialMenu inner = SpatialMenu.of("inner", SpatialMenu.Choice.branch("inner:deep", "deep", deep));
+		SpatialMenu gate = SpatialMenu.of(
+			"gate",
+			SpatialMenu.Choice.branch("gate:inner", "inner", inner),
+			SpatialMenu.Choice.leaf("gate:other", "other", "a:other"));
+		SpatialMenu turnRoot = SpatialMenu.of(
+			"turn-root",
+			SpatialMenu.Choice.branch("gate", "gate", gate).withSector(0.0, 360.0));
+
+		SpatialController controller = new SpatialController(turnRoot, tuning(200L, false, 500L));
+		controller.start(0L);
+		moveToBearing(controller, controller.snapshot().pointer(), 0.0, 200.0, 10L);
+		controller.tick(210L);
+
+		SpatialController.Point gateOrigin = activeOrigin(controller);
+		moveToBearing(controller, gateOrigin, 300.0, 120.0, 220L);
+		assertEquals("gate:inner", controller.snapshot().focusId());
+
+		moveToBearing(controller, gateOrigin, 300.0, 240.0, 260L);
+
+		controller.rebase(-259.8076211353316, -50.0, 270L);
+		assertEquals("gate:inner", controller.snapshot().focusId());
+
+		controller.movePhysical(5.0, 0.0, 280L);
+		assertEquals(2, controller.snapshot().menus().size(), "rebase must not leave a phantom turn corner");
 	}
 }

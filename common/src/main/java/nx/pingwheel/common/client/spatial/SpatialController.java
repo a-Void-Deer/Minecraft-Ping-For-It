@@ -33,6 +33,13 @@ public final class SpatialController {
 	/** Prototype runtime policy constants, not player-facing settings. */
 	private static final double DWELL_MIN_TRAVEL = 8.0;
 	private static final int TRAIL_LIMIT = 65;
+	private static final long ENTRY_MIN_ELAPSED_MILLIS = 35L;
+	private static final double ENTRY_MIN_TURN_SEGMENT = 8.0;
+	private static final double TURN_MIN_DEGREES = 40.0;
+	private static final double RETRACE_MIN_DISTANCE = 68.0;
+	private static final double RETRACE_RATIO = 0.56;
+	private static final double RETRACE_PROGRESS_STEP = 2.0;
+	private static final double RETRACE_LATERAL_LIMIT = 16.0;
 
 	/** A point in controller space (GUI pixels for the renderer). */
 	public record Point(double x, double y) {}
@@ -165,11 +172,12 @@ public final class SpatialController {
 
 	/** Adds a physical delta to the virtual pointer and refreshes the focus. */
 	public void movePhysical(double deltaX, double deltaY, long nowMillis) {
-		if (!active) {
+		if (!active || (deltaX == 0.0 && deltaY == 0.0)) {
 			return;
 		}
 
 		MenuState menu = activeMenu();
+		Point previous = pointer;
 		pointer = new Point(pointer.x() + deltaX, pointer.y() + deltaY);
 		menu.traveled += Math.hypot(deltaX, deltaY);
 		trail.add(pointer);
@@ -179,7 +187,64 @@ public final class SpatialController {
 		}
 
 		menu.lastMovement = nowMillis;
+
+		// A thin reverse-stroke corridor can pop an ordinary radial; row-anchored
+		// (inventory) menus are excluded and hover mode owns Back instead.
+		if (retracing(menu, previous)) {
+			pop(nowMillis);
+			return;
+		}
+
+		Resolved before = menu.focus;
+		double radiusBefore = distance(menu.origin, previous);
+		boolean branchable = before != null && !before.disabled() && (before.branch() || before.back());
+
+		if (branchable
+			&& radiusBefore >= tuning.stroke()
+			&& (!menu.freshStrokeRequired || menu.traveled >= tuning.stroke())
+			&& nowMillis - menu.enteredAt >= ENTRY_MIN_ELAPSED_MILLIS) {
+			if (menu.candidate == null || !before.id().equals(menu.candidateId)) {
+				menu.candidate = previous;
+				menu.candidateId = before.id();
+			}
+
+			Point corner = menu.candidate;
+
+			if (distance(corner, pointer) >= ENTRY_MIN_TURN_SEGMENT) {
+				double inbound = bearing(menu.origin, corner);
+				double outbound = bearing(corner, pointer);
+
+				if (turnDegrees(outbound, inbound) >= TURN_MIN_DEGREES
+					&& distance(menu.origin, corner) >= tuning.stroke()) {
+					if (!before.back()) {
+						enterAt(before, corner, nowMillis);
+						return;
+					}
+
+					if (!tuning.hoverEnabled()) {
+						pop(nowMillis);
+						return;
+					}
+				}
+
+				// Progress the possible corner along a straight stroke without
+				// rebasing the menu origin on a purely radial crossing.
+				menu.candidate = previous;
+				menu.candidateId = before.id();
+			}
+		} else {
+			menu.candidate = null;
+			menu.candidateId = null;
+		}
+
 		setFocus(nowMillis);
+		Resolved after = menu.focus;
+
+		if (!Objects.equals(after == null ? null : after.id(), before == null ? null : before.id())) {
+			menu.candidate = null;
+			menu.candidateId = null;
+		}
+
 		updateHover(nowMillis);
 	}
 
@@ -254,6 +319,7 @@ public final class SpatialController {
 		MenuState parent = activeMenu();
 		Point origin = new Point(originX, originY);
 		MenuState state = new MenuState(menu, origin, parent.origin);
+		state.rowAnchored = true;
 		state.enteredAt = nowMillis;
 		state.lastMovement = nowMillis;
 		stack.add(state);
@@ -306,6 +372,10 @@ public final class SpatialController {
 		pointer = point;
 		trail.clear();
 		trail.add(point);
+		MenuState menu = activeMenu();
+		menu.candidate = null;
+		menu.candidateId = null;
+		menu.lastMovement = nowMillis;
 		setFocus(nowMillis);
 		updateHover(nowMillis);
 	}
@@ -332,6 +402,8 @@ public final class SpatialController {
 		if (!Objects.equals(currentId, nextId)) {
 			menu.focus = next;
 			menu.enteredAt = nowMillis;
+			menu.candidate = null;
+			menu.candidateId = null;
 		}
 	}
 
@@ -413,8 +485,12 @@ public final class SpatialController {
 	}
 
 	private void enter(Resolved choice, long nowMillis) {
+		enterAt(choice, pointer, nowMillis);
+	}
+
+	private void enterAt(Resolved choice, Point origin, long nowMillis) {
 		MenuState parent = activeMenu();
-		MenuState child = new MenuState(choice.children(), pointer, parent.origin);
+		MenuState child = new MenuState(choice.children(), origin, parent.origin);
 		child.enteredAt = nowMillis;
 		child.lastMovement = nowMillis;
 		stack.add(child);
@@ -434,6 +510,8 @@ public final class SpatialController {
 		parent.lastMovement = nowMillis;
 		parent.traveled = 0.0;
 		parent.freshStrokeRequired = true;
+		parent.candidate = null;
+		parent.candidateId = null;
 		return true;
 	}
 
@@ -506,6 +584,36 @@ public final class SpatialController {
 		return normalize(Math.toDegrees(Math.atan2(to.x() - from.x(), from.y() - to.y())));
 	}
 
+	private boolean retracing(MenuState menu, Point previous) {
+		if (tuning.hoverEnabled() || menu.rowAnchored || stack.size() < 2) {
+			return false;
+		}
+
+		double length = distance(menu.origin, menu.parentOrigin);
+
+		if (length <= 0.0) {
+			return false;
+		}
+
+		double directionX = menu.parentOrigin.x() - menu.origin.x();
+		double directionY = menu.parentOrigin.y() - menu.origin.y();
+		double offsetX = pointer.x() - menu.origin.x();
+		double offsetY = pointer.y() - menu.origin.y();
+		double previousX = previous.x() - menu.origin.x();
+		double previousY = previous.y() - menu.origin.y();
+		double toward = (offsetX * directionX + offsetY * directionY) / length;
+		double previousToward = (previousX * directionX + previousY * directionY) / length;
+		double sideways = Math.abs(offsetX * directionY - offsetY * directionX) / length;
+
+		return toward >= Math.min(RETRACE_MIN_DISTANCE, length * RETRACE_RATIO)
+			&& toward > previousToward + RETRACE_PROGRESS_STEP
+			&& sideways <= RETRACE_LATERAL_LIMIT;
+	}
+
+	private static double turnDegrees(double outbound, double inbound) {
+		return Math.abs(((outbound - inbound + 540.0) % 360.0) - 180.0);
+	}
+
 	private static double normalize(double degrees) {
 		return ((degrees % 360.0) + 360.0) % 360.0;
 	}
@@ -525,6 +633,9 @@ public final class SpatialController {
 		long lastMovement;
 		double traveled;
 		boolean freshStrokeRequired;
+		Point candidate;
+		String candidateId;
+		boolean rowAnchored;
 
 		MenuState(SpatialMenu menu, Point origin, Point parentOrigin) {
 			this.menu = menu;
