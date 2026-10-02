@@ -9,6 +9,7 @@ import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
@@ -63,6 +64,12 @@ public class CommonServer {
 
 	public void onPresentationPacket(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet) {
 		ServerCore.onPresentationPacket(server, player, packet);
+	}
+	public void onPresentationPreview(MinecraftServer server, ServerPlayer player, PresentationPreviewC2SPacket packet) {
+		ServerCore.onPresentationPreview(server, player, packet);
+	}
+	public void onServerStopped(MinecraftServer server) {
+		nx.pingwheel.common.presentation.minecraft.PresentationServer.stopped(server);
 	}
 
 	public void onInventoryPacket(MinecraftServer server, ServerPlayer player, InventoryC2SPacket packet) {

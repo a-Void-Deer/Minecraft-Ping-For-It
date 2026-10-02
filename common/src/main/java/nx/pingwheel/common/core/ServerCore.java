@@ -45,6 +45,7 @@ import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
@@ -52,6 +53,7 @@ import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService;
 import nx.pingwheel.common.presentation.minecraft.PresentationServer;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryServer;
+import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
@@ -334,6 +336,8 @@ public class ServerCore {
 			LOGGER.debug("server settings update rejected: invalid update");
 			return;
 		}
+		final var inventoryCandidate = (update.changedFields() & ServerConfigUpdate.ALL_INVENTORY_FIELDS) != 0
+			? plan.snapshot().inventory().toSettings() : null;
 
 		if ((update.changedFields() & ServerConfigUpdate.DEFAULT_CHANNEL_MODE) != 0) {
 			config.setDefaultChannelMode(update.defaultChannelMode());
@@ -351,6 +355,7 @@ public class ServerCore {
 			config.setSyncDuration(update.syncDuration());
 		}
 
+		if (inventoryCandidate != null) config.setInventory(inventoryCandidate);
 		config.validate();
 		ServerConfig.HANDLER.save();
 	}
@@ -597,6 +602,11 @@ public class ServerCore {
 		}
 	}
 
+	/** Read-only route: thread/session admission and queueing, never marker creation or source reads. */
+	public static void onPresentationPreview(MinecraftServer server, ServerPlayer player, PresentationPreviewC2SPacket packet) {
+		PresentationServer.preview(server, player, packet);
+	}
+
 	private static void onMarkerCreate(MinecraftServer server, ServerPlayer player, long requestId,
 		Target requestedTarget, String requestedPingType, List<PresentationPropertyIntent> properties) {
 		ensureMarkerStore(server);
@@ -676,6 +686,39 @@ public class ServerCore {
 	 */
 	public static void onMarkerRemove(MinecraftServer server, ServerPlayer player, MarkerRemoveC2SPacket packet) {
 		// This legacy ingress is disabled; the negotiated presentation route calls the private adjudicator.
+	}
+
+	/** Immediate dedicated create; no queued retry, SECTION intent or client-supplied audience. */
+	public static InventoryBackend.Created createInventory(MinecraftServer server, ServerPlayer player,
+		InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
+		if (player == null || !server.isSameThread()) return new InventoryBackend.Created(null, MarkerRejectReason.INVALID_REQUEST);
+		ensureMarkerStore(server);
+		PLAYER_RATES.putIfAbsent(player.getUUID(), new RateLimiter());
+		if (SERVER_CONFIG.getRateLimit() > 0 && PLAYER_RATES.get(player.getUUID()).checkExceeded())
+			return new InventoryBackend.Created(null, MarkerRejectReason.RATE_LIMITED);
+		String channel = PLAYER_CHANNELS.getOrDefault(player.getUUID(), "");
+		ChannelMode mode = SERVER_CONFIG.getDefaultChannelMode();
+		if (channel.isEmpty() && (mode == ChannelMode.DISABLED || mode == ChannelMode.TEAM_ONLY && !TeamContextHandler.hasTeam(player)))
+			return new InventoryBackend.Created(null, MarkerRejectReason.CHANNEL_DISABLED);
+		List<UUID> audience = snapshotRecipients(server.getPlayerList(), player, channel, mode);
+		long now = server.getTickCount();
+		var outcome = markerService(server).createDedicated(player.serverLevel(), player.getUUID(), frozen.target(), frozen.defaultPingType(),
+			now, now + SERVER_CONFIG.getSyncDuration() * (long) TICKS_PER_SECOND, audience, (target, type, owner, recipients, intents) -> {
+				var policy = PresentationServer.inventoryPolicy(owner).orElse(null);
+				MarkerRejectReason rejection = policy == null || !policy.types().contains(type) ? MarkerRejectReason.INVALID_REQUEST : admission.prepare(target, type, recipients);
+				return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of()) : MarkerCreationService.AdmissionResult.rejected(rejection);
+			});
+		if (!outcome.isAccepted()) return new InventoryBackend.Created(null, outcome.rejectReason().orElseThrow());
+		var creation = outcome.creation().orElseThrow();
+		try {
+			PresentationServer.created(server, creation.marker(), outcome.targetName().orElseThrow(), player.getGameProfile().getName());
+			sendPresentationWinnerChanges(server.getPlayerList(), creation.winnerChanges(), null);
+		} catch (RuntimeException | LinkageError deliveryFailure) {
+			// Storage has committed: never turn publication failure into a rejected/retryable create.
+			// Dedicated recipients remain fenced by inventoryKnows until Basic delivery succeeds.
+			LOGGER.debug("inventory create publication failed after commit", deliveryFailure);
+		}
+		return new InventoryBackend.Created(creation.marker(), null);
 	}
 
 	private static void onMarkerRemove(MinecraftServer server, ServerPlayer player, MarkerId requestedMarkerId) {
@@ -880,6 +923,7 @@ public class ServerCore {
 	}
 
 	private static void releaseExternal(MinecraftServer server, ServerMarker marker) {
+		InventoryServer.remove(marker.id());
 		if (marker.target() instanceof Target.ExternalBlockTarget external) {
 			ExternalBlockServerProviders.registry().release(
 				server, external, Long.toString(marker.id().value()));

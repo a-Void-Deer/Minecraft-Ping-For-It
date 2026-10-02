@@ -18,6 +18,9 @@ public final class CreateRequestTracker {
 
 	private long latestRequestId;
 	private boolean hasLatest;
+	private long revision;
+	public enum Route { PRESENTATION, INVENTORY }
+	private Route latestRoute = Route.PRESENTATION;
 
 	public CreateRequestTracker() {
 	}
@@ -27,8 +30,28 @@ public final class CreateRequestTracker {
 	 * superseding any previously recorded id.
 	 */
 	public void onCreateDispatched(long requestId) {
+		onCreateDispatched(Route.PRESENTATION, requestId);
+	}
+	public void onCreateDispatched(Route route, long requestId) {
+		revision++;
+		latestRoute = java.util.Objects.requireNonNull(route);
 		latestRequestId = requestId;
 		hasLatest = true;
+	}
+
+	/** A synchronous rejection may run in the sender. Failure restores history only if still ours. */
+	record Attempt(long revision, Route previousRoute, long previousId, boolean previousPresent) {}
+	Attempt beginDispatch(Route route, long requestId) {
+		Route previousRoute = latestRoute;
+		long previousId = latestRequestId;
+		boolean previousPresent = hasLatest;
+		onCreateDispatched(route, requestId);
+		return new Attempt(revision, previousRoute, previousId, previousPresent);
+	}
+	void failedDispatch(Attempt attempt) {
+		if (revision != attempt.revision()) return;
+		latestRoute = attempt.previousRoute(); latestRequestId = attempt.previousId(); hasLatest = attempt.previousPresent();
+		revision++;
 	}
 
 	/**
@@ -50,6 +73,7 @@ public final class CreateRequestTracker {
 	 * True when {@code requestId} is the latest dispatched create request id.
 	 */
 	public boolean isLatest(long requestId) {
-		return hasLatest && requestId == latestRequestId;
+		return isLatest(Route.PRESENTATION, requestId);
 	}
+	public boolean isLatest(Route route, long requestId) { return hasLatest && latestRoute == route && requestId == latestRequestId; }
 }

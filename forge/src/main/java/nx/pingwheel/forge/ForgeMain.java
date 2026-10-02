@@ -8,6 +8,8 @@ import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.network.ChannelBuilder;
 import net.minecraftforge.network.EventNetworkChannel;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.server.ServerStoppedEvent;
 import nx.pingwheel.common.CommonServer;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
@@ -21,6 +23,8 @@ import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
+import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
@@ -59,10 +63,13 @@ public class ForgeMain {
 	public static final EventNetworkChannel PRESENTATION_CHANNEL_S2C = ChannelBuilder.named(PresentationS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel INVENTORY_CHANNEL_C2S = ChannelBuilder.named(InventoryC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel INVENTORY_CHANNEL_S2C = ChannelBuilder.named(InventoryS2CPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel PRESENTATION_PREVIEW_CHANNEL_C2S = ChannelBuilder.named(PresentationPreviewC2SPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel PRESENTATION_PREVIEW_CHANNEL_S2C = ChannelBuilder.named(PresentationPreviewS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 
 	@SuppressWarnings({"java:S1118", "the public constructor is required by forge"})
 	public ForgeMain() {
 		CommonServer.INSTANCE.onInit();
+		MinecraftForge.EVENT_BUS.addListener((ServerStoppedEvent event) -> CommonServer.INSTANCE.onServerStopped(event.getServer()));
 
 		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> ForgeClient::new);
 
@@ -86,6 +93,8 @@ public class ForgeMain {
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationS2CPacket.PACKET_ID, PRESENTATION_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(InventoryC2SPacket.PACKET_ID, INVENTORY_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(InventoryS2CPacket.PACKET_ID, INVENTORY_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationPreviewC2SPacket.PACKET_ID, PRESENTATION_PREVIEW_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationPreviewS2CPacket.PACKET_ID, PRESENTATION_PREVIEW_CHANNEL_S2C);
 		registerPacketHandler(PING_LOCATION_CHANNEL_C2S, PingLocationC2SPacket::readSafe, CommonServer.INSTANCE::onPingLocationPacket);
 		registerPacketHandler(UPDATE_CHANNEL_C2S, UpdateChannelC2SPacket::readSafe, CommonServer.INSTANCE::onChannelUpdatePacket);
 		registerPacketHandler(MARKER_CREATE_CHANNEL_C2S, MarkerCreateC2SPacket::readSafe, CommonServer.INSTANCE::onMarkerCreatePacket);
@@ -95,6 +104,7 @@ public class ForgeMain {
 		registerPacketHandler(SERVER_PRESENTATION_POLICY_CHANNEL_C2S, ServerPresentationPolicyC2SPacket::readSafe, CommonServer.INSTANCE::onServerPresentationPolicyPacket);
 		registerPacketHandler(PRESENTATION_CHANNEL_C2S, PresentationC2SPacket::readSafe, CommonServer.INSTANCE::onPresentationPacket);
 		registerPacketHandler(INVENTORY_CHANNEL_C2S, InventoryC2SPacket::readSafe, CommonServer.INSTANCE::onInventoryPacket);
+		registerPacketHandler(PRESENTATION_PREVIEW_CHANNEL_C2S, PresentationPreviewC2SPacket::readSafe, CommonServer.INSTANCE::onPresentationPreview);
 	}
 
 	public static <T> void registerPacketHandler(EventNetworkChannel channel, Function<FriendlyByteBuf, T> packetReader, TriConsumer<MinecraftServer, ServerPlayer, T> packetHandler) {

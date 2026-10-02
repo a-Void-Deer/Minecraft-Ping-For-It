@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 /**
- * Pins the timing contract of {@link SpatialOverlayRenderer#smoothingFactor}:
- * smoothing depends only on monotonic elapsed time, not on how many frames the
- * same interval is split across, and negative or oversized gaps stay bounded.
+ * Preserves the bounded exponential fraction's timing semantics. The finite
+ * appearance/exit/retarget model is covered by SpatialOverlayTransitionsTest;
+ * this compatibility helper still composes across bounded elapsed partitions.
  */
 class SpatialOverlayRendererTimingTest {
 

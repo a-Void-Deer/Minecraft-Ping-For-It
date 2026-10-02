@@ -22,6 +22,7 @@ import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
@@ -103,6 +104,8 @@ public class FabricClient implements ClientModInitializer {
 		ClientPlayNetworking.registerGlobalReceiver(
 			InventoryS2CPacket.PACKET_TYPE,
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onInventoryPacket(packet)));
+		ClientPlayNetworking.registerGlobalReceiver(PresentationPreviewS2CPacket.PACKET_TYPE,
+			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onPresentationPreview(packet)));
 
 		// resource reload
 		ResourceManagerHelper.get(PackType.CLIENT_RESOURCES)

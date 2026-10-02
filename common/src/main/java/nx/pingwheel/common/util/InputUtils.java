@@ -141,6 +141,16 @@ public class InputUtils {
 			eventTimeMillis);
 	}
 
+	/** A committed local selector action shares persistence and feedback with hotkey toggles. */
+	public static void applySelectorToggle(nx.pingwheel.common.client.spatial.SelectorIntent.CaptureToggle toggle,
+		long eventTimeMillis) {
+		switch (java.util.Objects.requireNonNull(toggle)) {
+			case FLUIDS -> toggleMarkFluids(eventTimeMillis);
+			case ENTITY_BLACKLIST -> toggleMarkBlacklistedTargets(eventTimeMillis);
+			case TRANSPARENT_BLOCKS -> togglePassThroughTransparentBlocks(eventTimeMillis);
+		}
+	}
+
 	private static void toggleMarkBlacklistedTargets(long eventTimeMillis) {
 		final ClientConfig config = ClientConfig.HANDLER.getConfig();
 		config.setMarkBlacklistedTargets(!config.isMarkBlacklistedTargets());

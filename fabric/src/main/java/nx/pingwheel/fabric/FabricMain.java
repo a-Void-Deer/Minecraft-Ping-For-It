@@ -3,6 +3,7 @@ package nx.pingwheel.fabric;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import nx.pingwheel.common.CommonServer;
@@ -18,6 +19,8 @@ import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
+import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
@@ -49,10 +52,13 @@ public class FabricMain implements ModInitializer {
 	private static final StreamCodec<FriendlyByteBuf, PresentationS2CPacket> PRESENTATION_S2C_CODEC = StreamCodec.ofMember(PresentationS2CPacket::write, PresentationS2CPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, InventoryC2SPacket> INVENTORY_C2S_CODEC = StreamCodec.ofMember(InventoryC2SPacket::write, InventoryC2SPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, InventoryS2CPacket> INVENTORY_S2C_CODEC = StreamCodec.ofMember(InventoryS2CPacket::write, InventoryS2CPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, PresentationPreviewC2SPacket> PRESENTATION_PREVIEW_C2S_CODEC = StreamCodec.ofMember(PresentationPreviewC2SPacket::write, PresentationPreviewC2SPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, PresentationPreviewS2CPacket> PRESENTATION_PREVIEW_S2C_CODEC = StreamCodec.ofMember(PresentationPreviewS2CPacket::write, PresentationPreviewS2CPacket::readSafe);
 
 	@Override
 	public void onInitialize() {
 		CommonServer.INSTANCE.onInit();
+		ServerLifecycleEvents.SERVER_STOPPED.register(CommonServer.INSTANCE::onServerStopped);
 
 		PayloadTypeRegistry.playS2C().register(PingLocationS2CPacket.PACKET_TYPE, PING_LOCATION_S2C_CODEC);
 		PayloadTypeRegistry.playC2S().register(PingLocationC2SPacket.PACKET_TYPE, PING_LOCATION_C2S_CODEC);
@@ -74,6 +80,8 @@ public class FabricMain implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(PresentationS2CPacket.PACKET_TYPE, PRESENTATION_S2C_CODEC);
 		PayloadTypeRegistry.playC2S().register(InventoryC2SPacket.PACKET_TYPE, INVENTORY_C2S_CODEC);
 		PayloadTypeRegistry.playS2C().register(InventoryS2CPacket.PACKET_TYPE, INVENTORY_S2C_CODEC);
+		PayloadTypeRegistry.playC2S().register(PresentationPreviewC2SPacket.PACKET_TYPE, PRESENTATION_PREVIEW_C2S_CODEC);
+		PayloadTypeRegistry.playS2C().register(PresentationPreviewS2CPacket.PACKET_TYPE, PRESENTATION_PREVIEW_S2C_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(
 			PingLocationC2SPacket.PACKET_TYPE,
@@ -147,5 +155,10 @@ public class FabricMain implements ModInitializer {
 				server.execute(() -> CommonServer.INSTANCE.onInventoryPacket(server, player, packet));
 			}
 		);
+		ServerPlayNetworking.registerGlobalReceiver(PresentationPreviewC2SPacket.PACKET_TYPE, (packet, context) -> {
+			final var player = context.player();
+			final var server = context.server();
+			server.execute(() -> CommonServer.INSTANCE.onPresentationPreview(server, player, packet));
+		});
 	}
 }

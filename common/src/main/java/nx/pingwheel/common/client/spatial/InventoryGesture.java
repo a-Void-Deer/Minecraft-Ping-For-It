@@ -44,6 +44,7 @@ public final class InventoryGesture {
 	private final InventoryListModel list;
 	private final double glideSensitivity;
 	private final boolean backHoverEnabled;
+	private final double pixelsPerRow;
 
 	private double axisX;
 	private double glideBaseY;
@@ -59,14 +60,21 @@ public final class InventoryGesture {
 	private double forwardSign = 1.0;
 
 	public InventoryGesture(InventoryListModel list, double glideSensitivity, boolean backHoverEnabled) {
+		this(list, glideSensitivity, backHoverEnabled, PIXELS_PER_ROW);
+	}
+
+	/** The native facade supplies its immutable layout's travel-per-row metric. */
+	public InventoryGesture(InventoryListModel list, double glideSensitivity, boolean backHoverEnabled, double pixelsPerRow) {
 		this.list = Objects.requireNonNull(list, "list");
 
-		if (!(glideSensitivity > 0.0)) {
+		if (!Double.isFinite(glideSensitivity) || !(glideSensitivity > 0.0)
+			|| !Double.isFinite(pixelsPerRow) || !(pixelsPerRow > 0.0)) {
 			throw new IllegalArgumentException("glideSensitivity must be positive");
 		}
 
 		this.glideSensitivity = glideSensitivity;
 		this.backHoverEnabled = backHoverEnabled;
+		this.pixelsPerRow = pixelsPerRow;
 	}
 
 	/** Enters the list with its frozen axis, vertical baseline and side pair. */
@@ -128,18 +136,29 @@ public final class InventoryGesture {
 
 		double gain = 1.0 + Math.min(MAX_GAIN, Math.abs(pointerY - glideBaseY) / GAIN_DISTANCE);
 		glideRemainder += deltaY * gain * glideSensitivity;
-		int steps = (int) (glideRemainder / PIXELS_PER_ROW);
+		int steps = (int) (glideRemainder / pixelsPerRow);
 
 		if (steps != 0) {
-			glideRemainder -= steps * PIXELS_PER_ROW;
+			glideRemainder -= steps * pixelsPerRow;
 			list.glide(steps);
 		}
 
 		return Action.NONE;
 	}
 
+	/** Native movement computes current-sample Back focus, including deliberate leave. */
+	public Action moveGui(double deltaX, double deltaY) {
+		if (backHoverEnabled) backHoverFocused = (pointerX + deltaX - axisX) * backSign >= SIDE_HINT;
+		return move(deltaX, deltaY);
+	}
+
 	/** Platform-converted row deltas (already divided by its own scroll unit). */
 	public int wheelRows(float rows) {
+		return wheelRows((double) rows);
+	}
+
+	/** Double-precision native callback path; normalization remains external. */
+	public int wheelRows(double rows) {
 		return wheelPixels(rows * WHEEL_PIXELS_PER_ROW);
 	}
 
@@ -148,6 +167,7 @@ public final class InventoryGesture {
 		if (backHoverFocused) {
 			return 0;
 		}
+		if (pixels != 0.0) list.markScrolled();
 
 		wheelRemainder += pixels;
 		int rows = (int) (wheelRemainder / WHEEL_PIXELS_PER_ROW);
@@ -169,6 +189,17 @@ public final class InventoryGesture {
 
 	public boolean isBackHoverFocused() {
 		return backHoverFocused;
+	}
+
+	/** Same gate used by movement and release; no facade-owned tuning duplicate. */
+	public boolean isBackSideFocused() {
+		return (pointerX - axisX) * backSign >= SIDE_HINT;
+	}
+
+	/** Import the controller's sole logical pointer after a move or rebase. */
+	public void alignPointer(double x, double y) {
+		pointerX = x;
+		pointerY = y;
 	}
 
 	public double axisX() {

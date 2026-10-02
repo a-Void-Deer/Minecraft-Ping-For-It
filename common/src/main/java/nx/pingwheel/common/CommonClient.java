@@ -63,7 +63,6 @@ import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.render.OverlayRenderer;
 import nx.pingwheel.common.render.SelectionToggleNoticeRenderer;
-import nx.pingwheel.common.render.WheelOverlayRenderer;
 import nx.pingwheel.common.render.WorldRenderContext;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.util.InputUtils;
@@ -127,6 +126,7 @@ public class CommonClient {
 		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 		pingRuntime = createPingRuntimeIfInWorld();
 		inventory = new ClientInventory(IPlatformNetworkService.INSTANCE::sendToServer);
+		if (pingRuntime != null) pingRuntime.inventory(inventory);
 
 		// A fresh connection-scoped policy view starts unknown and asks the
 		// server for an authoritative read. A server without the versioned route
@@ -243,25 +243,18 @@ public class CommonClient {
 			return;
 		}
 
-		abortInteractionIfActive(false);
+		if (pingRuntime != null) pingRuntime.abortForScreenTransition();
+		InputUtils.resetPingInteraction();
 	}
 
 	private void abortInteractionIfActive(boolean resetAllInputState) {
-		boolean claimedInput = InputUtils.isPingHotkeyDown();
-		boolean activeInteraction = pingRuntime != null
-			&& pingRuntime.phase() != PingInteractionPhase.IDLE;
-		boolean compatibilityState = pingRuntime != null && pingRuntime.hasCompatibilityState();
-
 		if (resetAllInputState) {
 			InputUtils.resetPingHold();
 		} else {
 			InputUtils.resetPingInteraction();
 		}
-		if (activeInteraction || claimedInput || compatibilityState) {
-			if (pingRuntime != null) {
-				pingRuntime.abort();
-			}
-		}
+		// Hard lifecycle disposal also ends an idle paint tail and compatibility seed.
+		if (pingRuntime != null) pingRuntime.abort();
 	}
 
 	public void onTickStart() {
@@ -275,6 +268,7 @@ public class CommonClient {
 		// Drive HELLO negotiation and the inventory resync/unknown-baseline
 		// timers; the session exists only between join and leave.
 		if (inventory != null) {
+			if (pingRuntime != null) pingRuntime.inventory(inventory);
 			inventory.tick(true);
 		}
 
@@ -305,6 +299,7 @@ public class CommonClient {
 			pingRuntime == null ? null : pingRuntime.store(),
 			pingRuntime == null ? null : pingRuntime.nameStore(),
 			pingRuntime == null ? null : pingRuntime.presentation());
+		if (pingRuntime != null) pingRuntime.prepareInventoryTracking(ctx);
 		prepareEntityOutlines();
 		prepareBlockOutlines();
 
@@ -576,8 +571,24 @@ public class CommonClient {
 
 	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
 		OverlayRenderer.draw(guiGraphics, tickDelta);
-		WheelOverlayRenderer.draw(guiGraphics, tickDelta);
+		if (pingRuntime != null) {
+			pingRuntime.drawInventoryTracking(guiGraphics);
+			pingRuntime.drawSelector(guiGraphics);
+		}
 	}
+
+	public void onMouseMove(long window, double x, double y) {
+		Game = Minecraft.getInstance();
+		if (pingRuntime != null) pingRuntime.onMouseMove(window, x, y);
+	}
+	public boolean onMouseScroll(long window, double horizontal, double vertical) {
+		Game = Minecraft.getInstance();
+		return pingRuntime != null && pingRuntime.onMouseScroll(window, horizontal, vertical);
+	}
+	public void onMouseCaptureChanged() {
+		if (pingRuntime != null) pingRuntime.rePrimeSelectorInput();
+	}
+	public boolean isSelectorMouseTransition() { return pingRuntime != null && pingRuntime.isSelectorMouseTransition(); }
 
 	/** Draws the latest toggle notice in a late HUD pass, after vanilla HUD layers. */
 	public void onRenderToggleNotice(GuiGraphics guiGraphics) {
@@ -669,7 +680,7 @@ public class CommonClient {
 	 * counted and dropped inside the session; no world or UI state is touched.
 	 */
 	public void onInventoryPacket(InventoryS2CPacket packet) {
-		if (inventory != null) inventory.accept(packet);
+		if (pingRuntime != null) pingRuntime.onInventoryPacket(packet);
 	}
 
 	/**
@@ -679,6 +690,9 @@ public class CommonClient {
 	 */
 	public ClientInventory getInventory() {
 		return inventory;
+	}
+	public void onPresentationPreview(nx.pingwheel.common.network.PresentationPreviewS2CPacket packet) {
+		if (pingRuntime != null) pingRuntime.onPresentationPreview(packet);
 	}
 
 	/**

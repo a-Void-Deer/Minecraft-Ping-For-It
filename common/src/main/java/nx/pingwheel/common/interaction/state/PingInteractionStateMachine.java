@@ -3,10 +3,13 @@ package nx.pingwheel.common.interaction.state;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import nx.pingwheel.common.config.ClientConfigBounds;
 import nx.pingwheel.common.domain.PingType;
+import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.interaction.ActiveInteraction;
 import nx.pingwheel.common.interaction.CapturedPingContext;
 import nx.pingwheel.common.interaction.InteractionToken;
@@ -70,6 +73,8 @@ public final class PingInteractionStateMachine {
 
 	private PingInteractionPhase phase = PingInteractionPhase.IDLE;
 	private InteractionToken token;
+	/** Release ports may re-enter an abort after the visible machine is terminal. */
+	private InteractionToken releasingSelectorToken;
 	private CapturedPingContext capturedContext;
 	private long pressTimeMillis;
 	private long wheelOpenTimeMillis;
@@ -251,8 +256,108 @@ public final class PingInteractionStateMachine {
 		if (token != null) {
 			activeInteraction.invalidate(token);
 		}
+		if (releasingSelectorToken != null) {
+			activeInteraction.invalidate(releasingSelectorToken);
+			releasingSelectorToken = null;
+		}
 
 		resetMachineState();
+	}
+
+	/**
+	 * Releases an actually opened native selector. All ownership and deadline
+	 * checks precede proposal evaluation; an old caller cannot release a newer
+	 * interaction or advance its clock. Pre-open/default release remains on
+	 * {@link #updateAt(boolean, WheelSelection, CancellationContext, long)}.
+	 *
+	 * <p>The candidate lookup must be the immutable table bound to this selector,
+	 * not a resolver or a world read. Its contexts retain the original token,
+	 * press ray and candidate metadata. Cancellation context is acquired lazily
+	 * only for an explicit Cancel. The machine is terminal before invoking any
+	 * caller port, so duplicate/reentrant releases and failing ports cannot commit
+	 * the same interaction twice. The result authorizes no sender side effect by
+	 * itself; the runtime still owns dispatch and its actual outcome.
+	 */
+	public <P> SelectorReleaseResult<P> releaseSelectorAt(
+		InteractionToken expectedToken,
+		long observedTimeMillis,
+		Supplier<SelectorReleaseProposal<P>> proposalSupplier,
+		Function<String, Optional<CapturedPingContext>> frozenCandidateContext,
+		Supplier<CancellationContext> cancellationContextSupplier
+	) {
+		Objects.requireNonNull(expectedToken, "expectedToken");
+		Objects.requireNonNull(proposalSupplier, "proposalSupplier");
+		Objects.requireNonNull(frozenCandidateContext, "frozenCandidateContext");
+		Objects.requireNonNull(cancellationContextSupplier, "cancellationContextSupplier");
+		if (token != expectedToken || phase != PingInteractionPhase.WHEEL_OPEN) {
+			return SelectorReleaseResult.empty();
+		}
+
+		long now = observeTimeValue(observedTimeMillis);
+		Optional<CapturedPingContext> capture = activeInteraction.currentContext();
+		if (!activeInteraction.isCurrent(expectedToken) || capture.isEmpty()
+			|| capture.get() != capturedContext || capture.get().token() != expectedToken) {
+			resetMachineState();
+			return SelectorReleaseResult.empty();
+		}
+		if (now - wheelOpenTimeMillis >= wheelTimeoutMillis) {
+			logger.debug("wheel timeout: token={} openMillis={}", expectedToken.sequence(), now - wheelOpenTimeMillis);
+			resetMachineState();
+			return SelectorReleaseResult.empty();
+		}
+
+		CapturedPingContext openedCapture = capturedContext;
+		resetMachineState();
+		releasingSelectorToken = expectedToken;
+		try {
+			return admitSelectorProposal(expectedToken, openedCapture, proposalSupplier,
+				frozenCandidateContext, cancellationContextSupplier);
+		} finally {
+			if (releasingSelectorToken == expectedToken) releasingSelectorToken = null;
+		}
+	}
+
+	private <P> SelectorReleaseResult<P> admitSelectorProposal(InteractionToken expectedToken,
+		CapturedPingContext openedCapture, Supplier<SelectorReleaseProposal<P>> proposalSupplier,
+		Function<String, Optional<CapturedPingContext>> frozenCandidateContext,
+		Supplier<CancellationContext> cancellationContextSupplier) {
+		SelectorReleaseProposal<P> proposal = Objects.requireNonNull(proposalSupplier.get(), "proposal");
+		if (!activeInteraction.isCurrent(expectedToken)) return SelectorReleaseResult.empty();
+		return switch (proposal) {
+			case SelectorReleaseProposal.None<P> ignored -> SelectorReleaseResult.empty();
+			case SelectorReleaseProposal.Local<P> local ->
+				new SelectorReleaseResult<>(Optional.of(local.intent()), Optional.empty());
+			case SelectorReleaseProposal.Cancel<P> cancel -> {
+				CancellationContext cancellation = Objects.requireNonNull(cancellationContextSupplier.get(), "cancellationContext");
+				yield activeInteraction.isCurrent(expectedToken)
+					? new SelectorReleaseResult<>(Optional.of(cancel.intent()), pickCancellation(expectedToken, cancellation))
+					: SelectorReleaseResult.empty();
+			}
+			case SelectorReleaseProposal.Create<P> create -> {
+				Optional<CapturedPingContext> candidate = Objects.requireNonNull(
+					frozenCandidateContext.apply(create.candidateId()), "candidateContext");
+				if (!activeInteraction.isCurrent(expectedToken) || candidate.isEmpty()
+					|| !isSelectorCandidate(candidate.get(), openedCapture, create)) {
+					yield SelectorReleaseResult.empty();
+				}
+				Optional<PingInteractionAction> action = validatePing(candidate.get(), create.pingType());
+				if (!activeInteraction.isCurrent(expectedToken)) yield SelectorReleaseResult.empty();
+				yield new SelectorReleaseResult<>(action.orElseThrow() instanceof PingInteractionAction.CreatePing
+					? Optional.of(create.intent()) : Optional.empty(), action);
+			}
+		};
+	}
+
+	private boolean isSelectorCandidate(CapturedPingContext candidate, CapturedPingContext openedCapture,
+		SelectorReleaseProposal.Create<?> proposal) {
+		return candidate.token() == openedCapture.token()
+			&& candidate.ray().equals(openedCapture.ray())
+			&& candidate.resolvedTarget().target().dimensionId().equals(openedCapture.resolvedTarget().target().dimensionId())
+			&& candidate.resolvedTarget().equals(proposal.target())
+			&& (!(candidate.resolvedTarget().target() instanceof Target.ExternalBlockTarget external)
+				|| proposal.target().target() instanceof Target.ExternalBlockTarget claimedExternal
+					&& external.providerLocator().equals(claimedExternal.providerLocator()))
+			&& candidate.resolvedTarget().targetType().pingTypes().contains(proposal.pingType());
 	}
 
 	/**
@@ -508,19 +613,9 @@ public final class PingInteractionStateMachine {
 		}
 
 		if (committed == WheelSelection.CENTER) {
-			Optional<CancelMarkerCandidate> candidate = cancelCandidatePicker.pick(cancellationContext);
-
-			if (candidate.isPresent()) {
-				logger.debug("cancel selected: token={} candidateCount={} markerId={}",
-					token.sequence(), cancellationContext.candidates().size(), candidate.get().markerId().value());
-				resetMachineState();
-				return Optional.of(new PingInteractionAction.CancelMarker(candidate.get().markerId()));
-			}
-
-			logger.debug("cancel empty: token={} candidateCount={}",
-				token.sequence(), cancellationContext.candidates().size());
+			InteractionToken releasedToken = token;
 			resetMachineState();
-			return Optional.empty();
+			return pickCancellation(releasedToken, cancellationContext);
 		}
 
 		// No selection (or an invalid sector normalised to None): no action.
@@ -529,20 +624,36 @@ public final class PingInteractionStateMachine {
 	}
 
 	private Optional<PingInteractionAction> commitPing(CapturedPingContext context, PingType pingType) {
+		resetMachineState();
+		return validatePing(context, pingType);
+	}
+
+	private Optional<PingInteractionAction> pickCancellation(InteractionToken releasedToken,
+		CancellationContext cancellationContext) {
+		Optional<CancelMarkerCandidate> candidate = cancelCandidatePicker.pick(cancellationContext);
+		if (candidate.isPresent()) {
+			logger.debug("cancel selected: token={} candidateCount={} markerId={}",
+				releasedToken.sequence(), cancellationContext.candidates().size(), candidate.get().markerId().value());
+			return Optional.of(new PingInteractionAction.CancelMarker(candidate.get().markerId()));
+		}
+		logger.debug("cancel empty: token={} candidateCount={}",
+			releasedToken.sequence(), cancellationContext.candidates().size());
+		return Optional.empty();
+	}
+
+	private Optional<PingInteractionAction> validatePing(CapturedPingContext context, PingType pingType) {
 		logger.debug("ping commit: token={} kind={} pingType={}",
-			token.sequence(), context.resolvedTarget().target().kind(), pingType.id());
+			context.token().sequence(), context.resolvedTarget().target().kind(), pingType.id());
 
 		TargetValidation validation = targetValidator.validate(context.resolvedTarget());
 
 		if (validation.isValid()) {
-			resetMachineState();
 			return Optional.of(new PingInteractionAction.CreatePing(context, pingType));
 		}
 
 		TargetGoneReason reason = validation.goneReason().orElseThrow();
 		logger.debug("target gone: token={} kind={} reason={}",
-			token.sequence(), context.resolvedTarget().target().kind(), reason);
-		resetMachineState();
+			context.token().sequence(), context.resolvedTarget().target().kind(), reason);
 		return Optional.of(new PingInteractionAction.TargetGone(context, reason));
 	}
 

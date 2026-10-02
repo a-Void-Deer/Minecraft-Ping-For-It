@@ -266,9 +266,11 @@ public final class InventoryListModel {
 	 * focused, so no stale remainder is kept.
 	 */
 	public int wheel(float rowDelta) {
-		if (backHoverFocused || rows.isEmpty()) {
+		if (backHoverFocused) {
 			return 0;
 		}
+		if (rowDelta != 0.0f) markScrolled();
+		if (rows.isEmpty()) return 0;
 
 		wheelRemainder += rowDelta;
 		int steps = (int) wheelRemainder;
@@ -283,6 +285,11 @@ public final class InventoryListModel {
 
 	public void setBackHoverFocused(boolean focused) {
 		this.backHoverFocused = focused;
+	}
+
+	/** A fractional or boundary-limited vertical scroll still freezes discovery positions. */
+	public void markScrolled() {
+		if (open) userScrolled = true;
 	}
 
 	public boolean isBackHoverFocused() {
@@ -377,9 +384,13 @@ public final class InventoryListModel {
 	}
 
 	private int moveSelection(int steps) {
-		if (rows.isEmpty() || steps == 0) {
+		if (steps == 0) {
 			return 0;
 		}
+		// An attempted vertical scroll freezes positions even at an end stop or
+		// before the first partial batch arrives.
+		userScrolled = true;
+		if (rows.isEmpty()) return 0;
 
 		int current = Math.max(0, selectedIndex());
 		int target = Math.max(0, Math.min(current + steps, rows.size() - 1));

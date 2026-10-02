@@ -125,7 +125,7 @@ public final class SpatialController {
 		double hoverProgress
 	) {}
 
-	private final SpatialMenu root;
+	private SpatialMenu root;
 	private final Tuning tuning;
 	private final BackHoverController hover = new BackHoverController();
 
@@ -315,11 +315,18 @@ public final class SpatialController {
 		if (!active) {
 			return;
 		}
+		enterExternal(menu, new Point(originX, originY), activeMenu().origin, nowMillis);
+	}
 
-		MenuState parent = activeMenu();
-		Point origin = new Point(originX, originY);
-		MenuState state = new MenuState(menu, origin, parent.origin);
+	/** Row-anchored children return toward the selected row, not the list centre. */
+	public void enterExternal(SpatialMenu menu, Point origin, Point parentOrigin, long nowMillis) {
+		if (!active) {
+			return;
+		}
+
+		MenuState state = new MenuState(menu, origin, parentOrigin);
 		state.rowAnchored = true;
+		state.external = true;
 		state.enteredAt = nowMillis;
 		state.lastMovement = nowMillis;
 		stack.add(state);
@@ -335,6 +342,79 @@ public final class SpatialController {
 		rebaseInternal(new Point(x, y), nowMillis);
 	}
 
+	/** Keeps this controller as the sole pointer and hover owner for a list surface. */
+	public void useExternalSurface() {
+		if (!active) return;
+		MenuState state = activeMenu();
+		state.surface = true;
+		state.focus = null;
+		state.candidate = null;
+		state.candidateId = null;
+	}
+
+	/** GUI deltas on an external surface do not run radial dwell, turn or retrace. */
+	public void moveExternalPointer(double deltaX, double deltaY, long nowMillis) {
+		if (!active || !activeMenu().surface || (deltaX == 0.0 && deltaY == 0.0)) return;
+		pointer = new Point(pointer.x() + deltaX, pointer.y() + deltaY);
+		trail.add(pointer);
+		if (trail.size() > TRAIL_LIMIT) trail.remove(0);
+		activeMenu().lastMovement = nowMillis;
+	}
+
+	/** Advances the same hover state across radial/list boundaries; pops at most once. */
+	public boolean updateExternalBack(boolean focused, long nowMillis) {
+		if (!active || !activeMenu().surface) return false;
+		activeMenu().externalBackFocus = focused;
+		return updateHover(nowMillis);
+	}
+
+	/** External navigation uses the same one-level pop and fresh-stroke fence. */
+	public boolean back(long nowMillis) {
+		return active && pop(nowMillis);
+	}
+
+	/** Refreshes an active row's allowed annotations without moving its origin. */
+	public void replaceExternalMenu(SpatialMenu replacement, long nowMillis) {
+		if (!active || !activeMenu().external || !activeMenu().menu.id().equals(replacement.id())) return;
+		activeMenu().menu = replacement;
+		setFocus(nowMillis);
+	}
+
+	/**
+	 * Replaces a caller-owned projection without restarting the session. Removed
+	 * branches prune their descendants; row-anchored external children remain only
+	 * while their owning branch remains. Geometry and the pointer are unchanged.
+	 */
+	public void replaceRoot(SpatialMenu replacement, long nowMillis) {
+		Objects.requireNonNull(replacement, "replacement");
+		if (!root.id().equals(replacement.id())) throw new IllegalArgumentException("root identity must remain frozen");
+		for (SpatialMenu.Choice choice : replacement.choices()) {
+			if (!choice.hasSector()) throw new IllegalArgumentException("root entry needs a sector");
+		}
+		root = replacement;
+		if (!active) return;
+		for (int index = 0; index < stack.size(); index++) {
+			MenuState state = stack.get(index);
+			SpatialMenu next = findMenu(replacement, state.menu.id());
+			if (next == null && !state.external) {
+				stack.subList(index, stack.size()).clear();
+				break;
+			}
+			if (next != null) state.menu = next;
+		}
+		setFocus(nowMillis);
+	}
+
+	private static SpatialMenu findMenu(SpatialMenu menu, String id) {
+		if (menu.id().equals(id)) return menu;
+		for (SpatialMenu.Choice choice : menu.choices()) {
+			if (choice.children() == null || choice.disabled()) continue;
+			SpatialMenu found = findMenu(choice.children(), id);
+			if (found != null) return found;
+		}
+		return null;
+	}
+
 	/** The renderer read model for the current frame. */
 	public Snapshot snapshot() {
 		if (!active) {
@@ -344,7 +424,8 @@ public final class SpatialController {
 		List<MenuView> menus = new ArrayList<>();
 
 		for (MenuState state : stack) {
-			String focusId = state.focus == null ? null : state.focus.id();
+			String focusId = state.surface && state.externalBackFocus ? state.menu.id() + ":back"
+				: state.focus == null ? null : state.focus.id();
 			List<ChoiceView> choices = new ArrayList<>();
 
 			for (Resolved choice : displayedChoices(state)) {
@@ -364,7 +445,7 @@ public final class SpatialController {
 			menus.add(new MenuView(state.menu.id(), state.origin, state.parentOrigin, focusId, List.copyOf(choices)));
 		}
 
-		String focusId = activeMenu().focus == null ? null : activeMenu().focus.id();
+		String focusId = menus.get(menus.size() - 1).focusId();
 		return new Snapshot(true, pointer, List.copyOf(trail), focusId, List.copyOf(menus), hoverProgress);
 	}
 
@@ -377,7 +458,7 @@ public final class SpatialController {
 		menu.candidateId = null;
 		menu.lastMovement = nowMillis;
 		setFocus(nowMillis);
-		updateHover(nowMillis);
+		if (!menu.surface) updateHover(nowMillis);
 	}
 
 	private void endSession() {
@@ -400,14 +481,15 @@ public final class SpatialController {
 		String nextId = next == null ? null : next.id();
 
 		if (!Objects.equals(currentId, nextId)) {
-			menu.focus = next;
 			menu.enteredAt = nowMillis;
 			menu.candidate = null;
 			menu.candidateId = null;
 		}
+		menu.focus = next;
 	}
 
 	private Resolved focusAt(MenuState menu) {
+		if (menu.surface) return null;
 		double dx = pointer.x() - menu.origin.x();
 		double dy = pointer.y() - menu.origin.y();
 
@@ -428,7 +510,7 @@ public final class SpatialController {
 
 	private boolean updateHover(long nowMillis) {
 		MenuState menu = activeMenu();
-		boolean backFocused = menu.focus != null && menu.focus.back();
+		boolean backFocused = menu.surface ? menu.externalBackFocus : menu.focus != null && menu.focus.back();
 		Result result = hover.update(menu.menu.id(), backFocused, nowMillis);
 
 		if (result.triggerPop()) {
@@ -517,6 +599,7 @@ public final class SpatialController {
 
 	private List<Resolved> displayedChoices(MenuState menu) {
 		List<Resolved> resolved = new ArrayList<>();
+		if (menu.surface) return resolved;
 
 		if (menu == stack.get(0)) {
 			for (SpatialMenu.Choice choice : menu.menu.choices()) {
@@ -625,7 +708,7 @@ public final class SpatialController {
 	/** Mutable per-menu session state; never exposed outside the controller. */
 	private static final class MenuState {
 
-		final SpatialMenu menu;
+		SpatialMenu menu;
 		final Point origin;
 		final Point parentOrigin;
 		Resolved focus;
@@ -636,6 +719,9 @@ public final class SpatialController {
 		Point candidate;
 		String candidateId;
 		boolean rowAnchored;
+		boolean external;
+		boolean surface;
+		boolean externalBackFocus;
 
 		MenuState(SpatialMenu menu, Point origin, Point parentOrigin) {
 			this.menu = menu;

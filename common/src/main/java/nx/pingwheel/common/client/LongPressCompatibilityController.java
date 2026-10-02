@@ -17,10 +17,10 @@ import nx.pingwheel.common.interaction.state.PingInteractionPhase;
  *
  * <p>The normal port remains the only owner of capture, wheel presentation,
  * validation, selection, and dispatch.  This class only recognizes a bounded
- * sequence of claimed press edges and, after a normal short click has emitted
- * its {@link PingInteractionAction.CreatePing}, starts one backdated virtual
- * interaction.  Consequently compatibility mode cannot duplicate the wheel
- * implementation or bypass the existing action boundary.</p>
+ * sequence of claimed press edges and, after a normal short click has actually
+ * dispatched its default {@link PingInteractionAction.CreatePing}, starts one
+ * backdated virtual interaction. Consequently compatibility mode cannot
+ * duplicate the wheel implementation or bypass the existing action boundary.</p>
  *
  * <p>All state is one-slot state: a first interaction, one possible rapid
  * sequence, and one deferred fresh press while an asynchronous first capture
@@ -29,10 +29,10 @@ import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 public final class LongPressCompatibilityController {
 
 	/**
-	 * The high-precision baseline interaction port.  Returned actions have
-	 * already crossed the port's dispatch boundary; the return value exists so
-	 * this controller can observe whether a normal short click really emitted a
-	 * CreatePing without taking over dispatching.
+	 * The high-precision baseline interaction port. Legacy action methods remain
+	 * source-compatible but are not dispatch proof. Implementations must override
+	 * the outcome methods to report a create handed to the sender after courtesy
+	 * admission and dispatch recording. The controller never performs dispatch.
 	 */
 	public interface InteractionPort {
 
@@ -65,9 +65,50 @@ public final class LongPressCompatibilityController {
 			return presentFrame(keyDown);
 		}
 
+		/** Conservative bridge: an emitted action is not a successful dispatch receipt. */
+		default BaselineOutcome releaseOutcome() {
+			boolean menuOpened = phase() == PingInteractionPhase.WHEEL_OPEN;
+			return new BaselineOutcome(release(), DispatchOutcome.NOT_SENT,
+				menuOpened || phase() == PingInteractionPhase.WHEEL_OPEN);
+		}
+
+		default BaselineOutcome presentFrameOutcome(boolean keyDown) {
+			boolean menuOpened = phase() == PingInteractionPhase.WHEEL_OPEN;
+			return new BaselineOutcome(presentFrame(keyDown), DispatchOutcome.NOT_SENT,
+				menuOpened || phase() == PingInteractionPhase.WHEEL_OPEN);
+		}
+
+		default BaselineOutcome presentFrameOutcome(boolean keyDown, long frameTimeMillis) {
+			boolean menuOpened = phase() == PingInteractionPhase.WHEEL_OPEN;
+			return new BaselineOutcome(presentFrame(keyDown, frameTimeMillis), DispatchOutcome.NOT_SENT,
+				menuOpened || phase() == PingInteractionPhase.WHEEL_OPEN);
+		}
+
 		void abort();
 
 		PingInteractionPhase phase();
+	}
+
+	/** CREATE_SENT means admitted, recorded and handed to the sender, not server acceptance. */
+	public enum DispatchOutcome { NOT_SENT, CREATE_SENT }
+
+	/** Explicit baseline receipt; menuOpened includes any actual opening during this baseline. */
+	public record BaselineOutcome(Optional<PingInteractionAction> action, DispatchOutcome dispatch,
+		boolean menuOpened) {
+		public BaselineOutcome {
+			Objects.requireNonNull(action, "action");
+			Objects.requireNonNull(dispatch, "dispatch");
+			if (dispatch == DispatchOutcome.CREATE_SENT
+				&& !(action.orElse(null) instanceof PingInteractionAction.CreatePing)) {
+				throw new IllegalArgumentException("a create receipt requires a CreatePing action");
+			}
+		}
+
+		public boolean qualifyingDefaultCreate() {
+			return dispatch == DispatchOutcome.CREATE_SENT && !menuOpened
+				&& action.orElse(null) instanceof PingInteractionAction.CreatePing create
+				&& create.pingType().equals(create.context().resolvedTarget().targetType().defaultPingType());
+		}
 	}
 
 	private final InteractionPort port;
@@ -221,7 +262,7 @@ public final class LongPressCompatibilityController {
 	 */
 	public Optional<PingInteractionAction> onRelease() {
 		if (!syncMode()) {
-			return port.release();
+			return port.releaseOutcome().action();
 		}
 
 		if (candidate != null) {
@@ -237,7 +278,7 @@ public final class LongPressCompatibilityController {
 			// A release without a controller-owned first press is not expected from
 			// the input arbiter, but passing it through is the least surprising
 			// baseline behavior and keeps this wrapper non-invasive.
-			return port.release();
+			return port.releaseOutcome().action();
 		}
 
 		if (normalInteraction.hasRapidPress) {
@@ -245,8 +286,8 @@ public final class LongPressCompatibilityController {
 		}
 
 		normalInteraction.releaseObserved = true;
-		Optional<PingInteractionAction> action = port.release();
-		return handleNormalAction(action, currentTimeForAction());
+		BaselineOutcome outcome = port.releaseOutcome();
+		return handleNormalOutcome(outcome, currentTimeForAction());
 	}
 
 	/**
@@ -256,7 +297,7 @@ public final class LongPressCompatibilityController {
 	 */
 	public Optional<PingInteractionAction> onRenderFrame(boolean physicalKeyDown) {
 		if (!syncMode()) {
-			return port.presentFrame(physicalKeyDown);
+			return port.presentFrameOutcome(physicalKeyDown).action();
 		}
 
 		long now = observeFrameTime();
@@ -268,7 +309,7 @@ public final class LongPressCompatibilityController {
 				return terminateCandidate(now, threshold);
 			}
 
-			Optional<PingInteractionAction> action = port.presentFrame(true, now);
+			BaselineOutcome outcome = port.presentFrameOutcome(true, now);
 			if (port.phase() == PingInteractionPhase.WHEEL_OPEN) {
 				candidate.wheelOpened = true;
 			} else if (port.phase() == PingInteractionPhase.IDLE) {
@@ -278,7 +319,7 @@ public final class LongPressCompatibilityController {
 				candidate = null;
 			}
 
-			return action;
+			return outcome.action();
 		}
 
 		if (normalInteraction != null) {
@@ -291,8 +332,8 @@ public final class LongPressCompatibilityController {
 			}
 
 			boolean baselineKeyDown = normal.releaseObserved ? false : physicalKeyDown;
-			Optional<PingInteractionAction> action = port.presentFrame(baselineKeyDown, now);
-			return handleNormalAction(action, now);
+			BaselineOutcome outcome = port.presentFrameOutcome(baselineKeyDown, now);
+			return handleNormalOutcome(outcome, now);
 		}
 
 		if (seed != null && strictlyBeyondGap(now, seed.lastPressTimestamp, effectiveSliceMillis())) {
@@ -304,7 +345,7 @@ public final class LongPressCompatibilityController {
 		// second ordinary hold on a later frame.
 		return port.phase() == PingInteractionPhase.IDLE
 			? Optional.empty()
-			: port.presentFrame(physicalKeyDown, now);
+			: port.presentFrameOutcome(physicalKeyDown, now).action();
 	}
 
 	/**
@@ -404,10 +445,12 @@ public final class LongPressCompatibilityController {
 		normal.count = incrementCount(normal.count);
 	}
 
-	private Optional<PingInteractionAction> handleNormalAction(
-		Optional<PingInteractionAction> action,
+	private Optional<PingInteractionAction> handleNormalOutcome(
+		BaselineOutcome outcome,
 		long now
 	) {
+		Optional<PingInteractionAction> action = outcome.action();
+		if (normalInteraction != null && outcome.menuOpened()) normalInteraction.hasNormalWheel = true;
 		if (action.isEmpty()) {
 			if (port.phase() == PingInteractionPhase.WHEEL_OPEN) {
 				// A normal long press has become a wheel interaction and can never
@@ -429,12 +472,9 @@ public final class LongPressCompatibilityController {
 			return action;
 		}
 
-		boolean create = action.get() instanceof PingInteractionAction.CreatePing;
-		// The action itself is the dispatch-boundary proof that this was a real
-		// normal short CreatePing. Do not require a separate release callback:
-		// an asynchronous capture may complete on the frame path after the raw
-		// release, and a frame-side release fallback must seed identically.
-		boolean canSeed = create
+		// Synchronous release and late asynchronous completion require the same
+		// explicit default-create receipt, never just the shape of an action.
+		boolean canSeed = outcome.qualifyingDefaultCreate()
 			&& port.phase() == PingInteractionPhase.IDLE
 			&& !completed.hasNormalWheel;
 
@@ -455,15 +495,15 @@ public final class LongPressCompatibilityController {
 		}
 
 		// A rapid click recorded while an async capture was pending is allowed to
-		// disappear here.  The first action has already been dispatched and is
-		// never replayed; no invalid second interaction is synthesized.
+		// disappear here. The first action is never replayed, including when its
+		// dispatch was declined; no invalid second interaction is synthesized.
 		if (canSeed && !completed.hasRapidPress && deferredPress == null) {
 			seed = new Seed(firstPressTimestamp, firstPressTimestamp);
 		}
 
 		DeferredPress deferred = deferredPress;
 		deferredPress = null;
-		if (deferred != null) {
+		if (deferred != null && canSeed) {
 			// A deferred press was captured at its raw edge. If that immutable ray
 			// could not be obtained, dropping the click is safer than calling the
 			// ordinary no-ray overload, which would raycast again later.
@@ -478,8 +518,9 @@ public final class LongPressCompatibilityController {
 				if (normalInteraction != null) {
 					normalInteraction.releaseObserved = true;
 				}
-				Optional<PingInteractionAction> releaseAction = port.release();
-				handleNormalAction(releaseAction, now);
+				BaselineOutcome releaseOutcome = port.releaseOutcome();
+				Optional<PingInteractionAction> releaseAction = releaseOutcome.action();
+				handleNormalOutcome(releaseOutcome, now);
 				return releaseAction.isPresent() ? releaseAction : deferredAction;
 			}
 
@@ -499,7 +540,7 @@ public final class LongPressCompatibilityController {
 		if (ending.wheelOpened && port.phase() == PingInteractionPhase.WHEEL_OPEN) {
 			// This is the exact baseline release path, including the latest wheel
 			// selection and its frozen cancellation context.
-			action = port.release();
+			action = port.releaseOutcome().action();
 			logger.debug(
 				"long press compatibility formed: durationMillis={} thresholdMillis={} count={}",
 				elapsedMillis(ending.firstPressTimestamp, endTimestamp),

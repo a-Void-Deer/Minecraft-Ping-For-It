@@ -298,4 +298,20 @@ class InventoryListModelTest {
 		assertEquals(List.of("z", "y", "a"), keys(model), "a later existing-key batch keeps fixed positions");
 		assertEquals("y", model.selectedKey());
 	}
+
+	@Test
+	void attemptedScrollAtBoundaryFreezesLaterDiscoveryPositions() {
+		InventoryListModel model = opened(3, entry("a", 10), entry("b", 5));
+		assertEquals(0, model.glide(-1));
+		model.applyBatch(List.of(entry("new", 100)));
+		assertEquals(List.of("a", "b", "new"), keys(model), "a deliberate scroll need not change selection to freeze rows");
+	}
+
+	@Test
+	void fractionalWheelScrollFreezesDiscoveryWithoutNeedingAWholeRow() {
+		InventoryListModel model = opened(3, entry("a", 10), entry("b", 5));
+		assertEquals(0, model.wheel(0.25f));
+		model.applyBatch(List.of(entry("new", 100)));
+		assertEquals(List.of("a", "b", "new"), keys(model));
+	}
 }

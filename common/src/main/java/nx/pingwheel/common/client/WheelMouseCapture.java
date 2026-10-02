@@ -47,6 +47,21 @@ public final class WheelMouseCapture {
 
 	private final PingInteractionLogger logger;
 	private boolean releasedByWheel;
+	private int transitionDepth;
+
+	interface MouseAccess {
+		boolean screenOpen();
+		boolean grabbed();
+		void release();
+		void grab();
+	}
+	private record MinecraftMouseAccess(Minecraft game) implements MouseAccess {
+		public boolean screenOpen() { return game.screen != null; }
+		public boolean grabbed() { return game.mouseHandler.isMouseGrabbed(); }
+		public void release() { game.mouseHandler.releaseMouse(); }
+		public void grab() { game.mouseHandler.grabMouse(); }
+	}
+	public boolean isTransitioning() { return transitionDepth != 0; }
 
 	public WheelMouseCapture(PingInteractionLogger logger) {
 		this.logger = Objects.requireNonNull(logger, "logger");
@@ -95,24 +110,30 @@ public final class WheelMouseCapture {
 	 * and claimed on the next tick while the wheel is still open.
 	 */
 	public void sync(PingInteractionPhase phase, Minecraft game) {
+		sync(phase, new MinecraftMouseAccess(Objects.requireNonNull(game, "game")));
+	}
+	void sync(PingInteractionPhase phase, MouseAccess mouse) {
 		Objects.requireNonNull(phase, "phase");
-		Objects.requireNonNull(game, "game");
 
 		Action action = nextAction(
 			phase == PingInteractionPhase.WHEEL_OPEN,
 			releasedByWheel,
-			game.screen != null,
-			game.mouseHandler.isMouseGrabbed());
+			mouse.screenOpen(),
+			mouse.grabbed());
 
 		switch (action) {
 			case RELEASE -> {
-				game.mouseHandler.releaseMouse();
 				releasedByWheel = true;
+				transitionDepth++;
+				try { mouse.release(); }
+				finally { transitionDepth--; }
 				logger.debug("wheel mouse released");
 			}
 			case GRAB -> {
 				releasedByWheel = false;
-				game.mouseHandler.grabMouse();
+				transitionDepth++;
+				try { mouse.grab(); }
+				finally { transitionDepth--; }
 				logger.debug("wheel mouse regrabbed");
 			}
 			default -> {
@@ -130,17 +151,27 @@ public final class WheelMouseCapture {
 	 * this controller is done.
 	 */
 	public void close(Minecraft game) {
+		close(game, false);
+	}
+
+	/** setScreen HEAD still exposes the old screen; an incoming screen must never be grabbed over. */
+	public void close(Minecraft game, boolean screenTransition) {
+		close(game == null ? null : new MinecraftMouseAccess(game), screenTransition);
+	}
+	void close(MouseAccess mouse, boolean screenTransition) {
 		if (!releasedByWheel) {
 			return;
 		}
 
 		releasedByWheel = false;
 
-		if (game == null || game.screen != null) {
+		if (mouse == null || mouse.screenOpen() || screenTransition) {
 			return;
 		}
 
-		game.mouseHandler.grabMouse();
+		transitionDepth++;
+		try { mouse.grab(); }
+		finally { transitionDepth--; }
 		logger.debug("wheel mouse regrabbed on close");
 	}
 }
