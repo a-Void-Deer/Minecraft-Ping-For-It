@@ -17,6 +17,57 @@ and another entity entering
 the crosshair must not retarget or change the wheel. Release, selection, and
 timeout do not initiate a new selection ray.
 
+An ordinary block hit also retains the actual hit face from the press-time
+result, and the same-target capture and coordinator path carries that face
+forward. The frozen face is read context for ordinary-block inventory access,
+owned by
+[inventory preview and tracking](../presentation/inventory.md#provider-layer-and-safety);
+it is not part of the captured target identity or the marker identity. A miss
+result's direction is arbitrary and is ignored: only a concrete block hit
+establishes a face, and a location fallback never acquires one. Every
+ordinary-block candidate allocated at the same press edge retains its own
+actual hit face under these same rules.
+
+## Press-time candidate allocation
+
+A capture may also allocate a bounded set of supplemental target candidates for
+the native selector's precise branch. Allocation starts at the same press edge
+as the ordinary capture and shares its one frozen press ray and frozen
+[selection policy](selection_policy.md#raycast-use-and-blacklist-boundary);
+release, selection and timeout still never initiate a new selection ray. Its
+scan range and its independence from the ordinary native trace and the Distant
+Horizons route are owned by
+[capture range](range.md#selector-candidate-supplements). The scan traverses
+the established native and provider pick paths under
+[local geometry](local_geometry.md); it defines no separate collision or
+display-extent rule.
+
+Each precise class installs at most one candidate. A more specific class
+consumes its identity first; a generic class may skip an identity already
+consumed by a more specific class and install the next nearest. The installed
+candidate is the nearest certified one. Certification means the established
+native or provider pick path completed its bounded traversal within the
+candidate work budget; it is not coverage of every registered shape or of
+block-display/outline eligibility. A scan that cannot complete leaves the
+affected classes incomplete and unavailable, never a nearest or missing
+result. A failed or limited supplemental allocation disables only the
+selector's supplemental attachment; the ordinary captured target and the
+short-press/default outcome are unaffected.
+
+Supplemental identities follow ordinary capture. An entity candidate uses the
+same canonical locator as ordinary capture, including the established
+experience-orb runtime-ID and multipart canonicalization rules
+([target model](../identity/target_model.md#ordinary-identities-and-lifecycle)).
+An external block candidate requires positive capture-local provider
+equivalence and never fabricates a server materialization ID. Sable's bounded
+transformed-behind discovery is owned by the
+[Sable integration](../../integrations/sable.md#supplemental-transformed-behind-discovery).
+The location class is derived rather than scanned: it uses the actual ordinary
+concrete hit point when the ordinary capture has one and otherwise the existing
+native or Distant Horizons miss fallback. An exact-owned non-hit remains
+rejected under [local geometry](local_geometry.md); a candidate scan never
+revives its coarse bounds.
+
 ## Baseline release and actual wheel opening
 
 At the baseline press, freeze the effective long-press threshold. Its timing

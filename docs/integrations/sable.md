@@ -14,7 +14,9 @@ entity tracking or Immersive Portals behavior here.
 Client capture creates an external candidate only after positive Sable
 sub-level containment; otherwise it preserves the existing projected-position
 or location fallback. Server validation and materialization remain required
-before that candidate can become a Marker.
+before that candidate can become a Marker. This is the ordinary projected
+capture path; the separate supplemental transformed-behind discovery is
+described below.
 
 During server validation, Sable uses its logical pose to derive the external
 validation anchor. Client presentation separately applies the current render
@@ -27,6 +29,41 @@ and the fact that a single immutable frame snapshot is not currently
 guaranteed for those provider-local decisions, are recorded in
 [presentation subjects](../architecture/rendering/presentation_subjects.md) and the
 [verification inventory](../testing/verification.md#sable-integration-coverage).
+
+## Supplemental transformed-behind discovery
+
+The native selector's supplemental candidate allocation includes a separate
+Sable provider ray. It is the adopted bounded discovery of a Sable surface
+behind a blocker or after a native miss, independently of the ordinary
+projected capture above; it never changes, replaces or extends that ordinary
+capture. It uses the frozen press ray bounded by the frozen client
+`pingDistance` under the
+[range contract](../architecture/picking/range.md#selector-candidate-supplements)
+and the same frozen selection policy as ordinary picking.
+
+The provider walks its raw loaded-sublevel list directly, charging every
+sublevel visit and provider call to the bounded candidate work budget and
+re-checking the list for stability before reporting completion. A removed,
+mismatched or unresolvable sublevel is skipped as positively empty or makes the
+attempt incomplete; it never becomes a candidate. For each visited sublevel,
+the logical pose is frozen for the attempt, the frozen world endpoints are
+inverse-transformed into local space, the local bounds are intersected, and the
+direct local native pick runs against that sublevel's own loaded local view
+under the frozen selection policy. It does not recursively project a world hit
+through candidate sublevels to locate the source.
+
+A local hit is transformed back to world space and counted at its world
+distance from the frozen ray origin only when it lies on the frozen world
+segment within the integration's small projection epsilon; a transformed hit
+outside the segment is not counted, and an off-segment deviation beyond that
+epsilon makes the attempt incomplete. A discovered candidate carries positive
+capture-local provider equivalence and keeps the canonical external identity
+unmaterialized under the ordinary
+[candidate and committed identity](#candidate-and-committed-identity) contract
+below; the provider ray never materializes a tracking identity itself. This
+path discovers targets only; it reads no inventory and grants no inventory
+preview or tracking. Numeric engine limits remain implementation values, and
+the integration's established provider API gate still applies.
 
 ## Candidate and committed identity
 

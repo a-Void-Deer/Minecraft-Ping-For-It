@@ -46,9 +46,12 @@ versioning, recovery, and save-protection behavior are owned by
 At ordinary capture start, the three values are copied into one immutable
 raycast policy. That policy selects the block and fluid modes in the table and
 decides whether ignored entity candidates join nearest-hit competition. The
-ordinary press-time sampling boundary is owned by [capture](capture.md). A
-deferred compatibility press stores only its ray and reads this policy when its
-later capture starts; that sequence is owned by
+ordinary press-time sampling boundary is owned by [capture](capture.md). The
+same immutable policy is consumed by the press-time supplemental candidate
+allocation and by provider supplements; that allocation boundary is owned by
+[capture](capture.md#press-time-candidate-allocation). A deferred compatibility
+press stores only its ray and reads this policy when its later capture starts;
+that sequence is owned by
 [long-press compatibility](../input/long-press-compatibility.md).
 
 Spectator entities are always excluded, including when
@@ -66,3 +69,12 @@ client configuration. `blockShapeBlacklist`, together with the block display
 whitelist, controls client-local native-glow/outline attempt eligibility; it is
 not consulted while selecting a target. Conversely,
 `markBlacklistedTargets` does not edit or evaluate either block-display list.
+
+## Selector settings branch
+
+The native selector's settings branch exposes these same three toggles as
+release-committed entries. Committing one updates the same in-memory setting
+that a later capture reads; the running interaction already copied its
+immutable raycast policy at press start and is unaffected. The selector
+branch's presentation and release behavior are owned by
+[wheel](wheel.md#headless-spatial-menu-model).

@@ -32,11 +32,13 @@ the same segment through the common raycast request. Create transforms that
 already-bounded segment into its local space and scans its frozen local shapes;
 it does not reuse Create's interaction picker or add a second range.
 
-The Sable capture attempt occurs only after that native route yielded a block
-hit. It receives the native hit plus the same origin and endpoint of the
-effective segment; Sable candidate projection requires the transformed point to
-lie on that segment, with only the integration's small projection epsilon. It
-therefore has no independent range expansion.
+The ordinary Sable capture attempt occurs only after that native route yielded
+a block hit. It receives the native hit plus the same origin and endpoint of
+the effective segment; Sable candidate projection requires the transformed
+point to lie on that segment, with only the integration's small projection
+epsilon. It therefore has no independent range expansion. Sable's separate
+transformed-behind discovery is the additive provider supplement bounded in
+[Selector candidate supplements](#selector-candidate-supplements).
 
 After a native miss, Distant Horizons is a separate optional asynchronous route.
 It receives the frozen press origin and direction but calls its API with an
@@ -53,6 +55,24 @@ retain a ray rather than a target. When their
 new baseline capture actually starts, it reads the current range fields and
 then follows this same pipeline. They do not freeze range at the raw deferred
 press edge.
+
+## Selector candidate supplements
+
+The native selector's supplemental candidate allocation is an additive
+press-time scan, not a second capture range. It shares the frozen press origin
+and direction and is bounded by the same frozen client `pingDistance` read at
+capture start; within that bound it may find surfaces behind occluders along
+the ray. It never extends, replaces or re-samples the ordinary native effective
+segment (`min(raycastDistance, pingDistance)`), and it neither starts nor
+changes the Distant Horizons route. The same frozen bound applies to provider
+supplements: Sable's transformed-behind discovery shares this frozen press ray
+and frozen client `pingDistance`, and its bounded local traversal, completion
+and candidate rules are owned by the
+[Sable integration](../../integrations/sable.md#supplemental-transformed-behind-discovery).
+A missing, incomplete or failed supplemental scan changes only the selector's
+supplemental availability: the ordinary native minimum-range behavior and the
+Distant Horizons miss fallback remain exactly as above. Supplemental candidates
+still face the independent server acceptance check.
 
 ## Server acceptance
 
@@ -81,8 +101,10 @@ ordinary lifecycle contract.
 | Route | Client segment / input | Range source | Result before authority |
 | --- | --- | --- | --- |
 | Vanilla blocks, fluids, entities | Frozen finite press segment | `min(client raycastDistance, client pingDistance)` | Native hit or location miss |
+| Selector candidate supplements | Same frozen press ray; occluders allowed within the frozen client ping distance | Frozen client `pingDistance` | Nearest certified supplement per class, or incomplete/unavailable; ordinary result unaffected |
+| Sable transformed-behind supplement | Same frozen press ray; provider-local sublevel traversal | Frozen client `pingDistance` | Provider candidate only when the bounded local trace completes; otherwise incomplete/unavailable; ordinary result unaffected |
 | Create contraption local shapes | Same finite segment passed through the common entity-candidate request and transformed locally | Reuses the native effective segment; no Create interaction-picker range | Exact whole-entity hit, or owned miss/unavailable/failure with no coarse-AABB revival |
-| Sable external candidate | Native block hit plus that same segment's frozen origin/end | Reuses native effective segment; point must project onto the segment | External candidate only after provider checks; otherwise existing projected/location or vanilla fallback |
+| Sable external candidate (ordinary projection) | Native block hit plus that same segment's frozen origin/end | Reuses native effective segment; point must project onto the segment | External candidate only after provider checks; otherwise existing projected/location or vanilla fallback |
 | Distant Horizons | Frozen origin/direction after native miss | Integration-specific fixed API trace, independent of both client fields | Distant block hit or original native location miss |
 | Server validator | Current server player eye and authoritative validation anchor | Server `pingDistance` | Accept or `OUT_OF_RANGE`, independently of client capture; an external candidate's provider validation anchor is checked before later materialization |
 
