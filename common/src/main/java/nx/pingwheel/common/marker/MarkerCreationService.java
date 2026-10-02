@@ -200,6 +200,13 @@ public final class MarkerCreationService {
 			recipients, intents, admission, null);
 	}
 
+	/** Dedicated admission executes even when no SECTION property observation was supplied. */
+	public MarkerCreateOutcome createDedicated(ServerLevel level, UUID owner, Target requestedTarget,
+		String pingTypeId, long arrivalTick, long expiresAtTick, List<UUID> recipients, PropertyAdmission dedicated) {
+		return create(level, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick,
+			recipients, List.of(), null, null, Objects.requireNonNull(dedicated));
+	}
+
 	/**
 	 * Test seam for the external materialization transaction. It keeps the
 	 * creation pipeline independent of a live Minecraft server while preserving
@@ -237,6 +244,13 @@ public final class MarkerCreationService {
 		PropertyAdmission admission,
 		ExternalBlockTransaction transaction
 	) {
+		return create(level, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients,
+			intents, admission, transaction, null);
+	}
+
+	private MarkerCreateOutcome create(ServerLevel level, UUID owner, Target requestedTarget, String pingTypeId,
+		long arrivalTick, long expiresAtTick, List<UUID> recipients, List<PresentationPropertyIntent> intents,
+		PropertyAdmission admission, ExternalBlockTransaction transaction, PropertyAdmission dedicated) {
 		if (owner == null || requestedTarget == null || pingTypeId == null || recipients == null || intents == null) {
 			logger.debug("create rejected: null owner, target, ping type id, or recipients");
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
@@ -336,6 +350,13 @@ public final class MarkerCreationService {
 
 		AdmissionResult admitted;
 		try {
+			if (dedicated != null) {
+				AdmissionResult result = dedicated.admit(markerTarget, markerTargetType.id(), owner, List.copyOf(recipients), List.of());
+				if (result == null || result.rejection() != null || !result.selections().isEmpty() || !result.sourceSeeds().isEmpty()) {
+					if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
+					return MarkerCreateOutcome.rejected(result == null || result.rejection() == null ? MarkerRejectReason.INVALID_REQUEST : result.rejection());
+				}
+			}
 			admitted = intents.isEmpty() ? AdmissionResult.accepted(List.of(), Map.of())
 				: admission == null ? AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST)
 				: admission.admit(markerTarget, markerTargetType.id(), owner, List.copyOf(recipients), List.copyOf(intents));

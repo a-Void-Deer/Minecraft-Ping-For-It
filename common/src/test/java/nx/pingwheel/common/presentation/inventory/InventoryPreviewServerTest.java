@@ -2,6 +2,7 @@ package nx.pingwheel.common.presentation.inventory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -20,20 +21,23 @@ import static org.junit.jupiter.api.Assertions.*;
 class InventoryPreviewServerTest {
 
 	private static final UUID PLAYER = new UUID(1, 2);
-	private static final Target TARGET = new Target.LocationTarget("minecraft:overworld", 1, 2, 3);
+	private static final Target.BlockTarget TARGET = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest");
 	private static final InventoryScanner.Key STONE = new InventoryScanner.Key("minecraft:stone", "plain");
 	private static final InventoryScanner.Key DIRT = new InventoryScanner.Key("minecraft:dirt", "plain");
 	private static final InventoryScanner.Key SAND = new InventoryScanner.Key("minecraft:sand", "plain");
+	private static InventoryC2SPacket openPacket(long epoch, long request) {
+		return InventoryC2SPacket.open(epoch, 100, 1, request, TARGET, nx.pingwheel.common.domain.BlockFace.NORTH);
+	}
 
 	@Test
 	void negotiationIsStableAndUnknownEpochsCannotAccessWorld() {
 		Fixture f = new Fixture(stack(STONE, 5));
-		f.server.handle(PLAYER, InventoryC2SPacket.open(9, 1, TARGET), 0, f.settings);
+		f.server.handle(PLAYER, openPacket(9, 1), 0, f.settings);
 		f.server.tick(0, f.settings);
 		assertEquals(0, f.host.resolutions);
 		long epoch = f.hello();
 		assertTrue(epoch > 0);
-		f.server.handle(PLAYER, InventoryC2SPacket.open(epoch + 1, 1, TARGET), 0, f.settings);
+		f.server.handle(PLAYER, openPacket(epoch + 1, 1), 0, f.settings);
 		f.server.tick(1, f.settings);
 		assertEquals(0, f.host.resolutions);
 		f.server.handle(PLAYER, InventoryC2SPacket.hello(), 40, f.settings);
@@ -55,21 +59,236 @@ class InventoryPreviewServerTest {
 	}
 
 	@Test
-	void sharedPhysicalObservationStillChargesEachLogicalConsumer() {
+	void duplicateRequestsReuseOnlyThisClientsPaidCoverage() throws ReflectiveOperationException {
 		Fixture f = new Fixture(stack(STONE, 1), stack(DIRT, 2), stack(SAND, 3));
 		f.settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(2));
 		f.open(1);
 		f.open(2);
 		f.server.tick(0, f.settings);
 		assertEquals(2, f.host.reads);
-		assertFalse(f.data().stream().anyMatch(packet -> packet.requestId() == 2 && !packet.entries().isEmpty()));
+		assertEquals(2, f.data().stream().filter(packet -> packet.requestId() == 2).flatMap(packet -> packet.entries().stream()).count());
+		assertEquals(2, field(f.server, "globalSlots"), "duplicate delivery consumes only one client's logical prefix");
+		UUID other = new UUID(3, 4);
+		f.open(other, 3, 0);
+		f.server.tick(0, f.settings);
+		assertEquals(2, f.items(3).size());
+		assertEquals(4, field(f.server, "globalSlots"), "a different client independently pays for the same physical slots");
 		f.server.tick(3, f.settings);
 		assertEquals(3, f.host.reads);
-		assertFalse(f.complete(2));
-		f.server.tick(6, f.settings);
-		assertEquals(3, f.host.reads, "both consumers share the same three physical reads");
 		assertTrue(f.complete(1));
 		assertTrue(f.complete(2));
+	}
+
+	@Test
+	void differentClientsPayIndependentLogicalProgressForASharedRead() {
+		Fixture f = new Fixture(stack(STONE, 1), stack(DIRT, 2), stack(SAND, 3));
+		f.settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(2));
+		f.settings.getPreview().setMaxSlotsServer(IntLimit.finite(3));
+		f.open(1);
+		UUID other = new UUID(3, 4);
+		f.server.handle(other, InventoryC2SPacket.hello(), 0, f.settings);
+		long otherEpoch = f.host.packets.getLast().epoch();
+		f.server.handle(other, openPacket(otherEpoch, 2), 0, f.settings);
+		f.server.tick(0, f.settings);
+		assertEquals(2, f.host.reads);
+		assertEquals(3, f.items().size(), "global logical limit includes both clients' independent progress");
+		assertFalse(f.complete(1));
+		assertFalse(f.complete(2));
+		f.server.tick(3, f.settings);
+		assertEquals(3, f.host.reads, "three physical reads serve six charged logical slots");
+		assertEquals(6, f.items().size());
+		assertTrue(f.complete(1));
+		assertTrue(f.complete(2));
+	}
+
+	@Test
+	void duplicateCloseAndReopenPreserveOnlyRemainingRequestsPaidCoverage() throws ReflectiveOperationException {
+		Fixture f = new Fixture(stack(STONE, 1), stack(DIRT, 2), stack(SAND, 3));
+		f.settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
+		f.settings.getPreview().setMaxSlotsServer(IntLimit.finite(1));
+		long epoch = f.open(1);
+		f.open(2);
+		UUID other = new UUID(3, 4);
+		f.open(other, 99, 0);
+		f.server.tick(0, f.settings);
+		assertEquals(1, f.items(1).size());
+		assertEquals(1, f.items(2).size());
+		assertEquals(2, progressSubjects(f.server));
+
+		f.server.handle(PLAYER, InventoryC2SPacket.close(epoch, 1), 1, f.settings);
+		long afterClose = retainedBytes(f.server);
+		f.server.handle(PLAYER, InventoryC2SPacket.close(epoch, 1), 1, f.settings);
+		assertEquals(afterClose, retainedBytes(f.server), "duplicate close releases nothing twice");
+		f.server.handle(PLAYER, openPacket(epoch, 3), 1, f.settings);
+		f.server.tick(1, f.settings);
+		assertEquals(1, f.items(3).size(), "the remaining duplicate keeps this client's paid prefix");
+		assertEquals(1, f.host.reads);
+		assertEquals(2, progressSubjects(f.server));
+
+		f.server.handle(PLAYER, InventoryC2SPacket.close(epoch, 2), 1, f.settings);
+		f.server.handle(PLAYER, InventoryC2SPacket.close(epoch, 3), 1, f.settings);
+		assertEquals(1, progressSubjects(f.server), "another client keeps the round, not the departing client's claim");
+		f.server.handle(PLAYER, openPacket(epoch, 4), 1, f.settings);
+		f.server.tick(1, f.settings);
+		assertTrue(f.items(4).isEmpty(), "rejoining cannot reuse a retired prefix or refund period slots");
+		assertTrue(f.items(99).isEmpty(), "retiring a claim does not refund the global slot charge");
+		assertEquals(1, f.host.reads);
+	}
+
+	@Test
+	void disconnectAndReconnectDoNotRefundGlobalPeriodProgress() throws ReflectiveOperationException {
+		Fixture f = new Fixture(stack(STONE, 1), stack(DIRT, 2));
+		f.settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
+		f.settings.getPreview().setMaxSlotsServer(IntLimit.finite(1));
+		f.open(1);
+		UUID other = new UUID(3, 4);
+		f.open(other, 2, 0);
+		f.server.tick(0, f.settings);
+		f.server.disconnect(PLAYER);
+		assertEquals(1, progressSubjects(f.server));
+		f.open(PLAYER, 3, 1);
+		f.server.tick(1, f.settings);
+		assertTrue(f.items(2).isEmpty());
+		assertTrue(f.items(3).isEmpty(), "a fresh session cannot spend already-charged global slots again");
+		assertEquals(1, f.host.reads, "the other client keeps the physical observation alive");
+	}
+
+	@Test
+	void clientProgressOccupiesMemoryOnceAndLastClientRequestReleasesIt() throws ReflectiveOperationException {
+		Fixture f = new Fixture(stack(STONE, 1), stack(DIRT, 2));
+		f.settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
+		f.settings.getPreview().setMaxSlotsServer(IntLimit.finite(1));
+		f.open(1);
+		f.server.tick(0, f.settings);
+		long anchorMemory = retainedBytes(f.server);
+		UUID other = new UUID(3, 4);
+		long otherEpoch = f.open(other, 2, 0);
+		long beforeAttach = retainedBytes(f.server);
+		f.server.tick(0, f.settings);
+		long progressCost = retainedBytes(f.server) - beforeAttach;
+		assertTrue(progressCost > 0, "even quota-deferred recipient progress is retained and accounted");
+		assertTrue(f.items(2).isEmpty());
+		assertEquals(2, progressSubjects(f.server));
+
+		long beforeOpen = retainedBytes(f.server);
+		f.server.handle(other, openPacket(otherEpoch, 3), 0, f.settings);
+		long requestCost = retainedBytes(f.server) - beforeOpen;
+		f.server.tick(0, f.settings);
+		assertEquals(beforeOpen + requestCost, retainedBytes(f.server), "duplicates share the same progress allocation");
+		f.server.handle(other, InventoryC2SPacket.close(otherEpoch, 2), 0, f.settings);
+		assertEquals(beforeOpen, retainedBytes(f.server), "closing one duplicate leaves the shared progress allocated");
+		assertEquals(2, progressSubjects(f.server));
+		f.server.handle(other, InventoryC2SPacket.close(otherEpoch, 3), 0, f.settings);
+		assertEquals(beforeOpen - requestCost - progressCost, retainedBytes(f.server));
+		assertEquals(1, progressSubjects(f.server));
+		f.server.disconnect(other);
+		assertEquals(anchorMemory, retainedBytes(f.server));
+		f.server.reset();
+		assertEquals(0, retainedBytes(f.server));
+		assertEquals(0, progressSubjects(f.server));
+		assertTrue(rounds(f.server).isEmpty());
+	}
+
+	@Test
+	void memoryPressureDefersNewClientProgressUntilRoomIsReleased() throws ReflectiveOperationException {
+		Fixture f = new Fixture(stack(STONE, 1));
+		f.settings.setPendingMemoryMiB(1);
+		f.settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
+		f.settings.getPreview().setMaxSlotsServer(IntLimit.finite(1));
+		f.settings.getPreview().getClientByteMultiplier().setUnlimited(true);
+		f.settings.getPreview().getGlobalByteMultiplier().setUnlimited(true);
+		f.open(1);
+		f.open(new UUID(3, 4), 2, 0);
+		f.server.tick(0, f.settings);
+		UUID pending = new UUID(5, 6);
+		f.open(pending, 3, 0);
+		List<UUID> padding = new ArrayList<>();
+		for (int i = 0; i < 2048; i++) {
+			UUID player = new UUID(100, i);
+			int packets = f.host.packets.size();
+			f.server.handle(player, InventoryC2SPacket.hello(), 0, f.settings);
+			if (f.host.packets.size() == packets) break;
+			padding.add(player);
+		}
+		assertFalse(padding.isEmpty());
+		long fullMemory = retainedBytes(f.server);
+		f.server.tick(0, f.settings);
+		assertEquals(2, progressSubjects(f.server), "no new claim may allocate beyond pending-memory admission");
+		assertEquals(fullMemory, retainedBytes(f.server));
+		assertTrue(f.items(3).isEmpty());
+		assertEquals(1, f.host.reads);
+
+		f.server.disconnect(padding.getLast());
+		long availableMemory = retainedBytes(f.server);
+		f.server.tick(0, f.settings);
+		assertEquals(3, progressSubjects(f.server));
+		assertTrue(retainedBytes(f.server) > availableMemory);
+		padding.forEach(f.server::disconnect); // A scanned entry needs its own independent retained-memory room.
+		f.server.tick(3, f.settings);
+		f.server.tick(6, f.settings);
+		assertTrue(f.complete(3), "a deferred claim can resume once retained memory is available");
+		assertEquals(1, f.host.reads, "admission recovery uses the existing physical observation");
+		f.server.reset();
+		assertEquals(0, retainedBytes(f.server));
+	}
+
+	@Test
+	void disconnectedClientsDoNotAccumulateClaimsOnAnAnchoredRound() throws ReflectiveOperationException {
+		Fixture f = new Fixture(stack(STONE, 1));
+		f.settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
+		f.settings.getPreview().setMaxSlotsServer(IntLimit.finite(2));
+		f.open(1);
+		f.server.tick(0, f.settings);
+		long anchorMemory = retainedBytes(f.server);
+		// More distinct historical clients than the concurrency cap, with only two connected at once.
+		for (int i = 0; i < 1100; i++) {
+			UUID player = new UUID(100, i);
+			long tick = 3L * (i + 1);
+			f.open(player, i + 2, tick);
+			f.server.tick(tick, f.settings);
+			assertTrue(f.complete(i + 2));
+			assertEquals(2, progressSubjects(f.server));
+			f.server.disconnect(player);
+			f.server.disconnect(player);
+			assertEquals(1, progressSubjects(f.server), "departed UUIDs must not remain on the shared round");
+			assertEquals(anchorMemory, retainedBytes(f.server), "churn returns to the anchor's retained cost");
+			f.host.packets.clear();
+		}
+		assertEquals(1, f.host.reads, "all independent clients still share one physical slot read");
+		f.server.disconnect(PLAYER);
+		assertEquals(0, retainedBytes(f.server));
+		assertEquals(0, progressSubjects(f.server));
+		assertTrue(rounds(f.server).isEmpty());
+		int probes = f.host.resolutions;
+		f.server.tick(3303, f.settings);
+		assertEquals(probes, f.host.resolutions);
+	}
+
+	@Test
+	void invalidatingOneClientDoesNotRetireAnotherClientsPaidCoverage() throws ReflectiveOperationException {
+		Fixture f = new Fixture(stack(STONE, 1), stack(DIRT, 2));
+		f.settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
+		f.settings.getPreview().setMaxSlotsServer(IntLimit.finite(2));
+		long epoch = f.open(1);
+		UUID other = new UUID(3, 4);
+		f.open(other, 2, 0);
+		f.server.tick(0, f.settings);
+		assertEquals(2, progressSubjects(f.server));
+		f.host.deniedPlayer = other;
+		f.server.tick(1, f.settings);
+		assertEquals(1, progressSubjects(f.server));
+		assertEquals(InventoryS2CPacket.Status.INVALID,
+			f.data().stream().filter(packet -> packet.requestId() == 2).toList().getLast().status());
+		f.server.handle(PLAYER, openPacket(epoch, 3), 1, f.settings);
+		f.server.tick(1, f.settings);
+		assertEquals(1, f.items(3).size());
+		assertEquals(1, f.host.reads);
+		f.host.allowed = false;
+		f.server.tick(1, f.settings);
+		assertEquals(0, progressSubjects(f.server));
+		assertTrue(rounds(f.server).isEmpty());
+		f.server.reset();
+		assertEquals(0, retainedBytes(f.server));
 	}
 
 	@Test
@@ -134,7 +353,7 @@ class InventoryPreviewServerTest {
 		long epoch = f.open(1);
 		f.server.tick(0, f.settings);
 		f.server.handle(PLAYER, InventoryC2SPacket.close(epoch, 1), 1, f.settings);
-		f.server.handle(PLAYER, InventoryC2SPacket.open(epoch, 2, TARGET), 1, f.settings);
+		f.server.handle(PLAYER, openPacket(epoch, 2), 1, f.settings);
 		f.server.tick(1, f.settings);
 		assertEquals(1, f.host.reads);
 		f.server.tick(3, f.settings);
@@ -202,6 +421,29 @@ class InventoryPreviewServerTest {
 		return new InventoryScanner.Stack(key, count);
 	}
 
+	// Narrow ledger/lifetime probes: publication alone cannot detect retained departed UUIDs.
+	private static Object field(Object owner, String name) throws ReflectiveOperationException {
+		var field = owner.getClass().getDeclaredField(name);
+		field.setAccessible(true);
+		return field.get(owner);
+	}
+
+	private static long retainedBytes(InventoryPreviewServer server) throws ReflectiveOperationException {
+		return (long) field(server, "retainedBytes");
+	}
+
+	private static Map<?, ?> rounds(InventoryPreviewServer server) throws ReflectiveOperationException {
+		return (Map<?, ?>) field(server, "rounds");
+	}
+
+	private static int progressSubjects(InventoryPreviewServer server) throws ReflectiveOperationException {
+		int subjects = 0;
+		for (Object session : ((Map<?, ?>) field(server, "sessions")).values()) {
+			subjects += ((Map<?, ?>) field(session, "claimedProgress")).size();
+		}
+		return subjects;
+	}
+
 	private static final class Fixture {
 		final FakeHost host;
 		final InventoryPreviewServer server;
@@ -224,13 +466,24 @@ class InventoryPreviewServerTest {
 		}
 		long open(long id) {
 			long epoch = hello();
-			server.handle(PLAYER, InventoryC2SPacket.open(epoch, id, TARGET), 0, settings);
+			server.handle(PLAYER, openPacket(epoch, id), 0, settings);
+			return epoch;
+		}
+		long open(UUID player, long id, long tick) {
+			int before = host.packets.size();
+			server.handle(player, InventoryC2SPacket.hello(), tick, settings);
+			assertTrue(host.packets.size() > before, "fixture client must receive an offer");
+			long epoch = host.packets.getLast().epoch();
+			server.handle(player, openPacket(epoch, id), tick, settings);
 			return epoch;
 		}
 		List<InventoryS2CPacket> data() {
 			return host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW).toList();
 		}
 		List<InventoryS2CPacket.Entry> items() { return data().stream().flatMap(packet -> packet.entries().stream()).toList(); }
+		List<InventoryS2CPacket.Entry> items(long id) {
+			return data().stream().filter(packet -> packet.requestId() == id).flatMap(packet -> packet.entries().stream()).toList();
+		}
 		boolean complete(long id) { return data().stream().anyMatch(packet -> packet.requestId() == id && packet.completeScan()); }
 	}
 
@@ -240,10 +493,11 @@ class InventoryPreviewServerTest {
 		int reads, resolutions;
 		int failAt = -1;
 		boolean allowed = true;
+		UUID deniedPlayer;
 		FakeHost(List<InventoryScanner.Stack> values) { this.values = values; }
 		@Override public Optional<InventoryPreviewServer.Resolved> resolve(UUID player, Target target) {
 			resolutions++;
-			if (!allowed) return Optional.empty();
+			if (!allowed || player.equals(deniedPlayer)) return Optional.empty();
 			InventoryScanner.Source source = new InventoryScanner.Source() {
 				@Override public int slots() { return values.size(); }
 				@Override public boolean stableCursor() { return true; }

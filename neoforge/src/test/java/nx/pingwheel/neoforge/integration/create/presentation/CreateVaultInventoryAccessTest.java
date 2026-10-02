@@ -1,0 +1,76 @@
+package nx.pingwheel.neoforge.integration.create.presentation;
+
+import java.util.HashMap;
+import java.util.Map;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.neoforged.neoforge.items.IItemHandler;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class CreateVaultInventoryAccessTest {
+	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
+	static class Handler implements IItemHandler {
+		final ItemStack[] stacks;
+		Handler(int slots) { stacks = new ItemStack[slots]; java.util.Arrays.fill(stacks, ItemStack.EMPTY); }
+		void setStackInSlot(int slot, ItemStack stack) { stacks[slot] = stack; }
+		@Override public int getSlots() { return stacks.length; }
+		@Override public ItemStack getStackInSlot(int slot) { return stacks[slot]; }
+		@Override public int getSlotLimit(int slot) { return 64; }
+		@Override public boolean isItemValid(int slot, ItemStack stack) { return true; }
+		@Override public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) { throw new AssertionError("read-only"); }
+		@Override public ItemStack extractItem(int slot, int amount, boolean simulate) { throw new AssertionError("read-only"); }
+	}
+	static class Member implements CreateVaultInventoryAccess.Member {
+		BlockPos controller = BlockPos.ZERO; int width = 1, length = 2; Direction.Axis axis = Direction.Axis.X;
+		IItemHandler handler = new Handler(1); String block = "create:item_vault"; boolean master; int localCalls;
+		@Override public String blockId() { return block; }
+		@Override public BlockPos controller() { return controller; }
+		@Override public boolean isController() { return master; }
+		@Override public int width() { return width; }
+		@Override public int length() { return length; }
+		@Override public Direction.Axis axis() { return axis; }
+		@Override public IItemHandler local() { localCalls++; return handler; }
+	}
+	static class World implements CreateVaultInventoryAccess.World {
+		final Map<BlockPos, Member> members = new HashMap<>(); int probes;
+		@Override public String dimension() { return "minecraft:overworld"; }
+		@Override public Member loaded(BlockPos pos) {
+			probes++; Member member = members.get(pos); if (member == null) throw new IllegalStateException("unloaded"); return member;
+		}
+		static World pair() { var world = new World(); var first = new Member(); first.master = true; world.members.put(BlockPos.ZERO, first); world.members.put(new BlockPos(1, 0, 0), new Member()); return world; }
+	}
+	@Test void aliasesAreCanonicalFromEitherHalfAndEveryReadReacquiresLocalInventory() {
+		World world = World.pair(); var first = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
+		var second = CreateVaultInventoryAccess.find(world, new BlockPos(1, 0, 0), Direction.SOUTH).orElseThrow();
+		assertEquals(first.alias(), second.alias()); assertEquals(2, first.slots()); assertTrue(first.stableCursor()); assertTrue(first.version().isEmpty());
+		var member = world.members.get(new BlockPos(1, 0, 0)); var live = new Handler(1); live.setStackInSlot(0, new ItemStack(Items.STONE, 17)); member.handler = live;
+		var entry = first.read(1); assertEquals(17, entry.amount()); assertEquals(1, entry.exemplar().getCount());
+		entry.exemplar().setCount(50); assertEquals(17, live.getStackInSlot(0).getCount(), "read detaches provider state");
+		world.members.remove(new BlockPos(1, 0, 0)); assertFalse(first.valid()); assertThrows(IllegalStateException.class, () -> first.read(0));
+	}
+	@Test void unloadedAndMalformedTopologyFailsBeforeAnyLocalSegmentIsRequested() {
+		World world = World.pair(); world.members.remove(new BlockPos(1, 0, 0));
+		assertTrue(CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).isEmpty()); assertEquals(0, world.members.get(BlockPos.ZERO).localCalls);
+		world = World.pair(); world.members.get(BlockPos.ZERO).width = 4;
+		assertTrue(CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).isEmpty()); assertEquals(0, world.members.get(BlockPos.ZERO).localCalls);
+		world = World.pair(); world.members.get(new BlockPos(1, 0, 0)).controller = new BlockPos(8, 0, 0);
+		assertTrue(CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).isEmpty()); assertEquals(0, world.members.get(BlockPos.ZERO).localCalls);
+		assertTrue(CreateVaultInventoryAccess.find(world, BlockPos.ZERO, null).isEmpty());
+	}
+	@Test void maximum81MemberTopologyStaysBoundedAndPerSegmentChangesInvalidateEvenWithSameTotal() {
+		World world = new World();
+		for (int x = 0; x < 9; x++) for (int y = 0; y < 3; y++) for (int z = 0; z < 3; z++) {
+			var member = new Member(); member.width = 3; member.length = 9; member.master = x == 0 && y == 0 && z == 0;
+			world.members.put(new BlockPos(x, y, z), member);
+		}
+		var access = CreateVaultInventoryAccess.find(world, new BlockPos(8, 2, 2), Direction.UP).orElseThrow();
+		assertEquals(81, access.slots()); assertEquals(164, world.probes);
+		world.members.get(BlockPos.ZERO).handler = new Handler(0);
+		world.members.get(new BlockPos(1, 0, 0)).handler = new Handler(2);
+		assertFalse(access.valid(), "stable cursor requires segment boundaries, not only total slots");
+	}
+}

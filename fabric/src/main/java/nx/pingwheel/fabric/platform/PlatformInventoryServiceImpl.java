@@ -35,9 +35,10 @@ import nx.pingwheel.common.platform.IPlatformInventoryService;
 public final class PlatformInventoryServiceImpl implements IPlatformInventoryService {
 
 	@Override
-	public Optional<Access> find(ServerLevel level, BlockPos pos, @Nullable Direction side) {
+	public Optional<Access> find(ServerLevel level, BlockPos pos, Direction side) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(pos, "pos");
+		Objects.requireNonNull(side, "side");
 		if (!level.isLoaded(pos)) return Optional.empty();
 		BlockEntity blockEntity = level.getBlockEntity(pos);
 		if (blockEntity instanceof RandomizableContainer randomizable && randomizable.getLootTable() != null) {
@@ -142,6 +143,15 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		@Override
 		public Entry read(int slot) {
 			throw new UnsupportedOperationException("source has no stable slot cursor");
+		}
+
+		@Override
+		public Budgeted observe(int limit) {
+			if (limit < 0) throw new IllegalArgumentException("negative observation limit");
+			java.util.List<Entry> entries = new java.util.ArrayList<>();
+			Iterator<StorageView<ItemVariant>> iterator = storage.iterator();
+			while (entries.size() < limit && iterator.hasNext()) entries.add(entry(iterator.next()));
+			return new Budgeted(entries, !iterator.hasNext());
 		}
 
 		@Override

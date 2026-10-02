@@ -366,4 +366,39 @@ class InventoryClientStoreTest {
 		assertTrue(store.values(channel).isEmpty());
 		assertEquals(6L, store.baselineId(channel));
 	}
+
+	@Test
+	void matchingRebaseKeepsAdmittedPartsAndStartTickWhileWeakerControlCannotReplaceThem() {
+		var store = new InventoryClientStore(4, 16L, 4);
+		var channel = Channel.tracked(1L);
+		store.snapshot(channel, 5L, 1L, map("old", value(7L, 1L)));
+		store.beginSnapshot(channel, 9L, 3L, 2, 10L);
+		store.part(channel, 9L, 3L, 0, map("a", value(3L, 0L)), 11L);
+
+		assertFalse(store.rebase(channel, 8L, 3L));
+		assertFalse(store.rebase(channel, 9L, 2L));
+		assertTrue(store.rebase(channel, 9L, 3L));
+		assertTrue(store.rebase(channel, 9L, 3L));
+		assertEquals(10L, store.assemblyStartTick(channel).orElseThrow());
+		assertTrue(store.values(channel).isEmpty(), "new fence clears old values but not admitted parts");
+		assertEquals(PartOutcome.COMMITTED,
+			store.part(channel, 9L, 3L, 1, map("b", value(5L, 0L)), 1_000L));
+		assertEquals(Map.of("a", value(3L, 0L), "b", value(5L, 0L)), store.values(channel));
+	}
+
+	@Test
+	void invalidationCannotRetireAnAlreadyAdmittedNewerOrEqualFence() {
+		var store = new InventoryClientStore(4, 16L, 4);
+		var channel = Channel.tracked(1L);
+		store.snapshot(channel, 5L, 1L, map("old", value(7L, 1L)));
+		store.beginSnapshot(channel, 9L, 3L, 2, 10L);
+		store.part(channel, 9L, 3L, 0, map("a", value(3L, 0L)), 11L);
+		assertFalse(store.invalidate(channel, 2L));
+		assertFalse(store.invalidate(channel, 3L));
+		assertFalse(store.isInvalid(channel));
+		assertEquals(PartOutcome.COMMITTED,
+			store.part(channel, 9L, 3L, 1, map("b", value(5L, 0L)), 12L));
+		assertTrue(store.invalidate(channel, 4L));
+		assertTrue(store.isInvalid(channel));
+	}
 }

@@ -65,6 +65,7 @@ class InventoryS2CPacketTest {
 		buf.writeLong(revision);
 		buf.writeBoolean(false);
 		buf.writeBoolean(false);
+		buf.writeLong(0L); buf.writeBoolean(false); buf.writeBoolean(false);
 	}
 
 	private static void writeStreamPrefix(FriendlyByteBuf frame, int partIndex, int partCount) {
@@ -72,6 +73,7 @@ class InventoryS2CPacketTest {
 		frame.writeVarInt(InventoryS2CPacket.VERSION);
 		frame.writeLong(1L);
 		frame.writeLong(1L);
+		frame.writeLong(100L); frame.writeLong(1L);
 		MarkerPacketCodec.writeOptionalMarkerId(frame, Optional.of(new MarkerId(1L)));
 		frame.writeLong(1L);
 		frame.writeLong(0L);
@@ -104,6 +106,7 @@ class InventoryS2CPacketTest {
 		frame.writeVarInt(InventoryS2CPacket.VERSION);
 		frame.writeLong(1L);
 		frame.writeLong(1L);
+		frame.writeLong(100L); frame.writeLong(1L);
 		MarkerPacketCodec.writeOptionalMarkerId(frame, Optional.of(new MarkerId(1L)));
 		frame.writeLong(0L);
 		frame.writeLong(0L);
@@ -119,6 +122,7 @@ class InventoryS2CPacketTest {
 		frame.writeVarInt(InventoryS2CPacket.VERSION);
 		frame.writeLong(1L);
 		frame.writeLong(0L);
+		frame.writeLong(100L); frame.writeLong(1L);
 		frame.writeVarInt(preview);
 		frame.writeVarInt(tracking);
 		frame.writeVarInt(resync);
@@ -127,10 +131,10 @@ class InventoryS2CPacketTest {
 	}
 
 	@Test
-	void routeVersionKindsAndStatusAreInventoryV1() {
-		assertEquals(1, InventoryS2CPacket.VERSION);
-		assertEquals("pingforit-s2c:inventory-v1", InventoryS2CPacket.PACKET_ID.toString());
-		assertEquals(List.of(InventoryS2CPacket.Kind.OFFER, InventoryS2CPacket.Kind.PREVIEW,
+	void routeVersionKindsAndStatusAreInventoryV2() {
+		assertEquals(2, InventoryS2CPacket.VERSION);
+		assertEquals("pingforit-s2c:inventory-v2", InventoryS2CPacket.PACKET_ID.toString());
+		assertEquals(List.of(InventoryS2CPacket.Kind.OFFER, InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.SELECTED, InventoryS2CPacket.Kind.REJECT, InventoryS2CPacket.Kind.PREVIEW,
 			InventoryS2CPacket.Kind.SNAPSHOT, InventoryS2CPacket.Kind.STREAM,
 			InventoryS2CPacket.Kind.STATUS, InventoryS2CPacket.Kind.HEARTBEAT),
 			Arrays.asList(InventoryS2CPacket.Kind.values()));
@@ -337,7 +341,7 @@ class InventoryS2CPacketTest {
 		List<InventoryS2CPacket.Entry> nearBound = new ArrayList<>();
 		for (int i = 0; i < 7; i++) {
 			nearBound.add(new InventoryS2CPacket.Entry("k" + i, "minecraft:stone", "l".repeat(1024),
-				"d".repeat(3600), 1L, 1L, false, null));
+				"d".repeat(3585), 1L, 1L, false, null));
 		}
 		InventoryS2CPacket accepted = InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1L, 1L,
 			new MarkerId(1L), 0, 0, 0, 0, 1, true, InventoryS2CPacket.Status.READY, 0, nearBound);

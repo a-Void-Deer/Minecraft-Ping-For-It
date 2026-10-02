@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.BlockFace;
 
 import java.util.Arrays;
 import java.util.List;
@@ -36,9 +37,9 @@ class InventoryC2SPacketTest {
 	}
 
 	@Test
-	void routeAndKindsAreVersionedInventoryV1() {
-		assertEquals(1, InventoryC2SPacket.VERSION);
-		assertEquals("pingforit-c2s:inventory-v1", InventoryC2SPacket.PACKET_ID.toString());
+	void routeAndKindsAreVersionedInventoryV2() {
+		assertEquals(2, InventoryC2SPacket.VERSION);
+		assertEquals("pingforit-c2s:inventory-v2", InventoryC2SPacket.PACKET_ID.toString());
 		assertEquals(List.of(InventoryC2SPacket.Kind.HELLO, InventoryC2SPacket.Kind.OPEN,
 			InventoryC2SPacket.Kind.CLOSE, InventoryC2SPacket.Kind.RESYNC,
 			InventoryC2SPacket.Kind.SELECT), Arrays.asList(InventoryC2SPacket.Kind.values()));
@@ -62,9 +63,10 @@ class InventoryC2SPacketTest {
 	void openBindsARequestToATargetAndRoundTrips() {
 		long epoch = (1L << 53) + 1;
 		long request = (1L << 53) + 3;
-		Target target = new Target.LocationTarget("minecraft:overworld", 12.5, 64.0, -8.25);
+		Target.BlockTarget target = new Target.BlockTarget("minecraft:overworld", 12, 64, -8, "minecraft:chest");
 
-		InventoryC2SPacket decoded = roundTrip(InventoryC2SPacket.open(epoch, request, target));
+		InventoryC2SPacket decoded = roundTrip(InventoryC2SPacket.open(epoch, 100, 3, request, target, BlockFace.WEST));
+		assertEquals(BlockFace.WEST, decoded.face());
 
 		assertEquals(InventoryC2SPacket.Kind.OPEN, decoded.kind());
 		assertEquals(epoch, decoded.epoch());
@@ -92,11 +94,11 @@ class InventoryC2SPacketTest {
 		InventoryC2SPacket resyncAll = roundTrip(InventoryC2SPacket.resync(epoch, request));
 		assertNull(resyncAll.markerId());
 
-		InventoryC2SPacket select = roundTrip(InventoryC2SPacket.select(epoch, request, "sha256-token", "minecraft:stone", "attention"));
+		InventoryC2SPacket select = roundTrip(InventoryC2SPacket.select(epoch, 100, 3, 5, request, 9, 7, "opaque-token", "attention"));
 		assertEquals(InventoryC2SPacket.Kind.SELECT, select.kind());
 		assertEquals(request, select.requestId());
-		assertEquals("sha256-token", select.entryKey());
-		assertEquals("minecraft:stone", select.itemId());
+		assertEquals("opaque-token", select.entryKey());
+		assertNull(select.itemId());
 		assertEquals("attention", select.pingType());
 		assertNull(select.target());
 		assertNull(select.markerId());
@@ -105,9 +107,9 @@ class InventoryC2SPacketTest {
 	@Test
 	void maximumBoundedTextRoundTripsAndLargerTextIsRejected() {
 		String max = "a".repeat(256);
-		InventoryC2SPacket decoded = roundTrip(InventoryC2SPacket.select(1L, 2L, max, max, max));
+		InventoryC2SPacket decoded = roundTrip(InventoryC2SPacket.select(1, 100, 3, 5, 2, 9, 7, max, max));
 		assertEquals(max, decoded.entryKey());
-		assertEquals(max, decoded.itemId());
+		assertNull(decoded.itemId());
 		assertEquals(max, decoded.pingType());
 
 		assertThrows(IllegalArgumentException.class,
@@ -151,7 +153,7 @@ class InventoryC2SPacketTest {
 			buf.release();
 		}
 
-		assertTrue(new InventoryC2SPacket(InventoryC2SPacket.Kind.HELLO, 2, 0L, 0L,
+		assertTrue(new InventoryC2SPacket(InventoryC2SPacket.Kind.HELLO, 1, 0L, 0L,
 			null, null, null, null, null).isCorrupt());
 	}
 

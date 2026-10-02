@@ -7,7 +7,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -16,7 +15,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
-import net.minecraft.world.LockCode;
 import net.minecraft.world.RandomizableContainer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.vehicle.ContainerEntity;
@@ -48,7 +46,7 @@ import nx.pingwheel.common.presentation.source.SourceKey;
  * its loot table (block entities via {@link RandomizableContainer}; minecarts
  * and chest boats via {@link ContainerEntity}) must be absent before any item
  * is read. Locks are checked through
- * {@link BaseContainerBlockEntity#collectComponents()} so the vanilla
+	 * a lock-only accessor so the vanilla
  * {@code canOpen} feedback message and sound are not emitted. Double chests
  * resolve only when both halves are loaded and both block entities pass the
  * same gates; a canonical lower-lexicographic position alias makes either half
@@ -313,9 +311,7 @@ public final class VanillaInventorySource {
 		}
 
 		private boolean unlocked(BaseContainerBlockEntity blockEntity) {
-			LockCode lock = blockEntity.collectComponents()
-				.getOrDefault(DataComponents.LOCK, LockCode.NO_LOCK);
-			return lock.unlocksWith(player.getMainHandItem());
+			return InventoryReadSafety.readable(blockEntity, player.getMainHandItem());
 		}
 
 		private Container entityContainer(Target.EntityTarget target) {

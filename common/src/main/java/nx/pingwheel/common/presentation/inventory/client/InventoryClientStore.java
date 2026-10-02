@@ -209,6 +209,10 @@ public final class InventoryClientStore {
 	 * value changes.
 	 */
 	public Outcome apply(Channel channel, long baselineId, long stateRevision, Map<String, Value> updates) {
+		return applyReplacing(channel, baselineId, stateRevision, updates, java.util.Set.of());
+	}
+	/** Atomic domain group replacement; removal and its aggregate are admitted together. */
+	public Outcome applyReplacing(Channel channel, long baselineId, long stateRevision, Map<String, Value> updates, java.util.Set<String> removed) {
 		Objects.requireNonNull(channel, "channel");
 		Map<String, Value> copy = copyValues(updates);
 		requireBaseline(baselineId);
@@ -226,11 +230,12 @@ public final class InventoryClientStore {
 
 		long newKeys = 0L;
 		for (Map.Entry<String, Value> update : copy.entrySet()) {
-			if (!state.values.containsKey(update.getKey()))
+			if (!state.values.containsKey(update.getKey()) || removed.contains(update.getKey()))
 				newKeys++;
 		}
-		if ((long) state.values.size() + newKeys > maxEntries)
+		if ((long) state.values.size() - removed.stream().filter(state.values::containsKey).count() + newKeys > maxEntries)
 			return Outcome.REJECTED_BOUND;
+		removed.forEach(state.values::remove);
 
 		for (Map.Entry<String, Value> update : copy.entrySet()) {
 			Value existing = state.values.get(update.getKey());
@@ -245,6 +250,7 @@ public final class InventoryClientStore {
 	 * Committed values are kept for grey presentation and in-flight assembly is
 	 * discarded. A same-fence or older invalidate never transitions a valid
 	 * channel; repeating it on an already invalid channel is idempotent.
+	 * An admitted assembly's fence also protects it from weaker invalidations.
 	 */
 	public boolean invalidate(Channel channel, long newStateRevision) {
 		Objects.requireNonNull(channel, "channel");
@@ -262,6 +268,8 @@ public final class InventoryClientStore {
 		}
 		if (newStateRevision < state.statusRevision)
 			return false;
+		if (state.assembly != null && newStateRevision <= state.assembly.stateRevision)
+			return false;
 		if (newStateRevision == state.statusRevision)
 			return state.invalid;
 
@@ -276,7 +284,8 @@ public final class InventoryClientStore {
 	 * state revision may recover an invalid channel. At the same fence a valid
 	 * channel accepts only an equal baseline (idempotent no-op preserving
 	 * values) or a monotonic forward baseline (resync), never a lower baseline,
-	 * and an invalid channel is never revived.
+	 * and an invalid channel is never revived. A matching pending assembly keeps
+	 * its admitted parts and original start tick; weaker controls cannot reset it.
 	 */
 	public boolean rebase(Channel channel, long newBaselineId, long newStateRevision) {
 		Objects.requireNonNull(channel, "channel");
@@ -295,6 +304,10 @@ public final class InventoryClientStore {
 		}
 		if (newStateRevision < state.statusRevision)
 			return false;
+		Assembly pending = state.assembly;
+		if (pending != null && (newStateRevision < pending.stateRevision
+			|| (newStateRevision == pending.stateRevision && newBaselineId < pending.baselineId)))
+			return false;
 		if (newStateRevision == state.statusRevision) {
 			if (state.invalid)
 				return false;
@@ -305,7 +318,9 @@ public final class InventoryClientStore {
 		}
 
 		state.values.clear();
-		state.assembly = null;
+		// A control for the very baseline being assembled must not restart its work.
+		if (pending == null || pending.baselineId != newBaselineId || pending.stateRevision != newStateRevision)
+			state.assembly = null;
 		state.invalid = false;
 		state.baselineId = newBaselineId;
 		state.statusRevision = newStateRevision;

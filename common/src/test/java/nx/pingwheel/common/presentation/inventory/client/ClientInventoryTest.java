@@ -1,7 +1,9 @@
 package nx.pingwheel.common.presentation.inventory.client;
 
+import io.netty.buffer.Unpooled;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.network.IPacket;
@@ -25,8 +27,35 @@ class ClientInventoryTest {
 	private static final long WINDOW = 60L;
 
 	private final List<IPacket> sent = new ArrayList<>();
-	private final ClientInventory session = new ClientInventory(sent::add);
+	private final V2Fixture session = new V2Fixture();
 	private final MarkerId markerId = new MarkerId(3L);
+
+	/** Existing delivery regressions run under an explicitly authorized v2 presentation fixture. */
+	private final class V2Fixture {
+		final ClientInventory client = new ClientInventory(sent::add);
+		long open(Target target) {
+			client.presentationReset(100, 1);
+			return client.open((Target.BlockTarget) target, nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
+		}
+		void accept(InventoryS2CPacket packet) {
+			client.accept(packet.stamp(100, 1));
+			if (packet.kind() == InventoryS2CPacket.Kind.OFFER && packet.epoch() == EPOCH) {
+				client.presentationReset(100, 1);
+				client.accept(InventoryS2CPacket.policy(EPOCH, 100, 1, java.util.Set.of("entity_block")));
+				for (long id : new long[] {3, 8}) client.markerCreated(new nx.pingwheel.common.marker.MarkerSnapshot(new MarkerId(id), new java.util.UUID(1, 1),
+					target(), "entity_block", "attention", new nx.pingwheel.common.marker.MarkerAnchor(1, 2, 3), 0, 10000));
+			}
+		}
+		void tick(boolean connected) { client.tick(connected); }
+		void reset() { client.reset(); }
+		boolean ready() { return client.ready(); }
+		boolean helloPending() { return client.helloPending(); }
+		long epoch() { return client.epoch(); }
+		ClientInventory.Stats stats() { return client.stats(); }
+		ClientInventory.Tracking tracking(MarkerId id) { return client.tracking(id); }
+		ClientInventory.Preview preview(long request) { return client.preview(request); }
+		boolean select(long request, String key, String item, String type) { return client.select(request, key, item, type); }
+	}
 
 	private static Target target() {
 		return new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest");
@@ -71,6 +100,37 @@ class ClientInventoryTest {
 		return InventoryS2CPacket.heartbeat(EPOCH, 1L, markerId, BASELINE, REVISION, watermark, checksum);
 	}
 
+	private void receive(InventoryS2CPacket packet) {
+		FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+		try {
+			packet.write(buffer);
+			InventoryS2CPacket decoded = new InventoryS2CPacket(buffer);
+			assertFalse(decoded.isCorrupt(), "the regression stimulus is an actual valid inventory frame");
+			assertFalse(buffer.isReadable(), "the decoder consumes the whole frame");
+			session.accept(decoded);
+		} finally {
+			buffer.release();
+		}
+	}
+
+	private static long checksum(InventoryS2CPacket.Entry... entries) {
+		InventoryChecksums.Builder builder = InventoryChecksums.builder();
+		for (InventoryS2CPacket.Entry entry : entries)
+			builder.add(entry.key(), entry.itemId(), entry.count(),
+				entry.quality() == null ? null : entry.quality().name(), entry.fallback());
+		return builder.checksum();
+	}
+
+	private ClientInventory.EntryView trackedEntry(String key) {
+		return session.tracking(markerId).entries().stream().filter(view -> view.key().equals(key))
+			.findFirst().orElseThrow();
+	}
+
+	private void elapseRepairCooldown() {
+		for (long i = 0; i < WINDOW; i++)
+			session.tick(true);
+	}
+
 	@Test
 	void helloIsAttemptedOnFirstTickAndStoppedByOffer() {
 		session.tick(true);
@@ -112,7 +172,10 @@ class ClientInventoryTest {
 		assertEquals(InventoryC2SPacket.Kind.OPEN, open.kind());
 		assertEquals(EPOCH, open.epoch());
 		assertEquals(requestId, open.requestId());
-		assertTrue(session.select(requestId, "a", "minecraft:stone", "basic"));
+		session.accept(previewData(requestId, 1, 1, 1, 0, 1, false, InventoryS2CPacket.Status.UPDATING, List.of(entry("a", 1, 1))));
+		assertEquals(ClientInventory.DispatchOutcome.SENT, session.client.select(session.client.selectable(requestId).getFirst(), "attention", packet -> {
+			sent.add(packet); return ClientInventory.DispatchOutcome.SENT;
+		}));
 		assertEquals(InventoryC2SPacket.Kind.SELECT,
 			assertInstanceOf(InventoryC2SPacket.class, sent.get(1)).kind());
 	}
@@ -328,6 +391,487 @@ class ClientInventoryTest {
 		assertEquals(3L, tracking.entries().get(0).count());
 		assertEquals("minecraft:stone", tracking.entries().get(0).itemId());
 		assertFalse(tracking.grey());
+	}
+
+	@Test
+	void equalFenceInvalidationIsFencedAndKeepsValidTracking() {
+		commitTwoEntries();
+		long fencedBefore = session.stats().fencedPackets();
+
+		session.accept(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, REVISION, WATERMARK,
+			InventoryS2CPacket.Status.INVALID, 0L));
+
+		ClientInventory.Tracking tracking = session.tracking(markerId);
+		assertFalse(tracking.grey(), "an equal-fence invalid is refused by the store fence");
+		assertEquals(InventoryS2CPacket.Status.READY, tracking.status());
+		assertEquals(2, tracking.entries().size(), "committed values stay valid");
+		assertTrue(session.stats().fencedPackets() > fencedBefore);
+	}
+
+	@Test
+	void newerInvalidationDropsBufferedOldStateAndBlocksOldData() {
+		commitTwoEntries();
+		session.accept(data(InventoryS2CPacket.Kind.STREAM, 9L, REVISION, 0, 1, WATERMARK,
+			List.of(entry("x", 1L, 1L))));
+		assertEquals(1, session.stats().unknownSessions());
+		long fencedBefore = session.stats().fencedPackets();
+
+		session.accept(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, REVISION + 1L, WATERMARK,
+			InventoryS2CPacket.Status.INVALID, 0L));
+
+		ClientInventory.Tracking invalid = session.tracking(markerId);
+		assertTrue(invalid.grey());
+		assertEquals(2, invalid.entries().size(), "the last committed values stay visible grey");
+		assertEquals(0, session.stats().unknownSessions(), "an accepted invalidation drops old unknown streams");
+
+		session.accept(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, WATERMARK,
+			List.of(entry("a", 99L, 9L))));
+
+		ClientInventory.Tracking after = session.tracking(markerId);
+		assertEquals(2, after.entries().size(), "old valid data cannot revive an invalidated channel");
+		assertTrue(session.stats().fencedPackets() > fencedBefore);
+	}
+
+	@Test
+	void invalidationRetiresOldBuffersButPreservesReorderedRecoveryAndOtherMarker() {
+		commitTwoEntries();
+		MarkerId other = new MarkerId(8L);
+		receive(data(InventoryS2CPacket.Kind.STREAM, 8L, REVISION, 0, 1, WATERMARK,
+			List.of(entry("old", 99L, 1L))));
+		receive(data(InventoryS2CPacket.Kind.STREAM, 9L, 3L, 1, 2, 1L,
+			List.of(entry("recovered-b", 6L, 0L))));
+		receive(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, EPOCH, 2L, other, 12L, 1L, 2L,
+			1, 2, true, InventoryS2CPacket.Status.READY, 0L, List.of(entry("other-b", 8L, 0L))));
+		assertEquals(3, session.stats().unknownSessions());
+		sent.clear();
+
+		receive(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, 2L, 99L,
+			InventoryS2CPacket.Status.INVALID, 0L));
+		assertEquals(2, session.stats().unknownSessions(), "only <= invalidation-fence buffers retire");
+		assertEquals(WATERMARK, session.tracking(markerId).watermark(), "control is not a delivered cut");
+		assertTrue(session.tracking(markerId).grey());
+
+		receive(InventoryS2CPacket.status(EPOCH, 1L, markerId, 9L, 3L, 100L,
+			InventoryS2CPacket.Status.READY, 0L));
+		assertEquals(0L, session.tracking(markerId).watermark(), "a clean baseline resets the old cut");
+		receive(data(InventoryS2CPacket.Kind.SNAPSHOT, 9L, 3L, 0, 2, 1L,
+			List.of(entry("recovered-a", 4L, 0L))));
+
+		ClientInventory.Tracking recovered = session.tracking(markerId);
+		assertTrue(recovered.complete(), "the future fragment buffered before invalidation completes recovery");
+		assertFalse(recovered.grey());
+		assertEquals(1L, recovered.watermark());
+		assertEquals(List.of("recovered-a", "recovered-b"),
+			recovered.entries().stream().map(ClientInventory.EntryView::key).toList());
+		assertEquals(1, session.stats().unknownSessions(), "A's recovery never drains B's buffer");
+
+		receive(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, EPOCH, 2L, other, 12L, 1L, 2L,
+			0, 2, true, InventoryS2CPacket.Status.READY, 0L, List.of(entry("other-a", 7L, 0L))));
+		assertTrue(session.tracking(other).complete());
+		assertEquals(2, session.tracking(other).entries().size());
+		assertEquals(0, session.stats().unknownSessions());
+		assertTrue(sent.isEmpty(), "valid reorderings require neither timeout nor repair");
+	}
+
+	@Test
+	void rejectedBaselinePartCannotPoisonMetadataStatusOrCut() {
+		offer();
+		receive(snapshot(0, 2, List.of(entry("a", 3L, 1L))));
+		InventoryS2CPacket.Entry poison = new InventoryS2CPacket.Entry("a", "minecraft:dirt", "poison",
+			"{}", 99L, 9L, true, InventoryS2CPacket.Status.COMPONENT_TOO_LONG);
+		long rejects = session.stats().boundRejects();
+		receive(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, EPOCH, 1L, markerId, BASELINE,
+			REVISION, WATERMARK, 0, 2, true, InventoryS2CPacket.Status.UNCERTAIN, 0L, List.of(poison)));
+		receive(data(InventoryS2CPacket.Kind.SNAPSHOT, BASELINE, REVISION, 1, 2, WATERMARK,
+			List.of(poison)));
+		receive(data(InventoryS2CPacket.Kind.SNAPSHOT, BASELINE, REVISION, 1, 2, WATERMARK + 20L,
+			List.of(entry("b", 99L, 9L))));
+		assertFalse(session.tracking(markerId).complete());
+		assertEquals(0L, session.tracking(markerId).watermark());
+		assertTrue(session.tracking(markerId).entries().isEmpty());
+		assertTrue(session.stats().boundRejects() >= rejects + 2L);
+
+		receive(snapshot(1, 2, List.of(entry("b", 5L, 1L))));
+		assertEquals("minecraft:stone", trackedEntry("a").itemId());
+		assertEquals("a", trackedEntry("a").label());
+		assertNull(trackedEntry("a").displayJson());
+		assertFalse(trackedEntry("a").fallback());
+		assertNull(trackedEntry("a").quality());
+		assertEquals(3L, trackedEntry("a").count());
+		assertEquals(InventoryS2CPacket.Status.READY, session.tracking(markerId).status());
+		assertEquals(WATERMARK, session.tracking(markerId).watermark());
+		elapseRepairCooldown();
+		sent.clear();
+		long expected = checksum(entry("a", 3L, 1L), entry("b", 5L, 1L));
+		receive(heartbeat(expected, WATERMARK));
+		assertTrue(sent.isEmpty(), "the digest uses only the metadata and quantities of accepted fragments");
+		receive(heartbeat(expected + 1L, WATERMARK));
+		assertEquals(1, sent.size(), "a mismatch at this cut can repair: the positive assertion is not cooldown-masked");
+		assertEquals(InventoryC2SPacket.Kind.RESYNC,
+			assertInstanceOf(InventoryC2SPacket.class, sent.get(0)).kind());
+	}
+
+	@Test
+	void acceptedSameKeyRevisionOwnsMetadataAndQuantityTogether() {
+		commitTwoEntries();
+		InventoryS2CPacket.Entry fresh = new InventoryS2CPacket.Entry("a", "minecraft:dirt", "fresh", "{}",
+			7L, 3L, true, InventoryS2CPacket.Status.COMPONENT_TOO_LONG);
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 7L, List.of(fresh)));
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 6L,
+			List.of(entry("a", 90L, 2L), entry("b", 8L, 2L))));
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 8L,
+			List.of(entry("a", 91L, 3L))));
+
+		assertEquals(7L, trackedEntry("a").count());
+		assertEquals("minecraft:dirt", trackedEntry("a").itemId());
+		assertEquals("fresh", trackedEntry("a").label());
+		assertEquals("{}", trackedEntry("a").displayJson());
+		assertTrue(trackedEntry("a").fallback());
+		assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, trackedEntry("a").quality());
+		assertEquals(8L, trackedEntry("b").count(), "a late different key is not packet-global stale");
+		sent.clear();
+		receive(heartbeat(checksum(fresh, entry("b", 8L, 2L)), 8L));
+		assertTrue(sent.isEmpty(), "stale/equal item revisions cannot contaminate the closed digest");
+	}
+
+	@Test
+	void multipartStreamClosesOnlyEveryAcceptedDistinctPartAndRechecksDeferredHeartbeat() {
+		commitTwoEntries();
+		sent.clear();
+		InventoryS2CPacket part = data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 1, 2, 6L,
+			List.of(entry("b", 8L, 2L)));
+		receive(part);
+		receive(part);
+		assertEquals(8L, trackedEntry("b").count(), "tracking applies accepted parts immediately per key");
+		assertEquals(WATERMARK, session.tracking(markerId).watermark(), "duplicate indexes never close the cut");
+		long expected = checksum(entry("a", 9L, 2L), entry("b", 8L, 2L));
+		receive(heartbeat(expected + 1L, 6L));
+		assertTrue(sent.isEmpty(), "partial state is not compared to the heartbeat's future cut");
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 2, 6L,
+			List.of(entry("a", 9L, 2L))));
+		assertEquals(6L, session.tracking(markerId).watermark());
+		assertEquals(1, sent.size(), "the deferred mismatch is tested as soon as the cut closes");
+		assertEquals(InventoryC2SPacket.Kind.RESYNC,
+			assertInstanceOf(InventoryC2SPacket.class, sent.get(0)).kind());
+	}
+
+	@Test
+	void conflictingStreamIndexCannotMutateMetadataStatusOrCloseBarrier() {
+		commitTwoEntries();
+		sent.clear();
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 2, 6L,
+			List.of(entry("a", 6L, 2L))));
+		InventoryS2CPacket.Entry poison = new InventoryS2CPacket.Entry("a", "minecraft:dirt", "bad", null,
+			99L, 9L, true, InventoryS2CPacket.Status.COMPONENT_TOO_LONG);
+		receive(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, EPOCH, 1L, markerId, BASELINE,
+			REVISION, 6L, 0, 2, true, InventoryS2CPacket.Status.UNCERTAIN, 0L, List.of(poison)));
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 1, 3, 6L,
+			List.of(entry("b", 99L, 9L))));
+		assertEquals(6L, trackedEntry("a").count());
+		assertEquals("minecraft:stone", trackedEntry("a").itemId());
+		assertEquals(5L, trackedEntry("b").count());
+		assertEquals(InventoryS2CPacket.Status.READY, session.tracking(markerId).status());
+		assertEquals(WATERMARK, session.tracking(markerId).watermark());
+		elapseRepairCooldown();
+		sent.clear();
+		long expected = checksum(entry("a", 6L, 2L), entry("b", 7L, 2L));
+		receive(heartbeat(expected, 6L));
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 1, 2, 6L,
+			List.of(entry("b", 7L, 2L))));
+		assertEquals(6L, session.tracking(markerId).watermark());
+		assertTrue(sent.isEmpty(), "conflicting content was neither applied nor used by the digest");
+		receive(heartbeat(expected + 1L, 6L));
+		assertEquals(1, sent.size(), "a mismatch still repairs after the accepted parts close, without cooldown masking");
+		assertEquals(InventoryC2SPacket.Kind.RESYNC,
+			assertInstanceOf(InventoryC2SPacket.class, sent.get(0)).kind());
+	}
+
+	@Test
+	void interleavedDeliveriesKeepLivePerKeyRevisionsSeparateFromClosedDigest() {
+		commitTwoEntries();
+		sent.clear();
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 2, 6L,
+			List.of(entry("a", 6L, 2L))));
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 7L,
+			List.of(entry("a", 7L, 3L))));
+		assertEquals(7L, trackedEntry("a").count(), "newer live per-key state is not stalled by another cut");
+		assertEquals(WATERMARK, session.tracking(markerId).watermark());
+		receive(heartbeat(checksum(entry("a", 6L, 2L), entry("b", 6L, 2L)), 6L));
+		receive(heartbeat(checksum(entry("a", 7L, 3L), entry("b", 6L, 2L)), 7L));
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 1, 2, 6L,
+			List.of(entry("b", 6L, 2L))));
+		assertEquals(7L, session.tracking(markerId).watermark());
+		assertEquals(7L, trackedEntry("a").count());
+		assertEquals(6L, trackedEntry("b").count(), "a late distinct key is still accepted");
+		assertTrue(sent.isEmpty(), "neither closed-cut checksum sees the other cut's newer value");
+	}
+
+	@Test
+	void baselineHeartbeatWaitsForLastPartAndAssemblySurvivesDuplicateStatusBeyondUnknownWindow() {
+		offer();
+		receive(snapshot(0, 2, List.of(entry("a", 3L, 1L))));
+		receive(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, REVISION, 99L,
+			InventoryS2CPacket.Status.UPDATING, 0L));
+		receive(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, REVISION, 99L,
+			InventoryS2CPacket.Status.UPDATING, 0L));
+		receive(heartbeat(checksum(entry("a", 3L, 1L), entry("b", 5L, 1L)) + 1L, WATERMARK));
+		for (int i = 0; i < WINDOW * 2L; i++)
+			session.tick(true);
+		assertTrue(sent.isEmpty(), "admitted assembly is not an unknown-buffer timeout");
+		assertFalse(session.tracking(markerId).complete());
+		assertEquals(0L, session.tracking(markerId).watermark());
+		receive(snapshot(1, 2, List.of(entry("b", 5L, 1L))));
+		assertTrue(session.tracking(markerId).complete());
+		assertEquals(WATERMARK, session.tracking(markerId).watermark());
+		assertEquals(1, sent.size(), "the deferred baseline heartbeat is compared after completion");
+	}
+
+	private static List<InventoryS2CPacket.Entry> largeMetadataPart(int part) {
+		return largeMetadataPart(part, 3990);
+	}
+
+	private static List<InventoryS2CPacket.Entry> largeMetadataPart(int part, int displayLength) {
+		List<InventoryS2CPacket.Entry> entries = new ArrayList<>();
+		for (int i = part * 8; i < (part + 1) * 8; i++)
+			entries.add(new InventoryS2CPacket.Entry("k" + i, "minecraft:stone", "", "d".repeat(displayLength),
+				1L, 1L, false, null));
+		if (part == 7)
+			entries.add(new InventoryS2CPacket.Entry("small", "minecraft:stone", "", null, 1L, 1L, false, null));
+		return entries;
+	}
+
+	@Test
+	void trackingReplacementGrowthIsRejectedBeforeQuantityMetadataAndCutMutation() {
+		offer();
+		for (int part = 0; part < 8; part++)
+			receive(snapshot(part, 8, largeMetadataPart(part)));
+		assertTrue(session.tracking(markerId).complete());
+		assertEquals(65, session.tracking(markerId).entries().size());
+		long rejects = session.stats().boundRejects();
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 6L,
+			List.of(new InventoryS2CPacket.Entry("small", "minecraft:stone", "", "d".repeat(3990),
+				99L, 2L, false, null))));
+		assertTrue(session.stats().boundRejects() > rejects);
+		assertEquals(1L, trackedEntry("small").count(), "byte admission precedes numeric acceptance");
+		assertNull(trackedEntry("small").displayJson());
+		assertEquals(WATERMARK, session.tracking(markerId).watermark());
+		sent.clear();
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 6L,
+			List.of(new InventoryS2CPacket.Entry("small", "minecraft:stone", "", null, 9L, 2L, false, null))));
+		assertEquals(9L, trackedEntry("small").count(), "rejected growth did not consume the item revision");
+		assertEquals(6L, session.tracking(markerId).watermark(), "the fitting retry closes normally");
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 7L,
+			List.of(entry("extra", 2L, 1L))));
+		assertEquals(66, session.tracking(markerId).entries().size(), "retained-byte accounting still admits room");
+	}
+
+	@Test
+	void baselineMetadataOverageRejectsWholePartAndFittingRetryCompletes() {
+		offer();
+		for (int part = 0; part < 7; part++)
+			receive(snapshot(part, 8, largeMetadataPart(part, 4030)));
+		receive(snapshot(7, 8, largeMetadataPart(7, 4010)));
+		assertFalse(session.tracking(markerId).complete());
+		assertTrue(session.tracking(markerId).entries().isEmpty());
+		assertEquals(0L, session.tracking(markerId).watermark());
+		receive(snapshot(7, 8, largeMetadataPart(7, 3820)));
+		assertTrue(session.tracking(markerId).complete(), "byte rejection did not consume the last part index");
+		assertEquals(65, session.tracking(markerId).entries().size());
+		assertEquals(1L, trackedEntry("small").count());
+		assertNull(trackedEntry("small").displayJson());
+	}
+
+	@Test
+	void unknownLaterDeliveryAfterBaselineCommitIsAppliedRatherThanDropped() {
+		offer();
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 6L,
+			List.of(entry("a", 8L, 2L))));
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 1, 2, WATERMARK,
+			List.of(entry("b", 5L, 1L))));
+		receive(snapshot(0, 2, List.of(entry("a", 3L, 1L))));
+		assertTrue(session.tracking(markerId).complete());
+		assertEquals(8L, trackedEntry("a").count());
+		assertEquals(5L, trackedEntry("b").count());
+		assertEquals(6L, session.tracking(markerId).watermark());
+		assertEquals(0, session.stats().unknownSessions());
+	}
+
+	@Test
+	void trackedReplayGuardsDoNotStarveLongSequenceOfServiceableDeliveries() {
+		commitTwoEntries();
+		sent.clear();
+		for (long watermark = 6L; watermark < 50L; watermark++) {
+			receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, watermark,
+				List.of(entry("a", watermark, watermark))));
+			receive(heartbeat(checksum(entry("a", watermark, watermark), entry("b", 5L, 1L)), watermark));
+		}
+		assertEquals(49L, session.tracking(markerId).watermark());
+		assertEquals(49L, trackedEntry("a").count());
+		assertEquals(0L, session.stats().boundRejects());
+		assertTrue(sent.isEmpty(), "bounded replay history is retired without blocking new deliveries");
+	}
+
+	@Test
+	void evictedSnapshotReplayCannotReopenItsClosedBarrierOrSuppressRepair() {
+		assertEvictedReplayCannotReopenBarrier(InventoryS2CPacket.Kind.SNAPSHOT);
+	}
+
+	@Test
+	void evictedMultipartStreamReplayCannotReopenItsClosedBarrierOrSuppressRepair() {
+		assertEvictedReplayCannotReopenBarrier(InventoryS2CPacket.Kind.STREAM);
+	}
+
+	private void assertEvictedReplayCannotReopenBarrier(InventoryS2CPacket.Kind kind) {
+		commitTwoEntries();
+		InventoryS2CPacket replay;
+		InventoryS2CPacket.Entry lastB;
+		long first;
+		if (kind == InventoryS2CPacket.Kind.SNAPSHOT) {
+			replay = snapshot(0, 2, List.of(entry("a", 3L, 1L)));
+			lastB = entry("b", 5L, 1L);
+			first = 6L;
+		} else {
+			replay = data(kind, BASELINE, REVISION, 0, 2, 6L, List.of(entry("a", 6L, 2L)));
+			lastB = entry("b", 6L, 2L);
+			receive(replay);
+			receive(data(kind, BASELINE, REVISION, 1, 2, 6L, List.of(lastB)));
+			first = 7L;
+		}
+		// Eight newer completed deliveries evict every retained part of the replay's
+		// delivery. The completion fence must outlive the bounded replay history.
+		long closed = first + 7L;
+		for (long watermark = first; watermark <= closed; watermark++)
+			receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, watermark,
+				List.of(entry("a", watermark, watermark))));
+		sent.clear();
+		receive(replay);
+		assertEquals(closed, session.tracking(markerId).watermark());
+		assertEquals(closed, trackedEntry("a").count());
+		receive(heartbeat(checksum(entry("a", closed, closed), lastB), closed));
+		assertTrue(sent.isEmpty(), "a stale replay cannot contaminate the current digest");
+		receive(heartbeat(checksum(entry("a", closed, closed), lastB) + 1L, closed));
+		assertEquals(1, sent.size(), "evicted old fragments cannot defer a mismatch at the already closed cut");
+		assertEquals(InventoryC2SPacket.Kind.RESYNC,
+			assertInstanceOf(InventoryC2SPacket.class, sent.get(0)).kind());
+
+		elapseRepairCooldown();
+		sent.clear();
+		long next = closed + 1L;
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, next,
+			List.of(entry("a", next, next))));
+		assertEquals(next, session.tracking(markerId).watermark(), "the higher completed delivery cannot starve");
+		receive(heartbeat(checksum(entry("a", next, next), lastB), next));
+		assertTrue(sent.isEmpty(), "the new closed-cut digest includes no replay rollback");
+		receive(heartbeat(checksum(entry("a", next, next), lastB) + 1L, next));
+		assertEquals(1, sent.size(), "repair remains enabled at the higher cut after the cooldown");
+		assertEquals(0L, session.stats().boundRejects(), "benign old replays allocate no blocking delivery");
+	}
+
+	@Test
+	void lateHistoricalMultipartKeyCoalescesWithoutReopeningClosedCut() {
+		commitTwoEntries();
+		for (long watermark = 7L; watermark <= 14L; watermark++)
+			receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, watermark,
+				List.of(entry("a", watermark, watermark))));
+		sent.clear();
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 2, 15L,
+			List.of(entry("a", 15L, 15L))));
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 2, 6L,
+			List.of(entry("a", 90L, 2L), entry("b", 8L, 2L))));
+		assertEquals(15L, trackedEntry("a").count(), "a stale historical key does not roll back a newer live revision");
+		assertEquals(8L, trackedEntry("b").count(), "a lower watermark does not discard an independent newer key");
+		assertEquals(14L, session.tracking(markerId).watermark(), "historical partial delivery never reopens the cut");
+		receive(heartbeat(checksum(entry("a", 14L, 14L), entry("b", 8L, 2L)), 14L));
+		assertTrue(sent.isEmpty(), "the late absolute value coalesces without importing the newer open cut's value");
+
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 1, 2, 15L, List.of()));
+		assertEquals(15L, session.tracking(markerId).watermark(), "the absent historical part cannot starve new cuts");
+		receive(heartbeat(checksum(entry("a", 15L, 15L), entry("b", 8L, 2L)), 15L));
+		assertTrue(sent.isEmpty());
+		receive(heartbeat(checksum(entry("a", 15L, 15L), entry("b", 8L, 2L)) + 1L, 15L));
+		assertEquals(1, sent.size(), "any missing historical contribution is repairable, not a permanent deferral");
+	}
+
+	@Test
+	void resetCanReinstallTheSameMarkerAndFenceWithoutRetainedStoreState() {
+		commitTwoEntries();
+		session.reset();
+		offer();
+		receive(snapshot(0, 1, List.of(entry("a", 8L, 1L))));
+		assertTrue(session.tracking(markerId).complete());
+		assertEquals(8L, trackedEntry("a").count());
+	}
+
+	@Test
+	void pendingFutureBaselineSurvivesOlderInvalidationAndRecoveryCannotReadmitOldBaseline() {
+		commitTwoEntries();
+		receive(data(InventoryS2CPacket.Kind.SNAPSHOT, 9L, 3L, 0, 2, 1L,
+			List.of(entry("new-a", 3L, 0L))));
+		receive(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, 2L, 99L,
+			InventoryS2CPacket.Status.INVALID, 0L));
+		assertFalse(session.tracking(markerId).grey(), "an admitted future fence is not canceled by old control");
+		receive(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, REVISION, 99L,
+			InventoryS2CPacket.Status.UNCERTAIN, 0L));
+		assertEquals(InventoryS2CPacket.Status.READY, session.tracking(markerId).status(),
+			"an old matching-committed control cannot evade the stronger pending fence");
+		receive(data(InventoryS2CPacket.Kind.SNAPSHOT, 9L, 3L, 1, 2, 1L,
+			List.of(entry("new-b", 4L, 0L))));
+		assertTrue(session.tracking(markerId).complete());
+		assertEquals(9L, session.tracking(markerId).baselineId());
+		assertEquals(1L, session.tracking(markerId).watermark());
+		receive(data(InventoryS2CPacket.Kind.STREAM, 8L, 3L, 0, 1, 2L,
+			List.of(entry("old", 99L, 0L))));
+		assertEquals(0, session.stats().unknownSessions(), "retired baselines cannot consume the unknown buffer");
+		assertEquals(2, session.tracking(markerId).entries().size());
+	}
+
+	@Test
+	void openDeliveryBoundsRejectWithoutConsumingPartsAndAdmittedWorkStillCompletes() {
+		commitTwoEntries();
+		for (long watermark = 6L; watermark < 14L; watermark++)
+			receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 2, watermark,
+				List.of(entry("a", watermark, watermark))));
+		long rejects = session.stats().boundRejects();
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 14L,
+			List.of(entry("a", 14L, 14L))));
+		assertTrue(session.stats().boundRejects() > rejects);
+		assertEquals(13L, trackedEntry("a").count(), "a rejected ninth delivery changes no live state");
+		assertEquals(WATERMARK, session.tracking(markerId).watermark());
+		for (long watermark = 6L; watermark < 14L; watermark++)
+			receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 1, 2, watermark,
+				List.of(entry("b", watermark, watermark))));
+		assertEquals(13L, session.tracking(markerId).watermark(), "every admitted cut progresses despite overage");
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 14L,
+			List.of(entry("a", 14L, 14L))));
+		assertEquals(14L, trackedEntry("a").count());
+		assertEquals(14L, session.tracking(markerId).watermark());
+	}
+
+	@Test
+	void oneMarkersOpenCutAndRepairNeverBlockOrRebaseAnotherMarker() {
+		commitTwoEntries();
+		MarkerId other = new MarkerId(8L);
+		receive(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, EPOCH, 2L, other, BASELINE, REVISION,
+			WATERMARK, 0, 1, true, InventoryS2CPacket.Status.READY, 0L, List.of(entry("x", 4L, 1L))));
+		sent.clear();
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 2, 6L,
+			List.of(entry("a", 6L, 2L))));
+		receive(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, EPOCH, 2L, other, BASELINE, REVISION,
+			6L, 0, 1, true, InventoryS2CPacket.Status.READY, 0L, List.of(entry("x", 7L, 2L))));
+		receive(InventoryS2CPacket.heartbeat(EPOCH, 2L, other, BASELINE, REVISION, 6L,
+			checksum(entry("x", 7L, 2L)) + 1L));
+		assertEquals(1, sent.size());
+		InventoryC2SPacket repair = assertInstanceOf(InventoryC2SPacket.class, sent.get(0));
+		assertEquals(other, repair.markerId());
+		assertEquals(0L, repair.requestId(), "tracking scope is independent of any preview request");
+		assertEquals(6L, session.tracking(other).watermark());
+		assertEquals(WATERMARK, session.tracking(markerId).watermark());
+		receive(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, 2L, 6L,
+			InventoryS2CPacket.Status.INVALID, 0L));
+		assertTrue(session.tracking(markerId).grey());
+		assertFalse(session.tracking(other).grey());
+		assertEquals(7L, session.tracking(other).entries().get(0).count());
+		assertEquals(6L, session.tracking(other).watermark());
 	}
 
 	@Test

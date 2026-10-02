@@ -30,11 +30,14 @@ import nx.pingwheel.common.platform.IPlatformInventoryService;
 public final class PlatformInventoryServiceImpl implements IPlatformInventoryService {
 
 	@Override
-	public Optional<Access> find(ServerLevel level, BlockPos pos, @Nullable Direction side) {
+	public Optional<Access> find(ServerLevel level, BlockPos pos, Direction side) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(pos, "pos");
+		Objects.requireNonNull(side, "side");
 		if (!level.isLoaded(pos)) return Optional.empty();
 		BlockEntity blockEntity = level.getBlockEntity(pos);
+		if (nx.pingwheel.neoforge.integration.create.presentation.CreateVaultInventoryAccess.recognizes(blockEntity))
+			return nx.pingwheel.neoforge.integration.create.presentation.CreateVaultInventoryAccess.find(level, pos, side);
 		if (blockEntity instanceof RandomizableContainer randomizable && randomizable.getLootTable() != null) {
 			return Optional.empty();
 		}

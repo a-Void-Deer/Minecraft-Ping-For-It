@@ -51,7 +51,9 @@ public final class InventoryPreviewServer {
 	// Conservative retained-object admission, separate from the logical encoded queue ceiling.
 	private static final long REQUEST_MEMORY = 1024;
 	private static final long ENTRY_MEMORY = 2L * InventoryS2CPacket.MAX_ENTRY_BYTES + 1536;
+	// Includes the progress index, whose peak capacity is bounded by this session's MAX_TARGETS.
 	private static final long SESSION_MEMORY = 1024;
+	private static final long CLIENT_PROGRESS_MEMORY = 256;
 	private static final int FRAME_WORKSPACE = 2 * (InventoryS2CPacket.MAX_FRAME_BYTES + InventoryS2CPacket.MAX_ENTRY_BYTES);
 	private static final int ENTRY_UPPER_BYTES = InventoryS2CPacket.MAX_ENTRY_BYTES + 128;
 
@@ -197,13 +199,22 @@ public final class InventoryPreviewServer {
 		}
 		if (request.round == null) {
 			Round round = rounds.get(resolved.key());
+			ClientProgress progress = round == null ? null : session.claimedProgress.get(round);
+			if (progress == null && !room(CLIENT_PROGRESS_MEMORY + FRAME_WORKSPACE)) return;
 			if (round == null) {
 				if (rounds.size() >= MAX_ROUNDS) return;
 				round = new Round(resolved);
 				rounds.put(resolved.key(), round);
 			}
+			if (progress == null) {
+				progress = new ClientProgress(session);
+				session.claimedProgress.put(round, progress);
+				retainedBytes += CLIENT_PROGRESS_MEMORY;
+			}
+			progress.references++;
 			round.references++;
 			request.round = round;
+			request.progress = progress;
 		}
 		if (request.terminal == null) scan(session, request);
 		flush(session, request);
@@ -211,11 +222,15 @@ public final class InventoryPreviewServer {
 	}
 
 	private void scan(Session session, Request request) {
+		Round round = request.round;
+		int cursor = request.scanner == null ? 0 : request.scanner.snapshot().scanned();
+		int paidPrefix = request.progress.paidPrefix;
+		int paidAvailable = Math.max(0, paidPrefix - cursor);
 		int logical = Math.min(limit(settings.getPreview().effectiveMaxSlotsPerClient()) - session.slots,
 			limit(settings.getPreview().effectiveMaxSlotsServer()) - globalSlots);
 		long queueRoom = settings.previewQueueBytes() - queuedBytes;
 		// Reserve a whole-entry upper bound for every potentially discovered/changed slot before reading.
-		int grant = (int) Math.min(Math.min(Math.max(0, logical), 128), Math.max(0, queueRoom / ENTRY_UPPER_BYTES));
+		int grant = (int) Math.min(Math.min(paidAvailable + Math.max(0, logical), 128), Math.max(0, queueRoom / ENTRY_UPPER_BYTES));
 		int freeEntries = request.entryCapacity - request.observed.size();
 		long affordableEntries = Math.max(0, (settings.pendingMemoryBytes() - retainedBytes - FRAME_WORKSPACE) / ENTRY_MEMORY);
 		if (request.entryCapacity < MAX_ENTRIES) grant = (int) Math.min(grant, freeEntries + affordableEntries);
@@ -225,8 +240,6 @@ public final class InventoryPreviewServer {
 			retainedBytes += (capacity - request.entryCapacity) * ENTRY_MEMORY;
 			request.entryCapacity = capacity;
 		}
-		Round round = request.round;
-		int cursor = request.scanner == null ? 0 : request.scanner.snapshot().scanned();
 		int needed = Math.max(0, cursor + grant - round.broker.scanned());
 		int physical = Math.max(0, limit(settings.effectivePhysicalSlotsPerTick()) - physicalSlots);
 		long before = round.attempts;
@@ -244,9 +257,12 @@ public final class InventoryPreviewServer {
 			return;
 		}
 		InventoryScanner.Result result = request.scanner.step(Math.max(1, available));
-		int used = result.scanned() - cursor;
+		// A second request by this client may consume coverage the same client already paid for.
+		// Another client, even on a compatible physical cache, has its own logical prefix.
+		int used = Math.max(0, result.scanned() - paidPrefix);
 		session.slots += used;
 		globalSlots += used;
+		request.progress.paidPrefix = Math.max(paidPrefix, result.scanned());
 		request.watermark++;
 		for (Map.Entry<InventoryScanner.Key, Long> value : result.counts().entrySet()) {
 			if (Objects.equals(request.observed.get(value.getKey()), value.getValue())) continue;
@@ -369,9 +385,18 @@ public final class InventoryPreviewServer {
 		if (request.scanner != null) { request.scanner.close(); request.scanner = null; }
 		Round round = request.round;
 		request.round = null;
-		if (round != null && --round.references == 0) {
-			round.broker.close();
-			rounds.remove(round.resolved.key(), round);
+		ClientProgress progress = request.progress;
+		request.progress = null;
+		if (round != null) {
+			if (--progress.references == 0) {
+				// Only active requests retain paid coverage; removing it never refunds period counters.
+				progress.session.claimedProgress.remove(round, progress);
+				retainedBytes -= CLIENT_PROGRESS_MEMORY;
+			}
+			if (--round.references == 0) {
+				round.broker.close();
+				rounds.remove(round.resolved.key(), round);
+			}
 		}
 	}
 
@@ -379,6 +404,7 @@ public final class InventoryPreviewServer {
 		final UUID player;
 		final long epoch;
 		final Map<Long, Request> requests = new LinkedHashMap<>();
+		final Map<Round, ClientProgress> claimedProgress = new LinkedHashMap<>();
 		long lastHello = Long.MIN_VALUE;
 		long bytes, controls;
 		int slots, variants;
@@ -393,6 +419,7 @@ public final class InventoryPreviewServer {
 		final Map<InventoryScanner.Key, String> tokens = new LinkedHashMap<>();
 		final Map<String, Entry> pending = new LinkedHashMap<>();
 		Round round;
+		ClientProgress progress;
 		InventoryScanner scanner;
 		Status terminal;
 		long fence = 1, watermark;
@@ -400,6 +427,13 @@ public final class InventoryPreviewServer {
 		boolean statusPending = true;
 		int entryCapacity;
 		Request(long id, Target target) { this.id = id; this.target = target; }
+	}
+
+	/** One accounted quota subject per round, retained only while this client's requests reference it. */
+	private static final class ClientProgress {
+		final Session session;
+		int paidPrefix, references;
+		ClientProgress(Session session) { this.session = session; }
 	}
 
 	private static final class Round {

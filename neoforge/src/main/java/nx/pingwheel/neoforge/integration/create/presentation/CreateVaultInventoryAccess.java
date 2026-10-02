@@ -1,0 +1,124 @@
+package nx.pingwheel.neoforge.integration.create.presentation;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.OptionalLong;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.neoforged.neoforge.items.IItemHandler;
+import nx.pingwheel.common.platform.IPlatformInventoryService;
+
+/** Lazy tested-shape Vault access; never asks Create to initialize its combined capability. */
+public final class CreateVaultInventoryAccess {
+	private static final String TYPE = "com.simibubi.create.content.logistics.vault.ItemVaultBlockEntity";
+	private CreateVaultInventoryAccess() {}
+	public static boolean recognizes(BlockEntity entity) { return entity != null && TYPE.equals(entity.getClass().getName()); }
+	public static Optional<IPlatformInventoryService.Access> find(ServerLevel level, BlockPos original, Direction face) {
+		if (face == null || !CreatePresentationAvailability.available()) return Optional.empty();
+		return find(new MinecraftWorld(level), original, face);
+	}
+	/** Same bounded topology and segmented read path with a detached test port, not a second provider. */
+	interface World {
+		String dimension();
+		Member loaded(BlockPos pos) throws ReflectiveOperationException;
+	}
+	interface Member {
+		String blockId();
+		BlockPos controller() throws ReflectiveOperationException;
+		boolean isController() throws ReflectiveOperationException;
+		int width() throws ReflectiveOperationException;
+		int length() throws ReflectiveOperationException;
+		Direction.Axis axis() throws ReflectiveOperationException;
+		IItemHandler local() throws ReflectiveOperationException;
+	}
+	static Optional<IPlatformInventoryService.Access> find(World world, BlockPos original, Direction face) {
+		if (face == null) return Optional.empty();
+		try { return Optional.of(new Segmented(world, original, layout(world, original))); }
+		catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) { return Optional.empty(); }
+	}
+	private record Layout(BlockPos controller, int width, int length, Direction.Axis axis, List<BlockPos> members, List<Integer> slotCounts, int slots) {}
+	private static Object call(BlockEntity entity, String name) throws ReflectiveOperationException { return entity.getClass().getMethod(name).invoke(entity); }
+	private record MinecraftWorld(ServerLevel level) implements World {
+		@Override public String dimension() { return level.dimension().location().toString(); }
+		@Override public Member loaded(BlockPos pos) {
+			if (!level.isLoaded(pos)) throw new IllegalStateException("Vault member unloaded");
+			BlockEntity entity = level.getBlockEntity(pos);
+			if (!recognizes(entity) || entity.isRemoved()) throw new IllegalStateException("Vault member unavailable");
+			return new MinecraftMember(entity);
+		}
+	}
+	private record MinecraftMember(BlockEntity entity) implements Member {
+		@Override public String blockId() { return BuiltInRegistries.BLOCK.getKey(entity.getBlockState().getBlock()).toString(); }
+		@Override public BlockPos controller() throws ReflectiveOperationException { return (BlockPos) call(entity, "getController"); }
+		@Override public boolean isController() throws ReflectiveOperationException { return (Boolean) call(entity, "isController"); }
+		@Override public int width() throws ReflectiveOperationException { return (Integer) call(entity, "getWidth"); }
+		@Override public int length() throws ReflectiveOperationException { return (Integer) call(entity, "getHeight"); }
+		@Override public Direction.Axis axis() throws ReflectiveOperationException { return (Direction.Axis) call(entity, "getMainConnectionAxis"); }
+		@Override public IItemHandler local() throws ReflectiveOperationException {
+			Object inventory = call(entity, "getInventoryOfBlock");
+			if (!(inventory instanceof IItemHandler handler)) throw new IllegalStateException("Vault local inventory shape");
+			return handler;
+		}
+	}
+	private static Layout layout(World world, BlockPos original) throws ReflectiveOperationException {
+		Member part = world.loaded(original);
+		BlockPos controller = part.controller();
+		Member master = world.loaded(controller); // before any controller-BE or aggregate call
+		if (!master.isController() || !controller.equals(master.controller()) || !"create:item_vault".equals(master.blockId())) throw new IllegalStateException("Vault controller relation");
+		int width = master.width(), length = master.length();
+		Direction.Axis axis = master.axis();
+		if (width < 1 || width > 3 || length < 1 || length > 3 * width || (axis != Direction.Axis.X && axis != Direction.Axis.Z))
+			throw new IllegalStateException("Vault bounded topology");
+		List<BlockPos> members = new ArrayList<>(width * width * length);
+		for (int x = 0; x < (axis == Direction.Axis.X ? length : width); x++) for (int y = 0; y < width; y++)
+			for (int z = 0; z < (axis == Direction.Axis.Z ? length : width); z++) {
+				BlockPos pos = controller.offset(x, y, z); Member member = world.loaded(pos);
+				if (!member.blockId().equals(master.blockId()) || !controller.equals(member.controller())
+					|| member.axis() != axis) throw new IllegalStateException("Vault member relation");
+				members.add(pos);
+			}
+		if (!members.contains(original)) throw new IllegalStateException("original Vault outside controller");
+		int slots = 0;
+		List<Integer> counts = new ArrayList<>(members.size());
+		for (BlockPos pos : members) {
+			int count = world.loaded(pos).local().getSlots();
+			if (count < 0 || count > 4096 - slots) throw new IllegalStateException("Vault finite slots");
+			slots += count;
+			counts.add(count);
+		}
+		return new Layout(controller, width, length, axis, List.copyOf(members), List.copyOf(counts), slots);
+	}
+	private static final class Segmented implements IPlatformInventoryService.Access {
+		final World world; final BlockPos original; final Layout expected;
+		Segmented(World world, BlockPos original, Layout expected) { this.world = world; this.original = original; this.expected = expected; }
+		@Override public Optional<String> alias() { return Optional.of(world.dimension() + "|vault|" + expected.controller.toShortString() + "|create:item_vault"); }
+		@Override public boolean valid() { try { return expected.equals(layout(world, original)); } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) { return false; } }
+		@Override public int slots() { return expected.slots; }
+		@Override public boolean stableCursor() { return true; }
+		@Override public OptionalLong version() { return OptionalLong.empty(); }
+		@Override public IPlatformInventoryService.Entry read(int slot) {
+			if (!valid()) throw new IllegalStateException("Vault topology changed");
+			java.util.Objects.checkIndex(slot, slots());
+			try {
+				for (int index = 0; index < expected.members.size(); index++) {
+					int count = expected.slotCounts.get(index);
+					if (slot < count) {
+						IItemHandler live = world.loaded(expected.members.get(index)).local();
+						if (live.getSlots() != count) throw new IllegalStateException("Vault mapping changed");
+						var stack = live.getStackInSlot(slot);
+						return stack.isEmpty() ? IPlatformInventoryService.Entry.empty() : new IPlatformInventoryService.Entry(stack.copyWithCount(1), stack.getCount());
+					}
+					slot -= count;
+				}
+			} catch (ReflectiveOperationException failure) { throw new IllegalStateException("Vault local read unavailable", failure); }
+			throw new IllegalStateException("Vault mapping changed");
+		}
+		@Override public boolean visit(int limit, java.util.function.Consumer<IPlatformInventoryService.Entry> consumer) {
+			for (int i = 0; i < Math.min(limit, slots()); i++) consumer.accept(read(i)); return slots() <= limit;
+		}
+	}
+}

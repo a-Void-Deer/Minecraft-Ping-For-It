@@ -8,9 +8,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.function.Function;
 import java.util.function.Consumer;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.BlockFace;
+import nx.pingwheel.common.interaction.CapturedPingContext;
+import nx.pingwheel.common.marker.MarkerSnapshot;
+import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
@@ -38,6 +45,10 @@ import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
  * entry metadata only when a fragmented baseline commits or an absolute stream
  * update is applied; a partial assembly stays invisible. Missing server entries
  * stay missing (never zero) until a complete scan reports them.
+ * Live tracking revisions merge per key while a separate bounded projection
+ * advances the digest only through fully accepted fragment deliveries. Pending
+ * deliveries do not overwrite or restart an older admitted delivery, and a
+ * heartbeat for an unfinished cut is deferred rather than compared to live state.
  */
 public final class ClientInventory {
 
@@ -57,13 +68,21 @@ public final class ClientInventory {
 
 	private static final int HELLO_RETRY_TICKS = 40;
 	private static final int MAX_HELLO_ATTEMPTS = 5;
-	private static final int MAX_ASSEMBLY_PARTS = 8;
+	private static final int MAX_ASSEMBLY_PARTS = 256;
+	private static final int MAX_TRACKING_BATCHES = 8;
 	private static final long FALLBACK_UNKNOWN_WINDOW_TICKS = 1200L;
 	private static final int STORE_CHANNELS = 128;
 
 	/** Rendering projection of one committed entry; metadata may be absent for a fallback. */
 	public record EntryView(String key, String itemId, String label, String displayJson, long count,
-		boolean fallback, InventoryS2CPacket.Status quality) {}
+		boolean fallback, InventoryS2CPacket.Status quality, String itemPingType) {
+		public EntryView(String key, String itemId, String label, String displayJson, long count, boolean fallback, InventoryS2CPacket.Status quality) {
+			this(key, itemId, label, displayJson, count, fallback, quality, null);
+		}
+	}
+	public record PreviewEntryReference(long requestId, long baselineId, long stateRevision, String entryKey) {}
+	public enum DispatchOutcome { SENT, NOT_READY, STALE_REFERENCE, ALREADY_RELEASED, THROTTLED, TRANSPORT_FAILED }
+	public record SelectionResult(long commitId, long requestId, MarkerId markerId, MarkerRejectReason rejection) {}
 
 	/**
 	 * Immutable preview projection. {@code entries} may be partial and is
@@ -80,7 +99,7 @@ public final class ClientInventory {
 		}
 	}
 
-	/** Immutable tracking projection; {@code grey} keeps the last values under invalidity. */
+	/** Live per-key projection; {@code watermark} is the closed digest cut, not the newest live item. */
 	public record Tracking(MarkerId markerId, InventoryS2CPacket.Status status, boolean grey, boolean complete,
 		long baselineId, long statusRevision, long watermark, List<EntryView> entries) {
 
@@ -99,6 +118,10 @@ public final class ClientInventory {
 	private static final class PreviewState {
 		final long requestId;
 		final Target target;
+		final BlockFace face;
+		final String targetType;
+		final Map<String, Long> groups = new LinkedHashMap<>();
+		boolean released;
 		final Map<String, EntryView> entries = new LinkedHashMap<>();
 		final Map<String, Long> itemRevisions = new LinkedHashMap<>();
 		InventoryS2CPacket.Status status = InventoryS2CPacket.Status.UPDATING;
@@ -114,9 +137,10 @@ public final class ClientInventory {
 		boolean sent;
 		int bytes;
 
-		PreviewState(long requestId, Target target) {
+		PreviewState(long requestId, Target target, BlockFace face, String targetType) {
 			this.requestId = requestId;
 			this.target = target;
+			this.face = face; this.targetType = targetType;
 		}
 	}
 
@@ -124,7 +148,12 @@ public final class ClientInventory {
 		final MarkerId markerId;
 		final InventoryClientStore.Channel channel;
 		final Map<String, EntryView> metadata = new LinkedHashMap<>();
-		final Map<String, EntryView> pendingMetadata = new LinkedHashMap<>();
+		final Map<String, Long> groups = new LinkedHashMap<>();
+		final Map<String, InventoryS2CPacket.Entry> closedEntries = new LinkedHashMap<>();
+		final Map<Long, TrackingBatch> batches = new LinkedHashMap<>();
+		final Map<Long, TrackingBatch> closedBatches = new LinkedHashMap<>();
+		final Map<Long, Long> heartbeats = new LinkedHashMap<>();
+		TrackingBatch pending;
 		InventoryS2CPacket.Status status = InventoryS2CPacket.Status.UPDATING;
 		long serverRequestId;
 		long baselineId = InventoryClientStore.NO_BASELINE;
@@ -132,16 +161,59 @@ public final class ClientInventory {
 		long watermark;
 		long committedChecksum;
 		long nextRepairTick;
-		int metadataBytes;
-		int pendingBytes;
+		long batchBytes;
+		long closedBatchBytes;
+		long completionWatermark = -1, completionChecksum, completionSince = -1, heartbeatGapSince = -1;
 		boolean committed;
-		boolean pendingHasIdentity;
-		long pendingBaseline = InventoryClientStore.NO_BASELINE;
-		long pendingRevision = -1L;
+		boolean closedCut;
 
 		TrackingState(MarkerId markerId, InventoryClientStore.Channel channel) {
 			this.markerId = markerId;
 			this.channel = channel;
+		}
+	}
+
+	/** A bounded logical delivery, independent of the immediately visible per-key values. */
+	private static final class TrackingBatch {
+		final long requestId;
+		final long baselineId;
+		final long statusRevision;
+		final long watermark;
+		final int totalParts;
+		final Map<Integer, InventoryS2CPacket> parts = new LinkedHashMap<>();
+		final Map<String, InventoryS2CPacket.Entry> entries = new LinkedHashMap<>();
+		long bytes;
+
+		TrackingBatch(InventoryS2CPacket packet) {
+			requestId = packet.requestId();
+			baselineId = packet.baselineId();
+			statusRevision = packet.statusRevision();
+			watermark = packet.watermark();
+			totalParts = packet.partCount();
+		}
+
+		boolean matches(InventoryS2CPacket packet) {
+			return requestId == packet.requestId() && baselineId == packet.baselineId()
+				&& statusRevision == packet.statusRevision()
+				&& watermark == packet.watermark() && totalParts == packet.partCount();
+		}
+
+		void add(InventoryS2CPacket packet) {
+			add(packet, packet.entries());
+		}
+
+		void add(InventoryS2CPacket packet, Iterable<InventoryS2CPacket.Entry> acceptedEntries) {
+			parts.put(packet.partIndex(), packet);
+			mergeEntries(entries, acceptedEntries);
+			bytes += packetBytes(packet);
+		}
+
+		boolean complete() {
+			return parts.size() == totalParts;
+		}
+
+		InventoryS2CPacket.Status status() {
+			return parts.get(totalParts - 1).status();
 		}
 	}
 
@@ -171,6 +243,11 @@ public final class ClientInventory {
 	private long nextRequestId = 1L;
 	private int helloAttempts;
 	private boolean offered;
+	private long presentationEpoch, presentationView, policyView = -1, nextCommitId = 1;
+	private Set<String> allowedTypes = Set.of();
+	private final Map<MarkerId, String> knownMarkers = new LinkedHashMap<>();
+	private final Map<Long, Long> pendingCommits = new LinkedHashMap<>();
+	private final Map<Long, SelectionResult> selectionResults = new LinkedHashMap<>();
 	private int invalidPackets;
 	private long staleEpochPackets;
 	private long fencedPackets;
@@ -187,7 +264,25 @@ public final class ClientInventory {
 
 	/** Whether an OFFER established the epoch and server periods for this connection. */
 	public boolean ready() {
-		return offered;
+		return offered && policyView == presentationView && presentationEpoch != 0;
+	}
+	/** Accepted presentation RESET immediately purges old-view inventory, before POLICY arrives. */
+	public void presentationReset(long epoch, long view) {
+		if (epoch == 0 || view < 0 || (epoch == presentationEpoch && view <= presentationView)) return;
+		purgeViews(); presentationEpoch = epoch; presentationView = view; policyView = -1; allowedTypes = Set.of();
+	}
+	public void markerCreated(MarkerSnapshot marker) {
+		if (marker == null || knownMarkers.size() >= MAX_TRACKED_CHANNELS && !knownMarkers.containsKey(marker.id())) return;
+		knownMarkers.put(marker.id(), marker.targetTypeId());
+	}
+	public void markerRemoved(MarkerId marker) {
+		knownMarkers.remove(marker); TrackingState state = tracking.remove(marker);
+		if (state != null) store.expire(state.channel); removeUnknownSessions(marker);
+	}
+	public SelectionResult selectionResult(long commitId) { return selectionResults.get(commitId); }
+	private void purgeViews() {
+		previews.clear(); for (TrackingState state : tracking.values()) store.expire(state.channel);
+		tracking.clear(); unknown.clear(); tombstones.clear(); knownMarkers.clear(); pendingCommits.clear();
 	}
 
 	public long epoch() {
@@ -217,11 +312,20 @@ public final class ClientInventory {
 			helloAttempts++;
 		}
 		expireUnknownSessions();
+		for (TrackingState state : tracking.values()) {
+			compareCompletion(state);
+			compareHeartbeat(state);
+			if (state.completionSince >= 0 && ticks - state.completionSince >= unknownWindowTicks()
+				|| state.heartbeatGapSince >= 0 && ticks - state.heartbeatGapSince >= unknownWindowTicks())
+				scheduleRepair(state);
+		}
 	}
 
 	/** Clears every channel, metadata map, tombstone and unknown-baseline buffer. */
 	public void reset() {
 		previews.clear();
+		for (TrackingState state : tracking.values())
+			store.expire(state.channel);
 		tracking.clear();
 		unknown.clear();
 		tombstones.clear();
@@ -231,6 +335,8 @@ public final class ClientInventory {
 		nextRequestId = 1L;
 		helloAttempts = 0;
 		offered = false;
+		presentationEpoch = presentationView = 0; policyView = -1; nextCommitId = 1; allowedTypes = Set.of();
+		knownMarkers.clear(); pendingCommits.clear(); selectionResults.clear();
 	}
 
 	/**
@@ -240,14 +346,22 @@ public final class ClientInventory {
 	 * the preview channel bound is reached or the target is absent.
 	 */
 	public long open(Target target) {
-		if (target == null || previews.size() >= MAX_PREVIEW_CHANNELS) {
+		return NO_REQUEST; // No face is never an unsided or inferred-UP view.
+	}
+	public long open(CapturedPingContext frozen) {
+		if (frozen == null || frozen.blockHitFace().isEmpty() || !(frozen.resolvedTarget().target() instanceof Target.BlockTarget block)) return NO_REQUEST;
+		return open(block, frozen.blockHitFace().get(), frozen.resolvedTarget().targetType().id());
+	}
+	public long open(Target.BlockTarget target, BlockFace face, String targetType) {
+		if (target == null || face == null || !nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(targetType)
+			|| previews.size() >= MAX_PREVIEW_CHANNELS) {
 			boundRejects++;
 			return NO_REQUEST;
 		}
 		long requestId = nextRequestId++;
-		PreviewState state = new PreviewState(requestId, target);
+		PreviewState state = new PreviewState(requestId, target, face, targetType);
 		previews.put(requestId, state);
-		if (offered) {
+		if (ready() && allowedTypes.contains(targetType)) {
 			sendOpen(state);
 		}
 		return requestId;
@@ -257,7 +371,7 @@ public final class ClientInventory {
 	public void close(long requestId) {
 		PreviewState state = previews.remove(requestId);
 		if (state != null && state.sent && offered) {
-			send(InventoryC2SPacket.close(epoch, requestId));
+			 send(InventoryC2SPacket.close(epoch, requestId).stamp(presentationEpoch, presentationView));
 		}
 	}
 
@@ -267,11 +381,33 @@ public final class ClientInventory {
 	 * not ready, or any text exceeds the wire bound.
 	 */
 	public boolean select(long requestId, String entryKey, String itemId, String pingType) {
+		return false; // SELECT cannot invent a reference from client item metadata.
+	}
+	public List<PreviewEntryReference> selectable(long requestId) {
 		PreviewState state = previews.get(requestId);
-		if (state == null || !offered || !bounded(entryKey) || !bounded(itemId) || !bounded(pingType))
-			return false;
-		send(InventoryC2SPacket.select(epoch, requestId, entryKey, itemId, pingType));
-		return true;
+		if (state == null || !state.serverSeen || state.released || !ready() || !allowedTypes.contains(state.targetType)
+			|| state.status == InventoryS2CPacket.Status.INVALID || state.status == InventoryS2CPacket.Status.UNAVAILABLE) return List.of();
+		return state.entries.keySet().stream().map(key -> new PreviewEntryReference(requestId, state.baselineId, state.statusRevision, key)).toList();
+	}
+	/** Single-use release. The injected dispatcher owns the shared courtesy limiter and transport result. */
+	public DispatchOutcome select(PreviewEntryReference reference, String itemPingType, Function<InventoryC2SPacket, DispatchOutcome> dispatch) {
+		if (!ready()) return DispatchOutcome.NOT_READY;
+		PreviewState state = reference == null ? null : previews.get(reference.requestId());
+		if (state == null || state.baselineId != reference.baselineId() || state.statusRevision != reference.stateRevision()
+			|| !state.entries.containsKey(reference.entryKey()) || !bounded(itemPingType) || !allowedTypes.contains(state.targetType)) return DispatchOutcome.STALE_REFERENCE;
+		if (state.released) return DispatchOutcome.ALREADY_RELEASED;
+		state.released = true;
+		if (state.status == InventoryS2CPacket.Status.INVALID || state.status == InventoryS2CPacket.Status.UNAVAILABLE || state.status == InventoryS2CPacket.Status.EXPIRED)
+			return DispatchOutcome.STALE_REFERENCE;
+		long commit = nextCommitId++;
+		var packet = InventoryC2SPacket.select(epoch, presentationEpoch, presentationView, commit, state.requestId,
+			reference.baselineId(), reference.stateRevision(), reference.entryKey(), itemPingType);
+		DispatchOutcome outcome = dispatch.apply(packet);
+		if (outcome == DispatchOutcome.SENT) {
+			pendingCommits.put(commit, state.requestId);
+			while (pendingCommits.size() > 64) pendingCommits.remove(pendingCommits.keySet().iterator().next());
+		}
+		return outcome;
 	}
 
 	/** Immutable preview projection; an unknown request yields an empty preview. */
@@ -302,7 +438,7 @@ public final class ClientInventory {
 			InventoryClientStore.Value value = committed.get(view.key());
 			entries.add(value == null ? view
 				: new EntryView(view.key(), view.itemId(), view.label(), view.displayJson(), value.count(),
-					view.fallback(), view.quality()));
+					view.fallback(), view.quality(), view.itemPingType()));
 		}
 		return new Tracking(markerId, state.status, store.isInvalid(state.channel), state.committed,
 			store.baselineId(state.channel), state.statusRevision, state.watermark, List.copyOf(entries));
@@ -311,7 +447,7 @@ public final class ClientInventory {
 	public Stats stats() {
 		return new Stats(previews.size(), tracking.size(), unknown.size(), tombstones.size(), invalidPackets,
 			staleEpochPackets, fencedPackets, boundRejects, droppedUnknownSessions, expiredUnknownSessions,
-			repairRequests, acceptedPackets, helloAttempts, offered, epoch);
+			 repairRequests, acceptedPackets, helloAttempts, ready(), epoch);
 	}
 
 	/**
@@ -332,31 +468,51 @@ public final class ClientInventory {
 			staleEpochPackets++;
 			return;
 		}
+		if (packet.presentationEpoch() != presentationEpoch || packet.view() != presentationView) { fencedPackets++; return; }
+		if (packet.kind() == InventoryS2CPacket.Kind.POLICY) {
+			allowedTypes = packet.allowedTypes(); policyView = packet.view();
+			for (TrackingState state : List.copyOf(tracking.values())) if (!allowedTypes.contains(knownMarkers.get(state.markerId))) {
+				store.expire(state.channel); tracking.remove(state.markerId); removeUnknownSessions(state.markerId);
+			}
+			previews.values().removeIf(state -> !allowedTypes.contains(state.targetType));
+			for (PreviewState state : previews.values()) if (!state.sent && allowedTypes.contains(state.targetType)) sendOpen(state);
+			return;
+		}
+		if (!ready()) { fencedPackets++; return; }
+		if (packet.kind() == InventoryS2CPacket.Kind.SELECTED || packet.kind() == InventoryS2CPacket.Kind.REJECT) {
+			Long request = pendingCommits.remove(packet.commitId());
+			if (request == null || request != packet.requestId()) return;
+			selectionResults.put(packet.commitId(), new SelectionResult(packet.commitId(), request, packet.markerId(), packet.rejection()));
+			while (selectionResults.size() > 64) selectionResults.remove(selectionResults.keySet().iterator().next());
+			return;
+		}
+		if (packet.markerId() != null && (!knownMarkers.containsKey(packet.markerId()) || !allowedTypes.contains(knownMarkers.get(packet.markerId())))) { fencedPackets++; return; }
 		acceptedPackets++;
 		switch (packet.kind()) {
 			case PREVIEW -> acceptPreview(packet);
 			case SNAPSHOT, STREAM -> acceptTrackedData(packet);
 			case STATUS -> acceptStatus(packet);
 			case HEARTBEAT -> acceptHeartbeat(packet);
-			case OFFER -> {}
+			case OFFER, POLICY, SELECTED, REJECT -> {}
 		}
 	}
 
 	private void acceptOffer(InventoryS2CPacket packet) {
-		if (offered || packet.offer() == null)
+		if (packet.offer() == null || (offered && packet.epoch() != epoch)
+			|| presentationEpoch != 0 && (packet.presentationEpoch() != presentationEpoch || packet.view() != presentationView))
 			return;
 		offered = true;
 		epoch = packet.epoch();
 		offer = packet.offer();
 		for (PreviewState state : previews.values()) {
-			if (!state.sent)
+			if (!state.sent && ready() && allowedTypes.contains(state.targetType))
 				sendOpen(state);
 		}
 	}
 
 	private void sendOpen(PreviewState state) {
 		state.sent = true;
-		send(InventoryC2SPacket.open(epoch, state.requestId, state.target));
+		send(InventoryC2SPacket.open(epoch, presentationEpoch, presentationView, state.requestId, (Target.BlockTarget) state.target, state.face));
 	}
 
 	private void send(IPacket packet) {
@@ -390,6 +546,7 @@ public final class ClientInventory {
 			if (state.serverSeen && packet.baselineId() != state.baselineId) {
 				state.entries.clear();
 				state.itemRevisions.clear();
+				state.groups.clear();
 				state.bytes = 0;
 			}
 			state.receivedPartIndexes.clear();
@@ -443,6 +600,8 @@ public final class ClientInventory {
 	private boolean applyPreviewEntries(PreviewState state, List<InventoryS2CPacket.Entry> entries) {
 		boolean allAccepted = true;
 		for (InventoryS2CPacket.Entry entry : entries) {
+			Long group = state.groups.get(entry.itemId());
+			if (group != null && (!entry.fallback() || entry.groupRevision() < group)) continue;
 			Long knownRevision = state.itemRevisions.get(entry.key());
 			if (knownRevision != null && entry.itemRevision() < knownRevision)
 				continue;
@@ -450,13 +609,17 @@ public final class ClientInventory {
 			EntryView previous = state.entries.get(entry.key());
 			int size = byteSize(view);
 			int nextBytes = state.bytes - (previous == null ? 0 : byteSize(previous)) + size;
+			List<String> removed = entry.replaceGroup() ? state.entries.values().stream().filter(old -> old.itemId().equals(entry.itemId()) && !old.key().equals(entry.key())).map(EntryView::key).toList() : List.of();
+			for (String key : removed) nextBytes -= byteSize(state.entries.get(key));
 			if (nextBytes > MAX_PREVIEW_BYTES
-				|| (previous == null && state.entries.size() >= MAX_PREVIEW_ENTRIES)) {
+				|| (previous == null && state.entries.size() - removed.size() >= MAX_PREVIEW_ENTRIES)) {
 				boundRejects++;
 				allAccepted = false;
 				continue;
 			}
 			state.bytes = nextBytes;
+			for (String key : removed) { state.entries.remove(key); state.itemRevisions.remove(key); }
+			if (entry.replaceGroup()) state.groups.put(entry.itemId(), entry.groupRevision());
 			state.entries.put(view.key(), view);
 			state.itemRevisions.put(view.key(), entry.itemRevision());
 		}
@@ -490,7 +653,23 @@ public final class ClientInventory {
 			fencedPackets++;
 			return;
 		}
-		state.watermark = Math.max(state.watermark, packet.watermark());
+		if ((packet.statusRevision() == state.statusRevision && state.baselineId != InventoryClientStore.NO_BASELINE
+			&& packet.baselineId() < state.baselineId)
+			|| (state.pending != null && (packet.statusRevision() < state.pending.statusRevision
+				|| (packet.statusRevision() == state.pending.statusRevision
+					&& packet.baselineId() < state.pending.baselineId)))) {
+			fencedPackets++;
+			return;
+		}
+		if (store.isInvalid(state.channel) && packet.statusRevision() == state.statusRevision) {
+			fencedPackets++;
+			return;
+		}
+		if (packet.partCount() > MAX_ASSEMBLY_PARTS) {
+			boundRejects++;
+			scheduleRepair(state);
+			return;
+		}
 		if (state.committed && packet.baselineId() == store.baselineId(state.channel)
 			&& packet.statusRevision() == state.statusRevision && !store.assembling(state.channel)) {
 			applyUpdates(state, packet);
@@ -498,7 +677,9 @@ public final class ClientInventory {
 		}
 		boolean sameFence = packet.statusRevision() == state.statusRevision
 			&& packet.baselineId() == state.baselineId;
-		if (packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT || sameFence) {
+		boolean pendingFence = state.pending != null && state.pending.baselineId == packet.baselineId()
+			&& state.pending.statusRevision == packet.statusRevision();
+		if (packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT || sameFence || pendingFence) {
 			assemble(state, packet);
 			return;
 		}
@@ -506,6 +687,18 @@ public final class ClientInventory {
 	}
 
 	private void assemble(TrackingState state, InventoryS2CPacket packet) {
+		TrackingBatch batch = state.pending;
+		boolean sameIdentity = batch != null && batch.baselineId == packet.baselineId()
+			&& batch.statusRevision == packet.statusRevision();
+		if (sameIdentity && batch.watermark != packet.watermark()
+			&& packet.kind() == InventoryS2CPacket.Kind.STREAM) {
+			bufferUnknown(state, packet);
+			return;
+		}
+		if (!sameIdentity)
+			batch = new TrackingBatch(packet);
+		if (!admitPart(state, batch, packet, true))
+			return;
 		InventoryClientStore.PartOutcome begin = store.beginSnapshot(state.channel, packet.baselineId(),
 			packet.statusRevision(), packet.partCount(), ticks);
 		if (begin == InventoryClientStore.PartOutcome.REJECTED_BOUND
@@ -517,14 +710,6 @@ public final class ClientInventory {
 				boundRejects++;
 			return;
 		}
-		if (state.pendingBaseline != packet.baselineId() || state.pendingRevision != packet.statusRevision()) {
-			state.pendingMetadata.clear();
-			state.pendingBytes = 0;
-			state.pendingHasIdentity = false;
-		}
-		state.pendingBaseline = packet.baselineId();
-		state.pendingRevision = packet.statusRevision();
-		stashPending(state, packet.entries());
 		InventoryClientStore.PartOutcome outcome = store.part(state.channel, packet.baselineId(),
 			packet.statusRevision(), packet.partIndex(), valuesOf(packet.entries()), ticks);
 		if (outcome == InventoryClientStore.PartOutcome.REJECTED_BOUND
@@ -533,77 +718,261 @@ public final class ClientInventory {
 			boundRejects++;
 			return;
 		}
-		if (outcome == InventoryClientStore.PartOutcome.COMMITTED) {
-			commitTracking(state, packet.baselineId(), packet.statusRevision(), packet.watermark(), packet.status());
+		if (outcome != InventoryClientStore.PartOutcome.ACCEPTED
+			&& outcome != InventoryClientStore.PartOutcome.COMMITTED)
 			return;
+		batch.add(packet);
+		if (!sameIdentity && (state.baselineId != packet.baselineId()
+			|| state.statusRevision != packet.statusRevision()))
+			state.heartbeats.clear();
+		state.pending = batch;
+		if (outcome == InventoryClientStore.PartOutcome.COMMITTED) {
+			commitTracking(state, batch);
 		}
 		flushUnknownIntoAssembly(state, packet.baselineId(), packet.statusRevision());
 	}
 
 	private void applyUpdates(TrackingState state, InventoryS2CPacket packet) {
+		List<InventoryS2CPacket.Entry> permitted = packet.entries().stream().filter(entry -> {
+			Long group = state.groups.get(entry.itemId());
+			return group == null || entry.fallback() && entry.groupRevision() >= group;
+		}).toList();
+		packet = InventoryS2CPacket.data(packet.kind(), packet.epoch(), packet.requestId(), packet.markerId(), packet.baselineId(), packet.statusRevision(),
+			packet.watermark(), packet.partIndex(), packet.partCount(), packet.completeScan(), packet.status(), packet.checksum(), permitted).stamp(packet.presentationEpoch(), packet.view());
+		TrackingBatch batch = state.batches.get(packet.watermark());
+		TrackingBatch closed = state.closedBatches.get(packet.watermark());
+		if (closed != null) {
+			// Closed deliveries retain a bounded replay guard; they never become new batches.
+			admitPart(state, closed, packet, false);
+			return;
+		}
+		// Replay detail is evictable, completion ownership is not: the closed
+		// watermark permanently retires barriers in its range. A late independent
+		// key can still contribute its absolute revision to that range, but an old
+		// SNAPSHOT/STREAM fragment must never recreate an incomplete delivery.
+		boolean historical = batch == null && state.closedCut && packet.watermark() <= state.watermark;
+		if (batch == null) {
+			if (!historical && state.batches.size() >= MAX_TRACKING_BATCHES) {
+				boundRejects++;
+				scheduleRepair(state);
+				return;
+			}
+			batch = new TrackingBatch(packet);
+		}
+		if (!admitPart(state, batch, packet, false))
+			return;
+		long bytes = packetBytes(packet);
+		if (!historical && state.batchBytes + bytes > MAX_METADATA_BYTES_PER_CHANNEL) {
+			boundRejects++;
+			scheduleRepair(state);
+			return;
+		}
 		Map<String, InventoryClientStore.Value> before = store.values(state.channel);
+		Map<String, EntryView> nextMetadata = new LinkedHashMap<>(state.metadata);
+		Set<String> removed = new HashSet<>();
+		for (var entry : packet.entries()) if (entry.replaceGroup()) {
+			for (EntryView old : nextMetadata.values()) if (old.itemId().equals(entry.itemId()) && !old.key().equals(entry.key())) removed.add(old.key());
+			removed.forEach(nextMetadata::remove);
+		}
+		List<InventoryS2CPacket.Entry> cutEntries = new ArrayList<>(packet.entries().size());
+		for (InventoryS2CPacket.Entry entry : packet.entries()) {
+			InventoryClientStore.Value previous = before.get(entry.key());
+			if (previous == null || entry.itemRevision() > previous.revision())
+				nextMetadata.put(entry.key(), viewOf(entry));
+			if (previous != null && entry.itemRevision() == previous.revision()) {
+				EntryView accepted = state.metadata.get(entry.key());
+				cutEntries.add(new InventoryS2CPacket.Entry(accepted.key(), accepted.itemId(), accepted.label(),
+					accepted.displayJson(), previous.count(), previous.revision(), accepted.fallback(), accepted.quality()));
+			} else {
+				cutEntries.add(entry);
+			}
+		}
+		int nextBytes = metadataBytes(nextMetadata);
+		Map<String, InventoryS2CPacket.Entry> nextCut = new LinkedHashMap<>(historical
+			? state.closedEntries : batch.entries);
+		mergeEntries(nextCut, cutEntries);
+		if (nextMetadata.size() > MAX_METADATA_ENTRIES || nextBytes > MAX_METADATA_BYTES_PER_CHANNEL
+			|| entryBytes(nextCut) > MAX_METADATA_BYTES_PER_CHANNEL) {
+			boundRejects++;
+			scheduleRepair(state);
+			return;
+		}
 		Map<String, InventoryClientStore.Value> updates = valuesOf(packet.entries());
-		InventoryClientStore.Outcome outcome = store.apply(state.channel, packet.baselineId(),
-			packet.statusRevision(), updates);
+		InventoryClientStore.Outcome outcome = store.applyReplacing(state.channel, packet.baselineId(),
+			packet.statusRevision(), updates, removed);
 		if (outcome == InventoryClientStore.Outcome.REJECTED_BOUND) {
 			boundRejects++;
 			return;
 		}
 		if (outcome != InventoryClientStore.Outcome.APPLIED)
 			return;
-		Map<String, InventoryClientStore.Value> after = store.values(state.channel);
-		for (InventoryS2CPacket.Entry entry : packet.entries()) {
-			InventoryClientStore.Value now = after.get(entry.key());
-			if (now == null || now.equals(before.get(entry.key())))
-				continue;
-			updateMetadata(state, viewOf(entry));
-		}
-		state.committedChecksum = computeChecksum(state);
-	}
-
-	private void commitTracking(TrackingState state, long baselineId, long statusRevision, long watermark,
-		InventoryS2CPacket.Status status) {
 		state.metadata.clear();
-		state.metadata.putAll(state.pendingMetadata);
-		state.metadataBytes = state.pendingBytes;
-		state.pendingMetadata.clear();
-		state.pendingBytes = 0;
-		state.pendingHasIdentity = false;
-		state.baselineId = baselineId;
-		state.statusRevision = statusRevision;
-		state.watermark = Math.max(state.watermark, watermark);
-		if (status != null)
-			state.status = status;
-		state.committed = true;
-		state.committedChecksum = computeChecksum(state);
-	}
-
-	private void stashPending(TrackingState state, List<InventoryS2CPacket.Entry> entries) {
-		for (InventoryS2CPacket.Entry entry : entries) {
-			EntryView view = viewOf(entry);
-			EntryView previous = state.pendingMetadata.get(view.key());
-			int size = byteSize(view);
-			if (previous == null && (state.pendingMetadata.size() >= MAX_METADATA_ENTRIES
-				|| state.pendingBytes + size > MAX_METADATA_BYTES_PER_CHANNEL)) {
-				boundRejects++;
-				continue;
-			}
-			state.pendingBytes = state.pendingBytes - (previous == null ? 0 : byteSize(previous)) + size;
-			state.pendingMetadata.put(view.key(), view);
-			state.pendingHasIdentity = true;
-		}
-	}
-
-	private void updateMetadata(TrackingState state, EntryView view) {
-		EntryView previous = state.metadata.get(view.key());
-		int size = byteSize(view);
-		if (previous == null && (state.metadata.size() >= MAX_METADATA_ENTRIES
-			|| state.metadataBytes + size > MAX_METADATA_BYTES_PER_CHANNEL)) {
-			boundRejects++;
+		state.metadata.putAll(nextMetadata);
+		for (var entry : packet.entries()) if (entry.replaceGroup()) state.groups.put(entry.itemId(), entry.groupRevision());
+		if (historical) {
+			// Coalesce only this accepted old-range delta, not newer live values from
+			// open deliveries. Per-key revisions preserve newer closed values; missing
+			// historical keys remain a digest mismatch, never a permanent barrier.
+			state.closedEntries.clear();
+			state.closedEntries.putAll(nextCut);
+			state.committedChecksum = computeChecksum(state);
+			compareHeartbeat(state);
 			return;
 		}
-		state.metadataBytes = state.metadataBytes - (previous == null ? 0 : byteSize(previous)) + size;
-		state.metadata.put(view.key(), view);
+		batch.add(packet, cutEntries);
+		state.batches.put(packet.watermark(), batch);
+		state.batchBytes += bytes;
+		advanceClosedCut(state);
+	}
+
+	private void commitTracking(TrackingState state, TrackingBatch batch) {
+		state.metadata.clear();
+		state.groups.clear();
+		for (InventoryS2CPacket.Entry entry : batch.entries.values())
+			state.metadata.put(entry.key(), viewOf(entry));
+		for (var entry : batch.entries.values()) if (entry.replaceGroup()) state.groups.put(entry.itemId(), entry.groupRevision());
+		state.pending = null;
+		Map<Long, Long> heartbeats = new LinkedHashMap<>(state.heartbeats);
+		long completionWatermark = state.completionWatermark, completionChecksum = state.completionChecksum, completionSince = state.completionSince;
+		clearCuts(state);
+		state.heartbeats.putAll(heartbeats);
+		state.completionWatermark = completionWatermark; state.completionChecksum = completionChecksum; state.completionSince = completionSince;
+		state.closedEntries.putAll(batch.entries);
+		state.baselineId = batch.baselineId;
+		state.statusRevision = batch.statusRevision;
+		state.watermark = batch.watermark;
+		state.status = batch.status();
+		state.committed = true;
+		state.closedCut = true;
+		state.committedChecksum = computeChecksum(state);
+		rememberClosedBatch(state, batch);
+		retireUnknownBefore(state.markerId, batch.baselineId, batch.statusRevision, false);
+		compareHeartbeat(state);
+		compareCompletion(state);
+	}
+
+	/** Admission never mutates values, metadata, status or the accepted delivery barrier. */
+	private boolean admitPart(TrackingState state, TrackingBatch batch, InventoryS2CPacket packet,
+		boolean baseline) {
+		if (!batch.matches(packet)) {
+			boundRejects++;
+			scheduleRepair(state);
+			return false;
+		}
+		InventoryS2CPacket previous = batch.parts.get(packet.partIndex());
+		if (previous != null) {
+			if (!samePart(previous, packet)) {
+				boundRejects++;
+				scheduleRepair(state);
+			}
+			return false;
+		}
+		if (baseline) {
+			for (InventoryS2CPacket.Entry entry : packet.entries()) {
+				if (batch.entries.containsKey(entry.key())) {
+					boundRejects++;
+					scheduleRepair(state);
+					return false;
+				}
+			}
+		} else {
+			for (InventoryS2CPacket.Entry entry : packet.entries()) {
+				InventoryS2CPacket.Entry known = batch.entries.get(entry.key());
+				if (known != null && known.itemRevision() == entry.itemRevision() && !known.equals(entry)) {
+					boundRejects++;
+					scheduleRepair(state);
+					return false;
+				}
+			}
+		}
+		Map<String, InventoryS2CPacket.Entry> entries = new LinkedHashMap<>(batch.entries);
+		mergeEntries(entries, packet.entries());
+		if (entries.size() > MAX_METADATA_ENTRIES
+			|| batch.bytes + packetBytes(packet) > MAX_METADATA_BYTES_PER_CHANNEL
+			|| entryBytes(entries) > MAX_METADATA_BYTES_PER_CHANNEL) {
+			boundRejects++;
+			scheduleRepair(state);
+			return false;
+		}
+		return true;
+	}
+
+	private void advanceClosedCut(TrackingState state) {
+		// Close admitted deliveries in watermark order. Live values can already be
+		// newer; using them here would make a valid earlier heartbeat look corrupt.
+		while (!state.batches.isEmpty()) {
+			TrackingBatch first = null;
+			for (TrackingBatch batch : state.batches.values()) {
+				if (first == null || batch.watermark < first.watermark)
+					first = batch;
+			}
+			if (!first.complete())
+				break;
+			Map<String, InventoryS2CPacket.Entry> next = new LinkedHashMap<>(state.closedEntries);
+			mergeEntries(next, first.entries.values());
+			if (next.size() > MAX_METADATA_ENTRIES || entryBytes(next) > MAX_METADATA_BYTES_PER_CHANNEL) {
+				boundRejects++;
+				scheduleRepair(state);
+				break;
+			}
+			state.closedEntries.clear();
+			state.closedEntries.putAll(next);
+			if (first.watermark > state.watermark) {
+				state.watermark = first.watermark;
+				state.status = first.status();
+			}
+			state.batches.remove(first.watermark);
+			state.batchBytes -= first.bytes;
+			rememberClosedBatch(state, first);
+			state.committedChecksum = computeChecksum(state);
+			compareHeartbeat(state);
+		}
+		compareHeartbeat(state);
+		compareCompletion(state);
+	}
+
+	private static void rememberClosedBatch(TrackingState state, TrackingBatch batch) {
+		state.closedBatches.put(batch.watermark, batch);
+		state.closedBatchBytes += batch.bytes;
+		var iterator = state.closedBatches.entrySet().iterator();
+		while ((state.closedBatches.size() > MAX_TRACKING_BATCHES
+			|| state.closedBatchBytes > MAX_METADATA_BYTES_PER_CHANNEL) && iterator.hasNext()) {
+			TrackingBatch old = iterator.next().getValue();
+			state.closedBatchBytes -= old.bytes;
+			iterator.remove();
+		}
+	}
+
+	private static boolean samePart(InventoryS2CPacket left, InventoryS2CPacket right) {
+		// SNAPSHOT and a pre-baseline STREAM may be fragments of the same delivery.
+		return left.requestId() == right.requestId() && left.entries().equals(right.entries())
+			&& left.status() == right.status() && left.completeScan() == right.completeScan()
+			&& left.checksum() == right.checksum();
+	}
+
+	private static void mergeEntries(Map<String, InventoryS2CPacket.Entry> target,
+		Iterable<InventoryS2CPacket.Entry> entries) {
+		for (InventoryS2CPacket.Entry entry : entries) {
+			if (entry.replaceGroup()) target.values().removeIf(old -> old.itemId().equals(entry.itemId()) && !old.key().equals(entry.key()) && old.groupRevision() <= entry.groupRevision());
+			if (!entry.fallback() && target.values().stream().anyMatch(old -> old.itemId().equals(entry.itemId()) && old.replaceGroup() && old.groupRevision() >= entry.groupRevision())) continue;
+			InventoryS2CPacket.Entry previous = target.get(entry.key());
+			if (previous == null || entry.itemRevision() > previous.itemRevision())
+				target.put(entry.key(), entry);
+		}
+	}
+
+	private static int metadataBytes(Map<String, EntryView> entries) {
+		int bytes = 0;
+		for (EntryView entry : entries.values())
+			bytes += byteSize(entry);
+		return bytes;
+	}
+
+	private static int entryBytes(Map<String, InventoryS2CPacket.Entry> entries) {
+		int bytes = 0;
+		for (InventoryS2CPacket.Entry entry : entries.values())
+			bytes += byteSize(viewOf(entry));
+		return bytes;
 	}
 
 	private void invalidateTracking(TrackingState state, long statusRevision) {
@@ -611,9 +980,15 @@ public final class ClientInventory {
 			fencedPackets++;
 			return;
 		}
-		store.invalidate(state.channel, statusRevision);
+		if (!store.invalidate(state.channel, statusRevision)) {
+			fencedPackets++;
+			return;
+		}
 		state.status = InventoryS2CPacket.Status.INVALID;
 		state.statusRevision = Math.max(state.statusRevision, statusRevision);
+		state.pending = null;
+		clearCuts(state);
+		retireUnknownBefore(state.markerId, InventoryClientStore.NO_BASELINE, statusRevision, true);
 		state.committedChecksum = computeChecksum(state);
 	}
 
@@ -643,41 +1018,108 @@ public final class ClientInventory {
 			fencedPackets++;
 			return;
 		}
-		state.watermark = Math.max(state.watermark, packet.watermark());
 		if (status == InventoryS2CPacket.Status.INVALID) {
 			invalidateTracking(state, packet.statusRevision());
 			return;
 		}
 		boolean rebase = !state.committed
+			|| state.pending != null
 			|| packet.statusRevision() > state.statusRevision
 			|| packet.baselineId() != store.baselineId(state.channel);
+		boolean establishedFence = packet.statusRevision() == state.statusRevision && packet.baselineId() == store.baselineId(state.channel);
+		boolean completionFence = establishedFence || state.pending != null && state.pending.baselineId == packet.baselineId()
+			&& state.pending.statusRevision == packet.statusRevision();
 		if (rebase) {
+			boolean keepAssembly = state.pending != null && state.pending.baselineId == packet.baselineId()
+				&& state.pending.statusRevision == packet.statusRevision();
 			if (!store.rebase(state.channel, packet.baselineId(), packet.statusRevision())) {
 				boundRejects++;
 				return;
 			}
+			TrackingBatch pending = keepAssembly ? state.pending : null;
+			Map<Long, Long> heartbeats = keepAssembly ? new LinkedHashMap<>(state.heartbeats) : Map.of();
+			long completionWatermark = state.completionWatermark, completionChecksum = state.completionChecksum, completionSince = state.completionSince;
 			clearTrackingState(state);
+			state.pending = pending;
+			state.heartbeats.putAll(heartbeats);
+			if (establishedFence || keepAssembly) {
+				state.completionWatermark = completionWatermark; state.completionChecksum = completionChecksum; state.completionSince = completionSince;
+			}
+			retireUnknownBefore(state.markerId, packet.baselineId(), packet.statusRevision(), false);
 		}
 		state.status = status == null ? state.status : status;
 		state.baselineId = packet.baselineId();
 		state.statusRevision = packet.statusRevision();
 		if (state.committed)
 			state.committedChecksum = computeChecksum(state);
+		if (completionFence && (status == InventoryS2CPacket.Status.READY || status == InventoryS2CPacket.Status.UNCERTAIN)) {
+			// These controls are emitted only after every part through this cut was
+			// transmitted. They prove completion, not client receipt or application.
+			if (packet.watermark() >= state.watermark && packet.watermark() >= state.completionWatermark) {
+				state.completionWatermark = packet.watermark(); state.completionChecksum = packet.checksum();
+				if (state.completionSince < 0) state.completionSince = ticks;
+				compareCompletion(state);
+			}
+		}
+	}
+
+	private void compareCompletion(TrackingState state) {
+		if (state.completionWatermark < 0 || !state.committed || !state.closedCut || store.assembling(state.channel)) return;
+		if (state.completionWatermark < state.watermark) { clearCompletion(state); return; }
+		for (long watermark : state.batches.keySet()) if (watermark <= state.completionWatermark) return;
+		if (state.committedChecksum != state.completionChecksum) {
+			scheduleRepair(state); // compare the closed projection only, never partially applied live entries
+			return;
+		}
+		// A matching completed control can close unchanged observations without
+		// inventing empty STREAM parts. The permanent closed watermark still owns replay retirement.
+		state.watermark = state.completionWatermark;
+		clearCompletion(state);
+		compareHeartbeat(state);
+	}
+	private static void clearCompletion(TrackingState state) {
+		state.completionWatermark = -1; state.completionSince = -1;
 	}
 
 	private void acceptHeartbeat(InventoryS2CPacket packet) {
 		TrackingState state = tracking.get(packet.markerId());
-		if (state == null || !state.committed || store.assembling(state.channel))
+		if (state == null || store.isInvalid(state.channel))
 			return;
-		if (packet.statusRevision() != state.statusRevision
-			|| packet.baselineId() != store.baselineId(state.channel))
+		boolean pendingFence = state.pending != null && state.pending.baselineId == packet.baselineId()
+			&& state.pending.statusRevision == packet.statusRevision();
+		if (state.pending != null && !pendingFence)
 			return;
-		// Only a closed watermark is comparable: a heartbeat ahead of the
-		// committed fragments describes a future state and is not a mismatch.
-		if (packet.watermark() != state.watermark)
+		if (!pendingFence && (packet.statusRevision() != state.statusRevision
+			|| packet.baselineId() != store.baselineId(state.channel)))
 			return;
-		if (computeChecksum(state) != packet.checksum())
+		if (!pendingFence && state.closedCut && packet.watermark() < state.watermark)
+			return;
+		state.heartbeats.put(packet.watermark(), packet.checksum());
+		var iterator = state.heartbeats.keySet().iterator();
+		while (state.heartbeats.size() > MAX_TRACKING_BATCHES && iterator.hasNext()) {
+			iterator.next();
+			iterator.remove();
+		}
+		compareHeartbeat(state);
+	}
+
+	private void compareHeartbeat(TrackingState state) {
+		if (!state.committed || !state.closedCut || store.assembling(state.channel)) {
+			state.heartbeatGapSince = -1;
+			return;
+		}
+		for (long watermark : state.batches.keySet()) {
+			if (watermark <= state.watermark)
+				return;
+		}
+		Long checksum = state.heartbeats.remove(state.watermark);
+		state.heartbeats.keySet().removeIf(watermark -> watermark < state.watermark);
+		if (checksum != null && state.committedChecksum != checksum)
 			scheduleRepair(state);
+		boolean futureGap = state.heartbeats.keySet().stream().anyMatch(watermark -> watermark > state.watermark
+			&& state.batches.keySet().stream().noneMatch(open -> open <= watermark));
+		if (!futureGap) state.heartbeatGapSince = -1;
+		else if (state.heartbeatGapSince < 0) state.heartbeatGapSince = ticks;
 	}
 
 	private void scheduleRepair(TrackingState state) {
@@ -687,7 +1129,7 @@ public final class ClientInventory {
 		if (ticks < state.nextRepairTick)
 			return;
 		state.nextRepairTick = ticks + Math.max(1L, window);
-		send(InventoryC2SPacket.resync(epoch, state.serverRequestId, state.markerId));
+		send(InventoryC2SPacket.resync(epoch, 0, state.markerId).stamp(presentationEpoch, presentationView));
 		repairRequests++;
 	}
 
@@ -736,16 +1178,14 @@ public final class ClientInventory {
 		if (session == null)
 			return;
 		for (InventoryS2CPacket fragment : session.fragments) {
-			if (!store.assembling(state.channel))
-				return;
-			stashPending(state, fragment.entries());
-			InventoryClientStore.PartOutcome outcome = store.part(state.channel, baselineId, statusRevision,
-				fragment.partIndex(), valuesOf(fragment.entries()), ticks);
-			if (outcome == InventoryClientStore.PartOutcome.COMMITTED) {
-				commitTracking(state, baselineId, statusRevision, fragment.watermark(), fragment.status());
-				return;
-			}
+			acceptTrackedData(fragment);
 		}
+	}
+
+	private void retireUnknownBefore(MarkerId markerId, long baselineId, long statusRevision, boolean invalid) {
+		unknown.keySet().removeIf(key -> key.markerId().equals(markerId)
+			&& (key.statusRevision() < statusRevision || (key.statusRevision() == statusRevision
+				&& (invalid || key.baselineId() < baselineId))));
 	}
 
 	private void removeUnknownSessions(MarkerId markerId) {
@@ -791,25 +1231,28 @@ public final class ClientInventory {
 
 	private static void clearTrackingState(TrackingState state) {
 		state.metadata.clear();
-		state.metadataBytes = 0;
-		state.pendingMetadata.clear();
-		state.pendingBytes = 0;
-		state.pendingHasIdentity = false;
-		state.pendingBaseline = InventoryClientStore.NO_BASELINE;
-		state.pendingRevision = -1L;
+		state.pending = null;
+		clearCuts(state);
 		state.committed = false;
 		state.committedChecksum = 0L;
+		state.watermark = 0L;
+	}
+
+	private static void clearCuts(TrackingState state) {
+		state.closedEntries.clear();
+		state.batches.clear();
+		state.closedBatches.clear();
+		state.heartbeats.clear();
+		state.batchBytes = 0L;
+		state.closedBatchBytes = 0L;
+		state.closedCut = false;
+		clearCompletion(state); state.heartbeatGapSince = -1;
 	}
 
 	private long computeChecksum(TrackingState state) {
 		InventoryChecksums.Builder builder = InventoryChecksums.builder();
-		Map<String, InventoryClientStore.Value> committed = store.values(state.channel);
-		for (Map.Entry<String, InventoryClientStore.Value> entry : committed.entrySet()) {
-			EntryView view = state.metadata.get(entry.getKey());
-			if (view == null)
-				continue;
-			builder.add(entry.getKey(), view.itemId(), entry.getValue().count(), qualityToken(view.quality()),
-				view.fallback());
+		for (InventoryS2CPacket.Entry entry : state.closedEntries.values()) {
+			builder.add(entry.key(), entry.itemId(), entry.count(), qualityToken(entry.quality()), entry.fallback());
 		}
 		return builder.checksum();
 	}
@@ -832,7 +1275,7 @@ public final class ClientInventory {
 
 	private static EntryView viewOf(InventoryS2CPacket.Entry entry) {
 		return new EntryView(entry.key(), entry.itemId(), entry.label(), entry.displayJson(), entry.count(),
-			entry.fallback(), entry.quality());
+			entry.fallback(), entry.quality(), entry.itemPingType());
 	}
 
 	private static String qualityToken(InventoryS2CPacket.Status quality) {
@@ -845,12 +1288,12 @@ public final class ClientInventory {
 	}
 
 	private static int byteSize(EntryView view) {
-		return 64 + utf8Length(view.itemId()) + utf8Length(view.label())
+		return 64 + utf8Length(view.key()) + utf8Length(view.itemId()) + utf8Length(view.label())
 			+ (view.displayJson() == null ? 0 : utf8Length(view.displayJson()));
 	}
 
 	private static long packetBytes(InventoryS2CPacket packet) {
-		long bytes = 32L;
+		long bytes = 128L;
 		for (InventoryS2CPacket.Entry entry : packet.entries()) {
 			bytes += 48L + utf8Length(entry.key()) + utf8Length(entry.itemId()) + utf8Length(entry.label())
 				+ (entry.displayJson() == null ? 0 : utf8Length(entry.displayJson()));

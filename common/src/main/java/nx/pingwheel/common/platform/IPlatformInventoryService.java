@@ -13,8 +13,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 
-import org.jetbrains.annotations.Nullable;
-
 /**
  * Loader bridge for item sources that expose a native, read-only inventory
  * capability.
@@ -26,10 +24,10 @@ import org.jetbrains.annotations.Nullable;
  * Minecraft stacks and never mutate the source, open a transaction, force-load
  * a chunk, or trigger loot generation.
  *
- * <p>The bridge carries no provider identity, alias, controller resolution,
- * permission or lock decision, and no consumer or packet state: those stay with
- * the caller and the resolver integration that composes this physical access
- * with {@code SourceKey} identity.
+	 * <p>A specialized safe provider may establish a canonical alias, but the
+	 * bridge owns no permission or lock decision and no consumer or packet state.
+	 * The caller admits bounded provider work before resolution and composes the
+	 * physical access with {@code SourceKey} identity.
  */
 public interface IPlatformInventoryService {
 
@@ -38,13 +36,13 @@ public interface IPlatformInventoryService {
 		.orElseThrow(() -> new IllegalStateException("No IPlatformInventoryService implementation found!"));
 
 	/**
-	 * Resolves the loader item capability at {@code pos}, optionally for one
+	 * Resolves the loader item capability at {@code pos} for the non-null frozen
 	 * side. Returns empty when the position is not loaded, when no block entity
 	 * or capability is present, when loot generation is pending, or when the
 	 * provider fails. Must be called on the server thread; the caller owns
 	 * target validation and every permission decision.
 	 */
-	Optional<Access> find(ServerLevel level, BlockPos pos, @Nullable Direction side);
+	Optional<Access> find(ServerLevel level, BlockPos pos, Direction side);
 
 	/**
 	 * One detached observation of a source entry. {@code exemplar} is a
@@ -91,6 +89,21 @@ public interface IPlatformInventoryService {
 	 * behind it, and every returned stack stay confined to the server thread.
 	 */
 	interface Access {
+		/** Canonical controller alias, only when established without force-loading. */
+		default Optional<String> alias() { return Optional.empty(); }
+		/** Reacquire live provider segments on validation/read when the provider requires it. */
+		default boolean valid() { return true; }
+		/** Counts every visited view, including blanks; implementations override cursorless enumeration. */
+		default Budgeted observe(int limit) {
+			if (limit < 0) throw new IllegalArgumentException("negative observation limit");
+			List<Entry> entries = new ArrayList<>();
+			if (stableCursor()) {
+				int count = slots();
+				for (int i = 0; i < Math.min(count, limit); i++) entries.add(read(i));
+				return new Budgeted(entries, count <= limit);
+			}
+			throw new UnsupportedOperationException("cursorless observation must account blank views");
+		}
 
 		/**
 		 * Number of stable slots, or {@code 0} when the source has no stable

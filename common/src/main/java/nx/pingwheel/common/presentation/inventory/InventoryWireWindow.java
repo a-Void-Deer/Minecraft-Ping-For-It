@@ -27,9 +27,9 @@ public final class InventoryWireWindow {
 	/** Largest supported rolling window. */
 	public static final int MAX_GRACE_PERIODS = 32;
 
-	private final long baseBytes;
-	private final long peakBytes;
-	private final long[] excesses;
+	private long baseBytes;
+	private long peakBytes;
+	private long[] excesses;
 	private long period;
 	private long spent;
 	private long excessTotal;
@@ -83,6 +83,22 @@ public final class InventoryWireWindow {
 		}
 		spent += bytes;
 		return true;
+	}
+
+	/** Live policy changes retain debt and actual current-period spend; no free new window. */
+	public void reconfigure(long base, int periods) {
+		if (base <= 0 || periods < MIN_GRACE_PERIODS || periods > MAX_GRACE_PERIODS) throw new IllegalArgumentException("wire policy");
+		long peak = Math.multiplyExact(base, periods + 1L);
+		long[] next = new long[periods - 1];
+		int kept = Math.min(next.length, excesses.length);
+		long retained = 0;
+		for (int i = 0; i < kept; i++) {
+			int source = (cursor + excesses.length - kept + i) % excesses.length;
+			next[next.length - kept + i] = excesses[source]; retained = Math.addExact(retained, excesses[source]);
+		}
+		// Debt aged out only by shrinking policy is carried into the present period.
+		spent = Math.addExact(spent, excessTotal - retained);
+		excesses = next; cursor = 0; excessTotal = retained; baseBytes = base; peakBytes = peak;
 	}
 
 	/**

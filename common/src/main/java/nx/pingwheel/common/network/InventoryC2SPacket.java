@@ -4,6 +4,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.BlockFace;
 import org.jetbrains.annotations.NotNull;
 
 import java.nio.charset.StandardCharsets;
@@ -27,12 +28,14 @@ import static nx.pingwheel.common.Global.C2S_NAMESPACE;
  * to the corrupt no-arg instance through {@link #readSafe}.
  */
 public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long requestId, Target target,
-	MarkerId markerId, String entryKey, String itemId, String pingType) implements IPacket {
+	MarkerId markerId, String entryKey, String itemId, String pingType, long presentationEpoch, long view,
+	BlockFace face, long commitId, long baselineId, long stateRevision) implements IPacket {
 	public enum Kind { HELLO, OPEN, CLOSE, RESYNC, SELECT }
 
-	public static final int VERSION = 1;
+	public static final int VERSION = 2;
 	public static final int MAX_ID_BYTES = MarkerPacketCodec.MAX_ID_LENGTH;
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "inventory-v1");
+	public static final int MAX_FRAME_BYTES = 4096;
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "inventory-v2");
 	public static final Type<InventoryC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public InventoryC2SPacket {
@@ -42,10 +45,16 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 	}
 
 	public InventoryC2SPacket() { this(null, 0, 0, 0, null, null, null, null, null); }
+	/** Kept for constructing corrupt/legacy-shaped fixtures; runtime OPEN always requires a face. */
+	public InventoryC2SPacket(Kind kind, int protocol, long epoch, long requestId, Target target,
+		MarkerId markerId, String entryKey, String itemId, String pingType) {
+		this(kind, protocol, epoch, requestId, target, markerId, entryKey, itemId, pingType, 0, 0, null, 0, 0, 0);
+	}
 	public InventoryC2SPacket(FriendlyByteBuf buf) { this(decode(buf)); }
 	private InventoryC2SPacket(InventoryC2SPacket packet) {
 		this(packet.kind, packet.protocol, packet.epoch, packet.requestId, packet.target, packet.markerId,
-			packet.entryKey, packet.itemId, packet.pingType);
+			packet.entryKey, packet.itemId, packet.pingType, packet.presentationEpoch, packet.view, packet.face,
+			packet.commitId, packet.baselineId, packet.stateRevision);
 	}
 
 	public static InventoryC2SPacket hello() {
@@ -54,6 +63,19 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 
 	public static InventoryC2SPacket open(long epoch, long requestId, Target target) {
 		return new InventoryC2SPacket(Kind.OPEN, VERSION, epoch, requestId, target, null, null, null, null);
+	}
+	public static InventoryC2SPacket open(long epoch, long presentationEpoch, long view, long requestId, Target.BlockTarget target, BlockFace face) {
+		return new InventoryC2SPacket(Kind.OPEN, VERSION, epoch, requestId, target, null, null, null, null,
+			presentationEpoch, view, face, 0, 0, 0);
+	}
+	public static InventoryC2SPacket select(long epoch, long presentationEpoch, long view, long commitId, long requestId,
+		long baselineId, long stateRevision, String entryKey, String itemPingType) {
+		return new InventoryC2SPacket(Kind.SELECT, VERSION, epoch, requestId, null, null, entryKey, null, itemPingType,
+			presentationEpoch, view, null, commitId, baselineId, stateRevision);
+	}
+	public InventoryC2SPacket stamp(long presentationEpoch, long view) {
+		return new InventoryC2SPacket(kind, protocol, epoch, requestId, target, markerId, entryKey, itemId, pingType,
+			presentationEpoch, view, face, commitId, baselineId, stateRevision);
 	}
 
 	public static InventoryC2SPacket close(long epoch, long requestId) {
@@ -78,9 +100,11 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 		MarkerPacketCodec.writeEnum(buf, kind);
 		buf.writeVarInt(protocol);
 		buf.writeLong(epoch);
+		buf.writeLong(presentationEpoch);
+		buf.writeLong(view);
 		switch (kind) {
 			case HELLO -> {}
-			case OPEN -> { buf.writeLong(requestId); MarkerPacketCodec.writeTarget(buf, target); }
+			case OPEN -> { buf.writeLong(requestId); MarkerPacketCodec.writeTarget(buf, target); MarkerPacketCodec.writeEnum(buf, face); }
 			case CLOSE -> buf.writeLong(requestId);
 			case RESYNC -> {
 				buf.writeLong(requestId);
@@ -88,20 +112,25 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 			}
 			case SELECT -> {
 				buf.writeLong(requestId);
+				buf.writeLong(commitId);
+				buf.writeLong(baselineId);
+				buf.writeLong(stateRevision);
 				buf.writeUtf(entryKey, MAX_ID_BYTES);
-				buf.writeUtf(itemId, MAX_ID_BYTES);
 				buf.writeUtf(pingType, MAX_ID_BYTES);
 			}
 		}
 	}
 
 	private static InventoryC2SPacket decode(FriendlyByteBuf buf) {
-		Kind kind = MarkerPacketCodec.readEnum(buf, Kind.class);
-		int protocol = buf.readVarInt();
+		if (buf.readableBytes() > MAX_FRAME_BYTES) throw new IllegalArgumentException("inventory request frame");
+		Kind kind = StrictPacketCodec.readEnum(buf, Kind.class);
+		int protocol = StrictPacketCodec.readVarInt(buf);
 		if (protocol != VERSION) {
 			throw new IllegalArgumentException("Unsupported inventory protocol");
 		}
 		long epoch = buf.readLong();
+		long presentationEpoch = buf.readLong(), view = buf.readLong(), commitId = 0, baselineId = 0, stateRevision = 0;
+		BlockFace face = null;
 		long requestId = 0;
 		Target target = null;
 		MarkerId markerId = null;
@@ -110,20 +139,23 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 		String pingType = null;
 		switch (kind) {
 			case HELLO -> {}
-			case OPEN -> { requestId = readRequestId(buf); target = MarkerPacketCodec.readTarget(buf); }
+			case OPEN -> { requestId = readRequestId(buf); target = readBlockTarget(buf); face = StrictPacketCodec.readEnum(buf, BlockFace.class); }
 			case CLOSE -> requestId = readRequestId(buf);
-			case RESYNC -> { requestId = readRequestId(buf); markerId = MarkerPacketCodec.readOptionalMarkerId(buf).orElse(null); }
+			case RESYNC -> { requestId = readRequestId(buf); markerId = StrictPacketCodec.readBoolean(buf) ? new MarkerId(buf.readLong()) : null; }
 			case SELECT -> {
 				requestId = readRequestId(buf);
-				entryKey = buf.readUtf(MAX_ID_BYTES);
-				itemId = buf.readUtf(MAX_ID_BYTES);
-				pingType = buf.readUtf(MAX_ID_BYTES);
+				commitId = readRequestId(buf);
+				baselineId = readRequestId(buf);
+				stateRevision = readRequestId(buf);
+				entryKey = StrictPacketCodec.readUtf(buf, MAX_ID_BYTES);
+				pingType = StrictPacketCodec.readUtf(buf, MAX_ID_BYTES);
 			}
 		}
 		if (buf.isReadable()) {
 			throw new IllegalArgumentException("Trailing inventory request");
 		}
-		return new InventoryC2SPacket(kind, protocol, epoch, requestId, target, markerId, entryKey, itemId, pingType);
+		return new InventoryC2SPacket(kind, protocol, epoch, requestId, target, markerId, entryKey, itemId, pingType,
+			presentationEpoch, view, face, commitId, baselineId, stateRevision);
 	}
 
 	private static long readRequestId(FriendlyByteBuf buf) {
@@ -132,6 +164,14 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 			throw new IllegalArgumentException("Negative inventory request id");
 		}
 		return value;
+	}
+	private static Target.BlockTarget readBlockTarget(FriendlyByteBuf buf) {
+		if (StrictPacketCodec.readEnum(buf, nx.pingwheel.common.domain.TargetKind.class) != nx.pingwheel.common.domain.TargetKind.BLOCK)
+			throw new IllegalArgumentException("inventory requires an ordinary block");
+		String dimension = StrictPacketCodec.readUtf(buf, MAX_ID_BYTES);
+		if (StrictPacketCodec.readVarInt(buf) != MarkerPacketCodec.BLOCK_TARGET_STANDARD_TAG)
+			throw new IllegalArgumentException("inventory requires an ordinary block");
+		return new Target.BlockTarget(dimension, buf.readInt(), buf.readInt(), buf.readInt(), StrictPacketCodec.readUtf(buf, MAX_ID_BYTES));
 	}
 
 	private static void validateBoundedText(String value, String name) {
@@ -149,17 +189,18 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 		}
 		if (kind == Kind.HELLO) {
 			return epoch != 0 || requestId != 0 || target != null || markerId != null
-				|| entryKey != null || itemId != null || pingType != null;
+				|| entryKey != null || itemId != null || pingType != null || face != null || presentationEpoch != 0 || view != 0
+				|| commitId != 0 || baselineId != 0 || stateRevision != 0;
 		}
-		if (epoch == 0 || requestId < 0) {
+		if (epoch == 0 || requestId < 0 || view < 0 || commitId < 0 || baselineId < 0 || stateRevision < 0) {
 			return true;
 		}
 		return switch (kind) {
-			case OPEN -> target == null || markerId != null || entryKey != null || itemId != null || pingType != null;
-			case CLOSE -> target != null || markerId != null || entryKey != null || itemId != null || pingType != null;
-			case RESYNC -> target != null || entryKey != null || itemId != null || pingType != null;
+			case OPEN -> !(target instanceof Target.BlockTarget) || face == null || markerId != null || entryKey != null || itemId != null || pingType != null || commitId != 0 || baselineId != 0 || stateRevision != 0;
+			case CLOSE -> target != null || markerId != null || entryKey != null || itemId != null || pingType != null || face != null || commitId != 0 || baselineId != 0 || stateRevision != 0;
+			case RESYNC -> target != null || entryKey != null || itemId != null || pingType != null || face != null || commitId != 0 || baselineId != 0 || stateRevision != 0;
 			case SELECT -> target != null || markerId != null || entryKey == null || entryKey.isBlank()
-				|| itemId == null || itemId.isBlank() || pingType == null || pingType.isBlank();
+				|| itemId != null || face != null || commitId <= 0 || baselineId <= 0 || stateRevision <= 0 || pingType == null || pingType.isBlank();
 			case HELLO -> true;
 		};
 	}
