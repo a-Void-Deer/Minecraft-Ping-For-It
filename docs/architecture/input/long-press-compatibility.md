@@ -6,10 +6,9 @@ a queue of creates. Its persisted fields are catalogued in
 [client configuration](../../config/client.md#press-wheel-and-cancellation-interaction),
 and their timing relation is owned by [long-press timing](long-press.md).
 
-> **Current implementation-conformance gaps.** The create-only dispatch gate
-> for both paths has known gaps. Their concrete defect explanation and pending
-> regression matrix are maintained only in
-> [verification](../../testing/verification.md#known-automated-gaps).
+> **Dispatch-boundary evidence.** The create-only dispatch gate for both paths
+> is covered by the declined-create regressions inventoried in
+> [testing and verification](../../testing/verification.md#capture-wheel-and-cancellation).
 
 ## Observed mode and slice
 

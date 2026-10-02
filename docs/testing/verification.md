@@ -51,15 +51,17 @@ The current suite covers:
 Marker-store, packet, and update tests provide recipient-scoped state and
 channel-mode transport seams, but do not establish the complete `ServerCore`
 ordering and channel/admission matrix in a live client/server path. Loader
-registration of the legacy, presentation-v3, presentation-policy, and
-superseded marker routes is confirmed by source inspection for Fabric, Forge,
-and NeoForge; `ModIdentityTest` additionally pins the fork identity, the
-packet-ID namespaces, and the versioned v3/v2 presentation route IDs.
-Focused packet tests cover the permitted create/remove request fields, exact
-consumption of their encoded payloads, and safe decoding. These checks do not
-establish server authority. There is no direct automated test that a valid
-legacy location S2C packet or a superseded marker S2C packet is ignored by the
-client, nor a live cross-loader network test.
+registration of the legacy, presentation-v3, presentation-policy, inventory-v2,
+presentation-preview-v1, server-configuration-v2, and superseded marker routes
+is confirmed by source inspection for Fabric, Forge, and NeoForge;
+`ModIdentityTest` pins the fork identity, packet-ID namespaces, and the
+versioned presentation-v3, inventory-v2, policy-v2, and server-configuration-v2
+route IDs; focused packet tests pin those families' version boundaries and
+codec shapes, and `PresentationPreviewWiringTest` statically confirms the
+preview codec registration and main-thread handoff on every loader. These
+checks do not establish server authority or live transport. There is no direct
+automated test that a valid legacy location S2C packet or a superseded marker
+S2C packet is ignored by the client, nor a live cross-loader network test.
 
 ### Presentation snapshot negotiation, policy and adapters
 
@@ -236,10 +238,12 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   caps, case-sensitive duplicate rejection, not-found and invalid removal, and
   immutable non-mutating results.
 
-`ClientPingActionDispatcherTest` adds a programmatic property create that uses
-the frozen target and the actual typed wire without any GUI trigger, and
-`ModIdentityTest` pins the fork identity, the packet-ID namespaces, and the
-versioned v3/v2 presentation route IDs.
+`ClientPingActionDispatcherTest` covers a typed property create using the
+frozen target on the actual wire; `ClientPingDispatchReceiptTest` covers the
+actual-send receipt and transport-failure rollback; and
+`ClientPingRuntimeInteractionTest` drives that property create through the
+native selector's content release. `ModIdentityTest` pins the fork identity,
+the packet-ID namespaces, and the versioned route IDs.
 
 NeoForge Create adapter seams cover the optional summary route:
 `CreatePresentationAdapterTest` (server/client manifest parity, demand gating,
@@ -268,6 +272,64 @@ rendered property/chat/HUD lines, the live settings-screen draft,
 field-catalogue rendering, feedback, caret, or list-capacity behavior, a
 persistence fault during a policy mutation, or in-game Create/Sable sampling.
 
+### Target content preview
+
+The [content-preview owner](../architecture/presentation/presentation_snapshot.md#target-content-preview)
+has foundation and production-seam tests, not a live client/server validation:
+
+- `PresentationPreviewAccessTest` and `ClientPresentationPreviewAccessTest`
+  cover accepted-manifest and exact target-type mask intersection, unready and
+  unknown-field denial, matching field kinds, dedicated-inventory exclusion,
+  detached access snapshots, and a production client-session reset revoking
+  reader demand and late responses without populating the marker store;
+- `ClientPresentationPreviewTest` and `PreviewFoundationRegressionTest` cover
+  local-first observations, fallback for missing authorized roots, observed
+  zero and false, one-shot attempt history and cadence, timeout and deferred
+  outcomes without polling or invented values, interaction/level/view fences,
+  detached projections that expose neither world handles nor caller tokens,
+  and historical marker-cache identity, schema, mask and annotation boundaries.
+  `PreviewPropertyEntriesTest` covers actual nested literal property keys and
+  sequence roots without inventing addressable sequence indexes;
+- `PresentationPreviewServerTest` covers queue admission without ingress reads,
+  residual-work and capture limits, bounded queue expiry, cancellation, fresh
+  authorization before capture and send, cadence across request IDs, and no
+  repeated read after transport refusal. `PresentationServerPreviewTest`
+  additionally exercises production access, validation/capture and tick-order
+  seams: advertised and fresh permissions intersect, validation and reads are
+  admitted before execution, leases consume shared work before preview,
+  exhausted work defers, revocation stops publication, optional failures stay
+  bounded, request/result codecs compose, and preview never creates marker
+  state or materializes an uncommitted external candidate;
+- `MinecraftPreviewFieldAccessTest` covers the Basic reader with real headless
+  entity and item instances: demand precedes getters, observed health and item
+  data are retained, constructor-empty item data is unavailable rather than
+  zero, and dimension, identity, unavailable-block and generic-name gates stop
+  unsupported observations;
+- `PresentationPreviewPacketsTest` and `PresentationPreviewInnerSectionTest`
+  cover bounded request/result/control codecs, exact consumption, duplicate
+  demand rejection, mask/kind/schema checks, denied-field skipping, annotation
+  rejection, and strict wrapper and inner-section integer decoding. An
+  unaccepted field frame is skipped by its framed length before typed decoding,
+  yet the whole result is rejected without consuming the pending request; mixed
+  allowed and denied fields are never partially applied, and a later authorized
+  zero or false is still observed. Malformed replies cannot become provisional
+  values or consume the pending request; legacy section decoding remains a
+  separately exercised route and keeps its existing grammar; and
+- `PresentationPreviewWiringTest` provides static loader registration,
+  main-thread handoff, client-only prediction-guard and queue-cleanup evidence.
+  It does not exercise transport registration or mixin application in a game.
+
+NeoForge's `CreatePreviewReceiptStateTest` covers explicit client receipt
+evidence and its invalidation without treating absent constructor fields as
+observed zero. `CreatePreviewMixinPluginTest` covers a constructed target's
+receipt/invalidation method and field-shape gate, not live mixin application.
+
+These tests exist at headless runtime, reader, model, codec and static wiring
+seams. They do not record a current Gradle run or establish world-backed
+validation, prediction-guard application, live permission changes, native
+content selection through authoritative CREATE, installed optional providers,
+network delivery, rendering, or multiplayer behavior.
+
 ### Capture, wheel and cancellation
 
 `PingInteractionStateMachineTest` covers short press, long press,
@@ -279,12 +341,34 @@ races, first-completion ownership and identity-preserving metadata retention.
 context construction; `TargetSnapshotBlockClassificationTest` covers explicit
 and absent block-entity classification metadata; and
 `MinecraftTargetSnapshotFactoryDetailedTest` covers retaining local detail only
-for the matching entity-hit owner.
+for the matching entity-hit owner. `MinecraftTargetSnapshotFactoryFaceTest`
+covers the ordinary-block capture face at the level-free factory seam: each of
+the six resolved hit directions is copied as exactly that face, while a
+synthetic `MISS` direction and an unavailable-block location fallback never
+invent a face. `MinecraftSyntheticBlockFaceTest` covers retaining an actual
+native face through the candidate factory path and capture coordinator, while
+a synthetic concrete block keeps its target without acquiring a face, including
+after direction/position copies and coordinator completion.
+`PingCaptureCoordinatorTest` additionally covers
+face identity retention: the captured face survives only when resolution
+preserves the captured ordinary-block identity, duplicate and late-stale
+completions cannot replace an accepted face, and a changed block type or
+position discards it. These are factory and coordinator seams; the complete
+client/server `entity_block` classification path, including synthetic-face
+provenance from every optional producer, remains unexercised.
 
 `LongPressCompatibilityControllerTest` covers the ordinary rapid-click and
 asynchronous deferred-compatibility paths, with focused bounds coverage supplied
-by the applicable config-bounds tests. These are controller/config slices, not
-real input callbacks or render-frame integration. They do not exercise the real
+by the applicable config-bounds tests. `LongPressCompatibilityDispatchTest`
+drives that controller over the real baseline lifecycle, courtesy limiter and
+dispatch receipt: a rejected or unready synchronous first default create cannot
+seed rapid input; a rejected or unready asynchronous first default create drops
+both rapid and deferred presses without queueing, retrying or replaying a
+create or capture; a non-`CreatePing` result such as `TargetGone` discards the
+deferred press; an actually opened menu disqualifies even a sent default type;
+and successful receipts start the rapid second-ray and deferred fresh-press
+captures. These are controller/config slices, not real
+input callbacks or render-frame integration. They do not exercise the real
 focus-loss `KeyMapping.releaseAll` hook, screen-transition callbacks,
 level-instance/dimension discontinuity detection or loader/gameplay input
 lifecycle. The abort-before-ownership-clear order is source-confirmed; the
@@ -297,6 +381,45 @@ Those seams do not runtime-cover a retained stale or display-hidden marker
 reaching cancellation and then being rejected by the server without a local
 fallback. Frozen press-ray behavior and the pending-capture/wheel interaction
 boundary otherwise have focused test coverage.
+
+### Press-time candidate allocation
+
+The [candidate-allocation owner](../architecture/picking/capture.md#press-time-candidate-allocation)
+has focused headless evidence:
+
+- `FrozenCandidateAcquisitionTest` covers bounded allocation and identity
+  de-duplication, retained actual class and per-candidate face, ordinary-target
+  preservation when supplements are incomplete, exact-hit location derivation,
+  late ordinary completion without recollection, provider-local equivalence,
+  immutable evidence and independent work guards;
+- `CandidateCaptureLifecycleTest` covers same-token attachment, duplicate,
+  superseded, aborted and reentrant completion fences, no cross-token/ray reuse,
+  ordinary readiness and face preservation when optional finalization fails,
+  and avoiding duplicate ordinary resolution;
+- `NativeBlockCandidateScanTest` and `NativeBlockCandidateRegressionTest`
+  exercise native block/fluid shapes behind blockers, finite-segment and loaded
+  access gates, actual surface coordinates and faces on long oblique rays,
+  moving-piston shape access, bounded neighbor/block-entity and shape work, and
+  incomplete rather than certified prefixes on exhaustion. They also cover
+  origin containment without an observed face and no adjacent presentation-owner
+  expansion;
+- `NativeBoundaryFaceProvenanceTest` carries boundary contacts through the
+  production native scan, level-free snapshot factory and frozen allocation: a
+  tangential boundary contact retains its point and target without installing
+  a clamped slab face, a genuine inward boundary entry keeps its actual front
+  face, an outward boundary contact stays a miss, true origin containment
+  stays unobserved, and a real approach surface keeps its observed face; and
+- `RaycastSupplementalCandidateTest` and `NativeEntityEnumerationBudgetTest`
+  cover farther entity candidates, exact-owned non-hit rejection without coarse
+  fallback, frozen geometry ownership, selection filters, canonical multipart
+  and XP locator construction, and bounded lazy enumeration charging nonmatches
+  before filtering. The multipart case is a factory fixture, not a dragon-world
+  or rendering test.
+
+These are allocation, capture, native-shape and enumeration seams. The
+transformed Sable scanner has its own evidence below; no complete live press,
+optional-provider, selector release, packet and authoritative acceptance path
+is established by these tests.
 
 ### Selection-policy and input-state seams
 
@@ -399,8 +522,28 @@ stay independent and control only their own scope, the snapshot fragment and
 per-client period scopes stay equal, unlimited byte multipliers stay finite,
 the step helpers cross boundaries and saturate, pending-memory steps follow the
 piecewise grid, and independent defaults do not alias.
-`SpatialSelectorSettingsTest` covers glide and hover clamping and the opt-in
-default of Back-hover. `InventorySettingsPersistenceTest` covers additive
+`SpatialSelectorSettingsTest` covers the spatial-selector settings snapshot and
+bounds: target-glide, hover, deadzone, stroke, dwell, and root-distance
+clamping saturate on both sides over the whole valid interval, null and
+out-of-range nested values validate without throwing, the opt-in Back-hover
+default stays disabled, raw-JSON validation and a frozen snapshot clamp every
+value without resetting boolean choices, a frozen session snapshot never
+follows later config edits, root distance and gesture preferences stay
+independent in both mutation directions, and fresh defaults do not alias
+another client's mutable preferences. `SpatialSelectorMigrationTest` covers the
+release-boundary migration that removes only the old wheel radius keys without
+injecting defaults: the exact boundary and pre-target versions retire the radii
+while unknown root data and appearance values survive, a running version below
+the target keeps them, at-or-after-introduction and server configs are not
+consumed, a target-version upgrade persists model defaults while preserving
+unknown nested selector data, same-version absent, partial, and null selectors
+gain model defaults without a load rewrite, a pre-target writeback keeps old
+radius data until the target upgrade, a current-version load is not radius
+normalization while a target-version save cannot resurrect radii, every
+explicit preference round-trips independently of appearance, and the
+future-version guard keeps all bytes and refuses save and reset; an injected
+failed write retains usable in-memory preferences and a retry discards the
+stale source before migration. `InventorySettingsPersistenceTest` covers additive
 defaults without rewriting a current-version file, older-version migration
 writing the nested inventory object while preserving user data, explicit
 unlimited round trips, out-of-range values clamping without resetting
@@ -424,9 +567,18 @@ stamps and negative counts, a known zero expected count is distinct from an
 unknown expected count, the keyed-fragment page bound is independent of the
 existing record-value entry bound, snapshot records reuse the existing
 presentation field and value bounds, and opaque evidence and cursor tokens are
-bounded and detached. These are model seams only: no real source step,
-provider read, shared-consumer accounting, transport or running server path
-exercises them.
+bounded and detached. `OpaqueKeyedPayloadTest` covers the opaque keyed-payload
+model: an exact long beyond double precision survives the domain byte codec
+while the legacy double form cannot represent it; a domain display value larger
+than the generic presentation text bound is carried independently and rejected
+by that generic bound; construction and access copy caller bytes and maps;
+opaque values compare by their bytes; the exact opaque value bound is admitted
+and one more rejected; invalid values, keys, and codecs are rejected; the
+opaque page bound is independent of the record-value entry bound; and a
+readable capture result carries the opaque payload while unavailable and
+invalid results reject a payload. These are model seams only: no real source
+step, provider read, shared-consumer accounting, transport or running server
+path exercises them.
 
 ### Back-hover return state
 
@@ -453,8 +605,9 @@ fragment, then defers without further reads while charging exactly one unit;
 closing is idempotent; an authorized demand set is copied, immutable and
 compatibility-checked against the descriptor's read scope; and one-shot,
 stable-cursor and stable-version capabilities are declared and tested
-independently. This is a contract seam only: no real Minecraft provider, world
-read, integrated server runtime, transport, or sync publication exercises it.
+independently. This is a contract seam; the production wrapper and publisher
+seams are covered separately below, while no live Minecraft world, integrated
+server runtime or transport exercises it.
 
 ### Shared source sync publication contract
 
@@ -465,8 +618,10 @@ and a cancel are isolated per consumer and do not discard another consumer's
 delivered values; a budget defer keeps the observation valid and publishes
 nothing; an unavailable control result is accepted as status and never deferred
 or turned into data or a fake zero; and the context and projection bounds are
-validated and frozen. The fake is not a transport or production implementer: no
-wire send, client receipt, integrated runtime, or inventory delivery exercises
+validated and frozen. The fake is not a transport or production implementer.
+The production publisher's ordering and repair behavior is exercised separately
+by `InventoryPublicationIntegrationTest` with a recording transport and real
+encoded frames; no live transport, integrated runtime or world read exercises
 this boundary.
 
 ### Headless spatial radial menu
@@ -486,9 +641,74 @@ physical deltas accumulate and rebase starts a fresh trail; cancel clears the
 session idempotently; an externally composed submenu is pushed at a given
 origin with a rebased pointer and gains one automatic Back entry; and an
 explicit Back is centred on the parent bearing with equal non-root sibling
-spans that tile. It is a standalone model seam: no native screen, renderer,
-input callback, configuration, or world-candidate source is exercised, and
-qualified-turn, retrace and inventory-list behavior are not implemented.
+spans that tile. The same headless controller model covers qualified-turn
+entry at a corner and reverse-stroke retrace, including that a disabled branch
+cannot be entered by turn and a row-anchored external menu does not retrace.
+It is a standalone model seam: no native screen, renderer, input callback,
+configuration, or world-candidate source is exercised.
+
+`SpatialSelectorSessionTest` covers the production headless selector facade:
+the frozen root menu and its allowed typed intents (with a whole-marker choice
+disallowed for the entity-block fixture rather than by a universal disable),
+supplied precise allocations that are never retargeted or reused, broad
+precise slots keeping their candidate's canonical target type while a foreign
+canonical type is rejected, single-use release,
+unavailable/reserved/branch releases producing no action, next-capture
+toggles that do not mutate the frozen target, actual property values and
+annotations without fixture data, the inventory submenu anchored at the logical
+selected row with Back preserving selection, direct list release choosing one
+opaque reference without count authority, partial-batch ordering and freeze
+rules with explicit zero retained, list Back-hover ownership and one-level pop,
+lifecycle and unavailable fences discarding old references and late data,
+missing counts staying unknown while an explicit zero remains selectable, and
+opaque property keys not aliasing another annotation action.
+`NativeSelectorInputTest` covers the headless input normalization seam: only
+accepted successive window positions become GUI travel, opening, resize, focus
+loss, and reopen reprime without phantom travel, and scroll normalization
+occurs once only while owned without moving the pointer. These are headless
+model and input-normalization seams: no native screen, renderer, input
+callback, world-candidate source, or in-game integration is exercised.
+
+`NativeSelectorContentTest` additionally exercises the production content bridge
+against a real headless client inventory session: opaque selectable references,
+explicit zero and row quality, folded-row replacement resetting the list,
+close cleanup, and reentrant abort during open without reviving the request.
+This is client-session/facade coverage, not native input or HUD evidence.
+
+### Native client interaction runtime
+
+`ClientPingRuntimeInteractionTest` drives the production interaction runtime
+through headless world, cursor and clock ports: press-time ray and target stay
+frozen through camera movement and asynchronous completion; a pending
+completion cannot open a menu or start a held preview; release alone produces
+exactly one default create; abort reasons invalidate a late capture and
+synthetic release; a center release abandons without a cancellation while the
+cancel branch builds the frozen cone lazily; list release sends `SELECT` before
+the exact `CLOSE` and never falls back to a plain create; timeout wins over a
+selected row; reset and late-preview responses cannot revive or select; precise
+release consumes the frozen candidate; broad block and entity slots stay
+distinct from the ordinary target and keep their candidate's canonical target;
+property create preserves the address, observed value, annotation and
+whole-marker type, and a denied property cannot
+fall back to a plain create; toggles commit once; deferred compatibility
+receipts gate the deferred capture; resize, invalid frames and screen disposal
+reprime without synthetic travel; held preview forwarding and its late-response
+fence; a late old capture cannot clear a new selector or its exact request;
+rapid receipts backdate only time and keep the second physical ray; spatial
+settings are frozen at press and the timeout is fixed at actual open; an
+invalid viewport cannot open; and a reentrant abort inside validation blocks
+every release packet. `ClientPingDispatchReceiptTest` covers actual-send
+receipt, transport-failure rollback without queueing or refund, empty-tracker
+restoration and preservation of a newer reentrant route receipt.
+`WheelMouseCaptureLifecycleTest` covers owned release and re-grab,
+incoming-screen disposal ordering, an unowned free cursor and reentrant
+disposal. `NativeSelectorMixinContractTest` checks the mapped `MouseHandler`
+callback ABI, the mixin hook descriptors, and that each effective loader
+manifest registers every hook exactly once on the client side.
+
+These are production-orchestration tests over recording world, cursor, clock
+and transport ports; they are source-reviewed test existence, not a live client
+run, mixin application, GPU submission, or multiplayer verification.
 
 ### Inventory preview and tracking foundation
 
@@ -497,24 +717,84 @@ supporting models. `InventoryC2SPacketTest` and `InventoryS2CPacketTest` cover
 request and response codec round trips, bounded text and frame limits,
 corruption rejection, part-range and duplicate-key rejection, and the status
 values. `InventoryChecksumsTest` covers the entry checksum model.
+`InventoryStrictDecodeTest` covers raw overflowing request/response frame
+numbers and strict helper rejection of overflowing or noncanonical varints and
+overflowing varlongs; it is codec coverage, not transport or admission evidence.
 `InventoryScannerTest`, `InventoryScanBrokerTest` and `InventoryWireWindowTest`
 cover bounded scanning, the shared-read broker, the wire window, and
 incomplete/unavailable outcomes. `InventoryPreviewServerTest` covers preview
 session negotiation, request binding, bounded budget admission, invalidation,
-close, and the ignored forged `SELECT`. `InventoryPresentationTest`,
+close, and the ignored forged `SELECT`; it also covers the preview progress and
+retained-memory model headlessly: duplicate requests reuse only one client's
+paid coverage while different clients pay independent logical progress for a
+shared physical read, close, reopen, disconnect, reconnect, and invalidation
+never refund already-charged period slots, a client's progress is retained and
+accounted once and released by the last request, pending-memory pressure defers
+new client progress until room is released, departed-UUID churn returns to the
+anchored round's retained cost, and an exact long count beyond double precision
+survives publication. `InventoryRuntimeTest` covers the production runtime
+seam: one admitted physical prefix shared by preview, duplicate-preview and
+tracking consumers while client and target logical subjects stay independent
+and finite; a memory defer performs no resolver or read and retained lifetime
+ends with the paid period; cursorless enumeration cannot invent continuation;
+owner and frozen face split physical sharing; repeated tracking Pings share one
+target quota while a fresh select skips an older preview sweep; live cadence
+and cap changes cannot refund spent usage; invalid rounds retire all shared
+handles once without closing consumers and unrelated work progresses; a
+throwing read or close releases all retained and reserved memory; and a live
+physical-cap reduction preserves already-spent slots and blocks reads or
+selection past the new cap. `InventoryAuthorityOrderTest` covers the production
+admission order before any source read: rate and channel reject first,
+authoritative target-gone precedes source admission, and the witness and
+annotation steps sit inside production dedicated admission before storage with
+no leaked reservation. `InventoryPublicationIntegrationTest` replays the
+production publisher's real encoded frames into the client session: a recovery
+fence precedes the baseline snapshot per recipient, a grey baseline is replaced
+without resurrecting an old stream, each recipient's receipt stays isolated, a
+withheld stream is repaired by real completion controls at the negotiated
+cooldown, an admitted multipart baseline beyond its periods defers future
+digests and repeated `RESYNC` resumes the same baseline, a future heartbeat
+without application delivery requests bounded repair, a completed digest with a
+missing part repairs without partial comparison, a failed fence blocks baseline
+parts until the same fence can be sent, and duplicate controls never reset
+assembly or the gap timer. `InventoryMinecraftSourcesTest` composes the
+production source wrapper with a recording platform view: a same-alias topology
+change invalidates before the cursor continues and a fresh observation recovers
+all slots. NeoForge's `CreateVaultSourceWrapperTest` composes the real lazy
+segmented Vault provider with the production common wrapper: a same-controller
+rotation invalidates before the cursor continues, and a fresh handle recovers
+the complete twelve-slot sum. `InventoryPresentationTest`,
 `DedicatedDeliveryBoundaryTest` and `ClientDedicatedDeliveryTest` cover the
 dedicated-delivery boundary: the inventory adapter is negotiated and
 policy-catalogued but never sampled, masked, published or rendered by the
 section machinery. `InventoryItemCodecTest` and `VanillaInventorySourceTest`
 cover the ordinary-block item codec and source. `InventoryClientStoreTest` and
-`ClientInventoryTest` cover the client connection session, preview projection
+`ClientInventoryTest` cover the client connection session: preview projection
 and its accepted barrier across every part, byte bound and fence, baseline
 assembly, unknown-baseline buffer, checksum comparison and resync scheduling;
-the tracking closed-watermark barrier remains pending.
-`PlatformInventoryServiceContractTest` covers the loader service contract. `InventoryGestureTest`, `InventoryListModelTest` and
-`SpatialOverlayRendererTimingTest` cover the client gesture, list and renderer
-timing models. These are headless runtime and model seams: no manual world,
-renderer, transport or multiplayer behavior is verified.
+accepted per-key revisions own metadata and quantity together; byte-bound
+replacement growth is refused before quantity, metadata, or cut mutation; the
+tracking closed-watermark barrier closes only after every accepted distinct
+part and a deferred heartbeat is rechecked once the cut closes; a future
+baseline buffered before an invalidation completes recovery without readmitting
+the old baseline; and an evicted snapshot or multipart-stream replay cannot
+reopen its closed barrier or suppress repair. `PlatformInventoryServiceContractTest`
+covers the loader service contract. `InventoryGestureTest`, `InventoryListModelTest` and
+`SpatialOverlayRendererTimingTest` cover the client gesture, list ordering and
+freeze, and renderer timing models. `SpatialOverlayTransitionsTest`,
+`SpatialInventoryLayoutTest` and `SpatialOverlayRendererStyleTest` cover the
+CPU overlay models: appearance, exit, reappearance, retargeting, reduced
+motion, rewind and bounded churn; row layout and coordinate conversion with
+status separate from rows and unknown counts; and caller style overrides,
+legacy font scaling and alpha arithmetic. `InventoryTrackingRendererTest`
+projects received tracking data into bounded renderer lines: explicit zero is
+retained, unknown or invalid counts are never synthesized as zero, and status
+and grey state stay explicit. These are headless runtime, model and
+production-seam tests over recording providers and transports: no manual world,
+renderer, GPU submission, icon rendering, live transport or multiplayer
+behavior is verified, and live world-backed provider safety, installed
+optional-provider wiring, native HUD integration and the manual inventory matrix
+below remain pending.
 
 ### Server-settings snapshots and updates
 
@@ -537,6 +817,33 @@ do not establish the live settings UI, permission changes over a connection,
 actual packet exchange, or persistence behavior in a running client/server
 session.
 
+`InventoryConfigValuesTest` covers the nineteen-leaf admin inventory value
+model: each leaf's merge preserves every unselected current value and stays
+independent of the rate-limit, channel, and sync fields; an invalid leaf
+rejects the whole mixed update and unsafe snapshots fail closed without
+defaulting; each leaf converts to and from its persisted member without
+aliasing; missing, null, off-grid, and unexpected-unlimited values are unsafe
+without substitution; and unsafe current or missing updates never report an
+applied transaction. `ServerInventoryConfigPacketsTest` covers the strict v2
+administration wire: the v2 request, update, and snapshot routes; every leaf
+and explicit unlimited finite value round-tripping; every legal grid value
+exact on the wire; truncation, old-prefix, and trailing data rejecting without
+throwing; an invalid encoded leaf or malformed mode rejecting the whole packet;
+and off-grid quanta, unknown masks, missing inventory, nonpositive caps, and
+out-of-range scalars failing closed without clamping. `ServerConfigVarNumbersTest`
+covers canonical integer and positive correlation boundaries, truncation,
+overflow, signed-width and noncanonical encodings, malformed update/snapshot
+numbers failing closed before service mutation or view publication, and legal
+maximum values retaining their exact meaning. `ServerInventoryDraftTest` covers
+the admin draft model: per-leaf dirty, revert, and independent update-plan state; a malformed
+leaf not erasing other invalid drafts or permitting partial updates; read-only
+values visible but every edit inert; unlimited leaves retaining finite text;
+decimal parsing and stepped boundaries; the session lifecycle across
+navigation, permission revocation, and disconnect; and unsafe or stale
+responses neither installing a view nor overwriting drafts. These are headless
+model and wire seams: no `ServerCore` or live administration path exercises
+them.
+
 ### Settings-screen navigation, catalog, layout and localization
 
 The [configuration UI](../UI/settings-screen.md) scope, category, and page
@@ -545,8 +852,9 @@ screen evidence:
 
 - `SettingsNavigationModelTest` covers the initial client overview, per-scope
   overview selection, each category opening its own leaf page within its scope,
-  the immutable six-category client and four-category server order, the
-  server Presentation category opening without ordinary-server permission, the
+  the immutable six-category client and five-category server order including
+  the Performance category, the server Presentation category opening without
+  ordinary-server permission, the
   separate Server Presentation leaf, independent ordinary-server and
   presentation-policy view access, and independent per-page viewport and focus
   retention; it also covers rejection of a
@@ -559,9 +867,10 @@ screen evidence:
   retains a viewable snapshot while forcing the scope overview without one;
 - `SettingsCategoryCatalogTest` covers exactly-once placement of every existing
   control in the approved category order and immutable per-category lists,
-  including the client scope without a presentation category and the server
-  Presentation category; it does not cover full-width layout flags or actual
-  widget placement;
+  including the client scope without a presentation category, the server
+  Presentation category, and the server Performance category exposing every
+  inventory leaf exactly once; it does not cover full-width layout flags or
+  actual widget placement;
 - `PresentationFieldOutcomeTest` covers the server policy role: the advertised
   manifest default, exact and wildcard allow rules winning over block rules,
   exact membership toggles mapping to single list operations, whitelist-only
@@ -587,20 +896,43 @@ screen evidence:
   the regression that a null focused widget with a null list never calls the
   list-child supplier. This is headless coverage of the production focus-key
   helper, not a constructed `SettingsScreen`, live focus-list traversal, or
-  in-game focus validation; and
+  in-game focus validation;
+- `SettingsListFocusTest` covers the headless settings-list focus and reveal
+  helper: a deferred-rebuild validation from the bottom explicitly reveals the
+  first invalid row after the rebuild, ordinary mouse focus keeps its retained
+  viewport, an already-visible validation does not reset the viewport, an
+  unknown widget is a no-op, and a lower row or keyboard-origin reveal does not
+  reset the top; it does not construct a native widget list or exercise mouse
+  dispatch;
 - `ClientConfigLocalizationTest` covers the eight bundled locale files and the
   settings, category-navigation, server-status, entity-block-mode, and
   target-gone resource keys, their required format placeholders, the category
-  entrance ellipsis, the exact local feedback prefix, and the restart-required
-  external-list tooltips; it does not render or assemble screen labels; and
+  entrance ellipsis, the exact local feedback prefix, the restart-required
+  external-list tooltips, and the nine spatial-selector preference keys with
+  their tooltips and numeric/boolean placeholder rules; it does not render or
+  assemble screen labels;
+- `InventorySettingsLocalizationTest` covers the eight bundled locale files,
+  the inventory settings label and tooltip key set, the performance category
+  entrance, the inventory group headings, and the shared inventory range
+  placeholder; it does not render or assemble screen labels;
+- `SpatialInventoryLocalizationTest` covers the eight bundled locale files, the
+  renderer-referenced inventory keys, every inventory status label as a
+  non-formatted literal, and inventory key-set alignment across locales; it
+  does not render or assemble screen labels;
+- `SpatialSelectorLocalizationTest` covers the eight bundled locale files and
+  the native selector facade's real menu-label keys: every non-blank label the
+  headless facade publishes exists and is non-blank in every locale and carries
+  no format placeholder, code-defined toggle and target-type identities are
+  published as keys, and the spatial key set stays aligned across locales; it
+  does not render or assemble screen labels; and
 - `PresentationSettingsLocalizationTest` covers the eight bundled locale files,
   every presentation key present, non-blank, and with an identical key set
   across them, the approved English presentation labels, key placeholders,
-  localized names and descriptions for every builtin and Create field in every
-  locale, bundled translations for the recognized namespace headings, the
-  read-only server status wording, and a property request phrase separate from
-  the whole-marker Ping Type phrase in every bundled locale; it does not render
-  or assemble screen labels.
+  localized names and descriptions for every builtin, Create, and
+  inventory-manifest field in every locale, bundled translations for the
+  recognized namespace headings, the read-only server status wording, and a
+  property request phrase separate from the whole-marker Ping Type phrase in
+  every bundled locale; it does not render or assemble screen labels.
 
 The production screen routes native widget input through the deferred-action
 coordinator, but these tests exercise the model, catalog, geometry, and resource
@@ -657,6 +989,14 @@ provider-observation and diagnostic evidence:
   closed for non-live references, wrong entries, invalid tracking-point state,
   and invalid coordinates. It does not load the Sable API or exercise live
   reflection, sublevels, materialization, persistence, or release;
+- `SableSupplementalRaycasterTest` covers the production transformed scanner
+  with real Companion poses and native shapes but recording sublevel ports:
+  translated and rotated hits behind a blocker or after a miss, world-segment
+  range under nonuniform scale, detached pose evidence, distinct provider-local
+  equivalence, raw-entry and shape-work admission, loaded/invalid-pose gates,
+  selection-policy reuse, removed entries and absent-Sable safety. It does not
+  exercise an installed Sable client, live list/reflection access, server
+  materialization, or inventory reads;
 - `SableRefreshLogGateTest` checks decision state for tested locator or reason
   changes and duplicates, rather than a refresh operation or log sink;
 - `SableDiagnosticsTest` and `SableServerDiagnosticsTest` check selected event
@@ -691,9 +1031,30 @@ distinct units; closing an uncommitted reservation refunds everything and
 repeated close is idempotent; over-commit, unknown counters, negative amounts,
 blank scopes and negative limits are rejected before any counter moves;
 `Long.MAX_VALUE` limits do not overflow remaining accounting; and caller maps
-are copied so later caller mutation cannot move the ledger. This is a model
-seam only: no integrated scheduler, provider, real read admission, retained
-memory or wire lifetime, or running server path exercises the ledger.
+are copied so later caller mutation cannot move the ledger. This is a generic
+counter-ledger model seam; the production runtime and source-wrapper tests
+exercise it through recording providers, while a running server path remains
+unexercised. `RetainedMemoryLedgerTest`
+covers the production retained-memory ledger headlessly: a reservation holds
+its actual cost until close and close is idempotent; closing an uncommitted
+reservation releases its whole upper bound; a cap reduction keeps live
+reservations charged and defers new admission until the ledger returns under
+cap; one shared object is charged once while each recipient cursor is charged
+separately; a denied admission runs no read, encode, or allocation callback and
+moves nothing; and rejected requests leave the ledger untouched.
+`LedgerTicketTest` covers combined admission across memory and counter ledgers:
+one deferred ledger releases every already-granted provisional ticket, a
+granted set holds every ledger until the caller closes, a denial short-circuits
+later attempts, the returned tickets are the real ledger tickets, an
+exceptional exit releases granted tickets in reverse order, rethrows the same
+failure object, propagates an error instead of treating it as deferral,
+suppresses a cleanup failure under the original failure while still closing
+other tickets, releases granted tickets on null attempts or results, and
+rejects an empty attempt list. These are ledger and admission-composition
+seams; `InventoryRuntimeTest`, `InventoryMinecraftSourcesTest` and the Create
+Vault wrapper test exercise their integration into production source
+allocation, scanning and delivery through recording providers, while live
+world, transport and optional-provider behavior remains unexercised.
 
 ### Rate-policy courtesy behavior
 
@@ -754,11 +1115,20 @@ Their loader source sets receive common Java and resources through the shared
 loader wiring. Fabric retains the common mixin configuration and Loom-generated
 intermediary refmap; Forge and NeoForge use their loader-local official-Mojmap
 configuration instead. This routing identifies existing tasks and artifact
-purposes only. Public build orientation and commands are listed in the
+purposes only; because each loader source set compiles the shared common
+sources, an affected loader `build` is source-set and compile evidence for
+those units, not runtime, transport, or in-game verification. Public build
+orientation and commands are listed in the
 [repository README](../../README.md#install-build-and-verify); the tracked
 [geometry pipeline](../architecture/geometry/geometry-pipeline.md) is the public
 architecture entry point. Local agent instructions, when present, are
 supplementary execution guidance rather than a public documentation prerequisite.
+
+An inventory entry or static wiring test is not a Gradle execution record.
+Final-state evidence for an implementation change must identify the combined
+tree, commands and results for the affected tests and loader source sets;
+blocked or unrun tests, builds and artifact checks remain explicit gaps in that
+change's report. Earlier runs do not validate subsequent relevant edits.
 
 | Module or artifact scope | Task | Purpose |
 | --- | --- | --- |
@@ -771,60 +1141,43 @@ supplementary execution guidance rather than a public documentation prerequisite
 
 The following gaps remain open until direct evidence closes them:
 
-- the shared source mechanism is partly implemented: the cost-ledger seam, the
-  detached source-key and capture-result models, the source-access boundary
-  contract, the sync-publisher declaration, and the ordinary-block inventory
-  preview foundation are covered (see the coverage notes below). The preview
-  foundation does not yet run through the generic source-access, capture-result
-  or cost-ledger seams, and sync publication has no production implementer;
-  tracking delivery, the remaining provider contexts and native UI integration
-  remain adopted contracts with no runtime implementation or automated
-  coverage; every statement in
-  [shared source capture and sync](../architecture/presentation/shared_sources.md)
-  and [inventory preview and tracking](../architecture/presentation/inventory.md)
-  that is not backed by those notes is a confirmed contract pending
-  implementation rather than existing behavior;
-- the inventory foundation is preview-only: `SELECT` and tracking delivery are
-  not implemented (the server ignores both), no native input or HUD facade
-  consumes the client session, entity/private/external provider contexts report
-  unavailable, no manual world, renderer, transport or multiplayer behavior is
-  verified, and no loader build or source-set verification is recorded for
-  these units; the preview foundation charges logical slot progress per preview
-  request instead of once per the confirmed client/target quota identity, which
-  is an implementation gap against the confirmed quota rule, not an open
-  product decision; client preview accepted-barrier coverage now exercises all
-  parts, byte bounds and fences, while the tracking closed-watermark barrier
-  remains pending;
-- inventory boundaries without coverage: preview ordering and freeze rules,
-  selected-item zero versus unknown, per-item revisioning, per-Ping+recipient
-  baseline and resynchronization isolation, unknown-baseline expiry versus
-  admitted fragment-baseline progress, component-too-long all-variant folding,
-  per-client period snapshot byte accounting across targets, heartbeat zero
-  semantics, variant identity and quotas, and the hard stop at Ping expiry;
-- inventory budget and spatial-selector configuration have only model and
-  persistence seams: the server administration path, remote change route,
-  settings-UI exposure, scheduler consumption, and native selector integration
-  remain unexercised;
-- the shared source runtime paths without coverage: production sync
-  publication, cross-consumer physical and logical charging beyond the
-  foundation seams, receiver-isolated runtime publication, and the ledger's
-  integrated admission path; the model-level identity, result, access-contract,
-  sync-publication declaration and preview-foundation validation is covered by
-  their notes;
-- the shared client/server `entity_block` classification path end to end;
+- the shared-source identity, opaque-payload, result, access-contract,
+  sync-publication declaration, counter/retained-memory and combined-admission
+  primitives have the headless coverage inventoried above, and the production
+  runtime, source-wrapper and publisher seams now exercise allocation, physical
+  and logical sharing, retained lifetime, invalidation and recovery through
+  recording providers and transports. They do not establish live world or
+  optional-provider behavior, real transport, GPU or multiplayer execution, or
+  a complete backend migration. The
+  [shared-source](../architecture/presentation/shared_sources.md) and
+  [inventory](../architecture/presentation/inventory.md) owners remain the
+  contracts; source presence alone does not close these evidence gaps;
+- the inventory preview-foundation, production runtime and publication tests
+  cover per-client/target logical progress, accepted barriers, the tracking
+  closed-watermark barrier, production selection admission order and publisher
+  recovery/repair seams. Native input/HUD, world-backed provider safety,
+  installed optional-provider wiring and live transport still require their own
+  evidence, and no manual world, GPU, transport or multiplayer validation is
+  recorded by those seams;
+- inventory ordering/freezing, explicit zero versus unknown, per-key revisions,
+  client barriers and publisher recovery/repair have headless and
+  production-seam evidence above, not live execution. Per-Ping/recipient
+  baseline and resynchronization isolation are exercised at the production
+  seam, while unknown-baseline expiry, component folding, cross-target period
+  bytes, heartbeat-zero behavior, variant quotas and the hard stop at Ping
+  expiry remain manual/integration scenarios;
+- inventory administration and spatial-selector configuration have model,
+  persistence, strict wire, draft, catalog and focus-helper seams; live
+  administration, native widget input/focus, permission changes, persistence,
+  scheduler consumption and selector integration remain unexercised by them;
+- the shared client/server `entity_block` classification path end to end,
+  including synthetic-face provenance from every optional producer;
 - stale or display-hidden cancellation followed by authoritative rejection with
   no local fallback;
 - real input-callback and render-frame behavior for rapid/deferred long-press
   compatibility;
 - asynchronous completion after lifecycle abort, including the token
   invalidation/ownership-clear boundary;
-- compatibility create-only dispatch conformance: the controller currently
-  receives an action result rather than an explicit successful-dispatch outcome.
-  A courtesy-rejected `CreatePing` can therefore still look qualifying even
-  though the limiter/dispatcher did not track or hand it to the sender; the
-  deferred path can also launch after a non-`CreatePing` result such as
-  `TargetGone`. This action-versus-dispatch defect is not intended behavior;
-  the pending regression matrix below specifies the required checks;
 - live GUI/screen input callbacks and physical key-repeat behavior across
   Fabric, Forge, and NeoForge, beyond the input-state seams; and
 - the complete range pipeline across native, Distant Horizons, Create/Sable,
@@ -853,9 +1206,10 @@ The following gaps remain open until direct evidence closes them:
   materialization, or packet transport is exercised; property Ping Type
   override matching is model-tested against supplied tag IDs rather than a live
   registry or tag manager; rendered property HUD lines and frozen-mask retained
-  values are client/provider seams rather than a frame observation; and no
-  in-game property-entry GUI exists by design, so the programmatic/harness
-  create path is the only creation route;
+  values are client/provider seams rather than a frame observation. Content
+  preview has the client-first, server-fallback and production-seam coverage
+  inventoried above, but native property selection through authoritative CREATE
+  in a live session remains pending rather than established by those tests;
 - installed-Create presentation sampling and display remain unexercised in-game:
   automated seams cover vault/tank structure capture, bounded summaries,
   nested count property selections, the cached network stress/capacity
@@ -898,14 +1252,6 @@ callers, and integration proof that non-render callers bypass render-path cache
 results. No automated evidence currently establishes CPU frame cost or
 allocation behavior for one, ten, or fifty entity marks in a dense world at high
 frame rates.
-
-### Pending long-press compatibility regression matrix
-
-| Scenario | Required regression assertion |
-| --- | --- |
-| Courtesy limiter rejects the first default `CreatePing`, then a rapid second press occurs | No rapid candidate or virtual capture begins; the dropped request is not queued, retried, or replayed. |
-| Courtesy limiter rejects the first default `CreatePing`, then a deferred fresh press is present | No deferred capture begins; the dropped request is not queued, retried, or replayed. |
-| A first result is `TargetGone` or another non-`CreatePing` while a deferred fresh press is present | The deferred press is discarded and no ordinary capture starts. |
 
 ### Sable-specific gaps
 
@@ -952,7 +1298,7 @@ or because related automated tests exist.
 | Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location; an owner-online refresh that changes the locator or the anchor; a marker beyond the bounded sampling cache synchronizing its known recipients without a new lease; an older or equal-revision initial arriving after a newer one without rolling back the stored payload; a legitimate policy change between cached projection and delivery; and a legitimate later packet arriving after the refresh. |
 | Marker HUD | Repeated same-target pings from one sender and from several senders while same-target records remain display-active: the target's displayed HUD alpha does not accumulate with the number of same-target records ([invariant owner](../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection)). |
 | Inventory and shared sources (planned) | Preview and tracking on Fabric, Forge, and NeoForge; vanilla single and double chests, hopper, furnace, shulker box, and an unopened loot chest without loot-table generation; installed Create Vault; private or unavailable inventories; permission and tag governance; unload/reload; block-type replacement versus same-type restore before expiry; different-block invalidation and grey status; hard stop at Ping expiry without recovery afterward; session end; queue overload and coalescing including explicit zero values; component-too-long all-variant folding; heartbeat zero mode with repair and status still active; and an explicit unlimited physical mode keeping finite work and memory guards. |
-| Presentation snapshot | Live v3 negotiation, offer and reset-mask pruning, and reset on Fabric, Forge, and NeoForge; the server-selected mask removing retained and frozen values; permission-gated and per-target-type-policy-gated projection for two recipients of one marker; live property uploads through the intended programmatic/harness create path (there is no in-game property-entry GUI by design) recaptured against authoritative world state with whole-create rejection on a wrong-kind, unknown, forbidden, or unavailable selection; rendered default display reference and property HUD lines; live property Ping Type override resolution and tag/registry selector matching against actual block, item, and entity tags; the policy rule-view read and per-target-type mutation route over a real connection, including the permission-3 mutation gate, rule-view revision ordering, and unsolicited broadcast to a second client; the server per-target-type policy page with no property-entry editor; superseded marker C2S/S2C routes mutating nothing; installed-Create kinetic and vault/tank summaries including nested count property selections and the cached stress/capacity accessor path and an untested-version fallback; and a live validated Sable external-block input through the Create route with unavailable and stale outcomes; and a zero server `scanBudget` under live demand with captures deferred while cached values and staleness semantics are retained. |
+| Presentation snapshot | Live v3 negotiation, offer and reset-mask pruning, and reset on Fabric, Forge, and NeoForge; the server-selected mask removing retained and frozen values; permission-gated and per-target-type-policy-gated projection for two recipients of one marker; live property uploads through the approved native content property-selection route (client-first selection, server fallback, and authoritative CREATE validation) recaptured against authoritative world state with whole-create rejection on a wrong-kind, unknown, forbidden, or unavailable selection; rendered default display reference and property HUD lines; live property Ping Type override resolution and tag/registry selector matching against actual block, item, and entity tags; the policy rule-view read and per-target-type mutation route over a real connection, including the permission-3 mutation gate, rule-view revision ordering, and unsolicited broadcast to a second client; the server per-target-type policy page with no property-entry editor; superseded marker C2S/S2C routes mutating nothing; installed-Create kinetic and vault/tank summaries including nested count property selections and the cached stress/capacity accessor path and an untested-version fallback; and a live validated Sable external-block input through the Create route with unavailable and stale outcomes; and a zero server `scanBudget` under live demand with captures deferred while cached values and staleness semantics are retained. |
 | Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live scope-tab and category navigation with leaf Back/Escape and root Done/Escape, a fixed footer with non-covering scrolled content, and per-page scroll/focus retention across back navigation and GUI resize, native widget input dispatch and focus-list traversal after a deferred page transition, and root and leaf pages at small GUI sizes and with long localized labels; one shared server session with a single correlated snapshot request retained across category and scope navigation, loading/permission/unavailable status, and a non-editable snapshot rendering read-only for a viewer below the required level; live permission revocation retaining a read-only leaf view, permission-return draft reset, promotion requesting a fresh snapshot, and reconnect draft behavior; invalid-draft close blocking with routing to the offending category and field; the client configuration file action and confirmation-dialog flows, including the reset warning when a server draft exists; the server Presentation category's per-target-type policy rows with their paired allow/block toggles and editable add/remove, whitelist-only changes, refresh, feedback, and broadcast to another client when permitted, including bounded no-response timeout retry, list-capacity feedback, caret and field focus, and a persistence fault during a mutation; and the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)). |
 | Range | Client/server range combinations in one live pipeline: native minimum, a live long-distance Distant Horizons target, Create/Sable finite-segment reuse and server acceptance, including exact Create surface selection followed by whole-entity server-anchor range rejection. Installed-Sable scenarios are listed below. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |

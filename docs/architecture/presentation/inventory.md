@@ -9,14 +9,10 @@ keeps the live Ping and original target identity instead of a source-instance
 generation is recorded in
 [D0008](../../decisions/D0008-inventory-source-recovery.md).
 
-This is the adopted contract for the confirmed inventory design. The
-ordinary-block preview foundation is implemented on the server and client as
-headless runtime and model seams: the dedicated route and its configurable
-budgets exist, and the server can open bounded preview sessions for accepted
-ordinary-block targets. Tracking delivery (`SELECT`), frozen-face source reads,
-the item-choice create path, the native input and HUD facade, and the remaining
-provider contexts are not implemented; the contract below stays normative for
-that work. Until a route is integrated, the existing
+This is the adopted contract for the confirmed inventory design. Coverage scope
+and pending runtime evidence for the ordinary-block preview and tracking,
+item-choice create and native input/HUD seams are owned by
+[testing and verification](../../testing/verification.md). The existing
 one-shot capture and whole-section presentation paths keep their present
 semantics, and the existing server gates for permission, range, lock state and
 safe reads are unchanged. Wire routes and message families are owned by

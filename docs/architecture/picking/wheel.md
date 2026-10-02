@@ -1,10 +1,9 @@
 # Wheel interaction and cancellation
 
-> **Implementation status.** This topic states the adopted native-selector
-> interaction. Its headless controller, session, candidate-allocation and
-> transition/renderer models exist, but the native input and HUD integration is
-> still in progress: the live client keeps the superseded wheel path until that
-> integration lands, and no game or runtime behavior is verified here.
+> **Coverage.** This topic states the adopted native-selector interaction.
+> Coverage scope and pending runtime evidence for its headless controller,
+> session, candidate-allocation, transition/renderer and native input seams are
+> owned by [testing and verification](../../testing/verification.md).
 
 ## Opening, selection and timeout
 
@@ -229,5 +228,6 @@ disabled, the session stays inert and never triggers.
 
 The preference keys and their local authority are owned by
 [client configuration](../../config/client.md#spatial-selector-interaction);
-their numeric range, step, and default remain implementation values. Native
-screen and input integration and game-feel validation remain pending.
+their numeric range, step, and default remain implementation values. Coverage
+for the native screen and input integration and game-feel validation is owned
+by [testing and verification](../../testing/verification.md).

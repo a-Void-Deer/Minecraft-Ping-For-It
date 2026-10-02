@@ -2,17 +2,15 @@
 
 This topic owns the generic, domain-neutral mechanism shared by presentation
 sources: source access, capture results, cost accounting, and sync publication.
-It is the adopted contract for the approved shared-source mechanism. All four
-boundaries have headless declarations with model coverage: the server-side
-source-access contract, the detached source-key and capture-result models, the
-cost ledgers, and the sync-publisher declaration. The four roles are not yet
-fully integrated: a backend implementation is in progress, but runtime
-migration to the declared boundaries is not claimed, and production sync
-publication, the remaining provider contexts and native input/UI integration
-are not finally established. The existing one-shot adapter capture path, the
-per-marker cache, and whole-section replacement keep their present semantics
-until an implementation migrates or wraps them, and this adoption does not
-rewrite those routes.
+It is the adopted contract for the approved shared-source mechanism: the
+server-side source-access contract, the detached source-key and capture-result
+models, the cost ledgers, and the sync publisher are integrated through the
+production runtime, source wrapper and publisher seams. Coverage scope and
+pending runtime evidence are owned by
+[testing and verification](../../testing/verification.md). The existing
+one-shot adapter capture path, the per-marker cache, and whole-section
+replacement keep their present semantics on their current routes, and this
+adoption does not rewrite those routes.
 
 Inventory domain policy — item identity, preview and tracking behavior, zero and
 component-fallback rules, and recovery deadlines — is owned by

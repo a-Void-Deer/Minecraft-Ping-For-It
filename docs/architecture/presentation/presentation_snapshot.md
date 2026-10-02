@@ -324,8 +324,8 @@ presentation, navigation, selection input and lifecycle, and
 [capture](../picking/capture.md#interaction-lifecycle-aborts) owns the
 interaction abort; this section owns the preview's field authorization,
 provenance and fallback mechanics. This is the adopted contract for the
-confirmed preview design; implementation is in progress, and no completion or
-runtime behavior is claimed here.
+confirmed preview design; coverage scope and pending runtime evidence are owned
+by [testing and verification](../../testing/verification.md).
 
 - **Field authorization.** A preview value is eligible only under the current
   accepted presentation epoch and view. The field must be included by the
