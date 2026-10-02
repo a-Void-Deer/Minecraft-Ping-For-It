@@ -37,6 +37,10 @@ dependencies {
     // Mergetool already supplies ASM on the test runtime classpath; expose the
     // same existing core artifact to javac for compiled-bytecode invariant tests.
     testCompileOnly "org.ow2.asm:asm:9.5"
+    // The mixin contract tests read annotations through the ASM tree API.
+    // Mergetool's runtime variant already supplies the tree classes to the
+    // test runtime, so only javac's classpath needs the artifact.
+    testCompileOnly "org.ow2.asm:asm-tree:9.5"
     testImplementation files(compiledMinecraft)
     testRuntimeOnly files(compiledMinecraftResources)
 
@@ -48,6 +52,12 @@ dependencies {
     // artifact the main compileClasspath receives transitively via neoform —
     // provides exactly that and shadows no Minecraft classes.
     testImplementation "net.neoforged:mergetool:2.0.3:api"
+
+    // Sable remains a compile-only optional integration for main (see
+    // multiloader-common). The raycaster tests exercise the real Companion
+    // poses at runtime, so the same artifact is declared for the test source
+    // set only; this adds no loader metadata or production runtime dependency.
+    testImplementation "dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:${sable_version}"
 
     // Minecraft's full runtime library set (netty, datafixerupper, guava,
     // ...) with versions aligned to 1.21.1. Declaring this as a test
