@@ -23,10 +23,11 @@ public final class ExactNativeShapeClip {
 				|| hit.t == best.hit.t && hit.inside && !best.hit.inside)) best.hit = hit;
 		});
 		if (best.hit == null) return null;
-		if (best.hit.inside) {
-			// Origin containment establishes no observed surface face. Preserve point/target
-			// compatibility but do not authorize a sided inventory from the backwards ray.
-			return new UnobservedFaceBlockHitResult(start, best.hit.face, pos, true);
+		if (best.hit.containment) {
+			// Origin containment or a parallel boundary contact establishes no observed
+			// surface face. Preserve point/target compatibility but do not authorize a
+			// sided inventory from the backwards ray.
+			return new UnobservedFaceBlockHitResult(start, best.hit.face, pos, best.hit.inside);
 		}
 		return new BlockHitResult(start.add(end.subtract(start).scale(best.hit.t)), best.hit.face, pos, best.hit.inside);
 	}
@@ -63,15 +64,19 @@ public final class ExactNativeShapeClip {
 		if (entry > exit || exit < 0) return null;
 		double t = Math.max(0, entry);
 		if (t >= 1 || t == 0 && !inside && exit <= 0) return null;
-		// True origin containment uses the existing local-geometry t=0 convention.
-		// Its direction is the backwards ray, not a fabricated later surface/probe.
-		if (inside || face == null) face = Direction.getNearest(-deltas[0], -deltas[1], -deltas[2]);
-		return new BoxHit(t, face, inside);
+		// A negative entry means the origin already lies within every moving slab, so the
+		// clamped t=0 point is containment or a parallel boundary contact, not a positive
+		// crossing. Only a non-negative entry observes a surface face; the backwards ray
+		// is an API placeholder, never a fabricated surface face.
+		if (entry < 0) {
+			return new BoxHit(0, Direction.getNearest(-deltas[0], -deltas[1], -deltas[2]), inside, true);
+		}
+		return new BoxHit(t, face, inside, false);
 	}
 
 	public static final class Incomplete extends RuntimeException {
 		private static final long serialVersionUID = 1L;
 	}
-	private record BoxHit(double t, Direction face, boolean inside) {}
+	private record BoxHit(double t, Direction face, boolean inside, boolean containment) {}
 	private static final class Best { private BoxHit hit; }
 }
