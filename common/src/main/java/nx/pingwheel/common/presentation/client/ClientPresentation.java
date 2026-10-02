@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import net.minecraft.network.FriendlyByteBuf;
@@ -25,6 +26,8 @@ import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationStore;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
+import nx.pingwheel.common.presentation.PresentationSettings;
+import nx.pingwheel.common.presentation.preview.PresentationPreviewAccess;
 
 /** One client connection's negotiated capabilities, server mask and retained presentation. */
 public final class ClientPresentation {
@@ -134,6 +137,21 @@ public final class ClientPresentation {
 
 	public boolean ready() { return ready; }
 	public long epoch() { return epoch; }
+	public long sessionView() { return view; }
+	/** Detached accepted SECTION descriptors intersected with the current RESET, never catalogue defaults. */
+	public Optional<PresentationPreviewAccess> previewAccess(String targetTypeId) {
+		if (!ready || !PresentationSettings.isKnownTargetType(targetTypeId)) return Optional.empty();
+		Map<String, PresentationPreviewAccess.Adapter> adapters = new LinkedHashMap<>();
+		for (PresentationAdapter adapter : registry.sectionAdapters()) {
+			Map<String, PresentationField> accepted = compatible.get(adapter.adapterId());
+			if (accepted == null) continue;
+			Set<String> allowed = mask.getOrDefault(targetTypeId, Map.of()).getOrDefault(adapter.adapterId(), Set.of());
+			Map<String, PresentationField> fields = new LinkedHashMap<>();
+			accepted.forEach((id, field) -> { if (allowed.contains(id)) fields.put(id, field); });
+			if (!fields.isEmpty()) adapters.put(adapter.adapterId(), new PresentationPreviewAccess.Adapter(adapter.schema(), fields));
+		}
+		return Optional.of(new PresentationPreviewAccess(epoch, view, targetTypeId, adapters));
+	}
 	/** Package-private verification seam; UI callers only receive {@link #view}. */
 	PresentationStore store() { return store; }
 

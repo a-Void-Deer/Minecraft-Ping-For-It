@@ -29,9 +29,12 @@ import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.name.TargetNameJsonCodec;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.presentation.*;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
+import nx.pingwheel.common.presentation.preview.PresentationPreviewAccess;
+import nx.pingwheel.common.presentation.preview.PresentationPreviewServer;
 
 import java.util.*;
 import java.util.function.Function;
@@ -48,6 +51,7 @@ public final class PresentationServer {
 	private static PresentationRegistry registry = new PresentationRegistry();
 	private static int cursor;
 	private static String policyFingerprint = "";
+	private static PresentationPreviewServer previews;
 
 	private PresentationServer() {}
 
@@ -57,6 +61,7 @@ public final class PresentationServer {
 		final Map<String, List<PresentationField>> manifest;
 		final Map<Long, SentMarker> sent = new HashMap<>();
 		Map<String, Map<String, Set<String>>> mask = Map.of();
+		Set<String> inventoryTypes = Set.of();
 		long view;
 		long revision;
 		boolean ready;
@@ -86,7 +91,9 @@ public final class PresentationServer {
 	public static void activate(MinecraftServer server) {
 		if (activeServer == server) return;
 		SESSIONS.clear(); LEASES.clear(); cursor = 0;
+		if (previews != null) previews.reset();
 		activeServer = server;
+		previews = new PresentationPreviewServer(new MinecraftPresentationPreview(server));
 		registry = new PresentationRegistry();
 		registry.register(new BasicManifest());
 		registry.register(InventoryPresentation.INSTANCE);
@@ -101,7 +108,21 @@ public final class PresentationServer {
 	}
 
 	public static void reset() {
+		if (previews != null) previews.reset();
+		previews = null;
 		SESSIONS.clear(); LEASES.clear(); activeServer = null; registry = new PresentationRegistry();
+	}
+
+	/** Authenticated server-thread ingress only queues; it performs no target/source observation. */
+	public static void preview(MinecraftServer server, ServerPlayer player, PresentationPreviewC2SPacket packet) {
+		if (server == null || player == null || packet == null || packet.isCorrupt() || !server.isSameThread()
+			|| player.serverLevel().getServer() != server) return;
+		activate(server);
+		previews.handle(player.getUUID(), packet, server.getTickCount());
+	}
+
+	public static void stopped(MinecraftServer server) {
+		if (activeServer == server) reset();
 	}
 
 	/** Validate a negotiated intent before entering the existing authority pipeline. */
@@ -142,6 +163,7 @@ public final class PresentationServer {
 
 	private static void prepare(ServerPlayer player, Session session) {
 		session.mask = mask(player, session);
+		session.inventoryTypes = inventoryTypes(player, session);
 		session.view++;
 		session.ready = true;
 		session.sent.clear();
@@ -264,8 +286,10 @@ public final class PresentationServer {
 			ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
 			if (player == null) continue;
 			Map<String, Map<String, Set<String>>> effective = mask(player, session);
-			if (!policyChanged && effective.equals(session.mask)) continue;
+			Set<String> dedicated = inventoryTypes(player, session);
+			if (!policyChanged && effective.equals(session.mask) && dedicated.equals(session.inventoryTypes)) continue;
 			session.mask = effective;
+			session.inventoryTypes = dedicated;
 			session.view++;
 			Map<Long, SentMarker> previouslySent = new HashMap<>(session.sent);
 			session.sent.clear();
@@ -299,19 +323,30 @@ public final class PresentationServer {
 		}
 		LEasesWithoutMarkers(active);
 		List<Lease> leases = new ArrayList<>(LEASES.values());
-		if (leases.isEmpty()) return;
 		PresentationAdapter.CaptureBudget work = new PresentationAdapter.CaptureBudget(MAX_CAPTURE_WORK_PER_TICK);
-		int captures = MAX_CAPTURES_PER_TICK;
-		for (int i = 0; i < leases.size(); i++) {
-			Lease lease = leases.get((cursor + i) % leases.size());
-			if (lease.marker.expiresAtTick() <= server.getTickCount()) continue;
-			captures -= capture(server, lease, work, captures, false);
+		sampleTick(leases, cursor, server.getTickCount(), work, MAX_CAPTURES_PER_TICK,
+			(lease, sharedWork, remainingCaptures) -> capture(server, lease, sharedWork, remainingCaptures, false), lease -> {
 			for (UUID recipient : lease.marker.recipients()) {
 				Session session = SESSIONS.get(recipient); ServerPlayer player = server.getPlayerList().getPlayer(recipient);
 				if (player != null && session != null && session.ready) publish(player, session, lease);
 			}
+		}, previews);
+		if (!leases.isEmpty()) cursor = (cursor + 1) % leases.size();
+	}
+
+	@FunctionalInterface interface LeaseCapture {
+		int capture(Lease lease, PresentationAdapter.CaptureBudget work, int remainingCaptures);
+	}
+	/** Production tick sequencing: previews receive exactly the residual lease allowance, even without leases. */
+	static void sampleTick(List<Lease> leases, int cursor, long tick, PresentationAdapter.CaptureBudget work,
+		int captures, LeaseCapture capture, java.util.function.Consumer<Lease> publish, PresentationPreviewServer previews) {
+		for (int i = 0; i < leases.size(); i++) {
+			Lease lease = leases.get((cursor + i) % leases.size());
+			if (lease.marker.expiresAtTick() <= tick) continue;
+			captures -= capture.capture(lease, work, captures);
+			publish.accept(lease);
 		}
-		cursor = (cursor + 1) % leases.size();
+		if (previews != null) previews.drain(tick, work, captures);
 	}
 
 	private static void LEasesWithoutMarkers(Set<Long> active) {
@@ -359,8 +394,8 @@ public final class PresentationServer {
 				else {
 					int allowance = Math.min(policy.scanBudget(), work.remaining());
 					PresentationAdapter.CaptureBudget budget = new PresentationAdapter.CaptureBudget(allowance);
-					value = adapter.collect(detached(lease.marker.target()), Set.copyOf(demand), budget);
-					for (int used = allowance - budget.remaining(); used > 0; used--) work.scan();
+					try { value = adapter.collect(detached(lease.marker.target()), Set.copyOf(demand), budget); }
+					finally { for (int used = allowance - budget.remaining(); used > 0; used--) work.scan(); }
 				}
 			} catch (RuntimeException | LinkageError ignored) { value = null; }
 			try { value = sanitize(adapter, value, demand); }
@@ -530,7 +565,63 @@ public final class PresentationServer {
 		session.sent.remove(id.value());
 	}
 	public static void forget(MarkerId id) { LEASES.remove(id.value()); }
-	public static void disconnect(UUID player) { SESSIONS.remove(player); }
+	public static void disconnect(UUID player) {
+		SESSIONS.remove(player);
+		if (previews != null) previews.disconnect(player);
+	}
+
+	/** Fresh server permission/policy intersected with the already-advertised SECTION view. */
+	public static Optional<PresentationPreviewAccess> previewAccess(UUID playerId, String targetTypeId) {
+		Session session = SESSIONS.get(playerId);
+		ServerPlayer player = activeServer == null ? null : activeServer.getPlayerList().getPlayer(playerId);
+		if (player == null) return Optional.empty();
+		return previewAccess(session, registry, targetTypeId, adapter -> allowed(player, session, adapter, targetTypeId));
+	}
+	static Optional<PresentationPreviewAccess> previewAccess(Session session, PresentationRegistry adapters,
+		String targetTypeId, Function<PresentationAdapter, Set<String>> freshAuthorization) {
+		if (session == null || !session.ready || !PresentationSettings.isKnownTargetType(targetTypeId)) return Optional.empty();
+		Map<String, PresentationPreviewAccess.Adapter> result = new LinkedHashMap<>();
+		for (PresentationAdapter adapter : adapters.sectionAdapters()) {
+			if (!Objects.equals(session.schemas.get(adapter.adapterId()), adapter.schema())) continue;
+			Set<String> advertised = session.mask.getOrDefault(targetTypeId, Map.of()).getOrDefault(adapter.adapterId(), Set.of());
+			if (advertised.isEmpty()) continue;
+			Map<String, PresentationField> fields = new LinkedHashMap<>();
+			Set<String> fresh = freshAuthorization.apply(adapter);
+			for (PresentationField field : session.manifest.getOrDefault(adapter.adapterId(), List.of())) {
+				if (advertised.contains(field.id()) && fresh.contains(field.id()) && adapter.fields().stream().anyMatch(local ->
+					local.id().equals(field.id()) && local.kind() == field.kind())) fields.put(field.id(), field);
+			}
+			if (!fields.isEmpty()) result.put(adapter.adapterId(), new PresentationPreviewAccess.Adapter(adapter.schema(), fields));
+		}
+		return Optional.of(new PresentationPreviewAccess(session.epoch, session.view, targetTypeId, result));
+	}
+	static PresentationAdapter previewAdapter(String id) { return registry.get(id); }
+	static PresentationSettings previewSettings() { return settings(); }
+
+	/** Dedicated delivery shares the presentation fence, but never widens the SECTION mask. */
+	public record InventoryPolicy(long epoch, long view, Set<String> types) {
+		public InventoryPolicy { types = Set.copyOf(types); }
+	}
+	public static Optional<InventoryPolicy> inventoryPolicy(UUID playerId) {
+		Session session = SESSIONS.get(playerId);
+		ServerPlayer player = activeServer == null ? null : activeServer.getPlayerList().getPlayer(playerId);
+		if (session == null || !session.ready || player == null) return Optional.empty();
+		// Fresh authorization is intersected with the already-advertised view; promotion waits for RESET.
+		Set<String> fresh = new HashSet<>(inventoryTypes(player, session));
+		fresh.retainAll(session.inventoryTypes);
+		return Optional.of(new InventoryPolicy(session.epoch, session.view, fresh));
+	}
+	public static boolean inventoryKnows(UUID player, MarkerId marker) {
+		Session session = SESSIONS.get(player);
+		return session != null && session.ready && session.sent.containsKey(marker.value());
+	}
+	private static Set<String> inventoryTypes(ServerPlayer player, Session session) {
+		if (!Objects.equals(session.schemas.get(InventoryPresentation.ADAPTER_ID), InventoryPresentation.SCHEMA)) return Set.of();
+		Set<String> result = new HashSet<>();
+		for (String type : PresentationSettings.TARGET_TYPE_IDS)
+			if (allowed(player, session, InventoryPresentation.INSTANCE, type).contains(InventoryPresentation.ITEMS)) result.add(type);
+		return Set.copyOf(result);
+	}
 	public static void winner(ServerPlayer player, TargetKey key, Optional<MarkerId> winner) {
 		Session session = SESSIONS.get(player.getUUID());
 		if (session != null && session.ready) send(player, PresentationS2CPacket.winner(session.epoch, session.view, key, winner));
@@ -680,7 +771,10 @@ public final class PresentationServer {
 	}
 
 	private static PresentationSection basic(MinecraftServer server, ServerMarker marker, Set<String> demand) {
-		Target target = marker.target();
+		return basic(server, marker.owner(), marker.target(), demand);
+	}
+	/** Shared one-shot Basic reader; preview never needs or allocates a marker/lease. */
+	static PresentationSection basic(MinecraftServer server, UUID owner, Target target, Set<String> demand) {
 		ResourceLocation dimension = ResourceLocation.tryParse(target.dimensionId());
 		if (dimension == null) return null;
 		ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
@@ -701,11 +795,11 @@ public final class PresentationServer {
 		} else if (target instanceof Target.ExternalBlockTarget external) {
 			return basicExternal(demand,
 				() -> ExternalBlockServerProviders.registry().observeBlock(server, level, external),
-				() -> new MinecraftTargetNameResolver(server).resolveName(marker.owner(), external));
+				() -> new MinecraftTargetNameResolver(server).resolveName(owner, external));
 		} else if (target instanceof Target.LocationTarget) {
 			if (demand.contains(PresentationBasic.NAME)) name = TargetNameComposer.here();
 		} else if (demand.contains(PresentationBasic.NAME)) {
-			TargetNameJson resolved = new MinecraftTargetNameResolver(server).resolveName(marker.owner(), target);
+			TargetNameJson resolved = new MinecraftTargetNameResolver(server).resolveName(owner, target);
 			put(fields, demand, PresentationBasic.NAME, new PresentationValue.Text(resolved.value()));
 		}
 		if (name != null) {
@@ -732,7 +826,8 @@ public final class PresentationServer {
 		TargetNameJson resolved) {
 		if (demand.contains(PresentationBasic.BLOCK_STATE) && state == null) return null;
 		Map<String, PresentationValue> fields = new LinkedHashMap<>();
-		if (state != null) put(fields, demand, PresentationBasic.BLOCK_STATE, blockState(state));
+		if (state != null && demand.contains(PresentationBasic.BLOCK_STATE))
+			put(fields, demand, PresentationBasic.BLOCK_STATE, blockState(state));
 		if (demand.contains(PresentationBasic.NAME) && resolved != null)
 			put(fields, demand, PresentationBasic.NAME, new PresentationValue.Text(resolved.value()));
 		return new PresentationSection(PresentationBasic.ID, 1, fields, false);
@@ -752,18 +847,21 @@ public final class PresentationServer {
 	 */
 	static PresentationSection basicEntity(Set<String> demand, Entity entity, Function<Component, String> encodeName) {
 		Map<String, PresentationValue> fields = new LinkedHashMap<>();
-		put(fields, demand, PresentationBasic.ENTITY_TYPE, new PresentationValue.Text(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString()));
+		if (demand.contains(PresentationBasic.ENTITY_TYPE))
+			put(fields, demand, PresentationBasic.ENTITY_TYPE, new PresentationValue.Text(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString()));
 		if (entity instanceof LivingEntity living) {
-			put(fields, demand, PresentationBasic.HEALTH, new PresentationValue.NumberValue(living.getHealth()));
-			put(fields, demand, PresentationBasic.MAX_HEALTH, new PresentationValue.NumberValue(living.getMaxHealth()));
+			if (demand.contains(PresentationBasic.HEALTH)) put(fields, demand, PresentationBasic.HEALTH, new PresentationValue.NumberValue(living.getHealth()));
+			if (demand.contains(PresentationBasic.MAX_HEALTH)) put(fields, demand, PresentationBasic.MAX_HEALTH, new PresentationValue.NumberValue(living.getMaxHealth()));
 		}
 		Component name = null;
 		if (entity instanceof ItemEntity item) {
-			var stack = item.getItem();
-			put(fields, demand, PresentationBasic.ITEM_ID, new PresentationValue.Text(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString()));
-			put(fields, demand, PresentationBasic.ITEM_COUNT, new PresentationValue.NumberValue(stack.getCount()));
-			put(fields, demand, PresentationBasic.ITEM_ICON, new PresentationValue.Flag(true));
-			if (demand.contains(PresentationBasic.NAME)) name = optionalName(stack.get(DataComponents.CUSTOM_NAME), Component.translatable(stack.getDescriptionId()));
+			if (demand.contains(PresentationBasic.ITEM_ICON)) put(fields, demand, PresentationBasic.ITEM_ICON, new PresentationValue.Flag(true));
+			if (demand.contains(PresentationBasic.ITEM_ID) || demand.contains(PresentationBasic.ITEM_COUNT) || demand.contains(PresentationBasic.NAME)) {
+				var stack = item.getItem();
+				if (demand.contains(PresentationBasic.ITEM_ID)) put(fields, demand, PresentationBasic.ITEM_ID, new PresentationValue.Text(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString()));
+				if (demand.contains(PresentationBasic.ITEM_COUNT)) put(fields, demand, PresentationBasic.ITEM_COUNT, new PresentationValue.NumberValue(stack.getCount()));
+				if (demand.contains(PresentationBasic.NAME)) name = optionalName(stack.get(DataComponents.CUSTOM_NAME), Component.translatable(stack.getDescriptionId()));
+			}
 		} else if (demand.contains(PresentationBasic.NAME)) {
 			name = entity instanceof ServerPlayer player ? Component.literal(player.getGameProfile().getName())
 				: optionalName(entity.getCustomName(), entity.getType().getDescription());

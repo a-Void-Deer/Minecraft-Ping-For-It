@@ -168,16 +168,47 @@ class PresentationServerBasicEntityTest {
 			PresentationServer.optionalName(Component.literal("Bob"), base));
 	}
 
+	@Test void deniedHealthAndNameGettersNeverRunForTypeOnlyDemand() {
+		TestLivingEntity pig = new TestLivingEntity(); pig.setHealth(7.5F); pig.setCustomName(Component.literal("Private"));
+		pig.healthReads = pig.nameReads = 0;
+		var typeOnly = PresentationServer.basicEntity(Set.of(PresentationBasic.ENTITY_TYPE), pig,
+			name -> { throw new AssertionError("denied name encoder"); });
+		assertEquals(Map.of(PresentationBasic.ENTITY_TYPE, new PresentationValue.Text("minecraft:pig")), typeOnly.fields());
+		assertEquals(0, pig.healthReads); assertEquals(0, pig.nameReads);
+		var healthOnly = PresentationServer.basicEntity(Set.of(PresentationBasic.HEALTH), pig,
+			name -> { throw new AssertionError("denied name encoder"); });
+		assertEquals(Map.of(PresentationBasic.HEALTH, new PresentationValue.NumberValue(7.5)), healthOnly.fields());
+		assertEquals(1, pig.healthReads); assertEquals(0, pig.nameReads);
+	}
+
+	@Test void deniedDroppedItemContentsNeverResolveStackForTypeOrIconOnly() {
+		class CountingItem extends ItemEntity {
+			int stackReads;
+			CountingItem() { super(EntityType.ITEM, null); }
+			@Override public ItemStack getItem() { stackReads++; return super.getItem(); }
+		}
+		var item = new CountingItem(); item.setItem(new ItemStack(Items.DIAMOND, 7)); item.stackReads = 0;
+		assertEquals(Set.of(PresentationBasic.ENTITY_TYPE), basicEntity(Set.of(PresentationBasic.ENTITY_TYPE), item).fields().keySet());
+		assertEquals(0, item.stackReads);
+		assertEquals(Map.of(PresentationBasic.ITEM_ICON, new PresentationValue.Flag(true)), basicEntity(Set.of(PresentationBasic.ITEM_ICON), item).fields());
+		assertEquals(0, item.stackReads);
+		assertEquals(Map.of(PresentationBasic.ITEM_COUNT, new PresentationValue.NumberValue(7)), basicEntity(Set.of(PresentationBasic.ITEM_COUNT), item).fields());
+		assertEquals(1, item.stackReads);
+	}
+
 	/**
 	 * Minimal headless {@link LivingEntity} reusing the registered pig type;
 	 * a vanilla {@code Pig} cannot be built without a level because
 	 * {@code Mob} touches the level in its constructor.
 	 */
 	private static final class TestLivingEntity extends LivingEntity {
+		int healthReads, nameReads;
 
 		TestLivingEntity() {
 			super(EntityType.PIG, null);
 		}
+		@Override public float getHealth() { healthReads++; return super.getHealth(); }
+		@Override public Component getCustomName() { nameReads++; return super.getCustomName(); }
 
 		@Override
 		public void readAdditionalSaveData(CompoundTag tag) {

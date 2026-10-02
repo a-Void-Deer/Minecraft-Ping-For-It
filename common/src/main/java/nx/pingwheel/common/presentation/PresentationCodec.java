@@ -2,6 +2,7 @@ package nx.pingwheel.common.presentation;
 
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
+import nx.pingwheel.common.network.StrictPacketCodec;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -12,7 +13,8 @@ import java.util.function.Predicate;
 
 /**
  * Bounded, independently framed fields. A denied field never enters typed
- * decoding. Every top-level field value and every addressable record entry is
+ * decoding; the opt-in strict preview reader additionally rejects a frame that
+ * contains one. Every top-level field value and every addressable record entry is
  * followed by a nullable property annotation; entries inside a sequence carry
  * no annotation because a sequence item has no addressable path.
  *
@@ -78,30 +80,53 @@ public final class PresentationCodec {
 	}
 
 	public static PresentationSection read(FriendlyByteBuf buf, Predicate<String> receive) {
-		int size = buf.readVarInt();
+		return read(buf, receive, false);
+	}
+
+	/**
+	 * Opt-in canonical metadata and whole-frame acceptance for preview frames: a
+	 * field outside {@code receive} is skipped by its framed byte length without
+	 * typed decoding, then rejects the whole frame. Legacy SECTION and intent
+	 * readers stay unchanged.
+	 */
+	public static PresentationSection readStrict(FriendlyByteBuf buf, Predicate<String> receive) {
+		return read(buf, receive, true);
+	}
+
+	private static PresentationSection read(FriendlyByteBuf buf, Predicate<String> receive, boolean strict) {
+		int size = readInt(buf, strict);
 		if (size < 0 || size > MAX_SECTION_BYTES || size > buf.readableBytes()) throw new IllegalArgumentException("section frame");
 		FriendlyByteBuf frame = new FriendlyByteBuf(buf.readSlice(size));
-		String adapter = frame.readUtf(MAX_ID_LENGTH);
-		int schema = frame.readVarInt();
-		boolean stale = frame.readBoolean();
-		int count = frame.readVarInt();
+		String adapter = readUtf(frame, MAX_ID_LENGTH, strict);
+		int schema = readInt(frame, strict);
+		if (strict && (schema < 1 || schema > 255)) throw new IllegalArgumentException("section schema");
+		boolean stale = readBoolean(frame, strict);
+		int count = readInt(frame, strict);
 		if (count < 0 || count > MAX_FIELDS) throw new IllegalArgumentException("field count");
 		Map<String, PresentationValue> fields = new LinkedHashMap<>();
 		Map<PresentationPropertyRef, String> annotations = new LinkedHashMap<>();
 		java.util.Set<String> seen = new java.util.HashSet<>();
+		boolean unaccepted = false;
 		for (int i = 0; i < count; i++) {
-			String id = frame.readUtf(MAX_ID_LENGTH);
+			String id = readUtf(frame, MAX_ID_LENGTH, strict);
 			PresentationIds.validate(id);
 			if (!seen.add(id)) throw new IllegalArgumentException("duplicate field");
-			int bytes = frame.readVarInt();
+			int bytes = readInt(frame, strict);
 			if (bytes < 0 || bytes > MAX_FIELD_BYTES || bytes > frame.readableBytes())
 				throw new IllegalArgumentException("field frame");
-			if (!receive.test(id)) { frame.skipBytes(bytes); continue; }
+			if (!receive.test(id)) {
+				// Skip before typed decoding: an unaccepted payload is never parsed,
+				// even though the strict preview reader rejects the whole frame.
+				frame.skipBytes(bytes);
+				unaccepted = true;
+				continue;
+			}
 			FriendlyByteBuf field = new FriendlyByteBuf(frame.readSlice(bytes));
-			PresentationValue value = readAnnotatedValue(field, 0, adapter, id, List.of(), annotations, false, true);
+			PresentationValue value = readAnnotatedValue(field, 0, adapter, id, List.of(), annotations, false, true, strict);
 			if (field.isReadable()) throw new IllegalArgumentException("field trailing bytes");
 			fields.put(id, value);
 		}
+		if (strict && unaccepted) throw new IllegalArgumentException("unaccepted preview field");
 		if (frame.isReadable()) throw new IllegalArgumentException("section trailing bytes");
 		return new PresentationSection(adapter, schema, fields, stale, annotations);
 	}
@@ -113,7 +138,7 @@ public final class PresentationCodec {
 
 	/** Bounded value decoding without property annotations, shared with intents. */
 	public static PresentationValue readValue(FriendlyByteBuf buf) {
-		return readAnnotatedValue(buf, 0, null, null, List.of(), null, true, true);
+		return readAnnotatedValue(buf, 0, null, null, List.of(), null, true, true, false);
 	}
 
 	public static void writePropertyRef(FriendlyByteBuf buf, PresentationPropertyRef ref) {
@@ -195,37 +220,37 @@ public final class PresentationCodec {
 
 	private static PresentationValue readAnnotatedValue(FriendlyByteBuf buf, int depth, String adapterId,
 		String fieldId, List<String> path, Map<PresentationPropertyRef, String> annotations, boolean insideSequence,
-		boolean addressable) {
+		boolean addressable, boolean strict) {
 		if (depth > MAX_DEPTH) throw new IllegalArgumentException("presentation depth");
 		PresentationValue value = switch (buf.readUnsignedByte()) {
-			case 1 -> new PresentationValue.Text(buf.readUtf(MAX_TEXT_BYTES));
+			case 1 -> new PresentationValue.Text(readUtf(buf, MAX_TEXT_BYTES, strict));
 			case 2 -> new PresentationValue.NumberValue(buf.readDouble());
-			case 3 -> new PresentationValue.Flag(buf.readBoolean());
+			case 3 -> new PresentationValue.Flag(readBoolean(buf, strict));
 			case 4 -> {
-				int count = count(buf);
+				int count = count(buf, strict);
 				var values = new ArrayList<PresentationValue>(count);
 				for (int i = 0; i < count; i++)
-					values.add(readAnnotatedValue(buf, depth + 1, adapterId, fieldId, path, annotations, true, addressable));
+					values.add(readAnnotatedValue(buf, depth + 1, adapterId, fieldId, path, annotations, true, addressable, strict));
 				yield new PresentationValue.Sequence(values);
 			}
 			case 5 -> {
-				int count = count(buf);
+				int count = count(buf, strict);
 				var values = new LinkedHashMap<String, PresentationValue>();
 				for (int i = 0; i < count; i++) {
-					String key = buf.readUtf(PresentationPropertyRef.MAX_KEY_BYTES);
+					String key = readUtf(buf, PresentationPropertyRef.MAX_KEY_BYTES, strict);
 					boolean childAddressable = addressable && PresentationPropertyRef.isAddressableKey(key);
 					if (values.putIfAbsent(key, readAnnotatedValue(buf, depth + 1, adapterId, fieldId,
-						appended(path, key), annotations, insideSequence, childAddressable)) != null)
+						appended(path, key), annotations, insideSequence, childAddressable, strict)) != null)
 						throw new IllegalArgumentException("duplicate map key");
 				}
 				yield new PresentationValue.RecordValue(values);
 			}
 			default -> throw new IllegalArgumentException("unknown presentation value tag");
 		};
-		if (annotations != null && !insideSequence && buf.readBoolean()) {
+		if (annotations != null && !insideSequence && readBoolean(buf, strict)) {
 			if (!addressable) throw new IllegalArgumentException("annotation on an unaddressable path");
 			annotations.put(new PresentationPropertyRef(adapterId, fieldId, path),
-				buf.readUtf(MAX_PING_TYPE_LENGTH));
+				readUtf(buf, MAX_PING_TYPE_LENGTH, strict));
 		}
 		return value;
 	}
@@ -237,9 +262,19 @@ public final class PresentationCodec {
 		return next;
 	}
 
-	private static int count(FriendlyByteBuf buf) {
-		int count = buf.readVarInt();
+	private static int count(FriendlyByteBuf buf, boolean strict) {
+		int count = readInt(buf, strict);
 		if (count < 0 || count > MAX_ENTRIES) throw new IllegalArgumentException("entry count");
 		return count;
+	}
+
+	private static int readInt(FriendlyByteBuf buf, boolean strict) {
+		return strict ? StrictPacketCodec.readVarInt(buf) : buf.readVarInt();
+	}
+	private static String readUtf(FriendlyByteBuf buf, int maxChars, boolean strict) {
+		return strict ? StrictPacketCodec.readUtf(buf, maxChars) : buf.readUtf(maxChars);
+	}
+	private static boolean readBoolean(FriendlyByteBuf buf, boolean strict) {
+		return strict ? StrictPacketCodec.readBoolean(buf) : buf.readBoolean();
 	}
 }
