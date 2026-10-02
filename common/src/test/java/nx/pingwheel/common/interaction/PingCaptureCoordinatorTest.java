@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.domain.ResolvedTarget;
+import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetResolver;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
@@ -281,6 +282,70 @@ class PingCaptureCoordinatorTest {
 	}
 
 	@Test
+	void retainsBlockFaceOnlyWhenResolutionPreservesTheCapturedOrdinaryBlockIdentity() {
+		TargetSnapshot snapshot = TargetSnapshotFactory.block(
+			OVERWORLD, 1, 2, 3, "minecraft:stone", false, BlockFace.NORTH);
+
+		CapturedPingContext retained = resolveWith(snapshot, (target, context) -> new ResolvedTarget(
+			target, TargetTypeCatalog.builtIn().findById("block").orElseThrow()));
+
+		assertEquals(Optional.of(BlockFace.NORTH), retained.blockHitFace());
+
+		// an equal, separately constructed block target still preserves identity
+		CapturedPingContext equalRetained = resolveWith(snapshot, (target, context) -> new ResolvedTarget(
+			new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone"),
+			TargetTypeCatalog.builtIn().findById("block").orElseThrow()));
+
+		assertEquals(Optional.of(BlockFace.NORTH), equalRetained.blockHitFace());
+
+		// a resolver that changes the block type or the position discards the face
+		for (Target changed : List.of(
+			new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:dirt"),
+			new Target.BlockTarget(OVERWORLD, 4, 5, 6, "minecraft:stone"))) {
+			CapturedPingContext dropped = resolveWith(snapshot, (target, context) -> new ResolvedTarget(
+				changed, TargetTypeCatalog.builtIn().findById("block").orElseThrow()));
+
+			assertTrue(dropped.blockHitFace().isEmpty());
+		}
+	}
+
+	@Test
+	void duplicateCompletionCannotReplaceTheAcceptedBlockFace() {
+		ActiveInteraction interaction = new ActiveInteraction();
+		PingCaptureCoordinator coordinator = coordinator(interaction, PingCaptureLogger.noop());
+		InteractionToken token = coordinator.begin();
+
+		Optional<CapturedPingContext> first = coordinator.complete(
+			token, TargetSnapshotFactory.block(OVERWORLD, 1, 2, 3, "minecraft:stone", false, BlockFace.NORTH));
+		Optional<CapturedPingContext> duplicate = coordinator.complete(
+			token, TargetSnapshotFactory.block(OVERWORLD, 1, 2, 3, "minecraft:stone", true, BlockFace.SOUTH));
+
+		assertTrue(first.isPresent());
+		assertTrue(duplicate.isEmpty());
+		assertEquals(Optional.of(BlockFace.NORTH),
+			interaction.currentContext().orElseThrow().blockHitFace());
+	}
+
+	@Test
+	void lateStaleBlockFaceCannotReplaceTheNewerAcceptedFace() {
+		ActiveInteraction interaction = new ActiveInteraction();
+		PingCaptureCoordinator coordinator = coordinator(interaction, PingCaptureLogger.noop());
+
+		InteractionToken stale = coordinator.begin();
+		InteractionToken current = coordinator.begin();
+
+		Optional<CapturedPingContext> accepted = coordinator.complete(
+			current, TargetSnapshotFactory.block(OVERWORLD, 1, 2, 3, "minecraft:stone", false, BlockFace.EAST));
+		Optional<CapturedPingContext> lateStale = coordinator.complete(
+			stale, TargetSnapshotFactory.block(OVERWORLD, 1, 2, 3, "minecraft:stone", false, BlockFace.WEST));
+
+		assertTrue(accepted.isPresent());
+		assertTrue(lateStale.isEmpty());
+		assertEquals(Optional.of(BlockFace.EAST),
+			interaction.currentContext().orElseThrow().blockHitFace());
+	}
+
+	@Test
 	void completeRejectsNullArguments() {
 		ActiveInteraction interaction = new ActiveInteraction();
 		PingCaptureCoordinator coordinator = coordinator(interaction, new RecordingCaptureLogger());
@@ -328,6 +393,15 @@ class PingCaptureCoordinatorTest {
 	private static PingCaptureCoordinator coordinator(ActiveInteraction interaction, PingCaptureLogger logger) {
 		return new PingCaptureCoordinator(
 			DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()), interaction, logger);
+	}
+
+	private static CapturedPingContext resolveWith(TargetSnapshot snapshot, TargetResolver resolver) {
+		ActiveInteraction interaction = new ActiveInteraction();
+		PingCaptureCoordinator coordinator =
+			new PingCaptureCoordinator(resolver, interaction, PingCaptureLogger.noop());
+		InteractionToken token = coordinator.begin();
+
+		return coordinator.complete(token, snapshot).orElseThrow();
 	}
 
 	private static EntityLocalGeometryMetadata localGeometryMetadata() {

@@ -1,11 +1,21 @@
 package nx.pingwheel.common.math;
 
 import java.util.Objects;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Optional;
 
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.phys.*;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import nx.pingwheel.common.interaction.CapturedRay;
+import nx.pingwheel.common.interaction.InteractionToken;
+import nx.pingwheel.common.interaction.MinecraftTargetSnapshotFactory;
+import nx.pingwheel.common.interaction.cancel.WorldVector;
+import nx.pingwheel.common.interaction.candidate.*;
 
 import static nx.pingwheel.common.CommonClient.Game;
 
@@ -76,6 +86,16 @@ public class Raycast {
 			return java.util.Optional.empty();
 		}
 
+		return traceDirectionalDetailed(cameraEntity, rayStartVec, direction, maxDistance, policy,
+			EntityLocalGeometryRegistry.INSTANCE.snapshot());
+	}
+
+	private static Optional<RaycastSelection> traceDirectionalDetailed(
+		Entity cameraEntity, Vec3 rayStartVec, Vec3 direction, double maxDistance,
+		RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot localGeometrySnapshot
+	) {
+		var rayEndVec = rayStartVec.add(direction.scale(maxDistance));
+
 		var boundingBox = cameraEntity
 			.getBoundingBox()
 			.expandTowards(direction.scale(maxDistance))
@@ -104,7 +124,6 @@ public class Raycast {
 			1.0f,
 			collisionContext,
 			cameraEntity.position());
-		EntityLocalGeometryRegistry.Snapshot localGeometrySnapshot = EntityLocalGeometryRegistry.INSTANCE.snapshot();
 		EntitySelection entitySelection = traceEntity(
 			cameraEntity,
 			rayStartVec,
@@ -121,6 +140,146 @@ public class Raycast {
 				? java.util.Optional.empty()
 				: java.util.Optional.of(new RaycastSelection(entitySelection.hitResult(), entitySelection.localHit())));
 	}
+
+	/**
+	 * Additive press-start API. Use {@code ordinarySelection()} in the existing native/Sable/DH
+	 * pipeline, then carry {@code candidates()} to coordinator.complete(token, finalSnapshot,
+	 * pressRay, Optional.of(candidates)). Do not call this API from release or a DH callback.
+	 * Ordinary tracing retains its native distance and is not charged to supplemental budgets.
+	 */
+	public static Optional<SelectorTrace> traceDirectionalCandidates(
+		InteractionToken token, CapturedRay ray, double nativeDistance, double pingDistance,
+		RaycastPolicy policy, CandidateWorkLimits limits, CandidateBlockCapture blockCapture
+	) {
+		Entity camera = Game.cameraEntity;
+		if (camera == null || camera.level() == null) return Optional.empty();
+		return traceDirectionalCandidates(camera, token, ray, nativeDistance, pingDistance, policy, limits, blockCapture);
+	}
+
+	/** Production native mapping plus independent transformed Sable supplementation. */
+	public static Optional<SelectorTrace> traceDirectionalCandidates(
+		InteractionToken token, CapturedRay ray, double nativeDistance, double pingDistance,
+		RaycastPolicy policy, CandidateWorkLimits limits
+	) {
+		return traceDirectionalCandidates(token, ray, nativeDistance, pingDistance, policy, limits,
+			nx.pingwheel.common.integration.sable.client.SableClientProvider.candidateBlocks());
+	}
+
+	/** Explicit game-thread camera adapter, useful to integrations without a second client-state owner. */
+	public static Optional<SelectorTrace> traceDirectionalCandidates(
+		Entity camera, InteractionToken token, CapturedRay ray, double nativeDistance, double pingDistance,
+		RaycastPolicy policy, CandidateWorkLimits limits, CandidateBlockCapture blockCapture
+	) {
+		Objects.requireNonNull(camera, "camera");
+		Objects.requireNonNull(token, "token");
+		Objects.requireNonNull(ray, "ray");
+		Objects.requireNonNull(policy, "policy");
+		Objects.requireNonNull(limits, "limits");
+		Objects.requireNonNull(blockCapture, "blockCapture");
+		if (camera.level() == null) return Optional.empty();
+		if (!Double.isFinite(nativeDistance) || !Double.isFinite(pingDistance)
+			|| nativeDistance < 0 || pingDistance < nativeDistance) {
+			throw new IllegalArgumentException("native distance must be within frozen Ping range");
+		}
+		Vec3 start = vec(ray.origin());
+		Vec3 direction = vec(ray.direction());
+		// CapturedRay deliberately preserves raw direction. Only this supplemental
+		// extent is normalized so a non-unit input cannot extend the Ping-distance cap.
+		Vec3 supplementalDirection = direction.scale(1.0 / Math.hypot(Math.hypot(direction.x, direction.y), direction.z));
+		Vec3 end = start.add(supplementalDirection.scale(pingDistance));
+		if (!isFinite(end)) return Optional.empty();
+		var owners = EntityLocalGeometryRegistry.INSTANCE.snapshot();
+		RaycastSelection ordinary = traceDirectionalDetailed(camera, start, direction, nativeDistance, policy, owners)
+			.orElseThrow();
+		CandidateCollector collector = new CandidateCollector();
+		CandidateWorkBudget budget = new CandidateWorkBudget(limits);
+		EnumSet<PreciseTargetType> certified = EnumSet.noneOf(PreciseTargetType.class);
+		Level level = camera.level();
+		CollisionContext collisionContext = CollisionContext.of(camera);
+		EntityLocalRaycastRequest request = new EntityLocalRaycastRequest(start, end, policy,
+			1.0f, collisionContext, camera.position());
+		AABB bounds = new AABB(start, end).inflate(1);
+		try {
+			// ClientLevel's public native view is a lazy EntityLookup.byId.values view.
+			// There is no filtered getEntities or section walk before our visit counter.
+			boolean complete = level instanceof ClientLevel clientLevel
+				&& collectVisibleEntityCandidates(clientLevel.entitiesForRendering(), bounds, start, end,
+					policy, owners, request, budget, collector, level.dimension().location().toString(), camera);
+			if (complete) {
+				certified.add(PreciseTargetType.DROPPED_ITEM);
+				certified.add(PreciseTargetType.ENTITY);
+			}
+		} catch (RuntimeException | LinkageError failure) {
+			// Discard certification, not the independently completed ordinary trace.
+		}
+		try {
+			boolean[] providerComplete = {true};
+			ClipContext context = new ClipContext(start, end,
+				policy.blockMode() == RaycastPolicy.BlockMode.OUTLINE ? ClipContext.Block.OUTLINE : ClipContext.Block.VISUAL,
+				policy.fluidMode() == RaycastPolicy.FluidMode.ANY ? ClipContext.Fluid.ANY : ClipContext.Fluid.NONE,
+				collisionContext);
+			LoadedCandidateBlockView view = new LoadedCandidateBlockView(level, budget);
+			boolean complete = NativeBlockCandidateScan.scan(view, level::isLoaded,
+				context, budget, hit -> {
+					CandidateBlockCapture.Result result = blockCapture.capture(level, hit, start, end, budget);
+					providerComplete[0] &= result.complete();
+					result.snapshot().filter(snapshot -> !(snapshot.target() instanceof nx.pingwheel.common.domain.Target.LocationTarget))
+						.ifPresent(snapshot -> {
+							if (snapshot.candidateHit().isEmpty()) {
+								providerComplete[0] = false;
+								return;
+							}
+							double distance = FrozenCandidateAcquisition.distance(ray.origin(), snapshot.candidateHit().orElseThrow().worldHit());
+							if (distance <= pingDistance) collector.add(new CandidateEvidence(snapshot, distance));
+						});
+				});
+			boolean externalComplete = blockCapture.collectSupplemental(level, start, end, policy,
+				collisionContext, camera.position(), budget, collector);
+			if (complete && providerComplete[0] && view.complete() && externalComplete) {
+				certified.add(PreciseTargetType.ENTITY_BLOCK);
+				certified.add(PreciseTargetType.BLOCK);
+			}
+		} catch (RuntimeException | LinkageError failure) {
+			// A partial native/provider scan cannot certify a nearest block.
+		}
+		return Optional.of(new SelectorTrace(ordinary, new FrozenCandidateAcquisition(token, ray, pingDistance,
+			world(ordinary.hitResult().getLocation()), collector.evidence(), certified)));
+	}
+
+	/** Contains transient ordinary HitResult only; retain candidates(), never this object across callbacks. */
+	public record SelectorTrace(RaycastSelection ordinarySelection, FrozenCandidateAcquisition candidates) {}
+
+	static boolean collectEntityCandidates(Iterable<Entity> entities, Vec3 start, Vec3 end,
+		RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot owners, EntityLocalRaycastRequest request,
+		CandidateWorkBudget budget, CandidateCollector collector, String dimensionId, Entity excluded
+	) {
+		for (Entity entity : entities) {
+			if (!budget.visitEntity()) return false;
+			if (entity == null || entity == excluded) continue;
+			// Reuses exactly the ordinary ownership/non-hit/filter/endpoint path, no coarse revival.
+			Optional<RaycastSelection> selection = traceEntityCandidates(List.of(entity), start, end, policy, owners, request);
+			selection.ifPresent(hit -> {
+				var snapshot = MinecraftTargetSnapshotFactory.fromEntityCandidateSelection(dimensionId, hit);
+				collector.add(new CandidateEvidence(snapshot, start.distanceTo(hit.hitResult().getLocation())));
+			});
+		}
+		return true;
+	}
+
+	/** Same native lookup enumeration as production, before bounding-box or selection filters. */
+	static boolean collectVisibleEntityCandidates(Iterable<Entity> entities, AABB bounds, Vec3 start, Vec3 end,
+		RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot owners, EntityLocalRaycastRequest request,
+		CandidateWorkBudget budget, CandidateCollector collector, String dimensionId, Entity excluded
+	) {
+		return NativeEntityCandidateScan.scan(entities, bounds, excluded, budget, entity ->
+			traceEntityCandidates(List.of(entity), start, end, policy, owners, request).ifPresent(hit -> {
+				var snapshot = MinecraftTargetSnapshotFactory.fromEntityCandidateSelection(dimensionId, hit);
+				collector.add(new CandidateEvidence(snapshot, start.distanceTo(hit.hitResult().getLocation())));
+			}));
+	}
+
+	private static Vec3 vec(WorldVector value) { return new Vec3(value.x(), value.y(), value.z()); }
+	private static WorldVector world(Vec3 value) { return new WorldVector(value.x, value.y, value.z); }
 
 	/** Package-private production seam for the final world/entity comparison. */
 	static java.util.Optional<RaycastSelection> selectNearestWorldOrEntity(

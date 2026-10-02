@@ -3,6 +3,7 @@ package nx.pingwheel.common.interaction;
 import java.util.Objects;
 
 import nx.pingwheel.common.domain.ResolvedTarget;
+import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.EntityLocalGeometryMetadata;
 
 /**
@@ -15,12 +16,18 @@ import nx.pingwheel.common.domain.EntityLocalGeometryMetadata;
  * interaction state machine. All fields are validated non-null and are
  * effectively immutable (the token is identity-compared and the resolved target
  * and ray are immutable records).
+ *
+ * <p>Capture-only metadata stays attached to its matching identity: entity-local
+ * geometry detail is retained only for an entity target, and an ordinary-block
+ * hit face only for a {@code Target.BlockTarget}.
  */
 public record CapturedPingContext(
 	InteractionToken token,
 	ResolvedTarget resolvedTarget,
 	CapturedRay ray,
-	java.util.Optional<EntityLocalGeometryMetadata> entityLocalGeometryMetadata
+	java.util.Optional<EntityLocalGeometryMetadata> entityLocalGeometryMetadata,
+	java.util.Optional<BlockFace> blockHitFace,
+	java.util.Optional<nx.pingwheel.common.interaction.candidate.FrozenCandidateSet> selectorCandidates
 ) {
 
 	public CapturedPingContext {
@@ -28,10 +35,21 @@ public record CapturedPingContext(
 		Objects.requireNonNull(resolvedTarget, "resolvedTarget");
 		Objects.requireNonNull(ray, "ray");
 		Objects.requireNonNull(entityLocalGeometryMetadata, "entityLocalGeometryMetadata");
+		Objects.requireNonNull(blockHitFace, "blockHitFace");
+		Objects.requireNonNull(selectorCandidates, "selectorCandidates");
+		if (selectorCandidates.isPresent()
+			&& !selectorCandidates.orElseThrow().ordinary().resolvedTarget().equals(resolvedTarget)) {
+			throw new IllegalArgumentException("selector ordinary target must be the accepted capture");
+		}
 
 		if (entityLocalGeometryMetadata.isPresent()
 			&& !(resolvedTarget.target() instanceof nx.pingwheel.common.domain.Target.EntityTarget)) {
 			throw new IllegalArgumentException("only an entity target can retain local geometry metadata");
+		}
+
+		if (blockHitFace.isPresent()
+			&& !(resolvedTarget.target() instanceof nx.pingwheel.common.domain.Target.BlockTarget)) {
+			throw new IllegalArgumentException("only an ordinary block target can retain a hit face");
 		}
 	}
 
@@ -46,6 +64,30 @@ public record CapturedPingContext(
 	/** Compatibility constructor retained for callers that provide a press ray. */
 	public CapturedPingContext(InteractionToken token, ResolvedTarget resolvedTarget, CapturedRay ray) {
 		this(token, resolvedTarget, ray, java.util.Optional.empty());
+	}
+
+	/**
+	 * Compatibility constructor retained for callers that provide entity-local
+	 * geometry metadata without the later ordinary-block hit face.
+	 */
+	public CapturedPingContext(
+		InteractionToken token,
+		ResolvedTarget resolvedTarget,
+		CapturedRay ray,
+		java.util.Optional<EntityLocalGeometryMetadata> entityLocalGeometryMetadata
+	) {
+		this(token, resolvedTarget, ray, entityLocalGeometryMetadata, java.util.Optional.empty());
+	}
+
+	/** Compatibility constructor retaining the completed face-capture API. */
+	public CapturedPingContext(
+		InteractionToken token,
+		ResolvedTarget resolvedTarget,
+		CapturedRay ray,
+		java.util.Optional<EntityLocalGeometryMetadata> entityLocalGeometryMetadata,
+		java.util.Optional<BlockFace> blockHitFace
+	) {
+		this(token, resolvedTarget, ray, entityLocalGeometryMetadata, blockHitFace, java.util.Optional.empty());
 	}
 
 	/**

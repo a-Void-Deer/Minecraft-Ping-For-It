@@ -20,6 +20,7 @@ import nx.pingwheel.common.math.EntityLocalHit;
 import nx.pingwheel.common.math.LocalGeometryHit;
 import nx.pingwheel.common.math.LocalGeometryKind;
 import nx.pingwheel.common.math.RaycastSelection;
+import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -59,6 +60,20 @@ class MinecraftTargetSnapshotFactoryDetailedTest {
 			"minecraft:overworld", fabricatedMismatch);
 
 		assertTrue(dropped.entityLocalGeometryMetadata().isEmpty());
+	}
+
+	@Test
+	void entityHitNeverCarriesABlockFace() {
+		TestEntity entity = new TestEntity(EntityType.PIG, null);
+
+		TargetSnapshot snapshot = MinecraftTargetSnapshotFactory.fromHitResult(
+			"minecraft:overworld",
+			new EntityHitResult(entity, new Vec3(4, 5, 6)),
+			Optional.empty(),
+			false);
+
+		assertTrue(snapshot.target() instanceof Target.EntityTarget);
+		assertTrue(snapshot.blockHitFace().isEmpty());
 	}
 
 	private static final class TestEntity extends Entity {

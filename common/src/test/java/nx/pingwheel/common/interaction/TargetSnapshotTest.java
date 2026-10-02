@@ -1,6 +1,7 @@
 package nx.pingwheel.common.interaction;
 
 import nx.pingwheel.common.domain.EntityLocator;
+import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.EntityCaptureMetadata;
 import nx.pingwheel.common.domain.EntityLocalGeometryMetadata;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
@@ -218,6 +219,75 @@ class TargetSnapshotTest {
 		assertEquals(Optional.of(metadata), context.entityLocalGeometryMetadata());
 		assertTrue(new TargetSnapshot(target, TargetMatchContext.none()).entityLocalGeometryMetadata().isEmpty());
 		assertTrue(new CapturedPingContext(new InteractionToken(8), resolved).entityLocalGeometryMetadata().isEmpty());
+	}
+
+	@Test
+	void ordinaryBlockSnapshotCarriesTheCaptureFaceAndOlderFactoriesLeaveItEmpty() {
+		TargetSnapshot faced = TargetSnapshotFactory.block(
+			OVERWORLD, 1, 2, 3, "minecraft:chest", true, BlockFace.NORTH);
+
+		assertEquals(Optional.of(BlockFace.NORTH), faced.blockHitFace());
+		assertTrue(TargetSnapshotFactory.block(OVERWORLD, 1, 2, 3, "minecraft:chest").blockHitFace().isEmpty());
+		assertTrue(TargetSnapshotFactory.block(OVERWORLD, 1, 2, 3, "minecraft:chest", true).blockHitFace().isEmpty());
+	}
+
+	@Test
+	void onlyAnOrdinaryBlockTargetCanCarryAHitFace() {
+		TargetSnapshot block = new TargetSnapshot(
+			new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone"),
+			TargetMatchContext.none(),
+			Optional.empty(),
+			Optional.empty(),
+			Optional.of(BlockFace.UP));
+
+		assertEquals(Optional.of(BlockFace.UP), block.blockHitFace());
+
+		assertThrows(IllegalArgumentException.class, () -> new TargetSnapshot(
+			new Target.EntityTarget(OVERWORLD, ENTITY_ID),
+			TargetMatchContext.none(),
+			Optional.empty(),
+			Optional.empty(),
+			Optional.of(BlockFace.UP)));
+		assertThrows(IllegalArgumentException.class, () -> new TargetSnapshot(
+			new Target.LocationTarget(OVERWORLD, 0, 0, 0),
+			TargetMatchContext.none(),
+			Optional.empty(),
+			Optional.empty(),
+			Optional.of(BlockFace.UP)));
+		assertThrows(IllegalArgumentException.class, () -> new TargetSnapshot(
+			new Target.ExternalBlockTarget(
+				OVERWORLD, "provider:test", "target-1", "minecraft:chest", "opaque-locator"),
+			TargetMatchContext.none(),
+			Optional.empty(),
+			Optional.empty(),
+			Optional.of(BlockFace.UP)));
+	}
+
+	@Test
+	void capturedPingContextCarriesABlockFaceOnlyForAnOrdinaryBlockTarget() {
+		InteractionToken token = new InteractionToken(9);
+		ResolvedTarget resolvedBlock = new ResolvedTarget(
+			new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone"),
+			TargetTypeCatalog.builtIn().findById("block").orElseThrow());
+
+		CapturedPingContext context = new CapturedPingContext(
+			token, resolvedBlock, CapturedRay.defaultRay(), Optional.empty(), Optional.of(BlockFace.EAST));
+
+		assertEquals(Optional.of(BlockFace.EAST), context.blockHitFace());
+		assertTrue(new CapturedPingContext(new InteractionToken(10), resolvedBlock).blockHitFace().isEmpty());
+		assertTrue(new CapturedPingContext(
+			new InteractionToken(11), resolvedBlock, CapturedRay.defaultRay()).blockHitFace().isEmpty());
+		assertTrue(new CapturedPingContext(
+			new InteractionToken(12), resolvedBlock, CapturedRay.defaultRay(), Optional.empty())
+			.blockHitFace().isEmpty());
+
+		ResolvedTarget resolvedEntity = new ResolvedTarget(
+			new Target.EntityTarget(OVERWORLD, ENTITY_ID),
+			TargetTypeCatalog.builtIn().findById("entity").orElseThrow());
+
+		assertThrows(IllegalArgumentException.class, () -> new CapturedPingContext(
+			new InteractionToken(13), resolvedEntity, CapturedRay.defaultRay(),
+			Optional.empty(), Optional.of(BlockFace.EAST)));
 	}
 
 	@Test

@@ -160,11 +160,17 @@ public class DistantHorizonsIntegration {
 
 			final var pos = new Vec3(rayCastResult.payload.pos.x, rayCastResult.payload.pos.y, rayCastResult.payload.pos.z);
 
-			return Optional.of(new BlockHitResult(pos, Direction.UP, new BlockPos((int) pos.x, (int) pos.y, (int) pos.z), true));
+			return Optional.of(terrainHit(pos));
 		} catch (LinkageError error) {
 			LINK_GUARD.disable(error);
 			return Optional.empty();
 		}
+	}
+
+	/** DH observes a terrain point but does not report a native block face. */
+	static BlockHitResult terrainHit(Vec3 point) {
+		return new nx.pingwheel.common.interaction.candidate.UnobservedFaceBlockHitResult(
+			point, Direction.UP, new BlockPos((int) point.x, (int) point.y, (int) point.z), true);
 	}
 
 	/**

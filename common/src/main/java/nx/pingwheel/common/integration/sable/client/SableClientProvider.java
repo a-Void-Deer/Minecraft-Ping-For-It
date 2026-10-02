@@ -124,6 +124,35 @@ public final class SableClientProvider {
 		}
 	}
 
+	/** Native mapping plus a separate transformed provider ray; ordinary capture remains unchanged. */
+	public static nx.pingwheel.common.interaction.candidate.CandidateBlockCapture candidateBlocks() {
+		var nativeBlocks = nx.pingwheel.common.interaction.candidate.CandidateBlockCapture.nativeBlocks();
+		return new nx.pingwheel.common.interaction.candidate.CandidateBlockCapture() {
+			@Override public Result capture(net.minecraft.world.level.Level level, BlockHitResult hit,
+				Vec3 start, Vec3 end, nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget) {
+				return nativeBlocks.capture(level, hit, start, end, budget);
+			}
+			@Override public boolean collectSupplemental(net.minecraft.world.level.Level level, Vec3 start, Vec3 end,
+				nx.pingwheel.common.math.RaycastPolicy policy, CollisionContext context, Vec3 cameraFeet,
+				nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget,
+				nx.pingwheel.common.interaction.candidate.CandidateCollector collector) {
+				if (!ModContext.HasSable) return true;
+				if (!enabled() || !(level instanceof ClientLevel clientLevel)) return false;
+				try {
+					return getAccess().collectSupplemental(clientLevel, start, end, policy, context, cameraFeet, budget, collector);
+				} catch (ReflectiveOperationException | RuntimeException failure) {
+					diagnostics.captureException("supplemental-ray", "unavailable-or-incomplete", failure,
+						"companion_contract", "1.6.0", "api", "getAllSubLevels/getPlot");
+					return false;
+				} catch (LinkageError failure) {
+					diagnostics.captureException("supplemental-ray", "linkage-unavailable", failure,
+						"companion_contract", "1.6.0", "api", "getAllSubLevels/getPlot");
+					return false;
+				}
+			}
+		};
+	}
+
 	/**
 	 * Preserves the legacy projected-position fallback for a Sable hit. This is
 	 * intentionally separate from candidate capture so an unresolved candidate

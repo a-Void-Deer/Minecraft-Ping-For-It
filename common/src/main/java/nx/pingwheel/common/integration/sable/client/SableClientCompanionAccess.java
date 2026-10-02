@@ -35,6 +35,8 @@ import nx.pingwheel.common.interaction.TargetSnapshot;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.name.TargetNameComposer;
 import nx.pingwheel.common.resolve.BlockEntityClassification;
+import nx.pingwheel.common.interaction.candidate.*;
+import nx.pingwheel.common.math.RaycastPolicy;
 
 /** Direct Companion 1.6.0 calls, isolated from the common client runtime. */
 final class SableClientCompanionAccess {
@@ -384,7 +386,47 @@ final class SableClientCompanionAccess {
 			SableClientProvider.PROVIDER_ID,
 			best.registryId().toString(),
 			best.locator().encode(),
-			best.hasBlockEntity()));
+			best.hasBlockEntity()).withCandidateHit(new nx.pingwheel.common.interaction.candidate.CandidateHit(
+				new nx.pingwheel.common.interaction.cancel.WorldVector(
+					best.worldHit().x, best.worldHit().y, best.worldHit().z),
+				SableCaptureEquivalence.fromResolved(level.dimension().location().toString(), best.subLevelId(),
+					localPos.getX(), localPos.getY(), localPos.getZ(), best.registryId().toString()))));
+	}
+
+	/** Independent bounded local-plot trace, never derived from a parent-world block hit. */
+	boolean collectSupplemental(ClientLevel level, Vec3 start, Vec3 end, RaycastPolicy policy,
+		CollisionContext context, Vec3 cameraFeet, CandidateWorkBudget budget, CandidateCollector collector)
+		throws ReflectiveOperationException {
+		if (internal == null) return false;
+		List<?> raw = internal.loadedSubLevels(level, budget);
+		return SableSupplementalRaycaster.scan(new SableSupplementalRaycaster.Source() {
+			@Override public int size() { return raw.size(); }
+			@Override public SableSupplementalRaycaster.SubLevel at(int index, CandidateWorkBudget work) {
+				Object value = raw.get(index);
+				if (!(value instanceof ClientSubLevelAccess access)) throw new ExactNativeShapeClip.Incomplete();
+				try {
+					Object plot = internal.existingPlot(level, value, work);
+					if (plot == null) return null;
+					if (!work.callProvider()) throw new ExactNativeShapeClip.Incomplete();
+					UUID id = access.getUniqueId();
+					if (!work.callProvider()) throw new ExactNativeShapeClip.Incomplete();
+					Pose3dc pose = access.logicalPose();
+					if (id == null || pose == null) throw new ExactNativeShapeClip.Incomplete();
+					var bounds = internal.bounds(plot, work);
+					if (bounds == null) throw new ExactNativeShapeClip.Incomplete();
+					if (bounds.minX() > bounds.maxX() || bounds.minY() > bounds.maxY() || bounds.minZ() > bounds.maxZ()) return null;
+					return new SableSupplementalRaycaster.SubLevel(id, pose,
+						new net.minecraft.world.phys.AABB(bounds.minX(), bounds.minY(), bounds.minZ(),
+							bounds.maxX() + 1.0, bounds.maxY() + 1.0, bounds.maxZ() + 1.0), level,
+						pos -> {
+							try { return internal.contains(plot, pos, work); }
+							catch (ReflectiveOperationException failure) { throw new ExactNativeShapeClip.Incomplete(); }
+						}, level::isLoaded);
+				} catch (ReflectiveOperationException failure) {
+					throw new ExactNativeShapeClip.Incomplete();
+				}
+			}
+		}, level.dimension().location().toString(), start, end, policy, context, cameraFeet, budget, collector);
 	}
 
 	Vec3 projectOutOfSubLevel(ClientLevel level, Vec3 hitPosition) {

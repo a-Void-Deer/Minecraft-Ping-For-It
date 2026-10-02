@@ -74,9 +74,27 @@ public final class PingCaptureCoordinator {
 		TargetSnapshot snapshot,
 		CapturedRay ray
 	) {
+		return complete(token, snapshot, ray, Optional.empty());
+	}
+
+	/**
+	 * Completes ordinary capture with evidence collected at the same capture start.
+	 * Supplemental failure can disable the selector attachment, never ordinary readiness.
+	 * The DH callback may call this overload with its final ordinary snapshot; no scan occurs here.
+	 */
+	public Optional<CapturedPingContext> complete(
+		InteractionToken token,
+		TargetSnapshot snapshot,
+		CapturedRay ray,
+		Optional<nx.pingwheel.common.interaction.candidate.FrozenCandidateAcquisition> candidates
+	) {
 		Objects.requireNonNull(token, "token");
 		Objects.requireNonNull(snapshot, "snapshot");
 		Objects.requireNonNull(ray, "ray");
+		Objects.requireNonNull(candidates, "candidates");
+		if (candidates.isPresent() && !candidates.orElseThrow().belongsTo(token, ray)) {
+			throw new IllegalArgumentException("candidate evidence belongs to a different press");
+		}
 
 		if (!activeInteraction.isCurrent(token)) {
 			logger.debug("capture reject: stale token={} kind={} dimension={}",
@@ -104,7 +122,19 @@ public final class PingCaptureCoordinator {
 		java.util.Optional<nx.pingwheel.common.domain.EntityLocalGeometryMetadata> localGeometryMetadata =
 			snapshot.entityLocalGeometryMetadata().filter(ignored -> isSameEntityTargetIdentity(
 				snapshot.target(), resolved.target()));
-		CapturedPingContext context = new CapturedPingContext(token, resolved, ray, localGeometryMetadata);
+		java.util.Optional<nx.pingwheel.common.domain.BlockFace> blockHitFace = snapshot.blockHitFace()
+			.filter(ignored -> isSameOrdinaryBlockTargetIdentity(snapshot.target(), resolved.target()));
+		Optional<nx.pingwheel.common.interaction.candidate.FrozenCandidateSet> selectorCandidates = Optional.empty();
+		if (candidates.isPresent()) {
+			try {
+				selectorCandidates = Optional.of(candidates.orElseThrow().finish(snapshot, resolved, targetResolver));
+			} catch (RuntimeException failure) {
+				logger.debug("selector capture unavailable: token={} cause={}",
+					token.sequence(), failure.getClass().getSimpleName());
+			}
+		}
+		CapturedPingContext context =
+			new CapturedPingContext(token, resolved, ray, localGeometryMetadata, blockHitFace, selectorCandidates);
 
 		if (!activeInteraction.tryComplete(token, context)) {
 			logger.debug("capture reject: race/duplicate token={} kind={} dimension={}",
@@ -132,5 +162,14 @@ public final class PingCaptureCoordinator {
 		return captured instanceof nx.pingwheel.common.domain.Target.EntityTarget capturedEntity
 			&& resolved instanceof nx.pingwheel.common.domain.Target.EntityTarget resolvedEntity
 			&& capturedEntity.equals(resolvedEntity);
+	}
+
+	private static boolean isSameOrdinaryBlockTargetIdentity(
+		nx.pingwheel.common.domain.Target captured,
+		nx.pingwheel.common.domain.Target resolved
+	) {
+		return captured instanceof nx.pingwheel.common.domain.Target.BlockTarget capturedBlock
+			&& resolved instanceof nx.pingwheel.common.domain.Target.BlockTarget resolvedBlock
+			&& capturedBlock.equals(resolvedBlock);
 	}
 }

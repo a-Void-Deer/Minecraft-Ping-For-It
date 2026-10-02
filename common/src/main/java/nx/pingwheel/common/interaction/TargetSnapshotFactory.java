@@ -3,6 +3,7 @@ package nx.pingwheel.common.interaction;
 import java.util.UUID;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.EntityCaptureMetadata;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.TargetMatchContext;
@@ -111,6 +112,29 @@ public final class TargetSnapshotFactory {
 		return new TargetSnapshot(
 			new Target.BlockTarget(dimensionId, x, y, z, blockRegistryId),
 			TargetMatchContext.blockEntityBlock(hasBlockEntity));
+	}
+
+	/**
+	 * A block snapshot carrying dimension, position, block registry id, the
+	 * transient block classification, and the capture-only face of the
+	 * ordinary block hit. The face never participates in target identity and is
+	 * meaningful only for this ordinary block target.
+	 */
+	public static TargetSnapshot block(
+		String dimensionId,
+		int x,
+		int y,
+		int z,
+		String blockRegistryId,
+		boolean hasBlockEntity,
+		BlockFace blockHitFace
+	) {
+		return new TargetSnapshot(
+			new Target.BlockTarget(dimensionId, x, y, z, blockRegistryId),
+			TargetMatchContext.blockEntityBlock(hasBlockEntity),
+			java.util.Optional.empty(),
+			java.util.Optional.empty(),
+			java.util.Optional.of(blockHitFace));
 	}
 
 	/**
