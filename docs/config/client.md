@@ -51,8 +51,6 @@ here.
 | `longPressCompatibilitySliceMillis` | number, milliseconds | Compatibility adjacency slice. [Long-press timing](../architecture/input/long-press.md) owns its relation to the effective hold threshold. |
 | `wheelTimeoutMillis` | number, milliseconds | Maximum duration of an actually open wheel; [wheel](../architecture/picking/wheel.md) owns actual-open snapshot and timeout behavior. |
 | `cancelHalfConeAngleDegrees` | number, degrees | Half-angle for local own-marker cancellation; [wheel](../architecture/picking/wheel.md#cancel-marker-selection) owns candidate selection. |
-| `wheelInnerRadius` | number, GUI pixels | Center/cancellation boundary. It must remain less than `wheelOuterRadius`. |
-| `wheelOuterRadius` | number, GUI pixels | Outer sector boundary. It must remain greater than `wheelInnerRadius`. |
 | `wheelOpacity` | number | Local wheel visual opacity. |
 | `wheelFontSize` | number | Local wheel-label text size. |
 | `wheelTargetFontSize` | number | Local target-label text size. |
@@ -70,17 +68,32 @@ here.
 
 ### Spatial selector interaction
 
+`spatialSelector` holds client-local spatial-selector gesture and appearance
+preferences. An absent or `null` object is initialized by the config model, and
+a missing member keeps its model-initialized value while explicit members are
+retained.
+
 | Key | JSON form | Local meaning |
 | --- | --- | --- |
-| `spatialSelector` | object | Client-local target-list glide and Back-hover preference; it is never sent to the server and cannot alter server policy. |
-| `spatialSelector.targetGlide` | number | Target-list glide factor. The frozen press result and glide application are owned by [wheel](../architecture/picking/wheel.md); its range and reset value are implementation values. |
-| `spatialSelector.hoverEnabled` | boolean | Whether Back-hover target return is enabled. Back-hover is opt-in and stays inactive until the user enables it. |
-| `spatialSelector.hoverMillis` | number, milliseconds | Dwell threshold before Back-hover returns one level. Its range and step are implementation values. |
+| `spatialSelector` | object | Container for the preferences below; never sent to the server and cannot alter server policy. |
+| `spatialSelector.deadzone` | number, GUI pixels | Center deadzone; a release inside it abandons the gesture. |
+| `spatialSelector.stroke` | number, GUI pixels | Minimum pointer stroke before a dwell can enter a focused submenu. |
+| `spatialSelector.dwellMillis` | number, milliseconds | Dwell threshold before a focused branch entry is entered. |
+| `spatialSelector.rootDistance` | number, GUI pixels | Visual root-menu distance from the center; it does not change the deadzone or entry stroke. |
+| `spatialSelector.targetGlide` | number | Vertical glide factor for inventory-row mouse movement; it does not affect the scroll wheel. |
+| `spatialSelector.hoverEnabled` | boolean | Whether sustained Back hover returns one level; opt-in and inert until enabled. |
+| `spatialSelector.hoverMillis` | number, milliseconds | Dwell threshold before Back-hover returns one level. |
+| `spatialSelector.showTrail` | boolean | Whether the virtual-pointer trail is drawn; it does not change gesture selection. |
+| `spatialSelector.reduceMotion` | boolean | Reduces selector animation without changing gesture timing or selection. |
 
-No other spatial-selector prototype tuning, such as dead zone or stroke, is
-persisted. The return-state contract — one level, leaving before re-entry to
-re-arm, and a frozen press start — is owned by
-[wheel](../architecture/picking/wheel.md#back-hover-return-state).
+The config model supplies an immutable validated snapshot for one held gesture,
+so editing the live configuration cannot change a gesture already in progress.
+Gesture behavior is owned by
+[wheel](../architecture/picking/wheel.md#headless-spatial-menu-model), which
+also owns the
+[Back-hover return state](../architecture/picking/wheel.md#back-hover-return-state)
+and the model's native-integration boundary; numeric ranges, steps, and defaults
+remain implementation values.
 
 ### Block display lists
 
@@ -93,7 +106,7 @@ These display lists are separate from the entity-selection blacklist controlled
 by `markBlacklistedTargets`; see
 [the blacklist boundary](../architecture/picking/selection_policy.md#raycast-use-and-blacklist-boundary).
 
-### Obsolete presentation policy keys
+### Obsolete keys
 
 `presentationReceive` and `presentationDisplay` are obsolete keys with no
 persisted meaning. The handler removes them from a loaded or serialized
@@ -102,6 +115,14 @@ policy exists. The removal and recovery behavior is owned by
 [configuration revisioning](../architecture/config/revisioning.md). The
 versioned presentation field policy is server-owned; its persisted shape is
 catalogued in [server configuration](server.md#presentation-policy-object).
+
+`wheelInnerRadius` and `wheelOuterRadius` are retired keys with no persisted
+meaning. They are removed by the version-boundary migration and from every
+client serialization at or after that boundary, so a later save cannot
+resurrect them; removal, migration, and preservation behavior is owned by
+[configuration revisioning](../architecture/config/revisioning.md). The keys do
+not configure the live wheel, whose release boundaries are owned by
+[wheel](../architecture/picking/wheel.md#radial-release-result).
 
 ### Channel preferences
 

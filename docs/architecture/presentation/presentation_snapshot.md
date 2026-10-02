@@ -3,9 +3,10 @@
 This topic owns the versioned presentation snapshot subsystem: its independent
 negotiation/intent/mutation route, its separate policy rule-view route, the
 adapter and field model, the demand-driven server capture and per-recipient
-projection, the per-target-type server field policy, marker-owned property
-selections and their code-defined property Ping Type policy, and the
-session-scoped client value store. Packet
+projection, the per-target-type server field policy, the pre-commit target
+content preview with its field authorization, provenance and bounded fallback,
+marker-owned property selections and their code-defined property Ping Type
+policy, and the session-scoped client value store. Packet
 registration as a family and the legacy route boundary are summarized by
 [network protocol](../network/protocol.md); marker record state, visual
 deadlines, and winner slots remain owned by
@@ -16,7 +17,8 @@ by [Create integration](../../integrations/create.md). Generic source access,
 capture results, cost accounting and sync publication are owned by
 [shared source capture and sync](shared_sources.md), and the inventory preview
 and tracking domain is owned by [inventory](inventory.md); this topic retains
-negotiation, field policy, adapters and the session value store.
+negotiation, field policy, adapters, the target content preview and the session
+value store.
 
 ## Route and negotiated session
 
@@ -231,7 +233,7 @@ topic owns policy application:
 
 The persisted per-target-type field policy is also exposed through its own
 versioned route (`server-presentation-policy-v2`), independent of both the
-marker session above and the five-field server-configuration request/update
+marker session above and the ordinary server-configuration request/update
 transaction. A read request carries a positive request identifier and is
 answered with all five target-type rule views — each type's white list, black
 list, and whitelist-only flag — the server's in-memory rule-view revision, a
@@ -306,6 +308,85 @@ lines are truncated and blank lines dropped), can narrow the supplied view but
 cannot acquire a store, sender, or capture callback, and switching or failing a
 provider performs no network or source work. Display text is presentation only;
 it never changes marker identity, winner slots, or server state.
+
+## Target content preview
+
+The wheel's content branch may present a captured target's authorized
+observations before any Ping exists. It is client-first: it shows a value the
+client can observe locally and falls back to the bounded server preview only
+for a field it cannot observe locally. The preview is a presentation read: it
+creates no marker, audience, lease, winner slot, chat output, or marker
+lifetime, and a missing or unavailable preview never changes the plain default
+action. Its provisional projection is not the retained marker store and never
+supplies marker records or marker names.
+The [wheel](../picking/wheel.md) owns the branch's native
+presentation, navigation, selection input and lifecycle, and
+[capture](../picking/capture.md#interaction-lifecycle-aborts) owns the
+interaction abort; this section owns the preview's field authorization,
+provenance and fallback mechanics. This is the adopted contract for the
+confirmed preview design; implementation is in progress, and no completion or
+runtime behavior is claimed here.
+
+- **Field authorization.** A preview value is eligible only under the current
+  accepted presentation epoch and view. The field must be included by the
+  accepted `RESET` mask for the target's exact target type and must intersect
+  the accepted manifest's compatible section fields with a matching kind; the
+  client adds no grant of its own. Manifest metadata such as a field's default
+  enablement or label is not a grant by itself, and an unready session, a stale
+  view, an unknown field, a target-type mismatch, or a mask exclusion makes the
+  field ineligible. Dedicated adapters, including inventory, are excluded from
+  this preview; inventory's own list, stream and variant rules stay owned by
+  [inventory](inventory.md).
+- **Provenance and precedence.** A value the client already legitimately
+  received for the exact target is shown as `CLIENT_SYNCED`; only a field the
+  client cannot observe locally may fall back to the bounded server preview,
+  and a local observation that satisfies the field sends no server request.
+  Every preview value is detached, bounded and provisional — `CLIENT_SYNCED`
+  and server-preview values alike are not fresh world authority and never
+  bypass the server's authoritative recapture at create
+  ([Property Ping](#property-ping)). An unsynced or unknown value, including an
+  unverified constructor/default value, is never treated as a zero, an empty
+  result, or an observed absence, and a missing fallback result is absent or
+  unavailable rather than an empty value. Legitimately observed or synchronized
+  zero, false, and empty values remain usable data.
+- **Local observations.** Local values come from explicit code-registered
+  readers per field, never a reflective or arbitrary dump, and must match the
+  captured target: the live dimension and canonical entity locator, or the live
+  block identity. A block value requires actually loaded state, never a pending
+  prediction, and an empty or merely named generic block entity is not evidence
+  of content. An optional-mod reader that is missing, fails, or returns no
+  usable observation — including an unverified constructor/default value or
+  missing synchronization evidence — yields no local value, so the field is
+  locally unavailable and falls back per field without breaking
+  another field or an unrelated ping. An external target without a safe
+  read-only provider observation stays unavailable; preview never materializes
+  a temporary external target.
+- **Bounded server fallback.** A fallback request carries its own one-shot
+  per-target request identity, created before and independent of any Ping,
+  marker or inventory identity; no preview Ping is invented. It is rooted in
+  the already-authorized demand as a hint, not a subscription, and the server
+  derives actual demand from its own authorization, so the request cannot
+  widen authorization. A response is accepted only when correlated to its
+  request token, the target identity including dimension, the session epoch
+  and the view; a stale or off-view response is rejected, as after an
+  interaction abort, a `RESET`, or a target identity change. Server-side, the
+  fallback samples with bounded residual work under the existing per-tick work
+  and capture budget; it adds no direct unbudgeted ingress read, no continuous
+  polling or heartbeat, and no migration onto the inventory route. It reuses the
+  established capture helper, so the Basic, create and `SECTION` semantics and
+  their global bounds are unchanged and no second capture owner is introduced.
+  Generic source access, capture-result and cost mechanics remain owned by
+  [shared source capture and sync](shared_sources.md), and wire grammar and
+  message identity remain owned by
+  [network protocol](../network/protocol.md).
+- **Selection and optional cache.** Selecting an actual provisional property
+  creates the existing typed property-selection intent, and the server still
+  recaptures or rejects the whole create atomically; an explicit property
+  rejection is never silently retried as a plain create without it. A
+  previously received marker value for the exact target may optionally serve as
+  a cached preview only with exact identity, fields pruned to the current mask,
+  historical-stale provenance, and property annotations stripped; using it is
+  not required, and no dominance between the preview forms is established.
 
 ## Property Ping
 

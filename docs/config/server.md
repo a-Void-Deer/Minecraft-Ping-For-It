@@ -21,8 +21,9 @@ The server configuration object is the typed persisted schema. It applies live
 validation, numeric bounds, and fallbacks; those implementation values are
 deliberately not mirrored here.
 
-The five fields other than `pingDistance`, `presentation` and `inventory` can
-also be changed over the client/server connection through
+The five top-level fields other than `pingDistance` and `presentation`, and the
+nineteen `inventory` administration settings, can also be changed over the
+client/server connection through
 [changing server configuration](../architecture/config/changing-server-config.md).
 Within the `presentation` object, the per-target-type `white`, `black`, and
 `whitelistOnly` rules are changed through the dedicated presentation policy
@@ -30,9 +31,7 @@ route owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md);
 its `minUpdateIntervalTicks`, `scanBudget`, `permissionLevels`, and
 `updateIntervals` members, like `pingDistance`, are configured only by editing
-the file. The `inventory` object is configured only by editing the file; it has
-no remote change route and no settings-UI controls. The
-[configuration UI](../UI/settings-screen.md#server-presentation-category)
+the file. The [configuration UI](../UI/settings-screen.md#server-performance-category)
 exposes the remote settings and the presentation policy controls.
 
 ## Persisted fields
@@ -140,9 +139,9 @@ array or an unbounded work loop.
 | `tracking.streamByteMultiplier` | multiplier object | Tracking stream byte allowance per client+target period on the client multiplier grid. |
 | `tracking.snapshotByteMultiplier` | multiplier object | Tracking snapshot byte allowance on the client multiplier grid; it bounds both one fragment and the client period total across all targets. |
 | `tracking.globalByteMultiplier` | multiplier object | Tracking global period byte allowance on the global multiplier grid. |
-| `tracking.resyncMinPeriods` | number, periods | Bounded abnormal-resynchronization cooldown; positive and with no unlimited mode. |
+| `tracking.resyncMinPeriods` | number, periods | Bounded abnormal-resynchronization cooldown; it is also the negotiated interval that bounds the unknown-baseline stream buffer. Positive and with no unlimited mode; buffer semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md#tracking). |
 | `tracking.heartbeatPeriods` | number, periods | Periodic checksum heartbeat cadence. `0` disables only the periodic heartbeat and is not an unlimited value; other repair and status paths remain active. |
-| `tracking.gracePeriods` | number, periods | Bounded grace window for an unknown-baseline stream. |
+| `tracking.gracePeriods` | number, periods | Rolling smoothing window for global wire accounting: the number of periods `n` in the confirmed excess-smoothing algorithm owned by [inventory preview and tracking](../architecture/presentation/inventory.md#budgets-queues-and-memory). It is independent of the resynchronization cooldown and of the bounded unknown-baseline stream window. |
 
 A limit object has the stable JSON form
 `{"unlimited": boolean, "value": number}`; a multiplier object has the form

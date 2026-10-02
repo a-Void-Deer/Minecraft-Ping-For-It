@@ -3,17 +3,16 @@
 This topic owns the generic, domain-neutral mechanism shared by presentation
 sources: source access, capture results, cost accounting, and sync publication.
 It is the adopted contract for the approved shared-source mechanism. All four
-boundaries now have headless declarations with model coverage: the server-side
+boundaries have headless declarations with model coverage: the server-side
 source-access contract, the detached source-key and capture-result models, the
-cost ledger, and the sync-publisher declaration. The ordinary-block inventory
-preview foundation does not yet run through those seams: it reads through its
-own source key and scanner/broker path, so runtime migration to the declared
-boundaries is pending. Sync publication has no production implementer, and the
-remaining provider contexts and native input/UI integration are not
-implemented. The existing one-shot adapter
-capture path, the per-marker cache, and whole-section
-replacement keep their present semantics until an implementation migrates or
-wraps them, and this adoption does not rewrite those routes.
+cost ledgers, and the sync-publisher declaration. The four roles are not yet
+fully integrated: a backend implementation is in progress, but runtime
+migration to the declared boundaries is not claimed, and production sync
+publication, the remaining provider contexts and native input/UI integration
+are not finally established. The existing one-shot adapter capture path, the
+per-marker cache, and whole-section replacement keep their present semantics
+until an implementation migrates or wraps them, and this adoption does not
+rewrite those routes.
 
 Inventory domain policy — item identity, preview and tracking behavior, zero and
 component-fallback rules, and recovery deadlines — is owned by
@@ -102,19 +101,25 @@ is claimed.
 
 A capture result carries an optional payload, coverage facts, availability,
 consistency, an optional source version and an optional next cursor. The
-payload is either a bounded whole-unit replacement snapshot of existing
+payload has three bounded forms: a whole-unit replacement snapshot of existing
 presentation values, whose entries may be fractional, textual or boolean
-scalars, or a keyed fragment whose domain key/value entries are
-normalized, bounded and immutable. A keyed fragment never carries live
-components, item stacks, or raw NBT, and it does not enlarge the existing global
-record-value bounds; inventory's codec and limits are independent and owned
-elsewhere. A `SnapshotRecord` may carry scalar or record replacement for
-related units, but this introduces no general cross-source transaction
-framework.
+scalars; a keyed fragment whose domain key/value entries are normalized,
+bounded and immutable; and a keyed opaque fragment whose bounded opaque domain
+keys map to deeply immutable opaque bytes under a code-registered codec
+identity. The generic layer never decodes an opaque fragment: the identified
+codec owns the domain normalization, validation and its own stricter encoding
+bounds. The opaque form lets a domain carry lossless values, such as an exact
+integer count or a display string beyond the presentation text bound, without
+widening the existing presentation-value or section bounds. No payload form
+carries live components, item stacks, or raw NBT, and none enlarges the
+existing global record-value bounds; inventory's codec and limits are
+independent and owned elsewhere. A `SnapshotRecord` may carry scalar or record
+replacement for related units, but this introduces no general cross-source
+transaction framework.
 
 ```text
 CaptureResult {
-  payload?: SnapshotRecord | KeyedFragment
+  payload?: SnapshotRecord | KeyedFragment | OpaqueKeyedFragment
   coverage: { demandStamp, scanWatermark, progress }
   availability: readable | unavailable | invalid
   consistency: verified_snapshot | eventual | unknown
@@ -157,6 +162,7 @@ Cost accounting is expressed as logical roles:
 
 ```text
 tryReserve(scope, codeOwnedUnit, upperBound) -> Ticket | Deferred
+tryReserveAll(attempts) -> Tickets | Deferred
 commit(ticket, measuredActual)
 releaseUnused(ticket)
 claimProgress(policySubject, watermark, boundedCoverage)
@@ -175,6 +181,26 @@ domain-specific examples rather than registered units of this contract.
 
 Four ledgers stay separate — physical reads, logical progress, wire bytes, and
 retained memory — with no mixed or weighted unit and no universal conversion.
+
+A period reservation commits its measured actual use permanently for that
+period: closing a settled period ticket refunds nothing further. A
+retained-memory reservation is persistent instead: its upper bound is held
+until it settles, and the measured actual retained cost stays charged for the
+whole lifetime of the cached object, released only when that object's ticket
+closes. The retained-memory ledger is one finite server-wide cap. Lowering the
+cap never discards or rewrites an outstanding charge: committed retained bytes
+and outstanding reservations stay accounted, the remaining budget may become
+negative, and further admission defers until enough charges close.
+
+Several ledgers may be admitted together as one all-or-none reservation:
+attempts are tried in order, and when any ledger defers, every earlier grant is
+released and later attempts are not invoked. An ordinary exception or error
+during admission or result construction likewise releases every earlier grant
+and rethrows the original failure unchanged, with any cleanup failure
+suppressed under it. No read, encoding, or allocation may run before the
+complete grant is held, and a retained ticket's lifetime follows the object it
+pays for. This is bounded admission bookkeeping, not an arbitrary rollback,
+weighted-unit, or general plugin framework.
 
 One compatible physical read is charged once. Every consumer records its
 applicable logical progress once per quota subject and coverage watermark; a

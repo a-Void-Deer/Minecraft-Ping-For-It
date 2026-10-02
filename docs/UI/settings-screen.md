@@ -47,20 +47,32 @@ The client scope has six categories:
   Icons, Direction Indicator, Player Info, and Team Color.
 - **Target Selection**: Pass Through Transparent Blocks, Mark Blacklisted
   Targets, and Mark Fluids.
-- **Wheel Appearance**: Wheel Inner Radius, Wheel Outer Radius, Wheel Opacity,
-  Wheel Target Font Size, and Wheel Option Font Size.
+- **Wheel Appearance**: Root Menu Distance, Wheel Opacity, Wheel Target Font
+  Size, Wheel Option Font Size, Show Gesture Trail, and Reduce Selector Motion.
 - **Input Interaction**: Wheel Hold Time, Wheel Timeout, Long-Press
-  Compatibility Mode, Compatibility Time Slice, and Cancel Cone Half-Angle.
+  Compatibility Mode, Compatibility Time Slice, and Cancel Cone Half-Angle,
+  followed by a Spatial selector gestures subgroup with Center Deadzone, Entry
+  Stroke Length, Entry Dwell, Inventory Vertical Mouse Sensitivity, Require
+  Sustained Hover to Return, and Back-Hover Dwell.
 - **Channel & Notices**: Ping Channel, Ping Volume, and Configuration Notice
   Size.
 - **Rendering & Config**: Entity Block Geometry and the configuration-file
   action.
 
-The server scope has four categories:
+The server scope has five categories:
 
 - **Channel & Players**: Default Channel Mode and Player Tracking.
 - **Send Rate**: Regeneration Time and Rate Limit.
 - **Marker Duration**: Sync Duration.
+- **Performance**: a Shared inventory budgets subgroup with Physical Slots per
+  Tick and Pending Memory; an Inventory preview subgroup with Preview Period,
+  Preview Variants per Client Period, Preview Slots per Client, Preview Slots
+  Server-wide, Preview Targets per Client, Preview Client Byte Multiplier, and
+  Preview Global Byte Multiplier; and an Inventory tracking subgroup with
+  Tracking Period, Tracking Variants per Target, Tracking Slots per Target,
+  Tracking Slots Server-wide, Tracking Stream Byte Multiplier, Tracking
+  Snapshot Byte Multiplier, Tracking Global Byte Multiplier, Resync Cooldown,
+  Heartbeat Cadence, and Byte Smoothing Window.
 - **Server Presentation**: Server Policy.
 
 The category structure supports later categories; it defines no configuration
@@ -70,7 +82,30 @@ exposed under which category and whether a group edits local or server policy.
 
 The screen exposes no controls for the hidden native raycast cap or the four
 direction-indicator safe-area insets; their file semantics remain in the client
-catalogue. There is no user-facing reload control.
+catalogue. The retired wheel radius keys are also absent from the screen and
+have no persisted meaning
+([client configuration](../config/client.md#obsolete-keys)). There is no
+user-facing reload control.
+
+## Server performance category
+
+The Performance category exposes the inventory administration controls in three
+plain-text, non-interactive subgroups: Shared inventory budgets, Inventory
+preview, and Inventory tracking. Each control is one atomic leaf: a numeric
+field holds the finite value, and a cap or multiplier also has a
+finite/unlimited mode control. The mode is independent of the finite text, so
+switching a row to unlimited never discards the finite value, including text
+that is currently invalid. Multiplier fields and the pending-memory field offer
+native step buttons that use the confirmed grids and steps without
+floating-point rounding. The persisted keys, bounds, grid normalization, and
+unlimited semantics are owned by
+[server configuration](../config/server.md#inventory-policy-object) and
+[inventory preview and tracking](../architecture/presentation/inventory.md).
+
+These controls belong to the shared ordinary server settings session and its
+correlated snapshot, not to a separate inventory session; the draft, close, and
+read-only rules in [Server settings session](#server-settings-session) apply to
+them.
 
 ## Server presentation category
 
@@ -139,7 +174,9 @@ the file action and reset behaviors below.
 On final root close, the screen first attempts local `saveSafely`; only if that
 succeeds does it commit any dirty server-settings draft. It remains open if
 either attempted step fails, and an invalid server-settings draft also blocks
-the close and routes to the category and field that needs correction. Because
+the close and routes to the owning category and first invalid field, checking
+Send Rate before Marker Duration before Performance so a draft with several
+invalid leaves lands deterministically. Because
 local persistence is attempted first, it can succeed before a later
 server-draft commit fails. The snapshot-request, correlation, field-mask, and
 no-acknowledgement transaction is owned by
@@ -148,19 +185,20 @@ so the screen does not promise that the server applied or persisted an update.
 
 ## Server settings session
 
-The ordinary five-field server settings are one shared session within the
-screen, not a per-category or per-visit section. This session covers the
-Channel & Players, Send Rate, and Marker Duration categories. Entering the
-server scope shows its overview and requests the current server configuration
-when the client holds a live connection and the session holds no loaded or
-in-flight snapshot. The loaded snapshot, the draft, and any in-flight request
-are retained across scope-tab switches and category navigation; entering an
-ordinary server category does not request another snapshot. The separate Server
+The ordinary server settings are one shared session within the screen, not a
+per-category or per-visit section. This session covers the Channel & Players,
+Send Rate, Marker Duration, and Performance categories, including the nineteen
+inventory administration leaves. Entering the server scope shows its overview
+and requests the current server configuration when the client holds a live
+connection and the session holds no loaded or in-flight snapshot. The loaded
+snapshot, the draft, and any in-flight request are retained across scope-tab
+switches and category navigation; entering an ordinary server category does
+not request another snapshot. The separate Server
 Presentation category is not part of this session; its policy snapshot and
 status follow the independent workflow described in
 [Server presentation category](#server-presentation-category).
 
-The ordinary server scope overview and its three ordinary server leaf pages show
+The ordinary server scope overview and its ordinary server leaf pages show
 the session status: loading while a request is pending, a permission state when
 a snapshot is viewable but not editable, and an unavailable state when no
 authoritative snapshot exists. A snapshot the server marks non-editable is
@@ -180,13 +218,16 @@ and [security](../architecture/security.md) own.
 
 The draft begins when an editable authoritative snapshot is accepted. Controls
 are inert unless `canEdit` holds. Each control recomputes dirty bits against the
-authoritative snapshot. Numeric draft text must parse as a non-negative
-integer; an empty, non-numeric, or negative numeric draft remains dirty but
-makes the update plan unavailable. A draft that returns every edited value to
-its authoritative value has no dirty bits and produces no update plan. Thus
-no-change and invalid-draft states do not dispatch a settings update merely
-because a page is open. The field-masked merge and the no-update-result
-consequence are owned by
+authoritative snapshot. The original numeric fields must parse as non-negative
+integers; each inventory leaf parses under its own kind, range, and grid. An
+empty, malformed, out-of-range, or off-grid draft remains dirty but makes the
+update plan unavailable. An inventory cap or multiplier is one leaf: its
+unlimited mode is independent of its finite text, and toggling the mode never
+discards the finite text, including text that is currently invalid. A draft
+that returns every edited value to its authoritative value has no dirty bits
+and produces no update plan. Thus no-change and invalid-draft states do not
+dispatch a settings update merely because a page is open. The field-masked
+merge and the no-update-result consequence are owned by
 [changing server configuration](../architecture/config/changing-server-config.md#no-update-result).
 
 Category, scope-tab, and overview navigation neither dispatches an update nor

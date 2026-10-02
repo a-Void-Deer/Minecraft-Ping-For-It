@@ -13,9 +13,10 @@ This is the adopted contract for the confirmed inventory design. The
 ordinary-block preview foundation is implemented on the server and client as
 headless runtime and model seams: the dedicated route and its configurable
 budgets exist, and the server can open bounded preview sessions for accepted
-ordinary-block targets. Tracking delivery (`SELECT`), the native input and HUD
-facade, and the remaining provider contexts are not implemented; the contract
-below stays normative for that work. Until a route is integrated, the existing
+ordinary-block targets. Tracking delivery (`SELECT`), frozen-face source reads,
+the item-choice create path, the native input and HUD facade, and the remaining
+provider contexts are not implemented; the contract below stays normative for
+that work. Until a route is integrated, the existing
 one-shot capture and whole-section presentation paths keep their present
 semantics, and the existing server gates for permission, range, lock state and
 safe reads are unchanged. Wire routes and message families are owned by
@@ -28,19 +29,26 @@ are owned by the configuration topics. Marker lifetime remains owned by
 ## Source identity, invalidation and recovery
 
 An ordinary-block source identity is the dimension, the block position, and the
-original block registry ID, or a canonical container alias. A consumer binds
-tracking to the live Ping and the original target identity. Ping identity is
-not part of the physical source key, no source-instance generation is
-introduced, and a block-state or property change with the same registry ID is
-not a new source. Detecting a destroyed, missing or otherwise unavailable
-source is an invalidity, not an empty result.
+original block registry ID, or a canonical container alias. For a double chest,
+the source identity is a canonical alias over both half positions and the
+original registry ID, so either half addresses the same source; the original
+hit half's position remains the target and marker identity, and the alias is
+source identity only. A consumer binds tracking to the live Ping and the
+original target identity. Ping identity is not part of the physical source key,
+no source-instance generation is introduced, and a block-state or property
+change with the same registry ID is not a new source. Detecting a destroyed,
+missing or otherwise unavailable source is an invalidity, not an empty result.
 
 On invalidity, tracking stops publishing valid updates, discards or cancels
 queued old valid state, and sends the invalidation status. That status is
 control information: it is prioritized independently of item quotas and is
 charged to total bytes under [shared sources](shared_sources.md#sync-publication).
-Invalidity is separate from the ordinary marker lifetime and never removes,
-shortens or extends it.
+A pairing, slot-mapping or other view-topology change during an in-progress
+observation is detected as the same invalidity: the partial sweep is discarded
+and a later observation starts afresh under the clean baseline and revision
+fences rather than the changed view completing as if continuous. Invalidity is
+separate from the ordinary marker lifetime and never removes, shortens or
+extends it.
 
 Recovery probing and polling are allowed before the hard deadline. Recovery
 keeps the existing Ping ID, advances the inventory status revision, and
@@ -83,6 +91,18 @@ server assigns bounded opaque entry keys scoped to the request, not item IDs.
 The authoritative handoff from preview to tracking is defined by the owning
 implementation contract; no preview Ping is invented.
 
+Choosing one inventory item from the preview and releasing creates a new Ping
+immediately; items are never accumulated into a staged multi-item selection.
+The create passes the existing marker-admission authority and gates owned by
+[target validation](../authority/target_validation.md), with the selected item
+reference validated safely and immediately against the authoritative source
+instead of trusted from preview data. The new Ping's whole-marker type is the
+frozen Target Type's default Ping Type; the chosen Ping Type travels as a
+separate item annotation rather than as the whole-marker type. The annotation's
+quantity starts unknown, and its first authoritative count follows the
+complete-observation rules in [Tracking](#tracking); the preview's own count is
+not reused for it.
+
 The first batch is sorted by count immediately rather than after the scan
 finishes. Newly discovered batches may reorder entries only before the user has
 scrolled vertically; once scrolling has occurred, existing rows stay fixed and
@@ -115,6 +135,23 @@ the selected keys; an incomplete scan must not claim a total for a selected
 key. The only full-ID exception is the component-fallback aggregate, whose
 permission and completeness rules are owned below.
 
+The sampling owner's container read condition is the sampling authority: the
+preview requester, or for tracking the bound Ping owner, is checked for lock,
+loot-table, loaded and block-identity state, and those checks continue to run
+on every read and recovery probe. The sampled data is delivered to the Ping's
+normal frozen
+[audience snapshot](../authority/target_validation.md#audience-snapshot-at-create)
+under the existing per-target-type
+[field policy](presentation_snapshot.md#per-target-type-field-policy). A
+recipient does not need to hold the container's key or reproduce the owner's
+look or read condition, and no new inventory distance or audience policy is
+introduced: the marker's established audience and acceptance range remain
+authoritative. The owner's condition is checked again before cached or queued
+valid inventory is published: if the owner's lock or read condition no longer
+holds, that data is not sent to a recipient even when the recipient's field
+permission remains. This send-time check asks nothing of the recipient and
+changes no audience or distance rule.
+
 Only a complete scan produces a normal valid quantity update. One logical batch
 may span several periods and may contain more entries than one fragment
 carries; it must not rescan the inventory once per fragment. Stream updates are
@@ -124,8 +161,11 @@ unchanged.
 
 A selected item that is absent from a complete, successful, authoritative scan
 is reported as zero even when the container holds other items; an empty
-container is one such observation. Partial, unknown or incomplete observations
-never report zero.
+container is one such observation. For a face-scoped source, a complete,
+successful observation that finds no items is a valid empty observation of
+that view, not a claim that the whole source is empty outside the slots the
+frozen face exposes. Partial, unknown or incomplete observations never report
+zero.
 
 A periodic heartbeat carries only checksum and watermark information and never
 resends state. A positive heartbeat value selects the periodic cadence within
@@ -136,16 +176,17 @@ implementation and configuration values, not catalogued here. Abnormal
 resynchronization uses a bounded retry cooldown; the initial push for a new Ping
 is exempt from that cooldown but is not exempt from the byte budget.
 
-A stream whose baseline is unknown is buffered only within a bounded window. If
-the baseline is not obtained within the configured window, the stream is
-dropped and resynchronization is scheduled after a cooldown. That window
-governs only the unknown-baseline buffer: an admitted, stable, serviceable
-fragment baseline may continue beyond it and complete. Repeated requests for
-such a baseline must coalesce, resume, or reuse work rather than blindly
-restarting, and no new timeout value is invented. Scheduling must prevent
-unbounded restart or starvation against a stable, serviceable source, but
-completion is not guaranteed under sustained overload or insufficient
-bandwidth.
+A stream whose baseline is unknown is buffered only for the negotiated
+resynchronization interval, measured in tracking periods; no independent
+timeout setting is introduced. If the baseline is not obtained within that
+interval, the stream is dropped and resynchronization is scheduled after a
+cooldown. That interval governs only the unknown-baseline buffer: an admitted,
+stable, serviceable fragment baseline may continue beyond it and complete.
+Repeated requests for such a baseline must coalesce, resume, or reuse work
+rather than blindly restarting, and no new timeout value is invented.
+Scheduling must prevent unbounded restart or starvation against a stable,
+serviceable source, but completion is not guaranteed under sustained overload
+or insufficient bandwidth.
 
 Baseline assembly is bounded. A temporarily displayed value does not mean the
 baseline is complete, and a per-item stream is applied item by item rather than
@@ -171,10 +212,11 @@ ID — including variants that were not initially selected — merge into a tota
 with the grey component-too-long presentation, and the merge persists until a
 new snapshot. This all-ID variant sweep remains subject to permissions, and an
 incomplete scan must not claim an aggregate total. That persistence and reset
-rule belongs to tracking. Preview
-scope and the handoff to tracking preserve both the same-ID all-variant fold
-and full variant identity, but add no user-visible reset policy and assume
-nothing about whether closing and reopening a preview resets the fallback.
+rule belongs to tracking. Preview folding is scoped to the current preview
+request: closing that request ends the fold, and a reopened preview starts a
+fresh scan that may choose exact or folded presentation for the same item ID
+again; the handoff to tracking preserves both the same-ID all-variant fold and
+full variant identity.
 
 The recommended engineering design is an atomic per-ID replacement or
 tombstone that prevents double counting and isolates old variant streams. Any
@@ -235,6 +277,37 @@ Fabric Transfer item storage and inventory storage, the Forge item handler, and
 the NeoForge item handler. Create's Vault is a NeoForge-only, registry-ID
 aggregate adapter with its own small adapter limit; it is not a general
 container solution and does not cover every container.
+
+Ordinary-block inventory source access is face-scoped. Every preview, tracking
+and recovery read uses the face frozen at press time by
+[capture](../picking/capture.md#ordinary-and-asynchronous-capture), one of the
+six block directions; an ordinary-block source with no frozen face is
+unavailable, and an unsided read or one inferred from the reader's current
+look is never substituted. The frozen face is read context only and is not part
+of target identity, the canonical target key, or the marker identity. The safe
+vanilla route is preferred: the vanilla container contract exposes
+face-invariant slots, while the worldly-container contract exposes only the
+exact slot mapping its frozen face permits; a worldly-container source that
+supplies no mapping for that face is unavailable rather than read
+face-invariantly, while an explicitly empty mapping is a valid complete empty
+view of that face rather than an unavailable source. A vanilla lock,
+loot-table or other safety denial makes the source unavailable; the read must
+not fall through to a loader capability. Only an unsupported vanilla route may
+try a loader item-storage capability, and only for that same selected face; a
+missing or denied selected-face capability is unavailable and never widens to
+a null, unsided, or different face. These failures report unavailable, not an
+empty result.
+
+A double chest is read as the pair, never either half alone. The pair is a
+valid source only when both halves are loaded, share the same container type,
+form a reciprocal pair, and both halves pass the owner's loot-table and lock
+gates before either half is read; a missing, mismatched, non-reciprocal or
+denied half makes the source unavailable, not empty. Both halves are read
+under the same frozen face as one consistent source view, each contributing
+the slots that face permits; a pairing or mapping change is the view-topology
+invalidity owned by
+[source identity, invalidation and recovery](#source-identity-invalidation-and-recovery),
+not a completed mixed view.
 
 Shared reads are reference-counted and a leaving consumer must not block other
 consumers. A shared value is detached and immutable; world and provider objects

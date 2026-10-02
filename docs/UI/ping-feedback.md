@@ -19,8 +19,10 @@ marker and immediately shows the local player the invalid-target chat line.
 A missing, dead, or cross-dimension entity, or a block replaced by a different
 block type at commit, triggers this local error. Same-type block-state changes
 are not an error. Cancellation and timeout are not equivalent to target-loss
-submission: choosing the center cancel action or letting the wheel time out
-does not create a marker and does not raise this message.
+submission: activating the wheel's downward
+[Cancel Marker action](../architecture/picking/wheel.md#cancel-marker-selection)
+or letting the wheel time out does not create a marker and does not raise this
+message.
 
 This local check is a client-side guard; it does not supersede authoritative
 server validation.

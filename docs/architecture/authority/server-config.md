@@ -11,13 +11,17 @@ server-side identity and enforcement mechanism ([security](../security.md)).
 
 Changing persisted server configuration requires inherent server permission
 level 3. This eligibility governs whether a snapshot or presentation policy
-rule view may expose editable controls and whether a mutation is allowed.
+rule view may expose editable controls and whether a mutation is allowed. The
+inventory administration values carried by the ordinary snapshot are part of
+the same persisted configuration and use the same gate; no inventory-specific
+permission exists.
 
 Reading server configuration is not an edit and does not require that level:
 every authenticated player may request the server configuration snapshot and
-the presentation policy rule view. Requesting either view does not itself grant
-edit authority. Which values a route discloses and how a mutation is transacted
-are owned by
+the presentation policy rule view, and a viewer below the level receives the
+snapshot as a read-only view. Requesting either view does not itself grant edit
+authority. Which values a route discloses and how a mutation is transacted are
+owned by
 [changing server configuration](../config/changing-server-config.md) and
 [presentation snapshot](../presentation/presentation_snapshot.md).
 

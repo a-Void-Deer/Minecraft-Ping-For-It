@@ -72,14 +72,24 @@ the invalid row rather than being treated as a usable migration.
 ## Ordered migration and writeback
 
 Migration operates on a copy of the raw JSON root before the typed config is
-deserialized. The current server-only step applies when the stored version is
-older than `0.3.0-pfi-beta1` and the running version includes that migration
-target:
+deserialized. A step applies when the stored version is older than the step's
+target version and the running version includes that target.
+
+The server step at `0.3.0-pfi-beta1`:
 
 - if `syncDuration` is absent and `pingDuration` is present, copy the raw
   `pingDuration` value to `syncDuration`;
 - if `syncDuration` is already present, retain it rather than overwriting it;
 - remove `pingDuration` in either case.
+
+The client step at `0.5.0-pfi-beta1` retires the persisted wheel radius keys:
+
+- remove `wheelInnerRadius` and `wheelOuterRadius`;
+- never derive a spatial-selector value from a retired radius and never inject
+  defaults in the raw step: the step changes only those two keys, and the config
+  model initializes missing selector members;
+- retain unrelated entries, the persisted wheel appearance keys, and unknown
+  data.
 
 After the ordered steps, the migration stamps the current marker. Before the
 handler writes it, it compares the current on-disk bytes with the bytes read for
@@ -88,9 +98,17 @@ and reloads the current disk state instead of overwriting an external edit.
 
 The write uses the transformed raw root as its preservation base: serialized
 known configuration fields replace their corresponding entries, other retained
-raw entries survive, and the current marker is stamped again. If that write
-fails, the valid loaded configuration remains in memory and the migration stays
-pending for a later save attempt; it is not converted into invalid-file recovery.
+raw entries survive (including unknown members nested inside the client
+`spatialSelector` object), and the current marker is stamped again. If that
+write fails, the valid loaded configuration remains in memory and the migration
+stays pending for a later save attempt; it is not converted into invalid-file
+recovery.
+
+Client serialization at or after `0.5.0-pfi-beta1` also removes the retired
+radius keys from the document it writes, including the preservation base of a
+guarded writeback, so a later save cannot resurrect them. A same-version load is
+not rewritten merely because retired radius keys are present; the removal takes
+effect when that configuration is next serialized.
 
 ## Same-version shape normalization
 
