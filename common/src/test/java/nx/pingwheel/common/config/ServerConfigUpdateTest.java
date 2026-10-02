@@ -67,7 +67,7 @@ class ServerConfigUpdateTest {
 	@Test
 	void invalidMasksAndValuesAreRejected() {
 		assertFalse(new ServerConfigUpdate(0, ChannelMode.AUTO, true, 0, 0).isValid());
-		assertFalse(new ServerConfigUpdate(1 << 8, ChannelMode.AUTO, true, 0, 0).isValid());
+		assertFalse(new ServerConfigUpdate(1 << 24, ChannelMode.AUTO, true, 0, 0).isValid());
 		assertFalse(new ServerConfigUpdate(1, null, true, 0, 0).isValid());
 		assertFalse(new ServerConfigUpdate(1, ChannelMode.AUTO, true, -1, 0).isValid());
 	}

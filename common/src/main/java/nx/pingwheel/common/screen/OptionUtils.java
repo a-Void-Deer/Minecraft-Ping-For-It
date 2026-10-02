@@ -5,6 +5,8 @@ import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -50,6 +52,22 @@ public class OptionUtils {
 
 	public static OptionInstance<Boolean> ofBool(String key, Supplier<Boolean> getter, Consumer<Boolean> setter) {
 		return ofBool(key, getter, setter, null);
+	}
+
+	/** A decimal preference on an exact slider grid, without float rounding in persistence. */
+	public static OptionInstance<BigDecimal> ofDecimal(String key, BigDecimal min, BigDecimal max,
+		BigDecimal step, Function<BigDecimal, Component> formatter, Supplier<Component> tooltipSupplier,
+		Supplier<BigDecimal> getter, Consumer<BigDecimal> setter) {
+		int minimumIndex = min.divide(step).intValueExact();
+		int maximumIndex = max.divide(step).intValueExact();
+		return new OptionInstance<>(key,
+			tooltipSupplier == null ? OptionInstance.noTooltip() : value -> Tooltip.create(tooltipSupplier.get()),
+			(optionText, value) -> formatter.apply(getter.get()),
+			new OptionInstance.IntRange(minimumIndex, maximumIndex).xmap(
+				index -> step.multiply(BigDecimal.valueOf(index)),
+				value -> value.divide(step, 0, RoundingMode.HALF_UP).intValueExact()),
+			Codec.doubleRange(min.doubleValue(), max.doubleValue()).xmap(BigDecimal::valueOf, BigDecimal::doubleValue),
+			getter.get(), setter);
 	}
 
 	public static OptionInstance<Boolean> ofBool(String key, Supplier<Boolean> getter, Consumer<Boolean> setter, Supplier<Component> tooltipSupplier) {

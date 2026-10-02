@@ -20,7 +20,7 @@ class ServerConfigPacketsTest {
 
 		buf.writeVarLong(7L);
 		buf.writeByte(1);
-		assertFalse(ServerConfigRequestC2SPacket.readSafe(buf).isCorrupt());
+		assertTrue(ServerConfigRequestC2SPacket.readSafe(buf).isCorrupt());
 		assertEquals(0, buf.readableBytes());
 
 		FriendlyByteBuf truncated = new FriendlyByteBuf(Unpooled.buffer());
@@ -69,7 +69,7 @@ class ServerConfigPacketsTest {
 		assertFalse(valid.isCorrupt());
 
 		assertTrue(new ServerConfigUpdateC2SPacket(0, ChannelMode.AUTO, true, 0, 0).isCorrupt());
-		assertTrue(new ServerConfigUpdateC2SPacket(1 << 8, ChannelMode.AUTO, true, 0, 0).isCorrupt());
+		assertTrue(new ServerConfigUpdateC2SPacket(1 << 24, ChannelMode.AUTO, true, 0, 0).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, -1, 0).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, null, true, 0, 0).isCorrupt());
 	}

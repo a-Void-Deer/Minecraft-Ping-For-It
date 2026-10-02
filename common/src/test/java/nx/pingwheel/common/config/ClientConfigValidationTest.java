@@ -170,8 +170,6 @@ class ClientConfigValidationTest {
 				+ ClientConfigBounds.MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS
 				+ ",\"wheelTimeoutMillis\":" + Integer.MAX_VALUE
 				+ ",\"cancelHalfConeAngleDegrees\":" + Integer.MIN_VALUE
-				+ ",\"wheelInnerRadius\":" + Integer.MAX_VALUE
-				+ ",\"wheelOuterRadius\":" + Integer.MIN_VALUE
 				+ ",\"wheelOpacity\":" + Integer.MIN_VALUE
 				+ ",\"wheelFontSize\":" + Integer.MAX_VALUE
 				+ ",\"wheelTargetFontSize\":" + Integer.MIN_VALUE + "}",
@@ -187,23 +185,15 @@ class ClientConfigValidationTest {
 			config.getLongPressCompatibilitySliceMillis());
 		assertEquals(ClientConfigBounds.MAX_WHEEL_TIMEOUT_MILLIS, config.getWheelTimeoutMillis());
 		assertEquals(ClientConfigBounds.MIN_CANCEL_HALF_CONE_ANGLE_DEGREES, config.getCancelHalfConeAngleDegrees());
-		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS,
-			config.getWheelInnerRadius());
-		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS, config.getWheelOuterRadius());
 		assertEquals(ClientConfigBounds.MIN_WHEEL_OPACITY, config.getWheelOpacity());
 		assertEquals(ClientConfigBounds.MAX_WHEEL_FONT_SIZE, config.getWheelFontSize());
 		assertEquals(ClientConfigBounds.MIN_WHEEL_TARGET_FONT_SIZE, config.getWheelTargetFontSize());
-		assertTrue(config.getWheelOuterRadius() - config.getWheelInnerRadius()
-			>= ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS);
 		assertEquals(
 			List.of(
 				new ClampWarning("wheelHoldMillis", Integer.MIN_VALUE, ClientConfigBounds.MIN_WHEEL_HOLD_MILLIS),
 				new ClampWarning("wheelTimeoutMillis", Integer.MAX_VALUE, ClientConfigBounds.MAX_WHEEL_TIMEOUT_MILLIS),
 				new ClampWarning("cancelHalfConeAngleDegrees", Integer.MIN_VALUE,
 					ClientConfigBounds.MIN_CANCEL_HALF_CONE_ANGLE_DEGREES),
-				new ClampWarning("wheelInnerRadius", Integer.MAX_VALUE,
-					ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS),
-				new ClampWarning("wheelOuterRadius", Integer.MIN_VALUE, ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS),
 				new ClampWarning("wheelOpacity", Integer.MIN_VALUE, ClientConfigBounds.MIN_WHEEL_OPACITY),
 				new ClampWarning("wheelFontSize", Integer.MAX_VALUE, ClientConfigBounds.MAX_WHEEL_FONT_SIZE),
 				new ClampWarning("wheelTargetFontSize", Integer.MIN_VALUE,
@@ -257,22 +247,15 @@ class ClientConfigValidationTest {
 	}
 
 	@Test
-	void directJsonPairConvergesToTheMinimumValidAnnulus() {
-		int minimumOuter = ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS;
-		int suppliedInner = minimumOuter + ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS;
+	void legacyRadiusValuesAreNotReadOrPersistedAndNeverSeedSpatialPreferences() {
 		ClientConfig config = new Gson().fromJson(
-			"{\"wheelInnerRadius\":" + suppliedInner + ",\"wheelOuterRadius\":" + minimumOuter + "}",
-			ClientConfig.class);
-		List<ClampWarning> warnings = new ArrayList<>();
+			"{\"wheelInnerRadius\":63,\"wheelOuterRadius\":231}", ClientConfig.class);
+		config.validate((key, suppliedValue, effectiveValue) -> {});
 
-		config.validate((key, suppliedValue, effectiveValue) ->
-			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
-
-		assertEquals(minimumOuter - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS,
-			config.getWheelInnerRadius());
-		assertEquals(minimumOuter, config.getWheelOuterRadius());
-		assertEquals(List.of(new ClampWarning("wheelInnerRadius", suppliedInner,
-			minimumOuter - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS)), warnings);
+		var serialized = new Gson().toJsonTree(config).getAsJsonObject();
+		assertFalse(serialized.has("wheelInnerRadius"));
+		assertFalse(serialized.has("wheelOuterRadius"));
+		assertEquals(new SpatialSelectorSettings(), config.getSpatialSelector());
 	}
 
 	@Test
@@ -288,44 +271,6 @@ class ClientConfigValidationTest {
 
 		assertEquals(ClientConfig.MAX_CHANNEL_LENGTH, config.channel.length());
 		assertEquals(List.of(), warnings);
-	}
-
-	@Test
-	void radiusSettersKeepEveryLivePairValidInEitherMutationOrder() {
-		ClientConfig config = new ClientConfig();
-		config.setWheelOuterRadius(64);
-		config.setWheelInnerRadius(30);
-		assertEquals(30, config.getWheelInnerRadius());
-		assertEquals(64, config.getWheelOuterRadius());
-
-		config.setWheelOuterRadius(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS);
-		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS,
-			config.getWheelInnerRadius());
-		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS, config.getWheelOuterRadius());
-
-		config.setWheelInnerRadius(30);
-		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS,
-			config.getWheelInnerRadius());
-		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS, config.getWheelOuterRadius());
-
-		config.setWheelOuterRadius(75);
-		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS - ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS,
-			config.getWheelInnerRadius());
-		assertEquals(75, config.getWheelOuterRadius());
-
-		config.setWheelInnerRadius(30);
-		assertEquals(30, config.getWheelInnerRadius());
-		assertEquals(75, config.getWheelOuterRadius());
-
-		config.setWheelInnerRadius(Integer.MIN_VALUE);
-		assertEquals(ClientConfigBounds.MIN_WHEEL_INNER_RADIUS, config.getWheelInnerRadius());
-		assertEquals(75, config.getWheelOuterRadius());
-
-		config.setWheelOuterRadius(Integer.MIN_VALUE);
-		assertEquals(ClientConfigBounds.MIN_WHEEL_INNER_RADIUS, config.getWheelInnerRadius());
-		assertEquals(ClientConfigBounds.MIN_WHEEL_OUTER_RADIUS, config.getWheelOuterRadius());
-		assertTrue(config.getWheelOuterRadius() - config.getWheelInnerRadius()
-			>= ClientConfigBounds.MIN_WHEEL_ANNULUS_THICKNESS);
 	}
 
 	@Test

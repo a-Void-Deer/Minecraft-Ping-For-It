@@ -55,7 +55,7 @@ public final class InventoryLimits {
 	public static final int MIN_HEARTBEAT_PERIODS = 0;
 	public static final int MAX_HEARTBEAT_PERIODS = 32;
 
-	/** Bounded grace periods before an unknown-baseline stream is dropped. */
+	/** Finite rolling excess-byte smoothing window in tracking periods. */
 	public static final int MIN_GRACE_PERIODS = 1;
 	public static final int MAX_GRACE_PERIODS = 32;
 

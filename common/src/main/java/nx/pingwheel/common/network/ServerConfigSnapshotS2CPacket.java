@@ -5,6 +5,7 @@ import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ServerConfigBounds;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
+import nx.pingwheel.common.config.InventoryConfigValues;
 import org.jetbrains.annotations.NotNull;
 
 import static nx.pingwheel.common.Global.S2C_NAMESPACE;
@@ -18,11 +19,12 @@ public record ServerConfigSnapshotS2CPacket(
 	boolean playerTrackingEnabled,
 	int msToRegenerate,
 	int rateLimit,
-	int syncDuration
+	int syncDuration,
+	InventoryConfigValues inventory
 ) implements IPacket {
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		S2C_NAMESPACE,
-		"server-config-snapshot");
+		"server-config-snapshot-v2");
 	public static final Type<ServerConfigSnapshotS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	/** Compatibility constructor for snapshots from the pre-duration settings model. */
@@ -37,9 +39,16 @@ public record ServerConfigSnapshotS2CPacket(
 			ServerConfigBounds.DEFAULT_SYNC_DURATION);
 	}
 
+	/** Source compatibility only; v2 wire snapshots always contain inventory. */
+	public ServerConfigSnapshotS2CPacket(long requestId, boolean canEdit, ChannelMode defaultChannelMode,
+		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration) {
+		this(requestId, canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, InventoryConfigValues.defaults());
+	}
+
 	/** Invalid values are used only by safe-decoding fallback. */
 	public ServerConfigSnapshotS2CPacket() {
-		this(-1L, false, null, false, -1, -1, -1);
+		this(-1L, false, null, false, -1, -1, -1, null);
 	}
 
 	/** Builds an expansion response with the request id echoed by the server. */
@@ -51,18 +60,20 @@ public record ServerConfigSnapshotS2CPacket(
 			snapshot.playerTrackingEnabled(),
 			snapshot.msToRegenerate(),
 			snapshot.rateLimit(),
-			snapshot.syncDuration());
+			snapshot.syncDuration(),
+			snapshot.inventory());
 	}
 
 	public ServerConfigSnapshotS2CPacket(FriendlyByteBuf buf) {
 		this(
-			buf.readVarLong(),
-			buf.readBoolean(),
+			ServerConfigVarNumbers.readLong(buf),
+			ServerInventoryConfigCodec.readBoolean(buf),
 			readChannelMode(buf),
-			buf.readBoolean(),
-			buf.readVarInt(),
-			buf.readVarInt(),
-			buf.readVarInt());
+			ServerInventoryConfigCodec.readBoolean(buf),
+			ServerConfigVarNumbers.readInt(buf),
+			ServerConfigVarNumbers.readInt(buf),
+			ServerConfigVarNumbers.readInt(buf),
+			ServerInventoryConfigCodec.readComplete(buf));
 	}
 
 	@Override
@@ -74,6 +85,7 @@ public record ServerConfigSnapshotS2CPacket(
 		buf.writeVarInt(msToRegenerate);
 		buf.writeVarInt(rateLimit);
 		buf.writeVarInt(syncDuration);
+		ServerInventoryConfigCodec.write(buf, inventory);
 	}
 
 	@Override
@@ -83,7 +95,8 @@ public record ServerConfigSnapshotS2CPacket(
 			|| msToRegenerate < 0
 			|| rateLimit < 0
 			|| syncDuration < ServerConfigBounds.MIN_PING_DURATION
-			|| syncDuration > ServerConfigBounds.MAX_PING_DURATION;
+			|| syncDuration > ServerConfigBounds.MAX_PING_DURATION
+			|| inventory == null || !inventory.isSafe();
 	}
 
 	public ServerConfigSnapshot snapshot() {
@@ -93,7 +106,8 @@ public record ServerConfigSnapshotS2CPacket(
 			playerTrackingEnabled,
 			msToRegenerate,
 			rateLimit,
-			syncDuration);
+			syncDuration,
+			inventory);
 	}
 
 	public ResourceLocation getId() {
@@ -110,7 +124,7 @@ public record ServerConfigSnapshotS2CPacket(
 	}
 
 	static ChannelMode readChannelMode(FriendlyByteBuf buf) {
-		int ordinal = buf.readVarInt();
+		int ordinal = ServerConfigVarNumbers.readInt(buf);
 		ChannelMode[] values = ChannelMode.values();
 		if (ordinal < 0 || ordinal >= values.length) {
 			throw new IllegalArgumentException("invalid server config enum ordinal");

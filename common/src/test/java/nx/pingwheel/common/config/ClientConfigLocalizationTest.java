@@ -242,6 +242,45 @@ class ClientConfigLocalizationTest {
 	}
 
 	@Test
+	void everyBundledLocaleContainsTheSpatialSelectorSettings() throws IOException {
+		List<String> formattedLabels = List.of(
+			"settings.pingforit.spatial_selector.deadzone",
+			"settings.pingforit.spatial_selector.stroke",
+			"settings.pingforit.spatial_selector.dwell_millis",
+			"settings.pingforit.spatial_selector.root_distance",
+			"settings.pingforit.spatial_selector.target_glide",
+			"settings.pingforit.spatial_selector.hover_millis");
+		List<String> booleanLabels = List.of(
+			"settings.pingforit.spatial_selector.hover_enabled",
+			"settings.pingforit.spatial_selector.show_trail",
+			"settings.pingforit.spatial_selector.reduce_motion");
+		Set<String> expectedKeys = new java.util.HashSet<>();
+		for (String key : java.util.stream.Stream.concat(formattedLabels.stream(), booleanLabels.stream()).toList()) {
+			expectedKeys.add(key);
+			expectedKeys.add(key + ".tooltip");
+		}
+
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			assertEquals(expectedKeys, json.keySet().stream()
+				.filter(key -> key.startsWith("settings.pingforit.spatial_selector.")).collect(Collectors.toSet()), locale);
+			nonBlankTranslation(json, locale, "settings.pingforit.group.spatial_selector");
+			for (String key : expectedKeys) {
+				nonBlankTranslation(json, locale, key);
+			}
+			for (String key : formattedLabels) {
+				String label = nonBlankTranslation(json, locale, key);
+				assertEquals(1, countOccurrences(label, "%s"),
+					() -> "spatial selector numeric label must be formatted: " + locale + ":" + key);
+				assertFalse(label.replace("%s", "").contains("%"), locale + ":" + key);
+			}
+			for (String key : booleanLabels) {
+				assertFalse(nonBlankTranslation(json, locale, key).contains("%"), locale + ":" + key);
+			}
+		}
+	}
+
+	@Test
 	void everyExternalListTooltipRequiresRestartingTheClient() throws IOException {
 		for (String locale : BUNDLED_LOCALES) {
 			String tooltip = readTranslation(locale,

@@ -1,7 +1,9 @@
 package nx.pingwheel.common.screen;
 
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
+import nx.pingwheel.common.config.InventoryConfigValues.Field;
 
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -28,16 +30,23 @@ public final class SettingsCategoryCatalog {
 		PASS_THROUGH_TRANSPARENT_BLOCKS("pass_through_transparent_blocks"),
 		MARK_BLACKLISTED_TARGETS("mark_blacklisted_targets"),
 		MARK_FLUIDS("mark_fluids"),
-		WHEEL_INNER_RADIUS("wheel_inner_radius"),
-		WHEEL_OUTER_RADIUS("wheel_outer_radius"),
+		SPATIAL_ROOT_DISTANCE("spatial_selector.root_distance"),
 		WHEEL_OPACITY("wheel_opacity"),
 		WHEEL_TARGET_FONT_SIZE("wheel_target_font_size"),
 		WHEEL_OPTION_FONT_SIZE("wheel_font_size"),
+		SPATIAL_SHOW_TRAIL("spatial_selector.show_trail"),
+		SPATIAL_REDUCE_MOTION("spatial_selector.reduce_motion"),
 		WHEEL_HOLD_MILLIS("wheel_hold_millis"),
 		WHEEL_TIMEOUT_MILLIS("wheel_timeout_millis"),
 		LONG_PRESS_COMPATIBILITY_MODE("long_press_compatibility_mode"),
 		LONG_PRESS_COMPATIBILITY_SLICE_MILLIS("long_press_compatibility_slice_millis"),
 		CANCEL_HALF_CONE_ANGLE_DEGREES("cancel_half_cone_angle_degrees"),
+		SPATIAL_DEADZONE("spatial_selector.deadzone"),
+		SPATIAL_STROKE("spatial_selector.stroke"),
+		SPATIAL_DWELL_MILLIS("spatial_selector.dwell_millis"),
+		SPATIAL_TARGET_GLIDE("spatial_selector.target_glide"),
+		SPATIAL_HOVER_ENABLED("spatial_selector.hover_enabled"),
+		SPATIAL_HOVER_MILLIS("spatial_selector.hover_millis"),
 		CHANNEL("channel"),
 		PING_VOLUME("ping_volume"),
 		CONFIGURATION_NOTICE_SIZE("configuration_notice_size"),
@@ -48,13 +57,41 @@ public final class SettingsCategoryCatalog {
 		MS_TO_REGENERATE("ms_to_regenerate"),
 		RATE_LIMIT("rate_limit"),
 		SYNC_DURATION("sync_duration"),
-		PRESENTATION_SERVER_POLICY("presentation_server_policy");
+		PRESENTATION_SERVER_POLICY("presentation_server_policy"),
+		INVENTORY_PHYSICAL_SLOTS_PER_TICK(Field.PHYSICAL_SLOTS_PER_TICK),
+		INVENTORY_PENDING_MEMORY_MIB(Field.PENDING_MEMORY_MIB),
+		INVENTORY_PREVIEW_PERIOD_TICKS(Field.PREVIEW_PERIOD_TICKS),
+		INVENTORY_PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD(Field.PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD),
+		INVENTORY_PREVIEW_MAX_SLOTS_PER_CLIENT(Field.PREVIEW_MAX_SLOTS_PER_CLIENT),
+		INVENTORY_PREVIEW_MAX_SLOTS_SERVER(Field.PREVIEW_MAX_SLOTS_SERVER),
+		INVENTORY_PREVIEW_MAX_TARGETS_PER_CLIENT(Field.PREVIEW_MAX_TARGETS_PER_CLIENT),
+		INVENTORY_PREVIEW_CLIENT_BYTE_MULTIPLIER(Field.PREVIEW_CLIENT_BYTE_MULTIPLIER),
+		INVENTORY_PREVIEW_GLOBAL_BYTE_MULTIPLIER(Field.PREVIEW_GLOBAL_BYTE_MULTIPLIER),
+		INVENTORY_TRACKING_PERIOD_TICKS(Field.TRACKING_PERIOD_TICKS),
+		INVENTORY_TRACKING_MAX_VARIANTS_PER_TARGET(Field.TRACKING_MAX_VARIANTS_PER_TARGET),
+		INVENTORY_TRACKING_MAX_SLOTS_PER_TARGET(Field.TRACKING_MAX_SLOTS_PER_TARGET),
+		INVENTORY_TRACKING_MAX_SLOTS_SERVER(Field.TRACKING_MAX_SLOTS_SERVER),
+		INVENTORY_TRACKING_STREAM_BYTE_MULTIPLIER(Field.TRACKING_STREAM_BYTE_MULTIPLIER),
+		INVENTORY_TRACKING_SNAPSHOT_BYTE_MULTIPLIER(Field.TRACKING_SNAPSHOT_BYTE_MULTIPLIER),
+		INVENTORY_TRACKING_GLOBAL_BYTE_MULTIPLIER(Field.TRACKING_GLOBAL_BYTE_MULTIPLIER),
+		INVENTORY_TRACKING_RESYNC_MIN_PERIODS(Field.TRACKING_RESYNC_MIN_PERIODS),
+		INVENTORY_TRACKING_HEARTBEAT_PERIODS(Field.TRACKING_HEARTBEAT_PERIODS),
+		INVENTORY_TRACKING_GRACE_PERIODS(Field.TRACKING_GRACE_PERIODS);
 
 		private final String id;
+		private final Field inventoryField;
 
 		Setting(String id) {
 			this.id = id;
+			this.inventoryField = null;
 		}
+
+		Setting(Field field) {
+			this.id = "inventory." + field.name().toLowerCase(java.util.Locale.ROOT);
+			this.inventoryField = field;
+		}
+
+		public Field inventoryField() { return inventoryField; }
 
 		public String id() {
 			return id;
@@ -96,17 +133,24 @@ public final class SettingsCategoryCatalog {
 			Setting.MARK_BLACKLISTED_TARGETS,
 			Setting.MARK_FLUIDS));
 		settings.put(Category.WHEEL_APPEARANCE, List.of(
-			Setting.WHEEL_INNER_RADIUS,
-			Setting.WHEEL_OUTER_RADIUS,
+			Setting.SPATIAL_ROOT_DISTANCE,
 			Setting.WHEEL_OPACITY,
 			Setting.WHEEL_TARGET_FONT_SIZE,
-			Setting.WHEEL_OPTION_FONT_SIZE));
+			Setting.WHEEL_OPTION_FONT_SIZE,
+			Setting.SPATIAL_SHOW_TRAIL,
+			Setting.SPATIAL_REDUCE_MOTION));
 		settings.put(Category.INPUT_INTERACTION, List.of(
 			Setting.WHEEL_HOLD_MILLIS,
 			Setting.WHEEL_TIMEOUT_MILLIS,
 			Setting.LONG_PRESS_COMPATIBILITY_MODE,
 			Setting.LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
-			Setting.CANCEL_HALF_CONE_ANGLE_DEGREES));
+			Setting.CANCEL_HALF_CONE_ANGLE_DEGREES,
+			Setting.SPATIAL_DEADZONE,
+			Setting.SPATIAL_STROKE,
+			Setting.SPATIAL_DWELL_MILLIS,
+			Setting.SPATIAL_TARGET_GLIDE,
+			Setting.SPATIAL_HOVER_ENABLED,
+			Setting.SPATIAL_HOVER_MILLIS));
 		settings.put(Category.CHANNEL_NOTICES, List.of(
 			Setting.CHANNEL,
 			Setting.PING_VOLUME,
@@ -121,6 +165,8 @@ public final class SettingsCategoryCatalog {
 			Setting.MS_TO_REGENERATE,
 			Setting.RATE_LIMIT));
 		settings.put(Category.MARKER_DURATION, List.of(Setting.SYNC_DURATION));
+		settings.put(Category.PERFORMANCE, Arrays.stream(Setting.values())
+			.filter(setting -> setting.inventoryField() != null).toList());
 		settings.put(Category.SERVER_PRESENTATION, List.of(Setting.PRESENTATION_SERVER_POLICY));
 		return Map.copyOf(settings);
 	}

@@ -3,11 +3,17 @@ package nx.pingwheel.common.screen;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
+import nx.pingwheel.common.config.InventoryConfigValues;
+import nx.pingwheel.common.config.InventoryConfigValues.Field;
+import nx.pingwheel.common.config.InventoryConfigValues.Value;
+import nx.pingwheel.common.config.InventorySettings;
 
+import java.math.BigDecimal;
+import java.util.EnumMap;
 import java.util.Optional;
 
 /**
- * Pure state for the collapsible server section of the settings screen.
+	 * Pure state for the shared server-settings session, including inventory performance.
  * Permission changes, authoritative snapshots, dirty tracking, and the
  * update-plan preconditions live here rather than in Screen callbacks.
  */
@@ -27,6 +33,8 @@ public final class ServerSettingsModel {
 	private String msToRegenerate = "";
 	private String rateLimit = "";
 	private String syncDuration = "";
+	private final EnumMap<Field, String> inventoryText = new EnumMap<>(Field.class);
+	private final EnumMap<Field, Boolean> inventoryUnlimited = new EnumMap<>(Field.class);
 	private int dirtyFields;
 
 	public ServerSettingsModel(boolean clientPermission) {
@@ -105,6 +113,48 @@ public final class ServerSettingsModel {
 
 	public String syncDurationText() {
 		return syncDuration;
+	}
+
+	public String inventoryText(Field field) {
+		return inventoryText.getOrDefault(field, "");
+	}
+
+	public boolean inventoryUnlimited(Field field) {
+		return inventoryUnlimited.getOrDefault(field, false);
+	}
+
+	public void setInventoryText(Field field, String text) {
+		if (!canEdit()) return;
+		inventoryText.put(field, text);
+		recomputeDirtyFields();
+	}
+
+	/** Mode and retained finite text are independent parts of one atomic leaf setting. */
+	public void toggleInventoryUnlimited(Field field) {
+		if (!canEdit() || !field.supportsUnlimited()) return;
+		inventoryUnlimited.put(field, !inventoryUnlimited(field));
+		recomputeDirtyFields();
+	}
+
+	/** Native step buttons use the confirmed piecewise grids without floating-point rounding. */
+	public void stepInventoryValue(Field field, boolean forward) {
+		if (!canEdit()) return;
+		var parsed = inventoryDraftValue(field);
+		if (parsed.isEmpty()) return;
+		BigDecimal value = parsed.orElseThrow().value();
+		if (field.isMultiplier()) {
+			value = forward ? field.grid().next(value) : field.grid().previous(value);
+		} else {
+			int current = value.intValueExact();
+			int step = field == Field.PENDING_MEMORY_MIB
+				? InventorySettings.pendingMemoryStepMiB(forward ? current : Math.max(field.minimum(), current - 1)) : 1;
+			value = BigDecimal.valueOf(Math.clamp((long) current + (forward ? step : -step), field.minimum(), field.maximum()));
+		}
+		setInventoryText(field, value.toPlainString());
+	}
+
+	private Optional<Value> inventoryDraftValue(Field field) {
+		return field.parse(inventoryText(field), inventoryUnlimited(field));
 	}
 
 	/**
@@ -286,8 +336,9 @@ public final class ServerSettingsModel {
 	}
 
 	/**
-	 * Bitmask of the dirty numeric draft fields that do not parse as a
-	 * non-negative integer, or zero when no dirty numeric field is invalid.  The
+	 * Bitmask of dirty numeric draft fields that cannot be safely planned,
+	 * or zero when no dirty numeric field is invalid. The original fields use
+	 * non-negative integers; inventory leaves retain their own ranges and grids. The
 	 * mask reuses the {@link ServerConfigUpdate} field constants so validation
 	 * routing can identify the owning category and field without re-parsing the
 	 * draft.
@@ -307,6 +358,9 @@ public final class ServerSettingsModel {
 		if (parseNonNegative(syncDuration).isEmpty()) {
 			fields |= ServerConfigUpdate.SYNC_DURATION;
 		}
+		for (Field field : Field.values()) {
+			if ((dirtyFields & field.mask()) != 0 && inventoryDraftValue(field).isEmpty()) fields |= field.mask();
+		}
 		return fields;
 	}
 
@@ -319,13 +373,16 @@ public final class ServerSettingsModel {
 			return Optional.empty();
 		}
 
+		var inventory = new EnumMap<Field, Value>(Field.class);
+		for (Field field : Field.values()) inventory.put(field, inventoryDraftValue(field).orElseThrow());
 		return Optional.of(new ServerConfigUpdate(
 			dirtyFields,
 			defaultChannelMode,
 			playerTrackingEnabled,
 			parseNonNegative(msToRegenerate).orElseThrow(),
 			parseNonNegative(rateLimit).orElseThrow(),
-			parseNonNegative(syncDuration).orElseThrow()));
+			parseNonNegative(syncDuration).orElseThrow(),
+			new InventoryConfigValues(inventory)));
 	}
 
 	public void markClean() {
@@ -338,6 +395,11 @@ public final class ServerSettingsModel {
 		msToRegenerate = Integer.toString(authoritative.msToRegenerate());
 		rateLimit = Integer.toString(authoritative.rateLimit());
 		syncDuration = Integer.toString(authoritative.syncDuration());
+		for (Field field : Field.values()) {
+			Value value = authoritative.inventory().value(field);
+			inventoryText.put(field, value.value().toPlainString());
+			inventoryUnlimited.put(field, value.unlimited());
+		}
 	}
 
 	private void clearDraft() {
@@ -346,6 +408,8 @@ public final class ServerSettingsModel {
 		msToRegenerate = "";
 		rateLimit = "";
 		syncDuration = "";
+		inventoryText.clear();
+		inventoryUnlimited.clear();
 	}
 
 	private void recomputeDirtyFields() {
@@ -369,6 +433,11 @@ public final class ServerSettingsModel {
 		}
 		if (!matchesAuthoritative(syncDuration, authoritative.syncDuration())) {
 			fields |= ServerConfigUpdate.SYNC_DURATION;
+		}
+		for (Field field : Field.values()) {
+			if (!inventoryDraftValue(field).map(value -> value.equals(authoritative.inventory().value(field))).orElse(false)) {
+				fields |= field.mask();
+			}
 		}
 		dirtyFields = fields;
 	}

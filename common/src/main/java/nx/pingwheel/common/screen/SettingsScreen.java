@@ -26,7 +26,9 @@ import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
+import nx.pingwheel.common.config.InventoryConfigValues.Field;
 import nx.pingwheel.common.config.ServerConfigUpdate;
+import nx.pingwheel.common.config.SpatialSelectorSettings;
 import nx.pingwheel.common.config.TeamColorMode;
 import nx.pingwheel.common.integration.TeamContext;
 import nx.pingwheel.common.integration.TeamContextHandler;
@@ -59,6 +61,7 @@ import java.util.function.Supplier;
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 import static nx.pingwheel.common.config.ClientConfigBounds.*;
+import static nx.pingwheel.common.config.SpatialSelectorSettings.*;
 import static nx.pingwheel.common.Global.warnException;
 
 public class SettingsScreen extends OptionsSubScreen {
@@ -508,6 +511,10 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 
 		for (Setting setting : SettingsCategoryCatalog.settings(category)) {
+			if (setting == Setting.SPATIAL_DEADZONE) this.addSubgroup("spatial_selector");
+			if (setting == Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK) this.addSubgroup("inventory_shared");
+			if (setting == Setting.INVENTORY_PREVIEW_PERIOD_TICKS) this.addSubgroup("inventory_preview");
+			if (setting == Setting.INVENTORY_TRACKING_PERIOD_TICKS) this.addSubgroup("inventory_tracking");
 			this.addSetting(category, setting);
 		}
 		this.flushPendingHalfWidthRow();
@@ -517,6 +524,10 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void addSetting(Category category, Setting setting) {
+		if (setting.inventoryField() != null) {
+			this.addServerInventoryRow(setting);
+			return;
+		}
 		switch (setting) {
 			case PING_DISTANCE -> this.addOption(setting, this.getPingDistanceOption(), false);
 			case MARKER_DISPLAY_DURATION -> this.addOption(setting, this.getMarkerDisplayDurationOption(), true);
@@ -528,16 +539,23 @@ public class SettingsScreen extends OptionsSubScreen {
 			case PASS_THROUGH_TRANSPARENT_BLOCKS -> this.addOption(setting, this.getPassThroughTransparentBlocksOption(), true);
 			case MARK_BLACKLISTED_TARGETS -> this.addOption(setting, this.getMarkBlacklistedTargetsOption(), true);
 			case MARK_FLUIDS -> this.addOption(setting, this.getMarkFluidsOption(), false);
-			case WHEEL_INNER_RADIUS -> this.addOption(setting, this.getWheelInnerRadiusOption(), false);
-			case WHEEL_OUTER_RADIUS -> this.addOption(setting, this.getWheelOuterRadiusOption(), false);
+			case SPATIAL_ROOT_DISTANCE -> this.addOption(setting, this.getSpatialRootDistanceOption(), false);
 			case WHEEL_OPACITY -> this.addOption(setting, this.getWheelOpacityOption(), false);
 			case WHEEL_TARGET_FONT_SIZE -> this.addOption(setting, this.getWheelTargetFontSizeOption(), false);
 			case WHEEL_OPTION_FONT_SIZE -> this.addOption(setting, this.getWheelOptionFontSizeOption(), false);
+			case SPATIAL_SHOW_TRAIL -> this.addOption(setting, this.getSpatialShowTrailOption(), false);
+			case SPATIAL_REDUCE_MOTION -> this.addOption(setting, this.getSpatialReduceMotionOption(), false);
 			case WHEEL_HOLD_MILLIS -> this.addOption(setting, this.getWheelHoldMillisOption(), false);
 			case WHEEL_TIMEOUT_MILLIS -> this.addOption(setting, this.getWheelTimeoutMillisOption(), false);
 			case LONG_PRESS_COMPATIBILITY_MODE -> this.addOption(setting, this.getLongPressCompatibilityModeOption(), true);
 			case LONG_PRESS_COMPATIBILITY_SLICE_MILLIS -> this.addOption(setting, this.getLongPressCompatibilitySliceMillisOption(), true);
 			case CANCEL_HALF_CONE_ANGLE_DEGREES -> this.addOption(setting, this.getCancelHalfConeAngleDegreesOption(), true);
+			case SPATIAL_DEADZONE -> this.addOption(setting, this.getSpatialDeadzoneOption(), false);
+			case SPATIAL_STROKE -> this.addOption(setting, this.getSpatialStrokeOption(), false);
+			case SPATIAL_DWELL_MILLIS -> this.addOption(setting, this.getSpatialDwellOption(), false);
+			case SPATIAL_TARGET_GLIDE -> this.addOption(setting, this.getSpatialTargetGlideOption(), true);
+			case SPATIAL_HOVER_ENABLED -> this.addOption(setting, this.getSpatialHoverEnabledOption(), true);
+			case SPATIAL_HOVER_MILLIS -> this.addOption(setting, this.getSpatialHoverMillisOption(), false);
 			case CHANNEL -> this.addChannelRow();
 			case PING_VOLUME -> this.addOption(setting, this.getPingVolumeOption(), false);
 			case CONFIGURATION_NOTICE_SIZE -> this.addOption(setting, this.getConfigurationNoticeSizeOption(), true);
@@ -1604,6 +1622,62 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 	}
 
+	private void addServerInventoryRow(Setting setting) {
+		final Field inventoryField = setting.inventoryField();
+		final String key = setting.id();
+		this.flushPendingHalfWidthRow();
+		final var label = new StringWidget(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT, LanguageUtils.settings(key).get(), this.font).alignLeft();
+		label.active = false;
+		final Component tooltip = LanguageUtils.settings(key).path("tooltip").get().append("\n")
+			.append(LanguageUtils.settings("inventory.range").get(
+				inventoryField.isMultiplier() ? inventoryField.grid().minimum().toPlainString() : inventoryField.minimum(),
+				inventoryField.isMultiplier() ? inventoryField.grid().maximum().toPlainString() : inventoryField.maximum()));
+		label.setTooltip(Tooltip.create(tooltip));
+		this.settingsList.addSmall(label, null);
+
+		final EditBox field = this.createServerNumericField(this.serverSettings.inventoryText(inventoryField),
+			text -> this.serverSettings.setInventoryText(inventoryField, text), key + ".tooltip", key,
+			inventoryField.isMultiplier());
+		field.setEditable(this.serverSettings.canEdit());
+		field.active = this.serverSettings.canEdit();
+		field.setTooltip(Tooltip.create(tooltip));
+		this.addHalfWidth(key, field);
+		if (inventoryField.supportsUnlimited()) {
+			final var mode = Button.builder(this.inventoryLimitMode(inventoryField), clicked -> {
+				this.serverValidationMessage = null;
+				this.serverSettings.toggleInventoryUnlimited(inventoryField);
+				clicked.setMessage(this.inventoryLimitMode(inventoryField));
+			}).bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT).build();
+			mode.active = this.serverSettings.canEdit();
+			mode.setTooltip(Tooltip.create(LanguageUtils.settings("inventory.mode.tooltip").get()));
+			this.addHalfWidth(key + ".mode", mode);
+		} else {
+			this.flushPendingHalfWidthRow();
+		}
+		if (inventoryField.isMultiplier() || inventoryField == Field.PENDING_MEMORY_MIB) {
+			this.addInventoryStepButton(setting, field, false);
+			this.addInventoryStepButton(setting, field, true);
+		}
+	}
+
+	private Component inventoryLimitMode(Field field) {
+		return LanguageUtils.settings(this.serverSettings.inventoryUnlimited(field)
+			? "inventory.unlimited" : "inventory.finite").get();
+	}
+
+	private void addInventoryStepButton(Setting setting, EditBox field, boolean forward) {
+		String direction = forward ? "increase" : "decrease";
+		final var button = Button.builder(LanguageUtils.settings("inventory." + direction).get(), clicked -> {
+			this.serverValidationMessage = null;
+			this.serverSettings.stepInventoryValue(setting.inventoryField(), forward);
+			field.setValue(this.serverSettings.inventoryText(setting.inventoryField()));
+		}).bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT).build();
+		button.active = this.serverSettings.canEdit();
+		button.setTooltip(Tooltip.create(LanguageUtils.settings(setting.id()).get()));
+		this.addHalfWidth(setting.id() + "." + direction, button);
+	}
+
 	private void addServerStatus() {
 		this.flushPendingHalfWidthRow();
 		this.serverStatusWidget = new StringWidget(
@@ -1742,12 +1816,17 @@ public class SettingsScreen extends OptionsSubScreen {
 			target = this.serverMsToRegenerateField;
 		} else if ((invalidMask & ServerConfigUpdate.RATE_LIMIT) != 0) {
 			target = this.serverRateLimitField;
-		} else {
+		} else if ((invalidMask & ServerConfigUpdate.SYNC_DURATION) != 0) {
 			target = this.serverSyncDurationField;
+		} else {
+			target = SettingsCategoryCatalog.settings(Category.PERFORMANCE).stream()
+				.filter(setting -> (invalidMask & setting.inventoryField().mask()) != 0)
+				.map(setting -> this.keyedWidgets.get(setting.id())).filter(java.util.Objects::nonNull)
+				.findFirst().orElse(null);
 		}
 		if (target != null) {
 			this.clearFocus();
-			this.settingsList.focusWidget(target);
+			this.settingsList.focusWidget(target, true);
 			this.setFocused(this.settingsList);
 		}
 	}
@@ -1909,13 +1988,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		final var values = update.orElseThrow();
 		this.serverSettings.markClean();
-		IPlatformNetworkService.INSTANCE.sendToServer(new ServerConfigUpdateC2SPacket(
-			values.changedFields(),
-			values.defaultChannelMode(),
-			values.playerTrackingEnabled(),
-			values.msToRegenerate(),
-			values.rateLimit(),
-			values.syncDuration()));
+		IPlatformNetworkService.INSTANCE.sendToServer(new ServerConfigUpdateC2SPacket(values));
 		return true;
 	}
 
@@ -2124,20 +2197,75 @@ public class SettingsScreen extends OptionsSubScreen {
 			config::setLongPressCompatibilitySliceMillis);
 	}
 
-	private OptionInstance<Integer> getWheelInnerRadiusOption() {
-		final var text = LanguageUtils.settings("wheel_inner_radius");
-		return OptionUtils.ofInt(text.getKey(), MIN_WHEEL_INNER_RADIUS, MAX_WHEEL_INNER_RADIUS, WHEEL_INNER_RADIUS_STEP,
-			value -> text.get(LanguageUtils.UNIT_PIXELS.get(value)),
-			config::getWheelInnerRadius,
-			config::setWheelInnerRadius);
+	private OptionInstance<Integer> getSpatialRootDistanceOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		return this.spatialDistanceOption("root_distance", MIN_ROOT_DISTANCE, MAX_ROOT_DISTANCE, ROOT_DISTANCE_STEP,
+			selector::getRootDistance, selector::setRootDistance);
 	}
 
-	private OptionInstance<Integer> getWheelOuterRadiusOption() {
-		final var text = LanguageUtils.settings("wheel_outer_radius");
-		return OptionUtils.ofInt(text.getKey(), MIN_WHEEL_OUTER_RADIUS, MAX_WHEEL_OUTER_RADIUS, WHEEL_OUTER_RADIUS_STEP,
+	private OptionInstance<Integer> spatialDistanceOption(String key, int min, int max, int step,
+		Supplier<Integer> getter, Consumer<Integer> setter) {
+		final var text = LanguageUtils.settings("spatial_selector").path(key);
+		return OptionUtils.ofInt(text.getKey(), min, max, step,
 			value -> text.get(LanguageUtils.UNIT_PIXELS.get(value)),
-			config::getWheelOuterRadius,
-			config::setWheelOuterRadius);
+			() -> text.path("tooltip").get(), getter, setter);
+	}
+
+	private OptionInstance<Integer> getSpatialDeadzoneOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		return this.spatialDistanceOption("deadzone", MIN_DEADZONE, MAX_DEADZONE, DEADZONE_STEP,
+			selector::getDeadzone, selector::setDeadzone);
+	}
+
+	private OptionInstance<Integer> getSpatialStrokeOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		return this.spatialDistanceOption("stroke", MIN_STROKE, MAX_STROKE, STROKE_STEP,
+			selector::getStroke, selector::setStroke);
+	}
+
+	private OptionInstance<Integer> getSpatialDwellOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("dwell_millis");
+		return OptionUtils.ofInt(text.getKey(), MIN_DWELL_MILLIS, MAX_DWELL_MILLIS, DWELL_MILLIS_STEP,
+			value -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
+			() -> text.path("tooltip").get(), selector::getDwellMillis, selector::setDwellMillis);
+	}
+
+	private OptionInstance<java.math.BigDecimal> getSpatialTargetGlideOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("target_glide");
+		return OptionUtils.ofDecimal(text.getKey(), MIN_TARGET_GLIDE, MAX_TARGET_GLIDE, TARGET_GLIDE_STEP,
+			value -> text.get(Component.literal(value.stripTrailingZeros().toPlainString() + "×")),
+			() -> text.path("tooltip").get(), selector::getTargetGlide, selector::setTargetGlide);
+	}
+
+	private OptionInstance<Boolean> getSpatialHoverEnabledOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("hover_enabled");
+		return OptionUtils.ofBool(text.getKey(), selector::isHoverEnabled, selector::setHoverEnabled,
+			() -> text.path("tooltip").get());
+	}
+
+	private OptionInstance<Integer> getSpatialHoverMillisOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("hover_millis");
+		return OptionUtils.ofInt(text.getKey(), MIN_HOVER_MILLIS, MAX_HOVER_MILLIS, HOVER_MILLIS_STEP,
+			value -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
+			() -> text.path("tooltip").get(), selector::getHoverMillis, selector::setHoverMillis);
+	}
+
+	private OptionInstance<Boolean> getSpatialShowTrailOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("show_trail");
+		return OptionUtils.ofBool(text.getKey(), selector::isShowTrail, selector::setShowTrail,
+			() -> text.path("tooltip").get());
+	}
+
+	private OptionInstance<Boolean> getSpatialReduceMotionOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("reduce_motion");
+		return OptionUtils.ofBool(text.getKey(), selector::isReduceMotion, selector::setReduceMotion,
+			() -> text.path("tooltip").get());
 	}
 
 	private OptionInstance<Integer> getWheelOpacityOption() {
@@ -2230,6 +2358,11 @@ public class SettingsScreen extends OptionsSubScreen {
 		String tooltipKey,
 		String narrationKey
 	) {
+		return this.createServerNumericField(value, responder, tooltipKey, narrationKey, false);
+	}
+
+	private EditBox createServerNumericField(String value, Consumer<String> responder,
+		String tooltipKey, String narrationKey, boolean decimal) {
 		final var field = new EditBox(
 			this.font,
 			-1,
@@ -2237,9 +2370,9 @@ public class SettingsScreen extends OptionsSubScreen {
 			SettingsScreenLayout.SMALL_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
 			LanguageUtils.settings(narrationKey).get());
-		field.setMaxLength(Integer.toString(Integer.MAX_VALUE).length());
+		field.setMaxLength(decimal ? 32 : Integer.toString(Integer.MAX_VALUE).length());
 		field.setFilter(text -> text.isEmpty()
-			|| text.chars().allMatch(character -> character >= '0' && character <= '9'));
+			|| text.chars().allMatch(character -> character >= '0' && character <= '9' || decimal && character == '.'));
 		field.setValue(value);
 		field.setTooltip(Tooltip.create(LanguageUtils.settings(tooltipKey).get()));
 		field.setResponder(text -> {
@@ -2310,13 +2443,15 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 
 		private void focusWidget(AbstractWidget widget) {
-			for (OptionsList.Entry entry : this.children()) {
-				if (entry.children().contains(widget)) {
+			this.focusWidget(widget, false);
+		}
+
+		private void focusWidget(AbstractWidget widget, boolean reveal) {
+			SettingsListFocus.focus(this.children(), entry -> entry.children().contains(widget),
+				entry -> {
 					entry.setFocused(widget);
 					this.setFocused(entry);
-					return;
-				}
-			}
+				}, this::ensureVisible, reveal);
 		}
 	}
 }

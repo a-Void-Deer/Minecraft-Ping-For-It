@@ -14,13 +14,20 @@ final class ConfigVersionUpdater {
 	private static final String SYNC_DURATION_KEY = "syncDuration";
 	private static final PingForItVersion SYNC_DURATION_INTRODUCED_VERSION =
 		PingForItVersion.parse("0.3.0-pfi-beta1");
+	static final PingForItVersion SPATIAL_SELECTOR_INTRODUCED_VERSION =
+		PingForItVersion.parse("0.5.0-pfi-beta1");
 
 	private static final List<MigrationStep> MIGRATION_STEPS = orderedSteps(List.of(
 		new MigrationStep(
 			SYNC_DURATION_INTRODUCED_VERSION,
 			ServerConfig.class,
 			ConfigVersionUpdater::migrateLegacyServerDuration,
-			"syncDuration: pingDuration -> syncDuration")
+			"syncDuration: pingDuration -> syncDuration"),
+		new MigrationStep(
+			SPATIAL_SELECTOR_INTRODUCED_VERSION,
+			ClientConfig.class,
+			ConfigVersionUpdater::removeLegacyWheelRadii,
+			"wheel: obsolete radius keys removed")
 	));
 
 	private ConfigVersionUpdater() {}
@@ -88,6 +95,12 @@ final class ConfigVersionUpdater {
 		}
 
 		root.remove(LEGACY_SYNC_DURATION_KEY);
+	}
+
+	static void removeLegacyWheelRadii(JsonObject root) {
+		root.remove("wheelInnerRadius");
+		root.remove("wheelOuterRadius");
+		// New preferences are initialized by the model, not copied or injected here.
 	}
 
 	private static List<MigrationStep> orderedSteps(List<MigrationStep> steps) {

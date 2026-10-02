@@ -23,7 +23,8 @@ class PresentationSettingsLocalizationTest {
 		"minecraft_entity_max_health", "minecraft_item_id", "minecraft_item_count",
 		"minecraft_item_icon", "minecraft_block_state", "create_kinetic_speed",
 		"create_kinetic_has_network", "create_kinetic_overstressed", "create_kinetic_stress",
-		"create_kinetic_capacity", "create_inventory_summary", "create_fluid_summary");
+		"create_kinetic_capacity", "create_inventory_summary", "create_fluid_summary",
+		"pingforit_inventory_items");
 
 	@Test void everyLocaleOwnsCompleteIndependentPresentationVocabulary() throws IOException {
 		Set<String> parity = presentationKeys(read("en_us"));

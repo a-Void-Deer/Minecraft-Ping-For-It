@@ -249,7 +249,7 @@ public final class InventorySettings {
 		private int resyncMinPeriods = 5;
 		/** Periodic heartbeat cadence; zero is the explicit disabled value, not unlimited. */
 		private int heartbeatPeriods = 16;
-		/** Bounded grace periods for an unknown-baseline stream. */
+		/** Rolling excess-byte smoothing window; independent of the resync/unknown-stream window. */
 		private int gracePeriods = 4;
 
 		void validate() {

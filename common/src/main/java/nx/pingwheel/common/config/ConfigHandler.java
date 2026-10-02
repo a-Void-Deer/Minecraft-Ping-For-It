@@ -329,9 +329,26 @@ public class ConfigHandler <T extends IConfig> {
 
 			var merged = rootToPreserve.getAsJsonObject().deepCopy();
 			for (var entry : serialized.getAsJsonObject().entrySet()) {
+				if (configType == ClientConfig.class && entry.getKey().equals("spatialSelector")
+					&& merged.has(entry.getKey()) && merged.get(entry.getKey()).isJsonObject()
+					&& entry.getValue().isJsonObject()) {
+					// Additive selector fields replace only their own entries. Keep unknown
+					// nested preferences in the guarded migration preservation base.
+					JsonObject selector = merged.getAsJsonObject(entry.getKey());
+					for (var preference : entry.getValue().getAsJsonObject().entrySet()) {
+						selector.add(preference.getKey(), preference.getValue());
+					}
+					continue;
+				}
 				merged.add(entry.getKey(), entry.getValue());
 			}
 			serialized = merged;
+		}
+
+		if (configType == ClientConfig.class
+			&& modVersion.compareTo(ConfigVersionUpdater.SPATIAL_SELECTOR_INTRODUCED_VERSION) >= 0) {
+			// Even a preservation-base merge must not resurrect retired radius keys.
+			ConfigVersionUpdater.removeLegacyWheelRadii(serialized.getAsJsonObject());
 		}
 
 		JsonElement marker = new com.google.gson.JsonPrimitive(modVersion.originalVersion());

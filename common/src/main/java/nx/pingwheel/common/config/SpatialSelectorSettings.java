@@ -8,12 +8,12 @@ import lombok.ToString;
 import java.math.BigDecimal;
 
 /**
- * Client-local spatial selector behavior: the target-list glide factor and the
- * Back-hover dwell. Both are user preferences and stay client-local; no other
- * selector prototype tuning (dead zone, stroke, dwell beyond the confirmed
- * Back-hover) is persisted.
+ * Client-local spatial selector preferences. Distances are GUI pixels and
+ * durations are milliseconds. Missing JSON members receive model defaults;
+ * legacy wheel radii are never a source for these values.
  *
- * <p>JSON shape: {@code {"targetGlide": 0.25, "hoverEnabled": false, "hoverMillis": 500}}.
+ * <p>{@link #snapshot()} supplies a validated immutable set for one held
+ * gesture. Editing the live configuration cannot change an existing snapshot.
  */
 @Getter
 @Setter
@@ -21,10 +21,31 @@ import java.math.BigDecimal;
 @EqualsAndHashCode
 public final class SpatialSelectorSettings {
 
-	/** Confirmed glide prototype range and reset value. */
+	public static final int MIN_DEADZONE = 24;
+	public static final int MAX_DEADZONE = 64;
+	public static final int DEFAULT_DEADZONE = 36;
+	public static final int DEADZONE_STEP = 1;
+
+	public static final int MIN_STROKE = 80;
+	public static final int MAX_STROKE = 170;
+	public static final int DEFAULT_STROKE = 110;
+	public static final int STROKE_STEP = 1;
+
+	public static final int MIN_DWELL_MILLIS = 80;
+	public static final int MAX_DWELL_MILLIS = 360;
+	public static final int DEFAULT_DWELL_MILLIS = 180;
+	public static final int DWELL_MILLIS_STEP = 10;
+
+	/** Visual root-node distance, independent from every gesture threshold. */
+	public static final int MIN_ROOT_DISTANCE = 64;
+	public static final int MAX_ROOT_DISTANCE = 240;
+	public static final int DEFAULT_ROOT_DISTANCE = 110;
+	public static final int ROOT_DISTANCE_STEP = 1;
+
 	public static final BigDecimal MIN_TARGET_GLIDE = new BigDecimal("0.25");
 	public static final BigDecimal MAX_TARGET_GLIDE = new BigDecimal("3");
 	public static final BigDecimal DEFAULT_TARGET_GLIDE = new BigDecimal("0.25");
+	public static final BigDecimal TARGET_GLIDE_STEP = new BigDecimal("0.25");
 
 	/** Confirmed Back-hover dwell range, step and disabled-by-default policy. */
 	public static final int MIN_HOVER_MILLIS = 100;
@@ -33,14 +54,47 @@ public final class SpatialSelectorSettings {
 	public static final int DEFAULT_HOVER_MILLIS = 500;
 	public static final boolean DEFAULT_HOVER_ENABLED = false;
 
+	private int deadzone = DEFAULT_DEADZONE;
+	private int stroke = DEFAULT_STROKE;
+	private int dwellMillis = DEFAULT_DWELL_MILLIS;
+	private int rootDistance = DEFAULT_ROOT_DISTANCE;
 	private BigDecimal targetGlide = DEFAULT_TARGET_GLIDE;
 	private boolean hoverEnabled = DEFAULT_HOVER_ENABLED;
 	private int hoverMillis = DEFAULT_HOVER_MILLIS;
+	private boolean showTrail = true;
+	private boolean reduceMotion = false;
 
-	/** Clamps both numeric values into their confirmed ranges without touching the enabled flag. */
+	/** Clamps numeric preferences independently, without changing boolean choices. */
 	public void validate() {
+		deadzone = clampDeadzone(deadzone);
+		stroke = clampStroke(stroke);
+		dwellMillis = clampDwellMillis(dwellMillis);
+		rootDistance = clampRootDistance(rootDistance);
 		targetGlide = clampTargetGlide(targetGlide);
 		hoverMillis = clampHoverMillis(hoverMillis);
+	}
+
+	public void setDeadzone(int value) { deadzone = clampDeadzone(value); }
+	public void setStroke(int value) { stroke = clampStroke(value); }
+	public void setDwellMillis(int value) { dwellMillis = clampDwellMillis(value); }
+	public void setRootDistance(int value) { rootDistance = clampRootDistance(value); }
+	public void setTargetGlide(BigDecimal value) { targetGlide = clampTargetGlide(value); }
+	public void setHoverMillis(int value) { hoverMillis = clampHoverMillis(value); }
+
+	public static int clampDeadzone(int value) {
+		return Math.clamp(value, MIN_DEADZONE, MAX_DEADZONE);
+	}
+
+	public static int clampStroke(int value) {
+		return Math.clamp(value, MIN_STROKE, MAX_STROKE);
+	}
+
+	public static int clampDwellMillis(int value) {
+		return Math.clamp(value, MIN_DWELL_MILLIS, MAX_DWELL_MILLIS);
+	}
+
+	public static int clampRootDistance(int value) {
+		return Math.clamp(value, MIN_ROOT_DISTANCE, MAX_ROOT_DISTANCE);
 	}
 
 	public static BigDecimal clampTargetGlide(BigDecimal value) {
@@ -55,4 +109,16 @@ public final class SpatialSelectorSettings {
 	public static int clampHoverMillis(int value) {
 		return Math.clamp(value, MIN_HOVER_MILLIS, MAX_HOVER_MILLIS);
 	}
+
+	/** Safe even before validation of a deserialized object; does not mutate it. */
+	public Snapshot snapshot() {
+		return new Snapshot(clampDeadzone(deadzone), clampStroke(stroke),
+			clampDwellMillis(dwellMillis), clampRootDistance(rootDistance),
+			clampTargetGlide(targetGlide), hoverEnabled, clampHoverMillis(hoverMillis),
+			showTrail, reduceMotion);
+	}
+
+	public record Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
+		BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+		boolean showTrail, boolean reduceMotion) {}
 }

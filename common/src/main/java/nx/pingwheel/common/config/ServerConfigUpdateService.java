@@ -20,7 +20,7 @@ public final class ServerConfigUpdateService {
 		}
 
 		final var authoritative = current.withCanEdit(hasPermission);
-		if (!hasPermission || update == null || !update.isValid()) {
+		if (!hasPermission || !current.isSafe() || update == null || !update.isValid()) {
 			return new Result(false, authoritative);
 		}
 

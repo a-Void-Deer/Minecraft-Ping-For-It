@@ -33,7 +33,7 @@ public class ClientConfig implements IConfig {
 	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
 	TeamColorMode teamColorMode = TeamColorMode.FULL;
 	EntityBlockRenderMode entityBlockRenderMode = EntityBlockRenderMode.ALL;
-	/** Client-local target-list glide and Back-hover preference; additive with defaults. */
+	/** Client-local spatial gesture and appearance preferences; additive with defaults. */
 	SpatialSelectorSettings spatialSelector = new SpatialSelectorSettings();
 	int pingSize = 100;
 	int configurationNoticeSize = ClientConfigBounds.DEFAULT_CONFIGURATION_NOTICE_SIZE;
@@ -42,8 +42,6 @@ public class ClientConfig implements IConfig {
 	int longPressCompatibilitySliceMillis = ClientConfigBounds.DEFAULT_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS;
 	int wheelTimeoutMillis = ClientConfigBounds.DEFAULT_WHEEL_TIMEOUT_MILLIS;
 	int cancelHalfConeAngleDegrees = ClientConfigBounds.DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES;
-	int wheelInnerRadius = ClientConfigBounds.DEFAULT_WHEEL_INNER_RADIUS;
-	int wheelOuterRadius = ClientConfigBounds.DEFAULT_WHEEL_OUTER_RADIUS;
 	int wheelOpacity = ClientConfigBounds.DEFAULT_WHEEL_OPACITY;
 	/** Kept as wheelFontSize in JSON: this is the radial option-label value. */
 	int wheelFontSize = ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE;
@@ -95,16 +93,16 @@ public class ClientConfig implements IConfig {
 		}
 	}
 
-	public void setWheelInnerRadius(int wheelInnerRadius) {
-		final var radii = ClientConfigBounds.clampWheelRadii(wheelInnerRadius, this.wheelOuterRadius);
-		this.wheelInnerRadius = radii.innerRadius();
-		this.wheelOuterRadius = radii.outerRadius();
+	/** Temporary nonpersisted bridge for the old wheel renderer during native-input integration. */
+	@Deprecated
+	public int getWheelInnerRadius() {
+		return ClientConfigBounds.DEFAULT_WHEEL_INNER_RADIUS;
 	}
 
-	public void setWheelOuterRadius(int wheelOuterRadius) {
-		final var radii = ClientConfigBounds.clampWheelRadii(this.wheelInnerRadius, wheelOuterRadius);
-		this.wheelInnerRadius = radii.innerRadius();
-		this.wheelOuterRadius = radii.outerRadius();
+	/** Temporary nonpersisted bridge; deliberately unrelated to spatial-selector settings. */
+	@Deprecated
+	public int getWheelOuterRadius() {
+		return ClientConfigBounds.DEFAULT_WHEEL_OUTER_RADIUS;
 	}
 
 	public void setWheelHoldMillis(int wheelHoldMillis) {
@@ -218,8 +216,6 @@ public class ClientConfig implements IConfig {
 		final int suppliedLongPressCompatibilitySliceMillis = longPressCompatibilitySliceMillis;
 		final int suppliedWheelTimeoutMillis = wheelTimeoutMillis;
 		final int suppliedCancelHalfConeAngleDegrees = cancelHalfConeAngleDegrees;
-		final int suppliedWheelInnerRadius = wheelInnerRadius;
-		final int suppliedWheelOuterRadius = wheelOuterRadius;
 		final int suppliedWheelOpacity = wheelOpacity;
 		final int suppliedWheelFontSize = wheelFontSize;
 		final int suppliedWheelTargetFontSize = wheelTargetFontSize;
@@ -255,12 +251,6 @@ public class ClientConfig implements IConfig {
 			"cancelHalfConeAngleDegrees",
 			suppliedCancelHalfConeAngleDegrees,
 			cancelHalfConeAngleDegrees);
-
-		final var radii = ClientConfigBounds.clampWheelRadii(wheelInnerRadius, wheelOuterRadius);
-		wheelInnerRadius = radii.innerRadius();
-		wheelOuterRadius = radii.outerRadius();
-		warnIfChanged(warningSink, "wheelInnerRadius", suppliedWheelInnerRadius, wheelInnerRadius);
-		warnIfChanged(warningSink, "wheelOuterRadius", suppliedWheelOuterRadius, wheelOuterRadius);
 
 		wheelOpacity = ClientConfigBounds.clampWheelOpacity(wheelOpacity);
 		warnIfChanged(warningSink, "wheelOpacity", suppliedWheelOpacity, wheelOpacity);
@@ -318,19 +308,18 @@ public class ClientConfig implements IConfig {
 	public void onUpdate() {
 		blockDisplayPolicy = BlockDisplayPolicy.compile(blockDisplayWhitelist, blockShapeBlacklist);
 		LOGGER.debug(
-			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, wheelTimeoutMillis=%d, cancelHalfConeAngleDegrees=%d, wheelInnerRadius=%d, wheelOuterRadius=%d, wheelOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d"
+			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, wheelTimeoutMillis=%d, cancelHalfConeAngleDegrees=%d, wheelOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d, spatialSelector=%s"
 				.formatted(
 					wheelHoldMillis,
 					longPressCompatibilityMode,
 					getEffectiveLongPressCompatibilitySliceMillis(),
 					wheelTimeoutMillis,
 					cancelHalfConeAngleDegrees,
-					wheelInnerRadius,
-					wheelOuterRadius,
 					wheelOpacity,
 					wheelFontSize,
 					wheelTargetFontSize,
-					configurationNoticeSize));
+					configurationNoticeSize,
+					spatialSelector));
 
 		if (Game != null) {
 			IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(getChannel()));

@@ -74,7 +74,7 @@ class SettingsNavigationModelTest {
 		var server = SettingsNavigationModel.categories(Scope.SERVER);
 
 		assertEquals(6, client.size());
-		assertEquals(4, server.size());
+		assertEquals(5, server.size());
 		assertEquals(
 			List.of(
 				"display",
@@ -85,7 +85,7 @@ class SettingsNavigationModelTest {
 				"geometry_config"),
 			client.stream().map(Category::id).toList());
 		assertEquals(
-			List.of("channel_players", "send_rate", "marker_duration", "server_presentation"),
+			List.of("channel_players", "send_rate", "marker_duration", "performance", "server_presentation"),
 			server.stream().map(Category::id).toList());
 		assertThrows(UnsupportedOperationException.class, () -> client.add(Category.MARKER_DISPLAY));
 
@@ -301,5 +301,23 @@ class SettingsNavigationModelTest {
 		navigation.openCategory(Category.MARKER_DISPLAY);
 		assertFalse(navigation.onServerViewAccessLost(false));
 		assertEquals(Page.CLIENT_MARKER_DISPLAY, navigation.current());
+	}
+
+	@Test
+	void inventoryInvalidMaskRoutesToPerformanceAndKeepsItsOwnViewport() {
+		var navigation = new SettingsNavigationModel();
+		navigation.selectScope(Scope.SERVER);
+		navigation.openCategory(Category.PERFORMANCE);
+		navigation.saveViewStateBeforeNavigation(120, "inventory.tracking_grace_periods");
+		navigation.selectScope(Scope.CLIENT);
+		assertTrue(navigation.routeToInvalidServerDraft(ServerConfigUpdate.INVENTORY_TRACKING_GRACE_PERIODS));
+		assertEquals(Page.SERVER_PERFORMANCE, navigation.current());
+		assertEquals(120, navigation.scrollAmount());
+		assertEquals("inventory.tracking_grace_periods", navigation.focusKey());
+		assertFalse(navigation.onServerViewAccessLost(true, false));
+		assertEquals(Page.SERVER_PERFORMANCE, navigation.current());
+		assertTrue(navigation.routeToInvalidServerDraft(ServerConfigUpdate.SYNC_DURATION
+			| ServerConfigUpdate.INVENTORY_PENDING_MEMORY_MIB));
+		assertEquals(Page.SERVER_MARKER_DURATION, navigation.current());
 	}
 }
