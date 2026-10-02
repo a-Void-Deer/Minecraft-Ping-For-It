@@ -1,6 +1,7 @@
 package nx.pingwheel.common.presentation.source;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -113,11 +114,14 @@ public record CaptureResult(
 	}
 
 	/**
-	 * One bounded observation payload. Both forms hold only detached presentation
-	 * values, and neither may carry game objects, item stacks, components, or raw
-	 * NBT.
+	 * One bounded observation payload. {@link SnapshotRecord} and
+	 * {@link KeyedFragment} carry detached presentation values;
+	 * {@link OpaqueKeyedFragment} carries bounded opaque domain bytes whose
+	 * codec is identified in code. None of the forms may carry game objects,
+	 * item stacks, components, or raw NBT.
 	 */
-	public sealed interface CapturePayload permits CaptureResult.SnapshotRecord, CaptureResult.KeyedFragment {}
+	public sealed interface CapturePayload permits CaptureResult.SnapshotRecord, CaptureResult.KeyedFragment,
+		CaptureResult.OpaqueKeyedFragment {}
 
 	/**
 	 * Whole-unit replacement of existing presentation fields. The map is copied
@@ -177,6 +181,80 @@ public record CaptureResult(
 			if (key.getBytes(StandardCharsets.UTF_8).length > PresentationPropertyRef.MAX_KEY_BYTES)
 				throw new IllegalArgumentException("domain key exceeds the key byte bound");
 			return key;
+		}
+	}
+
+	/**
+	 * Deep-detached immutable opaque bytes. Construction copies the caller's
+	 * array and every access returns a fresh copy, so neither the producer nor
+	 * any consumer can mutate a carried payload. The generic layer never
+	 * interprets these bytes: the owning codec identified by
+	 * {@link OpaqueKeyedFragment#codecId()} defines their meaning and keeps its
+	 * own stricter domain bounds.
+	 */
+	public record OpaqueValue(byte[] bytes) {
+
+		/** Engineering guard for one opaque value; not a product or wire value. */
+		static final int MAX_VALUE_BYTES = 8192;
+
+		public OpaqueValue {
+			Objects.requireNonNull(bytes, "bytes");
+			if (bytes.length > MAX_VALUE_BYTES)
+				throw new IllegalArgumentException("opaque value exceeds the value bound");
+			bytes = bytes.clone();
+		}
+
+		/** A fresh copy; callers can never mutate the carried bytes. */
+		@Override
+		public byte[] bytes() {
+			return bytes.clone();
+		}
+
+		@Override
+		public boolean equals(Object other) {
+			return other instanceof OpaqueValue value && Arrays.equals(bytes, value.bytes);
+		}
+
+		@Override
+		public int hashCode() {
+			return Arrays.hashCode(bytes);
+		}
+	}
+
+	/**
+	 * Bounded page of keyed opaque domain values, identified by the code-owned
+	 * codec that produced them. Keys are bounded opaque server tokens and
+	 * values are deep-detached bytes; the generic layer never interprets
+	 * either. This form lets a domain carry lossless data, such as an exact
+	 * integer or a display string beyond the presentation text bound, without
+	 * widening the existing global presentation limits: the domain codec owns
+	 * normalization and its own stricter encoding limits.
+	 *
+	 * <p>{@code codecId} names a code-registered encoding, not a dynamic plugin
+	 * type. A missing key means unchanged or unknown, never zero, and an
+	 * explicit value stays explicit.
+	 */
+	public record OpaqueKeyedFragment(String codecId, Map<String, OpaqueValue> entries) implements CapturePayload {
+
+		/**
+		 * Engineering bound for one opaque fragment page. It is independent of
+		 * the record-value entry bound and of any domain page quota; it is not
+		 * a product default.
+		 */
+		static final int MAX_ENTRIES = 256;
+
+		public OpaqueKeyedFragment {
+			codecId = SourceKey.requireToken(codecId, "codecId");
+			Objects.requireNonNull(entries, "entries");
+			if (entries.size() > MAX_ENTRIES)
+				throw new IllegalArgumentException("opaque fragment exceeds the page bound");
+			Map<String, OpaqueValue> copy = new LinkedHashMap<>();
+			for (Map.Entry<String, OpaqueValue> entry : entries.entrySet()) {
+				String key = SourceKey.requireToken(entry.getKey(), "opaque key");
+				OpaqueValue value = Objects.requireNonNull(entry.getValue(), "opaque value");
+				copy.put(key, value);
+			}
+			entries = Map.copyOf(copy);
 		}
 	}
 

@@ -42,7 +42,7 @@ public final class CostLedger {
 		}
 	}
 
-	public interface Ticket extends AutoCloseable {
+	public interface Ticket extends LedgerTicket {
 		/**
 		 * Charges measured use, which must be a non-negative subset of this
 		 * reservation and must not exceed any reserved amount. The ticket
