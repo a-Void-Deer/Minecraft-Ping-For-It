@@ -313,9 +313,9 @@ public final class LongPressCompatibilityController {
 			if (port.phase() == PingInteractionPhase.WHEEL_OPEN) {
 				candidate.wheelOpened = true;
 			} else if (port.phase() == PingInteractionPhase.IDLE) {
-				// The baseline can end a virtual interaction itself, for example by
-				// its existing wheel timeout.  Never retain a compatibility seed after
-				// that lifecycle has ended.
+				// The baseline can end a virtual interaction itself, for example
+				// when it is aborted or superseded.  Never retain a compatibility
+				// seed after that lifecycle has ended.
 				candidate = null;
 			}
 

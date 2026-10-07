@@ -6,6 +6,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientConfigBoundsTest {
+	@Test
+	void requestedDefaultsRemainIndependent() {
+		ClientConfig config = new ClientConfig();
+		assertEquals(150, config.getWheelHoldMillis());
+		assertEquals(20, ClientConfigBounds.MIN_WHEEL_HOLD_MILLIS);
+		assertEquals(300, config.getWheelFontSize());
+		assertEquals(100, config.getWheelTargetFontSize());
+		assertEquals(100, config.getConfigurationNoticeSize());
+		assertEquals(100, config.getWheelTargetOpacity());
+		assertEquals(5, ClientConfigBounds.WHEEL_TARGET_OPACITY_STEP);
+		config.setWheelTargetOpacity(-1);
+		assertEquals(0, config.getWheelTargetOpacity());
+		config.setWheelTargetOpacity(101);
+		assertEquals(100, config.getWheelTargetOpacity());
+	}
 
 	@Test
 	void wheelHoldMillisClampsDirectValues() {
@@ -49,14 +64,6 @@ class ClientConfigBoundsTest {
 			ClientConfigBounds.clampLongPressCompatibilitySliceMillis(Integer.MIN_VALUE, hold));
 		assertEquals(35, ClientConfigBounds.clampLongPressCompatibilitySliceMillis(35, hold));
 		assertEquals(hold / 2, ClientConfigBounds.clampLongPressCompatibilitySliceMillis(Integer.MAX_VALUE, hold));
-	}
-
-	@Test
-	void wheelTimeoutMillisClampsDirectValues() {
-		int inRange = ClientConfigBounds.MIN_WHEEL_TIMEOUT_MILLIS + 1;
-		assertEquals(ClientConfigBounds.MIN_WHEEL_TIMEOUT_MILLIS, ClientConfigBounds.clampWheelTimeoutMillis(Integer.MIN_VALUE));
-		assertEquals(inRange, ClientConfigBounds.clampWheelTimeoutMillis(inRange));
-		assertEquals(ClientConfigBounds.MAX_WHEEL_TIMEOUT_MILLIS, ClientConfigBounds.clampWheelTimeoutMillis(Integer.MAX_VALUE));
 	}
 
 	@Test
@@ -104,6 +111,11 @@ class ClientConfigBoundsTest {
 		assertEquals(ClientConfigBounds.MIN_WHEEL_OPACITY, ClientConfigBounds.clampWheelOpacity(Integer.MIN_VALUE));
 		assertEquals(50, ClientConfigBounds.clampWheelOpacity(50));
 		assertEquals(ClientConfigBounds.MAX_WHEEL_OPACITY, ClientConfigBounds.clampWheelOpacity(Integer.MAX_VALUE));
+		assertEquals(ClientConfigBounds.MIN_WHEEL_TARGET_OPACITY,
+			ClientConfigBounds.clampWheelTargetOpacity(Integer.MIN_VALUE));
+		assertEquals(50, ClientConfigBounds.clampWheelTargetOpacity(50));
+		assertEquals(ClientConfigBounds.MAX_WHEEL_TARGET_OPACITY,
+			ClientConfigBounds.clampWheelTargetOpacity(Integer.MAX_VALUE));
 		assertEquals(ClientConfigBounds.MIN_WHEEL_FONT_SIZE, ClientConfigBounds.clampWheelFontSize(Integer.MIN_VALUE));
 		assertEquals(100, ClientConfigBounds.clampWheelFontSize(100));
 		assertEquals(ClientConfigBounds.MAX_WHEEL_FONT_SIZE, ClientConfigBounds.clampWheelFontSize(Integer.MAX_VALUE));

@@ -60,20 +60,20 @@ class ClientPingRuntimeInteractionTest {
 	private static final TargetSnapshot BEHIND_CHEST = TargetSnapshotFactory.block(DIMENSION, 7, 2, 3, "minecraft:chest", true, BlockFace.EAST);
 	private static final TargetSnapshot ITEM = TargetSnapshotFactory.entity(DIMENSION, new UUID(3, 4), "minecraft:item");
 	private static final TargetSnapshot BEHIND_ITEM = TargetSnapshotFactory.entity(DIMENSION, new UUID(5, 6), "minecraft:item");
-	private int oldHold, oldTimeout, oldSlice;
+	private int oldHold, oldSlice;
 	private boolean oldCompatibility;
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 	@BeforeEach void settings() {
 		var config = ClientConfig.HANDLER.getConfig();
-		oldHold = config.getWheelHoldMillis(); oldTimeout = config.getWheelTimeoutMillis();
+		oldHold = config.getWheelHoldMillis();
 		oldSlice = config.getLongPressCompatibilitySliceMillis(); oldCompatibility = config.isLongPressCompatibilityMode();
-		config.setWheelHoldMillis(250); config.setWheelTimeoutMillis(10000);
+		config.setWheelHoldMillis(250);
 		config.setLongPressCompatibilityMode(false); config.setLongPressCompatibilitySliceMillis(125);
 	}
 	@AfterEach void restoreSettings() {
 		var config = ClientConfig.HANDLER.getConfig();
-		config.setWheelHoldMillis(oldHold); config.setWheelTimeoutMillis(oldTimeout);
+		config.setWheelHoldMillis(oldHold);
 		config.setLongPressCompatibilitySliceMillis(oldSlice); config.setLongPressCompatibilityMode(oldCompatibility);
 	}
 
@@ -272,10 +272,11 @@ class ClientPingRuntimeInteractionTest {
 			&& c.kind() == InventoryC2SPacket.Kind.CLOSE && c.requestId() == request).findFirst().orElseThrow();
 		assertTrue(selected < closed); assertEquals(1, f.validations.size()); assertEquals(0, f.access.cancellations);
 	}
-	@Test void timeoutWinsOverSelectedRowWithoutValidationOrPacket() {
-		Fixture f = new Fixture(); f.openList(); f.release(10250);
-		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty()); assertTrue(f.validations.isEmpty());
-		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase()); assertTrue(f.runtime.selectorSnapshot().isEmpty()); assertEquals(0, f.inventory.stats().previewChannels());
+	@Test void longHeldSelectorDoesNotAutoCloseAndReleaseStillSelectsRow() {
+		Fixture f = new Fixture(); f.openList(); long request = f.request(); f.release(10250);
+		assertEquals(1, f.selects().size()); assertEquals("opaque", f.selects().getFirst().entryKey()); assertEquals(request, f.selects().getFirst().requestId());
+		assertTrue(f.creates().isEmpty()); assertEquals(1, f.validations.size());
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase()); assertEquals(0, f.inventory.stats().previewChannels());
 	}
 	@Test void resetImmediatelyBeforeReleaseCannotSelectAndLatePreviewCannotRevive() {
 		Fixture f = new Fixture(); f.openList(); long request = f.request(); f.runtime.abort(); f.release(700);
@@ -423,12 +424,15 @@ class ClientPingRuntimeInteractionTest {
 		f.focus("intent:attention", 460);
 		f.frame(480, false); assertEquals(2, f.creates().size()); assertFalse(f.runtime.hasCompatibilityState());
 	}
-	@Test void spatialSettingsAreFrozenAtPressAndWheelTimeoutAtActualOpen() {
+	@Test void spatialSettingsAreFrozenAtPressAndOpenWheelIgnoresElapsedTime() {
 		var settings = ClientConfig.HANDLER.getConfig().getSpatialSelector(); int oldStroke = settings.getStroke();
 		try {
-			settings.setStroke(90); Fixture f = new Fixture(); f.press(0); settings.setStroke(170); f.frame(250, true);
-			assertEquals(90, f.snapshot().settings().stroke()); ClientConfig.HANDLER.getConfig().setWheelTimeoutMillis(20000);
-			f.frame(10250, true); assertEquals(PingInteractionPhase.IDLE, f.runtime.phase()); assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+			settings.setStroke(70); Fixture f = new Fixture(); f.press(0); settings.setStroke(85); f.frame(250, true);
+			assertEquals(70, f.snapshot().settings().stroke());
+			f.frame(10250, true);
+			assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase());
+			assertTrue(f.runtime.selectorSnapshot().isPresent());
+			assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
 		} finally { settings.setStroke(oldStroke); }
 	}
 	@Test void invalidViewportCannotActuallyOpenAndReleaseStillUsesDefaultPath() {

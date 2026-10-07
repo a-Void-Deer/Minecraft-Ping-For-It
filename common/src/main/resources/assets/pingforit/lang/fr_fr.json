@@ -25,6 +25,8 @@
 	"settings.pingforit.mark_blacklisted_targets": "Marquer les cibles de la liste noire",
 	"settings.pingforit.mark_fluids": "Marquer les fluides",
 	"settings.pingforit.ping_size": "Taille du Ping : %s",
+	"settings.pingforit.wheel_opacity": "Opacité de la roue : %s",
+	"settings.pingforit.wheel_target_opacity": "Opacité de la cible de la roue : %s",
 	"settings.pingforit.wheel_font_size": "Taille de police des options de la roue : %s",
 	"settings.pingforit.wheel_target_font_size": "Taille de police de la cible de la roue : %s",
 	"settings.pingforit.reset_all": "Tout réinitialiser",

@@ -28,13 +28,13 @@ class SettingsCategoryCatalogTest {
 		assertEquals(List.of(
 			Setting.SPATIAL_ROOT_DISTANCE,
 			Setting.WHEEL_OPACITY,
+			Setting.WHEEL_TARGET_OPACITY,
 			Setting.WHEEL_TARGET_FONT_SIZE,
 			Setting.WHEEL_OPTION_FONT_SIZE,
 			Setting.SPATIAL_SHOW_TRAIL,
 			Setting.SPATIAL_REDUCE_MOTION), SettingsCategoryCatalog.settings(Category.WHEEL_APPEARANCE));
 		assertEquals(List.of(
 			Setting.WHEEL_HOLD_MILLIS,
-			Setting.WHEEL_TIMEOUT_MILLIS,
 			Setting.LONG_PRESS_COMPATIBILITY_MODE,
 			Setting.LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
 			Setting.CANCEL_HALF_CONE_ANGLE_DEGREES,

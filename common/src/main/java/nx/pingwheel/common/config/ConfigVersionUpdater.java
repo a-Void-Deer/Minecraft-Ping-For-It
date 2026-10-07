@@ -16,6 +16,8 @@ final class ConfigVersionUpdater {
 		PingForItVersion.parse("0.3.0-pfi-beta1");
 	static final PingForItVersion SPATIAL_SELECTOR_INTRODUCED_VERSION =
 		PingForItVersion.parse("0.5.0-pfi-beta1");
+	static final PingForItVersion WHEEL_TIMEOUT_REMOVED_VERSION =
+		SPATIAL_SELECTOR_INTRODUCED_VERSION;
 
 	private static final List<MigrationStep> MIGRATION_STEPS = orderedSteps(List.of(
 		new MigrationStep(
@@ -26,8 +28,8 @@ final class ConfigVersionUpdater {
 		new MigrationStep(
 			SPATIAL_SELECTOR_INTRODUCED_VERSION,
 			ClientConfig.class,
-			ConfigVersionUpdater::removeLegacyWheelRadii,
-			"wheel: obsolete radius keys removed")
+			ConfigVersionUpdater::removeRetiredWheelKeys,
+			"wheel: obsolete radius and timeout keys removed")
 	));
 
 	private ConfigVersionUpdater() {}
@@ -101,6 +103,15 @@ final class ConfigVersionUpdater {
 		root.remove("wheelInnerRadius");
 		root.remove("wheelOuterRadius");
 		// New preferences are initialized by the model, not copied or injected here.
+	}
+
+	static void removeRetiredWheelKeys(JsonObject root) {
+		removeLegacyWheelRadii(root);
+		removeLegacyWheelTimeout(root);
+	}
+
+	static void removeLegacyWheelTimeout(JsonObject root) {
+		root.remove("wheelTimeoutMillis");
 	}
 
 	private static List<MigrationStep> orderedSteps(List<MigrationStep> steps) {

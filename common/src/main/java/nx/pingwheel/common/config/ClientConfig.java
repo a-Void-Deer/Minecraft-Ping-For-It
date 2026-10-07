@@ -40,9 +40,9 @@ public class ClientConfig implements IConfig {
 	int wheelHoldMillis = ClientConfigBounds.DEFAULT_WHEEL_HOLD_MILLIS;
 	boolean longPressCompatibilityMode = false;
 	int longPressCompatibilitySliceMillis = ClientConfigBounds.DEFAULT_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS;
-	int wheelTimeoutMillis = ClientConfigBounds.DEFAULT_WHEEL_TIMEOUT_MILLIS;
 	int cancelHalfConeAngleDegrees = ClientConfigBounds.DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES;
 	int wheelOpacity = ClientConfigBounds.DEFAULT_WHEEL_OPACITY;
+	int wheelTargetOpacity = ClientConfigBounds.DEFAULT_WHEEL_TARGET_OPACITY;
 	/** Kept as wheelFontSize in JSON: this is the radial option-label value. */
 	int wheelFontSize = ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE;
 	int wheelTargetFontSize = ClientConfigBounds.DEFAULT_WHEEL_TARGET_FONT_SIZE;
@@ -170,6 +170,10 @@ public class ClientConfig implements IConfig {
 		this.configurationNoticeSize = ClientConfigBounds.clampConfigurationNoticeSize(configurationNoticeSize);
 	}
 
+	public void setWheelTargetOpacity(int wheelTargetOpacity) {
+		this.wheelTargetOpacity = ClientConfigBounds.clampWheelTargetOpacity(wheelTargetOpacity);
+	}
+
 	public void setBlockDisplayWhitelist(List<String> entries) {
 		List<String> copy = validatedEntries(entries, "blockDisplayWhitelist");
 		BlockDisplayPolicy nextPolicy = BlockDisplayPolicy.compile(copy, blockShapeBlacklist);
@@ -214,9 +218,9 @@ public class ClientConfig implements IConfig {
 
 		final int suppliedWheelHoldMillis = wheelHoldMillis;
 		final int suppliedLongPressCompatibilitySliceMillis = longPressCompatibilitySliceMillis;
-		final int suppliedWheelTimeoutMillis = wheelTimeoutMillis;
 		final int suppliedCancelHalfConeAngleDegrees = cancelHalfConeAngleDegrees;
 		final int suppliedWheelOpacity = wheelOpacity;
+		final int suppliedWheelTargetOpacity = wheelTargetOpacity;
 		final int suppliedWheelFontSize = wheelFontSize;
 		final int suppliedWheelTargetFontSize = wheelTargetFontSize;
 		final int suppliedConfigurationNoticeSize = configurationNoticeSize;
@@ -238,13 +242,6 @@ public class ClientConfig implements IConfig {
 			suppliedLongPressCompatibilitySliceMillis,
 			longPressCompatibilitySliceMillis);
 
-		wheelTimeoutMillis = ClientConfigBounds.clampWheelTimeoutMillis(wheelTimeoutMillis);
-		warnIfChanged(
-			warningSink,
-			"wheelTimeoutMillis",
-			suppliedWheelTimeoutMillis,
-			wheelTimeoutMillis);
-
 		cancelHalfConeAngleDegrees = ClientConfigBounds.clampCancelHalfConeAngleDegrees(cancelHalfConeAngleDegrees);
 		warnIfChanged(
 			warningSink,
@@ -254,6 +251,9 @@ public class ClientConfig implements IConfig {
 
 		wheelOpacity = ClientConfigBounds.clampWheelOpacity(wheelOpacity);
 		warnIfChanged(warningSink, "wheelOpacity", suppliedWheelOpacity, wheelOpacity);
+
+		wheelTargetOpacity = ClientConfigBounds.clampWheelTargetOpacity(wheelTargetOpacity);
+		warnIfChanged(warningSink, "wheelTargetOpacity", suppliedWheelTargetOpacity, wheelTargetOpacity);
 
 		wheelFontSize = ClientConfigBounds.clampWheelFontSize(wheelFontSize);
 		warnIfChanged(warningSink, "wheelFontSize", suppliedWheelFontSize, wheelFontSize);
@@ -308,14 +308,14 @@ public class ClientConfig implements IConfig {
 	public void onUpdate() {
 		blockDisplayPolicy = BlockDisplayPolicy.compile(blockDisplayWhitelist, blockShapeBlacklist);
 		LOGGER.debug(
-			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, wheelTimeoutMillis=%d, cancelHalfConeAngleDegrees=%d, wheelOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d, spatialSelector=%s"
+			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, cancelHalfConeAngleDegrees=%d, wheelOpacity=%d, wheelTargetOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d, spatialSelector=%s"
 				.formatted(
 					wheelHoldMillis,
 					longPressCompatibilityMode,
 					getEffectiveLongPressCompatibilitySliceMillis(),
-					wheelTimeoutMillis,
 					cancelHalfConeAngleDegrees,
 					wheelOpacity,
+					wheelTargetOpacity,
 					wheelFontSize,
 					wheelTargetFontSize,
 					configurationNoticeSize,

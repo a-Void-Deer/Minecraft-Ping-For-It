@@ -32,12 +32,12 @@ public final class SettingsCategoryCatalog {
 		MARK_FLUIDS("mark_fluids"),
 		SPATIAL_ROOT_DISTANCE("spatial_selector.root_distance"),
 		WHEEL_OPACITY("wheel_opacity"),
+		WHEEL_TARGET_OPACITY("wheel_target_opacity"),
 		WHEEL_TARGET_FONT_SIZE("wheel_target_font_size"),
 		WHEEL_OPTION_FONT_SIZE("wheel_font_size"),
 		SPATIAL_SHOW_TRAIL("spatial_selector.show_trail"),
 		SPATIAL_REDUCE_MOTION("spatial_selector.reduce_motion"),
 		WHEEL_HOLD_MILLIS("wheel_hold_millis"),
-		WHEEL_TIMEOUT_MILLIS("wheel_timeout_millis"),
 		LONG_PRESS_COMPATIBILITY_MODE("long_press_compatibility_mode"),
 		LONG_PRESS_COMPATIBILITY_SLICE_MILLIS("long_press_compatibility_slice_millis"),
 		CANCEL_HALF_CONE_ANGLE_DEGREES("cancel_half_cone_angle_degrees"),
@@ -135,13 +135,13 @@ public final class SettingsCategoryCatalog {
 		settings.put(Category.WHEEL_APPEARANCE, List.of(
 			Setting.SPATIAL_ROOT_DISTANCE,
 			Setting.WHEEL_OPACITY,
+			Setting.WHEEL_TARGET_OPACITY,
 			Setting.WHEEL_TARGET_FONT_SIZE,
 			Setting.WHEEL_OPTION_FONT_SIZE,
 			Setting.SPATIAL_SHOW_TRAIL,
 			Setting.SPATIAL_REDUCE_MOTION));
 		settings.put(Category.INPUT_INTERACTION, List.of(
 			Setting.WHEEL_HOLD_MILLIS,
-			Setting.WHEEL_TIMEOUT_MILLIS,
 			Setting.LONG_PRESS_COMPATIBILITY_MODE,
 			Setting.LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
 			Setting.CANCEL_HALF_CONE_ANGLE_DEGREES,

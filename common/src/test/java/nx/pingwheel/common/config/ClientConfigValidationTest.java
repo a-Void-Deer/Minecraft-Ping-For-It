@@ -168,9 +168,9 @@ class ClientConfigValidationTest {
 			"{\"wheelHoldMillis\":" + Integer.MIN_VALUE
 				+ ",\"longPressCompatibilityMode\":true,\"longPressCompatibilitySliceMillis\":"
 				+ ClientConfigBounds.MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS
-				+ ",\"wheelTimeoutMillis\":" + Integer.MAX_VALUE
 				+ ",\"cancelHalfConeAngleDegrees\":" + Integer.MIN_VALUE
 				+ ",\"wheelOpacity\":" + Integer.MIN_VALUE
+				+ ",\"wheelTargetOpacity\":" + Integer.MAX_VALUE
 				+ ",\"wheelFontSize\":" + Integer.MAX_VALUE
 				+ ",\"wheelTargetFontSize\":" + Integer.MIN_VALUE + "}",
 			ClientConfig.class);
@@ -183,18 +183,18 @@ class ClientConfigValidationTest {
 		assertTrue(config.isLongPressCompatibilityMode());
 		assertEquals(ClientConfigBounds.MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
 			config.getLongPressCompatibilitySliceMillis());
-		assertEquals(ClientConfigBounds.MAX_WHEEL_TIMEOUT_MILLIS, config.getWheelTimeoutMillis());
 		assertEquals(ClientConfigBounds.MIN_CANCEL_HALF_CONE_ANGLE_DEGREES, config.getCancelHalfConeAngleDegrees());
 		assertEquals(ClientConfigBounds.MIN_WHEEL_OPACITY, config.getWheelOpacity());
+		assertEquals(ClientConfigBounds.MAX_WHEEL_TARGET_OPACITY, config.getWheelTargetOpacity());
 		assertEquals(ClientConfigBounds.MAX_WHEEL_FONT_SIZE, config.getWheelFontSize());
 		assertEquals(ClientConfigBounds.MIN_WHEEL_TARGET_FONT_SIZE, config.getWheelTargetFontSize());
 		assertEquals(
 			List.of(
 				new ClampWarning("wheelHoldMillis", Integer.MIN_VALUE, ClientConfigBounds.MIN_WHEEL_HOLD_MILLIS),
-				new ClampWarning("wheelTimeoutMillis", Integer.MAX_VALUE, ClientConfigBounds.MAX_WHEEL_TIMEOUT_MILLIS),
 				new ClampWarning("cancelHalfConeAngleDegrees", Integer.MIN_VALUE,
 					ClientConfigBounds.MIN_CANCEL_HALF_CONE_ANGLE_DEGREES),
 				new ClampWarning("wheelOpacity", Integer.MIN_VALUE, ClientConfigBounds.MIN_WHEEL_OPACITY),
+				new ClampWarning("wheelTargetOpacity", Integer.MAX_VALUE, ClientConfigBounds.MAX_WHEEL_TARGET_OPACITY),
 				new ClampWarning("wheelFontSize", Integer.MAX_VALUE, ClientConfigBounds.MAX_WHEEL_FONT_SIZE),
 				new ClampWarning("wheelTargetFontSize", Integer.MIN_VALUE,
 					ClientConfigBounds.MIN_WHEEL_TARGET_FONT_SIZE)),

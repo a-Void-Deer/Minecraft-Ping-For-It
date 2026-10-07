@@ -350,6 +350,10 @@ public class ConfigHandler <T extends IConfig> {
 			// Even a preservation-base merge must not resurrect retired radius keys.
 			ConfigVersionUpdater.removeLegacyWheelRadii(serialized.getAsJsonObject());
 		}
+		if (configType == ClientConfig.class
+			&& modVersion.compareTo(ConfigVersionUpdater.WHEEL_TIMEOUT_REMOVED_VERSION) >= 0) {
+			ConfigVersionUpdater.removeLegacyWheelTimeout(serialized.getAsJsonObject());
+		}
 
 		JsonElement marker = new com.google.gson.JsonPrimitive(modVersion.originalVersion());
 		serialized.getAsJsonObject().add(ConfigVersionUpdater.VERSION_KEY, marker);

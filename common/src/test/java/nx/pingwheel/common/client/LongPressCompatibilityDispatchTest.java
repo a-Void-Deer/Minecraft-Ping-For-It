@@ -171,7 +171,7 @@ class LongPressCompatibilityDispatchTest {
 			this.delayedFirst = delayedFirst;
 			this.ready = ready;
 			machine = new PingInteractionStateMachine(coordinator, active, clock, target -> verdict,
-				new CancelCandidatePicker(), PingInteractionLogger.noop(), () -> HOLD, () -> 1000L);
+				new CancelCandidatePicker(), PingInteractionLogger.noop(), () -> HOLD);
 			limiter = new ClientCreateRateLimiter(clock, new ClientRateLimitPolicy(exhaustLimiter ? 1 : 3, 1000));
 			if (exhaustLimiter) assertTrue(limiter.tryAcquire(), "explicitly consume fixture allowance before first action");
 		}

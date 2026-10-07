@@ -31,8 +31,8 @@ import nx.pingwheel.common.interaction.wheel.WheelSelection;
  * <p>Timing is driven by an injected {@link InteractionTimeSource}; all hold
  * durations are computed from monotonic differences, and a clock that moves
  * backwards while an interaction is active is rejected with an
- * {@link IllegalStateException}. Presentation-only threshold and timeout
- * transitions are driven by {@link #presentFrame(boolean)} on GUI/render
+ * {@link IllegalStateException}. Presentation-only threshold transitions are
+ * driven by {@link #presentFrame(boolean)} on GUI/render
  * cadence, while {@link #update(boolean, WheelSelection, CancellationContext)}
  * remains the tick-authoritative action boundary. No Minecraft, networking, or
  * rendering concerns live here: phase 6 remains authoritative for validation
@@ -53,12 +53,6 @@ public final class PingInteractionStateMachine {
 	 */
 	public static final long LONG_PRESS_MILLIS = 300L;
 
-	/**
-	 * The default maximum wheel-open duration in milliseconds: once the wheel
-	 * has been open this long it closes with no action.
-	 */
-	public static final long WHEEL_TIMEOUT_MILLIS = 5000L;
-
 	private final PingCaptureCoordinator coordinator;
 	private final ActiveInteraction activeInteraction;
 	private final InteractionTimeSource timeSource;
@@ -66,10 +60,8 @@ public final class PingInteractionStateMachine {
 	private final CancelCandidatePicker cancelCandidatePicker;
 	private final PingInteractionLogger logger;
 	private final LongSupplier wheelHoldMillisSupplier;
-	private final LongSupplier wheelTimeoutMillisSupplier;
 	private final boolean supplierValuesUseClientConfigBounds;
 	private long longPressMillis = LONG_PRESS_MILLIS;
-	private long wheelTimeoutMillis = WHEEL_TIMEOUT_MILLIS;
 
 	private PingInteractionPhase phase = PingInteractionPhase.IDLE;
 	private InteractionToken token;
@@ -77,14 +69,13 @@ public final class PingInteractionStateMachine {
 	private InteractionToken releasingSelectorToken;
 	private CapturedPingContext capturedContext;
 	private long pressTimeMillis;
-	private long wheelOpenTimeMillis;
 	private long lastObservedTimeMillis;
 	private boolean releaseObserved;
 	private WheelSelection selection = WheelSelection.NONE;
 	private List<PingType> wheelPingTypes = List.of();
 
 	/**
-	 * Creates a state machine with the default thresholds.
+	 * Creates a state machine with the default long-press threshold.
 	 */
 	public PingInteractionStateMachine(
 		PingCaptureCoordinator coordinator,
@@ -101,15 +92,13 @@ public final class PingInteractionStateMachine {
 			targetValidator,
 			cancelCandidatePicker,
 			logger,
-			() -> LONG_PRESS_MILLIS,
-			() -> WHEEL_TIMEOUT_MILLIS);
+			() -> LONG_PRESS_MILLIS);
 	}
 
 	/**
-	 * Creates a state machine whose interaction settings are read lazily from
-	 * the supplied providers. The hold threshold is read once by
-	 * {@link #press()}, and the wheel timeout is read once when the wheel opens,
-	 * so changing a live config never changes an interaction already in progress.
+	 * Creates a state machine whose long-press threshold is read lazily from the
+	 * supplied provider. The hold threshold is read once by {@link #press()}, so
+	 * changing a live config never changes an interaction already in progress.
 	 */
 	public PingInteractionStateMachine(
 		PingCaptureCoordinator coordinator,
@@ -118,8 +107,7 @@ public final class PingInteractionStateMachine {
 		TargetValidator targetValidator,
 		CancelCandidatePicker cancelCandidatePicker,
 		PingInteractionLogger logger,
-		LongSupplier wheelHoldMillisSupplier,
-		LongSupplier wheelTimeoutMillisSupplier
+		LongSupplier wheelHoldMillisSupplier
 	) {
 		this(
 			coordinator,
@@ -129,25 +117,23 @@ public final class PingInteractionStateMachine {
 			cancelCandidatePicker,
 			logger,
 			wheelHoldMillisSupplier,
-			wheelTimeoutMillisSupplier,
 			true);
 	}
 
 	/**
-	 * Creates a state machine with custom positive thresholds.
+	 * Creates a state machine with a custom positive long-press threshold.
 	 *
 	 * <p>Package-private test seam: production callers use the default
-	 * thresholds above.
+	 * threshold above.
 	 */
-		PingInteractionStateMachine(
+	PingInteractionStateMachine(
 		PingCaptureCoordinator coordinator,
 		ActiveInteraction activeInteraction,
 		InteractionTimeSource timeSource,
 		TargetValidator targetValidator,
 		CancelCandidatePicker cancelCandidatePicker,
 		PingInteractionLogger logger,
-		long longPressMillis,
-		long wheelTimeoutMillis
+		long longPressMillis
 	) {
 		this(
 			coordinator,
@@ -157,7 +143,6 @@ public final class PingInteractionStateMachine {
 			cancelCandidatePicker,
 			logger,
 			constantThresholdSupplier("longPressMillis", longPressMillis),
-			constantThresholdSupplier("wheelTimeoutMillis", wheelTimeoutMillis),
 			false);
 	}
 
@@ -169,7 +154,6 @@ public final class PingInteractionStateMachine {
 		CancelCandidatePicker cancelCandidatePicker,
 		PingInteractionLogger logger,
 		LongSupplier wheelHoldMillisSupplier,
-		LongSupplier wheelTimeoutMillisSupplier,
 		boolean supplierValuesUseClientConfigBounds
 	) {
 		this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
@@ -179,7 +163,6 @@ public final class PingInteractionStateMachine {
 		this.cancelCandidatePicker = Objects.requireNonNull(cancelCandidatePicker, "cancelCandidatePicker");
 		this.logger = Objects.requireNonNull(logger, "logger");
 		this.wheelHoldMillisSupplier = Objects.requireNonNull(wheelHoldMillisSupplier, "wheelHoldMillisSupplier");
-		this.wheelTimeoutMillisSupplier = Objects.requireNonNull(wheelTimeoutMillisSupplier, "wheelTimeoutMillisSupplier");
 		this.supplierValuesUseClientConfigBounds = supplierValuesUseClientConfigBounds;
 	}
 
@@ -265,9 +248,9 @@ public final class PingInteractionStateMachine {
 	}
 
 	/**
-	 * Releases an actually opened native selector. All ownership and deadline
-	 * checks precede proposal evaluation; an old caller cannot release a newer
-	 * interaction or advance its clock. Pre-open/default release remains on
+	 * Releases an actually opened native selector. All ownership checks precede
+	 * proposal evaluation; an old caller cannot release a newer interaction or
+	 * advance its clock. Pre-open/default release remains on
 	 * {@link #updateAt(boolean, WheelSelection, CancellationContext, long)}.
 	 *
 	 * <p>The candidate lookup must be the immutable table bound to this selector,
@@ -293,15 +276,10 @@ public final class PingInteractionStateMachine {
 			return SelectorReleaseResult.empty();
 		}
 
-		long now = observeTimeValue(observedTimeMillis);
+		observeTimeValue(observedTimeMillis);
 		Optional<CapturedPingContext> capture = activeInteraction.currentContext();
 		if (!activeInteraction.isCurrent(expectedToken) || capture.isEmpty()
 			|| capture.get() != capturedContext || capture.get().token() != expectedToken) {
-			resetMachineState();
-			return SelectorReleaseResult.empty();
-		}
-		if (now - wheelOpenTimeMillis >= wheelTimeoutMillis) {
-			logger.debug("wheel timeout: token={} openMillis={}", expectedToken.sequence(), now - wheelOpenTimeMillis);
 			resetMachineState();
 			return SelectorReleaseResult.empty();
 		}
@@ -430,7 +408,7 @@ public final class PingInteractionStateMachine {
 		}
 
 		if (phase == PingInteractionPhase.WHEEL_OPEN) {
-			return updateWheelOpen(keyDown, wheelSelection, cancellationContext, now);
+			return updateWheelOpen(keyDown, wheelSelection, cancellationContext);
 		}
 
 		return updatePressed(keyDown, capture, now);
@@ -440,10 +418,9 @@ public final class PingInteractionStateMachine {
 	 * Advances presentation-only timing from one GUI/render frame.
 	 *
 	 * <p>This method may open the wheel once a capture-ready interaction has
-	 * reached the long-press threshold, or silently close an already-open wheel
-	 * after its maximum duration. It never validates a target, consumes a wheel
-	 * selection, or emits an action. The press timestamp remains the baseline
-	 * even when the capture arrived asynchronously after the threshold.
+	 * reached the long-press threshold. It never validates a target, consumes a
+	 * wheel selection, or emits an action. The press timestamp remains the
+	 * baseline even when the capture arrived asynchronously after the threshold.
 	 *
 	 * <p>A release observed by a frame does not commit or cancel anything by
 	 * itself; the event/frame action path owns the single release action.
@@ -489,13 +466,6 @@ public final class PingInteractionStateMachine {
 		}
 
 		if (phase == PingInteractionPhase.WHEEL_OPEN) {
-			long openDuration = now - wheelOpenTimeMillis;
-
-			if (openDuration >= wheelTimeoutMillis) {
-				logger.debug("wheel timeout: token={} openMillis={}", token.sequence(), openDuration);
-				resetMachineState();
-			}
-
 			return;
 		}
 
@@ -506,7 +476,7 @@ public final class PingInteractionStateMachine {
 		long elapsed = now - pressTimeMillis;
 
 		if (elapsed >= longPressMillis) {
-			openWheel(capture.get(), now);
+			openWheel(capture.get());
 		}
 	}
 
@@ -577,20 +547,8 @@ public final class PingInteractionStateMachine {
 	private Optional<PingInteractionAction> updateWheelOpen(
 		boolean keyDown,
 		WheelSelection wheelSelection,
-		CancellationContext cancellationContext,
-		long now
+		CancellationContext cancellationContext
 	) {
-		// Rendering normally owns visible timeout transitions, but a release tick
-		// can arrive after the last frame. The same observed monotonic timestamp
-		// must win before selection or release can commit an action.
-		long openDuration = now - wheelOpenTimeMillis;
-
-		if (openDuration >= wheelTimeoutMillis) {
-			logger.debug("wheel timeout: token={} openMillis={}", token.sequence(), openDuration);
-			resetMachineState();
-			return Optional.empty();
-		}
-
 		WheelSelection effective = normalizeSelection(wheelSelection);
 
 		if (!effective.equals(selection)) {
@@ -657,16 +615,9 @@ public final class PingInteractionStateMachine {
 		return Optional.of(new PingInteractionAction.TargetGone(context, reason));
 	}
 
-	private void openWheel(CapturedPingContext context, long now) {
-		long configuredTimeoutMillis = readConfiguredThreshold(
-			"wheelTimeoutMillis",
-			wheelTimeoutMillisSupplier,
-			ClientConfigBounds.MIN_WHEEL_TIMEOUT_MILLIS,
-			ClientConfigBounds.MAX_WHEEL_TIMEOUT_MILLIS);
+	private void openWheel(CapturedPingContext context) {
 		this.capturedContext = context;
 		this.wheelPingTypes = List.copyOf(context.resolvedTarget().targetType().pingTypes());
-		this.wheelOpenTimeMillis = now;
-		this.wheelTimeoutMillis = configuredTimeoutMillis;
 		this.selection = WheelSelection.NONE;
 		this.phase = PingInteractionPhase.WHEEL_OPEN;
 		logger.debug("wheel open: token={} pingTypeCount={}", token.sequence(), wheelPingTypes.size());
@@ -710,9 +661,7 @@ public final class PingInteractionStateMachine {
 		token = null;
 		capturedContext = null;
 		pressTimeMillis = 0L;
-		wheelOpenTimeMillis = 0L;
 		longPressMillis = LONG_PRESS_MILLIS;
-		wheelTimeoutMillis = WHEEL_TIMEOUT_MILLIS;
 		releaseObserved = false;
 		selection = WheelSelection.NONE;
 		wheelPingTypes = List.of();

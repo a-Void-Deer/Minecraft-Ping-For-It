@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class PingSelectorReleaseTest {
 	private static final String DIMENSION = "minecraft:overworld";
 	private static final long HOLD = 20;
-	private static final long TIMEOUT = 70;
+	private static final long LONG_AFTER_OPEN = 600_000L;
 	private static final CapturedRay RAY = new CapturedRay(new WorldVector(1, 2, 3), new WorldVector(0, 0, 1));
 
 	@Test
@@ -82,31 +82,23 @@ class PingSelectorReleaseTest {
 	}
 
 	@Test
-	void deadlineWinsBetweenLastFrameAndReleaseWithoutEvaluatingAnyPort() {
+	void elapsedTimeAloneNeverClosesAnActuallyOpenSelector() {
 		Harness h = new Harness();
 		h.open();
-		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, HOLD + TIMEOUT,
-			unexpectedProposal(), id -> fail("timeout lookup"), unexpectedCancellation()));
-		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
-	}
 
-	@Test
-	void timeoutSnapshotIsTakenAtActualOpenAndCannotChangeDuringSelector() {
-		Harness h = new Harness();
-		long[] timeout = { 1000L };
-		var machine = new PingInteractionStateMachine(h.coordinator, h.active, h.clock,
-			target -> TargetValidation.valid(), new CancelCandidatePicker(), PingInteractionLogger.noop(),
-			() -> 200L, () -> timeout[0]);
-		InteractionToken token = machine.press();
-		h.coordinator.complete(token, TargetSnapshotFactory.location(DIMENSION, 4, 5, 6), RAY);
-		// Capture readiness/holding does not use any part of the open timeout.
-		long openedAt = 1000;
-		h.clock.now = openedAt;
-		machine.presentFrame(true);
-		timeout[0] *= 2;
-		assertEquals(SelectorReleaseResult.empty(), machine.releaseSelectorAt(token, openedAt + timeout[0] / 2,
-			unexpectedProposal(), id -> fail("frozen timeout lookup"), unexpectedCancellation()));
-		assertEquals(PingInteractionPhase.IDLE, machine.phase());
+		h.clock.now = LONG_AFTER_OPEN;
+		assertTrue(h.machine.update(true, WheelSelection.NONE, h.cancellation()).isEmpty());
+		h.machine.presentFrame(true);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+		assertSame(h.token, h.machine.currentToken().orElseThrow());
+
+		var result = h.machine.releaseSelectorAt(h.token, LONG_AFTER_OPEN,
+			() -> new SelectorReleaseProposal.Create<>("ordinary", h.ordinary.resolvedTarget(),
+				h.ordinary.resolvedTarget().targetType().defaultPingType(), "create"),
+			id -> Optional.of(h.ordinary), unexpectedCancellation());
+		assertInstanceOf(PingInteractionAction.CreatePing.class, result.action().orElseThrow());
+		assertSame(h.ordinary.resolvedTarget(), h.validated, "release validates the frozen target exactly once");
+		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
 	}
 
 	@Test
@@ -312,18 +304,6 @@ class PingSelectorReleaseTest {
 	}
 
 	@Test
-	void releaseJustBeforeDeadlineKeepsTheOneValidatedCreate() {
-		Harness h = new Harness();
-		h.open();
-		var result = h.machine.releaseSelectorAt(h.token, HOLD + TIMEOUT - 1,
-			() -> new SelectorReleaseProposal.Create<>("ordinary", h.ordinary.resolvedTarget(),
-				h.ordinary.resolvedTarget().targetType().defaultPingType(), "create"),
-			id -> Optional.of(h.ordinary), unexpectedCancellation());
-		assertInstanceOf(PingInteractionAction.CreatePing.class, result.action().orElseThrow());
-		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
-	}
-
-	@Test
 	void abortReenteredFromTerminalReleasePortsStillInvalidatesBeforeAdmittingAnything() {
 		for (String port : List.of("proposal", "lookup", "cancellation", "validator")) {
 			Harness h = new Harness();
@@ -368,7 +348,7 @@ class PingSelectorReleaseTest {
 		CapturedPingContext ordinary;
 		Harness() {
 			machine = new PingInteractionStateMachine(coordinator, active, clock, this::validate,
-				new CancelCandidatePicker(), PingInteractionLogger.noop(), HOLD, TIMEOUT);
+				new CancelCandidatePicker(), PingInteractionLogger.noop(), HOLD);
 		}
 		TargetValidation validate(ResolvedTarget target) {
 			assertEquals(PingInteractionPhase.IDLE, machine.phase(), "terminal before validator");

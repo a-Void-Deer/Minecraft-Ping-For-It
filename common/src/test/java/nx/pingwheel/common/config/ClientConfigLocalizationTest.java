@@ -85,16 +85,16 @@ class ClientConfigLocalizationTest {
 		String enUs;
 		try (InputStream stream = getClass().getClassLoader().getResourceAsStream(
 			"assets/pingforit/lang/en_us.json")) {
-			assertNotNull(stream);
+		assertNotNull(stream);
 			enUs = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
 		}
 
 		assertContainsKey(enUs, "settings.pingforit.wheel_hold_millis");
-		assertContainsKey(enUs, "settings.pingforit.wheel_timeout_millis");
 		assertContainsKey(enUs, "settings.pingforit.cancel_half_cone_angle_degrees");
 		assertContainsKey(enUs, "settings.pingforit.wheel_inner_radius");
 		assertContainsKey(enUs, "settings.pingforit.wheel_outer_radius");
 		assertContainsKey(enUs, "settings.pingforit.wheel_opacity");
+		assertContainsKey(enUs, "settings.pingforit.wheel_target_opacity");
 		assertContainsKey(enUs, "settings.pingforit.wheel_font_size");
 		assertContainsKey(enUs, "settings.pingforit.wheel_target_font_size");
 		assertContainsKey(enUs, "settings.pingforit.marker_display_duration");
@@ -140,6 +140,8 @@ class ClientConfigLocalizationTest {
 				"settings.pingforit.pass_through_transparent_blocks",
 				"settings.pingforit.mark_blacklisted_targets",
 				"settings.pingforit.mark_fluids",
+				"settings.pingforit.wheel_opacity",
+				"settings.pingforit.wheel_target_opacity",
 				"settings.pingforit.wheel_font_size",
 				"settings.pingforit.wheel_target_font_size",
 				"settings.pingforit.marker_display_duration",
@@ -160,9 +162,17 @@ class ClientConfigLocalizationTest {
 			nonBlankTranslation(json, locale, "unit.pingforit.milliseconds");
 			nonBlankTranslation(json, locale, "unit.pingforit.seconds");
 			nonBlankTranslation(json, locale, "value.pingforit.follow_server");
-			assertTrue(
+				assertTrue(
 				json.get("settings.pingforit.long_press_compatibility_slice_millis").getAsString().contains("%s"),
-				() -> "compatibility slice must be formatted: " + locale);
+					() -> "compatibility slice must be formatted: " + locale);
+			assertTrue(
+				json.get("settings.pingforit.wheel_target_opacity").getAsString().contains("%s"),
+				() -> "wheel target opacity must be formatted: " + locale);
+			assertFalse(json.has("settings.pingforit.wheel_timeout_millis"),
+				() -> "retired wheel timeout translation must be absent: " + locale);
+			assertFalse(json.has("settings.pingforit.wheel_timeout_millis.tooltip"),
+				() -> "retired wheel timeout tooltip must be absent: " + locale);
+			nonBlankTranslation(json, locale, "pingforit.spatial.back");
 		}
 	}
 

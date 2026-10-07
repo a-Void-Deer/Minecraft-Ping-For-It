@@ -25,6 +25,8 @@
 	"settings.pingforit.mark_blacklisted_targets": "Kara Listedeki Hedefleri İşaretle",
 	"settings.pingforit.mark_fluids": "Sıvıları İşaretle",
 	"settings.pingforit.ping_size": "Ping Boyutu: %s",
+	"settings.pingforit.wheel_opacity": "Tekerlek Opaklığı: %s",
+	"settings.pingforit.wheel_target_opacity": "Tekerlek Hedef Opaklığı: %s",
 	"settings.pingforit.wheel_font_size": "Tekerlek Seçenek Yazı Boyutu: %s",
 	"settings.pingforit.wheel_target_font_size": "Tekerlek Hedef Yazı Boyutu: %s",
 	"settings.pingforit.reset_all": "Tümünü Sıfırla",

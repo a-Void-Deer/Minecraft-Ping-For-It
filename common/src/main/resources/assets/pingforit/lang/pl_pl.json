@@ -25,6 +25,8 @@
 	"settings.pingforit.mark_blacklisted_targets": "Oznaczanie celów z czarnej listy",
 	"settings.pingforit.mark_fluids": "Oznaczanie płynów",
 	"settings.pingforit.ping_size": "Rozmiar pingu: %s",
+	"settings.pingforit.wheel_opacity": "Nieprzezroczystość koła: %s",
+	"settings.pingforit.wheel_target_opacity": "Przezroczystość celu koła: %s",
 	"settings.pingforit.wheel_font_size": "Rozmiar czcionki opcji koła: %s",
 	"settings.pingforit.wheel_target_font_size": "Rozmiar czcionki celu koła: %s",
 	"settings.pingforit.reset_all": "Resetuj wszystko",

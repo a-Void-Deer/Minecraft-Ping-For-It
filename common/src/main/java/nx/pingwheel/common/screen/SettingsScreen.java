@@ -541,12 +541,12 @@ public class SettingsScreen extends OptionsSubScreen {
 			case MARK_FLUIDS -> this.addOption(setting, this.getMarkFluidsOption(), false);
 			case SPATIAL_ROOT_DISTANCE -> this.addOption(setting, this.getSpatialRootDistanceOption(), false);
 			case WHEEL_OPACITY -> this.addOption(setting, this.getWheelOpacityOption(), false);
+			case WHEEL_TARGET_OPACITY -> this.addOption(setting, this.getWheelTargetOpacityOption(), false);
 			case WHEEL_TARGET_FONT_SIZE -> this.addOption(setting, this.getWheelTargetFontSizeOption(), false);
 			case WHEEL_OPTION_FONT_SIZE -> this.addOption(setting, this.getWheelOptionFontSizeOption(), false);
 			case SPATIAL_SHOW_TRAIL -> this.addOption(setting, this.getSpatialShowTrailOption(), false);
 			case SPATIAL_REDUCE_MOTION -> this.addOption(setting, this.getSpatialReduceMotionOption(), false);
 			case WHEEL_HOLD_MILLIS -> this.addOption(setting, this.getWheelHoldMillisOption(), false);
-			case WHEEL_TIMEOUT_MILLIS -> this.addOption(setting, this.getWheelTimeoutMillisOption(), false);
 			case LONG_PRESS_COMPATIBILITY_MODE -> this.addOption(setting, this.getLongPressCompatibilityModeOption(), true);
 			case LONG_PRESS_COMPATIBILITY_SLICE_MILLIS -> this.addOption(setting, this.getLongPressCompatibilitySliceMillisOption(), true);
 			case CANCEL_HALF_CONE_ANGLE_DEGREES -> this.addOption(setting, this.getCancelHalfConeAngleDegreesOption(), true);
@@ -2278,6 +2278,15 @@ public class SettingsScreen extends OptionsSubScreen {
 			config::setWheelOpacity);
 	}
 
+	private OptionInstance<Integer> getWheelTargetOpacityOption() {
+		final var text = LanguageUtils.settings("wheel_target_opacity");
+		return OptionUtils.ofInt(text.getKey(), MIN_WHEEL_TARGET_OPACITY, MAX_WHEEL_TARGET_OPACITY,
+			WHEEL_TARGET_OPACITY_STEP,
+			value -> value == 0 ? text.get(CommonComponents.OPTION_OFF) : text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			config::getWheelTargetOpacity,
+			config::setWheelTargetOpacity);
+	}
+
 	private OptionInstance<Integer> getWheelOptionFontSizeOption() {
 		final var text = LanguageUtils.settings("wheel_font_size");
 		return OptionUtils.ofInt(text.getKey(), MIN_WHEEL_FONT_SIZE, MAX_WHEEL_FONT_SIZE, WHEEL_FONT_SIZE_STEP,
@@ -2295,14 +2304,6 @@ public class SettingsScreen extends OptionsSubScreen {
 			value -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
 			config::getWheelTargetFontSize,
 			config::setWheelTargetFontSize);
-	}
-
-	private OptionInstance<Integer> getWheelTimeoutMillisOption() {
-		final var text = LanguageUtils.settings("wheel_timeout_millis");
-		return OptionUtils.ofInt(text.getKey(), MIN_WHEEL_TIMEOUT_MILLIS, MAX_WHEEL_TIMEOUT_MILLIS, WHEEL_TIMEOUT_MILLIS_STEP,
-			value -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
-			config::getWheelTimeoutMillis,
-			config::setWheelTimeoutMillis);
 	}
 
 	private OptionInstance<Integer> getCancelHalfConeAngleDegreesOption() {

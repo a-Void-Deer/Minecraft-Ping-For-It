@@ -119,7 +119,7 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
  *   <li>the shared {@link ActiveInteraction} plus
  *       {@link PingCaptureCoordinator} freeze the key-down capture;</li>
  *   <li>the {@link PingInteractionStateMachine} applies short/long-press,
- *       wheel, cancellation, and timeout rules;</li>
+ *       wheel, and cancellation rules;</li>
  *   <li>the {@link WheelMouseCapture} releases the mouse for the open wheel
  *       and re-grabs it only when this runtime released it;</li>
  *   <li>the {@link ClientPingActionDispatcher} maps the single emitted action
@@ -394,8 +394,7 @@ public final class ClientPingRuntime {
 			new CancelCandidatePicker(
 				() -> ClientConfig.HANDLER.getConfig().getCancelHalfConeAngleDegrees()),
 			logger,
-			() -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis(),
-			() -> ClientConfig.HANDLER.getConfig().getWheelTimeoutMillis());
+			() -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis());
 		ClientPresentation presentation = negotiatePresentation
 			? new ClientPresentation(packetSender::sendToServer)
 			: null;
@@ -438,8 +437,7 @@ public final class ClientPingRuntime {
 		var limiter = new ClientCreateRateLimiter(clock, policy);
 		var tracker = new CreateRequestTracker();
 		var machine = new PingInteractionStateMachine(coordinator, active, clock, validator, new CancelCandidatePicker(),
-			logger, () -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis(),
-			() -> ClientConfig.HANDLER.getConfig().getWheelTimeoutMillis());
+			logger, () -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis());
 		var runtime = new ClientPingRuntime(new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS), active, coordinator, machine,
 			new ClientPingActionDispatcher(sender, errors, logger, tracker, limiter, presentation), errors, logger,
 			new WheelMouseCapture(logger), tracker, limiter, clock, presentation, new PresentationReceiptFeedback() {
@@ -586,7 +584,7 @@ public final class ClientPingRuntime {
 		baselineMenuOpened = false;
 		ClientConfig config = ClientConfig.HANDLER.getConfig();
 		selectorSettings = config.getSpatialSelector().snapshot();
-		selectorStyle = SpatialOverlayRenderer.Style.fromLegacyFontSizes(config.getWheelOpacity(), config.getWheelFontSize(),
+		selectorStyle = SpatialOverlayRenderer.Style.fromLegacyFontSizes(config.getWheelOpacity(), config.getWheelTargetOpacity(), config.getWheelFontSize(),
 			config.getWheelTargetFontSize(), selectorSettings.rootDistance(), selectorSettings.showTrail(), selectorSettings.reduceMotion());
 		pendingRay = null;
 		if (pressRay == null) machine.abort();
@@ -1696,7 +1694,7 @@ public final class ClientPingRuntime {
 	 * Returns the frozen capture and wheel choices only while the wheel is
 	 * visibly open.  GUI code must use this read-only snapshot rather than
 	 * performing a new target selection; no snapshot is exposed during a press,
-	 * release, timeout, or idle phase.
+	 * release, or idle phase.
 	 */
 	public Optional<WheelPresentationSnapshot> wheelPresentation() {
 		if (machine.phase() != PingInteractionPhase.WHEEL_OPEN) {

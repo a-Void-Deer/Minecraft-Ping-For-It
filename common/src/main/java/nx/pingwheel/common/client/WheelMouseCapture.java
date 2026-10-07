@@ -19,7 +19,7 @@ import nx.pingwheel.common.interaction.state.PingInteractionPhase;
  *       {@code MouseHandler#releaseMouse()} so the cursor can select sectors.
  *       It remembers that only this controller released it, including when
  *       vanilla re-grabs the cursor after a screen closes mid-hold;</li>
- *   <li>on the transition out of {@code WHEEL_OPEN} (commit, timeout,
+ *   <li>on the transition out of {@code WHEEL_OPEN} (commit,
  *       cancellation, stale, superseded), the mouse is re-grabbed only when
  *       this controller released it and no screen is open. While a screen is
  *       open the re-grab is deferred to a later tick: the controller never

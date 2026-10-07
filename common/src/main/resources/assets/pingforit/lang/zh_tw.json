@@ -25,6 +25,8 @@
 	"settings.pingforit.mark_blacklisted_targets": "標記黑名單目標",
 	"settings.pingforit.mark_fluids": "標記流體",
 	"settings.pingforit.ping_size": "標記大小：%s",
+	"settings.pingforit.wheel_opacity": "輪盤不透明度：%s",
+	"settings.pingforit.wheel_target_opacity": "輪盤目標不透明度：%s",
 	"settings.pingforit.wheel_font_size": "輪盤選項字型大小：%s",
 	"settings.pingforit.wheel_target_font_size": "輪盤目標字型大小：%s",
 	"settings.pingforit.reset_all": "全部重設",

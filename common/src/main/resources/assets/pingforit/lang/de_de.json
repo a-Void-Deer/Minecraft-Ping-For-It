@@ -28,6 +28,8 @@
 	"settings.pingforit.player_info_mode.hold.tooltip": "Die Spieler Info wird angezeigt, wenn ‚%s‘ (%s) Tastenbelegung gehalten wird",
 	"settings.pingforit.team_color_mode": "Team Farbe",
 	"settings.pingforit.ping_size": "Ping-Größe: %s",
+	"settings.pingforit.wheel_opacity": "Radialmenü-Deckkraft: %s",
+	"settings.pingforit.wheel_target_opacity": "Radialmenü-Zieldeckkraft: %s",
 	"settings.pingforit.wheel_font_size": "Radialmenü-Optionsschrift: %s",
 	"settings.pingforit.wheel_target_font_size": "Radialmenü-Zielschrift: %s",
 	"settings.pingforit.reset_all": "Alles zurücksetzen",

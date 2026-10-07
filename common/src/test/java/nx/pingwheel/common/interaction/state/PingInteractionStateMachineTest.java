@@ -226,8 +226,7 @@ class PingInteractionStateMachineTest {
 			resolved -> TargetValidation.valid(),
 			new CancelCandidatePicker(),
 			h.logger,
-			100L,
-			5000L);
+			100L);
 		InteractionToken token = lowThreshold.press();
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
 
@@ -249,8 +248,7 @@ class PingInteractionStateMachineTest {
 			resolved -> TargetValidation.valid(),
 			new CancelCandidatePicker(),
 			h.logger,
-			100L,
-			5000L);
+			100L);
 		InteractionToken token = lowThreshold.press();
 
 		h.clock.now = 150L;
@@ -383,7 +381,7 @@ class PingInteractionStateMachineTest {
 	}
 
 	@Test
-	void wheelOpenAt4999RemainsOpenAnd5000TimesOutWithNoAction() {
+	void openedWheelNeverClosesByElapsedTimeAlone() {
 		Harness h = harness();
 		InteractionToken token = h.press();
 
@@ -391,22 +389,21 @@ class PingInteractionStateMachineTest {
 		h.clock.now = 300L;
 		h.machine.presentFrame(true);
 
-		h.clock.now = 300L + 4999L;
+		h.clock.now = 300L + 5000L;
 		assertTrue(h.machine.update(true, WheelSelection.NONE, emptyContext()).isEmpty());
+		h.machine.presentFrame(true);
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
 
-		h.clock.now = 300L + 5000L;
+		h.clock.now = 300L + 600_000L;
+		assertTrue(h.machine.update(true, WheelSelection.NONE, emptyContext()).isEmpty());
 		h.machine.presentFrame(true);
-		Optional<PingInteractionAction> action =
-			h.machine.update(false, WheelSelection.sector(pingType("go_to")), emptyContext());
-
-		assertTrue(action.isEmpty(), "timeout must win regardless of release/selection");
-		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
-		assertEquals(1L, h.logger.messages().stream().filter(m -> m.contains("wheel timeout")).count());
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+		assertSame(token, h.machine.currentToken().orElseThrow());
+		assertFalse(h.logger.messages().stream().anyMatch(m -> m.contains("wheel timeout")));
 	}
 
 	@Test
-	void tickTimeoutClosesWithoutRenderAndIgnoresReleaseSelection() {
+	void releaseWithoutInterveningFrameStillCommitsAfterLongElapsedTime() {
 		Harness h = harness();
 		InteractionToken token = h.press();
 
@@ -414,19 +411,18 @@ class PingInteractionStateMachineTest {
 		h.clock.now = 300L;
 		h.machine.presentFrame(true);
 
-		// No presentation frame observes the timeout before this release tick.
-		h.clock.now = 300L + 5000L;
+		// No presentation frame observes the elapsed time before this release tick.
+		h.clock.now = 300L + 600_000L;
 		Optional<PingInteractionAction> action = h.machine.update(
 			false, WheelSelection.sector(pingType("go_to")), emptyContext());
 
-		assertTrue(action.isEmpty());
+		assertEquals("go_to", ((PingInteractionAction.CreatePing) action.orElseThrow()).pingType().id());
 		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
-		assertEquals(WheelSelection.NONE, h.machine.selection());
-		assertEquals(1L, h.logger.messages().stream().filter(m -> m.contains("wheel timeout")).count());
+		assertTrue(h.machine.update(false, WheelSelection.NONE, emptyContext()).isEmpty());
 	}
 
 	@Test
-	void releaseTickJustBeforeTimeoutCommitsExactlyOnce() {
+	void releaseFrameAfterLongElapsedTimeLeavesCommitToTheReleaseTick() {
 		Harness h = harness();
 		InteractionToken token = h.press();
 
@@ -435,17 +431,21 @@ class PingInteractionStateMachineTest {
 		h.machine.presentFrame(true);
 
 		PingType goTo = pingType("go_to");
-		h.clock.now = 300L + 4999L;
-		Optional<PingInteractionAction> action = h.machine.update(
-			false, WheelSelection.sector(goTo), emptyContext());
+		h.machine.update(true, WheelSelection.sector(goTo), emptyContext());
 
+		h.clock.now = 300L + 600_000L;
+		h.machine.presentFrame(false);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+
+		Optional<PingInteractionAction> action =
+			h.machine.update(false, WheelSelection.sector(goTo), emptyContext());
 		assertEquals(goTo, ((PingInteractionAction.CreatePing) action.orElseThrow()).pingType());
 		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
 		assertTrue(h.machine.update(false, WheelSelection.sector(goTo), emptyContext()).isEmpty());
 	}
 
 	@Test
-	void tickTimeoutClearsSelectionAndFreshWheelStartsClean() {
+	void heldWheelRetainsSelectionUntilReleaseAndFreshPressStartsClean() {
 		Harness h = harness();
 		InteractionToken token = h.press();
 
@@ -456,16 +456,20 @@ class PingInteractionStateMachineTest {
 		h.machine.update(true, WheelSelection.sector(goTo), emptyContext());
 		assertEquals(WheelSelection.sector(goTo), h.machine.selection());
 
-		h.clock.now = 300L + 5000L;
+		h.clock.now = 300L + 600_000L;
 		assertTrue(h.machine.update(true, WheelSelection.sector(goTo), emptyContext()).isEmpty());
-		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+		assertEquals(WheelSelection.sector(goTo), h.machine.selection());
+
+		h.clock.now = 600_400L;
+		InteractionToken next = h.press();
+
+		assertEquals(PingInteractionPhase.PRESSED, h.machine.phase());
 		assertEquals(WheelSelection.NONE, h.machine.selection());
 		assertTrue(h.machine.wheelPingTypes().isEmpty());
 
-		h.clock.now = 5400L;
-		InteractionToken next = h.press();
 		h.complete(next, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
-		h.clock.now = 5700L;
+		h.clock.now = 600_700L;
 		h.machine.presentFrame(true);
 
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
@@ -734,14 +738,18 @@ class PingInteractionStateMachineTest {
 	}
 
 	@Test
-	void customThresholdsArePositiveAndHonored() {
+	void customThresholdIsPositiveAndHonored() {
 		Harness h = harness();
 		PingInteractionStateMachine custom = new PingInteractionStateMachine(
 			h.coordinator, h.interaction, h.clock,
-			r -> TargetValidation.valid(), new CancelCandidatePicker(), h.logger, 10L, 100L);
+			r -> TargetValidation.valid(), new CancelCandidatePicker(), h.logger, 10L);
 
 		InteractionToken token = custom.press();
 		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+
+		h.clock.now = 9L;
+		custom.presentFrame(true);
+		assertEquals(PingInteractionPhase.PRESSED, custom.phase());
 
 		h.clock.now = 10L;
 		custom.presentFrame(true);
@@ -750,26 +758,27 @@ class PingInteractionStateMachineTest {
 		h.clock.now = 110L;
 		assertTrue(custom.update(true, WheelSelection.NONE, emptyContext()).isEmpty());
 		custom.presentFrame(true);
-		assertEquals(PingInteractionPhase.IDLE, custom.phase());
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, custom.phase(),
+			"elapsed time alone never closes the wheel");
+		assertTrue(custom.update(false, WheelSelection.sector(pingType("go_to")), emptyContext()).isPresent());
 	}
 
 	@Test
-	void customConstructorRejectsNonPositiveThresholds() {
+	void customConstructorRejectsNonPositiveThreshold() {
 		Harness h = harness();
 
 		assertThrows(IllegalArgumentException.class, () -> new PingInteractionStateMachine(
 			h.coordinator, h.interaction, h.clock,
-			r -> TargetValidation.valid(), new CancelCandidatePicker(), h.logger, 0L, 100L));
+			r -> TargetValidation.valid(), new CancelCandidatePicker(), h.logger, 0L));
 		assertThrows(IllegalArgumentException.class, () -> new PingInteractionStateMachine(
 			h.coordinator, h.interaction, h.clock,
-			r -> TargetValidation.valid(), new CancelCandidatePicker(), h.logger, 10L, -1L));
+			r -> TargetValidation.valid(), new CancelCandidatePicker(), h.logger, -1L));
 	}
 
 	@Test
-	void configuredThresholdsAreSnapshottedAndNextInteractionSeesChanges() {
+	void configuredHoldThresholdIsSnapshottedAndNextInteractionSeesChanges() {
 		Harness h = harness();
 		AtomicLong holdMillis = new AtomicLong(500L);
-		AtomicLong timeoutMillis = new AtomicLong(1000L);
 		PingInteractionStateMachine configured = new PingInteractionStateMachine(
 			h.coordinator,
 			h.interaction,
@@ -777,8 +786,7 @@ class PingInteractionStateMachineTest {
 			r -> TargetValidation.valid(),
 			new CancelCandidatePicker(),
 			h.logger,
-			holdMillis::get,
-			timeoutMillis::get);
+			holdMillis::get);
 
 		InteractionToken first = configured.press();
 		holdMillis.set(1000L);
@@ -788,16 +796,17 @@ class PingInteractionStateMachineTest {
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, configured.phase(),
 			"the hold threshold is frozen at press time");
 
-		timeoutMillis.set(2000L);
+		// Elapsed time does not close the open wheel; release still commits.
 		h.clock.now = 1499L;
 		assertTrue(configured.update(true, WheelSelection.NONE, emptyContext()).isEmpty());
-		assertEquals(PingInteractionPhase.WHEEL_OPEN, configured.phase(),
-			"the timeout is frozen at wheel-open time");
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, configured.phase());
 		h.clock.now = 1500L;
-		assertTrue(configured.update(false, WheelSelection.sector(pingType("go_to")), emptyContext()).isEmpty());
+		PingType goTo = pingType("go_to");
+		Optional<PingInteractionAction> action =
+			configured.update(false, WheelSelection.sector(goTo), emptyContext());
+		assertEquals(goTo, ((PingInteractionAction.CreatePing) action.orElseThrow()).pingType());
 		assertEquals(PingInteractionPhase.IDLE, configured.phase());
 
-		holdMillis.set(1000L);
 		h.clock.now = 2000L;
 		InteractionToken second = configured.press();
 		h.complete(second, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));

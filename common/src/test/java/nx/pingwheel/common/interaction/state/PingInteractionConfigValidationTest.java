@@ -32,8 +32,7 @@ class PingInteractionConfigValidationTest {
 			resolved -> TargetValidation.valid(),
 			new CancelCandidatePicker(),
 			PingInteractionLogger.noop(),
-			holdMillis::get,
-			() -> 1000L);
+			holdMillis::get);
 
 		assertThrows(IllegalArgumentException.class, machine::press);
 		holdMillis.set(ClientConfigBounds.MAX_WHEEL_HOLD_MILLIS + 1L);

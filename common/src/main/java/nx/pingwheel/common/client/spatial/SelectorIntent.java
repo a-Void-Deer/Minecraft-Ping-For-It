@@ -5,7 +5,7 @@ import java.util.Objects;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 
-/** One single-use proposal. Runtime phase/token/timeout and server admission remain external. */
+/** One single-use proposal. Runtime phase/token and server admission remain external. */
 public sealed interface SelectorIntent<R> permits SelectorIntent.None, SelectorIntent.CreateTarget,
 	SelectorIntent.CreateProperty, SelectorIntent.SelectInventory, SelectorIntent.CancelOwnMarker,
 	SelectorIntent.ToggleNextCapture {

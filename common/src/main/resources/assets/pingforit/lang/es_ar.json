@@ -28,6 +28,8 @@
 	"settings.pingforit.player_info_mode.hold.tooltip": "La información del jugador se muestra cuando se mantiene la tecla \"%s\" (%s)",
 	"settings.pingforit.team_color_mode": "Color de equipo",
 	"settings.pingforit.ping_size": "Tamaño del ping: %s",
+	"settings.pingforit.wheel_opacity": "Opacidad de la rueda: %s",
+	"settings.pingforit.wheel_target_opacity": "Opacidad del objetivo de la rueda: %s",
 	"settings.pingforit.wheel_font_size": "Tamaño de fuente de opciones de la rueda: %s",
 	"settings.pingforit.wheel_target_font_size": "Tamaño de fuente del objetivo de la rueda: %s",
 	"settings.pingforit.reset_all": "Restablecer todo",
