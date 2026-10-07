@@ -366,6 +366,29 @@ class SpatialControllerTest {
 	}
 
 	@Test
+	void automaticBackEntryHasALocalizedLabelAndReleaseStaysNavigation() {
+		SpatialController controller = enteredContent(false, 500L, 200L, 210L);
+		SpatialController.Point contentOrigin = activeOrigin(controller);
+		moveToBearing(controller, contentOrigin, 282.0, 130.0, 220L);
+		assertEquals("content:back", controller.snapshot().focusId());
+
+		SpatialController.ChoiceView back = controller.snapshot().menus().get(1).choices().stream()
+			.filter(SpatialController.ChoiceView::back)
+			.findFirst()
+			.orElseThrow();
+		assertEquals("pingforit.spatial.back", back.label(), "the automatic Back entry carries a localized label key");
+		assertNull(back.action(), "the automatic Back entry commits nothing");
+		assertFalse(back.branch(), "the automatic Back entry opens nothing");
+
+		SpatialController.Release.NoAction noAction = assertInstanceOf(
+			SpatialController.Release.NoAction.class,
+			controller.release(230L));
+		assertEquals(SpatialController.Release.NoAction.Reason.NAVIGATION, noAction.reason());
+		assertEquals("content:back", noAction.choiceId());
+		assertFalse(controller.isActive(), "a Back release ends the session without committing");
+	}
+
+	@Test
 	void qualifiedTurnEntersBranchAtCornerWithoutDwell() {
 		SpatialController controller = new SpatialController(root(), tuning(200L, false, 500L));
 		controller.start(0L);

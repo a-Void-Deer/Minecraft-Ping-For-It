@@ -7,7 +7,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import org.junit.jupiter.api.Test;
+import nx.pingwheel.common.client.spatial.SpatialController;
+import nx.pingwheel.common.client.spatial.SpatialMenu;
 import nx.pingwheel.common.client.spatial.SpatialSelectorSession;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.PingTypeCatalog;
@@ -70,5 +73,33 @@ class NativeSelectorContentTest {
 		closeOnOpen.set(true); owner[0].begin(new Object());
 		assertEquals(0, inventory.stats().previewChannels());
 		assertEquals(1, sent.stream().filter(p -> p instanceof InventoryC2SPacket i && i.kind() == InventoryC2SPacket.Kind.CLOSE).count());
+	}
+	@Test void nullLabelIsEmptyAndUnknownKeyKeepsTranslationFallback() {
+		var content = new NativeSelectorContent(capture(), null, () -> null, ignored -> List.of(),
+			ref -> Component.literal(ref.fieldId()), json -> null);
+		Component back = assertDoesNotThrow(() -> content.label(null));
+		assertEquals("", back.getString(), "a defensive null label must resolve to an empty component");
+		assertFalse(back.getContents() instanceof TranslatableContents, "a null label must not fabricate a translation key");
+		Component unknown = content.label("pingforit.selector.unknown.key");
+		assertInstanceOf(TranslatableContents.class, unknown.getContents(), "an unknown non-empty key keeps the translation fallback");
+		assertEquals("pingforit.selector.unknown.key", ((TranslatableContents) unknown.getContents()).getKey());
+	}
+	@Test void controllerAutomaticBackEntryResolvesThroughTheContentAdapterAsLocalizedKey() {
+		SpatialMenu root = SpatialMenu.of("root", SpatialMenu.Choice.branch("content", "content",
+			SpatialMenu.of("content", SpatialMenu.Choice.leaf("content:items", "items", "ping:attention"))).withSector(0.0, 360.0));
+		SpatialController controller = new SpatialController(root, new SpatialController.Tuning(36.0, 110.0, 200L, false, 500L));
+		controller.start(0L);
+		controller.movePhysical(0.0, -200.0, 10L);
+		controller.tick(210L);
+		assertEquals(2, controller.snapshot().menus().size(), "helper precondition: content entered");
+		SpatialController.ChoiceView back = controller.snapshot().menus().get(1).choices().stream()
+			.filter(SpatialController.ChoiceView::back).findFirst().orElseThrow();
+		assertEquals("pingforit.spatial.back", back.label(), "the controller-generated Back entry carries a localized key");
+		var content = new NativeSelectorContent(capture(), null, () -> null, ignored -> List.of(),
+			ref -> Component.literal(ref.fieldId()), json -> null);
+		Component resolved = content.label(back.label());
+		assertInstanceOf(TranslatableContents.class, resolved.getContents());
+		assertEquals("pingforit.spatial.back", ((TranslatableContents) resolved.getContents()).getKey());
+		controller.cancel();
 	}
 }

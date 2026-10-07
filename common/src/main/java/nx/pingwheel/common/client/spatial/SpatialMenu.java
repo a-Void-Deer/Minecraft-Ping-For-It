@@ -96,7 +96,7 @@ public record SpatialMenu(String id, List<Choice> choices) {
 
 		/** The navigation entry synthesized by the controller for a submenu. */
 		public static Choice back(String id) {
-			return new Choice(id, null, null, null, true, false, false, null, null);
+			return new Choice(id, "pingforit.spatial.back", null, null, true, false, false, null, null);
 		}
 
 		/** Returns a copy carrying caller-fixed root geometry. */

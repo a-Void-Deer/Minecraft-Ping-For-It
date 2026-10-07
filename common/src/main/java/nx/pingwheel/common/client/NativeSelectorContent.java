@@ -84,7 +84,10 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 		return closed || preview == null ? Optional.empty() : preview.intent(capture.token(), ref, annotation);
 	}
 
-	Component label(String key) { return labels.getOrDefault(key, Component.translatable(key)); }
+	/** Null remains a defensive fallback; synthesized Back entries carry a localized key. */
+	Component label(String key) {
+		return key == null ? Component.empty() : labels.getOrDefault(key, Component.translatable(key));
+	}
 
 	@Override
 	public SpatialSelectorSession.ContentProjection<ClientInventory.PreviewEntryReference> read(

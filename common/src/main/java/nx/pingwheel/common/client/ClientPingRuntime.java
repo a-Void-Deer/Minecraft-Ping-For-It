@@ -826,7 +826,8 @@ public final class ClientPingRuntime {
 		var snapshot = selector == null ? null : selector.snapshot();
 		selectorPaint.drawFrame(graphics, snapshot == null ? null : snapshot.radial(),
 			snapshot == null ? null : snapshot.inventoryView(), choice -> selectorContent == null
-				? Component.translatable(choice.label()) : selectorContent.label(choice.label()), selectorStyle,
+				? choice.label() == null ? Component.empty() : Component.translatable(choice.label())
+				: selectorContent.label(choice.label()), selectorStyle,
 			java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeSource.nowMillis()));
 	}
 	public void prepareInventoryTracking(nx.pingwheel.common.render.WorldRenderContext frame) {

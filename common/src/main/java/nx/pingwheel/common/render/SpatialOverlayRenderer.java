@@ -566,7 +566,7 @@ public final class SpatialOverlayRenderer {
 	) {
 		SpatialController.ChoiceView choice = node.choice();
 		boolean selected = node.selected();
-		Component label = node.label() == null ? Component.empty() : node.label();
+		Component label = nodeLabel(choice, node.label());
 		double boxWidth = Math.max(MIN_BOX_WIDTH, font.width(label) * style.optionTextScale() + 8.0);
 		double boxHeight = Math.max(BOX_HEIGHT, font.lineHeight * style.optionTextScale() + 6.0);
 		int left = (int) Math.round(-boxWidth / 2.0);
@@ -607,6 +607,12 @@ public final class SpatialOverlayRenderer {
 		} finally {
 			pose.popPose();
 		}
+	}
+
+	/** Keeps the renderer defensive when an older projection still supplies no Back label. */
+	private static Component nodeLabel(SpatialController.ChoiceView choice, Component resolved) {
+		if (resolved != null && !resolved.getString().isBlank()) return resolved;
+		return choice.back() ? Component.translatable("pingforit.spatial.back") : Component.empty();
 	}
 
 	private static void drawMenuLinks(

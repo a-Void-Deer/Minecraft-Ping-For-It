@@ -637,7 +637,7 @@ public final class SpatialController {
 		if (!hasBack) {
 			resolved.add(new Resolved(
 				menu.menu.id() + ":back",
-				null,
+				"pingforit.spatial.back",
 				null,
 				null,
 				true,
