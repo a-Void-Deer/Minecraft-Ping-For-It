@@ -110,4 +110,46 @@ class PresentationPropertyFormatterTest {
 		assertEquals(List.of(new PresentationPropertyFormatter.LabelProperty(HEALTH, null)),
 			PresentationPropertyFormatter.plan(view), "only the default and explicitly annotated refs produce lines");
 	}
+
+	@Test void targetNameDefaultIsExcludedFromThePropertyPlan() {
+		var name = PresentationPropertyRef.root(BASIC, "minecraft:target.name");
+		var section = new PresentationSection(BASIC, 1,
+			Map.of("minecraft:target.name", new PresentationValue.Text("{\"text\":\"Named\"}")), false);
+		for (String targetType : List.of("block", "entity_block", "location")) {
+			var view = new PresentationView(targetType, name, Map.of(BASIC, section));
+			assertTrue(PresentationPropertyFormatter.plan(view).isEmpty(),
+				targetType + ": the name default must not add a second line beside the authoritative name");
+			assertTrue(ClientPresentation.defaultLabels(view).isEmpty());
+			assertNotNull(view.property(name), "the name value stays available to the separate name path");
+		}
+	}
+
+	@Test void explicitTargetNameAnnotationCannotDuplicateTheAuthoritativeName() {
+		var name = PresentationPropertyRef.root(BASIC, "minecraft:target.name");
+		var section = new PresentationSection(BASIC, 1, Map.of(
+			"minecraft:entity.health", new PresentationValue.NumberValue(5),
+			"minecraft:entity.max_health", new PresentationValue.NumberValue(20),
+			"minecraft:target.name", new PresentationValue.Text("{\"text\":\"Named\"}")), false,
+			Map.of(name, "attention"));
+		var view = new PresentationView("entity", HEALTH, Map.of(BASIC, section));
+		assertEquals(List.of(new PresentationPropertyFormatter.LabelProperty(HEALTH, null)),
+			PresentationPropertyFormatter.plan(view),
+			"the annotated name is excluded while the non-name default still produces its line");
+		List<String> labels = ClientPresentation.defaultLabels(view);
+		assertEquals(1, labels.size());
+		assertTrue(labels.stream().noneMatch(line -> line.contains("Named")),
+			"no property line repeats the authoritative target name");
+	}
+
+	@Test void droppedItemDefaultAndCountContextAreUnaffectedByTheNameExclusion() {
+		var item = PresentationPropertyRef.root(BASIC, "minecraft:item.id");
+		var section = new PresentationSection(BASIC, 1, Map.of(
+			"minecraft:item.id", new PresentationValue.Text("minecraft:cobblestone"),
+			"minecraft:item.count", new PresentationValue.NumberValue(64)), false);
+		var view = new PresentationView("dropped_item", item, Map.of(BASIC, section));
+		assertEquals(List.of(new PresentationPropertyFormatter.LabelProperty(item, null)),
+			PresentationPropertyFormatter.plan(view),
+			"the dropped-item default is not the name and stays displayable");
+		assertEquals(1, ClientPresentation.defaultLabels(view).size());
+	}
 }

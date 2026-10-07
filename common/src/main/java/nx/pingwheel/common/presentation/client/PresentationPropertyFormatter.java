@@ -5,7 +5,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
@@ -29,7 +28,12 @@ final class PresentationPropertyFormatter {
 		return List.copyOf(result);
 	}
 
-	/** The default goes first, followed by distinct explicit server annotations in ref order. */
+	/**
+	 * The default goes first, followed by distinct explicit server annotations in
+	 * ref order. The root {@code minecraft:target.name} is excluded: the HUD
+	 * renders the authoritative name on its own line, so neither a name default
+	 * reference nor a name annotation may add a duplicate property line.
+	 */
 	static List<LabelProperty> plan(PresentationView view) {
 		List<LabelProperty> result = new ArrayList<>();
 		Set<PresentationPropertyRef> shown = new HashSet<>();
@@ -50,6 +54,7 @@ final class PresentationPropertyFormatter {
 
 	private static boolean displayable(PresentationView view, PresentationPropertyRef ref) {
 		if (ref == null || view.property(ref) == null) return false;
+		if (ref.isRoot() && ClientPresentation.NAME.equals(ref.fieldId())) return false;
 		return !ref.isRoot() || !HEALTH.equals(ref.fieldId())
 			|| (view.property(ref) instanceof PresentationValue.NumberValue
 				&& view.field(ref.adapterId(), MAX_HEALTH) instanceof PresentationValue.NumberValue);
@@ -101,8 +106,6 @@ final class PresentationPropertyFormatter {
 		String named = fieldName(view, ref);
 		if (!ref.recordPath().isEmpty()) named = fieldName(view, ref.recordPath().get(ref.recordPath().size() - 1), null);
 		if (value instanceof PresentationValue.Text text) {
-			// Target-name JSON is decoded for the separate name label; never dump it here.
-			if (field.equals(ClientPresentation.NAME) && ref.isRoot()) return resolvedTargetName(text.value());
 			return format("text", named, shortText(text.value()));
 		}
 		if (value instanceof PresentationValue.NumberValue number) return format("number", named, number(number.value()));
@@ -113,14 +116,6 @@ final class PresentationPropertyFormatter {
 		if (value instanceof PresentationValue.Sequence sequence)
 			return format("record", named, Integer.toString(sequence.values().size()));
 		return null;
-	}
-
-	private static String resolvedTargetName(String json) {
-		try {
-			Minecraft game = Minecraft.getInstance();
-			return game == null || game.level == null ? null
-				: Component.Serializer.fromJson(json, game.level.registryAccess()).getString();
-		} catch (RuntimeException | LinkageError invalid) { return null; }
 	}
 
 	private static String fieldName(PresentationView view, PresentationPropertyRef ref) {
