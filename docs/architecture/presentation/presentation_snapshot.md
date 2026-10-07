@@ -429,17 +429,20 @@ the existing health-line rule that requires both current health and maximum
 health to be authorized and captured, a dropped item's `minecraft:item.id`
 formatted with its count, and `minecraft:target.name` for entity-block, block,
 and location targets. The default reference controls the marker's ordinary
-display, may be formatted without a Ping Type, and selects which authorized
-property the HUD presents first; it does not limit which fields remain available
-or received, and it is not a legacy marker-shape fallback. The marker name is
-sent whenever the server authorizes and knows it, independently of the default
-reference and of any non-null property annotation; the name is not exempt from
-the field policy. The HUD presents the default reference and the properties
-carrying an explicit non-null Ping Type annotation in a deterministic,
-de-duplicated order within the existing per-provider line cap. A field whose
-annotation is null is still retained and server-projected but is not displayed
-unless the default reference selects it, and presenting count context still
-requires its parent field to be authorized.
+  display, may be formatted without a Ping Type, and selects which authorized
+  property the HUD presents first; it does not limit which fields remain available
+  or received, and it is not a legacy marker-shape fallback. For entity-block,
+  block, and location targets, the `minecraft:target.name` default is consumed by
+  the authoritative marker name line rather than added as a second property line.
+  The marker name is sent whenever the server authorizes and knows it,
+  independently of the default reference and of any non-null property annotation;
+  the name is not exempt from the field policy. The HUD presents the default
+  non-name reference and the properties carrying an explicit non-null Ping Type
+  annotation in a deterministic, de-duplicated order within the existing
+  per-provider line cap. A field whose annotation is null is still retained and
+  server-projected but is not displayed unless the default reference selects it,
+  and presenting count context still requires its parent field to be authorized.
+  An annotation on `minecraft:target.name` does not add another name line.
 
 Property Ping Types are code-defined and independent of the whole-marker Ping
 Type list owned by [catalogs](../identity/catalogs.md). The default allowed set

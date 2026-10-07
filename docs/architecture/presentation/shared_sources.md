@@ -70,8 +70,13 @@ never observe baselines, HUD state, or inventory fallback policy. Compatible
 views share one physical observation.
 
 Capabilities are independent. The mode (one-shot or resumable) is separate from
-the two independent capabilities of a stable cursor and a stable version or
-atomic snapshot; a one-shot read is not automatically atomic.
+the independent capabilities of a stable cursor, a stable version, and an
+atomic snapshot; a one-shot read is not automatically atomic. Atomic snapshot
+evidence requires a complete detached capture made in one contiguous
+server-thread operation; a tick number, a single generic live step, or a stable
+cursor does not establish it. A real source version is independent evidence:
+it is never fabricated when absent, and it does not by itself make a capture
+atomic.
 
 A world object or provider handle lives only on the server thread, inside the
 server-local handle, and only for as long as the handle is needed. Cursor state
@@ -132,8 +137,14 @@ absence must never be interpreted as an empty snapshot.
 The three result states are independent. Availability
 (readable/unavailable/invalid), completeness
 (continue/complete-demand-sweep/incomplete-budget) and consistency
-(verified-snapshot/eventual/unknown) are judged separately. A defer caused by
-an exhausted budget is a scheduling result, not an invalid source.
+(verified-snapshot/eventual/unknown) are judged separately. Consistency is
+judged from evidence: a completed detached capture that was atomic by
+construction is verified-snapshot even when no source version exists, while a
+complete sweep that is neither snapshot-atomic nor backed by a stable version
+keeps its eventual quality. Decoding the snapshot later, across ticks or
+periods, does not downgrade its verification, and a missing version never
+does. A defer caused by an exhausted budget is a scheduling result, not an
+invalid source.
 
 Coverage describes the truth of the whole sweep, not progress inside one page.
 A completed narrow-range sweep must not be reused for a full-width demand.
@@ -142,17 +153,20 @@ Zero values and absence are distinct. A directly observed scalar, record field,
 or collection value of zero is publishable under its domain's validity and
 quality rules; it is not equivalent to a zero inferred from absence. A domain
 may derive zero from absence only when a complete, usable scan validly proves
-the key missing under that domain's rules. A complete non-atomic scan keeps its
-uncertain quality. Evidence that is unknown, incomplete or unavailable never
-synthesizes zero, even when it would display as grey. An unknown consistency
-state only means consistent-version metadata is missing; it does not mean the
-data or coverage is unknown, and atomicity is not a prerequisite for producing
-an observed zero.
+the key missing under that domain's rules. A complete sweep that is
+neither snapshot-atomic nor backed by a stable version keeps its uncertain
+quality. Evidence that is unknown, incomplete or unavailable never synthesizes
+zero, even when it would display as grey. An unknown consistency state only
+means consistent-version metadata is missing; it does not mean the data or
+coverage is unknown, and atomicity is not a prerequisite for producing an
+observed zero.
 
 Sparse semantics distinguish an omitted key (unchanged), an explicit zero, a
 deletion tombstone, and an unknown state; a tombstone is not zero. An optional
 source version is evidence only and is not a protocol revision: the publication
-layer assigns fences and revisions.
+layer assigns fences and revisions. A capture observation is likewise evidence
+only: it is not source identity and does not by itself create or advance a
+protocol baseline, which the owning domain establishes explicitly.
 
 ## Cost accounting
 
@@ -173,12 +187,18 @@ access. The mechanism cannot preempt a provider call and does not guarantee
 wall-clock time: it continues only while progress can be safely bounded, and
 reports unavailable explicitly when it cannot be.
 
-Units are owned by code. Inventory's first unit is the slot; the existing work
-and capture budgets remain in force, and future tank or read units would be
-domain-specific examples rather than registered units of this contract.
+Units are owned by code. Inventory's charged unit is the slot: consuming a
+captured snapshot's parse statistics spends the shared scan allowance and the
+per-client or per-target logical progress, while capture, copy and freeze are
+bounded by fixed work and the finite memory guard instead. A source with no
+snapshot support keeps its live route and is charged by its live slots, and
+future tank or read units would be domain-specific examples rather than
+registered units of this contract. The supported snapshot shapes are owned by
+[inventory](inventory.md#detached-snapshot-capture-and-schema).
 
-Four ledgers stay separate — physical reads, logical progress, wire bytes, and
-retained memory — with no mixed or weighted unit and no universal conversion.
+Four ledgers stay separate — shared scan work, logical progress, wire bytes,
+and retained memory — with no mixed or weighted unit and no universal
+conversion.
 
 A period reservation commits its measured actual use permanently for that
 period: closing a settled period ticket refunds nothing further. A
@@ -200,13 +220,15 @@ complete grant is held, and a retained ticket's lifetime follows the object it
 pays for. This is bounded admission bookkeeping, not an arbitrary rollback,
 weighted-unit, or general plugin framework.
 
-One compatible physical read is charged once. Every consumer records its
-applicable logical progress once per quota subject and coverage watermark; a
-cache consumer pays no physical charge but is not exempt from logical progress.
-The domain selects the quota identity, and it is not multiplied by a new Ping
-or a new view: inventory uses the target or client, for example, and target
-slots are not multiplied by the number of recipients. Wire bytes are charged
-per recipient, so N recipients mean N copies.
+One compatible shared observation is charged once: a live read or a snapshot
+decode does not multiply the scan charge across compatible consumers. Every
+consumer records its applicable logical progress once per quota subject and
+coverage watermark; a consumer that reuses a cached capture pays no new scan
+charge but is not exempt from logical progress. The domain selects the quota
+identity, and it is not multiplied by a new Ping or a new view: inventory uses
+the target or client, for example, and target slots are not multiplied by the
+number of recipients. Wire bytes are charged per recipient, so N recipients
+mean N copies.
 
 Consumer lag is bounded and must not block other consumers. A cache miss must
 not masquerade as a complete observation.

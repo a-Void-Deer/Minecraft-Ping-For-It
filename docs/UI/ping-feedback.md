@@ -18,11 +18,10 @@ marker and immediately shows the local player the invalid-target chat line.
 
 A missing, dead, or cross-dimension entity, or a block replaced by a different
 block type at commit, triggers this local error. Same-type block-state changes
-are not an error. Cancellation and timeout are not equivalent to target-loss
-submission: activating the wheel's downward
+are not an error. Cancellation is not equivalent to target-loss submission:
+activating the wheel's downward
 [Cancel Marker action](../architecture/picking/wheel.md#cancel-marker-selection)
-or letting the wheel time out does not create a marker and does not raise this
-message.
+does not create a marker and does not raise this message.
 
 This local check is a client-side guard; it does not supersede authoritative
 server validation.
@@ -36,8 +35,8 @@ courtesy-throttled create is not sent and is not recorded as dispatched, so it
 adds no such feedback; the courtesy gate and its dispatch boundary are owned by
 [rate policy](../architecture/config/rate-limit.md).
 
-Wheel timeout, cancel with no eligible own marker, stale removal, invalid
-removal, and unauthorized removal are silent no-ops or rejections. Their
+Cancel with no eligible own marker, stale removal, invalid removal, and
+unauthorized removal are silent no-ops or rejections. Their
 selection and authorization rules are owned by
 [wheel](../architecture/picking/wheel.md) and
 [target validation](../architecture/authority/target_validation.md).

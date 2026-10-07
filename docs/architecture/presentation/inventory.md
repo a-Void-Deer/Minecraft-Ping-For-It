@@ -1,8 +1,9 @@
 # Inventory preview and tracking
 
 This topic owns the inventory domain of the versioned presentation subsystem:
-preview, tracking, item-variant identity, zero and component-fallback rules,
-budget and sync policy, and source recovery deadlines. The generic mechanism —
+preview, tracking, detached snapshot capture and schema, item-variant identity,
+zero and component-fallback rules, budget and sync policy, and source recovery
+deadlines. The generic mechanism —
 source access, capture results, cost accounting, and sync publication — is
 owned by [shared sources](shared_sources.md). The reason a tracked inventory
 keeps the live Ping and original target identity instead of a source-instance
@@ -32,8 +33,11 @@ hit half's position remains the target and marker identity, and the alias is
 source identity only. A consumer binds tracking to the live Ping and the
 original target identity. Ping identity is not part of the physical source key,
 no source-instance generation is introduced, and a block-state or property
-change with the same registry ID is not a new source. Detecting a destroyed,
-missing or otherwise unavailable source is an invalidity, not an empty result.
+change with the same registry ID is not a new source. A capture observation,
+including a complete detached snapshot, is evidence about the source, never its
+identity: it does not become the source key, a source-instance generation, or a
+protocol baseline generation. Detecting a destroyed, missing or otherwise
+unavailable source is an invalidity, not an empty result.
 
 On invalidity, tracking stops publishing valid updates, discards or cancels
 queued old valid state, and sends the invalidation status. That status is
@@ -77,7 +81,9 @@ targets only; entity, private-inventory, and external-provider contexts report
 unavailable until their owning contracts exist.
 
 Holding the ping key starts a bounded initial inventory preview on a new
-request path; it does not reuse the legacy subscription route. A preview may
+request path; it does not reuse the legacy subscription route. The preview is
+served from one initial snapshot capture and has no periodic capture cycle of
+its own. A preview may
 begin before the Ping exists and therefore has its own request and session
 identity, which must not be equated with a Ping or with the inventory snapshot
 identity. A preview request binds to one bounded server target at open time and
@@ -92,12 +98,15 @@ immediately; items are never accumulated into a staged multi-item selection.
 The create passes the existing marker-admission authority and gates owned by
 [target validation](../authority/target_validation.md), with the selected item
 reference validated safely and immediately against the authoritative source
-instead of trusted from preview data. The new Ping's whole-marker type is the
+instead of trusted from preview data. That live witness is not authorized by
+the preview snapshot or by any capture observation, and captured data never
+stands in for it. The new Ping's whole-marker type is the
 frozen Target Type's default Ping Type; the chosen Ping Type travels as a
 separate item annotation rather than as the whole-marker type. The annotation's
 quantity starts unknown, and its first authoritative count follows the
-complete-observation rules in [Tracking](#tracking); the preview's own count is
-not reused for it.
+complete-observation rules in [Tracking](#tracking). The first tracking
+observation uses a fresh authoritative capture; it reuses neither the preview
+snapshot nor its count.
 
 The first batch is sorted by count immediately rather than after the scan
 finishes. Newly discovered batches may reorder entries only before the user has
@@ -125,28 +134,37 @@ component identity must work in both.
 ## Tracking
 
 Tracking is a snapshot plus an absolute stream of the Ping's selected items,
-not a continuous copy of the whole inventory. Normal tracking scans whatever
+not a continuous copy of the whole inventory. Normal tracking reads whatever
 slots its selected keys require, which may be a full sweep, and publishes only
 the selected keys; an incomplete scan must not claim a total for a selected
 key. The only full-ID exception is the component-fallback aggregate, whose
 permission and completeness rules are owned below.
 
+Tracking reuses the existing tracking period with no separate capture-cycle
+setting: it consumes the current snapshot, and the next capture follows the
+existing cycle after that snapshot is consumed. A new cycle never replaces a
+snapshot that a consumer has not finished consuming and never resets that
+consumer's progress; a slow consumer keeps its earlier snapshot instead of
+being starved by newer captures.
+
 The sampling owner's container read condition is the sampling authority: the
 preview requester, or for tracking the bound Ping owner, is checked for lock,
-loot-table, loaded and block-identity state, and those checks continue to run
-on every read and recovery probe. The sampled data is delivered to the Ping's
-normal frozen
+loot-table, loaded, block-identity and view-topology state, and those checks
+continue to run on every read, cache consumption and recovery probe. The
+sampled data is delivered to the Ping's normal frozen
 [audience snapshot](../authority/target_validation.md#audience-snapshot-at-create)
 under the existing per-target-type
 [field policy](presentation_snapshot.md#per-target-type-field-policy). A
 recipient does not need to hold the container's key or reproduce the owner's
 look or read condition, and no new inventory distance or audience policy is
 introduced: the marker's established audience and acceptance range remain
-authoritative. The owner's condition is checked again before cached or queued
-valid inventory is published: if the owner's lock or read condition no longer
-holds, that data is not sent to a recipient even when the recipient's field
-permission remains. This send-time check asks nothing of the recipient and
-changes no audience or distance rule.
+authoritative. The owner's read condition is checked again before cached or
+queued valid inventory is published: if it no longer holds, that data is not
+sent to a recipient even when the recipient's field permission remains. This
+send-time check asks nothing of the recipient and changes no audience or
+distance rule. An already captured frozen snapshot is not rewritten by ordinary
+content changes inside the container; a new capture or the view-topology
+invalidity changes what is published.
 
 Only a complete scan produces a normal valid quantity update. One logical batch
 may span several periods and may contain more entries than one fragment
@@ -219,22 +237,70 @@ tombstone that prevents double counting and isolates old variant streams. Any
 allowlist, key, hash, or reassembly hard cap is an engineering choice and is not
 defined here.
 
+## Detached snapshot capture and schema
+
+Each supported inventory source is captured into complete detached NBT; that
+inventory capture provides the atomic-snapshot evidence. Ordinary vanilla
+container snapshots are therefore verified without requiring a source version.
+The generic atomicity, version evidence and later decoding rules are owned by
+[shared sources](shared_sources.md#capture-results). The shared scan allowance
+charges consumption of the captured data, not this inventory capture; cost
+accounting is owned by [shared sources](shared_sources.md#cost-accounting).
+
+A Minecraft block-entity inventory is retained per member: each member keeps
+only its inventory-related NBT together with a structure envelope that keeps
+the member positions and identity, the controller or layout relationship, the
+segments, and the frozen-face slot mapping. A multi-member source is never
+flattened into a structureless tag or a single total. The default supported
+shapes are the ordinary single block and the vanilla double chest; additional
+member structure exists only through explicitly registered member providers,
+and arbitrary mod multipart discovery is not promised. Client presentation
+subjects never establish or widen the server inventory structure or permission:
+a door, bed or other multipart render form, including a large waterwheel form,
+is client presentation only.
+
+The default block-entity candidates are a root `Items` list and an
+`Inventory.Items` list, whose wrapper may also carry `Size`; other fields and
+custom counts require an adapter port, and no arbitrary NBT recursion guess is
+performed. A 1.21.1 item entry is its ID, count and components. Present
+candidates with an ambiguous reading are never summed, and a missing candidate
+is never an empty result: the ambiguity is recorded as a diagnostic and the
+source falls back to its unsupported live route. An explicitly empty recognized
+items list is a valid explicit empty observation. An empty view proven by a
+recognized known omission — an explicitly empty frozen-face slot mapping, for
+example — is a distinct evidence-backed known-empty observation, not a
+substitute for a missing candidate. A recognized candidate that is present but
+malformed is a read failure and is never treated as empty.
+
+A supported snapshot capture that fails or exceeds a bound publishes no mixed
+partial data: consumers receive an explicit unavailable or incomplete state,
+never a partial snapshot presented as atomic. A source with no snapshot support
+keeps its existing live route, whose completed non-atomic observations may
+remain uncertain. Temporary memory pressure may defer a capture and must not be
+reported as a completed or empty snapshot. Limit and failure events keep fixed
+work, the structure guard and the finite shared memory, and are logged at low
+frequency with the reason and the source context; raw NBT is never dumped.
+
 ## Budgets, queues and memory
 
 Preview and tracking keep separate period, byte, slot and quota accounting, and
-the server keeps a shared physical scan budget plus per-recipient wire-byte
+the server keeps a shared source-scan allowance plus per-recipient wire-byte
 accounting. Quota identity is preview-client for preview and target for
 tracking, and neither is multiplied per recipient. The server-authoritative
 per-client and global send-byte multipliers scale the byte allowances; they are
 server settings, not a client display scale or UI preference, and their numeric
 ranges and steps stay in implementation and configuration owners.
 
-The physical scan budget is configurable and measured in slots; it guarantees
-no provider wall-clock time, and provider calls need their own independent
-safety bound. An unlimited physical mode is an explicit mode that removes only
-the configurable slot cap: the finite internal work and memory guard and both
-logical quotas survive, and unlimited is never implemented as a sentinel,
-integer overflow, unbounded array, or unbounded work loop.
+The shared scan allowance is configurable and measured in slots. It is charged
+by the parse work that consumes a captured source snapshot, and a source with no
+snapshot support keeps its live route and is charged by its live slots. Snapshot
+capture, copy and freeze are bounded instead by fixed work, the structure guard,
+and the finite shared memory; capture is never a free or unbounded operation.
+The allowance guarantees no provider wall-clock time, and provider calls need
+their own independent safety bound. An unlimited mode is an explicit mode that
+removes only the configurable slot cap: the finite internal work and memory
+guard and both logical quotas survive, and unlimited is never implemented as a
+sentinel, integer overflow, unbounded array, or unbounded work loop.
 
 Pending memory is a single finite server-wide bound covering preview and
 tracking together, configurable to a finite hard cap; it is not a per-queue
@@ -303,7 +369,9 @@ under the same frozen face as one consistent source view, each contributing
 the slots that face permits; a pairing or mapping change is the view-topology
 invalidity owned by
 [source identity, invalidation and recovery](#source-identity-invalidation-and-recovery),
-not a completed mixed view.
+not a completed mixed view. Any registered member source follows the same
+all-members precheck: every member is gated before any member content is read,
+and a failing member makes the source unavailable rather than partially empty.
 
 Shared reads are reference-counted and a leaving consumer must not block other
 consumers. A shared value is detached and immutable; world and provider objects
@@ -324,7 +392,8 @@ are distinct states with their own semantics. An inventory with no stable
 cursor that cannot finish enumerating within its admitted hard budget ends as
 incomplete, and preview and HUD present that incompleteness explicitly; a
 small container without a cursor may still complete within budget. A completed
-non-atomic sweep with no stable version remains a grey uncertain result. Data
+sweep that is neither a verified detached snapshot nor backed by a stable
+version remains a grey uncertain result. Data
 that is unknown, or known to be missing without a complete observation, is not
 zero and is distinct from an unknown consistency state. The exact localized
 labels are added as resource keys with the implementation; the English state

@@ -55,7 +55,7 @@ conflicts rather than silently choosing or dropping a requirement.
 | Change target-selection toggles, block/fluid modes or entity-selection blacklist | [Selection policy](architecture/picking/selection_policy.md) | [Capture](architecture/picking/capture.md), Create raycast |
 | Change exact entity picking or geometry ownership | [Local geometry picking](architecture/picking/local_geometry.md) | Create raycast integration and D0006 |
 | Change client capture distance, optional long-range traces or server range acceptance | [Range](architecture/picking/range.md) | [Capture](architecture/picking/capture.md), [Target validation](architecture/authority/target_validation.md), server configuration and the affected integration |
-| Change an already-open wheel's timeout, selection, or cancellation | [Wheel](architecture/picking/wheel.md) | Capture, client config and validation |
+| Change an already-open wheel's selection or cancellation | [Wheel](architecture/picking/wheel.md) | Capture, client config and validation |
 | Change target acceptance, admissibility or removal adjudication | [Target validation](architecture/authority/target_validation.md) | [Security](architecture/security.md), rate policy and identity |
 | Change registered marker/legacy packet ingress or client packet acceptance | [Network protocol](architecture/network/protocol.md) | [Target validation](architecture/authority/target_validation.md), [presentation snapshot](architecture/presentation/presentation_snapshot.md), client marker state and compatibility |
 | Change local invalid-target or server-rejection feedback | [Ping feedback](UI/ping-feedback.md) | [Target validation](architecture/authority/target_validation.md), rate policy and client configuration |

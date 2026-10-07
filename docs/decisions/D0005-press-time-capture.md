@@ -10,7 +10,7 @@ Preserve press-time intent across synchronous and asynchronous completion.
 [Capture](../architecture/picking/capture.md) owns the sampling, target locking,
 release outcomes and actual-wheel-open boundary;
 [wheel interaction](../architecture/picking/wheel.md) owns an opened wheel's
-timeout and selection behavior.
+selection and cancellation behavior.
 
 Allow only the established narrow deferred-capture exception under
 [long-press compatibility](../architecture/input/long-press-compatibility.md).
@@ -23,8 +23,7 @@ Press-time ray capture preserves the user's input intent across camera and
 target movement. It also makes synchronous and asynchronous capture obey the
 same sampling rule. Delaying only the narrow compatibility capture prevents
 parallel interaction ownership while allowing the established compatibility
-sequence. Tying wheel timeout to actual presentation avoids consuming a UI
-duration before the wheel exists.
+sequence.
 
 ## Why not other approaches
 
@@ -41,7 +40,7 @@ duration before the wheel exists.
 ## Consequences
 
 Capture state must retain a token, frozen ray and asynchronous completion
-ownership. Release, wheel selection, cancellation and timeout consume that
+ownership. Release, wheel selection and cancellation consume that
 context and never initiate a new selection ray. A stale callback must be
 ignored or abandon its exact interaction without affecting a newer one.
 

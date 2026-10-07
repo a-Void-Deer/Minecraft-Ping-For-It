@@ -42,8 +42,8 @@ the slice ends adjacency; equality remains eligible. At termination, a wheel
 that actually opened and remains open follows ordinary
 [wheel release](../picking/wheel.md#radial-release-result). If it never
 opened, the still-pressed baseline aborts; if it already closed, the candidate
-is discarded. Neither outcome emits another default tap. Timeout, lifecycle
-abort, or observed disabling can end the sequence sooner.
+is discarded. Neither outcome emits another default tap. Lifecycle abort or
+observed disabling can end the sequence sooner.
 
 ## Pending-first-capture deferred fresh press
 

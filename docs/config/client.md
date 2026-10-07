@@ -49,9 +49,9 @@ here.
 | `wheelHoldMillis` | number, milliseconds | Long-press threshold; [timing relationships](../architecture/input/long-press.md) and [capture-time consumption](../architecture/picking/capture.md#baseline-release-and-actual-wheel-opening) own its behavior. |
 | `longPressCompatibilityMode` | boolean | Enables the narrow rapid/deferred compatibility sequence; [long-press compatibility](../architecture/input/long-press-compatibility.md) owns its behavior. |
 | `longPressCompatibilitySliceMillis` | number, milliseconds | Compatibility adjacency slice. [Long-press timing](../architecture/input/long-press.md) owns its relation to the effective hold threshold. |
-| `wheelTimeoutMillis` | number, milliseconds | Maximum duration of an actually open wheel; [wheel](../architecture/picking/wheel.md) owns actual-open snapshot and timeout behavior. |
 | `cancelHalfConeAngleDegrees` | number, degrees | Half-angle for local own-marker cancellation; [wheel](../architecture/picking/wheel.md#cancel-marker-selection) owns candidate selection. |
-| `wheelOpacity` | number | Local wheel visual opacity. |
+| `wheelOpacity` | number | Local opacity of the selector's visual underlay; [wheel](../architecture/picking/wheel.md#native-selector-presentation) owns what the underlay covers and how it layers. |
+| `wheelTargetOpacity` | number | Local opacity of text-bearing selector frames together with their labels; [wheel](../architecture/picking/wheel.md#native-selector-presentation) owns the layering. |
 | `wheelFontSize` | number | Local wheel-label text size. |
 | `wheelTargetFontSize` | number | Local target-label text size. |
 
@@ -123,6 +123,15 @@ resurrect them; removal, migration, and preservation behavior is owned by
 [configuration revisioning](../architecture/config/revisioning.md). The keys do
 not configure the live wheel, whose release boundaries are owned by
 [wheel](../architecture/picking/wheel.md#radial-release-result).
+
+`wheelTimeoutMillis` is a retired key with no persisted meaning. It is removed
+by the version-boundary migration and from every client serialization at or
+after that boundary, so a later save cannot resurrect it; removal, migration,
+and preservation behavior is owned by
+[configuration revisioning](../architecture/config/revisioning.md). It no
+longer configures any selector lifetime; the open selector's interaction
+lifetime is owned by
+[wheel](../architecture/picking/wheel.md#opening-and-selection).
 
 ### Channel preferences
 

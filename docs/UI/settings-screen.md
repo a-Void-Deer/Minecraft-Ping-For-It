@@ -47,9 +47,10 @@ The client scope has six categories:
   Icons, Direction Indicator, Player Info, and Team Color.
 - **Target Selection**: Pass Through Transparent Blocks, Mark Blacklisted
   Targets, and Mark Fluids.
-- **Wheel Appearance**: Root Menu Distance, Wheel Opacity, Wheel Target Font
-  Size, Wheel Option Font Size, Show Gesture Trail, and Reduce Selector Motion.
-- **Input Interaction**: Wheel Hold Time, Wheel Timeout, Long-Press
+- **Wheel Appearance**: Root Menu Distance, Wheel Opacity, Wheel Target
+  Opacity, Wheel Target Font Size, Wheel Option Font Size, Show Gesture Trail,
+  and Reduce Selector Motion.
+- **Input Interaction**: Wheel Hold Time, Long-Press
   Compatibility Mode, Compatibility Time Slice, and Cancel Cone Half-Angle,
   followed by a Spatial selector gestures subgroup with Center Deadzone, Entry
   Stroke Length, Entry Dwell, Inventory Vertical Mouse Sensitivity, Require
@@ -82,8 +83,8 @@ exposed under which category and whether a group edits local or server policy.
 
 The screen exposes no controls for the hidden native raycast cap or the four
 direction-indicator safe-area insets; their file semantics remain in the client
-catalogue. The retired wheel radius keys are also absent from the screen and
-have no persisted meaning
+catalogue. The retired wheel radius and wheel timeout keys are also absent from
+the screen and have no persisted meaning
 ([client configuration](../config/client.md#obsolete-keys)). There is no
 user-facing reload control.
 

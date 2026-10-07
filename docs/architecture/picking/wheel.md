@@ -5,31 +5,33 @@
 > session, candidate-allocation, transition/renderer and native input seams are
 > owned by [testing and verification](../../testing/verification.md).
 
-## Opening, selection and timeout
+## Opening and selection
 
 Opening follows [capture readiness and the present-frame boundary](capture.md).
-Every subsequent action operates on the captured context. Exceeding the
-configured timeout closes an actually open selector with no ping, no
-cancellation and no timeout error. Timeout is measured from actual opening.
-The timeout value is frozen at that actual-open boundary. Pre-open release
-behavior is owned by
+Every subsequent action operates on the captured context. An actually open
+selector has no elapsed-time auto close: it ends through a release, a
+cancellation, or an interaction lifecycle abort. Pre-open release behavior is
+owned by
 [capture](capture.md#baseline-release-and-actual-wheel-opening).
 
 One held interaction consumes one immutable, validated
 [spatial-selector settings](../../config/client.md#spatial-selector-interaction)
 snapshot; editing the live configuration cannot change a gesture already in
-progress. The retired persisted wheel radii never configure this interaction;
-their removal and migration are owned by
+progress. The retired persisted wheel radius and wheel timeout keys never
+configure this interaction; their removal and migration are owned by
 [revisioning](../config/revisioning.md#ordered-migration-and-writeback) and
 [client configuration](../../config/client.md#obsolete-keys).
 
 ## Native selector presentation
 
-The selector is a square, straight HUD: options are framed by rectangular
-borders, the pointer is a straight crosshair, the trail is a series of small
-squares, menu guides are straight lines, and the Back-hover progress is a
-square perimeter. No arc, circle or rounded corner is drawn; a bearing only
-positions a node along a straight guide.
+The selector keeps square nodes and straight interaction guides: options are
+framed by rectangular borders, the pointer is a straight crosshair, the trail
+is a series of small squares, menu guides are straight lines, and the
+Back-hover progress traces the focused Back frame's actual boundary. A radial
+menu may place a semi-transparent circular sector under each entry to make its
+bearing and angular span legible and to support label contrast. This sector is
+a visual underlay; it does not round or replace the node, pointer, trail, guide,
+or Back-hover geometry, and it does not change focus or release selection.
 
 The root presents the fixed eight-sector layout:
 
@@ -57,24 +59,27 @@ Position, opacity and scale are smoothly interpolated for an unchanged entry,
 for appearance and disappearance, and across a radial/list mode switch. A
 removed entry keeps only detached paint data for one exit interval and is never
 interactive. Reduced motion collapses the interpolation without changing
-selection. The existing wheel opacity and font-size preferences remain the
-appearance inputs; the selector adds no separate appearance catalogue, and
+selection. Opacity is split by layer: the wheel opacity preference reaches only
+the visual underlay, while the target opacity preference reaches every
+text-bearing frame together with its label. Neither preference dims the
+interaction chrome — the pointer, guides, and trail follow only the transition
+fade. The font-size preferences remain the text inputs; the selector adds no
+separate appearance catalogue, and
 [client configuration](../../config/client.md#press-wheel-and-cancellation-interaction)
 owns those keys and meanings. The trail and root distance are visual only and
 never change gesture thresholds or selection.
 
 ## Radial release result
 
-For a non-timeout release of an actually open selector, the frozen menu
-geometry resolves the focused entry. A release inside the center deadzone
-abandons the session with no action. A release on a sector resolves that
-sector: a focused leaf commits exactly one action and ends the session; a
-reserved, disabled, navigation or actionless-branch entry reports its reason
-and never commits. A release outside every sector without crossing the deadzone
-is a silent no-action that sends neither a create nor a cancellation request.
+For a release of an actually open selector, the frozen menu geometry resolves
+the focused entry. A release inside the center deadzone abandons the session
+with no action. A release on a sector resolves that sector: a focused leaf
+commits exactly one action and ends the session; a reserved, disabled,
+navigation or actionless-branch entry reports its reason and never commits. A
+release outside every sector without crossing the deadzone is a silent no-action
+that sends neither a create nor a cancellation request.
 The down (180) cancel entry activates
-[Cancel Marker selection](#cancel-marker-selection). Timeout remains the
-separate no-action close described above.
+[Cancel Marker selection](#cancel-marker-selection).
 
 ## Headless spatial menu model
 
@@ -107,8 +112,9 @@ Root entries carry caller-fixed sector geometry, so a root menu never derives
 its own geometry. Every non-root menu instead computes equal sectors from its
 actual entry count, including its Back entry. An explicit Back entry stays
 centered on the bearing from the child origin back to its parent origin, and an
-automatically appended Back takes that same parent-centered position; siblings
-keep their declared order and tile with equal spans.
+automatically appended Back takes that same parent-centered position and
+carries the localized Back label rather than an unlabeled frame; siblings keep
+their declared order and tile with equal spans.
 
 ### Intent
 
@@ -215,8 +221,9 @@ The return state machine is a standalone, headless client model. A session
 freezes whether Back-hover is enabled and the required dwell at its start, so a
 later preference change cannot alter a running interaction. While a Back
 affordance is focused, sustained focus accumulates dwell and reports a progress
-value in `[0, 1]` that a renderer can paint as square progress. At the dwell
-threshold the model reports one return trigger and then blocks the same held
+value in `[0, 1]` that a renderer can paint along the focused frame's actual
+perimeter. At the dwell threshold the model reports one return trigger and then
+blocks the same held
 focus, so a single sustained focus never cascades through several levels — even
 when the menu changes to the parent and the focus stays in the Back direction.
 The block is released when the Back focus is lost, and a deliberate leave and

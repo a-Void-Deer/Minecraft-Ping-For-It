@@ -99,12 +99,18 @@ is owned by
 
 ## Inventory policy object
 
-The `inventory` object persists the shared physical scan allowance, the single
-pending-memory bound, and the separate preview and tracking budgets. Every cap
-is either a positive finite value or an explicit unlimited mode; periods,
-resynchronization cooldown, pending memory and heartbeat have no unlimited
-mode. There is no tracking-duration member: the tracking deadline follows the
-Ping's own marker lifetime, owned by
+The `inventory` object persists the shared scan-work allowance, the single
+pending-memory bound, and the separate preview and tracking budgets. The
+existing `physicalSlotsPerTick` key is retained: supported detached snapshot
+capture and copying do not consume its slot allowance; decoding and parsing the
+captured snapshot are charged, while unsupported live fallback is charged by
+the slots it reads. The source-specific accounting contract is owned by
+[inventory preview and tracking](../architecture/presentation/inventory.md)
+and [shared source capture and sync](../architecture/presentation/shared_sources.md).
+Every cap is either a positive finite value or an explicit unlimited mode;
+periods, resynchronization cooldown, pending memory and heartbeat have no
+unlimited mode. There is no tracking-duration member: the tracking deadline
+follows the Ping's own marker lifetime, owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md).
 
 Numeric bounds, grids and defaults are applied by the implementation and are
@@ -121,7 +127,7 @@ array or an unbounded work loop.
 
 | Member | JSON form | Meaning |
 | --- | --- | --- |
-| `physicalSlotsPerTick` | limit object | Shared physical source-scan allowance per tick. Unlimited removes only the configurable cap; the finite internal work and memory guards and both logical quotas remain in force. |
+| `physicalSlotsPerTick` | limit object | Shared scan-work allowance per tick: snapshot decode/parsing and unsupported live slot reads consume it; supported detached snapshot capture and copying do not. Unlimited removes only the configurable cap; finite work and memory guards and both logical quotas remain in force. |
 | `pendingMemoryMiB` | number, MiB | Single finite server-wide pending-memory bound covering preview and tracking together. It is not a per-queue bound and has no unlimited mode. |
 | `preview` | object | Preview accounting; the members below. |
 | `preview.periodTicks` | number, ticks | Preview accounting period. |

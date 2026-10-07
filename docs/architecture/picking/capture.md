@@ -14,8 +14,8 @@ When the snapshot is ready, resolve its Target Type under the
 [catalog matching rules](../identity/catalogs.md). Freeze the resolved Target
 and Target Type for the rest of the interaction. Camera motion, target motion,
 and another entity entering
-the crosshair must not retarget or change the wheel. Release, selection, and
-timeout do not initiate a new selection ray.
+the crosshair must not retarget or change the wheel. Release and selection
+do not initiate a new selection ray.
 
 An ordinary block hit also retains the actual hit face from the press-time
 result, and the same-target capture and coordinator path carries that face
@@ -34,7 +34,7 @@ A capture may also allocate a bounded set of supplemental target candidates for
 the native selector's precise branch. Allocation starts at the same press edge
 as the ordinary capture and shares its one frozen press ray and frozen
 [selection policy](selection_policy.md#raycast-use-and-blacklist-boundary);
-release, selection and timeout still never initiate a new selection ray. Its
+release and selection still never initiate a new selection ray. Its
 scan range and its independence from the ordinary native trace and the Distant
 Horizons route are owned by
 [capture range](range.md#selector-candidate-supplements). The scan traverses
@@ -83,9 +83,9 @@ Release and wheel-open outcomes are:
 
 Holding beyond the threshold opens a wheel only after capture is ready and a
 render/present frame occurs while the key remains held. Elapsed time alone does
-not fabricate an opened wheel. [Wheel](wheel.md) owns timeout snapshot timing,
-its value, and its resulting close behavior. No release outcome samples the
-release-time camera or casts a release-time ray.
+not fabricate an opened wheel. [Wheel](wheel.md) owns the actual-open snapshot
+and the resulting selection and cancellation behavior. No release outcome
+samples the release-time camera or casts a release-time ray.
 
 ## Interaction lifecycle aborts
 
