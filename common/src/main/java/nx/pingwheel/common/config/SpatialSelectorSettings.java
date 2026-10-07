@@ -21,14 +21,14 @@ import java.math.BigDecimal;
 @EqualsAndHashCode
 public final class SpatialSelectorSettings {
 
-	public static final int MIN_DEADZONE = 24;
-	public static final int MAX_DEADZONE = 64;
-	public static final int DEFAULT_DEADZONE = 36;
+	public static final int MIN_DEADZONE = 12;
+	public static final int MAX_DEADZONE = 32;
+	public static final int DEFAULT_DEADZONE = 18;
 	public static final int DEADZONE_STEP = 1;
 
-	public static final int MIN_STROKE = 80;
-	public static final int MAX_STROKE = 170;
-	public static final int DEFAULT_STROKE = 110;
+	public static final int MIN_STROKE = 40;
+	public static final int MAX_STROKE = 85;
+	public static final int DEFAULT_STROKE = 50;
 	public static final int STROKE_STEP = 1;
 
 	public static final int MIN_DWELL_MILLIS = 80;
@@ -37,9 +37,9 @@ public final class SpatialSelectorSettings {
 	public static final int DWELL_MILLIS_STEP = 10;
 
 	/** Visual root-node distance, independent from every gesture threshold. */
-	public static final int MIN_ROOT_DISTANCE = 64;
-	public static final int MAX_ROOT_DISTANCE = 240;
-	public static final int DEFAULT_ROOT_DISTANCE = 110;
+	public static final int MIN_ROOT_DISTANCE = 32;
+	public static final int MAX_ROOT_DISTANCE = 120;
+	public static final int DEFAULT_ROOT_DISTANCE = 55;
 	public static final int ROOT_DISTANCE_STEP = 1;
 
 	public static final BigDecimal MIN_TARGET_GLIDE = new BigDecimal("0.25");

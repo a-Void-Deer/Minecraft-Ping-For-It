@@ -74,6 +74,28 @@ class SpatialSelectorSettingsTest {
 	}
 
 	@Test
+	void halfScaleDistanceDefaultsAndBoundsStayInsideTheirClamps() {
+		// The selector keeps the confirmed half-scale geometry, with the entry
+		// stroke default reduced independently to the requested 50 pixels.
+		assertEquals(18, SpatialSelectorSettings.DEFAULT_DEADZONE);
+		assertEquals(50, SpatialSelectorSettings.DEFAULT_STROKE);
+		assertEquals(55, SpatialSelectorSettings.DEFAULT_ROOT_DISTANCE);
+		assertEquals(12, SpatialSelectorSettings.MIN_DEADZONE);
+		assertEquals(32, SpatialSelectorSettings.MAX_DEADZONE);
+		assertEquals(40, SpatialSelectorSettings.MIN_STROKE);
+		assertEquals(85, SpatialSelectorSettings.MAX_STROKE);
+		assertEquals(32, SpatialSelectorSettings.MIN_ROOT_DISTANCE);
+		assertEquals(120, SpatialSelectorSettings.MAX_ROOT_DISTANCE);
+		assertEquals(SpatialSelectorSettings.DEFAULT_DEADZONE,
+			SpatialSelectorSettings.clampDeadzone(SpatialSelectorSettings.DEFAULT_DEADZONE));
+		assertEquals(SpatialSelectorSettings.DEFAULT_STROKE,
+			SpatialSelectorSettings.clampStroke(SpatialSelectorSettings.DEFAULT_STROKE));
+		assertEquals(SpatialSelectorSettings.DEFAULT_ROOT_DISTANCE,
+			SpatialSelectorSettings.clampRootDistance(SpatialSelectorSettings.DEFAULT_ROOT_DISTANCE));
+		assertTrue(SpatialSelectorSettings.MIN_STROKE > SpatialSelectorSettings.MAX_DEADZONE);
+	}
+
+	@Test
 	void everySupportedStrokeCanLeaveEverySupportedCenterDeadzone() {
 		assertTrue(SpatialSelectorSettings.MIN_STROKE > SpatialSelectorSettings.MAX_DEADZONE);
 	}
@@ -101,17 +123,17 @@ class SpatialSelectorSettingsTest {
 	void frozenSessionPreferencesNeverFollowLaterConfigEdits() {
 		SpatialSelectorSettings settings = explicitSettings();
 		SpatialSelectorSettings.Snapshot frozen = settings.snapshot();
-		settings.setDeadzone(50);
-		settings.setStroke(150);
+		settings.setDeadzone(30);
+		settings.setStroke(80);
 		settings.setDwellMillis(250);
-		settings.setRootDistance(200);
+		settings.setRootDistance(100);
 		settings.setTargetGlide(new BigDecimal("2"));
 		settings.setHoverEnabled(false);
 		settings.setHoverMillis(1000);
 		settings.setShowTrail(false);
 		settings.setReduceMotion(true);
 
-		assertEquals(new SpatialSelectorSettings.Snapshot(40, 120, 200, 90,
+		assertEquals(new SpatialSelectorSettings.Snapshot(28, 70, 200, 90,
 			new BigDecimal("1.5"), true, 750, true, false), frozen);
 	}
 
@@ -119,8 +141,8 @@ class SpatialSelectorSettingsTest {
 	void rootDistanceAndGesturePreferencesAreIndependentInBothMutationDirections() {
 		SpatialSelectorSettings settings = explicitSettings();
 		settings.setRootDistance(Integer.MAX_VALUE);
-		assertEquals(40, settings.getDeadzone());
-		assertEquals(120, settings.getStroke());
+		assertEquals(28, settings.getDeadzone());
+		assertEquals(70, settings.getStroke());
 		assertEquals(200, settings.getDwellMillis());
 		assertEquals(new BigDecimal("1.5"), settings.getTargetGlide());
 		assertEquals(750, settings.getHoverMillis());
@@ -149,7 +171,7 @@ class SpatialSelectorSettingsTest {
 
 	private static SpatialSelectorSettings explicitSettings() {
 		return new Gson().fromJson("""
-			{"deadzone":40,"stroke":120,"dwellMillis":200,"rootDistance":90,"targetGlide":1.5,
+			{"deadzone":28,"stroke":70,"dwellMillis":200,"rootDistance":90,"targetGlide":1.5,
 			 "hoverEnabled":true,"hoverMillis":750,"showTrail":true,"reduceMotion":false}
 			""", SpatialSelectorSettings.class);
 	}

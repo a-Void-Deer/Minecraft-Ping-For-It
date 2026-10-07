@@ -11,12 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SpatialSquareProgressTest {
 	@Test
 	void perimeterWalkUsesStraightConnectedSegmentsAndOnlyThePresentedProgress() {
-		assertEquals(List.of(new SpatialSquareProgress.Segment(10, 20, 30, 20),
-			new SpatialSquareProgress.Segment(30, 20, 30, 30)), SpatialSquareProgress.segments(10, 20, 20, 0.375));
-		assertEquals(List.of(new SpatialSquareProgress.Segment(10, 20, 30, 20),
-			new SpatialSquareProgress.Segment(30, 20, 30, 40), new SpatialSquareProgress.Segment(30, 40, 10, 40),
-			new SpatialSquareProgress.Segment(10, 40, 10, 20)), SpatialSquareProgress.segments(10, 20, 20, 1.0));
+		// A size-20 frame at (10,20) paints columns 10..29 and rows 20..39:
+		// strokeRect's right and bottom bounds are exclusive, so the path ends
+		// on the last painted column and row, 29 and 39, not 30 and 40.
+		assertEquals(List.of(new SpatialSquareProgress.Segment(10, 20, 29, 20),
+			new SpatialSquareProgress.Segment(29, 20, 29, 29.5)), SpatialSquareProgress.segments(10, 20, 20, 0.375));
+		assertEquals(List.of(new SpatialSquareProgress.Segment(10, 20, 29, 20),
+			new SpatialSquareProgress.Segment(29, 20, 29, 39), new SpatialSquareProgress.Segment(29, 39, 10, 39),
+			new SpatialSquareProgress.Segment(10, 39, 10, 20)), SpatialSquareProgress.segments(10, 20, 20, 1.0));
 		assertTrue(SpatialSquareProgress.segments(10, 20, 20, 0.0).isEmpty());
+		assertTrue(SpatialSquareProgress.segments(10, 20, 1, 1.0).isEmpty());
 	}
 
 	@Test

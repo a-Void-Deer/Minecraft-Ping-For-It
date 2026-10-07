@@ -24,12 +24,18 @@ import nx.pingwheel.common.domain.PingTypeCatalog;
 /**
  * Native Minecraft overlay for the spatial selector read models.
  *
- * <p>Every shape is square and straight: options are framed by thin
+ * <p>Every option is square and straight: options are framed by thin
  * rectangular borders, the pointer is a straight-line crosshair, the trail is a
  * series of small squares, and the Back hover progress is a square perimeter
- * walked in four straight segments. There are no arcs, circles, or rounded
- * corners anywhere; the radial bearing only positions a node along a straight
+ * walked in four straight segments. The one curved element is a semi-transparent
+ * circular-sector backdrop painted beneath the radial nodes, using each entry's
+ * own bearing span; a bearing still only positions a node along a straight
  * guide line.
+ *
+ * <p>Wheel opacity governs only the sector underlay; target opacity governs
+ * every text-bearing frame together with its label. Neither preference reaches
+ * the interaction chrome (pointer, guides, trail), which follows only the
+ * transition fade.
  *
  * <p>The controller's geometry is virtual: menu origins and the pointer are
  * relative to the gesture origin, so this renderer offsets every point by the
@@ -70,6 +76,7 @@ public final class SpatialOverlayRenderer {
 	static final int POINTER_COLOR = 0xFFFFFFFF;
 	static final int PROGRESS_COLOR = 0xFFFFFFFF;
 	static final int TRAIL_COLOR = 0x99FFFFFF;
+	static final int SECTOR_BACKGROUND = 0x26FFFFFF;
 
 	static final int BORDER_THICKNESS = 1;
 	static final int ROW_HEIGHT = 12;
@@ -77,10 +84,11 @@ public final class SpatialOverlayRenderer {
 	static final int ITEM_ICON_SIZE = 16;
 	static final double BOX_HEIGHT = 14.0;
 	static final double MIN_BOX_WIDTH = 14.0;
-	static final double ORBIT_MIN = 64.0;
-	static final double ORBIT_MAX = 132.0;
-	static final double ORBIT_RATIO = 0.22;
-	static final double ORBIT_SELECTED_PUSH = 10.0;
+	static final double ORBIT_MIN = 32.0;
+	static final double ORBIT_MAX = 66.0;
+	static final double ORBIT_RATIO = 0.11;
+	static final double ORBIT_SELECTED_PUSH = 5.0;
+	static final double SECTOR_PADDING = ORBIT_SELECTED_PUSH + BOX_HEIGHT / 2.0;
 	static final double ANIMATION_RATE_PER_MILLI = 0.02;
 	static final double MAX_FRAME_MILLIS = 100.0;
 	static final double ANCESTOR_ALPHA = 0.35;
@@ -91,25 +99,47 @@ public final class SpatialOverlayRenderer {
 	private static final double APPEARANCE_SCALE = 0.92;
 	private static final Session SHARED = new Session();
 
+	/** Main-thread scratch row; backdrop painting must not allocate per frame. */
+	private static final double[] SECTOR_ROW_BOUNDS = new double[2];
+
 	/**
 	 * Caller-resolved visual preferences; no configuration access occurs here.
 	 * Scales are actual text scales, not persisted percentage values. The facade
 	 * can pass normalized old font percentages to fromLegacyFontSizes, preserving
 	 * the old radial option base scale and independent target/list text scale.
+	 * The two opacity percentages are independent: wheel opacity reaches only the
+	 * sector underlay, while target opacity reaches every text-bearing frame
+	 * (radial nodes, inventory panel, rows, header and footer) and its label.
 	 */
-	public record Style(int opacityPercent, double optionTextScale, double inventoryTextScale,
+	public record Style(int opacityPercent, int targetOpacityPercent, double optionTextScale, double inventoryTextScale,
 		double rootDistance, boolean showTrail, boolean reduceMotion) {
 
-		public static final Style NATIVE = new Style(100, 1.0, 1.0, 0.0, true, false);
+		public static final Style NATIVE = new Style(100, 100, 1.0, 1.0, 0.0, true, false);
+
+		/**
+		 * Compatibility form with one opacity value feeding both the sector
+		 * underlay and the text-bearing frames.
+		 */
+		public Style(int opacityPercent, double optionTextScale, double inventoryTextScale,
+			double rootDistance, boolean showTrail, boolean reduceMotion) {
+			this(opacityPercent, opacityPercent, optionTextScale, inventoryTextScale, rootDistance, showTrail, reduceMotion);
+		}
 
 		/** Zero rootDistance retains viewport-derived spacing for old overloads only. */
 		public Style(int opacityPercent, double optionTextScale, double inventoryTextScale,
 			boolean showTrail, boolean reduceMotion) {
-			this(opacityPercent, optionTextScale, inventoryTextScale, 0.0, showTrail, reduceMotion);
+			this(opacityPercent, opacityPercent, optionTextScale, inventoryTextScale, 0.0, showTrail, reduceMotion);
+		}
+
+		/** Zero rootDistance retains viewport-derived spacing for this form. */
+		public Style(int opacityPercent, int targetOpacityPercent, double optionTextScale, double inventoryTextScale,
+			boolean showTrail, boolean reduceMotion) {
+			this(opacityPercent, targetOpacityPercent, optionTextScale, inventoryTextScale, 0.0, showTrail, reduceMotion);
 		}
 
 		public Style {
 			opacityPercent = WheelOpacity.clampPercent(opacityPercent);
+			targetOpacityPercent = WheelOpacity.clampPercent(targetOpacityPercent);
 			if (!Double.isFinite(optionTextScale) || optionTextScale <= 0.0
 				|| !Double.isFinite(inventoryTextScale) || inventoryTextScale <= 0.0
 				|| !Double.isFinite(rootDistance) || rootDistance < 0.0) {
@@ -126,23 +156,37 @@ public final class SpatialOverlayRenderer {
 		/** rootDistance is visual spacing only; no gesture thresholds or old radii are consumed. */
 		public static Style fromLegacyFontSizes(int opacityPercent, int optionFontPercent, int targetFontPercent,
 			double rootDistance, boolean showTrail, boolean reduceMotion) {
-			return new Style(opacityPercent, WheelLabelLayout.BASE_TEXT_SCALE * optionFontPercent / 100.0,
+			return fromLegacyFontSizes(opacityPercent, opacityPercent, optionFontPercent, targetFontPercent,
+				rootDistance, showTrail, reduceMotion);
+		}
+
+		/**
+		 * Full form with independent backdrop and target-frame opacities. Font
+		 * percentages stay in their persisted units: the option percentage keeps
+		 * the radial base scale, and the target percentage is an actual text
+		 * scale.
+		 */
+		public static Style fromLegacyFontSizes(int opacityPercent, int targetOpacityPercent, int optionFontPercent,
+			int targetFontPercent, double rootDistance, boolean showTrail, boolean reduceMotion) {
+			return new Style(opacityPercent, targetOpacityPercent,
+				WheelLabelLayout.BASE_TEXT_SCALE * optionFontPercent / 100.0,
 				targetFontPercent / 100.0, rootDistance, showTrail, reduceMotion);
 		}
 	}
 
 	private record VisualKey(String kind, String owner, String entry) {}
-	private sealed interface Paint permits NodePaint, PanelPaint, RowPaint, HeaderPaint, FooterPaint, ChromePaint {}
-	private record NodePaint(SpatialController.ChoiceView choice, Component label, boolean selected,
+	sealed interface Paint permits NodePaint, PanelPaint, RowPaint, HeaderPaint, FooterPaint, ChromePaint, SectorPaint {}
+	record NodePaint(SpatialController.ChoiceView choice, Component label, boolean selected,
 		double hoverProgress) implements Paint {}
-	private record PanelPaint(double width, double height, double headerHeight) implements Paint {}
-	private record RowPaint(SpatialInventoryView.Row row, double width, double height, boolean selected,
+	record PanelPaint(double width, double height, double headerHeight) implements Paint {}
+	record RowPaint(SpatialInventoryView.Row row, double width, double height, boolean selected,
 		boolean grey) implements Paint {}
-	private record HeaderPaint(double width, double height, String position, SpatialInventoryView.Status status)
+	record HeaderPaint(double width, double height, String position, SpatialInventoryView.Status status)
 		implements Paint {}
-	private record FooterPaint(double width, double height, boolean backLeft,
+	record FooterPaint(double width, double height, boolean backLeft,
 		SpatialInventoryView.BackAffordance back) implements Paint {}
-	private record ChromePaint(SpatialController.Snapshot snapshot) implements Paint {}
+	record ChromePaint(SpatialController.Snapshot snapshot) implements Paint {}
+	record SectorPaint(SpatialController.ChoiceView choice, double radius) implements Paint {}
 
 	/**
 	 * Default radial label contract: {@link SpatialController.ChoiceView#label()}
@@ -312,14 +356,15 @@ public final class SpatialOverlayRenderer {
 			List<SpatialOverlayTransitions.State<VisualKey, Paint>> states =
 				transitions.update(targets, nowNanos, style.reduceMotion());
 			RowLayout selected = RowLayout.NONE;
-			// A replacement panel may have been admitted after surviving rows. Paint
-			// all backdrops first so cache insertion order never covers their text.
+			// Sector backdrops and replacement panels may be admitted after
+			// surviving rows, so rank every layer explicitly: radial backdrops,
+			// inventory panels, then rows, nodes, and chrome.
 			for (SpatialOverlayTransitions.State<VisualKey, Paint> state : states.stream()
-				.sorted(Comparator.comparingInt(value -> value.data() instanceof PanelPaint ? 0 : 1)).toList()) {
+				.sorted(Comparator.comparingInt(value -> paintRank(value.data()))).toList()) {
 				if (state.present() && state.data() instanceof RowPaint row && row.selected()) {
 					selected = new RowLayout(state.y(), row.width() * state.scale());
 				}
-				if (WheelOpacity.shouldRender(style.opacityPercent())) {
+				if (renders(state.data(), state.alpha(), style)) {
 					paint(graphics, font, state, style);
 				}
 			}
@@ -341,11 +386,12 @@ public final class SpatialOverlayRenderer {
 			for (SpatialController.ChoiceView choice : menu.choices()) {
 				double bearing = Math.toRadians(choice.startDegrees() + choice.spanDegrees() / 2.0);
 				boolean selected = active && choice.id().equals(menu.focusId());
-				double radius = nodeRadius(i, orbit, rootDistance, selected);
-				double alpha = active ? (selected ? 1.0 : 0.8) : ANCESTOR_ALPHA;
-				if (choice.disabled() || choice.reserved()) {
-					alpha *= DISABLED_ALPHA_FACTOR;
-				}
+				double baseRadius = nodeRadius(i, orbit, rootDistance, false);
+				double radius = baseRadius + (selected ? ORBIT_SELECTED_PUSH : 0.0);
+				double alpha = nodeAlpha(active, selected, choice.disabled() || choice.reserved());
+				add(targets, new VisualKey("sector", menu.menuId(), choice.id()),
+					menuX, menuY, 1.0, alpha, menuX, menuY,
+					new SectorPaint(choice, sectorRadius(baseRadius)));
 				add(targets, new VisualKey("node", menu.menuId(), choice.id()),
 					menuX + Math.sin(bearing) * radius, menuY - Math.cos(bearing) * radius,
 					active ? (selected ? 1.12 : 0.95) : 0.85, alpha,
@@ -355,9 +401,64 @@ public final class SpatialOverlayRenderer {
 		}
 	}
 
+	/**
+	 * Shared node/backdrop opacity: selection and ancestor dimming plus the
+	 * disabled/reserved factor, so both layers fade together.
+	 */
+	static double nodeAlpha(boolean active, boolean selected, boolean disabledOrReserved) {
+		double alpha = active ? (selected ? 1.0 : 0.8) : ANCESTOR_ALPHA;
+		return disabledOrReserved ? alpha * DISABLED_ALPHA_FACTOR : alpha;
+	}
+
+	/** Wheel opacity reaches only the sector underlay. */
+	static double backdropAlpha(double stateAlpha, Style style) {
+		return stateAlpha * style.opacityPercent() / 100.0;
+	}
+
+	/** Target opacity reaches every text-bearing frame together with its label. */
+	static double targetAlpha(double stateAlpha, Style style) {
+		return stateAlpha * style.targetOpacityPercent() / 100.0;
+	}
+
+	/**
+	 * Layer alpha for one transition state: the sector underlay follows wheel
+	 * opacity, text-bearing frames follow target opacity, and the interaction
+	 * chrome follows only the transition fade so neither preference can hide
+	 * the pointer or its guides.
+	 */
+	static double layerAlpha(Object data, double stateAlpha, Style style) {
+		if (data instanceof SectorPaint) return backdropAlpha(stateAlpha, style);
+		if (data instanceof ChromePaint) return stateAlpha;
+		return targetAlpha(stateAlpha, style);
+	}
+
+	/**
+	 * Whether one transition layer still contributes visible paint. The sector
+	 * underlay needs wheel opacity, every text-bearing frame needs target
+	 * opacity, and the interaction chrome follows only the transition fade, so a
+	 * zero opacity pair hides the underlay and frames without hiding the
+	 * pointer, guides, or trail. {@link #paint} applies the same alpha again as
+	 * its own guard, including the font-color transparency protection.
+	 */
+	static boolean renders(Object data, double stateAlpha, Style style) {
+		return layerAlpha(data, stateAlpha, style) > 0.0;
+	}
+
 	static double nodeRadius(int menuIndex, double viewportOrbit, double rootDistance, boolean selected) {
 		return (menuIndex == 0 && rootDistance > 0.0 ? rootDistance : viewportOrbit)
 			+ (selected ? ORBIT_SELECTED_PUSH : 0.0);
+	}
+
+	/** Backdrop outer radius: the base node orbit plus one focus margin. */
+	static double sectorRadius(double nodeRadius) {
+		return nodeRadius + SECTOR_PADDING;
+	}
+
+	/** Radial sector backdrops first, then inventory panels, then every node/chrome layer. */
+	static int paintRank(Object data) {
+		if (data instanceof SectorPaint) return 0;
+		if (data instanceof PanelPaint) return 1;
+		return 2;
 	}
 
 	private static void addInventory(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
@@ -412,12 +513,16 @@ public final class SpatialOverlayRenderer {
 
 	private static void paint(GuiGraphics graphics, Font font,
 		SpatialOverlayTransitions.State<VisualKey, Paint> state, Style style) {
-		double alpha = state.alpha() * style.opacityPercent() / 100.0;
+		double alpha = layerAlpha(state.data(), state.alpha(), style);
 		if (alpha <= 0.0) {
 			return;
 		}
 		if (state.data() instanceof NodePaint node) {
 			drawNode(graphics, font, node, state, style, alpha);
+			return;
+		}
+		if (state.data() instanceof SectorPaint sector) {
+			drawSector(graphics, sector, state, alpha);
 			return;
 		}
 		if (state.data() instanceof ChromePaint chrome) {
@@ -596,12 +701,9 @@ public final class SpatialOverlayRenderer {
 				-font.lineHeight * style.optionTextScale() / 2.0, style.optionTextScale(), textColor, alpha);
 
 			if (choice.back() && selected && state.present() && node.hoverProgress() > 0.0) {
-				drawSquareProgress(
+				drawProgressSegments(
 					guiGraphics,
-					left - 2,
-					top - 2,
-					Math.max(right - left, bottom - top) + 3,
-					node.hoverProgress(),
+					backProgressSegments(left, top, right, bottom, node.hoverProgress()),
 					withAlpha(PROGRESS_COLOR, alpha));
 			}
 		} finally {
@@ -613,6 +715,161 @@ public final class SpatialOverlayRenderer {
 	private static Component nodeLabel(SpatialController.ChoiceView choice, Component resolved) {
 		if (resolved != null && !resolved.getString().isBlank()) return resolved;
 		return choice.back() ? Component.translatable("pingforit.spatial.back") : Component.empty();
+	}
+
+	/**
+	 * Returns a progress path over the exact node frame, rather than a square
+	 * derived from the frame's width or height alone. The frame is painted by
+	 * {@code fill(left, top, right, bottom)} plus a one-pixel
+	 * {@code strokeRect}, so right and bottom are exclusive bounds: the path
+	 * must end on the last painted column and row, {@code right - 1} and
+	 * {@code bottom - 1}, or {@link #line} paints one pixel past the border.
+	 */
+	static List<SpatialSquareProgress.Segment> backProgressSegments(
+		int left, int top, int right, int bottom, double progress) {
+		int lastX = right - BORDER_THICKNESS;
+		int lastY = bottom - BORDER_THICKNESS;
+		if (!Double.isFinite(progress) || progress <= 0.0 || lastX <= left || lastY <= top) {
+			return List.of();
+		}
+		double clamped = Math.min(1.0, progress);
+		double[] xs = {left, lastX, lastX, left, left};
+		double[] ys = {top, top, lastY, lastY, top};
+		double[] lengths = {lastX - left, lastY - top, lastX - left, lastY - top};
+		double perimeter = 0.0;
+		for (double length : lengths) perimeter += length;
+		double remaining = perimeter * clamped;
+		List<SpatialSquareProgress.Segment> result = new ArrayList<>(4);
+		for (int i = 0; i < lengths.length && remaining > 0.0; i++) {
+			double fraction = Math.min(1.0, remaining / lengths[i]);
+			result.add(new SpatialSquareProgress.Segment(xs[i], ys[i],
+				xs[i] + (xs[i + 1] - xs[i]) * fraction,
+				ys[i] + (ys[i + 1] - ys[i]) * fraction));
+			remaining -= lengths[i] * fraction;
+		}
+		return List.copyOf(result);
+	}
+
+	private static void drawProgressSegments(GuiGraphics graphics,
+		List<SpatialSquareProgress.Segment> segments, int color) {
+		for (SpatialSquareProgress.Segment segment : segments) {
+			line(graphics, segment.x1(), segment.y1(), segment.x2(), segment.y2(), color, BORDER_THICKNESS);
+		}
+	}
+
+	private static void drawSector(GuiGraphics graphics, SectorPaint sector,
+		SpatialOverlayTransitions.State<VisualKey, Paint> state, double alpha) {
+		int color = withAlpha(SECTOR_BACKGROUND, alpha);
+		if ((color >>> 24) == 0) {
+			return;
+		}
+		var pose = graphics.pose();
+		pose.pushPose();
+		try {
+			pose.translate(state.x(), state.y(), 0.0);
+			pose.scale((float) state.scale(), (float) state.scale(), 1.0f);
+			fillSector(graphics, sector.radius(), sector.choice().startDegrees(), sector.choice().spanDegrees(), color);
+		} finally {
+			pose.popPose();
+		}
+	}
+
+	/**
+	 * Fills a sector as one bounded quad per scanline. Rows are derived from the
+	 * transition state's origin, so no per-frame allocation occurs here.
+	 */
+	private static void fillSector(GuiGraphics graphics, double radius, double startDegrees,
+		double spanDegrees, int color) {
+		int firstRow = (int) Math.ceil(-radius);
+		int lastRow = (int) Math.floor(radius);
+		for (int dy = firstRow; dy <= lastRow; dy++) {
+			sectorRow(dy, radius, startDegrees, spanDegrees, SECTOR_ROW_BOUNDS);
+			if (SECTOR_ROW_BOUNDS[0] > SECTOR_ROW_BOUNDS[1]) {
+				continue;
+			}
+			int left = (int) Math.round(SECTOR_ROW_BOUNDS[0]);
+			int right = (int) Math.round(SECTOR_ROW_BOUNDS[1]);
+			if (right <= left) {
+				right = left + 1;
+			}
+			graphics.fill(left, dy, right, dy + 1, color);
+		}
+	}
+
+	/**
+	 * Pure scanline probe for one backdrop row, in coordinates relative to the
+	 * sector origin: {@code bounds[0]} is the leftmost and {@code bounds[1]} the
+	 * rightmost covered x, and {@code bounds[0] > bounds[1]} means the row is
+	 * empty. Exact for the supported spans the controller emits: a convex sector
+	 * of at most a half turn, or a full disc. Only callers asking for the returned
+	 * array allocate; painting reuses a main-thread scratch row.
+	 */
+	static double[] sectorRowBounds(double dy, double radius, double startDegrees, double spanDegrees) {
+		double[] bounds = new double[2];
+		sectorRow(dy, radius, startDegrees, spanDegrees, bounds);
+		return bounds;
+	}
+
+	private static void sectorRow(double dy, double radius, double startDegrees, double spanDegrees, double[] bounds) {
+		bounds[0] = Double.POSITIVE_INFINITY;
+		bounds[1] = Double.NEGATIVE_INFINITY;
+		if (!(radius > 0.0) || !(spanDegrees > 0.0)) {
+			return;
+		}
+		double halfWidthSquared = radius * radius - dy * dy;
+		if (halfWidthSquared < 0.0) {
+			return;
+		}
+		double halfWidth = Math.sqrt(halfWidthSquared);
+		// The row through the origin meets the shared sector vertex; the covered
+		// side is decided by the row's own horizontal bearings.
+		if (dy == 0.0) {
+			boolean right = bearingWithin(90.0, startDegrees, spanDegrees);
+			boolean left = bearingWithin(-90.0, startDegrees, spanDegrees);
+			if (right || left) {
+				bounds[0] = left ? -halfWidth : 0.0;
+				bounds[1] = right ? halfWidth : 0.0;
+			}
+			return;
+		}
+		// A convex sector's row interval ends on the circle or on one of its two
+		// radial edges, so the inside candidates bound the interval exactly.
+		considerRowPoint(bounds, -halfWidth, dy, radius, startDegrees, spanDegrees);
+		considerRowPoint(bounds, halfWidth, dy, radius, startDegrees, spanDegrees);
+		for (int edge = 0; edge < 2; edge++) {
+			double radians = Math.toRadians(startDegrees + edge * spanDegrees);
+			double cosine = Math.cos(radians);
+			if (Math.abs(cosine) < 1.0e-9) {
+				continue; // a horizontal edge only meets the origin row
+			}
+			double distance = -dy / cosine;
+			if (distance < 0.0) {
+				continue; // the edge points away from this row
+			}
+			considerRowPoint(bounds, distance * Math.sin(radians), dy, radius, startDegrees, spanDegrees);
+		}
+	}
+
+	private static void considerRowPoint(double[] bounds, double x, double dy, double radius,
+		double startDegrees, double spanDegrees) {
+		if (x * x + dy * dy > radius * radius + 1.0e-9) {
+			return;
+		}
+		if (!bearingWithin(Math.toDegrees(Math.atan2(x, -dy)), startDegrees, spanDegrees)) {
+			return;
+		}
+		if (x < bounds[0]) bounds[0] = x;
+		if (x > bounds[1]) bounds[1] = x;
+	}
+
+	private static boolean bearingWithin(double bearingDegrees, double startDegrees, double spanDegrees) {
+		if (spanDegrees >= 360.0) {
+			return true;
+		}
+		double offset = (bearingDegrees - startDegrees) % 360.0;
+		if (offset < 0.0) offset += 360.0;
+		if (offset >= 360.0 - 1.0e-9) offset = 0.0;
+		return offset <= spanDegrees + 1.0e-9;
 	}
 
 	private static void drawMenuLinks(
@@ -787,8 +1044,12 @@ public final class SpatialOverlayRenderer {
 	}
 
 	private static double orbit(GuiGraphics guiGraphics) {
-		double smallest = Math.min(guiGraphics.guiWidth(), guiGraphics.guiHeight());
-		return clamp(smallest * ORBIT_RATIO, ORBIT_MIN, ORBIT_MAX);
+		return orbitFor(Math.min(guiGraphics.guiWidth(), guiGraphics.guiHeight()));
+	}
+
+	/** Viewport-derived child orbit, clamped to the half-scale window. */
+	static double orbitFor(double smallestGuiDimension) {
+		return clamp(smallestGuiDimension * ORBIT_RATIO, ORBIT_MIN, ORBIT_MAX);
 	}
 
 	static int withAlpha(int color, double alpha) {
