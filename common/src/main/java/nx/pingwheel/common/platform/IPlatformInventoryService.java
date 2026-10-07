@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 
 /**
  * Loader bridge for item sources that expose a native, read-only inventory
@@ -91,6 +92,12 @@ public interface IPlatformInventoryService {
 	interface Access {
 		/** Canonical controller alias, only when established without force-loading. */
 		default Optional<String> alias() { return Optional.empty(); }
+		/**
+		 * Optional detached description of an explicitly supported multipart NBT
+		 * snapshot. This DTO contains positions and slot mappings only; it never
+		 * carries live block entities or widens this access's frozen side.
+		 */
+		default Optional<InventorySnapshotLayout> snapshotLayout() { return Optional.empty(); }
 		/** Reacquire live provider segments on validation/read when the provider requires it. */
 		default boolean valid() { return true; }
 		/** Counts every visited view, including blanks; implementations override cursorless enumeration. */

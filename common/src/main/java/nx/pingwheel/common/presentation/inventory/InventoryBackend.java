@@ -336,6 +336,20 @@ public final class InventoryBackend implements AutoCloseable {
 		publisher.drain();
 	}
 	private void samplePreview(UUID player, Preview preview) {
+		InventorySourceAccess.Preparation preparation = runtime.prepare(preview.consumer);
+		if (preparation == InventorySourceAccess.Preparation.DEFERRED) return;
+		if (preparation != InventorySourceAccess.Preparation.READY) {
+			var observation = runtime.step(preview.consumer, 1);
+			if (observation.isEmpty()) return;
+			CaptureResult result = observation.get().result();
+			if (result.availability() != CaptureResult.Availability.READABLE) {
+				invalidatePreview(sessions.get(player), preview); return;
+			}
+			preview.last = result; preview.terminal = true; preview.revision++;
+			publisher.status(preview.context, InventoryS2CPacket.Status.INCOMPLETE);
+			publishPreview(preview);
+			return;
+		}
 		if (!variantMemory.containsKey(player)) {
 			if (variantMemory.size() >= MAX_SESSIONS) return;
 			var claimMemory = runtime.memory().tryReserve(65536);

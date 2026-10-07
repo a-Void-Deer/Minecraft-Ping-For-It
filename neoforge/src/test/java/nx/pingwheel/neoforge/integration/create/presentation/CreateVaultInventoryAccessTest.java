@@ -1,12 +1,15 @@
 package nx.pingwheel.neoforge.integration.create.presentation;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.neoforged.neoforge.items.IItemHandler;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotSchemas;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -72,5 +75,32 @@ class CreateVaultInventoryAccessTest {
 		world.members.get(BlockPos.ZERO).handler = new Handler(0);
 		world.members.get(new BlockPos(1, 0, 0)).handler = new Handler(2);
 		assertFalse(access.valid(), "stable cursor requires segment boundaries, not only total slots");
+	}
+	@Test void snapshotLayoutPreservesMemberOrderControllerAndLocalSlotMappings() {
+		World world = World.pair();
+		world.members.get(BlockPos.ZERO).handler = new Handler(2);
+		world.members.get(new BlockPos(1, 0, 0)).handler = new Handler(3);
+		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
+		var layout = access.snapshotLayout().orElseThrow();
+		assertEquals(access.alias().orElseThrow(), layout.layoutId());
+		assertEquals("axis=X;width=1;length=2", layout.layoutData());
+		assertEquals(BlockPos.ZERO, layout.controller());
+		assertEquals(List.of(BlockPos.ZERO, new BlockPos(1, 0, 0)), layout.members().stream().map(InventorySnapshotLayout.Member::position).toList());
+		assertEquals(List.of("controller", "member"), layout.members().stream().map(InventorySnapshotLayout.Member::role).toList());
+		assertEquals(List.of("create:item_vault", "create:item_vault"), layout.members().stream().map(InventorySnapshotLayout.Member::blockEntityId).toList());
+		var first = layout.members().get(0).segments().get(0);
+		var second = layout.members().get(1).segments().get(0);
+		assertEquals("Inventory.Items", first.fieldPath());
+		assertEquals(InventorySnapshotSchemas.ITEMS, first.schemaId());
+		assertEquals(2, first.localSlots());
+		assertEquals(List.of(0, 1), first.visibleSlots());
+		assertEquals(3, second.localSlots());
+		assertEquals(List.of(0, 1, 2), second.visibleSlots(), "visible indices remain member-local rather than global");
+	}
+	@Test void invalidCurrentLayoutDoesNotExposeSnapshotDescriptor() {
+		World world = World.pair();
+		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
+		world.members.get(BlockPos.ZERO).width = 2;
+		assertTrue(access.snapshotLayout().isEmpty());
 	}
 }

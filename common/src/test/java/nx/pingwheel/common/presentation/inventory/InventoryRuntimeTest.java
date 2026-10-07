@@ -21,10 +21,11 @@ class InventoryRuntimeTest {
 	static InventoryDomainCodec.Item item(long count) { return new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "plain"), count, "stone", null, false); }
 	static class Source implements InventorySourceAccess.Source {
 		final InventorySourceInput input; final AtomicInteger reads; final int size;
+		final AtomicInteger validCalls = new AtomicInteger();
 		boolean stable = true, valid = true;
 		Source(InventorySourceInput input, AtomicInteger reads, int size) { this.input = input; this.reads = reads; this.size = size; }
 		@Override public SourceKey key() { return new SourceKey("test", "inventory", "same-container", input.viewKey()); }
-		@Override public boolean valid() { return valid; }
+		@Override public boolean valid() { validCalls.incrementAndGet(); return valid; }
 		@Override public boolean stableCursor() { return stable; }
 		@Override public int slots() { return size; }
 		@Override public InventoryDomainCodec.Item read(int slot) { reads.incrementAndGet(); return slot == 0 ? item(7) : null; }
@@ -206,6 +207,162 @@ class InventoryRuntimeTest {
 			settings.setPhysicalSlotsPerTick(IntLimit.finite(3)); runtime.advance(0, settings); runtime.step(consumer, 1); assertEquals(2, reads.get());
 			assertTrue(runtime.step(consumer, 1).isEmpty(), "raising live cap does not reset this tick's original finite ledger");
 			runtime.advance(1, settings); runtime.step(consumer, 1); assertEquals(3, reads.get());
+		}
+	}
+	@Test void snapshotPreparationSurvivesZeroScanAndDecodesFrozenSlotsAcrossPeriods() {
+		var settings = InventorySettings.serverDefaults(); settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
+		settings.getPreview().setPeriodTicks(1);
+		UUID owner = new UUID(3, 3); AtomicInteger liveReads = new AtomicInteger(), captures = new AtomicInteger(), snapshotReads = new AtomicInteger(), snapshotCloses = new AtomicInteger();
+		List<InventoryDomainCodec.Item> live = new java.util.ArrayList<>();
+		for (int i = 0; i < 54; i++) live.add(item(i + 1));
+		try (var runtime = new InventoryRuntime(i -> Optional.of(new Source(i, liveReads, 54) {
+			@Override public InventoryDomainCodec.Item read(int slot) { liveReads.incrementAndGet(); return live.get(slot); }
+			@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
+				return Optional.of(new InventorySourceAccess.SnapshotPlan() {
+					@Override public long memoryUpperBoundBytes() { return 1_000_000; }
+					@Override public Optional<InventorySourceAccess.InventorySnapshot> capture() {
+						captures.incrementAndGet(); List<InventoryDomainCodec.Item> frozen = List.copyOf(live);
+						return Optional.of(new InventorySourceAccess.InventorySnapshot() {
+							@Override public int slots() { return frozen.size(); }
+							@Override public InventoryDomainCodec.Item read(int index) { snapshotReads.incrementAndGet(); return frozen.get(index); }
+							@Override public long retainedBytes() { return frozen.size() * 256L; }
+							@Override public InventorySourceAccess.SnapshotEvidence evidence() { return InventorySourceAccess.SnapshotEvidence.ATOMIC_DETACHED; }
+							@Override public void close() { snapshotCloses.incrementAndGet(); }
+						});
+					}
+				});
+			}
+		}), 16_000_000)) {
+			runtime.advance(0, settings);
+			assertTrue(runtime.selectionPresent(input(owner), new InventorySelection(item(1).key(), "minecraft:stone", "stone", null, false, "danger"), 0));
+			var consumer = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(consumer));
+			assertTrue(runtime.step(consumer, 2).isEmpty(), "zero remaining scan allowance cannot consume non-empty snapshot slots");
+			assertEquals(1, captures.get(), "preparation captures once even after the physical scan allowance is spent");
+			assertEquals(1, liveReads.get(), "only the separately admitted selection witness reads the live source");
+			live.replaceAll(ignored -> item(999));
+			settings.setPhysicalSlotsPerTick(IntLimit.finite(2));
+			long consumed = 0;
+			for (int tick = 1; tick <= 27; tick++) {
+				runtime.advance(tick, settings);
+				var observation = runtime.step(consumer, 2).orElseThrow();
+				assertEquals(CaptureResult.Consistency.VERIFIED, observation.result().consistency());
+				for (var slot : observation.slots()) {
+					assertNotNull(slot);
+					assertTrue(slot.count() <= 54, "consumption uses detached values, not changed live inventory");
+					consumed++;
+				}
+			}
+			assertEquals(54, consumed);
+			assertEquals(54, snapshotReads.get());
+			assertEquals(1, captures.get());
+			assertEquals(1, liveReads.get(), "snapshot consumption never falls back to live slot reads");
+		}
+		assertEquals(1, snapshotCloses.get(), "last consumer close releases the retained snapshot");
+	}
+	@Test void cachedEmptySnapshotCompletesIndependentLogicalConsumersWithoutRepeatValidationOrReads() {
+		var settings = InventorySettings.serverDefaults(); settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
+		UUID owner = new UUID(4, 4); AtomicInteger reads = new AtomicInteger(), captures = new AtomicInteger();
+		InventorySourceInput quotaInput = input(owner);
+		InventorySourceInput emptyInput = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 2, 2, 3, "minecraft:chest"), owner, BlockFace.NORTH);
+		java.util.Map<Integer, Source> sources = new java.util.HashMap<>();
+		try (var runtime = new InventoryRuntime(i -> {
+			int x = i.target().x();
+			Source source = new Source(i, reads, x == 1 ? 1 : 0) {
+				@Override public SourceKey key() { return new SourceKey("test", "inventory", "target-" + x, i.viewKey()); }
+				@Override public InventoryDomainCodec.Item read(int slot) { reads.incrementAndGet(); return x == 1 ? item(1) : null; }
+				@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
+					if (x != 2) return Optional.empty();
+					return Optional.of(new InventorySourceAccess.SnapshotPlan() {
+						@Override public long memoryUpperBoundBytes() { return 1024; }
+						@Override public Optional<InventorySourceAccess.InventorySnapshot> capture() {
+							captures.incrementAndGet();
+							return Optional.of(new InventorySourceAccess.InventorySnapshot() {
+								@Override public int slots() { return 0; }
+								@Override public InventoryDomainCodec.Item read(int index) { throw new AssertionError("empty snapshot has no reads"); }
+								@Override public long retainedBytes() { return 0; }
+								@Override public InventorySourceAccess.SnapshotEvidence evidence() { return InventorySourceAccess.SnapshotEvidence.ATOMIC_DETACHED; }
+							});
+						}
+					});
+				}
+			};
+			sources.put(x, source); return Optional.of(source);
+		}, 4_000_000)) {
+			runtime.advance(0, settings);
+			var subject = new InventoryRuntime.PreviewSubject(owner);
+			var quota = runtime.attach(quotaInput, subject).orElseThrow();
+			assertEquals(1, runtime.step(quota).orElseThrow().slots().size(), "spend the subject logical allowance on a separate source first");
+			var first = runtime.attach(emptyInput, subject).orElseThrow();
+			var second = runtime.attach(emptyInput, subject).orElseThrow();
+			assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(first).orElseThrow().result().completeness());
+			int validations = sources.get(2).validCalls.get();
+			assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(second).orElseThrow().result().completeness());
+			assertEquals(validations, sources.get(2).validCalls.get(), "cached empty delivery does not revalidate or step the handle");
+			assertEquals(1, captures.get()); assertEquals(1, reads.get());
+		}
+	}
+	@Test void zeroAllowanceProviderValidationRequiresFixedProviderBudgetAndMemoryDeferredRetriesAreAdmitted() {
+		var settings = InventorySettings.serverDefaults(); settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
+		settings.setPendingMemoryMiB(4);
+		UUID owner = new UUID(5, 5); AtomicInteger reads = new AtomicInteger(), captures = new AtomicInteger(); Source[] source = new Source[1];
+		try (var runtime = new InventoryRuntime(i -> {
+			source[0] = new Source(i, reads, 0) {
+				@Override public boolean valid() { validCalls.incrementAndGet(); return true; }
+				@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
+					return Optional.of(new InventorySourceAccess.SnapshotPlan() {
+						@Override public long memoryUpperBoundBytes() { return 1024; }
+						@Override public Optional<InventorySourceAccess.InventorySnapshot> capture() {
+							captures.incrementAndGet();
+							return Optional.of(new InventorySourceAccess.InventorySnapshot() {
+								@Override public int slots() { return 0; }
+								@Override public InventoryDomainCodec.Item read(int index) { return null; }
+								@Override public long retainedBytes() { return 0; }
+							});
+						}
+					});
+				}
+			}; return Optional.of(source[0]);
+		}, 4_000_000)) {
+			runtime.advance(0, settings);
+			var consumer = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			assertFalse(runtime.selectionPresent(input(owner), new InventorySelection(item(1).key(), "minecraft:stone", "stone", null, false, "danger"), 0));
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(consumer));
+			for (int i = 0; i < 128; i++) runtime.preflight(() -> Optional.of(true));
+			int beforeBudgetFailure = source[0].validCalls.get();
+			assertTrue(runtime.step(consumer).isEmpty());
+			assertEquals(beforeBudgetFailure, source[0].validCalls.get(), "zero-slot source validation defers after provider-work exhaustion");
+			assertTrue(beforeBudgetFailure > 0);
+		}
+
+		AtomicInteger memoryCaptures = new AtomicInteger(), memoryValidCalls = new AtomicInteger();
+		try (var runtime = new InventoryRuntime(i -> Optional.of(new Source(i, new AtomicInteger(), 0) {
+			@Override public boolean valid() { memoryValidCalls.incrementAndGet(); return true; }
+			@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
+				return Optional.of(new InventorySourceAccess.SnapshotPlan() {
+					@Override public long memoryUpperBoundBytes() { return 256_000; }
+					@Override public Optional<InventorySourceAccess.InventorySnapshot> capture() {
+						memoryCaptures.incrementAndGet();
+						return Optional.of(new InventorySourceAccess.InventorySnapshot() {
+							@Override public int slots() { return 0; }
+							@Override public InventoryDomainCodec.Item read(int index) { return null; }
+							@Override public long retainedBytes() { return 0; }
+						});
+					}
+				});
+			}
+		}), 4_000_000)) {
+			runtime.advance(0, settings); var consumer = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			var held = runtime.memory().tryReserve(runtime.memory().remaining() - 400_000).orElseThrow();
+			assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(consumer));
+			int afterDefer = memoryValidCalls.get();
+			assertTrue(afterDefer > 0, "round and source handle exist before snapshot-memory defer");
+			while (runtime.preflight(() -> Optional.of(true)).isPresent()) {}
+			assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(consumer));
+			assertEquals(afterDefer, memoryValidCalls.get(), "exhausted fixed work defers before another snapshot-plan validity check");
+			runtime.advance(1, settings); held.close();
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(consumer));
+			assertEquals(1, memoryCaptures.get()); assertTrue(memoryValidCalls.get() > afterDefer);
 		}
 	}
 }

@@ -36,6 +36,7 @@ class PlatformInventoryServiceContractTest {
 		assertTrue(source.contains("ServiceLoader.load(IPlatformInventoryService.class)"));
 		assertTrue(source.contains(
 			"Optional<Access> find(ServerLevel level, BlockPos pos, Direction side)"));
+		assertTrue(source.contains("default Optional<InventorySnapshotLayout> snapshotLayout() { return Optional.empty(); }"));
 	}
 
 	@Test

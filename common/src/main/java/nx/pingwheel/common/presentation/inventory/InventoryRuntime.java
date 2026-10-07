@@ -36,6 +36,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		private final RetainedMemoryLedger.Ticket memory;
 		private Round round;
 		private Observation invalidObservation;
+		private Observation pendingObservation;
 		private int cursor;
 		private boolean closed;
 		private long observationFloor;
@@ -48,12 +49,12 @@ public final class InventoryRuntime implements AutoCloseable {
 		public InventorySourceInput input() { return input; }
 		public void restart() {
 			if (round != null) rounds.remove(round.key, round); // new observation evidence, not source identity
-			release(this); invalidObservation = null; cursor = 0; observationFloor = tick; firstRound = 0;
+			release(this); invalidObservation = null; pendingObservation = null; cursor = 0; observationFloor = tick; firstRound = 0;
 		}
 		@Override public void close() {
 			if (!closed) {
 				closed = true;
-				invalidObservation = null;
+				invalidObservation = null; pendingObservation = null;
 				try { release(this); } finally { consumers.remove(this); memory.close(); }
 			}
 		}
@@ -65,10 +66,12 @@ public final class InventoryRuntime implements AutoCloseable {
 		final long startedTick;
 		final long sequence;
 		boolean trackingObservation;
+		InventorySourceAccess.Preparation preparation;
 		final List<InventoryDomainCodec.Item> slots = new ArrayList<>();
 		final Map<Subject, Integer> paid = new LinkedHashMap<>();
 		final List<RetainedMemoryLedger.Ticket> pages = new ArrayList<>();
 		CaptureResult last;
+		Observation failureObservation;
 		int references;
 		Round(SourceKey key, SourceAccess.Handle handle, RetainedMemoryLedger.Ticket memory, long tick, long sequence, boolean tracking) {
 			this.key = key; this.handle = handle; this.memory = memory; startedTick = tick; this.sequence = sequence; trackingObservation = tracking;
@@ -160,10 +163,98 @@ public final class InventoryRuntime implements AutoCloseable {
 	public Optional<Observation> step(Consumer consumer) {
 		return step(consumer, InventorySourceAccess.MAX_STEP);
 	}
+	/** Fix the physical capture route before scan or logical allowance is considered. */
+	public InventorySourceAccess.Preparation prepare(Consumer consumer) {
+		if (consumer.closed) return InventorySourceAccess.Preparation.UNAVAILABLE;
+		if (consumer.invalidObservation != null || consumer.pendingObservation != null)
+			return InventorySourceAccess.Preparation.UNAVAILABLE;
+		if (consumer.round == null) {
+			for (Consumer peer : consumers) if (peer != consumer && peer.round != null && peer.input.equals(consumer.input)
+				&& shareable(consumer, peer.round)) {
+				consumer.round = peer.round; consumer.round.references++; break;
+			}
+		}
+		if (consumer.round == null) {
+			if (retainedRounds >= MAX_ROUNDS) return InventorySourceAccess.Preparation.DEFERRED;
+			var retained = memory.tryReserve(ROUND_MEMORY);
+			if (retained.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
+			boolean ownsReservation = true;
+			SourceAccess.Handle openedHandle = null;
+			try {
+				var access = new InventorySourceAccess(consumer.input, resolver);
+				var target = consumer.input.target();
+				var scope = new SourceAccess.ReadScope(consumer.input.viewKey(), Set.of("pingforit:inventory.items"));
+				var resolved = access.resolve(new PresentationAdapter.DetachedTarget(target.dimensionId(), "block", target.blockRegistryId(),
+					target.x(), target.y(), target.z(), ""), scope, physical);
+				if (!(resolved instanceof SourceAccess.ResolveResult.Available available)) {
+					if (resolved == SourceAccess.ResolveResult.Unresolved.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
+					consumer.pendingObservation = unavailable(scope.viewKey());
+					return InventorySourceAccess.Preparation.UNAVAILABLE;
+				}
+				var opened = access.open(available.descriptor(), scope, physical);
+				if (!(opened instanceof SourceAccess.OpenResult.Started started)) {
+					if (opened == SourceAccess.OpenResult.Unstarted.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
+					consumer.pendingObservation = unavailable(scope.viewKey());
+					return InventorySourceAccess.Preparation.UNAVAILABLE;
+				}
+				openedHandle = started.handle();
+				Round round = rounds.get(available.descriptor().key());
+				// A newly selected Ping never inherits a completed preview count.
+				if (round != null && !shareable(consumer, round)) round = null;
+				if (round == null) {
+					retained.get().commit(ROUND_MEMORY);
+					round = new Round(available.descriptor().key(), started.handle(), retained.get(), tick, ++roundSequence, consumer.subject instanceof TrackingSubject);
+					retainedRounds++;
+					rounds.put(round.key, round);
+					ownsReservation = false; openedHandle = null;
+				}
+				round.references++; consumer.round = round;
+			} finally {
+				try { if (openedHandle != null) openedHandle.close(); }
+				finally { if (ownsReservation) retained.get().close(); }
+			}
+		}
+		Round round = consumer.round;
+		if (round.preparation != null) return round.preparation;
+		if (round.handle instanceof InventorySourceAccess.InventoryHandle inventory) {
+			var admission = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L,
+				InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+			if (admission.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
+			try (var grant = admission.get()) {
+				grant.commit(Map.of(InventorySourceAccess.PROBES, 1L,
+					InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+				InventorySourceAccess.Preparation outcome = inventory.prepareSnapshot(memory);
+				if (outcome != InventorySourceAccess.Preparation.DEFERRED) round.preparation = outcome;
+				return outcome;
+			}
+		}
+		round.preparation = InventorySourceAccess.Preparation.READY;
+		return InventorySourceAccess.Preparation.READY;
+	}
 	public Optional<Observation> step(Consumer consumer, int slotBound) {
 		if (slotBound < 1 || slotBound > InventorySourceAccess.MAX_STEP) throw new IllegalArgumentException("inventory step bound");
 		if (consumer.closed) return Optional.empty();
 		if (consumer.invalidObservation != null) return Optional.of(consumer.invalidObservation);
+		if (consumer.pendingObservation != null) return Optional.of(consumer.pendingObservation);
+		InventorySourceAccess.Preparation preparation = prepare(consumer);
+		if (preparation == InventorySourceAccess.Preparation.DEFERRED) return Optional.empty();
+		if (preparation != InventorySourceAccess.Preparation.READY) {
+			Round failedRound = consumer.round;
+			if (failedRound == null) return Optional.ofNullable(consumer.pendingObservation);
+			if (failedRound.failureObservation == null) {
+				var zero = new CostLedger(Map.of(InventorySourceAccess.PHYSICAL, 0L, InventorySourceAccess.PROBES, 0L,
+					InventorySourceAccess.PROVIDER_WORK, 0L));
+				SourceAccess.StepOutcome outcome = failedRound.handle.step(zero);
+				if (outcome instanceof SourceAccess.StepOutcome.Deferred) return Optional.empty();
+				CaptureResult failed = ((SourceAccess.StepOutcome.Captured) outcome).result();
+				failedRound.last = failed;
+				failedRound.failureObservation = new Observation(failed, List.of());
+			}
+			Observation terminal = failedRound.failureObservation;
+			if (terminal.result().availability() != CaptureResult.Availability.READABLE
+				|| failedRound.preparation == InventorySourceAccess.Preparation.INCOMPLETE) retire(failedRound, terminal);
+			return Optional.of(terminal); // INCOMPLETE remains explicit, never pretend-complete.
+		}
 		if (!logicalUsed.containsKey(consumer.subject) && logicalUsed.size() >= MAX_CONSUMERS) return Optional.empty();
 		if (!logicalMemory.containsKey(consumer.subject)) {
 			var held = memory.tryReserve(1024);
@@ -176,52 +267,27 @@ public final class InventoryRuntime implements AutoCloseable {
 			: settings.getTracking().effectiveMaxSlotsServer();
 		int global = consumer.subject instanceof PreviewSubject ? previewGlobal : trackingGlobal;
 		int allowance = Math.min(slotBound, Math.min(cap - logicalUsed.getOrDefault(consumer.subject, 0), globalCap - global));
-		if (consumer.round == null) {
-			for (Consumer peer : consumers) if (peer != consumer && peer.round != null && peer.input.equals(consumer.input)
-				&& shareable(consumer, peer.round)) {
-				consumer.round = peer.round; consumer.round.references++; break;
-			}
-		}
-		if (consumer.round == null) {
-			if (allowance <= 0 || physicalRemaining() == 0 || retainedRounds >= MAX_ROUNDS) return Optional.empty();
-			var retained = memory.tryReserve(ROUND_MEMORY);
-			if (retained.isEmpty()) return Optional.empty();
-			boolean ownsReservation = true;
-			SourceAccess.Handle openedHandle = null;
-			try {
-			var access = new InventorySourceAccess(consumer.input, resolver);
-			var target = consumer.input.target();
-			var scope = new SourceAccess.ReadScope(consumer.input.viewKey(), Set.of("pingforit:inventory.items"));
-			var resolved = access.resolve(new PresentationAdapter.DetachedTarget(target.dimensionId(), "block", target.blockRegistryId(),
-				target.x(), target.y(), target.z(), ""), scope, physical);
-			if (!(resolved instanceof SourceAccess.ResolveResult.Available available)) {
-				return resolved == SourceAccess.ResolveResult.Unresolved.DEFERRED ? Optional.empty() : Optional.of(unavailable(scope.viewKey()));
-			}
-			var opened = access.open(available.descriptor(), scope, physical);
-			if (!(opened instanceof SourceAccess.OpenResult.Started started)) return Optional.empty();
-			openedHandle = started.handle();
-			Round round = rounds.get(available.descriptor().key());
-			// A newly selected Ping never inherits a completed preview count.
-			if (round != null && !shareable(consumer, round)) round = null;
-			if (round == null) {
-				retained.get().commit(ROUND_MEMORY);
-				round = new Round(available.descriptor().key(), started.handle(), retained.get(), tick, ++roundSequence, consumer.subject instanceof TrackingSubject);
-				retainedRounds++;
-				rounds.put(round.key, round);
-				ownsReservation = false; openedHandle = null;
-			}
-			round.references++; consumer.round = round;
-			} finally {
-				try { if (openedHandle != null) openedHandle.close(); }
-				finally { if (ownsReservation) retained.get().close(); }
-			}
-		}
 		Round round = consumer.round;
 		if (!round.paid.containsKey(consumer.subject) && round.paid.size() >= MAX_CONSUMERS) return Optional.empty();
 		if (consumer.subject instanceof TrackingSubject) round.trackingObservation = true;
 		int paid = round.paid.getOrDefault(consumer.subject, 0);
 		int available = Math.min(slotBound, Math.max(0, paid - consumer.cursor) + Math.max(0, allowance));
-		if (available == 0) return Optional.empty();
+		if (available == 0) {
+			if (round.slots.isEmpty() && round.last != null && zeroCostEmptyCompletion(round.last))
+				return Optional.of(new Observation(round.last, List.of()));
+			if (consumer.cursor < round.slots.size() || round.last != null && round.last.completeness() != CaptureResult.Completeness.CONTINUE) return Optional.empty();
+			SourceAccess.StepOutcome outcome = zeroAllowanceStep(round);
+			if (outcome instanceof SourceAccess.StepOutcome.Deferred) return Optional.empty();
+			CaptureResult result = ((SourceAccess.StepOutcome.Captured) outcome).result();
+			if (result.availability() != CaptureResult.Availability.READABLE) {
+				Observation invalid = new Observation(result, List.of());
+				retire(round, invalid);
+				return Optional.of(invalid);
+			}
+			if (!zeroCostEmptyCompletion(result)) return Optional.empty();
+			round.last = result;
+			return Optional.of(new Observation(result, List.of()));
+		}
 		if (consumer.cursor >= round.slots.size() && (round.last == null || round.last.completeness() == CaptureResult.Completeness.CONTINUE)) {
 			int memoryBound = (int) Math.min(available, Math.max(0, (memory.remaining() - 8192) / (InventoryDomainCodec.MAX_BYTES * 2L)));
 			if (memoryBound == 0) return Optional.empty();
@@ -231,7 +297,22 @@ public final class InventoryRuntime implements AutoCloseable {
 			try {
 			int bounded = Math.min(memoryBound, (int) Math.min(physicalRemaining(),
 				Math.max(0, physical.remaining(InventorySourceAccess.PROVIDER_WORK) / InventorySourceAccess.PROVIDER_CALL_WORK - 1)));
-			if (bounded == 0) { workspace.get().close(); return Optional.empty(); }
+			if (bounded == 0) {
+				SourceAccess.StepOutcome outcome = zeroAllowanceStep(round);
+				if (outcome instanceof SourceAccess.StepOutcome.Deferred) { workspace.get().close(); return Optional.empty(); }
+				CaptureResult zeroResult = ((SourceAccess.StepOutcome.Captured) outcome).result();
+				if (zeroResult.availability() != CaptureResult.Availability.READABLE) {
+					Observation invalid = new Observation(zeroResult, List.of());
+					workspace.get().close(); retire(round, invalid); return Optional.of(invalid);
+				}
+				if (!zeroCostEmptyCompletion(zeroResult)) { workspace.get().close(); return Optional.empty(); }
+				round.last = zeroResult;
+				workspace.get().commit(4096); round.pages.add(workspace.get()); retainedPage = true;
+			}
+			if (bounded == 0) {
+				// Snapshot handles may report an empty COMPLETE observation without scan allowance;
+				// live handles defer before touching their source at zero allowance.
+			} else {
 			long workBound = (bounded + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK;
 			var grant = physical.tryReserve(Map.of(InventorySourceAccess.PHYSICAL, (long) bounded, InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, workBound));
 			if (grant.isEmpty()) { workspace.get().close(); return Optional.empty(); }
@@ -260,6 +341,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			workspace.get().commit(retainedBytes);
 			round.pages.add(workspace.get());
 			retainedPage = true;
+			}
 			} finally { if (!retainedPage) workspace.get().close(); }
 		}
 		if (round.last == null) return Optional.empty();
@@ -283,6 +365,26 @@ public final class InventoryRuntime implements AutoCloseable {
 	private static Observation unavailable(String stamp) {
 		return new Observation(new CaptureResult(Optional.empty(), new CaptureResult.Coverage(stamp, 0, 0, OptionalLong.empty()),
 			CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE, CaptureResult.Consistency.UNKNOWN, Optional.empty(), Optional.empty()), List.of());
+	}
+	private static boolean zeroCostEmptyCompletion(CaptureResult result) {
+		return result.availability() == CaptureResult.Availability.READABLE
+			&& result.completeness() == CaptureResult.Completeness.COMPLETE
+			&& result.coverage().expected().isPresent() && result.coverage().expected().getAsLong() == 0
+			&& result.payload().isEmpty();
+	}
+	private SourceAccess.StepOutcome zeroAllowanceStep(Round round) {
+		Map<CostLedger.Counter, Long> limits = Map.of(InventorySourceAccess.PHYSICAL, 0L, InventorySourceAccess.PROBES, 1L,
+			InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK);
+		var admission = physical.tryReserve(limits);
+		if (admission.isEmpty()) return new SourceAccess.StepOutcome.Deferred();
+		try (var grant = admission.get()) {
+			CostLedger step = new CostLedger(limits);
+			SourceAccess.StepOutcome outcome = round.handle.step(step);
+			grant.commit(Map.of(InventorySourceAccess.PHYSICAL, 0L,
+				InventorySourceAccess.PROBES, 1L - step.remaining(InventorySourceAccess.PROBES),
+				InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK - step.remaining(InventorySourceAccess.PROVIDER_WORK)));
+			return outcome;
+		}
 	}
 	private boolean shareable(Consumer consumer, Round round) {
 		// Observation evidence is local bookkeeping, never physical-source identity.

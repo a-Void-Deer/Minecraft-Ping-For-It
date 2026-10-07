@@ -11,6 +11,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.neoforged.neoforge.items.IItemHandler;
 import nx.pingwheel.common.platform.IPlatformInventoryService;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotSchemas;
 
 /** Lazy tested-shape Vault access; never asks Create to initialize its combined capability. */
 public final class CreateVaultInventoryAccess {
@@ -28,6 +30,7 @@ public final class CreateVaultInventoryAccess {
 	}
 	interface Member {
 		String blockId();
+		default String blockEntityId() { return "create:item_vault"; }
 		BlockPos controller() throws ReflectiveOperationException;
 		boolean isController() throws ReflectiveOperationException;
 		int width() throws ReflectiveOperationException;
@@ -53,6 +56,7 @@ public final class CreateVaultInventoryAccess {
 	}
 	private record MinecraftMember(BlockEntity entity) implements Member {
 		@Override public String blockId() { return BuiltInRegistries.BLOCK.getKey(entity.getBlockState().getBlock()).toString(); }
+		@Override public String blockEntityId() { return BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).toString(); }
 		@Override public BlockPos controller() throws ReflectiveOperationException { return (BlockPos) call(entity, "getController"); }
 		@Override public boolean isController() throws ReflectiveOperationException { return (Boolean) call(entity, "isController"); }
 		@Override public int width() throws ReflectiveOperationException { return (Integer) call(entity, "getWidth"); }
@@ -97,6 +101,23 @@ public final class CreateVaultInventoryAccess {
 		Segmented(World world, BlockPos original, Layout expected) { this.world = world; this.original = original; this.expected = expected; }
 		@Override public Optional<String> alias() { return Optional.of(world.dimension() + "|vault|" + expected.controller.toShortString() + "|create:item_vault"); }
 		@Override public boolean valid() { try { return expected.equals(layout(world, original)); } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) { return false; } }
+		@Override public Optional<InventorySnapshotLayout> snapshotLayout() {
+			if (!valid()) return Optional.empty();
+			try {
+				List<InventorySnapshotLayout.Member> members = new ArrayList<>(expected.members.size());
+				for (int index = 0; index < expected.members.size(); index++) {
+					BlockPos position = expected.members.get(index);
+					Member member = world.loaded(position);
+					int localSlots = expected.slotCounts.get(index);
+					List<Integer> visibleSlots = java.util.stream.IntStream.range(0, localSlots).boxed().toList();
+					var segment = new InventorySnapshotLayout.Segment("Inventory.Items", InventorySnapshotSchemas.ITEMS, localSlots, visibleSlots);
+					members.add(new InventorySnapshotLayout.Member(position, member.blockId(), member.blockEntityId(),
+						position.equals(expected.controller) ? "controller" : "member", List.of(segment)));
+				}
+				String layoutData = "axis=" + expected.axis.name() + ";width=" + expected.width + ";length=" + expected.length;
+				return Optional.of(new InventorySnapshotLayout(alias().orElseThrow(), layoutData, expected.controller, members));
+			} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) { return Optional.empty(); }
+		}
 		@Override public int slots() { return expected.slots; }
 		@Override public boolean stableCursor() { return true; }
 		@Override public OptionalLong version() { return OptionalLong.empty(); }
