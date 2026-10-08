@@ -43,13 +43,14 @@ versioning, recovery, and save-protection behavior are owned by
 
 ## Raycast use and blacklist boundary
 
-At ordinary capture start, the three values are copied into one immutable
-raycast policy. That policy selects the block and fluid modes in the table and
+At hold start, the three values are copied into one immutable raycast policy
+for that hold. That policy selects the block and fluid modes in the table and
 decides whether ignored entity candidates join nearest-hit competition. The
 ordinary press-time sampling boundary is owned by [capture](capture.md). The
-same immutable policy is consumed by the press-time supplemental candidate
-allocation and by provider supplements; that allocation boundary is owned by
-[capture](capture.md#press-time-candidate-allocation). A deferred compatibility
+same immutable policy is consumed by the ordinary trace, by the Precise
+branch's live casts while the hold is open, and by provider supplements; the
+live-capture boundary is owned by
+[capture](capture.md#precise-live-candidate-capture). A deferred compatibility
 press stores only its ray and reads this policy when its later capture starts;
 that sequence is owned by
 [long-press compatibility](../input/long-press-compatibility.md).
@@ -75,6 +76,6 @@ not consulted while selecting a target. Conversely,
 The native selector's settings branch exposes these same three toggles as
 release-committed entries. Committing one updates the same in-memory setting
 that a later capture reads; the running interaction already copied its
-immutable raycast policy at press start and is unaffected. The selector
+immutable raycast policy at hold start and is unaffected. The selector
 branch's presentation and release behavior are owned by
 [wheel](wheel.md#headless-spatial-menu-model).

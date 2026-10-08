@@ -26,8 +26,10 @@ There are seven predefined ping types: **Attention**, **Danger**, **Go To**,
 captured target type's default. Holding the key opens a wheel for that target's
 available types; releasing at the center abandons the selector session with no
 action. The root's down (180°) Cancel Marker action explicitly requests
-cancellation of the nearest eligible marker you own. The wheel can also time
-out without acting. The authoritative type catalogue is owned by
+cancellation of the nearest eligible marker you own. The wheel's interaction
+and cancellation behavior is owned by
+[Wheel interaction](docs/architecture/picking/wheel.md), and the authoritative
+type catalogue is owned by
 [Catalogs](docs/architecture/identity/catalogs.md).
 
 Markers, target validation, ownership, shared-target winner selection, and rate
@@ -79,10 +81,11 @@ cancellation of the nearest eligible marker you own.
 
 The client and server settings are stored in configurable JSON files under
 `config/`. The settings GUI includes client controls and, when permitted, the
-server section; it has no GUI list editor, and its block-list action saves and
-closes the screen before opening the client file. Exact filenames, keys, list
-syntax, close/save behavior, external-edit reload timing, and reset semantics
-are owned by the [client configuration](docs/config/client.md),
+server section. Client-side lists have no GUI list editor: the block-list action
+saves and closes the screen before opening the client file, while the server
+presentation policy selector provides its own GUI add and remove editing. Exact
+filenames, keys, list syntax, close/save behavior, external-edit reload timing,
+and reset semantics are owned by the [client configuration](docs/config/client.md),
 [server configuration](docs/config/server.md), and
 [configuration UI](docs/UI/settings-screen.md) contracts.
 

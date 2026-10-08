@@ -9,9 +9,10 @@ client's trace.
 
 | Field / value | Sampling and owner |
 | --- | --- |
-| Client `pingDistance` | Read at ordinary capture start; local only, not synchronized to a server. Its persisted-file catalogue is [client configuration](../../config/client.md). |
-| Client `raycastDistance` | Read at ordinary capture start; native vanilla/Create trace cap. Its persisted-file catalogue is [client configuration](../../config/client.md). |
-| Effective native trace distance | `min(raycastDistance, pingDistance)`: one finite frozen segment for vanilla world/entity selection and Create candidate refinement. |
+| Client `pingDistance` | Read once at hold start; local only, not synchronized to a server. Its persisted-file catalogue is [client configuration](../../config/client.md). |
+| Client `raycastDistance` | Read once at hold start; native vanilla/Create trace cap. Its persisted-file catalogue is [client configuration](../../config/client.md). |
+| Effective native trace distance | `min(raycastDistance, pingDistance)`: one finite frozen segment for the ordinary vanilla world/entity selection and its Create candidate refinement. |
+| Precise live cast segment | Current camera ray, re-cast on the configured capture period while the Precise branch is active; bounded by the hold's frozen client range snapshot. Ownership is [Precise live candidate capture](capture.md#precise-live-candidate-capture). |
 | Distant Horizons trace range | Fixed integration range, independent of either client field; started only after the native trace misses using the press origin/direction. |
 | Server `pingDistance` | Constructed into each authoritative validator; separate from the client field and not sent to clients as a capture setting. |
 
@@ -30,7 +31,11 @@ to the native raycast. The native trace selects Minecraft world
 blocks/fluids and entity candidates, while a claimed Create candidate receives
 the same segment through the common raycast request. Create transforms that
 already-bounded segment into its local space and scans its frozen local shapes;
-it does not reuse Create's interaction picker or add a second range.
+it does not reuse Create's interaction picker or add a second range. This
+segment reuse is the ordinary native trace only; the Precise branch's live
+casts are owned by
+[capture](capture.md#precise-live-candidate-capture) and their range by
+[Selector candidate supplements](#selector-candidate-supplements).
 
 The ordinary Sable capture attempt occurs only after that native route yielded
 a block hit. It receives the native hit plus the same origin and endpoint of
@@ -58,21 +63,27 @@ press edge.
 
 ## Selector candidate supplements
 
-The native selector's supplemental candidate allocation is an additive
-press-time scan, not a second capture range. It shares the frozen press origin
-and direction and is bounded by the same frozen client `pingDistance` read at
-capture start; within that bound it may find surfaces behind occluders along
-the ray. It never extends, replaces or re-samples the ordinary native effective
-segment (`min(raycastDistance, pingDistance)`), and it neither starts nor
-changes the Distant Horizons route. The same frozen bound applies to provider
-supplements: Sable's transformed-behind discovery shares this frozen press ray
-and frozen client `pingDistance`, and its bounded local traversal, completion
-and candidate rules are owned by the
+The native selector's Precise branch re-casts a bounded supplemental scan from
+the current camera ray while the branch is active, not a second capture range.
+Each cast shares the hold's frozen
+[selection policy](selection_policy.md#raycast-use-and-blacklist-boundary) and
+client range snapshot and is bounded by that hold's frozen client
+`pingDistance`; within that bound it may find surfaces behind occluders along
+the live ray. It never extends, replaces or re-samples the ordinary
+press-frozen native effective segment
+(`min(raycastDistance, pingDistance)`), and it neither starts nor changes the
+Distant Horizons route; the location candidate's independent Distant Horizons
+completion is owned by
+[Precise live candidate capture](capture.md#precise-live-candidate-capture).
+The same hold-frozen bound applies to provider supplements: Sable's
+transformed-behind discovery shares the live ray and the hold-frozen client
+`pingDistance`, and its bounded local traversal, completion and candidate rules
+are owned by the
 [Sable integration](../../integrations/sable.md#supplemental-transformed-behind-discovery).
-A missing, incomplete or failed supplemental scan changes only the selector's
-supplemental availability: the ordinary native minimum-range behavior and the
-Distant Horizons miss fallback remain exactly as above. Supplemental candidates
-still face the independent server acceptance check.
+A missing, incomplete or failed scan disables the affected Precise leaf even
+when an ordinary result exists; it is not replaced by the ordinary result or
+the Distant Horizons miss fallback. Supplemental
+candidates still face the independent server acceptance check.
 
 ## Server acceptance
 
@@ -101,11 +112,11 @@ ordinary lifecycle contract.
 | Route | Client segment / input | Range source | Result before authority |
 | --- | --- | --- | --- |
 | Vanilla blocks, fluids, entities | Frozen finite press segment | `min(client raycastDistance, client pingDistance)` | Native hit or location miss |
-| Selector candidate supplements | Same frozen press ray; occluders allowed within the frozen client ping distance | Frozen client `pingDistance` | Nearest certified supplement per class, or incomplete/unavailable; ordinary result unaffected |
-| Sable transformed-behind supplement | Same frozen press ray; provider-local sublevel traversal | Frozen client `pingDistance` | Provider candidate only when the bounded local trace completes; otherwise incomplete/unavailable; ordinary result unaffected |
-| Create contraption local shapes | Same finite segment passed through the common entity-candidate request and transformed locally | Reuses the native effective segment; no Create interaction-picker range | Exact whole-entity hit, or owned miss/unavailable/failure with no coarse-AABB revival |
+| Selector candidate supplements | Live current camera ray while the Precise branch is active; occluders allowed within the hold-frozen client ping distance | Hold-frozen client `pingDistance` | Nearest certified candidate per type, or incomplete/unavailable; a missing or incomplete scan disables the leaf even when an ordinary result exists |
+| Sable transformed-behind supplement | Live current camera ray; provider-local sublevel traversal | Hold-frozen client `pingDistance` | Provider candidate only when the bounded local trace completes; otherwise incomplete/unavailable |
+| Create contraption local shapes | Ordinary trace passes the finite segment through the common entity-candidate request and transforms it locally; Precise live casts use the current ray | Ordinary trace reuses the native effective segment; Precise live casts use the hold-frozen range; no Create interaction-picker range | Exact whole-entity hit, or owned miss/unavailable/failure with no coarse-AABB revival |
 | Sable external candidate (ordinary projection) | Native block hit plus that same segment's frozen origin/end | Reuses native effective segment; point must project onto the segment | External candidate only after provider checks; otherwise existing projected/location or vanilla fallback |
-| Distant Horizons | Frozen origin/direction after native miss | Integration-specific fixed API trace, independent of both client fields | Distant block hit or original native location miss |
+| Distant Horizons | Frozen press origin/direction after the ordinary native miss; the live cast ray for the Precise location candidate | Integration-specific fixed API trace, independent of both client fields | Distant block hit, or the ordinary native location miss |
 | Server validator | Current server player eye and authoritative validation anchor | Server `pingDistance` | Accept or `OUT_OF_RANGE`, independently of client capture; an external candidate's provider validation anchor is checked before later materialization |
 
 ## Evidence and remaining verification

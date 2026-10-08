@@ -41,7 +41,7 @@ does not discard the session or a draft.
 
 ## Category layout
 
-The client scope has six categories:
+The client scope has seven categories:
 
 - **Marker Display**: Ping Distance, Marker Display Duration, Ping Size, Item
   Icons, Direction Indicator, Player Info, and Team Color.
@@ -59,6 +59,8 @@ The client scope has six categories:
   Size.
 - **Rendering & Config**: Entity Block Geometry and the configuration-file
   action.
+- **Performance**: a Wheel options subgroup with Precise Selection Capture
+  Period.
 
 The server scope has five categories:
 
@@ -116,9 +118,8 @@ target-type selection over exactly the five fixed target types. The editor has
 no property-entry control: property selections are not configured in the GUI.
 Its field list is the fields advertised by the connection's accepted offer after
 the local ID/kind compatibility check, so it shows only compatible fields and is
-unknown — not an authoritative empty list — until a valid offer is accepted. The
-offline local preview is the locally registered manifest rather than server
-truth. The policy snapshot and status are independent of the ordinary
+unknown — not an authoritative empty list — until a valid offer is accepted.
+The policy snapshot and status are independent of the ordinary
 server-settings view, so that view does not gate entry to or viewability of this
 policy page.
 

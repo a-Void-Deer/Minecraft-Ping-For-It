@@ -88,13 +88,14 @@ ID.
 The settings-UI field catalogue is a read-only view of one metadata source and
 never exposes retained or sampled world values. The server policy page reads
 only the fields advertised by the accepted `OFFER` after the local adapter and
-field ID/kind compatibility check; its offline preview is the locally registered
-manifest rather than server truth. An accepted entry keeps the server's
-advertised default enablement and label, never the local manifest's metadata for
-that ID. Entries are grouped by the namespace of the field ID, not by the owning
-adapter's mod ID, and a field ID that occurs more than once renders once. The
-offered catalogue contains compatible fields only and need not list every field
-the server supports. A structurally invalid offer is rejected before any
+field ID/kind compatibility check; only the accepted offer populates it, and no
+offline local-manifest catalogue is published. An accepted entry keeps the
+server's advertised default enablement and label, never the local manifest's
+metadata for that ID. Entries are grouped by the namespace of the field ID, not
+by the owning adapter's mod ID, and a field ID that occurs more than once
+renders once. The offered catalogue contains compatible fields only and need not
+list every field the server supports. A structurally invalid offer is rejected
+before any
 connection state changes and publishes no catalogue; a structurally valid offer
 without a compatible Basic adapter opens no session and likewise publishes
 nothing. The accepted catalogue is cleared when the connection closes and is
@@ -404,11 +405,11 @@ add a HUD line, and it is not a claim that the field is unreceived, unknown, or
 absent from the authorized projection. A non-null Ping Type is a code-defined
 property Ping Type and drives that property's additional display line. One
 intent may co-annotate several properties. On the wire, every top-level field
-value and every addressable record entry carries a nullable Ping Type
-annotation; an absent annotation decodes to null and means no explicit property
-Ping for that entry, and there is no separate presence flag. Annotations never
-appear inside a sequence, and a denied top-level field skips its whole frame
-including annotations.
+value and every addressable record entry carries a presence flag and, only when
+that flag is true, a Ping Type ID; a false flag decodes to null and means no
+explicit property Ping for that entry, with no ID payload written. Annotations
+never appear inside a sequence, and a denied top-level field skips its whole
+frame including annotations.
 
 An uploaded value is not world authority. The server recaptures the current
 authorized world value for every accepted selection from the same authoritative

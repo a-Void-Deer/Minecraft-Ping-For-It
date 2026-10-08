@@ -336,9 +336,13 @@ resynchronization cooldown, never from the byte budget.
 
 The provider layer covers the vanilla container and worldly-container contracts,
 Fabric Transfer item storage and inventory storage, the Forge item handler, and
-the NeoForge item handler. Create's Vault is a NeoForge-only, registry-ID
-aggregate adapter with its own small adapter limit; it is not a general
-container solution and does not cover every container.
+the NeoForge item handler. Create's Vault is a separate NeoForge-only member
+provider over the tested Vault structure; it preserves per-member segmentation,
+variant identity and a canonical controller alias rather than aggregating by
+registry ID, and its version, loaded-member, controller-alias and
+per-member-layout rules are owned by
+[Create integration](../../integrations/create.md#vault-inventory-provider). It
+is not a general container solution and does not cover every container.
 
 Ordinary-block inventory source access is face-scoped. Every preview, tracking
 and recovery read uses the face frozen at press time by

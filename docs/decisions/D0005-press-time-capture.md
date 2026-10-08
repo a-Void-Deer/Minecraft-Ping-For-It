@@ -10,7 +10,10 @@ Preserve press-time intent across synchronous and asynchronous completion.
 [Capture](../architecture/picking/capture.md) owns the sampling, target locking,
 release outcomes and actual-wheel-open boundary;
 [wheel interaction](../architecture/picking/wheel.md) owns an opened wheel's
-selection and cancellation behavior.
+selection and cancellation behavior. The confirmed Precise live-candidate
+exception is recorded in
+[D0009](D0009-precise-live-candidate-capture.md): only the Precise branch
+re-casts while it is active, and ordinary press-time freezing is unchanged.
 
 Allow only the established narrow deferred-capture exception under
 [long-press compatibility](../architecture/input/long-press-compatibility.md).
@@ -27,7 +30,10 @@ sequence.
 
 ## Why not other approaches
 
-- Do not raycast on release or wheel movement: that can retarget the action.
+- Do not raycast on release, and do not retarget an ordinary press-frozen action
+  on wheel movement: that can change the action the player started. The
+  confirmed Precise live-capture exception is recorded in
+  [D0009](D0009-precise-live-candidate-capture.md).
 - Do not let an async callback read the current camera: completion timing would
   change the captured intent.
 - Do not start a second capture while the first is pending: two interactions

@@ -10,10 +10,13 @@ how clients present rejection outcomes is owned by
 
 ## Create adjudication order
 
-`MarkerCreate` is the authoritative marker-creation ingress. For it, the server
-repeats target classification from its own game state and does not trust
-client-supplied target validity or presentation/ownership data. The request
-field boundary is owned by [network protocol](../network/protocol.md#registered-ingress-and-current-effects).
+The authoritative marker-creation ingress is the negotiated presentation
+session's `CREATE` intent, delivered through the network/session boundary owned
+by [network protocol](../network/protocol.md#registered-ingress-and-current-effects);
+the superseded `MarkerCreate` route is registered but inert and creates nothing.
+The server repeats target classification from its own game state and does not
+trust client-supplied target validity or presentation/ownership data. The
+request field boundary is owned by the same network protocol contract.
 
 The effective first-return order after a structurally valid request is:
 
@@ -27,18 +30,26 @@ The effective first-return order after a structurally valid request is:
 5. initial authoritative Target Type classification and requested Ping Type
    membership;
 6. for an explicit external target, provider materialization followed by the
-   post-materialization reclassification and Ping Type check; and
-7. marker-store creation.
+   post-materialization reclassification and Ping Type check;
+7. property-selection admission and dedicated-adapter admission before
+   marker-store creation, with a failure rolling back any external-target
+   materialization and leaving the store untouched. Uploaded property
+   selections are owned by
+   [presentation snapshot](../presentation/presentation_snapshot.md#property-ping),
+   and the dedicated inventory item choice by
+   [inventory](../presentation/inventory.md#preview); and
+8. marker-store creation.
 
-A structurally corrupt request receives `INVALID_REQUEST` and returns before the
-rate, channel, recipient, target, or marker-store creation stages. Thus
-target/range validation, the initial Target Type classification, and the initial
-Ping Type check do not run before the channel gate or recipient snapshot. Once
-validation begins, target/range validation precedes the initial authoritative
-Target Type classification and Ping Type check, and the initial classification
-precedes any external-target materialization. The later materialization
-transaction and the post-materialization reclassification, cleanup, and release
-rules are owned by
+Whether and how a structurally corrupt request is answered is owned by the
+network boundary ([network protocol](../network/protocol.md)); this topic
+promises no response for it and begins at the delivered, structurally valid
+request. Thus target/range validation, the initial Target Type classification,
+and the initial Ping Type check do not run before the channel gate or recipient
+snapshot. Once validation begins, target/range validation precedes the initial
+authoritative Target Type classification and Ping Type check, and the initial
+classification precedes any external-target materialization. The later
+materialization transaction and the post-materialization reclassification,
+cleanup, and release rules are owned by
 [Sable](../../integrations/sable.md#server-validation-and-materialization). The
 first returning gate is the reported rejection; no later reason is inferred.
 
@@ -110,22 +121,23 @@ to a location at the player's authoritative current position.
 
 ## Removal and channel roles
 
-`MarkerRemove` carries a marker identity/request. The server checks that the
-requester owns the active marker, then synchronizes a valid removal. Stale or
-unauthorized requests are safely ignored or rejected. Another player's marker
-cannot be cancelled even if a modified client requests it. Ordinary marker
-creation and removal are not OP-gated; the ownership contract governs removal.
+A negotiated marker-remove intent carries a marker identity/request. The server
+checks that the requester owns the active marker, then synchronizes a valid
+removal. Stale or unauthorized requests are safely ignored or rejected. Another
+player's marker cannot be cancelled even if a modified client requests it.
+Ordinary marker creation and removal are not OP-gated; the ownership contract
+governs removal.
 
 Existing channel-update behavior, including policy updates, remains intact; it
 is not treated as a create-only operation, and its route effect is owned by
 [network protocol](../network/protocol.md#route-effects-and-channel-establishment).
 The [rate limiter](../config/rate-limit.md) applies its client courtesy gate only
-immediately before a `MarkerCreate` dispatch. Cancellation and expiry also drive
+immediately before a marker-create dispatch. Cancellation and expiry also drive
 [winner recomputation](ping_winner.md).
 
 ## Audience snapshot at create
 
-The `MarkerCreate` request does not authorize its channel or recipients. The
+The marker-create request does not authorize its channel or recipients. The
 server uses the sender's stored channel and the current server channel mode,
 then snapshots a non-empty recipient list at creation. The sender is included
 in every accepted snapshot; other recipients are online players selected by the

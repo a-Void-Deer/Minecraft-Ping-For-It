@@ -114,9 +114,9 @@ rate-controlled.
 ## Create presentation summary adapter
 
 A fourth, rendering-independent route registers adapter `create:presentation`
-(schema 1) in the versioned presentation snapshot. The client registers a
-manifest-only instance and never loads Create classes; the server registers a
-lazy, server-thread sampling source. The generic negotiation, demand-driven
+(schema 1) in the versioned presentation snapshot. The client's manifest-only
+registration never loads Create classes; the server registers a lazy,
+server-thread sampling source. The generic negotiation, demand-driven
 capture, policy, and projection contracts are owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md).
 
@@ -154,12 +154,30 @@ the adapter's declared minimum sampling cadence.
 
 Kinetic reads use Create's public speed, network, and overstress getters. Cached
 network stress and capacity additionally require a signature-gated accessor.
-The tested Create version is `6.0.10` (`6.0.10-281` artifact); the dedicated
-mixin applies only when the runtime Create mod metadata reports a tested
-version and an ASM shape check confirms `KineticBlockEntity` still has the
-protected instance `float` fields the accessor shadows. A version or shape
-mismatch disables only the cached stress/capacity route; speed, network, and
-overstress continue through the public getters, and the adapter stays optional.
+The tested Create version is `6.0.10` (`6.0.10-281` artifact). The runtime
+Create mod metadata must report a tested version for the summary adapter to be
+registered at all; an absent or untested version registers no Create adapter
+and disables the whole summary route. Within that gate, the dedicated
+cached-accessor mixin additionally requires an ASM shape check that
+`KineticBlockEntity` still has the protected instance `float` fields the
+accessor shadows; a shape mismatch disables only the cached stress/capacity
+route, while speed, network, and overstress continue through the public
+getters, and the adapter stays optional.
+
+### Client kinetic preview
+
+A separate client preview reader answers `create:kinetic.speed`,
+`create:kinetic.has_network`, and `create:kinetic.overstressed` locally for an
+ordinary live block whose kinetic block entity has a reliable client receipt.
+The receipt is accepted only for a client-applied update of a non-virtual,
+non-moved block entity with the expected field shape, and a later failed or
+empty update invalidates the earlier receipt; a removed or virtual block entity
+yields no local value. Cached network totals (stress and capacity), registry-ID
+summaries, and external-block targets have no local quantity guarantee and use
+the authorized server preview fallback owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md#target-content-preview).
+The reader is gated independently of the summary adapter's cached-accessor
+mixin and loads Create classes lazily.
 
 Inventory and fluid sampling verify the whole controller structure before
 asking a capability: item vaults are read from the verified controller's block
@@ -178,6 +196,24 @@ pings keep working. Loader registration, version gates, and the cached-accessor
 shape gate have unit and ASM-node seam coverage only; no installed-Create
 in-game presentation scenario has run yet, as recorded in
 [verification](../testing/verification.md).
+
+## Vault inventory provider
+
+The Vault inventory source is a NeoForge-only inventory provider registered
+independently of the registry-ID `create:inventory.summary` presentation field
+above; it is an ordinary source for the inventory preview and tracking domain,
+not a registry-ID aggregate. It is available only under the tested Create
+version gate, and a captured topology requires every member position to be
+loaded and recognized, with the original position inside the verified
+controller structure, before any member content is read; an unloaded, removed,
+mismatched or incomplete member makes the source unavailable. The source
+identity is a canonical controller alias, and the captured layout keeps each
+member's position, controller/member role, and its own inventory segments so
+per-member slot boundaries and variants stay distinct. Unlike the summary, it
+reads each verified member's local inventory rather than the controller's
+combined item-handler capability. Snapshot capture, recovery, budget and
+variant semantics remain owned by
+[inventory preview and tracking](../architecture/presentation/inventory.md).
 
 ## Create block presentation resolvers
 

@@ -85,6 +85,7 @@ retained.
 | `spatialSelector.hoverMillis` | number, milliseconds | Dwell threshold before Back-hover returns one level. |
 | `spatialSelector.showTrail` | boolean | Whether the virtual-pointer trail is drawn; it does not change gesture selection. |
 | `spatialSelector.reduceMotion` | boolean | Reduces selector animation without changing gesture timing or selection. |
+| `spatialSelector.preciseCapturePeriodTicks` | positive integer, ticks | Live candidate capture period for the Precise branch while it is active; the persisted range is 1..50 ticks with default 1. A change applies to the next hold, not to the running one. |
 
 The config model supplies an immutable validated snapshot for one held gesture,
 so editing the live configuration cannot change a gesture already in progress.
@@ -92,8 +93,8 @@ Gesture behavior is owned by
 [wheel](../architecture/picking/wheel.md#headless-spatial-menu-model), which
 also owns the
 [Back-hover return state](../architecture/picking/wheel.md#back-hover-return-state)
-and the model's native-integration boundary; numeric ranges, steps, and defaults
-remain implementation values.
+and the model's native-integration boundary; the remaining numeric ranges,
+steps, and defaults remain implementation values.
 
 ### Block display lists
 

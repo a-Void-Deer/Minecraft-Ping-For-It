@@ -13,9 +13,12 @@ at capture start; their toggles and raycast meanings are owned by
 When the snapshot is ready, resolve its Target Type under the
 [catalog matching rules](../identity/catalogs.md). Freeze the resolved Target
 and Target Type for the rest of the interaction. Camera motion, target motion,
-and another entity entering
-the crosshair must not retarget or change the wheel. Release and selection
-do not initiate a new selection ray.
+and another entity entering the crosshair must not retarget or change the
+ordinary short-press, Danger, Intent, Content, or Cancel action. Release and
+selection do not initiate a new selection ray. The Precise branch is the
+confirmed exception: its candidates are captured live from the current camera
+ray while that branch is active
+([Precise live candidate capture](#precise-live-candidate-capture)).
 
 An ordinary block hit also retains the actual hit face from the press-time
 result, and the same-target capture and coordinator path carries that face
@@ -28,33 +31,41 @@ establishes a face, and a location fallback never acquires one. Every
 ordinary-block candidate allocated at the same press edge retains its own
 actual hit face under these same rules.
 
-## Press-time candidate allocation
+## Precise live candidate capture
 
-A capture may also allocate a bounded set of supplemental target candidates for
-the native selector's precise branch. Allocation starts at the same press edge
-as the ordinary capture and shares its one frozen press ray and frozen
-[selection policy](selection_policy.md#raycast-use-and-blacklist-boundary);
-release and selection still never initiate a new selection ray. Its
-scan range and its independence from the ordinary native trace and the Distant
-Horizons route are owned by
-[capture range](range.md#selector-candidate-supplements). The scan traverses
-the established native and provider pick paths under
+The native selector's precise branch captures its bounded candidate set live
+from the current camera ray while that branch is active, on the configured
+[capture period](../../config/client.md#spatial-selector-interaction); entering
+the branch starts capture and leaving it pauses capture. Each live cast uses
+the hold's frozen
+[selection policy](selection_policy.md#raycast-use-and-blacklist-boundary) and
+range snapshot, so a settings change applies to the next hold rather than the
+running one. Release and selection never initiate another live cast. The live
+scan's range and its independence from the ordinary native trace and the
+Distant Horizons route are owned by
+[capture range](range.md#selector-candidate-supplements). It traverses the
+established native and provider pick paths under
 [local geometry](local_geometry.md); it defines no separate collision or
 display-extent rule.
 
-Each precise class installs at most one candidate. A more specific class
-consumes its identity first; a generic class may skip an identity already
-consumed by a more specific class and install the next nearest. The installed
-candidate is the nearest certified one. Certification means the established
-native or provider pick path completed its bounded traversal within the
-candidate work budget; it is not coverage of every registered shape or of
-block-display/outline eligibility. A scan that cannot complete leaves the
-affected classes incomplete and unavailable, never a nearest or missing
-result. A failed or limited supplemental allocation disables only the
-selector's supplemental attachment; the ordinary captured target and the
-short-press/default outcome are unaffected.
+All candidates of one fixed Target Type compete by nearest actual hit from the
+live ray origin. A more specific class consumes its identity first; a generic
+class may skip an identity already consumed by a more specific class and
+compete for the next nearest. A type's candidate is certified only when the
+established native or provider pick path completed its bounded traversal
+within the candidate work budget; certification is not coverage of every
+registered shape or of block-display/outline eligibility. A scan that cannot
+complete disables that type's leaf even when an ordinary target of that type
+exists; the leaf never falls back to the ordinary result. While a refresh is
+in progress the leaf keeps the last certified
+candidate selectable, and a leaf with no previously certified candidate is
+disabled. Native categories publish first; the Distant Horizons location
+candidate completes independently and a final missing or incomplete result
+disables its leaf. Every live capture is bounded and generation-fenced: a late
+or stale asynchronous completion never publishes into the live set, the
+ordinary capture, or another interaction.
 
-Supplemental identities follow ordinary capture. An entity candidate uses the
+Live candidates follow ordinary capture. An entity candidate uses the
 same canonical locator as ordinary capture, including the established
 experience-orb runtime-ID and multipart canonicalization rules
 ([target model](../identity/target_model.md#ordinary-identities-and-lifecycle)).
@@ -62,11 +73,11 @@ An external block candidate requires positive capture-local provider
 equivalence and never fabricates a server materialization ID. Sable's bounded
 transformed-behind discovery is owned by the
 [Sable integration](../../integrations/sable.md#supplemental-transformed-behind-discovery).
-The location class is derived rather than scanned: it uses the actual ordinary
-concrete hit point when the ordinary capture has one and otherwise the existing
-native or Distant Horizons miss fallback. An exact-owned non-hit remains
-rejected under [local geometry](local_geometry.md); a candidate scan never
-revives its coarse bounds.
+The location class is derived rather than scanned: it uses the current concrete
+hit point when a live native trace has one and otherwise the independently
+completing Distant Horizons route. An exact-owned non-hit remains rejected
+under [local geometry](local_geometry.md); a candidate scan never revives its
+coarse bounds.
 
 ## Baseline release and actual wheel opening
 

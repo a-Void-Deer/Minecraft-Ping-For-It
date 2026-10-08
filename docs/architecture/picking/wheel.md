@@ -8,7 +8,9 @@
 ## Opening and selection
 
 Opening follows [capture readiness and the present-frame boundary](capture.md).
-Every subsequent action operates on the captured context. An actually open
+Every subsequent action operates on the captured context, except the Precise
+branch, whose candidates are live while that branch is active
+([Precise](#precise)). An actually open
 selector has no elapsed-time auto close: it ends through a release, a
 cancellation, or an interaction lifecycle abort. Pre-open release behavior is
 owned by
@@ -74,7 +76,9 @@ never change gesture thresholds or selection.
 For a release of an actually open selector, the frozen menu geometry resolves
 the focused entry. A release inside the center deadzone abandons the session
 with no action. A release on a sector resolves that sector: a focused leaf
-commits exactly one action and ends the session; a reserved, disabled,
+commits exactly one action and ends the session; a precise leaf commits the
+last actually painted selectable candidate version and never initiates a new
+candidate capture; a reserved, disabled,
 navigation or actionless-branch entry reports its reason and never commits. A
 release outside every sector without crossing the deadzone is a silent no-action
 that sends neither a create nor a cancellation request.
@@ -125,13 +129,19 @@ Each leaf creates the frozen ordinary captured target with that Ping Type.
 
 The precise branch offers the five fixed Target Types in
 [catalog priority order](../identity/catalogs.md#target-type-resolution-and-fixed-order).
-A leaf is enabled only for a candidate installed by
-[press-time candidate allocation](capture.md#press-time-candidate-allocation);
-availability, installation and completion rules are owned there. A missing or
-incomplete allocation is a disabled leaf, never a fallback to another
-candidate. Each available leaf creates its assigned canonical candidate using
-that candidate's own Target Type default Ping Type. The separate, equal-width
-Back entry is navigation and is never a candidate.
+Its candidates are captured live from the current camera ray while the branch
+is active, under
+[Precise live candidate capture](capture.md#precise-live-candidate-capture):
+entering the branch starts capture, leaving it pauses, and the hold's frozen
+settings still change only on the next hold. A type's leaf is enabled only
+while that type has a currently certified candidate. An incomplete scan
+disables the leaf even when an ordinary target of that type exists; a refresh
+in progress keeps the last certified candidate selectable, and a leaf with no
+certified candidate is disabled. A focused fixed-type leaf keeps its focus when
+the live target changes. Each available leaf creates its assigned canonical
+candidate using that candidate's own Target Type default Ping Type; release
+follows [Radial release result](#radial-release-result). The separate,
+equal-width Back entry is navigation and is never a candidate.
 
 ### Content
 
@@ -174,10 +184,20 @@ defers while a screen is open, and disposal may relinquish pending selector
 ownership rather than stealing the cursor from a screen or another owner.
 
 The native input adapter converts absolute window mouse positions into owned
-GUI deltas and exposes no screen facade. A window, scale, focus or capture
-change, a re-prime, or a cursor warp resets the sample baseline and contributes
-no movement or action. The screen-transition abort rule remains owned by
+GUI deltas and exposes no screen facade. Mouse movement never cancels vanilla's
+absolute-position bookkeeping; the selector only reads positions for its own
+GUI deltas. A window, scale, focus or capture change, a re-prime, or a cursor
+warp resets the sample baseline and contributes no movement or action. The
+screen-transition abort rule remains owned by
 [capture](capture.md#interaction-lifecycle-aborts) and is unchanged.
+
+While the selector owns input for its current window — ownership is active, the
+window is focused, and the mouse is not grabbed — every scroll callback is
+consumed before vanilla can act on it, including in radial mode, for a
+horizontal-only delta, and for a zero vertical delta. Only the inventory list
+consumes the vertical scroll amount to move its rows; a radial menu consumes
+the callback without using a scroll value, and a consumed scroll moves no
+pointer. A scroll outside that ownership passes through to vanilla unchanged.
 
 ## Cancel Marker selection
 

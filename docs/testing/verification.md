@@ -42,6 +42,10 @@ The current suite covers:
 - `targetTypeId`, including `entity_block`, surviving marker codec round trips
   without changing the protocol shape; and
 - same-target winner selection and recomputation;
+- `ServerMarkerStoreTest` covers the active-recipient winner snapshot: expired
+  markers are filtered before selection, ordering uses arrival then larger ID,
+  the returned list is immutable, and a baseline query does not mutate the
+  stored winner;
 - synchronized-deadline and visual-state seams for display expiry and
   expire-fallback behavior through `ClientMarkerDisplayDurationTest` and
   `ClientMarkerStoreTest`; and
@@ -110,9 +114,9 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   validation against known Ping Types;
 - `PresentationCodecAnnotationTest` covers the wire annotation contract:
   deterministic root and nested annotation round trips, absent annotations
-  staying nullable without consuming payload, a denied top-level frame skipping
-  its whole frame including annotations, sequence entries carrying no
-  addressable annotation,
+  staying nullable while consuming only the presence flag and no ID payload, a
+  denied top-level frame skipping its whole frame including annotations,
+  sequence entries carrying no addressable annotation,
   unknown annotation type and section trailing bytes rejected on decode, typed
   bounded property-intent frames with trailing safety, blank or whitespace
   record keys round-tripping without annotations, and a non-boolean annotation
@@ -154,7 +158,11 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   recipient from the already-delivered Basic section with no new lease
   allocation and no source read; a negotiated baseline across many entirely due
   cached leases replays CREATED snapshots without re-entering source capture or
-  advancing `nextSample`; positive per-capture allowances cannot reset the
+  advancing `nextSample`, announces the store's actual winner rather than a
+  cached lease winner, and never fabricates a record outside the sampling
+  cache; that winner reaches the client outline projection once its record is
+  known; a policy reset re-announces the winner under the advanced view;
+  positive per-capture allowances cannot reset the
   shared per-tick capture quota across leases; refreshed metadata does not
   advance the effective sampling interval; a zero `scanBudget` defers Basic and
   optional observations without mutating cached values or their stale flag, and
@@ -162,8 +170,8 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   exhausted shared work defers an optional observation without a fake failure
   while unused per-call allowance does not drain shared tick work. Its sessions,
   demand and Basic observation ports are in-memory or recording; the live
-  server world, registry lookups, real providers, packet transport and
-  rendering remain unexercised;
+  server world, registry lookups, real providers, packet transport, rendering,
+  and the complete tick/live baseline remain unexercised;
 - `ClientPresentationTest` covers the v3 client session: `HELLO`/`OFFER`/`RESET`
   epoch and view guards without any client preference, a tighter reset mask
   pruning frozen fields and annotations without resurrection, accepted metadata
@@ -342,6 +350,15 @@ time alone while release still commits its selection.
 `PingCaptureCoordinatorTest` covers capture tokens, rejection of stale
 superseded completions, completion
 races, first-completion ownership and identity-preserving metadata retention.
+`PingSelectorReleaseTest` covers the selector release adjudication seam: a
+wrong token, a threshold without an actual open, and a pending release with a
+late capture never evaluate a selector proposal or retroactively open; elapsed
+time alone never closes an actually open selector; terminal local intents and
+explicit cancellation outcomes are single-use; precise and opaque inventory
+proposals keep their frozen payload without item or count authority; an
+unavailable candidate never falls back to the ordinary target; and an abort
+fences a late completion before any release proposal can evaluate it,
+including an abort re-entered from terminal release ports.
 `TargetSnapshotTest` covers snapshot identity, copied capture metadata and frozen
 context construction; `TargetSnapshotBlockClassificationTest` covers explicit
 and absent block-entity classification metadata; and
@@ -373,12 +390,12 @@ create or capture; a non-`CreatePing` result such as `TargetGone` discards the
 deferred press; an actually opened menu disqualifies even a sent default type;
 and successful receipts start the rapid second-ray and deferred fresh-press
 captures. These are controller/config slices, not real
-input callbacks or render-frame integration. They do not exercise the real
-focus-loss `KeyMapping.releaseAll` hook, screen-transition callbacks,
-level-instance/dimension discontinuity detection or loader/gameplay input
-lifecycle. The abort-before-ownership-clear order is source-confirmed; the
-state-machine abort and coordinator stale-token cases do not directly test an
-abort followed by a late asynchronous completion.
+input callbacks or render-frame integration. An abort followed by a late
+asynchronous completion is exercised by `PingSelectorReleaseTest` and
+`ClientPingRuntimeInteractionTest`; the real focus-loss `KeyMapping.releaseAll`
+hook, screen-transition callbacks, level-instance/dimension discontinuity
+detection, loader/gameplay input lifecycle, and genuinely asynchronous
+completion remain unverified.
 
 `CancelCandidatePickerTest` covers press-ray cone filtering and nearest-candidate
 selection, while `ClientMarkerStoreTest` covers owner/dimension retrieval.
@@ -387,16 +404,30 @@ reaching cancellation and then being rejected by the server without a local
 fallback. Frozen press-ray behavior and the pending-capture/wheel interaction
 boundary otherwise have focused test coverage.
 
-### Press-time candidate allocation
+### Precise live candidate capture
 
-The [candidate-allocation owner](../architecture/picking/capture.md#press-time-candidate-allocation)
-has focused headless evidence:
+The [live-capture owner](../architecture/picking/capture.md#precise-live-candidate-capture)
+has focused headless evidence across its allocation, refresh-controller,
+session, release-admission and paint-admission seams:
 
 - `FrozenCandidateAcquisitionTest` covers bounded allocation and identity
-  de-duplication, retained actual class and per-candidate face, ordinary-target
-  preservation when supplements are incomplete, exact-hit location derivation,
-  late ordinary completion without recollection, provider-local equivalence,
-  immutable evidence and independent work guards;
+  de-duplication, retained actual class and per-candidate face, nearest
+  same-category competition (a nearer supplement beats a farther ordinary and
+  vice versa, with an equal distance keeping the ordinary before an equivalent
+  supplement), an incomplete scanned class staying unavailable even when the
+  ordinary matches it while a complete no-hit is missing rather than
+  incomplete, distinct missing and incomplete results for the same empty
+  evidence, specific-class identity consumption before a generic class takes
+  the next nearest, stable strict-tie ordering that keeps encounter order
+  rather than a specialized bucket order, provider-local equivalence,
+  immutable evidence and independent work guards, and a bounded collector
+  matching an independent exhaustive nearest oracle across randomized
+  mixed-identity orders. Its same-identity near-contact cases keep the ordinary
+  resolved target and press context, use the selected contact's snapshot
+  geometry and face, leave the ordinary hit unchanged on equal-far evidence,
+  and check near-contact block-face and entity-metadata consistency; the
+  exhaustive oracle derives its expectation from the complete candidate pool
+  independently of the production collector;
 - `CandidateCaptureLifecycleTest` covers same-token attachment, duplicate,
   superseded, aborted and reentrant completion fences, no cross-token/ray reuse,
   ordinary readiness and face preservation when optional finalization fails,
@@ -419,12 +450,51 @@ has focused headless evidence:
   fallback, frozen geometry ownership, selection filters, canonical multipart
   and XP locator construction, and bounded lazy enumeration charging nonmatches
   before filtering. The multipart case is a factory fixture, not a dragon-world
-  or rendering test.
+  or rendering test;
+- `PreciseCaptureRefreshTest` covers the production refresh controller
+  headlessly: capture starts immediately on branch entry and then follows the
+  frozen tick period, entering again does not duplicate the first scan, leaving
+  pauses and re-entering restarts, and ending stops it; native slots publish
+  before the independent location request; each slot keeps its own ray context
+  and the last certified pending value; a final missing or incomplete result
+  replaces or disables the slot without an ordinary fallback; only one optional
+  request is in flight, coalescing the latest work without starving or
+  overwriting newer native results; stale, duplicate, foreign and post-end
+  completions are fenced, and a reentrant branch exit cannot start optional
+  work after its native publication;
+- `SpatialSelectorSessionTest` additionally covers the live precise session:
+  a revised immutable publication preserves slot focus, origin and typed color
+  while replacing the installed target; only an actually painted current node
+  can be acknowledged, an empty acknowledgement cannot authorize, and a
+  disabled paint clears the older selectable version; the release intent
+  carries the painted candidate and its presentation revision as a
+  `PRECISE_PRESENTED` admission while its previous constructor form remains
+  compatible, and duplicate, stale, wrong-token, wrong-level, stale-snapshot
+  and post-abort publications are rejected;
+- `PingSelectorReleaseTest` covers the release-admission fence: a `PRESS_RAY`
+  proposal stays strict to the press ray, while `PRECISE_PRESENTED` requires
+  the exact current interaction, the painted context table and an advancing
+  presentation revision; unpainted, wrong-revision, other-context and
+  press-ray proposals produce no action, and the presentation fence rejects a
+  wrong token, dimension or old revision and is revoked by abort;
+- `ClientPingRuntimeInteractionTest` drives the live branch through the
+  runtime ports: an ordinary press stays frozen while the precise branch's
+  live target changes, entering the branch starts the live request, release
+  consumes the last painted candidate without an ordinary recapture or a
+  release-time cast, and an unpainted newer target still releases the painted
+  one; and
+- `SpatialOverlayRendererPresentationTest` covers the paint-admission
+  predicates only: detached exit data, ancestor nodes, first-appearance or
+  quantized-zero paint, and a backdrop or pointer alone cannot acknowledge a
+  candidate, and absent graphics acknowledge nothing and start no transition.
 
-These are allocation, capture, native-shape and enumeration seams. The
-transformed Sable scanner has its own evidence below; no complete live press,
-optional-provider, selector release, packet and authoritative acceptance path
-is established by these tests.
+These are allocation, capture, native-shape, enumeration, refresh-controller,
+session, paint-admission and runtime-port seams; the period key's config and
+persistence coverage is inventoried above, and the transformed Sable scanner
+has its own evidence below. Real GPU/render submission, game-world and chunk
+lifecycle, provider behavior, multiplayer, loader input callbacks, and
+unbounded-geometry wall-clock behavior remain unexercised, and the manual
+Precise scenarios below remain pending.
 
 ### Selection-policy and input-state seams
 
@@ -470,9 +540,11 @@ boundaries. They do not constitute an in-game Create validation.
 `OptionalDependencySafetyTest` covers absent optional-integration safety.
 Source and focused seam evidence establish
 the native `min(raycastDistance, pingDistance)` limit, Distant Horizons'
-independent trace, the server acceptance range, and Create/Sable reuse of the
-finite native segment. No automated end-to-end test exercises that entire client capture,
-optional-provider, packet, and authoritative server-acceptance pipeline.
+independent trace, the server acceptance range, Create/Sable reuse of the
+finite native segment in the ordinary trace, and the hold-frozen client
+`pingDistance` bound of the Precise live casts. No automated
+end-to-end test exercises that entire client capture, optional-provider,
+packet, and authoritative server-acceptance pipeline.
 
 ### Presentation, chat, config and geometry outcomes
 
@@ -532,11 +604,14 @@ bounds: target-glide, hover, deadzone, stroke, dwell, and root-distance
 clamping saturate on both sides over the whole valid interval, the spatial
 distance defaults and bounds preserve their half-scale relationship, null and
 out-of-range nested values validate without throwing, the opt-in Back-hover
-default stays disabled, raw-JSON validation and a frozen snapshot clamp every
-value without resetting boolean choices, a frozen session snapshot never
-follows later config edits, root distance and gesture preferences stay
-independent in both mutation directions, and fresh defaults do not alias
-another client's mutable preferences. `SpatialSelectorMigrationTest` covers the
+default stays disabled, the precise capture period clamps to its persisted
+range, defaults to its minimum, and freezes into the snapshot, the previous
+snapshot constructor form remains compatible, raw-JSON validation and a frozen
+snapshot clamp every value without resetting boolean choices, a frozen session
+snapshot never follows later config edits, root distance and gesture
+preferences stay independent in both mutation directions, and fresh defaults do
+not alias another client's mutable preferences. `SpatialSelectorMigrationTest`
+covers the
 release-boundary migrations that remove only obsolete wheel keys without
 injecting defaults: the exact boundaries and pre-target versions retire the old
 wheel radius keys and the retired wheel timeout key while unknown root data and
@@ -547,7 +622,8 @@ same-version absent, partial, and null selectors gain model defaults without a
 load rewrite, a pre-target writeback keeps old key data until the target
 upgrade, a current-version load is not retired-key normalization while a
 target-version save cannot resurrect the retired keys,
-every explicit preference round-trips independently of appearance, and the
+every explicit preference round-trips independently of appearance, including
+the precise capture period added without a migration, and the
 future-version guard keeps all bytes and refuses save and reset; an injected
 failed write retains usable in-memory preferences and a retry discards the
 stale source before migration. `InventorySettingsPersistenceTest` covers additive
@@ -556,7 +632,8 @@ writing the nested inventory object while preserving user data, explicit
 unlimited round trips, out-of-range values clamping without resetting
 unrelated fields or producing a broken backup, the future-version guard
 leaving defaults in memory and refusing to save, and the client
-spatial-selector keys defaulting and clamping. These are model and persistence
+spatial-selector keys defaulting and clamping, including the precise capture
+period's persisted round trip. These are model and persistence
 seams only: no server-administration path, remote change route, settings-UI
 exposure, scheduler consumption or native selector integration exercises them.
 
@@ -659,7 +736,9 @@ configuration, or world-candidate source is exercised.
 `SpatialSelectorSessionTest` covers the production headless selector facade:
 the frozen root menu and its allowed typed intents (with a whole-marker choice
 disallowed for the entity-block fixture rather than by a universal disable),
-supplied precise allocations that are never retargeted or reused, broad
+real typed choices inheriting their catalog Ping Type outline color while
+untyped choices keep a null color, supplied precise allocations that are never
+retargeted or reused, broad
 precise slots keeping their candidate's canonical target type while a foreign
 canonical type is rejected, single-use release,
 unavailable/reserved/branch releases producing no action, next-capture
@@ -698,7 +777,7 @@ cancel branch builds the frozen cone lazily; list release sends `SELECT` before
 the exact `CLOSE` and never falls back to a plain create; a long-held selector
 never auto-closes and its release still selects the row; reset and late-preview
 responses cannot revive or select; precise
-release consumes the frozen candidate; broad block and entity slots stay
+release consumes the supplied selectable candidate; broad block and entity slots stay
 distinct from the ordinary target and keep their candidate's canonical target;
 property create preserves the address, observed value, annotation and
 whole-marker type, and a denied property cannot
@@ -709,7 +788,10 @@ fence; a late old capture cannot clear a new selector or its exact request;
 rapid receipts backdate only time and keep the second physical ray; spatial
 settings are frozen at press and an opened selector ignores elapsed time; an
 invalid viewport cannot open; and a reentrant abort inside validation blocks
-every release packet. `ClientPingDispatchReceiptTest` covers actual-send
+every release packet. A nearer same-identity precise contact without a face
+preserves the ordinary press-time inventory face: the ordinary content branch
+still opens with that face, its inventory selection remains enabled, and the
+release selects without a fallback create. `ClientPingDispatchReceiptTest` covers actual-send
 receipt, transport-failure rollback without queueing or refund, empty-tracker
 restoration and preservation of a newer reentrant route receipt.
 `WheelMouseCaptureLifecycleTest` covers owned release and re-grab,
@@ -728,7 +810,9 @@ The inventory foundation has headless coverage for the preview route and its
 supporting models. `InventoryC2SPacketTest` and `InventoryS2CPacketTest` cover
 request and response codec round trips, bounded text and frame limits,
 corruption rejection, part-range and duplicate-key rejection, and the status
-values. `InventoryChecksumsTest` covers the entry checksum model.
+values; an offer's positive period values round-trip at their upper bounds
+including `72001` and `Integer.MAX_VALUE`, while zero, out-of-range, and raw
+overlong or noncanonical period encodings are rejected without defaults. `InventoryChecksumsTest` covers the entry checksum model.
 `InventoryStrictDecodeTest` covers raw overflowing request/response frame
 numbers and strict helper rejection of overflowing or noncanonical varints and
 overflowing varlongs; it is codec coverage, not transport or admission evidence.
@@ -766,7 +850,36 @@ per-tick allowance, keep their captured values after live contents change,
 never fall back to live reads, and release the retained snapshot on the last
 consumer close; an already-delivered cached empty snapshot completes another
 consumer without revalidation, capture, or read; and a snapshot-memory defer
-retries later and admits the capture once capacity returns.
+retries later and admits the capture once capacity returns. A restarted sweep
+cannot reattach an older peer's incomplete round; an invalid probe retires the
+shared round while paid quotas survive until fresh tracking recovery; a
+rejected completed sweep does not replace the still-published previous result,
+and terminal publication uses retained evidence rather than a fresh
+self-consistent wrapper; publication-evidence admission defers before any
+provider call and never invalidates on budget pressure; the evidence lease
+releases pages at the last scanner restart and closes only when replaced or
+when the last consumer leaves; and the bounded retained-evidence-lease set
+allows a fresh replacement without an unbounded cache. A second batch of new
+consumers cannot consume the replacement reserve: with normal new-observation
+admission full, their preparations defer before resolver work, retain no memory
+and cannot turn into replacement leases, while the existing consumers'
+replacements proceed across periods and keep their prior publication evidence
+until an accepted replacement; releasing the prior leases lets the waiting
+consumers enter, and closing evidence never refunds the current target's paid
+progress. Compatible aliased inputs still share one physical round when normal
+observation admission is full, because the bounded round guard counts physical
+rounds rather than a compatible consumer's references, and per-target-key
+quotas stay independent. A shared physical replacement hands off from a
+predecessor to its successor: same-owner, same-subject peers skewed across
+periods share the one replacement, a fast peer's accepted successor stays
+serviceable to a slow peer that can consume it without a second physical
+sweep, and the handoff is counted in the bounded scan admission so another
+handoff cannot fork before the slow peer advances. Rejected, invalid or merged
+successors detach their handoff, and closing, retiring or merging peers cancel
+handoff-only references without dropping independently owned old publication
+evidence or refunding paid target progress; a successor's cached-validity
+admission defers before provider work and cannot authorize an invalid cached
+successor. Handoff completion and close leave no reserved or retained leak.
 `InventorySourceSnapshotTest` covers the source-access snapshot preparation and
 decode seam headlessly: capture stays lazy until preparation and the prepared
 route is fixed for the handle lifetime; explicit atomic-detached evidence
@@ -798,12 +911,39 @@ digests and repeated `RESYNC` resumes the same baseline, a future heartbeat
 without application delivery requests bounded repair, a completed digest with a
 missing part repairs without partial comparison, a failed fence blocks baseline
 parts until the same fence can be sent, and duplicate controls never reset
-assembly or the gap timer. `InventoryMinecraftSourcesTest` composes the
+assembly or the gap timer; a later shared retirement withdraws an earlier
+checked terminal preview before the publisher drains, a cached tracking
+publication defers with zero provider calls and resumes the same baseline when
+budget returns, a tracking restart keeps published completed evidence until a
+fresh accepted result and invalidity fences real frames, and positive `HELLO`
+periods round-trip exactly including their upper bounds.
+`InventoryBackendTest` exercises the production
+backend orchestration headlessly: one bounded preview selection creates once
+and the first tracking observation reuses neither the preview snapshot nor its
+count; invalidation, recovery and hard expiry leave marker lifetime untouched
+and stop probing after the deadline; revoked views purge recipient queues
+without changing the frozen audience; component folding is decided afresh per
+preview/recovery and a fresh resync drops only that recipient's fold; a stale
+selected item is rejected at one bounded witness without an automatic retry; a
+failed prepared create releases its sidecar reservations; an invalid
+preview releases its physical round so unrelated work can progress; positive
+resync periods at the integer maximum stay exact in an existing session; and an
+actual resync at those periods rejects an immediate repeat without overflow.
+`InventorySyncPublisherTest` covers the production publisher headlessly: the
+same-recipient per-period SNAPSHOT byte total spans multiple targets, revoke
+and memory defer encode and send nothing, and an indivisible oversized preview
+batch terminates incomplete instead of waiting forever.
+`InventoryMinecraftSourcesTest` composes the
 production source wrapper with a recording platform view: a same-alias topology
 change invalidates before the cursor continues, a fresh observation recovers
 all slots, snapshot-plan discovery stays lazy without capturing or saving NBT
-and without replacing the live selection witness, and an aggregate alias
-without an explicit member layout keeps the live route.
+and without replacing the live selection witness, an aggregate alias
+without an explicit member layout keeps the live route, a completed
+double-chest preview withdraws its cross-period encoded batch when the original
+hit half becomes a legal single, normal content changes do not rebase or
+recapture a stable cross-period preview, and terminal evidence detects a
+same-alias same-count snapshot-layout change even when access remains
+self-valid.
 `InventoryMinecraftSnapshotCaptureTest` drives the production view and NBT
 capture algorithms against bootstrapped vanilla block entities: a single chest
 and both double-chest members are captured through the real vanilla save path
@@ -860,7 +1000,8 @@ seam of the platform access bridge. `InventoryGestureTest`, `InventoryListModelT
 `SpatialOverlayRendererTimingTest` cover the client gesture, list ordering and
 freeze, and renderer timing models. `SpatialOverlayTransitionsTest`,
 `SpatialInventoryLayoutTest`, `SpatialOverlayRendererStyleTest`,
-`SpatialOverlayRendererSectorTest` and `SpatialSquareProgressTest` cover the CPU
+`SpatialOverlayRendererSectorTest`, `SpatialOverlayRendererBorderTest` and
+`SpatialSquareProgressTest` cover the CPU
 overlay models: appearance,
 exit, reappearance, retargeting, reduced motion, rewind and bounded churn; row
 layout and coordinate conversion with status separate from rows and unknown
@@ -872,7 +1013,10 @@ tracing the frame's actually painted pixel extents and never leaving them;
 half-scale child-orbit bounds and selected offsets; the square progress walk's
 last-painted extents and the inventory footer's immutable back-affordance
 state; and sector scanline geometry, adjacent-sector tiling, shared
-disabled/reserved alpha, and paint ordering.
+disabled/reserved alpha, and paint ordering; `SpatialOverlayRendererBorderTest`
+projects the real facade's typed border color in both focus states, keeps the
+untyped and legacy `ping:` action fallbacks, and retains the detached color
+through the exit transition.
 `InventoryTrackingRendererTest`
 projects received tracking data into bounded renderer lines: explicit zero is
 retained, unknown or invalid counts are never synthesized as zero, and status
@@ -944,8 +1088,10 @@ screen evidence:
 
 - `SettingsNavigationModelTest` covers the initial client overview, per-scope
   overview selection, each category opening its own leaf page within its scope,
-  the immutable six-category client and five-category server order including
-  the Performance category, the server Presentation category opening without
+  the immutable seven-category client and five-category server order including
+  the client Performance and server Performance categories, the client
+  Performance category opening independently of the server Performance
+  category, the server Presentation category opening without
   ordinary-server permission, the
   separate Server Presentation leaf, independent ordinary-server and
   presentation-policy view access, and independent per-page viewport and focus
@@ -959,9 +1105,11 @@ screen evidence:
   retains a viewable snapshot while forcing the scope overview without one;
 - `SettingsCategoryCatalogTest` covers exactly-once placement of every existing
   control in the approved category order and immutable per-category lists,
-  including the client scope without a presentation category, the server
-  Presentation category, and the server Performance category exposing every
-  inventory leaf exactly once; it does not cover full-width layout flags or
+  including the client scope without a presentation category, the client
+  Performance category exposing exactly the precise capture period control, the
+  server Presentation category, and the server Performance category exposing
+  every inventory leaf exactly once and only in the server scope; it does not
+  cover full-width layout flags or
   actual widget placement;
 - `PresentationFieldOutcomeTest` covers the server policy role: the advertised
   manifest default, exact and wildcard allow rules winning over block rules,
@@ -1001,8 +1149,11 @@ screen evidence:
   target-gone resource keys, their required format placeholders, the category
   entrance ellipsis, the exact local feedback prefix, the restart-required
   external-list tooltips, the independent wheel and target opacity labels, the
-  retired wheel timeout key's removal, and the nine spatial-selector preference
-  keys with their tooltips and numeric/boolean placeholder rules; it does not
+  retired wheel timeout key's removal, and the complete spatial-selector
+  preference key set with its wheel-options group heading, including the
+  precise capture period, with their tooltips and numeric/boolean placeholder
+  rules; it checks required key presence per locale rather than a
+  full-translation guarantee, and does not
   render or assemble screen labels;
 - `InventorySettingsLocalizationTest` covers the eight bundled locale files,
   the inventory settings label and tooltip key set, the performance category
@@ -1262,13 +1413,21 @@ The following gaps remain open until direct evidence closes them:
   per-key revisions, client barriers and publisher recovery/repair have
   headless and production-seam evidence above, not live execution.
   Per-Ping/recipient baseline and resynchronization isolation are exercised at
-  the production seam, while unknown-baseline expiry, component folding,
-  cross-target period bytes, heartbeat-zero behavior, variant quotas, the hard
-  stop at Ping expiry, a fresh capture after ordinary single- or double-chest
-  contents change, a multi-period low-consumption quota completing stably, a
-  real mod-provided multi-member NBT source or installed multi-member Create
-  Vault, live-world safety invalidation and recovery, and low-frequency
-  limit/failure diagnostics remain manual/integration scenarios;
+  the production seam, and the double-chest NBT/cross-period preview,
+  same-alias layout-change, restart/retirement and evidence-admission seams are
+  covered by the tests above. The unknown-baseline window has a headless
+  expiry/delete/RESYNC seam but no per-tick no-early-expiry proof or live
+  roundtrip; the publisher's cross-target period accounting is headless for
+  SNAPSHOT bytes only; the zero-heartbeat publication seam exercises watermark
+  and repair without asserting the absence of a periodic HEARTBEAT. Full
+  all-variant folding, variant quotas, a real provider resolver and
+  recovery-probe expiry, the hard stop at Ping expiry, a fresh capture after
+  ordinary single- or double-chest contents change, a multi-period
+  low-consumption quota completing stably, a real mod-provided multi-member NBT
+  source or installed multi-member Create Vault, live-world safety invalidation
+  and recovery, low-frequency limit/failure diagnostics, and real world,
+  multiplayer, tick-order and GPU execution remain manual/integration
+  scenarios;
 - inventory administration and spatial-selector configuration have model,
   persistence, strict wire, draft, catalog and focus-helper seams; live
   administration, native widget input/focus, permission changes, persistence,
@@ -1279,8 +1438,9 @@ The following gaps remain open until direct evidence closes them:
   no local fallback;
 - real input-callback and render-frame behavior for rapid/deferred long-press
   compatibility;
-- asynchronous completion after lifecycle abort, including the token
-  invalidation/ownership-clear boundary;
+- asynchronous completion after lifecycle abort in a real input/loader context,
+  including the token invalidation/ownership-clear boundary; the headless
+  abort-plus-late-completion seams are inventoried above;
 - live GUI/screen input callbacks and physical key-repeat behavior across
   Fabric, Forge, and NeoForge, beyond the input-state seams; and
 - the complete range pipeline across native, Distant Horizons, Create/Sable,
@@ -1314,15 +1474,22 @@ The following gaps remain open until direct evidence closes them:
   inventoried above, but native property selection through authoritative CREATE
   in a live session remains pending rather than established by those tests;
 - installed-Create presentation sampling and display remain unexercised in-game:
-  automated seams cover vault/tank structure capture, bounded summaries,
-  nested count property selections, the cached network stress/capacity
-  accessor, and the external-block `observeSource` position/demand/budget route
-  with recording access, but not a real Create collector or handler, Create
-  accessor/mixin, Sable API, or resulting HUD label lines;
+  automated seams cover the summary adapter's shape, work and version gates,
+  detached registry-ID aggregation, the constructed ASM field-shape gate for
+  the cached network accessor, and the external-block `observeSource`
+  position/demand/budget route with recording access, but no automated test
+  captures a real Create collector's vault or tank controller/member structure
+  or samples a live block capability; a real Create collector or handler, the
+  applied Create accessor/mixin, the Sable API, and resulting HUD label lines
+  remain pending;
 - the complete `ServerCore` operation ordering and channel/admission matrix in
   an end-to-end server path;
-- same-ID marker creation after local record deletion, where current behavior
-  treats the late create as a new insertion with a new visual deadline;
+- same-ID marker creation after local record deletion in the full client
+  runtime: production final deletion evicts retained presentation values under
+  a session tombstone, so the late create is dropped, while the isolated
+  marker-record seam alone would reinsert it as a new insertion with a new
+  visual deadline; no automated test drives that production orchestration end
+  to end;
 - the live local invalid-target chat path: focused tests cover the composed
   translatable prefix and message component, its color, and the bundled resource
   text, but no test exercises the Minecraft chat overlay or the client trigger
@@ -1393,6 +1560,7 @@ or because related automated tests exist.
 | Block | Plain `block` versus `entity_block`; `ALL`/`COMPATIBLE`/`VOXEL_SHAPE_ONLY` modes and source fallback; whitelist native glow and fallback; a non-full native shape; same-type state change versus block-type replacement. |
 | Entity | Ordinary entity and dropped item; movement and same-dimension teleportation; death and disappearance; same-dimension world unload/rejoin and runtime-ID reuse in a game session. |
 | Wheel | Short and long press; every sector and border color; independent wheel-underlay and target-frame opacity; frozen target; location fallback; Back-hover dwell, one-level return, and leave/re-entry re-arm under real input; Back progress following the focused Back frame boundary; radial root caller geometry, non-root Back centring, dwell entry and fresh-stroke re-arm under real input. |
+| Precise live capture | Periodic capture while the Precise branch is active and pause on leaving it; a moving target while the ordinary action stays press-frozen; release committing the last actually painted selectable version; a pending refresh keeping the last certified candidate; independent Distant Horizons location completion; and multi-loader live sessions. |
 | Selection policy and input | Live GUI/screen callbacks for selection gating; focus-loss `KeyMapping.releaseAll`, screen-transition and level-instance/dimension discontinuity aborts with late asynchronous completion; loader/gameplay input lifecycle and physical key-repeat behavior on Fabric, Forge, and NeoForge; selection toggles, entity blacklist/default `simulated:honey_glue` rule, and spectator exclusion in a game session. |
 | Movement, death and replacement | Target movement while the wheel is open; entity death or dimension change; block state change or replacement while open. |
 | Naming and chat | Custom-name formatting; localized base names; item naming; phrase-only text color. |
@@ -1401,7 +1569,7 @@ or because related automated tests exist.
 | Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location; an owner-online refresh that changes the locator or the anchor; a marker beyond the bounded sampling cache synchronizing its known recipients without a new lease; an older or equal-revision initial arriving after a newer one without rolling back the stored payload; a legitimate policy change between cached projection and delivery; and a legitimate later packet arriving after the refresh. |
 | Marker HUD | Repeated same-target pings from one sender and from several senders while same-target records remain display-active: the target's displayed HUD alpha does not accumulate with the number of same-target records ([invariant owner](../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection)). |
 | Inventory and shared sources (planned) | Preview and tracking on Fabric, Forge, and NeoForge; vanilla single and double chests in a live world (their headless real-NBT capture is inventoried above), hopper, furnace, shulker box, and an unopened loot chest without loot-table generation; a fresh capture after ordinary single- or double-chest contents change; installed Create Vault with a real multi-member topology and a real mod-provided multi-member NBT source; private or unavailable inventories; permission and tag governance; unload/reload and live-world safety invalidation and recovery; block-type replacement versus same-type restore before expiry; different-block invalidation and grey status; hard stop at Ping expiry without recovery afterward; session end; queue overload and coalescing including explicit zero values; a multi-period low-consumption quota completing stably; component-too-long all-variant folding; heartbeat zero mode with repair and status still active; low-frequency limit/failure diagnostics; and an explicit unlimited scan mode keeping finite work and memory guards. |
-| Presentation snapshot | Live v3 negotiation, offer and reset-mask pruning, and reset on Fabric, Forge, and NeoForge; the server-selected mask removing retained and frozen values; permission-gated and per-target-type-policy-gated projection for two recipients of one marker; live property uploads through the approved native content property-selection route (client-first selection, server fallback, and authoritative CREATE validation) recaptured against authoritative world state with whole-create rejection on a wrong-kind, unknown, forbidden, or unavailable selection; rendered default display reference and property HUD lines; live property Ping Type override resolution and tag/registry selector matching against actual block, item, and entity tags; the policy rule-view read and per-target-type mutation route over a real connection, including the permission-3 mutation gate, rule-view revision ordering, and unsolicited broadcast to a second client; the server per-target-type policy page with no property-entry editor; superseded marker C2S/S2C routes mutating nothing; installed-Create kinetic and vault/tank summaries including nested count property selections and the cached stress/capacity accessor path and an untested-version fallback; and a live validated Sable external-block input through the Create route with unavailable and stale outcomes; and a zero server `scanBudget` under live demand with captures deferred while cached values and staleness semantics are retained. |
+| Presentation snapshot | Live v3 negotiation, offer and reset-mask pruning, and reset on Fabric, Forge, and NeoForge; the server-selected mask removing retained and frozen values; permission-gated and per-target-type-policy-gated projection for two recipients of one marker; live property uploads through the approved native content property-selection route (client-first selection, server fallback, and authoritative CREATE validation) recaptured against authoritative world state with whole-create rejection on a wrong-kind, unknown, forbidden, or unavailable selection; rendered default display reference and property HUD lines; live property Ping Type override resolution and tag/registry selector matching against actual block, item, and entity tags; the policy rule-view read and per-target-type mutation route over a real connection, including the permission-3 mutation gate, rule-view revision ordering, and unsolicited broadcast to a second client; the server per-target-type policy page with no property-entry editor; superseded marker C2S/S2C routes mutating nothing; installed-Create kinetic and vault/tank summaries including nested count property selections and the cached stress/capacity accessor path and an absent or untested version registering no Create adapter; and a live validated Sable external-block input through the Create route with unavailable and stale outcomes; and a zero server `scanBudget` under live demand with captures deferred while cached values and staleness semantics are retained. |
 | Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live scope-tab and category navigation with leaf Back/Escape and root Done/Escape, a fixed footer with non-covering scrolled content, and per-page scroll/focus retention across back navigation and GUI resize, native widget input dispatch and focus-list traversal after a deferred page transition, and root and leaf pages at small GUI sizes and with long localized labels; one shared server session with a single correlated snapshot request retained across category and scope navigation, loading/permission/unavailable status, and a non-editable snapshot rendering read-only for a viewer below the required level; live permission revocation retaining a read-only leaf view, permission-return draft reset, promotion requesting a fresh snapshot, and reconnect draft behavior; invalid-draft close blocking with routing to the offending category and field; the client configuration file action and confirmation-dialog flows, including the reset warning when a server draft exists; the server Presentation category's per-target-type policy rows with their paired allow/block toggles and editable add/remove, whitelist-only changes, refresh, feedback, and broadcast to another client when permitted, including bounded no-response timeout retry, list-capacity feedback, caret and field focus, and a persistence fault during a mutation; and the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)). |
 | Range | Client/server range combinations in one live pipeline: native minimum, a live long-distance Distant Horizons target, Create/Sable finite-segment reuse and server acceptance, including exact Create surface selection followed by whole-entity server-anchor range rejection. Installed-Sable scenarios are listed below. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |

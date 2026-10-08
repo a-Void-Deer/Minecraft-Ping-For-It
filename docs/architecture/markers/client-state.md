@@ -77,10 +77,14 @@ records, winners, and tombstones; it is not a permanent cross-clear history.
 A merely local fallback-`STALE` record has no authoritative-removal tombstone
 and can recover to `SYNCHRONIZED` if a later same-ID snapshot arrives; while the
 record remains stored, that recovery still does not change its existing visual
-deadline. Once local housekeeping has finally deleted a record after its visual
-deadline, a later same-ID create is treated as a new insertion and receives a
-new visual deadline. Automated coverage of this behavior remains a gap tracked in
-[verification](../../testing/verification.md).
+deadline. When local housekeeping finally deletes a record after its visual
+deadline, the client also evicts that marker's retained presentation values and
+leaves a session-scoped eviction tombstone, so a delayed same-ID create cannot
+resurrect the marker in that session; the eviction-tombstone retention rule is
+owned by
+[presentation snapshot](../presentation/presentation_snapshot.md#client-retention-and-display).
+Automated coverage of the complete production orchestration remains a gap
+tracked in [verification](../../testing/verification.md).
 
 The fallback branches above are state-specific. A visually expired
 `SYNCHRONIZED` record remains stored until its own fallback deadline is due; at

@@ -32,14 +32,14 @@ guaranteed for those provider-local decisions, are recorded in
 
 ## Supplemental transformed-behind discovery
 
-The native selector's supplemental candidate allocation includes a separate
+The native selector's Precise live candidate capture includes a separate
 Sable provider ray. It is the adopted bounded discovery of a Sable surface
 behind a blocker or after a native miss, independently of the ordinary
 projected capture above; it never changes, replaces or extends that ordinary
-capture. It uses the frozen press ray bounded by the frozen client
-`pingDistance` under the
+capture. Each live cast uses the current camera ray bounded by the hold-frozen
+client `pingDistance` under the
 [range contract](../architecture/picking/range.md#selector-candidate-supplements)
-and the same frozen selection policy as ordinary picking.
+and the hold's frozen selection policy.
 
 The provider walks its raw loaded-sublevel list directly, charging every
 sublevel visit and provider call to the bounded candidate work budget and
