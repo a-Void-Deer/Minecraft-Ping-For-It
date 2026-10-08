@@ -64,6 +64,7 @@ import nx.pingwheel.common.interaction.state.PingInteractionStateMachine;
 import nx.pingwheel.common.interaction.state.SelectorReleaseProposal;
 import nx.pingwheel.common.client.spatial.NativeSelectorInput;
 import nx.pingwheel.common.client.spatial.SelectorIntent;
+import nx.pingwheel.common.client.spatial.SpatialController;
 import nx.pingwheel.common.client.spatial.SpatialSelectorSession;
 import nx.pingwheel.common.client.spatial.PreciseCaptureRefresh;
 import nx.pingwheel.common.config.SpatialSelectorSettings;
@@ -211,6 +212,8 @@ public final class ClientPingRuntime {
 	private double selectorNativeDistance, selectorPingDistance;
 	private PreciseCaptureRefresh preciseRefresh;
 	private SpatialOverlayRenderer.Style selectorStyle;
+	private final SelectorToggleLabels selectorToggleLabels = new SelectorToggleLabels(
+		() -> raycastPolicy(ClientConfig.HANDLER.getConfig()));
 	private InteractionToken baselineToken;
 	private boolean baselineHeld;
 	private boolean baselineMenuOpened;
@@ -599,7 +602,7 @@ public final class ClientPingRuntime {
 		baselineMenuOpened = false;
 		ClientConfig config = ClientConfig.HANDLER.getConfig();
 		selectorSettings = config.getSpatialSelector().snapshot();
-		selectorPolicy = RaycastPolicy.from(config.isPassThroughTransparentBlocks(), config.isMarkBlacklistedTargets(), config.isMarkFluids());
+		selectorPolicy = raycastPolicy(config);
 		selectorPingDistance = config.getPingDistance();
 		selectorNativeDistance = Math.min(config.getRaycastDistance(), selectorPingDistance);
 		selectorStyle = SpatialOverlayRenderer.Style.fromLegacyFontSizes(config.getWheelOpacity(), config.getWheelTargetOpacity(), config.getWheelFontSize(),
@@ -613,6 +616,15 @@ public final class ClientPingRuntime {
 		}
 		interactionAccess.syncMouse(machine.phase());
 		return Optional.empty();
+	}
+
+	/**
+	 * The one mapping from the persistent target-selection settings to the
+	 * immutable raycast policy: sampled at hold start for capture and re-sampled
+	 * live by the selector toggle labels.
+	 */
+	private static RaycastPolicy raycastPolicy(ClientConfig config) {
+		return RaycastPolicy.from(config.isPassThroughTransparentBlocks(), config.isMarkBlacklistedTargets(), config.isMarkFluids());
 	}
 
 	private LongPressCompatibilityController.BaselineOutcome baselineRelease() {
@@ -849,11 +861,22 @@ public final class ClientPingRuntime {
 		var opened = selector;
 		var snapshot = opened == null ? null : opened.snapshot();
 		selectorPaint.drawFrame(graphics, snapshot == null ? null : snapshot.radial(),
-			snapshot == null ? null : snapshot.inventoryView(), choice -> selectorContent == null
-				? choice.label() == null ? Component.empty() : Component.translatable(choice.label())
-				: selectorContent.label(choice.label()), selectorStyle,
+			snapshot == null ? null : snapshot.inventoryView(), this::selectorChoiceLabel, selectorStyle,
 			java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeSource.nowMillis()));
 		acknowledgeSelectorPaint(opened, snapshot, selectorPaint.paintedChoiceIds());
+	}
+
+	/**
+	 * The selector's live label resolver: target-selection toggles gain their
+	 * live ON/OFF state; every other choice keeps the held-content or default
+	 * translation-key behavior unchanged.
+	 */
+	private Component selectorChoiceLabel(SpatialController.ChoiceView choice) {
+		Component toggleLabel = selectorToggleLabels.label(choice);
+		if (toggleLabel != null) return toggleLabel;
+		return selectorContent == null
+			? choice.label() == null ? Component.empty() : Component.translatable(choice.label())
+			: selectorContent.label(choice.label());
 	}
 	/** Actual renderer handoff; a headless recording may acknowledge only paint it exercised. */
 	void acknowledgeSelectorPaint(SpatialSelectorSession.Snapshot snapshot, Set<String> paintedChoiceIds) {
