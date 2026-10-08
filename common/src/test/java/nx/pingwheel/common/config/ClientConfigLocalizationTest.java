@@ -62,6 +62,7 @@ class ClientConfigLocalizationTest {
 		"settings.pingforit.group.channel_players",
 		"settings.pingforit.group.send_rate",
 		"settings.pingforit.group.marker_duration",
+		"settings.pingforit.group.wheel_options",
 		"settings.pingforit.server_status.loading",
 		"settings.pingforit.server_status.permission",
 		"settings.pingforit.server_status.unavailable",
@@ -117,6 +118,7 @@ class ClientConfigLocalizationTest {
 		assertEquals("%ss", readTranslation("en_us", "unit.pingforit.seconds"));
 		assertContainsKey(enUs, "unit.pingforit.degrees");
 		assertContainsKey(enUs, "unit.pingforit.pixels");
+		assertEquals("%st", readTranslation("en_us", "unit.pingforit.ticks"));
 	}
 
 	@Test
@@ -259,7 +261,8 @@ class ClientConfigLocalizationTest {
 			"settings.pingforit.spatial_selector.dwell_millis",
 			"settings.pingforit.spatial_selector.root_distance",
 			"settings.pingforit.spatial_selector.target_glide",
-			"settings.pingforit.spatial_selector.hover_millis");
+			"settings.pingforit.spatial_selector.hover_millis",
+			"settings.pingforit.spatial_selector.precise_capture_period_ticks");
 		List<String> booleanLabels = List.of(
 			"settings.pingforit.spatial_selector.hover_enabled",
 			"settings.pingforit.spatial_selector.show_trail",
@@ -275,6 +278,7 @@ class ClientConfigLocalizationTest {
 			assertEquals(expectedKeys, json.keySet().stream()
 				.filter(key -> key.startsWith("settings.pingforit.spatial_selector.")).collect(Collectors.toSet()), locale);
 			nonBlankTranslation(json, locale, "settings.pingforit.group.spatial_selector");
+			nonBlankTranslation(json, locale, "unit.pingforit.ticks");
 			for (String key : expectedKeys) {
 				nonBlankTranslation(json, locale, key);
 			}

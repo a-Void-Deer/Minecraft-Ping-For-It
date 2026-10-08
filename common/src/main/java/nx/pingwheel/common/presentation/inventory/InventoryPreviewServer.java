@@ -336,7 +336,7 @@ public final class InventoryPreviewServer {
 
 	private void sendOffer(Session session) {
 		InventoryS2CPacket.Offer offer = new InventoryS2CPacket.Offer(settings.getPreview().getPeriodTicks(),
-			settings.getTracking().getPeriodTicks(), Math.min(InventoryLimits.MAX_PERIOD_TICKS, settings.getTracking().getResyncMinPeriods()),
+			settings.getTracking().getPeriodTicks(), settings.getTracking().getResyncMinPeriods(),
 			settings.getTracking().getHeartbeatPeriods());
 		if (send(session, InventoryS2CPacket.offer(session.epoch, offer), true)) {
 			session.offerPending = false;

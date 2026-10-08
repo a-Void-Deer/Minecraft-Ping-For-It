@@ -375,4 +375,8 @@
   ,"settings.pingforit.inventory.tracking_heartbeat_periods.tooltip": "0 只禁用周期性校验和心跳，修复和状态消息保持活跃。"
   ,"settings.pingforit.inventory.tracking_grace_periods": "字节平滑窗口（周期）"
   ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "追踪超额字节的滚动窗口，不是未知基线超时。"
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks": "Precise Selection Capture Period: %s"
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "How often the active Precise branch captures its live candidate set. 1 captures every tick; higher values reduce updates. Applies to the next hold."
+  ,"settings.pingforit.group.wheel_options": "Wheel options"
+  ,"unit.pingforit.ticks": "%st"
 }

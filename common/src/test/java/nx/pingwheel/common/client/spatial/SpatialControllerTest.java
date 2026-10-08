@@ -174,7 +174,7 @@ class SpatialControllerTest {
 	void disabledEntryFocusesButNeverCommitsAndNeverEnters() {
 		SpatialMenu gate = SpatialMenu.of(
 			"gate",
-			new SpatialMenu.Choice("gate:off", "off", "ping:danger", null, false, true, false, null, null),
+			new SpatialMenu.Choice("gate:off", "off", "ping:danger", null, false, true, false, null, null, null),
 			SpatialMenu.Choice.leaf("gate:on", "on", "ping:attention"));
 		SpatialMenu disabledRoot = SpatialMenu.of(
 			"disabled-root",
@@ -409,7 +409,7 @@ class SpatialControllerTest {
 		SpatialMenu deep = SpatialMenu.of("gate:off:sub", SpatialMenu.Choice.leaf("gate:off:x", "x", "a:x"));
 		SpatialMenu gate = SpatialMenu.of(
 			"gate",
-			new SpatialMenu.Choice("gate:off", "off", "ping:danger", deep, false, true, false, null, null),
+			new SpatialMenu.Choice("gate:off", "off", "ping:danger", deep, false, true, false, null, null, null),
 			SpatialMenu.Choice.leaf("gate:on", "on", "ping:attention"));
 		SpatialMenu turnRoot = SpatialMenu.of(
 			"turn-root",

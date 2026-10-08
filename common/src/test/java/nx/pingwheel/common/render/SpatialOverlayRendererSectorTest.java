@@ -80,7 +80,7 @@ class SpatialOverlayRendererSectorTest {
 	@Test
 	void backdropLayerPaintsBeforePanelsNodesAndChrome() {
 		var choice = new SpatialController.ChoiceView("root:danger", "label", "ping:danger",
-			false, false, false, false, true, 332.5, 55.0);
+			false, false, false, false, true, 332.5, 55.0, null);
 		var snapshot = new SpatialController.Snapshot(true, null, List.of(), null, List.of(), 0.0);
 		int sector = SpatialOverlayRenderer.paintRank(new SpatialOverlayRenderer.SectorPaint(choice, RADIUS));
 		int panel = SpatialOverlayRenderer.paintRank(new SpatialOverlayRenderer.PanelPaint(10.0, 10.0, 3.0));

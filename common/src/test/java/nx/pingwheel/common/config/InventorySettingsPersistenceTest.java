@@ -239,6 +239,9 @@ class InventorySettingsPersistenceTest {
 		assertTrue(selector.has("targetGlide"));
 		assertTrue(selector.has("hoverEnabled"));
 		assertTrue(selector.has("hoverMillis"));
+		assertTrue(selector.has("preciseCapturePeriodTicks"));
+		assertEquals(SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS,
+			selector.get("preciseCapturePeriodTicks").getAsInt());
 	}
 
 	private static JsonObject readRoot(Path path) throws IOException {

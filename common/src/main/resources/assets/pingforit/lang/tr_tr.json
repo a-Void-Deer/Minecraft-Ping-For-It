@@ -367,4 +367,8 @@
   ,"settings.pingforit.inventory.tracking_heartbeat_periods.tooltip": "0 yalnızca dönemsel sağlama toplamı kontrollerini kapatır. Onarım ve durum mesajları devam eder."
   ,"settings.pingforit.inventory.tracking_grace_periods": "Bayt yumuşatma penceresi"
   ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "Fazla takip baytları için dönem cinsinden kayan pencere; bilinmeyen temel zaman aşımı değildir."
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks": "Precise Selection Capture Period: %s"
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "How often the active Precise branch captures its live candidate set. 1 captures every tick; higher values reduce updates. Applies to the next hold."
+  ,"settings.pingforit.group.wheel_options": "Wheel options"
+  ,"unit.pingforit.ticks": "%st"
 }

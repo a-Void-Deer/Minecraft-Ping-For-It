@@ -3,16 +3,21 @@ package nx.pingwheel.common.presentation.minecraft;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
+import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
 import nx.pingwheel.common.marker.MarkerAnchor;
+import nx.pingwheel.common.marker.MarkerIdSource;
 import nx.pingwheel.common.marker.ServerMarker;
+import nx.pingwheel.common.marker.ServerMarkerStore;
+import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.PresentationBasic;
@@ -32,6 +37,7 @@ class PresentationServerRefreshTest {
 	private static final UUID OWNER = new UUID(0, 1);
 	private static final UUID VIEWER = new UUID(0, 2);
 	private static final UUID OTHER = new UUID(0, 3);
+	private static final UUID STRANGER = new UUID(0, 4);
 	private static final String BASIC = PresentationBasic.ID;
 	private static final String NAME = PresentationBasic.NAME;
 
@@ -343,6 +349,147 @@ class PresentationServerRefreshTest {
 		assertEquals(2, optional.reads, "a new lease must not reset the common capture quota");
 		assertEquals(0, remainingCaptures);
 		assertEquals(6, work.remaining());
+	}
+
+	@Test
+	void baselineAnnouncesStoreWinnerRatherThanCachedLeaseAndNeverFabricatesRecords() {
+		var store = new ServerMarkerStore(new MarkerIdSource());
+		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
+		var target = externalTarget();
+		var older = store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
+			2L, 500L, List.of(VIEWER));
+		var newer = store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(4, 5, 6),
+			3L, 500L, List.of(VIEWER));
+		var lease = new PresentationServer.Lease(older.marker(), "Owner");
+		var source = new PresentationServer.Source(BASIC, 1);
+		source.value = cached();
+		source.nextSample = 250;
+		lease.sources.put(BASIC, source);
+		var session = readySession();
+		var deliveries = new ArrayList<PresentationS2CPacket>();
+
+		PresentationServer.cachedBaseline(List.of(lease), 100, VIEWER, l ->
+			PresentationServer.sendInitial(session, l, new BasicAdapter(), Set.of(NAME), deliveries::add));
+		PresentationServer.sendWinnerBaseline(session, VIEWER, 100, store, deliveries::add);
+
+		assertEquals(2, deliveries.size());
+		assertEquals(PresentationS2CPacket.Kind.CREATED, deliveries.get(0).kind());
+		var winner = deliveries.get(1);
+		assertEquals(PresentationS2CPacket.Kind.WINNER, winner.kind());
+		assertEquals(session.epoch, winner.epoch());
+		assertEquals(session.view, winner.view());
+		assertEquals(TargetKey.from(target), winner.targetKey());
+		assertEquals(Optional.of(newer.marker().id()), winner.winnerId(),
+			"the baseline winner comes from the store, not from cache iteration");
+		assertEquals(250, source.nextSample, "winner replay must not re-enter source capture");
+		assertTrue(session.sent.containsKey(older.marker().id().value()));
+		assertFalse(session.sent.containsKey(newer.marker().id().value()),
+			"winner replay must not fabricate a record outside the sampling cache");
+	}
+
+	@Test
+	void winnerBaselineSkipsDueMarkersAndRecipientsOutsideTheFrozenAudience() {
+		var store = new ServerMarkerStore(new MarkerIdSource());
+		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
+		var target = externalTarget();
+		store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
+			10L, 100L, List.of(VIEWER)); // id 0
+		store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
+			20L, 100L, List.of(VIEWER)); // id 1: would win but is due at tick 100
+		store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
+			5L, 200L, List.of(VIEWER)); // id 2
+		store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
+			30L, 200L, List.of(OTHER)); // id 3: other recipient only
+		var session = readySession();
+		var deliveries = new ArrayList<PresentationS2CPacket>();
+
+		PresentationServer.sendWinnerBaseline(session, VIEWER, 99, store, deliveries::add);
+		assertEquals(List.of(new MarkerId(1L)), winnerIds(deliveries));
+		deliveries.clear();
+		PresentationServer.sendWinnerBaseline(session, VIEWER, 100, store, deliveries::add);
+		assertEquals(List.of(new MarkerId(2L)), winnerIds(deliveries),
+			"a due marker must not mask an active same-target sibling before physical removal");
+		deliveries.clear();
+		PresentationServer.sendWinnerBaseline(session, VIEWER, 200, store, deliveries::add);
+		assertTrue(deliveries.isEmpty());
+		PresentationServer.sendWinnerBaseline(session, OTHER, 99, store, deliveries::add);
+		assertEquals(List.of(new MarkerId(3L)), winnerIds(deliveries));
+		deliveries.clear();
+		PresentationServer.sendWinnerBaseline(session, STRANGER, 99, store, deliveries::add);
+		assertTrue(deliveries.isEmpty(), "the winner baseline is recipient scoped");
+	}
+
+	@Test
+	void baselineWinnerReachesTheClientOutlineProjectionAfterItsRecord() {
+		var store = new ServerMarkerStore(new MarkerIdSource());
+		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
+		var target = externalTarget();
+		var created = store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
+			2L, 500L, List.of(VIEWER));
+		var lease = new PresentationServer.Lease(created.marker(), "Owner");
+		var source = new PresentationServer.Source(BASIC, 1);
+		source.value = cached();
+		lease.sources.put(BASIC, source);
+		var session = readySession();
+		var deliveries = new ArrayList<PresentationS2CPacket>();
+
+		PresentationServer.cachedBaseline(List.of(lease), 100, VIEWER, l ->
+			PresentationServer.sendInitial(session, l, new BasicAdapter(), Set.of(NAME), deliveries::add));
+		PresentationServer.sendWinnerBaseline(session, VIEWER, 100, store, deliveries::add);
+
+		var client = new ClientMarkerStore(0L, 100L);
+		for (var packet : deliveries) {
+			if (packet.kind() == PresentationS2CPacket.Kind.CREATED) client.onCreated(packet.snapshot(), 0L);
+			else if (packet.kind() == PresentationS2CPacket.Kind.WINNER)
+				client.onWinnerChanged(packet.targetKey(), packet.winnerId());
+		}
+
+		var key = TargetKey.from(target);
+		assertEquals(Optional.of(created.marker().id()), client.winnerId(key));
+		assertTrue(client.visibleWinnersInDimension("minecraft:overworld").containsKey(key),
+			"the baseline winner is exposed to outline consumers once its record is known");
+	}
+
+	@Test
+	void resetRebaselineAnnouncesWinnerUnderTheAdvancedView() {
+		var store = new ServerMarkerStore(new MarkerIdSource());
+		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
+		var target = externalTarget();
+		var created = store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
+			2L, 500L, List.of(VIEWER));
+		var lease = new PresentationServer.Lease(created.marker(), "Owner");
+		var source = new PresentationServer.Source(BASIC, 1);
+		source.value = cached();
+		lease.sources.put(BASIC, source);
+		var session = readySession();
+		var deliveries = new ArrayList<PresentationS2CPacket>();
+
+		// The policy reset advances the view and replays records before the winner.
+		session.view++;
+		session.sent.clear();
+		PresentationServer.cachedBaseline(List.of(lease), 100, VIEWER, l ->
+			PresentationServer.sendInitial(session, l, new BasicAdapter(), Set.of(NAME), deliveries::add));
+		PresentationServer.sendWinnerBaseline(session, VIEWER, 100, store, deliveries::add);
+
+		assertEquals(2, deliveries.size());
+		assertEquals(PresentationS2CPacket.Kind.CREATED, deliveries.get(0).kind());
+		var winner = deliveries.get(1);
+		assertEquals(PresentationS2CPacket.Kind.WINNER, winner.kind());
+		assertEquals(session.epoch, winner.epoch());
+		assertEquals(2, winner.view(), "the rebaseline winner carries the advanced view");
+		assertEquals(Optional.of(created.marker().id()), winner.winnerId());
+	}
+
+	private static Target.ExternalBlockTarget externalTarget() {
+		return Target.ExternalBlockTarget.committed(
+			"minecraft:overworld", "sable", "tracking-id", "minecraft:chest", "locator", true);
+	}
+
+	private static List<MarkerId> winnerIds(List<PresentationS2CPacket> packets) {
+		return packets.stream()
+			.filter(packet -> packet.kind() == PresentationS2CPacket.Kind.WINNER)
+			.map(packet -> packet.winnerId().orElseThrow())
+			.toList();
 	}
 
 	private static final class BasicAdapter implements PresentationAdapter {

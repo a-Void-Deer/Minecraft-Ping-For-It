@@ -12,9 +12,13 @@ public sealed interface SelectorIntent<R> permits SelectorIntent.None, SelectorI
 
 	record None<R>() implements SelectorIntent<R> {}
 
-	record CreateTarget<R>(SpatialSelectorSession.CapturedTarget candidate, PingType pingType)
+	record CreateTarget<R>(SpatialSelectorSession.CapturedTarget candidate, PingType pingType,
+		nx.pingwheel.common.interaction.state.SelectorReleaseProposal.Admission admission, long presentationRevision)
 		implements SelectorIntent<R> {
-		public CreateTarget { Objects.requireNonNull(candidate); Objects.requireNonNull(pingType); }
+		public CreateTarget(SpatialSelectorSession.CapturedTarget candidate, PingType pingType) {
+			this(candidate, pingType, nx.pingwheel.common.interaction.state.SelectorReleaseProposal.Admission.PRESS_RAY, 0);
+		}
+		public CreateTarget { Objects.requireNonNull(candidate); Objects.requireNonNull(pingType); Objects.requireNonNull(admission); }
 	}
 
 	record CreateProperty<R>(SpatialSelectorSession.CapturedTarget candidate, PingType mainType,

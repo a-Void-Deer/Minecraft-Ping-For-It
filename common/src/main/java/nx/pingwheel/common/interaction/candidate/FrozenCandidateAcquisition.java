@@ -50,11 +50,24 @@ public record FrozenCandidateAcquisition(InteractionToken token, CapturedRay ray
 		if (!sameIdentity(ordinarySnapshot.target(), ordinaryResolved.target())) {
 			throw new IllegalArgumentException("ordinary resolution changed captured identity");
 		}
-		Candidate ordinary = candidate(0, ordinarySnapshot, ordinaryResolved, ordinaryHit);
+		TargetSnapshot ordinaryContact = ordinarySnapshot;
+		double ordinaryDistance = distance(ray.origin(), ordinaryHit.worldHit());
 		List<Candidate> supplements = new ArrayList<>();
 		int id = 1;
 		for (CandidateEvidence value : evidence) {
-			if (value.hit().equivalenceKey().equals(ordinary.equivalenceKey())) continue;
+			if (value.hit().equivalenceKey().equals(ordinaryHit.equivalenceKey())) {
+				// The supplemental scan may re-contact the ordinary identity at a nearer
+				// actual point. The installed candidate then takes that contact's own
+				// geometry/face provenance, while the canonical owner type and resolution
+				// stay the ordinary ones; an equal or farther re-contact is not installed.
+				double actualDistance = distance(ray.origin(), value.hit().worldHit());
+				if (actualDistance < ordinaryDistance) {
+					ordinaryDistance = actualDistance;
+					ordinaryHit = value.hit();
+					ordinaryContact = value.snapshot();
+				}
+				continue;
+			}
 			if (!value.snapshot().target().dimensionId().equals(ordinaryResolved.target().dimensionId())) {
 				throw new IllegalArgumentException("supplement belongs to a different dimension");
 			}
@@ -64,6 +77,7 @@ public record FrozenCandidateAcquisition(InteractionToken token, CapturedRay ray
 			}
 			supplements.add(candidate(id++, value.snapshot(), resolved, value.hit()));
 		}
+		Candidate ordinary = candidate(0, ordinaryContact, ordinaryResolved, ordinaryHit);
 		WorldVector point = ordinaryHit.worldHit();
 		TargetSnapshot locationSnapshot = TargetSnapshotFactory.location(ordinaryResolved.target().dimensionId(),
 			point.x(), point.y(), point.z());

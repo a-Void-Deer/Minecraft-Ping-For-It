@@ -131,7 +131,8 @@ public final class PresentationServer {
 		return !packet.isCorrupt() && session != null && session.ready && session.epoch == packet.epoch();
 	}
 
-	public static void negotiate(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet) {
+	public static void negotiate(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet,
+		ServerMarkerStore store) {
 		activate(server);
 		if (packet.isCorrupt()) return;
 		if (packet.kind() == PresentationC2SPacket.Kind.HELLO) {
@@ -139,7 +140,7 @@ public final class PresentationServer {
 			if (existing != null) {
 				if (!existing.ready) {
 					send(player, PresentationS2CPacket.offer(existing.epoch, existing.manifest, existing.schemas));
-					prepare(player, existing);
+					prepare(player, existing, store);
 				}
 				return;
 			}
@@ -156,22 +157,24 @@ public final class PresentationServer {
 			Session session = new Session(epoch, schemas, manifest);
 			SESSIONS.put(player.getUUID(), session);
 			send(player, PresentationS2CPacket.offer(epoch, manifest, schemas));
-			prepare(player, session);
+			prepare(player, session, store);
 			return;
 		}
 	}
 
-	private static void prepare(ServerPlayer player, Session session) {
+	private static void prepare(ServerPlayer player, Session session, ServerMarkerStore store) {
 		session.mask = mask(player, session);
 		session.inventoryTypes = inventoryTypes(player, session);
 		session.view++;
 		session.ready = true;
 		session.sent.clear();
 		send(player, PresentationS2CPacket.reset(session.epoch, session.view, session.mask));
-		cachedBaseline(LEASES.values(), activeServer.getTickCount(), player.getUUID(), lease -> {
+		long tick = activeServer.getTickCount();
+		cachedBaseline(LEASES.values(), tick, player.getUUID(), lease -> {
 			sendInitial(player, session, lease);
 			publish(player, session, lease);
 		});
+		sendWinnerBaseline(session, player.getUUID(), tick, store, packet -> send(player, packet));
 	}
 
 	/** The negotiated baseline replays retained values; it never enters the source sampler. */
@@ -180,6 +183,22 @@ public final class PresentationServer {
 		for (Lease lease : leases) {
 			if (lease.marker.expiresAtTick() > tick && lease.marker.recipients().contains(recipient))
 				delivery.accept(lease);
+		}
+	}
+
+	/**
+	 * Replays the authoritative recipient-scoped winner for every target key that
+	 * has an active marker visible to {@code recipient}, after the record/value
+	 * baseline. It reads only the current marker store: no source observation, no
+	 * lease allocation, and no fabricated marker record.
+	 */
+	static void sendWinnerBaseline(Session session, UUID recipient, long tick, ServerMarkerStore store,
+		java.util.function.Consumer<PresentationS2CPacket> delivery) {
+		if (!session.ready) return;
+
+		for (ServerMarker winner : store.winnersFor(recipient, tick)) {
+			delivery.accept(PresentationS2CPacket.winner(session.epoch, session.view,
+				winner.targetKey(), Optional.of(winner.id())));
 		}
 	}
 
@@ -275,8 +294,9 @@ public final class PresentationServer {
 		}
 	}
 
-	public static void tick(MinecraftServer server, List<ServerMarker> markers) {
+	public static void tick(MinecraftServer server, ServerMarkerStore store) {
 		activate(server);
+		List<ServerMarker> markers = store.allMarkers();
 		String nextPolicy = settings().fingerprint();
 		boolean policyChanged = !nextPolicy.equals(policyFingerprint);
 		policyFingerprint = nextPolicy;
@@ -314,6 +334,7 @@ public final class PresentationServer {
 					if (cached != null) publishCached(player, session, marker, adapter, cached);
 				}
 			}
+			sendWinnerBaseline(session, player.getUUID(), server.getTickCount(), store, packet -> send(player, packet));
 		}
 		Set<Long> active = new HashSet<>();
 		for (ServerMarker marker : markers) {

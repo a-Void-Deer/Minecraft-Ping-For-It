@@ -79,10 +79,14 @@ public final class InventorySourceAccess implements SourceAccess {
 	public interface InventoryHandle extends SourceAccess.Handle {
 		/**
 		 * Resolves the route once. A successful snapshot keeps its measured
-		 * reservation charged until close; a retryable memory defer performs no
-		 * capture and leaves the route unresolved.
+		 * reservation charged until its captured data is released or the handle
+		 * closes; a retryable memory defer leaves the route unresolved without capture.
 		 */
 		Preparation prepareSnapshot(RetainedMemoryLedger memory);
+		/** Validates this observation's retained source evidence, even after its terminal step; never reads items. */
+		boolean evidenceValid();
+		/** Drops detached capture data when no scanner needs it; keeps source evidence until close. */
+		void releaseCapturedData();
 	}
 
 	public interface Source extends AutoCloseable {
@@ -190,6 +194,8 @@ public final class InventorySourceAccess implements SourceAccess {
 		}
 		@Override public Descriptor descriptor() { return descriptor; }
 		@Override public java.util.Set<String> demand() { return scope.demand(); }
+		@Override public boolean evidenceValid() { return !closed && source.valid(); }
+		@Override public void releaseCapturedData() { releaseRetained(); }
 
 		/**
 		 * One lazy, memory-bounded detached capture. The plan's upper bound is

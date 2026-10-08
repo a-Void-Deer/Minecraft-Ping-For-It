@@ -92,7 +92,11 @@ public final class SpatialController {
 		record Idle() implements Release {}
 	}
 
-	/** One entry as resolved for rendering or hit-testing. */
+	/**
+	 * One entry as resolved for rendering or hit-testing. {@code outlineColor} is
+	 * the nullable detached 24-bit Ping Type outline colour, never decoded from
+	 * the opaque action.
+	 */
 	public record ChoiceView(
 		String id,
 		String label,
@@ -103,7 +107,8 @@ public final class SpatialController {
 		boolean branch,
 		boolean selected,
 		double startDegrees,
-		double spanDegrees
+		double spanDegrees,
+		Integer outlineColor
 	) {}
 
 	/** One menu of the current ancestor path. */
@@ -439,7 +444,8 @@ public final class SpatialController {
 					choice.branch(),
 					choice.id().equals(focusId),
 					choice.startDegrees(),
-					choice.spanDegrees()));
+					choice.spanDegrees(),
+					choice.outlineColor()));
 			}
 
 			menus.add(new MenuView(state.menu.id(), state.origin, state.parentOrigin, focusId, List.copyOf(choices)));
@@ -644,7 +650,8 @@ public final class SpatialController {
 				false,
 				false,
 				normalize(start + index * span),
-				span));
+				span,
+				null));
 		}
 
 		return resolved;
@@ -660,7 +667,8 @@ public final class SpatialController {
 			choice.disabled(),
 			choice.reserved(),
 			startDegrees,
-			spanDegrees);
+			spanDegrees,
+			choice.outlineColor());
 	}
 
 	private static double bearing(Point from, Point to) {
@@ -740,7 +748,8 @@ public final class SpatialController {
 		boolean disabled,
 		boolean reserved,
 		double startDegrees,
-		double spanDegrees
+		double spanDegrees,
+		Integer outlineColor
 	) {
 		boolean branch() {
 			return children != null && !children.choices().isEmpty();

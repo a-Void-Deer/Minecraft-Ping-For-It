@@ -128,10 +128,12 @@ public final class InventoryBackend implements AutoCloseable {
 			@Override public boolean admittedToSend(SyncPublisher.Context context) {
 				Session session = sessions.get(context.recipient());
 				if (session == null) return false;
-				for (Preview preview : session.previews.values()) if (preview.context.equals(context)) return preview.checkedTick == tick;
+				for (Preview preview : session.previews.values()) if (preview.context.equals(context))
+					return preview.checkedTick == tick && (preview.context.stateFence() > 1 || !preview.consumer.invalidated());
 				for (Tracking lease : tracking.values()) {
 					Recipient recipient = lease.recipients.get(context.recipient());
-					if (recipient != null && recipient.context.equals(context)) return lease.checkedTick == tick;
+					if (recipient != null && recipient.context.equals(context))
+						return lease.checkedTick == tick && (lease.invalid || !lease.consumer.invalidated());
 				}
 				return false;
 			}
@@ -305,13 +307,15 @@ public final class InventoryBackend implements AutoCloseable {
 			}
 		}
 		// Hard stop precedes every validation, recovery probe and read.
+		for (Tracking lease : List.copyOf(tracking.values())) if (lease.marker.expiresAtTick() <= now) remove(lease.marker.id());
 		var leases = new ArrayList<>(tracking.values());
 		if (!leases.isEmpty()) java.util.Collections.rotate(leases, -(trackingCursor++ % leases.size()));
 		for (Tracking lease : leases) {
-			if (lease.marker.expiresAtTick() <= now) { remove(lease.marker.id()); continue; }
+			lease.checkedTick = lease.invalid ? tick : -1; // already-withdrawn INVALID control needs no recovery read grant
 			syncRecipients(lease);
 			if (lease.recipients.isEmpty()) continue;
-			var valid = runtime.probe(lease.input);
+			if (lease.consumer.invalidated() && !lease.invalid) { invalidate(lease); continue; }
+			var valid = lease.invalid ? runtime.probe(lease.input) : runtime.probe(lease.consumer);
 			if (valid.isEmpty()) continue;
 			lease.checkedTick = tick;
 			if (!valid.get()) { invalidate(lease); continue; }
@@ -326,13 +330,20 @@ public final class InventoryBackend implements AutoCloseable {
 		if (!previews.isEmpty()) java.util.Collections.rotate(previews, -(previewCursor++ % previews.size()));
 		for (var entry : previews) {
 			Preview preview = entry.getValue();
-			var valid = runtime.probe(preview.input);
+			preview.checkedTick = -1;
+			if (preview.context.stateFence() > 1) { preview.checkedTick = tick; continue; }
+			var valid = runtime.probe(preview.consumer);
 			if (valid.isEmpty()) continue;
 			preview.checkedTick = tick;
 			if (!valid.get()) invalidatePreview(sessions.get(entry.getKey()), preview);
 			else if (!preview.terminal) samplePreview(entry.getKey(), preview);
 			else if (preview.last != null) publishPreview(preview);
 		}
+		// A later shared probe/step can retire an earlier, already-checked terminal consumer.
+		// Cancel/rebase outside publisher traversal so no admitted old fragment can escape this tick.
+		for (Tracking lease : tracking.values()) if (lease.consumer.invalidated() && !lease.invalid) invalidate(lease);
+		for (Session session : sessions.values()) for (Preview preview : session.previews.values())
+			if (preview.consumer.invalidated() && preview.context.stateFence() == 1) invalidatePreview(session, preview);
 		publisher.drain();
 	}
 	private void samplePreview(UUID player, Preview preview) {
@@ -421,7 +432,8 @@ public final class InventoryBackend implements AutoCloseable {
 		return new InventoryDomainCodec.Item(item.key(), previous == null ? item.count() : Math.addExact(previous.count(), item.count()), item.label(), item.displayJson(), item.stripped());
 	}
 	private void invalidatePreview(Session session, Preview preview) {
-		runtime.retireInvalid(preview.input);
+		preview.consumer.discardObservation();
+		preview.checkedTick = tick; // invalid control is independent of item/read admission
 		if (preview.context.stateFence() == 1) {
 			publisher.cancel(preview.context);
 			preview.context = new SyncPublisher.Context(preview.context.consumerId(), preview.context.recipient(), preview.context.sessionView(), 2, preview.context.baseline());
@@ -457,12 +469,14 @@ public final class InventoryBackend implements AutoCloseable {
 		if (result.completeness() != CaptureResult.Completeness.COMPLETE) {
 			for (Recipient recipient : lease.recipients.values()) publisher.status(recipient.context, InventoryS2CPacket.Status.INCOMPLETE); return;
 		}
+		lease.consumer.retainCompleted();
 		lease.revision++; lease.completed = result;
 		lease.completedCount = lease.count; lease.completedTotal = lease.total; lease.completedFolded = lease.folded;
 		for (Recipient recipient : lease.recipients.values()) publishTracking(lease, recipient);
 	}
 	private void invalidate(Tracking lease) {
-		runtime.retireInvalid(lease.input);
+		lease.consumer.discardObservation();
+		lease.checkedTick = tick; // withdrawing valid state never waits for another probe grant
 		if (!lease.invalid) {
 			lease.state++; lease.invalid = true; lease.completed = null;
 			resetRecipients(lease);

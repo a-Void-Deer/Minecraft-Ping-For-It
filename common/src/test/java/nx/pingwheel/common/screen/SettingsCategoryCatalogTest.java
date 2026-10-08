@@ -51,6 +51,8 @@ class SettingsCategoryCatalogTest {
 		assertEquals(List.of(
 			Setting.ENTITY_BLOCK_RENDER_MODE,
 			Setting.OPEN_CLIENT_CONFIG), SettingsCategoryCatalog.settings(Category.GEOMETRY_CONFIG));
+		assertEquals(List.of(Setting.PRECISE_CAPTURE_PERIOD_TICKS),
+			SettingsCategoryCatalog.settings(Category.CLIENT_PERFORMANCE));
 		assertEquals(List.of(
 			Setting.DEFAULT_CHANNEL_MODE,
 			Setting.PLAYER_TRACKING_ENABLED), SettingsCategoryCatalog.settings(Category.CHANNEL_PLAYERS));

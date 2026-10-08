@@ -21,6 +21,7 @@ import nx.pingwheel.common.client.spatial.NativeSelectorInput;
 import nx.pingwheel.common.client.spatial.SpatialController;
 import nx.pingwheel.common.client.spatial.SpatialSelectorSession;
 import nx.pingwheel.common.client.spatial.SelectorIntent;
+import nx.pingwheel.common.client.spatial.PreciseCaptureRefresh;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.MarkerId;
@@ -79,15 +80,18 @@ class ClientPingRuntimeInteractionTest {
 
 	private static final class Access implements ClientPingRuntime.InteractionAccess {
 		Object world = new Object(), screen;
-		boolean player = true, focus = true, overlay, grabbed = true, pending, validFrame = true;
+		boolean player = true, focus = true, overlay, grabbed = true, pending, validFrame = true, distantPending, preciseIncomplete;
 		String dimension = DIMENSION;
 		int captures, cancellations, resets, disposals;
 		boolean screenDisposal;
 		CapturedRay ray = CapturedRay.defaultRay();
 		TargetSnapshot snapshot = CHEST;
 		List<TargetSnapshot> supplements = List.of();
+		WorldVector supplementHit = new WorldVector(5, 5, 5);
 		final List<Runnable> completions = new ArrayList<>();
 		CapturedRay capturedRay, cancellationRay;
+		final List<PreciseCaptureRefresh.Request> liveRequests = new ArrayList<>();
+		final List<java.util.function.Consumer<PreciseCaptureRefresh.Outcome>> distantCompletions = new ArrayList<>();
 		final List<SelectorIntent.CaptureToggle> toggles = new ArrayList<>();
 		NativeSelectorInput.Frame frame = new NativeSelectorInput.Frame(1, 2000, 1400, 1000, 700, true, true);
 		public Lifecycle lifecycle() { return new Lifecycle(world, dimension, screen, player, focus, overlay); }
@@ -95,13 +99,34 @@ class ClientPingRuntimeInteractionTest {
 		public void capture(InteractionToken token, CapturedRay pressRay, ClientPingRuntime.CaptureCompletion completion) {
 			captures++; capturedRay = pressRay;
 			TargetSnapshot frozen = surface(snapshot, new WorldVector(1, 2, 3));
-			var evidence = supplements.stream().map(value -> surface(value, new WorldVector(5, 5, 5)))
+			var evidence = supplements.stream().map(value -> surface(value, supplementHit))
 				.map(value -> new CandidateEvidence(value, FrozenCandidateAcquisition.distance(pressRay.origin(), value.candidateHit().orElseThrow().worldHit()))).toList();
 			var acquisition = new FrozenCandidateAcquisition(token, pressRay, 100, new WorldVector(1, 2, 3), evidence,
 				Set.of(PreciseTargetType.values()));
 			Runnable apply = () -> completion.complete(frozen, Optional.of(acquisition));
 			completions.add(apply);
 			if (!pending) apply.run();
+		}
+		public PreciseCaptureRefresh.Scan capturePrecise(PreciseCaptureRefresh.Request request) {
+			liveRequests.add(request);
+			if (preciseIncomplete) return PreciseCaptureRefresh.Scan.incomplete();
+			var inputs = request.inputs();
+			TargetSnapshot reference = surface(snapshot, new WorldVector(1, 2, 3));
+			var evidence = supplements.stream().map(value -> surface(value, supplementHit))
+				.map(value -> new CandidateEvidence(value, FrozenCandidateAcquisition.distance(inputs.ray().origin(), value.candidateHit().orElseThrow().worldHit()))).toList();
+			var acquisition = new FrozenCandidateAcquisition(inputs.token(), inputs.ray(), inputs.pingDistance(), new WorldVector(1, 2, 3), evidence,
+				Set.of(PreciseTargetType.values()));
+			var resolver = nx.pingwheel.common.resolve.DefaultTargetResolver.builtIn(nx.pingwheel.common.resolve.TargetResolutionLogger.noop());
+			var allocated = acquisition.finish(reference, resolver.resolve(reference.target(), reference.matchContext()), resolver);
+			var slots = new java.util.EnumMap<PreciseTargetType, PreciseCaptureRefresh.Outcome>(PreciseTargetType.class);
+			for (var type : PreciseTargetType.values()) if (type != PreciseTargetType.LOCATION) slots.put(type,
+				allocated.slot(type).candidateId().map(id -> PreciseCaptureRefresh.Outcome.available(allocated.candidate(id).orElseThrow()))
+					.orElseGet(PreciseCaptureRefresh.Outcome::missing));
+			var location = allocated.candidate(allocated.slot(PreciseTargetType.LOCATION).candidateId().orElseThrow()).orElseThrow();
+			return new PreciseCaptureRefresh.Scan(slots, PreciseCaptureRefresh.Outcome.available(location), distantPending);
+		}
+		public boolean capturePreciseDistant(PreciseCaptureRefresh.Request request, java.util.function.Consumer<PreciseCaptureRefresh.Outcome> completion) {
+			distantCompletions.add(completion); return true;
 		}
 		public CancellationContext cancellation(CapturedRay frozen) {
 			cancellations++; cancellationRay = frozen;
@@ -184,6 +209,12 @@ class ClientPingRuntimeInteractionTest {
 		void press(long time) { now = time; runtime.onPress(time); }
 		void release(long time) { now = time; runtime.onRelease(); }
 		void frame(long time, boolean held) { now = time; runtime.onRenderFrame(held); }
+		void tick(long time) { now = time; runtime.onTick(); }
+		/** Recording the paint handoff only, not exercising GuiGraphics/GPU. */
+		void paint() {
+			var snapshot = snapshot(); runtime.acknowledgeSelectorPaint(snapshot, snapshot.radial().menus().getLast().choices().stream()
+				.map(SpatialController.ChoiceView::id).collect(java.util.stream.Collectors.toSet()));
+		}
 		SpatialSelectorSession.Snapshot snapshot() { return runtime.selectorSnapshot().orElseThrow(); }
 		SpatialController.MenuView menu() { return snapshot().radial().menus().getLast(); }
 		double rawX = 1000, rawY = 700;
@@ -201,6 +232,10 @@ class ClientPingRuntimeInteractionTest {
 		void enter(String choiceId, long time) {
 			int depth = snapshot().radial().menus().size(); focus(choiceId, time); frame(time + snapshot().settings().dwellMillis(), true);
 			assertEquals(depth + 1, snapshot().radial().menus().size());
+		}
+		void enterBack(String choiceId, long time) {
+			int depth = snapshot().radial().menus().size(); focus(choiceId, time); frame(time + snapshot().settings().dwellMillis(), true);
+			assertEquals(depth - 1, snapshot().radial().menus().size());
 		}
 		long request() { return sent.stream().filter(p -> p instanceof InventoryC2SPacket i && i.kind() == InventoryC2SPacket.Kind.OPEN)
 			.map(p -> ((InventoryC2SPacket) p).requestId()).reduce((a, b) -> b).orElseThrow(); }
@@ -288,21 +323,36 @@ class ClientPingRuntimeInteractionTest {
 		Fixture f = new Fixture(); f.openList(); f.reset(2, Set.of()); f.release(700);
 		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty()); assertTrue(f.runtime.selectorSnapshot().isEmpty());
 	}
-	@Test void preciseReleaseConsumesFrozenCandidateIdRatherThanCurrentCamera() {
+	@Test void preciseReleaseConsumesPaintedLiveCandidateWithoutOrdinaryRecaptureOrReleaseCast() {
 		Fixture f = new Fixture(); f.access.supplements = List.of(STONE); f.press(0); f.frame(250, true); f.prime(); f.enter("precise", 260);
-		f.focus("precise:block", 460); f.access.snapshot = CHEST; f.release(470);
+		f.focus("precise:block", 460); f.paint(); f.access.snapshot = CHEST; f.release(470);
 		assertEquals(STONE.target(), f.creates().getFirst().target()); assertEquals(1, f.access.captures); assertEquals(1, f.validations.size());
+		assertEquals(1, f.access.liveRequests.size());
+	}
+	@Test void nearerPreciseContactWithoutFacePreservesPressFaceForOrdinaryInventoryContent() {
+		Fixture f = new Fixture();
+		TargetSnapshot noFaceChest = TargetSnapshotFactory.block(DIMENSION, 1, 2, 3, "minecraft:chest", true);
+		f.access.supplements = List.of(noFaceChest);
+		f.access.supplementHit = new WorldVector(0.1, 2, 3);
+		f.press(0); f.inventoryRows(); f.frame(250, true); f.prime(); f.enter("content", 260);
+		assertEquals(BlockFace.WEST, f.sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p
+			&& p.kind() == InventoryC2SPacket.Kind.OPEN).map(packet -> ((InventoryC2SPacket) packet).face()).findFirst().orElseThrow());
+		SpatialController.ChoiceView inventory = f.menu().choices().stream()
+			.filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow();
+		assertFalse(inventory.disabled(), "Precise contact provenance must not erase the press-time inventory face");
+		f.enter(inventory.id(), 460); f.release(700);
+		assertEquals(1, f.selects().size()); assertTrue(f.creates().isEmpty());
 	}
 	@Test void broadBlockSlotKeepsBehindChestSeparateFromOrdinaryEntityBlock() {
 		Fixture front = new Fixture(); front.access.supplements = List.of(BEHIND_CHEST);
 		front.press(0); front.frame(250, true); front.prime(); front.enter("precise", 260);
 		assertFalse(disabled(front, "precise:entity_block")); assertFalse(disabled(front, "precise:block"));
-		front.focus("precise:entity_block", 460); front.release(470);
+		front.focus("precise:entity_block", 460); front.paint(); front.release(470);
 		assertEquals(CHEST.target(), front.creates().getFirst().target()); assertEquals("attention", front.creates().getFirst().pingType());
 
 		Fixture behind = new Fixture(); behind.access.supplements = List.of(BEHIND_CHEST);
 		behind.press(0); behind.frame(250, true); behind.prime(); behind.enter("precise", 260);
-		behind.focus("precise:block", 460); behind.release(470);
+		behind.focus("precise:block", 460); behind.paint(); behind.release(470);
 		assertEquals(BEHIND_CHEST.target(), behind.creates().getFirst().target());
 		assertEquals("attention", behind.creates().getFirst().pingType());
 	}
@@ -310,12 +360,12 @@ class ClientPingRuntimeInteractionTest {
 		Fixture front = new Fixture(); front.access.snapshot = ITEM; front.access.supplements = List.of(BEHIND_ITEM);
 		front.press(0); front.frame(250, true); front.prime(); front.enter("precise", 260);
 		assertFalse(disabled(front, "precise:dropped_item")); assertFalse(disabled(front, "precise:entity"));
-		front.focus("precise:dropped_item", 460); front.release(470);
+		front.focus("precise:dropped_item", 460); front.paint(); front.release(470);
 		assertEquals(ITEM.target(), front.creates().getFirst().target()); assertEquals("loot", front.creates().getFirst().pingType());
 
 		Fixture behind = new Fixture(); behind.access.snapshot = ITEM; behind.access.supplements = List.of(BEHIND_ITEM);
 		behind.press(0); behind.frame(250, true); behind.prime(); behind.enter("precise", 260);
-		behind.focus("precise:entity", 460); behind.release(470);
+		behind.focus("precise:entity", 460); behind.paint(); behind.release(470);
 		assertEquals(BEHIND_ITEM.target(), behind.creates().getFirst().target());
 		assertEquals("loot", behind.creates().getFirst().pingType());
 	}
@@ -447,5 +497,93 @@ class ClientPingRuntimeInteractionTest {
 		f.validationHook = f.runtime::abort; f.release(menu ? 470 : 20);
 		assertTrue(f.creates().isEmpty()); assertTrue(f.selects().isEmpty()); assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
 		assertEquals(0, f.inventory.stats().previewChannels());
+	}
+
+	@Test void ordinaryPressAStaysFrozenWhilePreciseLiveBThenUnpaintedCReleasesB() {
+		Fixture f = new Fixture(); f.press(0); var pressRay = f.access.capturedRay; long request = f.request();
+		f.access.ray = new CapturedRay(new WorldVector(10, 11, 12), new WorldVector(1, 0, 0)); f.access.snapshot = STONE;
+		f.frame(250, true); assertEquals(0, f.access.liveRequests.size());
+		f.prime(); f.enter("precise", 260); assertEquals(1, f.access.liveRequests.size());
+		assertEquals(f.access.ray, f.access.liveRequests.getFirst().inputs().ray());
+		assertEquals(pressRay, f.access.capturedRay); assertEquals(1, f.access.captures);
+		f.focus("precise:block", 460); f.paint(); var painted = f.snapshot().preciseFrame();
+		f.access.snapshot = TargetSnapshotFactory.block(DIMENSION, 20, 5, 6, "minecraft:stone", false, BlockFace.SOUTH);
+		f.access.ray = new CapturedRay(new WorldVector(20, 21, 22), new WorldVector(0, 1, 0)); f.tick(465);
+		assertEquals("precise:block", f.menu().focusId());
+		assertNotEquals(painted.choices().get("precise:block").candidateId(), f.snapshot().preciseFrame().choices().get("precise:block").candidateId());
+		assertEquals(1, f.inventory.stats().previewChannels()); assertEquals(request, f.request());
+		f.release(470); assertEquals(STONE.target(), f.creates().getFirst().target());
+		assertEquals(2, f.access.liveRequests.size(), "release does not cast"); assertEquals(1, f.access.captures);
+		assertEquals(0, f.access.cancellations); assertEquals(0, f.inventory.stats().previewChannels());
+
+		Fixture ordinary = new Fixture(); ordinary.press(0); ordinary.access.snapshot = STONE; ordinary.frame(250, true);
+		ordinary.prime(); ordinary.enter("intent", 260); ordinary.focus("intent:attention", 460); ordinary.release(470);
+		assertEquals(CHEST.target(), ordinary.creates().getFirst().target()); assertTrue(ordinary.access.liveRequests.isEmpty());
+	}
+
+	@Test void frameIsNotPaintAndUnpaintedLiveCandidateNeverCommits() {
+		Fixture f = new Fixture(); f.press(0); f.frame(250, true); f.prime(); f.enter("precise", 260);
+		f.focus("precise:entity_block", 460); f.frame(465, true); f.release(470);
+		assertTrue(f.creates().isEmpty()); assertTrue(f.validations.isEmpty()); assertEquals(0, f.access.cancellations);
+	}
+
+	@Test void partialNativeUpdateKeepsPendingDistantLocationAndItsOriginalRayAtRelease() {
+		Fixture f = new Fixture(); f.press(0); f.frame(250, true); f.prime(); f.access.distantPending = true;
+		CapturedRay rayA = f.access.ray; f.enter("precise", 260);
+		assertTrue(disabled(f, "precise:location"));
+		var locationSnapshot = TargetSnapshotFactory.location(DIMENSION, 100, 2, 3);
+		var resolved = nx.pingwheel.common.resolve.DefaultTargetResolver.builtIn(nx.pingwheel.common.resolve.TargetResolutionLogger.noop())
+			.resolve(locationSnapshot.target(), locationSnapshot.matchContext());
+		var location = new nx.pingwheel.common.interaction.candidate.Candidate(0, resolved, new WorldVector(100, 2, 3), 100,
+			Optional.empty(), Optional.empty(), CaptureEquivalenceKey.nativeTarget(locationSnapshot.target()));
+		f.access.distantCompletions.getFirst().accept(PreciseCaptureRefresh.Outcome.available(location));
+		f.access.ray = new CapturedRay(new WorldVector(10, 20, 30), new WorldVector(1, 0, 0)); f.access.snapshot = STONE; f.tick(450);
+		assertFalse(disabled(f, "precise:location")); assertFalse(disabled(f, "precise:block"));
+		var live = f.snapshot().preciseFrame();
+		assertEquals(rayA, live.contexts().get(live.choices().get("precise:location").candidateId()).ray());
+		assertEquals(f.access.ray, live.contexts().get(live.choices().get("precise:block").candidateId()).ray());
+		f.focus("precise:location", 460); f.paint(); f.release(470);
+		assertEquals(locationSnapshot.target(), f.creates().getFirst().target()); assertEquals(1, f.validations.size());
+		assertEquals(1, f.access.captures); assertEquals(0, f.access.cancellations);
+	}
+
+	@Test void liveRefreshLeavesCancelAndContentBoundToOrdinaryPressAndPausesOnBranchExit() {
+		Fixture f = new Fixture(); f.press(0); CapturedRay pressRay = f.access.capturedRay; long request = f.request();
+		f.frame(250, true); f.prime(); f.access.ray = new CapturedRay(new WorldVector(10, 20, 30), new WorldVector(1, 0, 0));
+		f.access.snapshot = STONE; f.enter("precise", 260); f.tick(450);
+		String back = f.menu().choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow().id();
+		f.enterBack(back, 460); int scans = f.access.liveRequests.size(); f.tick(700);
+		assertEquals(scans, f.access.liveRequests.size()); assertEquals(request, f.request()); assertEquals(1, f.inventory.stats().previewChannels());
+		f.focus("cancel-marker", 710); f.release(720); assertEquals(pressRay, f.access.cancellationRay);
+		assertTrue(f.creates().isEmpty()); assertEquals(1, f.access.cancellations); assertEquals(1, f.access.captures);
+	}
+
+	@Test void precisePeriodAndRangePolicyFreezeAtPressAndChangesApplyNextHoldOnly() {
+		var config = ClientConfig.HANDLER.getConfig(); var settings = config.getSpatialSelector();
+		int oldPeriod = settings.getPreciseCapturePeriodTicks(), oldPing = config.getPingDistance(), oldRaycast = config.getRaycastDistance();
+		boolean oldFluid = config.isMarkFluids();
+		try {
+			settings.setPreciseCapturePeriodTicks(50); config.setPingDistance(100); config.setRaycastDistance(50); config.setMarkFluids(false);
+			Fixture f = new Fixture(); f.press(0);
+			settings.setPreciseCapturePeriodTicks(1); config.setPingDistance(200); config.setRaycastDistance(150); config.setMarkFluids(true);
+			f.frame(250, true); f.prime(); f.enter("precise", 260);
+			for (int tick = 1; tick < 50; tick++) f.tick(440 + tick);
+			assertEquals(1, f.access.liveRequests.size()); f.tick(500); assertEquals(2, f.access.liveRequests.size());
+			var inputs = f.access.liveRequests.getLast().inputs(); assertEquals(100, inputs.pingDistance()); assertEquals(50, inputs.nativeDistance());
+			assertEquals(nx.pingwheel.common.math.RaycastPolicy.FluidMode.NONE, inputs.policy().fluidMode());
+			f.runtime.abort(); f.press(600); f.frame(850, true); f.prime(); f.enter("precise", 860); f.tick(1050);
+			assertEquals(4, f.access.liveRequests.size()); assertEquals(200, f.access.liveRequests.getLast().inputs().pingDistance());
+			assertEquals(nx.pingwheel.common.math.RaycastPolicy.FluidMode.ANY, f.access.liveRequests.getLast().inputs().policy().fluidMode());
+		} finally { settings.setPreciseCapturePeriodTicks(oldPeriod); config.setPingDistance(oldPing); config.setRaycastDistance(oldRaycast); config.setMarkFluids(oldFluid); }
+	}
+
+	@Test void worldChangeAndNewHoldFenceLateLiveCompletionWithoutTouchingNewPreview() {
+		Fixture f = new Fixture(); f.press(0); f.frame(250, true); f.prime(); f.access.distantPending = true; f.enter("precise", 260);
+		var late = f.access.distantCompletions.getFirst(); f.access.world = new Object(); f.tick(450);
+		assertTrue(f.runtime.selectorSnapshot().isEmpty()); assertEquals(0, f.inventory.stats().previewChannels());
+		f.access.distantPending = false; f.press(500); long request = f.request(); f.frame(750, true);
+		late.accept(PreciseCaptureRefresh.Outcome.missing()); assertEquals(request, f.request()); assertEquals(1, f.inventory.stats().previewChannels());
+		f.prime(); f.enter("intent", 760); f.focus("intent:attention", 960); f.release(970);
+		assertEquals(CHEST.target(), f.creates().getFirst().target()); assertEquals(0, f.access.cancellations);
 	}
 }

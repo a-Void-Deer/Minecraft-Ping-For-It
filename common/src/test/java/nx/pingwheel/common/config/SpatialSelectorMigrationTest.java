@@ -187,7 +187,8 @@ class SpatialSelectorMigrationTest {
 		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
 		SpatialSelectorSettings preferences = new Gson().fromJson("""
 			{"deadzone":28,"stroke":70,"dwellMillis":230,"rootDistance":90,"targetGlide":1.75,
-			 "hoverEnabled":true,"hoverMillis":750,"showTrail":false,"reduceMotion":true}
+			 "hoverEnabled":true,"hoverMillis":750,"showTrail":false,"reduceMotion":true,
+			 "preciseCapturePeriodTicks":25}
 			""", SpatialSelectorSettings.class);
 		handler.getConfig().setSpatialSelector(preferences);
 		handler.getConfig().setWheelOpacity(35);

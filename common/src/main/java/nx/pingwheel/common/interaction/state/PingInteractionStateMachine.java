@@ -1,6 +1,7 @@
 package nx.pingwheel.common.interaction.state;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
@@ -73,6 +74,24 @@ public final class PingInteractionStateMachine {
 	private boolean releaseObserved;
 	private WheelSelection selection = WheelSelection.NONE;
 	private List<PingType> wheelPingTypes = List.of();
+	private long presentedRevision;
+	private Map<String, CapturedPingContext> presentedPrecise = Map.of();
+
+	/**
+	 * Actual paint admission, not a frame/tick readiness signal. The runtime calls
+	 * this only after drawing the selector's immutable publication. A mode flag on
+	 * a release cannot authorize a cross-ray candidate absent this exact table.
+	 */
+	public boolean markSelectorPresented(InteractionToken expectedToken, long revision,
+		Map<String, CapturedPingContext> contexts) {
+		Objects.requireNonNull(contexts);
+		if (token != expectedToken || phase != PingInteractionPhase.WHEEL_OPEN || revision <= 0
+			|| revision < presentedRevision || !activeInteraction.isCurrent(expectedToken)) return false;
+		for (var value : contexts.values()) if (value.token() != expectedToken
+			|| !value.resolvedTarget().target().dimensionId().equals(capturedContext.resolvedTarget().target().dimensionId())) return false;
+		presentedPrecise = Map.copyOf(contexts); presentedRevision = revision;
+		return true;
+	}
 
 	/**
 	 * Creates a state machine with the default long-press threshold.
@@ -254,8 +273,9 @@ public final class PingInteractionStateMachine {
 	 * {@link #updateAt(boolean, WheelSelection, CancellationContext, long)}.
 	 *
 	 * <p>The candidate lookup must be the immutable table bound to this selector,
-	 * not a resolver or a world read. Its contexts retain the original token,
-	 * press ray and candidate metadata. Cancellation context is acquired lazily
+	 * not a resolver or a world read. Ordinary contexts retain the press ray;
+	 * precise contexts must match the acknowledged paint table with their own
+	 * capture ray and metadata. Cancellation context is acquired lazily
 	 * only for an explicit Cancel. The machine is terminal before invoking any
 	 * caller port, so duplicate/reentrant releases and failing ports cannot commit
 	 * the same interaction twice. The result authorizes no sender side effect by
@@ -285,11 +305,13 @@ public final class PingInteractionStateMachine {
 		}
 
 		CapturedPingContext openedCapture = capturedContext;
+		Map<String, CapturedPingContext> painted = presentedPrecise;
+		long paintRevision = presentedRevision;
 		resetMachineState();
 		releasingSelectorToken = expectedToken;
 		try {
 			return admitSelectorProposal(expectedToken, openedCapture, proposalSupplier,
-				frozenCandidateContext, cancellationContextSupplier);
+				frozenCandidateContext, cancellationContextSupplier, painted, paintRevision);
 		} finally {
 			if (releasingSelectorToken == expectedToken) releasingSelectorToken = null;
 		}
@@ -298,7 +320,7 @@ public final class PingInteractionStateMachine {
 	private <P> SelectorReleaseResult<P> admitSelectorProposal(InteractionToken expectedToken,
 		CapturedPingContext openedCapture, Supplier<SelectorReleaseProposal<P>> proposalSupplier,
 		Function<String, Optional<CapturedPingContext>> frozenCandidateContext,
-		Supplier<CancellationContext> cancellationContextSupplier) {
+		Supplier<CancellationContext> cancellationContextSupplier, Map<String, CapturedPingContext> painted, long paintRevision) {
 		SelectorReleaseProposal<P> proposal = Objects.requireNonNull(proposalSupplier.get(), "proposal");
 		if (!activeInteraction.isCurrent(expectedToken)) return SelectorReleaseResult.empty();
 		return switch (proposal) {
@@ -315,7 +337,7 @@ public final class PingInteractionStateMachine {
 				Optional<CapturedPingContext> candidate = Objects.requireNonNull(
 					frozenCandidateContext.apply(create.candidateId()), "candidateContext");
 				if (!activeInteraction.isCurrent(expectedToken) || candidate.isEmpty()
-					|| !isSelectorCandidate(candidate.get(), openedCapture, create)) {
+					|| !isSelectorCandidate(candidate.get(), openedCapture, create, painted, paintRevision)) {
 					yield SelectorReleaseResult.empty();
 				}
 				Optional<PingInteractionAction> action = validatePing(candidate.get(), create.pingType());
@@ -327,9 +349,11 @@ public final class PingInteractionStateMachine {
 	}
 
 	private boolean isSelectorCandidate(CapturedPingContext candidate, CapturedPingContext openedCapture,
-		SelectorReleaseProposal.Create<?> proposal) {
+		SelectorReleaseProposal.Create<?> proposal, Map<String, CapturedPingContext> painted, long paintRevision) {
 		return candidate.token() == openedCapture.token()
-			&& candidate.ray().equals(openedCapture.ray())
+			&& (proposal.admission() == SelectorReleaseProposal.Admission.PRESS_RAY
+				? candidate.ray().equals(openedCapture.ray())
+				: proposal.presentationRevision() == paintRevision && painted.get(proposal.candidateId()) == candidate)
 			&& candidate.resolvedTarget().target().dimensionId().equals(openedCapture.resolvedTarget().target().dimensionId())
 			&& candidate.resolvedTarget().equals(proposal.target())
 			&& (!(candidate.resolvedTarget().target() instanceof Target.ExternalBlockTarget external)
@@ -665,6 +689,7 @@ public final class PingInteractionStateMachine {
 		releaseObserved = false;
 		selection = WheelSelection.NONE;
 		wheelPingTypes = List.of();
+		presentedRevision = 0; presentedPrecise = Map.of();
 	}
 
 	private long readConfiguredThreshold(

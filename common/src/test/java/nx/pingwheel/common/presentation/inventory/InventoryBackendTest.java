@@ -47,11 +47,12 @@ class InventoryBackendTest {
 	}
 	static class Fixture implements AutoCloseable {
 		final Host host = new Host(); final InventorySettings settings = InventorySettings.serverDefaults(); final AtomicInteger reads = new AtomicInteger();
+		final AtomicInteger validations = new AtomicInteger();
 		boolean valid = true; long amount = 7;
 		boolean stripped;
 		String itemId = "minecraft:stone";
 		final InventoryBackend backend = new InventoryBackend(host, new InventoryRuntime(i -> Optional.of(new InventoryRuntimeTest.Source(i, reads, 1) {
-			@Override public boolean valid() { return Fixture.this.valid; }
+			@Override public boolean valid() { validations.incrementAndGet(); return Fixture.this.valid; }
 			@Override public InventoryDomainCodec.Item read(int slot) {
 				reads.incrementAndGet(); var item = InventoryRuntimeTest.item(amount);
 				return amount == 0 ? null : new InventoryDomainCodec.Item(new InventoryScanner.Key(itemId, item.key().componentsKey()), item.count(), item.label(), item.displayJson(), stripped);
@@ -87,7 +88,8 @@ class InventoryBackendTest {
 			f.valid = true; f.backend.tick(6, f.settings);
 			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && p.statusRevision() > 1));
 			f.backend.handle(A, InventoryC2SPacket.close(f.host.epoch(A), 1).stamp(100, 1), 7, f.settings);
-			int reads = f.reads.get(); f.backend.tick(12, f.settings); f.backend.tick(30, f.settings); assertEquals(reads, f.reads.get());
+			int reads = f.reads.get(), validations = f.validations.get(); f.backend.tick(12, f.settings); f.backend.tick(30, f.settings);
+			assertEquals(reads, f.reads.get()); assertEquals(validations, f.validations.get(), "hard expiry removes all tracking evidence before any validation or recovery probe");
 		}
 	}
 	@Test void revokedViewPurgesQueuesWithoutChangingFrozenAudience() {
@@ -181,6 +183,39 @@ class InventoryBackendTest {
 			f.valid = true; f.backend.handle(B, InventoryC2SPacket.open(f.host.epoch(B), 100, 1, 1, InventoryRuntimeTest.TARGET, BlockFace.SOUTH), 2, f.settings); f.backend.tick(2, f.settings);
 			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty() && p.epoch() == f.host.epoch(B)));
 			assertEquals(0, f.backend.runtime().memory().reserved());
+		}
+	}
+	@Test void helloAndLiveRefreshKeepPositiveIntMaxResyncPeriodsExactInTheExistingSession() {
+		for (int periods : new int[] {72_001, Integer.MAX_VALUE}) try (Fixture f = new Fixture()) {
+			f.settings.getTracking().setResyncMinPeriods(periods); f.hello(A);
+			long epoch = f.host.epoch(A);
+			var offered = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OFFER).reduce((a, b) -> b).orElseThrow();
+			assertEquals(periods, InventoryPublicationIntegrationTest.wire(offered).offer().resyncMinPeriods());
+			int replacement = periods == Integer.MAX_VALUE ? 72_001 : Integer.MAX_VALUE;
+			f.settings.getTracking().setResyncMinPeriods(replacement); assertDoesNotThrow(() -> f.backend.tick(1, f.settings));
+			assertEquals(epoch, f.host.epoch(A));
+			var refreshed = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OFFER).reduce((a, b) -> b).orElseThrow();
+			assertEquals(replacement, InventoryPublicationIntegrationTest.wire(refreshed).offer().resyncMinPeriods());
+		}
+	}
+	@Test void actualResyncWithIntMaxPeriodsTimesMaxTrackingPeriodRejectsImmediateRepeatWithoutOverflow() {
+		try (Fixture f = new Fixture()) {
+			f.host.expiry = Long.MAX_VALUE; f.settings.getTracking().setPeriodTicks(72_000);
+			f.settings.getTracking().setResyncMinPeriods(Integer.MAX_VALUE); f.open(); f.backend.handle(A, f.select(1), 1, f.settings); f.backend.tick(2, f.settings);
+			var marker = f.host.store.allMarkers().getFirst();
+			var resync = InventoryC2SPacket.resync(f.host.epoch(A), 0, marker.id()).stamp(100, 1);
+			int start = f.host.packets.size(); f.backend.handle(A, resync, 3, f.settings); f.backend.tick(3, f.settings);
+			var replacement = f.host.packets.subList(start, f.host.packets.size()).stream()
+				.filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId())).findFirst().orElseThrow();
+			start = f.host.packets.size(); f.backend.handle(A, resync, 4, f.settings); f.backend.tick(4, f.settings);
+			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT
+				|| p.kind() == InventoryS2CPacket.Kind.STATUS && p.status() == InventoryS2CPacket.Status.UPDATING && p.baselineId() != replacement.baselineId()), "the long product must not wrap to an already elapsed cooldown");
+			long deadline = 3L + (long) Integer.MAX_VALUE * 72_000;
+			f.backend.handle(A, resync, deadline - 1, f.settings); f.backend.tick(deadline - 1, f.settings);
+			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT).allMatch(p -> p.baselineId() == replacement.baselineId()));
+			start = f.host.packets.size(); f.backend.handle(A, resync, deadline, f.settings); f.backend.tick(deadline, f.settings);
+			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && p.baselineId() != replacement.baselineId()));
+			assertEquals(Long.MAX_VALUE, marker.expiresAtTick());
 		}
 	}
 }

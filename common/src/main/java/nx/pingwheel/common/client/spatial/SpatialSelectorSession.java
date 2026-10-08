@@ -17,6 +17,9 @@ import nx.pingwheel.common.domain.ResolvedTarget;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
+import nx.pingwheel.common.interaction.CapturedPingContext;
+import nx.pingwheel.common.interaction.InteractionToken;
+import nx.pingwheel.common.interaction.state.SelectorReleaseProposal.Admission;
 import nx.pingwheel.common.interaction.candidate.PreciseTargetType;
 import nx.pingwheel.common.presentation.PresentationLimits;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
@@ -30,7 +33,8 @@ import nx.pingwheel.common.render.SpatialInventoryView.Status;
  * Headless native selector facade over the radial controller and streamed list.
  * Capture allocation, observations, authorization, networking and actual-open
  * lifecycle guards are external. This instance can open and release only once.
- * All pointer/layout positions are GUI-centre-relative; no game objects enter it.
+	 * All pointer/layout positions are GUI-centre-relative; an opaque level identity
+	 * fences live updates but grants no world access to this model.
  *
  * @param <R> detached opaque inventory-selection reference owned by the backend
  */
@@ -132,10 +136,18 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	/** Frozen radial/list frame; session/list keys fence transition identities across opens. */
 	public record Snapshot(boolean active, String sessionKey, SpatialSelectorSettings.Snapshot settings,
 		ContentFence contentFence, Status contentStatus, SpatialController.Snapshot radial,
-		InventoryListModel.Snapshot inventory, SpatialInventoryView inventoryView) {}
+		InventoryListModel.Snapshot inventory, SpatialInventoryView inventoryView, PreciseFrame preciseFrame) {}
+
+	/** Detached atomic paint payload, including each candidate's own capture ray and generation-scoped ID. */
+	public record PreciseFrame(long revision, Map<String, CapturedTarget> choices, Map<String, CapturedPingContext> contexts) {
+		public PreciseFrame { choices = Map.copyOf(choices); contexts = Map.copyOf(contexts); }
+	}
 
 	private final CapturedTarget ordinary;
-	private final Map<String, CapturedTarget> precise;
+	private Map<String, CapturedTarget> precise;
+	private InteractionToken liveToken;
+	private Object liveLevel;
+	private PreciseFrame preciseFrame, issuedPreciseFrame, presentedPreciseFrame;
 	private final SpatialSelectorSettings.Snapshot settings;
 	private final ContentFence fence;
 	private final ContentPort<R> contentPort;
@@ -250,19 +262,81 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	}
 
 	public Snapshot snapshot() {
+		issuedPreciseFrame = preciseFrame;
 		return new Snapshot(active, sessionKey, settings, fence,
-			projection == null ? Status.UNKNOWN : projection.status(), radial.snapshot(), list.snapshot(), inventoryView());
+			projection == null ? Status.UNKNOWN : projection.status(), radial.snapshot(), list.snapshot(), inventoryView(), preciseFrame);
+	}
+
+	/** Production live mode starts empty; press-time precise attachments are not installed. */
+	public void beginLivePrecise(InteractionToken token, Object level) {
+		if (opened || liveToken != null || token.sequence() != fence.selectorSession()) throw new IllegalStateException("wrong live session");
+		liveToken = Objects.requireNonNull(token); liveLevel = Objects.requireNonNull(level); precise = Map.of();
+		radial.replaceRoot(buildRoot(), 0);
+	}
+	public boolean isPreciseBranchActive() { return active && (sessionKey + ":precise").equals(activeMenuId()); }
+
+	/** Replaces the fixed type slots without moving focus, origin or ordinary/content identity. */
+	public boolean updatePrecise(PreciseCaptureRefresh.Published update, long nowMillis) {
+		if (!active || liveToken == null || update.inputs().token() != liveToken || update.inputs().level() != liveLevel
+			|| preciseFrame != null && update.revision() <= preciseFrame.revision()) return false;
+		Map<String, CapturedTarget> next = new LinkedHashMap<>(), choices = new LinkedHashMap<>();
+		Map<String, CapturedPingContext> contexts = new LinkedHashMap<>();
+		for (var type : PreciseTargetType.values()) {
+			var slot = update.slots().get(type);
+			if (slot.outcome().candidate().isEmpty()) continue;
+			var candidate = slot.outcome().candidate().orElseThrow();
+			String id = "live:" + liveToken.sequence() + ":" + slot.generation() + ":" + type.targetTypeId() + ":" + candidate.candidateId();
+			var target = new CapturedTarget(id, candidate.resolvedTarget(), candidate.blockHitFace(), Optional.of(candidate.worldHit()));
+			next.put(type.targetTypeId(), target); choices.put("precise:" + type.targetTypeId(), target);
+			contexts.put(id, slot.context().orElseThrow());
+		}
+		precise = Map.copyOf(next); preciseFrame = new PreciseFrame(update.revision(), choices, contexts);
+		radial.replaceRoot(buildRoot(), nowMillis);
+		return true;
+	}
+
+	/** Only actually painted active node IDs advance the release payload; disabled paints clear their old action. */
+	public Optional<PreciseFrame> markPresented(Snapshot painted, Set<String> paintedChoiceIds) {
+		if (!active || liveToken == null || painted == null || !sessionKey.equals(painted.sessionKey())
+			|| painted.preciseFrame() == null || painted.preciseFrame() != issuedPreciseFrame
+			|| paintedChoiceIds.stream().noneMatch(id -> id.startsWith("precise:")) || !isPreciseSnapshot(painted.radial())
+			|| presentedPreciseFrame != null && painted.preciseFrame().revision() < presentedPreciseFrame.revision()) return Optional.empty();
+		Map<String, CapturedTarget> choices = new LinkedHashMap<>(presentedPreciseFrame == null ? Map.of() : presentedPreciseFrame.choices());
+		for (String id : paintedChoiceIds) if (id.startsWith("precise:")) {
+			choices.remove(id);
+			var target = painted.preciseFrame().choices().get(id);
+			if (target != null) choices.put(id, target);
+		}
+		Map<String, CapturedPingContext> contexts = new LinkedHashMap<>();
+		for (var target : choices.values()) {
+			var context = painted.preciseFrame().contexts().get(target.candidateId());
+			if (context == null && presentedPreciseFrame != null) context = presentedPreciseFrame.contexts().get(target.candidateId());
+			contexts.put(target.candidateId(), Objects.requireNonNull(context));
+		}
+		presentedPreciseFrame = new PreciseFrame(painted.preciseFrame().revision(), choices, contexts);
+		return Optional.of(presentedPreciseFrame);
+	}
+	public Optional<PreciseFrame> presentedPrecise() { return Optional.ofNullable(presentedPreciseFrame); }
+	private boolean isPreciseSnapshot(SpatialController.Snapshot snapshot) {
+		return snapshot.active() && !snapshot.menus().isEmpty() && (sessionKey + ":precise").equals(snapshot.menus().getLast().menuId());
 	}
 
 	public SelectorIntent<R> releaseIntent(long nowMillis) {
 		if (!active) return new SelectorIntent.None<>();
 		SelectorIntent<R> result = new SelectorIntent.None<>();
+		boolean livePrecise = liveToken != null && isPreciseBranchActive();
+		String preciseFocus = livePrecise ? radial.snapshot().focusId() : null;
 		if (isListActive()) {
 			if (!gesture.isBackSideFocused() && preview != null && list.selectedKey() != null)
 				result = inventoryIntent(list.selectedKey(), preview.defaultItemType());
 			radial.cancel();
 		} else if (radial.release(nowMillis) instanceof SpatialController.Release.Committed committed) {
 			result = actions.getOrDefault(committed.action(), new SelectorIntent.None<>());
+		}
+		if (livePrecise) {
+			CapturedTarget painted = presentedPreciseFrame == null || preciseFocus == null ? null : presentedPreciseFrame.choices().get(preciseFocus);
+			result = painted == null ? new SelectorIntent.None<>() : new SelectorIntent.CreateTarget<>(painted,
+				painted.resolvedTarget().targetType().defaultPingType(), Admission.PRECISE_PRESENTED, presentedPreciseFrame.revision());
 		}
 		finish();
 		return result;
@@ -274,6 +348,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private void finish() {
 		active = false; list.close(); rows.clear(); actions.clear(); projection = null; preview = null;
 		itemKey = null; itemAnchorY = Double.NaN; listWasActive = false;
+		precise = Map.of(); preciseFrame = null; issuedPreciseFrame = null; presentedPreciseFrame = null; liveToken = null; liveLevel = null;
 	}
 
 	private void pollContent(long nowMillis) { updateContent(contentPort.read(ordinary, fence), nowMillis); }
@@ -325,10 +400,11 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			for (PingType type : property.allowedTypes()) {
 				String action = id + ":" + type.id();
 				actions.put(action, propertyIntent(property, type));
-				types.add(SpatialMenu.Choice.leaf(action, type.displayKey(), action));
+				types.add(SpatialMenu.Choice.leaf(action, type.displayKey(), action).withOutlineColor(type.outlineColor()));
 			}
 			actions.put(id, propertyIntent(property, property.defaultType()));
-			result.add(SpatialMenu.Choice.branch(id, property.labelKey(), id, new SpatialMenu(id + ":types", types)));
+			result.add(SpatialMenu.Choice.branch(id, property.labelKey(), id, new SpatialMenu(id + ":types", types))
+				.withOutlineColor(property.defaultType().outlineColor()));
 		}
 		if (preview != null) {
 			if (!inventoryEligible() || unavailable(preview.status()) || preview.allowedItemTypes().isEmpty())
@@ -344,7 +420,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 
 	private SpatialMenu.Choice targetChoice(String id, String label, CapturedTarget candidate, PingType type) {
 		actions.put(id, new SelectorIntent.CreateTarget<>(candidate, type));
-		return SpatialMenu.Choice.leaf(id, label, id);
+		return SpatialMenu.Choice.leaf(id, label, id).withOutlineColor(type.outlineColor());
 	}
 
 	private SelectorIntent<R> propertyIntent(Property property, PingType type) {
@@ -365,7 +441,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		for (PingType type : preview.allowedItemTypes()) {
 			String action = menu + ":" + type.id();
 			actions.put(action, inventoryIntent(key, type));
-			choices.add(SpatialMenu.Choice.leaf(action, type.displayKey(), action));
+			choices.add(SpatialMenu.Choice.leaf(action, type.displayKey(), action).withOutlineColor(type.outlineColor()));
 		}
 		return new SpatialMenu(menu, choices);
 	}

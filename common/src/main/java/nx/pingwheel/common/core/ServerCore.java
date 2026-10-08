@@ -591,7 +591,8 @@ public class ServerCore {
 		PresentationServer.activate(server);
 		if (packet == null || packet.isCorrupt()) return;
 		if (packet.kind() == PresentationC2SPacket.Kind.HELLO) {
-			PresentationServer.negotiate(server, player, packet);
+			ensureMarkerStore(server);
+			PresentationServer.negotiate(server, player, packet, markerStore());
 			return;
 		}
 		if (!PresentationServer.accepts(player, packet)) return;
@@ -766,8 +767,9 @@ public class ServerCore {
 			ensureMarkerStore(server);
 		}
 
-		PresentationServer.tick(server, markerStore().allMarkers());
-		final var batch = markerStore().expire(server.getTickCount());
+		final var store = markerStore();
+		PresentationServer.tick(server, store);
+		final var batch = store.expire(server.getTickCount());
 
 		final var playerList = server.getPlayerList();
 

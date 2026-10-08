@@ -11,7 +11,9 @@ import java.util.Objects;
  * navigation ({@code back}), reserved, or disabled entry. The action string is
  * deliberately opaque here: a later Minecraft adapter maps it to ping types,
  * target selections, toggles, or cancellation without this model depending on
- * any game class.
+ * any game class. A choice may also carry a nullable detached {@code outlineColor}
+ * (24-bit RGB) copied from the Ping Type it commits, so a renderer never has to
+ * decode the opaque action to recover it.
  *
  * <p>Root entries carry the fixed geometry supplied by the caller through
  * {@link Choice#withSector(double, double)} (for example the eight-way
@@ -35,7 +37,9 @@ public record SpatialMenu(String id, List<Choice> choices) {
 	/**
 	 * One selectable entry. {@code bearing}/{@code span} are only meaningful
 	 * for caller-fixed geometry (root entries); they are null for equal-sector
-	 * child menus and must be provided together.
+	 * child menus and must be provided together. {@code outlineColor} is a
+	 * detached 24-bit Ping Type outline colour, never decoded from the opaque
+	 * action.
 	 */
 	public record Choice(
 		String id,
@@ -46,7 +50,8 @@ public record SpatialMenu(String id, List<Choice> choices) {
 		boolean disabled,
 		boolean reserved,
 		Double bearing,
-		Double span
+		Double span,
+		Integer outlineColor
 	) {
 
 		public Choice {
@@ -67,41 +72,50 @@ public record SpatialMenu(String id, List<Choice> choices) {
 			if (reserved && children != null) {
 				throw new IllegalArgumentException("reserved entry cannot carry children: " + id);
 			}
+
+			if (outlineColor != null && (outlineColor & 0xFF000000) != 0) {
+				throw new IllegalArgumentException("outlineColor must be a 24-bit RGB value: " + id);
+			}
 		}
 
 		/** A leaf entry that commits {@code action} on release. */
 		public static Choice leaf(String id, String label, String action) {
-			return new Choice(id, label, action, null, false, false, false, null, null);
+			return new Choice(id, label, action, null, false, false, false, null, null, null);
 		}
 
 		/** A branch entry with no default release action. */
 		public static Choice branch(String id, String label, SpatialMenu children) {
-			return new Choice(id, label, null, children, false, false, false, null, null);
+			return new Choice(id, label, null, children, false, false, false, null, null, null);
 		}
 
 		/** A branch entry that also commits {@code action} on release. */
 		public static Choice branch(String id, String label, String action, SpatialMenu children) {
-			return new Choice(id, label, action, children, false, false, false, null, null);
+			return new Choice(id, label, action, children, false, false, false, null, null, null);
 		}
 
 		/** A focusable entry that never commits or opens anything. */
 		public static Choice reserved(String id, String label) {
-			return new Choice(id, label, null, null, false, false, true, null, null);
+			return new Choice(id, label, null, null, false, false, true, null, null, null);
 		}
 
 		/** A focusable entry whose action and children are ignored. */
 		public static Choice disabled(String id, String label) {
-			return new Choice(id, label, null, null, false, true, false, null, null);
+			return new Choice(id, label, null, null, false, true, false, null, null, null);
 		}
 
 		/** The navigation entry synthesized by the controller for a submenu. */
 		public static Choice back(String id) {
-			return new Choice(id, "pingforit.spatial.back", null, null, true, false, false, null, null);
+			return new Choice(id, "pingforit.spatial.back", null, null, true, false, false, null, null, null);
 		}
 
 		/** Returns a copy carrying caller-fixed root geometry. */
 		public Choice withSector(double bearing, double span) {
-			return new Choice(id, label, action, children, back, disabled, reserved, bearing, span);
+			return new Choice(id, label, action, children, back, disabled, reserved, bearing, span, outlineColor);
+		}
+
+		/** Returns a copy carrying a detached Ping Type outline colour (24-bit RGB). */
+		public Choice withOutlineColor(int outlineColor) {
+			return new Choice(id, label, action, children, back, disabled, reserved, bearing, span, outlineColor);
 		}
 
 		/** Whether this entry opens a menu with at least one choice. */

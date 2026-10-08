@@ -73,7 +73,7 @@ class SettingsNavigationModelTest {
 		var client = SettingsNavigationModel.categories(Scope.CLIENT);
 		var server = SettingsNavigationModel.categories(Scope.SERVER);
 
-		assertEquals(6, client.size());
+		assertEquals(7, client.size());
 		assertEquals(5, server.size());
 		assertEquals(
 			List.of(
@@ -82,7 +82,8 @@ class SettingsNavigationModelTest {
 				"wheel_appearance",
 				"input",
 				"channel_notices",
-				"geometry_config"),
+				"geometry_config",
+				"performance"),
 			client.stream().map(Category::id).toList());
 		assertEquals(
 			List.of("channel_players", "send_rate", "marker_duration", "performance", "server_presentation"),
@@ -142,6 +143,19 @@ class SettingsNavigationModelTest {
 		navigation.forcePage(Page.SERVER_PRESENTATION);
 		assertEquals(22, navigation.scrollAmount());
 		assertEquals("server_black_field", navigation.focusKey());
+	}
+
+	@Test
+	void clientPerformanceIsIndependentFromTheServerPerformanceCategory() {
+		var navigation = new SettingsNavigationModel();
+
+		assertTrue(navigation.openCategory(Category.CLIENT_PERFORMANCE));
+		assertEquals(Page.CLIENT_PERFORMANCE, navigation.current());
+		assertEquals(Scope.CLIENT, navigation.scope());
+		assertFalse(navigation.openCategory(Category.PERFORMANCE));
+		assertEquals(Page.CLIENT_PERFORMANCE, navigation.current());
+		assertEquals(Category.PERFORMANCE.id(), Category.CLIENT_PERFORMANCE.id());
+		assertEquals(Page.SERVER_PERFORMANCE, Category.PERFORMANCE.page());
 	}
 
 	@Test

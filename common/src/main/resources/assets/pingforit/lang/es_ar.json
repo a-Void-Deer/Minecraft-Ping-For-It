@@ -375,4 +375,8 @@
   ,"settings.pingforit.inventory.tracking_heartbeat_periods.tooltip": "0 desactiva solo las comprobaciones periódicas. Los mensajes de reparación y estado siguen activos."
   ,"settings.pingforit.inventory.tracking_grace_periods": "Ventana de suavizado de bytes"
   ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "Ventana móvil, en períodos, para bytes de seguimiento excedentes; no es un plazo de base desconocida."
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks": "Precise Selection Capture Period: %s"
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "How often the active Precise branch captures its live candidate set. 1 captures every tick; higher values reduce updates. Applies to the next hold."
+  ,"settings.pingforit.group.wheel_options": "Wheel options"
+  ,"unit.pingforit.ticks": "%st"
 }

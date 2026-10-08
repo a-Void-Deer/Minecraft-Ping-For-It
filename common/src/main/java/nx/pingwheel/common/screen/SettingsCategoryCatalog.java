@@ -47,6 +47,7 @@ public final class SettingsCategoryCatalog {
 		SPATIAL_TARGET_GLIDE("spatial_selector.target_glide"),
 		SPATIAL_HOVER_ENABLED("spatial_selector.hover_enabled"),
 		SPATIAL_HOVER_MILLIS("spatial_selector.hover_millis"),
+		PRECISE_CAPTURE_PERIOD_TICKS("spatial_selector.precise_capture_period_ticks"),
 		CHANNEL("channel"),
 		PING_VOLUME("ping_volume"),
 		CONFIGURATION_NOTICE_SIZE("configuration_notice_size"),
@@ -158,6 +159,7 @@ public final class SettingsCategoryCatalog {
 		settings.put(Category.GEOMETRY_CONFIG, List.of(
 			Setting.ENTITY_BLOCK_RENDER_MODE,
 			Setting.OPEN_CLIENT_CONFIG));
+		settings.put(Category.CLIENT_PERFORMANCE, List.of(Setting.PRECISE_CAPTURE_PERIOD_TICKS));
 		settings.put(Category.CHANNEL_PLAYERS, List.of(
 			Setting.DEFAULT_CHANNEL_MODE,
 			Setting.PLAYER_TRACKING_ENABLED));

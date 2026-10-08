@@ -62,7 +62,10 @@ class SpatialSelectorSettingsTest {
 			new IntBound(SpatialSelectorSettings.MIN_ROOT_DISTANCE, SpatialSelectorSettings.MAX_ROOT_DISTANCE,
 				SpatialSelectorSettings::clampRootDistance),
 			new IntBound(SpatialSelectorSettings.MIN_HOVER_MILLIS, SpatialSelectorSettings.MAX_HOVER_MILLIS,
-				SpatialSelectorSettings::clampHoverMillis))) {
+				SpatialSelectorSettings::clampHoverMillis),
+			new IntBound(SpatialSelectorSettings.MIN_PRECISE_CAPTURE_PERIOD_TICKS,
+				SpatialSelectorSettings.MAX_PRECISE_CAPTURE_PERIOD_TICKS,
+				SpatialSelectorSettings::clampPreciseCapturePeriodTicks))) {
 			assertEquals(bound.min(), bound.clamp().applyAsInt(bound.min() - 1));
 			assertEquals(bound.max(), bound.clamp().applyAsInt(bound.max() + 1));
 			assertEquals(bound.min(), bound.clamp().applyAsInt(Integer.MIN_VALUE));
@@ -157,6 +160,27 @@ class SpatialSelectorSettingsTest {
 		settings.setHoverEnabled(false);
 		settings.validate();
 		assertEquals(90, settings.getRootDistance());
+	}
+
+	@Test
+	void preciseCapturePeriodDefaultsToOneTickAndFreezesIntoTheSnapshot() {
+		assertEquals(1, SpatialSelectorSettings.MIN_PRECISE_CAPTURE_PERIOD_TICKS);
+		assertEquals(50, SpatialSelectorSettings.MAX_PRECISE_CAPTURE_PERIOD_TICKS);
+		assertEquals(1, SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS);
+
+		SpatialSelectorSettings settings = new SpatialSelectorSettings();
+		assertEquals(1, settings.getPreciseCapturePeriodTicks());
+		assertEquals(1, settings.snapshot().preciseCapturePeriodTicks());
+
+		settings.setPreciseCapturePeriodTicks(25);
+		SpatialSelectorSettings.Snapshot frozen = settings.snapshot();
+		settings.setPreciseCapturePeriodTicks(50);
+		assertEquals(25, frozen.preciseCapturePeriodTicks());
+
+		settings.setPreciseCapturePeriodTicks(0);
+		assertEquals(1, settings.getPreciseCapturePeriodTicks());
+		settings.setPreciseCapturePeriodTicks(51);
+		assertEquals(50, settings.getPreciseCapturePeriodTicks());
 	}
 
 	@Test

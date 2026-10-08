@@ -15,23 +15,34 @@ import nx.pingwheel.common.domain.ResolvedTarget;
 public sealed interface SelectorReleaseProposal<P> permits SelectorReleaseProposal.None,
 	SelectorReleaseProposal.Create, SelectorReleaseProposal.Cancel, SelectorReleaseProposal.Local {
 
+	enum Admission { PRESS_RAY, PRECISE_PRESENTED }
+
 	/** Navigation, disabled entries, the deadzone and outside releases are all no-action. */
 	record None<P>() implements SelectorReleaseProposal<P> {}
 
 	/**
-	 * A create must resolve through the caller's frozen candidate table. The
+	 * A create must resolve through the caller's immutable release table. Ordinary
+	 * admission requires the press ray; Precise additionally requires the machine's
+	 * exact paint-admitted context and revision, not merely this admission flag. The
 	 * claimed target is compared with that entry; it never supplies a new context.
 	 * pingType is the whole-marker type; a property's or item's separate annotation
 	 * stays in intent and is never used as the whole-marker type here.
 	 */
-	record Create<P>(String candidateId, ResolvedTarget target, PingType pingType, P intent)
+	record Create<P>(String candidateId, ResolvedTarget target, PingType pingType, P intent,
+		Admission admission, long presentationRevision)
 		implements SelectorReleaseProposal<P> {
+		public Create(String candidateId, ResolvedTarget target, PingType pingType, P intent) {
+			this(candidateId, target, pingType, intent, Admission.PRESS_RAY, 0);
+		}
 		public Create {
 			Objects.requireNonNull(candidateId, "candidateId");
 			Objects.requireNonNull(target, "target");
 			Objects.requireNonNull(pingType, "pingType");
 			Objects.requireNonNull(intent, "intent");
+			Objects.requireNonNull(admission, "admission");
 			if (candidateId.isBlank()) throw new IllegalArgumentException("blank candidate id");
+			if (admission == Admission.PRECISE_PRESENTED && presentationRevision <= 0)
+				throw new IllegalArgumentException("precise create requires a paint revision");
 		}
 	}
 

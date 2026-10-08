@@ -305,6 +305,40 @@ public final class ServerMarkerStore {
 	}
 
 	/**
+	 * The authoritative winner baseline for {@code recipient} at
+	 * {@code currentTick}: one active marker per {@link TargetKey} whose frozen
+	 * audience contains the recipient and whose expiry tick has not been
+	 * reached, selected by {@link MarkerWinner#ARRIVAL_THEN_ID}.
+	 *
+	 * <p>Markers at or past {@link ServerMarker#expiresAtTick()} are excluded
+	 * before selection, so a due marker that the store has not yet physically
+	 * removed cannot mask an active same-target sibling. The result is
+	 * immutable, sorted by ascending {@link MarkerId}, and the query never
+	 * mutates the store or reports winner transitions.
+	 */
+	public synchronized List<ServerMarker> winnersFor(UUID recipient, long currentTick) {
+		Objects.requireNonNull(recipient, "recipient");
+
+		Map<TargetKey, ServerMarker> winners = new LinkedHashMap<>();
+
+		for (ServerMarker marker : markers.values()) {
+			if (marker.expiresAtTick() <= currentTick || !marker.recipients().contains(recipient)) {
+				continue;
+			}
+
+			ServerMarker current = winners.get(marker.targetKey());
+
+			if (current == null || MarkerWinner.ARRIVAL_THEN_ID.compare(marker, current) > 0) {
+				winners.put(marker.targetKey(), marker);
+			}
+		}
+
+		return winners.values().stream()
+			.sorted(Comparator.comparing(ServerMarker::id))
+			.toList();
+	}
+
+	/**
 	 * The number of active markers.
 	 */
 	public synchronized int size() {

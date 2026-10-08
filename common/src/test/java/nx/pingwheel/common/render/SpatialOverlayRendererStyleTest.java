@@ -47,7 +47,7 @@ class SpatialOverlayRendererStyleTest {
 	void wheelAndTargetOpacityAffectOnlyTheirAssignedLayers() {
 		var style = new SpatialOverlayRenderer.Style(20, 80, 1.0, 1.0, true, false);
 		var choice = new SpatialController.ChoiceView("back", "pingforit.spatial.back", null,
-			true, false, false, false, true, 0.0, 90.0);
+			true, false, false, false, true, 0.0, 90.0, null);
 		var sector = new SpatialOverlayRenderer.SectorPaint(choice, 20.0);
 		var node = new SpatialOverlayRenderer.NodePaint(choice, Component.literal("Back"), true, 0.0);
 		var chrome = new SpatialOverlayRenderer.ChromePaint(
@@ -64,7 +64,7 @@ class SpatialOverlayRendererStyleTest {
 	void zeroOpacityPairStillRendersChromeWithoutUnderlayOrTextFrames() {
 		var style = new SpatialOverlayRenderer.Style(0, 0, 1.0, 1.0, true, false);
 		var choice = new SpatialController.ChoiceView("back", "pingforit.spatial.back", null,
-			true, false, false, false, true, 0.0, 90.0);
+			true, false, false, false, true, 0.0, 90.0, null);
 		var snapshot = new SpatialController.Snapshot(true, null, java.util.List.of(), null,
 			java.util.List.of(), 0.0);
 		var chrome = new SpatialOverlayRenderer.ChromePaint(snapshot);

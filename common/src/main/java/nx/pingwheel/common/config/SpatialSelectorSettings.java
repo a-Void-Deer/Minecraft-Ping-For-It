@@ -8,9 +8,10 @@ import lombok.ToString;
 import java.math.BigDecimal;
 
 /**
- * Client-local spatial selector preferences. Distances are GUI pixels and
- * durations are milliseconds. Missing JSON members receive model defaults;
- * legacy wheel radii are never a source for these values.
+ * Client-local spatial selector preferences. Distances are GUI pixels,
+ * durations are milliseconds, and the precise capture period is ticks. Missing
+ * JSON members receive model defaults; legacy wheel radii are never a source
+ * for these values.
  *
  * <p>{@link #snapshot()} supplies a validated immutable set for one held
  * gesture. Editing the live configuration cannot change an existing snapshot.
@@ -54,6 +55,12 @@ public final class SpatialSelectorSettings {
 	public static final int DEFAULT_HOVER_MILLIS = 500;
 	public static final boolean DEFAULT_HOVER_ENABLED = false;
 
+	/** Precise live-capture period in ticks; one tick captures without an interval. */
+	public static final int MIN_PRECISE_CAPTURE_PERIOD_TICKS = 1;
+	public static final int MAX_PRECISE_CAPTURE_PERIOD_TICKS = 50;
+	public static final int DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS = 1;
+	public static final int PRECISE_CAPTURE_PERIOD_TICKS_STEP = 1;
+
 	private int deadzone = DEFAULT_DEADZONE;
 	private int stroke = DEFAULT_STROKE;
 	private int dwellMillis = DEFAULT_DWELL_MILLIS;
@@ -63,6 +70,7 @@ public final class SpatialSelectorSettings {
 	private int hoverMillis = DEFAULT_HOVER_MILLIS;
 	private boolean showTrail = true;
 	private boolean reduceMotion = false;
+	private int preciseCapturePeriodTicks = DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS;
 
 	/** Clamps numeric preferences independently, without changing boolean choices. */
 	public void validate() {
@@ -72,6 +80,7 @@ public final class SpatialSelectorSettings {
 		rootDistance = clampRootDistance(rootDistance);
 		targetGlide = clampTargetGlide(targetGlide);
 		hoverMillis = clampHoverMillis(hoverMillis);
+		preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks);
 	}
 
 	public void setDeadzone(int value) { deadzone = clampDeadzone(value); }
@@ -80,6 +89,7 @@ public final class SpatialSelectorSettings {
 	public void setRootDistance(int value) { rootDistance = clampRootDistance(value); }
 	public void setTargetGlide(BigDecimal value) { targetGlide = clampTargetGlide(value); }
 	public void setHoverMillis(int value) { hoverMillis = clampHoverMillis(value); }
+	public void setPreciseCapturePeriodTicks(int value) { preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(value); }
 
 	public static int clampDeadzone(int value) {
 		return Math.clamp(value, MIN_DEADZONE, MAX_DEADZONE);
@@ -110,15 +120,31 @@ public final class SpatialSelectorSettings {
 		return Math.clamp(value, MIN_HOVER_MILLIS, MAX_HOVER_MILLIS);
 	}
 
+	public static int clampPreciseCapturePeriodTicks(int value) {
+		return Math.clamp(value, MIN_PRECISE_CAPTURE_PERIOD_TICKS, MAX_PRECISE_CAPTURE_PERIOD_TICKS);
+	}
+
 	/** Safe even before validation of a deserialized object; does not mutate it. */
 	public Snapshot snapshot() {
 		return new Snapshot(clampDeadzone(deadzone), clampStroke(stroke),
 			clampDwellMillis(dwellMillis), clampRootDistance(rootDistance),
 			clampTargetGlide(targetGlide), hoverEnabled, clampHoverMillis(hoverMillis),
-			showTrail, reduceMotion);
+			showTrail, reduceMotion, clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks));
 	}
 
 	public record Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
 		BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
-		boolean showTrail, boolean reduceMotion) {}
+		boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks) {
+
+		/**
+		 * Compatibility constructor for callers that predate the precise capture
+		 * period; the confirmed default captures every tick.
+		 */
+		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
+			BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+			boolean showTrail, boolean reduceMotion) {
+			this(deadzone, stroke, dwellMillis, rootDistance, targetGlide, hoverEnabled,
+				hoverMillis, showTrail, reduceMotion, DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS);
+		}
+	}
 }

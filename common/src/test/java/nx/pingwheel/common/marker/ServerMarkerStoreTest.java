@@ -176,6 +176,70 @@ class ServerMarkerStoreTest {
 	}
 
 	@Test
+	void winnersForExcludesExpiredBeforeSelectionWithoutMutatingTheStore() {
+		ServerMarkerStore store = newStore();
+		Target target = entityTarget(UUID.randomUUID());
+		TargetKey key = TargetKey.from(target);
+
+		create(store, target, 10L, 100L, RECIPIENT_A); // id 0
+		MarkerCreation dueWinner = create(store, target, 20L, 100L, RECIPIENT_A); // id 1
+		create(store, target, 5L, 200L, RECIPIENT_A); // id 2
+
+		assertEquals(List.of(new MarkerId(1L)), winnerIds(store.winnersFor(RECIPIENT_A, 99L)));
+		assertEquals(List.of(new MarkerId(2L)), winnerIds(store.winnersFor(RECIPIENT_A, 100L)),
+			"a marker at its expiry tick must not mask an active same-target sibling");
+		assertTrue(store.winnersFor(RECIPIENT_A, 200L).isEmpty());
+		assertEquals(3, store.size(), "the baseline query must not expire or remove markers");
+		assertEquals(dueWinner.marker().id(), store.winnerFor(key, RECIPIENT_A).orElseThrow().id(),
+			"the stored winner is unchanged by a baseline query");
+	}
+
+	@Test
+	void winnersForIsRecipientScopedAndUsesArrivalThenIdOrdering() {
+		ServerMarkerStore store = newStore();
+		Target shared = entityTarget(UUID.randomUUID());
+		Target other = entityTarget(UUID.randomUUID());
+		TargetKey sharedKey = TargetKey.from(shared);
+		TargetKey otherKey = TargetKey.from(other);
+
+		create(store, shared, 20L, 200L, RECIPIENT_A); // id 0
+		create(store, other, 10L, 200L, RECIPIENT_A); // id 1
+		create(store, shared, 10L, 200L, RECIPIENT_B); // id 2
+		create(store, shared, 20L, 200L, RECIPIENT_A); // id 3: equal arrival, larger id
+
+		List<ServerMarker> forA = store.winnersFor(RECIPIENT_A, 100L);
+		assertEquals(List.of(new MarkerId(1L), new MarkerId(3L)), winnerIds(forA),
+			"one winner per target key, ordered by ascending marker id");
+		assertEquals(new MarkerId(3L), winnerId(forA, sharedKey),
+			"equal arrival resolves to the larger marker id");
+		assertEquals(new MarkerId(1L), winnerId(forA, otherKey));
+		assertEquals(List.of(new MarkerId(2L)), winnerIds(store.winnersFor(RECIPIENT_B, 100L)));
+		assertTrue(store.winnersFor(STRANGER, 100L).isEmpty());
+	}
+
+	@Test
+	void winnersForIsImmutableAndRejectsNullRecipient() {
+		ServerMarkerStore store = newStore();
+		create(store, entityTarget(UUID.randomUUID()), 10L, 100L, RECIPIENT_A);
+
+		assertThrows(NullPointerException.class, () -> store.winnersFor(null, 0L));
+		assertThrows(UnsupportedOperationException.class,
+			() -> store.winnersFor(RECIPIENT_A, 0L).add(null));
+	}
+
+	private static List<MarkerId> winnerIds(List<ServerMarker> winners) {
+		return winners.stream().map(ServerMarker::id).toList();
+	}
+
+	private static MarkerId winnerId(List<ServerMarker> winners, TargetKey key) {
+		return winners.stream()
+			.filter(marker -> marker.targetKey().equals(key))
+			.findFirst()
+			.orElseThrow()
+			.id();
+	}
+
+	@Test
 	void removeOwnedMissingReturnsNotFoundWithoutMutation() {
 		ServerMarkerStore store = newStore();
 		Target target = entityTarget(UUID.randomUUID());

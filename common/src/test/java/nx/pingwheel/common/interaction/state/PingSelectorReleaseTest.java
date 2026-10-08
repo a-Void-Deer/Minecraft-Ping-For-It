@@ -328,6 +328,38 @@ class PingSelectorReleaseTest {
 		}
 	}
 
+	@Test void crossRayPreciseModeRequiresExactCurrentInteractionPaintTableAndRevision() {
+		for (String scenario : List.of("unpainted", "wrong-revision", "other-context", "press-ray", "valid")) {
+			Harness h = new Harness(); h.open();
+			var snapshot = TargetSnapshotFactory.block(DIMENSION, 7, 8, 9, "minecraft:stone");
+			var resolved = h.resolver.resolve(snapshot.target(), snapshot.matchContext());
+			var live = new CapturedPingContext(h.token, resolved, CapturedRay.defaultRay(), Optional.empty(), Optional.of(BlockFace.NORTH));
+			if (!scenario.equals("unpainted")) assertTrue(h.machine.markSelectorPresented(h.token, 7, Map.of("live", live)));
+			var lookup = scenario.equals("other-context") ? new CapturedPingContext(h.token, resolved, live.ray(), Optional.empty(), live.blockHitFace()) : live;
+			var admission = scenario.equals("press-ray") ? SelectorReleaseProposal.Admission.PRESS_RAY : SelectorReleaseProposal.Admission.PRECISE_PRESENTED;
+			var result = h.machine.releaseSelectorAt(h.token, HOLD + 1, () -> new SelectorReleaseProposal.Create<>("live", resolved,
+				resolved.targetType().defaultPingType(), "opaque", admission, scenario.equals("wrong-revision") ? 6 : 7),
+				id -> Optional.of(lookup), unexpectedCancellation());
+			if (scenario.equals("valid")) {
+				assertSame(live, assertInstanceOf(PingInteractionAction.CreatePing.class, result.action().orElseThrow()).context());
+				assertEquals(Optional.of("opaque"), result.admittedIntent());
+			} else { assertEquals(SelectorReleaseResult.empty(), result, scenario); assertNull(h.validated, scenario); }
+		}
+	}
+
+	@Test void presentationFenceRejectsWrongTokenDimensionAndOldRevisionAndAbortRevokesIt() {
+		Harness h = new Harness(); h.open();
+		assertFalse(h.machine.markSelectorPresented(new ActiveInteraction().begin(), 1, Map.of("ordinary", h.ordinary)));
+		var snapshot = TargetSnapshotFactory.location("minecraft:the_nether", 1, 2, 3);
+		var foreign = new CapturedPingContext(h.token, h.resolver.resolve(snapshot.target(), snapshot.matchContext()), RAY);
+		assertFalse(h.machine.markSelectorPresented(h.token, 1, Map.of("foreign", foreign)));
+		assertTrue(h.machine.markSelectorPresented(h.token, 2, Map.of("ordinary", h.ordinary)));
+		assertFalse(h.machine.markSelectorPresented(h.token, 1, Map.of("ordinary", h.ordinary)));
+		h.machine.abort(); assertFalse(h.machine.markSelectorPresented(h.token, 3, Map.of("ordinary", h.ordinary)));
+		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, HOLD + 1,
+			unexpectedProposal(), id -> fail("aborted paint lookup"), unexpectedCancellation()));
+	}
+
 	private static <P> Supplier<SelectorReleaseProposal<P>> unexpectedProposal() {
 		return () -> fail("proposal must not be evaluated");
 	}

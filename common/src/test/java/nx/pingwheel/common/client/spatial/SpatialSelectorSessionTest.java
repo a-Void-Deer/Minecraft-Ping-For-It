@@ -135,6 +135,63 @@ class SpatialSelectorSessionTest {
 	}
 
 	@Test
+	void pingTypeChoicesCarryTheirCatalogOutlineColorWhileUntypedChoicesStayNull() {
+		var ordinary = target("ordinary", "entity", false);
+		var preciseEntity = target("precise-entity", "entity", false);
+		var rootSession = session(ordinary, Map.of("entity", preciseEntity), false, new Content());
+		rootSession.open(0);
+		var root = current(rootSession);
+		assertEquals(ping("danger").outlineColor(),
+			root.choices().stream().filter(choice -> choice.id().equals("danger")).findFirst().orElseThrow().outlineColor());
+		assertNull(root.choices().stream().filter(choice -> choice.id().equals("cancel-marker")).findFirst().orElseThrow().outlineColor());
+		assertNull(root.choices().stream().filter(choice -> choice.id().equals("reserved-ne")).findFirst().orElseThrow().outlineColor());
+
+		enter(rootSession, "intent", 10);
+		for (PingType type : ordinary.resolvedTarget().targetType().pingTypes()) {
+			var choice = current(rootSession).choices().stream()
+				.filter(value -> value.id().equals("intent:" + type.id())).findFirst().orElseThrow();
+			assertEquals(type.outlineColor(), choice.outlineColor());
+		}
+
+		var preciseSession = session(ordinary, Map.of("entity", preciseEntity), false, new Content());
+		preciseSession.open(0);
+		enter(preciseSession, "precise", 10);
+		assertEquals(preciseEntity.resolvedTarget().targetType().defaultPingType().outlineColor(),
+			current(preciseSession).choices().stream()
+				.filter(value -> value.id().equals("precise:entity")).findFirst().orElseThrow().outlineColor());
+		assertNull(current(preciseSession).choices().stream()
+			.filter(value -> value.id().equals("precise:block")).findFirst().orElseThrow().outlineColor(),
+			"an unavailable precise slot carries no Ping Type");
+
+		Content content = new Content();
+		content.next = new SpatialSelectorSession.ContentProjection<>(fence(ordinary), 1, false, Status.READY,
+			List.of(new SpatialSelectorSession.Property("health", "health",
+				PresentationPropertyRef.root("pingforit:basic", "pingforit:health"), new PresentationValue.NumberValue(7),
+				List.of(ping("attention"), ping("danger")), ping("attention"))), null);
+		var contentSession = session(ordinary, Map.of(), false, content);
+		contentSession.open(0);
+		enter(contentSession, "content", 10);
+		String property = current(contentSession).choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id();
+		assertEquals(ping("attention").outlineColor(),
+			current(contentSession).choices().stream().filter(choice -> choice.id().equals(property))
+				.findFirst().orElseThrow().outlineColor(),
+			"a property branch direct release carries its default Ping Type");
+		enter(contentSession, property, 150);
+		assertEquals(ping("danger").outlineColor(), current(contentSession).choices().stream()
+			.filter(value -> value.id().equals(property + ":danger")).findFirst().orElseThrow().outlineColor());
+
+		var list = openedList(false, new Content());
+		double forward = list.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		list.moveGui(forward * 200, 0, 290);
+		var itemMenu = current(list);
+		for (PingType type : List.of(ping("attention"), ping("request"))) {
+			assertEquals(type.outlineColor(), itemMenu.choices().stream()
+				.filter(value -> value.id().equals(itemMenu.menuId() + ":" + type.id()))
+				.findFirst().orElseThrow().outlineColor());
+		}
+	}
+
+	@Test
 	void suppliedPreciseAllocationIsNotRetargetedOrReusedAndReleaseIsSingleUse() {
 		var ordinary = target("ordinary", "entity", false);
 		var item = target("item-A", "dropped_item", false);
@@ -484,5 +541,96 @@ class SpatialSelectorSessionTest {
 		var intent = assertInstanceOf(SelectorIntent.CreateProperty.class, session.releaseIntent(291));
 		assertEquals(health, intent.property().ref());
 		assertEquals("danger", intent.property().pingTypeId());
+	}
+
+	private static SpatialSelectorSession<String> liveSession(nx.pingwheel.common.interaction.InteractionToken token, Object level) {
+		var ordinary = target("ordinary", "entity", false);
+		var session = new SpatialSelectorSession<String>(ordinary, Map.of(), settings(false),
+			new SpatialSelectorSession.ContentFence(token.sequence(), 42, 53, "ordinary"), new Content(), GEOMETRY);
+		session.beginLivePrecise(token, level); session.open(0); enter(session, "precise", 10);
+		return session;
+	}
+	private static PreciseCaptureRefresh.Published publication(nx.pingwheel.common.interaction.InteractionToken token,
+		Object level, long revision, int x, boolean available) {
+		var inputs = new PreciseCaptureRefresh.Inputs(token, level,
+			new nx.pingwheel.common.interaction.CapturedRay(new WorldVector(x, 2, 3), new WorldVector(1, 0, 0)),
+			nx.pingwheel.common.math.RaycastPolicy.from(false, false, false), 10, 100);
+		var slots = new java.util.EnumMap<nx.pingwheel.common.interaction.candidate.PreciseTargetType, PreciseCaptureRefresh.Slot>(
+			nx.pingwheel.common.interaction.candidate.PreciseTargetType.class);
+		for (var type : nx.pingwheel.common.interaction.candidate.PreciseTargetType.values()) {
+			var outcome = type == nx.pingwheel.common.interaction.candidate.PreciseTargetType.BLOCK && available
+				? PreciseCaptureRefresh.Outcome.available(PreciseCaptureRefreshTest.candidate(false, x)) : PreciseCaptureRefresh.Outcome.missing();
+			slots.put(type, new PreciseCaptureRefresh.Slot(revision, inputs, outcome));
+		}
+		return new PreciseCaptureRefresh.Published(revision, revision, inputs, slots);
+	}
+
+	@Test void liveReplacementPreservesSlotFocusOriginTypedColorAndPaintedPayloadRatherThanInstalledTarget() {
+		var token = new nx.pingwheel.common.interaction.ActiveInteraction().begin(); Object level = new Object();
+		var session = liveSession(token, level);
+		assertTrue(session.isPreciseBranchActive());
+		assertTrue(session.updatePrecise(publication(token, level, 1, 10, true), 140));
+		focus(session, "precise:block", 150);
+		var before = current(session); var frame = session.snapshot();
+		var painted = session.markPresented(frame, java.util.Set.of("precise:block")).orElseThrow();
+		var targetA = painted.choices().get("precise:block");
+		assertEquals(ping("attention").outlineColor(), before.choices().stream().filter(choice -> choice.id().equals("precise:block"))
+			.findFirst().orElseThrow().outlineColor());
+		assertTrue(session.updatePrecise(publication(token, level, 2, 20, true), 160));
+		assertEquals(before.origin(), current(session).origin()); assertEquals("precise:block", current(session).focusId());
+		assertNotEquals(targetA.candidateId(), session.snapshot().preciseFrame().choices().get("precise:block").candidateId());
+		var intent = assertInstanceOf(SelectorIntent.CreateTarget.class, session.releaseIntent(170));
+		assertSame(targetA, intent.candidate()); assertEquals(1, intent.presentationRevision());
+		assertEquals(nx.pingwheel.common.interaction.state.SelectorReleaseProposal.Admission.PRECISE_PRESENTED, intent.admission());
+		assertEquals(new WorldVector(10, 2, 3), painted.contexts().get(targetA.candidateId()).ray().origin());
+		assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(171));
+	}
+
+	@Test void liveInstalledWithoutPaintCannotReleaseAndDisabledPaintClearsOlderSelectableVersion() {
+		for (boolean firstPaint : List.of(false, true)) {
+			var token = new nx.pingwheel.common.interaction.ActiveInteraction().begin(); Object level = new Object();
+			var session = liveSession(token, level);
+			session.updatePrecise(publication(token, level, 1, 10, true), 140); focus(session, "precise:block", 150);
+			if (firstPaint) {
+				session.markPresented(session.snapshot(), java.util.Set.of("precise:block"));
+				session.updatePrecise(publication(token, level, 2, 20, false), 160);
+				assertTrue(session.markPresented(session.snapshot(), java.util.Set.of("precise:block")).orElseThrow().choices().isEmpty());
+			}
+			assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(170));
+		}
+	}
+
+	@Test void unpaintedIncompleteReplacementKeepsLastPaintedSelectablePayloadButEmptyAckCannotAuthorize() {
+		var token = new nx.pingwheel.common.interaction.ActiveInteraction().begin(); Object level = new Object();
+		var session = liveSession(token, level);
+		session.updatePrecise(publication(token, level, 1, 10, true), 140); focus(session, "precise:block", 150);
+		assertTrue(session.markPresented(session.snapshot(), java.util.Set.of()).isEmpty());
+		var painted = session.markPresented(session.snapshot(), java.util.Set.of("precise:block")).orElseThrow();
+		session.updatePrecise(publication(token, level, 2, 20, false), 160);
+		var intent = assertInstanceOf(SelectorIntent.CreateTarget.class, session.releaseIntent(170));
+		assertSame(painted.choices().get("precise:block"), intent.candidate());
+	}
+
+	@Test void livePublicationAndPaintFencesRejectDuplicateWrongTokenWrongLevelAndEndedSession() {
+		var token = new nx.pingwheel.common.interaction.ActiveInteraction().begin(); Object level = new Object();
+		var session = liveSession(token, level);
+		assertTrue(session.updatePrecise(publication(token, level, 2, 20, true), 140));
+		assertFalse(session.updatePrecise(publication(token, level, 2, 99, true), 141));
+		assertFalse(session.updatePrecise(publication(token, level, 1, 99, true), 142));
+		assertFalse(session.updatePrecise(publication(new nx.pingwheel.common.interaction.ActiveInteraction().begin(), level, 3, 99, true), 143));
+		assertFalse(session.updatePrecise(publication(token, new Object(), 3, 99, true), 144));
+		var old = session.snapshot(); session.updatePrecise(publication(token, level, 3, 30, true), 145); session.snapshot();
+		assertTrue(session.markPresented(old, java.util.Set.of("precise:block")).isEmpty());
+		session.abort(); assertFalse(session.updatePrecise(publication(token, level, 4, 40, true), 146));
+		assertTrue(session.markPresented(old, java.util.Set.of("precise:block")).isEmpty());
+	}
+
+	@Test void preciseDeadzoneAfterPaintRemainsSilentNoAction() {
+		var token = new nx.pingwheel.common.interaction.ActiveInteraction().begin(); Object level = new Object();
+		var session = liveSession(token, level);
+		session.updatePrecise(publication(token, level, 1, 10, true), 140);
+		session.markPresented(session.snapshot(), java.util.Set.of("precise:block"));
+		assertNull(current(session).focusId());
+		assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(150));
 	}
 }

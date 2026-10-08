@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.function.Function;
 
 import net.minecraft.client.Minecraft;
@@ -321,11 +323,15 @@ public final class SpatialOverlayRenderer {
 
 	/** Per-native-session render state, main-thread confined and finitely retained. */
 	public static final class Session {
+		private Set<String> paintedChoiceIds = Set.of();
+		/** Current active nodes whose visible paint completed successfully, never detached exit nodes. */
+		public Set<String> paintedChoiceIds() { return paintedChoiceIds; }
 		private final SpatialOverlayTransitions<VisualKey, Paint> transitions =
 			new SpatialOverlayTransitions<>(TRANSITION_NANOS, TRANSITION_CAPACITY, APPEARANCE_SCALE);
 
 		public void reset() {
 			transitions.clear();
+			paintedChoiceIds = Set.of();
 		}
 
 		/** Whether inactive frames still need painting/cleanup, not an input-active predicate. */
@@ -336,6 +342,7 @@ public final class SpatialOverlayRenderer {
 		public RowLayout drawFrame(GuiGraphics graphics, SpatialController.Snapshot radial,
 			SpatialInventoryView inventory, Function<SpatialController.ChoiceView, Component> labels,
 			Style style, long nowNanos) {
+			paintedChoiceIds = Set.of();
 			if (graphics == null || style == null) {
 				return RowLayout.NONE;
 			}
@@ -356,6 +363,9 @@ public final class SpatialOverlayRenderer {
 			List<SpatialOverlayTransitions.State<VisualKey, Paint>> states =
 				transitions.update(targets, nowNanos, style.reduceMotion());
 			RowLayout selected = RowLayout.NONE;
+			Set<String> painted = new HashSet<>();
+			String activeMenu = radial == null || !radial.active() || radial.menus().isEmpty()
+				? null : radial.menus().getLast().menuId();
 			// Sector backdrops and replacement panels may be admitted after
 			// surviving rows, so rank every layer explicitly: radial backdrops,
 			// inventory panels, then rows, nodes, and chrome.
@@ -366,10 +376,19 @@ public final class SpatialOverlayRenderer {
 				}
 				if (renders(state.data(), state.alpha(), style)) {
 					paint(graphics, font, state, style);
+					if (state.data() instanceof NodePaint node && acknowledgesNodePaint(state.present(),
+						state.key().owner().equals(activeMenu), state.alpha(), style))
+						painted.add(node.choice().id());
 				}
 			}
+			paintedChoiceIds = Set.copyOf(painted);
 			return selected;
 		}
+	}
+
+	/** Called only after successful node paint; detached/ancestor/fully transparent states cannot acknowledge. */
+	static boolean acknowledgesNodePaint(boolean present, boolean activeMenu, double alpha, Style style) {
+		return present && activeMenu && (withAlpha(BORDER_COLOR, targetAlpha(alpha, style)) >>> 24) != 0;
 	}
 
 	private static void addRadial(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
@@ -688,7 +707,7 @@ public final class SpatialOverlayRenderer {
 			guiGraphics.fill(left, top, right, bottom,
 				withAlpha(selected ? NODE_SELECTED_BACKGROUND : NODE_BACKGROUND, alpha));
 
-			int borderColor = selected ? accentColor(choice.action()) : BORDER_COLOR;
+			int borderColor = nodeBorderColor(choice, selected);
 
 			if (choice.disabled() || choice.reserved()) {
 				dashedRect(guiGraphics, left, top, right, bottom, withAlpha(borderColor, alpha * DISABLED_ALPHA_FACTOR));
@@ -1005,6 +1024,21 @@ public final class SpatialOverlayRenderer {
 			int y = (int) Math.round(y1 + dy * t);
 			guiGraphics.fill(x, y, x + 1, y + 1, color);
 		}
+	}
+
+	/**
+	 * Border colour for one radial choice. A choice carrying a detached Ping Type
+	 * outline uses that colour in both focus states; a choice without one keeps
+	 * the legacy selected fallback (including its {@code ping:} action form) and
+	 * the ordinary border colour when unfocused. The opaque action is never
+	 * decoded for a typed choice.
+	 */
+	static int nodeBorderColor(SpatialController.ChoiceView choice, boolean selected) {
+		if (choice.outlineColor() != null) {
+			return 0xFF000000 | choice.outlineColor();
+		}
+
+		return selected ? accentColor(choice.action()) : BORDER_COLOR;
 	}
 
 	private static int accentColor(String action) {

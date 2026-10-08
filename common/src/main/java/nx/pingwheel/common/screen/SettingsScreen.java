@@ -508,6 +508,8 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.addSubgroup("send_rate");
 		} else if (category == Category.MARKER_DURATION) {
 			this.addSubgroup("marker_duration");
+		} else if (category == Category.CLIENT_PERFORMANCE) {
+			this.addSubgroup("wheel_options");
 		}
 
 		for (Setting setting : SettingsCategoryCatalog.settings(category)) {
@@ -556,6 +558,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			case SPATIAL_TARGET_GLIDE -> this.addOption(setting, this.getSpatialTargetGlideOption(), true);
 			case SPATIAL_HOVER_ENABLED -> this.addOption(setting, this.getSpatialHoverEnabledOption(), true);
 			case SPATIAL_HOVER_MILLIS -> this.addOption(setting, this.getSpatialHoverMillisOption(), false);
+			case PRECISE_CAPTURE_PERIOD_TICKS -> this.addOption(setting, this.getPreciseCapturePeriodTicksOption(), false);
 			case CHANNEL -> this.addChannelRow();
 			case PING_VOLUME -> this.addOption(setting, this.getPingVolumeOption(), false);
 			case CONFIGURATION_NOTICE_SIZE -> this.addOption(setting, this.getConfigurationNoticeSizeOption(), true);
@@ -2252,6 +2255,19 @@ public class SettingsScreen extends OptionsSubScreen {
 		return OptionUtils.ofInt(text.getKey(), MIN_HOVER_MILLIS, MAX_HOVER_MILLIS, HOVER_MILLIS_STEP,
 			value -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
 			() -> text.path("tooltip").get(), selector::getHoverMillis, selector::setHoverMillis);
+	}
+
+	private OptionInstance<Integer> getPreciseCapturePeriodTicksOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("precise_capture_period_ticks");
+		return OptionUtils.ofInt(text.getKey(),
+			MIN_PRECISE_CAPTURE_PERIOD_TICKS,
+			MAX_PRECISE_CAPTURE_PERIOD_TICKS,
+			PRECISE_CAPTURE_PERIOD_TICKS_STEP,
+			value -> text.get(LanguageUtils.UNIT_TICKS.get(value)),
+			() -> text.path("tooltip").get(),
+			selector::getPreciseCapturePeriodTicks,
+			selector::setPreciseCapturePeriodTicks);
 	}
 
 	private OptionInstance<Boolean> getSpatialShowTrailOption() {

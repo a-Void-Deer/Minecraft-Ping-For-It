@@ -234,4 +234,79 @@ class InventoryPublicationIntegrationTest {
 			int repairs = endpoint.repairs().size(); endpoint.tickTo(33, 70); assertEquals(repairs, endpoint.repairs().size());
 		}
 	}
+	@Test void laterSharedRetirementWithdrawsAnEarlierCheckedTerminalPreviewBeforePublisherDrain() {
+		var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
+		settings.getPreview().setPeriodTicks(1); var reads = new java.util.concurrent.atomic.AtomicInteger();
+		boolean[] invalidatingTick = {false}, readable = {true}; var checks = new java.util.concurrent.atomic.AtomicInteger();
+		var runtime = new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2) {
+			@Override public boolean valid() {
+				if (invalidatingTick[0] && checks.incrementAndGet() == 2) readable[0] = false;
+				return readable[0];
+			}
+		}), 16_000_000);
+		try (var backend = new InventoryBackend(host, runtime, 1)) {
+			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings);
+			for (int request = 1; request <= 2; request++) backend.handle(InventoryBackendTest.A,
+				InventoryC2SPacket.open(host.epoch(InventoryBackendTest.A), 100, 1, request, InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH), 0, settings);
+			// Admit both scanners before either finishes so they really share one round.
+			settings.setPhysicalSlotsPerTick(nx.pingwheel.common.config.IntLimit.finite(1)); backend.tick(0, settings);
+			backend.tick(1, settings); assertEquals(2, reads.get());
+			assertEquals(Set.of(1L, 2L), host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.completeScan()).map(InventoryS2CPacket::requestId).collect(java.util.stream.Collectors.toSet()));
+			int start = host.packets.size(); invalidatingTick[0] = true; backend.tick(2, settings);
+			var after = host.packets.subList(start, host.packets.size()).stream().map(InventoryPublicationIntegrationTest::wire).toList();
+			assertEquals(2, checks.get(), "first terminal consumer is admitted, second retires their shared evidence");
+			assertEquals(Set.of(1L, 2L), after.stream().filter(p -> p.status() == InventoryS2CPacket.Status.INVALID).map(InventoryS2CPacket::requestId).collect(java.util.stream.Collectors.toSet()));
+			assertTrue(after.stream().allMatch(p -> p.entries().isEmpty()), "earlier checkedTick cannot send stale valid state after the later shared retire");
+			assertEquals(2, reads.get()); assertEquals(0, runtime.memory().reserved());
+		}
+		assertEquals(0, runtime.memory().retained());
+	}
+	@Test void cachedTrackingPublicationDefersWithZeroProviderCallsAndResumesSameBaselineWhenBudgetReturns() {
+		try (var f = new InventoryBackendTest.Fixture()) {
+			f.open(); f.backend.handle(InventoryBackendTest.A, f.select(1), 1, f.settings); f.backend.tick(2, f.settings);
+			var marker = f.host.store.allMarkers().getFirst();
+			long baseline = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId())).findFirst().orElseThrow().baselineId();
+			// A same-tick repeat must not reuse the previous checkedTick after work admission is exhausted.
+			while (f.backend.runtime().preflight(() -> Optional.of(true)).isPresent()) {}
+			int start = f.host.packets.size(), reads = f.reads.get(), validations = f.validations.get(); f.backend.tick(2, f.settings);
+			assertEquals(start, f.host.packets.size()); assertEquals(reads, f.reads.get()); assertEquals(validations, f.validations.get(), "provider-work defer performs no source validity call");
+			f.backend.tick(3, f.settings);
+			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(p -> p.status() == InventoryS2CPacket.Status.INVALID));
+			assertTrue(f.host.packets.stream().filter(p -> marker.id().equals(p.markerId()) && p.epoch() == f.host.epoch(InventoryBackendTest.A)
+				&& Set.of(InventoryS2CPacket.Kind.SNAPSHOT, InventoryS2CPacket.Kind.STREAM, InventoryS2CPacket.Kind.STATUS, InventoryS2CPacket.Kind.HEARTBEAT).contains(p.kind()))
+				.allMatch(p -> p.baselineId() == baseline), "defer neither invalidates nor resets a healthy baseline");
+		}
+	}
+	@Test void trackingRestartKeepsPublishedCompletedEvidenceUntilFreshAcceptedResultAndInvalidityFencesRealFrames() {
+		var host = new InventoryBackendTest.Host(); host.expiry = 30;
+		var settings = InventorySettings.serverDefaults(); var reads = new java.util.concurrent.atomic.AtomicInteger();
+		boolean[] newObservation = {false}, oldValid = {true};
+		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> {
+			boolean fresh = newObservation[0];
+			return Optional.of(new InventoryRuntimeTest.Source(input, reads, 2) {
+				@Override public boolean valid() { return fresh || oldValid[0]; }
+				@Override public InventoryDomainCodec.Item read(int slot) { reads.incrementAndGet(); return InventoryRuntimeTest.item(fresh ? 9 : 7); }
+			});
+		}, 16_000_000), 1)) {
+			for (UUID player : List.of(InventoryBackendTest.A, InventoryBackendTest.B)) backend.handle(player, InventoryC2SPacket.hello(), 0, settings);
+			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.open(host.epoch(InventoryBackendTest.A), 100, 1, 1, InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH), 0, settings); backend.tick(0, settings);
+			var preview = host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
+			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.select(host.epoch(InventoryBackendTest.A), 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "danger"), 1, settings);
+			var marker = host.store.allMarkers().getFirst(); var a = new Endpoint(InventoryBackendTest.A, MarkerSnapshot.from(marker)); var b = new Endpoint(InventoryBackendTest.B, MarkerSnapshot.from(marker));
+			backend.tick(2, settings); a.drain(host); b.drain(host); count(a.client, marker.id(), 14); count(b.client, marker.id(), 14);
+			long baselineA = a.client.tracking(marker.id()).baselineId();
+			newObservation[0] = true; settings.setPhysicalSlotsPerTick(nx.pingwheel.common.config.IntLimit.finite(1));
+			backend.tick(5, settings); a.drain(host); b.drain(host);
+			assertEquals(14, a.client.tracking(marker.id()).entries().getFirst().count(), "in-progress replacement scan still publishes the old accepted complete result");
+			int start = host.packets.size(), before = reads.get(); oldValid[0] = false; backend.tick(6, settings);
+			var invalid = host.packets.subList(start, host.packets.size()).stream().map(InventoryPublicationIntegrationTest::wire).toList();
+			assertEquals(before, reads.get(), "the new self-valid scanning source cannot authorize the old completed quantity");
+			assertEquals(2, invalid.stream().filter(p -> marker.id().equals(p.markerId()) && p.kind() == InventoryS2CPacket.Kind.STATUS && p.status() == InventoryS2CPacket.Status.INVALID).count());
+			assertTrue(invalid.stream().filter(p -> marker.id().equals(p.markerId())).allMatch(p -> p.entries().isEmpty()));
+			a.drain(host); b.drain(host); assertTrue(a.client.tracking(marker.id()).grey()); assertTrue(b.client.tracking(marker.id()).grey());
+			backend.tick(9, settings); backend.tick(10, settings); a.drain(host); b.drain(host);
+			count(a.client, marker.id(), 18); count(b.client, marker.id(), 18); assertNotEquals(baselineA, a.client.tracking(marker.id()).baselineId());
+			assertEquals(30, marker.expiresAtTick()); assertEquals(1, host.store.size()); assertEquals(InventoryRuntimeTest.TARGET, marker.target());
+		}
+	}
 }

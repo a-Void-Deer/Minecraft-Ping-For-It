@@ -22,6 +22,7 @@ import nx.pingwheel.common.presentation.source.SourceKey;
 /** One server-lifetime owner of physical rounds, logical coverage and retained admission. */
 public final class InventoryRuntime implements AutoCloseable {
 	private static final int MAX_CONSUMERS = 256, MAX_ROUNDS = 32;
+	private static final int MAX_RETAINED_ROUNDS = MAX_ROUNDS * 2; // bounded replacement headroom for completed evidence leases
 	private static final long CONSUMER_MEMORY = 4096;
 	private static final long ROUND_MEMORY = 4096 + 262144 + 32768; // provider catalog and bounded logical subject history
 	public sealed interface Subject permits PreviewSubject, TrackingSubject {}
@@ -35,6 +36,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		private final Subject subject;
 		private final RetainedMemoryLedger.Ticket memory;
 		private Round round;
+		private Round completedRound;
 		private Observation invalidObservation;
 		private Observation pendingObservation;
 		private int cursor;
@@ -47,9 +49,22 @@ public final class InventoryRuntime implements AutoCloseable {
 			firstRound = roundSequence + 1;
 		}
 		public InventorySourceInput input() { return input; }
+		public boolean invalidated() { return invalidObservation != null; }
+		/** Pins the complete observation actually accepted for publication, not a rejected or overflowing sweep. */
+		public void retainCompleted() {
+			if (closed || invalidObservation != null || round == null || round.last == null
+				|| round.last.completeness() != CaptureResult.Completeness.COMPLETE || cursor != round.slots.size())
+				throw new IllegalStateException("no complete inventory observation");
+			completed(this, round);
+		}
 		public void restart() {
 			if (round != null) rounds.remove(round.key, round); // new observation evidence, not source identity
-			release(this); invalidObservation = null; pendingObservation = null; cursor = 0; observationFloor = tick; firstRound = 0;
+			releaseScanning(this); invalidObservation = null; pendingObservation = null; cursor = 0; observationFloor = tick; firstRound = 0;
+		}
+		/** Releases this consumer's invalid data/evidence without invalidating unrelated physical rounds. */
+		public void discardObservation() {
+			invalidObservation = unavailable(input.viewKey()); pendingObservation = null; cursor = 0;
+			release(this);
 		}
 		@Override public void close() {
 			if (!closed) {
@@ -61,7 +76,8 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private static final class Round {
 		final SourceKey key;
-		final SourceAccess.Handle handle;
+		final InventorySourceInput input;
+		final InventorySourceAccess.InventoryHandle handle;
 		final RetainedMemoryLedger.Ticket memory;
 		final long startedTick;
 		final long sequence;
@@ -73,14 +89,19 @@ public final class InventoryRuntime implements AutoCloseable {
 		CaptureResult last;
 		Observation failureObservation;
 		int references;
-		Round(SourceKey key, SourceAccess.Handle handle, RetainedMemoryLedger.Ticket memory, long tick, long sequence, boolean tracking) {
-			this.key = key; this.handle = handle; this.memory = memory; startedTick = tick; this.sequence = sequence; trackingObservation = tracking;
+		int scanners; // consumer scans plus bounded physical handoff leases
+		Round successor;
+		final Set<Round> predecessors = new java.util.LinkedHashSet<>();
+		boolean closed;
+		Round(SourceKey key, InventorySourceInput input, InventorySourceAccess.InventoryHandle handle, RetainedMemoryLedger.Ticket memory, long tick, long sequence, boolean tracking) {
+			this.key = key; this.input = input; this.handle = handle; this.memory = memory; startedTick = tick; this.sequence = sequence; trackingObservation = tracking;
 		}
 	}
 	private final Function<InventorySourceInput, Optional<InventorySourceAccess.Source>> resolver;
 	private final List<Consumer> consumers = new ArrayList<>();
 	private final Map<SourceKey, Round> rounds = new LinkedHashMap<>();
 	private int retainedRounds;
+	private int scanningRounds;
 	private long roundSequence;
 	private final RetainedMemoryLedger memory;
 	private CostLedger physical;
@@ -138,7 +159,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		return Optional.of(consumer);
 	}
 
-	/** A publication gate also invokes this on completed cached observations before sending. */
+	/** Input-only authority for initial admission, recovery and live SELECT witnesses, not cached publication. */
 	public boolean validate(InventorySourceInput input) {
 		return probe(input).orElse(false);
 	}
@@ -159,6 +180,36 @@ public final class InventoryRuntime implements AutoCloseable {
 		} catch (RuntimeException | LinkageError unavailable) { retireInvalid(input); return Optional.of(false); }
 		}
 	}
+	/** Checks the actual observation being published, including the completed result retained during a new sweep. */
+	public Optional<Boolean> probe(Consumer consumer) {
+		if (consumer.closed || consumer.invalidObservation != null) return Optional.of(false);
+		Round completed = consumer.completedRound, scanning = consumer.round;
+		if (completed == null && scanning == null) return probe(consumer.input);
+		int calls = completed != null && scanning != null && completed != scanning ? 2 : 1;
+		var workspace = memory.tryReserve(ROUND_MEMORY);
+		if (workspace.isEmpty()) return Optional.empty();
+		try (var reserved = workspace.get()) {
+			var admission = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, (long) calls,
+				InventorySourceAccess.PROVIDER_WORK, calls * InventorySourceAccess.PROVIDER_CALL_WORK));
+			if (admission.isEmpty()) return Optional.empty();
+			int used = 0;
+			try (var grant = admission.get()) {
+				try {
+					for (Round round : completed == null ? List.of(scanning) : scanning == null || completed == scanning ? List.of(completed) : List.of(completed, scanning)) {
+						used++; // attempted validity calls remain charged, including exceptions and invalid retirement
+						boolean valid;
+						try { valid = !round.closed && round.handle.evidenceValid(); }
+						catch (RuntimeException | LinkageError unavailable) { valid = false; }
+						if (!valid) { retire(round, unavailable(consumer.input.viewKey())); return Optional.of(false); }
+					}
+					return Optional.of(true);
+				} finally {
+					grant.commit(Map.of(InventorySourceAccess.PROBES, (long) used,
+						InventorySourceAccess.PROVIDER_WORK, used * InventorySourceAccess.PROVIDER_CALL_WORK));
+				}
+			}
+		}
+	}
 
 	public Optional<Observation> step(Consumer consumer) {
 		return step(consumer, InventorySourceAccess.MAX_STEP);
@@ -168,14 +219,24 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (consumer.closed) return InventorySourceAccess.Preparation.UNAVAILABLE;
 		if (consumer.invalidObservation != null || consumer.pendingObservation != null)
 			return InventorySourceAccess.Preparation.UNAVAILABLE;
+		Round handoff = consumer.completedRound == null ? null : consumer.completedRound.successor;
+		if (consumer.round == null && consumer.completedRound != null && !consumer.completedRound.predecessors.isEmpty())
+			return InventorySourceAccess.Preparation.DEFERRED; // finish the physical handoff before another replacement forks
+		if (consumer.round == null && handoff != null && consumer.input.equals(handoff.input)) return prepareHandoff(consumer, handoff);
 		if (consumer.round == null) {
-			for (Consumer peer : consumers) if (peer != consumer && peer.round != null && peer.input.equals(consumer.input)
+			for (Consumer peer : consumers) if (handoff == null && peer != consumer && peer.round != null && peer.input.equals(consumer.input)
 				&& shareable(consumer, peer.round)) {
-				consumer.round = peer.round; consumer.round.references++; break;
+				join(consumer, peer.round);
+				break;
 			}
 		}
 		if (consumer.round == null) {
-			if (retainedRounds >= MAX_ROUNDS) return InventorySourceAccess.Preparation.DEFERRED;
+			// A first observation cannot consume the completed-evidence replacement reserve.
+			// Count physical rounds, not consumers: compatible scanners already share above.
+			int retainedLimit = consumer.completedRound == null ? MAX_ROUNDS : MAX_RETAINED_ROUNDS;
+			boolean canCreate = handoff == null && scanningRounds < MAX_ROUNDS && retainedRounds < retainedLimit;
+			if (!canCreate && handoff == null && rounds.values().stream().noneMatch(round -> round.key.readScope().equals(consumer.input.viewKey())
+				&& shareable(consumer, round))) return InventorySourceAccess.Preparation.DEFERRED;
 			var retained = memory.tryReserve(ROUND_MEMORY);
 			if (retained.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
 			boolean ownsReservation = true;
@@ -198,17 +259,31 @@ public final class InventoryRuntime implements AutoCloseable {
 					return InventorySourceAccess.Preparation.UNAVAILABLE;
 				}
 				openedHandle = started.handle();
+				// Aliased hit positions still resolve their canonical key before joining a pinned handoff.
+				if (handoff != null && !handoff.key.equals(available.descriptor().key())) {
+					retire(consumer.completedRound, unavailable(scope.viewKey()));
+					return InventorySourceAccess.Preparation.UNAVAILABLE;
+				}
+				if (handoff != null) return prepareHandoff(consumer, handoff);
 				Round round = rounds.get(available.descriptor().key());
 				// A newly selected Ping never inherits a completed preview count.
 				if (round != null && !shareable(consumer, round)) round = null;
 				if (round == null) {
+					// Another hit position may resolve to a compatible canonical alias even at capacity.
+					// Only an actual new physical round needs the normal/replacement admission slot.
+					if (!canCreate) return InventorySourceAccess.Preparation.DEFERRED;
+					if (consumer.completedRound != null && !consumer.completedRound.key.equals(available.descriptor().key())) {
+						retire(consumer.completedRound, unavailable(scope.viewKey()));
+						return InventorySourceAccess.Preparation.UNAVAILABLE; // canonical view topology changed, not admission pressure
+					}
 					retained.get().commit(ROUND_MEMORY);
-					round = new Round(available.descriptor().key(), started.handle(), retained.get(), tick, ++roundSequence, consumer.subject instanceof TrackingSubject);
+					round = new Round(available.descriptor().key(), consumer.input, (InventorySourceAccess.InventoryHandle) started.handle(), retained.get(), tick, ++roundSequence, consumer.subject instanceof TrackingSubject);
 					retainedRounds++;
+					scanningRounds++;
 					rounds.put(round.key, round);
 					ownsReservation = false; openedHandle = null;
 				}
-				round.references++; consumer.round = round;
+				join(consumer, round);
 			} finally {
 				try { if (openedHandle != null) openedHandle.close(); }
 				finally { if (ownsReservation) retained.get().close(); }
@@ -216,20 +291,41 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 		Round round = consumer.round;
 		if (round.preparation != null) return round.preparation;
-		if (round.handle instanceof InventorySourceAccess.InventoryHandle inventory) {
+		var admission = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L,
+			InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+		if (admission.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
+		try (var grant = admission.get()) {
+			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L,
+				InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+			InventorySourceAccess.Preparation outcome = round.handle.prepareSnapshot(memory);
+			if (outcome != InventorySourceAccess.Preparation.DEFERRED) round.preparation = outcome;
+			return outcome;
+		}
+	}
+	private InventorySourceAccess.Preparation prepareHandoff(Consumer consumer, Round handoff) {
+		// A cached successor may be consumed after its original scanner's tick. Validate its
+		// own retained evidence, not just the slow peer's still-published predecessor.
+		var workspace = memory.tryReserve(ROUND_MEMORY);
+		if (workspace.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
+		try (var reserved = workspace.get()) {
 			var admission = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L,
 				InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 			if (admission.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
 			try (var grant = admission.get()) {
 				grant.commit(Map.of(InventorySourceAccess.PROBES, 1L,
 					InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-				InventorySourceAccess.Preparation outcome = inventory.prepareSnapshot(memory);
-				if (outcome != InventorySourceAccess.Preparation.DEFERRED) round.preparation = outcome;
-				return outcome;
+				boolean valid;
+				try { valid = !handoff.closed && handoff.handle.evidenceValid(); }
+				catch (RuntimeException | LinkageError unavailable) { valid = false; }
+				if (!valid) {
+					Observation invalid = unavailable(consumer.input.viewKey());
+					retire(handoff, invalid); consumer.pendingObservation = invalid;
+					return InventorySourceAccess.Preparation.UNAVAILABLE;
+				}
 			}
 		}
-		round.preparation = InventorySourceAccess.Preparation.READY;
-		return InventorySourceAccess.Preparation.READY;
+		join(consumer, handoff);
+		return handoff.preparation == null ? prepare(consumer) : handoff.preparation;
 	}
 	public Optional<Observation> step(Consumer consumer, int slotBound) {
 		if (slotBound < 1 || slotBound > InventorySourceAccess.MAX_STEP) throw new IllegalArgumentException("inventory step bound");
@@ -238,6 +334,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (consumer.pendingObservation != null) return Optional.of(consumer.pendingObservation);
 		InventorySourceAccess.Preparation preparation = prepare(consumer);
 		if (preparation == InventorySourceAccess.Preparation.DEFERRED) return Optional.empty();
+		if (consumer.invalidObservation != null) return Optional.of(consumer.invalidObservation);
 		if (preparation != InventorySourceAccess.Preparation.READY) {
 			Round failedRound = consumer.round;
 			if (failedRound == null) return Optional.ofNullable(consumer.pendingObservation);
@@ -251,8 +348,7 @@ public final class InventoryRuntime implements AutoCloseable {
 				failedRound.failureObservation = new Observation(failed, List.of());
 			}
 			Observation terminal = failedRound.failureObservation;
-			if (terminal.result().availability() != CaptureResult.Availability.READABLE
-				|| failedRound.preparation == InventorySourceAccess.Preparation.INCOMPLETE) retire(failedRound, terminal);
+			if (terminal.result().availability() != CaptureResult.Availability.READABLE) retire(failedRound, terminal);
 			return Optional.of(terminal); // INCOMPLETE remains explicit, never pretend-complete.
 		}
 		if (!logicalUsed.containsKey(consumer.subject) && logicalUsed.size() >= MAX_CONSUMERS) return Optional.empty();
@@ -273,8 +369,9 @@ public final class InventoryRuntime implements AutoCloseable {
 		int paid = round.paid.getOrDefault(consumer.subject, 0);
 		int available = Math.min(slotBound, Math.max(0, paid - consumer.cursor) + Math.max(0, allowance));
 		if (available == 0) {
-			if (round.slots.isEmpty() && round.last != null && zeroCostEmptyCompletion(round.last))
+			if (round.slots.isEmpty() && round.last != null && zeroCostEmptyCompletion(round.last)) {
 				return Optional.of(new Observation(round.last, List.of()));
+			}
 			if (consumer.cursor < round.slots.size() || round.last != null && round.last.completeness() != CaptureResult.Completeness.CONTINUE) return Optional.empty();
 			SourceAccess.StepOutcome outcome = zeroAllowanceStep(round);
 			if (outcome instanceof SourceAccess.StepOutcome.Deferred) return Optional.empty();
@@ -388,33 +485,125 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private boolean shareable(Consumer consumer, Round round) {
 		// Observation evidence is local bookkeeping, never physical-source identity.
+		if (round.closed || round.scanners == 0) return false;
+		if (consumer.completedRound != null && (round.sequence <= consumer.completedRound.sequence || round.successor != null
+			|| !round.key.equals(consumer.completedRound.key))) return false;
 		if (round.startedTick < consumer.observationFloor || round.sequence < consumer.firstRound) return false;
 		if (round.last == null || round.last.completeness() == CaptureResult.Completeness.CONTINUE) return true;
 		return !(consumer.subject instanceof TrackingSubject) || round.trackingObservation && round.startedTick == tick;
 	}
-	private void release(Consumer consumer) {
+	private void join(Consumer consumer, Round round) {
+		Round previous = consumer.completedRound;
+		if (previous != null && previous != round && previous.successor == null) {
+			// One successor per physical observation, not one replacement allowance per consumer.
+			// The lease keeps its data serviceable after the fast peer restarts; the slow peer consumes it
+			// as its next observation without losing either its previous publication evidence or progress.
+			previous.successor = round; round.predecessors.add(previous); round.references++; round.scanners++;
+		}
+		round.scanners++;
+		if (previous != round) round.references++;
+		consumer.round = round;
+	}
+	private void completed(Consumer consumer, Round round) {
+		Round previous = consumer.completedRound;
+		consumer.completedRound = round; // the scanning reference already pays for this consumer
+		if (previous != null && previous != round) releaseReference(previous);
+	}
+	private void releaseScanning(Consumer consumer) {
 		Round round = consumer.round; consumer.round = null;
-		if (round != null && --round.references == 0) {
-			try { round.handle.close(); }
-			finally { round.pages.forEach(RetainedMemoryLedger.Ticket::close); round.memory.close(); rounds.remove(round.key, round); retainedRounds--; }
+		if (round == null) return;
+		releaseScanner(round, round != consumer.completedRound);
+	}
+	private void releaseScanner(Round round, boolean ownsReference) {
+		round.scanners--;
+		if (round.scanners == 0) scanningRounds--;
+		if (ownsReference) releaseReference(round);
+		if (round.closed) return;
+		if (round.scanners == 0) {
+			// Completed publication needs only bounded local evidence, not decoded pages or quota history.
+			try { round.handle.releaseCapturedData(); }
+			finally {
+				round.pages.forEach(RetainedMemoryLedger.Ticket::close); round.pages.clear();
+				round.slots.clear(); round.paid.clear(); round.last = null;
+				rounds.remove(round.key, round);
+			}
 		}
 	}
-	/** Retire physical state, not a marker or a quota subject. Recovery requires a fresh restart. */
-	public void retireInvalid(InventorySourceInput input) {
-		var invalidRounds = new java.util.HashSet<Round>();
-		for (Consumer consumer : consumers) if (consumer.input.equals(input) && consumer.round != null) invalidRounds.add(consumer.round);
-		for (Round round : invalidRounds) retire(round, unavailable(input.viewKey()));
-	}
-	private void retire(Round round, Observation invalid) {
-		for (Consumer consumer : consumers) if (consumer.round == round) {
-			consumer.round = null; consumer.cursor = 0; consumer.invalidObservation = invalid;
+	private void releaseReference(Round round) {
+		if (--round.references == 0) { closeRound(round); return; }
+		if (!round.predecessors.isEmpty() && round.references == round.predecessors.size()) {
+			// No consumer accepted or still scans this successor. A rejected/abandoned sweep must
+			// not pin its predecessors forever or prevent a later fresh replacement.
+			releasePredecessors(round);
 		}
-		round.references = 0;
-		try { round.handle.close(); }
+	}
+	private void releasePredecessors(Round round) {
+		Error fatal = null;
+		for (Round previous : List.copyOf(round.predecessors)) {
+			try { releaseHandoff(previous); }
+			catch (Error failure) {
+				if (fatal == null) fatal = failure;
+				else if (failure != fatal) fatal.addSuppressed(failure);
+			}
+		}
+		if (fatal != null) throw fatal;
+	}
+	private void releaseHandoff(Round previous) {
+		Round successor = previous.successor; previous.successor = null;
+		if (successor == null) return;
+		successor.predecessors.remove(previous);
+		releaseScanner(successor, true);
+	}
+	private void release(Consumer consumer) {
+		Error fatal = null;
+		try { releaseScanning(consumer); } catch (Error failure) { fatal = failure; }
+		try {
+			Round completed = consumer.completedRound; consumer.completedRound = null;
+			if (completed != null) releaseReference(completed);
+		} catch (Error failure) {
+			if (fatal == null) fatal = failure;
+			else if (failure != fatal) fatal.addSuppressed(failure);
+		}
+		if (fatal != null) throw fatal;
+	}
+	private void closeRound(Round round) {
+		if (round.closed) return;
+		round.closed = true;
+		Error fatal = null;
+		try { round.handle.close(); } catch (Error failure) { fatal = failure; }
 		finally {
 			round.pages.forEach(RetainedMemoryLedger.Ticket::close); round.memory.close(); rounds.remove(round.key, round); retainedRounds--;
 			round.pages.clear(); round.slots.clear(); round.paid.clear(); round.last = null;
 		}
+		try { releaseHandoff(round); }
+		catch (Error failure) {
+			if (fatal == null) fatal = failure;
+			else if (failure != fatal) fatal.addSuppressed(failure);
+		}
+		if (fatal != null) throw fatal;
+	}
+	/** Retire physical state, not a marker or a quota subject. Recovery requires a fresh restart. */
+	public void retireInvalid(InventorySourceInput input) {
+		var invalidRounds = new java.util.HashSet<Round>();
+		for (Consumer consumer : consumers) if (consumer.input.equals(input)) {
+			if (consumer.round != null) invalidRounds.add(consumer.round);
+			if (consumer.completedRound != null) invalidRounds.add(consumer.completedRound);
+		}
+		for (Round round : invalidRounds) retire(round, unavailable(input.viewKey()));
+	}
+	private void retire(Round round, Observation invalid) {
+		if (round.closed) return;
+		Error fatal = null;
+		try { releasePredecessors(round); } catch (Error failure) { fatal = failure; }
+		for (Consumer consumer : consumers) if (consumer.round == round || consumer.completedRound == round) {
+			consumer.cursor = 0; consumer.invalidObservation = invalid; consumer.pendingObservation = null;
+			try { release(consumer); } // also releases a different in-progress round without leaking shared references
+			catch (Error failure) {
+				if (fatal == null) fatal = failure;
+				else if (failure != fatal) fatal.addSuppressed(failure);
+			}
+		}
+		if (fatal != null) throw fatal;
 	}
 	private void clearLogical(boolean preview) {
 		logicalUsed.keySet().removeIf(s -> (s instanceof PreviewSubject) == preview);

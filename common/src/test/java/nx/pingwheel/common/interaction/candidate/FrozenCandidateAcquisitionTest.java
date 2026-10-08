@@ -9,6 +9,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.domain.BlockFace;
+import nx.pingwheel.common.domain.EntityLocalGeometryMetadata;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.ResolvedTarget;
 import nx.pingwheel.common.domain.Target;
@@ -19,6 +20,7 @@ import nx.pingwheel.common.interaction.TargetSnapshot;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
 import nx.pingwheel.common.integration.sable.client.SableCaptureEquivalence;
+import nx.pingwheel.common.math.LocalGeometryKind;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 
@@ -78,14 +80,18 @@ class FrozenCandidateAcquisitionTest {
 	}
 
 	@Test
-	void truncatedUnorderedPrefixCannotPublishItsProvisionalNearestButOrdinaryRemains() {
+	void incompleteScannedClassStaysUnavailableEvenWhenTheOrdinaryMatchesIt() {
 		TargetSnapshot ordinary = block(1, false, BlockFace.WEST);
 		FrozenCandidateSet set = finish(ordinary, List.of(entity(10, "minecraft:item", 1), block(3, true, BlockFace.UP)),
 			EnumSet.noneOf(PreciseTargetType.class));
-		assertEquals(PreciseSlot.Availability.INCOMPLETE, set.slot(PreciseTargetType.DROPPED_ITEM).availability());
-		assertEquals(PreciseSlot.Availability.INCOMPLETE, set.slot(PreciseTargetType.ENTITY_BLOCK).availability());
-		assertEquals(ordinary.target(), selected(set, PreciseTargetType.BLOCK).resolvedTarget().target());
-		assertEquals(2, set.candidates().size());
+		for (PreciseTargetType type : List.of(PreciseTargetType.DROPPED_ITEM, PreciseTargetType.ENTITY,
+			PreciseTargetType.ENTITY_BLOCK, PreciseTargetType.BLOCK)) {
+			assertEquals(PreciseSlot.Availability.INCOMPLETE, set.slot(type).availability(), type.name());
+			assertTrue(set.slot(type).candidateId().isEmpty(), type.name());
+		}
+		assertEquals(PreciseSlot.Availability.AVAILABLE, set.slot(PreciseTargetType.LOCATION).availability());
+		assertEquals(ordinary.target(), set.ordinary().resolvedTarget().target());
+		assertEquals(2, set.candidates().size(), "an incomplete scan retains only the ordinary and the derived location");
 	}
 
 	@Test
@@ -98,15 +104,20 @@ class FrozenCandidateAcquisitionTest {
 	}
 
 	@Test
-	void ordinaryIsPreferredForItsSlotAndOnlyOneSupplementIsInstalledPerConcreteType() {
+	void nearestSameCategoryCandidateWinsAndOnlyOneSupplementIsInstalledPerConcreteType() {
 		TargetSnapshot ordinary = entity(10, "minecraft:cow", 1);
 		List<TargetSnapshot> alternatives = new ArrayList<>();
 		alternatives.add(entity(2, "minecraft:item", 2));
-		alternatives.add(entity(1, "minecraft:cow", 3));
+		TargetSnapshot nearerCow = entity(1, "minecraft:cow", 3);
+		alternatives.add(nearerCow);
 		for (int i = 3; i < 30; i++) alternatives.add(block(i, i % 2 == 0, BlockFace.WEST));
 		FrozenCandidateSet set = finish(ordinary, alternatives, all());
-		assertEquals(ordinary.target(), selected(set, PreciseTargetType.ENTITY).resolvedTarget().target());
-		assertEquals(5, set.candidates().size());
+		assertEquals(nearerCow.target(), selected(set, PreciseTargetType.ENTITY).resolvedTarget().target(),
+			"a nearer same-category supplement wins over the farther ordinary");
+		assertEquals(entity(2, "minecraft:item", 2).target(),
+			selected(set, PreciseTargetType.DROPPED_ITEM).resolvedTarget().target());
+		assertEquals(ordinary.target(), set.ordinary().resolvedTarget().target());
+		assertEquals(6, set.candidates().size());
 		assertTrue(set.candidates().size() <= FrozenCandidateSet.MAX_CANDIDATES);
 		assertEquals(5, set.preciseSlots().stream().map(slot -> slot.candidateId().orElseThrow()).distinct().count());
 	}
@@ -192,7 +203,143 @@ class FrozenCandidateAcquisitionTest {
 	}
 
 	@Test
-	void boundedCollectorMatchesAnIndependentExhaustiveAllocationAcrossMixedIdentityOrders() {
+	void nearerSupplementBeatsFartherOrdinaryInTheSameCategory() {
+		TargetSnapshot ordinary = entity(5, "minecraft:item", 1);
+		TargetSnapshot nearerItem = entity(2, "minecraft:item", 2);
+		FrozenCandidateSet set = finish(ordinary, List.of(nearerItem), all());
+		Candidate specific = selected(set, PreciseTargetType.DROPPED_ITEM);
+		assertEquals(nearerItem.target(), specific.resolvedTarget().target());
+		assertEquals(2, specific.distance());
+		Candidate generic = selected(set, PreciseTargetType.ENTITY);
+		assertEquals(ordinary.target(), generic.resolvedTarget().target(),
+			"the specific class consumed the nearer identity, so the generic class keeps the ordinary");
+		assertEquals(5, generic.distance());
+	}
+
+	@Test
+	void nearerOrdinaryBeatsFartherSupplementInTheSameCategory() {
+		TargetSnapshot ordinary = entity(2, "minecraft:item", 1);
+		TargetSnapshot fartherItem = entity(5, "minecraft:item", 2);
+		FrozenCandidateSet set = finish(ordinary, List.of(fartherItem), all());
+		Candidate specific = selected(set, PreciseTargetType.DROPPED_ITEM);
+		assertEquals(ordinary.target(), specific.resolvedTarget().target());
+		assertEquals(2, specific.distance());
+		Candidate generic = selected(set, PreciseTargetType.ENTITY);
+		assertEquals(fartherItem.target(), generic.resolvedTarget().target());
+		assertEquals(5, generic.distance());
+	}
+
+	@Test
+	void equalDistanceKeepsTheOrdinaryBeforeAnEquivalentSupplement() {
+		TargetSnapshot ordinary = block(2, false, BlockFace.WEST);
+		TargetSnapshot tied = blockAt(0, 0, 2, false, BlockFace.NORTH);
+		FrozenCandidateSet set = finish(ordinary, List.of(tied), all());
+		Candidate selected = selected(set, PreciseTargetType.BLOCK);
+		assertEquals(ordinary.target(), selected.resolvedTarget().target());
+		assertEquals(2, selected.distance());
+		assertEquals(2, set.candidates().size(), "an exact tie installs neither the supplement nor any other candidate");
+	}
+
+	@Test
+	void eachCertifiedClassScansIndependentlyAndTheOrdinaryCannotBypassAnIncompleteClass() {
+		TargetSnapshot ordinary = block(5, true, BlockFace.WEST);
+		TargetSnapshot item = entity(2, "minecraft:item", 1);
+		FrozenCandidateSet set = finish(ordinary, List.of(item),
+			EnumSet.of(PreciseTargetType.DROPPED_ITEM, PreciseTargetType.BLOCK));
+		assertEquals(item.target(), selected(set, PreciseTargetType.DROPPED_ITEM).resolvedTarget().target());
+		assertEquals(PreciseSlot.Availability.INCOMPLETE, set.slot(PreciseTargetType.ENTITY).availability());
+		assertEquals(PreciseSlot.Availability.INCOMPLETE, set.slot(PreciseTargetType.ENTITY_BLOCK).availability(),
+			"an incomplete more specific class disables its leaf even though the ordinary chest would match it");
+		assertTrue(set.slot(PreciseTargetType.ENTITY_BLOCK).candidateId().isEmpty());
+		assertEquals(ordinary.target(), selected(set, PreciseTargetType.BLOCK).resolvedTarget().target());
+		assertEquals(PreciseSlot.Availability.AVAILABLE, set.slot(PreciseTargetType.LOCATION).availability());
+	}
+
+	@Test
+	void specificClassConsumesItsIdentityBeforeTheGenericClassInstallsTheNextNearest() {
+		TargetSnapshot ordinary = blockAt(5, 0, 0, true, BlockFace.WEST);
+		TargetSnapshot nearerChest = blockAt(2, 0, 0, true, BlockFace.EAST);
+		TargetSnapshot stone = blockAt(3, 0, 0, false, BlockFace.NORTH);
+		FrozenCandidateSet set = finish(ordinary, List.of(stone, nearerChest), all());
+		Candidate specific = selected(set, PreciseTargetType.ENTITY_BLOCK);
+		assertEquals(nearerChest.target(), specific.resolvedTarget().target());
+		assertEquals(2, specific.distance());
+		Candidate generic = selected(set, PreciseTargetType.BLOCK);
+		assertEquals(stone.target(), generic.resolvedTarget().target());
+		assertEquals(3, generic.distance(),
+			"the generic class skips the consumed identity and installs the next nearest, not the farther ordinary");
+	}
+
+	@Test
+	void sameIdentityNearerContactInstallsThatContactsOwnFaceInsteadOfTheOrdinaryFace() {
+		TargetSnapshot base = TargetSnapshotFactory.block(DIMENSION, 5, 0, 0, "minecraft:chest", true);
+		CaptureEquivalenceKey key = CaptureEquivalenceKey.nativeTarget(base.target());
+		TargetSnapshot ordinary = TargetSnapshotFactory.block(DIMENSION, 5, 0, 0, "minecraft:chest", true, BlockFace.WEST)
+			.withCandidateHit(new CandidateHit(new WorldVector(5.5, 0, 0), key));
+		TargetSnapshot nearerContact = TargetSnapshotFactory.block(DIMENSION, 5, 0, 0, "minecraft:chest", true, BlockFace.NORTH)
+			.withCandidateHit(new CandidateHit(new WorldVector(5.25, 0, 0), key));
+		FrozenCandidateSet set = acquisition(List.of(evidence(nearerContact)), all())
+			.finish(ordinary, resolve(ordinary), RESOLVER);
+		assertEquals(new WorldVector(5.25, 0, 0), set.ordinary().worldHit());
+		assertEquals(5.25, set.ordinary().distance());
+		assertEquals(Optional.of(BlockFace.NORTH), set.ordinary().blockHitFace(),
+			"the installed face must come from the selected nearer contact, not the farther ordinary hit");
+		assertEquals(resolve(ordinary).target(), set.ordinary().resolvedTarget().target());
+	}
+
+	@Test
+	void sameIdentityNearerContactInstallsThatContactsOwnLocalGeometryMetadataConsistentWithItsPoint() {
+		TargetSnapshot ordinary = entityWithMetadata(5, new UUID(0, 1), "test:ordinary");
+		TargetSnapshot nearerContact = entityWithMetadata(2, new UUID(0, 1), "test:near");
+		FrozenCandidateSet set = acquisition(List.of(evidence(nearerContact)), all())
+			.finish(ordinary, resolve(ordinary), RESOLVER);
+		assertEquals(new WorldVector(2, 0, 0), set.ordinary().worldHit());
+		assertEquals(2, set.ordinary().distance());
+		EntityLocalGeometryMetadata installed = set.ordinary().entityLocalGeometryMetadata().orElseThrow();
+		assertEquals("test:near", installed.sourceId(),
+			"the installed metadata must be the selected contact's own, not the farther ordinary detail");
+		assertEquals(new WorldVector(2, 0, 0), installed.worldWorldVector());
+		assertEquals(resolve(ordinary).target(), set.ordinary().resolvedTarget().target());
+		assertEquals(2, selected(set, PreciseTargetType.ENTITY).distance());
+		assertEquals(2, set.candidates().size(), "the same identity is never installed twice");
+	}
+
+	@Test
+	void sameIdentityEvidenceAtEqualDistanceKeepsTheOrdinaryContactAndProvenance() {
+		TargetSnapshot ordinary = entityWithMetadata(5, new UUID(0, 1), "test:ordinary");
+		TargetSnapshot equal = entityWithMetadata(5, new UUID(0, 1), "test:equal");
+		FrozenCandidateSet set = acquisition(List.of(evidence(equal)), all())
+			.finish(ordinary, resolve(ordinary), RESOLVER);
+		assertEquals(new WorldVector(5, 0, 0), set.ordinary().worldHit());
+		assertEquals("test:ordinary", set.ordinary().entityLocalGeometryMetadata().orElseThrow().sourceId());
+		assertEquals(2, set.candidates().size());
+	}
+
+	@Test
+	void fartherSameIdentityEvidenceIsNotInstalledAndCannotDuplicateTheOrdinary() {
+		TargetSnapshot ordinary = entityWithMetadata(5, new UUID(0, 1), "test:ordinary");
+		TargetSnapshot farther = entityWithMetadata(9, new UUID(0, 1), "test:farther");
+		FrozenCandidateSet set = acquisition(List.of(evidence(farther)), all())
+			.finish(ordinary, resolve(ordinary), RESOLVER);
+		assertEquals(new WorldVector(5, 0, 0), set.ordinary().worldHit());
+		assertEquals(5, set.ordinary().distance());
+		assertEquals("test:ordinary", set.ordinary().entityLocalGeometryMetadata().orElseThrow().sourceId());
+		assertEquals(ordinary.target(), selected(set, PreciseTargetType.ENTITY).resolvedTarget().target());
+		assertEquals(2, set.candidates().size());
+	}
+
+	@Test
+	void missingAndIncompleteStayDistinctForTheSameEmptyEvidence() {
+		TargetSnapshot ordinary = block(2, false, BlockFace.NORTH);
+		FrozenCandidateSet complete = finish(ordinary, List.of(), all());
+		assertEquals(PreciseSlot.Availability.MISSING, complete.slot(PreciseTargetType.DROPPED_ITEM).availability());
+		FrozenCandidateSet truncated = finish(ordinary, List.of(), EnumSet.noneOf(PreciseTargetType.class));
+		assertEquals(PreciseSlot.Availability.INCOMPLETE, truncated.slot(PreciseTargetType.DROPPED_ITEM).availability());
+		assertTrue(truncated.slot(PreciseTargetType.DROPPED_ITEM).candidateId().isEmpty());
+	}
+
+	@Test
+	void boundedCollectorMatchesAnIndependentExhaustiveNearestAllocationAcrossMixedIdentityOrders() {
 		java.util.Random random = new java.util.Random(4182);
 		for (int attempt = 0; attempt < 80; attempt++) {
 			List<TargetSnapshot> pool = new ArrayList<>();
@@ -201,29 +348,78 @@ class FrozenCandidateAcquisitionTest {
 				pool.add(i % 2 == 0 ? entity(distance, i % 4 == 0 ? "minecraft:item" : "minecraft:cow", i)
 					: block(distance, i % 3 == 0, BlockFace.WEST));
 			}
+			// The bounded collector may re-contact an identity nearer with its own provenance.
+			// The independent expectation below is derived from this original pool only, never
+			// from the collector reduction, so a dropped winner cannot hide behind it.
+			if (random.nextBoolean()) {
+				TargetSnapshot original = pool.get(random.nextInt(pool.size()));
+				pool.add(recontact(original, Math.max(0.5, evidence(original).distance() - 1)));
+			}
 			java.util.Collections.shuffle(pool, random);
 			TargetSnapshot ordinary = pool.get(random.nextInt(pool.size()));
-			FrozenCandidateSet actual = finish(ordinary, pool, all());
+			EnumSet<PreciseTargetType> certified = EnumSet.noneOf(PreciseTargetType.class);
+			for (PreciseTargetType type : List.of(PreciseTargetType.DROPPED_ITEM, PreciseTargetType.ENTITY,
+				PreciseTargetType.ENTITY_BLOCK, PreciseTargetType.BLOCK)) {
+				if (random.nextBoolean()) certified.add(type);
+			}
+			List<CandidateEvidence> bounded = orderedEvidence(pool);
+			FrozenCandidateSet actual = acquisition(bounded, certified).finish(ordinary, resolve(ordinary), RESOLVER);
+			java.util.Map<CaptureEquivalenceKey, Contact> contacts = canonicalContacts(pool);
+			CaptureEquivalenceKey ordinaryKey = ordinary.candidateHit().orElseThrow().equivalenceKey();
+			Contact ordinaryContact = contacts.get(ordinaryKey);
+			assertNotNull(ordinaryContact, "attempt=" + attempt);
+			// A non-winning ordinary identity need not survive the nearest-two reduction.
+			// Independently sort the original contacts to determine whether its nearer
+			// contact can reach finalization; do not derive this expectation from bounded.
+			if (!retainedByNearestTwo(ordinaryContact, contacts.values())
+				|| ordinaryContact.distance() >= evidence(ordinary).distance()) {
+				CandidateEvidence original = evidence(ordinary);
+				ordinaryContact = new Contact(ordinaryKey, resolve(ordinary), original.distance(),
+					original.hit().worldHit(), ordinary.entityLocalGeometryMetadata(), ordinary.blockHitFace(), -1);
+			}
 			java.util.Set<CaptureEquivalenceKey> consumed = new java.util.HashSet<>();
 			for (PreciseTargetType type : List.of(PreciseTargetType.DROPPED_ITEM, PreciseTargetType.ENTITY,
 				PreciseTargetType.ENTITY_BLOCK, PreciseTargetType.BLOCK)) {
-				TargetSnapshot expected = null;
-				if (type.matches(resolve(ordinary)) && !consumed.contains(ordinary.candidateHit().orElseThrow().equivalenceKey())) {
-					expected = ordinary;
-				} else {
-					for (TargetSnapshot snapshot : pool) {
-						if (!type.matches(resolve(snapshot)) || consumed.contains(snapshot.candidateHit().orElseThrow().equivalenceKey())) continue;
-						if (expected == null || evidence(snapshot).distance() < evidence(expected).distance()) expected = snapshot;
+				if (!certified.contains(type)) {
+					assertTrue(actual.slot(type).candidateId().isEmpty(), "attempt=" + attempt + " type=" + type);
+					assertEquals(PreciseSlot.Availability.INCOMPLETE, actual.slot(type).availability(),
+						"attempt=" + attempt + " type=" + type);
+					continue;
+				}
+				Contact expected = type.matches(ordinaryContact.resolved()) && !consumed.contains(ordinaryKey)
+					? ordinaryContact : null;
+				Contact nearestSupplement = null;
+				for (Contact contact : contacts.values()) {
+					if (contact.key().equals(ordinaryKey) || !type.matches(contact.resolved())
+						|| consumed.contains(contact.key())) continue;
+					if (nearestSupplement == null || contact.distance() < nearestSupplement.distance()
+						|| (contact.distance() == nearestSupplement.distance()
+							&& contact.encounter() < nearestSupplement.encounter())) {
+						nearestSupplement = contact;
 					}
 				}
-				if (expected == null) {
-					assertTrue(actual.slot(type).candidateId().isEmpty());
-				} else {
-					CaptureEquivalenceKey expectedKey = expected.candidateHit().orElseThrow().equivalenceKey();
-					assertEquals(expectedKey, selected(actual, type).equivalenceKey(), "attempt=" + attempt + " type=" + type);
-					consumed.add(expectedKey);
+				if (nearestSupplement != null && (expected == null || nearestSupplement.distance() < expected.distance())) {
+					expected = nearestSupplement;
 				}
+				if (expected == null) {
+					assertTrue(actual.slot(type).candidateId().isEmpty(), "attempt=" + attempt + " type=" + type);
+					continue;
+				}
+				Candidate installed = selected(actual, type);
+				assertEquals(expected.key(), installed.equivalenceKey(), "attempt=" + attempt + " type=" + type);
+				assertEquals(expected.distance(), installed.distance(), 1.0E-12, "attempt=" + attempt + " type=" + type);
+				assertEquals(expected.worldHit(), installed.worldHit(), "attempt=" + attempt + " type=" + type);
+				assertEquals(expected.metadata(), installed.entityLocalGeometryMetadata(),
+					"attempt=" + attempt + " type=" + type);
+				assertEquals(expected.face(), installed.blockHitFace(), "attempt=" + attempt + " type=" + type);
+				consumed.add(expected.key());
 			}
+			assertEquals(ordinaryContact.distance(), actual.ordinary().distance(), 1.0E-12, "attempt=" + attempt);
+			assertEquals(ordinaryContact.worldHit(), actual.ordinary().worldHit(), "attempt=" + attempt);
+			assertEquals(ordinaryContact.metadata(), actual.ordinary().entityLocalGeometryMetadata(), "attempt=" + attempt);
+			assertEquals(ordinaryContact.face(), actual.ordinary().blockHitFace(), "attempt=" + attempt);
+			assertEquals(ordinaryContact.resolved().target(), actual.ordinary().resolvedTarget().target(),
+				"attempt=" + attempt);
 		}
 	}
 
@@ -231,10 +427,13 @@ class FrozenCandidateAcquisitionTest {
 	private static FrozenCandidateAcquisition acquisition(List<CandidateEvidence> values, java.util.Set<PreciseTargetType> certified) {
 		return new FrozenCandidateAcquisition(new ActiveInteraction().begin(), RAY, 100, new WorldVector(20, 0, 0), values, certified);
 	}
-	private static FrozenCandidateSet finish(TargetSnapshot ordinary, List<TargetSnapshot> values, java.util.Set<PreciseTargetType> certified) {
+	private static List<CandidateEvidence> orderedEvidence(List<TargetSnapshot> values) {
 		CandidateCollector collector = new CandidateCollector();
 		values.forEach(snapshot -> collector.add(evidence(snapshot)));
-		return acquisition(collector.evidence(), certified).finish(ordinary, resolve(ordinary), RESOLVER);
+		return collector.evidence();
+	}
+	private static FrozenCandidateSet finish(TargetSnapshot ordinary, List<TargetSnapshot> values, java.util.Set<PreciseTargetType> certified) {
+		return acquisition(orderedEvidence(values), certified).finish(ordinary, resolve(ordinary), RESOLVER);
 	}
 	private static Candidate selected(FrozenCandidateSet set, PreciseTargetType type) {
 		return set.candidate(set.slot(type).candidateId().orElseThrow()).orElseThrow();
@@ -243,9 +442,60 @@ class FrozenCandidateAcquisitionTest {
 	private static CandidateEvidence evidence(TargetSnapshot snapshot) {
 		return new CandidateEvidence(snapshot, FrozenCandidateAcquisition.distance(RAY.origin(), snapshot.candidateHit().orElseThrow().worldHit()));
 	}
+	private record Contact(CaptureEquivalenceKey key, ResolvedTarget resolved, double distance,
+		WorldVector worldHit, Optional<EntityLocalGeometryMetadata> metadata, Optional<BlockFace> face, int encounter) {}
+	private static java.util.Map<CaptureEquivalenceKey, Contact> canonicalContacts(List<TargetSnapshot> pool) {
+		java.util.Map<CaptureEquivalenceKey, Contact> contacts = new java.util.LinkedHashMap<>();
+		for (int index = 0; index < pool.size(); index++) {
+			TargetSnapshot snapshot = pool.get(index);
+			CandidateEvidence value = evidence(snapshot);
+			Contact existing = contacts.get(value.hit().equivalenceKey());
+			if (existing == null || value.distance() < existing.distance()) {
+				contacts.put(value.hit().equivalenceKey(), new Contact(value.hit().equivalenceKey(),
+					resolve(snapshot), value.distance(), value.hit().worldHit(),
+					snapshot.entityLocalGeometryMetadata(), snapshot.blockHitFace(), index));
+			}
+		}
+		return contacts;
+	}
+	private static boolean retainedByNearestTwo(Contact ordinary, java.util.Collection<Contact> contacts) {
+		for (PreciseTargetType type : List.of(PreciseTargetType.DROPPED_ITEM, PreciseTargetType.ENTITY,
+			PreciseTargetType.ENTITY_BLOCK, PreciseTargetType.BLOCK)) {
+			boolean retained = contacts.stream().filter(contact -> type.matches(contact.resolved()))
+				.sorted(java.util.Comparator.comparingDouble(Contact::distance).thenComparingInt(Contact::encounter))
+				.limit(2).anyMatch(contact -> contact.key().equals(ordinary.key()));
+			if (retained) return true;
+		}
+		return false;
+	}
+	private static TargetSnapshot recontact(TargetSnapshot original, double nearer) {
+		CandidateHit hit = new CandidateHit(new WorldVector(nearer, 0, 0),
+			original.candidateHit().orElseThrow().equivalenceKey());
+		if (original.target() instanceof Target.BlockTarget block) {
+			return TargetSnapshotFactory.block(block.dimensionId(), block.x(), block.y(), block.z(),
+				block.blockRegistryId(), original.matchContext().blockHasBlockEntity().orElse(false), BlockFace.NORTH)
+				.withCandidateHit(hit);
+		}
+		Target.EntityTarget entity = (Target.EntityTarget) original.target();
+		EntityLocalGeometryMetadata metadata = new EntityLocalGeometryMetadata("test:recontact", LocalGeometryKind.BLOCK,
+			0, 0, 0, "minecraft:stone", Optional.empty(), new WorldVector(0.5, 0, 0.5), new WorldVector(nearer, 0, 0));
+		return new TargetSnapshot(entity, original.matchContext(), Optional.empty(), Optional.of(metadata),
+			Optional.empty(), Optional.of(hit));
+	}
+	private static TargetSnapshot entityWithMetadata(int distance, UUID id, String sourceId) {
+		TargetSnapshot base = TargetSnapshotFactory.entity(DIMENSION, id, "minecraft:cow");
+		EntityLocalGeometryMetadata metadata = new EntityLocalGeometryMetadata(sourceId, LocalGeometryKind.BLOCK,
+			0, 0, 0, "minecraft:stone", Optional.empty(), new WorldVector(0.5, 0, 0.5), new WorldVector(distance, 0, 0));
+		return new TargetSnapshot(base.target(), base.matchContext(), Optional.empty(), Optional.of(metadata),
+			Optional.empty(), Optional.of(new CandidateHit(new WorldVector(distance, 0, 0),
+				CaptureEquivalenceKey.nativeTarget(base.target()))));
+	}
 	private static TargetSnapshot block(int x, boolean blockEntity, BlockFace face) {
-		TargetSnapshot snapshot = TargetSnapshotFactory.block(DIMENSION, x, 0, 0, blockEntity ? "minecraft:chest" : "minecraft:stone", blockEntity, face);
-		return snapshot.withCandidateHit(new CandidateHit(new WorldVector(x, 0, 0), CaptureEquivalenceKey.nativeTarget(snapshot.target())));
+		return blockAt(x, 0, 0, blockEntity, face);
+	}
+	private static TargetSnapshot blockAt(int x, int y, int z, boolean blockEntity, BlockFace face) {
+		TargetSnapshot snapshot = TargetSnapshotFactory.block(DIMENSION, x, y, z, blockEntity ? "minecraft:chest" : "minecraft:stone", blockEntity, face);
+		return snapshot.withCandidateHit(new CandidateHit(new WorldVector(x, y, z), CaptureEquivalenceKey.nativeTarget(snapshot.target())));
 	}
 	private static TargetSnapshot entity(int distance, String type, int id) {
 		TargetSnapshot snapshot = TargetSnapshotFactory.entity(DIMENSION, new UUID(0, id), type);

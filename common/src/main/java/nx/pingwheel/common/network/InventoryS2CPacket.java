@@ -57,7 +57,6 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 		public Offer {
 			if (periodOutOfRange(previewPeriodTicks) || periodOutOfRange(trackingPeriodTicks)
 				|| resyncMinPeriods < InventoryLimits.MIN_RESYNC_PERIODS
-				|| resyncMinPeriods > InventoryLimits.MAX_PERIOD_TICKS
 				|| heartbeatPeriods < InventoryLimits.MIN_HEARTBEAT_PERIODS
 				|| heartbeatPeriods > InventoryLimits.MAX_HEARTBEAT_PERIODS) {
 				throw new IllegalArgumentException("inventory offer periods");

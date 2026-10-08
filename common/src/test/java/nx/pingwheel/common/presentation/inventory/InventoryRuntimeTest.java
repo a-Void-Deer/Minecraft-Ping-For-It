@@ -365,4 +365,449 @@ class InventoryRuntimeTest {
 			assertEquals(1, memoryCaptures.get()); assertTrue(memoryValidCalls.get() > afterDefer);
 		}
 	}
+	@Test void terminalPublicationUsesRetainedEvidenceNotAFreshSelfConsistentWrapper() {
+		var settings = InventorySettings.serverDefaults(); var owner = new UUID(6, 6);
+		var reads = new AtomicInteger(); var resolutions = new AtomicInteger(); var closes = new AtomicInteger(); int[] layout = {1};
+		try (var runtime = new InventoryRuntime(i -> {
+			resolutions.incrementAndGet(); int expected = layout[0];
+			return Optional.of(new Source(i, reads, 1) {
+				@Override public boolean valid() { validCalls.incrementAndGet(); return layout[0] == expected; }
+				@Override public void close() { closes.incrementAndGet(); }
+			});
+		}, 16_000_000)) {
+			runtime.advance(0, settings);
+			var consumer = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(consumer).orElseThrow().result().completeness());
+			layout[0] = 2;
+			assertTrue(runtime.validate(input(owner)), "fresh authority can read the new topology, but does not authorize old data");
+			int before = resolutions.get();
+			assertEquals(Optional.of(false), runtime.probe(consumer));
+			assertEquals(before, resolutions.get(), "publication checks the admitted terminal handle, never a new resolve");
+			assertEquals(1, reads.get(), "publication validity never steps or reads items");
+			assertTrue(consumer.invalidated()); assertEquals(2, closes.get(), "one fresh authority wrapper and one retained handle");
+			layout[0] = 1;
+			assertEquals(Optional.of(false), runtime.probe(consumer), "retirement cannot fall back to a now-valid fresh resolve");
+			assertEquals(before, resolutions.get());
+			consumer.close(); assertEquals(2, closes.get()); assertEquals(1024, runtime.memory().retained());
+		}
+	}
+	@Test void restartedTrackingRetainsOldCompletedEvidenceAndSharedRetirementRevokesPreviouslyCheckedTerminalPeer() {
+		var settings = InventorySettings.serverDefaults(); var owner = new UUID(7, 7);
+		var reads = new AtomicInteger(); var closes = new AtomicInteger(); int[] layout = {1};
+		try (var runtime = new InventoryRuntime(i -> {
+			int expected = layout[0]; return Optional.of(new Source(i, reads, 2) {
+				@Override public boolean valid() { return layout[0] == expected; }
+				@Override public void close() { closes.incrementAndGet(); }
+			});
+		}, 16_000_000)) {
+			runtime.advance(0, settings);
+			var terminal = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			var tracking = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+			runtime.step(terminal, 1).orElseThrow(); runtime.step(tracking).orElseThrow();
+			runtime.step(terminal, 1).orElseThrow(); runtime.step(tracking).orElseThrow(); tracking.retainCompleted(); assertEquals(2, reads.get());
+			runtime.advance(3, settings); tracking.restart();
+			assertEquals(Optional.of(true), runtime.probe(terminal), "earlier same-tick publication admission");
+			layout[0] = 2;
+			assertEquals(CaptureResult.Completeness.CONTINUE, runtime.step(tracking, 1).orElseThrow().result().completeness());
+			assertEquals(Optional.of(false), runtime.probe(tracking), "new scanning handle is valid; the old completed result is not");
+			assertTrue(terminal.invalidated(), "retiring shared evidence reaches terminal/non-scanning consumers too");
+			assertEquals(Optional.of(false), runtime.probe(terminal), "an earlier check cannot shield a subsequently retired consumer");
+			assertEquals(2, closes.get(), "old shared evidence and the abandoned new scan each close once");
+			assertEquals(3, reads.get(), "retirement does not read a fourth slot");
+			assertEquals(2L * 4096 + 2L * 1024, runtime.memory().retained());
+			terminal.close(); tracking.close(); assertEquals(2, closes.get()); assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void evidenceLeaseReleasesPagesAtLastScannerRestartAndClosesOnlyWhenReplacedOrLastConsumerLeaves() {
+		var settings = InventorySettings.serverDefaults(); var owner = new UUID(8, 8);
+		var reads = new AtomicInteger(); var closes = new AtomicInteger(); var validations = new AtomicInteger(); var snapshotCloses = new AtomicInteger();
+		try (var runtime = new InventoryRuntime(i -> Optional.of(new Source(i, reads, 2) {
+			@Override public boolean valid() { validations.incrementAndGet(); return true; }
+			@Override public void close() { closes.incrementAndGet(); }
+			@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
+				return Optional.of(new InventorySourceAccess.SnapshotPlan() {
+					@Override public long memoryUpperBoundBytes() { return 1024; }
+					@Override public Optional<InventorySourceAccess.InventorySnapshot> capture() {
+						return Optional.of(new InventorySourceAccess.InventorySnapshot() {
+							@Override public int slots() { return 2; }
+							@Override public InventoryDomainCodec.Item read(int slot) { reads.incrementAndGet(); return slot == 0 ? item(7) : null; }
+							@Override public long retainedBytes() { return 256; }
+							@Override public void close() { snapshotCloses.incrementAndGet(); }
+						});
+					}
+				});
+			}
+		}), 16_000_000)) {
+			runtime.advance(0, settings);
+			var a = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+			var b = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+			runtime.step(a).orElseThrow(); a.retainCompleted(); runtime.step(b).orElseThrow(); b.retainCompleted();
+			int before = validations.get(); assertEquals(Optional.of(true), runtime.probe(a));
+			assertEquals(before + 1, validations.get(), "identical scan/completed references are validated only once");
+			long retainedPages = runtime.memory().retained(); a.restart(); b.restart();
+			assertTrue(runtime.memory().retained() < retainedPages, "last scanner drops pages while both evidence references stay charged");
+			assertEquals(2L * 4096 + 1024 + 4096 + 262144 + 32768, runtime.memory().retained(), "one bounded evidence lease plus paid target quota and two consumers");
+			assertEquals(0, closes.get()); assertEquals(1, snapshotCloses.get(), "last scanner releases detached snapshot memory, but not its source evidence");
+			assertTrue(runtime.step(a).isPresent()); a.retainCompleted(); assertEquals(4, reads.get(), "restart creates a fresh sweep even in the same tick");
+			assertEquals(0, closes.get(), "the slow peer still owns the old completed evidence");
+			b.close(); assertEquals(1, closes.get()); a.close(); assertEquals(2, closes.get());
+			assertEquals(2, snapshotCloses.get(), "each capture is released once despite scan and completed references sharing a handle");
+			assertEquals(1024, runtime.memory().retained(), "replacing or releasing evidence never refunds paid logical usage");
+		}
+	}
+	@Test void publicationEvidenceAdmissionDefersBeforeAnyProviderCallAndNeverInvalidatesOnBudgetPressure() {
+		var settings = InventorySettings.serverDefaults(); var owner = new UUID(9, 9); var reads = new AtomicInteger(); var validations = new AtomicInteger();
+		try (var runtime = new InventoryRuntime(i -> Optional.of(new Source(i, reads, 1) {
+			@Override public boolean valid() { validations.incrementAndGet(); return true; }
+		}), 16_000_000)) {
+			runtime.advance(0, settings); var consumer = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow(); runtime.step(consumer).orElseThrow();
+			int before = validations.get(); runtime.memory().setCap(runtime.memory().retained());
+			assertTrue(runtime.probe(consumer).isEmpty()); assertEquals(before, validations.get()); assertFalse(consumer.invalidated());
+			runtime.memory().setCap(16_000_000);
+			while (runtime.preflight(() -> Optional.of(true)).isPresent()) {}
+			assertTrue(runtime.probe(consumer).isEmpty()); assertEquals(before, validations.get()); assertFalse(consumer.invalidated()); assertEquals(1, reads.get());
+			runtime.advance(1, settings); assertEquals(Optional.of(true), runtime.probe(consumer)); assertEquals(before + 1, validations.get());
+			assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void rejectedCompletedSweepDoesNotReplaceTheEvidenceOfTheStillPublishedPreviousResult() {
+		var settings = InventorySettings.serverDefaults(); var owner = new UUID(10, 10); var reads = new AtomicInteger(); var closes = new AtomicInteger();
+		boolean[] oldValid = {true}; var resolutions = new AtomicInteger();
+		try (var runtime = new InventoryRuntime(i -> {
+			boolean old = resolutions.incrementAndGet() == 1;
+			return Optional.of(new Source(i, reads, 1) {
+				@Override public boolean valid() { return !old || oldValid[0]; }
+				@Override public void close() { closes.incrementAndGet(); }
+			});
+		}, 16_000_000)) {
+			runtime.advance(0, settings); var consumer = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+			runtime.step(consumer).orElseThrow(); consumer.retainCompleted();
+			runtime.advance(3, settings); consumer.restart();
+			assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(consumer).orElseThrow().result().completeness());
+			// The domain may reject this quantity (for example an overflow) and keep publishing its last accepted result.
+			assertEquals(0, closes.get(), "step completion alone cannot release the published result's evidence");
+			oldValid[0] = false; assertEquals(Optional.of(false), runtime.probe(consumer));
+			assertEquals(2, closes.get()); assertTrue(consumer.invalidated());
+		}
+	}
+	@Test void allThirtyTwoRetainedTrackingEvidenceLeasesAllowFreshReplacementWithoutAnUnboundedCache() {
+		var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(32);
+		var reads = new AtomicInteger(); var closes = new AtomicInteger();
+		try (var runtime = new InventoryRuntime(i -> Optional.of(new Source(i, reads, 1) {
+			@Override public void close() { closes.incrementAndGet(); }
+		}), 32_000_000)) {
+			runtime.advance(0, settings); var consumers = new java.util.ArrayList<InventoryRuntime.Consumer>();
+			for (int index = 0; index < 32; index++) {
+				var owner = new UUID(11, index); var consumer = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+				runtime.step(consumer).orElseThrow(); consumer.retainCompleted(); consumers.add(consumer);
+			}
+			assertEquals(32, reads.get()); assertEquals(0, closes.get());
+			runtime.advance(3, settings); consumers.forEach(InventoryRuntime.Consumer::restart);
+			for (var consumer : consumers) {
+				assertTrue(runtime.step(consumer).isPresent(), "bounded replacement headroom prevents evidence retention from deadlocking all 32 sources");
+				consumer.retainCompleted();
+			}
+			assertEquals(64, reads.get()); assertEquals(32, closes.get()); assertEquals(0, runtime.memory().reserved());
+			consumers.forEach(InventoryRuntime.Consumer::close); assertEquals(64, closes.get());
+			assertEquals(1024, runtime.memory().retained(), "one target quota stays charged until its period ends");
+		}
+	}
+	@Test void secondBatchOfNewConsumersCannotConsumeTheReserveNeededByThirtyTwoRetainedEvidenceReplacements() {
+		var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(64);
+		var reads = new AtomicInteger(); var closes = new AtomicInteger(); var resolutions = new AtomicInteger();
+		var runtime = new InventoryRuntime(i -> {
+			resolutions.incrementAndGet(); return Optional.of(new Source(i, reads, 1) {
+				@Override public void close() { closes.incrementAndGet(); }
+			});
+		}, 64_000_000);
+		try (runtime) {
+			runtime.advance(0, settings);
+			var existing = new java.util.ArrayList<InventoryRuntime.Consumer>();
+			var newcomers = new java.util.ArrayList<InventoryRuntime.Consumer>();
+			for (int index = 0; index < 32; index++) {
+				var owner = new UUID(12, index);
+				var consumer = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+				runtime.step(consumer).orElseThrow(); consumer.retainCompleted(); existing.add(consumer);
+			}
+			existing.forEach(InventoryRuntime.Consumer::restart);
+			for (int index = 0; index < 32; index++) {
+				var owner = new UUID(13, index);
+				newcomers.add(runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow());
+			}
+			for (int period = 1; period <= 3; period++) {
+				runtime.advance(period * 3L, settings); long retained = runtime.memory().retained();
+				int before = resolutions.get();
+				for (var consumer : newcomers) {
+					assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(consumer));
+					assertTrue(runtime.step(consumer).isEmpty());
+					consumer.restart(); // denied observation cannot turn into a replacement lease
+				}
+				assertEquals(before, resolutions.get(), "the count guard rejects new physical observations before resolver/work admission");
+				assertEquals(retained, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+				assertTrue(runtime.memory().remaining() > 32_000_000, "memory is sufficient; only the new-observation guard defers");
+				// Fill all 32 scan positions concurrently while the 32 old evidences remain charged.
+				for (var consumer : existing) assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(consumer));
+				assertEquals(before + 32, resolutions.get());
+				assertEquals((period - 1) * 32, closes.get(), "old publication evidence survives until an accepted replacement");
+				for (var consumer : existing) {
+					assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(consumer).orElseThrow().result().completeness());
+					consumer.retainCompleted();
+				}
+				assertEquals(period * 32, closes.get()); assertEquals((period + 1) * 32, reads.get());
+				existing.forEach(InventoryRuntime.Consumer::restart); assertEquals(0, runtime.memory().reserved());
+			}
+			int before = reads.get(); existing.forEach(InventoryRuntime.Consumer::close);
+			assertEquals(128, closes.get());
+			runtime.advance(12, settings); // replace the exhausted fixed-work period, not the retained admission state
+			for (var consumer : newcomers) {
+				assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(consumer).orElseThrow().result().completeness());
+				consumer.retainCompleted();
+			}
+			assertEquals(before + 32, reads.get(), "new observers become serviceable once prior evidence leases leave");
+			newcomers.forEach(InventoryRuntime.Consumer::close); assertEquals(160, closes.get());
+			assertEquals(1024, runtime.memory().retained(), "closing evidence never refunds the current target's paid progress");
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@Test void compatibleAliasedInputsStillShareOnePhysicalRoundWhenNormalObservationAdmissionIsFull() {
+		var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(64);
+		var reads = new AtomicInteger(); var closes = new AtomicInteger(); var resolutions = new AtomicInteger();
+		try (var runtime = new InventoryRuntime(i -> {
+			resolutions.incrementAndGet(); return Optional.of(new Source(i, reads, 2) {
+				@Override public void close() { closes.incrementAndGet(); }
+			});
+		}, 64_000_000)) {
+			runtime.advance(0, settings); var existing = new java.util.ArrayList<InventoryRuntime.Consumer>();
+			for (int index = 0; index < 31; index++) {
+				runtime.advance(index * 3L, settings);
+				var owner = new UUID(14, index); var consumer = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+				runtime.step(consumer).orElseThrow(); consumer.retainCompleted(); consumer.restart(); existing.add(consumer);
+			}
+			runtime.advance(93, settings);
+			var owner = new UUID(14, 31);
+			var a = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+			var aliasedInput = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 2, 2, 3, "minecraft:chest"), owner, BlockFace.NORTH);
+			var b = runtime.attach(aliasedInput, new InventoryRuntime.TrackingSubject(TargetKey.from(aliasedInput.target()))).orElseThrow();
+			assertEquals(CaptureResult.Completeness.CONTINUE, runtime.step(a, 1).orElseThrow().result().completeness());
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(b), "the 32-round guard counts physical rounds, not a compatible consumer's references");
+			runtime.step(b, 1).orElseThrow(); assertEquals(33, resolutions.get()); assertEquals(63, reads.get());
+			runtime.advance(94, settings);
+			runtime.step(a, 1).orElseThrow(); a.retainCompleted(); runtime.step(b, 1).orElseThrow(); b.retainCompleted();
+			runtime.advance(96, settings); a.restart(); b.restart();
+			runtime.step(a).orElseThrow(); a.retainCompleted(); runtime.step(b).orElseThrow(); b.retainCompleted();
+			assertEquals(35, resolutions.get(), "both hit targets resolve, but replacement scans share one physical round");
+			assertEquals(66, reads.get()); assertEquals(3, closes.get(), "two unused alias wrappers and the old shared evidence close once");
+			a.close(); assertEquals(3, closes.get()); b.close(); assertEquals(4, closes.get());
+			existing.forEach(InventoryRuntime.Consumer::close); assertEquals(35, closes.get()); assertEquals(0, runtime.memory().reserved());
+			assertEquals(2048, runtime.memory().retained(), "both hit-target quotas survive shared physical evidence cleanup");
+		}
+	}
+	@Test void thirtyTwoSharedRoundsWithSkewedReplacementAndRestartKeepSlowPeersServiceableAcrossPeriods() {
+		var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(64);
+		settings.setPhysicalSlotsPerTick(IntLimit.finite(32)); settings.getTracking().setMaxSlotsPerTarget(IntLimit.finite(32));
+		var reads = new AtomicInteger(); var closes = new AtomicInteger(); var resolutions = new AtomicInteger();
+		var runtime = new InventoryRuntime(i -> {
+			resolutions.incrementAndGet(); return Optional.of(new Source(i, reads, 1) {
+				@Override public void close() { closes.incrementAndGet(); }
+			});
+		}, 64_000_000);
+		try (runtime) {
+			runtime.advance(0, settings);
+			var fast = new java.util.ArrayList<InventoryRuntime.Consumer>();
+			var slow = new java.util.ArrayList<InventoryRuntime.Consumer>();
+			for (int index = 0; index < 32; index++) {
+				var owner = new UUID(15, index); var subject = new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET));
+				var a = runtime.attach(input(owner), subject).orElseThrow(); var b = runtime.attach(input(owner), subject).orElseThrow();
+				assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(a).orElseThrow().result().completeness()); a.retainCompleted();
+				assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(b).orElseThrow().result().completeness()); b.retainCompleted();
+				fast.add(a); slow.add(b);
+			}
+			assertEquals(32, reads.get()); assertEquals(32, resolutions.get()); assertEquals(0, closes.get());
+			fast.forEach(InventoryRuntime.Consumer::restart); slow.forEach(InventoryRuntime.Consumer::restart);
+			for (int period = 1; period <= 3; period++) {
+				runtime.advance(period * 6L - 3, settings);
+				for (var consumer : fast) assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(consumer));
+				for (var consumer : fast) {
+					assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(consumer).orElseThrow().result().completeness());
+					consumer.retainCompleted();
+				}
+				assertEquals((period + 1) * 32, reads.get()); assertEquals(64, resolutions.get() - closes.get(), "all 64 physical evidence handles are retained, including the slow peers' old publications");
+				assertEquals((period - 1) * 32, closes.get(), "no slow peer's old evidence is discarded to make room");
+				long pinned = runtime.memory().retained(); fast.forEach(InventoryRuntime.Consumer::restart);
+				assertEquals(pinned, runtime.memory().retained(), "the physical handoff lease keeps its data serviceable after every fast peer detaches");
+				assertTrue(runtime.memory().remaining() > 32_000_000); assertEquals(0, runtime.memory().reserved());
+				runtime.advance(period * 6L, settings);
+				int before = resolutions.get();
+				for (var consumer : fast) assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(consumer), "a physical handoff cannot fork again before its slow peer advances");
+				assertEquals(before, resolutions.get(), "fanout guard defers before resolver/provider work");
+				for (var consumer : slow) {
+					assertEquals(Optional.of(true), runtime.probe(consumer), "the still-published old evidence remains valid while waiting");
+					assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(consumer), "a slow peer remains serviceable even with all 64 retained positions occupied");
+					var observed = runtime.step(consumer).orElseThrow();
+					assertEquals(CaptureResult.Completeness.COMPLETE, observed.result().completeness()); assertEquals(List.of(item(7)), observed.slots());
+					consumer.retainCompleted(); assertFalse(consumer.invalidated());
+				}
+				assertEquals(before, resolutions.get()); assertEquals((period + 1) * 32, reads.get(), "both peers use one physical replacement, not a new sweep for the lagging peer");
+				assertEquals(period * 32, closes.get(), "the last old evidence reference closes each predecessor once");
+				slow.forEach(InventoryRuntime.Consumer::restart);
+				assertEquals(64L * 4096 + 32L * (4096 + 262144 + 32768) + 1024, runtime.memory().retained(), "only current evidence and one target quota remain after handoff completion");
+				assertEquals(0, runtime.memory().reserved());
+			}
+			fast.forEach(InventoryRuntime.Consumer::close); assertEquals(96, closes.get(), "one peer closing cannot release the other's current evidence");
+			slow.forEach(InventoryRuntime.Consumer::close); assertEquals(128, closes.get());
+			assertEquals(1024, runtime.memory().retained(), "handoff completion and close never refund the target's logical progress");
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@Test void rejectedSharedReplacementReleasesItsHandoffWithoutDroppingOldEvidenceOrRefundingTargetQuota() {
+		var settings = InventorySettings.serverDefaults(); settings.getTracking().setMaxSlotsPerTarget(IntLimit.finite(2));
+		var owner = new UUID(16, 16); var reads = new AtomicInteger(); var closes = new AtomicInteger();
+		var runtime = new InventoryRuntime(i -> Optional.of(new Source(i, reads, 1) {
+			@Override public void close() { closes.incrementAndGet(); }
+		}), 16_000_000);
+		try (runtime) {
+			runtime.advance(0, settings); var subject = new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET));
+			var fast = runtime.attach(input(owner), subject).orElseThrow(); var slow = runtime.attach(input(owner), subject).orElseThrow();
+			runtime.step(fast).orElseThrow(); fast.retainCompleted(); runtime.step(slow).orElseThrow(); slow.retainCompleted();
+			fast.restart(); slow.restart(); runtime.advance(1, settings);
+			assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(fast).orElseThrow().result().completeness());
+			assertEquals(2, reads.get()); assertEquals(0, closes.get(), "an unaccepted completed sweep cannot replace either publication's evidence");
+			fast.restart(); // the domain rejected the replacement instead of retaining it
+			assertEquals(1, closes.get(), "a successor with only a handoff reference is cancelled, not leaked");
+			assertEquals(2L * 4096 + 1024 + 4096 + 262144 + 32768, runtime.memory().retained());
+			assertEquals(Optional.of(true), runtime.probe(fast)); assertEquals(Optional.of(true), runtime.probe(slow));
+			assertFalse(fast.invalidated()); assertFalse(slow.invalidated());
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(fast), "the cancelled handoff allows another fresh attempt");
+			assertTrue(runtime.step(fast).isEmpty(), "cancelled capture and evidence releases do not refund the two paid target slots");
+			assertEquals(2, reads.get()); fast.restart(); assertEquals(2, closes.get());
+			runtime.advance(3, settings); runtime.step(fast).orElseThrow(); fast.retainCompleted(); fast.restart();
+			assertEquals(0, runtime.memory().reserved()); assertEquals(2, closes.get());
+			assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(slow).orElseThrow().result().completeness()); slow.retainCompleted();
+			assertEquals(3, reads.get()); assertEquals(3, closes.get(), "the old shared evidence releases only after the slow peer accepts its successor");
+			fast.close(); slow.close(); assertEquals(4, closes.get()); assertEquals(1024, runtime.memory().retained());
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@Test void invalidSharedSuccessorDetachesItsHandoffAndLeavesUnrelatedOldPublishedEvidenceOwnedBySlowPeer() {
+		var settings = InventorySettings.serverDefaults(); var owner = new UUID(17, 17);
+		var reads = new AtomicInteger(); var closes = new AtomicInteger(); var resolutions = new AtomicInteger(); boolean[] replacementValid = {true};
+		var runtime = new InventoryRuntime(i -> {
+			boolean replacement = resolutions.incrementAndGet() == 2;
+			return Optional.of(new Source(i, reads, 2) {
+				@Override public boolean valid() { return !replacement || replacementValid[0]; }
+				@Override public void close() { closes.incrementAndGet(); }
+			});
+		}, 16_000_000);
+		try (runtime) {
+			runtime.advance(0, settings); var subject = new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET));
+			var fast = runtime.attach(input(owner), subject).orElseThrow(); var slow = runtime.attach(input(owner), subject).orElseThrow();
+			runtime.step(fast).orElseThrow(); fast.retainCompleted(); runtime.step(slow).orElseThrow(); slow.retainCompleted();
+			fast.restart(); slow.restart(); runtime.advance(3, settings);
+			assertEquals(CaptureResult.Completeness.CONTINUE, runtime.step(fast, 1).orElseThrow().result().completeness());
+			replacementValid[0] = false; runtime.advance(4, settings);
+			assertEquals(CaptureResult.Availability.INVALID, runtime.step(fast, 1).orElseThrow().result().availability());
+			assertTrue(fast.invalidated()); assertFalse(slow.invalidated()); assertEquals(1, closes.get());
+			assertEquals(Optional.of(true), runtime.probe(slow), "retiring an unaccepted successor cannot revoke independent still-valid old publication evidence");
+			assertEquals(2L * 4096 + 1024 + 4096 + 262144 + 32768, runtime.memory().retained());
+			assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(slow).orElseThrow().result().completeness()); slow.retainCompleted();
+			assertEquals(5, reads.get()); assertEquals(2, closes.get(), "a fresh slow-peer replacement can release the old evidence after successor invalidity");
+			fast.close(); slow.close(); assertEquals(3, closes.get()); assertEquals(1024, runtime.memory().retained());
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@Test void skewedAliasedHandoffKeepsOnePhysicalRoundAndIndependentTargetQuotasAcrossTicks() {
+		var settings = InventorySettings.serverDefaults(); settings.getTracking().setMaxSlotsPerTarget(IntLimit.finite(1));
+		var owner = new UUID(18, 18); var alias = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 2, 2, 3, "minecraft:chest"), owner, BlockFace.NORTH);
+		var reads = new AtomicInteger(); var closes = new AtomicInteger(); var resolutions = new AtomicInteger();
+		var runtime = new InventoryRuntime(i -> {
+			resolutions.incrementAndGet(); return Optional.of(new Source(i, reads, 1) {
+				@Override public void close() { closes.incrementAndGet(); }
+			});
+		}, 16_000_000);
+		try (runtime) {
+			runtime.advance(0, settings);
+			var fast = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+			var slow = runtime.attach(alias, new InventoryRuntime.TrackingSubject(TargetKey.from(alias.target()))).orElseThrow();
+			runtime.step(fast).orElseThrow(); fast.retainCompleted(); runtime.step(slow).orElseThrow(); slow.retainCompleted();
+			assertEquals(1, reads.get()); assertEquals(2, resolutions.get()); assertEquals(1, closes.get(), "the unused alias wrapper closes");
+			fast.restart(); slow.restart(); runtime.advance(3, settings);
+			runtime.step(fast).orElseThrow(); fast.retainCompleted(); fast.restart();
+			runtime.advance(4, settings);
+			assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(fast));
+			assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(slow).orElseThrow().result().completeness()); slow.retainCompleted(); slow.restart();
+			assertEquals(2, reads.get(), "a later alias consumer resolves compatibility but consumes the same pinned physical capture");
+			assertEquals(4, resolutions.get()); assertEquals(3, closes.get(), "old shared evidence and both unused alias wrappers close once");
+			assertEquals(2L * 4096 + 2048 + 4096 + 262144 + 32768, runtime.memory().retained(), "the two hit-target quota subjects remain independent");
+			assertTrue(runtime.step(slow).isEmpty(), "serving the alias spends its own target allowance even when no new physical read was needed");
+			assertEquals(2, reads.get()); fast.close(); slow.close(); assertEquals(5, closes.get());
+			assertEquals(2048, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@Test void closingAcceptedPeersCancelsMergedPhysicalHandoffsWithoutLeakingReferencesOrRefundingQuota() {
+		var settings = InventorySettings.serverDefaults(); settings.getTracking().setMaxSlotsPerTarget(IntLimit.finite(3));
+		var owner = new UUID(19, 19); var reads = new AtomicInteger(); var closes = new AtomicInteger(); var resolutions = new AtomicInteger();
+		var runtime = new InventoryRuntime(i -> {
+			resolutions.incrementAndGet(); return Optional.of(new Source(i, reads, 1) {
+				@Override public void close() { closes.incrementAndGet(); }
+			});
+		}, 16_000_000);
+		try (runtime) {
+			runtime.advance(0, settings); var subject = new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET));
+			var first = runtime.attach(input(owner), subject).orElseThrow(); var firstSlow = runtime.attach(input(owner), subject).orElseThrow();
+			runtime.step(first).orElseThrow(); first.retainCompleted(); runtime.step(firstSlow).orElseThrow(); firstSlow.retainCompleted();
+			var second = runtime.attach(input(owner), subject).orElseThrow(); var secondSlow = runtime.attach(input(owner), subject).orElseThrow();
+			runtime.step(second).orElseThrow(); second.retainCompleted(); runtime.step(secondSlow).orElseThrow(); secondSlow.retainCompleted();
+			assertEquals(2, reads.get(), "a newly attached pair starts its own fresh observation, not the earlier completed sweep");
+			first.restart(); firstSlow.restart(); second.restart(); secondSlow.restart(); runtime.advance(1, settings);
+			runtime.step(first).orElseThrow(); first.retainCompleted(); runtime.step(second).orElseThrow(); second.retainCompleted();
+			assertEquals(3, reads.get()); assertEquals(3, resolutions.get(), "two older evidence rounds hand off into one compatible physical replacement");
+			first.restart(); second.restart(); first.close(); assertEquals(0, closes.get()); second.close();
+			assertEquals(1, closes.get(), "when the last accepted peer leaves, both handoff-only leases cancel and the successor closes once");
+			assertEquals(2L * 4096 + 2L * (4096 + 262144 + 32768) + 1024, runtime.memory().retained());
+			assertEquals(Optional.of(true), runtime.probe(firstSlow)); assertEquals(Optional.of(true), runtime.probe(secondSlow));
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(firstSlow));
+			assertTrue(runtime.step(firstSlow).isEmpty(), "closing accepted peers and handoff leases does not refund their target's three paid slots");
+			firstSlow.restart(); assertEquals(2, closes.get()); assertEquals(3, reads.get());
+			runtime.advance(3, settings);
+			runtime.step(firstSlow).orElseThrow(); firstSlow.retainCompleted(); runtime.step(secondSlow).orElseThrow(); secondSlow.retainCompleted();
+			assertEquals(4, reads.get()); assertEquals(5, resolutions.get()); assertEquals(4, closes.get(), "both old completed rounds safely release into one new accepted replacement");
+			firstSlow.close(); secondSlow.close(); assertEquals(5, closes.get());
+			assertEquals(1024, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@Test void cachedHandoffValidityIsAdmittedBeforeSlowPeerConsumesItsCapturedReplacement() {
+		var settings = InventorySettings.serverDefaults(); var owner = new UUID(20, 20);
+		var reads = new AtomicInteger(); var validations = new AtomicInteger(); var closes = new AtomicInteger(); var resolutions = new AtomicInteger(); boolean[] replacementValid = {true};
+		var runtime = new InventoryRuntime(i -> {
+			boolean replacement = resolutions.incrementAndGet() == 2;
+			return Optional.of(new Source(i, reads, 1) {
+				@Override public boolean valid() { validations.incrementAndGet(); return !replacement || replacementValid[0]; }
+				@Override public void close() { closes.incrementAndGet(); }
+			});
+		}, 16_000_000);
+		try (runtime) {
+			runtime.advance(0, settings); var subject = new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET));
+			var fast = runtime.attach(input(owner), subject).orElseThrow(); var slow = runtime.attach(input(owner), subject).orElseThrow();
+			runtime.step(fast).orElseThrow(); fast.retainCompleted(); runtime.step(slow).orElseThrow(); slow.retainCompleted();
+			fast.restart(); slow.restart(); runtime.advance(3, settings); runtime.step(fast).orElseThrow(); fast.retainCompleted(); fast.restart();
+			runtime.advance(4, settings); replacementValid[0] = false; int before = validations.get();
+			runtime.memory().setCap(runtime.memory().retained());
+			assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(slow));
+			assertEquals(before, validations.get()); assertFalse(fast.invalidated()); assertFalse(slow.invalidated());
+			runtime.memory().setCap(settings.pendingMemoryBytes()); while (runtime.preflight(() -> Optional.of(true)).isPresent()) {}
+			assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(slow));
+			assertEquals(before, validations.get()); assertEquals(0, runtime.memory().reserved());
+			runtime.advance(5, settings);
+			assertEquals(CaptureResult.Availability.UNAVAILABLE, runtime.step(slow).orElseThrow().result().availability(), "a valid old publication cannot authorize the now-invalid cached successor");
+			assertEquals(before + 1, validations.get()); assertEquals(2, reads.get(), "handoff validity never reads or redelivers invalid cached items");
+			assertEquals(2, resolutions.get(), "the retained successor is checked, not replaced by a fresh self-consistent wrapper");
+			assertTrue(fast.invalidated()); assertFalse(slow.invalidated()); assertEquals(1, closes.get());
+			assertEquals(Optional.of(true), runtime.probe(slow), "the old evidence remains independently owned until the caller handles the unavailable handoff");
+			slow.discardObservation(); assertTrue(slow.invalidated()); assertEquals(2, closes.get());
+			fast.close(); slow.close(); assertEquals(2, closes.get()); assertEquals(1024, runtime.memory().retained());
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
 }
