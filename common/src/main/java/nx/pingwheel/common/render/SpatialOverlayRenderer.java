@@ -40,9 +40,14 @@ import nx.pingwheel.common.domain.PingTypeCatalog;
  * transition fade.
  *
  * <p>The controller's geometry is virtual: menu origins and the pointer are
- * relative to the gesture origin, so this renderer offsets every point by the
- * GUI center. GUI scaling of physical input is owned by the future actor; this
- * class only paints in GUI space.
+ * relative to the gesture origin. Every point is offset by the GUI center, and
+ * while a menu is active the whole overlay additionally receives one rigid
+ * translation that projects that menu's origin onto the GUI center, so opening
+ * a submenu recenters the pattern, returning restores the parent level, and the
+ * root restores the plain GUI center. Because it is a single translation per
+ * frame, parent/child menu vectors, the pointer, the trail and inventory row
+ * anchors keep their controller-space relationships. GUI scaling of physical
+ * input is owned by the future actor; this class only paints in GUI space.
  *
  * <p>{@link #drawFrame} is the complete-frame entry point: it transitions radial
  * nodes, list content and outgoing content together with caller-owned time and
@@ -221,9 +226,11 @@ public final class SpatialOverlayRenderer {
 			: Component.translatable(choice.label());
 
 	/**
-	 * Actual selected-row geometry in ABSOLUTE GUI coordinates, not controller
-	 * coordinates. Before enterExternal/rebase, subtract guiHeight / 2 exactly
-	 * once. Width includes the row's animated scale. Outgoing rows return NONE.
+	 * Actual displayed selected-row geometry in ABSOLUTE GUI coordinates,
+	 * including the current rigid view translation, not controller coordinates.
+	 * Subtracting guiHeight / 2 yields the displayed row position relative to
+	 * the current view center (the active menu origin), not the gesture origin.
+	 * Width includes the row's animated scale. Outgoing rows return NONE.
 	 */
 	public record RowLayout(double centerY, double width) {
 
@@ -332,12 +339,41 @@ public final class SpatialOverlayRenderer {
 	/**
 	 * Paint once per frame. Pass only the radial menus/list that are presented in
 	 * this mode (both may be supplied for a row-anchored submenu). Null/inactive
-	 * inputs are an exit, not disposal. No target acquisition or sends occur.
+	 * inputs are an exit, not disposal. The active menu's origin is projected
+	 * onto the GUI center by one rigid view translation; an inactive frame keeps
+	 * the last displayed translation for the exit tail. No target acquisition or
+	 * sends occur.
 	 */
 	public static RowLayout drawFrame(GuiGraphics graphics, SpatialController.Snapshot radial,
 		SpatialInventoryView inventory, Function<SpatialController.ChoiceView, Component> labels,
 		Style style, long nowNanos) {
 		return SHARED.drawFrame(graphics, radial, inventory, labels, style, nowNanos);
+	}
+
+	/**
+	 * Controller-space origin of the currently active (last) menu, or null when
+	 * no menu is presented. The rigid view translation is its negation.
+	 */
+	static SpatialController.Point activeOrigin(SpatialController.Snapshot radial) {
+		if (radial == null || !radial.active() || radial.menus().isEmpty()) {
+			return null;
+		}
+		return radial.menus().getLast().origin();
+	}
+
+	/**
+	 * Samples the single rigid view translation for one frame. An active origin
+	 * re-aims the offset at its negation and samples it; a null origin (inactive
+	 * radial, or no presented menu) leaves the last sample in place, so the exit
+	 * tail keeps its translation instead of snapping back to the GUI center.
+	 */
+	static void sampleViewOffset(SpatialViewOffset offset, SpatialController.Point activeOrigin,
+		long nowNanos, boolean reduceMotion) {
+		if (activeOrigin == null) {
+			return;
+		}
+		offset.centerOn(activeOrigin.x(), activeOrigin.y(), nowNanos, reduceMotion);
+		offset.sample(nowNanos);
 	}
 
 	/** Per-native-session render state, main-thread confined and finitely retained. */
@@ -347,9 +383,11 @@ public final class SpatialOverlayRenderer {
 		public Set<String> paintedChoiceIds() { return paintedChoiceIds; }
 		private final SpatialOverlayTransitions<VisualKey, Paint> transitions =
 			new SpatialOverlayTransitions<>(TRANSITION_NANOS, TRANSITION_CAPACITY, APPEARANCE_SCALE);
+		private final SpatialViewOffset viewOffset = new SpatialViewOffset(TRANSITION_NANOS);
 
 		public void reset() {
 			transitions.clear();
+			viewOffset.clear();
 			paintedChoiceIds = Set.of();
 		}
 
@@ -370,35 +408,50 @@ public final class SpatialOverlayRenderer {
 				return RowLayout.NONE;
 			}
 			List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets = new ArrayList<>();
-			double centerX = graphics.guiWidth() / 2.0;
-			double centerY = graphics.guiHeight() / 2.0;
+			double guiWidth = graphics.guiWidth();
+			double guiHeight = graphics.guiHeight();
+			double centerX = guiWidth / 2.0;
+			double centerY = guiHeight / 2.0;
+			SpatialController.Point origin = activeOrigin(radial);
+			sampleViewOffset(viewOffset, origin, nowNanos, style.reduceMotion());
 			if (radial != null && radial.active()) {
 				addRadial(targets, radial, labels == null ? TRANSLATION_KEY_LABELS : labels,
 					centerX, centerY, orbit(graphics), style.rootDistance(), style.submenuRadiusScale());
 			}
 			if (inventory != null && inventory.open()) {
-				addInventory(targets, inventory, font, style, centerX, centerY);
+				addInventory(targets, inventory, font, style, guiWidth, guiHeight);
 			}
 			List<SpatialOverlayTransitions.State<VisualKey, Paint>> states =
 				transitions.update(targets, nowNanos, style.reduceMotion());
+			if (origin == null && transitions.isEmpty()) {
+				// The exit tail is gone: hard-reset so a later session starts centered.
+				viewOffset.clear();
+			}
 			RowLayout selected = RowLayout.NONE;
 			Set<String> painted = new HashSet<>();
-			String activeMenu = radial == null || !radial.active() || radial.menus().isEmpty()
-				? null : radial.menus().getLast().menuId();
+			String activeMenu = origin == null ? null : radial.menus().getLast().menuId();
 			// Sector backdrops and replacement panels may be admitted after
 			// surviving rows, so rank every layer explicitly: radial backdrops,
-			// inventory panels, then rows, nodes, and chrome.
-			for (SpatialOverlayTransitions.State<VisualKey, Paint> state : states.stream()
-				.sorted(Comparator.comparingInt(value -> paintRank(value.data()))).toList()) {
-				if (state.present() && state.data() instanceof RowPaint row && row.selected()) {
-					selected = new RowLayout(state.y(), row.width() * state.scale());
+			// inventory panels, then rows, nodes, and chrome. The single view
+			// translation wraps every layer so the whole pattern stays rigid.
+			var pose = graphics.pose();
+			pose.pushPose();
+			try {
+				pose.translate(viewOffset.x(), viewOffset.y(), 0.0);
+				for (SpatialOverlayTransitions.State<VisualKey, Paint> state : states.stream()
+					.sorted(Comparator.comparingInt(value -> paintRank(value.data()))).toList()) {
+					if (state.present() && state.data() instanceof RowPaint row && row.selected()) {
+						selected = new RowLayout(state.y() + viewOffset.y(), row.width() * state.scale());
+					}
+					if (renders(state.data(), state.alpha(), style)) {
+						paint(graphics, font, state, style);
+						if (state.data() instanceof NodePaint node && acknowledgesNodePaint(state.present(),
+							state.key().owner().equals(activeMenu), state.alpha(), style))
+							painted.add(node.choice().id());
+					}
 				}
-				if (renders(state.data(), state.alpha(), style)) {
-					paint(graphics, font, state, style);
-					if (state.data() instanceof NodePaint node && acknowledgesNodePaint(state.present(),
-						state.key().owner().equals(activeMenu), state.alpha(), style))
-						painted.add(node.choice().id());
-				}
+			} finally {
+				pose.popPose();
 			}
 			paintedChoiceIds = Set.copyOf(painted);
 			return selected;
@@ -509,8 +562,8 @@ public final class SpatialOverlayRenderer {
 	}
 
 	private static void addInventory(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
-		SpatialInventoryView view, Font font, Style style, double centerX, double centerY) {
-		SpatialInventoryLayout layout = inventoryLayout(view, centerX * 2.0, centerY * 2.0, font.lineHeight, style);
+		SpatialInventoryView view, Font font, Style style, double guiWidth, double guiHeight) {
+		SpatialInventoryLayout layout = inventoryLayout(view, guiWidth, guiHeight, font.lineHeight, style);
 		double rowHeight = layout.rowHeight();
 		double headerHeight = layout.headerHeight();
 		double footerHeight = layout.footerHeight();
@@ -538,9 +591,11 @@ public final class SpatialOverlayRenderer {
 
 	/**
 	 * Logical target geometry using the same font metrics as painting. All layout
-	 * coordinates are absolute GUI pixels. For a logical submenu origin the
-	 * facade converts rowCenterY(selectedIndex) minus guiHeight / 2 exactly once;
-	 * drawFrame's RowLayout instead reports the animated displayed row position.
+	 * coordinates are absolute GUI pixels and are not polluted by the view
+	 * translation. For a logical submenu origin the facade converts
+	 * rowCenterY(selectedIndex) minus guiHeight / 2 exactly once; drawFrame's
+	 * RowLayout instead reports the animated displayed row position after the
+	 * rigid view translation.
 	 */
 	public static SpatialInventoryLayout inventoryLayout(SpatialInventoryView view, double guiWidth, double guiHeight,
 		int fontLineHeight, Style style) {
