@@ -87,7 +87,7 @@ public final class SpatialOverlayRenderer {
 	static final int ROW_SELECTED_BACKGROUND = 0xD0303030;
 	static final int GUIDE_COLOR = 0x558A8A8A;
 	static final int POINTER_COLOR = 0xFFFFFFFF;
-	static final int PROGRESS_COLOR = 0xFFFFFFFF;
+	static final int PROGRESS_COLOR = 0xFFBAFFD2;
 	static final int TRAIL_COLOR = 0x99FFFFFF;
 	static final int SECTOR_BACKGROUND = 0x26FFFFFF;
 
