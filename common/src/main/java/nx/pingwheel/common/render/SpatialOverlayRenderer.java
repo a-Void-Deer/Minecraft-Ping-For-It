@@ -112,11 +112,14 @@ public final class SpatialOverlayRenderer {
 	 * The two opacity percentages are independent: wheel opacity reaches only the
 	 * sector underlay, while target opacity reaches every text-bearing frame
 	 * (radial nodes, inventory panel, rows, header and footer) and its label.
+	 * {@code submenuRadiusScale} multiplies the viewport-derived non-root orbit
+	 * only; the root menu keeps its caller distance and the inventory list keeps
+	 * its own width and height.
 	 */
 	public record Style(int opacityPercent, int targetOpacityPercent, double optionTextScale, double inventoryTextScale,
-		double rootDistance, boolean showTrail, boolean reduceMotion) {
+		double rootDistance, double submenuRadiusScale, boolean showTrail, boolean reduceMotion) {
 
-		public static final Style NATIVE = new Style(100, 100, 1.0, 1.0, 0.0, true, false);
+		public static final Style NATIVE = new Style(100, 100, 1.0, 1.0, 0.0, 1.0, true, false);
 
 		/**
 		 * Compatibility form with one opacity value feeding both the sector
@@ -124,19 +127,25 @@ public final class SpatialOverlayRenderer {
 		 */
 		public Style(int opacityPercent, double optionTextScale, double inventoryTextScale,
 			double rootDistance, boolean showTrail, boolean reduceMotion) {
-			this(opacityPercent, opacityPercent, optionTextScale, inventoryTextScale, rootDistance, showTrail, reduceMotion);
+			this(opacityPercent, opacityPercent, optionTextScale, inventoryTextScale, rootDistance, 1.0, showTrail, reduceMotion);
 		}
 
 		/** Zero rootDistance retains viewport-derived spacing for old overloads only. */
 		public Style(int opacityPercent, double optionTextScale, double inventoryTextScale,
 			boolean showTrail, boolean reduceMotion) {
-			this(opacityPercent, opacityPercent, optionTextScale, inventoryTextScale, 0.0, showTrail, reduceMotion);
+			this(opacityPercent, opacityPercent, optionTextScale, inventoryTextScale, 0.0, 1.0, showTrail, reduceMotion);
 		}
 
 		/** Zero rootDistance retains viewport-derived spacing for this form. */
 		public Style(int opacityPercent, int targetOpacityPercent, double optionTextScale, double inventoryTextScale,
 			boolean showTrail, boolean reduceMotion) {
-			this(opacityPercent, targetOpacityPercent, optionTextScale, inventoryTextScale, 0.0, showTrail, reduceMotion);
+			this(opacityPercent, targetOpacityPercent, optionTextScale, inventoryTextScale, 0.0, 1.0, showTrail, reduceMotion);
+		}
+
+		/** Compatibility form predating the submenu radius scale; keeps the baseline 1.0. */
+		public Style(int opacityPercent, int targetOpacityPercent, double optionTextScale, double inventoryTextScale,
+			double rootDistance, boolean showTrail, boolean reduceMotion) {
+			this(opacityPercent, targetOpacityPercent, optionTextScale, inventoryTextScale, rootDistance, 1.0, showTrail, reduceMotion);
 		}
 
 		public Style {
@@ -144,8 +153,10 @@ public final class SpatialOverlayRenderer {
 			targetOpacityPercent = WheelOpacity.clampPercent(targetOpacityPercent);
 			if (!Double.isFinite(optionTextScale) || optionTextScale <= 0.0
 				|| !Double.isFinite(inventoryTextScale) || inventoryTextScale <= 0.0
-				|| !Double.isFinite(rootDistance) || rootDistance < 0.0) {
-				throw new IllegalArgumentException("text scales must be finite and positive");
+				|| !Double.isFinite(rootDistance) || rootDistance < 0.0
+				|| !Double.isFinite(submenuRadiusScale) || submenuRadiusScale <= 0.0) {
+				throw new IllegalArgumentException(
+					"visual scales must be finite and positive, and root distance finite and non-negative");
 			}
 		}
 
@@ -159,20 +170,28 @@ public final class SpatialOverlayRenderer {
 		public static Style fromLegacyFontSizes(int opacityPercent, int optionFontPercent, int targetFontPercent,
 			double rootDistance, boolean showTrail, boolean reduceMotion) {
 			return fromLegacyFontSizes(opacityPercent, opacityPercent, optionFontPercent, targetFontPercent,
-				rootDistance, showTrail, reduceMotion);
+				rootDistance, 1.0, showTrail, reduceMotion);
 		}
 
 		/**
 		 * Full form with independent backdrop and target-frame opacities. Font
 		 * percentages stay in their persisted units: the option percentage keeps
 		 * the radial base scale, and the target percentage is an actual text
-		 * scale.
+		 * scale. This compatibility form keeps the baseline submenu radius scale.
 		 */
 		public static Style fromLegacyFontSizes(int opacityPercent, int targetOpacityPercent, int optionFontPercent,
 			int targetFontPercent, double rootDistance, boolean showTrail, boolean reduceMotion) {
+			return fromLegacyFontSizes(opacityPercent, targetOpacityPercent, optionFontPercent, targetFontPercent,
+				rootDistance, 1.0, showTrail, reduceMotion);
+		}
+
+		/** Full form including the frozen non-root submenu radius scale. */
+		public static Style fromLegacyFontSizes(int opacityPercent, int targetOpacityPercent, int optionFontPercent,
+			int targetFontPercent, double rootDistance, double submenuRadiusScale,
+			boolean showTrail, boolean reduceMotion) {
 			return new Style(opacityPercent, targetOpacityPercent,
 				WheelLabelLayout.BASE_TEXT_SCALE * optionFontPercent / 100.0,
-				targetFontPercent / 100.0, rootDistance, showTrail, reduceMotion);
+				targetFontPercent / 100.0, rootDistance, submenuRadiusScale, showTrail, reduceMotion);
 		}
 	}
 
@@ -355,7 +374,7 @@ public final class SpatialOverlayRenderer {
 			double centerY = graphics.guiHeight() / 2.0;
 			if (radial != null && radial.active()) {
 				addRadial(targets, radial, labels == null ? TRANSLATION_KEY_LABELS : labels,
-					centerX, centerY, orbit(graphics), style.rootDistance());
+					centerX, centerY, orbit(graphics), style.rootDistance(), style.submenuRadiusScale());
 			}
 			if (inventory != null && inventory.open()) {
 				addInventory(targets, inventory, font, style, centerX, centerY);
@@ -393,7 +412,7 @@ public final class SpatialOverlayRenderer {
 
 	private static void addRadial(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
 		SpatialController.Snapshot snapshot, Function<SpatialController.ChoiceView, Component> labels,
-		double centerX, double centerY, double orbit, double rootDistance) {
+		double centerX, double centerY, double orbit, double rootDistance, double submenuRadiusScale) {
 		add(targets, new VisualKey("chrome", "radial", ""), centerX, centerY, 1.0, 1.0,
 			centerX, centerY, new ChromePaint(snapshot));
 		List<SpatialController.MenuView> menus = snapshot.menus();
@@ -405,7 +424,7 @@ public final class SpatialOverlayRenderer {
 			for (SpatialController.ChoiceView choice : menu.choices()) {
 				double bearing = Math.toRadians(choice.startDegrees() + choice.spanDegrees() / 2.0);
 				boolean selected = active && choice.id().equals(menu.focusId());
-				double baseRadius = nodeRadius(i, orbit, rootDistance, false);
+				double baseRadius = nodeRadius(i, orbit, rootDistance, submenuRadiusScale, false);
 				double radius = baseRadius + (selected ? ORBIT_SELECTED_PUSH : 0.0);
 				double alpha = nodeAlpha(active, selected, choice.disabled() || choice.reserved());
 				add(targets, new VisualKey("sector", menu.menuId(), choice.id()),
@@ -463,9 +482,18 @@ public final class SpatialOverlayRenderer {
 		return layerAlpha(data, stateAlpha, style) > 0.0;
 	}
 
-	static double nodeRadius(int menuIndex, double viewportOrbit, double rootDistance, boolean selected) {
-		return (menuIndex == 0 && rootDistance > 0.0 ? rootDistance : viewportOrbit)
-			+ (selected ? ORBIT_SELECTED_PUSH : 0.0);
+	/**
+	 * Base node radius before the selected push. The root keeps its caller
+	 * distance unscaled; every non-root menu multiplies the viewport-derived
+	 * orbit by the frozen submenu radius scale, and its sector underlay follows
+	 * that same orbit.
+	 */
+	static double nodeRadius(int menuIndex, double viewportOrbit, double rootDistance,
+		double submenuRadiusScale, boolean selected) {
+		double base = menuIndex == 0
+			? (rootDistance > 0.0 ? rootDistance : viewportOrbit)
+			: viewportOrbit * submenuRadiusScale;
+		return base + (selected ? ORBIT_SELECTED_PUSH : 0.0);
 	}
 
 	/** Backdrop outer radius: the base node orbit plus one focus margin. */

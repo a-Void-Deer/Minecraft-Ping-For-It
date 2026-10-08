@@ -606,7 +606,8 @@ public final class ClientPingRuntime {
 		selectorPingDistance = config.getPingDistance();
 		selectorNativeDistance = Math.min(config.getRaycastDistance(), selectorPingDistance);
 		selectorStyle = SpatialOverlayRenderer.Style.fromLegacyFontSizes(config.getWheelOpacity(), config.getWheelTargetOpacity(), config.getWheelFontSize(),
-			config.getWheelTargetFontSize(), selectorSettings.rootDistance(), selectorSettings.showTrail(), selectorSettings.reduceMotion());
+			config.getWheelTargetFontSize(), selectorSettings.rootDistance(), selectorSettings.submenuRadiusScale().doubleValue(),
+			selectorSettings.showTrail(), selectorSettings.reduceMotion());
 		pendingRay = null;
 		if (pressRay == null) machine.abort();
 		else {

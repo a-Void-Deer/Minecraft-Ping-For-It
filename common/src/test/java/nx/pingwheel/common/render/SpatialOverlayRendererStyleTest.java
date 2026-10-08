@@ -132,11 +132,11 @@ class SpatialOverlayRendererStyleTest {
 
 	@Test
 	void rootSpacingUsesOnlyCallerVisualDistanceAndChildSpacingKeepsItsOwnGeometry() {
-		assertEquals(88.0, SpatialOverlayRenderer.nodeRadius(0, 120.0, 88.0, false));
-		assertEquals(88.0, SpatialOverlayRenderer.nodeRadius(0, 75.0, 88.0, false));
-		assertEquals(120.0, SpatialOverlayRenderer.nodeRadius(1, 120.0, 88.0, false));
-		assertEquals(120.0, SpatialOverlayRenderer.nodeRadius(1, 120.0, 180.0, false));
-		assertTrue(SpatialOverlayRenderer.nodeRadius(0, 120.0, 88.0, true) > 88.0);
+		assertEquals(88.0, SpatialOverlayRenderer.nodeRadius(0, 120.0, 88.0, 1.0, false));
+		assertEquals(88.0, SpatialOverlayRenderer.nodeRadius(0, 75.0, 88.0, 1.0, false));
+		assertEquals(120.0, SpatialOverlayRenderer.nodeRadius(1, 120.0, 88.0, 1.0, false));
+		assertEquals(120.0, SpatialOverlayRenderer.nodeRadius(1, 120.0, 180.0, 1.0, false));
+		assertTrue(SpatialOverlayRenderer.nodeRadius(0, 120.0, 88.0, 1.0, true) > 88.0);
 	}
 
 	@Test
@@ -146,7 +146,27 @@ class SpatialOverlayRendererStyleTest {
 		assertEquals(33.0, SpatialOverlayRenderer.orbitFor(300.0), 1.0e-9);
 		assertEquals(44.0, SpatialOverlayRenderer.orbitFor(400.0), 1.0e-9);
 		assertEquals(5.0, SpatialOverlayRenderer.ORBIT_SELECTED_PUSH);
-		assertEquals(49.0, SpatialOverlayRenderer.nodeRadius(1, 44.0, 55.0, true), 1.0e-9);
-		assertEquals(60.0, SpatialOverlayRenderer.nodeRadius(0, 44.0, 55.0, true), 1.0e-9);
+		assertEquals(49.0, SpatialOverlayRenderer.nodeRadius(1, 44.0, 55.0, 1.0, true), 1.0e-9);
+		assertEquals(60.0, SpatialOverlayRenderer.nodeRadius(0, 44.0, 55.0, 1.0, true), 1.0e-9);
+	}
+
+	@Test
+	void submenuRadiusScaleMultipliesOnlyNonRootOrbitsAndLegacyFormsKeepTheBaseline() {
+		assertEquals(1.0, SpatialOverlayRenderer.Style.NATIVE.submenuRadiusScale());
+		assertEquals(1.0, new SpatialOverlayRenderer.Style(37, 0.62, 1.4, false, true).submenuRadiusScale());
+		var legacyFull = SpatialOverlayRenderer.Style.fromLegacyFontSizes(37, 37, 80, 140, 88.0, true, false);
+		assertEquals(1.0, legacyFull.submenuRadiusScale());
+		var scaled = SpatialOverlayRenderer.Style.fromLegacyFontSizes(37, 37, 80, 140, 88.0, 2.5, true, false);
+		assertEquals(2.5, scaled.submenuRadiusScale());
+		assertEquals(88.0, scaled.rootDistance());
+
+		// The root keeps its caller distance while every non-root menu scales
+		// the viewport orbit, and the sector underlay follows that scaled orbit.
+		assertEquals(88.0, SpatialOverlayRenderer.nodeRadius(0, 44.0, 88.0, 2.5, false), 1.0e-9);
+		assertEquals(44.0, SpatialOverlayRenderer.nodeRadius(1, 44.0, 88.0, 1.0, false), 1.0e-9);
+		assertEquals(110.0, SpatialOverlayRenderer.nodeRadius(1, 44.0, 88.0, 2.5, false), 1.0e-9);
+		assertEquals(115.0, SpatialOverlayRenderer.nodeRadius(1, 44.0, 88.0, 2.5, true), 1.0e-9);
+		assertTrue(SpatialOverlayRenderer.sectorRadius(
+			SpatialOverlayRenderer.nodeRadius(1, 44.0, 88.0, 2.5, false)) > SpatialOverlayRenderer.sectorRadius(44.0));
 	}
 }

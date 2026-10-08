@@ -542,6 +542,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			case MARK_BLACKLISTED_TARGETS -> this.addOption(setting, this.getMarkBlacklistedTargetsOption(), true);
 			case MARK_FLUIDS -> this.addOption(setting, this.getMarkFluidsOption(), false);
 			case SPATIAL_ROOT_DISTANCE -> this.addOption(setting, this.getSpatialRootDistanceOption(), false);
+			case SPATIAL_SUBMENU_RADIUS_SCALE -> this.addOption(setting, this.getSpatialSubmenuRadiusScaleOption(), false);
 			case WHEEL_OPACITY -> this.addOption(setting, this.getWheelOpacityOption(), false);
 			case WHEEL_TARGET_OPACITY -> this.addOption(setting, this.getWheelTargetOpacityOption(), false);
 			case WHEEL_TARGET_FONT_SIZE -> this.addOption(setting, this.getWheelTargetFontSizeOption(), false);
@@ -2204,6 +2205,14 @@ public class SettingsScreen extends OptionsSubScreen {
 		SpatialSelectorSettings selector = config.getSpatialSelector();
 		return this.spatialDistanceOption("root_distance", MIN_ROOT_DISTANCE, MAX_ROOT_DISTANCE, ROOT_DISTANCE_STEP,
 			selector::getRootDistance, selector::setRootDistance);
+	}
+
+	private OptionInstance<java.math.BigDecimal> getSpatialSubmenuRadiusScaleOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("submenu_radius_scale");
+		return OptionUtils.ofDecimal(text.getKey(), MIN_SUBMENU_RADIUS_SCALE, MAX_SUBMENU_RADIUS_SCALE, SUBMENU_RADIUS_SCALE_STEP,
+			value -> text.get(Component.literal(value.stripTrailingZeros().toPlainString() + "×")),
+			() -> text.path("tooltip").get(), selector::getSubmenuRadiusScale, selector::setSubmenuRadiusScale);
 	}
 
 	private OptionInstance<Integer> spatialDistanceOption(String key, int min, int max, int step,

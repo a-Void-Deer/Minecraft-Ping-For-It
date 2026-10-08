@@ -291,6 +291,8 @@
   ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Tiempo de pausa tras un trazo completo para entrar a un submenú. Se aplica al siguiente gesto."
   ,"settings.pingforit.spatial_selector.root_distance": "Distancia del menú raíz: %s"
   ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Distancia visual de las opciones raíz al centro; no cambia la zona muerta ni el trazo de entrada."
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale": "Tamaño del submenú: %s"
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Multiplicador visual del tamaño de todos los submenús, incluidos los menús de objetos del inventario, relativo a la distancia derivada de la vista; no cambia la distancia del menú raíz ni los umbrales de gestos."
   ,"settings.pingforit.spatial_selector.target_glide": "Sensibilidad vertical del mouse en inventario: %s"
   ,"settings.pingforit.spatial_selector.target_glide.tooltip": "Factor para recorrer filas del inventario con movimiento vertical del mouse. No afecta la rueda."
   ,"settings.pingforit.spatial_selector.hover_enabled": "Exigir enfoque sostenido para volver"

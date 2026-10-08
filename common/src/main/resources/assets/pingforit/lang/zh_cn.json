@@ -291,6 +291,8 @@
   ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "完成笔画后需停顿多久才进入子菜单。下次按住生效。"
   ,"settings.pingforit.spatial_selector.root_distance": "根菜单距离：%s"
   ,"settings.pingforit.spatial_selector.root_distance.tooltip": "根菜单选项与中心的显示距离，不改变中心死区或进入笔画。"
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale": "子圆盘大小：%s"
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "所有非根圆盘（包括物品栏物品圆盘）相对于视口距离的显示大小倍率；不改变根菜单距离或手势阈值。"
   ,"settings.pingforit.spatial_selector.target_glide": "库存鼠标上下滑动灵敏度：%s"
   ,"settings.pingforit.spatial_selector.target_glide.tooltip": "鼠标上下移动浏览库存行时的滑动系数，不影响滚轮。"
   ,"settings.pingforit.spatial_selector.hover_enabled": "返回需持续悬停确认"

@@ -27,6 +27,7 @@ class SettingsCategoryCatalogTest {
 			Setting.MARK_FLUIDS), SettingsCategoryCatalog.settings(Category.TARGET_SELECTION));
 		assertEquals(List.of(
 			Setting.SPATIAL_ROOT_DISTANCE,
+			Setting.SPATIAL_SUBMENU_RADIUS_SCALE,
 			Setting.WHEEL_OPACITY,
 			Setting.WHEEL_TARGET_OPACITY,
 			Setting.WHEEL_TARGET_FONT_SIZE,

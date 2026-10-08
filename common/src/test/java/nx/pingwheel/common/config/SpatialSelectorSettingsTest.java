@@ -135,6 +135,7 @@ class SpatialSelectorSettingsTest {
 		settings.setHoverMillis(1000);
 		settings.setShowTrail(false);
 		settings.setReduceMotion(true);
+		settings.setSubmenuRadiusScale(new BigDecimal("4"));
 
 		assertEquals(new SpatialSelectorSettings.Snapshot(28, 70, 200, 90,
 			new BigDecimal("1.5"), true, 750, true, false), frozen);
@@ -181,6 +182,65 @@ class SpatialSelectorSettingsTest {
 		assertEquals(1, settings.getPreciseCapturePeriodTicks());
 		settings.setPreciseCapturePeriodTicks(51);
 		assertEquals(50, settings.getPreciseCapturePeriodTicks());
+	}
+
+	@Test
+	void submenuRadiusScaleClampsToTheConfirmedRange() {
+		assertEquals(0, SpatialSelectorSettings.MIN_SUBMENU_RADIUS_SCALE
+			.compareTo(SpatialSelectorSettings.clampSubmenuRadiusScale(new BigDecimal("0.5"))));
+		assertEquals(0, SpatialSelectorSettings.MAX_SUBMENU_RADIUS_SCALE
+			.compareTo(SpatialSelectorSettings.clampSubmenuRadiusScale(new BigDecimal("9"))));
+		assertEquals(0, new BigDecimal("2.5")
+			.compareTo(SpatialSelectorSettings.clampSubmenuRadiusScale(new BigDecimal("2.5"))));
+	}
+
+	@Test
+	void missingAndNullSubmenuRadiusScaleGainTheConfirmedDefault() {
+		SpatialSelectorSettings missing = new Gson().fromJson("{}", SpatialSelectorSettings.class);
+		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE
+			.compareTo(missing.getSubmenuRadiusScale()));
+
+		SpatialSelectorSettings explicitNull = new Gson().fromJson(
+			"{\"submenuRadiusScale\":null}", SpatialSelectorSettings.class);
+		explicitNull.validate();
+		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE
+			.compareTo(explicitNull.getSubmenuRadiusScale()));
+		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE
+			.compareTo(explicitNull.snapshot().submenuRadiusScale()));
+	}
+
+	@Test
+	void outOfRangeSubmenuRadiusScaleClampsAndFreezesIntoTheSnapshot() {
+		SpatialSelectorSettings settings = new Gson().fromJson(
+			"{\"submenuRadiusScale\":0.5}", SpatialSelectorSettings.class);
+		assertEquals(0, SpatialSelectorSettings.MIN_SUBMENU_RADIUS_SCALE
+			.compareTo(settings.snapshot().submenuRadiusScale()));
+		settings.validate();
+		assertEquals(0, SpatialSelectorSettings.MIN_SUBMENU_RADIUS_SCALE
+			.compareTo(settings.getSubmenuRadiusScale()));
+
+		settings.setSubmenuRadiusScale(new BigDecimal("9"));
+		assertEquals(0, SpatialSelectorSettings.MAX_SUBMENU_RADIUS_SCALE
+			.compareTo(settings.getSubmenuRadiusScale()));
+
+		settings.setSubmenuRadiusScale(new BigDecimal("2.5"));
+		SpatialSelectorSettings.Snapshot frozen = settings.snapshot();
+		settings.setSubmenuRadiusScale(new BigDecimal("1.0"));
+		assertEquals(0, new BigDecimal("2.5").compareTo(frozen.submenuRadiusScale()));
+	}
+
+	@Test
+	void previousSnapshotConstructorFormsDefaultTheSubmenuRadiusScale() {
+		SpatialSelectorSettings.Snapshot nine = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			new BigDecimal("0.25"), false, 500, true, false);
+		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE.compareTo(nine.submenuRadiusScale()));
+		assertEquals(SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS,
+			nine.preciseCapturePeriodTicks());
+
+		SpatialSelectorSettings.Snapshot ten = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			new BigDecimal("0.25"), false, 500, true, false, 25);
+		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE.compareTo(ten.submenuRadiusScale()));
+		assertEquals(25, ten.preciseCapturePeriodTicks());
 	}
 
 	@Test

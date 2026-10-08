@@ -43,6 +43,12 @@ public final class SpatialSelectorSettings {
 	public static final int DEFAULT_ROOT_DISTANCE = 55;
 	public static final int ROOT_DISTANCE_STEP = 1;
 
+	/** Non-root visual radius, relative to the viewport-derived orbit. */
+	public static final BigDecimal MIN_SUBMENU_RADIUS_SCALE = new BigDecimal("1.0");
+	public static final BigDecimal MAX_SUBMENU_RADIUS_SCALE = new BigDecimal("4.0");
+	public static final BigDecimal DEFAULT_SUBMENU_RADIUS_SCALE = new BigDecimal("1.5");
+	public static final BigDecimal SUBMENU_RADIUS_SCALE_STEP = new BigDecimal("0.1");
+
 	public static final BigDecimal MIN_TARGET_GLIDE = new BigDecimal("0.25");
 	public static final BigDecimal MAX_TARGET_GLIDE = new BigDecimal("3");
 	public static final BigDecimal DEFAULT_TARGET_GLIDE = new BigDecimal("0.25");
@@ -65,6 +71,7 @@ public final class SpatialSelectorSettings {
 	private int stroke = DEFAULT_STROKE;
 	private int dwellMillis = DEFAULT_DWELL_MILLIS;
 	private int rootDistance = DEFAULT_ROOT_DISTANCE;
+	private BigDecimal submenuRadiusScale = DEFAULT_SUBMENU_RADIUS_SCALE;
 	private BigDecimal targetGlide = DEFAULT_TARGET_GLIDE;
 	private boolean hoverEnabled = DEFAULT_HOVER_ENABLED;
 	private int hoverMillis = DEFAULT_HOVER_MILLIS;
@@ -78,6 +85,7 @@ public final class SpatialSelectorSettings {
 		stroke = clampStroke(stroke);
 		dwellMillis = clampDwellMillis(dwellMillis);
 		rootDistance = clampRootDistance(rootDistance);
+		submenuRadiusScale = clampSubmenuRadiusScale(submenuRadiusScale);
 		targetGlide = clampTargetGlide(targetGlide);
 		hoverMillis = clampHoverMillis(hoverMillis);
 		preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks);
@@ -87,6 +95,7 @@ public final class SpatialSelectorSettings {
 	public void setStroke(int value) { stroke = clampStroke(value); }
 	public void setDwellMillis(int value) { dwellMillis = clampDwellMillis(value); }
 	public void setRootDistance(int value) { rootDistance = clampRootDistance(value); }
+	public void setSubmenuRadiusScale(BigDecimal value) { submenuRadiusScale = clampSubmenuRadiusScale(value); }
 	public void setTargetGlide(BigDecimal value) { targetGlide = clampTargetGlide(value); }
 	public void setHoverMillis(int value) { hoverMillis = clampHoverMillis(value); }
 	public void setPreciseCapturePeriodTicks(int value) { preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(value); }
@@ -105,6 +114,15 @@ public final class SpatialSelectorSettings {
 
 	public static int clampRootDistance(int value) {
 		return Math.clamp(value, MIN_ROOT_DISTANCE, MAX_ROOT_DISTANCE);
+	}
+
+	public static BigDecimal clampSubmenuRadiusScale(BigDecimal value) {
+		if (value == null) return DEFAULT_SUBMENU_RADIUS_SCALE;
+		if (value.compareTo(MIN_SUBMENU_RADIUS_SCALE) < 0) return MIN_SUBMENU_RADIUS_SCALE;
+		if (value.compareTo(MAX_SUBMENU_RADIUS_SCALE) > 0) return MAX_SUBMENU_RADIUS_SCALE;
+
+		BigDecimal stripped = value.stripTrailingZeros();
+		return stripped.scale() < 0 ? stripped.setScale(0) : stripped;
 	}
 
 	public static BigDecimal clampTargetGlide(BigDecimal value) {
@@ -129,12 +147,25 @@ public final class SpatialSelectorSettings {
 		return new Snapshot(clampDeadzone(deadzone), clampStroke(stroke),
 			clampDwellMillis(dwellMillis), clampRootDistance(rootDistance),
 			clampTargetGlide(targetGlide), hoverEnabled, clampHoverMillis(hoverMillis),
-			showTrail, reduceMotion, clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks));
+			showTrail, reduceMotion, clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks),
+			clampSubmenuRadiusScale(submenuRadiusScale));
 	}
 
 	public record Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
 		BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
-		boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks) {
+		boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
+		BigDecimal submenuRadiusScale) {
+
+		/**
+		 * Compatibility constructor for callers that predate the submenu radius
+		 * scale; the confirmed default is the baseline 1.5 multiplier.
+		 */
+		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
+			BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+			boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks) {
+			this(deadzone, stroke, dwellMillis, rootDistance, targetGlide, hoverEnabled,
+				hoverMillis, showTrail, reduceMotion, preciseCapturePeriodTicks, DEFAULT_SUBMENU_RADIUS_SCALE);
+		}
 
 		/**
 		 * Compatibility constructor for callers that predate the precise capture

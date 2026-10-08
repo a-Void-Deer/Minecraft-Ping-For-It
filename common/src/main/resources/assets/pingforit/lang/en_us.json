@@ -296,6 +296,8 @@
   ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "How long to pause after a full stroke to enter a submenu. Applies to the next hold."
   ,"settings.pingforit.spatial_selector.root_distance": "Root Menu Distance: %s"
   ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Visual distance of root choices from the center; does not change the deadzone or entry stroke."
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale": "Submenu Size: %s"
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Visual size multiplier for every non-root menu, including inventory item menus, relative to the viewport-derived distance; does not change the root menu distance or any gesture threshold."
   ,"settings.pingforit.spatial_selector.target_glide": "Inventory Vertical Mouse Sensitivity: %s"
   ,"settings.pingforit.spatial_selector.target_glide.tooltip": "Glide factor for vertical mouse movement through inventory rows. Does not affect the scroll wheel."
   ,"settings.pingforit.spatial_selector.hover_enabled": "Require Sustained Hover to Return"

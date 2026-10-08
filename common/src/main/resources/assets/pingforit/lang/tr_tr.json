@@ -283,6 +283,8 @@
   ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Tam hareketten sonra alt menüye girmek için beklenecek süre. Sonraki basılı tutmada uygulanır."
   ,"settings.pingforit.spatial_selector.root_distance": "Kök menü uzaklığı: %s"
   ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Kök seçeneklerin merkezden görsel uzaklığı; ölü bölgeyi veya giriş hareketini değiştirmez."
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale": "Alt menü boyutu: %s"
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Envanter eşya menüleri dahil tüm alt menülerin görünümden türetilen uzaklığa göre görsel boyut çarpanı; kök menü uzaklığını ve hareket eşiklerini değiştirmez."
   ,"settings.pingforit.spatial_selector.target_glide": "Envanter dikey fare hassasiyeti: %s"
   ,"settings.pingforit.spatial_selector.target_glide.tooltip": "Envanter satırları arasında dikey fare hareketinin kaydırma çarpanı. Fare tekerleğini etkilemez."
   ,"settings.pingforit.spatial_selector.hover_enabled": "Dönüş için sürekli üzerinde bekleme gerektir"

@@ -283,6 +283,8 @@
   ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Czas pauzy po pełnym geście potrzebny do otwarcia podmenu. Działa od następnego przytrzymania."
   ,"settings.pingforit.spatial_selector.root_distance": "Odległość menu głównego: %s"
   ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Wizualna odległość głównych opcji od środka; nie zmienia martwej strefy ani gestu wejścia."
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale": "Rozmiar podmenu: %s"
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Wizualny mnożnik rozmiaru wszystkich podmenu, w tym menu przedmiotów ekwipunku, względem odległości wynikającej z widoku; nie zmienia odległości menu głównego ani progów gestów."
   ,"settings.pingforit.spatial_selector.target_glide": "Pionowa czułość myszy w ekwipunku: %s"
   ,"settings.pingforit.spatial_selector.target_glide.tooltip": "Współczynnik pionowego przesuwania myszy po wierszach ekwipunku. Nie wpływa na kółko myszy."
   ,"settings.pingforit.spatial_selector.hover_enabled": "Wymagaj ciągłego najechania dla powrotu"

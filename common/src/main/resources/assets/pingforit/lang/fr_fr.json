@@ -288,6 +288,8 @@
   ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Durée de pause après un trait complet pour entrer dans un sous-menu. S'applique au prochain maintien."
   ,"settings.pingforit.spatial_selector.root_distance": "Distance du menu racine : %s"
   ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Distance visuelle des choix racine au centre ; ne modifie ni la zone morte ni le trait d'entrée."
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale": "Taille du sous-menu : %s"
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Facteur visuel de taille de tous les sous-menus, y compris les menus d'objets de l'inventaire, par rapport à la distance dérivée de la vue ; ne modifie ni la distance du menu racine ni les seuils de geste."
   ,"settings.pingforit.spatial_selector.target_glide": "Sensibilité verticale de la souris dans l'inventaire : %s"
   ,"settings.pingforit.spatial_selector.target_glide.tooltip": "Facteur de glissement vertical de la souris dans les lignes de l'inventaire. N'affecte pas la molette."
   ,"settings.pingforit.spatial_selector.hover_enabled": "Exiger un survol continu pour revenir"

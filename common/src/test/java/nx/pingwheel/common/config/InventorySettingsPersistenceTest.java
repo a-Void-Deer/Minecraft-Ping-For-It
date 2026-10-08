@@ -206,6 +206,8 @@ class InventorySettingsPersistenceTest {
 		assertNotNull(selector);
 		assertFalse(selector.isHoverEnabled());
 		assertTrue(selector.getTargetGlide().compareTo(SpatialSelectorSettings.MIN_TARGET_GLIDE) >= 0);
+		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE
+			.compareTo(selector.getSubmenuRadiusScale()));
 		assertArrayEquals(original, Files.readAllBytes(configPath));
 	}
 
@@ -214,7 +216,7 @@ class InventorySettingsPersistenceTest {
 		Path configPath = tempDir.resolve("client.json");
 		Files.writeString(configPath,
 			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"pingVolume\":37,\"spatialSelector\":{"
-				+ "\"targetGlide\":9,\"hoverEnabled\":true,\"hoverMillis\":10}}\n",
+				+ "\"targetGlide\":9,\"submenuRadiusScale\":9,\"hoverEnabled\":true,\"hoverMillis\":10}}\n",
 			StandardCharsets.UTF_8);
 
 		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
@@ -223,6 +225,8 @@ class InventorySettingsPersistenceTest {
 		assertEquals(37, handler.getConfig().getPingVolume());
 		SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
 		assertEquals(0, SpatialSelectorSettings.MAX_TARGET_GLIDE.compareTo(selector.getTargetGlide()));
+		assertEquals(0, SpatialSelectorSettings.MAX_SUBMENU_RADIUS_SCALE
+			.compareTo(selector.getSubmenuRadiusScale()));
 		assertEquals(SpatialSelectorSettings.MIN_HOVER_MILLIS, selector.getHoverMillis());
 		assertTrue(selector.isHoverEnabled());
 		assertFalse(hasBrokenBackup(tempDir));
@@ -242,6 +246,33 @@ class InventorySettingsPersistenceTest {
 		assertTrue(selector.has("preciseCapturePeriodTicks"));
 		assertEquals(SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS,
 			selector.get("preciseCapturePeriodTicks").getAsInt());
+		assertTrue(selector.has("submenuRadiusScale"));
+		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE
+			.compareTo(selector.get("submenuRadiusScale").getAsBigDecimal()));
+	}
+
+	@Test
+	void clientSubmenuRadiusScaleRoundTripsThroughTheHandler(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("client.json");
+		byte[] original = ("{\"pingforit-version\":\"" + CURRENT_VERSION
+			+ "\",\"pingVolume\":37,\"spatialSelector\":{\"rootDistance\":90}}\n").getBytes(StandardCharsets.UTF_8);
+		Files.write(configPath, original);
+
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE
+			.compareTo(handler.getConfig().getSpatialSelector().getSubmenuRadiusScale()));
+		assertArrayEquals(original, Files.readAllBytes(configPath));
+
+		handler.getConfig().getSpatialSelector().setSubmenuRadiusScale(new BigDecimal("2.5"));
+		assertTrue(handler.saveSafely());
+		JsonObject selector = readRoot(configPath).getAsJsonObject("spatialSelector");
+		assertEquals(0, new BigDecimal("2.5").compareTo(selector.get("submenuRadiusScale").getAsBigDecimal()));
+
+		ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
+		reloaded.load();
+		assertEquals(0, new BigDecimal("2.5").compareTo(
+			reloaded.getConfig().getSpatialSelector().getSubmenuRadiusScale()));
 	}
 
 	private static JsonObject readRoot(Path path) throws IOException {

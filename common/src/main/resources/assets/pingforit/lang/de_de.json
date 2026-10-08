@@ -291,6 +291,8 @@
   ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Pausendauer nach einer vollständigen Geste zum Öffnen eines Untermenüs. Gilt ab dem nächsten Halten."
   ,"settings.pingforit.spatial_selector.root_distance": "Abstand des Hauptmenüs: %s"
   ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Sichtbarer Abstand der Hauptauswahl zur Mitte; verändert weder Totzone noch Eintrittsgeste."
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale": "Größe der Untermenüs: %s"
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Sichtbarer Größenfaktor für jedes Untermenü, einschließlich Gegenstandsmenüs im Inventar, relativ zum sichtbaren Abstand; verändert weder den Abstand des Hauptmenüs noch Gestenschwellen."
   ,"settings.pingforit.spatial_selector.target_glide": "Vertikale Inventar-Mausempfindlichkeit: %s"
   ,"settings.pingforit.spatial_selector.target_glide.tooltip": "Gleitfaktor für vertikale Mausbewegungen durch Inventarzeilen. Beeinflusst das Mausrad nicht."
   ,"settings.pingforit.spatial_selector.hover_enabled": "Zurück erfordert anhaltenden Hover"

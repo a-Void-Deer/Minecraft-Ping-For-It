@@ -260,6 +260,7 @@ class ClientConfigLocalizationTest {
 			"settings.pingforit.spatial_selector.stroke",
 			"settings.pingforit.spatial_selector.dwell_millis",
 			"settings.pingforit.spatial_selector.root_distance",
+			"settings.pingforit.spatial_selector.submenu_radius_scale",
 			"settings.pingforit.spatial_selector.target_glide",
 			"settings.pingforit.spatial_selector.hover_millis",
 			"settings.pingforit.spatial_selector.precise_capture_period_ticks");

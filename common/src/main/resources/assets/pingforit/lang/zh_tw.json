@@ -285,6 +285,8 @@
   ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "完成筆畫後需停頓多久才進入子選單。下次按住生效。"
   ,"settings.pingforit.spatial_selector.root_distance": "根選單距離：%s"
   ,"settings.pingforit.spatial_selector.root_distance.tooltip": "根選單選項與中心的顯示距離，不改變中心死區或進入筆畫。"
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale": "子圓盤大小：%s"
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "所有非根圓盤（包括物品欄物品圓盤）相對於視口距離的顯示大小倍率；不改變根選單距離或手勢閾值。"
   ,"settings.pingforit.spatial_selector.target_glide": "庫存滑鼠上下滑動靈敏度：%s"
   ,"settings.pingforit.spatial_selector.target_glide.tooltip": "滑鼠上下移動瀏覽庫存列時的滑動係數，不影響滾輪。"
   ,"settings.pingforit.spatial_selector.hover_enabled": "返回需持續懸停確認"

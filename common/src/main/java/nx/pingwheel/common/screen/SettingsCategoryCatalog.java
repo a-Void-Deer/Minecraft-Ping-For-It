@@ -31,6 +31,7 @@ public final class SettingsCategoryCatalog {
 		MARK_BLACKLISTED_TARGETS("mark_blacklisted_targets"),
 		MARK_FLUIDS("mark_fluids"),
 		SPATIAL_ROOT_DISTANCE("spatial_selector.root_distance"),
+		SPATIAL_SUBMENU_RADIUS_SCALE("spatial_selector.submenu_radius_scale"),
 		WHEEL_OPACITY("wheel_opacity"),
 		WHEEL_TARGET_OPACITY("wheel_target_opacity"),
 		WHEEL_TARGET_FONT_SIZE("wheel_target_font_size"),
@@ -135,6 +136,7 @@ public final class SettingsCategoryCatalog {
 			Setting.MARK_FLUIDS));
 		settings.put(Category.WHEEL_APPEARANCE, List.of(
 			Setting.SPATIAL_ROOT_DISTANCE,
+			Setting.SPATIAL_SUBMENU_RADIUS_SCALE,
 			Setting.WHEEL_OPACITY,
 			Setting.WHEEL_TARGET_OPACITY,
 			Setting.WHEEL_TARGET_FONT_SIZE,
