@@ -5,6 +5,7 @@ import java.util.Objects;
 import net.minecraft.client.Minecraft;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
+import org.lwjgl.glfw.GLFW;
 
 /**
  * Client-only controller that owns the Minecraft mouse grab state while the
@@ -16,25 +17,39 @@ import nx.pingwheel.common.interaction.state.PingInteractionPhase;
  * <ul>
  *   <li>whenever the wheel is open, no screen is open, and the mouse is
  *       grabbed, the controller releases the mouse via the 1.21.1
- *       {@code MouseHandler#releaseMouse()} so the cursor can select sectors.
- *       It remembers that only this controller released it, including when
- *       vanilla re-grabs the cursor after a screen closes mid-hold;</li>
+ *       {@code MouseHandler#releaseMouse()} so the cursor can select sectors,
+ *       then hides the operating-system cursor through the window's
+ *       {@code GLFW_CURSOR_HIDDEN} mode. Hiding never warps the pointer, so the
+ *       selector keeps receiving absolute positions for its virtual pointer
+ *       and no phantom travel or capture is produced. It remembers that only
+ *       this controller released and hid the cursor, including when vanilla
+ *       re-grabs the cursor after a screen closes mid-hold;</li>
  *   <li>on the transition out of {@code WHEEL_OPEN} (commit,
- *       cancellation, stale, superseded), the mouse is re-grabbed only when
- *       this controller released it and no screen is open. While a screen is
- *       open the re-grab is deferred to a later tick: the controller never
- *       steals the mouse from a screen;</li>
- *   <li>{@link #close(Minecraft)} applies the same re-grab rule when the
- *       runtime is disposed on disconnect.</li>
+ *       cancellation, stale, superseded), the recorded cursor mode is restored
+ *       and the mouse is re-grabbed only when this controller released it and
+ *       no screen is open. While a screen is open the re-grab is deferred to a
+ *       later tick: the controller never steals the mouse from a screen;</li>
+ *   <li>{@link #close(Minecraft)} applies the same restore/re-grab rule when
+ *       the runtime is disposed on disconnect, focus loss, or a world
+ *       abort.</li>
  * </ul>
+ *
+ * <p>The selector hides the cursor exactly while it actually owns the pointer:
+ * the wheel is open, no screen is open, and the mouse is not grabbed. The hide
+ * is owned together with its window handle and the cursor mode it replaced. A
+ * replaced window or another owner changing the mode first makes the
+ * controller drop its claim without touching that owner and without hiding
+ * over it again until a fresh owned release; only a mode that is still the
+ * hidden value this controller set is ever restored.
  *
  * <p>The transition policy itself is a pure, stateless function over one
  * sync snapshot ({@link #nextAction(boolean, boolean, boolean, boolean)}) so
  * it is unit tested without a game client; only the Minecraft
- * {@code MouseHandler} calls are untested glue (compile coverage).
+ * {@code MouseHandler} and GLFW adapter calls remain untested glue (compile
+ * coverage).
  *
- * <p>Only open/release/regrab transitions are debug logged, never per-tick
- * state.
+ * <p>Only open/release/regrab and cursor hide/restore transitions are debug
+ * logged, never per-tick state.
  */
 public final class WheelMouseCapture {
 
@@ -45,21 +60,51 @@ public final class WheelMouseCapture {
 		GRAB
 	}
 
+	/** Cursor mode values of the {@link MouseAccess} seam; the Minecraft adapter forwards them to GLFW. */
+	static final int CURSOR_MODE_NORMAL = GLFW.GLFW_CURSOR_NORMAL;
+	static final int CURSOR_MODE_HIDDEN = GLFW.GLFW_CURSOR_HIDDEN;
+	static final int CURSOR_MODE_DISABLED = GLFW.GLFW_CURSOR_DISABLED;
+	/** Any other value means the active cursor mode is unavailable. */
+	static final int CURSOR_MODE_UNKNOWN = -1;
+
 	private final PingInteractionLogger logger;
 	private boolean releasedByWheel;
 	private int transitionDepth;
+	/** Window whose cursor mode this controller hid, or {@code 0L} while no hide is owned. */
+	private long hiddenWindow;
+	/** Cursor mode recorded immediately before this controller hid the cursor. */
+	private int modeBeforeHide = CURSOR_MODE_UNKNOWN;
+	private boolean cursorHiddenByWheel;
+	/**
+	 * Set when a replaced window or another owner's mode change invalidated an
+	 * owned hide while the wheel stayed open; the selector does not hide over
+	 * that owner again until it performs a fresh owned release.
+	 */
+	private boolean cursorHideSuppressed;
 
 	interface MouseAccess {
 		boolean screenOpen();
 		boolean grabbed();
 		void release();
 		void grab();
+		/** Active window identity, or {@code 0L} when unavailable. */
+		default long window() { return 0L; }
+		/** Current cursor mode, or {@link WheelMouseCapture#CURSOR_MODE_UNKNOWN} when unavailable. */
+		default int cursorMode() { return CURSOR_MODE_UNKNOWN; }
+		/** Sets the cursor mode without warping the pointer; a no-op when unsupported. */
+		default void setCursorMode(int mode) {}
 	}
 	private record MinecraftMouseAccess(Minecraft game) implements MouseAccess {
 		public boolean screenOpen() { return game.screen != null; }
 		public boolean grabbed() { return game.mouseHandler.isMouseGrabbed(); }
 		public void release() { game.mouseHandler.releaseMouse(); }
 		public void grab() { game.mouseHandler.grabMouse(); }
+		public long window() { return game.getWindow().getWindow(); }
+		public int cursorMode() {
+			int mode = GLFW.glfwGetInputMode(window(), GLFW.GLFW_CURSOR);
+			return mode > 0 ? mode : CURSOR_MODE_UNKNOWN;
+		}
+		public void setCursorMode(int mode) { GLFW.glfwSetInputMode(window(), GLFW.GLFW_CURSOR, mode); }
 	}
 	public boolean isTransitioning() { return transitionDepth != 0; }
 
@@ -115,18 +160,24 @@ public final class WheelMouseCapture {
 	void sync(PingInteractionPhase phase, MouseAccess mouse) {
 		Objects.requireNonNull(phase, "phase");
 
-		Action action = nextAction(
-			phase == PingInteractionPhase.WHEEL_OPEN,
-			releasedByWheel,
-			mouse.screenOpen(),
-			mouse.grabbed());
+		boolean isOpen = phase == PingInteractionPhase.WHEEL_OPEN;
+		boolean screenOpen = mouse.screenOpen();
+		reconcileHiddenCursor(mouse, isOpen, screenOpen);
+		if (!isOpen) cursorHideSuppressed = false;
+
+		Action action = nextAction(isOpen, releasedByWheel, screenOpen, mouse.grabbed());
 
 		switch (action) {
 			case RELEASE -> {
 				releasedByWheel = true;
+				// A fresh owned release re-establishes the selector's cursor
+				// visibility even after a newer owner suppressed an earlier hide.
+				cursorHideSuppressed = false;
 				transitionDepth++;
 				try { mouse.release(); }
 				finally { transitionDepth--; }
+				// A reentrant dispose during the release already dropped the claim.
+				if (releasedByWheel) hideCursorIfOwned(mouse, isOpen, screenOpen);
 				logger.debug("wheel mouse released");
 			}
 			case GRAB -> {
@@ -137,9 +188,65 @@ public final class WheelMouseCapture {
 				logger.debug("wheel mouse regrabbed");
 			}
 			default -> {
-				// Screen still open: keep the pending re-grab for a later tick.
+				// The selector can already own a free cursor without this
+				// controller having released it; a screen still open keeps the
+				// pending re-grab for a later tick.
+				if (!cursorHideSuppressed) hideCursorIfOwned(mouse, isOpen, screenOpen);
 			}
 		}
+	}
+
+	/**
+	 * Keeps an owned hide consistent with the live snapshot before the next
+	 * transition: the claim is dropped without touching the mode when the
+	 * window was replaced or another owner changed the mode first, and a claim
+	 * that still matches is restored as soon as the selector no longer owns the
+	 * pointer.
+	 */
+	private void reconcileHiddenCursor(MouseAccess mouse, boolean isOpen, boolean screenOpen) {
+		if (!cursorHiddenByWheel) return;
+		if (mouse.window() != hiddenWindow || mouse.cursorMode() != CURSOR_MODE_HIDDEN) {
+			// A replaced window or a newer owner's mode: never touch it, and do
+			// not hide over that owner again until a fresh owned release.
+			dropHiddenCursor();
+			cursorHideSuppressed = true;
+		} else if (!isOpen || screenOpen || mouse.grabbed()) {
+			restoreHiddenCursor(mouse);
+		}
+	}
+
+	private void hideCursorIfOwned(MouseAccess mouse, boolean isOpen, boolean screenOpen) {
+		if (isOpen && !screenOpen && !mouse.grabbed()) hideCursor(mouse);
+	}
+
+	/** Hides from the visible mode only; never warps the pointer and never overwrites another owner. */
+	private void hideCursor(MouseAccess mouse) {
+		if (cursorHiddenByWheel) return;
+		long window = mouse.window();
+		int previous = mouse.cursorMode();
+		if (window == 0L || previous != CURSOR_MODE_NORMAL) return;
+		mouse.setCursorMode(CURSOR_MODE_HIDDEN);
+		hiddenWindow = window;
+		modeBeforeHide = previous;
+		cursorHiddenByWheel = true;
+		logger.debug("wheel cursor hidden");
+	}
+
+	/** Restores only a mode that is still the hidden value this controller set; never warps. */
+	private void restoreHiddenCursor(MouseAccess mouse) {
+		long window = hiddenWindow;
+		int previous = modeBeforeHide;
+		dropHiddenCursor();
+		if (mouse.window() == window && mouse.cursorMode() == CURSOR_MODE_HIDDEN) {
+			mouse.setCursorMode(previous);
+			logger.debug("wheel cursor restored");
+		}
+	}
+
+	private void dropHiddenCursor() {
+		cursorHiddenByWheel = false;
+		hiddenWindow = 0L;
+		modeBeforeHide = CURSOR_MODE_UNKNOWN;
 	}
 
 	/**
@@ -159,6 +266,14 @@ public final class WheelMouseCapture {
 		close(game == null ? null : new MinecraftMouseAccess(game), screenTransition);
 	}
 	void close(MouseAccess mouse, boolean screenTransition) {
+		if (cursorHiddenByWheel) {
+			if (mouse != null && mouse.window() == hiddenWindow && mouse.cursorMode() == CURSOR_MODE_HIDDEN)
+				restoreHiddenCursor(mouse);
+			else
+				dropHiddenCursor();
+		}
+		cursorHideSuppressed = false;
+
 		if (!releasedByWheel) {
 			return;
 		}
