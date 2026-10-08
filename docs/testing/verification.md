@@ -486,7 +486,18 @@ session, release-admission and paint-admission seams:
 - `SpatialOverlayRendererPresentationTest` covers the paint-admission
   predicates only: detached exit data, ancestor nodes, first-appearance or
   quantized-zero paint, and a backdrop or pointer alone cannot acknowledge a
-  candidate, and absent graphics acknowledge nothing and start no transition.
+  candidate, and absent graphics acknowledge nothing and start no transition;
+  and
+- `SelectorPreciseTargetLabelsTest` covers the Precise detail-label resolver
+  headlessly: every enabled Precise leaf names its own captured candidate from
+  the exact snapshot it is bound to, a broad slot keeps the candidate's
+  canonical target identity instead of synthesizing its slot type, choices
+  without a captured candidate never reach the naming function, a newer
+  publication cannot retarget an older bound snapshot, literal and localized
+  names pass through the existing name resolver including its unknown and Here
+  fallbacks, and the returned component is detached from the live one. It is a
+  label-resolution helper seam: it does not exercise the real selector draw,
+  renderer wiring, or GPU submission.
 
 These are allocation, capture, native-shape, enumeration, refresh-controller,
 session, paint-admission and runtime-port seams; the period key's config and
@@ -600,15 +611,18 @@ per-client period scopes stay equal, unlimited byte multipliers stay finite,
 the step helpers cross boundaries and saturate, pending-memory steps follow the
 piecewise grid, and independent defaults do not alias.
 `SpatialSelectorSettingsTest` covers the spatial-selector settings snapshot and
-bounds: target-glide, hover, deadzone, stroke, dwell, and root-distance
-clamping saturate on both sides over the whole valid interval, the spatial
-distance defaults and bounds preserve their half-scale relationship, null and
-out-of-range nested values validate without throwing, the opt-in Back-hover
-default stays disabled, the precise capture period clamps to its persisted
-range, defaults to its minimum, and freezes into the snapshot, the previous
-snapshot constructor form remains compatible, raw-JSON validation and a frozen
-snapshot clamp every value without resetting boolean choices, a frozen session
-snapshot never follows later config edits, root distance and gesture
+bounds: target-glide, hover, deadzone, stroke, dwell, root-distance, and
+submenu-radius-scale clamping saturate on both sides, the distance and timing
+clamps stay exact over their whole valid interval, the spatial distance defaults
+and bounds preserve their half-scale relationship, null and out-of-range nested
+values validate without throwing, the opt-in Back-hover default stays disabled,
+a missing or explicit-null submenu radius scale gains the confirmed default and
+the value clamps and freezes into the snapshot, the precise capture period
+clamps to its persisted range, defaults to its minimum, and freezes into the
+snapshot, the previous snapshot constructor forms remain compatible and default
+the submenu radius scale and precise capture period, raw-JSON validation and a
+frozen snapshot clamp every value without resetting boolean choices, a frozen
+session snapshot never follows later config edits, root distance and gesture
 preferences stay independent in both mutation directions, and fresh defaults do
 not alias another client's mutable preferences. `SpatialSelectorMigrationTest`
 covers the
@@ -632,7 +646,9 @@ writing the nested inventory object while preserving user data, explicit
 unlimited round trips, out-of-range values clamping without resetting
 unrelated fields or producing a broken backup, the future-version guard
 leaving defaults in memory and refusing to save, and the client
-spatial-selector keys defaulting and clamping, including the precise capture
+spatial-selector keys defaulting and clamping, including the submenu radius
+scale's missing-member default, out-of-range clamp without resetting unrelated
+fields, serialized key, and persisted round trip, and the precise capture
 period's persisted round trip. These are model and persistence
 seams only: no server-administration path, remote change route, settings-UI
 exposure, scheduler consumption or native selector integration exercises them.
@@ -764,6 +780,16 @@ cleanup, reentrant abort during open without reviving the request, and safe
 conversion of a null label to an empty component while unknown non-empty keys
 keep their translation fallback. This is client-session/facade coverage, not
 native input or HUD evidence.
+
+`SelectorToggleLabelsTest` covers the client-side settings-toggle label
+resolver headlessly: each of the three target-selection toggles reads only its
+own live concern (`markFluids`, `markBlacklistedTargets`,
+`passThroughTransparentBlocks`), every resolution re-samples the supplied live
+policy, the toggle name and separator stay plain while only the ON/OFF state
+word carries the status color (green for ON, red for OFF), and a non-toggle or
+unknown choice returns no label so the caller keeps its own resolver. It is a
+label-resolution helper seam: it does not exercise the real selector draw,
+renderer wiring, or GPU submission.
 
 ### Native client interaction runtime
 
@@ -1010,13 +1036,41 @@ independent wheel-underlay and target-frame opacity split, the per-layer gate
 that keeps only the transition-faded chrome when both opacity preferences are
 zero and drops every underlay or text-bearing frame, and the Back progress path
 tracing the frame's actually painted pixel extents and never leaving them;
-half-scale child-orbit bounds and selected offsets; the square progress walk's
-last-painted extents and the inventory footer's immutable back-affordance
-state; and sector scanline geometry, adjacent-sector tiling, shared
-disabled/reserved alpha, and paint ordering; `SpatialOverlayRendererBorderTest`
-projects the real facade's typed border color in both focus states, keeps the
-untyped and legacy `ping:` action fallbacks, and retains the detached color
-through the exit transition.
+half-scale child-orbit bounds, the non-root submenu-radius multiplier with the
+root distance and legacy forms unchanged, and selected offsets; the square
+progress walk's last-painted extents and the inventory footer's immutable
+back-affordance state; and sector scanline geometry, adjacent-sector tiling,
+shared disabled/reserved alpha, and paint ordering;
+`SpatialOverlayRendererBorderTest` projects the real facade's typed border
+color in both focus states, keeps the untyped and legacy `ping:` action
+fallbacks, and retains the detached color through the exit transition.
+`SpatialViewOffsetTest` and
+`SpatialViewOffsetProjectionTest` cover the selector's single rigid view
+translation: exact endpoints, continuous re-aiming, an unchanged origin never
+restarting its interval, reduced-motion snapping, an inert rewound clock and a
+hard clear, and, driven through the real headless controller and selector
+session, every active menu origin — root, pushed child, nested child and Back
+return — projecting onto the GUI center while pointer, trail and menu vectors
+stay rigid; the open inventory list centers on its active origin and an item
+submenu keeps the selected row's logical anchor under the same translation; and
+an inactive frame freezes the last displayed exit translation that a quick
+reopen re-aims from. `SpatialOverlayRendererNodeLayoutTest` drives real
+controller snapshots through the production radial-planning, node-layout and
+font-clipping seams: ordinary menus keep the historical single-line bounds and
+floors; every node of a Precise menu — the five type slots including a disabled
+one, and Back — shares that menu's single extent budget, and an independent
+title or target font preference survives while both rows fit; width overflow
+clips the text at its readable scale floor instead of shrinking it, so long
+English and Chinese names, extreme font-size preferences and the smallest
+viewport with large fonts keep nonblank title, detail, Back and disabled-type
+text; frame-collision checks use the actual rounded bounds including the
+disabled border's inclusive endpoint across rotations, submenu-size tiers and
+viewports; clipping preserves the first whole visible styled code point without
+splitting surrogate pairs; and the detail line adds no opacity or admission
+layer while an exit transition retains its detached component and frame
+constraint. These are pure projection, layout, clipping and paint-predicate
+seams: no GuiGraphics, GPU, native callback or gameplay frame is involved, and
+resource-pack font extremes remain a gap.
 `InventoryTrackingRendererTest`
 projects received tracking data into bounded renderer lines: explicit zero is
 retained, unknown or invalid counts are never synthesized as zero, and status
@@ -1559,7 +1613,7 @@ or because related automated tests exist.
 | --- | --- |
 | Block | Plain `block` versus `entity_block`; `ALL`/`COMPATIBLE`/`VOXEL_SHAPE_ONLY` modes and source fallback; whitelist native glow and fallback; a non-full native shape; same-type state change versus block-type replacement. |
 | Entity | Ordinary entity and dropped item; movement and same-dimension teleportation; death and disappearance; same-dimension world unload/rejoin and runtime-ID reuse in a game session. |
-| Wheel | Short and long press; every sector and border color; independent wheel-underlay and target-frame opacity; frozen target; location fallback; Back-hover dwell, one-level return, and leave/re-entry re-arm under real input; Back progress following the focused Back frame boundary; radial root caller geometry, non-root Back centring, dwell entry and fresh-stroke re-arm under real input. |
+| Wheel | Short and long press; every sector and border color; independent wheel-underlay and target-frame opacity; frozen target; location fallback; Back-hover dwell, one-level return, and leave/re-entry re-arm under real input; Back progress following the focused Back frame boundary; radial root caller geometry, non-root Back centring, dwell entry and fresh-stroke re-arm under real input; the target-selection settings branch's live ON/OFF toggle labels in the bundled Chinese and English locales, including a setting changed while the wheel key is still held, with the captured target and frozen policy unaffected and the entry border unchanged; the rigid centered view translation across multi-level submenus and a Back return, including small GUI scales, large fonts and the largest submenu size; and the Precise slot frames under real rendering, including a disabled slot and Back, long names clipped at their readable text size, and resource-pack font extremes. |
 | Precise live capture | Periodic capture while the Precise branch is active and pause on leaving it; a moving target while the ordinary action stays press-frozen; release committing the last actually painted selectable version; a pending refresh keeping the last certified candidate; independent Distant Horizons location completion; and multi-loader live sessions. |
 | Selection policy and input | Live GUI/screen callbacks for selection gating; focus-loss `KeyMapping.releaseAll`, screen-transition and level-instance/dimension discontinuity aborts with late asynchronous completion; loader/gameplay input lifecycle and physical key-repeat behavior on Fabric, Forge, and NeoForge; selection toggles, entity blacklist/default `simulated:honey_glue` rule, and spectator exclusion in a game session. |
 | Movement, death and replacement | Target movement while the wheel is open; entity death or dimension change; block state change or replacement while open. |

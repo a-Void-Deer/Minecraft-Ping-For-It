@@ -80,6 +80,7 @@ retained.
 | `spatialSelector.stroke` | number, GUI pixels | Minimum pointer stroke before a dwell can enter a focused submenu. |
 | `spatialSelector.dwellMillis` | number, milliseconds | Dwell threshold before a focused branch entry is entered. |
 | `spatialSelector.rootDistance` | number, GUI pixels | Visual root-menu distance from the center; it does not change the deadzone or entry stroke. |
+| `spatialSelector.submenuRadiusScale` | number, multiplier | Client-local visual multiplier of the viewport-derived non-root radial radius, applied to every radial submenu including an inventory item's radial menu; the root menu's distance and every gesture threshold stay independent, and it freezes into the held gesture's snapshot like the other selector preferences. |
 | `spatialSelector.targetGlide` | number | Vertical glide factor for inventory-row mouse movement; it does not affect the scroll wheel. |
 | `spatialSelector.hoverEnabled` | boolean | Whether sustained Back hover returns one level; opt-in and inert until enabled. |
 | `spatialSelector.hoverMillis` | number, milliseconds | Dwell threshold before Back-hover returns one level. |

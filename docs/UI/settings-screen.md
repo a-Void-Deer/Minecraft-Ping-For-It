@@ -47,9 +47,9 @@ The client scope has seven categories:
   Icons, Direction Indicator, Player Info, and Team Color.
 - **Target Selection**: Pass Through Transparent Blocks, Mark Blacklisted
   Targets, and Mark Fluids.
-- **Wheel Appearance**: Root Menu Distance, Wheel Opacity, Wheel Target
-  Opacity, Wheel Target Font Size, Wheel Option Font Size, Show Gesture Trail,
-  and Reduce Selector Motion.
+- **Wheel Appearance**: Root Menu Distance, Submenu Size, Wheel Opacity, Wheel
+  Target Opacity, Wheel Target Font Size, Wheel Option Font Size, Show Gesture
+  Trail, and Reduce Selector Motion.
 - **Input Interaction**: Wheel Hold Time, Long-Press
   Compatibility Mode, Compatibility Time Slice, and Cancel Cone Half-Angle,
   followed by a Spatial selector gestures subgroup with Center Deadzone, Entry

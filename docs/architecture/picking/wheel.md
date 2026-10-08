@@ -71,6 +71,28 @@ separate appearance catalogue, and
 owns those keys and meanings. The trail and root distance are visual only and
 never change gesture thresholds or selection.
 
+## Submenu centering and view translation
+
+While a menu is active, the whole selector overlay is translated so that the
+active menu's origin lands on the GUI center. Every radial submenu uses this
+mapping, including an inventory item's radial menu, whose logical origin is its
+selected row's anchor. The translation is one rigid value for the entire
+pattern: ancestor menus, the pointer, the trail, the interaction guides, and
+the inventory list all move by that same value, so the pattern never shears.
+
+The logical geometry does not change: parent-child menu placement and the
+inventory list's row anchoring are unchanged, and the translation only projects
+that controller space onto the screen. After a Back return the parent menu is
+the active menu and is centered again; the root's zero origin leaves the
+established center unchanged. A normal exit keeps the last displayed
+translation instead of snapping back to the center, so the exit tail does not
+jump; a screen, world, or connection discontinuity discards the retained
+translation instead.
+
+The translation is smoothly interpolated like the other selector transitions,
+and reduced motion snaps it immediately. It is visual only and never changes
+gesture thresholds, focus, or release selection.
+
 ## Radial release result
 
 For a release of an actually open selector, the frozen menu geometry resolves
@@ -140,7 +162,22 @@ in progress keeps the last certified candidate selectable, and a leaf with no
 certified candidate is disabled. A focused fixed-type leaf keeps its focus when
 the live target changes. Each available leaf creates its assigned canonical
 candidate using that candidate's own Target Type default Ping Type; release
-follows [Radial release result](#radial-release-result). The separate,
+follows [Radial release result](#radial-release-result). Each enabled leaf also
+shows its captured candidate's actual display name as a second line beneath the
+fixed type title; a leaf with no captured candidate shows the title alone. The
+name is resolved from the same immutable snapshot that carries the candidate
+entries for that paint, so a shown name always belongs to the candidate version
+the same frame exposes, and a newer live publication cannot retarget an already
+painted node. The name follows the candidate's certified lifetime under
+[Precise live candidate capture](capture.md#precise-live-candidate-capture): a
+pending refresh keeps the last certified name, while a final missing or
+incomplete scan clears it together with the entry. An unavailable name uses the
+established unknown-name fallback, and a Location candidate uses the
+established Here name, under the
+[names and chat](../rendering/names_chat.md) composition rules; the branch adds
+no separate name or appearance preference. The second line stays part of the
+node's text-bearing frame and follows the target text style, and an exit tail
+keeps the name it was painted with. The separate,
 equal-width Back entry is navigation and is never a candidate.
 
 ### Content
@@ -174,6 +211,14 @@ folding and item-selection semantics are owned by
 The settings branch exposes the three target-selection toggles. The toggle
 meanings and their next-capture application are owned by
 [selection policy](selection_policy.md#selector-settings-branch).
+
+Each toggle entry shows its localized name followed by a localized ON/OFF
+state — green for ON, red for OFF — and only the state word is colored; the
+name, the separator, and the entry's border styling stay unchanged. The
+displayed state samples the live setting on every draw rather than the hold's
+frozen raycast policy, so a setting changed while the interaction is still
+held is reflected on the next draw without reopening the wheel, while the
+captured target and the hold's frozen policy remain unaffected.
 
 ## Mouse ownership
 
