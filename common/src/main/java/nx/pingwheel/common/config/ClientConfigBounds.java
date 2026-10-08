@@ -44,7 +44,7 @@ public final class ClientConfigBounds {
 	public static final int MAX_WHEEL_TARGET_OPACITY = 100;
 	public static final int WHEEL_TARGET_OPACITY_STEP = 5;
 
-	public static final int DEFAULT_WHEEL_FONT_SIZE = 300;
+	public static final int DEFAULT_WHEEL_FONT_SIZE = 200;
 	public static final int MIN_WHEEL_FONT_SIZE = 10;
 	public static final int MAX_WHEEL_FONT_SIZE = 1000;
 	public static final int WHEEL_FONT_SIZE_STEP = 10;

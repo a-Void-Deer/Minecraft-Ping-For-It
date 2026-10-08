@@ -11,7 +11,7 @@ class ClientConfigBoundsTest {
 		ClientConfig config = new ClientConfig();
 		assertEquals(150, config.getWheelHoldMillis());
 		assertEquals(20, ClientConfigBounds.MIN_WHEEL_HOLD_MILLIS);
-		assertEquals(300, config.getWheelFontSize());
+		assertEquals(ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE, config.getWheelFontSize());
 		assertEquals(100, config.getWheelTargetFontSize());
 		assertEquals(100, config.getConfigurationNoticeSize());
 		assertEquals(100, config.getWheelTargetOpacity());
