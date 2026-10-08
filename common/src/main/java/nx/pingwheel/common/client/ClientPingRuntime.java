@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -95,6 +96,7 @@ import nx.pingwheel.common.marker.MarkerRequestKind;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.math.Raycast;
+import nx.pingwheel.common.name.ClientTargetNameResolver;
 import nx.pingwheel.common.name.ClientTargetNameStore;
 import nx.pingwheel.common.name.ClientTargetNameDecoder;
 import nx.pingwheel.common.name.TargetNameComposer;
@@ -214,6 +216,11 @@ public final class ClientPingRuntime {
 	private SpatialOverlayRenderer.Style selectorStyle;
 	private final SelectorToggleLabels selectorToggleLabels = new SelectorToggleLabels(
 		() -> raycastPolicy(ClientConfig.HANDLER.getConfig()));
+	/**
+	 * Localized display names for the Precise branch's captured candidates,
+	 * sampled from the frozen target only. The resolver itself is stateless.
+	 */
+	private final ClientTargetNameResolver selectorTargetNames = new ClientTargetNameResolver();
 	private InteractionToken baselineToken;
 	private boolean baselineHeld;
 	private boolean baselineMenuOpened;
@@ -861,8 +868,10 @@ public final class ClientPingRuntime {
 		if (selectorStyle == null || (selector == null && !selectorPaint.isAnimating())) return;
 		var opened = selector;
 		var snapshot = opened == null ? null : opened.snapshot();
+		Function<SpatialController.ChoiceView, Component> details = snapshot == null ? null
+			: new SelectorPreciseTargetLabels(snapshot, selectorTargetNames::resolve)::detail;
 		selectorPaint.drawFrame(graphics, snapshot == null ? null : snapshot.radial(),
-			snapshot == null ? null : snapshot.inventoryView(), this::selectorChoiceLabel, selectorStyle,
+			snapshot == null ? null : snapshot.inventoryView(), this::selectorChoiceLabel, details, selectorStyle,
 			java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeSource.nowMillis()));
 		acknowledgeSelectorPaint(opened, snapshot, selectorPaint.paintedChoiceIds());
 	}

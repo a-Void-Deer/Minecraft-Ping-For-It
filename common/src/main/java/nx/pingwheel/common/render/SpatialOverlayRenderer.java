@@ -4,16 +4,22 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.function.Function;
+import java.util.function.ToIntFunction;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.StringSplitter;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FormattedText;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -96,6 +102,25 @@ public final class SpatialOverlayRenderer {
 	static final double ORBIT_RATIO = 0.11;
 	static final double ORBIT_SELECTED_PUSH = 5.0;
 	static final double SECTOR_PADDING = ORBIT_SELECTED_PUSH + BOX_HEIGHT / 2.0;
+	/** Transition scales of the active menu's focused and unfocused nodes. */
+	static final double NODE_SELECTED_SCALE = 1.12;
+	static final double NODE_SCALE = 0.95;
+	/** Horizontal and vertical inset of node text inside its frame. */
+	static final double NODE_TEXT_INSET = 4.0;
+	/** Total vertical padding of a two-line frame: three pixels above and below. */
+	static final double NODE_VERTICAL_PADDING = 6.0;
+	/** The Precise branch's fixed slots: the five target types plus Back. */
+	static final int PRECISE_SLOT_COUNT = 6;
+	/**
+	 * Safe fraction of the adjacent-node chord for every Precise node's larger
+	 * painted extent. With the selected 1.12 and ordinary 0.95 node scales,
+	 * {@code 2.07 / 2 * 0.68 = 0.7038} stays below the 0.7071 minimum of
+	 * {@code max(|dx|, |dy|)} between adjacent equal-sector nodes, so node
+	 * frames cannot overlap at any menu rotation; the selected node's outward
+	 * push adds further margin. Constrained layout also reserves local pixels
+	 * for frame rounding and the disabled dashed border's inclusive endpoints.
+	 */
+	static final double PRECISE_NODE_EXTENT_FRACTION = 0.68;
 	static final double ANIMATION_RATE_PER_MILLI = 0.02;
 	static final double MAX_FRAME_MILLIS = 100.0;
 	static final double ANCESTOR_ALPHA = 0.35;
@@ -200,10 +225,31 @@ public final class SpatialOverlayRenderer {
 		}
 	}
 
-	private record VisualKey(String kind, String owner, String entry) {}
+	record VisualKey(String kind, String owner, String entry) {}
 	sealed interface Paint permits NodePaint, PanelPaint, RowPaint, HeaderPaint, FooterPaint, ChromePaint, SectorPaint {}
-	record NodePaint(SpatialController.ChoiceView choice, Component label, boolean selected,
-		double hoverProgress) implements Paint {}
+	/**
+	 * One node's paint payload. {@code targetDetail} is the caller-resolved
+	 * second line, or {@code null} for a single-line node. The menu's shared
+	 * {@code maxExtent} is retained even for disabled slots, Back and exit paint;
+	 * an infinite extent keeps ordinary menus unconstrained.
+	 */
+	record NodePaint(SpatialController.ChoiceView choice, Component label, Component targetDetail,
+		boolean selected, double hoverProgress, double maxExtent) implements Paint {
+
+		NodePaint(SpatialController.ChoiceView choice, Component label, Component targetDetail,
+			boolean selected, double hoverProgress) {
+			this(choice, label, targetDetail, selected, hoverProgress, Double.POSITIVE_INFINITY);
+		}
+
+		/** Compatibility form for callers that predate the two-line target detail. */
+		NodePaint(SpatialController.ChoiceView choice, Component label, boolean selected, double hoverProgress) {
+			this(choice, label, null, selected, hoverProgress);
+		}
+
+		boolean hasDetail() {
+			return targetDetail != null && !targetDetail.getString().isBlank();
+		}
+	}
 	record PanelPaint(double width, double height, double headerHeight) implements Paint {}
 	record RowPaint(SpatialInventoryView.Row row, double width, double height, boolean selected,
 		boolean grey) implements Paint {}
@@ -243,6 +289,130 @@ public final class SpatialOverlayRenderer {
 		public double controllerY(double guiHeight) {
 			return centerY - guiHeight / 2.0;
 		}
+	}
+
+	/**
+	 * Resolved merged bounds of one node plus its per-line effective text
+	 * scales. An ordinary single-line node keeps its historical bounds; a
+	 * two-line node merges the title and detail rows into one
+	 * frame, so the background, border and target opacity cover both lines.
+	 */
+	record NodeLayout(double width, double height, double titleScale, double detailScale) {
+		int left() { return (int) Math.round(-width / 2.0); }
+		int top() { return (int) Math.round(-height / 2.0); }
+		int right() { return (int) Math.round(width / 2.0); }
+		int bottom() { return (int) Math.round(height / 2.0); }
+		double contentWidth() { return right() - left() - NODE_TEXT_INSET * 2.0; }
+		double titleTop(int lineHeight) {
+			return detailScale > 0.0 ? top() + NODE_VERTICAL_PADDING / 2.0 : -lineHeight * titleScale / 2.0;
+		}
+		double detailTop(int lineHeight) { return titleTop(lineHeight) + lineHeight * titleScale; }
+	}
+
+	/**
+	 * Historical single-line node bounds: the title at its own scale with the
+	 * existing minimum floors. Ordinary nodes without a detail line keep this
+	 * form, so their established appearance is unchanged.
+	 */
+	static NodeLayout nodeLayout(double titleWidth, int lineHeight, double optionScale) {
+		double width = Math.max(MIN_BOX_WIDTH, titleWidth * optionScale + NODE_TEXT_INSET * 2.0);
+		double height = Math.max(BOX_HEIGHT, lineHeight * optionScale + NODE_VERTICAL_PADDING);
+		return new NodeLayout(width, height, optionScale, 0.0);
+	}
+
+	/**
+	 * Merged two-line bounds. Width clips text instead of reducing its scale.
+	 * Height fitting reserves the historical radial base scale for each row
+	 * (or the caller's smaller preference); only excess scale is reduced. For a
+	 * taller font whose two base-size rows cannot fit, that floor is determined
+	 * from the height budget once, never from the name's length.
+	 */
+	static NodeLayout nodeLayout(double titleWidth, double detailWidth, int lineHeight,
+		double optionScale, double targetScale, double maxExtent) {
+		double extent = constrainedExtent(maxExtent);
+		double availableScale = (extent - NODE_VERTICAL_PADDING) / lineHeight;
+		double floor = Math.min(WheelLabelLayout.BASE_TEXT_SCALE, availableScale / 2.0);
+		double titleFloor = Math.min(optionScale, floor);
+		double detailFloor = Math.min(targetScale, floor);
+		double excess = optionScale + targetScale - titleFloor - detailFloor;
+		double fit = excess > 0.0 ? Math.min(1.0, (availableScale - titleFloor - detailFloor) / excess) : 1.0;
+		double titleScale = titleFloor + (optionScale - titleFloor) * fit;
+		double detailScale = detailFloor + (targetScale - detailFloor) * fit;
+		return new NodeLayout(Math.min(extent, Math.max(MIN_BOX_WIDTH,
+			Math.max(titleWidth * titleScale, detailWidth * detailScale) + NODE_TEXT_INSET * 2.0)),
+			Math.min(extent, lineHeight * (titleScale + detailScale) + NODE_VERTICAL_PADDING), titleScale, detailScale);
+	}
+
+	/** Production planning seam: menu membership, not detail availability, owns the constraint. */
+	static NodeLayout nodeLayout(NodePaint node, ToIntFunction<Component> widths, int lineHeight, Style style) {
+		Component label = nodeLabel(node.choice(), node.label());
+		double titleWidth = widths.applyAsInt(label);
+		NodeLayout layout;
+		if (node.hasDetail()) {
+			layout = nodeLayout(titleWidth, widths.applyAsInt(node.targetDetail()), lineHeight,
+				style.optionTextScale(), style.inventoryTextScale(), node.maxExtent());
+		} else if (!Double.isFinite(node.maxExtent())) {
+			return nodeLayout(titleWidth, lineHeight, style.optionTextScale());
+		} else {
+			double extent = constrainedExtent(node.maxExtent());
+			double titleScale = Math.min(style.optionTextScale(), (extent - NODE_VERTICAL_PADDING) / lineHeight);
+			layout = new NodeLayout(Math.min(extent, Math.max(MIN_BOX_WIDTH,
+				titleWidth * titleScale + NODE_TEXT_INSET * 2.0)),
+				Math.min(extent, Math.max(BOX_HEIGHT, lineHeight * titleScale + NODE_VERTICAL_PADDING)), titleScale, 0.0);
+		}
+		if (!Double.isFinite(node.maxExtent())) return layout;
+		return new NodeLayout(layout.width(), layout.height(),
+			visibleNodeScale(label, widths, layout.contentWidth(), layout.titleScale(), style.optionTextScale()),
+			node.hasDetail() ? visibleNodeScale(node.targetDetail(), widths, layout.contentWidth(),
+				layout.detailScale(), style.inventoryTextScale()) : 0.0);
+	}
+
+	/** Fit one visible glyph, never the whole name; keep the height-fit and readable floors. */
+	private static double visibleNodeScale(Component label, ToIntFunction<Component> widths,
+		double contentWidth, double scale, double preference) {
+		var prefix = Component.empty();
+		label.visit((textStyle, text) -> {
+			int end = 0;
+			while (end < text.length()) {
+				int codePoint = text.codePointAt(end);
+				end += Character.charCount(codePoint);
+				if (!Character.isWhitespace(codePoint)) {
+					prefix.append(Component.literal(text.substring(0, end)).withStyle(textStyle));
+					return Optional.of(prefix);
+				}
+			}
+			prefix.append(Component.literal(text).withStyle(textStyle));
+			return Optional.empty();
+		}, net.minecraft.network.chat.Style.EMPTY);
+		int firstWidth = widths.applyAsInt(prefix);
+		if (firstWidth <= 0 || Math.floor(contentWidth / scale) >= firstWidth) return scale;
+		// A resource-pack glyph or whitespace prefix wider than the frame even at
+		// the floor cannot satisfy both constraints; retain the hard bounds/floor.
+		double floor = Math.min(preference, WheelLabelLayout.BASE_TEXT_SCALE);
+		return Math.min(scale, Math.max(floor, Math.nextDown(contentWidth / firstWidth)));
+	}
+
+	private static double constrainedExtent(double maxExtent) {
+		// Integer rounding and a dashed edge can otherwise exceed the chord budget.
+		return Math.max(MIN_BOX_WIDTH, Math.floor(maxExtent) - 2.0);
+	}
+
+	/** Same style-preserving font clipping used to paint a constrained node. */
+	static FormattedText clippedNodeText(Component label, double width, double scale, StringSplitter splitter) {
+		return splitter.headByWidth(label, Math.max(0, (int) Math.floor(width / scale)),
+			net.minecraft.network.chat.Style.EMPTY);
+	}
+
+	/**
+	 * Shared slot budget for every node of the Precise branch. The adjacent
+	 * chord of the six equal slots including Back bounds the node's larger
+	 * painted extent; the orbit and scale are the same visual geometry the
+	 * nodes are placed with, so no radius or sector geometry changes.
+	 */
+	static double preciseNodeExtentBudget(double viewportOrbit, double submenuRadiusScale) {
+		double radius = viewportOrbit * submenuRadiusScale;
+		double chord = 2.0 * radius * Math.sin(Math.PI / PRECISE_SLOT_COUNT);
+		return Math.max(MIN_BOX_WIDTH, PRECISE_NODE_EXTENT_FRACTION * chord);
 	}
 
 	/**
@@ -347,7 +517,20 @@ public final class SpatialOverlayRenderer {
 	public static RowLayout drawFrame(GuiGraphics graphics, SpatialController.Snapshot radial,
 		SpatialInventoryView inventory, Function<SpatialController.ChoiceView, Component> labels,
 		Style style, long nowNanos) {
-		return SHARED.drawFrame(graphics, radial, inventory, labels, style, nowNanos);
+		return drawFrame(graphics, radial, inventory, labels, null, style, nowNanos);
+	}
+
+	/**
+	 * Paint once per frame with an independent second-line resolver. The detail
+	 * resolver is applied to every presented choice exactly once per frame and
+	 * its component is retained in the node's paint payload, so an exit tail
+	 * keeps the detail it was painted with and no live lookup happens while the
+	 * overlay is only animating out. A null resolver omits the second line.
+	 */
+	public static RowLayout drawFrame(GuiGraphics graphics, SpatialController.Snapshot radial,
+		SpatialInventoryView inventory, Function<SpatialController.ChoiceView, Component> labels,
+		Function<SpatialController.ChoiceView, Component> details, Style style, long nowNanos) {
+		return SHARED.drawFrame(graphics, radial, inventory, labels, details, style, nowNanos);
 	}
 
 	/**
@@ -399,6 +582,12 @@ public final class SpatialOverlayRenderer {
 		public RowLayout drawFrame(GuiGraphics graphics, SpatialController.Snapshot radial,
 			SpatialInventoryView inventory, Function<SpatialController.ChoiceView, Component> labels,
 			Style style, long nowNanos) {
+			return drawFrame(graphics, radial, inventory, labels, null, style, nowNanos);
+		}
+
+		public RowLayout drawFrame(GuiGraphics graphics, SpatialController.Snapshot radial,
+			SpatialInventoryView inventory, Function<SpatialController.ChoiceView, Component> labels,
+			Function<SpatialController.ChoiceView, Component> details, Style style, long nowNanos) {
 			paintedChoiceIds = Set.of();
 			if (graphics == null || style == null) {
 				return RowLayout.NONE;
@@ -415,7 +604,7 @@ public final class SpatialOverlayRenderer {
 			SpatialController.Point origin = activeOrigin(radial);
 			sampleViewOffset(viewOffset, origin, nowNanos, style.reduceMotion());
 			if (radial != null && radial.active()) {
-				addRadial(targets, radial, labels == null ? TRANSLATION_KEY_LABELS : labels,
+				addRadial(targets, radial, labels == null ? TRANSLATION_KEY_LABELS : labels, details,
 					centerX, centerY, orbit(graphics), style.rootDistance(), style.submenuRadiusScale());
 			}
 			if (inventory != null && inventory.open()) {
@@ -463,8 +652,9 @@ public final class SpatialOverlayRenderer {
 		return present && activeMenu && (withAlpha(BORDER_COLOR, targetAlpha(alpha, style)) >>> 24) != 0;
 	}
 
-	private static void addRadial(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
+	static void addRadial(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
 		SpatialController.Snapshot snapshot, Function<SpatialController.ChoiceView, Component> labels,
+		Function<SpatialController.ChoiceView, Component> details,
 		double centerX, double centerY, double orbit, double rootDistance, double submenuRadiusScale) {
 		add(targets, new VisualKey("chrome", "radial", ""), centerX, centerY, 1.0, 1.0,
 			centerX, centerY, new ChromePaint(snapshot));
@@ -474,6 +664,8 @@ public final class SpatialOverlayRenderer {
 			boolean active = i == menus.size() - 1;
 			double menuX = centerX + menu.origin().x();
 			double menuY = centerY + menu.origin().y();
+			double maxExtent = menu.choices().stream().anyMatch(choice -> choice.id().startsWith("precise:"))
+				? preciseNodeExtentBudget(orbit, submenuRadiusScale) : Double.POSITIVE_INFINITY;
 			for (SpatialController.ChoiceView choice : menu.choices()) {
 				double bearing = Math.toRadians(choice.startDegrees() + choice.spanDegrees() / 2.0);
 				boolean selected = active && choice.id().equals(menu.focusId());
@@ -485,9 +677,10 @@ public final class SpatialOverlayRenderer {
 					new SectorPaint(choice, sectorRadius(baseRadius)));
 				add(targets, new VisualKey("node", menu.menuId(), choice.id()),
 					menuX + Math.sin(bearing) * radius, menuY - Math.cos(bearing) * radius,
-					active ? (selected ? 1.12 : 0.95) : 0.85, alpha,
+					active ? (selected ? NODE_SELECTED_SCALE : NODE_SCALE) : 0.85, alpha,
 					menuX + Math.sin(bearing) * (radius - 12.0), menuY - Math.cos(bearing) * (radius - 12.0),
-					new NodePaint(choice, labels.apply(choice), selected, snapshot.hoverProgress()));
+					new NodePaint(choice, labels.apply(choice),
+						details == null ? null : details.apply(choice), selected, snapshot.hoverProgress(), maxExtent));
 			}
 		}
 	}
@@ -744,6 +937,11 @@ public final class SpatialOverlayRenderer {
 
 	private static void drawText(GuiGraphics graphics, Font font, Component label, double x, double y,
 		double scale, int color, double alpha) {
+		drawText(graphics, font, label.getVisualOrderText(), x, y, scale, color, alpha);
+	}
+
+	private static void drawText(GuiGraphics graphics, Font font, FormattedCharSequence label, double x, double y,
+		double scale, int color, double alpha) {
 		int faded = withAlpha(color, alpha);
 		int channel = faded >>> 24;
 		if (channel == 0) {
@@ -774,12 +972,12 @@ public final class SpatialOverlayRenderer {
 		SpatialController.ChoiceView choice = node.choice();
 		boolean selected = node.selected();
 		Component label = nodeLabel(choice, node.label());
-		double boxWidth = Math.max(MIN_BOX_WIDTH, font.width(label) * style.optionTextScale() + 8.0);
-		double boxHeight = Math.max(BOX_HEIGHT, font.lineHeight * style.optionTextScale() + 6.0);
-		int left = (int) Math.round(-boxWidth / 2.0);
-		int top = (int) Math.round(-boxHeight / 2.0);
-		int right = (int) Math.round(boxWidth / 2.0);
-		int bottom = (int) Math.round(boxHeight / 2.0);
+		Component detail = node.targetDetail();
+		NodeLayout layout = nodeLayout(node, font::width, font.lineHeight, style);
+		int left = layout.left();
+		int top = layout.top();
+		int right = layout.right();
+		int bottom = layout.bottom();
 
 		var pose = guiGraphics.pose();
 		pose.pushPose();
@@ -799,8 +997,19 @@ public final class SpatialOverlayRenderer {
 			}
 
 			int textColor = choice.disabled() ? TEXT_DISABLED_COLOR : selected ? TEXT_COLOR : TEXT_DIMMED_COLOR;
-			drawText(guiGraphics, font, label, left + 4.0,
-				-font.lineHeight * style.optionTextScale() / 2.0, style.optionTextScale(), textColor, alpha);
+			if (node.hasDetail() || Double.isFinite(node.maxExtent())) {
+				drawText(guiGraphics, font, Language.getInstance().getVisualOrder(
+					clippedNodeText(label, layout.contentWidth(), layout.titleScale(), font.getSplitter())),
+					left + NODE_TEXT_INSET, layout.titleTop(font.lineHeight), layout.titleScale(), textColor, alpha);
+				if (node.hasDetail()) {
+					drawText(guiGraphics, font, Language.getInstance().getVisualOrder(
+						clippedNodeText(detail, layout.contentWidth(), layout.detailScale(), font.getSplitter())),
+						left + NODE_TEXT_INSET, layout.detailTop(font.lineHeight), layout.detailScale(), textColor, alpha);
+				}
+			} else {
+				drawText(guiGraphics, font, label, left + 4.0,
+					layout.titleTop(font.lineHeight), layout.titleScale(), textColor, alpha);
+			}
 
 			if (choice.back() && selected && state.present() && node.hoverProgress() > 0.0) {
 				drawProgressSegments(
