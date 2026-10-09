@@ -1,5 +1,7 @@
 package nx.pingwheel.common.client;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -7,8 +9,15 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
+import net.minecraft.SharedConstants;
+import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.util.FormattedCharSequence;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import nx.pingwheel.common.client.spatial.SpatialController;
 import nx.pingwheel.common.client.spatial.SpatialMenu;
@@ -35,6 +44,8 @@ import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class NativeSelectorContentTest {
+	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
+
 	private static CapturedPingContext capture() {
 		var snapshot = TargetSnapshotFactory.block("minecraft:overworld", 1, 2, 3, "minecraft:chest", true, BlockFace.NORTH);
 		var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()).resolve(snapshot.target(), snapshot.matchContext());
@@ -113,6 +124,7 @@ class NativeSelectorContentTest {
 	}
 
 	private static final String CREATE = "create:presentation";
+	private static final String SPEED = "create:kinetic.speed";
 	private static final String STRESS = "create:kinetic.stress";
 	private static final String CAPACITY = "create:kinetic.capacity";
 
@@ -164,12 +176,87 @@ class NativeSelectorContentTest {
 			.findFirst().orElseThrow();
 	}
 
+	private static SpatialSelectorSession.Property projectedEntry(
+		SpatialSelectorSession.ContentProjection<ClientInventory.PreviewEntryReference> projection,
+		String fieldId, List<String> recordPath) {
+		return projection.properties().stream().filter(property -> property.ref().fieldId().equals(fieldId)
+			&& property.ref().recordPath().equals(recordPath)).findFirst().orElseThrow();
+	}
+
 	private static void assertKineticValue(Component label, String key, String... args) {
 		Component value = label.getSiblings().getLast();
 		assertInstanceOf(TranslatableContents.class, value.getContents());
 		TranslatableContents contents = (TranslatableContents) value.getContents();
 		assertEquals("presentation.pingforit.format." + key, contents.getKey());
 		assertArrayEquals(args, contents.getArgs());
+	}
+
+	private static PresentationPreviewAccess previewRecordAccess(String field) {
+		return new PresentationPreviewAccess(1, 1, "entity_block", Map.of(CREATE,
+			new PresentationPreviewAccess.Adapter(1,
+				Map.of(field, new PresentationField(field, PresentationField.Kind.RECORD, true, 0, field)))));
+	}
+
+	private static PreviewFieldAccess previewValueReader(Map<String, PresentationValue> values) {
+		return new PreviewFieldAccess() {
+			@Override public String adapterId() { return CREATE; }
+			@Override public Map<String, Outcome> observe(Target target, Set<String> fields, ReadContext context) {
+				Map<String, Outcome> result = new LinkedHashMap<>();
+				for (String field : fields) {
+					PresentationValue value = values.get(field);
+					if (value != null) result.put(field, new Observed(new PreviewObservation(value,
+						PreviewObservation.Origin.CLIENT_SYNCED, context.tick(), false)));
+				}
+				return result;
+			}
+		};
+	}
+
+	private static PresentationValue speedRecord(double effectiveRpm, double theoreticalRpm, boolean moving) {
+		return new PresentationValue.RecordValue(Map.of(
+			"effective_rpm", new PresentationValue.NumberValue(effectiveRpm),
+			"theoretical_rpm", new PresentationValue.NumberValue(theoreticalRpm),
+			"moving", new PresentationValue.Flag(moving)));
+	}
+
+	/** One locally observed speed projection through the production content bridge. */
+	private static final class SpeedPreview {
+		private final List<PresentationPreviewC2SPacket> sent = new ArrayList<>();
+		private final PreviewContext context = new PreviewContext();
+		private final CapturedPingContext capture = capture();
+		private final NativeSelectorContent content;
+		private final SpatialSelectorSession.ContentProjection<ClientInventory.PreviewEntryReference> projection;
+
+		SpeedPreview(PresentationValue speed) {
+			var preview = new ClientPresentationPreview(type -> Optional.of(previewRecordAccess(SPEED)),
+				() -> context, List.of(previewValueReader(Map.of(SPEED, speed))),
+				(target, type) -> Optional.empty(), sent::add);
+			content = new NativeSelectorContent(capture, preview, () -> null, ignored -> List.of(),
+				ref -> Component.literal(ref.fieldId()), json -> null);
+			content.begin(context.level);
+			assertTrue(sent.isEmpty(), "a locally observed speed record needs no preview request");
+			projection = content.read(previewTarget(capture), previewFence(content));
+			assertNotNull(projection);
+		}
+
+		String label(List<String> recordPath) {
+			var property = projectedEntry(projection, SPEED, recordPath);
+			return content.label(property.labelKey()).getString();
+		}
+
+		void close() {
+			content.close();
+			assertTrue(sent.isEmpty(), "reading the local speed projection must not add another preview request");
+		}
+	}
+
+	private static void withSpeedPreview(PresentationValue speed, Consumer<SpeedPreview> body) {
+		SpeedPreview fixture = new SpeedPreview(speed);
+		try {
+			body.accept(fixture);
+		} finally {
+			fixture.close();
+		}
 	}
 
 	@Test void realPreviewFormatsStressWithTheSameProjectionCapacityAndNoExtraRequest() {
@@ -242,6 +329,46 @@ class NativeSelectorContentTest {
 		content.close();
 	}
 
+	@Test void realPreviewFormatsRootSpeedAsLocalizedEffectiveRpmForDrivenReversedAndStoppedRecords() throws IOException {
+		withEnglishTranslations(() -> {
+			withSpeedPreview(speedRecord(128, 128, true), speed -> {
+				assertEquals("create:kinetic.speed: 128 RPM", speed.label(List.of()));
+				assertEquals("effective_rpm: 128", speed.label(List.of("effective_rpm")),
+					"a nested record entry keeps its typed scalar value instead of the RPM display form");
+			});
+			withSpeedPreview(speedRecord(-64, -64, true), speed ->
+				assertEquals("create:kinetic.speed: -64 RPM", speed.label(List.of()),
+					"a reversed rotation keeps its signed effective RPM"));
+			withSpeedPreview(speedRecord(0, 32, false), speed -> {
+				assertEquals("create:kinetic.speed: 0 RPM", speed.label(List.of()),
+					"a stopped overstressed network shows the observed zero effective RPM, not the record size");
+				assertEquals("theoretical_rpm: 32", speed.label(List.of("theoretical_rpm")));
+				assertEquals("moving: No", speed.label(List.of("moving")));
+			});
+		});
+	}
+
+	@Test void speedWithoutNumericEffectiveRpmKeepsTheExistingGenericRecordSummary() throws IOException {
+		withEnglishTranslations(() -> {
+			// The HUD's established format logic falls through to the generic
+			// record summary when effective_rpm is absent or not numeric, so the
+			// preview keeps that fallback instead of inventing a 0 RPM value.
+			withSpeedPreview(new PresentationValue.RecordValue(Map.of(
+				"theoretical_rpm", new PresentationValue.NumberValue(32),
+				"moving", new PresentationValue.Flag(true))), speed -> {
+				assertEquals("create:kinetic.speed: 2", speed.label(List.of()));
+				assertEquals("theoretical_rpm: 32", speed.label(List.of("theoretical_rpm")));
+				assertEquals("moving: Yes", speed.label(List.of("moving")));
+			});
+			withSpeedPreview(new PresentationValue.RecordValue(Map.of(
+				"effective_rpm", new PresentationValue.Text("fast"),
+				"theoretical_rpm", new PresentationValue.NumberValue(32),
+				"moving", new PresentationValue.Flag(true))), speed ->
+				assertEquals("create:kinetic.speed: 3", speed.label(List.of()),
+					"a malformed effective_rpm keeps the record summary rather than fabricating an RPM value"));
+		});
+	}
+
 	@Test void inventoryItemsCarryTakeWhileRegularPropertiesKeepThePropertyPolicy() {
 		List<IPacket> sent = new ArrayList<>(); var inventory = new ClientInventory(sent::add); ready(inventory);
 		var context = new PreviewContext();
@@ -286,5 +413,32 @@ class NativeSelectorContentTest {
 		assertEquals(List.of("request"), projection.inventory().allowedItemTypes().stream().map(type -> type.id()).toList(),
 			"the legacy constructor keeps passing the original shared policy");
 		content.close();
+	}
+
+	@FunctionalInterface private interface ThrowingRunnable { void run(); }
+
+	private static void withEnglishTranslations(ThrowingRunnable body) throws IOException {
+		Map<String, String> english = new LinkedHashMap<>();
+		try (InputStream stream = NativeSelectorContentTest.class.getClassLoader()
+			.getResourceAsStream("assets/pingforit/lang/en_us.json")) {
+			assertNotNull(stream);
+			Language.loadFromJson(stream, english::put);
+		}
+		Language previous = Language.getInstance();
+		Language.inject(new MapLanguage(english));
+		try {
+			body.run();
+		} finally {
+			Language.inject(previous);
+		}
+	}
+
+	private static final class MapLanguage extends Language {
+		private final Map<String, String> translations;
+		private MapLanguage(Map<String, String> translations) { this.translations = translations; }
+		@Override public String getOrDefault(String key, String fallback) { return translations.getOrDefault(key, fallback); }
+		@Override public boolean has(String key) { return translations.containsKey(key); }
+		@Override public boolean isDefaultRightToLeft() { return false; }
+		@Override public FormattedCharSequence getVisualOrder(FormattedText text) { return FormattedCharSequence.EMPTY; }
 	}
 }

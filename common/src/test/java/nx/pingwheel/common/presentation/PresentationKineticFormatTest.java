@@ -1,5 +1,7 @@
 package nx.pingwheel.common.presentation;
 
+import java.util.List;
+import java.util.Map;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import org.junit.jupiter.api.Test;
@@ -7,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PresentationKineticFormatTest {
 	private static final String CREATE = "create:presentation";
+	private static final PresentationPropertyRef SPEED = PresentationPropertyRef.root(CREATE, "create:kinetic.speed");
 	private static final PresentationPropertyRef STRESS = PresentationPropertyRef.root(CREATE, "create:kinetic.stress");
 	private static final PresentationPropertyRef CAPACITY = PresentationPropertyRef.root(CREATE, "create:kinetic.capacity");
 	private static final PresentationPropertyRef AVAILABLE = PresentationPropertyRef.root(CREATE, "create:kinetic.available_capacity");
@@ -51,6 +54,35 @@ class PresentationKineticFormatTest {
 			ignored -> { throw new AssertionError("capacity must not be looked up"); }), "su", "10");
 		assertFormatted(PresentationKineticFormat.value(AVAILABLE, new PresentationValue.NumberValue(-5),
 			ignored -> { throw new AssertionError("capacity must not be looked up"); }), "su", "-5");
+	}
+
+	@Test void rootSpeedRecordFormatsItsEffectiveRpmWithoutConsultingCapacity() {
+		assertFormatted(PresentationKineticFormat.value(SPEED, new PresentationValue.RecordValue(Map.of(
+			"effective_rpm", new PresentationValue.NumberValue(128),
+			"theoretical_rpm", new PresentationValue.NumberValue(64),
+			"moving", new PresentationValue.Flag(true))), ignored -> {
+				throw new AssertionError("speed must not look up capacity");
+			}), "rpm", "128");
+		assertFormatted(PresentationKineticFormat.value(SPEED, new PresentationValue.RecordValue(Map.of(
+			"effective_rpm", new PresentationValue.NumberValue(-2.5),
+			"theoretical_rpm", new PresentationValue.NumberValue(-2.5),
+			"moving", new PresentationValue.Flag(true))), ignored -> null), "rpm", "-2.5");
+		assertFormatted(PresentationKineticFormat.value(SPEED, new PresentationValue.RecordValue(Map.of(
+			"effective_rpm", new PresentationValue.NumberValue(0),
+			"theoretical_rpm", new PresentationValue.NumberValue(32),
+			"moving", new PresentationValue.Flag(false))), ignored -> null), "rpm", "0");
+	}
+
+	@Test void speedWithoutANumericEffectiveRpmOrANestedRpmRefStaysUnformatted() {
+		assertNull(PresentationKineticFormat.value(SPEED, new PresentationValue.RecordValue(Map.of(
+			"theoretical_rpm", new PresentationValue.NumberValue(32))), ignored -> null),
+			"a speed record without effective_rpm keeps the caller's generic record summary");
+		assertNull(PresentationKineticFormat.value(SPEED, new PresentationValue.RecordValue(Map.of(
+			"effective_rpm", new PresentationValue.Text("fast"))), ignored -> null),
+			"a non-numeric effective_rpm is never fabricated into an RPM value");
+		assertNull(PresentationKineticFormat.value(new PresentationPropertyRef(CREATE, "create:kinetic.speed",
+			List.of("effective_rpm")), new PresentationValue.NumberValue(128), ignored -> null),
+			"a nested effective_rpm ref keeps its typed scalar representation");
 	}
 
 	@Test void unrelatedOrNonNumericValuesStayUnformatted() {

@@ -6,30 +6,43 @@ import java.util.function.Function;
 import net.minecraft.network.chat.Component;
 
 /**
- * Create-free SU value formatting shared by the selector content bridge and the
- * HUD property formatter. Only values already present in the same authorized
- * received projection are consulted; no client world state is sampled here.
+ * Create-free kinetic display formatting shared by the selector content bridge
+ * and the HUD property formatter. Only values already present in the same
+ * authorized received projection are consulted; no client world state is
+ * sampled here.
  */
 public final class PresentationKineticFormat {
+	public static final String SPEED_FIELD = "create:kinetic.speed";
 	public static final String STRESS_FIELD = "create:kinetic.stress";
 	public static final String CAPACITY_FIELD = "create:kinetic.capacity";
 	public static final String AVAILABLE_CAPACITY_FIELD = "create:kinetic.available_capacity";
+	private static final String EFFECTIVE_RPM_ENTRY = "effective_rpm";
 	private static final String PREFIX = "presentation.pingforit.format.";
 
 	private PresentationKineticFormat() {}
 
 	/**
 	 * Formats one root kinetic stress, capacity, or available-capacity value as a
-	 * semantic SU component, or returns null when the ref/value is not one of
-	 * those fields. The authorized lookup resolves capacity from the same
-	 * projection; a missing, non-numeric, or non-positive capacity omits the
-	 * percentage instead of inventing zero, and a value over capacity stays above
-	 * 100 percent.
+	 * semantic SU component, or a root kinetic speed record as its effective
+	 * RPM, or returns null when the ref/value is not one of those fields. A speed
+	 * record without a numeric {@code effective_rpm} entry stays unformatted so
+	 * the caller keeps its established generic record summary instead of
+	 * inventing a zero; a nested ref keeps its typed scalar representation. The
+	 * authorized lookup resolves capacity from the same projection; a missing,
+	 * non-numeric, or non-positive capacity omits the percentage instead of
+	 * inventing zero, and a value over capacity stays above 100 percent.
 	 */
 	public static Component value(PresentationPropertyRef ref, PresentationValue value,
 		Function<PresentationPropertyRef, PresentationValue> authorizedCapacity) {
-		if (ref == null || !ref.isRoot() || !(value instanceof PresentationValue.NumberValue number)) return null;
+		if (ref == null || !ref.isRoot()) return null;
 		String field = ref.fieldId();
+		if (SPEED_FIELD.equals(field)) {
+			if (value instanceof PresentationValue.RecordValue record
+				&& record.values().get(EFFECTIVE_RPM_ENTRY) instanceof PresentationValue.NumberValue rpm)
+				return Component.translatable(PREFIX + "rpm", decimal(rpm.value()));
+			return null;
+		}
+		if (!(value instanceof PresentationValue.NumberValue number)) return null;
 		boolean stress = STRESS_FIELD.equals(field);
 		if (!stress && !CAPACITY_FIELD.equals(field) && !AVAILABLE_CAPACITY_FIELD.equals(field)) return null;
 		double amount = number.value();
