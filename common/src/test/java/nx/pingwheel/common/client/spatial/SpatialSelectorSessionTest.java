@@ -18,6 +18,8 @@ import nx.pingwheel.common.domain.ResolvedTarget;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
+import nx.pingwheel.common.interaction.candidate.Candidate;
+import nx.pingwheel.common.interaction.candidate.CaptureEquivalenceKey;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.render.SpatialInventoryView.Status;
@@ -44,6 +46,19 @@ class SpatialSelectorSessionTest {
 		};
 		return new SpatialSelectorSession.CapturedTarget(id, new ResolvedTarget(value, classification),
 			face ? Optional.of(BlockFace.NORTH) : Optional.empty(), Optional.of(new WorldVector(1, 2, 3)));
+	}
+	private static Target.ExternalBlockTarget externalBlock(String locator) {
+		return Target.ExternalBlockTarget.candidate("minecraft:overworld", "sable", "minecraft:chest", locator, true);
+	}
+	private static SpatialSelectorSession.CapturedTarget externalTarget(String id, String locator, Optional<BlockFace> face) {
+		var classification = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
+		return new SpatialSelectorSession.CapturedTarget(id, new ResolvedTarget(externalBlock(locator), classification),
+			face, Optional.of(new WorldVector(1, 2, 3)));
+	}
+	private static Candidate externalCandidate(int x, Optional<BlockFace> face) {
+		var classification = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
+		return new Candidate(0, new ResolvedTarget(externalBlock("opaque-locator"), classification), new WorldVector(x, 2, 3), 1,
+			Optional.empty(), face, new CaptureEquivalenceKey.ExternalKey("minecraft:overworld", "sable", "opaque-locator", "minecraft:chest"));
 	}
 	private static SpatialSelectorSettings.Snapshot settings(boolean hover) {
 		return new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), hover, 250, true, false);
@@ -227,6 +242,29 @@ class SpatialSelectorSessionTest {
 		assertThrows(IllegalArgumentException.class, () -> session(ordinary, Map.of("entity", behind), false, new Content()));
 		assertThrows(IllegalArgumentException.class,
 			() -> session(ordinary, Map.of("dropped_item", target("plain", "entity", false)), false, new Content()));
+	}
+
+	@ParameterizedTest
+	@CsvSource({"entity, false", "location, false", "block, true", "entity_block, true"})
+	void hitFaceStaysRestrictedToBlockTargets(String type, boolean accepted) {
+		if (accepted) assertEquals(Optional.of(BlockFace.NORTH), target("ordinary", type, true).face());
+		else assertThrows(IllegalArgumentException.class, () -> target("ordinary", type, true));
+	}
+
+	@ParameterizedTest
+	@CsvSource({"NORTH", "NONE"})
+	void externalBlockOrdinaryTargetOpensSelectorAndKeepsOnlyItsOwnProviderLocalFace(String observedFace) {
+		Optional<BlockFace> face = "NONE".equals(observedFace) ? Optional.empty() : Optional.of(BlockFace.valueOf(observedFace));
+		var ordinary = externalTarget("ordinary", "opaque-locator", face);
+		var session = session(ordinary, Map.of(), false, new Content());
+		session.open(0);
+		enter(session, "intent", 10);
+		focus(session, "intent:" + ordinary.resolvedTarget().targetType().defaultPingType().id(), 150);
+		var intent = assertInstanceOf(SelectorIntent.CreateTarget.class, session.releaseIntent(151));
+		assertSame(ordinary, intent.candidate());
+		assertEquals(ordinary.resolvedTarget().target(), intent.candidate().resolvedTarget().target());
+		assertEquals(face, intent.candidate().face());
+		assertEquals(Optional.of(new WorldVector(1, 2, 3)), intent.candidate().hit());
 	}
 
 	@Test
@@ -552,6 +590,10 @@ class SpatialSelectorSessionTest {
 	}
 	private static PreciseCaptureRefresh.Published publication(nx.pingwheel.common.interaction.InteractionToken token,
 		Object level, long revision, int x, boolean available) {
+		return publication(token, level, revision, x, available, PreciseCaptureRefreshTest.candidate(false, x));
+	}
+	private static PreciseCaptureRefresh.Published publication(nx.pingwheel.common.interaction.InteractionToken token,
+		Object level, long revision, int x, boolean available, Candidate blockCandidate) {
 		var inputs = new PreciseCaptureRefresh.Inputs(token, level,
 			new nx.pingwheel.common.interaction.CapturedRay(new WorldVector(x, 2, 3), new WorldVector(1, 0, 0)),
 			nx.pingwheel.common.math.RaycastPolicy.from(false, false, false), 10, 100);
@@ -559,7 +601,7 @@ class SpatialSelectorSessionTest {
 			nx.pingwheel.common.interaction.candidate.PreciseTargetType.class);
 		for (var type : nx.pingwheel.common.interaction.candidate.PreciseTargetType.values()) {
 			var outcome = type == nx.pingwheel.common.interaction.candidate.PreciseTargetType.BLOCK && available
-				? PreciseCaptureRefresh.Outcome.available(PreciseCaptureRefreshTest.candidate(false, x)) : PreciseCaptureRefresh.Outcome.missing();
+				? PreciseCaptureRefresh.Outcome.available(blockCandidate) : PreciseCaptureRefresh.Outcome.missing();
 			slots.put(type, new PreciseCaptureRefresh.Slot(revision, inputs, outcome));
 		}
 		return new PreciseCaptureRefresh.Published(revision, revision, inputs, slots);
@@ -598,6 +640,27 @@ class SpatialSelectorSessionTest {
 			}
 			assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(170));
 		}
+	}
+
+	@ParameterizedTest
+	@CsvSource({"EAST", "NONE"})
+	void livePreciseExternalBlockCandidateKeepsItsProviderLocalFace(String observedFace) {
+		Optional<BlockFace> face = "NONE".equals(observedFace) ? Optional.empty() : Optional.of(BlockFace.valueOf(observedFace));
+		var token = new nx.pingwheel.common.interaction.ActiveInteraction().begin(); Object level = new Object();
+		var session = liveSession(token, level);
+		var candidate = externalCandidate(10, face);
+		assertTrue(session.updatePrecise(publication(token, level, 1, 10, true, candidate), 140));
+		var installed = session.snapshot().preciseFrame().choices().get("precise:block");
+		assertNotNull(installed);
+		assertEquals(candidate.resolvedTarget(), installed.resolvedTarget());
+		assertEquals(face, installed.face());
+		focus(session, "precise:block", 150);
+		var painted = session.markPresented(session.snapshot(), java.util.Set.of("precise:block")).orElseThrow();
+		var intent = assertInstanceOf(SelectorIntent.CreateTarget.class, session.releaseIntent(160));
+		assertSame(painted.choices().get("precise:block"), intent.candidate());
+		assertEquals(face, intent.candidate().face());
+		assertEquals(new WorldVector(10, 2, 3), painted.contexts().get(intent.candidate().candidateId()).ray().origin(),
+			"the painted context keeps the live ray");
 	}
 
 	@Test void unpaintedIncompleteReplacementKeepsLastPaintedSelectablePayloadButEmptyAckCannotAuthorize() {

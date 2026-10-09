@@ -46,8 +46,9 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		public CapturedTarget {
 			requireId(candidateId);
 			Objects.requireNonNull(resolvedTarget); Objects.requireNonNull(face); Objects.requireNonNull(hit);
-			if (face.isPresent() && !(resolvedTarget.target() instanceof Target.BlockTarget))
-				throw new IllegalArgumentException("a hit face belongs only to an ordinary block");
+			if (face.isPresent() && !(resolvedTarget.target() instanceof Target.BlockTarget)
+				&& !(resolvedTarget.target() instanceof Target.ExternalBlockTarget))
+				throw new IllegalArgumentException("a hit face belongs only to an ordinary or external block");
 			hit.ifPresent(point -> {
 				if (!Double.isFinite(point.x()) || !Double.isFinite(point.y()) || !Double.isFinite(point.z()))
 					throw new IllegalArgumentException("hit must be finite");

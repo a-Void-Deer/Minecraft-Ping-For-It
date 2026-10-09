@@ -148,7 +148,13 @@ class ClientPingRuntimeInteractionTest {
 		public void applyToggle(SelectorIntent.CaptureToggle toggle, long timeMillis) { toggles.add(toggle); }
 	}
 	private static TargetSnapshot surface(TargetSnapshot value, WorldVector hit) {
-		return value.withCandidateHit(new CandidateHit(hit, CaptureEquivalenceKey.nativeTarget(value.target())));
+		return value.withCandidateHit(new CandidateHit(hit, equivalenceKey(value.target())));
+	}
+	private static CaptureEquivalenceKey equivalenceKey(nx.pingwheel.common.domain.Target target) {
+		if (target instanceof nx.pingwheel.common.domain.Target.ExternalBlockTarget external)
+			return new CaptureEquivalenceKey.ExternalKey(external.dimensionId(), external.providerId(),
+				external.providerLocator(), external.expectedBlockRegistryId());
+		return CaptureEquivalenceKey.nativeTarget(target);
 	}
 	private static boolean disabled(Fixture f, String choiceId) {
 		return f.menu().choices().stream().filter(choice -> choice.id().equals(choiceId)).findFirst().orElseThrow().disabled();
@@ -355,6 +361,22 @@ class ClientPingRuntimeInteractionTest {
 		behind.focus("precise:block", 460); behind.paint(); behind.release(470);
 		assertEquals(BEHIND_CHEST.target(), behind.creates().getFirst().target());
 		assertEquals("attention", behind.creates().getFirst().pingType());
+	}
+	@Test void externalBlockPressWithProviderLocalFaceOpensSelectorAndReleasesItsOwnTarget() {
+		Fixture f = new Fixture();
+		TargetSnapshot external = TargetSnapshotFactory.externalBlockCandidate(DIMENSION, "sable", "minecraft:chest",
+			"opaque-locator", true, BlockFace.WEST);
+		f.access.snapshot = external;
+		f.press(0); f.frame(250, true);
+		assertTrue(f.runtime.selectorSnapshot().isPresent(), "an external block target actually opens the selector");
+		assertEquals(BlockFace.WEST, f.sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p
+			&& p.kind() == InventoryC2SPacket.Kind.OPEN).map(packet -> ((InventoryC2SPacket) packet).face())
+			.findFirst().orElseThrow(), "the frozen provider-local face is the preview read scope");
+		f.prime(); f.enter("intent", 260); f.focus("intent:attention", 460); f.release(470);
+		assertEquals(1, f.creates().size());
+		assertEquals(external.target(), f.creates().getFirst().target());
+		assertEquals("attention", f.creates().getFirst().pingType());
+		assertEquals(1, f.validations.size());
 	}
 	@Test void broadEntitySlotKeepsBehindDroppedItemSeparateFromOrdinaryDroppedItem() {
 		Fixture front = new Fixture(); front.access.snapshot = ITEM; front.access.supplements = List.of(BEHIND_ITEM);
