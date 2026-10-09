@@ -282,12 +282,16 @@ public final class CreatePresentationAdapters {
 			CreateSamplingLimits limits = new CreateSamplingLimits(defaults.maxStructureBlocks(),
 				defaults.maxSlots(), defaults.maxTanks(), defaults.maxRegistryIds(), maxWork,
 				defaults.maxOutputBytes());
+			// The derived available-capacity field reuses this single capture's raw
+			// stress/capacity pair; it never asks for a second observation and
+			// publishes nothing by itself.
+			boolean derivedRawPair = demand.contains(CreatePresentationAdapter.AVAILABLE_CAPACITY);
 			CreatePresentationCollector.Sample sampled = CreatePresentationCollector.capture(level, pos,
 				demand.contains(CreatePresentationAdapter.SPEED),
 				demand.contains(CreatePresentationAdapter.HAS_NETWORK),
 				demand.contains(CreatePresentationAdapter.OVERSTRESSED),
-				demand.contains(CreatePresentationAdapter.STRESS),
-				demand.contains(CreatePresentationAdapter.CAPACITY),
+				demand.contains(CreatePresentationAdapter.STRESS) || derivedRawPair,
+				demand.contains(CreatePresentationAdapter.CAPACITY) || derivedRawPair,
 				demand.contains(CreatePresentationAdapter.INVENTORY),
 				demand.contains(CreatePresentationAdapter.FLUID), limits, memberGate);
 			for (int scan = 0; scan < sampled.workUsed(); scan++) {

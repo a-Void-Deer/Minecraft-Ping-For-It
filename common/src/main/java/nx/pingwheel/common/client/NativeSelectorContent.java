@@ -16,6 +16,7 @@ import nx.pingwheel.common.client.spatial.SpatialSelectorSession;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.interaction.CapturedPingContext;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.presentation.PresentationKineticFormat;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
@@ -163,6 +164,9 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 				.map(entry -> Component.translatable("presentation.pingforit.format.item_count", itemName, valueLabel(entry.value())))
 				.orElseGet(() -> Component.translatable("presentation.pingforit.format.item", itemName));
 		}
+		Component kinetic = PresentationKineticFormat.value(ref, value,
+			capacity -> projection.property(capacity).map(observation -> observation.value()).orElse(null));
+		if (kinetic != null) return name.copy().append(": ").append(kinetic);
 		return name.copy().append(": ").append(valueLabel(value));
 	}
 

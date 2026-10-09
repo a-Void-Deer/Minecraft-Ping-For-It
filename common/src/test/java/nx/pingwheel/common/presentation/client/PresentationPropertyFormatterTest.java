@@ -1,14 +1,25 @@
 package nx.pingwheel.common.presentation.client;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.SharedConstants;
+import net.minecraft.locale.Language;
+import net.minecraft.network.chat.FormattedText;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.util.FormattedCharSequence;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PresentationPropertyFormatterTest {
+	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
+
 	private static final String BASIC = "minecraft:basic";
 	private static final String CREATE = "create:presentation";
 	private static final PresentationPropertyRef HEALTH = PresentationPropertyRef.root(BASIC, "minecraft:entity.health");
@@ -151,5 +162,82 @@ class PresentationPropertyFormatterTest {
 			PresentationPropertyFormatter.plan(view),
 			"the dropped-item default is not the name and stays displayable");
 		assertEquals(1, ClientPresentation.defaultLabels(view).size());
+	}
+
+	@Test void kineticStressCapacityAndAvailableFormatAsSuFromTheSameProjection() throws IOException {
+		withEnglishTranslations(() -> {
+			var stress = PresentationPropertyRef.root(CREATE, "create:kinetic.stress");
+			var capacity = PresentationPropertyRef.root(CREATE, "create:kinetic.capacity");
+			var available = PresentationPropertyRef.root(CREATE, "create:kinetic.available_capacity");
+			var section = new PresentationSection(CREATE, 1, Map.of(
+				"create:kinetic.stress", new PresentationValue.NumberValue(12),
+				"create:kinetic.capacity", new PresentationValue.NumberValue(10),
+				"create:kinetic.available_capacity", new PresentationValue.NumberValue(-2)), false,
+				Map.of(available, "attention"));
+			assertEquals(List.of(
+				"Used stress: 12 SU (120%)",
+				"Attention: Available stress: -2 SU"),
+				ClientPresentation.defaultLabels(new PresentationView("block", stress, Map.of(CREATE, section))));
+			assertEquals(List.of(
+				"Total stress capacity: 10 SU",
+				"Attention: Available stress: -2 SU"),
+				ClientPresentation.defaultLabels(new PresentationView("block", capacity, Map.of(CREATE, section))));
+		});
+	}
+
+	@Test void kineticStressOmitsThePercentageWithoutAnAuthorizedPositiveCapacity() throws IOException {
+		withEnglishTranslations(() -> {
+			var stress = PresentationPropertyRef.root(CREATE, "create:kinetic.stress");
+			var section = new PresentationSection(CREATE, 1,
+				Map.of("create:kinetic.stress", new PresentationValue.NumberValue(12)), false);
+			assertEquals(List.of("Used stress: 12 SU"),
+				ClientPresentation.defaultLabels(new PresentationView("block", stress, Map.of(CREATE, section))));
+			var zero = new PresentationSection(CREATE, 1, Map.of(
+				"create:kinetic.stress", new PresentationValue.NumberValue(12),
+				"create:kinetic.capacity", new PresentationValue.NumberValue(0)), false);
+			assertEquals(List.of("Used stress: 12 SU"),
+				ClientPresentation.defaultLabels(new PresentationView("block", stress, Map.of(CREATE, zero))));
+		});
+	}
+
+	@Test void unrelatedPropertyFormatsStayUnchanged() throws IOException {
+		withEnglishTranslations(() -> {
+			var health = PresentationPropertyRef.root(BASIC, "minecraft:entity.health");
+			var type = PresentationPropertyRef.root(BASIC, "minecraft:entity.type");
+			var section = new PresentationSection(BASIC, 1, Map.of(
+				"minecraft:entity.health", new PresentationValue.NumberValue(5),
+				"minecraft:entity.max_health", new PresentationValue.NumberValue(20),
+				"minecraft:entity.type", new PresentationValue.Text("minecraft:zombie")), false,
+				Map.of(type, "attention"));
+			assertEquals(List.of("Health: 5 / 20", "Attention: Entity type: minecraft:zombie"),
+				ClientPresentation.defaultLabels(new PresentationView("entity", health, Map.of(BASIC, section))));
+		});
+	}
+
+	@FunctionalInterface private interface ThrowingRunnable { void run(); }
+
+	private static void withEnglishTranslations(ThrowingRunnable body) throws IOException {
+		Map<String, String> english = new LinkedHashMap<>();
+		try (InputStream stream = PresentationPropertyFormatterTest.class.getClassLoader()
+			.getResourceAsStream("assets/pingforit/lang/en_us.json")) {
+			assertNotNull(stream);
+			Language.loadFromJson(stream, english::put);
+		}
+		Language previous = Language.getInstance();
+		Language.inject(new MapLanguage(english));
+		try {
+			body.run();
+		} finally {
+			Language.inject(previous);
+		}
+	}
+
+	private static final class MapLanguage extends Language {
+		private final Map<String, String> translations;
+		private MapLanguage(Map<String, String> translations) { this.translations = translations; }
+		@Override public String getOrDefault(String key, String fallback) { return translations.getOrDefault(key, fallback); }
+		@Override public boolean has(String key) { return translations.containsKey(key); }
+		@Override public boolean isDefaultRightToLeft() { return false; }
+		@Override public FormattedCharSequence getVisualOrder(FormattedText text) { return FormattedCharSequence.EMPTY; }
 	}
 }

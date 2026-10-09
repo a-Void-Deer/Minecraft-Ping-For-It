@@ -15,7 +15,7 @@ class PresentationSettingsLocalizationTest {
 	private static final List<String> LOCALES = List.of(
 		"de_de", "en_us", "es_ar", "fr_fr", "pl_pl", "tr_tr", "zh_cn", "zh_tw");
 	private static final List<String> PROPERTY_FORMATS = List.of(
-		"item", "item_count", "fluid_count", "health_max", "rpm", "text", "number", "flag", "record");
+		"item", "item_count", "fluid_count", "health_max", "rpm", "su", "su_percent", "text", "number", "flag", "record");
 	private static final List<String> TYPES = List.of(
 		"attention", "danger", "go_to", "loot", "destroy", "take", "request");
 	private static final List<String> FIELDS = List.of(
@@ -23,8 +23,8 @@ class PresentationSettingsLocalizationTest {
 		"minecraft_entity_max_health", "minecraft_item_id", "minecraft_item_count",
 		"minecraft_item_icon", "minecraft_block_state", "create_kinetic_speed",
 		"create_kinetic_has_network", "create_kinetic_overstressed", "create_kinetic_stress",
-		"create_kinetic_capacity", "create_inventory_summary", "create_fluid_summary",
-		"pingforit_inventory_items");
+		"create_kinetic_capacity", "create_kinetic_available_capacity", "create_inventory_summary",
+		"create_fluid_summary", "pingforit_inventory_items");
 
 	@Test void everyLocaleOwnsCompleteIndependentPresentationVocabulary() throws IOException {
 		Set<String> parity = presentationKeys(read("en_us"));

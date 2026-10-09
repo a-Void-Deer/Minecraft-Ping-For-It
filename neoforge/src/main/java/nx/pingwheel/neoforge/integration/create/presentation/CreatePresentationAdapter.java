@@ -28,6 +28,7 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 	public static final String OVERSTRESSED = "create:kinetic.overstressed";
 	public static final String STRESS = "create:kinetic.stress";
 	public static final String CAPACITY = "create:kinetic.capacity";
+	public static final String AVAILABLE_CAPACITY = "create:kinetic.available_capacity";
 	public static final String INVENTORY = "create:inventory.summary";
 	public static final String FLUID = "create:fluid.summary";
 
@@ -37,6 +38,7 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 		new PresentationField(OVERSTRESSED, PresentationField.Kind.FLAG, true, 0, "Overstressed"),
 		new PresentationField(STRESS, PresentationField.Kind.NUMBER, true, 0, "Cached network stress (SU)"),
 		new PresentationField(CAPACITY, PresentationField.Kind.NUMBER, true, 0, "Cached network capacity (SU)"),
+		new PresentationField(AVAILABLE_CAPACITY, PresentationField.Kind.NUMBER, true, 0, "Derived available capacity (SU)"),
 		new PresentationField(INVENTORY, PresentationField.Kind.RECORD, false, 0, "Vault items by registry ID"),
 		new PresentationField(FLUID, PresentationField.Kind.RECORD, false, 0, "Tank fluids by registry ID (mB)"));
 
@@ -178,8 +180,8 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 
 	private static boolean knownField(String id) {
 		return SPEED.equals(id) || HAS_NETWORK.equals(id) || OVERSTRESSED.equals(id)
-			|| STRESS.equals(id) || CAPACITY.equals(id) || INVENTORY.equals(id)
-			|| FLUID.equals(id);
+			|| STRESS.equals(id) || CAPACITY.equals(id) || AVAILABLE_CAPACITY.equals(id)
+			|| INVENTORY.equals(id) || FLUID.equals(id);
 	}
 
 	static PresentationSection project(Observation observed, Set<String> demand) {
@@ -202,6 +204,15 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 		}
 		if (demand.contains(CAPACITY) && observed.capacity() != null) {
 			result.put(CAPACITY, new PresentationValue.NumberValue(observed.capacity()));
+		}
+		if (demand.contains(AVAILABLE_CAPACITY) && observed.stress() != null
+			&& observed.capacity() != null) {
+			// The derived field publishes only itself. The raw pair is read once by
+			// the source; both values are promoted to double before subtracting so
+			// a large capacity keeps its exact difference, and a negative result
+			// stays valid.
+			result.put(AVAILABLE_CAPACITY, new PresentationValue.NumberValue(
+				observed.capacity().doubleValue() - observed.stress().doubleValue()));
 		}
 		if (demand.contains(INVENTORY) && observed.items() != null && observed.items().available()) {
 			result.put(INVENTORY, summarize(observed.items()));

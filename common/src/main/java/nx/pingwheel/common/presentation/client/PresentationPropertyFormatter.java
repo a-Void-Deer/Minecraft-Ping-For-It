@@ -7,6 +7,7 @@ import java.util.Set;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import nx.pingwheel.common.presentation.PresentationKineticFormat;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
@@ -105,6 +106,8 @@ final class PresentationPropertyFormatter {
 		}
 		String named = fieldName(view, ref);
 		if (!ref.recordPath().isEmpty()) named = fieldName(view, ref.recordPath().get(ref.recordPath().size() - 1), null);
+		Component kinetic = PresentationKineticFormat.value(ref, value, capacity -> view.property(capacity));
+		if (kinetic != null) return format("number", named, kinetic.getString());
 		if (value instanceof PresentationValue.Text text) {
 			return format("text", named, shortText(text.value()));
 		}
