@@ -41,7 +41,7 @@ import nx.pingwheel.common.domain.PingTypeCatalog;
  * guide line.
  *
  * <p>Wheel opacity governs only the sector underlay; target opacity governs
- * every text-bearing frame together with its label. Neither preference reaches
+	 * every text-bearing frame together with its label and external name preview. Neither preference reaches
  * the interaction chrome (pointer, guides, trail), which follows only the
  * transition fade.
  *
@@ -107,8 +107,10 @@ public final class SpatialOverlayRenderer {
 	static final double NODE_SCALE = 0.95;
 	/** Horizontal and vertical inset of node text inside its frame. */
 	static final double NODE_TEXT_INSET = 4.0;
-	/** Total vertical padding of a two-line frame: three pixels above and below. */
+	/** Total vertical padding of the title frame: three pixels above and below. */
 	static final double NODE_VERTICAL_PADDING = 6.0;
+	/** Visible space between the title frame and its unframed candidate-name preview. */
+	static final double NODE_DETAIL_GAP = 3.0;
 	/** The Precise branch's fixed slots: the five target types plus Back. */
 	static final int PRECISE_SLOT_COUNT = 6;
 	/**
@@ -229,7 +231,7 @@ public final class SpatialOverlayRenderer {
 	sealed interface Paint permits NodePaint, PanelPaint, RowPaint, HeaderPaint, FooterPaint, ChromePaint, SectorPaint {}
 	/**
 	 * One node's paint payload. {@code targetDetail} is the caller-resolved
-	 * second line, or {@code null} for a single-line node. The menu's shared
+	 * external name preview, or {@code null} for a title-only node. The menu's shared
 	 * {@code maxExtent} is retained even for disabled slots, Back and exit paint;
 	 * an infinite extent keeps ordinary menus unconstrained.
 	 */
@@ -241,13 +243,13 @@ public final class SpatialOverlayRenderer {
 			this(choice, label, targetDetail, selected, hoverProgress, Double.POSITIVE_INFINITY);
 		}
 
-		/** Compatibility form for callers that predate the two-line target detail. */
+		/** Compatibility form for callers that predate the target detail. */
 		NodePaint(SpatialController.ChoiceView choice, Component label, boolean selected, double hoverProgress) {
 			this(choice, label, null, selected, hoverProgress);
 		}
 
 		boolean hasDetail() {
-			return targetDetail != null && !targetDetail.getString().isBlank();
+			return targetDetail != null && !SpatialTargetDetailText.limit(targetDetail).getString().isBlank();
 		}
 	}
 	record PanelPaint(double width, double height, double headerHeight) implements Paint {}
@@ -291,22 +293,27 @@ public final class SpatialOverlayRenderer {
 		}
 	}
 
-	/**
-	 * Resolved merged bounds of one node plus its per-line effective text
-	 * scales. An ordinary single-line node keeps its historical bounds; a
-	 * two-line node merges the title and detail rows into one
-	 * frame, so the background, border and target opacity cover both lines.
-	 */
-	record NodeLayout(double width, double height, double titleScale, double detailScale) {
+	/** Title-only frame bounds; the optional name preview has its own paint geometry. */
+	record NodeLayout(double width, double height, double titleScale, DetailLayout detail) {
 		int left() { return (int) Math.round(-width / 2.0); }
 		int top() { return (int) Math.round(-height / 2.0); }
 		int right() { return (int) Math.round(width / 2.0); }
 		int bottom() { return (int) Math.round(height / 2.0); }
 		double contentWidth() { return right() - left() - NODE_TEXT_INSET * 2.0; }
-		double titleTop(int lineHeight) {
-			return detailScale > 0.0 ? top() + NODE_VERTICAL_PADDING / 2.0 : -lineHeight * titleScale / 2.0;
-		}
-		double detailTop(int lineHeight) { return titleTop(lineHeight) + lineHeight * titleScale; }
+		double titleTop(int lineHeight) { return -lineHeight * titleScale / 2.0; }
+		double detailScale() { return detail == null ? 0.0 : detail.scale(); }
+	}
+
+	/** Each wrapped line is centered independently, with no background, border or frame clipping. */
+	record DetailLine(FormattedText text, double width) {
+		double left(double scale) { return -width * scale / 2.0; }
+	}
+
+	record DetailLayout(Component text, List<DetailLine> lines, double scale, double top, double height) {
+		double width() { return lines.stream().mapToDouble(line -> line.width() * scale).max().orElse(0.0); }
+		double left() { return -width() / 2.0; }
+		double right() { return width() / 2.0; }
+		double bottom() { return top + height; }
 	}
 
 	/**
@@ -317,58 +324,53 @@ public final class SpatialOverlayRenderer {
 	static NodeLayout nodeLayout(double titleWidth, int lineHeight, double optionScale) {
 		double width = Math.max(MIN_BOX_WIDTH, titleWidth * optionScale + NODE_TEXT_INSET * 2.0);
 		double height = Math.max(BOX_HEIGHT, lineHeight * optionScale + NODE_VERTICAL_PADDING);
-		return new NodeLayout(width, height, optionScale, 0.0);
-	}
-
-	/**
-	 * Merged two-line bounds. Width clips text instead of reducing its scale.
-	 * Height fitting reserves the historical radial base scale for each row
-	 * (or the caller's smaller preference); only excess scale is reduced. For a
-	 * taller font whose two base-size rows cannot fit, that floor is determined
-	 * from the height budget once, never from the name's length.
-	 */
-	static NodeLayout nodeLayout(double titleWidth, double detailWidth, int lineHeight,
-		double optionScale, double targetScale, double maxExtent) {
-		double extent = constrainedExtent(maxExtent);
-		double availableScale = (extent - NODE_VERTICAL_PADDING) / lineHeight;
-		double floor = Math.min(WheelLabelLayout.BASE_TEXT_SCALE, availableScale / 2.0);
-		double titleFloor = Math.min(optionScale, floor);
-		double detailFloor = Math.min(targetScale, floor);
-		double excess = optionScale + targetScale - titleFloor - detailFloor;
-		double fit = excess > 0.0 ? Math.min(1.0, (availableScale - titleFloor - detailFloor) / excess) : 1.0;
-		double titleScale = titleFloor + (optionScale - titleFloor) * fit;
-		double detailScale = detailFloor + (targetScale - detailFloor) * fit;
-		return new NodeLayout(Math.min(extent, Math.max(MIN_BOX_WIDTH,
-			Math.max(titleWidth * titleScale, detailWidth * detailScale) + NODE_TEXT_INSET * 2.0)),
-			Math.min(extent, lineHeight * (titleScale + detailScale) + NODE_VERTICAL_PADDING), titleScale, detailScale);
+		return new NodeLayout(width, height, optionScale, null);
 	}
 
 	/** Production planning seam: menu membership, not detail availability, owns the constraint. */
-	static NodeLayout nodeLayout(NodePaint node, ToIntFunction<Component> widths, int lineHeight, Style style) {
+	static NodeLayout nodeLayout(NodePaint node, ToIntFunction<FormattedText> widths, int lineHeight, Style style,
+		StringSplitter splitter) {
 		Component label = nodeLabel(node.choice(), node.label());
 		double titleWidth = widths.applyAsInt(label);
 		NodeLayout layout;
-		if (node.hasDetail()) {
-			layout = nodeLayout(titleWidth, widths.applyAsInt(node.targetDetail()), lineHeight,
-				style.optionTextScale(), style.inventoryTextScale(), node.maxExtent());
-		} else if (!Double.isFinite(node.maxExtent())) {
-			return nodeLayout(titleWidth, lineHeight, style.optionTextScale());
+		if (!Double.isFinite(node.maxExtent())) {
+			layout = nodeLayout(titleWidth, lineHeight, style.optionTextScale());
 		} else {
 			double extent = constrainedExtent(node.maxExtent());
 			double titleScale = Math.min(style.optionTextScale(), (extent - NODE_VERTICAL_PADDING) / lineHeight);
 			layout = new NodeLayout(Math.min(extent, Math.max(MIN_BOX_WIDTH,
 				titleWidth * titleScale + NODE_TEXT_INSET * 2.0)),
-				Math.min(extent, Math.max(BOX_HEIGHT, lineHeight * titleScale + NODE_VERTICAL_PADDING)), titleScale, 0.0);
+				Math.min(extent, Math.max(BOX_HEIGHT, lineHeight * titleScale + NODE_VERTICAL_PADDING)), titleScale, null);
+			layout = new NodeLayout(layout.width(), layout.height(),
+				visibleNodeScale(label, widths, layout.contentWidth(), layout.titleScale(), style.optionTextScale()), null);
 		}
-		if (!Double.isFinite(node.maxExtent())) return layout;
-		return new NodeLayout(layout.width(), layout.height(),
-			visibleNodeScale(label, widths, layout.contentWidth(), layout.titleScale(), style.optionTextScale()),
-			node.hasDetail() ? visibleNodeScale(node.targetDetail(), widths, layout.contentWidth(),
-				layout.detailScale(), style.inventoryTextScale()) : 0.0);
+		if (node.targetDetail() == null) return layout;
+		Component text = SpatialTargetDetailText.limit(node.targetDetail());
+		if (text.getString().isBlank()) return layout;
+		double scale = style.inventoryTextScale();
+		List<FormattedText> lines = detailLines(text, node.maxExtent(), scale, splitter);
+		if (Double.isFinite(node.maxExtent()) && !lines.isEmpty()) {
+			// Width uses the full cell, not the title inset. Its vertical budget
+			// includes the rounded title frame and the gap: budgeting only the
+			// preview height lets its lower lines paint over a sibling frame.
+			// Fit before rewrapping, retaining every capped glyph and the floor.
+			double floor = Math.min(scale, WheelLabelLayout.BASE_TEXT_SCALE);
+			double availableHeight = Math.max(0.0, node.maxExtent() - (layout.bottom() - layout.top()) - NODE_DETAIL_GAP);
+			scale = Math.min(scale, Math.max(floor, availableHeight / (lineHeight * lines.size())));
+			lines = detailLines(text, node.maxExtent(), scale, splitter);
+		}
+		List<DetailLine> measured = lines.stream().map(line -> new DetailLine(line, widths.applyAsInt(line))).toList();
+		return new NodeLayout(layout.width(), layout.height(), layout.titleScale(),
+			new DetailLayout(text, measured, scale, layout.bottom() + NODE_DETAIL_GAP, lineHeight * scale * lines.size()));
+	}
+
+	private static List<FormattedText> detailLines(Component text, double width, double scale, StringSplitter splitter) {
+		int limit = Double.isFinite(width) ? Math.max(1, (int) Math.floor(width / scale)) : Integer.MAX_VALUE;
+		return splitter.splitLines(text, limit, net.minecraft.network.chat.Style.EMPTY);
 	}
 
 	/** Fit one visible glyph, never the whole name; keep the height-fit and readable floors. */
-	private static double visibleNodeScale(Component label, ToIntFunction<Component> widths,
+	private static double visibleNodeScale(Component label, ToIntFunction<FormattedText> widths,
 		double contentWidth, double scale, double preference) {
 		var prefix = Component.empty();
 		label.visit((textStyle, text) -> {
@@ -404,10 +406,11 @@ public final class SpatialOverlayRenderer {
 	}
 
 	/**
-	 * Shared slot budget for every node of the Precise branch. The adjacent
-	 * chord of the six equal slots including Back bounds the node's larger
-	 * painted extent; the orbit and scale are the same visual geometry the
-	 * nodes are placed with, so no radius or sector geometry changes.
+	 * Shared frame budget for every node of the Precise branch, also used as
+	 * the external preview's wrapping cell. The adjacent chord of the six equal
+	 * slots including Back bounds the frame's larger painted extent; the orbit
+	 * and scale are the same visual geometry the nodes are placed with, so no
+	 * radius or sector geometry changes. Preview glyphs are never frame-clipped.
 	 */
 	static double preciseNodeExtentBudget(double viewportOrbit, double submenuRadiusScale) {
 		double radius = viewportOrbit * submenuRadiusScale;
@@ -521,11 +524,11 @@ public final class SpatialOverlayRenderer {
 	}
 
 	/**
-	 * Paint once per frame with an independent second-line resolver. The detail
+	 * Paint once per frame with an independent external-name resolver. The detail
 	 * resolver is applied to every presented choice exactly once per frame and
 	 * its component is retained in the node's paint payload, so an exit tail
 	 * keeps the detail it was painted with and no live lookup happens while the
-	 * overlay is only animating out. A null resolver omits the second line.
+	 * overlay is only animating out. A null resolver omits the preview.
 	 */
 	public static RowLayout drawFrame(GuiGraphics graphics, SpatialController.Snapshot radial,
 		SpatialInventoryView inventory, Function<SpatialController.ChoiceView, Component> labels,
@@ -972,8 +975,7 @@ public final class SpatialOverlayRenderer {
 		SpatialController.ChoiceView choice = node.choice();
 		boolean selected = node.selected();
 		Component label = nodeLabel(choice, node.label());
-		Component detail = node.targetDetail();
-		NodeLayout layout = nodeLayout(node, font::width, font.lineHeight, style);
+		NodeLayout layout = nodeLayout(node, font::width, font.lineHeight, style, font.getSplitter());
 		int left = layout.left();
 		int top = layout.top();
 		int right = layout.right();
@@ -997,18 +999,22 @@ public final class SpatialOverlayRenderer {
 			}
 
 			int textColor = choice.disabled() ? TEXT_DISABLED_COLOR : selected ? TEXT_COLOR : TEXT_DIMMED_COLOR;
-			if (node.hasDetail() || Double.isFinite(node.maxExtent())) {
+			if (Double.isFinite(node.maxExtent())) {
 				drawText(guiGraphics, font, Language.getInstance().getVisualOrder(
 					clippedNodeText(label, layout.contentWidth(), layout.titleScale(), font.getSplitter())),
 					left + NODE_TEXT_INSET, layout.titleTop(font.lineHeight), layout.titleScale(), textColor, alpha);
-				if (node.hasDetail()) {
-					drawText(guiGraphics, font, Language.getInstance().getVisualOrder(
-						clippedNodeText(detail, layout.contentWidth(), layout.detailScale(), font.getSplitter())),
-						left + NODE_TEXT_INSET, layout.detailTop(font.lineHeight), layout.detailScale(), textColor, alpha);
-				}
 			} else {
 				drawText(guiGraphics, font, label, left + 4.0,
 					layout.titleTop(font.lineHeight), layout.titleScale(), textColor, alpha);
+			}
+			if (layout.detail() != null) {
+				DetailLayout detail = layout.detail();
+				for (int i = 0; i < detail.lines().size(); i++) {
+					DetailLine line = detail.lines().get(i);
+					drawText(guiGraphics, font, Language.getInstance().getVisualOrder(line.text()),
+						line.left(detail.scale()), detail.top() + i * font.lineHeight * detail.scale(),
+						detail.scale(), textColor, alpha);
+				}
 			}
 
 			if (choice.back() && selected && state.present() && node.hoverProgress() > 0.0) {
