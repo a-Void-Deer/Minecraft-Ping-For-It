@@ -3,12 +3,15 @@ package nx.pingwheel.neoforge.mixin.presentation;
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
+import org.spongepowered.asm.service.IClassBytecodeProvider;
 import org.spongepowered.asm.service.MixinService;
 
 import net.neoforged.fml.ModList;
@@ -26,6 +29,19 @@ public final class CreatePresentationMixinPlugin implements IMixinConfigPlugin {
 	// mod_version 6.0.10 without the artifact's build suffix.
 	private static final String TESTED_MOD_VERSION = "6.0.10";
 	private static final String TESTED_ARTIFACT_VERSION = "6.0.10-281";
+	private final BooleanSupplier testedCreate;
+	private final Supplier<IClassBytecodeProvider> bytecodeProvider;
+
+	public CreatePresentationMixinPlugin() {
+		this(CreatePresentationMixinPlugin::testedCreatePresent,
+			() -> MixinService.getService().getBytecodeProvider());
+	}
+
+	/** Loader ports let tests exercise the actual plugin decision without launching a game. */
+	CreatePresentationMixinPlugin(BooleanSupplier testedCreate, Supplier<IClassBytecodeProvider> bytecodeProvider) {
+		this.testedCreate = testedCreate;
+		this.bytecodeProvider = bytecodeProvider;
+	}
 
 	@Override
 	public void onLoad(String mixinPackage) {}
@@ -41,11 +57,13 @@ public final class CreatePresentationMixinPlugin implements IMixinConfigPlugin {
 			return false;
 		}
 		try {
-			if (!testedCreatePresent()) {
+			if (!testedCreate.getAsBoolean()) {
 				return false;
 			}
-			ClassNode target = MixinService.getService().getBytecodeProvider()
-				.getClassNode(TARGET, false);
+			// ModLauncher rejects untransformed lookups. Its bytecode-only path
+			// excludes Mixin itself, so this does not define the target or recurse.
+			ClassNode target = bytecodeProvider.get()
+				.getClassNode(TARGET, true);
 			return compatibleTarget(target);
 		} catch (ClassNotFoundException | IOException | RuntimeException | LinkageError failure) {
 			return false;

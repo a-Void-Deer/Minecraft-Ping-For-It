@@ -3,10 +3,13 @@ package nx.pingwheel.neoforge.mixin.presentation;
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
+import org.spongepowered.asm.service.IClassBytecodeProvider;
 import org.spongepowered.asm.service.MixinService;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.loading.LoadingModList;
@@ -14,15 +17,32 @@ import net.neoforged.fml.loading.LoadingModList;
 /** Independent fail-soft receipt gate; does not alter the existing summary/accessor plugin. */
 public final class CreatePreviewMixinPlugin implements IMixinConfigPlugin {
 	private static final String TARGET = "com.simibubi.create.content.kinetics.base.KineticBlockEntity";
+	private final BooleanSupplier testedCreate;
+	private final Supplier<IClassBytecodeProvider> bytecodeProvider;
+	public CreatePreviewMixinPlugin() {
+		this(CreatePreviewMixinPlugin::testedCreatePresent, () -> MixinService.getService().getBytecodeProvider());
+	}
+	/** Same loader ports as production, without initializing optional Create classes. */
+	CreatePreviewMixinPlugin(BooleanSupplier testedCreate, Supplier<IClassBytecodeProvider> bytecodeProvider) {
+		this.testedCreate = testedCreate;
+		this.bytecodeProvider = bytecodeProvider;
+	}
 	@Override public boolean shouldApplyMixin(String target, String mixin) {
 		if (!TARGET.equals(target) || !mixin.equals("nx.pingwheel.neoforge.mixin.presentation.KineticPreviewReceiptMixin")) return false;
 		try {
-			var loading = LoadingModList.get();
-			var mods = loading == null ? ModList.get().getMods() : loading.getMods();
-			if (mods.stream().noneMatch(mod -> mod.getModId().equals("create")
-				&& (mod.getVersion().toString().equals("6.0.10") || mod.getVersion().toString().equals("6.0.10-281")))) return false;
-			return compatibleTarget(MixinService.getService().getBytecodeProvider().getClassNode(TARGET, false));
+			if (!testedCreate.getAsBoolean()) return false;
+			// NeoForge's ModLauncher provider supports transformed bytecode only;
+			// that lookup excludes Mixin and never initializes the Create class.
+			return compatibleTarget(bytecodeProvider.get().getClassNode(TARGET, true));
 		} catch (ClassNotFoundException | IOException | RuntimeException | LinkageError unavailable) { return false; }
+	}
+	private static boolean testedCreatePresent() {
+		var loading = LoadingModList.get();
+		var loaded = loading == null ? ModList.get() : null;
+		if (loading == null && loaded == null) return false;
+		var mods = loading == null ? loaded.getMods() : loading.getMods();
+		return mods.stream().anyMatch(mod -> mod.getModId().equals("create")
+			&& (mod.getVersion().toString().equals("6.0.10") || mod.getVersion().toString().equals("6.0.10-281")));
 	}
 	static boolean compatibleTarget(ClassNode node) {
 		if (node == null || !node.name.equals(TARGET.replace('.', '/'))) return false;

@@ -76,6 +76,16 @@ dependencies {
     testImplementation "org.ow2.asm:asm-tree:9.5"
 }
 
+// Read the already-resolved compile-only artifact as bytes; never link Create
+// or its initialization/dependencies into the headless test runtime.
+def testedCreateArtifact = configurations.compileClasspath.elements.map { entries ->
+    entries.find { it.asFile.name == "create-1.21.1-${create_version}.jar" }.asFile
+}
+
 test {
     useJUnitPlatform()
+    inputs.file(testedCreateArtifact).withPropertyName("testedCreateArtifact")
+    doFirst {
+        systemProperty "pingforit.test.createArtifact", testedCreateArtifact.get().absolutePath
+    }
 }
