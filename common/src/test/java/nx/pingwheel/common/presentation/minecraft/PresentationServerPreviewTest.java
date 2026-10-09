@@ -7,11 +7,17 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.SharedConstants;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
+import nx.pingwheel.common.integration.externalblock.BlockReadSource;
+import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.marker.AuthoritativeTargetValidation;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerRejectReason;
@@ -32,9 +38,11 @@ import nx.pingwheel.common.presentation.preview.PresentationPreviewAccess;
 import nx.pingwheel.common.presentation.preview.PresentationPreviewLimits;
 import nx.pingwheel.common.presentation.preview.PresentationPreviewServer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PresentationServerPreviewTest {
+	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 	private static final UUID PLAYER = new UUID(0, 12);
 	private static final Target TARGET = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:stone");
 	private static final class Basic implements PresentationAdapter {
@@ -170,6 +178,64 @@ class PresentationServerPreviewTest {
 			new PresentationAdapter.CaptureBudget(4), () -> valid(candidate, TargetMatchContext.blockEntityBlock(false)),
 			(t, d) -> fail("optional adapters never use the Basic port")).status());
 		assertEquals(List.of("preview"), calls);
+	}
+	private static BlockReadSource candidateSource(Target.ExternalBlockTarget candidate) {
+		return new BlockReadSource(candidate, candidate.providerId(), "sublevel",
+			new Target.BlockTarget(candidate.dimensionId(), 100, 64, -200, candidate.expectedBlockRegistryId()), new MarkerAnchor(1, 2, 3));
+	}
+	@Test void authorizedCustomOnlyCandidateIsSelectableFromOnePaidMemberGatedObservation() {
+		var adapters = registry(); var session = session(adapters, Set.of(PresentationBasic.CUSTOM_NAME));
+		var access = PresentationServer.previewAccess(session, adapters, "block", adapter -> Set.of(PresentationBasic.CUSTOM_NAME)).orElseThrow();
+		var candidate = Target.ExternalBlockTarget.candidate(TARGET.dimensionId(), "sable", "minecraft:chest", "opaque", false);
+		var source = candidateSource(candidate);
+		var request = PresentationPreviewC2SPacket.read(23, 1, 1, candidate, "block", PresentationBasic.ID, Set.of(PresentationBasic.CUSTOM_NAME));
+		var budget = new PresentationAdapter.CaptureBudget(2); List<String> events = new ArrayList<>();
+		var captured = MinecraftPresentationPreview.capture(request, access, adapters.get(PresentationBasic.ID), budget,
+			() -> { events.add("validate"); return valid(candidate, TargetMatchContext.blockEntityBlock(false)); },
+			(t, d) -> fail("no committed capture/materialization"),
+			(t, demand) -> {
+				assertEquals(0, budget.remaining(), "validation and capture must both be admitted before reads");
+				return MinecraftPresentationPreview.candidateBasic(source, t, demand,
+					position -> { events.add("member"); return true; }, () -> fail("custom-only must not read state"),
+					() -> { events.add("name"); return PresentationServer.externalName(Optional.of(
+						new ExternalBlockServerProvider.ExternalBlockName(Component.literal("Chest"), Optional.of(Component.literal("Raw (name) \"quoted\"")))),
+						null, null, demand); });
+			});
+		assertEquals(List.of("validate", "member", "name"), events);
+		assertEquals(PresentationPreviewS2CPacket.Status.RESULT, captured.status());
+		assertEquals(Map.of(PresentationBasic.CUSTOM_NAME, new PresentationValue.Text("Raw (name) \"quoted\"")), captured.section().fields());
+		var ref = nx.pingwheel.common.presentation.PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.CUSTOM_NAME);
+		assertEquals(new PresentationValue.Text("Raw (name) \"quoted\""), ref.resolve(captured.section()));
+		assertTrue(captured.section().annotations().isEmpty()); assertTrue(session.sent.isEmpty()); assertEquals(0, session.revision);
+		assertEquals(PresentationPreviewS2CPacket.Status.REJECTED, MinecraftPresentationPreview.capture(request, access,
+			adapters.get(PresentationBasic.ID), new PresentationAdapter.CaptureBudget(2),
+			() -> valid(Target.ExternalBlockTarget.candidate(TARGET.dimensionId(), "sable", "minecraft:chest", "other", false), TargetMatchContext.blockEntityBlock(false)),
+			(t, d) -> fail("no committed capture"), (t, d) -> fail("binding drift before read")).status());
+	}
+	@Test void failedCandidateMembershipPartialStateAndMaskedCustomNeverReadOrPublishName() {
+		var candidate = Target.ExternalBlockTarget.candidate(TARGET.dimensionId(), "sable", "minecraft:chest", "opaque", false);
+		var source = candidateSource(candidate);
+		Set<String> custom = Set.of(PresentationBasic.CUSTOM_NAME);
+		for (java.util.function.Predicate<net.minecraft.core.BlockPos> gate : List.<java.util.function.Predicate<net.minecraft.core.BlockPos>>of(
+			position -> false, position -> { throw new LinkageError("provider unavailable"); })) {
+			assertNull(MinecraftPresentationPreview.candidateBasic(source, candidate, custom, gate,
+				() -> fail("member denial before state"), () -> fail("member denial before name")));
+		}
+		assertNull(MinecraftPresentationPreview.candidateBasic(null, candidate, custom, position -> true,
+			() -> fail("missing binding before state"), () -> fail("missing binding before name")));
+		assertNull(MinecraftPresentationPreview.candidateBasic(source, candidate,
+			Set.of(PresentationBasic.BLOCK_STATE, PresentationBasic.CUSTOM_NAME), position -> true, () -> null,
+			() -> fail("partial demanded source must not publish a name")));
+		assertNull(MinecraftPresentationPreview.candidateBasic(source, candidate,
+			Set.of(PresentationBasic.BLOCK_STATE, PresentationBasic.CUSTOM_NAME), position -> true, () -> Blocks.DIRT.defaultBlockState(),
+			() -> fail("mismatched state before name")));
+		var adapters = registry(); var session = session(adapters, Set.of(PresentationBasic.NAME));
+		var access = PresentationServer.previewAccess(session, adapters, "block", adapter -> Set.of(PresentationBasic.NAME)).orElseThrow();
+		var request = PresentationPreviewC2SPacket.read(23, 1, 1, candidate, "block", PresentationBasic.ID, custom);
+		assertEquals(PresentationPreviewS2CPacket.Status.REJECTED, MinecraftPresentationPreview.capture(request, access,
+			adapters.get(PresentationBasic.ID), new PresentationAdapter.CaptureBudget(10), () -> fail("masked before validation"),
+			(t, d) -> fail("masked committed source"), (t, d) -> fail("masked candidate source")).status());
+		assertTrue(session.sent.isEmpty());
 	}
 	private static final class QueueHost implements PresentationPreviewServer.Host {
 		final PresentationRegistry adapters = registry(); final PresentationServer.Session session = session(adapters, Set.of(PresentationBasic.BLOCK_STATE));

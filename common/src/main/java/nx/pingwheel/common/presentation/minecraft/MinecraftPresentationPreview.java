@@ -4,6 +4,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiFunction;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -16,6 +17,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.integration.ExternalBlockServerProviders;
+import nx.pingwheel.common.integration.externalblock.BlockReadSource;
 import nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource;
 import nx.pingwheel.common.marker.AuthoritativeTargetValidation;
 import nx.pingwheel.common.marker.MinecraftAuthoritativeTargetValidator;
@@ -62,25 +64,38 @@ final class MinecraftPresentationPreview implements PresentationPreviewServer.Ho
 		Optional<ResolvedBlockReadSource> resolved = previewReadSource(external);
 		if (resolved.isEmpty()) return null;
 		ResolvedBlockReadSource source = resolved.orElseThrow();
-		Target.BlockTarget physical = source.descriptor().blockTarget();
+		return candidateBasic(source.descriptor(), external, demand, source::containsMember,
+			() -> {
+				Target.BlockTarget physical = source.descriptor().blockTarget();
+				BlockPos position = new BlockPos(physical.x(), physical.y(), physical.z());
+				return source.level().isOutsideBuildHeight(position) || !source.level().isLoaded(position)
+					? null : source.level().getBlockState(position);
+			},
+			() -> source.level() instanceof ServerLevel level
+				? PresentationServer.externalName(
+					ExternalBlockServerProviders.registry().resolveName(level, external), server.registryAccess(), null, demand)
+				: null);
+	}
+	/** Safe candidate read seam: binding and positive membership precede every demanded getter. */
+	static PresentationSection candidateBasic(BlockReadSource source, Target target, Set<String> demand,
+		Predicate<BlockPos> memberGate, Supplier<BlockState> readState,
+		Supplier<PresentationServer.ExternalNameObservation> resolveName) {
+		if (source == null || !(target instanceof Target.ExternalBlockTarget external) || !external.isCandidate()
+			|| !MinecraftBlockReadSources.sameReadBinding(source.target(), external) || memberGate == null) return null;
+		Target.BlockTarget physical = source.blockTarget();
 		BlockPos position = new BlockPos(physical.x(), physical.y(), physical.z());
 		// The root must still be inside the resolved member scope before any state
 		// read or provider name resolution; membership is provider state, not a
 		// second world read.
-		if (!source.containsMember(position)) return null;
+		try { if (!memberGate.test(position)) return null; }
+		catch (RuntimeException | LinkageError unavailable) { return null; }
 		BlockState state = null;
 		if (demand.contains(PresentationBasic.BLOCK_STATE)) {
-			if (source.level().isOutsideBuildHeight(position) || !source.level().isLoaded(position)) return null;
-			state = source.level().getBlockState(position);
+			state = readState.get();
 			var id = state == null ? null : BuiltInRegistries.BLOCK.getKey(state.getBlock());
 			if (state == null || state.isAir() || id == null || !physical.blockRegistryId().equals(id.toString())) return null;
 		}
-		BlockState observed = state;
-		return PresentationServer.basicPreview(source.descriptor(), external, observed, demand,
-			() -> source.level() instanceof ServerLevel level
-				? PresentationServer.availableExternalName(
-					ExternalBlockServerProviders.registry().resolveName(level, external), server.registryAccess())
-				: null);
+		return PresentationServer.basicPreview(source, external, state, demand, resolveName);
 	}
 	private Optional<ResolvedBlockReadSource> previewReadSource(Target.ExternalBlockTarget external) {
 		ResourceLocation dimension = ResourceLocation.tryParse(external.dimensionId());

@@ -9,9 +9,14 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.ComponentContents;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.contents.PlainTextContents;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -78,7 +83,7 @@ class PresentationServerBasicEntityTest {
 		LivingEntity pig = new TestLivingEntity();
 		pig.setHealth(7.5F);
 
-		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME,
+		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME,
 			PresentationBasic.ENTITY_TYPE, PresentationBasic.HEALTH, PresentationBasic.MAX_HEALTH), pig);
 
 		Map<String, PresentationValue> fields = section.fields();
@@ -91,6 +96,7 @@ class PresentationServerBasicEntityTest {
 		Component name = decodeName(fields.get(PresentationBasic.NAME));
 		assertEquals("entity.minecraft.pig", translatableKey(name));
 		assertTrue(name.getSiblings().isEmpty(), "an unnamed target must keep the bare base name");
+		assertFalse(fields.containsKey(PresentationBasic.CUSTOM_NAME));
 	}
 
 	@Test
@@ -98,7 +104,7 @@ class PresentationServerBasicEntityTest {
 		ItemEntity item = new ItemEntity(EntityType.ITEM, null);
 		item.setItem(new ItemStack(Items.DIAMOND, 3));
 
-		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME, PresentationBasic.ENTITY_TYPE,
+		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME, PresentationBasic.ENTITY_TYPE,
 			PresentationBasic.ITEM_ID, PresentationBasic.ITEM_COUNT, PresentationBasic.ITEM_ICON), item);
 
 		Map<String, PresentationValue> fields = section.fields();
@@ -110,22 +116,29 @@ class PresentationServerBasicEntityTest {
 		Component name = decodeName(fields.get(PresentationBasic.NAME));
 		assertEquals("item.minecraft.diamond", translatableKey(name));
 		assertTrue(name.getSiblings().isEmpty(), "an unnamed dropped item must keep the bare base name");
+		assertFalse(fields.containsKey(PresentationBasic.CUSTOM_NAME));
 	}
 
 	@Test
 	void customNamedEntityKeepsComposedCustomBaseFormat() {
 		LivingEntity pig = new TestLivingEntity();
-		pig.setCustomName(Component.literal("Bob").withColor(0xFF0000).withStyle(style -> style.withItalic(true)));
+		String raw = "Bob (literal) \"quoted\" {text}";
+		pig.setCustomName(Component.literal(raw).withColor(0xFF0000).withStyle(style -> style.withItalic(true)
+			.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/say unsafe"))
+			.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("private hover")))));
 
-		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME, PresentationBasic.ENTITY_TYPE), pig);
+		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME,
+			PresentationBasic.ENTITY_TYPE), pig);
 
 		Component name = decodeName(section.fields().get(PresentationBasic.NAME));
-		assertEquals(TargetNameComposer.compose(Component.literal("Bob"), pig.getType().getDescription()), name);
+		assertEquals(TargetNameComposer.compose(Component.literal(raw), pig.getType().getDescription()), name);
 		assertEquals(pig.getType().getDescription(), name.getSiblings().get(1));
-		assertEquals("Bob", literalText(name));
+		assertEquals(raw, literalText(name));
 		assertEquals(" (", literalText(name.getSiblings().get(0)));
 		assertEquals(")", literalText(name.getSiblings().get(2)));
 		assertTrue(name.getStyle().isEmpty(), "the composed root text must stay unstyled");
+		assertEquals(new PresentationValue.Text(raw), section.fields().get(PresentationBasic.CUSTOM_NAME),
+			"custom_name is literal text, not composed JSON or a stripped-parentheses approximation");
 	}
 
 	@Test
@@ -134,14 +147,94 @@ class PresentationServerBasicEntityTest {
 		ItemStack stack = new ItemStack(Items.DIAMOND, 3);
 		stack.set(DataComponents.CUSTOM_NAME, Component.literal("Shiny"));
 		item.setItem(stack);
+		item.setCustomName(Component.literal("Ignored entity name"));
 
-		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME, PresentationBasic.ITEM_ID,
+		PresentationSection section = basicEntity(Set.of(PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME, PresentationBasic.ITEM_ID,
 			PresentationBasic.ITEM_COUNT, PresentationBasic.ITEM_ICON), item);
 
 		Component name = decodeName(section.fields().get(PresentationBasic.NAME));
 		assertEquals(TargetNameComposer.compose(Component.literal("Shiny"),
 			Component.translatable(stack.getDescriptionId())), name);
 		assertEquals("item.minecraft.diamond", translatableKey(name.getSiblings().get(1)));
+		assertEquals(new PresentationValue.Text("Shiny"), section.fields().get(PresentationBasic.CUSTOM_NAME));
+	}
+
+	@Test void customOnlyReadsOnceWithoutComposedNameEncodingAndEmptyIsOmitted() {
+		TestLivingEntity pig = new TestLivingEntity();
+		pig.setCustomName(Component.literal("Only (custom)"));
+		pig.nameReads = 0;
+		var customOnly = PresentationServer.basicEntity(Set.of(PresentationBasic.CUSTOM_NAME), pig,
+			name -> { throw new AssertionError("masked NAME must not encode"); });
+		assertEquals(Map.of(PresentationBasic.CUSTOM_NAME, new PresentationValue.Text("Only (custom)")), customOnly.fields());
+		assertEquals(1, pig.nameReads);
+		pig.setCustomName(Component.empty());
+		assertTrue(basicEntity(Set.of(PresentationBasic.CUSTOM_NAME), pig).fields().isEmpty());
+	}
+
+	@Test void droppedItemNeverFallsBackToEntityCustomNameForAbsentOrEmptyStackName() {
+		ItemEntity item = new ItemEntity(EntityType.ITEM, null);
+		ItemStack stack = new ItemStack(Items.DIAMOND);
+		item.setItem(stack);
+		item.setCustomName(Component.literal("Entity-only private name"));
+		assertTrue(basicEntity(Set.of(PresentationBasic.CUSTOM_NAME), item).fields().isEmpty());
+		stack.set(DataComponents.CUSTOM_NAME, Component.empty());
+		assertTrue(basicEntity(Set.of(PresentationBasic.CUSTOM_NAME), item).fields().isEmpty());
+	}
+
+	@Test void failedCustomGetterOmitsNameFieldsAndKeepsIndependentHealth() {
+		TestLivingEntity pig = new TestLivingEntity();
+		pig.setHealth(7.5F);
+		pig.customUnavailable = true;
+		pig.nameReads = 0;
+
+		PresentationSection customOnly = PresentationServer.basicEntity(
+			Set.of(PresentationBasic.HEALTH, PresentationBasic.CUSTOM_NAME), pig,
+			name -> { throw new AssertionError("a failed getter must not encode NAME"); });
+		assertEquals(Map.of(PresentationBasic.HEALTH, new PresentationValue.NumberValue(7.5)), customOnly.fields(),
+			"a failed custom-name acquisition must not discard independent health");
+		assertEquals(1, pig.nameReads, "the demanded name source is attempted once");
+
+		PresentationSection withName = PresentationServer.basicEntity(
+			Set.of(PresentationBasic.HEALTH, PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME), pig,
+			name -> { throw new AssertionError("a failed getter must not fabricate a composed name"); });
+		assertEquals(Map.of(PresentationBasic.HEALTH, new PresentationValue.NumberValue(7.5)), withName.fields(),
+			"a failed custom-name acquisition must not fall back to the base name");
+		assertEquals(2, pig.nameReads, "a composed-name demand must not repeat the getter read");
+	}
+
+	@Test void failedNameEncoderRetainsIndependentPlainCustomNameAndHealth() {
+		TestLivingEntity pig = new TestLivingEntity();
+		pig.setHealth(7.5F);
+		pig.setCustomName(Component.literal("Kept (custom)"));
+		pig.nameReads = 0;
+
+		PresentationSection section = PresentationServer.basicEntity(
+			Set.of(PresentationBasic.HEALTH, PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME), pig,
+			name -> { throw new LinkageError("name encoder unavailable"); });
+
+		assertEquals(new PresentationValue.NumberValue(7.5), section.fields().get(PresentationBasic.HEALTH));
+		assertEquals(new PresentationValue.Text("Kept (custom)"), section.fields().get(PresentationBasic.CUSTOM_NAME),
+			"a failed composed encoding must retain the independently captured plain custom name");
+		assertFalse(section.fields().containsKey(PresentationBasic.NAME),
+			"a failed composed encoding leaves only NAME absent");
+		assertEquals(1, pig.nameReads);
+	}
+
+	@Test void malformedCustomComponentOmitsOnlyNameFieldsAndKeepsIndependentHealth() {
+		TestLivingEntity pig = new TestLivingEntity();
+		pig.setHealth(7.5F);
+		pig.setCustomName(new UnflattenableName());
+
+		PresentationSection customOnly = PresentationServer.basicEntity(
+			Set.of(PresentationBasic.HEALTH, PresentationBasic.CUSTOM_NAME), pig, name -> "unused");
+		assertEquals(Map.of(PresentationBasic.HEALTH, new PresentationValue.NumberValue(7.5)), customOnly.fields(),
+			"a failed plain reduction must not discard independent health");
+
+		PresentationSection withName = PresentationServer.basicEntity(
+			Set.of(PresentationBasic.HEALTH, PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME), pig,
+			name -> { throw new AssertionError("a malformed custom component must not reach the encoder"); });
+		assertEquals(Map.of(PresentationBasic.HEALTH, new PresentationValue.NumberValue(7.5)), withName.fields(),
+			"a malformed custom component must not discard independent health even when NAME is demanded");
 	}
 
 	@Test
@@ -203,12 +296,17 @@ class PresentationServerBasicEntityTest {
 	 */
 	private static final class TestLivingEntity extends LivingEntity {
 		int healthReads, nameReads;
+		boolean customUnavailable;
 
 		TestLivingEntity() {
 			super(EntityType.PIG, null);
 		}
 		@Override public float getHealth() { healthReads++; return super.getHealth(); }
-		@Override public Component getCustomName() { nameReads++; return super.getCustomName(); }
+		@Override public Component getCustomName() {
+			nameReads++;
+			if (customUnavailable) throw new IllegalStateException("custom name unavailable");
+			return super.getCustomName();
+		}
 
 		@Override
 		public void readAdditionalSaveData(CompoundTag tag) {
@@ -239,5 +337,22 @@ class PresentationServerBasicEntityTest {
 		public HumanoidArm getMainArm() {
 			return HumanoidArm.RIGHT;
 		}
+	}
+
+	/**
+	 * A malformed custom name whose literal flattening always throws; every other
+	 * component surface stays well formed so only the name fields can be affected.
+	 */
+	private static final class UnflattenableName implements Component {
+		private final Component delegate = Component.literal("unavailable");
+
+		@Override public String getString() {
+			throw new IllegalStateException("custom text unavailable");
+		}
+
+		@Override public Style getStyle() { return delegate.getStyle(); }
+		@Override public ComponentContents getContents() { return delegate.getContents(); }
+		@Override public List<Component> getSiblings() { return delegate.getSiblings(); }
+		@Override public FormattedCharSequence getVisualOrderText() { return delegate.getVisualOrderText(); }
 	}
 }

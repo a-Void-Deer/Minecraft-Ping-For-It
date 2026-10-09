@@ -14,8 +14,10 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.integration.externalblock.BlockReadSource;
 import nx.pingwheel.common.marker.MarkerRejectReason;
+import nx.pingwheel.common.marker.MarkerWinnerChange;
 import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.source.CaptureResult;
@@ -35,8 +37,22 @@ public final class InventoryBackend implements AutoCloseable {
 				throw new IllegalArgumentException("inventory preview requires a block or external candidate");
 		}
 	}
-	public record Created(ServerMarker marker, MarkerRejectReason rejection) {
-		public Created { if ((marker == null) == (rejection == null)) throw new IllegalArgumentException("create outcome"); }
+	/**
+	 * One committed create outcome: storage is committed and the authoritative
+	 * name and winner changes are the already-computed publication inputs the
+	 * host emits once the caller has installed the tracking sidecar.
+	 */
+	public record Created(ServerMarker marker, MarkerRejectReason rejection, TargetNameJson authoritativeName,
+		List<MarkerWinnerChange> winnerChanges) {
+		public Created {
+			if ((marker == null) == (rejection == null)) throw new IllegalArgumentException("create outcome");
+			winnerChanges = List.copyOf(winnerChanges == null ? List.of() : winnerChanges);
+		}
+		/** Source-compatible outcome for hosts and fixtures that predate the publication split. */
+		public Created(ServerMarker marker, MarkerRejectReason rejection) { this(marker, rejection, null, List.of()); }
+		public Created(ServerMarker marker, MarkerRejectReason rejection, TargetNameJson authoritativeName) {
+			this(marker, rejection, authoritativeName, List.of());
+		}
 	}
 	@FunctionalInterface public interface Admission {
 		MarkerRejectReason prepare(Target committed, String targetType, List<UUID> audience);
@@ -54,8 +70,19 @@ public final class InventoryBackend implements AutoCloseable {
 				.map(block -> new InventorySourceInput(block, previewInput.readOwner(), previewInput.face()));
 		}
 		boolean annotationAllowed(InventorySourceInput input, String pingType);
-		/** Rate/channel/audience/target authority precedes admission, which precedes storage; Basic CREATED precedes return. */
+		/**
+		 * Rate/channel/audience/target authority precedes admission, which
+		 * precedes storage; the returned accepted outcome is committed but not
+		 * yet published, so the caller can install the tracking sidecar first.
+		 */
 		Created create(UUID player, Opened frozen, Admission admission);
+		/**
+		 * Emits the already-computed CREATED and winner changes after the
+		 * tracking sidecar exists. A publication failure must never turn the
+		 * committed create into a retryable rejection; the default keeps
+		 * fixtures and hosts without a publication port source compatible.
+		 */
+		default void publishCreated(Created created) {}
 		boolean knows(UUID player, MarkerId marker);
 	}
 	/**
@@ -181,6 +208,16 @@ public final class InventoryBackend implements AutoCloseable {
 		});
 	}
 	public InventoryRuntime runtime() { return runtime; }
+	/**
+	 * Pure sidecar query for the atomic-initial receipt projection: the marker
+	 * owns an active committed inventory selection, so its content receipt is
+	 * the dedicated inventory kind. No selection value, count, or annotation is
+	 * disclosed here, and no second metadata map is introduced.
+	 */
+	public boolean tracksInventory(MarkerId marker) {
+		Tracking lease = marker == null ? null : tracking.get(marker);
+		return lease != null && lease.marker.expiresAtTick() > tick;
+	}
 	private void advance(long now, InventorySettings settings) {
 		tick = now; this.settings = settings; runtime.advance(now, settings); publisher.advance(now, settings);
 		if (previewClock.advance(now, settings.getPreview().getPeriodTicks())) {
@@ -278,7 +315,16 @@ public final class InventoryBackend implements AutoCloseable {
 				try {
 					Created outcome = host.create(player, preview.frozen, prepared::prepare);
 					rejection = outcome.rejection(); marker = outcome.marker();
-					if (marker != null) prepared.commit(marker);
+					if (marker != null) {
+						// Storage is committed: install the sidecar, then publish the
+						// existing CREATED/winner changes, then attach the recipients
+						// the sidecar already reserved. A publication failure after
+						// commit is never reported as a retryable rejection.
+						prepared.commit(marker);
+						try { host.publishCreated(outcome); }
+						catch (RuntimeException | LinkageError publicationFailure) { /* committed; fail soft */ }
+						prepared.attachRecipients(marker);
+					}
 				} catch (RuntimeException | LinkageError failure) { rejection = MarkerRejectReason.INVALID_REQUEST; }
 				finally { prepared.close(); }
 			}
@@ -331,11 +377,22 @@ public final class InventoryBackend implements AutoCloseable {
 			}
 			return null;
 		}
+		/** Installs the committed tracking sidecar before any CREATED is published. */
 		void commit(ServerMarker marker) {
 			if (consumer == null || memory == null || committedInput == null) throw new IllegalStateException("dedicated admission bypass");
 			memory.commit(LEASE_BYTES);
 			Tracking lease = new Tracking(marker, committedInput, selection, consumer, memory);
 			tracking.put(marker.id(), lease); consumer = null; memory = null;
+		}
+		/**
+		 * Registers the reserved recipients after the atomic Basic initial is
+		 * known: the existing Basic-known-recipient gate still precedes every
+		 * inventory data frame, and the admission-reserved registrations are
+		 * honored exactly once.
+		 */
+		void attachRecipients(ServerMarker marker) {
+			Tracking lease = tracking.get(marker.id());
+			if (lease == null) return;
 			for (var entry : recipients.entrySet()) addRecipient(lease, entry.getKey(), entry.getValue());
 			recipients.clear();
 		}

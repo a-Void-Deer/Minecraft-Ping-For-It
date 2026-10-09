@@ -8,6 +8,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -35,6 +36,10 @@ import nx.pingwheel.common.client.duration.ClientMarkerDisplayDuration;
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.chat.PingChatBuilder;
+import nx.pingwheel.common.chat.ContentChatComposer;
+import nx.pingwheel.common.chat.PendingContentChatController;
+import nx.pingwheel.common.presentation.PresentationReceiptContent;
+import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.MarkerId;
@@ -79,6 +84,7 @@ import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.presentation.preview.ClientPresentationPreview;
 import nx.pingwheel.common.presentation.preview.client.MinecraftPreviewReadContext;
 import nx.pingwheel.common.presentation.preview.client.PreviewLocalReaders;
+import nx.pingwheel.common.presentation.InventoryItemPingTypes;
 import nx.pingwheel.common.presentation.PresentationPropertyPingTypes;
 import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.render.SpatialInventoryView;
@@ -174,11 +180,35 @@ public final class ClientPingRuntime {
 	private final ClientCreateRateLimiter createRateLimiter;
 	private final ClientPresentation presentation;
 	private final PresentationReceiptFeedback presentationReceiptFeedback;
+	private final PendingContentChatController contentChat;
 
-	/** Narrow receipt-effect port: a metadata upsert must never invoke either callback. */
+	/** Receipt effects and detached decoding only; a metadata upsert never repeats sound or ordinary chat. */
 	interface PresentationReceiptFeedback {
 		void play(MarkerSnapshot snapshot);
 		void chat(String ownerName, MarkerSnapshot snapshot, Component targetName);
+		default boolean ready() { return Game != null && Game.level != null && Game.player != null; }
+		default Optional<Component> name(String json) {
+			return Game == null || Game.level == null ? Optional.empty()
+				: ContentChatComposer.nameJsonDecoder(Game.level.registryAccess()).apply(json);
+		}
+		default Optional<Component> item(String json) {
+			return Game == null || Game.level == null ? Optional.empty()
+				: ContentChatComposer.itemDisplayDecoder(Game.level.registryAccess()).apply(json);
+		}
+		default String template(PingType type) { return null; }
+		/**
+		 * The full localized content-template source. The default adapts the
+		 * legacy single-template port, so existing feedback implementations keep
+		 * their established list defaults; production overrides this with the
+		 * selected-locale source implementing all three template methods.
+		 */
+		default ContentChatComposer.TemplateSource templates() { return this::template; }
+		default void content(Component message) {
+			Minecraft game = Game;
+			if (game == null || game.level == null || game.player == null) return;
+			try { game.player.displayClientMessage(message, false); }
+			catch (RuntimeException unavailable) { /* No log or ordinary fallback for a content receipt. */ }
+		}
 	}
 	private final InteractionTimeSource timeSource;
 	private final LongPressCompatibilityController compatibilityController;
@@ -284,7 +314,11 @@ public final class ClientPingRuntime {
 			@Override public void chat(String ownerName, MarkerSnapshot snapshot, Component targetName) {
 				sendCreatedChat(ownerName, snapshot, targetName);
 			}
+			@Override public ContentChatComposer.TemplateSource templates() { return contentChatTemplates(); }
 		} : presentationReceiptFeedback;
+		this.contentChat = new PendingContentChatController(ClientInventory.MAX_TRACKED_CHANNELS,
+			this::currentContentReceipt, this.presentationReceiptFeedback::name, this.presentationReceiptFeedback::item,
+			this.presentationReceiptFeedback.templates(), this.presentationReceiptFeedback::content);
 		this.timeSource = Objects.requireNonNull(timeSource, "timeSource");
 		this.interactionAccess = new MinecraftInteractionAccess();
 		this.compatibilityController = new LongPressCompatibilityController(
@@ -453,6 +487,18 @@ public final class ClientPingRuntime {
 		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
 		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
 		ClientPresentation presentation, ClientInventory inventory, ClientPresentationPreview preview) {
+		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
+			ClientMarker::serverDurationTicks, new PresentationReceiptFeedback() {
+				public void play(MarkerSnapshot snapshot) {}
+				public void chat(String owner, MarkerSnapshot snapshot, Component name) {}
+			});
+	}
+
+	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
+		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
+		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
+		ClientPresentation presentation, ClientInventory inventory, ClientPresentationPreview preview,
+		ClientMarkerStore.DisplayDurationPolicy displayDuration, PresentationReceiptFeedback feedback) {
 		var active = new ActiveInteraction();
 		var coordinator = new PingCaptureCoordinator(DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()),
 			active, PingCaptureLogger.noop());
@@ -461,12 +507,9 @@ public final class ClientPingRuntime {
 		var tracker = new CreateRequestTracker();
 		var machine = new PingInteractionStateMachine(coordinator, active, clock, validator, new CancelCandidatePicker(),
 			logger, () -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis());
-		var runtime = new ClientPingRuntime(new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS), active, coordinator, machine,
+		var runtime = new ClientPingRuntime(new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDuration), active, coordinator, machine,
 			new ClientPingActionDispatcher(sender, errors, logger, tracker, limiter, presentation), errors, logger,
-			new WheelMouseCapture(logger), tracker, limiter, clock, presentation, new PresentationReceiptFeedback() {
-				public void play(MarkerSnapshot snapshot) {}
-				public void chat(String owner, MarkerSnapshot snapshot, Component name) {}
-			});
+			new WheelMouseCapture(logger), tracker, limiter, clock, presentation, feedback);
 		runtime.interactionAccess = Objects.requireNonNull(access);
 		runtime.contentPreview = preview;
 		runtime.inventory(inventory);
@@ -477,7 +520,7 @@ public final class ClientPingRuntime {
 	public void onTick() {
 		observeInteractionLifecycle();
 		var lifecycle = interactionAccess.lifecycle();
-		if (lifecycle.level() == null || !lifecycle.player()) return;
+		if (lifecycle.level() == null || !lifecycle.player()) { contentChat.clear(); return; }
 
 		if (presentation != null) {
 			presentation.tick(Game != null && Game.getConnection() != null);
@@ -487,6 +530,7 @@ public final class ClientPingRuntime {
 		synchronizePreciseBranch();
 		if (preciseRefresh != null) preciseRefresh.tick(localTick);
 		expireFallbackMarkers();
+		reconcileContentReceipts();
 	}
 
 	/** Handles a claimed physical press immediately on the client thread. */
@@ -555,6 +599,7 @@ public final class ClientPingRuntime {
 	 */
 	public void close() {
 		abort();
+		contentChat.clear();
 		markerStore.clear();
 		if (presentation != null) presentation.close();
 		nameStore.clear();
@@ -740,7 +785,7 @@ public final class ClientPingRuntime {
 
 	private void startHeldPreview(CapturedPingContext capture) {
 		if (!baselineHeld || baselineToken != capture.token() || selectorContent != null) return;
-		selectorContent = new NativeSelectorContent(capture, contentPreview, () -> inventory, this::propertyTypes,
+		selectorContent = new NativeSelectorContent(capture, contentPreview, () -> inventory, this::propertyTypes, this::inventoryTypes,
 			ref -> {
 				String key = "settings.pingforit.presentation.field." + ref.fieldId().replace(':', '_').replace('.', '_') + ".name";
 				if (Language.getInstance().has(key)) return Component.translatable(key);
@@ -781,6 +826,30 @@ public final class ClientPingRuntime {
 					.collect(java.util.stream.Collectors.toSet());
 		}
 		return PresentationPropertyPingTypes.builtIn().effective(registry, tags).stream()
+			.flatMap(id -> PingTypeCatalog.builtIn().findById(id).stream()).toList();
+	}
+
+	/**
+	 * The inventory item policy for the held target's accepted block registry:
+	 * the property policy plus a deduplicated {@code take} only for an actual
+	 * chest tag. Inventory menus open only for ordinary or provider-backed block
+	 * containers, so this reads the accepted registry holder's tags without a
+	 * new world look; a Sable candidate contributes only its client-expected
+	 * registry, the same accepted menu gate the property policy already uses.
+	 */
+	private List<PingType> inventoryTypes(CapturedPingContext context) {
+		Target target = context.resolvedTarget().target();
+		String registry = null;
+		if (target instanceof Target.BlockTarget block) registry = block.blockRegistryId();
+		else if (target instanceof Target.ExternalBlockTarget external) registry = external.expectedBlockRegistryId();
+		Set<String> tags = Set.of();
+		if (registry != null) {
+			var id = ResourceLocation.tryParse(registry);
+			if (id != null && BuiltInRegistries.BLOCK.containsKey(id))
+				tags = BuiltInRegistries.BLOCK.getHolder(id).stream().flatMap(holder -> holder.tags()).map(tag -> tag.location().toString())
+					.collect(java.util.stream.Collectors.toSet());
+		}
+		return InventoryItemPingTypes.builtIn().effective(registry, tags).stream()
 			.flatMap(id -> PingTypeCatalog.builtIn().findById(id).stream()).toList();
 	}
 
@@ -1444,6 +1513,7 @@ public final class ClientPingRuntime {
 		// the independent display deadline causes the client record to be
 		// removed, so cleanup follows final record removal rather than sync loss.
 		for (ClientMarker marker : expired) {
+			contentChat.cancel(marker.id());
 			nameStore.onRemoved(marker.id());
 			if (inventory != null) inventory.markerRemoved(marker.id());
 			if (presentation != null) presentation.evict(marker.id());
@@ -1482,6 +1552,7 @@ public final class ClientPingRuntime {
 
 		List<ClientMarker> superseded = markerStore.onCreated(snapshot, localTick);
 		for (ClientMarker marker : superseded) {
+			contentChat.cancel(marker.id());
 			nameStore.onRemoved(marker.id());
 			if (presentation != null) presentation.evict(marker.id());
 		}
@@ -1502,10 +1573,12 @@ public final class ClientPingRuntime {
 	/** Sole production S2C path for versioned marker and presentation messages. */
 	public void onPresentationPacket(PresentationS2CPacket packet) {
 		if (presentation == null || packet == null || packet.isCorrupt()) return;
+		if (!presentationReceiptFeedback.ready()) contentChat.clear();
 		switch (packet.kind()) {
 			case OFFER -> presentation.offer(packet);
 			case RESET -> {
 				if (presentation.reset(packet)) {
+					contentChat.reset();
 					if (inventory != null) inventory.presentationReset(packet.epoch(), packet.view());
 					syncPresentationNames();
 				}
@@ -1515,8 +1588,7 @@ public final class ClientPingRuntime {
 					|| markerStore.isAuthoritativelyRemoved(packet.markerId())) return;
 				if (!presentation.initial(packet)) return;
 				updatePresentationName(packet.markerId());
-				applyPresentationCreated(packet.snapshot(), packet.ownerName());
-				if (inventory != null) inventory.markerCreated(packet.snapshot());
+				applyPresentationCreated(packet);
 			}
 			case SECTION -> {
 				// A store tombstone is also "known". Do not decode a section for
@@ -1525,6 +1597,7 @@ public final class ClientPingRuntime {
 					|| markerStore.marker(packet.markerId()).isEmpty()) return;
 				if (presentation.section(packet)) {
 					updatePresentationName(packet.markerId());
+					attemptContentReceipt(packet.markerId());
 				}
 			}
 			case REMOVED -> {
@@ -1565,6 +1638,9 @@ public final class ClientPingRuntime {
 		if (inventory == null) return;
 		var previous = packet == null ? null : inventory.selectionResult(packet.commitId());
 		inventory.accept(packet);
+		// The packet can have been rejected: only the post-accept stores supply data.
+		if (packet != null && packet.markerId() != null) attemptContentReceipt(packet.markerId());
+		else reconcileContentReceipts();
 		if (previous == null && packet != null && !packet.isCorrupt() && packet.kind() == nx.pingwheel.common.network.InventoryS2CPacket.Kind.REJECT
 			&& inventory.selectionResult(packet.commitId()) != null && packet.rejection() == MarkerRejectReason.TARGET_GONE
 			&& createRequestTracker.isLatest(CreateRequestTracker.Route.INVENTORY, packet.commitId()))
@@ -1582,19 +1658,85 @@ public final class ClientPingRuntime {
 		if (presentation != null) syncPresentationNames();
 	}
 
-	private void applyPresentationCreated(MarkerSnapshot snapshot, String ownerName) {
+	private void applyPresentationCreated(PresentationS2CPacket packet) {
+		MarkerSnapshot snapshot = packet.snapshot();
+		String ownerName = packet.ownerName();
 		if (snapshot == null || ownerName == null || markerStore.isAuthoritativelyRemoved(snapshot.id())) return;
 		boolean newlySeen = isNewMarkerReceipt(markerStore, snapshot.id());
 		List<ClientMarker> superseded = markerStore.onCreated(snapshot, localTick);
 		for (ClientMarker marker : superseded) {
+			contentChat.cancel(marker.id());
 			nameStore.onRemoved(marker.id());
 			presentation.evict(marker.id());
 			if (inventory != null) inventory.markerRemoved(marker.id());
 		}
+		if (inventory != null) inventory.markerCreated(snapshot);
 		if (newlySeen) {
 			presentationReceiptFeedback.play(snapshot);
-			presentationReceiptFeedback.chat(ownerName, snapshot, presentationTargetName(snapshot.id()));
+			if (packet.content().kind() == PresentationReceiptContent.Kind.WHOLE)
+				presentationReceiptFeedback.chat(ownerName, snapshot, presentationTargetName(snapshot.id()));
+			else if (contentChat.begin(packet, true)) attemptContentReceipt(snapshot.id());
 		}
+		else if (packet.content().kind() == PresentationReceiptContent.Kind.SUPPRESSED) contentChat.cancel(snapshot.id());
+		else attemptContentReceipt(snapshot.id());
+	}
+
+	private PendingContentChatController.Current currentContentReceipt(MarkerId id) {
+		ClientMarker marker = markerStore.marker(id).orElse(null);
+		Map<String, Set<String>> fields = new LinkedHashMap<>();
+		if (presentation != null && marker != null) presentation.previewAccess(marker.targetTypeId()).ifPresent(access ->
+			access.adapters().forEach((adapter, descriptor) -> fields.put(adapter, descriptor.fields().keySet())));
+		var authorization = inventory == null || presentation == null || marker == null ? Optional.<Boolean>empty()
+			: inventory.authorization(presentation.epoch(), presentation.sessionView(), marker.targetTypeId());
+		return new PendingContentChatController.Current(presentation == null ? 0 : presentation.epoch(),
+			presentation == null ? 0 : presentation.sessionView(), presentation != null && presentation.ready()
+				&& presentationReceiptFeedback.ready(), marker != null && marker.isSynchronized()
+				&& !markerStore.isAuthoritativelyRemoved(id),
+			marker == null ? null : PendingContentChatController.MarkerIdentity.of(marker), fields,
+			authorization.map(allowed -> allowed ? PendingContentChatController.Authorization.ALLOWED
+				: PendingContentChatController.Authorization.DENIED).orElse(PendingContentChatController.Authorization.UNKNOWN),
+			presentation == null ? PresentationView.empty() : presentation.view(id),
+			inventory == null ? null : inventory.tracking(id));
+	}
+
+	private void attemptContentReceipt(MarkerId id) {
+		if (!presentationReceiptFeedback.ready() || presentation == null || !presentation.ready()) {
+			contentChat.clear();
+			return;
+		}
+		contentChat.attempt(id);
+	}
+
+	/** Tick/accepted policy housekeeping uses actual synchronized membership, never HUD visibility. */
+	private void reconcileContentReceipts() {
+		if (!presentationReceiptFeedback.ready() || presentation == null || !presentation.ready()) {
+			contentChat.clear();
+			return;
+		}
+		var live = markerStore.allMarkers().stream().filter(marker -> marker.isSynchronized()
+			&& !markerStore.isAuthoritativelyRemoved(marker.id())).map(ClientMarker::id)
+			.collect(java.util.stream.Collectors.toSet());
+		contentChat.retainLive(live);
+		for (MarkerId id : live) contentChat.attempt(id);
+	}
+
+	/**
+	 * The production content-template construction shared with the headless
+	 * runtime receipt verification: the selected-locale presence predicate
+	 * chooses each override, while values always come from the merged
+	 * language. The returned source implements all three template methods.
+	 */
+	static ContentChatComposer.TemplateSource contentChatTemplates(Predicate<String> hasSelectedLocaleKey) {
+		Objects.requireNonNull(hasSelectedLocaleKey, "hasSelectedLocaleKey");
+		return ContentChatComposer.localized(hasSelectedLocaleKey, key -> Language.getInstance().getOrDefault(key));
+	}
+
+	private ContentChatComposer.TemplateSource contentChatTemplates() {
+		return contentChatTemplates(key -> {
+			Minecraft game = Game;
+			return game != null && selectedLocaleTranslationKeys.contains(game.getLanguageManager().getSelected(),
+				Language.getInstance(), game.getResourceManager(), key);
+		});
 	}
 
 	private Component presentationTargetName(MarkerId id) {
@@ -1719,6 +1861,7 @@ public final class ClientPingRuntime {
 	public void applyRemoved(MarkerId markerId, MarkerRemovalReason reason) {
 		Objects.requireNonNull(markerId, "markerId");
 		Objects.requireNonNull(reason, "reason");
+		contentChat.cancel(markerId);
 		if (inventory != null) inventory.markerRemoved(markerId);
 
 		boolean knownBeforeRemoval = markerStore.marker(markerId).isPresent();
@@ -1730,6 +1873,7 @@ public final class ClientPingRuntime {
 		}
 
 		for (ClientMarker removedMarker : removed) {
+			contentChat.cancel(removedMarker.id());
 			nameStore.onRemoved(removedMarker.id());
 			if (presentation != null) presentation.evict(removedMarker.id());
 		}
@@ -1746,6 +1890,7 @@ public final class ClientPingRuntime {
 
 		List<ClientMarker> superseded = markerStore.onWinnerChanged(targetKey, winnerId);
 		for (ClientMarker marker : superseded) {
+			contentChat.cancel(marker.id());
 			nameStore.onRemoved(marker.id());
 			if (presentation != null) presentation.evict(marker.id());
 			if (inventory != null) inventory.markerRemoved(marker.id());

@@ -4,6 +4,10 @@ import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.network.StrictPacketCodec;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -149,13 +153,78 @@ public final class PresentationCodec {
 	}
 
 	public static PresentationPropertyRef readPropertyRef(FriendlyByteBuf buf) {
-		String adapter = buf.readUtf(MAX_ID_LENGTH);
-		String field = buf.readUtf(MAX_ID_LENGTH);
-		int depth = buf.readVarInt();
+		return readPropertyRef(buf, false);
+	}
+
+	/**
+	 * Receipt metadata: one kind tag followed by the explicit property references.
+	 * Values, annotations and counts never travel here; they stay in the existing
+	 * authorized stores. The reader is strict and canonical: an unknown kind, an
+	 * over-capacity or malformed list, a duplicate or out-of-order ref, a
+	 * non-canonical number, and an invalid id or path all reject the frame.
+	 */
+	public static void writeReceiptContent(FriendlyByteBuf buf, PresentationReceiptContent content) {
+		buf.writeVarInt(content.kind().ordinal());
+		buf.writeVarInt(content.selectedRefs().size());
+		for (PresentationPropertyRef ref : content.selectedRefs()) writePropertyRef(buf, ref);
+	}
+
+	public static PresentationReceiptContent readReceiptContent(FriendlyByteBuf buf) {
+		PresentationReceiptContent.Kind[] kinds = PresentationReceiptContent.Kind.values();
+		int kindTag = StrictPacketCodec.readVarInt(buf);
+		if (kindTag < 0 || kindTag >= kinds.length) throw new IllegalArgumentException("receipt content kind");
+		int count = StrictPacketCodec.readVarInt(buf);
+		if (count < 0 || count > MAX_PROPERTIES) throw new IllegalArgumentException("receipt content ref count");
+		List<PresentationPropertyRef> refs = new ArrayList<>(count);
+		PresentationPropertyRef previous = null;
+		for (int i = 0; i < count; i++) {
+			PresentationPropertyRef ref = readPropertyRef(buf, true);
+			if (previous != null && previous.compareTo(ref) >= 0)
+				throw new IllegalArgumentException("receipt content ref order");
+			refs.add(ref);
+			previous = ref;
+		}
+		return new PresentationReceiptContent(kinds[kindTag], refs);
+	}
+
+	private static PresentationPropertyRef readPropertyRef(FriendlyByteBuf buf, boolean strict) {
+		String adapter = strict ? readReceiptUtf(buf, MAX_ID_LENGTH) : buf.readUtf(MAX_ID_LENGTH);
+		String field = strict ? readReceiptUtf(buf, MAX_ID_LENGTH) : buf.readUtf(MAX_ID_LENGTH);
+		int depth = strict ? StrictPacketCodec.readVarInt(buf) : buf.readVarInt();
 		if (depth < 0 || depth > MAX_DEPTH) throw new IllegalArgumentException("property record path depth");
 		List<String> path = new ArrayList<>(depth);
-		for (int i = 0; i < depth; i++) path.add(buf.readUtf(PresentationPropertyRef.MAX_KEY_BYTES));
+		for (int i = 0; i < depth; i++)
+			path.add(strict ? readReceiptUtf(buf, PresentationPropertyRef.MAX_KEY_BYTES)
+				: buf.readUtf(PresentationPropertyRef.MAX_KEY_BYTES));
 		return new PresentationPropertyRef(adapter, field, path);
+	}
+
+	/**
+	 * Receipt strings reject malformed UTF-8 instead of decoding replacement
+	 * characters: a replace-on-malformed byte decode would turn an invalid byte
+	 * into an addressable non-blank key, accepting malformed metadata and
+	 * changing the canonical receipt identity. The canonical varint, byte bound
+	 * and character bound stay the legacy strict reader's bounds; valid canonical
+	 * UTF-8, including a literal U+FFFD and supplementary code points, decodes
+	 * exactly.
+	 */
+	private static String readReceiptUtf(FriendlyByteBuf buf, int maxChars) {
+		int length = StrictPacketCodec.readVarInt(buf);
+		if (length < 0 || length > maxChars * 3 || length > buf.readableBytes())
+			throw new IllegalArgumentException("invalid receipt UTF length");
+		byte[] bytes = new byte[length];
+		buf.readBytes(bytes);
+		final String value;
+		try {
+			value = StandardCharsets.UTF_8.newDecoder()
+				.onMalformedInput(CodingErrorAction.REPORT)
+				.onUnmappableCharacter(CodingErrorAction.REPORT)
+				.decode(ByteBuffer.wrap(bytes)).toString();
+		} catch (CharacterCodingException malformed) {
+			throw new IllegalArgumentException("invalid receipt UTF bytes", malformed);
+		}
+		if (value.length() > maxChars) throw new IllegalArgumentException("invalid receipt UTF size");
+		return value;
 	}
 
 	public static void writePropertyIntent(FriendlyByteBuf buf, PresentationPropertyIntent intent) {

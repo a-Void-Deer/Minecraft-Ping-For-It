@@ -21,6 +21,8 @@ import nx.pingwheel.common.presentation.PresentationCodec;
 import nx.pingwheel.common.presentation.PresentationField;
 import nx.pingwheel.common.presentation.PresentationIds;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationBasic;
+import nx.pingwheel.common.presentation.PresentationReceiptContent;
 import nx.pingwheel.common.presentation.PresentationRegistry;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationStore;
@@ -56,10 +58,16 @@ public final class ClientPresentation {
 	private boolean ready;
 
 	public ClientPresentation(Consumer<IPacket> sender) {
+		this(sender, List.of());
+	}
+
+	/** Explicit detached descriptors for a client integration; registration never invokes collectors. */
+	public ClientPresentation(Consumer<IPacket> sender, List<PresentationAdapter> adapters) {
 		this.sender = Objects.requireNonNull(sender, "sender");
 		registry.register(new BasicDescriptor());
 		registry.register(InventoryPresentation.INSTANCE);
 		registerOptionalCreate();
+		for (PresentationAdapter adapter : List.copyOf(adapters)) registry.register(adapter);
 		registerProvider("default", ClientPresentation::defaultLabels);
 	}
 
@@ -264,7 +272,7 @@ public final class ClientPresentation {
 			|| packet.snapshot() == null || packet.markerId() == null
 			|| !packet.markerId().equals(packet.snapshot().id()) || packet.revision() < 1) return false;
 		PresentationSection basic = decode(packet.sectionBytes(), BASIC, packet.snapshot().targetTypeId());
-		if (basic == null) return false;
+		if (basic == null || !validReceipt(packet, basic)) return false;
 		long id = packet.markerId().value();
 		if (!store.isKnown(id)) {
 			if (!nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(packet.snapshot().targetTypeId())
@@ -278,6 +286,24 @@ public final class ClientPresentation {
 		// Only a newer atomic Basic initial may update this marker's payload.
 		return store.replace(epoch, view, id, packet.revision(),
 			project(basic, store.targetTypeId(id)));
+	}
+
+	/** Receipt hints are validated against current authority before the atomic initial mutates any store. */
+	private boolean validReceipt(PresentationS2CPacket packet, PresentationSection basic) {
+		if (packet.content() == null) return false;
+		if (packet.content().kind() != PresentationReceiptContent.Kind.PROPERTIES) return true;
+		var access = previewAccess(packet.snapshot().targetTypeId()).orElse(null);
+		if (access == null) return false;
+		for (PresentationPropertyRef ref : packet.content().selectedRefs()) {
+			var adapter = access.adapters().get(ref.adapterId());
+			PresentationField field = adapter == null ? null : adapter.fields().get(ref.fieldId());
+			if (field == null || !ref.isRoot() && field.kind() != PresentationField.Kind.RECORD) return false;
+			// A later SECTION may supply a missing value; presence without its explicit
+			// annotation is malformed metadata, not a reason to publish an ordinary line.
+			if (BASIC.equals(ref.adapterId()) && ref.resolve(basic) != null
+				&& basic.annotations().get(ref) == null) return false;
+		}
+		return true;
 	}
 
 	public boolean section(PresentationS2CPacket packet) {
@@ -420,6 +446,7 @@ public final class ClientPresentation {
 	private static final class BasicDescriptor implements PresentationAdapter {
 		private static final List<PresentationField> FIELDS = List.of(
 			new PresentationField(NAME, PresentationField.Kind.TEXT, true, 0, "Target name"),
+			new PresentationField(PresentationBasic.CUSTOM_NAME, PresentationField.Kind.TEXT, true, 0, "Custom name"),
 			new PresentationField("minecraft:entity.type", PresentationField.Kind.TEXT, true, 0, "Entity type"),
 			new PresentationField("minecraft:entity.health", PresentationField.Kind.NUMBER, true, 0, "Health"),
 			new PresentationField("minecraft:entity.max_health", PresentationField.Kind.NUMBER, true, 0, "Maximum health"),

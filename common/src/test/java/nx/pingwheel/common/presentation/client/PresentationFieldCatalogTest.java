@@ -40,7 +40,18 @@ class PresentationFieldCatalogTest {
 		assertEquals(CREATE_FIELD_IDS.stream().sorted().toList(),
 			catalog.namespaces().get(1).entries().stream()
 				.map(entry -> entry.field().id()).toList());
-		assertEquals(15, catalog.entries().size());
+		Set<String> basicIds = Set.of("minecraft:target.name", "minecraft:target.custom_name", "minecraft:entity.type",
+			"minecraft:entity.health", "minecraft:entity.max_health", "minecraft:item.id", "minecraft:item.count",
+			"minecraft:item.icon", "minecraft:block.state");
+		assertEquals(basicIds, catalog.namespaces().get(0).entries().stream()
+			.map(entry -> entry.field().id()).collect(java.util.stream.Collectors.toSet()));
+		assertEquals(basicIds.size() + CREATE_FIELD_IDS.size(), catalog.entries().size());
+		var custom = catalog.entries().stream().filter(entry -> entry.field().id().equals("minecraft:target.custom_name"))
+			.findFirst().orElseThrow();
+		assertEquals(PresentationBasic.ID, custom.adapterId());
+		assertEquals(PresentationField.Kind.TEXT, custom.field().kind());
+		assertTrue(custom.field().enabledByDefault());
+		assertEquals(0, custom.field().permissionLevel());
 		assertTrue(catalog.contains("create:kinetic.speed"));
 		assertFalse(catalog.contains("create:unknown.field"));
 	}

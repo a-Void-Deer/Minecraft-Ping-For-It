@@ -19,6 +19,7 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.interaction.MinecraftEntityTargetAdapter;
 import nx.pingwheel.common.name.TargetNameComposer;
 import nx.pingwheel.common.presentation.PresentationBasic;
+import nx.pingwheel.common.presentation.PresentationLimits;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.preview.PreviewFieldAccess;
 import nx.pingwheel.common.presentation.preview.PreviewObservation;
@@ -60,9 +61,9 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 		if (!(context instanceof WorldContext world) || !target.dimensionId().equals(context.dimensionId())) return Map.copyOf(result);
 		if (demand.isEmpty()) return Map.of();
 		if (target instanceof Target.EntityTarget entityTarget) {
-			Set<String> entityFields = Set.of(PresentationBasic.NAME, PresentationBasic.ENTITY_TYPE,
-				PresentationBasic.HEALTH, PresentationBasic.MAX_HEALTH, PresentationBasic.ITEM_ID,
-				PresentationBasic.ITEM_COUNT, PresentationBasic.ITEM_ICON);
+			Set<String> entityFields = Set.of(PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME,
+				PresentationBasic.ENTITY_TYPE, PresentationBasic.HEALTH, PresentationBasic.MAX_HEALTH,
+				PresentationBasic.ITEM_ID, PresentationBasic.ITEM_COUNT, PresentationBasic.ITEM_ICON);
 			boolean applicable = false;
 			for (String field : demand) {
 				if (entityFields.contains(field)) applicable = true;
@@ -75,18 +76,22 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 			if (!MinecraftEntityTargetAdapter.locatorFor(entity).equals(entityTarget.locator())) return Map.copyOf(result);
 			result.putAll(observeEntity(entity, demand, context.tick(), world::encodeName));
 		} else if (target instanceof Target.BlockTarget block) {
-			for (String field : demand) if (!PresentationBasic.NAME.equals(field) && !PresentationBasic.BLOCK_STATE.equals(field))
+			for (String field : demand) if (!PresentationBasic.NAME.equals(field) && !PresentationBasic.BLOCK_STATE.equals(field)
+				&& !PresentationBasic.CUSTOM_NAME.equals(field))
 				result.put(field, Missing.NOT_APPLICABLE);
-			if (!demand.contains(PresentationBasic.NAME) && !demand.contains(PresentationBasic.BLOCK_STATE)) return Map.copyOf(result);
+			if (!demand.contains(PresentationBasic.NAME) && !demand.contains(PresentationBasic.BLOCK_STATE)
+				&& !demand.contains(PresentationBasic.CUSTOM_NAME)) return Map.copyOf(result);
 			SafeBlockSource source = world.blockSource(block);
 			if (source == null || !source.containsMember(new BlockPos(source.block().x(), source.block().y(), source.block().z()))) return Map.copyOf(result);
 			BlockState state = world.blockState(source.block());
 			if (state == null || !BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(block.blockRegistryId())) return Map.copyOf(result);
 			observeBlockFields(result, demand, state, context.tick(), world::encodeName);
 		} else if (target instanceof Target.ExternalBlockTarget external) {
-			for (String field : demand) if (!PresentationBasic.NAME.equals(field) && !PresentationBasic.BLOCK_STATE.equals(field))
+			for (String field : demand) if (!PresentationBasic.NAME.equals(field) && !PresentationBasic.BLOCK_STATE.equals(field)
+				&& !PresentationBasic.CUSTOM_NAME.equals(field))
 				result.put(field, Missing.NOT_APPLICABLE);
-			if (!demand.contains(PresentationBasic.NAME) && !demand.contains(PresentationBasic.BLOCK_STATE)) return Map.copyOf(result);
+			if (!demand.contains(PresentationBasic.NAME) && !demand.contains(PresentationBasic.BLOCK_STATE)
+				&& !demand.contains(PresentationBasic.CUSTOM_NAME)) return Map.copyOf(result);
 			SafeBlockSource source = world.blockSource(external);
 			if (source == null || !source.containsMember(new BlockPos(source.block().x(), source.block().y(), source.block().z()))
 				|| !source.block().dimensionId().equals(external.dimensionId())
@@ -129,8 +134,10 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 		}
 		if (entity instanceof ItemEntity item) {
 			if (demand.contains(PresentationBasic.ITEM_ID) || demand.contains(PresentationBasic.ITEM_COUNT)
-				|| demand.contains(PresentationBasic.ITEM_ICON) || demand.contains(PresentationBasic.NAME)) {
-				for (String field : Set.of(PresentationBasic.ITEM_ID, PresentationBasic.ITEM_COUNT, PresentationBasic.ITEM_ICON, PresentationBasic.NAME))
+				|| demand.contains(PresentationBasic.ITEM_ICON) || demand.contains(PresentationBasic.NAME)
+				|| demand.contains(PresentationBasic.CUSTOM_NAME)) {
+				for (String field : Set.of(PresentationBasic.ITEM_ID, PresentationBasic.ITEM_COUNT,
+					PresentationBasic.ITEM_ICON, PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME))
 					if (demand.contains(field)) result.put(field, Missing.UNAVAILABLE);
 				var stack = item.getItem();
 				if (!stack.isEmpty()) {
@@ -138,18 +145,52 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 						() -> new PresentationValue.Text(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString()), tick);
 					if (demand.contains(PresentationBasic.ITEM_COUNT)) put(result, PresentationBasic.ITEM_COUNT, () -> new PresentationValue.NumberValue(stack.getCount()), tick);
 					if (demand.contains(PresentationBasic.ITEM_ICON)) put(result, PresentationBasic.ITEM_ICON, () -> new PresentationValue.Flag(true), tick);
-					if (demand.contains(PresentationBasic.NAME)) put(result, PresentationBasic.NAME, () -> {
-						Component base = Component.translatable(stack.getDescriptionId()), custom = stack.get(DataComponents.CUSTOM_NAME);
-						return new PresentationValue.Text(encode.apply(custom == null ? base : TargetNameComposer.compose(custom, base)));
-					}, tick);
+					if (demand.contains(PresentationBasic.NAME) || demand.contains(PresentationBasic.CUSTOM_NAME)) {
+						// A dropped item's custom name comes from the stack only; the entity's
+						// own custom name is never a fallback for this separate field.
+						Component stackCustom = stack.get(DataComponents.CUSTOM_NAME);
+						if (demand.contains(PresentationBasic.NAME)) put(result, PresentationBasic.NAME, () -> {
+							Component base = Component.translatable(stack.getDescriptionId());
+							return new PresentationValue.Text(encode.apply(stackCustom == null ? base : TargetNameComposer.compose(stackCustom, base)));
+						}, tick);
+						if (demand.contains(PresentationBasic.CUSTOM_NAME)) putCustomName(result, stackCustom, tick);
+					}
 				}
 			}
-		} else if (demand.contains(PresentationBasic.NAME)) put(result, PresentationBasic.NAME, () -> {
-			if (entity instanceof Player player) return new PresentationValue.Text(encode.apply(Component.literal(player.getGameProfile().getName())));
-			Component base = entity.getType().getDescription(), custom = entity.getCustomName();
-			return new PresentationValue.Text(encode.apply(custom == null ? base : TargetNameComposer.compose(custom, base)));
-		}, tick);
+		} else if (demand.contains(PresentationBasic.NAME) || demand.contains(PresentationBasic.CUSTOM_NAME)) {
+			if (entity instanceof Player player) {
+				if (demand.contains(PresentationBasic.NAME)) put(result, PresentationBasic.NAME,
+					() -> new PresentationValue.Text(encode.apply(Component.literal(player.getGameProfile().getName()))), tick);
+				// A player target has no custom-name field; the profile name is never reused.
+			} else {
+				Component custom;
+				try { custom = entity.getCustomName(); }
+				catch (RuntimeException | LinkageError unavailable) {
+					if (demand.contains(PresentationBasic.NAME)) result.put(PresentationBasic.NAME, Missing.UNAVAILABLE);
+					if (demand.contains(PresentationBasic.CUSTOM_NAME)) result.put(PresentationBasic.CUSTOM_NAME, Missing.UNAVAILABLE);
+					return Map.copyOf(result);
+				}
+				if (demand.contains(PresentationBasic.NAME)) put(result, PresentationBasic.NAME, () -> {
+					Component base = entity.getType().getDescription();
+					return new PresentationValue.Text(encode.apply(custom == null ? base : TargetNameComposer.compose(custom, base)));
+				}, tick);
+				if (demand.contains(PresentationBasic.CUSTOM_NAME)) {
+					// The synchronized name proves actual presence, never actual absence;
+					// an absent value stays unavailable instead of an observed empty text.
+					result.put(PresentationBasic.CUSTOM_NAME, Missing.UNAVAILABLE);
+					putCustomName(result, custom, tick);
+				}
+			}
+		}
 		return Map.copyOf(result);
+	}
+	/** The plain custom-name observation; an absent or empty custom name is not an empty value. */
+	private static void putCustomName(Map<String, Outcome> result, Component custom, long tick) {
+		if (custom == null) return;
+		try {
+			String text = TargetNameComposer.plainText(custom, PresentationLimits.MAX_TEXT_BYTES);
+			if (!text.isEmpty()) put(result, PresentationBasic.CUSTOM_NAME, () -> new PresentationValue.Text(text), tick);
+		} catch (RuntimeException | LinkageError unavailable) { result.put(PresentationBasic.CUSTOM_NAME, Missing.UNAVAILABLE); }
 	}
 	private static void put(Map<String, Outcome> result, String id, java.util.function.Supplier<PresentationValue> getter, long tick) {
 		try { result.put(id, new Observed(new PreviewObservation(getter.get(), PreviewObservation.Origin.CLIENT_SYNCED, tick, false))); }

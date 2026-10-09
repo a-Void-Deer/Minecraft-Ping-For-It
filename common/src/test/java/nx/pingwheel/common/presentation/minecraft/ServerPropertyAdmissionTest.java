@@ -35,6 +35,8 @@ class ServerPropertyAdmissionTest {
 	private static final PresentationPropertyRef NESTED = new PresentationPropertyRef(ADAPTER, GROUP, List.of("units"));
 	private static final PresentationPropertyRef NAME_REF =
 		PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.NAME);
+	private static final PresentationPropertyRef CUSTOM_REF =
+		PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.CUSTOM_NAME);
 	private static final PresentationAdapter ADAPTER_IMPL = new PresentationAdapter() {
 		public String adapterId() { return ADAPTER; }
 		public String modId() { return "test"; }
@@ -229,19 +231,20 @@ class ServerPropertyAdmissionTest {
 		Component custom = Component.literal("Server-owned");
 		var supplied = new ExternalBlockServerProvider.ExternalBlockName(base, Optional.of(custom));
 		TargetNameJson serverName = PresentationServer.availableExternalName(Optional.of(supplied), RegistryAccess.EMPTY);
+		var names = PresentationServer.externalName(Optional.of(supplied), RegistryAccess.EMPTY, null, Set.of(PresentationBasic.NAME));
 		assertEquals(TargetNameComposer.compose(custom, base), TargetNameJsonCodec.decode(serverName, RegistryAccess.EMPTY));
 		var accepted = ServerPropertyAdmission.admit(List.of(intent), registry,
 			Map.of(PresentationBasic.ID, Set.of(PresentationBasic.NAME)),
 			Map.of(PresentationBasic.ID, PresentationServer.admissionBasicDemand(
 				Set.of(PresentationBasic.NAME, PresentationBasic.BLOCK_STATE), source.nameOnly())), 1, null, null, 0,
-			(adapter, demand, budget) -> PresentationServer.assembleExternalBasic(demand, source.state(), serverName));
+			(adapter, demand, budget) -> PresentationServer.assembleExternalBasic(demand, source.state(), names));
 		assertNull(accepted.rejection());
 		assertEquals(new PresentationValue.Text(serverName.value()),
 			NAME_REF.resolve(accepted.sourceSeeds().get(PresentationBasic.ID)));
 		assertEquals(List.of(PresentationPropertySelection.of(NAME_REF)), accepted.selections());
 		assertTrue(accepted.sourceSeeds().get(PresentationBasic.ID).annotations().isEmpty());
-		TargetNameJson unavailable = PresentationServer.availableExternalName(Optional.empty(), RegistryAccess.EMPTY);
-		assertNull(unavailable, "an absent provider name must not be converted to the normal marker UNKNOWN fallback");
+		var unavailable = PresentationServer.externalName(Optional.empty(), RegistryAccess.EMPTY, null, Set.of(PresentationBasic.NAME));
+		assertNull(unavailable.composedName(), "an absent provider name must not be converted to the normal marker UNKNOWN fallback");
 		assertEquals(MarkerRejectReason.INVALID_REQUEST, ServerPropertyAdmission.admit(List.of(intent), registry,
 			Map.of(PresentationBasic.ID, Set.of(PresentationBasic.NAME)), 1, null,
 			(adapter, demand, budget) -> PresentationServer.assembleExternalBasic(demand, null, unavailable)).rejection(),
@@ -259,6 +262,55 @@ class ServerPropertyAdmissionTest {
 			}).rejection());
 	}
 
+	@Test void customOnlyExternalAdmissionRecapturesSelectableTextWithoutLeakingMaskedName() {
+		PresentationRegistry registry = new PresentationRegistry();
+		registry.register(new PresentationAdapter() {
+			public String adapterId() { return PresentationBasic.ID; }
+			public String modId() { return "minecraft"; }
+			public int schema() { return 1; }
+			public int minUpdateIntervalTicks() { return 5; }
+			public List<PresentationField> fields() { return PresentationBasic.fields(); }
+			public PresentationSection collect(DetachedTarget target, Set<String> demand, CaptureBudget budget) {
+				throw new AssertionError("Basic must use authoritative assembly");
+			}
+		});
+		var intent = PresentationPropertyIntent.observed(CUSTOM_REF, new PresentationValue.Text("client claim"));
+		var source = PresentationServer.observeExternalAdmission(List.of(intent),
+			() -> { throw new AssertionError("untyped name-only selection must not read state"); });
+		assertTrue(source.nameOnly());
+		Set<String> onlyCustom = Set.of(PresentationBasic.CUSTOM_NAME);
+		assertEquals(onlyCustom, PresentationServer.admissionBasicDemand(
+			Set.of(PresentationBasic.CUSTOM_NAME, PresentationBasic.BLOCK_STATE), true));
+		int[] nameReads = {0};
+		var accepted = ServerPropertyAdmission.admit(List.of(intent), registry, Map.of(PresentationBasic.ID, onlyCustom),
+			Map.of(PresentationBasic.ID, PresentationServer.admissionBasicDemand(onlyCustom, true)), 1, null, null, 0,
+			(adapter, demand, budget) -> {
+				assertEquals(onlyCustom, demand);
+				nameReads[0]++;
+				return PresentationServer.assembleExternalBasic(demand, source.state(), PresentationServer.externalName(
+					Optional.of(new ExternalBlockServerProvider.ExternalBlockName(Component.literal("Base"),
+						Optional.of(Component.literal("Server (custom) \"name\"")))), null, null, demand));
+			});
+		assertNull(accepted.rejection());
+		assertEquals(1, nameReads[0]);
+		assertEquals(List.of(PresentationPropertySelection.of(CUSTOM_REF)), accepted.selections());
+		assertEquals(Map.of(PresentationBasic.CUSTOM_NAME, new PresentationValue.Text("Server (custom) \"name\"")),
+			accepted.sourceSeeds().get(PresentationBasic.ID).fields());
+		assertEquals(NAME_REF, PresentationDefaults.forTargetType("block").orElseThrow(), "custom_name never replaces the default ref");
+		for (Optional<Component> custom : List.of(Optional.<Component>empty(), Optional.<Component>of(Component.empty()))) {
+			var rejected = ServerPropertyAdmission.admit(List.of(intent), registry, Map.of(PresentationBasic.ID, onlyCustom), 1, null,
+				(adapter, demand, budget) -> PresentationServer.assembleExternalBasic(demand, null, PresentationServer.externalName(
+					Optional.of(new ExternalBlockServerProvider.ExternalBlockName(Component.literal("Base"), custom)), null, null, demand)));
+			assertEquals(MarkerRejectReason.INVALID_REQUEST, rejected.rejection());
+			assertTrue(rejected.sourceSeeds().isEmpty(), "an absent actual name cannot admit the client's claim");
+		}
+		assertEquals(MarkerRejectReason.INVALID_REQUEST, ServerPropertyAdmission.admit(List.of(intent), registry, Map.of(), 1, null,
+			(adapter, demand, budget) -> { throw new AssertionError("masked custom name capture"); }).rejection());
+		assertEquals(MarkerRejectReason.INVALID_REQUEST, ServerPropertyAdmission.admit(List.of(intent), registry,
+			Map.of(PresentationBasic.ID, onlyCustom), 0, null,
+			(adapter, demand, budget) -> { throw new AssertionError("unpaid custom name capture"); }).rejection());
+	}
+
 	@Test
 	void externalNameTypeAndStateSelectionStillRequireAvailableObservation() {
 		var typedName = PresentationPropertyIntent.of(NAME_REF,
@@ -267,7 +319,8 @@ class ServerPropertyAdmissionTest {
 			PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.BLOCK_STATE),
 			new PresentationValue.RecordValue(Map.of()));
 		int[] observations = {0};
-		for (var intent : List.of(typedName, state)) {
+		var typedCustom = PresentationPropertyIntent.of(CUSTOM_REF, new PresentationValue.Text("untrusted"), "attention");
+		for (var intent : List.of(typedName, typedCustom, state)) {
 			var result = PresentationServer.observeExternalAdmission(List.of(intent), () -> {
 				observations[0]++;
 				return new ExternalBlockServerProvider.ObservationResult.TemporarilyUnavailable();
@@ -279,7 +332,7 @@ class ServerPropertyAdmissionTest {
 			observations[0]++;
 			return new ExternalBlockServerProvider.ObservationResult.TemporarilyUnavailable();
 		}), "a mixed request must not downgrade its state selection to name-only");
-		assertEquals(3, observations[0]);
+		assertEquals(4, observations[0]);
 	}
 
 	@Test

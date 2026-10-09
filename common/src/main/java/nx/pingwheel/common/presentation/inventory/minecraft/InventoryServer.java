@@ -25,7 +25,7 @@ import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
-import nx.pingwheel.common.presentation.PresentationPropertyPingTypes;
+import nx.pingwheel.common.presentation.InventoryItemPingTypes;
 import nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources;
 import nx.pingwheel.common.presentation.minecraft.PresentationServer;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
@@ -74,6 +74,14 @@ public final class InventoryServer {
 		if (backend != null) backend.disconnect(player);
 	}
 	public static void remove(MarkerId marker) { if (backend != null) backend.remove(marker); }
+	/**
+	 * Pure sidecar query for the presentation receipt projection: whether the
+	 * marker owns an active committed inventory selection. It never samples,
+	 * publishes, or mutates state.
+	 */
+	public static boolean tracksInventory(MarkerId marker) {
+		return backend != null && backend.tracksInventory(marker);
+	}
 
 	private record Host(MinecraftServer server, InventoryRuntime runtime) implements InventoryBackend.Host {
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) {
@@ -85,9 +93,19 @@ public final class InventoryServer {
 			return ServerCore.createInventory(server, server.getPlayerList().getPlayer(player), frozen, admission);
 		}
 		/**
+		 * Production committed publication: the backend installed the tracking
+		 * sidecar before this call, so the atomic initial can project the
+		 * inventory receipt kind. Publication failures stay fail-soft.
+		 */
+		@Override public void publishCreated(InventoryBackend.Created created) {
+			ServerCore.publishInventoryCreated(server, created);
+		}
+		/**
 		 * Annotation policy runs inside the runtime's provider-work preflight.
 		 * It queries the actual provider-confirmed physical block's live tags,
-		 * never a client-supplied expected registry or a placeholder position.
+		 * never a client-supplied expected registry or a placeholder position:
+		 * the inventory item policy grants {@code take} only when those actual
+		 * tags carry {@code #c:chests}.
 		 */
 		@Override public boolean annotationAllowed(InventorySourceInput input, String pingType) {
 			ServerLevel level = levelFor(input.target().dimensionId());
@@ -103,7 +121,7 @@ public final class InventoryServer {
 			var state = level.getBlockState(pos);
 			if (state == null || state.isAir()) return false;
 			String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
-			return id.equals(physical.blockRegistryId()) && PresentationPropertyPingTypes.builtIn().allows(pingType, id,
+			return id.equals(physical.blockRegistryId()) && InventoryItemPingTypes.builtIn().allows(pingType, id,
 				BuiltInRegistries.BLOCK.wrapAsHolder(state.getBlock()).tags().map(tag -> tag.location().toString()).collect(java.util.stream.Collectors.toSet()));
 		}
 

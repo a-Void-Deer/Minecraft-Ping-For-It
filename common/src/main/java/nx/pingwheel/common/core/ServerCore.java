@@ -711,15 +711,28 @@ public class ServerCore {
 			});
 		if (!outcome.isAccepted()) return new InventoryBackend.Created(null, outcome.rejectReason().orElseThrow());
 		var creation = outcome.creation().orElseThrow();
+		// Committed storage only: the backend installs the tracking sidecar and
+		// publishes the CREATED/winner changes after it exists.
+		return new InventoryBackend.Created(creation.marker(), null, outcome.targetName().orElseThrow(), creation.winnerChanges());
+	}
+
+	/**
+	 * Committed dedicated publication. The tracking sidecar already exists, so
+	 * the atomic initial projects the inventory receipt kind. Storage is
+	 * committed: a publication failure is logged and never becomes a retryable
+	 * rejection, and the existing Basic-known-recipient gate still precedes
+	 * every inventory data frame.
+	 */
+	public static void publishInventoryCreated(MinecraftServer server, InventoryBackend.Created created) {
+		if (created == null || created.marker() == null) return;
+		ServerPlayer owner = server.getPlayerList().getPlayer(created.marker().owner());
+		if (owner == null) return;
 		try {
-			PresentationServer.created(server, creation.marker(), outcome.targetName().orElseThrow(), player.getGameProfile().getName());
-			sendPresentationWinnerChanges(server.getPlayerList(), creation.winnerChanges(), null);
+			PresentationServer.created(server, created.marker(), created.authoritativeName(), owner.getGameProfile().getName());
+			sendPresentationWinnerChanges(server.getPlayerList(), created.winnerChanges(), null);
 		} catch (RuntimeException | LinkageError deliveryFailure) {
-			// Storage has committed: never turn publication failure into a rejected/retryable create.
-			// Dedicated recipients remain fenced by inventoryKnows until Basic delivery succeeds.
 			LOGGER.debug("inventory create publication failed after commit", deliveryFailure);
 		}
-		return new InventoryBackend.Created(creation.marker(), null);
 	}
 
 	private static void onMarkerRemove(MinecraftServer server, ServerPlayer player, MarkerId requestedMarkerId) {

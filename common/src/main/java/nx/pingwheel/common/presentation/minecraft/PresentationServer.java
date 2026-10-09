@@ -34,6 +34,7 @@ import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.presentation.*;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryServer;
 import nx.pingwheel.common.presentation.preview.PresentationPreviewAccess;
 import nx.pingwheel.common.presentation.preview.PresentationPreviewServer;
 
@@ -250,10 +251,15 @@ public final class PresentationServer {
 
 	public static void updated(MinecraftServer server, ServerMarker marker) {
 		PresentationAdapter basic = registry.get(PresentationBasic.ID);
+		String targetType = marker.targetType().id();
 		refreshMarker(marker, LEASES, basic, server.getTickCount(), SESSIONS,
 			recipient -> server.getPlayerList().getPlayer(recipient) != null,
 			recipient -> allowed(server.getPlayerList().getPlayer(recipient), SESSIONS.get(recipient),
-				basic, marker.targetType().id()),
+				basic, targetType),
+			recipient -> adapter -> allowed(server.getPlayerList().getPlayer(recipient),
+				SESSIONS.get(recipient), adapter, targetType),
+			recipient -> effectiveInventoryTypes(server.getPlayerList().getPlayer(recipient),
+				SESSIONS.get(recipient)),
 			(recipient, packet) -> send(server.getPlayerList().getPlayer(recipient), packet));
 	}
 
@@ -262,16 +268,48 @@ public final class PresentationServer {
 		Map<UUID, Session> sessions, java.util.function.Predicate<UUID> online,
 		Function<UUID, Set<String>> allowed,
 		java.util.function.BiConsumer<UUID, PresentationS2CPacket> delivery) {
+		refreshMarker(marker, leases, basic, tick, sessions, online, allowed, recipient -> adapter -> Set.of(), delivery);
+	}
+
+	/**
+	 * Metadata-only refresh with the recipient's fresh per-adapter authorization
+	 * port, so a replayed initial computes the same receipt descriptor as the
+	 * first delivery. No fresh dedicated inventory gate is supplied here, so an
+	 * inventory receipt stays conservatively suppressed.
+	 */
+	static void refreshMarker(ServerMarker marker, Map<Long, Lease> leases, PresentationAdapter basic, long tick,
+		Map<UUID, Session> sessions, java.util.function.Predicate<UUID> online,
+		Function<UUID, Set<String>> allowed,
+		Function<UUID, Function<PresentationAdapter, Set<String>>> freshAuthorization,
+		java.util.function.BiConsumer<UUID, PresentationS2CPacket> delivery) {
+		refreshMarker(marker, leases, basic, tick, sessions, online, allowed, freshAuthorization,
+			recipient -> Set.of(), delivery);
+	}
+
+	/**
+	 * Metadata-only refresh with the recipient's fresh per-adapter authorization
+	 * and fresh dedicated inventory gate, so a replayed initial computes the
+	 * same receipt descriptor as the first delivery.
+	 */
+	static void refreshMarker(ServerMarker marker, Map<Long, Lease> leases, PresentationAdapter basic, long tick,
+		Map<UUID, Session> sessions, java.util.function.Predicate<UUID> online,
+		Function<UUID, Set<String>> allowed,
+		Function<UUID, Function<PresentationAdapter, Set<String>>> freshAuthorization,
+		Function<UUID, Set<String>> freshInventoryTypes,
+		java.util.function.BiConsumer<UUID, PresentationS2CPacket> delivery) {
 		Lease lease = leases.get(marker.id().value());
+		boolean inventoryTracked = InventoryServer.tracksInventory(marker.id());
 		if (lease != null) {
 			updateLease(lease, marker, tick, sessions, online, recipient ->
 				sendInitial(sessions.get(recipient), lease, basic, allowed.apply(recipient),
-					packet -> delivery.accept(recipient, packet)));
+					packet -> delivery.accept(recipient, packet), freshAuthorization.apply(recipient),
+					inventoryTracked, freshInventoryTypes.apply(recipient)));
 		} else {
 			deliverKnownRefresh(marker, tick, sessions, online, (recipient, sent) ->
 				sendCachedInitial(sessions.get(recipient), marker, sent.ownerName, basic,
 					sent.sections.get(PresentationBasic.ID), allowed.apply(recipient),
-					packet -> delivery.accept(recipient, packet)));
+					packet -> delivery.accept(recipient, packet), freshAuthorization.apply(recipient),
+					inventoryTracked, freshInventoryTypes.apply(recipient)));
 		}
 	}
 
@@ -328,7 +366,9 @@ public final class PresentationServer {
 					|| !marker.recipients().contains(player.getUUID())) continue;
 				PresentationAdapter basic = registry.get(PresentationBasic.ID);
 				sendCachedInitial(session, marker, old.ownerName, basic, old.sections.get(PresentationBasic.ID),
-					allowed(player, session, basic, marker.targetType().id()), packet -> send(player, packet));
+					allowed(player, session, basic, marker.targetType().id()), packet -> send(player, packet),
+					adapter -> allowed(player, session, adapter, marker.targetType().id()),
+					InventoryServer.tracksInventory(marker.id()), effectiveInventoryTypes(player, session));
 				for (PresentationAdapter adapter : registry.sectionAdapters()) {
 					if (adapter.adapterId().equals(PresentationBasic.ID) || !session.schemas.containsKey(adapter.adapterId())) continue;
 					PresentationSection cached = old.sections.get(adapter.adapterId());
@@ -517,21 +557,51 @@ public final class PresentationServer {
 
 	private static void sendInitial(ServerPlayer player, Session session, Lease lease) {
 		PresentationAdapter basic = registry.get(PresentationBasic.ID);
+		String targetType = lease.marker.targetType().id();
 		sendInitial(session, lease, basic,
-			allowed(player, session, basic, lease.marker.targetType().id()), packet -> send(player, packet));
+			allowed(player, session, basic, targetType), packet -> send(player, packet),
+			adapter -> allowed(player, session, adapter, targetType),
+			InventoryServer.tracksInventory(lease.marker.id()), effectiveInventoryTypes(player, session));
 	}
 
-	/** Project and deliver cached Basic atomically with the marker, without a source observation. */
+	/** Test seam: no fresh non-Basic policy port, so content refs project conservatively. */
 	static void sendInitial(Session session, Lease lease, PresentationAdapter basic, Set<String> allowed,
 		java.util.function.Consumer<PresentationS2CPacket> delivery) {
-		Source source = lease.sources.get(basic.adapterId());
-		sendCachedInitial(session, lease.marker, lease.ownerName, basic,
-			source == null ? null : source.value, allowed, delivery);
+		sendInitial(session, lease, basic, allowed, delivery, adapter -> Set.of());
 	}
 
-	private static void sendCachedInitial(Session session, ServerMarker marker, String ownerName,
+	/**
+	 * Test seam: no fresh dedicated inventory gate is supplied, so an inventory
+	 * receipt stays conservatively suppressed.
+	 */
+	static void sendInitial(Session session, Lease lease, PresentationAdapter basic, Set<String> allowed,
+		java.util.function.Consumer<PresentationS2CPacket> delivery,
+		Function<PresentationAdapter, Set<String>> freshAuthorization) {
+		sendInitial(session, lease, basic, allowed, delivery, freshAuthorization, false, Set.of());
+	}
+
+	/**
+	 * Project and deliver cached Basic atomically with the marker, without a
+	 * source observation. Every initial exit computes the receipt descriptor
+	 * from the marker's explicit selections, the tracked inventory sidecar and
+	 * this recipient's fresh per-adapter and inventory authorization against
+	 * the accepted manifest/mask and the advertised route/session view.
+	 */
+	static void sendInitial(Session session, Lease lease, PresentationAdapter basic, Set<String> allowed,
+		java.util.function.Consumer<PresentationS2CPacket> delivery,
+		Function<PresentationAdapter, Set<String>> freshAuthorization,
+		boolean inventoryTracked, Set<String> freshInventoryTypes) {
+		Source source = lease.sources.get(basic.adapterId());
+		sendCachedInitial(session, lease.marker, lease.ownerName, basic,
+			source == null ? null : source.value, allowed, delivery, freshAuthorization,
+			inventoryTracked, freshInventoryTypes);
+	}
+
+	static void sendCachedInitial(Session session, ServerMarker marker, String ownerName,
 		PresentationAdapter basic, PresentationSection cached, Set<String> allowed,
-		java.util.function.Consumer<PresentationS2CPacket> delivery) {
+		java.util.function.Consumer<PresentationS2CPacket> delivery,
+		Function<PresentationAdapter, Set<String>> freshAuthorization,
+		boolean inventoryTracked, Set<String> freshInventoryTypes) {
 		PresentationPropertyRef defaultRef = PresentationDefaults.forTargetType(marker.targetType().id())
 			.orElse(null);
 		if (defaultRef == null) return;
@@ -539,10 +609,59 @@ public final class PresentationServer {
 		// degrade to the established empty stale section instead of throwing here.
 		PresentationSection projected = PresentationCodec.bounded(project(basic,
 			cached, allowed, marker.properties()));
+		PresentationReceiptContent content = receipt(session, marker, basic, allowed, freshAuthorization,
+			inventoryTracked, freshInventoryTypes);
 		delivery.accept(PresentationS2CPacket.created(session.epoch, session.view,
-			++session.revision, MarkerSnapshot.from(marker), ownerName, defaultRef, projected));
+			++session.revision, MarkerSnapshot.from(marker), ownerName, defaultRef, content, projected));
 		session.sent.computeIfAbsent(marker.id().value(), id -> new SentMarker(ownerName))
 			.sections.put(PresentationBasic.ID, projected);
+	}
+
+	/**
+	 * Per-recipient receipt projection: the accepted manifest/schema, the
+	 * advertised field mask and fresh policy authorization gate every explicit
+	 * selection, while the tracked inventory sidecar and the recipient's fresh
+	 * inventory authorization (already intersected with the advertised
+	 * route/session view) gate the dedicated inventory kind. A denied or
+	 * incompatible input suppresses the whole content message without
+	 * disclosing references.
+	 */
+	private static PresentationReceiptContent receipt(Session session, ServerMarker marker,
+		PresentationAdapter basic, Set<String> basicAllowed,
+		Function<PresentationAdapter, Set<String>> freshAuthorization,
+		boolean inventoryTracked, Set<String> freshInventoryTypes) {
+		String targetType = marker.targetType().id();
+		boolean nameAuthorized = receiptFieldAuthorized(session, targetType, basic,
+			PresentationBasic.NAME, basicAllowed);
+		boolean inventoryAuthorized = inventoryTracked
+			&& Objects.equals(session.schemas.get(InventoryPresentation.ADAPTER_ID), InventoryPresentation.SCHEMA)
+			&& freshInventoryTypes.contains(targetType);
+		return PresentationReceiptProjector.project(marker.properties(), inventoryTracked, inventoryAuthorized,
+			nameAuthorized,
+			ref -> {
+				PresentationAdapter adapter = ref.adapterId().equals(basic.adapterId())
+					? basic : registry.get(ref.adapterId());
+				if (adapter == null) return false;
+				Set<String> fresh = adapter == basic ? basicAllowed : freshAuthorization.apply(adapter);
+				return receiptFieldAuthorized(session, targetType, adapter, ref.fieldId(), fresh);
+			});
+	}
+
+	/** Accepted schema/kind, advertised mask, and fresh permission must all include the field. */
+	private static boolean receiptFieldAuthorized(Session session, String targetTypeId, PresentationAdapter adapter,
+		String fieldId, Set<String> freshAllowed) {
+		if (!Objects.equals(session.schemas.get(adapter.adapterId()), adapter.schema())) return false;
+		List<PresentationField> advertised = session.manifest.get(adapter.adapterId());
+		PresentationField local = null;
+		for (PresentationField field : adapter.fields()) if (field.id().equals(fieldId)) { local = field; break; }
+		if (local == null || advertised == null) return false;
+		PresentationField.Kind requiredKind = local.kind();
+		boolean compatible = advertised.stream().anyMatch(field ->
+			field.id().equals(fieldId) && field.kind() == requiredKind);
+		if (!compatible) return false;
+		if (!session.mask.getOrDefault(targetTypeId, Map.of())
+			.getOrDefault(adapter.adapterId(), Set.of()).contains(fieldId)) return false;
+		return freshAllowed.contains(fieldId);
 	}
 
 	private static void publish(ServerPlayer player, Session session, Lease lease) {
@@ -628,10 +747,21 @@ public final class PresentationServer {
 		Session session = SESSIONS.get(playerId);
 		ServerPlayer player = activeServer == null ? null : activeServer.getPlayerList().getPlayer(playerId);
 		if (session == null || !session.ready || player == null) return Optional.empty();
-		// Fresh authorization is intersected with the already-advertised view; promotion waits for RESET.
+		return Optional.of(new InventoryPolicy(session.epoch, session.view,
+			effectiveInventoryTypes(player, session)));
+	}
+
+	/**
+	 * The recipient's single fresh dedicated-inventory authorization: current
+	 * permission/policy intersected with the already-advertised route/session
+	 * view, so a newly allowed type is not promoted before RESET and a revoked
+	 * type is denied immediately. The dedicated policy and every initial
+	 * receipt share this one gate.
+	 */
+	private static Set<String> effectiveInventoryTypes(ServerPlayer player, Session session) {
 		Set<String> fresh = new HashSet<>(inventoryTypes(player, session));
 		fresh.retainAll(session.inventoryTypes);
-		return Optional.of(new InventoryPolicy(session.epoch, session.view, fresh));
+		return Set.copyOf(fresh);
 	}
 	public static boolean inventoryKnows(UUID player, MarkerId marker) {
 		Session session = SESSIONS.get(player);
@@ -716,11 +846,13 @@ public final class PresentationServer {
 				if (adapter.adapterId().equals(PresentationBasic.ID)) {
 					if (observedEntity != null) return basicEntity(demand, observedEntity,
 						component -> TargetNameJsonCodec.encode(component, server.registryAccess()).value());
-					if (committed instanceof Target.ExternalBlockTarget external)
-						return assembleExternalBasic(demand, observedState,
-							demand.contains(PresentationBasic.NAME)
-								? availableExternalName(ExternalBlockServerProviders.registry().resolveName(level, external),
-									server.registryAccess()) : null);
+					if (committed instanceof Target.ExternalBlockTarget external) {
+						ExternalNameObservation names = null;
+						if (demand.contains(PresentationBasic.NAME) || demand.contains(PresentationBasic.CUSTOM_NAME))
+							names = externalName(ExternalBlockServerProviders.registry().resolveName(level, external),
+								server.registryAccess(), null, demand);
+						return assembleExternalBasic(demand, observedState, names);
+					}
 					if (committed instanceof Target.BlockTarget block && observedState != null)
 						return basicBlock(server, level, block, observedState, demand);
 					return committed instanceof Target.LocationTarget && demand.contains(PresentationBasic.NAME)
@@ -738,16 +870,25 @@ public final class PresentationServer {
 
 	record ExternalAdmissionObservation(BlockState state, boolean nameOnly) {}
 
+	/**
+	 * Name-only external admission skips every non-name Basic field. A custom
+	 * name is a name observation too: it is admitted without forcing the
+	 * composed {@code minecraft:target.name} into the same demand.
+	 */
 	static Set<String> admissionBasicDemand(Set<String> allowed, boolean externalNameOnly) {
 		if (!externalNameOnly) return Set.copyOf(allowed);
-		return allowed.contains(PresentationBasic.NAME) ? Set.of(PresentationBasic.NAME) : Set.of();
+		Set<String> names = new LinkedHashSet<>();
+		if (allowed.contains(PresentationBasic.NAME)) names.add(PresentationBasic.NAME);
+		if (allowed.contains(PresentationBasic.CUSTOM_NAME)) names.add(PresentationBasic.CUSTOM_NAME);
+		return Set.copyOf(names);
 	}
 
 	private static boolean externalNameOnly(List<PresentationPropertyIntent> intents) {
 		return intents != null && !intents.isEmpty() && intents.stream().allMatch(intent ->
 			intent != null && intent.pingTypeId() == null && intent.ref().isRoot()
 				&& intent.ref().adapterId().equals(PresentationBasic.ID)
-				&& intent.ref().fieldId().equals(PresentationBasic.NAME));
+				&& (intent.ref().fieldId().equals(PresentationBasic.NAME)
+					|| intent.ref().fieldId().equals(PresentationBasic.CUSTOM_NAME)));
 	}
 
 	static ExternalAdmissionObservation observeExternalAdmission(List<PresentationPropertyIntent> intents,
@@ -756,6 +897,35 @@ public final class PresentationServer {
 		ExternalBlockServerProvider.ObservationResult result = observe.get();
 		return result instanceof ExternalBlockServerProvider.ObservationResult.Available available
 			? new ExternalAdmissionObservation(available.observation().state(), false) : null;
+	}
+
+	/**
+	 * One provider name observation: the composed display name and the plain
+	 * custom-name text, both derived from the same provider resolution so a
+	 * custom-name demand never triggers a second provider read. Either part may
+	 * be absent.
+	 */
+	record ExternalNameObservation(TargetNameJson composedName, String customName) {}
+
+	/**
+	 * Derives both Basic name fields from one provider resolution.
+	 * {@code nameFallback} is used only when the provider has no name: the
+	 * committed sampling route keeps its established UNKNOWN fallback, while
+	 * admission and candidate preview stay absent. A missing or empty custom
+	 * name stays absent and is never replaced by the vanilla or base name.
+	 */
+	static ExternalNameObservation externalName(
+		Optional<ExternalBlockServerProvider.ExternalBlockName> observed,
+		HolderLookup.Provider registries, TargetNameJson nameFallback, Set<String> demand) {
+		TargetNameJson composed = demand.contains(PresentationBasic.NAME) ? nameFallback : null;
+		if (observed.isEmpty()) return new ExternalNameObservation(composed, null);
+		ExternalBlockServerProvider.ExternalBlockName name = observed.orElseThrow();
+		String custom = demand.contains(PresentationBasic.CUSTOM_NAME) ? name.customName()
+			.map(component -> TargetNameComposer.plainText(component, PresentationLimits.MAX_TEXT_BYTES))
+			.filter(text -> !text.isEmpty())
+			.orElse(null) : null;
+		if (demand.contains(PresentationBasic.NAME)) composed = availableExternalName(observed, registries);
+		return new ExternalNameObservation(composed, custom);
 	}
 
 	public static TargetNameJson availableExternalName(
@@ -778,16 +948,43 @@ public final class PresentationServer {
 
 	private static PresentationSection basicBlock(MinecraftServer server, ServerLevel level,
 		Target.BlockTarget block, BlockState state, Set<String> demand) {
+		return basicBlock(demand, state,
+			() -> level.getBlockEntity(new BlockPos(block.x(), block.y(), block.z())),
+			component -> TargetNameJsonCodec.encode(component, server.registryAccess()).value());
+	}
+
+	/** World-free block assembly; the block-entity getter is reached only for demanded names. */
+	static PresentationSection basicBlock(Set<String> demand, BlockState state, Supplier<?> blockEntity,
+		Function<Component, String> encodeName) {
 		Map<String, PresentationValue> fields = new LinkedHashMap<>();
 		if (demand.contains(PresentationBasic.BLOCK_STATE))
 			put(fields, demand, PresentationBasic.BLOCK_STATE, blockState(state));
-		if (demand.contains(PresentationBasic.NAME)) {
-			Component name = state.getBlock().getName();
-			var blockEntity = level.getBlockEntity(new BlockPos(block.x(), block.y(), block.z()));
-			if (blockEntity instanceof Nameable named && named.hasCustomName())
-				name = TargetNameComposer.compose(named.getCustomName(), name);
-			put(fields, demand, PresentationBasic.NAME,
-				new PresentationValue.Text(TargetNameJsonCodec.encode(name, server.registryAccess()).value()));
+		if (demand.contains(PresentationBasic.NAME) || demand.contains(PresentationBasic.CUSTOM_NAME)) {
+			// The block entity's custom name is read once and feeds both the composed
+			// name and the separate plain custom-name field. A recoverable read failure
+			// omits only the dependent name fields.
+			Component custom = null;
+			boolean customNameReadable = true;
+			try {
+				Object observed = blockEntity.get();
+				custom = observed instanceof Nameable named && named.hasCustomName() ? named.getCustomName() : null;
+			} catch (RuntimeException | LinkageError unavailable) {
+				customNameReadable = false;
+			}
+			if (customNameReadable) {
+				if (demand.contains(PresentationBasic.NAME)) {
+					Component name = composeName(custom, state.getBlock().getName());
+					if (name != null) {
+						try {
+							put(fields, demand, PresentationBasic.NAME,
+								new PresentationValue.Text(encodeName.apply(name)));
+						} catch (RuntimeException | LinkageError unavailable) {
+							// NAME only; an independently captured plain custom name stays fresh.
+						}
+					}
+				}
+				if (demand.contains(PresentationBasic.CUSTOM_NAME)) putCustomName(fields, demand, custom);
+			}
 		}
 		return new PresentationSection(PresentationBasic.ID, 1, fields, false);
 	}
@@ -815,9 +1012,11 @@ public final class PresentationServer {
 			if (!BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(block.blockRegistryId())) return null;
 			return basicBlock(server, level, block, state, demand);
 		} else if (target instanceof Target.ExternalBlockTarget external) {
+			// One provider resolution feeds both name fields; the committed sampling
+			// route keeps the established UNKNOWN fallback for an unavailable name.
 			return basicExternal(demand,
 				() -> ExternalBlockServerProviders.registry().observeBlock(server, level, external),
-				() -> new MinecraftTargetNameResolver(server).resolveName(owner, external));
+				() -> committedExternalName(server, owner, external, demand));
 		} else if (target instanceof Target.LocationTarget) {
 			if (demand.contains(PresentationBasic.NAME)) name = TargetNameComposer.here();
 		} else if (demand.contains(PresentationBasic.NAME)) {
@@ -831,17 +1030,32 @@ public final class PresentationServer {
 		return new PresentationSection(PresentationBasic.ID, 1, fields, false);
 	}
 
+	/** Preserve the existing composed-name requester/dimension authority and fail-safe fallback. */
+	private static ExternalNameObservation committedExternalName(MinecraftServer server, UUID owner,
+		Target.ExternalBlockTarget target, Set<String> demand) {
+		try {
+			ServerPlayer player = server.getPlayerList().getPlayer(owner);
+			if (player != null && target.dimensionId().equals(player.serverLevel().dimension().location().toString()))
+				return externalName(ExternalBlockServerProviders.registry().resolveName(player.serverLevel(), target),
+					server.registryAccess(), TargetNameJsonCodec.UNKNOWN, demand);
+		} catch (RuntimeException unavailable) {
+			// A failed source must not synthesize custom text or change the existing NAME fallback.
+		}
+		return new ExternalNameObservation(demand.contains(PresentationBasic.NAME) ? TargetNameJsonCodec.UNKNOWN : null, null);
+	}
+
 	static PresentationSection basicExternal(Set<String> demand,
 		java.util.function.Supplier<ExternalBlockServerProvider.ObservationResult> observe,
-		java.util.function.Supplier<TargetNameJson> resolveName) {
+		java.util.function.Supplier<ExternalNameObservation> resolveName) {
 		BlockState state = null;
 		if (demand.contains(PresentationBasic.BLOCK_STATE)) {
 			ExternalBlockServerProvider.ObservationResult result = observe.get();
 			if (!(result instanceof ExternalBlockServerProvider.ObservationResult.Available available)) return null;
 			state = available.observation().state();
 		}
-		TargetNameJson name = demand.contains(PresentationBasic.NAME) ? resolveName.get() : null;
-		return assembleExternalBasic(demand, state, name);
+		ExternalNameObservation names = (demand.contains(PresentationBasic.NAME)
+			|| demand.contains(PresentationBasic.CUSTOM_NAME)) && resolveName != null ? resolveName.get() : null;
+		return assembleExternalBasic(demand, state, names);
 	}
 
 	/**
@@ -849,26 +1063,32 @@ public final class PresentationServer {
 	 * through its resolved safe read source. The committed observe route above is
 	 * deliberately not reused because it requires an active provider reference.
 	 * The caller supplies the already-admitted physical state and the lazy
-	 * provider name resolution; both remain detached from marker state.
+	 * provider name resolution; both remain detached from marker state. Both name
+	 * fields use the same observation, independently gated by authorized demand.
 	 */
 	static PresentationSection basicPreview(BlockReadSource source, Target target, BlockState state,
-		Set<String> demand, Supplier<TargetNameJson> resolveName) {
+		Set<String> demand, Supplier<ExternalNameObservation> resolveName) {
 		if (source == null || !(target instanceof Target.ExternalBlockTarget external) || !external.isCandidate()
 			|| !(source.target() instanceof Target.ExternalBlockTarget bound)
 			|| !MinecraftBlockReadSources.sameReadBinding(bound, external)) return null;
 		if (demand.contains(PresentationBasic.BLOCK_STATE) && state == null) return null;
-		TargetNameJson name = demand.contains(PresentationBasic.NAME) && resolveName != null ? resolveName.get() : null;
-		return assembleExternalBasic(demand, state, name);
+		ExternalNameObservation names = (demand.contains(PresentationBasic.NAME)
+			|| demand.contains(PresentationBasic.CUSTOM_NAME)) && resolveName != null ? resolveName.get() : null;
+		return assembleExternalBasic(demand, state, names);
 	}
 
 	static PresentationSection assembleExternalBasic(Set<String> demand, BlockState state,
-		TargetNameJson resolved) {
+		ExternalNameObservation names) {
 		if (demand.contains(PresentationBasic.BLOCK_STATE) && state == null) return null;
 		Map<String, PresentationValue> fields = new LinkedHashMap<>();
 		if (state != null && demand.contains(PresentationBasic.BLOCK_STATE))
 			put(fields, demand, PresentationBasic.BLOCK_STATE, blockState(state));
-		if (demand.contains(PresentationBasic.NAME) && resolved != null)
-			put(fields, demand, PresentationBasic.NAME, new PresentationValue.Text(resolved.value()));
+		if (names != null) {
+			if (demand.contains(PresentationBasic.NAME) && names.composedName() != null)
+				put(fields, demand, PresentationBasic.NAME, new PresentationValue.Text(names.composedName().value()));
+			if (demand.contains(PresentationBasic.CUSTOM_NAME) && names.customName() != null && !names.customName().isEmpty())
+				put(fields, demand, PresentationBasic.CUSTOM_NAME, new PresentationValue.Text(names.customName()));
+		}
 		return new PresentationSection(PresentationBasic.ID, 1, fields, false);
 	}
 
@@ -882,7 +1102,10 @@ public final class PresentationServer {
 	 * World-free assembly of the Basic fields for one live entity target. The
 	 * caller resolves the level, looks the entity up, and supplies the
 	 * registry-bound name encoder; keeping this routine detached makes the
-	 * name and value rules regression-tested without a running server.
+	 * name and value rules regression-tested without a running server. A
+	 * recoverable name-acquisition, composition, reduction or encoding failure
+	 * stays local to the name field it feeds; independently captured values
+	 * (health, type, item data) stay fresh.
 	 */
 	static PresentationSection basicEntity(Set<String> demand, Entity entity, Function<Component, String> encodeName) {
 		Map<String, PresentationValue> fields = new LinkedHashMap<>();
@@ -895,18 +1118,63 @@ public final class PresentationServer {
 		Component name = null;
 		if (entity instanceof ItemEntity item) {
 			if (demand.contains(PresentationBasic.ITEM_ICON)) put(fields, demand, PresentationBasic.ITEM_ICON, new PresentationValue.Flag(true));
-			if (demand.contains(PresentationBasic.ITEM_ID) || demand.contains(PresentationBasic.ITEM_COUNT) || demand.contains(PresentationBasic.NAME)) {
+			if (demand.contains(PresentationBasic.ITEM_ID) || demand.contains(PresentationBasic.ITEM_COUNT)
+				|| demand.contains(PresentationBasic.NAME) || demand.contains(PresentationBasic.CUSTOM_NAME)) {
 				var stack = item.getItem();
 				if (demand.contains(PresentationBasic.ITEM_ID)) put(fields, demand, PresentationBasic.ITEM_ID, new PresentationValue.Text(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString()));
 				if (demand.contains(PresentationBasic.ITEM_COUNT)) put(fields, demand, PresentationBasic.ITEM_COUNT, new PresentationValue.NumberValue(stack.getCount()));
-				if (demand.contains(PresentationBasic.NAME)) name = optionalName(stack.get(DataComponents.CUSTOM_NAME), Component.translatable(stack.getDescriptionId()));
+				if (demand.contains(PresentationBasic.NAME) || demand.contains(PresentationBasic.CUSTOM_NAME)) {
+					// A dropped item's custom name comes from the stack only; the entity's
+					// own custom name is never a fallback for this separate field.
+					Component stackCustom = stack.get(DataComponents.CUSTOM_NAME);
+					if (demand.contains(PresentationBasic.NAME))
+						name = composeName(stackCustom, Component.translatable(stack.getDescriptionId()));
+					if (demand.contains(PresentationBasic.CUSTOM_NAME)) putCustomName(fields, demand, stackCustom);
+				}
 			}
-		} else if (demand.contains(PresentationBasic.NAME)) {
-			name = entity instanceof ServerPlayer player ? Component.literal(player.getGameProfile().getName())
-				: optionalName(entity.getCustomName(), entity.getType().getDescription());
+		} else if (demand.contains(PresentationBasic.NAME) || demand.contains(PresentationBasic.CUSTOM_NAME)) {
+			if (entity instanceof ServerPlayer player) {
+				if (demand.contains(PresentationBasic.NAME)) name = Component.literal(player.getGameProfile().getName());
+				// A player target has no custom-name field; the profile name is never reused here.
+			} else {
+				Component custom = null;
+				boolean customNameReadable = true;
+				try {
+					custom = entity.getCustomName();
+				} catch (RuntimeException | LinkageError unavailable) {
+					customNameReadable = false;
+				}
+				if (customNameReadable) {
+					if (demand.contains(PresentationBasic.NAME)) name = composeName(custom, entity.getType().getDescription());
+					if (demand.contains(PresentationBasic.CUSTOM_NAME)) putCustomName(fields, demand, custom);
+				}
+			}
 		}
-		if (name != null) put(fields, demand, PresentationBasic.NAME, new PresentationValue.Text(encodeName.apply(name)));
+		if (name != null) {
+			try {
+				put(fields, demand, PresentationBasic.NAME, new PresentationValue.Text(encodeName.apply(name)));
+			} catch (RuntimeException | LinkageError unavailable) {
+				// NAME only; every independently captured value stays fresh.
+			}
+		}
 		return new PresentationSection(PresentationBasic.ID, 1, fields, false);
+	}
+
+	/**
+	 * The separate plain custom-name field: absent for a missing or empty custom
+	 * name, never replaced by a base, type, or profile name. The bounded plain
+	 * reduction strips styles and events while preserving literal text. A
+	 * recoverable reduction failure leaves only this field absent.
+	 */
+	private static void putCustomName(Map<String, PresentationValue> fields, Set<String> demand, Component custom) {
+		if (!demand.contains(PresentationBasic.CUSTOM_NAME) || custom == null) return;
+		try {
+			String text = TargetNameComposer.plainText(custom, PresentationLimits.MAX_TEXT_BYTES);
+			if (!text.isEmpty()) put(fields, demand, PresentationBasic.CUSTOM_NAME, new PresentationValue.Text(text));
+		} catch (RuntimeException | LinkageError unavailable) {
+			// An unreducible custom component stays absent; the composed name and every
+			// unrelated Basic field remain independently fresh.
+		}
 	}
 
 	/**
@@ -918,6 +1186,15 @@ public final class PresentationServer {
 	 */
 	static Component optionalName(Component customName, Component baseName) {
 		return customName != null ? TargetNameComposer.compose(customName, baseName) : baseName;
+	}
+
+	/** Composed-name build: a malformed custom component yields no composed name instead of failing the section. */
+	private static Component composeName(Component customName, Component baseName) {
+		try {
+			return optionalName(customName, baseName);
+		} catch (RuntimeException | LinkageError unavailable) {
+			return null;
+		}
 	}
 
 	private static void put(Map<String, PresentationValue> fields, Set<String> demand, String id, PresentationValue value) {

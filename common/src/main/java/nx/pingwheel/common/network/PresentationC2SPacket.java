@@ -29,10 +29,10 @@ public record PresentationC2SPacket(Kind kind, int protocol, long epoch,
 	Map<String, Integer> schemas, long requestId, Target target, String pingType, MarkerId markerId,
 	List<PresentationPropertyIntent> properties) implements IPacket {
 	public enum Kind { HELLO, CREATE, REMOVE }
-	public static final int VERSION = 3;
+	public static final int VERSION = 4;
 	public static final int MAX_ADAPTERS = 32;
 	public static final int MAX_FIELDS = 256;
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "presentation-v3");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "presentation-v4");
 	public static final Type<PresentationC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public PresentationC2SPacket {

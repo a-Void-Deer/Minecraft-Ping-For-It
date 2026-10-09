@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.function.Function;
@@ -265,6 +266,11 @@ public final class ClientInventory {
 	/** Whether an OFFER established the epoch and server periods for this connection. */
 	public boolean ready() {
 		return offered && policyView == presentationView && presentationEpoch != 0;
+	}
+	/** Current accepted dedicated-route policy; absence means authority is not ready, never denial. */
+	public Optional<Boolean> authorization(long currentEpoch, long currentView, String targetTypeId) {
+		if (!ready() || currentEpoch != presentationEpoch || currentView != presentationView) return Optional.empty();
+		return Optional.of(allowedTypes.contains(targetTypeId));
 	}
 	/** Accepted presentation RESET immediately purges old-view inventory, before POLICY arrives. */
 	public void presentationReset(long epoch, long view) {

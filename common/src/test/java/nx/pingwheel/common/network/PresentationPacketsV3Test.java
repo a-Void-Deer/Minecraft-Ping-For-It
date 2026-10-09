@@ -13,6 +13,7 @@ import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationReceiptContent;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 
@@ -35,11 +36,11 @@ class PresentationPacketsV3Test {
 	}
 
 	@Test
-	void versionThreeHasNoSubscribeKindAndUsesNewRouteIds() {
-		assertEquals(3, PresentationC2SPacket.VERSION);
-		assertEquals(3, PresentationS2CPacket.VERSION);
-		assertEquals("pingforit-c2s:presentation-v3", PresentationC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-s2c:presentation-v3", PresentationS2CPacket.PACKET_ID.toString());
+	void versionFourHasNoSubscribeKindAndUsesNewRouteIds() {
+		assertEquals(4, PresentationC2SPacket.VERSION);
+		assertEquals(4, PresentationS2CPacket.VERSION);
+		assertEquals("pingforit-c2s:presentation-v4", PresentationC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:presentation-v4", PresentationS2CPacket.PACKET_ID.toString());
 		assertEquals(List.of(PresentationC2SPacket.Kind.HELLO, PresentationC2SPacket.Kind.CREATE,
 			PresentationC2SPacket.Kind.REMOVE), Arrays.asList(PresentationC2SPacket.Kind.values()));
 	}
@@ -187,6 +188,7 @@ class PresentationPacketsV3Test {
 			assertFalse(decoded.isCorrupt());
 			assertEquals(PresentationS2CPacket.Kind.CREATED, decoded.kind());
 			assertEquals(defaultRef, decoded.defaultRef());
+			assertEquals(PresentationReceiptContent.whole(), decoded.content());
 			assertEquals(snapshot, decoded.snapshot());
 			assertEquals("Owner", decoded.ownerName());
 

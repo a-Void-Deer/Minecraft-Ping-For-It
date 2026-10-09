@@ -25,17 +25,19 @@ import static nx.pingwheel.common.Global.S2C_NAMESPACE;
  * terminal barriers. The server owns the field selection entirely: an accepted
  * {@code RESET} carries an authoritative bounded target-type/adapter/field mask,
  * an empty mask denies every field, and {@code CREATED} carries the marker's
- * default property ref beside the canonical snapshot.
+ * explicit receipt content descriptor and default property ref beside the
+ * canonical snapshot.
  */
 public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long view,
 	long revision, Map<String, List<PresentationField>> manifest, Map<String, Integer> schemas,
 	Map<String, Map<String, Set<String>>> mask,
-	MarkerSnapshot snapshot, String ownerName, PresentationPropertyRef defaultRef, byte[] sectionBytes,
+	MarkerSnapshot snapshot, String ownerName, PresentationPropertyRef defaultRef,
+	PresentationReceiptContent content, byte[] sectionBytes,
 	MarkerId markerId, MarkerRemovalReason removalReason, TargetKey targetKey, Optional<MarkerId> winnerId,
 	long requestId, MarkerRequestKind requestKind, MarkerRejectReason rejectReason) implements IPacket {
 	public enum Kind { OFFER, RESET, CREATED, SECTION, REMOVED, WINNER, REJECT }
 	public static final int VERSION = PresentationC2SPacket.VERSION;
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "presentation-v3");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "presentation-v4");
 	public static final Type<PresentationS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public PresentationS2CPacket {
@@ -45,6 +47,8 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 		schemas = Map.copyOf(schemas);
 		mask = validateMask(mask, kind);
 		if (kind != Kind.CREATED && defaultRef != null) throw new IllegalArgumentException("unexpected default property ref");
+		if (kind != Kind.CREATED && content != null) throw new IllegalArgumentException("unexpected receipt content");
+		if (kind == Kind.CREATED && content == null) throw new IllegalArgumentException("missing receipt content");
 		sectionBytes = sectionBytes == null ? new byte[0] : sectionBytes.clone();
 		if (sectionBytes.length > PresentationCodec.MAX_SECTION_BYTES + 5) throw new IllegalArgumentException("section bytes");
 	}
@@ -56,8 +60,24 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 	public PresentationS2CPacket(FriendlyByteBuf buf) { this(decode(buf)); }
 	private PresentationS2CPacket(PresentationS2CPacket p) {
 		this(p.kind, p.protocol, p.epoch, p.view, p.revision, p.manifest, p.schemas, p.mask,
-			p.snapshot, p.ownerName, p.defaultRef, p.sectionBytes, p.markerId, p.removalReason, p.targetKey,
-			p.winnerId, p.requestId, p.requestKind, p.rejectReason);
+			p.snapshot, p.ownerName, p.defaultRef, p.content, p.sectionBytes, p.markerId, p.removalReason,
+			p.targetKey, p.winnerId, p.requestId, p.requestKind, p.rejectReason);
+	}
+	/**
+	 * Source-compatible constructor for callers that predate the receipt
+	 * descriptor: a {@code CREATED} packet defaults to the ordinary
+	 * {@link PresentationReceiptContent.Kind#WHOLE} descriptor, and every other
+	 * kind carries none. The wire form always writes the descriptor explicitly.
+	 */
+	public PresentationS2CPacket(Kind kind, int protocol, long epoch, long view, long revision,
+		Map<String, List<PresentationField>> manifest, Map<String, Integer> schemas,
+		Map<String, Map<String, Set<String>>> mask, MarkerSnapshot snapshot, String ownerName,
+		PresentationPropertyRef defaultRef, byte[] sectionBytes, MarkerId markerId, MarkerRemovalReason removalReason,
+		TargetKey targetKey, Optional<MarkerId> winnerId, long requestId, MarkerRequestKind requestKind,
+		MarkerRejectReason rejectReason) {
+		this(kind, protocol, epoch, view, revision, manifest, schemas, mask, snapshot, ownerName, defaultRef,
+			kind == Kind.CREATED ? PresentationReceiptContent.whole() : null, sectionBytes, markerId,
+			removalReason, targetKey, winnerId, requestId, requestKind, rejectReason);
 	}
 	public static PresentationS2CPacket offer(long epoch, Map<String, List<PresentationField>> manifest, Map<String, Integer> schemas) {
 		return new PresentationS2CPacket(Kind.OFFER, VERSION, epoch, 0, 0, manifest, schemas, Map.of(),
@@ -68,8 +88,12 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 	}
 	public static PresentationS2CPacket created(long epoch, long view, long revision, MarkerSnapshot snapshot,
 		String owner, PresentationPropertyRef defaultRef, PresentationSection basic) {
+		return created(epoch, view, revision, snapshot, owner, defaultRef, PresentationReceiptContent.whole(), basic);
+	}
+	public static PresentationS2CPacket created(long epoch, long view, long revision, MarkerSnapshot snapshot,
+		String owner, PresentationPropertyRef defaultRef, PresentationReceiptContent content, PresentationSection basic) {
 		return new PresentationS2CPacket(Kind.CREATED, VERSION, epoch, view, revision, Map.of(), Map.of(), Map.of(),
-			snapshot, owner, defaultRef, encode(basic), snapshot.id(), null, null, Optional.empty(), 0, null, null);
+			snapshot, owner, defaultRef, content, encode(basic), snapshot.id(), null, null, Optional.empty(), 0, null, null);
 	}
 	public static PresentationS2CPacket section(long epoch, long view, long revision, MarkerId id, PresentationSection section) {
 		return new PresentationS2CPacket(Kind.SECTION, VERSION, epoch, view, revision, Map.of(), Map.of(), Map.of(),
@@ -110,6 +134,7 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 				MarkerPacketCodec.writeMarkerSnapshot(buf, snapshot);
 				MarkerPacketCodec.writeOwnerName(buf, ownerName);
 				PresentationCodec.writePropertyRef(buf, defaultRef);
+				PresentationCodec.writeReceiptContent(buf, content);
 				buf.writeByteArray(sectionBytes);
 			}
 			case SECTION -> { MarkerPacketCodec.writeMarkerId(buf, markerId); buf.writeByteArray(sectionBytes); }
@@ -124,6 +149,7 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 		Map<String, List<PresentationField>> manifest = new LinkedHashMap<>(); Map<String, Integer> schemas = new LinkedHashMap<>();
 		Map<String, Map<String, Set<String>>> mask = Map.of();
 		MarkerSnapshot snapshot = null; String owner = null; PresentationPropertyRef defaultRef = null;
+		PresentationReceiptContent content = null;
 		byte[] section = new byte[0]; MarkerId marker = null;
 		MarkerRemovalReason removal = null; TargetKey target = null; Optional<MarkerId> winner = Optional.empty();
 		long request = 0; MarkerRequestKind requestKind = null; MarkerRejectReason reject = null;
@@ -145,6 +171,7 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 				snapshot = MarkerPacketCodec.readMarkerSnapshot(buf); marker = snapshot.id();
 				owner = MarkerPacketCodec.readOwnerName(buf);
 				defaultRef = PresentationCodec.readPropertyRef(buf);
+				content = PresentationCodec.readReceiptContent(buf);
 				section = buf.readByteArray(PresentationCodec.MAX_SECTION_BYTES + 5);
 			}
 			case SECTION -> { marker = MarkerPacketCodec.readMarkerId(buf); section = buf.readByteArray(PresentationCodec.MAX_SECTION_BYTES + 5); }
@@ -154,12 +181,12 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 		}
 		if (buf.isReadable()) throw new IllegalArgumentException("trailing presentation response");
 		return new PresentationS2CPacket(kind, protocol, epoch, view, revision, manifest, schemas, mask, snapshot, owner,
-			defaultRef, section, marker, removal, target, winner, request, requestKind, reject);
+			defaultRef, content, section, marker, removal, target, winner, request, requestKind, reject);
 	}
 	@Override public boolean isCorrupt() {
 		return kind == null || protocol != VERSION || epoch == 0 || view < 0 || revision < 0
 			|| (kind == Kind.CREATED && (snapshot == null || ownerName == null || ownerName.isBlank()
-				|| defaultRef == null || sectionBytes.length == 0))
+				|| defaultRef == null || content == null || sectionBytes.length == 0))
 			|| (kind == Kind.SECTION && (markerId == null || sectionBytes.length == 0))
 			|| (kind == Kind.REMOVED && (markerId == null || removalReason == null))
 			|| (kind == Kind.WINNER && targetKey == null)

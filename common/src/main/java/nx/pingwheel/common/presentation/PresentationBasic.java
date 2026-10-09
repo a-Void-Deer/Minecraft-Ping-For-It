@@ -6,6 +6,7 @@ import java.util.List;
 public final class PresentationBasic {
 	public static final String ID = "minecraft:basic";
 	public static final String NAME = "minecraft:target.name";
+	public static final String CUSTOM_NAME = "minecraft:target.custom_name";
 	public static final String ENTITY_TYPE = "minecraft:entity.type";
 	public static final String HEALTH = "minecraft:entity.health";
 	public static final String MAX_HEALTH = "minecraft:entity.max_health";
@@ -19,6 +20,7 @@ public final class PresentationBasic {
 	public static List<PresentationField> fields() {
 		return List.of(
 			new PresentationField(NAME, PresentationField.Kind.TEXT, true, 0, "name"),
+			new PresentationField(CUSTOM_NAME, PresentationField.Kind.TEXT, true, 0, "custom name"),
 			new PresentationField(ENTITY_TYPE, PresentationField.Kind.TEXT, true, 0, "entity type"),
 			new PresentationField(HEALTH, PresentationField.Kind.NUMBER, true, 0, "health"),
 			new PresentationField(MAX_HEALTH, PresentationField.Kind.NUMBER, true, 0, "maximum health"),

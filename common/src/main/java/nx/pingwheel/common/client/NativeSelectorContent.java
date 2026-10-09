@@ -30,6 +30,7 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 	private final ClientPresentationPreview preview;
 	private final Supplier<ClientInventory> inventory;
 	private final Function<CapturedPingContext, List<PingType>> propertyTypes;
+	private final Function<CapturedPingContext, List<PingType>> inventoryTypes;
 	private final Function<PresentationPropertyRef, Component> fieldLabel;
 	private final Function<String, Component> targetName;
 	private final Map<String, Component> labels = new LinkedHashMap<>();
@@ -43,10 +44,19 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 		Supplier<ClientInventory> inventory, Function<CapturedPingContext, List<PingType>> propertyTypes,
 		Function<PresentationPropertyRef, Component> fieldLabel,
 		Function<String, Component> targetName) {
+		this(capture, preview, inventory, propertyTypes, propertyTypes, fieldLabel, targetName);
+	}
+
+	NativeSelectorContent(CapturedPingContext capture, ClientPresentationPreview preview,
+		Supplier<ClientInventory> inventory, Function<CapturedPingContext, List<PingType>> propertyTypes,
+		Function<CapturedPingContext, List<PingType>> inventoryTypes,
+		Function<PresentationPropertyRef, Component> fieldLabel,
+		Function<String, Component> targetName) {
 		this.capture = capture;
 		this.preview = preview;
 		this.inventory = inventory;
 		this.propertyTypes = propertyTypes;
+		this.inventoryTypes = inventoryTypes;
 		this.fieldLabel = fieldLabel;
 		this.targetName = targetName;
 	}
@@ -135,8 +145,10 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 			Status status = state.completeScan() && state.status() == InventoryS2CPacket.Status.READY ? Status.READY
 				: Status.fromName(state.status().name());
 			if (!state.completeScan() && status == Status.READY) status = Status.UPDATING;
+			List<PingType> itemTypes = inventoryTypes.apply(capture);
+			PingType defaultItemType = itemTypes.isEmpty() ? null : itemTypes.getFirst();
 			list = new SpatialSelectorSession.InventoryPreview<>("settings.pingforit.presentation.field.pingforit_inventory_items.name",
-				status, rows, types, defaultType);
+				status, rows, itemTypes, defaultItemType);
 		}
 		previousInventory = state;
 		var next = new SpatialSelectorSession.ContentProjection<>(fence, revision + 1, reset,

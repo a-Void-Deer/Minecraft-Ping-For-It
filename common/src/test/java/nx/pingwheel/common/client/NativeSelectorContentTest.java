@@ -241,4 +241,50 @@ class NativeSelectorContentTest {
 			"the reader is never asked for a field outside the accepted mask");
 		content.close();
 	}
+
+	@Test void inventoryItemsCarryTakeWhileRegularPropertiesKeepThePropertyPolicy() {
+		List<IPacket> sent = new ArrayList<>(); var inventory = new ClientInventory(sent::add); ready(inventory);
+		var context = new PreviewContext();
+		var capture = capture();
+		Map<String, Double> values = new LinkedHashMap<>();
+		values.put(STRESS, 12.0);
+		var preview = new ClientPresentationPreview(type -> Optional.of(previewAccess(Set.of(STRESS))),
+			() -> context, List.of(previewReader(values, new ArrayList<>())),
+			(target, type) -> Optional.empty(), sent::add);
+		var content = new NativeSelectorContent(capture, preview, () -> inventory,
+			ignored -> List.of(PingTypeCatalog.builtIn().findById("attention").orElseThrow()),
+			ignored -> List.of(PingTypeCatalog.builtIn().findById("attention").orElseThrow(),
+				PingTypeCatalog.builtIn().findById("take").orElseThrow()),
+			ref -> Component.literal(ref.fieldId()), json -> null);
+		content.begin(context.level);
+		long request = content.requestId();
+		inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 9, 1, 1, 0, 1, true,
+			InventoryS2CPacket.Status.READY, 0, List.of(entry("exact", 1, false, 1))).stamp(100, 1));
+		var projection = content.read(previewTarget(capture), previewFence(content));
+		assertNotNull(projection);
+		var property = projectedProperty(projection, STRESS);
+		assertEquals(List.of("attention"), property.allowedTypes().stream().map(type -> type.id()).toList(),
+			"a regular property keeps the property policy without the inventory-only take");
+		assertEquals(List.of("attention", "take"),
+			projection.inventory().allowedItemTypes().stream().map(type -> type.id()).toList(),
+			"the inventory item menu uses the inventory item policy");
+		content.close();
+	}
+
+	@Test void legacyConstructorSharesThePropertyPolicyWithInventoryItems() {
+		List<IPacket> sent = new ArrayList<>(); var inventory = new ClientInventory(sent::add); ready(inventory);
+		var capture = capture();
+		var content = new NativeSelectorContent(capture, null, () -> inventory,
+			ignored -> List.of(PingTypeCatalog.builtIn().findById("request").orElseThrow()),
+			ref -> Component.literal(ref.fieldId()), json -> null);
+		content.begin(new Object());
+		long request = content.requestId();
+		inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 9, 1, 1, 0, 1, true,
+			InventoryS2CPacket.Status.READY, 0, List.of(entry("exact", 1, false, 1))).stamp(100, 1));
+		var projection = content.read(previewTarget(capture), previewFence(content));
+		assertNotNull(projection);
+		assertEquals(List.of("request"), projection.inventory().allowedItemTypes().stream().map(type -> type.id()).toList(),
+			"the legacy constructor keeps passing the original shared policy");
+		content.close();
+	}
 }
