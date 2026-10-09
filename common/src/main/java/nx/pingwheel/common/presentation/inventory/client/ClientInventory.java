@@ -348,12 +348,23 @@ public final class ClientInventory {
 	public long open(Target target) {
 		return NO_REQUEST; // No face is never an unsided or inferred-UP view.
 	}
+	/**
+	 * Opens a preview request from a frozen capture. A native block target or an
+	 * uncommitted external provider candidate with a real press-time face is
+	 * retained verbatim: its provider locator and block-entity classification
+	 * stay the captured wire identity, and no physical block or world-space
+	 * coordinate is invented. A committed external target, an entity, a
+	 * location, or a missing face never opens a channel.
+	 */
 	public long open(CapturedPingContext frozen) {
-		if (frozen == null || frozen.blockHitFace().isEmpty() || !(frozen.resolvedTarget().target() instanceof Target.BlockTarget block)) return NO_REQUEST;
-		return open(block, frozen.blockHitFace().get(), frozen.resolvedTarget().targetType().id());
+		if (frozen == null || frozen.blockHitFace().isEmpty()) return NO_REQUEST;
+		Target target = frozen.resolvedTarget().target();
+		if (!(target instanceof Target.BlockTarget)
+			&& !(target instanceof Target.ExternalBlockTarget external && external.isCandidate())) return NO_REQUEST;
+		return open(target, frozen.blockHitFace().get(), frozen.resolvedTarget().targetType().id());
 	}
-	public long open(Target.BlockTarget target, BlockFace face, String targetType) {
-		if (target == null || face == null || !nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(targetType)
+	public long open(Target target, BlockFace face, String targetType) {
+		if (face == null || !isOpenTarget(target) || !nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(targetType)
 			|| previews.size() >= MAX_PREVIEW_CHANNELS) {
 			boundRejects++;
 			return NO_REQUEST;
@@ -512,7 +523,13 @@ public final class ClientInventory {
 
 	private void sendOpen(PreviewState state) {
 		state.sent = true;
-		send(InventoryC2SPacket.open(epoch, presentationEpoch, presentationView, state.requestId, (Target.BlockTarget) state.target, state.face));
+		send(InventoryC2SPacket.open(epoch, presentationEpoch, presentationView, state.requestId, state.target, state.face));
+	}
+
+	/** A version-three OPEN target is one native block or one uncommitted external candidate. */
+	private static boolean isOpenTarget(Target target) {
+		return target instanceof Target.BlockTarget
+			|| (target instanceof Target.ExternalBlockTarget external && external.isCandidate());
 	}
 
 	private void send(IPacket packet) {

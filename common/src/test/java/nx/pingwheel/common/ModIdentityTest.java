@@ -104,9 +104,9 @@ class ModIdentityTest {
 		assertEquals("pingforit-c2s:presentation-v3", PresentationC2SPacket.PACKET_ID.toString());
 		assertEquals("pingforit-s2c:presentation-v3", PresentationS2CPacket.PACKET_ID.toString());
 	}
-	@Test void inventoryRoutesUseIndependentV2Ids() {
-		assertEquals("pingforit-c2s:inventory-v2", nx.pingwheel.common.network.InventoryC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-s2c:inventory-v2", nx.pingwheel.common.network.InventoryS2CPacket.PACKET_ID.toString());
+	@Test void inventoryRoutesUseIndependentV3Ids() {
+		assertEquals("pingforit-c2s:inventory-v3", nx.pingwheel.common.network.InventoryC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:inventory-v3", nx.pingwheel.common.network.InventoryS2CPacket.PACKET_ID.toString());
 	}
 
 	@Test

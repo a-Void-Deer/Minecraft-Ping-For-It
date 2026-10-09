@@ -57,7 +57,7 @@ class SableSupplementalRaycasterTest {
 		var locator = nx.pingwheel.common.integration.sable.server.SableExternalBlockLocator.parse(target.providerLocator()).orElseThrow();
 		assertEquals(new BlockPos(100, 0, 100), locator.blockPos());
 		assertEquals(plot.id(), locator.subLevelId());
-		assertTrue(chest.snapshot().blockHitFace().isEmpty());
+		assertEquals(java.util.Optional.of(BlockFace.WEST), chest.snapshot().blockHitFace());
 		var resolver = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop());
 		TargetSnapshot ordinary = TargetSnapshotFactory.block(DIMENSION, 2, 0, 0, "minecraft:stone", false, BlockFace.WEST);
 		ordinary = ordinary.withCandidateHit(new CandidateHit(new WorldVector(2, .5, .5), CaptureEquivalenceKey.nativeTarget(ordinary.target())));
@@ -79,6 +79,8 @@ class SableSupplementalRaycasterTest {
 		CandidateEvidence hit = collector.evidence().getFirst();
 		assertEquals(8.0625, hit.hit().worldHit().x(), 1.0E-10);
 		assertEquals(.5, hit.hit().worldHit().z(), 1.0E-10);
+		assertEquals(java.util.Optional.of(BlockFace.NORTH), hit.snapshot().blockHitFace(),
+			"a world WEST approach hits provider-local NORTH after this rotation");
 		pose.position().set(40, 30, 20);
 		assertEquals(8.0625, hit.hit().worldHit().x(), 1.0E-10, "retained data is detached from mutable pose");
 		TargetSnapshot miss = TargetSnapshotFactory.location(DIMENSION, 20, .5, .5);
@@ -87,7 +89,9 @@ class SableSupplementalRaycasterTest {
 			new CapturedRay(new WorldVector(0, .5, .5), new WorldVector(1, 0, 0)), 20,
 			new WorldVector(20, .5, .5), collector.evidence(), EnumSet.allOf(PreciseTargetType.class))
 			.finish(miss, resolver.resolve(miss.target(), miss.matchContext()), resolver);
-		assertTrue(set.candidate(set.slot(PreciseTargetType.ENTITY_BLOCK).candidateId().orElseThrow()).orElseThrow().resolvedTarget().target() instanceof Target.ExternalBlockTarget);
+		var selected = set.candidate(set.slot(PreciseTargetType.ENTITY_BLOCK).candidateId().orElseThrow()).orElseThrow();
+		assertTrue(selected.resolvedTarget().target() instanceof Target.ExternalBlockTarget);
+		assertEquals(java.util.Optional.of(BlockFace.NORTH), selected.blockHitFace());
 		assertEquals(miss.target(), set.ordinary().resolvedTarget().target());
 	}
 
@@ -150,6 +154,8 @@ class SableSupplementalRaycasterTest {
 		boolean previous = ModContext.HasSable;
 		try {
 			ModContext.HasSable = false;
+			assertTrue(SableClientProvider.resolvePreviewReadSource(null, Target.ExternalBlockTarget.candidate(
+				DIMENSION, "sable", "minecraft:chest", "opaque", true)).isEmpty());
 			assertTrue(SableClientProvider.candidateBlocks().collectSupplemental(null, START, END, POLICY,
 				CollisionContext.empty(), Vec3.ZERO, new CandidateWorkBudget(new CandidateWorkLimits(0, 0, 0)), new CandidateCollector()));
 		} finally { ModContext.HasSable = previous; }
@@ -202,6 +208,82 @@ class SableSupplementalRaycasterTest {
 			@Override public SableSupplementalRaycaster.SubLevel at(int index, CandidateWorkBudget budget) { return null; }
 		}, DIMENSION, START, END, POLICY, CollisionContext.empty(), Vec3.ZERO,
 			new CandidateWorkBudget(new CandidateWorkLimits(0, 0, 1)), new CandidateCollector()));
+	}
+
+	@Test
+	void originContainmentKeepsExternalTargetWithoutInventingFace() {
+		var plot = plot(new Pose3d(new Vector3d(8, 0, 0), new Quaterniond(), new Vector3d(100, 0, 100), new Vector3d(1)), UUID.randomUUID());
+		CandidateCollector collector = new CandidateCollector();
+		assertTrue(scan(List.of(plot), new Vec3(8.5, .5, .5), END, POLICY, limits(), collector));
+		assertFalse(collector.evidence().isEmpty());
+		assertTrue(collector.evidence().getFirst().snapshot().target() instanceof Target.ExternalBlockTarget);
+		assertTrue(collector.evidence().getFirst().snapshot().blockHitFace().isEmpty());
+	}
+
+	@Test
+	void nearerSameExternalContactInstallsLocalFaceWithoutChangingOrdinaryFrozenFace() {
+		UUID id = UUID.randomUUID();
+		String locator = new nx.pingwheel.common.integration.sable.server.SableExternalBlockLocator(id, 100, 0, 100).encode();
+		var key = SableCaptureEquivalence.fromResolved(DIMENSION, id, 100, 0, 100, "minecraft:chest");
+		TargetSnapshot ordinary = TargetSnapshotFactory.externalBlockCandidate(DIMENSION, "sable", "minecraft:chest",
+			locator, true, BlockFace.WEST).withCandidateHit(new CandidateHit(new WorldVector(9, .5, .5), key));
+		TargetSnapshot nearer = TargetSnapshotFactory.externalBlockCandidate(DIMENSION, "sable", "minecraft:chest",
+			locator, true, BlockFace.NORTH).withCandidateHit(new CandidateHit(new WorldVector(8, .5, .5), key));
+		var resolver = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop());
+		var active = new ActiveInteraction();
+		var coordinator = new PingCaptureCoordinator(resolver, active, PingCaptureLogger.noop());
+		var token = coordinator.begin();
+		var ray = new CapturedRay(new WorldVector(0, .5, .5), new WorldVector(1, 0, 0));
+		var acquisition = new FrozenCandidateAcquisition(token, ray, 20, ordinary.candidateHit().orElseThrow().worldHit(),
+			List.of(new CandidateEvidence(nearer, 8)), EnumSet.allOf(PreciseTargetType.class));
+		var captured = coordinator.complete(token, ordinary, ray, java.util.Optional.of(acquisition)).orElseThrow();
+		assertEquals(java.util.Optional.of(BlockFace.WEST), captured.blockHitFace(), "ordinary Content stays frozen");
+		var precise = captured.selectorCandidates().orElseThrow().ordinary();
+		assertEquals(java.util.Optional.of(BlockFace.NORTH), precise.blockHitFace(), "Precise takes the nearest contact's local face");
+		assertEquals(new WorldVector(8, .5, .5), precise.worldHit());
+		assertEquals(ordinary.target(), precise.resolvedTarget().target());
+	}
+
+	@Test
+	void actualLocalFacesAreCopiedWhileSyntheticMissAndUnobservedHitsStayFaceless() {
+		BlockPos pos = new BlockPos(100, 0, 100);
+		Vec3 point = new Vec3(100, .5, 100.5);
+		for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
+			var nativeHit = new net.minecraft.world.phys.BlockHitResult(point, direction, pos, false);
+			assertEquals(java.util.Optional.of(BlockFace.valueOf(direction.name())),
+				SableClientCompanionAccess.observedLocalFace(nativeHit));
+			assertTrue(SableClientCompanionAccess.observedLocalFace(
+				net.minecraft.world.phys.BlockHitResult.miss(point, direction, pos)).isEmpty());
+			assertTrue(SableClientCompanionAccess.observedLocalFace(
+				new UnobservedFaceBlockHitResult(point, direction, pos, false)).isEmpty());
+			assertTrue(SableClientCompanionAccess.observedLocalFace(
+				new net.minecraft.world.phys.BlockHitResult(point, direction, pos, true)).isEmpty());
+		}
+	}
+
+	@Test
+	void nearerDifferentExternalLocatorCannotReplaceOrdinaryFaceDespiteEqualCandidateTargets() {
+		UUID firstId = UUID.randomUUID(), secondId = UUID.randomUUID();
+		var firstKey = SableCaptureEquivalence.fromResolved(DIMENSION, firstId, 100, 0, 100, "minecraft:chest");
+		var secondKey = SableCaptureEquivalence.fromResolved(DIMENSION, secondId, 100, 0, 100, "minecraft:chest");
+		TargetSnapshot ordinary = TargetSnapshotFactory.externalBlockCandidate(DIMENSION, "sable", "minecraft:chest",
+			new nx.pingwheel.common.integration.sable.server.SableExternalBlockLocator(firstId, 100, 0, 100).encode(),
+			true, BlockFace.WEST).withCandidateHit(new CandidateHit(new WorldVector(9, .5, .5), firstKey));
+		TargetSnapshot other = TargetSnapshotFactory.externalBlockCandidate(DIMENSION, "sable", "minecraft:chest",
+			new nx.pingwheel.common.integration.sable.server.SableExternalBlockLocator(secondId, 100, 0, 100).encode(),
+			true, BlockFace.NORTH).withCandidateHit(new CandidateHit(new WorldVector(8, .5, .5), secondKey));
+		assertEquals(ordinary.target(), other.target());
+		var resolver = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop());
+		var ray = new CapturedRay(new WorldVector(0, .5, .5), new WorldVector(1, 0, 0));
+		var acquisition = new FrozenCandidateAcquisition(new ActiveInteraction().begin(), ray, 20,
+			ordinary.candidateHit().orElseThrow().worldHit(), List.of(new CandidateEvidence(other, 8)),
+			EnumSet.allOf(PreciseTargetType.class));
+		var set = acquisition.finish(ordinary, resolver.resolve(ordinary.target(), ordinary.matchContext()), resolver);
+		assertEquals(java.util.Optional.of(BlockFace.WEST), set.ordinary().blockHitFace());
+		assertEquals(new WorldVector(9, .5, .5), set.ordinary().worldHit());
+		var nearest = set.candidate(set.slot(PreciseTargetType.ENTITY_BLOCK).candidateId().orElseThrow()).orElseThrow();
+		assertEquals(java.util.Optional.of(BlockFace.NORTH), nearest.blockHitFace());
+		assertEquals(secondKey, nearest.equivalenceKey());
 	}
 
 	private static boolean scan(List<SableSupplementalRaycaster.SubLevel> plots, Vec3 start, Vec3 end,

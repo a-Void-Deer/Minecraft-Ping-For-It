@@ -232,7 +232,7 @@ class TargetSnapshotTest {
 	}
 
 	@Test
-	void onlyAnOrdinaryBlockTargetCanCarryAHitFace() {
+	void ordinaryAndExternalBlockTargetsCanCarryAHitFaceButOtherKindsCannot() {
 		TargetSnapshot block = new TargetSnapshot(
 			new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone"),
 			TargetMatchContext.none(),
@@ -254,17 +254,20 @@ class TargetSnapshotTest {
 			Optional.empty(),
 			Optional.empty(),
 			Optional.of(BlockFace.UP)));
-		assertThrows(IllegalArgumentException.class, () -> new TargetSnapshot(
+		TargetSnapshot external = new TargetSnapshot(
 			new Target.ExternalBlockTarget(
 				OVERWORLD, "provider:test", "target-1", "minecraft:chest", "opaque-locator"),
 			TargetMatchContext.none(),
 			Optional.empty(),
 			Optional.empty(),
-			Optional.of(BlockFace.UP)));
+			Optional.of(BlockFace.UP));
+		assertEquals(Optional.of(BlockFace.UP), external.blockHitFace());
+		assertEquals(Optional.of(BlockFace.NORTH), TargetSnapshotFactory.externalBlockCandidate(
+			OVERWORLD, "provider:test", "minecraft:chest", "opaque-locator", true, BlockFace.NORTH).blockHitFace());
 	}
 
 	@Test
-	void capturedPingContextCarriesABlockFaceOnlyForAnOrdinaryBlockTarget() {
+	void capturedPingContextCarriesABlockFaceForOrdinaryAndExternalBlocksOnly() {
 		InteractionToken token = new InteractionToken(9);
 		ResolvedTarget resolvedBlock = new ResolvedTarget(
 			new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone"),
@@ -274,6 +277,11 @@ class TargetSnapshotTest {
 			token, resolvedBlock, CapturedRay.defaultRay(), Optional.empty(), Optional.of(BlockFace.EAST));
 
 		assertEquals(Optional.of(BlockFace.EAST), context.blockHitFace());
+		ResolvedTarget resolvedExternal = new ResolvedTarget(
+			Target.ExternalBlockTarget.candidate(OVERWORLD, "provider:test", "minecraft:chest", "opaque-locator", true),
+			TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow());
+		assertEquals(Optional.of(BlockFace.EAST), new CapturedPingContext(token, resolvedExternal,
+			CapturedRay.defaultRay(), Optional.empty(), Optional.of(BlockFace.EAST)).blockHitFace());
 		assertTrue(new CapturedPingContext(new InteractionToken(10), resolvedBlock).blockHitFace().isEmpty());
 		assertTrue(new CapturedPingContext(
 			new InteractionToken(11), resolvedBlock, CapturedRay.defaultRay()).blockHitFace().isEmpty());

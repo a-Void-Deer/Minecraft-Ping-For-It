@@ -3,10 +3,12 @@ package nx.pingwheel.common.network;
 import io.netty.buffer.Unpooled;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.TargetKind;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -89,5 +91,107 @@ class InventoryStrictDecodeTest {
 			buf.writeByte(0x81); for (int i = 0; i < 8; i++) buf.writeByte(0x80); buf.writeByte(2);
 			assertThrows(IllegalArgumentException.class, () -> StrictPacketCodec.readVarLong(buf));
 		} finally { buf.release(); }
+	}
+
+	private static FriendlyByteBuf externalOpenPrefix() {
+		var buf = new FriendlyByteBuf(Unpooled.buffer());
+		MarkerPacketCodec.writeEnum(buf, InventoryC2SPacket.Kind.OPEN);
+		buf.writeVarInt(InventoryC2SPacket.VERSION);
+		buf.writeLong(1L); buf.writeLong(100L); buf.writeLong(1L); buf.writeLong(1L);
+		MarkerPacketCodec.writeEnum(buf, TargetKind.BLOCK);
+		buf.writeUtf("minecraft:overworld", 256);
+		buf.writeVarInt(MarkerPacketCodec.BLOCK_TARGET_EXTERNAL_TAG);
+		return buf;
+	}
+	private static void writeCandidateBody(FriendlyByteBuf buf, String provider, String stable, String registry, String locator, int blockEntity) {
+		buf.writeUtf(provider, 256);
+		buf.writeUtf(stable, 256);
+		buf.writeUtf(registry, 256);
+		buf.writeUtf(locator, MarkerPacketCodec.MAX_EXTERNAL_PROVIDER_LOCATOR_LENGTH);
+		buf.writeByte(blockEntity);
+	}
+
+	@Test void openAcceptsOnlyNativeBlockOrUncommittedExternalCandidate() {
+		var candidate = Target.ExternalBlockTarget.candidate("minecraft:overworld", "provider:test", "minecraft:chest", "opaque:locator", true);
+		var valid = frame(InventoryC2SPacket.open(1, 100, 1, 1, candidate, BlockFace.UP));
+		try {
+			InventoryC2SPacket decoded = InventoryC2SPacket.readSafe(valid);
+			assertFalse(decoded.isCorrupt());
+			var external = assertInstanceOf(Target.ExternalBlockTarget.class, decoded.target());
+			assertEquals("provider:test", external.providerId());
+			assertEquals("minecraft:chest", external.expectedBlockRegistryId());
+			assertEquals("opaque:locator", external.providerLocator());
+			assertTrue(external.hasBlockEntity());
+			assertTrue(external.isCandidate());
+			assertEquals(BlockFace.UP, decoded.face());
+		} finally { valid.release(); }
+
+		List<Target> rejectedTargets = List.of(
+			Target.ExternalBlockTarget.committed("minecraft:overworld", "provider:test", "stable-1", "minecraft:chest", "opaque:locator", true),
+			new Target.EntityTarget("minecraft:overworld", UUID.randomUUID()),
+			new Target.LocationTarget("minecraft:overworld", 1, 2, 3));
+		for (Target rejected : rejectedTargets) {
+			var malformed = frame(InventoryC2SPacket.open(1, 100, 1, 1, rejected, BlockFace.UP));
+			try { assertTrue(InventoryC2SPacket.readSafe(malformed).isCorrupt(), rejected.kind().name()); }
+			finally { malformed.release(); }
+		}
+	}
+
+	@Test void openExternalCandidateRejectsOverlongCommittedBooleanNonCanonicalAndTrailing() {
+		var overlongProvider = externalOpenPrefix();
+		try {
+			overlongProvider.writeUtf("p".repeat(257), 1024);
+			overlongProvider.writeUtf("", 256);
+			overlongProvider.writeUtf("minecraft:chest", 256);
+			overlongProvider.writeUtf("locator", MarkerPacketCodec.MAX_EXTERNAL_PROVIDER_LOCATOR_LENGTH);
+			overlongProvider.writeByte(0);
+			MarkerPacketCodec.writeEnum(overlongProvider, BlockFace.UP);
+			assertTrue(InventoryC2SPacket.readSafe(overlongProvider).isCorrupt());
+		} finally { overlongProvider.release(); }
+
+		var committed = externalOpenPrefix();
+		try {
+			writeCandidateBody(committed, "provider:test", "stable-1", "minecraft:chest", "locator", 0);
+			MarkerPacketCodec.writeEnum(committed, BlockFace.UP);
+			assertTrue(InventoryC2SPacket.readSafe(committed).isCorrupt());
+		} finally { committed.release(); }
+
+		var invalidBoolean = externalOpenPrefix();
+		try {
+			writeCandidateBody(invalidBoolean, "provider:test", "", "minecraft:chest", "locator", 2);
+			MarkerPacketCodec.writeEnum(invalidBoolean, BlockFace.UP);
+			assertTrue(InventoryC2SPacket.readSafe(invalidBoolean).isCorrupt());
+		} finally { invalidBoolean.release(); }
+
+		var overFrame = externalOpenPrefix();
+		try {
+			writeCandidateBody(overFrame, "provider:test", "", "minecraft:chest", "l".repeat(InventoryC2SPacket.MAX_FRAME_BYTES), 0);
+			MarkerPacketCodec.writeEnum(overFrame, BlockFace.UP);
+			assertTrue(InventoryC2SPacket.readSafe(overFrame).isCorrupt());
+		} finally { overFrame.release(); }
+
+		var unknownVariant = externalOpenPrefix();
+		try {
+			unknownVariant.writeVarInt(2);
+			assertTrue(InventoryC2SPacket.readSafe(unknownVariant).isCorrupt());
+		} finally { unknownVariant.release(); }
+
+		var nonCanonicalVariant = new FriendlyByteBuf(Unpooled.buffer());
+		try {
+			MarkerPacketCodec.writeEnum(nonCanonicalVariant, InventoryC2SPacket.Kind.OPEN);
+			nonCanonicalVariant.writeVarInt(InventoryC2SPacket.VERSION);
+			nonCanonicalVariant.writeLong(1L); nonCanonicalVariant.writeLong(100L); nonCanonicalVariant.writeLong(1L); nonCanonicalVariant.writeLong(1L);
+			MarkerPacketCodec.writeEnum(nonCanonicalVariant, TargetKind.BLOCK);
+			nonCanonicalVariant.writeUtf("minecraft:overworld", 256);
+			nonCanonicalVariant.writeByte(0x81); nonCanonicalVariant.writeByte(0x00);
+			assertTrue(InventoryC2SPacket.readSafe(nonCanonicalVariant).isCorrupt());
+		} finally { nonCanonicalVariant.release(); }
+
+		var trailing = frame(InventoryC2SPacket.open(1, 100, 1, 1,
+			Target.ExternalBlockTarget.candidate("minecraft:overworld", "provider:test", "minecraft:chest", "locator", false), BlockFace.DOWN));
+		try {
+			trailing.writeByte(0);
+			assertTrue(InventoryC2SPacket.readSafe(trailing).isCorrupt());
+		} finally { trailing.release(); }
 	}
 }

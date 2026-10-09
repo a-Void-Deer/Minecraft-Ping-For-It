@@ -77,7 +77,7 @@ class InventoryMinecraftSourcesTest {
 	}
 	static SourceAccess.Handle open(World world, InventorySourceInput input) {
 		var access = new InventorySourceAccess(input, i -> Optional.of(world.source(i))); var scope = new SourceAccess.ReadScope(input.viewKey(), java.util.Set.of("pingforit:inventory.items"));
-		var target = input.target(); var resolved = (SourceAccess.ResolveResult.Available) access.resolve(new PresentationAdapter.DetachedTarget(target.dimensionId(), "block", target.blockRegistryId(), target.x(), target.y(), target.z(), ""), scope, grant(0));
+		var target = input.ordinaryTarget().orElseThrow(); var resolved = (SourceAccess.ResolveResult.Available) access.resolve(new PresentationAdapter.DetachedTarget(target.dimensionId(), "block", target.blockRegistryId(), target.x(), target.y(), target.z(), ""), scope, grant(0));
 		return ((SourceAccess.OpenResult.Started) access.open(resolved.descriptor(), scope, grant(0))).handle();
 	}
 	@Test void productionSourceWrapperRejectsSameAliasAndCountTopologyChangeBeforeContinuingCursorAndFreshObservationRecovers() {
@@ -234,7 +234,7 @@ class InventoryMinecraftSourcesTest {
 			assertEquals(resolutions, world.resolutions.get(), "terminal publication must retain old source evidence rather than resolve a fresh single");
 			backend.tick(10, settings); assertTrue(host.sent.subList(start, host.sent.size()).stream().allMatch(p -> p.entries().isEmpty()));
 			assertEquals(2, world.saves()); assertEquals(0, world.reads(), "validity does not save NBT or read Container items");
-			assertEquals(world.hit.getX(), world.input.target().x()); assertEquals(BlockFace.NORTH, world.input.face());
+			assertEquals(world.hit.getX(), world.input.ordinaryTarget().orElseThrow().x()); assertEquals(BlockFace.NORTH, world.input.face());
 		}
 		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 	}

@@ -5,6 +5,8 @@ import java.util.concurrent.atomic.AtomicLongArray;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import nx.pingwheel.common.domain.Target;
+
 /**
  * Low-frequency inventory snapshot-capture diagnostics. One bounded line per
  * reason and interval carries the target, the frozen face and a fixed reason
@@ -57,8 +59,15 @@ final class InventoryCaptureDiagnostics {
 		if (!LAST_LOGGED.compareAndSet(index, last, now)) return;
 		try {
 			var target = input.target();
-			logger().warn("inventory snapshot {} at {} {} {} face={} ({})", reason.token,
-				target.dimensionId(), target.x() + "," + target.y() + "," + target.z(), target.blockRegistryId(), input.face(), detail);
+			if (target instanceof Target.ExternalBlockTarget external) {
+				// External coordinates are placeholders; the provider identity is the diagnostic context.
+				logger().warn("inventory snapshot {} at {} provider={} registry={} face={} ({})", reason.token,
+					external.dimensionId(), external.providerId(), external.expectedBlockRegistryId(), input.face(), detail);
+			} else {
+				var block = (Target.BlockTarget) target;
+				logger().warn("inventory snapshot {} at {} {} {} face={} ({})", reason.token,
+					block.dimensionId(), block.x() + "," + block.y() + "," + block.z(), block.blockRegistryId(), input.face(), detail);
+			}
 		} catch (RuntimeException | LinkageError ignored) { /* diagnostics never affect capture */ }
 	}
 

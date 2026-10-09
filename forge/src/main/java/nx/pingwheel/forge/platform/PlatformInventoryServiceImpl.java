@@ -3,9 +3,9 @@ package nx.pingwheel.forge.platform;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
-
-import org.jetbrains.annotations.Nullable;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -31,35 +31,74 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 
 	@Override
 	public Optional<Access> find(ServerLevel level, BlockPos pos, Direction side) {
+		return find(level, pos, side, ignored -> true);
+	}
+
+	@Override
+	public Optional<Access> find(ServerLevel level, BlockPos pos, Direction side, Predicate<BlockPos> memberGate) {
 		Objects.requireNonNull(level, "level");
+		return find(new MinecraftWorld(level), pos, side, memberGate);
+	}
+
+	/** Synchronous native-lookup port; the same gated path is used in production and tests. */
+	interface World {
+		boolean loaded(BlockPos pos);
+		BlockEntity blockEntity(BlockPos pos);
+		Optional<IItemHandler> handler(BlockEntity entity, Direction side);
+	}
+	private record MinecraftWorld(ServerLevel level) implements World {
+		@Override public boolean loaded(BlockPos pos) { return level.isLoaded(pos); }
+		@Override public BlockEntity blockEntity(BlockPos pos) { return level.getBlockEntity(pos); }
+		@Override public Optional<IItemHandler> handler(BlockEntity entity, Direction side) {
+			return entity.getCapability(ForgeCapabilities.ITEM_HANDLER, side).resolve();
+		}
+	}
+	static Optional<Access> find(World world, BlockPos pos, Direction side, Predicate<BlockPos> memberGate) {
+		Objects.requireNonNull(world, "world");
 		Objects.requireNonNull(pos, "pos");
 		Objects.requireNonNull(side, "side");
-		if (!level.isLoaded(pos)) return Optional.empty();
-		BlockEntity blockEntity = level.getBlockEntity(pos);
+		Objects.requireNonNull(memberGate, "memberGate");
+		if (!memberGate.test(pos) || !world.loaded(pos) || !memberGate.test(pos)) return Optional.empty();
+		BlockEntity blockEntity = world.blockEntity(pos);
+		if (!memberGate.test(pos)) return Optional.empty();
 		if (blockEntity == null) return Optional.empty();
 		if (blockEntity instanceof RandomizableContainer randomizable && randomizable.getLootTable() != null) {
 			return Optional.empty();
 		}
 		try {
-			Optional<IItemHandler> handler =
-				blockEntity.getCapability(ForgeCapabilities.ITEM_HANDLER, side).resolve();
-			return handler.map(HandlerAccess::new);
+			if (!memberGate.test(pos)) return Optional.empty();
+			Optional<IItemHandler> handler = world.handler(blockEntity, side);
+			if (!memberGate.test(pos)) return Optional.empty();
+			BlockPos position = pos.immutable();
+			return handler.map(found -> new HandlerAccess(found, () -> memberGate.test(position)));
 		} catch (RuntimeException | LinkageError failure) {
 			return Optional.empty();
 		}
 	}
 
-	private static final class HandlerAccess implements Access {
+	static final class HandlerAccess implements Access {
 
 		private final IItemHandler handler;
+		private final BooleanSupplier memberGate;
 
 		HandlerAccess(IItemHandler handler) {
-			this.handler = Objects.requireNonNull(handler, "handler");
+			this(handler, () -> true);
+		}
+		HandlerAccess(IItemHandler handler, BooleanSupplier memberGate) {
+			this.handler = Objects.requireNonNull(handler, "handler"); this.memberGate = Objects.requireNonNull(memberGate);
+		}
+		private void requireMember() { if (!memberGate.getAsBoolean()) throw new IllegalStateException("inventory handler outside the read scope"); }
+		@Override public Access guardedBy(BooleanSupplier gate) { return new HandlerAccess(handler, () -> memberGate.getAsBoolean() && gate.getAsBoolean()); }
+		@Override public boolean valid() {
+			try { requireMember(); return true; }
+			catch (RuntimeException | LinkageError unavailable) { return false; }
 		}
 
 		@Override
 		public int slots() {
+			requireMember();
 			int slots = handler.getSlots();
+			requireMember();
 			if (slots < 0) throw new IllegalStateException("provider reported a negative slot count");
 			return slots;
 		}
@@ -77,7 +116,9 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		@Override
 		public Entry read(int slot) {
 			Objects.checkIndex(slot, slots());
+			requireMember();
 			ItemStack stack = handler.getStackInSlot(slot);
+			requireMember();
 			if (stack == null || stack.isEmpty()) return Entry.empty();
 			int count = stack.getCount();
 			if (count < 0) throw new IllegalStateException("provider reported a negative item count");
@@ -95,6 +136,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 				Entry entry = read(slot);
 				if (!entry.isEmpty()) consumer.accept(entry);
 			}
+			requireMember();
 			return count <= limit;
 		}
 	}

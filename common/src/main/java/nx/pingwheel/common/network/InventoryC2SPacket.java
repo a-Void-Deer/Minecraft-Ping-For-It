@@ -4,6 +4,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.TargetKind;
 import nx.pingwheel.common.domain.BlockFace;
 import org.jetbrains.annotations.NotNull;
 
@@ -13,29 +14,33 @@ import java.util.Optional;
 import static nx.pingwheel.common.Global.C2S_NAMESPACE;
 
 /**
- * Versioned inventory preview and tracking requests. {@code HELLO} is the
+ * Version-three inventory preview and tracking requests. {@code HELLO} is the
  * epoch-zero handshake; every other kind runs under the negotiated nonzero
  * epoch and carries a non-negative request id. {@code OPEN} binds that request
- * to one bounded server target for preview without exposing a player UUID,
- * {@code CLOSE} releases the preview request, {@code RESYNC} repairs tracking
- * for an optional marker id, and {@code SELECT} turns one inventory entry key
- * into a bounded query whose authoritative target is derived server-side from
- * the request. No trusted item count or player identity is part of this family.
+ * to one bounded server target for preview without exposing a player UUID: a
+ * native block target or an uncommitted external provider candidate carrying
+ * its provider locator and block-entity classification, never a committed
+ * external target, entity, or location. {@code CLOSE} releases the preview
+ * request, {@code RESYNC} repairs tracking for an optional marker id, and
+ * {@code SELECT} turns one inventory entry key into a bounded query whose
+ * authoritative target is derived server-side from the request. No trusted
+ * item count or player identity is part of this family.
  *
- * <p>All three text fields use the shared 256-cap UTF id encoding, so a request
- * frame is bounded by construction; a wrong protocol, an unknown enum name, a
- * negative request id, or trailing bytes is rejected by decode and falls back
- * to the corrupt no-arg instance through {@link #readSafe}.
+ * <p>The {@code SELECT} text fields use the shared 256-cap UTF id encoding, so
+ * a request frame is bounded by construction; a wrong protocol, an unknown
+ * enum name, a negative request id, an overlong target field, an invalid
+ * boolean, a non-canonical number, or trailing bytes is rejected by decode and
+ * falls back to the corrupt no-arg instance through {@link #readSafe}.
  */
 public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long requestId, Target target,
 	MarkerId markerId, String entryKey, String itemId, String pingType, long presentationEpoch, long view,
 	BlockFace face, long commitId, long baselineId, long stateRevision) implements IPacket {
 	public enum Kind { HELLO, OPEN, CLOSE, RESYNC, SELECT }
 
-	public static final int VERSION = 2;
+	public static final int VERSION = 3;
 	public static final int MAX_ID_BYTES = MarkerPacketCodec.MAX_ID_LENGTH;
 	public static final int MAX_FRAME_BYTES = 4096;
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "inventory-v2");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "inventory-v3");
 	public static final Type<InventoryC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public InventoryC2SPacket {
@@ -45,7 +50,7 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 	}
 
 	public InventoryC2SPacket() { this(null, 0, 0, 0, null, null, null, null, null); }
-	/** Kept for constructing corrupt/legacy-shaped fixtures; runtime OPEN always requires a face. */
+	/** Kept for constructing corrupt/legacy-shaped fixtures; runtime OPEN always requires a face and an openable target. */
 	public InventoryC2SPacket(Kind kind, int protocol, long epoch, long requestId, Target target,
 		MarkerId markerId, String entryKey, String itemId, String pingType) {
 		this(kind, protocol, epoch, requestId, target, markerId, entryKey, itemId, pingType, 0, 0, null, 0, 0, 0);
@@ -64,7 +69,7 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 	public static InventoryC2SPacket open(long epoch, long requestId, Target target) {
 		return new InventoryC2SPacket(Kind.OPEN, VERSION, epoch, requestId, target, null, null, null, null);
 	}
-	public static InventoryC2SPacket open(long epoch, long presentationEpoch, long view, long requestId, Target.BlockTarget target, BlockFace face) {
+	public static InventoryC2SPacket open(long epoch, long presentationEpoch, long view, long requestId, Target target, BlockFace face) {
 		return new InventoryC2SPacket(Kind.OPEN, VERSION, epoch, requestId, target, null, null, null, null,
 			presentationEpoch, view, face, 0, 0, 0);
 	}
@@ -139,7 +144,7 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 		String pingType = null;
 		switch (kind) {
 			case HELLO -> {}
-			case OPEN -> { requestId = readRequestId(buf); target = readBlockTarget(buf); face = StrictPacketCodec.readEnum(buf, BlockFace.class); }
+			case OPEN -> { requestId = readRequestId(buf); target = readOpenTarget(buf); face = StrictPacketCodec.readEnum(buf, BlockFace.class); }
 			case CLOSE -> requestId = readRequestId(buf);
 			case RESYNC -> { requestId = readRequestId(buf); markerId = StrictPacketCodec.readBoolean(buf) ? new MarkerId(buf.readLong()) : null; }
 			case SELECT -> {
@@ -165,13 +170,39 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 		}
 		return value;
 	}
-	private static Target.BlockTarget readBlockTarget(FriendlyByteBuf buf) {
-		if (StrictPacketCodec.readEnum(buf, nx.pingwheel.common.domain.TargetKind.class) != nx.pingwheel.common.domain.TargetKind.BLOCK)
-			throw new IllegalArgumentException("inventory requires an ordinary block");
+	/**
+	 * Strict version-three {@code OPEN} target grammar: one native block or one
+	 * uncommitted external provider candidate with bounded provider, expected
+	 * registry, opaque locator, and strict classification. Entity, location,
+	 * committed external, unknown variant, overlong, and non-canonical fields
+	 * are rejected instead of being reinterpreted through the permissive
+	 * marker target codec.
+	 */
+	private static Target readOpenTarget(FriendlyByteBuf buf) {
+		if (StrictPacketCodec.readEnum(buf, TargetKind.class) != TargetKind.BLOCK)
+			throw new IllegalArgumentException("inventory requires a block target");
 		String dimension = StrictPacketCodec.readUtf(buf, MAX_ID_BYTES);
-		if (StrictPacketCodec.readVarInt(buf) != MarkerPacketCodec.BLOCK_TARGET_STANDARD_TAG)
-			throw new IllegalArgumentException("inventory requires an ordinary block");
-		return new Target.BlockTarget(dimension, buf.readInt(), buf.readInt(), buf.readInt(), StrictPacketCodec.readUtf(buf, MAX_ID_BYTES));
+		int variant = StrictPacketCodec.readVarInt(buf);
+		if (variant == MarkerPacketCodec.BLOCK_TARGET_STANDARD_TAG) {
+			return new Target.BlockTarget(dimension, buf.readInt(), buf.readInt(), buf.readInt(), StrictPacketCodec.readUtf(buf, MAX_ID_BYTES));
+		}
+		if (variant == MarkerPacketCodec.BLOCK_TARGET_EXTERNAL_TAG) {
+			String providerId = StrictPacketCodec.readUtf(buf, MAX_ID_BYTES);
+			String stableTargetId = StrictPacketCodec.readUtf(buf, MAX_ID_BYTES);
+			if (!stableTargetId.isEmpty())
+				throw new IllegalArgumentException("inventory external target must be an uncommitted candidate");
+			String expectedBlockRegistryId = StrictPacketCodec.readUtf(buf, MAX_ID_BYTES);
+			String providerLocator = StrictPacketCodec.readUtf(buf, MarkerPacketCodec.MAX_EXTERNAL_PROVIDER_LOCATOR_LENGTH);
+			boolean hasBlockEntity = StrictPacketCodec.readBoolean(buf);
+			return Target.ExternalBlockTarget.candidate(dimension, providerId, expectedBlockRegistryId, providerLocator, hasBlockEntity);
+		}
+		throw new IllegalArgumentException("Unknown inventory block target variant");
+	}
+
+	/** A version-three OPEN target is one native block or one uncommitted external candidate. */
+	private static boolean openTarget(Target target) {
+		return target instanceof Target.BlockTarget
+			|| (target instanceof Target.ExternalBlockTarget external && external.isCandidate());
 	}
 
 	private static void validateBoundedText(String value, String name) {
@@ -196,7 +227,7 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 			return true;
 		}
 		return switch (kind) {
-			case OPEN -> !(target instanceof Target.BlockTarget) || face == null || markerId != null || entryKey != null || itemId != null || pingType != null || commitId != 0 || baselineId != 0 || stateRevision != 0;
+			case OPEN -> !openTarget(target) || face == null || markerId != null || entryKey != null || itemId != null || pingType != null || commitId != 0 || baselineId != 0 || stateRevision != 0;
 			case CLOSE -> target != null || markerId != null || entryKey != null || itemId != null || pingType != null || face != null || commitId != 0 || baselineId != 0 || stateRevision != 0;
 			case RESYNC -> target != null || entryKey != null || itemId != null || pingType != null || face != null || commitId != 0 || baselineId != 0 || stateRevision != 0;
 			case SELECT -> target != null || markerId != null || entryKey == null || entryKey.isBlank()

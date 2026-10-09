@@ -57,6 +57,20 @@ sourceSets.main.resources.srcDir "src/generated/resources"
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     implementation("net.sf.jopt-simple:jopt-simple:5.0.4") { version { strictly "5.0.4" } }
+
+    // Headless tests exercise the native sided inventory wrappers.
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+}
+
+// The native-wrapper seam is headless, not a Forge loader launch. Forge-patched
+// Minecraft bootstrap requires a LoadingModList; use the existing vanilla
+// artifact first while keeping the real Forge handler API on the classpath.
+evaluationDependsOn(":common")
+def headlessMinecraft = project(":common").tasks.named("createMinecraftArtifacts", net.neoforged.nfrtgradle.CreateMinecraftArtifacts).flatMap { it.compiledArtifact }
+def headlessMinecraftResources = project(":common").tasks.named("createMinecraftArtifacts", net.neoforged.nfrtgradle.CreateMinecraftArtifacts).flatMap { it.resourcesArtifact }
+test {
+    useJUnitPlatform()
+    classpath = files(headlessMinecraft, headlessMinecraftResources) + classpath
 }
 
 sourceSets.each {

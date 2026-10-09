@@ -12,7 +12,7 @@ import java.util.function.Function;
 
 import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.marker.TargetKey;
-import nx.pingwheel.common.presentation.PresentationAdapter;
+import nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
@@ -37,6 +37,9 @@ public final class InventoryRuntime implements AutoCloseable {
 		private final RetainedMemoryLedger.Ticket memory;
 		private Round round;
 		private Round completedRound;
+		// A canonical source alias shares data, not the original input's lease or physical-binding authority.
+		private InventorySourceAccess.InventoryHandle bindingEvidence;
+		private RetainedMemoryLedger.Ticket bindingMemory;
 		private Observation invalidObservation;
 		private Observation pendingObservation;
 		private int cursor;
@@ -60,6 +63,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		public void restart() {
 			if (round != null) rounds.remove(round.key, round); // new observation evidence, not source identity
 			releaseScanning(this); invalidObservation = null; pendingObservation = null; cursor = 0; observationFloor = tick; firstRound = 0;
+			if (completedRound == null) releaseBindingEvidence(this);
 		}
 		/** Releases this consumer's invalid data/evidence without invalidating unrelated physical rounds. */
 		public void discardObservation() {
@@ -185,7 +189,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (consumer.closed || consumer.invalidObservation != null) return Optional.of(false);
 		Round completed = consumer.completedRound, scanning = consumer.round;
 		if (completed == null && scanning == null) return probe(consumer.input);
-		int calls = completed != null && scanning != null && completed != scanning ? 2 : 1;
+		int calls = (completed != null && scanning != null && completed != scanning ? 2 : 1) + (consumer.bindingEvidence == null ? 0 : 1);
 		var workspace = memory.tryReserve(ROUND_MEMORY);
 		if (workspace.isEmpty()) return Optional.empty();
 		try (var reserved = workspace.get()) {
@@ -195,6 +199,10 @@ public final class InventoryRuntime implements AutoCloseable {
 			int used = 0;
 			try (var grant = admission.get()) {
 				try {
+					if (consumer.bindingEvidence != null) {
+						used++;
+						if (!bindingEvidenceValid(consumer)) { consumer.discardObservation(); return Optional.of(false); }
+					}
 					for (Round round : completed == null ? List.of(scanning) : scanning == null || completed == scanning ? List.of(completed) : List.of(completed, scanning)) {
 						used++; // attempted validity calls remain charged, including exceptions and invalid retirement
 						boolean valid;
@@ -222,9 +230,12 @@ public final class InventoryRuntime implements AutoCloseable {
 		Round handoff = consumer.completedRound == null ? null : consumer.completedRound.successor;
 		if (consumer.round == null && consumer.completedRound != null && !consumer.completedRound.predecessors.isEmpty())
 			return InventorySourceAccess.Preparation.DEFERRED; // finish the physical handoff before another replacement forks
-		if (consumer.round == null && handoff != null && consumer.input.equals(handoff.input)) return prepareHandoff(consumer, handoff);
+		var bindingCheck = checkBindingEvidence(consumer);
+		if (bindingCheck != InventorySourceAccess.Preparation.READY) return bindingCheck;
+		if (consumer.round == null && handoff != null && consumer.input.sameBinding(handoff.input)) return prepareHandoff(consumer, handoff);
 		if (consumer.round == null) {
-			for (Consumer peer : consumers) if (handoff == null && peer != consumer && peer.round != null && peer.input.equals(consumer.input)
+			for (Consumer peer : consumers) if (handoff == null && peer != consumer && peer.round != null && peer.input.sameBinding(consumer.input)
+				&& (!(consumer.input.target() instanceof nx.pingwheel.common.domain.Target.ExternalBlockTarget) || consumer.input.sameBinding(peer.round.input))
 				&& shareable(consumer, peer.round)) {
 				join(consumer, peer.round);
 				break;
@@ -243,10 +254,8 @@ public final class InventoryRuntime implements AutoCloseable {
 			SourceAccess.Handle openedHandle = null;
 			try {
 				var access = new InventorySourceAccess(consumer.input, resolver);
-				var target = consumer.input.target();
 				var scope = new SourceAccess.ReadScope(consumer.input.viewKey(), Set.of("pingforit:inventory.items"));
-				var resolved = access.resolve(new PresentationAdapter.DetachedTarget(target.dimensionId(), "block", target.blockRegistryId(),
-					target.x(), target.y(), target.z(), ""), scope, physical);
+				var resolved = access.resolve(MinecraftBlockReadSources.detached(consumer.input.target()), scope, physical);
 				if (!(resolved instanceof SourceAccess.ResolveResult.Available available)) {
 					if (resolved == SourceAccess.ResolveResult.Unresolved.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
 					consumer.pendingObservation = unavailable(scope.viewKey());
@@ -264,7 +273,12 @@ public final class InventoryRuntime implements AutoCloseable {
 					retire(consumer.completedRound, unavailable(scope.viewKey()));
 					return InventorySourceAccess.Preparation.UNAVAILABLE;
 				}
-				if (handoff != null) return prepareHandoff(consumer, handoff);
+				if (handoff != null) {
+					if (retainBindingEvidence(consumer, handoff, (InventorySourceAccess.InventoryHandle) openedHandle, retained.get())) {
+						ownsReservation = false; openedHandle = null;
+					}
+					return prepareHandoff(consumer, handoff);
+				}
 				Round round = rounds.get(available.descriptor().key());
 				// A newly selected Ping never inherits a completed preview count.
 				if (round != null && !shareable(consumer, round)) round = null;
@@ -283,7 +297,12 @@ public final class InventoryRuntime implements AutoCloseable {
 					rounds.put(round.key, round);
 					ownsReservation = false; openedHandle = null;
 				}
+				else if (retainBindingEvidence(consumer, round, (InventorySourceAccess.InventoryHandle) openedHandle, retained.get())) {
+					ownsReservation = false; openedHandle = null;
+				}
 				join(consumer, round);
+				var admittedBinding = checkBindingEvidence(consumer);
+				if (admittedBinding != InventorySourceAccess.Preparation.READY) return admittedBinding;
 			} finally {
 				try { if (openedHandle != null) openedHandle.close(); }
 				finally { if (ownsReservation) retained.get().close(); }
@@ -302,7 +321,38 @@ public final class InventoryRuntime implements AutoCloseable {
 			return outcome;
 		}
 	}
+	/** Keep the separately resolved alias input's evidence under the already admitted workspace ticket. */
+	private boolean retainBindingEvidence(Consumer consumer, Round round, InventorySourceAccess.InventoryHandle handle,
+		RetainedMemoryLedger.Ticket ticket) {
+		if (!(consumer.input.target() instanceof nx.pingwheel.common.domain.Target.ExternalBlockTarget)
+			|| consumer.bindingEvidence != null || consumer.input.sameBinding(round.input)) return false;
+		ticket.commit(ROUND_MEMORY);
+		consumer.bindingEvidence = handle; consumer.bindingMemory = ticket;
+		return true;
+	}
+	private boolean bindingEvidenceValid(Consumer consumer) {
+		try { return consumer.bindingEvidence == null || consumer.bindingEvidence.evidenceValid(); }
+		catch (RuntimeException | LinkageError unavailable) { return false; }
+	}
+	/** Cache consumption checks its own original binding, not only the peer whose physical sweep was shared. */
+	private InventorySourceAccess.Preparation checkBindingEvidence(Consumer consumer) {
+		if (consumer.bindingEvidence == null) return InventorySourceAccess.Preparation.READY;
+		var workspace = memory.tryReserve(ROUND_MEMORY);
+		if (workspace.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
+		try (var reserved = workspace.get()) {
+			var admission = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L,
+				InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+			if (admission.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
+			try (var grant = admission.get()) {
+				grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+				if (!bindingEvidenceValid(consumer)) { consumer.discardObservation(); return InventorySourceAccess.Preparation.UNAVAILABLE; }
+				return InventorySourceAccess.Preparation.READY;
+			}
+		}
+	}
 	private InventorySourceAccess.Preparation prepareHandoff(Consumer consumer, Round handoff) {
+		var bindingCheck = checkBindingEvidence(consumer);
+		if (bindingCheck != InventorySourceAccess.Preparation.READY) return bindingCheck;
 		// A cached successor may be consumed after its original scanner's tick. Validate its
 		// own retained evidence, not just the slow peer's still-published predecessor.
 		var workspace = memory.tryReserve(ROUND_MEMORY);
@@ -564,7 +614,18 @@ public final class InventoryRuntime implements AutoCloseable {
 			if (fatal == null) fatal = failure;
 			else if (failure != fatal) fatal.addSuppressed(failure);
 		}
+		try { releaseBindingEvidence(consumer); }
+		catch (Error failure) {
+			if (fatal == null) fatal = failure;
+			else if (failure != fatal) fatal.addSuppressed(failure);
+		}
 		if (fatal != null) throw fatal;
+	}
+	private void releaseBindingEvidence(Consumer consumer) {
+		var handle = consumer.bindingEvidence; consumer.bindingEvidence = null;
+		var ticket = consumer.bindingMemory; consumer.bindingMemory = null;
+		try { if (handle != null) handle.close(); }
+		finally { if (ticket != null) ticket.close(); }
 	}
 	private void closeRound(Round round) {
 		if (round.closed) return;
@@ -585,11 +646,37 @@ public final class InventoryRuntime implements AutoCloseable {
 	/** Retire physical state, not a marker or a quota subject. Recovery requires a fresh restart. */
 	public void retireInvalid(InventorySourceInput input) {
 		var invalidRounds = new java.util.HashSet<Round>();
-		for (Consumer consumer : consumers) if (consumer.input.equals(input)) {
-			if (consumer.round != null) invalidRounds.add(consumer.round);
-			if (consumer.completedRound != null) invalidRounds.add(consumer.completedRound);
+		var invalidAliases = new ArrayList<Consumer>();
+		boolean external = input.target() instanceof nx.pingwheel.common.domain.Target.ExternalBlockTarget;
+		for (Consumer consumer : consumers) {
+			// The origin may no longer have a consumer, but aliases can still retain its evidence.
+			if (external) {
+				if (consumer.round != null && consumer.round.input.sameBinding(input)) invalidRounds.add(consumer.round);
+				if (consumer.completedRound != null && consumer.completedRound.input.sameBinding(input)) invalidRounds.add(consumer.completedRound);
+				if (consumer.input.sameBinding(input) && (consumer.round != null || consumer.completedRound != null || consumer.bindingEvidence != null))
+					invalidAliases.add(consumer);
+			} else if (consumer.input.sameBinding(input)) {
+				if (consumer.round != null) invalidRounds.add(consumer.round);
+				if (consumer.completedRound != null) invalidRounds.add(consumer.completedRound);
+			}
 		}
-		for (Round round : invalidRounds) retire(round, unavailable(input.viewKey()));
+		Error fatal = null;
+		for (Round round : invalidRounds) {
+			try { retire(round, unavailable(input.viewKey())); }
+			catch (Error failure) {
+				if (fatal == null) fatal = failure;
+				else if (failure != fatal) fatal.addSuppressed(failure);
+			}
+		}
+		// A failed input-only alias probe invalidates that binding, not a still-readable peer's sweep.
+		for (Consumer consumer : invalidAliases) if (!consumer.invalidated()) {
+			try { consumer.discardObservation(); }
+			catch (Error failure) {
+				if (fatal == null) fatal = failure;
+				else if (failure != fatal) fatal.addSuppressed(failure);
+			}
+		}
+		if (fatal != null) throw fatal;
 	}
 	private void retire(Round round, Observation invalid) {
 		if (round.closed) return;

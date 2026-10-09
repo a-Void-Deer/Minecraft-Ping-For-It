@@ -35,6 +35,8 @@ public final class SableClientProvider {
 
 	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard(PROVIDER_ID);
 	private static volatile SableClientCompanionAccess access;
+	private static volatile SableClientCompanionAccess contentAccess;
+	private static volatile boolean contentUnavailable;
 	private static volatile SableDiagnostics diagnostics = SableDiagnostics.global();
 	private static final SablePresentationLogGate PRESENTATION_FAILURES =
 		new SablePresentationLogGate();
@@ -328,6 +330,47 @@ public final class SableClientProvider {
 			LINK_GUARD.disableSilently();
 			return Optional.empty();
 		}
+	}
+
+	/** Independently guarded Content source lookup; never calls the render-shape route. */
+	public static Optional<nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource> resolvePreviewReadSource(
+		ClientLevel level, Target.ExternalBlockTarget target
+	) {
+		if (!ModContext.HasSable || contentUnavailable || !currentContentLevel(level) || target == null
+			|| !PROVIDER_ID.equals(target.providerId())
+			|| !target.dimensionId().equals(level.dimension().location().toString())) return Optional.empty();
+		try {
+			SableClientCompanionAccess current = contentAccess;
+			if (current == null) {
+				synchronized (SableClientProvider.class) {
+					current = contentAccess;
+					if (current == null) {
+						current = SableClientCompanionAccess.create(diagnostics);
+						if (!current.hasInternalAccess()) {
+							contentUnavailable = true;
+							return Optional.empty();
+						}
+						contentAccess = current;
+					}
+				}
+			}
+			return current.resolvePreviewReadSource(level, target);
+		} catch (ReflectiveOperationException | LinkageError unavailable) {
+			contentUnavailable = true;
+			logPresentationException("content-read-source", unavailable, "target", target);
+			return Optional.empty();
+		} catch (RuntimeException unavailable) {
+			logPresentationException("content-read-source", unavailable, "target", target);
+			return Optional.empty();
+		}
+	}
+
+	static boolean currentContentLevel(ClientLevel level) {
+		if (level == null || contentUnavailable || !ModContext.HasSable) return false;
+		try {
+			net.minecraft.client.Minecraft game = net.minecraft.client.Minecraft.getInstance();
+			return game != null && game.level == level && game.isSameThread();
+		} catch (RuntimeException | LinkageError unavailable) { return false; }
 	}
 
 	private static boolean enabled() {

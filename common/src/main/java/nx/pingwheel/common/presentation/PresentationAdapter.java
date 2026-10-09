@@ -21,6 +21,15 @@ public interface PresentationAdapter {
 	PresentationSection collect(DetachedTarget target, java.util.Set<String> demand, CaptureBudget budget);
 
 	/**
+	 * Preview may observe a target through the adapter's safe read-only source.
+	 * The default keeps the committed one-shot collect contract; a
+	 * candidate-aware adapter overrides this without widening {@link #collect}.
+	 */
+	default PresentationSection collectPreview(DetachedTarget target, java.util.Set<String> demand, CaptureBudget budget) {
+		return collect(target, demand, budget);
+	}
+
+	/**
 	 * How this adapter's values reach a client. The legacy framed SECTION route
 	 * only ever samples, masks, publishes and renders {@link DeliveryMode#SECTION}
 	 * adapters; a dedicated adapter owns its own request, collection and

@@ -4,6 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
+import net.minecraft.core.BlockPos;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.preview.PreviewFieldAccess;
@@ -17,12 +18,18 @@ public final class CreateClientPreviewFieldAccess implements PreviewFieldAccess 
 		Map<String, Outcome> result = new LinkedHashMap<>();
 		for (String field : demand) result.put(field, Missing.UNAVAILABLE);
 		if (!CreatePresentationAvailability.available() || demand.isEmpty()) return Map.copyOf(result);
-		if (!(target instanceof Target.BlockTarget block)) {
-			if (!(target instanceof Target.ExternalBlockTarget)) demand.forEach(field -> result.put(field, Missing.NOT_APPLICABLE));
+		if (!(context instanceof MinecraftPreviewFieldAccess.WorldContext world)
+			|| !context.dimensionId().equals(target.dimensionId())) return Map.copyOf(result);
+		if (!(target instanceof Target.BlockTarget) && !(target instanceof Target.ExternalBlockTarget)) {
+			demand.forEach(field -> result.put(field, Missing.NOT_APPLICABLE));
 			return Map.copyOf(result);
 		}
-		if (!(context instanceof MinecraftPreviewFieldAccess.WorldContext world)
-			|| !context.dimensionId().equals(target.dimensionId()) || world.blockState(block) == null) return Map.copyOf(result);
+		// An external candidate is accepted only through a provider-confirmed
+		// source; its live kinetic state and receipt checks below are unchanged.
+		var source = world.blockSource(target);
+		if (source == null || !source.containsMember(new BlockPos(source.block().x(), source.block().y(), source.block().z()))) return Map.copyOf(result);
+		var block = source.block();
+		if (world.blockState(block) == null) return Map.copyOf(result);
 		var raw = world.blockEntity(block);
 		if (!(raw instanceof KineticBlockEntity entity)) {
 			if (raw != null) {

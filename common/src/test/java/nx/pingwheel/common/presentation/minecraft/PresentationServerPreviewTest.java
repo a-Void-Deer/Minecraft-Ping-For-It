@@ -104,10 +104,72 @@ class PresentationServerPreviewTest {
 			assertEquals(PresentationPreviewS2CPacket.Status.REJECTED, MinecraftPresentationPreview.capture(request, access, adapters.get(PresentationBasic.ID),
 				new PresentationAdapter.CaptureBudget(4), () -> verdict, (t, d) -> fail("invalid target/type must not retarget or capture")).status());
 		}
-		var external = Target.ExternalBlockTarget.candidate(TARGET.dimensionId(), "test:provider", "test:block", "opaque", true);
-		var externalRequest = PresentationPreviewC2SPacket.read(23, 1, 3, external, "block", PresentationBasic.ID, Set.of(PresentationBasic.BLOCK_STATE));
-		assertEquals(PresentationPreviewS2CPacket.Status.UNAVAILABLE, MinecraftPresentationPreview.capture(externalRequest, access, adapters.get(PresentationBasic.ID),
-			new PresentationAdapter.CaptureBudget(10), () -> fail("uncommitted external must not resolve/materialize"), (t, d) -> fail("unsafe external capture")).status());
+	}
+	@Test void candidatePreviewValidatesBindingAndActualTypeBeforeSafeSourceCapture() {
+		var adapters = registry(); var session = session(adapters, Set.of(PresentationBasic.BLOCK_STATE));
+		var access = PresentationServer.previewAccess(session, adapters, "block", adapter -> Set.of(PresentationBasic.BLOCK_STATE)).orElseThrow();
+		var adapter = adapters.get(PresentationBasic.ID);
+		var candidate = Target.ExternalBlockTarget.candidate(TARGET.dimensionId(), "test:provider", "test:block", "opaque", false);
+		var request = PresentationPreviewC2SPacket.read(23, 1, 3, candidate, "block", PresentationBasic.ID, Set.of(PresentationBasic.BLOCK_STATE));
+
+		// Identity drift including the opaque locator rejects before any provider source read.
+		var drifted = Target.ExternalBlockTarget.candidate(TARGET.dimensionId(), "test:provider", "test:block", "other", false);
+		assertEquals(PresentationPreviewS2CPacket.Status.REJECTED, MinecraftPresentationPreview.capture(request, access, adapter,
+			new PresentationAdapter.CaptureBudget(10), () -> valid(drifted, TargetMatchContext.blockEntityBlock(false)),
+			(t, d) -> fail("committed Basic must not serve a candidate"), (t, d) -> fail("drifted binding must not capture")).status());
+		// The actual server-resolved target type still governs the preview.
+		assertEquals(PresentationPreviewS2CPacket.Status.REJECTED, MinecraftPresentationPreview.capture(request, access, adapter,
+			new PresentationAdapter.CaptureBudget(10), () -> valid(candidate, TargetMatchContext.blockEntityBlock(true)),
+			(t, d) -> fail("committed Basic must not serve a candidate"), (t, d) -> fail("wrong type must not capture")).status());
+		// An unavailable safe source is unavailable, never approximated or materialized.
+		assertEquals(PresentationPreviewS2CPacket.Status.UNAVAILABLE, MinecraftPresentationPreview.capture(request, access, adapter,
+			new PresentationAdapter.CaptureBudget(10), () -> valid(candidate, TargetMatchContext.blockEntityBlock(false)),
+			(t, d) -> fail("committed Basic must not serve a candidate"), (t, d) -> null).status());
+		// The admitted candidate is observed through the safe capture port only.
+		List<String> events = new ArrayList<>();
+		var capture = MinecraftPresentationPreview.capture(request, access, adapter, new PresentationAdapter.CaptureBudget(3),
+			() -> { events.add("validate"); return valid(candidate, TargetMatchContext.blockEntityBlock(false)); },
+			(t, d) -> fail("committed Basic must not serve a candidate"),
+			(t, d) -> { events.add("candidate"); assertEquals(candidate, t); assertEquals(Set.of(PresentationBasic.BLOCK_STATE), d); return result(d); });
+		assertEquals(List.of("validate", "candidate"), events);
+		assertEquals(PresentationPreviewS2CPacket.Status.RESULT, capture.status());
+		assertFalse(capture.section().fields().containsKey(PresentationBasic.NAME));
+		assertTrue(session.sent.isEmpty()); assertEquals(0, session.revision, "candidate preview never becomes a marker");
+		// Budget admission precedes the safe source read.
+		assertEquals(PresentationPreviewS2CPacket.Status.DEFERRED, MinecraftPresentationPreview.capture(request, access, adapter,
+			new PresentationAdapter.CaptureBudget(1), () -> valid(candidate, TargetMatchContext.blockEntityBlock(false)),
+			(t, d) -> fail("committed Basic must not serve a candidate"), (t, d) -> fail("budget denial must not capture")).status());
+	}
+	@Test void optionalAdapterPreviewUsesCandidateAwareCollectInsteadOfCommittedCollect() {
+		List<String> calls = new ArrayList<>();
+		PresentationAdapter optional = new PresentationAdapter() {
+			public String adapterId() { return "test:optional"; }
+			public String modId() { return "test"; }
+			public int schema() { return 1; }
+			public int minUpdateIntervalTicks() { return 5; }
+			public List<PresentationField> fields() { return List.of(new PresentationField("test:value", PresentationField.Kind.FLAG, true, 0, "value")); }
+			public PresentationSection collect(DetachedTarget target, Set<String> demand, CaptureBudget budget) {
+				calls.add("collect"); return null;
+			}
+			@Override public PresentationSection collectPreview(DetachedTarget target, Set<String> demand, CaptureBudget budget) {
+				calls.add("preview"); return new PresentationSection("test:optional", 1,
+					Map.of("test:value", new PresentationValue.Flag(true)), false);
+			}
+		};
+		var adapters = registry(); adapters.register(optional);
+		var session = new PresentationServer.Session(23, Map.of(PresentationBasic.ID, 1, optional.adapterId(), 1),
+			Map.of(PresentationBasic.ID, PresentationBasic.fields(), optional.adapterId(), optional.fields()));
+		session.ready = true; session.view = 1;
+		session.mask = Map.of("block", Map.of(optional.adapterId(), Set.of("test:value")));
+		var candidate = Target.ExternalBlockTarget.candidate(TARGET.dimensionId(), "test:provider", "test:block", "opaque", false);
+		var request = PresentationPreviewC2SPacket.read(23, 1, 1, candidate, "block", optional.adapterId(), Set.of("test:value"));
+		var access = PresentationServer.previewAccess(session, adapters, "block",
+			adapter -> Set.of("test:value")).orElseThrow();
+
+		assertEquals(PresentationPreviewS2CPacket.Status.RESULT, MinecraftPresentationPreview.capture(request, access, optional,
+			new PresentationAdapter.CaptureBudget(4), () -> valid(candidate, TargetMatchContext.blockEntityBlock(false)),
+			(t, d) -> fail("optional adapters never use the Basic port")).status());
+		assertEquals(List.of("preview"), calls);
 	}
 	private static final class QueueHost implements PresentationPreviewServer.Host {
 		final PresentationRegistry adapters = registry(); final PresentationServer.Session session = session(adapters, Set.of(PresentationBasic.BLOCK_STATE));

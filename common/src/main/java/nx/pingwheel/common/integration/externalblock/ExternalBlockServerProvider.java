@@ -50,6 +50,20 @@ public interface ExternalBlockServerProvider {
 		return new ObservationResult.TemporarilyUnavailable();
 	}
 
+	/** Candidate-only synchronous read. Must never materialize, acquire, or mutate provider state. */
+	default Optional<ResolvedBlockReadSource> resolvePreviewReadSource(
+		ServerLevel level, Target.ExternalBlockTarget candidate
+	) {
+		return Optional.empty();
+	}
+
+	/** Read an existing active stable reference's current physical binding without changing its lease. */
+	default Optional<ResolvedBlockReadSource> resolveCommittedReadSource(
+		ServerLevel level, Target.ExternalBlockTarget committed
+	) {
+		return Optional.empty();
+	}
+
 	/** Resolves a current server-side name for a candidate or committed target. */
 	Optional<ExternalBlockName> resolveName(ServerLevel level, Target.ExternalBlockTarget target);
 

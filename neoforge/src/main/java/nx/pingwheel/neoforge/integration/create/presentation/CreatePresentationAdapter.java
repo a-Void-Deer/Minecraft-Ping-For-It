@@ -44,6 +44,10 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 	public interface Source {
 		/** Return null when the source is temporarily unavailable. */
 		Observation observe(DetachedTarget target, Set<String> demand, CaptureBudget budget);
+		/** Preview may observe an uncommitted candidate through a safe provider source. */
+		default Observation observePreview(DetachedTarget target, Set<String> demand, CaptureBudget budget) {
+			return observe(target, demand, budget);
+		}
 	}
 
 	/** Pure detached values; no block entities, world, handlers or stacks escape. */
@@ -132,6 +136,22 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 	@Override
 	public PresentationSection collect(DetachedTarget target, Set<String> demand,
 		CaptureBudget budget) {
+		return collect(target, demand, budget, false);
+	}
+
+	/**
+	 * Preview only: an external candidate is observed through its
+	 * provider-resolved local position; ordinary {@link #collect} stays
+	 * committed-only.
+	 */
+	@Override
+	public PresentationSection collectPreview(DetachedTarget target, Set<String> demand,
+		CaptureBudget budget) {
+		return collect(target, demand, budget, true);
+	}
+
+	private PresentationSection collect(DetachedTarget target, Set<String> demand,
+		CaptureBudget budget, boolean preview) {
 		Objects.requireNonNull(target, "target");
 		Objects.requireNonNull(demand, "demand");
 		Objects.requireNonNull(budget, "budget");
@@ -143,7 +163,8 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 			return PresentationSection.empty(ADAPTER_ID, SCHEMA);
 		}
 		try {
-			Observation observed = source.observe(target, requested, budget);
+			Observation observed = preview ? source.observePreview(target, requested, budget)
+				: source.observe(target, requested, budget);
 			return observed == null ? null : project(observed, requested);
 		} catch (RuntimeException | LinkageError failure) {
 			// A failed optional source cannot break Basic or another adapter.

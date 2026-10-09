@@ -5,10 +5,18 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.state.BlockState;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.integration.ExternalBlockServerProviders;
+import nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource;
 import nx.pingwheel.common.marker.AuthoritativeTargetValidation;
 import nx.pingwheel.common.marker.MinecraftAuthoritativeTargetValidator;
 import nx.pingwheel.common.name.TargetNameJsonCodec;
@@ -44,34 +52,84 @@ final class MinecraftPresentationPreview implements PresentationPreviewServer.Ho
 				// This placeholder is used only in the verdict, never captured or published.
 				return new MinecraftAuthoritativeTargetValidator(server, config.getPingDistance(), config.isPlayerTrackingEnabled(),
 					(owner, target) -> TargetNameJsonCodec.UNKNOWN, ExternalBlockServerProviders.registry()).validate(player, request.target());
-			}, (target, demand) -> PresentationServer.basic(server, player, target, demand));
+			},
+			(target, demand) -> PresentationServer.basic(server, player, target, demand),
+			(target, demand) -> candidateBasic(target, demand));
+	}
+	/** Candidate-only safe source read; never materializes, acquires or mutates provider state. */
+	private PresentationSection candidateBasic(Target target, Set<String> demand) {
+		if (!(target instanceof Target.ExternalBlockTarget external)) return null;
+		Optional<ResolvedBlockReadSource> resolved = previewReadSource(external);
+		if (resolved.isEmpty()) return null;
+		ResolvedBlockReadSource source = resolved.orElseThrow();
+		Target.BlockTarget physical = source.descriptor().blockTarget();
+		BlockPos position = new BlockPos(physical.x(), physical.y(), physical.z());
+		// The root must still be inside the resolved member scope before any state
+		// read or provider name resolution; membership is provider state, not a
+		// second world read.
+		if (!source.containsMember(position)) return null;
+		BlockState state = null;
+		if (demand.contains(PresentationBasic.BLOCK_STATE)) {
+			if (source.level().isOutsideBuildHeight(position) || !source.level().isLoaded(position)) return null;
+			state = source.level().getBlockState(position);
+			var id = state == null ? null : BuiltInRegistries.BLOCK.getKey(state.getBlock());
+			if (state == null || state.isAir() || id == null || !physical.blockRegistryId().equals(id.toString())) return null;
+		}
+		BlockState observed = state;
+		return PresentationServer.basicPreview(source.descriptor(), external, observed, demand,
+			() -> source.level() instanceof ServerLevel level
+				? PresentationServer.availableExternalName(
+					ExternalBlockServerProviders.registry().resolveName(level, external), server.registryAccess())
+				: null);
+	}
+	private Optional<ResolvedBlockReadSource> previewReadSource(Target.ExternalBlockTarget external) {
+		ResourceLocation dimension = ResourceLocation.tryParse(external.dimensionId());
+		if (dimension == null) return Optional.empty();
+		ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
+		if (level == null) return Optional.empty();
+		return MinecraftBlockReadSources.resolvePreviewReadSource(level, external);
 	}
 	/** Production admission/capture seam: ports expose reads, not marker mutation or cached values. */
 	static PresentationPreviewServer.Capture capture(PresentationPreviewC2SPacket request, PresentationPreviewAccess access,
 		PresentationAdapter adapter, PresentationAdapter.CaptureBudget budget, Supplier<AuthoritativeTargetValidation> validate,
 		BiFunction<Target, Set<String>, PresentationSection> basic) {
+		return capture(request, access, adapter, budget, validate, basic, (target, demand) -> null);
+	}
+	static PresentationPreviewServer.Capture capture(PresentationPreviewC2SPacket request, PresentationPreviewAccess access,
+		PresentationAdapter adapter, PresentationAdapter.CaptureBudget budget, Supplier<AuthoritativeTargetValidation> validate,
+		BiFunction<Target, Set<String>, PresentationSection> basic,
+		BiFunction<Target, Set<String>, PresentationSection> candidateBasic) {
 		if (request == null || request.isCorrupt() || request.kind() != PresentationPreviewC2SPacket.Kind.READ
 			|| access == null || adapter == null || adapter.deliveryMode() != PresentationAdapter.DeliveryMode.SECTION
 			|| !adapter.adapterId().equals(request.adapterId()) || access.epoch() != request.epoch() || access.view() != request.view()
 			|| !access.targetTypeId().equals(request.targetTypeId()) || !access.fields(request.adapterId()).containsAll(request.fields())
 			|| access.adapters().get(request.adapterId()).schema() != adapter.schema()) return outcome(PresentationPreviewS2CPacket.Status.REJECTED);
-		if (request.target() instanceof Target.ExternalBlockTarget external && external.isCandidate())
-			return outcome(PresentationPreviewS2CPacket.Status.UNAVAILABLE); // No safe pre-commit provider read/materialization contract.
 		if (!budget.scan()) return outcome(PresentationPreviewS2CPacket.Status.DEFERRED);
 		var verdict = validate.get();
 		if (verdict == null || !verdict.isAccepted()) return outcome(PresentationPreviewS2CPacket.Status.REJECTED);
 		var validated = verdict.validatedTarget().orElseThrow();
-		if (!request.target().equals(validated.normalizedTarget())) return outcome(PresentationPreviewS2CPacket.Status.REJECTED);
+		boolean candidate = request.target() instanceof Target.ExternalBlockTarget external && external.isCandidate();
+		// The validator already performed the nonallocating provider validation and
+		// the anchor range check; a candidate must still match its normalized
+		// identity including the opaque locator before any provider content read.
+		if (candidate) {
+			if (!MinecraftBlockReadSources.sameReadBinding(request.target(), validated.normalizedTarget()))
+				return outcome(PresentationPreviewS2CPacket.Status.REJECTED);
+		} else if (!request.target().equals(validated.normalizedTarget())) {
+			return outcome(PresentationPreviewS2CPacket.Status.REJECTED);
+		}
 		var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()).resolve(validated.normalizedTarget(), validated.matchContext());
 		if (!request.targetTypeId().equals(resolved.targetType().id())) return outcome(PresentationPreviewS2CPacket.Status.REJECTED);
 		Set<String> demand = Set.copyOf(request.fields()); // Queue already intersected fresh and advertised access.
 		PresentationSection section;
 		if (adapter.adapterId().equals(PresentationBasic.ID)) {
 			if (!budget.scan()) return outcome(PresentationPreviewS2CPacket.Status.DEFERRED);
-			section = basic.apply(validated.normalizedTarget(), demand);
+			section = candidate ? candidateBasic.apply(validated.normalizedTarget(), demand)
+				: basic.apply(validated.normalizedTarget(), demand);
 		} else {
 			if (budget.remaining() == 0) return outcome(PresentationPreviewS2CPacket.Status.DEFERRED);
-			section = adapter.collect(PresentationServer.detached(validated.normalizedTarget()), demand, budget);
+			// The preview source resolves candidates itself; the default keeps collect.
+			section = adapter.collectPreview(PresentationServer.detached(validated.normalizedTarget()), demand, budget);
 		}
 		section = PresentationServer.sanitize(adapter, section, demand);
 		return section == null || section.stale() ? outcome(PresentationPreviewS2CPacket.Status.UNAVAILABLE)

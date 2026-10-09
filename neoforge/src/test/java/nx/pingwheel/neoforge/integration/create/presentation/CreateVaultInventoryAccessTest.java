@@ -40,9 +40,11 @@ class CreateVaultInventoryAccessTest {
 	}
 	static class World implements CreateVaultInventoryAccess.World {
 		final Map<BlockPos, Member> members = new HashMap<>(); int probes;
+		final List<BlockPos> loadedPositions = new java.util.ArrayList<>();
+		java.util.function.Consumer<BlockPos> afterLoaded = ignored -> {};
 		@Override public String dimension() { return "minecraft:overworld"; }
 		@Override public Member loaded(BlockPos pos) {
-			probes++; Member member = members.get(pos); if (member == null) throw new IllegalStateException("unloaded"); return member;
+			probes++; loadedPositions.add(pos); Member member = members.get(pos); if (member == null) throw new IllegalStateException("unloaded"); afterLoaded.accept(pos); return member;
 		}
 		static World pair() { var world = new World(); var first = new Member(); first.master = true; world.members.put(BlockPos.ZERO, first); world.members.put(new BlockPos(1, 0, 0), new Member()); return world; }
 	}
@@ -102,5 +104,47 @@ class CreateVaultInventoryAccessTest {
 		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
 		world.members.get(BlockPos.ZERO).width = 2;
 		assertTrue(access.snapshotLayout().isEmpty());
+	}
+	@Test void providerScopeGatesRootControllerAndEveryMemberBeforeWorldOrLocalReads() {
+		World root = World.pair();
+		assertTrue(CreateVaultInventoryAccess.find(root, BlockPos.ZERO, Direction.NORTH, pos -> false).isEmpty());
+		assertEquals(0, root.probes);
+		World controller = World.pair(); BlockPos hit = new BlockPos(1, 0, 0);
+		assertTrue(CreateVaultInventoryAccess.find(controller, hit, Direction.NORTH, pos -> pos.equals(hit)).isEmpty());
+		assertEquals(List.of(hit), controller.loadedPositions, "denied controller is never loaded");
+		assertEquals(0, controller.members.values().stream().mapToInt(member -> member.localCalls).sum());
+		World member = World.pair();
+		assertTrue(CreateVaultInventoryAccess.find(member, BlockPos.ZERO, Direction.NORTH, pos -> pos.equals(BlockPos.ZERO)).isEmpty());
+		assertFalse(member.loadedPositions.contains(hit), "foreign member BE is never loaded");
+		assertEquals(0, member.members.values().stream().mapToInt(part -> part.localCalls).sum(), "all structure gates precede first local content");
+	}
+	@Test void repeatedReadsAndSnapshotLayoutCannotUsePreviouslyAdmittedScopeAfterRevocation() {
+		World world = World.pair(); var allowed = new java.util.HashSet<>(world.members.keySet());
+		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH, allowed::contains).orElseThrow();
+		assertEquals(0, access.read(0).amount()); assertTrue(access.snapshotLayout().isPresent());
+		int localCalls = world.members.values().stream().mapToInt(member -> member.localCalls).sum();
+		allowed.remove(new BlockPos(1, 0, 0)); world.loadedPositions.clear();
+		assertFalse(access.valid()); assertTrue(access.snapshotLayout().isEmpty());
+		assertThrows(IllegalStateException.class, () -> access.read(0));
+		assertThrows(IllegalStateException.class, () -> access.read(1));
+		assertThrows(IllegalStateException.class, () -> access.observe(2));
+		assertFalse(world.loadedPositions.contains(new BlockPos(1, 0, 0)));
+		assertEquals(localCalls, world.members.values().stream().mapToInt(member -> member.localCalls).sum());
+	}
+	@Test void revocationInsideWorldLookupOrLocalAcquisitionIsRecheckedBeforeNextMemberOrHandlerRead() {
+		World world = World.pair(); boolean[] allowed = {true};
+		world.afterLoaded = ignored -> allowed[0] = false;
+		assertTrue(CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH, pos -> allowed[0]).isEmpty());
+		assertEquals(1, world.probes); assertEquals(0, world.members.get(BlockPos.ZERO).localCalls);
+		World local = World.pair(); allowed[0] = true; var slotReads = new java.util.concurrent.atomic.AtomicInteger();
+		local.members.put(BlockPos.ZERO, new Member() {
+			{ master = true; }
+			@Override public IItemHandler local() {
+				allowed[0] = false;
+				return new Handler(1) { @Override public int getSlots() { slotReads.incrementAndGet(); return super.getSlots(); } };
+			}
+		});
+		assertTrue(CreateVaultInventoryAccess.find(local, BlockPos.ZERO, Direction.NORTH, pos -> allowed[0]).isEmpty());
+		assertEquals(0, slotReads.get(), "local handler cannot be read after its member scope is revoked");
 	}
 }

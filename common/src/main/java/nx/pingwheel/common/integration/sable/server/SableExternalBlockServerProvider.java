@@ -31,6 +31,8 @@ import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.integration.IntegrationLinkGuard;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockReferenceIndex;
+import nx.pingwheel.common.integration.externalblock.BlockReadSource;
+import nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.resolve.BlockEntityClassification;
@@ -59,6 +61,9 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	private final IntegrationLinkGuard linkGuard = new IntegrationLinkGuard(PROVIDER_ID);
 	private final SableDiagnostics diagnostics;
 	private final ReflectiveApi api;
+	private MembershipApi membershipApi;
+	private boolean contentUnavailable;
+	private long nextContentFailureLogNanos;
 	private final Map<MinecraftServer, ServerState> servers = new IdentityHashMap<>();
 
 	/** Factory used by the indirect optional bootstrap. */
@@ -640,6 +645,188 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		} catch (LinkageError failure) {
 			linkGuard.disableSilently();
 			return new ObservationResult.TemporarilyUnavailable();
+		}
+	}
+
+	@Override
+	public synchronized Optional<ResolvedBlockReadSource> resolvePreviewReadSource(
+		ServerLevel level, Target.ExternalBlockTarget candidate
+	) {
+		if (!contentUsable(level) || candidate == null || !candidate.isCandidate()
+			|| !PROVIDER_ID.equals(candidate.providerId()) || !dimensionMatches(level, candidate.dimensionId())
+			|| SableExternalBlockLocator.parse(candidate.providerLocator()).isEmpty()
+			|| parseBlockId(candidate.expectedBlockRegistryId()).isEmpty()) return Optional.empty();
+		try {
+			ContentAccess access = contentAccess();
+			var descriptor = resolvePreviewDescriptor(level, level.dimension().location().toString(), candidate, access);
+			return descriptor.map(value -> contentHandle(level, value, access));
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
+			return contentFailure(failure);
+		}
+	}
+
+	@Override
+	public synchronized Optional<ResolvedBlockReadSource> resolveCommittedReadSource(
+		ServerLevel level, Target.ExternalBlockTarget committed
+	) {
+		if (!contentUsable(level) || committed == null || !committed.isCommitted()
+			|| !PROVIDER_ID.equals(committed.providerId()) || !dimensionMatches(level, committed.dimensionId())
+			|| parseBlockId(committed.expectedBlockRegistryId()).isEmpty()) return Optional.empty();
+		Optional<UUID> trackingId = parseUuid(committed.stableTargetId());
+		ServerState state = serverState(level);
+		if (trackingId.isEmpty() || state == null || state.references.references(committed.stableTargetId()) <= 0) {
+			return Optional.empty();
+		}
+		Entry entry = state.entries.get(committed.stableTargetId());
+		if (entry == null) return Optional.empty();
+		try {
+			ContentAccess access = contentAccess();
+			Object point = invoke(api.getTrackingPoint, entry.data(), trackingId.get());
+			if (point == null) return Optional.empty();
+			Optional<BlockReadSource> descriptor = observeStableEntry(committed, state.entries,
+				state.references::references, entry, invoke(api.inSubLevel, point), invoke(api.subLevelId, point),
+				invoke(api.point, point), (id, pos) -> resolveContentDescriptor(level,
+					level.dimension().location().toString(), committed, new SableExternalBlockLocator(id, pos), access));
+			return descriptor == null ? Optional.empty() : descriptor.map(value -> contentHandle(level, value, access));
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
+			return contentFailure(failure);
+		}
+	}
+
+	private boolean contentUsable(ServerLevel level) {
+		return usable() && !contentUnavailable && level != null && level.getServer() != null
+			&& level.getServer().isSameThread();
+	}
+
+	private Optional<ResolvedBlockReadSource> contentFailure(Throwable failure) {
+		// Additive discovery and invocation failures cannot disable established capture/leases/Basic observation.
+		if (membershipApi == null || failure instanceof LinkageError) contentUnavailable = true;
+		long now = System.nanoTime();
+		if (nextContentFailureLogNanos == 0 || now - nextContentFailureLogNanos >= 0) {
+			nextContentFailureLogNanos = now + 5_000_000_000L;
+			diagnostics.serverException("content-read-source", "unavailable", failure, "provider", PROVIDER_ID);
+		}
+		return Optional.empty();
+	}
+
+	private ResolvedBlockReadSource contentHandle(ServerLevel level, BlockReadSource descriptor, ContentAccess access) {
+		UUID id = UUID.fromString(descriptor.subLevelId());
+		return new ResolvedBlockReadSource(level, descriptor, pos -> {
+			try {
+				return !contentUnavailable && contentUsable(level)
+					&& activeContentBinding(level, descriptor)
+					&& contentMember(level, access.subLevel(level, id), id, pos, access);
+			} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+				contentFailure(unavailable);
+				return false;
+			}
+		});
+	}
+
+	private boolean activeContentBinding(ServerLevel level, BlockReadSource descriptor) throws ReflectiveOperationException {
+		if (!(descriptor.target() instanceof Target.ExternalBlockTarget target) || target.isCandidate()) return true;
+		ServerState state = serverState(level);
+		if (state == null) return false;
+		Entry entry = state.entries.get(target.stableTargetId());
+		if (entry == null || state.references.references(target.stableTargetId()) <= 0) return false;
+		Object point = invoke(api.getTrackingPoint, entry.data(), entry.trackingId());
+		if (point == null) return false;
+		Boolean matches = observeStableEntry(target, state.entries, state.references::references, entry,
+			invoke(api.inSubLevel, point), invoke(api.subLevelId, point), invoke(api.point, point),
+			(id, pos) -> id.toString().equals(descriptor.subLevelId())
+				&& pos.equals(new BlockPos(descriptor.blockTarget().x(), descriptor.blockTarget().y(), descriptor.blockTarget().z())));
+		return Boolean.TRUE.equals(matches);
+	}
+
+	/** Production-used, level-free access seam; contains no materialization or reference operations. */
+	interface ContentAccess {
+		Object subLevel(Object parent, UUID id) throws ReflectiveOperationException;
+		boolean current(Object parent, Object subLevel, UUID id) throws ReflectiveOperationException;
+		UUID containing(Object parent, BlockPos position) throws ReflectiveOperationException;
+		boolean loaded(Object parent, BlockPos position);
+		BlockState state(Object parent, BlockPos position);
+		MarkerAnchor anchor(Object subLevel, BlockPos position) throws ReflectiveOperationException;
+	}
+
+	static Optional<BlockReadSource> resolvePreviewDescriptor(Object parent, String dimension,
+		Target.ExternalBlockTarget candidate, ContentAccess access) throws ReflectiveOperationException {
+		if (candidate == null || !candidate.isCandidate()) return Optional.empty();
+		Optional<SableExternalBlockLocator> locator = SableExternalBlockLocator.parse(candidate.providerLocator());
+		return locator.isEmpty() ? Optional.empty()
+			: resolveContentDescriptor(parent, dimension, candidate, locator.orElseThrow(), access);
+	}
+
+	static Optional<BlockReadSource> resolveContentDescriptor(Object parent, String dimension,
+		Target.ExternalBlockTarget original, SableExternalBlockLocator currentLocator, ContentAccess access)
+		throws ReflectiveOperationException {
+		if (parent == null || access == null || original == null || currentLocator == null
+			|| !PROVIDER_ID.equals(original.providerId()) || !original.dimensionId().equals(dimension)) {
+			return Optional.empty();
+		}
+		Optional<ResourceLocation> expectedId = parseBlockId(original.expectedBlockRegistryId());
+		if (expectedId.isEmpty()) return Optional.empty();
+		Object subLevel = access.subLevel(parent, currentLocator.subLevelId());
+		BlockPos pos = currentLocator.blockPos();
+		if (!contentMember(parent, subLevel, currentLocator.subLevelId(), pos, access)) return Optional.empty();
+		// Positive membership must precede every content field/state/BE read, including the root.
+		BlockState state = access.state(parent, pos);
+		ResourceLocation actualId = state == null ? null : BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		if (state == null || state.isAir() || !expectedId.orElseThrow().equals(actualId)) return Optional.empty();
+		MarkerAnchor anchor = access.anchor(subLevel, pos);
+		if (anchor == null) return Optional.empty();
+		return Optional.of(new BlockReadSource(original, PROVIDER_ID, currentLocator.subLevelId().toString(),
+			new Target.BlockTarget(dimension, pos.getX(), pos.getY(), pos.getZ(), actualId.toString()), anchor));
+	}
+
+	static boolean contentMember(Object parent, Object subLevel, UUID id, BlockPos pos, ContentAccess access)
+		throws ReflectiveOperationException {
+		return subLevel != null && pos != null && access.current(parent, subLevel, id)
+			&& id.equals(access.containing(parent, pos)) && access.loaded(parent, pos);
+	}
+
+	private ContentAccess contentAccess() throws ReflectiveOperationException {
+		if (membershipApi == null) membershipApi = MembershipApi.discover();
+		MembershipApi membership = membershipApi;
+		return new ContentAccess() {
+			@Override public Object subLevel(Object parent, UUID id) throws ReflectiveOperationException {
+				Object container = invoke(api.getContainer, null, parent);
+				return container == null ? null : invoke(api.getSubLevel, container, id);
+			}
+			@Override public boolean current(Object parent, Object subLevel, UUID id) throws ReflectiveOperationException {
+				return Boolean.FALSE.equals(invoke(api.isRemoved, subLevel)) && invoke(api.getLevel, subLevel) == parent
+					&& id.equals(invoke(membership.getUniqueId, subLevel));
+			}
+			@Override public UUID containing(Object parent, BlockPos pos) throws ReflectiveOperationException {
+				Object containing = invoke(membership.getContaining, membership.companion, parent,
+					new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5));
+				Object id = containing == null ? null : invoke(membership.getUniqueId, containing);
+				return id instanceof UUID value ? value : null;
+			}
+			@Override public boolean loaded(Object parent, BlockPos pos) {
+				return parent instanceof ServerLevel level && !level.isOutsideBuildHeight(pos) && level.isLoaded(pos);
+			}
+			@Override public BlockState state(Object parent, BlockPos pos) {
+				return ((ServerLevel) parent).getBlockState(pos);
+			}
+			@Override public MarkerAnchor anchor(Object subLevel, BlockPos pos) throws ReflectiveOperationException {
+				Object value = invoke(api.logicalPose, subLevel);
+				if (!(value instanceof Pose3dc pose)) return null;
+				Vector3d center = pose.transformPosition(new Vector3d(pos.getX() + 0.5, pos.getY() + 0.5,
+					pos.getZ() + 0.5), new Vector3d());
+				return finite(center) ? new MarkerAnchor(center.x, center.y, center.z) : null;
+			}
+		};
+	}
+
+	/** Discovered only by new Content reads, independently of the established provider API gate. */
+	private record MembershipApi(Object companion, Method getContaining, Method getUniqueId) {
+		private static MembershipApi discover() throws ReflectiveOperationException {
+			ClassLoader loader = SableExternalBlockServerProvider.class.getClassLoader();
+			Class<?> companion = Class.forName("dev.ryanhcode.sable.companion.SableCompanion", false, loader);
+			Class<?> access = Class.forName("dev.ryanhcode.sable.companion.SubLevelAccess", false, loader);
+			return new MembershipApi(companion.getField("INSTANCE").get(null),
+				ReflectiveApi.required(companion, "getContaining", access, false, Level.class, net.minecraft.core.Position.class),
+				ReflectiveApi.required(access, "getUniqueId", UUID.class, false));
 		}
 	}
 

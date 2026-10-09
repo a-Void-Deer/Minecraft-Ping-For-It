@@ -21,6 +21,7 @@ import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.integration.ExternalBlockServerProviders;
+import nx.pingwheel.common.integration.externalblock.BlockReadSource;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.marker.*;
 import nx.pingwheel.common.name.MinecraftTargetNameResolver;
@@ -840,6 +841,23 @@ public final class PresentationServer {
 			state = available.observation().state();
 		}
 		TargetNameJson name = demand.contains(PresentationBasic.NAME) ? resolveName.get() : null;
+		return assembleExternalBasic(demand, state, name);
+	}
+
+	/**
+	 * Preview-only Basic assembly for an uncommitted external candidate observed
+	 * through its resolved safe read source. The committed observe route above is
+	 * deliberately not reused because it requires an active provider reference.
+	 * The caller supplies the already-admitted physical state and the lazy
+	 * provider name resolution; both remain detached from marker state.
+	 */
+	static PresentationSection basicPreview(BlockReadSource source, Target target, BlockState state,
+		Set<String> demand, Supplier<TargetNameJson> resolveName) {
+		if (source == null || !(target instanceof Target.ExternalBlockTarget external) || !external.isCandidate()
+			|| !(source.target() instanceof Target.ExternalBlockTarget bound)
+			|| !MinecraftBlockReadSources.sameReadBinding(bound, external)) return null;
+		if (demand.contains(PresentationBasic.BLOCK_STATE) && state == null) return null;
+		TargetNameJson name = demand.contains(PresentationBasic.NAME) && resolveName != null ? resolveName.get() : null;
 		return assembleExternalBasic(demand, state, name);
 	}
 

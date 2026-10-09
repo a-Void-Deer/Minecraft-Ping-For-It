@@ -91,7 +91,7 @@ class CreateVaultSourceWrapperTest {
 	static SourceAccess.Handle open(World world, InventorySourceInput input) {
 		var access = new InventorySourceAccess(input, i -> Optional.of(new InventoryMinecraftSources.Source(i, world.view(), () -> true, world::view, entry ->
 			new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "plain"), entry.amount(), "Stone", null, false))));
-		var target = input.target(); var scope = new SourceAccess.ReadScope(input.viewKey(), Set.of("pingforit:inventory.items"));
+		var target = input.ordinaryTarget().orElseThrow(); var scope = new SourceAccess.ReadScope(input.viewKey(), Set.of("pingforit:inventory.items"));
 		var descriptor = ((SourceAccess.ResolveResult.Available) access.resolve(new PresentationAdapter.DetachedTarget(target.dimensionId(), "block", target.blockRegistryId(), target.x(), target.y(), target.z(), ""), scope, grant(0))).descriptor();
 		return ((SourceAccess.OpenResult.Started) access.open(descriptor, scope, grant(0))).handle();
 	}

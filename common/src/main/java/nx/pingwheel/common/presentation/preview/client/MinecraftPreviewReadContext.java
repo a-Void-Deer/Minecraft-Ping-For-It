@@ -13,7 +13,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource;
+import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 import nx.pingwheel.common.mixin.ClientLevelPreviewAccessor;
+import nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources;
 
 /** Tick-local view of the current client world. Consumers retain detached observations only. */
 public record MinecraftPreviewReadContext(ClientLevel level, long tick) implements MinecraftPreviewFieldAccess.WorldContext {
@@ -58,6 +61,25 @@ public record MinecraftPreviewReadContext(ClientLevel level, long tick) implemen
 		if (blockState(target) == null) return null;
 		BlockEntity entity = level.getBlockEntity(new BlockPos(target.x(), target.y(), target.z()));
 		return entity == null || entity.isRemoved() || entity.getLevel() != level ? null : entity;
+	}
+	/**
+	 * Ordinary blocks keep the direct received-state route. A Sable external
+	 * target resolves its provider source and is admitted only when the actual
+	 * physical state still passes the same received-chunk, prediction and
+	 * expected-registry checks.
+	 */
+	@Override public MinecraftPreviewFieldAccess.SafeBlockSource blockSource(Target target) {
+		if (!current()) return null;
+		if (target instanceof Target.BlockTarget block)
+			return new MinecraftPreviewFieldAccess.SafeBlockSource(block, null);
+		if (!(target instanceof Target.ExternalBlockTarget external)) return null;
+		ResolvedBlockReadSource source;
+		try { source = SableClientProvider.resolvePreviewReadSource(level, external).orElse(null); }
+		catch (RuntimeException | LinkageError unavailable) { source = null; }
+		if (source == null || !MinecraftBlockReadSources.sameReadBinding(source.descriptor().target(), external)) return null;
+		Target.BlockTarget physical = source.descriptor().blockTarget();
+		if (!physical.dimensionId().equals(dimensionId()) || blockState(physical) == null) return null;
+		return new MinecraftPreviewFieldAccess.SafeBlockSource(physical, source::containsMember);
 	}
 	@Override public String encodeName(Component name) { return Component.Serializer.toJson(name, level.registryAccess()); }
 }

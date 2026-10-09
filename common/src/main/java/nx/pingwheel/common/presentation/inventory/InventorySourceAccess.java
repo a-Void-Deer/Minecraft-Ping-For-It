@@ -169,9 +169,7 @@ public final class InventorySourceAccess implements SourceAccess {
 		return new OpenResult.Started(new CaptureHandle(input, descriptor, scope, source));
 	}
 	private boolean matches(PresentationAdapter.DetachedTarget target) {
-		var block = input.target();
-		return target != null && block.dimensionId().equals(target.dimension()) && block.blockRegistryId().equals(target.registryId())
-			&& block.x() == target.x() && block.y() == target.y() && block.z() == target.z();
+		return input.matchesDetached(target);
 	}
 
 	private static final class CaptureHandle implements InventoryHandle {

@@ -25,7 +25,8 @@ public record Candidate(int candidateId, ResolvedTarget resolvedTarget, WorldVec
 			throw new IllegalArgumentException("invalid candidate identity or distance");
 		}
 		if (entityLocalGeometryMetadata.isPresent() && !(resolvedTarget.target() instanceof Target.EntityTarget)
-			|| blockHitFace.isPresent() && !(resolvedTarget.target() instanceof Target.BlockTarget)) {
+			|| blockHitFace.isPresent() && !(resolvedTarget.target() instanceof Target.BlockTarget)
+				&& !(resolvedTarget.target() instanceof Target.ExternalBlockTarget)) {
 			throw new IllegalArgumentException("candidate metadata belongs to a different target kind");
 		}
 	}

@@ -119,6 +119,54 @@ public final class ExternalBlockServerProviderRegistry {
 		}
 	}
 
+	/** Candidate Content access is additive and never falls back to materialization/observation. */
+	public java.util.Optional<ResolvedBlockReadSource> resolvePreviewReadSource(
+		ServerLevel level, Target.ExternalBlockTarget candidate
+	) {
+		return resolveReadSource(level, candidate, true);
+	}
+
+	public java.util.Optional<ResolvedBlockReadSource> resolveCommittedReadSource(
+		ServerLevel level, Target.ExternalBlockTarget committed
+	) {
+		return resolveReadSource(level, committed, false);
+	}
+
+	private java.util.Optional<ResolvedBlockReadSource> resolveReadSource(
+		ServerLevel level, Target.ExternalBlockTarget target, boolean preview
+	) {
+		if (level == null || target == null || target.isCandidate() != preview
+			|| level.getServer() == null || !level.getServer().isSameThread()
+			|| !target.dimensionId().equals(level.dimension().location().toString())) {
+			return java.util.Optional.empty();
+		}
+		ExternalBlockServerProvider provider = find(target.providerId());
+		try {
+			var result = invokeReadSource(provider, level, target, preview);
+			if (result == null || result.isEmpty()) return java.util.Optional.empty();
+			var source = result.orElseThrow();
+			var descriptor = source.descriptor();
+			var physical = descriptor.blockTarget();
+			if (source.level() != level || !BlockReadSource.sameTargetBinding(target, descriptor.target())
+				|| !target.providerId().equals(descriptor.providerId())
+				|| !source.containsMember(new BlockPos(physical.x(), physical.y(), physical.z()))) {
+				return java.util.Optional.empty();
+			}
+			return result;
+		} catch (RuntimeException | LinkageError unavailable) { return java.util.Optional.empty(); }
+	}
+
+	static java.util.Optional<ResolvedBlockReadSource> invokeReadSource(ExternalBlockServerProvider provider,
+		ServerLevel level, Target.ExternalBlockTarget target, boolean preview) {
+		if (provider == null || target == null || target.isCandidate() != preview) return java.util.Optional.empty();
+		try {
+			if (!target.providerId().equals(provider.providerId())) return java.util.Optional.empty();
+			var result = preview ? provider.resolvePreviewReadSource(level, target)
+				: provider.resolveCommittedReadSource(level, target);
+			return result == null ? java.util.Optional.empty() : result;
+		} catch (RuntimeException | LinkageError unavailable) { return java.util.Optional.empty(); }
+	}
+
 	/** Resolves and validates one current committed external block observation. */
 	public ExternalBlockServerProvider.ObservationResult observeBlock(
 		MinecraftServer server, ServerLevel level, Target.ExternalBlockTarget committed

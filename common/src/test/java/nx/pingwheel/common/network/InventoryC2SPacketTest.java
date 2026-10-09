@@ -13,6 +13,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -37,9 +38,9 @@ class InventoryC2SPacketTest {
 	}
 
 	@Test
-	void routeAndKindsAreVersionedInventoryV2() {
-		assertEquals(2, InventoryC2SPacket.VERSION);
-		assertEquals("pingforit-c2s:inventory-v2", InventoryC2SPacket.PACKET_ID.toString());
+	void routeAndKindsAreVersionedInventoryV3() {
+		assertEquals(3, InventoryC2SPacket.VERSION);
+		assertEquals("pingforit-c2s:inventory-v3", InventoryC2SPacket.PACKET_ID.toString());
 		assertEquals(List.of(InventoryC2SPacket.Kind.HELLO, InventoryC2SPacket.Kind.OPEN,
 			InventoryC2SPacket.Kind.CLOSE, InventoryC2SPacket.Kind.RESYNC,
 			InventoryC2SPacket.Kind.SELECT), Arrays.asList(InventoryC2SPacket.Kind.values()));
@@ -73,6 +74,28 @@ class InventoryC2SPacketTest {
 		assertEquals(request, decoded.requestId());
 		assertEquals(target, decoded.target());
 		assertNull(decoded.markerId());
+	}
+
+	@Test
+	void openExternalCandidateRoundTripsExactLocatorClassificationAndFace() {
+		long epoch = (1L << 53) + 1;
+		long request = (1L << 53) + 3;
+		Target.ExternalBlockTarget candidate = Target.ExternalBlockTarget.candidate(
+			"minecraft:overworld", "provider:test", "minecraft:chest", "opaque locator:7", true);
+
+		InventoryC2SPacket decoded = roundTrip(InventoryC2SPacket.open(epoch, 100, 3, request, candidate, BlockFace.UP));
+		assertEquals(InventoryC2SPacket.Kind.OPEN, decoded.kind());
+		assertEquals(epoch, decoded.epoch());
+		assertEquals(request, decoded.requestId());
+
+		Target.ExternalBlockTarget written = assertInstanceOf(Target.ExternalBlockTarget.class, decoded.target());
+		assertEquals("minecraft:overworld", written.dimensionId());
+		assertEquals("provider:test", written.providerId());
+		assertEquals("minecraft:chest", written.expectedBlockRegistryId());
+		assertEquals("opaque locator:7", written.providerLocator(), "the opaque locator is wire identity");
+		assertTrue(written.hasBlockEntity(), "the provider classification is carried");
+		assertTrue(written.isCandidate(), "OPEN carries an uncommitted candidate");
+		assertEquals(BlockFace.UP, decoded.face());
 	}
 
 	@Test
@@ -158,6 +181,21 @@ class InventoryC2SPacketTest {
 	}
 
 	@Test
+	void oldInventoryV2FramesAreRejectedOnTheV3Route() {
+		FriendlyByteBuf buf = buffer();
+		try {
+			MarkerPacketCodec.writeEnum(buf, InventoryC2SPacket.Kind.HELLO);
+			buf.writeVarInt(2);
+			buf.writeLong(0L);
+			buf.writeLong(0L);
+			buf.writeLong(0L);
+			assertTrue(InventoryC2SPacket.readSafe(buf).isCorrupt());
+		} finally {
+			buf.release();
+		}
+	}
+
+	@Test
 	void decodeRejectsNegativeRequestAndOversizedText() {
 		FriendlyByteBuf buf = buffer();
 		try {
@@ -188,8 +226,14 @@ class InventoryC2SPacketTest {
 	@Test
 	void missingOrUnexpectedFieldsAreCorrupt() {
 		Target target = new Target.LocationTarget("minecraft:overworld", 0.0, 0.0, 0.0);
+		Target.ExternalBlockTarget committedExternal = Target.ExternalBlockTarget.committed(
+			"minecraft:overworld", "provider:test", "stable-1", "minecraft:chest", "opaque", false);
+		Target.ExternalBlockTarget candidate = Target.ExternalBlockTarget.candidate(
+			"minecraft:overworld", "provider:test", "minecraft:chest", "opaque", false);
 
 		assertTrue(InventoryC2SPacket.open(1L, 2L, null).isCorrupt());
+		assertTrue(InventoryC2SPacket.open(1L, 100, 3, 2L, committedExternal, BlockFace.UP).isCorrupt());
+		assertFalse(InventoryC2SPacket.open(1L, 100, 3, 2L, candidate, BlockFace.UP).isCorrupt());
 		assertTrue(InventoryC2SPacket.close(1L, -2L).isCorrupt());
 		assertTrue(InventoryC2SPacket.select(1L, 2L, null, "minecraft:stone", "attention").isCorrupt());
 		assertTrue(InventoryC2SPacket.select(1L, 2L, "key", null, "attention").isCorrupt());

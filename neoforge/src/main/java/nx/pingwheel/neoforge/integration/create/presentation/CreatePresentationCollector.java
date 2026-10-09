@@ -1,6 +1,9 @@
 package nx.pingwheel.neoforge.integration.create.presentation;
 
 import java.util.Objects;
+import java.util.function.Predicate;
+
+import static nx.pingwheel.neoforge.integration.create.presentation.CreateSamplingWork.member;
 
 import com.simibubi.create.content.fluids.tank.CreativeFluidTankBlockEntity;
 import com.simibubi.create.content.fluids.tank.FluidTankBlock;
@@ -64,13 +67,28 @@ public final class CreatePresentationCollector {
 	public static Sample capture(ServerLevel level, BlockPos pos, boolean kinetic,
 		boolean items, boolean fluids, CreateSamplingLimits limits) {
 		return capture(level, pos, kinetic, kinetic, kinetic, kinetic, kinetic,
-			items, fluids, limits);
+			items, fluids, limits, null);
+	}
+
+	/** External reads admit only positions inside the resolved source's member scope. */
+	public static Sample capture(ServerLevel level, BlockPos pos, boolean kinetic,
+		boolean items, boolean fluids, CreateSamplingLimits limits, Predicate<BlockPos> memberGate) {
+		return capture(level, pos, kinetic, kinetic, kinetic, kinetic, kinetic,
+			items, fluids, limits, memberGate);
 	}
 
 	/** Individual dynamic fields are read only when their IDs were demanded. */
 	public static Sample capture(ServerLevel level, BlockPos pos, boolean speed,
 		boolean hasNetwork, boolean overStressed, boolean stress, boolean capacity,
 		boolean items, boolean fluids, CreateSamplingLimits limits) {
+		return capture(level, pos, speed, hasNetwork, overStressed, stress, capacity,
+			items, fluids, limits, null);
+	}
+
+	/** Every member gate is checked before that position's block entity or capability read. */
+	public static Sample capture(ServerLevel level, BlockPos pos, boolean speed,
+		boolean hasNetwork, boolean overStressed, boolean stress, boolean capacity,
+		boolean items, boolean fluids, CreateSamplingLimits limits, Predicate<BlockPos> memberGate) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(pos, "pos");
 		Objects.requireNonNull(limits, "limits");
@@ -81,20 +99,20 @@ public final class CreatePresentationCollector {
 			return unavailableSample(0);
 		}
 		return captureLoaded(level, pos, speed, hasNetwork, overStressed,
-			stress, capacity, items, fluids, limits);
+			stress, capacity, items, fluids, limits, memberGate);
 	}
 
 	private static Sample captureLoaded(ServerLevel level, BlockPos pos, boolean speed,
 		boolean hasNetwork, boolean overStressed, boolean stress, boolean capacity,
-		boolean items, boolean fluids, CreateSamplingLimits limits) {
+		boolean items, boolean fluids, CreateSamplingLimits limits, Predicate<BlockPos> memberGate) {
 		if (!speed && !hasNetwork && !overStressed && !stress && !capacity
 			&& !items && !fluids) {
 			return unavailableSample(0);
 		}
-		if (!level.hasChunkAt(pos)) {
+		if (!level.hasChunkAt(pos) || !member(memberGate, pos)) {
 			return unavailableSample(0);
 		}
-		WorkBudget work = new WorkBudget(limits.maxWork());
+		CreateSamplingWork work = new CreateSamplingWork(limits.maxWork());
 		if (!work.take(1)) {
 			return unavailableSample(0);
 		}
@@ -107,9 +125,9 @@ public final class CreatePresentationCollector {
 				? readKinetic(source, speed, hasNetwork, overStressed, stress, capacity)
 				: Kinetic.unavailable();
 			BoundedCreateSummary.Summary i = items && source instanceof ItemVaultBlockEntity vault
-				? readVault(level, vault, limits, work) : BoundedCreateSummary.Summary.unavailable();
+				? readVault(level, vault, limits, work, memberGate) : BoundedCreateSummary.Summary.unavailable();
 			BoundedCreateSummary.Summary f = fluids && source instanceof FluidTankBlockEntity tank
-				? readTank(level, tank, limits, work) : BoundedCreateSummary.Summary.unavailable();
+				? readTank(level, tank, limits, work, memberGate) : BoundedCreateSummary.Summary.unavailable();
 			return new Sample(k, i, f, work.used(), true);
 		} catch (RuntimeException | LinkageError failure) {
 			return unavailableSample(work.used());
@@ -182,13 +200,14 @@ public final class CreatePresentationCollector {
 	}
 
 	private static BoundedCreateSummary.Summary readVault(ServerLevel level,
-		ItemVaultBlockEntity source, CreateSamplingLimits limits, WorkBudget work) {
+		ItemVaultBlockEntity source, CreateSamplingLimits limits, CreateSamplingWork work,
+		Predicate<BlockPos> memberGate) {
 		try {
 			if (!work.take(1)) {
 				return BoundedCreateSummary.Summary.incomplete();
 			}
 			BlockPos controllerPos = source.getController();
-			if (controllerPos == null || !level.hasChunkAt(controllerPos)) {
+			if (controllerPos == null || !level.hasChunkAt(controllerPos) || !member(memberGate, controllerPos)) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
 			BlockEntity candidate = level.getBlockEntity(controllerPos);
@@ -208,15 +227,13 @@ public final class CreatePresentationCollector {
 			if (!contains(controllerPos, source.getBlockPos(), x, y, z)) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
-			if (!limits.permitsShape(x, y, z, work.remaining)) {
+			if (!limits.permitsShape(x, y, z, work.remaining())) {
 				return BoundedCreateSummary.Summary.incomplete();
 			}
-			int shapeWork = verifyVault(level, controllerPos, x, y, z, limits, work.remaining);
-			if (shapeWork < 0) {
+			if (!verifyVault(level, controllerPos, x, y, z, limits, work, memberGate)) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
-			work.take(shapeWork);
-			if (work.remaining == 0) {
+			if (work.remaining() == 0) {
 				return BoundedCreateSummary.Summary.incomplete();
 			}
 			if (!work.take(1)) {
@@ -228,11 +245,11 @@ public final class CreatePresentationCollector {
 			if (handler == null) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
-		if (work.remaining == 0) {
+		if (work.remaining() == 0) {
 			return BoundedCreateSummary.Summary.incomplete();
 		}
 		BoundedCreateSummary summary = new BoundedCreateSummary(limits.maxSlots(),
-				limits.maxRegistryIds(), work.remaining, limits.maxOutputBytes());
+				limits.maxRegistryIds(), work.remaining(), limits.maxOutputBytes());
 			int slots = handler.getSlots();
 			if (slots < 0) {
 				return BoundedCreateSummary.Summary.unavailable();
@@ -267,7 +284,8 @@ public final class CreatePresentationCollector {
 	}
 
 	private static BoundedCreateSummary.Summary readTank(ServerLevel level,
-		FluidTankBlockEntity source, CreateSamplingLimits limits, WorkBudget work) {
+		FluidTankBlockEntity source, CreateSamplingLimits limits, CreateSamplingWork work,
+		Predicate<BlockPos> memberGate) {
 		try {
 			if (!work.take(1)) {
 				return BoundedCreateSummary.Summary.incomplete();
@@ -278,7 +296,7 @@ public final class CreatePresentationCollector {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
 			BlockPos controllerPos = source.getController();
-			if (controllerPos == null || !level.hasChunkAt(controllerPos)) {
+			if (controllerPos == null || !level.hasChunkAt(controllerPos) || !member(memberGate, controllerPos)) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
 			BlockEntity candidate = level.getBlockEntity(controllerPos);
@@ -292,15 +310,13 @@ public final class CreatePresentationCollector {
 			if (!contains(controllerPos, source.getBlockPos(), width, height, width)) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
-			if (!limits.permitsShape(width, height, width, work.remaining)) {
+			if (!limits.permitsShape(width, height, width, work.remaining())) {
 				return BoundedCreateSummary.Summary.incomplete();
 			}
-			int shapeWork = verifyTank(level, controllerPos, width, height, limits, work.remaining);
-			if (shapeWork < 0) {
+			if (!verifyTank(level, controllerPos, width, height, limits, work, memberGate)) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
-			work.take(shapeWork);
-			if (work.remaining == 0) {
+			if (work.remaining() == 0) {
 				return BoundedCreateSummary.Summary.incomplete();
 			}
 			if (controller.boiler.isActive()) {
@@ -318,11 +334,11 @@ public final class CreatePresentationCollector {
 			if (handler == null) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
-			if (work.remaining == 0) {
+			if (work.remaining() == 0) {
 				return BoundedCreateSummary.Summary.incomplete();
 			}
 			BoundedCreateSummary summary = new BoundedCreateSummary(limits.maxTanks(),
-				limits.maxRegistryIds(), work.remaining, limits.maxOutputBytes());
+				limits.maxRegistryIds(), work.remaining(), limits.maxOutputBytes());
 			int tanks = handler.getTanks();
 			if (tanks < 0) {
 				return BoundedCreateSummary.Summary.unavailable();
@@ -357,54 +373,30 @@ public final class CreatePresentationCollector {
 		}
 	}
 
-	/** Negative means untrusted/incomplete structure; never ask capability then. */
-	private static int verifyVault(ServerLevel level, BlockPos origin,
-		int x, int y, int z, CreateSamplingLimits limits, int remainingWork) {
-		if (!limits.permitsShape(x, y, z, remainingWork)) {
-			return -1;
-		}
-		for (int dx = 0; dx < x; dx++) {
-			for (int dy = 0; dy < y; dy++) {
-				for (int dz = 0; dz < z; dz++) {
-					BlockPos part = origin.offset(dx, dy, dz);
-					if (!level.hasChunkAt(part)) {
-						return -1;
-					}
-					BlockEntity be = level.getBlockEntity(part);
-					if (!(be instanceof ItemVaultBlockEntity vault) || vault.isRemoved()
-						|| !ItemVaultBlock.isVault(level.getBlockState(part))
-						|| !origin.equals(vault.getController())) {
-						return -1;
-					}
-				}
-			}
-		}
-		return x * y * z;
+	/** Untrusted/incomplete structure never reaches a capability; visited members remain paid. */
+	private static boolean verifyVault(ServerLevel level, BlockPos origin,
+		int x, int y, int z, CreateSamplingLimits limits, CreateSamplingWork work,
+		Predicate<BlockPos> memberGate) {
+		return work.verifyShape(origin, x, y, z, limits, memberGate, part -> {
+			if (!level.hasChunkAt(part)) return false;
+			BlockEntity be = level.getBlockEntity(part);
+			return be instanceof ItemVaultBlockEntity vault && !vault.isRemoved()
+				&& ItemVaultBlock.isVault(level.getBlockState(part))
+				&& origin.equals(vault.getController());
+		});
 	}
 
-	private static int verifyTank(ServerLevel level, BlockPos origin,
-		int width, int height, CreateSamplingLimits limits, int remainingWork) {
-		if (!limits.permitsShape(width, height, width, remainingWork)) {
-			return -1;
-		}
-		for (int dx = 0; dx < width; dx++) {
-			for (int dy = 0; dy < height; dy++) {
-				for (int dz = 0; dz < width; dz++) {
-					BlockPos part = origin.offset(dx, dy, dz);
-					if (!level.hasChunkAt(part)) {
-						return -1;
-					}
-					BlockEntity be = level.getBlockEntity(part);
-					if (!(be instanceof FluidTankBlockEntity tank) || tank.isRemoved()
-						|| tank instanceof CreativeFluidTankBlockEntity
-						|| !FluidTankBlock.isTank(level.getBlockState(part))
-						|| !origin.equals(tank.getController())) {
-						return -1;
-					}
-				}
-			}
-		}
-		return width * height * width;
+	private static boolean verifyTank(ServerLevel level, BlockPos origin,
+		int width, int height, CreateSamplingLimits limits, CreateSamplingWork work,
+		Predicate<BlockPos> memberGate) {
+		return work.verifyShape(origin, width, height, width, limits, memberGate, part -> {
+			if (!level.hasChunkAt(part)) return false;
+			BlockEntity be = level.getBlockEntity(part);
+			return be instanceof FluidTankBlockEntity tank && !tank.isRemoved()
+				&& !(tank instanceof CreativeFluidTankBlockEntity)
+				&& FluidTankBlock.isTank(level.getBlockState(part))
+				&& origin.equals(tank.getController());
+		});
 	}
 
 	private static boolean contains(BlockPos origin, BlockPos source, int x, int y, int z) {
@@ -412,27 +404,5 @@ public final class CreatePresentationCollector {
 		long dy = (long) source.getY() - origin.getY();
 		long dz = (long) source.getZ() - origin.getZ();
 		return dx >= 0 && dx < x && dy >= 0 && dy < y && dz >= 0 && dz < z;
-	}
-
-	private static final class WorkBudget {
-		private final int initial;
-		private int remaining;
-
-		private WorkBudget(int remaining) {
-			this.initial = remaining;
-			this.remaining = remaining;
-		}
-
-		private int used() {
-			return initial - remaining;
-		}
-
-		private boolean take(int cost) {
-			if (cost < 0 || cost > remaining) {
-				return false;
-			}
-			remaining -= cost;
-			return true;
-		}
 	}
 }

@@ -179,6 +179,26 @@ public final class TargetSnapshotFactory {
 		return externalBlock(dimensionId, providerId, "", expectedBlockRegistryId, providerLocator, hasBlockEntity);
 	}
 
+	/** Builds an external candidate with an observed provider-local native face, if any. */
+	public static TargetSnapshot externalBlockCandidate(
+		String dimensionId, String providerId, String expectedBlockRegistryId, String providerLocator,
+		boolean hasBlockEntity, BlockFace blockHitFace
+	) {
+		return externalBlockCandidate(dimensionId, providerId, expectedBlockRegistryId, providerLocator,
+			hasBlockEntity, java.util.Optional.of(blockHitFace));
+	}
+
+	/** Builds an external candidate with an observed provider-local native face, if any. */
+	public static TargetSnapshot externalBlockCandidate(
+		String dimensionId, String providerId, String expectedBlockRegistryId, String providerLocator,
+		boolean hasBlockEntity, java.util.Optional<BlockFace> blockHitFace
+	) {
+		Target.ExternalBlockTarget target = Target.ExternalBlockTarget.candidate(
+			dimensionId, providerId, expectedBlockRegistryId, providerLocator, hasBlockEntity);
+		return new TargetSnapshot(target, TargetMatchContext.blockEntityBlock(hasBlockEntity),
+			java.util.Optional.empty(), java.util.Optional.empty(), blockHitFace);
+	}
+
 	/** Builds a committed external block snapshot. */
 	public static TargetSnapshot externalBlockCommitted(
 		String dimensionId,

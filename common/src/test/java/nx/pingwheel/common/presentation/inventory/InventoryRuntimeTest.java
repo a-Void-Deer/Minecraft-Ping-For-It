@@ -92,6 +92,23 @@ class InventoryRuntimeTest {
 			assertThrows(NullPointerException.class, () -> new InventorySourceInput(TARGET, owner, null));
 		}
 	}
+	@Test void sameOriginalBlockStillResolvesSeparatelyForDifferentOwnersAndFrozenFaces() {
+		var owner = new UUID(17, 1); var other = new UUID(17, 2); var resolutions = new AtomicInteger();
+		var reads = new AtomicInteger();
+		try (var runtime = new InventoryRuntime(i -> {
+			resolutions.incrementAndGet();
+			return Optional.of(new Source(i, reads, 2));
+		}, 16_000_000)) {
+			runtime.advance(0, InventorySettings.serverDefaults());
+			var first = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			var anotherOwner = runtime.attach(input(other), new InventoryRuntime.PreviewSubject(other)).orElseThrow();
+			var anotherFace = runtime.attach(new InventorySourceInput(TARGET, owner, BlockFace.SOUTH), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			runtime.step(first, 1).orElseThrow(); runtime.step(anotherOwner, 1).orElseThrow(); runtime.step(anotherFace, 1).orElseThrow();
+			assertEquals(3, resolutions.get()); assertEquals(3, reads.get(), "same-binding shortcut must not bypass the owner/face source key");
+			runtime.retireInvalid(input(owner)); assertTrue(first.invalidated());
+			assertFalse(anotherOwner.invalidated()); assertFalse(anotherFace.invalidated());
+		}
+	}
 	@Test void repeatedTrackingPingsSharePhysicalAndTargetQuotaAndFreshSelectSkipsOlderPreviewSweep() {
 		AtomicInteger reads = new AtomicInteger(); UUID owner = new UUID(1, 1); var settings = InventorySettings.serverDefaults();
 		settings.getTracking().setMaxSlotsPerTarget(IntLimit.finite(1));
@@ -267,7 +284,7 @@ class InventoryRuntimeTest {
 		InventorySourceInput emptyInput = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 2, 2, 3, "minecraft:chest"), owner, BlockFace.NORTH);
 		java.util.Map<Integer, Source> sources = new java.util.HashMap<>();
 		try (var runtime = new InventoryRuntime(i -> {
-			int x = i.target().x();
+			int x = i.ordinaryTarget().orElseThrow().x();
 			Source source = new Source(i, reads, x == 1 ? 1 : 0) {
 				@Override public SourceKey key() { return new SourceKey("test", "inventory", "target-" + x, i.viewKey()); }
 				@Override public InventoryDomainCodec.Item read(int slot) { reads.incrementAndGet(); return x == 1 ? item(1) : null; }

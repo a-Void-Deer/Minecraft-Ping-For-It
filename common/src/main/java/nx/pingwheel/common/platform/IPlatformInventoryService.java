@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.ServiceLoader;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import net.minecraft.core.BlockPos;
@@ -44,6 +45,28 @@ public interface IPlatformInventoryService {
 	 * target validation and every permission decision.
 	 */
 	Optional<Access> find(ServerLevel level, BlockPos pos, Direction side);
+
+	/**
+	 * Compatible overload for multi-member sources: {@code memberGate} must be
+	 * consulted for the root and for every additional member position before
+	 * that member's state, block entity, capability or content is read. The
+	 * default single-block path gates before and after resolution and wraps the
+	 * returned access. Native implementations gate between composite provider
+	 * calls, and never widen to an unsided or different-face lookup.
+	 */
+	default Optional<Access> find(ServerLevel level, BlockPos pos, Direction side,
+		java.util.function.Predicate<BlockPos> memberGate) {
+		Objects.requireNonNull(level, "level");
+		Objects.requireNonNull(pos, "pos");
+		Objects.requireNonNull(side, "side");
+		Objects.requireNonNull(memberGate, "memberGate");
+		if (!memberGate.test(pos)) return Optional.empty();
+		// The existing single-position implementation owns its loaded/loot gates.
+		Optional<Access> found = find(level, pos, side);
+		if (!memberGate.test(pos)) return Optional.empty();
+		BlockPos position = pos.immutable();
+		return found.map(access -> access.guardedBy(() -> memberGate.test(position)));
+	}
 
 	/**
 	 * One detached observation of a source entry. {@code exemplar} is a
@@ -90,6 +113,13 @@ public interface IPlatformInventoryService {
 	 * behind it, and every returned stack stay confined to the server thread.
 	 */
 	interface Access {
+		/**
+		 * Synchronous member guard for this operation's reacquired access. Native
+		 * providers override to guard inside composite reads and cursorless iteration.
+		 * The default preserves metadata and indexed reads; cursorless enumeration
+		 * fails closed because a callback after an entry cannot authorize its read.
+		 */
+		default Access guardedBy(BooleanSupplier memberGate) { return new GuardedAccess(this, memberGate); }
 		/** Canonical controller alias, only when established without force-loading. */
 		default Optional<String> alias() { return Optional.empty(); }
 		/**
@@ -155,6 +185,42 @@ public interface IPlatformInventoryService {
 			List<Entry> entries = new ArrayList<>();
 			boolean complete = visit(limit, entries::add);
 			return new Budgeted(entries, complete);
+		}
+	}
+	/** Default indexed decorator; never retained by an external source across operations. */
+	final class GuardedAccess implements Access {
+		private final Access delegate;
+		private final BooleanSupplier memberGate;
+		GuardedAccess(Access delegate, BooleanSupplier memberGate) {
+			this.delegate = Objects.requireNonNull(delegate); this.memberGate = Objects.requireNonNull(memberGate);
+		}
+		private void requireMember() { if (!memberGate.getAsBoolean()) throw new IllegalStateException("inventory access outside the read scope"); }
+		private <T> T checked(java.util.function.Supplier<T> operation) {
+			requireMember(); T value = operation.get(); requireMember(); return value;
+		}
+		@Override public Optional<String> alias() { return checked(delegate::alias); }
+		@Override public Optional<InventorySnapshotLayout> snapshotLayout() { return checked(delegate::snapshotLayout); }
+		@Override public boolean valid() {
+			try { return checked(delegate::valid); }
+			catch (RuntimeException | LinkageError unavailable) { return false; }
+		}
+		@Override public int slots() { return checked(delegate::slots); }
+		@Override public boolean stableCursor() { return checked(delegate::stableCursor); }
+		@Override public OptionalLong version() { return checked(delegate::version); }
+		@Override public Entry read(int slot) { return checked(() -> delegate.read(slot)); }
+		@Override public Budgeted observe(int limit) {
+			if (limit < 0) throw new IllegalArgumentException("negative observation limit");
+			if (!stableCursor()) throw new UnsupportedOperationException("cursorless provider requires internal member gates");
+			Budgeted observed = Access.super.observe(limit); requireMember(); return observed;
+		}
+		@Override public boolean visit(int limit, Consumer<Entry> consumer) {
+			Objects.requireNonNull(consumer); if (limit < 0) throw new IllegalArgumentException("negative visit limit");
+			if (!stableCursor()) throw new UnsupportedOperationException("cursorless provider requires internal member gates");
+			int count = slots();
+			for (int slot = 0; slot < Math.min(count, limit); slot++) {
+				Entry entry = read(slot); if (!entry.isEmpty()) consumer.accept(entry);
+			}
+			requireMember(); return count <= limit;
 		}
 	}
 }

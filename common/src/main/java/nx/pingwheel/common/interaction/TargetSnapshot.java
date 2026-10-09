@@ -21,7 +21,7 @@ import nx.pingwheel.common.domain.TargetMatchContext;
  *
  * <p>Capture-only metadata is meaningful only for its matching captured
  * identity: entity metadata belongs to an entity target and a hit face belongs
- * to an ordinary {@link Target.BlockTarget}. None of it participates in target
+ * to a {@link Target.BlockTarget} or provider-local external block. None of it participates in target
  * identity or marker identity. Inventory protocols carry faces as read context.
  */
 public record TargetSnapshot(
@@ -92,8 +92,9 @@ public record TargetSnapshot(
 			throw new IllegalArgumentException("only an entity target can retain local geometry metadata");
 		}
 
-		if (blockHitFace.isPresent() && !(target instanceof Target.BlockTarget)) {
-			throw new IllegalArgumentException("only an ordinary block target can retain a hit face");
+		if (blockHitFace.isPresent() && !(target instanceof Target.BlockTarget)
+			&& !(target instanceof Target.ExternalBlockTarget)) {
+			throw new IllegalArgumentException("only a block target can retain a hit face");
 		}
 	}
 }

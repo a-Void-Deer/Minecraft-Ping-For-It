@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -23,6 +24,16 @@ public final class CreateVaultInventoryAccess {
 		if (face == null || !CreatePresentationAvailability.available()) return Optional.empty();
 		return find(new MinecraftWorld(level), original, face);
 	}
+	/** Root, controller and every member must pass the gate before its state, relation or local handler is read. */
+	public static Optional<IPlatformInventoryService.Access> find(ServerLevel level, BlockPos original, Direction face,
+		Predicate<BlockPos> memberGate) {
+		if (face == null || memberGate == null || !CreatePresentationAvailability.available()) return Optional.empty();
+		return find(new MinecraftWorld(level), original, face, memberGate);
+	}
+	static Optional<IPlatformInventoryService.Access> find(World world, BlockPos original, Direction face, Predicate<BlockPos> memberGate) {
+		if (face == null || world == null || memberGate == null) return Optional.empty();
+		return find(new GatedWorld(world, memberGate), original, face);
+	}
 	/** Same bounded topology and segmented read path with a detached test port, not a second provider. */
 	interface World {
 		String dimension();
@@ -37,6 +48,42 @@ public final class CreateVaultInventoryAccess {
 		int length() throws ReflectiveOperationException;
 		Direction.Axis axis() throws ReflectiveOperationException;
 		IItemHandler local() throws ReflectiveOperationException;
+	}
+	/** Per-operation scope checks, including reads through an already acquired member or local handler. */
+	private record GatedWorld(World delegate, Predicate<BlockPos> memberGate) implements World {
+		void require(BlockPos pos) {
+			if (pos == null || !memberGate.test(pos)) throw new IllegalStateException("Vault member outside the read scope");
+		}
+		@Override public String dimension() { return delegate.dimension(); }
+		@Override public Member loaded(BlockPos pos) throws ReflectiveOperationException {
+			require(pos);
+			return new GatedMember(this, pos.immutable(), delegate.loaded(pos));
+		}
+	}
+	private record GatedMember(GatedWorld world, BlockPos pos, Member delegate) implements Member {
+		@Override public String blockId() { world.require(pos); return delegate.blockId(); }
+		@Override public String blockEntityId() { world.require(pos); return delegate.blockEntityId(); }
+		@Override public BlockPos controller() throws ReflectiveOperationException { world.require(pos); return delegate.controller(); }
+		@Override public boolean isController() throws ReflectiveOperationException { world.require(pos); return delegate.isController(); }
+		@Override public int width() throws ReflectiveOperationException { world.require(pos); return delegate.width(); }
+		@Override public int length() throws ReflectiveOperationException { world.require(pos); return delegate.length(); }
+		@Override public Direction.Axis axis() throws ReflectiveOperationException { world.require(pos); return delegate.axis(); }
+		@Override public IItemHandler local() throws ReflectiveOperationException {
+			world.require(pos);
+			return new GatedHandler(world, pos, delegate.local());
+		}
+	}
+	private record GatedHandler(GatedWorld world, BlockPos pos, IItemHandler delegate) implements IItemHandler {
+		@Override public int getSlots() { world.require(pos); return delegate.getSlots(); }
+		@Override public net.minecraft.world.item.ItemStack getStackInSlot(int slot) { world.require(pos); return delegate.getStackInSlot(slot); }
+		@Override public int getSlotLimit(int slot) { world.require(pos); return delegate.getSlotLimit(slot); }
+		@Override public boolean isItemValid(int slot, net.minecraft.world.item.ItemStack stack) { world.require(pos); return delegate.isItemValid(slot, stack); }
+		@Override public net.minecraft.world.item.ItemStack insertItem(int slot, net.minecraft.world.item.ItemStack stack, boolean simulate) {
+			throw new UnsupportedOperationException("read-only Vault inventory");
+		}
+		@Override public net.minecraft.world.item.ItemStack extractItem(int slot, int amount, boolean simulate) {
+			throw new UnsupportedOperationException("read-only Vault inventory");
+		}
 	}
 	static Optional<IPlatformInventoryService.Access> find(World world, BlockPos original, Direction face) {
 		if (face == null) return Optional.empty();

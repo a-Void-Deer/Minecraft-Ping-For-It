@@ -4,6 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -31,6 +32,26 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 		BlockState blockState(Target.BlockTarget target);
 		BlockEntity blockEntity(Target.BlockTarget target);
 		String encodeName(Component name);
+		/**
+		 * Safe synchronous block binding. The default keeps the direct ordinary
+		 * route; a client context may additionally resolve an external provider
+		 * source. A non-null gate admits every additional member before its
+		 * content read.
+		 */
+		default SafeBlockSource blockSource(Target target) {
+			return target instanceof Target.BlockTarget block ? new SafeBlockSource(block, null) : null;
+		}
+	}
+	/** Physical block binding plus its member scope; no level or provider object escapes. */
+	public record SafeBlockSource(Target.BlockTarget block, java.util.function.Predicate<BlockPos> memberGate) {
+		public SafeBlockSource {
+			java.util.Objects.requireNonNull(block, "block");
+		}
+		public boolean containsMember(BlockPos position) {
+			if (memberGate == null) return true;
+			try { return memberGate.test(position); }
+			catch (RuntimeException | LinkageError unavailable) { return false; }
+		}
 	}
 	@Override public String adapterId() { return PresentationBasic.ID; }
 	@Override public Map<String, Outcome> observe(Target target, Set<String> demand, ReadContext context) {
@@ -57,22 +78,44 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 			for (String field : demand) if (!PresentationBasic.NAME.equals(field) && !PresentationBasic.BLOCK_STATE.equals(field))
 				result.put(field, Missing.NOT_APPLICABLE);
 			if (!demand.contains(PresentationBasic.NAME) && !demand.contains(PresentationBasic.BLOCK_STATE)) return Map.copyOf(result);
-			BlockState state = world.blockState(block);
+			SafeBlockSource source = world.blockSource(block);
+			if (source == null || !source.containsMember(new BlockPos(source.block().x(), source.block().y(), source.block().z()))) return Map.copyOf(result);
+			BlockState state = world.blockState(source.block());
 			if (state == null || !BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(block.blockRegistryId())) return Map.copyOf(result);
-			if (demand.contains(PresentationBasic.BLOCK_STATE)) {
-				Map<String, PresentationValue> values = new LinkedHashMap<>();
-				state.getValues().forEach((property, value) -> values.put(property.getName(), new PresentationValue.Text(value.toString())));
-				put(result, PresentationBasic.BLOCK_STATE, () -> new PresentationValue.RecordValue(values), context.tick());
-			}
-			// Generic block-entity existence/null name proves neither receipt nor absence of a custom name.
-			if (demand.contains(PresentationBasic.NAME) && !state.hasBlockEntity())
-				put(result, PresentationBasic.NAME, () -> new PresentationValue.Text(world.encodeName(state.getBlock().getName())), context.tick());
+			observeBlockFields(result, demand, state, context.tick(), world::encodeName);
+		} else if (target instanceof Target.ExternalBlockTarget external) {
+			for (String field : demand) if (!PresentationBasic.NAME.equals(field) && !PresentationBasic.BLOCK_STATE.equals(field))
+				result.put(field, Missing.NOT_APPLICABLE);
+			if (!demand.contains(PresentationBasic.NAME) && !demand.contains(PresentationBasic.BLOCK_STATE)) return Map.copyOf(result);
+			SafeBlockSource source = world.blockSource(external);
+			if (source == null || !source.containsMember(new BlockPos(source.block().x(), source.block().y(), source.block().z()))
+				|| !source.block().dimensionId().equals(external.dimensionId())
+				|| !source.block().blockRegistryId().equals(external.expectedBlockRegistryId())) return Map.copyOf(result);
+			BlockState state = world.blockState(source.block());
+			if (state == null) return Map.copyOf(result);
+			observeBlockFields(result, demand, state, context.tick(), world::encodeName);
 		} else if (target instanceof Target.LocationTarget) {
 			for (String field : demand) result.put(field, Missing.NOT_APPLICABLE);
 			if (demand.contains(PresentationBasic.NAME))
 				put(result, PresentationBasic.NAME, () -> new PresentationValue.Text(world.encodeName(TargetNameComposer.here())), context.tick());
 		}
 		return Map.copyOf(result);
+	}
+	/**
+	 * Shared block name/state assembly for the ordinary and provider-resolved
+	 * routes. Generic block-entity existence/null name proves neither receipt nor
+	 * absence of a custom name, so a name behind any block entity stays
+	 * unavailable rather than invented.
+	 */
+	private static void observeBlockFields(Map<String, Outcome> result, Set<String> demand, BlockState state,
+		long tick, Function<Component, String> encodeName) {
+		if (demand.contains(PresentationBasic.BLOCK_STATE)) {
+			Map<String, PresentationValue> values = new LinkedHashMap<>();
+			state.getValues().forEach((property, value) -> values.put(property.getName(), new PresentationValue.Text(value.toString())));
+			put(result, PresentationBasic.BLOCK_STATE, () -> new PresentationValue.RecordValue(values), tick);
+		}
+		if (demand.contains(PresentationBasic.NAME) && !state.hasBlockEntity())
+			put(result, PresentationBasic.NAME, () -> new PresentationValue.Text(encodeName.apply(state.getBlock().getName())), tick);
 	}
 	/** Real entity seam shared by the live reader and headless tests, not a synthetic preview fixture. */
 	public static Map<String, Outcome> observeEntity(Entity entity, Set<String> demand, long tick, Function<Component, String> encode) {

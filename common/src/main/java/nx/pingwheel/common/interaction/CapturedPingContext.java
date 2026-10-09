@@ -18,8 +18,8 @@ import nx.pingwheel.common.domain.EntityLocalGeometryMetadata;
  * and ray are immutable records).
  *
  * <p>Capture-only metadata stays attached to its matching identity: entity-local
- * geometry detail is retained only for an entity target, and an ordinary-block
- * hit face only for a {@code Target.BlockTarget}.
+ * geometry detail is retained only for an entity target, and a native block
+ * hit face only for an ordinary or external block's matching read binding.
  */
 public record CapturedPingContext(
 	InteractionToken token,
@@ -48,8 +48,9 @@ public record CapturedPingContext(
 		}
 
 		if (blockHitFace.isPresent()
-			&& !(resolvedTarget.target() instanceof nx.pingwheel.common.domain.Target.BlockTarget)) {
-			throw new IllegalArgumentException("only an ordinary block target can retain a hit face");
+			&& !(resolvedTarget.target() instanceof nx.pingwheel.common.domain.Target.BlockTarget)
+			&& !(resolvedTarget.target() instanceof nx.pingwheel.common.domain.Target.ExternalBlockTarget)) {
+			throw new IllegalArgumentException("only a block target can retain a hit face");
 		}
 	}
 

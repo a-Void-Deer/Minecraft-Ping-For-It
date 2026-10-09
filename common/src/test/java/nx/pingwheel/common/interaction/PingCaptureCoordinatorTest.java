@@ -346,6 +346,25 @@ class PingCaptureCoordinatorTest {
 	}
 
 	@Test
+	void externalFaceRequiresExactIdentityAndLocatorNotCandidateEquality() {
+		TargetSnapshot snapshot = TargetSnapshotFactory.externalBlockCandidate(
+			OVERWORLD, "sable", "minecraft:chest", "first-locator", true, Optional.of(BlockFace.NORTH));
+		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
+		CapturedPingContext retained = resolveWith(snapshot, (target, context) -> new ResolvedTarget(target, type));
+		assertEquals(Optional.of(BlockFace.NORTH), retained.blockHitFace());
+		Target.ExternalBlockTarget otherLocator = Target.ExternalBlockTarget.candidate(
+			OVERWORLD, "sable", "minecraft:chest", "different-locator", true);
+		assertEquals(snapshot.target(), otherLocator, "global candidate equality intentionally stays unchanged");
+		assertTrue(resolveWith(snapshot, (target, context) -> new ResolvedTarget(otherLocator, type)).blockHitFace().isEmpty());
+		for (Target.ExternalBlockTarget changed : List.of(
+			Target.ExternalBlockTarget.candidate(OVERWORLD, "other", "minecraft:chest", "first-locator", true),
+			Target.ExternalBlockTarget.candidate(OVERWORLD, "sable", "minecraft:stone", "first-locator", false),
+			Target.ExternalBlockTarget.committed(OVERWORLD, "sable", "stable", "minecraft:chest", "first-locator", true))) {
+			assertTrue(resolveWith(snapshot, (target, context) -> new ResolvedTarget(changed, type)).blockHitFace().isEmpty());
+		}
+	}
+
+	@Test
 	void completeRejectsNullArguments() {
 		ActiveInteraction interaction = new ActiveInteraction();
 		PingCaptureCoordinator coordinator = coordinator(interaction, new RecordingCaptureLogger());

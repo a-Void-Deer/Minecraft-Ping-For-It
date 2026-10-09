@@ -99,4 +99,46 @@ class MinecraftPreviewFieldAccessTest {
 		Context context = new Context(); var block = new Target.BlockTarget(context.dimensionId(), 1, 2, 3, "minecraft:stone");
 		assertTrue(new MinecraftPreviewFieldAccess().observe(block, Set.of(), context).isEmpty()); assertEquals(0, context.blockReads);
 	}
+	private static final class ExternalContext implements MinecraftPreviewFieldAccess.WorldContext {
+		MinecraftPreviewFieldAccess.SafeBlockSource source; BlockState state;
+		public Object levelIdentity() { return this; }
+		public String dimensionId() { return "minecraft:overworld"; }
+		public long tick() { return 3; }
+		public Entity entity(EntityLocator locator) { fail("a block preview must not resolve entities"); return null; }
+		public BlockState blockState(Target.BlockTarget target) { return state; }
+		public BlockEntity blockEntity(Target.BlockTarget target) { fail("Basic must not inspect generic BE for unsynced custom name"); return null; }
+		public String encodeName(Component component) { return Component.Serializer.toJson(component, RegistryAccess.EMPTY); }
+		@Override public MinecraftPreviewFieldAccess.SafeBlockSource blockSource(Target target) { return source; }
+	}
+	@Test void externalProviderSourceUsesPhysicalStateAndNoGenericBlockEntityName() {
+		var reader = new MinecraftPreviewFieldAccess();
+		var physical = new Target.BlockTarget("minecraft:overworld", 100, 64, -200, "minecraft:chest");
+		Target.ExternalBlockTarget external = Target.ExternalBlockTarget.candidate(
+			"minecraft:overworld", "sable", "minecraft:chest", "opaque-locator", false);
+		ExternalContext context = new ExternalContext();
+		context.state = Blocks.CHEST.defaultBlockState();
+
+		context.source = null;
+		assertEquals(PreviewFieldAccess.Missing.UNAVAILABLE,
+			reader.observe(external, Set.of(PresentationBasic.BLOCK_STATE), context).get(PresentationBasic.BLOCK_STATE));
+		context.source = new MinecraftPreviewFieldAccess.SafeBlockSource(physical, position -> true);
+		var state = reader.observe(external, Set.of(PresentationBasic.BLOCK_STATE), context);
+		assertTrue(value(state.get(PresentationBasic.BLOCK_STATE)) instanceof PresentationValue.RecordValue);
+		// A chest owns a block entity, so a generic name is never observed evidence.
+		assertEquals(PreviewFieldAccess.Missing.UNAVAILABLE,
+			reader.observe(external, Set.of(PresentationBasic.NAME), context).get(PresentationBasic.NAME));
+		// A provider binding outside its member scope or for a foreign registry is unavailable.
+		context.source = new MinecraftPreviewFieldAccess.SafeBlockSource(physical, position -> false);
+		assertEquals(PreviewFieldAccess.Missing.UNAVAILABLE,
+			reader.observe(external, Set.of(PresentationBasic.BLOCK_STATE), context).get(PresentationBasic.BLOCK_STATE));
+		context.source = new MinecraftPreviewFieldAccess.SafeBlockSource(
+			new Target.BlockTarget("minecraft:overworld", 100, 64, -200, "minecraft:dirt"), position -> true);
+		assertEquals(PreviewFieldAccess.Missing.UNAVAILABLE,
+			reader.observe(external, Set.of(PresentationBasic.BLOCK_STATE), context).get(PresentationBasic.BLOCK_STATE));
+		// A block without a block entity exposes the physical state name.
+		context.source = new MinecraftPreviewFieldAccess.SafeBlockSource(physical, position -> true);
+		context.state = Blocks.STONE.defaultBlockState();
+		assertTrue(value(reader.observe(external, Set.of(PresentationBasic.NAME), context).get(PresentationBasic.NAME))
+			instanceof PresentationValue.Text);
+	}
 }

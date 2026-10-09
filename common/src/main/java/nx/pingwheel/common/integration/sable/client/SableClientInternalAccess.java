@@ -28,6 +28,7 @@ final class SableClientInternalAccess {
 	private final Method getLevel;
 	private final Method getBlockState;
 	private volatile SupplementalMethods supplementalMethods;
+	private volatile Method contentIsRemoved;
 
 	private SableClientInternalAccess(
 		Method getContainer, Method getSubLevel, Method getLevel, Method getBlockState
@@ -124,6 +125,25 @@ final class SableClientInternalAccess {
 
 	private record SupplementalMethods(Method getAllSubLevels, Method isRemoved, Method getPlot,
 		Method plotContains, Method plotBounds) {}
+
+	/** Content-only live identity gate. Additive discovery cannot change ordinary capture's API gate. */
+	Object contentSubLevel(ClientLevel parent, UUID id) throws ReflectiveOperationException {
+		Method removed = contentIsRemoved;
+		if (removed == null) {
+			Class<?> owner = Class.forName(SUB_LEVEL_CLASS, false, SableClientInternalAccess.class.getClassLoader());
+			removed = owner.getMethod("isRemoved");
+			if (removed.getReturnType() != boolean.class || Modifier.isStatic(removed.getModifiers())) {
+				throw new NoSuchMethodException("isRemoved");
+			}
+			contentIsRemoved = removed;
+		}
+		Object container = invoke(getContainer, null, parent);
+		Object subLevel = container == null ? null : invoke(getSubLevel, container, id);
+		if (!(subLevel instanceof dev.ryanhcode.sable.companion.ClientSubLevelAccess access)
+			|| !id.equals(access.getUniqueId()) || !Boolean.FALSE.equals(invoke(removed, subLevel))
+			|| invoke(getLevel, subLevel) != parent) return null;
+		return subLevel;
+	}
 
 	Resolution resolve(ClientLevel parent, UUID subLevelId, BlockPos localPos)
 		throws ReflectiveOperationException {

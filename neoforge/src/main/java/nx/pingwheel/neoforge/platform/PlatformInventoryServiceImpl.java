@@ -31,19 +31,28 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 
 	@Override
 	public Optional<Access> find(ServerLevel level, BlockPos pos, Direction side) {
+		return find(level, pos, side, ignored -> true);
+	}
+
+	@Override
+	public Optional<Access> find(ServerLevel level, BlockPos pos, Direction side,
+		java.util.function.Predicate<BlockPos> memberGate) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(pos, "pos");
 		Objects.requireNonNull(side, "side");
-		if (!level.isLoaded(pos)) return Optional.empty();
+		Objects.requireNonNull(memberGate, "memberGate");
+		if (!memberGate.test(pos) || !level.isLoaded(pos)) return Optional.empty();
+		if (!memberGate.test(pos)) return Optional.empty();
 		BlockEntity blockEntity = level.getBlockEntity(pos);
 		if (nx.pingwheel.neoforge.integration.create.presentation.CreateVaultInventoryAccess.recognizes(blockEntity))
-			return nx.pingwheel.neoforge.integration.create.presentation.CreateVaultInventoryAccess.find(level, pos, side);
+			return nx.pingwheel.neoforge.integration.create.presentation.CreateVaultInventoryAccess.find(level, pos, side, memberGate);
 		if (blockEntity instanceof RandomizableContainer randomizable && randomizable.getLootTable() != null) {
 			return Optional.empty();
 		}
 		try {
+			if (!memberGate.test(pos)) return Optional.empty();
 			IItemHandler handler = level.getCapability(Capabilities.ItemHandler.BLOCK, pos, side);
-			return handler == null ? Optional.empty() : Optional.of(new HandlerAccess(handler));
+			return handler == null ? Optional.empty() : Optional.of(new HandlerAccess(handler, pos.immutable(), memberGate));
 		} catch (RuntimeException | LinkageError failure) {
 			return Optional.empty();
 		}
@@ -52,13 +61,25 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 	private static final class HandlerAccess implements Access {
 
 		private final IItemHandler handler;
+		private final BlockPos position;
+		private final java.util.function.Predicate<BlockPos> memberGate;
 
-		HandlerAccess(IItemHandler handler) {
+		HandlerAccess(IItemHandler handler, BlockPos position, java.util.function.Predicate<BlockPos> memberGate) {
 			this.handler = Objects.requireNonNull(handler, "handler");
+			this.position = position;
+			this.memberGate = memberGate;
+		}
+		private void requireMember() {
+			if (!memberGate.test(position)) throw new IllegalStateException("inventory handler outside the read scope");
+		}
+		@Override public boolean valid() {
+			try { requireMember(); return true; }
+			catch (RuntimeException | LinkageError unavailable) { return false; }
 		}
 
 		@Override
 		public int slots() {
+			requireMember();
 			int slots = handler.getSlots();
 			if (slots < 0) throw new IllegalStateException("provider reported a negative slot count");
 			return slots;
@@ -77,6 +98,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		@Override
 		public Entry read(int slot) {
 			Objects.checkIndex(slot, slots());
+			requireMember();
 			ItemStack stack = handler.getStackInSlot(slot);
 			if (stack == null || stack.isEmpty()) return Entry.empty();
 			int count = stack.getCount();

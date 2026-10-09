@@ -118,7 +118,8 @@ final class SableSupplementalRaycaster {
 			if (projected.distanceToSqr(worldHit) > 1.0E-10) throw new ExactNativeShapeClip.Incomplete();
 			String blockId = registryId.toString();
 			var snapshot = TargetSnapshotFactory.externalBlockCandidate(dimensionId, SableClientProvider.PROVIDER_ID,
-				blockId, new SableExternalBlockLocator(subLevel.id(), pos).encode(), BlockEntityClassification.hasBlockEntity(state))
+				blockId, new SableExternalBlockLocator(subLevel.id(), pos).encode(), BlockEntityClassification.hasBlockEntity(state),
+				SableClientCompanionAccess.observedLocalFace(hit))
 				.withCandidateHit(new CandidateHit(new WorldVector(worldHit.x, worldHit.y, worldHit.z),
 					SableCaptureEquivalence.fromResolved(dimensionId, subLevel.id(), pos.getX(), pos.getY(), pos.getZ(), blockId)));
 			provisional.add(new CandidateEvidence(snapshot, worldDistance));

@@ -145,9 +145,9 @@ class InventoryS2CPacketTest {
 	}
 
 	@Test
-	void routeVersionKindsAndStatusAreInventoryV2() {
-		assertEquals(2, InventoryS2CPacket.VERSION);
-		assertEquals("pingforit-s2c:inventory-v2", InventoryS2CPacket.PACKET_ID.toString());
+	void routeVersionKindsAndStatusAreInventoryV3() {
+		assertEquals(3, InventoryS2CPacket.VERSION);
+		assertEquals("pingforit-s2c:inventory-v3", InventoryS2CPacket.PACKET_ID.toString());
 		assertEquals(List.of(InventoryS2CPacket.Kind.OFFER, InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.SELECTED, InventoryS2CPacket.Kind.REJECT, InventoryS2CPacket.Kind.PREVIEW,
 			InventoryS2CPacket.Kind.SNAPSHOT, InventoryS2CPacket.Kind.STREAM,
 			InventoryS2CPacket.Kind.STATUS, InventoryS2CPacket.Kind.HEARTBEAT),
@@ -157,6 +157,26 @@ class InventoryS2CPacketTest {
 			InventoryS2CPacket.Status.UNAVAILABLE, InventoryS2CPacket.Status.INVALID,
 			InventoryS2CPacket.Status.EXPIRED, InventoryS2CPacket.Status.COMPONENT_TOO_LONG),
 			Arrays.asList(InventoryS2CPacket.Status.values()));
+	}
+
+	@Test
+	void oldInventoryV2FramesAreRejectedOnTheV3Route() {
+		FriendlyByteBuf frame = buffer();
+		try {
+			MarkerPacketCodec.writeEnum(frame, InventoryS2CPacket.Kind.OFFER);
+			frame.writeVarInt(2);
+			frame.writeLong(1L);
+			frame.writeLong(0L);
+			frame.writeLong(100L);
+			frame.writeLong(1L);
+			frame.writeVarInt(20);
+			frame.writeVarInt(40);
+			frame.writeVarInt(5);
+			frame.writeVarInt(0);
+			assertTrue(InventoryS2CPacket.readSafe(frame).isCorrupt());
+		} finally {
+			frame.release();
+		}
 	}
 
 	@Test

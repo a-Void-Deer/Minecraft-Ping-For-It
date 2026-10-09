@@ -59,6 +59,37 @@ class ExternalBlockServerProviderRegistryTest {
 
 		assertInstanceOf(ExternalBlockServerProvider.ObservationResult.TemporarilyUnavailable.class,
 			provider.observeBlock(null, committed));
+		assertTrue(provider.resolvePreviewReadSource(null, committed).isEmpty());
+		assertTrue(provider.resolveCommittedReadSource(null, committed).isEmpty());
+	}
+
+	@Test
+	void contentDispatchIsUnavailableForUnknownOrLegacyProvidersWithoutMaterialization() {
+		var candidate = Target.ExternalBlockTarget.candidate("minecraft:overworld", "provider:test", "minecraft:stone", "opaque", false);
+		var target = committed("minecraft:stone");
+		var legacy = new FakeProvider("provider:test");
+		assertTrue(ExternalBlockServerProviderRegistry.invokeReadSource(null, null, candidate, true).isEmpty());
+		assertTrue(ExternalBlockServerProviderRegistry.invokeReadSource(legacy, null, candidate, true).isEmpty());
+		assertTrue(ExternalBlockServerProviderRegistry.invokeReadSource(legacy, null, target, false).isEmpty());
+		assertEquals(0, legacy.materializationCalls.get());
+		assertEquals(0, legacy.references.size(), "preview cannot allocate a provider reference via materialization");
+		assertEquals(0, legacy.observationCalls.get());
+	}
+
+	@Test
+	void contentDispatchSelectsOnlyItsOwnCandidateOrCommittedMethodAndFailsSoft() {
+		var provider = new FakeProvider("provider:test");
+		var candidate = Target.ExternalBlockTarget.candidate("minecraft:overworld", "provider:test", "minecraft:stone", "opaque", false);
+		provider.contentFailure = new LinkageError("new Content API drift");
+		assertTrue(ExternalBlockServerProviderRegistry.invokeReadSource(provider, null, candidate, true).isEmpty());
+		assertEquals(1, provider.previewCalls.get());
+		assertTrue(ExternalBlockServerProviderRegistry.invokeReadSource(provider, null, candidate, false).isEmpty());
+		assertEquals(0, provider.committedCalls.get());
+		assertTrue(ExternalBlockServerProviderRegistry.invokeReadSource(provider, null, committed("minecraft:stone"), false).isEmpty());
+		assertEquals(1, provider.committedCalls.get());
+		assertTrue(ExternalBlockServerProviderRegistry.invokeReadSource(new FakeProvider("other"), null, candidate, true).isEmpty());
+		assertEquals(0, provider.materializationCalls.get());
+		assertEquals(0, provider.references.size());
 	}
 
 	@Test
@@ -254,6 +285,10 @@ class ExternalBlockServerProviderRegistryTest {
 		private ExternalBlockServerProvider.ObservationResult observationResult =
 			new ExternalBlockServerProvider.ObservationResult.TemporarilyUnavailable();
 		private final AtomicInteger observationCalls = new AtomicInteger();
+		private final AtomicInteger materializationCalls = new AtomicInteger();
+		private final ExternalBlockReferenceIndex references = new ExternalBlockReferenceIndex();
+		private final AtomicInteger previewCalls = new AtomicInteger(), committedCalls = new AtomicInteger();
+		private LinkageError contentFailure;
 
 		private FakeProvider(String id) {
 			this.id = id;
@@ -271,7 +306,21 @@ class ExternalBlockServerProviderRegistryTest {
 
 		@Override
 		public MaterializationResult materialize(ServerLevel level, Target.ExternalBlockTarget candidate) {
+			materializationCalls.incrementAndGet();
+			references.commit(references.prepare(new ExternalBlockReferenceIndex.LocatorKey(id,
+				candidate.providerLocator(), candidate.expectedBlockRegistryId(), candidate.hasBlockEntity()), () -> "allocated"));
 			return new MaterializationResult.Invalid();
+		}
+
+		@Override public Optional<ResolvedBlockReadSource> resolvePreviewReadSource(ServerLevel level, Target.ExternalBlockTarget candidate) {
+			previewCalls.incrementAndGet();
+			if (contentFailure != null) throw contentFailure;
+			return ExternalBlockServerProvider.super.resolvePreviewReadSource(level, candidate);
+		}
+		@Override public Optional<ResolvedBlockReadSource> resolveCommittedReadSource(ServerLevel level, Target.ExternalBlockTarget committed) {
+			committedCalls.incrementAndGet();
+			if (contentFailure != null) throw contentFailure;
+			return ExternalBlockServerProvider.super.resolveCommittedReadSource(level, committed);
 		}
 
 		@Override

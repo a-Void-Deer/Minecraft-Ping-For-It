@@ -47,7 +47,7 @@ class InventorySourceSnapshotTest {
 	private static InventorySourceAccess.InventoryHandle open(TestSource source, CostLedger ledger) {
 		var access = new InventorySourceAccess(INPUT, i -> Optional.of(source));
 		var scope = new SourceAccess.ReadScope(INPUT.viewKey(), Set.of("pingforit:inventory.items"));
-		var target = INPUT.target();
+		var target = INPUT.ordinaryTarget().orElseThrow();
 		var resolved = (SourceAccess.ResolveResult.Available) access.resolve(new PresentationAdapter.DetachedTarget(
 			target.dimensionId(), "block", target.blockRegistryId(), target.x(), target.y(), target.z(), ""), scope, ledger);
 		return (InventorySourceAccess.InventoryHandle) ((SourceAccess.OpenResult.Started) access.open(resolved.descriptor(), scope, ledger)).handle();

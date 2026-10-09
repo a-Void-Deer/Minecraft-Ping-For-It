@@ -123,7 +123,7 @@ public final class PingCaptureCoordinator {
 			snapshot.entityLocalGeometryMetadata().filter(ignored -> isSameEntityTargetIdentity(
 				snapshot.target(), resolved.target()));
 		java.util.Optional<nx.pingwheel.common.domain.BlockFace> blockHitFace = snapshot.blockHitFace()
-			.filter(ignored -> isSameOrdinaryBlockTargetIdentity(snapshot.target(), resolved.target()));
+			.filter(ignored -> isSameBlockReadBinding(snapshot.target(), resolved.target()));
 		Optional<nx.pingwheel.common.interaction.candidate.FrozenCandidateSet> selectorCandidates = Optional.empty();
 		if (candidates.isPresent()) {
 			try {
@@ -164,12 +164,12 @@ public final class PingCaptureCoordinator {
 			&& capturedEntity.equals(resolvedEntity);
 	}
 
-	private static boolean isSameOrdinaryBlockTargetIdentity(
+	private static boolean isSameBlockReadBinding(
 		nx.pingwheel.common.domain.Target captured,
 		nx.pingwheel.common.domain.Target resolved
 	) {
-		return captured instanceof nx.pingwheel.common.domain.Target.BlockTarget capturedBlock
-			&& resolved instanceof nx.pingwheel.common.domain.Target.BlockTarget resolvedBlock
-			&& capturedBlock.equals(resolvedBlock);
+		return (captured instanceof nx.pingwheel.common.domain.Target.BlockTarget
+			|| captured instanceof nx.pingwheel.common.domain.Target.ExternalBlockTarget)
+			&& nx.pingwheel.common.integration.externalblock.BlockReadSource.sameTargetBinding(captured, resolved);
 	}
 }

@@ -232,6 +232,18 @@ public final class MarkerCreationService {
 			recipients, intents, admission, transaction);
 	}
 
+	/**
+	 * Dedicated-admission variant of the external transaction seam: it keeps the
+	 * production materialize/admission/store ordering and the single release on
+	 * any post-materialization failure, without requiring a live server level.
+	 */
+	MarkerCreateOutcome createDedicatedWithExternalTransaction(ExternalBlockTransaction transaction,
+		UUID owner, Target requestedTarget, String pingTypeId, long arrivalTick, long expiresAtTick,
+		List<UUID> recipients, PropertyAdmission dedicated) {
+		return create(null, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick,
+			recipients, List.of(), null, transaction, Objects.requireNonNull(dedicated));
+	}
+
 	private MarkerCreateOutcome create(
 		ServerLevel level,
 		UUID owner,
