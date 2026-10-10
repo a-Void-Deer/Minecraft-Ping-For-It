@@ -713,7 +713,7 @@ class NativeSelectorContentTest {
 			assertTrue(projection.properties().stream().anyMatch(property -> property.ref().fieldId().equals(INVENTORY_SUMMARY)
 				&& property.ref().recordPath().equals(List.of("minecraft:stone"))),
 				"a registry-ID record descendant is projected under Create");
-			assertEquals("Create properties", content.label(createGroup.labelKey()).getString(),
+			assertEquals("Create properties...", content.label(createGroup.labelKey()).getString(),
 				"the Create group label resolves through the real language fallback");
 			content.close();
 		});
@@ -732,7 +732,7 @@ class NativeSelectorContentTest {
 			var fixture = new CreateContentSession(values, inventory);
 			enter(fixture.session, "content", 10L);
 			var top = fixture.menu().choices();
-			assertEquals(List.of("Create properties", "minecraft:block.state: 1", "minecraft:entity.type: minecraft:chest",
+			assertEquals(List.of("Create properties...", "minecraft:block.state: 1", "minecraft:entity.type: minecraft:chest",
 				"Chest", "Inventory items", "Back"), top.stream().map(fixture::label).toList(),
 				"generic fields and the inventory list stay outside the Create group");
 			var create = top.getFirst();
@@ -844,8 +844,8 @@ class NativeSelectorContentTest {
 			for (String field : List.of(SPEED, HAS_NETWORK, OVERSTRESSED, INVENTORY_SUMMARY, FLUID_SUMMARY))
 				assertEquals(createGroup.path(), projectedProperty(projection, field).groupPath(), field);
 			assertTrue(projectedProperty(projection, NAME).groupPath().isEmpty(), "a generic field stays outside Create");
-			assertEquals("Create properties", content.label(createGroup.labelKey()).getString());
-			assertEquals("Stress", content.label(stressGroup.labelKey()).getString(),
+			assertEquals("Create properties...", content.label(createGroup.labelKey()).getString());
+			assertEquals("Stress...", content.label(stressGroup.labelKey()).getString(),
 				"the Stress group label resolves through the real language fallback");
 			content.close();
 
@@ -872,11 +872,11 @@ class NativeSelectorContentTest {
 			enter(navigation.session, create, 150L);
 			var createChildren = navigation.menu().choices().stream().filter(choice -> !choice.back()).toList();
 			assertEquals(List.of("create:fluid.summary: 1", "minecraft:water: 100", "create:inventory.summary: 1",
-				"minecraft:stone: 3", "Stress", "create:kinetic.has_network: Yes", "create:kinetic.overstressed: No",
+				"minecraft:stone: 3", "Stress...", "create:kinetic.has_network: Yes", "create:kinetic.overstressed: No",
 				"create:kinetic.speed: 128 RPM", "effective_rpm: 128", "moving: Yes", "theoretical_rpm: 128"),
 				createChildren.stream().map(navigation::label).toList(),
 				"only the stress trio nests; the network flags and every other Create field stay direct");
-			var stress = createChildren.stream().filter(choice -> "Stress".equals(navigation.label(choice))).findFirst().orElseThrow();
+			var stress = createChildren.stream().filter(choice -> "Stress...".equals(navigation.label(choice))).findFirst().orElseThrow();
 			assertTrue(stress.branch());
 			assertNull(stress.action(), "the Stress group parent carries no property intent");
 			assertNull(stress.outlineColor(), "the Stress group parent carries no Ping Type color");
@@ -890,7 +890,7 @@ class NativeSelectorContentTest {
 			navigation.session.tick(600L);
 			assertEquals(createMenuId, navigation.menu().menuId(), "Back returns one level to the Create menu");
 			var stressAfterBack = navigation.menu().choices().stream()
-				.filter(choice -> "Stress".equals(navigation.label(choice))).findFirst().orElseThrow();
+				.filter(choice -> "Stress...".equals(navigation.label(choice))).findFirst().orElseThrow();
 			assertEquals(stress.id(), stressAfterBack.id(), "the Stress parent keeps its stable identity after the return");
 			navigation.content.close();
 
@@ -899,7 +899,7 @@ class NativeSelectorContentTest {
 			String groupCreate = groupRelease.menu().choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id();
 			enter(groupRelease.session, groupCreate, 150L);
 			String groupStress = groupRelease.menu().choices().stream()
-				.filter(choice -> "Stress".equals(groupRelease.label(choice))).findFirst().orElseThrow().id();
+				.filter(choice -> "Stress...".equals(groupRelease.label(choice))).findFirst().orElseThrow().id();
 			focus(groupRelease.session, groupStress, 300L);
 			assertInstanceOf(SelectorIntent.None.class, groupRelease.session.releaseIntent(301L),
 				"releasing the focused Stress group parent commits nothing");
@@ -914,7 +914,7 @@ class NativeSelectorContentTest {
 				String releaseCreate = releaseFixture.menu().choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id();
 				enter(releaseFixture.session, releaseCreate, 150L);
 				String releaseStress = releaseFixture.menu().choices().stream()
-					.filter(choice -> "Stress".equals(releaseFixture.label(choice))).findFirst().orElseThrow().id();
+					.filter(choice -> "Stress...".equals(releaseFixture.label(choice))).findFirst().orElseThrow().id();
 				enter(releaseFixture.session, releaseStress, 300L);
 				var child = releaseFixture.menu().choices().stream().filter(choice -> !choice.back()).toList().get(index);
 				focus(releaseFixture.session, child.id(), 450L);

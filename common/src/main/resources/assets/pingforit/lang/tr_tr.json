@@ -388,6 +388,6 @@
   ,"pingforit.chat.content.quality": "%s (%s)"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.name": "Özel ad"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "İşaretlenen hedefin özel adı."
-  ,"presentation.pingforit.content.group.create": "Create özellikleri"
-  ,"presentation.pingforit.content.group.stress": "Yük"
+  ,"presentation.pingforit.content.group.create": "Create özellikleri..."
+  ,"presentation.pingforit.content.group.stress": "Yük..."
 }

@@ -396,6 +396,6 @@
   ,"pingforit.chat.content.quality": "%s (%s)"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.name": "Nombre personalizado"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "Nombre personalizado del objetivo marcado."
-  ,"presentation.pingforit.content.group.create": "Propiedades de Create"
-  ,"presentation.pingforit.content.group.stress": "Carga"
+  ,"presentation.pingforit.content.group.create": "Propiedades de Create..."
+  ,"presentation.pingforit.content.group.stress": "Carga..."
 }
