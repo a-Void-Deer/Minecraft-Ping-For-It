@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodInsnNode;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Checks real mapped callback ABI and effective registration, not a live Mixin transformation. */
@@ -36,10 +37,60 @@ class NativeSelectorMixinContractTest {
 		}
 		for (String method : List.of("grabMouse", "releaseMouse", "cursorEntered", "setIgnoreFirstMove"))
 			assertEquals(void.class, MouseHandler.class.getDeclaredMethod(method).getReturnType());
-		for (String field : List.of("accumulatedDX", "accumulatedDY")) {
+		for (String field : List.of("accumulatedDX", "accumulatedDY", "xpos", "ypos")) {
 			assertEquals(double.class, MouseHandler.class.getDeclaredField(field).getType());
 			assertTrue(bridge.fields.stream().anyMatch(value -> value.name.equals(field) && value.desc.equals("D")));
 		}
+	}
+	@Test void releaseRedirectTargetsTheActualVanillaWarpThenModeCallAndGrabGuardKeepsRawPressDelivery() throws Exception {
+		ClassNode vanilla = readClass(MouseHandler.class, "MouseHandler.class");
+		ClassNode bridge = readClass(MouseHandlerMixin.class, "MouseHandlerMixin.class");
+		var release = vanilla.methods.stream().filter(method -> method.name.equals("releaseMouse") && method.desc.equals("()V"))
+			.findFirst().orElseThrow();
+		var calls = new ArrayList<MethodInsnNode>();
+		for (var instruction : release.instructions) if (instruction instanceof MethodInsnNode call
+			&& call.owner.equals("com/mojang/blaze3d/platform/InputConstants") && call.name.equals("grabOrReleaseMouse")) calls.add(call);
+		assertEquals(1, calls.size()); assertEquals("(JIDD)V", calls.getFirst().desc);
+		var redirected = bridge.methods.stream().filter(method -> method.name.equals("pingforit$releaseCursor")).findFirst().orElseThrow();
+		assertEquals("(JIDD)V", redirected.desc);
+		var redirect = annotations(redirected.visibleAnnotations, redirected.invisibleAnnotations).stream()
+			.filter(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/Redirect;")).findFirst().orElseThrow();
+		assertEquals(List.of("releaseMouse"), value(redirect, "method"));
+		var at = (AnnotationNode) value(redirect, "at");
+		assertEquals("INVOKE", value(at, "value"));
+		assertEquals("Lcom/mojang/blaze3d/platform/InputConstants;grabOrReleaseMouse(JIDD)V", value(at, "target"));
+
+		ClassNode input = readClass(com.mojang.blaze3d.platform.InputConstants.class, "InputConstants.class");
+		var modeAndWarp = input.methods.stream().filter(method -> method.name.equals("grabOrReleaseMouse")).findFirst().orElseThrow();
+		var nativeCalls = new ArrayList<String>();
+		for (var instruction : modeAndWarp.instructions) if (instruction instanceof MethodInsnNode call
+			&& call.owner.equals("org/lwjgl/glfw/GLFW")) nativeCalls.add(call.name);
+		assertEquals(List.of("glfwSetCursorPos", "glfwSetInputMode"), nativeCalls,
+			"the position regression fixture relies on the actual 1.21.1 native call ordering");
+
+		var guard = bridge.methods.stream().filter(method -> method.name.equals("pingforit$keepSelectorMouseFree")).findFirst().orElseThrow();
+		var pressRedirect = annotations(guard.visibleAnnotations, guard.invisibleAnnotations).stream()
+			.filter(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/Redirect;")).findFirst().orElseThrow();
+		assertEquals(List.of("onPress(JIII)V"), value(pressRedirect, "method"));
+		assertEquals("Lnet/minecraft/client/MouseHandler;grabMouse()V", value((AnnotationNode) value(pressRedirect, "at"), "target"));
+		assertEquals("(Lnet/minecraft/client/MouseHandler;)V", guard.desc);
+		var press = vanilla.methods.stream().filter(method -> method.name.equals("onPress") && method.desc.equals("(JIII)V"))
+			.findFirst().orElseThrow();
+		var pressCalls = new ArrayList<String>();
+		for (var instruction : press.instructions) if (instruction instanceof MethodInsnNode call
+			&& (call.owner.equals("net/minecraft/client/MouseHandler") && call.name.equals("grabMouse")
+				|| call.owner.equals("net/minecraft/client/KeyMapping") && call.name.equals("set"))) pressCalls.add(call.name);
+		assertEquals(List.of("grabMouse", "set"), pressCalls, "a vanilla auto-grab precedes raw key delivery");
+		assertFalse(bridge.methods.stream().flatMap(method -> annotations(method.visibleAnnotations, method.invisibleAnnotations).stream())
+			.filter(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/Inject;"))
+			.anyMatch(annotation -> ((List<?>) value(annotation, "method")).stream()
+				.anyMatch(method -> method.toString().startsWith("onPress"))),
+			"raw presses/releases must still reach KeyMapping, including a mouse-bound ping release");
+	}
+	private static ClassNode readClass(Class<?> type, String name) throws Exception {
+		ClassNode node = new ClassNode();
+		try (var bytes = type.getResourceAsStream(name)) { assertNotNull(bytes); new ClassReader(bytes).accept(node, 0); }
+		return node;
 	}
 	@Test void allEffectiveManifestsRegisterEachHookExactlyOnceOnItsCorrectSide() throws Exception {
 		Path root = Path.of("").toAbsolutePath();

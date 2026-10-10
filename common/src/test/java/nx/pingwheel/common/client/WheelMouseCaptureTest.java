@@ -1,7 +1,9 @@
 package nx.pingwheel.common.client;
 
 import org.junit.jupiter.api.Test;
+import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
@@ -17,6 +19,18 @@ import static org.junit.jupiter.api.Assertions.assertSame;
  * closing mid-hold.
  */
 class WheelMouseCaptureTest {
+
+	@Test
+	void vanillaMousePressCannotRegrabAnOpenSelectorButScreenAndInactiveGrabsAreUnchanged() {
+		for (var phase : PingInteractionPhase.values()) {
+			for (boolean screen : new boolean[]{false, true}) {
+				for (boolean focused : new boolean[]{false, true}) {
+					assertEquals(phase == PingInteractionPhase.WHEEL_OPEN && !screen && focused,
+						WheelMouseCapture.preventVanillaGrab(phase, screen, focused));
+				}
+			}
+		}
+	}
 
 	@Test
 	void enteringWheelWithGrabbedMouseReleases() {
