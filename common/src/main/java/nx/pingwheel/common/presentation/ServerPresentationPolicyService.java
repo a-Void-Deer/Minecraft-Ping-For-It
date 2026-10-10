@@ -10,11 +10,17 @@ import java.util.Map;
  * Pure authority and validation seam for the versioned server presentation
  * policy rule view. A read discloses the complete per-target-type rule view; a
  * mutation selects exactly one existing target type and changes only that
- * type's allow/deny/whitelist-only lists. The candidate is fully validated
- * before any persisted value changes, so a malformed, duplicate, missing,
- * over-capacity, or no-op request leaves the stored policy untouched.
- * Permission is supplied by the authenticated server-side caller; the service
- * never treats a client flag as authority.
+ * type's allow/deny/whitelist-only lists, preserving that type's persisted child
+ * deny list. The candidate is fully validated before any persisted value
+ * changes, so a malformed, duplicate, missing, over-capacity, or no-op request
+ * leaves the stored policy untouched. Permission is supplied by the
+ * authenticated server-side caller; the service never treats a client flag as
+ * authority.
+ *
+ * <p>{@link RulesView} carries only the selector fields; the child deny list is
+ * not part of this route's current wire version, so extending the disclosed
+ * view and its packet is a protocol update that must be versioned rather than
+ * emitted on the existing route.
  */
 public final class ServerPresentationPolicyService {
 	private ServerPresentationPolicyService() {}
@@ -215,7 +221,12 @@ public final class ServerPresentationPolicyService {
 			return new Result(false, Status.OK, current);
 		}
 
-		settings.setRules(targetTypeId, new PresentationSettings.RuleSet(candidate.white(), candidate.black(), candidate.whitelistOnly()));
+		// The selector mutation never touches the child deny list, so the
+		// installed rule set keeps the persisted child references instead of
+		// resetting them to the semantic default.
+		final List<PresentationPropertyRef> childBlack = settings.rulesFor(targetTypeId).getChildBlack();
+		settings.setRules(targetTypeId, new PresentationSettings.RuleSet(
+			candidate.white(), candidate.black(), candidate.whitelistOnly(), childBlack));
 
 		return new Result(true, Status.OK, read(settings, targetTypeId));
 	}

@@ -135,4 +135,31 @@ class ServerPresentationPolicyServiceTest {
 		assertFalse(copy.rulesFor("entity").isWhitelistOnly());
 		assertNull(ServerPresentationPolicyService.detachedCopy(null));
 	}
+
+	@Test
+	void fieldMutationsPreserveThePersistedChildDenyList() {
+		var effectiveRpm = new PresentationPropertyRef("create:presentation", "create:kinetic.speed",
+			List.of("effective_rpm"));
+		var custom = new PresentationPropertyRef("create:presentation", "create:inventory.summary",
+			List.of("minecraft:cobblestone"));
+		var settings = PresentationSettings.serverDefaults();
+		settings.setRules("entity", new PresentationSettings.RuleSet(List.of(), List.of(), false, List.of()));
+		settings.setRules("block", new PresentationSettings.RuleSet(List.of(), List.of(), false, List.of(custom)));
+
+		var added = ServerPresentationPolicyService.mutateSelectedRules(true, settings, "entity",
+			Operation.ADD_WHITE, "create:*", false);
+		assertTrue(added.applied());
+		assertFalse(settings.policyFor("entity").childDenied(effectiveRpm));
+		assertTrue(settings.rulesFor("entity").getChildBlack().isEmpty());
+
+		var toggled = ServerPresentationPolicyService.mutateSelectedRules(true, settings, "block",
+			Operation.SET_WHITELIST_ONLY, "", true);
+		assertTrue(toggled.applied());
+		assertTrue(settings.rulesFor("block").childDenied(custom));
+
+		var denied = ServerPresentationPolicyService.mutateSelectedRules(true, settings, "location",
+			Operation.ADD_BLACK, "create:*", false);
+		assertTrue(denied.applied());
+		assertTrue(settings.rulesFor("location").childDenied(effectiveRpm));
+	}
 }

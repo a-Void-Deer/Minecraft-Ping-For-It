@@ -4,10 +4,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 
 import static nx.pingwheel.common.Global.LOGGER;
@@ -16,12 +18,28 @@ import static nx.pingwheel.common.Global.LOGGER;
  * Server-side presentation policy: one independent field-selector rule set per
  * existing target type plus the global capture budget, interval and permission
  * overrides. A missing or unknown target-type rule set fails closed, and a
- * global structural failure denies every type instead of widening access.
+ * global structural failure denies every type instead of widening access. Each
+ * rule set also carries an exact child deny list whose defaults deny the nested
+ * Create kinetic RPM entries; an explicit empty list opts a target type out.
  */
 public final class PresentationSettings {
 	/** The exact existing target type IDs, in catalog order. */
 	public static final List<String> TARGET_TYPE_IDS =
 		List.of("dropped_item", "entity", "entity_block", "block", "location");
+
+	/** Per-target-type child deny reference capacity. */
+	public static final int MAX_CHILD_BLACK_REFS = 128;
+
+	/**
+	 * The default child deny list of every fresh rule set and of a persisted rule
+	 * set whose {@code childBlack} member is absent: the two nested Create kinetic
+	 * RPM entries are not selectable. The root speed record stays authorized and
+	 * complete so its RPM formatting still receives both entries; an explicit
+	 * empty persisted list opts a target type out of these defaults.
+	 */
+	public static final List<PresentationPropertyRef> DEFAULT_CHILD_BLACK = List.of(
+		new PresentationPropertyRef("create:presentation", "create:kinetic.speed", List.of("effective_rpm")),
+		new PresentationPropertyRef("create:presentation", "create:kinetic.speed", List.of("theoretical_rpm")));
 
 	private static final int MAX_SELECTORS = 128;
 	private static final int MAX_OVERRIDES = 128;
@@ -292,15 +310,22 @@ public final class PresentationSettings {
 		private List<String> white = List.of();
 		private List<String> black = List.of();
 		private boolean whitelistOnly;
+		private List<PresentationPropertyRef> childBlack = DEFAULT_CHILD_BLACK;
 
 		private transient boolean invalid;
 
 		public RuleSet() {}
 
 		public RuleSet(List<String> white, List<String> black, boolean whitelistOnly) {
+			this(white, black, whitelistOnly, DEFAULT_CHILD_BLACK);
+		}
+
+		public RuleSet(List<String> white, List<String> black, boolean whitelistOnly,
+			List<PresentationPropertyRef> childBlack) {
 			this.white = white == null ? List.of() : List.copyOf(white);
 			this.black = black == null ? List.of() : List.copyOf(black);
 			this.whitelistOnly = whitelistOnly;
+			this.childBlack = childBlack == null ? List.of() : List.copyOf(childBlack);
 		}
 
 		public static RuleSet allowByDefault() {
@@ -325,6 +350,7 @@ public final class PresentationSettings {
 			boolean denyAll = false;
 			List<String> validWhite = new ArrayList<>();
 			List<String> validBlack = new ArrayList<>();
+			List<PresentationPropertyRef> validChildBlack = new ArrayList<>();
 
 			if (white == null || white.size() > MAX_SELECTORS || black == null || black.size() > MAX_SELECTORS) {
 				denyAll = true;
@@ -343,8 +369,24 @@ public final class PresentationSettings {
 				}
 			}
 
+			if (childBlack == null || childBlack.size() > MAX_CHILD_BLACK_REFS) {
+				denyAll = true;
+				LOGGER.warn("Presentation child deny list missing or over capacity; denying fields for this target type");
+			} else {
+				Set<PresentationPropertyRef> unique = new HashSet<>();
+				for (PresentationPropertyRef ref : childBlack) {
+					if (ref == null || ref.isRoot() || !unique.add(ref)) {
+						denyAll = true;
+						LOGGER.warn("Invalid presentation child deny reference; denying fields for this target type");
+					} else {
+						validChildBlack.add(ref);
+					}
+				}
+			}
+
 			white = List.copyOf(validWhite);
 			black = List.copyOf(validBlack);
+			childBlack = List.copyOf(validChildBlack);
 			invalid |= denyAll;
 			if (invalid) {
 				// Serialize a durable deny-all state, even though the transient diagnostic flag
@@ -352,13 +394,14 @@ public final class PresentationSettings {
 				white = List.of();
 				black = List.of("*:*");
 				whitelistOnly = true;
+				childBlack = DEFAULT_CHILD_BLACK;
 			}
 		}
 
 		public PresentationPolicy policy() {
 			if (invalid) return denyAllPolicy();
 			try {
-				return new PresentationPolicy(white, black, whitelistOnly);
+				return new PresentationPolicy(white, black, whitelistOnly, childBlack);
 			} catch (RuntimeException ex) {
 				return denyAllPolicy();
 			}
@@ -368,6 +411,7 @@ public final class PresentationSettings {
 			RuleSet copy = new RuleSet();
 			copy.white = white == null ? List.of() : List.copyOf(white);
 			copy.black = black == null ? List.of() : List.copyOf(black);
+			copy.childBlack = childBlack == null ? List.of() : List.copyOf(childBlack);
 			copy.whitelistOnly = whitelistOnly;
 			copy.invalid = invalid;
 			return copy;
@@ -380,15 +424,53 @@ public final class PresentationSettings {
 			if (white != null) for (String selector : white) append(digest, selector);
 			append(digest, black == null ? "null" : String.valueOf(black.size()));
 			if (black != null) for (String selector : black) append(digest, selector);
+			append(digest, childBlack == null ? "null" : String.valueOf(childBlack.size()));
+			if (childBlack != null) for (PresentationPropertyRef ref : childBlack) {
+				append(digest, ref.adapterId());
+				append(digest, ref.fieldId());
+				append(digest, String.valueOf(ref.recordPath().size()));
+				for (String key : ref.recordPath()) append(digest, key);
+			}
 		}
 
 		public List<String> getWhite() { return white; }
 		public List<String> getBlack() { return black; }
 		public boolean isWhitelistOnly() { return whitelistOnly; }
+		public List<PresentationPropertyRef> getChildBlack() { return childBlack; }
 
 		public void setWhite(List<String> entries) { white = entries; invalid = false; validate(); }
 		public void setBlack(List<String> entries) { black = entries; invalid = false; validate(); }
 		public void setWhitelistOnly(boolean value) { whitelistOnly = value; }
+		public void setChildBlack(List<PresentationPropertyRef> entries) {
+			childBlack = entries;
+			invalid = false;
+			validate();
+		}
+
+		/**
+		 * The exact child-level predicate of this rule set: true when the tuple is
+		 * not on the child blacklist. An invalid rule set denies every reference.
+		 * Field-level authorization stays
+		 * {@link PresentationPolicy#allows(String, boolean)}; an allow selector
+		 * never overrides a child deny.
+		 */
+		public boolean propertyAllowed(PresentationPropertyRef ref) {
+			return !invalid && !childDenied(ref);
+		}
+
+		/**
+		 * The combined field-and-child predicate of this rule set; an invalid rule
+		 * set denies every reference.
+		 */
+		public boolean propertyAllowed(PresentationPropertyRef ref, boolean manifestDefault) {
+			return policy().propertyAllowed(ref, manifestDefault);
+		}
+
+		/** True when this exact tuple is on the child blacklist. */
+		public boolean childDenied(PresentationPropertyRef ref) {
+			Objects.requireNonNull(ref, "ref");
+			return childBlack != null && childBlack.contains(ref);
+		}
 
 		@Override
 		public boolean equals(Object other) {
@@ -396,12 +478,13 @@ public final class PresentationSettings {
 				&& whitelistOnly == rules.whitelistOnly
 				&& invalid == rules.invalid
 				&& java.util.Objects.equals(white, rules.white)
-				&& java.util.Objects.equals(black, rules.black);
+				&& java.util.Objects.equals(black, rules.black)
+				&& java.util.Objects.equals(childBlack, rules.childBlack);
 		}
 
 		@Override
 		public int hashCode() {
-			return Objects.hash(white, black, whitelistOnly, invalid);
+			return Objects.hash(white, black, whitelistOnly, childBlack, invalid);
 		}
 	}
 }

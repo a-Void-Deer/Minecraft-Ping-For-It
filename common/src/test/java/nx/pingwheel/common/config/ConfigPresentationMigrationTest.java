@@ -3,15 +3,20 @@ package nx.pingwheel.common.config;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -378,6 +383,192 @@ class ConfigPresentationMigrationTest {
 		assertTrue(readRoot(configPath).getAsJsonObject("presentation").has("targetTypes"));
 		try (var files = Files.list(tempDir)) {
 			assertFalse(files.anyMatch(path -> path.getFileName().toString().contains(".broken-")));
+		}
+	}
+
+	private static PresentationPropertyRef childRef(String field, String path) {
+		return new PresentationPropertyRef("create:presentation", field, List.of(path));
+	}
+
+	private static final PresentationPropertyRef EFFECTIVE_RPM = childRef("create:kinetic.speed", "effective_rpm");
+	private static final PresentationPropertyRef THEORETICAL_RPM =
+		childRef("create:kinetic.speed", "theoretical_rpm");
+
+	static Stream<Arguments> malformedChildBlackMembers() {
+		String reference = "{\"adapterId\":\"create:presentation\",\"fieldId\":\"create:kinetic.speed\","
+			+ "\"recordPath\":[\"effective_rpm\"]}";
+		StringBuilder overCapacity = new StringBuilder("[");
+		for (int i = 0; i <= PresentationSettings.MAX_CHILD_BLACK_REFS; i++) {
+			if (i > 0) overCapacity.append(',');
+			overCapacity.append("{\"adapterId\":\"create:presentation\",\"fieldId\":\"create:kinetic.speed\",")
+				.append("\"recordPath\":[\"k").append(i).append("\"]}");
+		}
+		overCapacity.append(']');
+		return Stream.of(
+			Arguments.of("primitive member", "5"),
+			Arguments.of("null member", "null"),
+			Arguments.of("string element", "[\"effective_rpm\"]"),
+			Arguments.of("null element", "[null]"),
+			Arguments.of("missing field id",
+				"[{\"adapterId\":\"create:presentation\",\"recordPath\":[\"effective_rpm\"]}]"),
+			Arguments.of("recordPath not an array",
+				"[{\"adapterId\":\"create:presentation\",\"fieldId\":\"create:kinetic.speed\","
+					+ "\"recordPath\":\"effective_rpm\"}]"),
+			Arguments.of("empty record path",
+				"[{\"adapterId\":\"create:presentation\",\"fieldId\":\"create:kinetic.speed\",\"recordPath\":[]}]"),
+			Arguments.of("invalid adapter id",
+				"[{\"adapterId\":\"Bad Id\",\"fieldId\":\"create:kinetic.speed\","
+					+ "\"recordPath\":[\"effective_rpm\"]}]"),
+			Arguments.of("deep record path",
+				"[{\"adapterId\":\"create:presentation\",\"fieldId\":\"create:kinetic.speed\","
+					+ "\"recordPath\":[\"a\",\"b\",\"c\",\"d\",\"e\"]}]"),
+			Arguments.of("duplicate reference", "[" + reference + "," + reference + "]"),
+			Arguments.of("over capacity", overCapacity.toString()));
+	}
+
+	@ParameterizedTest(name = "{0}")
+	@MethodSource("malformedChildBlackMembers")
+	void malformedChildBlackMemberDeniesItsOwnTargetType(String description, String childBlack, @TempDir Path tempDir)
+		throws IOException {
+		Path configPath = tempDir.resolve("server.json");
+		Files.writeString(configPath,
+			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"rateLimit\":3,\"presentation\":{\"targetTypes\":{"
+				+ "\"block\":{\"white\":[\"minecraft:basic\"],\"black\":[],\"whitelistOnly\":false,"
+				+ "\"childBlack\":" + childBlack + "},"
+				+ "\"entity\":{\"white\":[\"minecraft:basic\"],\"black\":[],\"whitelistOnly\":false}}}}\n",
+			StandardCharsets.UTF_8);
+
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+
+		PresentationSettings settings = handler.getConfig().getPresentation();
+		assertTrue(settings.policyFor("block").whitelistOnly(), description);
+		assertFalse(settings.policyFor("block").allows("minecraft:basic", true), description);
+		assertTrue(settings.policyFor("entity").allows("minecraft:basic", true), description);
+		assertEquals(3, handler.getConfig().getRateLimit(), description);
+	}
+
+	@Test
+	void malformedChildBlackDeniesOnlyItsOwnTargetTypeDurably(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("server.json");
+		Files.writeString(configPath,
+			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"rateLimit\":3,\"presentation\":{\"targetTypes\":{"
+				+ "\"block\":{\"white\":[\"minecraft:basic\"],\"black\":[],\"whitelistOnly\":false,"
+				+ "\"childBlack\":[{\"adapterId\":\"create:presentation\",\"fieldId\":\"create:kinetic.speed\"}]},"
+				+ "\"entity\":{\"white\":[\"minecraft:basic\"],\"black\":[],\"whitelistOnly\":false}}},"
+				+ "\"unknown\":{\"keep\":true}}\n",
+			StandardCharsets.UTF_8);
+
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+
+		PresentationSettings settings = handler.getConfig().getPresentation();
+		assertTrue(settings.policyFor("block").whitelistOnly());
+		assertFalse(settings.policyFor("block").allows("minecraft:basic", true));
+		assertTrue(settings.policyFor("entity").allows("minecraft:basic", true));
+		assertEquals(3, handler.getConfig().getRateLimit());
+		assertTrue(readRoot(configPath).getAsJsonObject("unknown").get("keep").getAsBoolean());
+
+		// The normalized deny-all state is durable across a reload.
+		ConfigHandler<ServerConfig> reloaded = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		reloaded.load();
+		assertFalse(reloaded.getConfig().getPresentation().policyFor("block").allows("minecraft:basic", true));
+		assertTrue(reloaded.getConfig().getPresentation().policyFor("entity").allows("minecraft:basic", true));
+	}
+
+	@Test
+	void missingChildBlackMemberGetsTheSemanticDefaultsWithoutRewritingTheFile(@TempDir Path tempDir)
+		throws IOException {
+		Path configPath = tempDir.resolve("server.json");
+		StringBuilder rules = new StringBuilder();
+		for (String id : PresentationSettings.TARGET_TYPE_IDS) {
+			if (rules.length() > 0) rules.append(',');
+			rules.append('"').append(id).append("\":{\"white\":[],\"black\":[],\"whitelistOnly\":false}");
+		}
+		String serialized = "{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"rateLimit\":3,"
+			+ "\"presentation\":{\"targetTypes\":{" + rules + "}}}\n";
+		Files.writeString(configPath, serialized, StandardCharsets.UTF_8);
+
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+
+		PresentationSettings settings = handler.getConfig().getPresentation();
+		for (String type : PresentationSettings.TARGET_TYPE_IDS) {
+			assertEquals(2, settings.rulesFor(type).getChildBlack().size(), type);
+			assertTrue(settings.rulesFor(type).childDenied(EFFECTIVE_RPM), type);
+			assertTrue(settings.rulesFor(type).childDenied(THEORETICAL_RPM), type);
+			assertFalse(settings.policyFor(type).propertyAllowed(EFFECTIVE_RPM, true), type);
+			assertTrue(settings.policyFor(type).propertyAllowed(
+				PresentationPropertyRef.root("create:presentation", "create:kinetic.speed"), true), type);
+		}
+		// An absent additive member needs no migration, normalization write, or reset.
+		assertArrayEquals(serialized.getBytes(StandardCharsets.UTF_8), Files.readAllBytes(configPath));
+		assertEquals(3, handler.getConfig().getRateLimit());
+	}
+
+	@Test
+	void explicitEmptyChildBlackOptsOutAndSurvivesReload(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("server.json");
+		Files.writeString(configPath,
+			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"presentation\":{\"targetTypes\":{"
+				+ "\"entity\":{\"white\":[],\"black\":[],\"whitelistOnly\":false,\"childBlack\":[]},"
+				+ "\"block\":{\"white\":[],\"black\":[],\"whitelistOnly\":false}}}}\n",
+			StandardCharsets.UTF_8);
+
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+		assertTrue(handler.getConfig().getPresentation().rulesFor("entity").getChildBlack().isEmpty());
+		assertTrue(handler.getConfig().getPresentation().policyFor("entity").propertyAllowed(EFFECTIVE_RPM, true));
+		assertFalse(handler.getConfig().getPresentation().policyFor("block").propertyAllowed(EFFECTIVE_RPM, true));
+
+		ConfigHandler<ServerConfig> reloaded = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		reloaded.load();
+		assertTrue(reloaded.getConfig().getPresentation().rulesFor("entity").getChildBlack().isEmpty());
+		assertTrue(reloaded.getConfig().getPresentation().policyFor("entity").propertyAllowed(EFFECTIVE_RPM, true));
+		assertFalse(reloaded.getConfig().getPresentation().policyFor("block").propertyAllowed(EFFECTIVE_RPM, true));
+	}
+
+	@Test
+	void customChildBlackReferenceSurvivesReloadAndNormalization(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("server.json");
+		String custom = "{\"adapterId\":\"create:presentation\",\"fieldId\":\"create:kinetic.stress\","
+			+ "\"recordPath\":[\"effective\"]}";
+		Files.writeString(configPath,
+			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"presentation\":{\"targetTypes\":{"
+				+ "\"block\":{\"white\":[],\"black\":[],\"whitelistOnly\":false,\"childBlack\":[" + custom + "]}}}}\n",
+			StandardCharsets.UTF_8);
+
+		var customRef = new PresentationPropertyRef("create:presentation", "create:kinetic.stress",
+			List.of("effective"));
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+		assertTrue(handler.getConfig().getPresentation().policyFor("block").childDenied(customRef));
+
+		ConfigHandler<ServerConfig> reloaded = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		reloaded.load();
+		assertTrue(reloaded.getConfig().getPresentation().policyFor("block").childDenied(customRef));
+		// The explicit list replaces the semantic defaults instead of stacking on them.
+		assertFalse(reloaded.getConfig().getPresentation().policyFor("block").childDenied(EFFECTIVE_RPM));
+	}
+
+	@Test
+	void resetToDefaultsRestoresTheSemanticChildDefaults(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("server.json");
+		Files.writeString(configPath,
+			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"presentation\":{\"targetTypes\":{"
+				+ "\"entity\":{\"white\":[],\"black\":[],\"whitelistOnly\":false,\"childBlack\":[]}}}}\n",
+			StandardCharsets.UTF_8);
+
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+		assertTrue(handler.getConfig().getPresentation().policyFor("entity").propertyAllowed(EFFECTIVE_RPM, true));
+
+		handler.resetToDefaults();
+
+		for (String type : PresentationSettings.TARGET_TYPE_IDS) {
+			assertFalse(handler.getConfig().getPresentation().policyFor(type).propertyAllowed(EFFECTIVE_RPM, true), type);
+			assertTrue(handler.getConfig().getPresentation().policyFor(type).propertyAllowed(
+				PresentationPropertyRef.root("create:presentation", "create:kinetic.speed"), true), type);
 		}
 	}
 }

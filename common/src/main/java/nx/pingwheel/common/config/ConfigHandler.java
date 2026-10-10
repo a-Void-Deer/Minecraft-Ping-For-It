@@ -10,6 +10,7 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import lombok.Getter;
 import lombok.SneakyThrows;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.util.SafeExceptionReport;
 import nx.pingwheel.common.platform.IPlatformContextService;
@@ -21,8 +22,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -555,7 +558,54 @@ public class ConfigHandler <T extends IConfig> {
 	private static boolean validRuleShape(JsonObject rule) {
 		return validStringArrayMember(rule, "white")
 			&& validStringArrayMember(rule, "black")
-			&& validBooleanMember(rule, "whitelistOnly");
+			&& validBooleanMember(rule, "whitelistOnly")
+			&& validChildBlackMember(rule);
+	}
+
+	/**
+	 * A present {@code childBlack} member must be an array of addressable nested
+	 * adapter/field/record-path references; a missing member keeps the model's
+	 * semantic default. Any malformed, duplicate, empty-path, or over-capacity
+	 * entry fails the whole rule shape closed, so the target type is replaced by
+	 * the durable deny-all rule instead of silently discarding the security
+	 * member and leaving the type allowed.
+	 */
+	private static boolean validChildBlackMember(JsonObject rule) {
+		JsonElement value = rule.get("childBlack");
+		if (value == null) return true;
+		if (!value.isJsonArray()) return false;
+		JsonArray array = value.getAsJsonArray();
+		if (array.size() > PresentationSettings.MAX_CHILD_BLACK_REFS) return false;
+		HashSet<PresentationPropertyRef> unique = new HashSet<>();
+		for (JsonElement element : array) {
+			PresentationPropertyRef ref = parseChildDenyRef(element);
+			if (ref == null || ref.isRoot() || !unique.add(ref)) return false;
+		}
+		return true;
+	}
+
+	/** A well-formed reference object, or null when any part is mistyped or invalid. */
+	private static PresentationPropertyRef parseChildDenyRef(JsonElement element) {
+		if (element == null || !element.isJsonObject()) return null;
+		JsonObject object = element.getAsJsonObject();
+		JsonElement adapterId = object.get("adapterId");
+		JsonElement fieldId = object.get("fieldId");
+		JsonElement recordPath = object.get("recordPath");
+		if (!isString(adapterId) || !isString(fieldId) || recordPath == null || !recordPath.isJsonArray()) return null;
+		List<String> keys = new ArrayList<>();
+		for (JsonElement key : recordPath.getAsJsonArray()) {
+			if (!isString(key)) return null;
+			keys.add(key.getAsString());
+		}
+		try {
+			return new PresentationPropertyRef(adapterId.getAsString(), fieldId.getAsString(), keys);
+		} catch (RuntimeException ex) {
+			return null;
+		}
+	}
+
+	private static boolean isString(JsonElement element) {
+		return element != null && element.isJsonPrimitive() && element.getAsJsonPrimitive().isString();
 	}
 
 	/** A present member must have the exact JSON type; a missing member keeps the documented default. */
