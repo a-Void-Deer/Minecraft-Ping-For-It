@@ -2,6 +2,9 @@ package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import nx.pingwheel.common.presentation.PresentationCodec;
+import nx.pingwheel.common.presentation.PresentationLimits;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService.RulesView;
@@ -11,9 +14,11 @@ import org.jetbrains.annotations.NotNull;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static nx.pingwheel.common.Global.S2C_NAMESPACE;
 
@@ -21,10 +26,10 @@ import static nx.pingwheel.common.Global.S2C_NAMESPACE;
  * Carries the complete per-target-type presentation selector rule view, the
  * server in-memory revision, and the status of the correlated request. Every
  * existing target type is present; a missing or unknown type is rejected so a
- * partial map can never fabricate an empty allow view. Only the three
- * presentation selector values travel per type; no other persisted server
- * setting is disclosed. A {@code requestId} of zero marks an unsolicited
- * broadcast.
+ * partial map can never fabricate an empty allow view. Each type also discloses
+ * its persisted child deny list; only the presentation selector values and
+ * child deny references travel per type, and no other persisted server setting
+ * is disclosed. A {@code requestId} of zero marks an unsolicited broadcast.
  *
  * <p>The no-argument fallback carries all existing target types with empty
  * allow views; it is only a decoder fallback and remains corrupt until a
@@ -37,20 +42,28 @@ public record ServerPresentationPolicyS2CPacket(
 	boolean canEdit,
 	Map<String, RulesView> rules
 ) implements IPacket {
-	public static final int VERSION = 2;
+	public static final int VERSION = 3;
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		S2C_NAMESPACE,
-		"server-presentation-policy-v2");
+		"server-presentation-policy-v3");
 	public static final Type<ServerPresentationPolicyS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	/** Maximum encoded size of one selector; the accepted grammar is ASCII. */
 	public static final int MAX_ENCODED_SELECTOR_BYTES = ServerPresentationPolicyService.MAX_SELECTOR_LENGTH;
 
-	/** Upper bound of one encoded rule-view payload including every target type id and both lists. */
+	/** Upper bound of one encoded child deny reference at the maximal ID, depth, and key sizes. */
+	public static final int MAX_ENCODED_CHILD_REF_BYTES =
+		2 * (MAX_ENCODED_SELECTOR_BYTES + 2)
+			+ 1 + PresentationLimits.MAX_DEPTH * (PresentationPropertyRef.MAX_KEY_BYTES + 2);
+
+	/** Upper bound of one encoded rule-view payload including every target type id, both lists, and the child deny list. */
 	public static final int MAX_ENCODED_PAYLOAD_BYTES =
 		PresentationSettings.TARGET_TYPE_IDS.size() * (MAX_ENCODED_SELECTOR_BYTES + 8)
 			+ 2 * PresentationSettings.TARGET_TYPE_IDS.size()
 				* ServerPresentationPolicyService.MAX_SELECTORS * (MAX_ENCODED_SELECTOR_BYTES + 3)
+			+ PresentationSettings.TARGET_TYPE_IDS.size() * PresentationSettings.MAX_CHILD_BLACK_REFS
+				* MAX_ENCODED_CHILD_REF_BYTES
+			+ PresentationSettings.TARGET_TYPE_IDS.size() * 5
 			+ 64;
 
 	/** All existing target types with empty allow views; a safe-decoding fallback only. */
@@ -78,11 +91,13 @@ public record ServerPresentationPolicyS2CPacket(
 	}
 
 	private static ServerPresentationPolicyS2CPacket decode(FriendlyByteBuf buf) {
+		if (buf.readableBytes() > PresentationS2CPacket.MAX_S2C_BODY_BYTES)
+			throw new IllegalArgumentException("presentation policy body bytes");
 		ServerPresentationPolicyS2CPacket packet = new ServerPresentationPolicyS2CPacket(
-			buf.readVarLong(),
-			buf.readVarLong(),
+			StrictPacketCodec.readVarLong(buf),
+			StrictPacketCodec.readVarLong(buf),
 			readStatus(buf),
-			buf.readBoolean(),
+			StrictPacketCodec.readBoolean(buf),
 			readRules(buf));
 		if (buf.isReadable()) throw new IllegalArgumentException("trailing presentation policy response");
 		return packet;
@@ -111,7 +126,8 @@ public record ServerPresentationPolicyS2CPacket(
 			return true;
 		}
 
-		return encodedRulesBytes() > MAX_ENCODED_PAYLOAD_BYTES;
+		return encodedRulesBytes() > MAX_ENCODED_PAYLOAD_BYTES
+			|| encodedRulesBytes() + 22 > PresentationS2CPacket.MAX_S2C_BODY_BYTES;
 	}
 
 	/** Exactly every existing target type, no missing and no unknown entry. */
@@ -122,10 +138,13 @@ public record ServerPresentationPolicyS2CPacket(
 
 		for (String id : PresentationSettings.TARGET_TYPE_IDS) {
 			RulesView view = rules.get(id);
-			if (view == null || view.white() == null || view.black() == null) {
+			if (view == null || view.white() == null || view.black() == null || view.childBlack() == null) {
 				return false;
 			}
 			if (!validSelectorList(view.white()) || !validSelectorList(view.black())) {
+				return false;
+			}
+			if (view.childBlack().size() > PresentationSettings.MAX_CHILD_BLACK_REFS) {
 				return false;
 			}
 		}
@@ -168,9 +187,28 @@ public record ServerPresentationPolicyS2CPacket(
 			size += encodedListBytes(view.white());
 			size += encodedListBytes(view.black());
 			size += 1; // whitelistOnly
+			size += encodedChildRefsBytes(view.childBlack());
 		}
 
 		return size;
+	}
+
+	private static int encodedChildRefsBytes(List<PresentationPropertyRef> refs) {
+		int size = varIntSize(refs.size());
+
+		for (PresentationPropertyRef ref : refs) {
+			size += encodedUtfBytes(ref.adapterId());
+			size += encodedUtfBytes(ref.fieldId());
+			size += varIntSize(ref.recordPath().size());
+			for (String key : ref.recordPath()) size += encodedUtfBytes(key);
+		}
+
+		return size;
+	}
+
+	private static int encodedUtfBytes(String value) {
+		int bytes = value.getBytes(StandardCharsets.UTF_8).length;
+		return varIntSize(bytes) + bytes;
 	}
 
 	private static int encodedListBytes(List<String> selectors) {
@@ -207,14 +245,14 @@ public record ServerPresentationPolicyS2CPacket(
 	}
 
 	static List<String> readSelectors(FriendlyByteBuf buf) {
-		int count = buf.readVarInt();
+		int count = StrictPacketCodec.readVarInt(buf);
 		if (count < 0 || count > ServerPresentationPolicyService.MAX_SELECTORS) {
 			throw new IllegalArgumentException("invalid presentation selector count");
 		}
 
 		List<String> selectors = new ArrayList<>(count);
 		for (int i = 0; i < count; i++) {
-			selectors.add(buf.readUtf(ServerPresentationPolicyService.MAX_SELECTOR_LENGTH));
+			selectors.add(StrictPacketCodec.readUtf(buf, ServerPresentationPolicyService.MAX_SELECTOR_LENGTH));
 		}
 
 		return List.copyOf(selectors);
@@ -228,18 +266,19 @@ public record ServerPresentationPolicyS2CPacket(
 	}
 
 	static Map<String, RulesView> readRules(FriendlyByteBuf buf) {
-		int count = buf.readVarInt();
+		int count = StrictPacketCodec.readVarInt(buf);
 		if (count != PresentationSettings.TARGET_TYPE_IDS.size()) {
 			throw new IllegalArgumentException("invalid presentation policy rule count");
 		}
 
 		Map<String, RulesView> rules = new LinkedHashMap<>();
 		for (int i = 0; i < count; i++) {
-			String type = buf.readUtf(193);
+			String type = StrictPacketCodec.readUtf(buf, 193);
 			if (!PresentationSettings.isKnownTargetType(type) || rules.containsKey(type)) {
 				throw new IllegalArgumentException("invalid presentation policy target type");
 			}
-			rules.put(type, new RulesView(readSelectors(buf), readSelectors(buf), buf.readBoolean()));
+			rules.put(type, new RulesView(readSelectors(buf), readSelectors(buf), StrictPacketCodec.readBoolean(buf),
+				readChildRefs(buf)));
 		}
 
 		return validateRules(rules);
@@ -253,11 +292,37 @@ public record ServerPresentationPolicyS2CPacket(
 			writeSelectors(buf, view.white());
 			writeSelectors(buf, view.black());
 			buf.writeBoolean(view.whitelistOnly());
+			writeChildRefs(buf, view.childBlack());
 		}
 	}
 
+	/** Strict child deny list: nested, unique, grammar-valid references within the per-type capacity. */
+	static List<PresentationPropertyRef> readChildRefs(FriendlyByteBuf buf) {
+		int count = StrictPacketCodec.readVarInt(buf);
+		if (count < 0 || count > PresentationSettings.MAX_CHILD_BLACK_REFS) {
+			throw new IllegalArgumentException("invalid presentation child deny count");
+		}
+
+		Set<PresentationPropertyRef> unique = new HashSet<>();
+		List<PresentationPropertyRef> refs = new ArrayList<>(count);
+		for (int i = 0; i < count; i++) {
+			PresentationPropertyRef ref = PresentationCodec.readPropertyRefStrict(buf);
+			if (ref.isRoot() || !unique.add(ref)) {
+				throw new IllegalArgumentException("invalid presentation child deny reference");
+			}
+			refs.add(ref);
+		}
+
+		return List.copyOf(refs);
+	}
+
+	static void writeChildRefs(FriendlyByteBuf buf, List<PresentationPropertyRef> refs) {
+		buf.writeVarInt(refs.size());
+		refs.forEach(ref -> PresentationCodec.writePropertyRef(buf, ref));
+	}
+
 	static Status readStatus(FriendlyByteBuf buf) {
-		int ordinal = buf.readVarInt();
+		int ordinal = StrictPacketCodec.readVarInt(buf);
 		Status[] values = Status.values();
 		if (ordinal < 0 || ordinal >= values.length) {
 			throw new IllegalArgumentException("invalid presentation policy status");

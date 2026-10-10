@@ -141,6 +141,9 @@ public final class ClientPingActionDispatcher {
 
 	private DispatchOutcome dispatchCreate(PingInteractionAction.CreatePing create, List<PresentationPropertyIntent> properties) {
 		if (presentation != null && !presentation.ready()) return DispatchOutcome.NOT_READY;
+		if (presentation != null && properties.stream().anyMatch(property ->
+			!presentation.propertyAllowed(create.context().resolvedTarget().targetType().id(), property.ref())))
+			return DispatchOutcome.NOT_READY;
 		long requestId = create.context().token().sequence();
 		var target = create.context().resolvedTarget().target();
 		var policy = createRateLimiter.policy();

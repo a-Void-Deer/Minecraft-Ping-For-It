@@ -45,6 +45,7 @@ public final class ClientPresentation {
 	private final PresentationStore store = new PresentationStore();
 	private final Consumer<IPacket> sender;
 	private Map<String, Map<String, Set<String>>> mask = Map.of();
+	private Map<String, List<PresentationPropertyRef>> childBlack = Map.of();
 	private final Map<String, Map<String, PresentationField>> compatible = new LinkedHashMap<>();
 	private final Map<String, Map<String, PresentationField>> acceptedServerCatalog = new LinkedHashMap<>();
 	private final Map<String, PresentationUiProvider> providers = new LinkedHashMap<>();
@@ -135,6 +136,7 @@ public final class ClientPresentation {
 		store.reset(0);
 		compatible.clear();
 		mask = Map.of();
+		childBlack = Map.of();
 		acceptedServerCatalog.clear();
 		catalogRevision++;
 		epoch = view = 0;
@@ -158,7 +160,14 @@ public final class ClientPresentation {
 			accepted.forEach((id, field) -> { if (allowed.contains(id)) fields.put(id, field); });
 			if (!fields.isEmpty()) adapters.put(adapter.adapterId(), new PresentationPreviewAccess.Adapter(adapter.schema(), fields));
 		}
-		return Optional.of(new PresentationPreviewAccess(epoch, view, targetTypeId, adapters));
+		return Optional.of(new PresentationPreviewAccess(epoch, view, targetTypeId, adapters,
+			Set.copyOf(childBlack.get(targetTypeId))));
+	}
+	/** Current server authority for an exact property, also used immediately before dispatch. */
+	public boolean propertyAllowed(String targetTypeId, PresentationPropertyRef ref) {
+		var access = previewAccess(targetTypeId).orElse(null);
+		if (access == null || !access.allows(ref)) return false;
+		return ref.isRoot() || access.adapters().get(ref.adapterId()).fields().get(ref.fieldId()).kind() == PresentationField.Kind.RECORD;
 	}
 	/** Package-private verification seam; UI callers only receive {@link #view}. */
 	PresentationStore store() { return store; }
@@ -252,8 +261,14 @@ public final class ClientPresentation {
 		// A structurally valid but incomplete mask is deny-all for missing types.
 		Map<String, Map<String, Set<String>>> nextMask = packet.mask();
 		if (nextMask == null) nextMask = Map.of();
-		mask = compatibleMask(nextMask);
-		store.restrict(mask);
+		Map<String, List<PresentationPropertyRef>> nextChildBlack = packet.childBlack();
+		if (nextChildBlack == null || nextChildBlack.size() != PresentationSettings.TARGET_TYPE_IDS.size()
+			|| !nextChildBlack.keySet().containsAll(PresentationSettings.TARGET_TYPE_IDS)) return false;
+		Map<String, Map<String, Set<String>>> acceptedMask = compatibleMask(nextMask);
+		// Both policies are validated before either becomes observable.
+		mask = acceptedMask;
+		childBlack = nextChildBlack;
+		store.restrict(mask, childBlack);
 		store.generation(epoch, packet.view());
 		view = packet.view();
 		ready = true;
@@ -271,6 +286,7 @@ public final class ClientPresentation {
 		if (!current(packet) || packet.kind() != PresentationS2CPacket.Kind.CREATED
 			|| packet.snapshot() == null || packet.markerId() == null
 			|| !packet.markerId().equals(packet.snapshot().id()) || packet.revision() < 1) return false;
+		if (packet.defaultRef() != null && childBlack.getOrDefault(packet.snapshot().targetTypeId(), List.of()).contains(packet.defaultRef())) return false;
 		PresentationSection basic = decode(packet.sectionBytes(), BASIC, packet.snapshot().targetTypeId());
 		if (basic == null || !validReceipt(packet, basic)) return false;
 		long id = packet.markerId().value();
@@ -297,7 +313,7 @@ public final class ClientPresentation {
 		for (PresentationPropertyRef ref : packet.content().selectedRefs()) {
 			var adapter = access.adapters().get(ref.adapterId());
 			PresentationField field = adapter == null ? null : adapter.fields().get(ref.fieldId());
-			if (field == null || !ref.isRoot() && field.kind() != PresentationField.Kind.RECORD) return false;
+			if (field == null || !access.allows(ref) || !ref.isRoot() && field.kind() != PresentationField.Kind.RECORD) return false;
 			// A later SECTION may supply a missing value; presence without its explicit
 			// annotation is malformed metadata, not a reason to publish an ordinary line.
 			if (BASIC.equals(ref.adapterId()) && ref.resolve(basic) != null
@@ -347,7 +363,7 @@ public final class ClientPresentation {
 			});
 			Map<PresentationPropertyRef, String> annotations = new LinkedHashMap<>();
 			decoded.annotations().forEach((ref, ping) -> {
-				if (checked.containsKey(ref.fieldId())) annotations.put(ref, ping);
+				if (checked.containsKey(ref.fieldId()) && !childBlack.getOrDefault(targetTypeId, List.of()).contains(ref)) annotations.put(ref, ping);
 			});
 			return new PresentationSection(adapter, schema, checked, decoded.stale(), annotations);
 		} catch (RuntimeException invalid) {
@@ -366,7 +382,7 @@ public final class ClientPresentation {
 		});
 		Map<PresentationPropertyRef, String> annotations = new LinkedHashMap<>();
 		section.annotations().forEach((ref, ping) -> {
-			if (fields.containsKey(ref.fieldId())) annotations.put(ref, ping);
+			if (fields.containsKey(ref.fieldId()) && !childBlack.getOrDefault(targetTypeId, List.of()).contains(ref)) annotations.put(ref, ping);
 		});
 		return new PresentationSection(section.adapterId(), section.schema(), fields, section.stale(), annotations);
 	}
@@ -395,9 +411,11 @@ public final class ClientPresentation {
 	/** Only values authorized by the latest server mask may reach a UI provider. */
 	public PresentationView view(MarkerId id) {
 		if (id == null || !store.isKnown(id.value())) return PresentationView.empty();
+		String targetTypeId = store.targetTypeId(id.value());
+		if (targetTypeId == null) return PresentationView.empty(); // a hard-removal tombstone has no display authority
 		Map<String, PresentationSection> shown = new LinkedHashMap<>();
 		store.sections(id.value()).forEach((adapter, entry) -> {
-			PresentationSection authorized = project(entry.section(), store.targetTypeId(id.value()));
+			PresentationSection authorized = project(entry.section(), targetTypeId);
 			if (!authorized.fields().isEmpty()) shown.put(adapter, authorized);
 		});
 		Map<String, Map<String, String>> labels = new LinkedHashMap<>();
@@ -406,7 +424,8 @@ public final class ClientPresentation {
 			descriptors.forEach((fieldId, descriptor) -> names.put(fieldId, descriptor.label()));
 			labels.put(adapter, names);
 		});
-		return new PresentationView(store.targetTypeId(id.value()), store.defaultRef(id.value()), shown, labels);
+		return new PresentationView(targetTypeId, store.defaultRef(id.value()), shown, labels,
+			Set.copyOf(childBlack.getOrDefault(targetTypeId, List.of())));
 	}
 
 	/** Provider changes affect presentation only: no packets or source work. */

@@ -86,6 +86,24 @@ class PresentationServerPreviewTest {
 		session.ready = false;
 		assertTrue(PresentationServer.previewAccess(session, adapters, "block", adapter -> fail("unready must not authorize")).isEmpty());
 	}
+
+	@Test void freshAndAdvertisedChildDenialsUnionAndPromotionWaitsForReset() {
+		var adapters = registry(); var session = session(adapters, Set.of(PresentationBasic.BLOCK_STATE));
+		var old = new nx.pingwheel.common.presentation.PresentationPropertyRef(PresentationBasic.ID, PresentationBasic.BLOCK_STATE, List.of("old"));
+		var fresh = new nx.pingwheel.common.presentation.PresentationPropertyRef(PresentationBasic.ID, PresentationBasic.BLOCK_STATE, List.of("fresh"));
+		var descendant = new nx.pingwheel.common.presentation.PresentationPropertyRef(PresentationBasic.ID, PresentationBasic.BLOCK_STATE, List.of("fresh", "leaf"));
+		session.childBlack = Map.of("block", List.of(old));
+		var settings = PresentationSettings.serverDefaults();
+		settings.setRules("block", new PresentationSettings.RuleSet(List.of("minecraft:*"), List.of(), false, List.of(fresh)));
+		var denied = PresentationServer.effectiveChildBlack(session, settings, "block");
+		assertEquals(Set.of(old, fresh), denied);
+		var access = PresentationServer.previewAccess(session, adapters, "block", adapter -> Set.of(PresentationBasic.BLOCK_STATE), denied).orElseThrow();
+		assertFalse(access.allows(old)); assertFalse(access.allows(fresh)); assertTrue(access.allows(descendant));
+		assertTrue(access.allows(nx.pingwheel.common.presentation.PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.BLOCK_STATE)));
+		session.childBlack = PresentationServer.childBlackFor(settings); session.view++;
+		assertEquals(Set.of(fresh), PresentationServer.effectiveChildBlack(session, settings, "block"), "new RESET enables the newly allowed exact child");
+		assertFalse(access.allows(old), "detached old access is never widened");
+	}
 	@Test void bridgeDebitsBeforeValidationAndReadsOnlyAdmittedDemandWithoutPublishingPlaceholder() {
 		var adapters = registry(); var session = session(adapters, Set.of(PresentationBasic.BLOCK_STATE));
 		var access = PresentationServer.previewAccess(session, adapters, "block", adapter -> Set.of(PresentationBasic.BLOCK_STATE)).orElseThrow();

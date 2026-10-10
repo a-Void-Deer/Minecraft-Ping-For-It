@@ -99,4 +99,49 @@ class ClientPresentationPreviewTest {
 		assertEquals(Set.of(LOCAL), sent.getFirst().fields());
 		assertTrue(preview.projection().orElseThrow().property(PresentationPropertyRef.root(ADAPTER, LOCAL)).isEmpty());
 	}
+
+	@Test void localAndServerRecordsKeepRootsButOmitExactChildrenAndRecheckRevocationAtDispatch() {
+		String field = "create:kinetic.speed", adapter = "create:presentation";
+		var root = PresentationPropertyRef.root(adapter, field);
+		var denied = new PresentationPropertyRef(adapter, field, List.of("effective_rpm"));
+		var other = new PresentationPropertyRef(adapter, field, List.of("moving"));
+		var descriptor = new PresentationPreviewAccess.Adapter(1, Map.of(field,
+			new PresentationField(field, PresentationField.Kind.RECORD, true, 0, "Speed")));
+		var record = new PresentationValue.RecordValue(Map.of("effective_rpm", new PresentationValue.NumberValue(32),
+			"theoretical_rpm", new PresentationValue.NumberValue(64), "moving", new PresentationValue.Flag(true)));
+		for (boolean local : List.of(true, false)) {
+			Context world = new Context(); List<PresentationPreviewC2SPacket> sent = new ArrayList<>();
+			var auth = new AtomicReference<>(new PresentationPreviewAccess(71, 1, "block", Map.of(adapter, descriptor), Set.of(denied)));
+			PreviewFieldAccess reader = new PreviewFieldAccess() {
+				public String adapterId() { return adapter; }
+				public Map<String, Outcome> observe(Target target, Set<String> demand, ReadContext context) {
+					return local ? Map.of(field, new Observed(new PreviewObservation(record, PreviewObservation.Origin.CLIENT_SYNCED, 0, false))) : Map.of();
+				}
+			};
+			var preview = new ClientPresentationPreview(type -> Optional.of(auth.get()), () -> world, List.of(reader), (t, type) -> Optional.empty(), sent::add);
+			Object token = new Object(); preview.begin(new ClientPresentationPreview.Binding(token,
+				new Target.LocationTarget(world.dimensionId(), 0, 0, 0), "block", world.level));
+			if (!local) assertTrue(preview.accept(PresentationPreviewS2CPacket.result(sent.getFirst(), new PresentationSection(adapter, 1, Map.of(field, record), false))));
+			else assertTrue(sent.isEmpty());
+			var projection = preview.projection().orElseThrow();
+			assertEquals(record, projection.property(root).orElseThrow().value());
+			assertTrue(projection.property(denied).isEmpty());
+			assertTrue(preview.intent(token, denied, "attention").isEmpty());
+			assertFalse(PreviewPropertyEntries.of(projection).stream().anyMatch(entry -> denied.equals(entry.ref())));
+			assertTrue(preview.intent(token, other, "attention").isPresent());
+			auth.set(new PresentationPreviewAccess(71, 2, "block", Map.of(adapter, descriptor), Set.of(denied, other)));
+			assertTrue(preview.intent(token, other, "attention").isEmpty(), "a painted/prepared child is rechecked at release");
+		}
+	}
+
+	@Test void intermediateDenialOmitsOnlyThatEntryNotItsDescendants() {
+		var parent = new PresentationPropertyRef(ADAPTER, LOCAL, List.of("parent"));
+		var child = new PresentationPropertyRef(ADAPTER, LOCAL, List.of("parent", "child"));
+		var value = new PresentationValue.RecordValue(Map.of("parent", new PresentationValue.RecordValue(Map.of("child", new PresentationValue.NumberValue(1)))));
+		var projection = new ClientPresentationPreview.Projection(java.util.UUID.randomUUID(), new Target.LocationTarget("minecraft:overworld", 0, 0, 0),
+			"block", 71, 1, Map.of(PresentationPropertyRef.root(ADAPTER, LOCAL), new PreviewFieldAccess.Observed(
+				new PreviewObservation(value, PreviewObservation.Origin.CLIENT_SYNCED, 0, false))), Set.of(parent));
+		assertTrue(projection.property(parent).isEmpty()); assertTrue(projection.property(child).isPresent());
+		assertEquals(List.of(PresentationPropertyRef.root(ADAPTER, LOCAL), child), PreviewPropertyEntries.of(projection).stream().map(PreviewPropertyEntries.Entry::ref).toList());
+	}
 }

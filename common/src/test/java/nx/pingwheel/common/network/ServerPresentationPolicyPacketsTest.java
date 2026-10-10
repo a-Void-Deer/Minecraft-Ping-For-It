@@ -30,11 +30,11 @@ class ServerPresentationPolicyPacketsTest {
 	}
 
 	@Test
-	void routeIsVersionTwo() {
-		assertEquals(2, ServerPresentationPolicyC2SPacket.VERSION);
-		assertEquals(2, ServerPresentationPolicyS2CPacket.VERSION);
-		assertEquals("pingforit-c2s:server-presentation-policy-v2", ServerPresentationPolicyC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-s2c:server-presentation-policy-v2", ServerPresentationPolicyS2CPacket.PACKET_ID.toString());
+	void routeIsVersionThree() {
+		assertEquals(3, ServerPresentationPolicyC2SPacket.VERSION);
+		assertEquals(3, ServerPresentationPolicyS2CPacket.VERSION);
+		assertEquals("pingforit-c2s:server-presentation-policy-v3", ServerPresentationPolicyC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:server-presentation-policy-v3", ServerPresentationPolicyS2CPacket.PACKET_ID.toString());
 	}
 
 	@Test

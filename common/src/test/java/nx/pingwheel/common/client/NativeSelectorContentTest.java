@@ -356,6 +356,37 @@ class NativeSelectorContentTest {
 		});
 	}
 
+	@Test void deniedRpmChildrenAreOmittedFromLocalAndServerMenusButRootStillFormatsRpm() throws IOException {
+		withEnglishTranslations(() -> {
+			for (boolean local : List.of(true, false)) {
+				var context = new PreviewContext(); var capture = capture();
+				var speed = speedRecord(32, 64, true);
+				var effective = new PresentationPropertyRef(CREATE, SPEED, List.of("effective_rpm"));
+				var theoretical = new PresentationPropertyRef(CREATE, SPEED, List.of("theoretical_rpm"));
+				var access = new PresentationPreviewAccess(1, 1, "entity_block", Map.of(CREATE,
+					new PresentationPreviewAccess.Adapter(1, Map.of(SPEED,
+						new PresentationField(SPEED, PresentationField.Kind.RECORD, true, 0, "Speed")))), Set.of(effective, theoretical));
+				List<PresentationPreviewC2SPacket> sent = new ArrayList<>();
+				var preview = new ClientPresentationPreview(type -> Optional.of(access), () -> context,
+					local ? List.of(previewValueReader(CREATE, Map.of(SPEED, speed))) : List.of(),
+					(target, type) -> Optional.empty(), sent::add);
+				var content = new NativeSelectorContent(capture, preview, () -> null, ignored -> List.of(ping("attention")),
+					ref -> Component.literal(ref.fieldId()), json -> null);
+				content.begin(context.level);
+				if (!local) assertTrue(preview.accept(PresentationPreviewS2CPacket.result(sent.getFirst(),
+					new PresentationSection(CREATE, 1, Map.of(SPEED, speed), false))));
+				var shown = content.read(previewTarget(capture), previewFence(content));
+				assertEquals(List.of(List.of(), List.of("moving")), shown.properties().stream().map(property -> property.ref().recordPath()).toList());
+				assertEquals(speed, projectedEntry(shown, SPEED, List.of()).observedValue());
+				assertEquals("create:kinetic.speed: 32 RPM", content.label(projectedEntry(shown, SPEED, List.of()).labelKey()).getString());
+				assertTrue(content.intent(effective, "attention").isEmpty());
+				assertTrue(content.intent(theoretical, "attention").isEmpty());
+				assertTrue(content.intent(PresentationPropertyRef.root(CREATE, SPEED), "attention").isPresent());
+				content.close();
+			}
+		});
+	}
+
 	@Test void speedWithoutNumericEffectiveRpmKeepsTheExistingGenericRecordSummary() throws IOException {
 		withEnglishTranslations(() -> {
 			// The HUD's established format logic falls through to the generic

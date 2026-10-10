@@ -40,6 +40,7 @@ import nx.pingwheel.common.presentation.preview.PresentationPreviewServer;
 
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /** Server-thread, world-lifetime presentation leases. Cached values never hold world objects. */
@@ -63,6 +64,7 @@ public final class PresentationServer {
 		final Map<String, List<PresentationField>> manifest;
 		final Map<Long, SentMarker> sent = new HashMap<>();
 		Map<String, Map<String, Set<String>>> mask = Map.of();
+		Map<String, List<PresentationPropertyRef>> childBlack = Map.of();
 		Set<String> inventoryTypes = Set.of();
 		long view;
 		long revision;
@@ -166,11 +168,12 @@ public final class PresentationServer {
 
 	private static void prepare(ServerPlayer player, Session session, ServerMarkerStore store) {
 		session.mask = mask(player, session);
+		session.childBlack = childBlackFor(settings());
 		session.inventoryTypes = inventoryTypes(player, session);
 		session.view++;
 		session.ready = true;
 		session.sent.clear();
-		send(player, PresentationS2CPacket.reset(session.epoch, session.view, session.mask));
+		send(player, PresentationS2CPacket.reset(session.epoch, session.view, session.mask, session.childBlack));
 		long tick = activeServer.getTickCount();
 		cachedBaseline(LEASES.values(), tick, player.getUUID(), lease -> {
 			sendInitial(player, session, lease);
@@ -345,14 +348,17 @@ public final class PresentationServer {
 			ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
 			if (player == null) continue;
 			Map<String, Map<String, Set<String>>> effective = mask(player, session);
+			Map<String, List<PresentationPropertyRef>> effectiveChildBlack = childBlackFor(settings());
 			Set<String> dedicated = inventoryTypes(player, session);
-			if (!policyChanged && effective.equals(session.mask) && dedicated.equals(session.inventoryTypes)) continue;
+			if (!policyChanged && effective.equals(session.mask)
+				&& effectiveChildBlack.equals(session.childBlack) && dedicated.equals(session.inventoryTypes)) continue;
 			session.mask = effective;
+			session.childBlack = effectiveChildBlack;
 			session.inventoryTypes = dedicated;
 			session.view++;
 			Map<Long, SentMarker> previouslySent = new HashMap<>(session.sent);
 			session.sent.clear();
-			send(player, PresentationS2CPacket.reset(session.epoch, session.view, effective));
+			send(player, PresentationS2CPacket.reset(session.epoch, session.view, effective, effectiveChildBlack));
 			cachedBaseline(LEASES.values(), server.getTickCount(), player.getUUID(), lease -> {
 				sendInitial(player, session, lease);
 				publish(player, session, lease);
@@ -504,6 +510,36 @@ public final class PresentationServer {
 		return Map.copyOf(result);
 	}
 
+	/** The fresh, complete per-target-type child deny map of the current policy. */
+	static Map<String, List<PresentationPropertyRef>> childBlackFor(PresentationSettings settings) {
+		Map<String, List<PresentationPropertyRef>> result = new LinkedHashMap<>();
+		for (String type : PresentationSettings.TARGET_TYPE_IDS)
+			result.put(type, settings == null ? List.of() : settings.policyFor(type).childBlack());
+		return Map.copyOf(result);
+	}
+
+	/**
+	 * The target type's effective child deny set: the advertised session map
+	 * (its RESET view fence) unioned with the fresh policy, so a newly denied
+	 * reference is denied immediately and a newly allowed reference is not
+	 * promoted before a RESET re-baselines the view.
+	 */
+	static Set<PresentationPropertyRef> effectiveChildBlack(Session session, PresentationSettings settings,
+		String targetTypeId) {
+		if (!PresentationSettings.isKnownTargetType(targetTypeId)) return Set.of();
+		Set<PresentationPropertyRef> result = new LinkedHashSet<>();
+		if (session != null && session.childBlack != null)
+			result.addAll(session.childBlack.getOrDefault(targetTypeId, List.of()));
+		if (settings != null) result.addAll(settings.policyFor(targetTypeId).childBlack());
+		return Set.copyOf(result);
+	}
+
+	/** True when the exact reference is denied by the advertised or fresh child deny list. */
+	static boolean childBlackDenied(Session session, PresentationSettings settings, String targetTypeId,
+		PresentationPropertyRef ref) {
+		return ref != null && effectiveChildBlack(session, settings, targetTypeId).contains(ref);
+	}
+
 	private static Set<String> allowed(ServerPlayer player, Session session, PresentationAdapter adapter,
 		String targetTypeId) {
 		if (!Objects.equals(session.schemas.get(adapter.adapterId()), adapter.schema())) return Set.of();
@@ -533,6 +569,17 @@ public final class PresentationServer {
 
 	static PresentationSection project(PresentationAdapter adapter, PresentationSection source,
 		Set<String> allowed, List<PresentationPropertySelection> selections) {
+		return project(adapter, source, allowed, selections, ref -> true);
+	}
+
+	/**
+	 * The exact child predicate suppresses a selection annotation while the root
+	 * value stays complete: a denied nested reference is never annotated, and no
+	 * allow selector or admitted selection can restore it.
+	 */
+	static PresentationSection project(PresentationAdapter adapter, PresentationSection source,
+		Set<String> allowed, List<PresentationPropertySelection> selections,
+		Predicate<PresentationPropertyRef> childAllowed) {
 		Map<String, PresentationValue> fields = new LinkedHashMap<>();
 		if (source != null) for (PresentationField descriptor : adapter.fields()) {
 			PresentationValue value = source.fields().get(descriptor.id());
@@ -543,16 +590,23 @@ public final class PresentationServer {
 			source != null && source.stale());
 		for (PresentationPropertySelection selection : selections) {
 			if (selection.pingTypeId() != null && selection.ref().adapterId().equals(adapter.adapterId())
-				&& allowed.contains(selection.ref().fieldId()) && selection.ref().resolve(neutral) != null)
+				&& allowed.contains(selection.ref().fieldId()) && childAllowed.test(selection.ref())
+				&& selection.ref().resolve(neutral) != null)
 				annotations.put(selection.ref(), selection.pingTypeId());
 		}
 		return new PresentationSection(adapter.adapterId(), adapter.schema(), fields, neutral.stale(), annotations);
 	}
 
+	private static Predicate<PresentationPropertyRef> childAllowed(Session session, String targetTypeId) {
+		Set<PresentationPropertyRef> denied = effectiveChildBlack(session, settings(), targetTypeId);
+		return ref -> !denied.contains(ref);
+	}
+
 	private static PresentationSection project(ServerPlayer player, Session session, PresentationAdapter adapter, Lease lease) {
 		Source source = lease.sources.get(adapter.adapterId());
+		String targetType = lease.marker.targetType().id();
 		return project(adapter, source == null ? null : source.value,
-			allowed(player, session, adapter, lease.marker.targetType().id()), lease.marker.properties());
+			allowed(player, session, adapter, targetType), lease.marker.properties(), childAllowed(session, targetType));
 	}
 
 	private static void sendInitial(ServerPlayer player, Session session, Lease lease) {
@@ -608,7 +662,7 @@ public final class PresentationServer {
 		// A semantically valid Basic capture may exceed the encoded field bounds;
 		// degrade to the established empty stale section instead of throwing here.
 		PresentationSection projected = PresentationCodec.bounded(project(basic,
-			cached, allowed, marker.properties()));
+			cached, allowed, marker.properties(), childAllowed(session, marker.targetType().id())));
 		PresentationReceiptContent content = receipt(session, marker, basic, allowed, freshAuthorization,
 			inventoryTracked, freshInventoryTypes);
 		delivery.accept(PresentationS2CPacket.created(session.epoch, session.view,
@@ -632,7 +686,7 @@ public final class PresentationServer {
 		boolean inventoryTracked, Set<String> freshInventoryTypes) {
 		String targetType = marker.targetType().id();
 		boolean nameAuthorized = receiptFieldAuthorized(session, targetType, basic,
-			PresentationBasic.NAME, basicAllowed);
+			PresentationPropertyRef.root(basic.adapterId(), PresentationBasic.NAME), basicAllowed);
 		boolean inventoryAuthorized = inventoryTracked
 			&& Objects.equals(session.schemas.get(InventoryPresentation.ADAPTER_ID), InventoryPresentation.SCHEMA)
 			&& freshInventoryTypes.contains(targetType);
@@ -643,25 +697,30 @@ public final class PresentationServer {
 					? basic : registry.get(ref.adapterId());
 				if (adapter == null) return false;
 				Set<String> fresh = adapter == basic ? basicAllowed : freshAuthorization.apply(adapter);
-				return receiptFieldAuthorized(session, targetType, adapter, ref.fieldId(), fresh);
+				return receiptFieldAuthorized(session, targetType, adapter, ref, fresh);
 			});
 	}
 
-	/** Accepted schema/kind, advertised mask, and fresh permission must all include the field. */
+	/**
+	 * Accepted schema/kind, advertised mask, fresh permission, and the exact
+	 * child deny predicate must all admit the reference; an allow selector never
+	 * overrides a child deny.
+	 */
 	private static boolean receiptFieldAuthorized(Session session, String targetTypeId, PresentationAdapter adapter,
-		String fieldId, Set<String> freshAllowed) {
-		if (!Objects.equals(session.schemas.get(adapter.adapterId()), adapter.schema())) return false;
+		PresentationPropertyRef ref, Set<String> freshAllowed) {
+		if (ref == null || !Objects.equals(session.schemas.get(adapter.adapterId()), adapter.schema())) return false;
 		List<PresentationField> advertised = session.manifest.get(adapter.adapterId());
 		PresentationField local = null;
-		for (PresentationField field : adapter.fields()) if (field.id().equals(fieldId)) { local = field; break; }
+		for (PresentationField field : adapter.fields()) if (field.id().equals(ref.fieldId())) { local = field; break; }
 		if (local == null || advertised == null) return false;
 		PresentationField.Kind requiredKind = local.kind();
 		boolean compatible = advertised.stream().anyMatch(field ->
-			field.id().equals(fieldId) && field.kind() == requiredKind);
+			field.id().equals(ref.fieldId()) && field.kind() == requiredKind);
 		if (!compatible) return false;
 		if (!session.mask.getOrDefault(targetTypeId, Map.of())
-			.getOrDefault(adapter.adapterId(), Set.of()).contains(fieldId)) return false;
-		return freshAllowed.contains(fieldId);
+			.getOrDefault(adapter.adapterId(), Set.of()).contains(ref.fieldId())) return false;
+		if (childBlackDenied(session, settings(), targetTypeId, ref)) return false;
+		return freshAllowed.contains(ref.fieldId());
 	}
 
 	private static void publish(ServerPlayer player, Session session, Lease lease) {
@@ -681,7 +740,8 @@ public final class PresentationServer {
 		SentMarker known = session.sent.get(marker.id().value());
 		if (known == null) return;
 		PresentationSection projected = project(adapter, cached,
-			allowed(player, session, adapter, marker.targetType().id()), marker.properties());
+			allowed(player, session, adapter, marker.targetType().id()), marker.properties(),
+			childAllowed(session, marker.targetType().id()));
 		sendProjectedSection(player, session, marker.id(), adapter, projected, known.sections);
 	}
 
@@ -711,15 +771,26 @@ public final class PresentationServer {
 		if (previews != null) previews.disconnect(player);
 	}
 
-	/** Fresh server permission/policy intersected with the already-advertised SECTION view. */
+	/**
+	 * Fresh server permission/policy and the exact child deny fence intersected
+	 * with the already-advertised SECTION view.
+	 */
 	public static Optional<PresentationPreviewAccess> previewAccess(UUID playerId, String targetTypeId) {
 		Session session = SESSIONS.get(playerId);
 		ServerPlayer player = activeServer == null ? null : activeServer.getPlayerList().getPlayer(playerId);
 		if (player == null) return Optional.empty();
-		return previewAccess(session, registry, targetTypeId, adapter -> allowed(player, session, adapter, targetTypeId));
+		return previewAccess(session, registry, targetTypeId,
+			adapter -> allowed(player, session, adapter, targetTypeId),
+			effectiveChildBlack(session, settings(), targetTypeId));
 	}
 	static Optional<PresentationPreviewAccess> previewAccess(Session session, PresentationRegistry adapters,
 		String targetTypeId, Function<PresentationAdapter, Set<String>> freshAuthorization) {
+		return previewAccess(session, adapters, targetTypeId, freshAuthorization,
+			session == null ? Set.of() : Set.copyOf(session.childBlack.getOrDefault(targetTypeId, List.of())));
+	}
+	static Optional<PresentationPreviewAccess> previewAccess(Session session, PresentationRegistry adapters,
+		String targetTypeId, Function<PresentationAdapter, Set<String>> freshAuthorization,
+		Set<PresentationPropertyRef> childBlack) {
 		if (session == null || !session.ready || !PresentationSettings.isKnownTargetType(targetTypeId)) return Optional.empty();
 		Map<String, PresentationPreviewAccess.Adapter> result = new LinkedHashMap<>();
 		for (PresentationAdapter adapter : adapters.sectionAdapters()) {
@@ -734,7 +805,8 @@ public final class PresentationServer {
 			}
 			if (!fields.isEmpty()) result.put(adapter.adapterId(), new PresentationPreviewAccess.Adapter(adapter.schema(), fields));
 		}
-		return Optional.of(new PresentationPreviewAccess(session.epoch, session.view, targetTypeId, result));
+		return Optional.of(new PresentationPreviewAccess(session.epoch, session.view, targetTypeId, result,
+			childBlack == null ? Set.of() : childBlack));
 	}
 	static PresentationAdapter previewAdapter(String id) { return registry.get(id); }
 	static PresentationSettings previewSettings() { return settings(); }
@@ -792,6 +864,13 @@ public final class PresentationServer {
 		if (session == null || !session.ready || settings().scanBudget() == 0)
 			return MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST);
 		Map<String, Set<String>> allowed = mask(owner, session).getOrDefault(targetTypeId, Map.of());
+		Set<PresentationPropertyRef> deniedChildren = effectiveChildBlack(session, settings(), targetTypeId);
+		// Reject forged/revoked references before world lookup or external source observation.
+		if (intents == null || intents.stream().anyMatch(intent -> intent == null
+			|| deniedChildren.contains(intent.ref())
+			|| !allowed.getOrDefault(intent.ref().adapterId(), Set.of()).contains(intent.ref().fieldId())
+			|| !session.mask.getOrDefault(targetTypeId, Map.of()).getOrDefault(intent.ref().adapterId(), Set.of()).contains(intent.ref().fieldId())))
+			return MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST);
 		Set<String> initialBasic = new LinkedHashSet<>();
 		PresentationAdapter basicAdapter = registry.get(PresentationBasic.ID);
 		for (UUID id : audience) {
@@ -865,7 +944,8 @@ public final class PresentationServer {
 				PresentationSection section = adapter.collect(detached(committed), demand, limited);
 				for (int i = allowance - limited.remaining(); i > 0; i--) budget.scan();
 				return section;
-			});
+			},
+			ref -> !deniedChildren.contains(ref));
 	}
 
 	record ExternalAdmissionObservation(BlockState state, boolean nameOnly) {}

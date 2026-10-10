@@ -62,7 +62,8 @@ public final class PendingContentChatController {
 	 * One detached read of the accepted stores. When ready, allowedFields is the
 	 * accepted schema/current mask intersection for this marker's target type;
 	 * an excluded root is denied, even if no value has arrived. Nested refs use
-	 * their root's authorization. Inventory authority is separate from SECTION
+	 * their root's authorization plus the exact child deny fence. Inventory
+	 * authority is separate from SECTION
 	 * masks. live means current membership without authoritative removal/expiry,
 	 * not visibility: a locally elapsed display deadline is irrelevant.
 	 *
@@ -86,7 +87,8 @@ public final class PendingContentChatController {
 				tracking.watermark(), List.copyOf(tracking.entries()));
 		}
 		boolean allows(PresentationPropertyRef ref) {
-			return allowedFields.getOrDefault(ref.adapterId(), Set.of()).contains(ref.fieldId());
+			return allowedFields.getOrDefault(ref.adapterId(), Set.of()).contains(ref.fieldId())
+				&& !projection.childBlack().contains(ref);
 		}
 	}
 
@@ -296,12 +298,12 @@ public final class PendingContentChatController {
 			Map<PresentationPropertyRef, String> annotations = new LinkedHashMap<>();
 			section.annotations().forEach((ref, ping) -> {
 				// Filtering keeps/removes whole roots; existing section paths remain valid.
-				if (fields.containsKey(ref.fieldId())) annotations.put(ref, ping);
+				if (fields.containsKey(ref.fieldId()) && current.allows(ref)) annotations.put(ref, ping);
 			});
 			sections.put(adapter, new PresentationSection(adapter, section.schema(), fields, false, annotations));
 		});
 		return new PresentationView(current.projection().targetTypeId(), current.projection().defaultRef(),
-			sections, current.projection().fieldLabels());
+			sections, current.projection().fieldLabels(), current.projection().childBlack());
 	}
 
 	/** Removal, EXPIRED, eviction and authorization revocation all use this hook. */

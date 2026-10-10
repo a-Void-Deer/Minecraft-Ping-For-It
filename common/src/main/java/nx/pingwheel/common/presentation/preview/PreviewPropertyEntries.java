@@ -13,21 +13,22 @@ public final class PreviewPropertyEntries {
 		List<Entry> result = new ArrayList<>();
 		projection.fields().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey()).forEach(entry -> {
 			if (entry.getValue() instanceof PreviewFieldAccess.Observed observed)
-				add(result, entry.getKey(), observed.observation());
+				add(result, entry.getKey(), observed.observation(), projection.childBlack());
 		});
 		return List.copyOf(result);
 	}
-	private static void add(List<Entry> result, PresentationPropertyRef ref, PreviewObservation observed) {
+	private static void add(List<Entry> result, PresentationPropertyRef ref, PreviewObservation observed,
+		java.util.Set<PresentationPropertyRef> childBlack) {
 		if (result.size() >= PresentationPreviewLimits.MAX_PROPERTY_ENTRIES) return;
 		// Health is displayed only with its maximum by the owning facade/formatter, not invented here.
-		result.add(new Entry(ref, observed));
+		if (!childBlack.contains(ref)) result.add(new Entry(ref, observed));
 		if (observed.value() instanceof PresentationValue.RecordValue record) {
 			for (String key : record.values().keySet().stream().sorted().toList()) {
 				List<String> path = new ArrayList<>(ref.recordPath()); path.add(key);
 				PresentationPropertyRef nested;
 				try { nested = new PresentationPropertyRef(ref.adapterId(), ref.fieldId(), path); }
 				catch (IllegalArgumentException unaddressable) { continue; }
-				add(result, nested, new PreviewObservation(record.values().get(key), observed.origin(), observed.observedAtTick(), observed.stale()));
+				add(result, nested, new PreviewObservation(record.values().get(key), observed.origin(), observed.observedAtTick(), observed.stale()), childBlack);
 			}
 		}
 	}

@@ -82,4 +82,40 @@ class ClientPresentationPreviewAccessTest {
 		assertTrue(preview.intent(token, PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.HEALTH), null).isEmpty());
 		assertTrue(client.store().sections(1).isEmpty(), "provisional data never populates the marker store");
 	}
+
+	@Test void childOnlyResetFencesPendingResponseAndRetainedCacheCannotReintroduceDeniedEntry() {
+		var client = new ClientPresentation(packet -> {}); client.tick(true);
+		assertTrue(client.offer(PresentationS2CPacket.offer(73, Map.of(PresentationBasic.ID, PresentationBasic.fields()), Map.of(PresentationBasic.ID, 1))));
+		var mask = Map.of("block", Map.of(PresentationBasic.ID, Set.of(PresentationBasic.BLOCK_STATE)));
+		assertTrue(client.reset(PresentationS2CPacket.reset(73, 1, mask)));
+		Object level = new Object(), token = new Object();
+		Target target = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:stone");
+		var context = new PreviewFieldAccess.ReadContext() {
+			public Object levelIdentity() { return level; }
+			public String dimensionId() { return target.dimensionId(); }
+			public long tick() { return 0; }
+		};
+		var child = new PresentationPropertyRef(PresentationBasic.ID, PresentationBasic.BLOCK_STATE, List.of("lit"));
+		var root = PresentationPropertyRef.root(child.adapterId(), child.fieldId());
+		var section = new PresentationSection(PresentationBasic.ID, 1, Map.of(PresentationBasic.BLOCK_STATE,
+			new PresentationValue.RecordValue(Map.of("lit", new PresentationValue.Flag(true), "facing", new PresentationValue.Text("north")))), false,
+			Map.of(child, "danger"));
+		List<PresentationPreviewC2SPacket> sent = new ArrayList<>();
+		var cached = new java.util.concurrent.atomic.AtomicReference<ClientPresentationPreview.RetainedSnapshot>();
+		var preview = new ClientPresentationPreview(client::previewAccess, () -> context, List.of(),
+			(t, type) -> Optional.ofNullable(cached.get()), sent::add);
+		preview.begin(new ClientPresentationPreview.Binding(token, target, "block", level));
+		var oldRequest = sent.getFirst();
+		var denies = new java.util.LinkedHashMap<>(PresentationS2CPacket.emptyChildBlack()); denies.put("block", List.of(child));
+		assertTrue(client.reset(PresentationS2CPacket.reset(73, 2, mask, denies)));
+		cached.set(new ClientPresentationPreview.RetainedSnapshot(target, "block", 0, Map.of(PresentationBasic.ID, section)));
+		assertFalse(preview.accept(PresentationPreviewS2CPacket.result(oldRequest,
+			new PresentationSection(PresentationBasic.ID, 1, section.fields(), false))));
+		var shown = preview.projection().orElseThrow();
+		assertEquals(section.fields().get(root.fieldId()), shown.property(root).orElseThrow().value());
+		assertEquals(PreviewObservation.Origin.RETAINED_MARKER, shown.property(root).orElseThrow().origin());
+		assertTrue(shown.property(child).isEmpty()); assertTrue(preview.intent(token, child, "danger").isEmpty());
+		assertFalse(nx.pingwheel.common.presentation.preview.PreviewPropertyEntries.of(shown).stream().anyMatch(entry -> child.equals(entry.ref())));
+		assertTrue(client.store().sections(1).isEmpty());
+	}
 }

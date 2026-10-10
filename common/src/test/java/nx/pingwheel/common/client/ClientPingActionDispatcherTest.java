@@ -33,6 +33,7 @@ import nx.pingwheel.common.presentation.client.ClientPresentation;
 import net.minecraft.network.FriendlyByteBuf;
 import io.netty.buffer.Unpooled;
 import java.util.Map;
+import java.util.Set;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 
@@ -326,14 +327,15 @@ class ClientPingActionDispatcherTest {
 		presentation.tick(true);
 		assertTrue(presentation.offer(PresentationS2CPacket.offer(31L,
 			Map.of(ClientPresentation.BASIC, List.of(new PresentationField(
-				"minecraft:entity.health", PresentationField.Kind.NUMBER, true, 0, "Health"))),
+				"minecraft:block.state", PresentationField.Kind.RECORD, true, 0, "State"))),
 			Map.of(ClientPresentation.BASIC, 1))));
-		assertTrue(presentation.reset(PresentationS2CPacket.reset(31L, 1L, Map.of())));
+		assertTrue(presentation.reset(PresentationS2CPacket.reset(31L, 1L,
+			Map.of("location", Map.of(ClientPresentation.BASIC, Set.of("minecraft:block.state"))))));
 		var dispatcher = new ClientPingActionDispatcher(h.sender, h.sink, h.logger,
 			new CreateRequestTracker(), new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(0, 0)),
 			presentation);
 		var action = createAction(new ActiveInteraction().begin());
-		var ref = new PresentationPropertyRef("create:presentation", "create:inventory.summary",
+		var ref = new PresentationPropertyRef(ClientPresentation.BASIC, "minecraft:block.state",
 			List.of("counts", "minecraft:cobblestone"));
 		var property = PresentationPropertyIntent.of(ref, new PresentationValue.NumberValue(64), "request");
 		dispatcher.dispatch(action, List.of(property));
@@ -350,6 +352,12 @@ class ClientPingActionDispatcherTest {
 		} finally { bytes.release(); }
 		dispatcher.dispatch(action);
 		assertEquals(List.of(), ((PresentationC2SPacket) h.sender.sent.get(2)).properties());
+		var denies = new java.util.LinkedHashMap<>(PresentationS2CPacket.emptyChildBlack());
+		denies.put("location", List.of(ref));
+		assertTrue(presentation.reset(PresentationS2CPacket.reset(31L, 2L,
+			Map.of("location", Map.of(ClientPresentation.BASIC, Set.of("minecraft:block.state"))), denies)));
+		assertEquals(ClientPingActionDispatcher.DispatchOutcome.NOT_READY, dispatcher.dispatchOutcome(action, List.of(property)));
+		assertEquals(3, h.sender.sent.size(), "revocation recheck sends no create and never silently sends a plain fallback");
 	}
 
 	private static final class ManualTime implements InteractionTimeSource {

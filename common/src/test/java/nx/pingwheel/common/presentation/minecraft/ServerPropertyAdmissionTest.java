@@ -134,6 +134,24 @@ class ServerPropertyAdmissionTest {
 			(adapter, roots, budget) -> { throw new AssertionError("budget exhausted"); }).rejection());
 	}
 
+	@Test void deniedChildRejectsWholeForgedIntentBeforeCaptureWhileRootKeepsCompleteRecord() {
+		var context = new ServerPropertyAdmission.Context("minecraft:stone", Set.of());
+		var denied = ServerPropertyAdmission.admit(List.of(
+			PresentationPropertyIntent.of(COUNT_REF, new PresentationValue.NumberValue(1), "attention"),
+			PresentationPropertyIntent.of(NESTED, new PresentationValue.NumberValue(4), "danger")),
+			registry(), Map.of(ADAPTER, Set.of(COUNT, GROUP)), Map.of(), 10, context, null, 0,
+			(adapter, roots, budget) -> fail("denied intent must reject before any source capture"), ref -> !NESTED.equals(ref));
+		assertEquals(MarkerRejectReason.INVALID_REQUEST, denied.rejection()); assertTrue(denied.sourceSeeds().isEmpty());
+		var root = PresentationPropertyRef.root(ADAPTER, GROUP);
+		var admitted = ServerPropertyAdmission.admit(List.of(PresentationPropertyIntent.of(root, live(Set.of(GROUP)).fields().get(GROUP), "attention")),
+			registry(), Map.of(ADAPTER, Set.of(GROUP)), Map.of(), 10, context, null, 0,
+			(adapter, roots, budget) -> live(roots), ref -> !NESTED.equals(ref));
+		assertNull(admitted.rejection()); assertEquals(new PresentationValue.NumberValue(4), NESTED.resolve(admitted.sourceSeeds().get(ADAPTER)));
+		var projected = PresentationServer.project(ADAPTER_IMPL, live(Set.of(GROUP)), Set.of(GROUP), List.of(
+			PresentationPropertySelection.of(NESTED, "danger"), PresentationPropertySelection.of(root, "attention")), ref -> !NESTED.equals(ref));
+		assertEquals(Set.of(root), projected.annotations().keySet()); assertEquals(live(Set.of(GROUP)).fields(), projected.fields());
+	}
+
 	@Test
 	void freshCaptureExceptionRejectsEntireRequestWithoutPublishingPartialSeeds() {
 		var admitted = ServerPropertyAdmission.admit(List.of(PresentationPropertyIntent.observed(COUNT_REF,

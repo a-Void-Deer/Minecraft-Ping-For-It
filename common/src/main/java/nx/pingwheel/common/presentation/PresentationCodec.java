@@ -156,6 +156,11 @@ public final class PresentationCodec {
 		return readPropertyRef(buf, false);
 	}
 
+	/** Canonical metadata with malformed UTF-8 rejected, shared by child policy frames. */
+	public static PresentationPropertyRef readPropertyRefStrict(FriendlyByteBuf buf) {
+		return readPropertyRef(buf, true);
+	}
+
 	/**
 	 * Receipt metadata: one kind tag followed by the explicit property references.
 	 * Values, annotations and counts never travel here; they stay in the existing

@@ -70,4 +70,20 @@ class ServerPresentationPolicyStateTest {
 			Map.of("entity", new RulesView(List.of(), List.of(), false))));
 		assertNull(state.policyFor("entity"));
 	}
+
+	@Test void remoteChildListIsDetachedAndFieldDraftsNeverAlterIt() {
+		var child = new nx.pingwheel.common.presentation.PresentationPropertyRef("create:presentation",
+			"create:kinetic.speed", List.of("effective_rpm"));
+		var views = new java.util.LinkedHashMap<>(rules("", ""));
+		views.put("block", new RulesView(List.of("create:*"), List.of(), false, List.of(child)));
+		var state = new ServerPresentationPolicyState();
+		long request = state.beginConnection();
+		assertTrue(state.applySnapshot(request, 1, Status.OK, true, views));
+		views.clear();
+		assertEquals(List.of(child), state.rulesFor("block").childBlack());
+		assertFalse(state.policyFor("block").propertyAllowed(child));
+		assertTrue(state.policyFor("block").propertyAllowed(nx.pingwheel.common.presentation.PresentationPropertyRef.root(child.adapterId(), child.fieldId())));
+		assertTrue(state.beginMutation("block", Operation.ADD_BLACK, "minecraft:*", false).isPresent());
+		assertEquals(List.of(child), state.rulesFor("block").childBlack());
+	}
 }

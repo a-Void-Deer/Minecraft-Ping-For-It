@@ -186,6 +186,27 @@ class PresentationServerReceiptTest {
 		assertTrue(content.selectedRefs().isEmpty(), "no selected ref may leak through a suppressed receipt");
 	}
 
+	@Test void deniedChildSuppressesReceiptAndAnnotationButRetainsCompleteRoot() {
+		var child = new PresentationPropertyRef(BASIC, PresentationBasic.BLOCK_STATE, List.of("lit"));
+		var root = PresentationPropertyRef.root(BASIC, PresentationBasic.BLOCK_STATE);
+		var session = session();
+		var allowed = Set.of(PresentationBasic.NAME, PresentationBasic.BLOCK_STATE);
+		session.mask = Map.of(TYPE, Map.of(BASIC, allowed)); session.childBlack = Map.of(TYPE, List.of(child));
+		var record = new PresentationValue.RecordValue(Map.of("lit", new PresentationValue.Flag(true), "facing", new PresentationValue.Text("north")));
+		var lease = lease(marker(List.of(PresentationPropertySelection.of(child, "attention"))));
+		lease.sources.get(BASIC).value = new PresentationSection(BASIC, 1, Map.of(
+			PresentationBasic.NAME, new PresentationValue.Text("{\"text\":\"Chest\"}"), PresentationBasic.BLOCK_STATE, record), false);
+		var packets = new ArrayList<PresentationS2CPacket>();
+		PresentationServer.sendInitial(session, lease, new BasicAdapter(), allowed, packets::add, adapter -> allowed);
+		assertEquals(PresentationReceiptContent.Kind.SUPPRESSED, contentOf(packets).kind());
+		var bytes = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(packets.getFirst().sectionBytes()));
+		try { var section = nx.pingwheel.common.presentation.PresentationCodec.read(bytes, field -> true);
+			assertEquals(record, root.resolve(section)); assertFalse(section.annotations().containsKey(child));
+		} finally { bytes.release(); }
+		var rootContent = contentOf(send(session, marker(List.of(PresentationPropertySelection.of(root, "attention"))), allowed, allowed));
+		assertEquals(PresentationReceiptContent.properties(List.of(root)), rootContent);
+	}
+
 	@Test void deniedTargetNameSuppressesAContentMarkerButKeepsTheWholeReceipt() {
 		var session = session();
 		var content = contentOf(send(session, marker(List.of(PresentationPropertySelection.of(ITEM_COUNT, "attention"))),

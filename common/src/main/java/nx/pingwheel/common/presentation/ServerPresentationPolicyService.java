@@ -8,19 +8,18 @@ import java.util.Map;
 
 /**
  * Pure authority and validation seam for the versioned server presentation
- * policy rule view. A read discloses the complete per-target-type rule view; a
- * mutation selects exactly one existing target type and changes only that
- * type's allow/deny/whitelist-only lists, preserving that type's persisted child
- * deny list. The candidate is fully validated before any persisted value
- * changes, so a malformed, duplicate, missing, over-capacity, or no-op request
- * leaves the stored policy untouched. Permission is supplied by the
- * authenticated server-side caller; the service never treats a client flag as
- * authority.
+ * policy rule view. A read discloses the complete per-target-type rule view
+ * including the persisted child deny list; a mutation selects exactly one
+ * existing target type and changes only that type's allow/deny/whitelist-only
+ * lists, preserving that type's persisted child deny list. The candidate is
+ * fully validated before any persisted value changes, so a malformed,
+ * duplicate, missing, over-capacity, or no-op request leaves the stored policy
+ * untouched. Permission is supplied by the authenticated server-side caller;
+ * the service never treats a client flag as authority.
  *
- * <p>{@link RulesView} carries only the selector fields; the child deny list is
- * not part of this route's current wire version, so extending the disclosed
- * view and its packet is a protocol update that must be versioned rather than
- * emitted on the existing route.
+ * <p>{@link RulesView} carries the selector fields and the child deny list; the
+ * child list travels on this route's versioned wire so the client mirror shows
+ * the same views the server evaluates.
  */
 public final class ServerPresentationPolicyService {
 	private ServerPresentationPolicyService() {}
@@ -60,24 +59,31 @@ public final class ServerPresentationPolicyService {
 		FAILED
 	}
 
-	/** One target type's disclosed rule view; construction validates the selector grammar. */
-	public record RulesView(List<String> white, List<String> black, boolean whitelistOnly) {
+	/** One target type's disclosed rule view; construction validates the selector grammar and the child deny list. */
+	public record RulesView(List<String> white, List<String> black, boolean whitelistOnly,
+		List<PresentationPropertyRef> childBlack) {
 		public RulesView {
 			white = white == null ? List.of() : List.copyOf(white);
 			black = black == null ? List.of() : List.copyOf(black);
-			new PresentationPolicy(white, black, whitelistOnly);
+			new PresentationPolicy(white, black, whitelistOnly, childBlack);
+			childBlack = List.copyOf(childBlack);
+		}
+
+		/** A selector-only view keeps the semantic default child deny list. */
+		public RulesView(List<String> white, List<String> black, boolean whitelistOnly) {
+			this(white, black, whitelistOnly, PresentationSettings.DEFAULT_CHILD_BLACK);
 		}
 
 		public static RulesView of(PresentationPolicy policy) {
-			return new RulesView(policy.white(), policy.black(), policy.whitelistOnly());
+			return new RulesView(policy.white(), policy.black(), policy.whitelistOnly(), policy.childBlack());
 		}
 
 		public static RulesView denyAll() {
-			return new RulesView(List.of(), List.of("*:*"), true);
+			return new RulesView(List.of(), List.of("*:*"), true, List.of());
 		}
 
 		public PresentationPolicy policy() {
-			return new PresentationPolicy(white, black, whitelistOnly);
+			return new PresentationPolicy(white, black, whitelistOnly, childBlack);
 		}
 	}
 
@@ -209,7 +215,7 @@ public final class ServerPresentationPolicyService {
 		final PresentationPolicy candidate;
 
 		try {
-			candidate = new PresentationPolicy(white, black, whitelistOnly);
+			candidate = new PresentationPolicy(white, black, whitelistOnly, current.childBlack());
 		} catch (RuntimeException ex) {
 			return new Result(false, Status.INVALID, current);
 		}

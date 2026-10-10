@@ -374,6 +374,38 @@ class PendingContentChatControllerTest {
 		assertTrue(replaced.controller.attempt(ID));
 	}
 
+	@Test void exactChildRevocationCancelsPendingChatEvenWhenRootValueAndAnnotationRemain() {
+		var child = new PresentationPropertyRef(CREATE, "create:kinetic.speed", List.of("effective_rpm"));
+		var root = PresentationPropertyRef.root(CREATE, "create:kinetic.speed");
+		var speed = new PresentationSection(CREATE, 1, Map.of(root.fieldId(), new PresentationValue.RecordValue(
+			Map.of("effective_rpm", new PresentationValue.NumberValue(32), "moving", new PresentationValue.Flag(true)))), false,
+			Map.of(child, "attention", root, "danger"));
+		Fixture f = new Fixture(); f.projection(ID, name(), speed);
+		assertTrue(f.begin(PresentationReceiptContent.properties(List.of(child))));
+		var original = f.projections.get(ID);
+		f.projections.put(ID, new PresentationView(original.targetTypeId(), original.defaultRef(), original.sections(), original.fieldLabels(), Set.of(child)));
+		assertFalse(f.controller.attempt(ID)); assertEquals(0, f.controller.pendingCount()); assertTrue(f.sent.isEmpty());
+		assertEquals(speed.fields().get(root.fieldId()), f.projections.get(ID).property(root));
+		assertTrue(f.begin(PresentationReceiptContent.properties(List.of(root))));
+		assertTrue(f.controller.attempt(ID), "the exact root record remains authorized and RPM-formattable");
+		assertEquals(1, f.sent.size());
+	}
+
+	@Test void childRevocationDuringFormattingIsRecheckedBeforeChatSink() {
+		var child = new PresentationPropertyRef(CREATE, "create:kinetic.speed", List.of("effective_rpm"));
+		Fixture f = new Fixture();
+		f.projection(ID, name(), new PresentationSection(CREATE, 1, Map.of(child.fieldId(), new PresentationValue.RecordValue(
+			Map.of("effective_rpm", new PresentationValue.NumberValue(32)))), false, Map.of(child, "attention")));
+		LifecycleFormatter formatter = new LifecycleFormatter();
+		f.controller = new PendingContentChatController(4, f::current, formatter, f.sent::add);
+		assertTrue(f.begin(PresentationReceiptContent.properties(List.of(child))));
+		formatter.onProperties = () -> {
+			var old = f.projections.get(ID);
+			f.projections.put(ID, new PresentationView(old.targetTypeId(), old.defaultRef(), old.sections(), old.fieldLabels(), Set.of(child)));
+		};
+		assertFalse(f.controller.attempt(ID)); assertTrue(f.sent.isEmpty()); assertEquals(0, f.controller.pendingCount());
+	}
+
 	@Test void clearAndRebeginDuringComposerCannotEmitTheOldEqualCapture() {
 		Fixture f = new Fixture();
 		LifecycleFormatter formatter = new LifecycleFormatter();

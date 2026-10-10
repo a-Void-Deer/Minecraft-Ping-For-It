@@ -23,10 +23,10 @@ public record ServerPresentationPolicyC2SPacket(
 	String selector,
 	boolean whitelistOnly
 ) implements IPacket {
-	public static final int VERSION = 2;
+	public static final int VERSION = 3;
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		C2S_NAMESPACE,
-		"server-presentation-policy-v2");
+		"server-presentation-policy-v3");
 	public static final Type<ServerPresentationPolicyC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	/** A correlated complete-map read request; any authenticated player may send one. */

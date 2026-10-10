@@ -47,12 +47,18 @@ public final class ClientPresentationPreview {
 	}
 	/** Detached UI values and an opaque interaction identity, with no lifecycle/world handle. */
 	public record Projection(UUID interactionId, Target target, String targetTypeId, long epoch, long view,
-		Map<PresentationPropertyRef, PreviewFieldAccess.Outcome> fields) {
+		Map<PresentationPropertyRef, PreviewFieldAccess.Outcome> fields, Set<PresentationPropertyRef> childBlack) {
 		public Projection {
 			Objects.requireNonNull(interactionId); Objects.requireNonNull(target); Objects.requireNonNull(targetTypeId);
 			fields = Map.copyOf(fields);
+			childBlack = Set.copyOf(childBlack);
+		}
+		public Projection(UUID interactionId, Target target, String targetTypeId, long epoch, long view,
+			Map<PresentationPropertyRef, PreviewFieldAccess.Outcome> fields) {
+			this(interactionId, target, targetTypeId, epoch, view, fields, Set.of());
 		}
 		public Optional<PreviewObservation> property(PresentationPropertyRef ref) {
+			if (ref == null || childBlack.contains(ref)) return Optional.empty();
 			var root = fields.get(PresentationPropertyRef.root(ref.adapterId(), ref.fieldId()));
 			if (!(root instanceof PreviewFieldAccess.Observed observed)) return Optional.empty();
 			PresentationValue value = ref.resolve(new PresentationSection(ref.adapterId(), 1,
@@ -233,7 +239,7 @@ public final class ClientPresentationPreview {
 		// A projection after RESET must not remain blank until a later game tick.
 		if (fields.isEmpty()) tick();
 		return binding == null || access == null ? Optional.empty()
-			: Optional.of(new Projection(interactionId, binding.target, binding.targetTypeId, access.epoch(), access.view(), fields));
+			: Optional.of(new Projection(interactionId, binding.target, binding.targetTypeId, access.epoch(), access.view(), fields, access.childBlack()));
 	}
 	/** Re-check access at dispatch; values are only claims and CREATE still recaptures. */
 	public Optional<PresentationPropertyIntent> intent(Object token, PresentationPropertyRef ref, String pingType) {

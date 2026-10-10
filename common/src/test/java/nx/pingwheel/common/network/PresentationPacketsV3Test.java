@@ -36,11 +36,11 @@ class PresentationPacketsV3Test {
 	}
 
 	@Test
-	void versionFourHasNoSubscribeKindAndUsesNewRouteIds() {
-		assertEquals(4, PresentationC2SPacket.VERSION);
-		assertEquals(4, PresentationS2CPacket.VERSION);
-		assertEquals("pingforit-c2s:presentation-v4", PresentationC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-s2c:presentation-v4", PresentationS2CPacket.PACKET_ID.toString());
+	void versionFiveHasNoSubscribeKindAndUsesNewRouteIds() {
+		assertEquals(5, PresentationC2SPacket.VERSION);
+		assertEquals(5, PresentationS2CPacket.VERSION);
+		assertEquals("pingforit-c2s:presentation-v5", PresentationC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:presentation-v5", PresentationS2CPacket.PACKET_ID.toString());
 		assertEquals(List.of(PresentationC2SPacket.Kind.HELLO, PresentationC2SPacket.Kind.CREATE,
 			PresentationC2SPacket.Kind.REMOVE), Arrays.asList(PresentationC2SPacket.Kind.values()));
 	}
@@ -213,7 +213,7 @@ class PresentationPacketsV3Test {
 			Map.of("minecraft:target.name", new PresentationValue.Text("Chest")), false);
 
 		assertTrue(new PresentationS2CPacket(PresentationS2CPacket.Kind.CREATED, PresentationS2CPacket.VERSION,
-			41L, 2L, 5L, Map.of(), Map.of(), Map.of(), snapshot, "Owner", null,
+			41L, 2L, 5L, Map.of(), Map.of(), Map.of(), Map.of(), snapshot, "Owner", null,
 			new byte[] {1}, snapshot.id(), null, null, java.util.Optional.empty(), 0, null, null).isCorrupt());
 	}
 

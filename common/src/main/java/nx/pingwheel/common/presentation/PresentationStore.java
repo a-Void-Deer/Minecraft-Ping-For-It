@@ -158,9 +158,17 @@ public final class PresentationStore {
 
 	/** Server authorization replaces the previous mask, including for frozen values. */
 	public void restrict(Map<String, Map<String, Set<String>>> mask) {
+		restrict(mask, Map.of());
+	}
+
+	/** Child revocation deletes annotations/default refs, never keys inside an authorized root record. */
+	public void restrict(Map<String, Map<String, Set<String>>> mask,
+		Map<String, java.util.List<PresentationPropertyRef>> childBlack) {
 		if (mask == null) mask = Map.of();
 		final Map<String, Map<String, Set<String>>> authoritative = mask;
 		for (MarkerState marker : markers.values()) {
+			Set<PresentationPropertyRef> denied = Set.copyOf(childBlack.getOrDefault(marker.targetTypeId, java.util.List.of()));
+			if (marker.defaultRef != null && denied.contains(marker.defaultRef)) marker.defaultRef = null;
 			marker.sections.replaceAll((adapter, entry) -> {
 				var fields = new HashMap<String, PresentationValue>();
 				Set<String> allowed = authoritative.getOrDefault(marker.targetTypeId, Map.of())
@@ -170,7 +178,7 @@ public final class PresentationStore {
 				});
 				var annotations = new HashMap<PresentationPropertyRef, String>();
 				entry.section().annotations().forEach((ref, type) -> {
-					if (fields.containsKey(ref.fieldId())) annotations.put(ref, type);
+					if (fields.containsKey(ref.fieldId()) && !denied.contains(ref)) annotations.put(ref, type);
 				});
 				return new Entry(entry.revision(),
 					new PresentationSection(adapter, entry.section().schema(), fields, entry.section().stale(), annotations));

@@ -120,4 +120,73 @@ class ClientPresentationTest {
 		assertNull(client.view(blockId).field(BASIC, HEALTH));
 		assertEquals(Map.of(), client.view(blockId).sections().get(BASIC).annotations());
 	}
+
+	@Test void childOnlyResetPrunesFrozenAnnotationsAndReferenceWithoutDestroyingRootOrResurrection() {
+		String state = "minecraft:block.state";
+		var denied = new PresentationPropertyRef(BASIC, state, List.of("denied"));
+		var descendant = new PresentationPropertyRef(BASIC, state, List.of("denied", "allowed"));
+		var sibling = new PresentationPropertyRef(BASIC, state, List.of("sibling"));
+		client.tick(true);
+		assertTrue(client.offer(PresentationS2CPacket.offer(81, Map.of(BASIC, List.of(
+			new PresentationField(state, PresentationField.Kind.RECORD, true, 0, "State"))), Map.of(BASIC, 1))));
+		var mask = Map.of("block", Map.of(BASIC, Set.of(state)));
+		assertTrue(client.reset(PresentationS2CPacket.reset(81, 1, mask)));
+		var value = new PresentationValue.RecordValue(Map.of("denied", new PresentationValue.RecordValue(
+			Map.of("allowed", new PresentationValue.Flag(true))), "sibling", new PresentationValue.NumberValue(2)));
+		var section = new PresentationSection(BASIC, 1, Map.of(state, value), false,
+			Map.of(denied, "danger", descendant, "attention", sibling, "attention"));
+		client.store().initial(81, 1, ID.value(), "block", denied, section);
+		client.removed(ID, 2, true);
+		var children = new java.util.LinkedHashMap<>(PresentationS2CPacket.emptyChildBlack());
+		children.put("block", List.of(denied));
+		assertTrue(client.reset(PresentationS2CPacket.reset(81, 2, mask, children)));
+		var shown = client.view(ID);
+		assertNull(shown.defaultRef()); assertNull(shown.property(denied));
+		assertEquals(value, shown.field(BASIC, state), "authorization never strips nested keys from a root record");
+		assertEquals(new PresentationValue.Flag(true), shown.property(descendant), "exact denial does not cascade");
+		assertEquals(Set.of(descendant, sibling), shown.sections().get(BASIC).annotations().keySet());
+		assertFalse(client.propertyAllowed("block", denied));
+		assertTrue(client.previewAccess("block").orElseThrow().allows(descendant));
+		assertTrue(client.reset(PresentationS2CPacket.reset(81, 3, mask)));
+		assertNull(client.view(ID).defaultRef(), "loosening cannot restore a removed frozen reference");
+		assertFalse(client.view(ID).sections().get(BASIC).annotations().containsKey(denied));
+		assertFalse(client.section(PresentationS2CPacket.section(81, 2, 4, ID, section)));
+		assertFalse(client.section(PresentationS2CPacket.section(81, 3, 4, ID, section)), "frozen data cannot resurrect annotations");
+	}
+
+	@Test void incomingSectionDropsDeniedAnnotationsAndReceiptCannotSelectDeniedChild() {
+		String state = "minecraft:block.state";
+		var denied = new PresentationPropertyRef(BASIC, state, List.of("lit"));
+		var allowed = new PresentationPropertyRef(BASIC, state, List.of("facing"));
+		client.tick(true);
+		assertTrue(client.offer(PresentationS2CPacket.offer(81, Map.of(BASIC, List.of(
+			new PresentationField(state, PresentationField.Kind.RECORD, true, 0, "State"))), Map.of(BASIC, 1))));
+		var children = new java.util.LinkedHashMap<>(PresentationS2CPacket.emptyChildBlack()); children.put("block", List.of(denied));
+		assertTrue(client.reset(PresentationS2CPacket.reset(81, 1, Map.of("block", Map.of(BASIC, Set.of(state))), children)));
+		var section = new PresentationSection(BASIC, 1, Map.of(state, new PresentationValue.RecordValue(
+			Map.of("lit", new PresentationValue.Flag(true), "facing", new PresentationValue.Text("north")))), false,
+			Map.of(denied, "danger", allowed, "attention"));
+		var snapshot = new MarkerSnapshot(ID, UUID.randomUUID(), new Target.LocationTarget("minecraft:overworld", 1, 2, 3),
+			"block", "attention", new MarkerAnchor(1, 2, 3), 1, 100);
+		assertFalse(client.initial(PresentationS2CPacket.created(81, 1, 1, snapshot, "Owner", PresentationPropertyRef.root(BASIC, state),
+			nx.pingwheel.common.presentation.PresentationReceiptContent.properties(List.of(denied)), section)));
+		assertFalse(client.store().isKnown(ID.value()), "receipt validation is atomic with marker acceptance");
+		assertTrue(client.initial(PresentationS2CPacket.created(81, 1, 1, snapshot, "Owner", PresentationPropertyRef.root(BASIC, state), section)));
+		assertEquals(Set.of(allowed), client.view(ID).sections().get(BASIC).annotations().keySet());
+		assertTrue(client.section(PresentationS2CPacket.section(81, 1, 2, ID, section)));
+		assertEquals(Set.of(allowed), client.view(ID).sections().get(BASIC).annotations().keySet());
+		assertEquals(section.fields().get(state), client.view(ID).field(BASIC, state));
+	}
+
+	@Test void resetZeroCannotPublishAuthorityAndTombstonesHaveNoProjection() {
+		offer();
+		assertFalse(client.reset(PresentationS2CPacket.reset(81, 0, Map.of())));
+		assertFalse(client.ready()); assertTrue(client.previewAccess("block").isEmpty());
+		assertTrue(client.reset(PresentationS2CPacket.reset(81, 1, Map.of("entity", Map.of(BASIC, Set.of(NAME, HEALTH))))));
+		client.store().initial(81, 1, ID.value(), "entity", DEFAULT, initial());
+		client.removed(ID, 2, false);
+		assertTrue(client.store().isKnown(ID.value()));
+		assertEquals(PresentationView.empty(), client.view(ID));
+		client.close(); assertTrue(client.previewAccess("entity").isEmpty());
+	}
 }

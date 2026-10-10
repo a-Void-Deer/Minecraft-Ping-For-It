@@ -161,5 +161,9 @@ class ServerPresentationPolicyServiceTest {
 			Operation.ADD_BLACK, "create:*", false);
 		assertTrue(denied.applied());
 		assertTrue(settings.rulesFor("location").childDenied(effectiveRpm));
+		assertEquals(List.of(custom), toggled.rules().childBlack(), "the remote rule view preserves explicit children");
+		assertEquals(List.of(), added.rules().childBlack(), "explicit opt-out remains visible");
+		assertFalse(ServerPresentationPolicyService.mutateSelectedRules(true, settings, "block",
+			Operation.SET_WHITELIST_ONLY, "", true).applied(), "child metadata cannot turn a field no-op into a write");
 	}
 }
