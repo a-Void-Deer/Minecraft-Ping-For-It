@@ -43,7 +43,8 @@ class SpatialSelectorLocalizationTest {
 	private static final Pattern PLACEHOLDER = Pattern.compile("%[a-zA-Z%]");
 	/** Keys the content bridge publishes for its navigation groups. */
 	private static final List<String> CONTENT_GROUP_KEYS = List.of(
-		"presentation.pingforit.content.group.create");
+		"presentation.pingforit.content.group.create",
+		"presentation.pingforit.content.group.stress");
 
 	@Test void facadeMenuLabelsExistAndAreNonBlankInEveryLocale() throws IOException {
 		Set<String> keys = facadeLabelKeys();

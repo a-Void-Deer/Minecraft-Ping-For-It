@@ -391,4 +391,5 @@
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.name": "自訂名稱"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "所標記目標的自訂名稱。"
   ,"presentation.pingforit.content.group.create": "Create 屬性"
+  ,"presentation.pingforit.content.group.stress": "應力"
 }

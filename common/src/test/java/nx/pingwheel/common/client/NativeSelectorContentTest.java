@@ -810,6 +810,123 @@ class NativeSelectorContentTest {
 		genericContent.close();
 	}
 
+	private static Map<String, PresentationValue> allCreateValues() {
+		Map<String, PresentationValue> values = new LinkedHashMap<>();
+		values.put(SPEED, speedRecord(128, 128, true));
+		values.put(HAS_NETWORK, new PresentationValue.Flag(true));
+		values.put(OVERSTRESSED, new PresentationValue.Flag(false));
+		values.put(STRESS, new PresentationValue.NumberValue(12));
+		values.put(CAPACITY, new PresentationValue.NumberValue(10));
+		values.put(AVAILABLE_CAPACITY, new PresentationValue.NumberValue(-2));
+		values.put(INVENTORY_SUMMARY, new PresentationValue.RecordValue(Map.of("minecraft:stone", new PresentationValue.NumberValue(3))));
+		values.put(FLUID_SUMMARY, new PresentationValue.RecordValue(Map.of("minecraft:water", new PresentationValue.NumberValue(100))));
+		return values;
+	}
+
+	@Test void createBridgeNestsOnlyTheKineticStressTrioUnderStress() throws IOException {
+		withEnglishTranslations(() -> {
+			var context = new PreviewContext();
+			var capture = capture();
+			var values = allCreateValues();
+			values.put(NAME, new PresentationValue.Text("\"Chest\""));
+			var content = createContent(values, context, capture, packet -> {}, null);
+			var projection = content.read(previewTarget(capture), previewFence(content));
+			assertNotNull(projection);
+			var createGroup = projection.groups().stream()
+				.filter(group -> group.labelKey().equals(NativeSelectorContent.CREATE_GROUP_LABEL_KEY)).findFirst().orElseThrow();
+			var stressGroup = projection.groups().stream()
+				.filter(group -> group.labelKey().equals(NativeSelectorContent.STRESS_GROUP_LABEL_KEY)).findFirst().orElseThrow();
+			assertEquals(List.of(NativeSelectorContent.CREATE_GROUP_STEP), createGroup.path());
+			assertEquals(List.of(NativeSelectorContent.CREATE_GROUP_STEP, NativeSelectorContent.STRESS_GROUP_STEP), stressGroup.path());
+			assertEquals(2, projection.groups().size(), "Stress nests under Create without a third group");
+			for (String field : List.of(STRESS, CAPACITY, AVAILABLE_CAPACITY))
+				assertEquals(stressGroup.path(), projectedProperty(projection, field).groupPath(), field);
+			for (String field : List.of(SPEED, HAS_NETWORK, OVERSTRESSED, INVENTORY_SUMMARY, FLUID_SUMMARY))
+				assertEquals(createGroup.path(), projectedProperty(projection, field).groupPath(), field);
+			assertTrue(projectedProperty(projection, NAME).groupPath().isEmpty(), "a generic field stays outside Create");
+			assertEquals("Create properties", content.label(createGroup.labelKey()).getString());
+			assertEquals("Stress", content.label(stressGroup.labelKey()).getString(),
+				"the Stress group label resolves through the real language fallback");
+			content.close();
+
+			Map<String, PresentationValue> withoutStress = new LinkedHashMap<>();
+			withoutStress.put(SPEED, speedRecord(64, 64, true));
+			var plainContext = new PreviewContext();
+			var plainCapture = capture();
+			var plainContent = createContent(withoutStress, plainContext, plainCapture, packet -> {}, null);
+			var plain = plainContent.read(previewTarget(plainCapture), previewFence(plainContent));
+			assertEquals(List.of(new SpatialSelectorSession.ContentGroup(List.of(NativeSelectorContent.CREATE_GROUP_STEP),
+				NativeSelectorContent.CREATE_GROUP_LABEL_KEY)), plain.groups(),
+				"no visible stress member leaves no declared Stress group");
+			plainContent.close();
+		});
+	}
+
+	@Test void stressGroupShowsExactlyTheStressTrioWithReleasesAndAncestorBack() throws IOException {
+		withEnglishTranslations(() -> {
+			Map<String, PresentationValue> values = allCreateValues();
+
+			var navigation = new CreateContentSession(values);
+			enter(navigation.session, "content", 10L);
+			String create = navigation.menu().choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id();
+			enter(navigation.session, create, 150L);
+			var createChildren = navigation.menu().choices().stream().filter(choice -> !choice.back()).toList();
+			assertEquals(List.of("create:fluid.summary: 1", "minecraft:water: 100", "create:inventory.summary: 1",
+				"minecraft:stone: 3", "Stress", "create:kinetic.has_network: Yes", "create:kinetic.overstressed: No",
+				"create:kinetic.speed: 128 RPM", "effective_rpm: 128", "moving: Yes", "theoretical_rpm: 128"),
+				createChildren.stream().map(navigation::label).toList(),
+				"only the stress trio nests; the network flags and every other Create field stay direct");
+			var stress = createChildren.stream().filter(choice -> "Stress".equals(navigation.label(choice))).findFirst().orElseThrow();
+			assertTrue(stress.branch());
+			assertNull(stress.action(), "the Stress group parent carries no property intent");
+			assertNull(stress.outlineColor(), "the Stress group parent carries no Ping Type color");
+			String createMenuId = navigation.menu().menuId();
+			enter(navigation.session, stress.id(), 300L);
+			assertEquals(List.of("create:kinetic.available_capacity: -2 SU", "create:kinetic.capacity: 10 SU",
+				"create:kinetic.stress: 12 SU (120%)"), navigation.menu().choices().stream().filter(choice -> !choice.back())
+				.map(navigation::label).toList(), "Stress contains exactly the three kinetic stress fields");
+			String back = navigation.menu().choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow().id();
+			focus(navigation.session, back, 400L);
+			navigation.session.tick(600L);
+			assertEquals(createMenuId, navigation.menu().menuId(), "Back returns one level to the Create menu");
+			var stressAfterBack = navigation.menu().choices().stream()
+				.filter(choice -> "Stress".equals(navigation.label(choice))).findFirst().orElseThrow();
+			assertEquals(stress.id(), stressAfterBack.id(), "the Stress parent keeps its stable identity after the return");
+			navigation.content.close();
+
+			var groupRelease = new CreateContentSession(values);
+			enter(groupRelease.session, "content", 10L);
+			String groupCreate = groupRelease.menu().choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id();
+			enter(groupRelease.session, groupCreate, 150L);
+			String groupStress = groupRelease.menu().choices().stream()
+				.filter(choice -> "Stress".equals(groupRelease.label(choice))).findFirst().orElseThrow().id();
+			focus(groupRelease.session, groupStress, 300L);
+			assertInstanceOf(SelectorIntent.None.class, groupRelease.session.releaseIntent(301L),
+				"releasing the focused Stress group parent commits nothing");
+			groupRelease.content.close();
+
+			List<String> fields = List.of(AVAILABLE_CAPACITY, CAPACITY, STRESS);
+			List<PresentationValue> expected = List.of(new PresentationValue.NumberValue(-2),
+				new PresentationValue.NumberValue(10), new PresentationValue.NumberValue(12));
+			for (int index = 0; index < fields.size(); index++) {
+				var releaseFixture = new CreateContentSession(values);
+				enter(releaseFixture.session, "content", 10L);
+				String releaseCreate = releaseFixture.menu().choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id();
+				enter(releaseFixture.session, releaseCreate, 150L);
+				String releaseStress = releaseFixture.menu().choices().stream()
+					.filter(choice -> "Stress".equals(releaseFixture.label(choice))).findFirst().orElseThrow().id();
+				enter(releaseFixture.session, releaseStress, 300L);
+				var child = releaseFixture.menu().choices().stream().filter(choice -> !choice.back()).toList().get(index);
+				focus(releaseFixture.session, child.id(), 450L);
+				var intent = assertInstanceOf(SelectorIntent.CreateProperty.class, releaseFixture.session.releaseIntent(451L));
+				assertEquals(new PresentationPropertyRef(CREATE, fields.get(index), List.of()), intent.property().ref());
+				assertEquals(expected.get(index), intent.property().observedValue());
+				assertEquals("attention", intent.property().pingTypeId());
+				releaseFixture.content.close();
+			}
+		});
+	}
+
 	@FunctionalInterface private interface ThrowingRunnable { void run(); }
 
 	private static void withEnglishTranslations(ThrowingRunnable body) throws IOException {

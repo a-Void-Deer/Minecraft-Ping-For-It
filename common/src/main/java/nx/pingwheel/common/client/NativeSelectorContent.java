@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -27,11 +28,16 @@ import nx.pingwheel.common.render.SpatialInventoryView.Status;
 
 /** One held target's authorized observation adapter. No marker data or sender is exposed to the facade. */
 final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<ClientInventory.PreviewEntryReference> {
-	/** Stable navigation-group identity for the confirmed Create properties content hierarchy. */
+	/** Stable navigation-group identities for the confirmed Create properties content hierarchy. */
 	static final String CREATE_GROUP_STEP = "create";
+	static final String STRESS_GROUP_STEP = "stress";
 	static final String CREATE_GROUP_LABEL_KEY = "presentation.pingforit.content.group.create";
+	static final String STRESS_GROUP_LABEL_KEY = "presentation.pingforit.content.group.stress";
 	private static final String CREATE_FIELD_NAMESPACE = "create:";
 	private static final List<String> CREATE_GROUP_PATH = List.of(CREATE_GROUP_STEP);
+	private static final List<String> STRESS_GROUP_PATH = List.of(CREATE_GROUP_STEP, STRESS_GROUP_STEP);
+	private static final Set<String> STRESS_FIELDS = Set.of(PresentationKineticFormat.STRESS_FIELD,
+		PresentationKineticFormat.CAPACITY_FIELD, PresentationKineticFormat.AVAILABLE_CAPACITY_FIELD);
 	private final CapturedPingContext capture;
 	private final ClientPresentationPreview preview;
 	private final Supplier<ClientInventory> inventory;
@@ -124,6 +130,7 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 			PresentationValue blockStateValue = null;
 			boolean blockStateMember = false;
 			boolean createMember = false;
+			boolean stressMember = false;
 			for (var entry : PreviewPropertyEntries.of(projection)) {
 				var ref = entry.ref();
 				if (ref.isRoot() && ref.fieldId().equals(PresentationBasic.BLOCK_STATE)
@@ -150,6 +157,7 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 				labels.put(labelId, value);
 				List<String> groupPath = contentGroupPath(ref, blockStateStep);
 				if (CREATE_GROUP_PATH.equals(groupPath)) createMember = true;
+				else if (STRESS_GROUP_PATH.equals(groupPath)) stressMember = true;
 				if (groupPath.size() == 1 && groupPath.getFirst().equals(blockStateStep)) blockStateMember = true;
 				properties.add(new SpatialSelectorSession.Property(id, labelId, ref, entry.observed().value(), types, defaultType, groupPath));
 			}
@@ -167,7 +175,10 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 						blockStateValue, List.of(), null, List.of()));
 				}
 			}
-			if (createMember) groups.add(new SpatialSelectorSession.ContentGroup(CREATE_GROUP_PATH, CREATE_GROUP_LABEL_KEY));
+			if (createMember || stressMember)
+				groups.add(new SpatialSelectorSession.ContentGroup(CREATE_GROUP_PATH, CREATE_GROUP_LABEL_KEY));
+			if (stressMember)
+				groups.add(new SpatialSelectorSession.ContentGroup(STRESS_GROUP_PATH, STRESS_GROUP_LABEL_KEY));
 		});
 		ClientInventory current = inventory.get();
 		ClientInventory.Preview state = current == null || request == ClientInventory.NO_REQUEST ? null : current.preview(request);
@@ -209,12 +220,16 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 	 * Confirmed content hierarchy: every create-namespace presentation field and
 	 * its record descendants join the Create properties group, while generic
 	 * Minecraft fields, the block-state group, and the separate inventory list
-	 * keep their own positions.
+	 * keep their own positions. Within Create, only the kinetic stress, capacity,
+	 * and available-capacity fields nest under the localized Stress group; the
+	 * network and overstress flags and every other Create field stay directly
+	 * under Create.
 	 */
 	private static List<String> contentGroupPath(PresentationPropertyRef ref, String blockStateStep) {
 		if (ref.fieldId().equals(PresentationBasic.BLOCK_STATE) && !ref.recordPath().isEmpty() && blockStateStep != null)
 			return List.of(blockStateStep);
-		if (ref.fieldId().startsWith(CREATE_FIELD_NAMESPACE)) return CREATE_GROUP_PATH;
+		if (ref.fieldId().startsWith(CREATE_FIELD_NAMESPACE))
+			return STRESS_FIELDS.contains(ref.fieldId()) ? STRESS_GROUP_PATH : CREATE_GROUP_PATH;
 		return List.of();
 	}
 

@@ -397,4 +397,5 @@
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.name": "Benutzerdefinierter Name"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "Benutzerdefinierter Name des angepingten Ziels."
   ,"presentation.pingforit.content.group.create": "Create-Eigenschaften"
+  ,"presentation.pingforit.content.group.stress": "Belastung"
 }
