@@ -396,4 +396,5 @@
   ,"pingforit.chat.content.quality": "%s（%s）"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.name": "自定义名称"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "所标记目标的自定义名称。"
+  ,"presentation.pingforit.content.group.create": "Create 属性"
 }

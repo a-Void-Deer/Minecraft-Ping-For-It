@@ -401,4 +401,5 @@
   ,"pingforit.chat.content.quality": "%s (%s)"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.name": "Custom name"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "Custom name of the pinged target."
+  ,"presentation.pingforit.content.group.create": "Create properties"
 }

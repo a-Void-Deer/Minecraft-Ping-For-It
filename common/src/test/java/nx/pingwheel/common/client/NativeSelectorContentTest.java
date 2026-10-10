@@ -588,7 +588,7 @@ class NativeSelectorContentTest {
 		content.close();
 	}
 
-	@Test void unrelatedRecordRootKeepsItsOrdinarySelectableBranch() {
+	@Test void createNamespaceRecordRootStaysSelectableInsideTheCreateGroup() {
 		var context = new PreviewContext();
 		var capture = capture();
 		var preview = new ClientPresentationPreview(type -> Optional.of(previewRecordAccess(SPEED)), () -> context,
@@ -600,11 +600,214 @@ class NativeSelectorContentTest {
 		var projection = content.read(previewTarget(capture), previewFence(content));
 		var root = projectedProperty(projection, SPEED);
 		assertTrue(root.ref().isRoot());
-		assertTrue(root.groupPath().isEmpty());
-		assertTrue(projection.groups().isEmpty(), "only block state opts into a navigation group");
+		assertEquals(List.of(NativeSelectorContent.CREATE_GROUP_STEP), root.groupPath(),
+			"a create-namespace record root joins the Create properties group");
+		assertEquals(List.of(new SpatialSelectorSession.ContentGroup(root.groupPath(), NativeSelectorContent.CREATE_GROUP_LABEL_KEY)),
+			projection.groups(), "the create record root declares the Create properties group");
 		assertEquals(List.of("attention"), root.allowedTypes().stream().map(type -> type.id()).toList(),
-			"an unrelated record root stays a selectable property");
+			"the grouped record root stays a selectable property with its Ping Types");
 		content.close();
+	}
+
+	private static final String NAME = "minecraft:target.name";
+	private static final String ENTITY_TYPE = "minecraft:entity.type";
+	private static final String HAS_NETWORK = "create:kinetic.has_network";
+	private static final String OVERSTRESSED = "create:kinetic.overstressed";
+	private static final String INVENTORY_SUMMARY = "create:inventory.summary";
+	private static final String FLUID_SUMMARY = "create:fluid.summary";
+	private static final String AVAILABLE_CAPACITY = "create:kinetic.available_capacity";
+
+	private static PresentationField.Kind createKind(String field) {
+		if (field.equals(SPEED) || field.equals(INVENTORY_SUMMARY) || field.equals(FLUID_SUMMARY))
+			return PresentationField.Kind.RECORD;
+		if (field.equals(HAS_NETWORK) || field.equals(OVERSTRESSED)) return PresentationField.Kind.FLAG;
+		return PresentationField.Kind.NUMBER;
+	}
+
+	private static PresentationPreviewAccess createAccess(Set<String> createFields, Set<String> basicFields) {
+		Map<String, PresentationPreviewAccess.Adapter> adapters = new LinkedHashMap<>();
+		if (!createFields.isEmpty()) {
+			Map<String, PresentationField> create = new LinkedHashMap<>();
+			for (String field : createFields)
+				create.put(field, new PresentationField(field, createKind(field), true, 0, field));
+			adapters.put(CREATE, new PresentationPreviewAccess.Adapter(1, create));
+		}
+		if (!basicFields.isEmpty()) {
+			Map<String, PresentationField> basic = new LinkedHashMap<>();
+			for (String field : basicFields)
+				basic.put(field, new PresentationField(field,
+					field.equals(BLOCK_STATE) ? PresentationField.Kind.RECORD : PresentationField.Kind.TEXT, true, 0, field));
+			adapters.put(BASIC, new PresentationPreviewAccess.Adapter(1, basic));
+		}
+		return new PresentationPreviewAccess(1, 1, "entity_block", adapters);
+	}
+
+	private static NativeSelectorContent createContent(Map<String, PresentationValue> values, PreviewContext context,
+		CapturedPingContext capture, Consumer<PresentationPreviewC2SPacket> sender, ClientInventory inventory) {
+		Set<String> createFields = new java.util.LinkedHashSet<>();
+		Set<String> basicFields = new java.util.LinkedHashSet<>();
+		values.keySet().forEach(field -> (field.startsWith("create:") ? createFields : basicFields).add(field));
+		var preview = new ClientPresentationPreview(
+			type -> Optional.of(createAccess(createFields, basicFields)), () -> context,
+			List.of(previewValueReader(CREATE, values), previewValueReader(BASIC, values)),
+			(target, type) -> Optional.empty(), sender);
+		if (inventory != null) ready(inventory);
+		var content = new NativeSelectorContent(capture, preview, () -> inventory,
+			ignored -> List.of(ping("attention")), ref -> Component.literal(ref.fieldId()),
+			json -> Component.literal("Chest"));
+		content.begin(context.level);
+		if (inventory != null) inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, content.requestId(),
+			null, 9, 1, 1, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of(entry("exact", 1, false, 1))).stamp(100, 1));
+		return content;
+	}
+
+	/** One real content bridge and headless selector session over locally observed create content. */
+	private static final class CreateContentSession {
+		final List<PresentationPreviewC2SPacket> sent = new ArrayList<>();
+		final CapturedPingContext capture = capture();
+		final PreviewContext context = new PreviewContext();
+		final NativeSelectorContent content;
+		final SpatialSelectorSession<ClientInventory.PreviewEntryReference> session;
+
+		CreateContentSession(Map<String, PresentationValue> values) { this(values, null); }
+
+		CreateContentSession(Map<String, PresentationValue> values, ClientInventory inventory) {
+			content = createContent(values, context, capture, sent::add, inventory);
+			assertTrue(sent.isEmpty(), "locally observed create content needs no preview request");
+			session = new SpatialSelectorSession<>(previewTarget(capture), Map.of(),
+				new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), false, 250, true, false),
+				previewFence(content), (target, contentFence) -> content.read(target, contentFence), SELECTOR_GEOMETRY);
+			session.open(0L);
+		}
+
+		SpatialController.MenuView menu() { return session.snapshot().radial().menus().getLast(); }
+		String label(SpatialController.ChoiceView choice) { return content.label(choice.label()).getString(); }
+	}
+
+	@Test void createNamespaceBridgeClassifiesEveryCreateFieldAndDescendantUnderCreateProperties() throws IOException {
+		withEnglishTranslations(() -> {
+			var context = new PreviewContext();
+			var capture = capture();
+			Map<String, PresentationValue> values = new LinkedHashMap<>();
+			values.put(SPEED, speedRecord(128, 128, true));
+			values.put(HAS_NETWORK, new PresentationValue.Flag(true));
+			values.put(OVERSTRESSED, new PresentationValue.Flag(false));
+			values.put(INVENTORY_SUMMARY, new PresentationValue.RecordValue(Map.of("minecraft:stone", new PresentationValue.NumberValue(3))));
+			values.put(FLUID_SUMMARY, new PresentationValue.RecordValue(Map.of("minecraft:water", new PresentationValue.NumberValue(100))));
+			values.put(NAME, new PresentationValue.Text("\"Chest\""));
+			values.put(ENTITY_TYPE, new PresentationValue.Text("minecraft:chest"));
+			values.put(BLOCK_STATE, new PresentationValue.RecordValue(Map.of("lit", new PresentationValue.Text("true"))));
+			var content = createContent(values, context, capture, packet -> {}, null);
+			var projection = content.read(previewTarget(capture), previewFence(content));
+			assertNotNull(projection);
+			var createGroup = projection.groups().stream()
+				.filter(group -> group.labelKey().equals(NativeSelectorContent.CREATE_GROUP_LABEL_KEY)).findFirst().orElseThrow();
+			assertEquals(List.of(NativeSelectorContent.CREATE_GROUP_STEP), createGroup.path());
+			assertEquals(2, projection.groups().size(), "the block-state group and the Create group are both declared");
+			for (var property : projection.properties()) {
+				if (property.ref().fieldId().startsWith("create:"))
+					assertEquals(createGroup.path(), property.groupPath(), property.ref()::toString);
+				else if (!property.ref().fieldId().equals(BLOCK_STATE))
+					assertTrue(property.groupPath().isEmpty(), property.ref()::toString);
+			}
+			assertTrue(projection.properties().stream().anyMatch(property -> property.ref().fieldId().equals(INVENTORY_SUMMARY)
+				&& property.ref().recordPath().equals(List.of("minecraft:stone"))),
+				"a registry-ID record descendant is projected under Create");
+			assertEquals("Create properties", content.label(createGroup.labelKey()).getString(),
+				"the Create group label resolves through the real language fallback");
+			content.close();
+		});
+	}
+
+	@Test void createGroupIsPureNavigationWhileGenericFieldsAndTheInventoryListStayOutside() throws IOException {
+		withEnglishTranslations(() -> {
+			Map<String, PresentationValue> values = new LinkedHashMap<>();
+			values.put(SPEED, speedRecord(128, 128, true));
+			values.put(HAS_NETWORK, new PresentationValue.Flag(true));
+			values.put(INVENTORY_SUMMARY, new PresentationValue.RecordValue(Map.of("minecraft:stone", new PresentationValue.NumberValue(3))));
+			values.put(NAME, new PresentationValue.Text("\"Chest\""));
+			values.put(ENTITY_TYPE, new PresentationValue.Text("minecraft:chest"));
+			values.put(BLOCK_STATE, new PresentationValue.RecordValue(Map.of("lit", new PresentationValue.Text("true"))));
+			var inventory = new ClientInventory(packet -> {});
+			var fixture = new CreateContentSession(values, inventory);
+			enter(fixture.session, "content", 10L);
+			var top = fixture.menu().choices();
+			assertEquals(List.of("Create properties", "minecraft:block.state: 1", "minecraft:entity.type: minecraft:chest",
+				"Chest", "Inventory items", "Back"), top.stream().map(fixture::label).toList(),
+				"generic fields and the inventory list stay outside the Create group");
+			var create = top.getFirst();
+			assertTrue(create.branch());
+			assertNull(create.action(), "the Create group parent carries no property intent");
+			assertNull(create.outlineColor(), "the Create group parent carries no Ping Type color");
+			enter(fixture.session, create.id(), 150L);
+			assertEquals(List.of("create:inventory.summary: 1", "minecraft:stone: 3", "create:kinetic.has_network: Yes",
+				"create:kinetic.speed: 128 RPM", "effective_rpm: 128", "moving: Yes", "theoretical_rpm: 128"),
+				fixture.menu().choices().stream().filter(choice -> !choice.back()).map(fixture::label).toList());
+			String back = fixture.menu().choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow().id();
+			focus(fixture.session, back, 200L);
+			fixture.session.tick(400L);
+			assertTrue(fixture.menu().menuId().endsWith(":content"), "Back returns one level to the content menu");
+			assertEquals(create.id(), fixture.menu().choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id(),
+				"the Create parent keeps its stable identity after the return");
+			fixture.content.close();
+		});
+	}
+
+	@Test void createGroupParentReleaseCommitsNothingAndItsSpeedRootStaysSelectable() throws IOException {
+		withEnglishTranslations(() -> {
+			Map<String, PresentationValue> values = new LinkedHashMap<>();
+			values.put(SPEED, speedRecord(128, 128, true));
+			var groupRelease = new CreateContentSession(values);
+			enter(groupRelease.session, "content", 10L);
+			String parent = groupRelease.menu().choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id();
+			focus(groupRelease.session, parent, 150L);
+			assertInstanceOf(SelectorIntent.None.class, groupRelease.session.releaseIntent(151L),
+				"releasing the focused Create group parent commits nothing");
+			groupRelease.content.close();
+
+			var rootRelease = new CreateContentSession(values);
+			enter(rootRelease.session, "content", 10L);
+			String create = rootRelease.menu().choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id();
+			enter(rootRelease.session, create, 150L);
+			var speed = rootRelease.menu().choices().stream()
+				.filter(choice -> "create:kinetic.speed: 128 RPM".equals(rootRelease.label(choice))).findFirst().orElseThrow();
+			focus(rootRelease.session, speed.id(), 300L);
+			var intent = assertInstanceOf(SelectorIntent.CreateProperty.class, rootRelease.session.releaseIntent(301L));
+			assertEquals(new PresentationPropertyRef(CREATE, SPEED, List.of()), intent.property().ref());
+			assertEquals(speedRecord(128, 128, true), intent.property().observedValue(),
+				"the grouped speed root still commits its actual observed RPM record");
+			assertEquals("attention", intent.property().pingTypeId());
+			rootRelease.content.close();
+		});
+	}
+
+	@Test void createGroupDeclarationIsStableAndAbsentWithoutCreateMembers() {
+		Map<String, PresentationValue> values = new LinkedHashMap<>();
+		values.put(SPEED, speedRecord(128, 128, true));
+		var context = new PreviewContext();
+		var capture = capture();
+		var content = createContent(values, context, capture, packet -> {}, null);
+		var first = content.read(previewTarget(capture), previewFence(content));
+		assertNotNull(first);
+		assertEquals(1, first.revision());
+		assertNull(content.read(previewTarget(capture), previewFence(content)), "an unchanged grouped projection adds no revision");
+		values.put(SPEED, speedRecord(64, 64, true));
+		content.tick();
+		var next = content.read(previewTarget(capture), previewFence(content));
+		assertNotNull(next);
+		assertEquals(2, next.revision());
+		assertEquals(first.groups(), next.groups(), "the Create group keeps its stable declaration and identity");
+		content.close();
+
+		Map<String, PresentationValue> generic = new LinkedHashMap<>();
+		generic.put(ENTITY_TYPE, new PresentationValue.Text("minecraft:chest"));
+		var genericContext = new PreviewContext();
+		var genericCapture = capture();
+		var genericContent = createContent(generic, genericContext, genericCapture, packet -> {}, null);
+		var plain = genericContent.read(previewTarget(genericCapture), previewFence(genericContent));
+		assertTrue(plain.groups().isEmpty(), "content without a create-namespace member declares no group");
+		assertTrue(plain.properties().stream().allMatch(property -> property.groupPath().isEmpty()));
+		genericContent.close();
 	}
 
 	@FunctionalInterface private interface ThrowingRunnable { void run(); }

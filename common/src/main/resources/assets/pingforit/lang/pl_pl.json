@@ -388,4 +388,5 @@
   ,"pingforit.chat.content.quality": "%s (%s)"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.name": "Nazwa niestandardowa"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "Niestandardowa nazwa oznaczonego celu."
+  ,"presentation.pingforit.content.group.create": "Właściwości Create"
 }

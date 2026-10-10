@@ -27,6 +27,11 @@ import nx.pingwheel.common.render.SpatialInventoryView.Status;
 
 /** One held target's authorized observation adapter. No marker data or sender is exposed to the facade. */
 final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<ClientInventory.PreviewEntryReference> {
+	/** Stable navigation-group identity for the confirmed Create properties content hierarchy. */
+	static final String CREATE_GROUP_STEP = "create";
+	static final String CREATE_GROUP_LABEL_KEY = "presentation.pingforit.content.group.create";
+	private static final String CREATE_FIELD_NAMESPACE = "create:";
+	private static final List<String> CREATE_GROUP_PATH = List.of(CREATE_GROUP_STEP);
 	private final CapturedPingContext capture;
 	private final ClientPresentationPreview preview;
 	private final Supplier<ClientInventory> inventory;
@@ -118,6 +123,7 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 			PresentationPropertyRef blockStateRef = null;
 			PresentationValue blockStateValue = null;
 			boolean blockStateMember = false;
+			boolean createMember = false;
 			for (var entry : PreviewPropertyEntries.of(projection)) {
 				var ref = entry.ref();
 				if (ref.isRoot() && ref.fieldId().equals(PresentationBasic.BLOCK_STATE)
@@ -142,24 +148,26 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 				Component value = propertyLabel(projection, ref, entry.observed().value(), name);
 				if (value == null) continue;
 				labels.put(labelId, value);
-				List<String> groupPath = ref.fieldId().equals(PresentationBasic.BLOCK_STATE) && !ref.recordPath().isEmpty()
-					&& blockStateStep != null ? List.of(blockStateStep) : List.of();
-				if (!groupPath.isEmpty()) blockStateMember = true;
+				List<String> groupPath = contentGroupPath(ref, blockStateStep);
+				if (CREATE_GROUP_PATH.equals(groupPath)) createMember = true;
+				if (groupPath.size() == 1 && groupPath.getFirst().equals(blockStateStep)) blockStateMember = true;
 				properties.add(new SpatialSelectorSession.Property(id, labelId, ref, entry.observed().value(), types, defaultType, groupPath));
 			}
-			if (blockStateAnchor < 0) return;
-			if (blockStateMember) {
-				String labelId = "selector-group:" + blockStateStep;
-				labels.put(labelId, blockStateLabel);
-				groups.add(new SpatialSelectorSession.ContentGroup(List.of(blockStateStep), labelId));
-			} else {
-				// Existing empty-group convention: a disabled row, never a dead selectable root.
-				String id = propertyKey(blockStateRef);
-				String labelId = "selector-property:" + id;
-				labels.put(labelId, blockStateLabel);
-				properties.add(blockStateAnchor, new SpatialSelectorSession.Property(id, labelId, blockStateRef,
-					blockStateValue, List.of(), null, List.of()));
+			if (blockStateAnchor >= 0) {
+				if (blockStateMember) {
+					String labelId = "selector-group:" + blockStateStep;
+					labels.put(labelId, blockStateLabel);
+					groups.add(new SpatialSelectorSession.ContentGroup(List.of(blockStateStep), labelId));
+				} else {
+					// Existing empty-group convention: a disabled row, never a dead selectable root.
+					String id = propertyKey(blockStateRef);
+					String labelId = "selector-property:" + id;
+					labels.put(labelId, blockStateLabel);
+					properties.add(blockStateAnchor, new SpatialSelectorSession.Property(id, labelId, blockStateRef,
+						blockStateValue, List.of(), null, List.of()));
+				}
 			}
+			if (createMember) groups.add(new SpatialSelectorSession.ContentGroup(CREATE_GROUP_PATH, CREATE_GROUP_LABEL_KEY));
 		});
 		ClientInventory current = inventory.get();
 		ClientInventory.Preview state = current == null || request == ClientInventory.NO_REQUEST ? null : current.preview(request);
@@ -195,6 +203,19 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 		revision++;
 		previous = next;
 		return next;
+	}
+
+	/**
+	 * Confirmed content hierarchy: every create-namespace presentation field and
+	 * its record descendants join the Create properties group, while generic
+	 * Minecraft fields, the block-state group, and the separate inventory list
+	 * keep their own positions.
+	 */
+	private static List<String> contentGroupPath(PresentationPropertyRef ref, String blockStateStep) {
+		if (ref.fieldId().equals(PresentationBasic.BLOCK_STATE) && !ref.recordPath().isEmpty() && blockStateStep != null)
+			return List.of(blockStateStep);
+		if (ref.fieldId().startsWith(CREATE_FIELD_NAMESPACE)) return CREATE_GROUP_PATH;
+		return List.of();
 	}
 
 	private Component propertyLabel(ClientPresentationPreview.Projection projection, PresentationPropertyRef ref,

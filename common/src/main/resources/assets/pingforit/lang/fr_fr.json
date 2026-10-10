@@ -393,4 +393,5 @@
   ,"pingforit.chat.content.quality": "%s (%s)"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.name": "Nom personnalisé"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "Nom personnalisé de la cible signalée."
+  ,"presentation.pingforit.content.group.create": "Propriétés de Create"
 }

@@ -41,6 +41,9 @@ class SpatialSelectorLocalizationTest {
 	private static final SpatialSelectorSession.ListGeometry GEOMETRY =
 		new SpatialSelectorSession.ListGeometry(4, 180, 17, 23, 19, 85);
 	private static final Pattern PLACEHOLDER = Pattern.compile("%[a-zA-Z%]");
+	/** Keys the content bridge publishes for its navigation groups. */
+	private static final List<String> CONTENT_GROUP_KEYS = List.of(
+		"presentation.pingforit.content.group.create");
 
 	@Test void facadeMenuLabelsExistAndAreNonBlankInEveryLocale() throws IOException {
 		Set<String> keys = facadeLabelKeys();
@@ -77,6 +80,16 @@ class SpatialSelectorLocalizationTest {
 					() -> "menu label must not be formatted: " + locale + ":" + key);
 			}
 			assertEquals(englishSpatial, spatialKeys(json), () -> "spatial key mismatch in " + locale);
+		}
+	}
+
+	@Test void contentGroupLabelsExistAndAreNonBlankInEveryLocale() throws IOException {
+		for (String locale : LOCALES) {
+			JsonObject json = read(locale);
+			for (String key : CONTENT_GROUP_KEYS) {
+				assertTrue(json.has(key), () -> "missing translation: " + locale + ":" + key);
+				assertFalse(json.get(key).getAsString().isBlank(), () -> "blank translation: " + locale + ":" + key);
+			}
 		}
 	}
 
