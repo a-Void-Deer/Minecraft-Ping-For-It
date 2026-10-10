@@ -55,11 +55,11 @@ The current suite covers:
 Marker-store, packet, and update tests provide recipient-scoped state and
 channel-mode transport seams, but do not establish the complete `ServerCore`
 ordering and channel/admission matrix in a live client/server path. Loader
-registration of the legacy, presentation-v3, presentation-policy, inventory-v2,
+registration of the legacy, presentation-v5, presentation-policy, inventory-v3,
 presentation-preview-v1, server-configuration-v2, and superseded marker routes
 is confirmed by source inspection for Fabric, Forge, and NeoForge;
 `ModIdentityTest` pins the fork identity, packet-ID namespaces, and the
-versioned presentation-v3, inventory-v2, policy-v2, and server-configuration-v2
+versioned presentation-v5, inventory-v3, policy-v3, and server-configuration-v2
 route IDs; focused packet tests pin those families' version boundaries and
 codec shapes, and `PresentationPreviewWiringTest` statically confirms the
 preview codec registration and main-thread handoff on every loader. These
@@ -70,7 +70,7 @@ S2C packet is ignored by the client, nor a live cross-loader network test.
 ### Presentation snapshot negotiation, policy and adapters
 
 Focused common tests cover the versioned presentation contract at model,
-property, codec, admission, and lease-refresh/capture-budget seams:
+property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
 
 - `PresentationCoreTest` covers allow/deny selector wildcard semantics with
   allow-before-deny precedence, fail-closed selector construction and value
@@ -89,7 +89,15 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   and localized base name; a present custom name composes as custom-plus-base
   for both an entity and an item stack; an undemanded name builds no name field
   and skips the registry-bound encoder; and an absent custom name keeps the
-  trusted base component instead of strict composition. It runs headless
+  trusted base component instead of strict composition. The same seam covers
+  the custom-name rules: a dropped item's stack custom name takes priority over
+  an entity custom name, a custom-only demand reads the name source once,
+  encodes no composed name and omits an empty name, a dropped item never falls
+  back to an entity custom name, `custom_name` stays literal raw text rather
+  than composed JSON or a stripped approximation, and a failed or throwing
+  custom-name getter, composed-name encoder, or malformed custom component
+  omits only the affected name fields while retaining independently demanded
+  health. It runs headless
   against real entity and item instances with builtin registries and component
   JSON name encoding; the surrounding live path (server-level and registry
   dimension lookup, entity lookup acceptance, world-backed projection, packet
@@ -121,7 +129,7 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   bounded property-intent frames with trailing safety, blank or whitespace
   record keys round-tripping without annotations, and a non-boolean annotation
   on a blank key path rejected on decode;
-- `PresentationPacketsV3Test` covers the v3 packet contract: no `SUBSCRIBE`
+- `PresentationPacketsV3Test` keeps its historical class name and covers the v5 packet contract: no `SUBSCRIBE`
   kind and new route IDs, schema-only `HELLO`, bounded typed property
   observations on `CREATE` with duplicate-ref rejection, `REMOVE` round trips
   and a targetless `CREATE` being corrupt, `OFFER` manifest round trips,
@@ -140,10 +148,18 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   when exhausted; recipient policy and marker selections staying independent
   across live samples; an external name-only path using the authoritative name
   without reading unavailable block state; external name, type, and state
-  selections still requiring available observation; and all-type masks
-  revoking on permission and provider changes without client selections. The
-  capture context and providers are fakes; the real server world, live
-  provider, and end-to-end transport remain unexercised;
+  selections still requiring available observation; a custom-only external
+  admission recapturing the actual provider's raw custom text as the selectable
+  value with one name read and a reduced Basic demand that drops masked block
+  state; an absent or empty actual custom name rejecting the uploaded claim
+  instead of admitting it; `custom_name` never replacing the default reference;
+  a masked or unpaid custom selection rejected before any capture; an exact
+  child-denied intent rejecting the whole request before any source capture
+  while its complete root record still admits and projects with only the root
+  annotation; and all-type masks revoking on permission and provider changes
+  without client selections. The capture context and providers are fakes; the
+  real server
+  world, live provider, and end-to-end transport remain unexercised;
 - `PresentationServerRefreshTest` covers the production server lease, refresh
   and capture-budget seams headlessly: a same-id external refresh delivers a
   CREATED snapshot with the updated locator/anchor to a known online recipient,
@@ -172,13 +188,63 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   demand and Basic observation ports are in-memory or recording; the live
   server world, registry lookups, real providers, packet transport, rendering,
   and the complete tick/live baseline remain unexercised;
-- `ClientPresentationTest` covers the v3 client session: `HELLO`/`OFFER`/`RESET`
+- `ClientPresentationTest` covers the v5 client session: `HELLO`/`OFFER`/`RESET`
   epoch and view guards without any client preference, a tighter reset mask
   pruning frozen fields and annotations without resurrection, accepted metadata
   being preserved but never treated as an authorization mask, `CREATED`
   initializing the stored target type and default while sections carry nested
-  annotations, and masks authorizing each marker by its stored type rather than
-  its adapter or name;
+  annotations, masks authorizing each marker by its stored type rather than
+  its adapter or name, a reset's child deny map pruning a stored frozen
+  annotation and a denied default reference while the parent field keeps its
+  complete value and its descendants stay selectable, a denied annotation
+  dropped before storage so neither a later loosening nor a frozen section can
+  resurrect it,
+  a `CREATED` selection naming a denied child rejecting atomically with the
+  marker insertion, a zero-view reset rejected without publishing authority,
+  and a soft-removed tombstone exposing an empty projection;
+- `PresentationReceiptContentTest` covers the v5 receipt content descriptor as
+  a strict codec: the non-property kinds carry no references, a property
+  descriptor requires a non-empty sorted unique bounded reference list in a
+  deterministic order and exposes it immutably, every kind round-trips, and
+  the strict reader rejects an unknown kind, an over-capacity count, an illegal
+  list shape, duplicate or out-of-order references, noncanonical numbers,
+  invalid identifiers and path grammar, and malformed UTF-8 metadata while a
+  literal replacement character and supplementary code points stay valid
+  canonical text and the existing UTF length and character bounds are kept; the
+  atomic initial carries the descriptor beside the marker snapshot, default
+  reference and section, and trailing bytes or the pre-descriptor version-three
+  shape are rejected and, on the safe read path, reported corrupt with the
+  frame fully drained;
+- `PresentationReceiptProjectorTest` covers the pure receipt projection: no
+  selection or only nullable unannotated selections project the whole kind, an
+  explicit selection set projects exactly its complete sorted references once
+  even when the same reference also appears nullable, any denied reference or a
+  denied target name suppresses without disclosing references, a health
+  selection requires its authorized maximum-health dependency, item count and
+  kinetic capacity are never mandatory dependencies, and the inventory kind
+  requires the dedicated route and an authorized name;
+- `PresentationServerReceiptTest` covers the production initial-sending
+  projection: a default-only marker stays whole even when the default reference
+  is a name, an explicit selection carries its exact references including a
+  name the HUD skips, a nullable-only selection sends a whole initial a
+  negotiated client accepts, a mixed nullable-and-annotated selection carries
+  only the explicit references while the nullable value stays
+  server-projected, one freshly denied reference suppresses the whole content
+  receipt without leaking references, an exact child-denied selection
+  suppresses the content receipt and drops only that annotation while a
+  root selection still sends a property receipt carrying the complete root
+  record, a denied target name suppresses a content
+  marker while an ordinary receipt keeps its unknown-name behavior, a missing
+  mask or accepted manifest entry suppresses, a health
+  selection requires the freshly authorized maximum, and both the atomic
+  initial and the cached re-baseline use the fresh inventory permission gate
+  rather than the session's cached advertised view without rewriting that view;
+- `ClientPresentationReceiptAcceptanceTest` covers client acceptance of the
+  descriptor: a denied or unaccepted selection rejects before any atomic store
+  mutation, a nested scalar selection and a present unannotated value reject
+  without rolling back the prior initial, a missing authorized value still
+  accepts and waits while a suppressed receipt retains no references, and the
+  custom-name manifest field is accepted as raw text beside the composed name;
 - `PresentationPropertyFormatterTest` covers the client display projection:
   distinct nested annotations following the default without inheriting an outer
   Ping Type, annotating the default without duplicating it and absent nested
@@ -188,7 +254,25 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   explicit Ping, the target-name default staying out of the property plan for
   block, entity-block, and location targets, explicit target-name annotations
   not duplicating the authoritative name, and dropped-item item/count display
-  remaining intact; and
+  remaining intact; it also covers kinetic used stress, total capacity, and
+  available capacity formatting as SU from the same projection with the bundled
+  English translations, where a used-stress percentage appears only beside a
+  positive capacity and a missing or zero capacity keeps plain SU, while
+  unrelated property formatting stays unchanged;
+- `PresentationKineticFormatTest` covers the kinetic display formatter
+  headlessly: used stress beside a positive capacity from the same projection
+  renders as SU plus a percent that is never clamped to 100, while a
+  missing, zero, non-positive, or non-number capacity omits the percent instead
+  of inventing a zero and keeps plain SU; total capacity and available capacity
+  stay plain SU with a negative available value unclamped; extreme and
+  fractional values use plain two-decimal rounding; the capacity lookup is
+  never consulted for capacity or available capacity; a root kinetic speed
+  record formats its numeric effective RPM through the localized RPM display
+  without consulting capacity — including a negative fractional value and an
+  observed zero beside a nonzero theoretical RPM — while a record without a
+  numeric `effective_rpm` stays unformatted for the caller's generic record
+  summary; and unrelated adapter
+  refs, non-numeric values, and nested refs stay unformatted; and
 - `PresentationFieldCatalogTest` covers namespace grouping by field ID rather
   than the owning adapter, exact field IDs, first-occurrence de-duplication,
   immutability, retained server-advertised default and label over local
@@ -202,6 +286,15 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   wildcards independent of permissions, effective sampling limits and
   fingerprints, and the replaceable permission provider's vanilla default and
   fail-closed behavior;
+- `PresentationChildBlackPolicyTest` covers the persisted child deny list:
+  every fresh target type denying exactly the two nested Create kinetic RPM
+  references by default while their root and sibling record keys stay
+  selectable, exact case-sensitive adapter/field/record-path matching without
+  descendant or allow-selector override, an explicit empty list opting a type
+  out, a programmatic malformed list durably denying only its own target type,
+  and child references surviving deep copy, fingerprint and JSON round trips,
+  including an absent member gaining the semantic defaults while an explicit
+  empty member stays empty;
 - `PresentationSettingsPolicyTest` covers per-target-type policy independence
   with missing types failing closed, mutation isolation between target types,
   invalid selectors denying only their own target type, deep-copy/fingerprint
@@ -217,28 +310,51 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   durable global denial, malformed interval shapes not resetting the config,
   older-version migration composing with the shape copy, obsolete client keys
   removed while unknown data is preserved, future-version files never
-  rewritten, and a malformed presentation object failing closed without
-  resetting unrelated config;
-- `ServerPresentationPolicyServiceTest` covers the v2 rule-view service:
+  rewritten, a malformed presentation object failing closed without
+  resetting unrelated config, an absent child deny member gaining the semantic
+  Create RPM defaults without a migration, normalization write, or reset while
+  an explicit empty member opts out across reloads, each malformed child deny
+  member durably denying only its own target type, a custom child reference
+  surviving reload and normalization instead of stacking on the defaults, and
+  reset restoring the semantic child defaults;
+- `ServerPresentationPolicyServiceTest` covers the policy-v3 rule-view service:
   read-all disclosing every target type in catalog order, missing settings or an
   unknown type failing closed, a permission-denied mutation changing no type,
   add and remove mutating only the selected target type,
   duplicate/missing/invalid/unknown-type requests never changing state,
   over-capacity and no-op requests leaving the rule view unchanged,
-  whitelist-only assignment affecting the selected type only, and detached-copy
-  isolation with missing settings failing closed;
-- `ServerPresentationPolicyPacketsTest` covers the v2 route and codec: the
-  version-two route, a C2S read without a target type round-tripping,
+  whitelist-only assignment affecting the selected type only, every field
+  mutation preserving the selected type's persisted child deny list in the
+  rule view it returns, including a custom entry and an explicit opt-out,
+  child metadata alone never turning a field no-op into a write, and
+  detached-copy isolation with missing settings failing closed;
+- `ServerPresentationPolicyPacketsTest` covers the policy-v3 route and codec:
+  the version-three route, a C2S read without a target type round-tripping,
   mutations round-tripping with a selected target type, unknown-type or
   selector mutations being corrupt, S2C carrying every target type, the
   default fallback carrying all five empty-allow views but being corrupt, a
   partial or unknown rule map rejected, a missing target type decoding to a
   fail-closed fallback, and trailing bytes yielding the corrupt fallback
   instead of an exception;
+- `PresentationChildPolicyPacketsTest` covers the child deny wire: a v5 `RESET`
+  round-tripping the complete five-type child map beside the field mask with an
+  explicit child-empty type not gaining defaults, a v4 version tag and a
+  missing, unknown, duplicate, root, over-capacity, malformed-path, depth,
+  non-canonical, missing-map or trailing child payload rejected as corrupt with
+  the reader draining the frame, the policy-v3 route carrying each type's
+  complete child list and an explicit opt-out, a missing or malformed child
+  list in that route rejected rather than defaulted, a complete old
+  version-two rule frame not reinterpreted as child-empty version three,
+  maximal accepted reset and policy bodies fitting the transport body bound
+  without truncation, and oversized bodies rejected before parsing with a
+  strict boolean;
 - `ServerPresentationPolicyStateTest` covers the per-target-type full rule map
   being read-only by type while mutations carry the selected type, timeout and
-  broadcast ordering never creating or regressing rule views, and an
-  incomplete view never publishing an allow policy; and
+  broadcast ordering never creating or regressing rule views, an
+  incomplete view never publishing an allow policy, and a remote child deny
+  list detached from its source map while a field mutation leaves it unchanged
+  and a child-denied reference yields no policy allowance beside an allowed
+  root; and
 - `PresentationSelectorDraftModelTest` covers per-target-type draft, feedback,
   and caret independence, one global pending submission clearing only the
   unchanged submitted draft, and a failed or timed-out submission retaining its
@@ -250,33 +366,81 @@ property, codec, admission, and lease-refresh/capture-budget seams:
   immutable non-mutating results.
 
 `ClientPingActionDispatcherTest` covers a typed property create using the
-frozen target on the actual wire; `ClientPingDispatchReceiptTest` covers the
+frozen target on the actual wire and an exact child revocation rejecting that
+create without sending and without silently falling back to a plain create;
+`ClientPingDispatchReceiptTest` covers the
 actual-send receipt and transport-failure rollback; and
 `ClientPingRuntimeInteractionTest` drives that property create through the
 native selector's content release. `ModIdentityTest` pins the fork identity,
 the packet-ID namespaces, and the versioned route IDs.
 
 NeoForge Create adapter seams cover the optional summary route:
-`CreatePresentationAdapterTest` (server/client manifest parity, demand gating,
-per-field projection, unavailable-versus-partial summary distinction, and
-cadence override), `CreatePresentationRegistrationTest` (idempotent
+`CreatePresentationAdapterTest` (server/client manifest parity including the
+default-enabled derived available-capacity number field, demand gating,
+per-field projection, derived-only available-capacity projection: computed only
+from the demanded raw capacity/stress pair, never leaking that pair into a
+projection that did not demand it, sharing one source capture, never reaching
+the source under a zero budget, yielding no derived value when either raw value
+is missing, and keeping a negative or double-precision result exact;
+unavailable-versus-partial summary distinction; and cadence override),
+`CreatePresentationRegistrationTest` (idempotent
 once-per-registry registration and absent-adapter rejection),
-`CreatePresentationCollectorBudgetTest` (shape/work/version gates),
+`CreatePresentationCollectorBudgetTest` (shape/work/version gates plus the paid
+visited-member prefix: a rejected, throwing or budget-exhausted member never
+refunds earlier member checks and a throwing gate never reads that member),
 `BoundedCreateSummaryTest` (registry-ID aggregation and scan/work/output
-limits), and `CreatePresentationMixinPluginTest` (version gate and constructed
-ASM node field-shape gate for the cached network accessor).
+limits), `CreatePresentationMixinPluginTest` (version gate and constructed
+ASM node field-shape gate for the cached network accessor), and
+`CreateCachedKineticPreviewTest` (the Create-free locally received cached
+network totals seam: a missing receipt never reads the network or raw totals; a
+missing network or cached-field accessor shape reads only its shape probe and
+no raw total; each condition yields per-field unavailability rather than an
+asserted zero, while a genuinely received zero stays observed; the raw
+accessors are read at most once per observation and the derived available
+capacity reuses that pair with double promotion over extreme finite floats; an
+undemanded family field is neither read nor published, so the raw pair never
+leaks into the projection; and a throwing or linkage-failing raw accessor or a
+non-finite or negative raw value loses only its own field).
+`CreateMixinLoaderGateTest` goes beyond the constructed ASM node field-shape
+gates: it reads the already-resolved compile-only Create artifact as bytes and
+drives both production plugins headlessly through the real ModLauncher bytecode
+provider, covering the tested archive's actual accessor and receipt shapes, the
+positive decision for each mixin, an untested version stopping before any
+bytecode discovery, an unavailable provider staying fail-soft, and a shape
+drift that closes only the affected gate. It also pins the provider behavior
+those decisions depend on: the unsupported untransformed lookup is rejected
+before any class byte is read, and the Mixin-owned lookup does not consult the
+installed Mixin class processor. That exclusion uses a per-instance recording
+processor whose positive control first shows an ordinary ModLauncher reason
+reaching it once — with the caller's reason observed and its AFTER nomination
+aggregated into the provider's result — while the Mixin-tagged lookup adds no
+processor call, and the actual provider lookup still returns the Create target.
+The exercised provider is the repository's normal test-classpath Mixin (0.8.6);
+the separate 0.8.7 provider run was an external verification command, not
+repository dependency metadata, so this coverage makes no provider-version
+promise. It adds no runtime Create dependency and does not apply either
+mixin in a launched game.
 `CreatePresentationExternalBlockTest` also covers the production `observeSource`
-routing seam: committed external metadata gates, provider-local position
-selection, demand and budget forwarding, ordinary-block routing without external
-observation, and unavailable or mismatched inputs stopping before collection.
-Its recording `SourceAccess` does not exercise a real Create collector or
-handler, the Create mixin/accessor, or a live Sable API.
+routing seam: committed external metadata gates, the current committed
+source-binding and member-gate forwarding, demand and budget forwarding,
+ordinary-block routing without external observation, and unavailable or
+mismatched inputs stopping before collection. It additionally covers the
+candidate preview entry: provider-resolved local position with the original
+detached metadata, member-gate forwarding, and foreign metadata, a missing
+binding or an out-of-scope or throwing member gate stopping before any member
+read. It also covers the compatible source-access defaults: they never fall
+back to the legacy observation or drop a resolved member scope. Its recording
+`SourceAccess` does not exercise a real Create collector or handler, the Create
+mixin/accessor, or a live Sable API.
 
-These are model, property, codec, admission, and lease-refresh/capture-budget
-seams. The refresh tests invoke production delivery, refresh and sampling
+These are model, property, child-deny, codec, receipt descriptor/projection,
+admission, and lease-refresh/capture-budget seams. The refresh tests invoke
+production delivery, refresh and sampling
 methods through in-memory sessions and recording observation ports. They do not
-establish live client/server negotiation, session reset or mask pruning over a
-real connection, transport registration in a running game, a real world or
+establish live client/server negotiation, session reset or mask pruning or child
+deny pruning over a
+real connection, transport registration in a running game, live receipt
+transport or chat delivery, a real world or
 provider observation, live permission projection, a live policy rule-view
 read/mutation/broadcast, property upload admission against a real world,
 rendered property/chat/HUD lines, the live settings-screen draft,
@@ -292,13 +456,21 @@ has foundation and production-seam tests, not a live client/server validation:
   cover accepted-manifest and exact target-type mask intersection, unready and
   unknown-field denial, matching field kinds, dedicated-inventory exclusion,
   detached access snapshots, and a production client-session reset revoking
-  reader demand and late responses without populating the marker store;
+  reader demand and late responses without populating the marker store,
+  including a child-only reset fencing a pending response while a retained
+  cached snapshot cannot reintroduce the denied entry;
 - `ClientPresentationPreviewTest` and `PreviewFoundationRegressionTest` cover
   local-first observations, fallback for missing authorized roots, observed
   zero and false, one-shot attempt history and cadence, timeout and deferred
   outcomes without polling or invented values, interaction/level/view fences,
   detached projections that expose neither world handles nor caller tokens,
-  and historical marker-cache identity, schema, mask and annotation boundaries.
+  and historical marker-cache identity, schema, mask and annotation boundaries;
+  a locally observed and a server-fetched record both keep their root entry
+  while an exact child denial omits only that entry, an intermediate denial
+  hides its own entry without hiding descendants, the flattened
+  `PreviewPropertyEntries` projection omits the denied exact reference, and a
+  release re-checks the current child authorization after a painted or prepared
+  entry was revoked.
   `PreviewPropertyEntriesTest` covers actual nested literal property keys and
   sequence roots without inventing addressable sequence indexes;
 - `PresentationPreviewServerTest` covers queue admission without ingress reads,
@@ -310,12 +482,36 @@ has foundation and production-seam tests, not a live client/server validation:
   admitted before execution, leases consume shared work before preview,
   exhausted work defers, revocation stops publication, optional failures stay
   bounded, request/result codecs compose, and preview never creates marker
-  state or materializes an uncommitted external candidate;
+  state or materializes an uncommitted external candidate. It also covers the
+  candidate preview route: identity drift including the opaque provider locator
+  rejects before any provider source read, the actual server-resolved target
+  type still governs, an unavailable safe source is unavailable rather than
+  approximated, budget admission precedes the safe source read, and an optional
+  adapter's preview uses its candidate-aware preview collection instead of its
+  committed collection. An authorized custom-only candidate preview resolves
+  through one paid member-gated observation: validation and capture are
+  admitted before reads, the member gate is checked, the name source is read
+  once with no block-state read, and the captured section carries the raw
+  custom text and resolves it through its reference without annotations or
+  session state; failed membership, a missing binding, a partial or mismatched
+  state observation, or a masked custom field never read or publish the name;
+  an advertised and a freshly configured child denial union into one
+  authorization snapshot, and a view promotion enables a newly allowed exact
+  child only through a fresh snapshot while a detached older snapshot is never
+  widened;
 - `MinecraftPreviewFieldAccessTest` covers the Basic reader with real headless
   entity and item instances: demand precedes getters, observed health and item
   data are retained, constructor-empty item data is unavailable rather than
   zero, and dimension, identity, unavailable-block and generic-name gates stop
-  unsupported observations;
+  unsupported observations. It also covers a provider-resolved external
+  binding: the physical binding is admitted only through its member gate, a
+  foreign expected registry is unavailable, a block-owning generic name is not
+  observed, and a block without a block entity exposes its physical state name;
+- `MinecraftBlockReadSourcesTest` covers the detached read binding: physical
+  read coordinates never leak into the original detached external target, and a
+  candidate or committed binding requires the exact opaque provider locator
+  alongside the unchanged identity quartet while a classification-only change
+  keeps the binding;
 - `PresentationPreviewPacketsTest` and `PresentationPreviewInnerSectionTest`
   cover bounded request/result/control codecs, exact consumption, duplicate
   demand rejection, mask/kind/schema checks, denied-field skipping, annotation
@@ -334,12 +530,144 @@ NeoForge's `CreatePreviewReceiptStateTest` covers explicit client receipt
 evidence and its invalidation without treating absent constructor fields as
 observed zero. `CreatePreviewMixinPluginTest` covers a constructed target's
 receipt/invalidation method and field-shape gate, not live mixin application.
+`CreateSableContentPreviewTest` covers the adapter-level separation between the
+candidate-aware preview collection and the committed collection, including a
+zero preview budget never reaching the source and an adapter without a
+candidate source keeping its committed path.
 
 These tests exist at headless runtime, reader, model, codec and static wiring
 seams. They do not record a current Gradle run or establish world-backed
-validation, prediction-guard application, live permission changes, native
+validation, prediction-guard application, live provider source or membership
+resolution, live permission changes, native
 content selection through authoritative CREATE, installed optional providers,
 network delivery, rendering, or multiplayer behavior.
+
+### Content receipt chat and pending completion
+
+The content receipt's message and completion lifecycle has headless model,
+store and port coverage rather than live chat evidence:
+
+- `ContentChatTemplateTest` covers the localized content template: its tokens
+  can be reordered, repeated tokens are allowed while escaped braces
+  stay literal, literal percent sequences are never formatted again, a
+  template missing any required token falls back to the safe default that
+  keeps the author, target, content and annotation phrase and never falls back
+  to the whole-message family, malformed templates report empty instead of
+  building a partial line, and the per-Ping-Type override follows the selected
+  locale's presence policy. Its list family covers the multi-entry grammar: the
+  outer template requires only author, target and content and adds no whole-set
+  annotation, each entry template carries its own annotation and content, an
+  invalid list or entry template falls back within its own family while
+  preserving every entry, the per-entry override follows the same
+  selected-locale presence policy independently of the single template, and
+  legacy single-template lambda sources remain compatible with the default list
+  templates;
+- `ContentChatComposerTest` covers the content composer: every explicit
+  reference is composed in order including an explicit name the HUD plan
+  excludes, a missing or unannotated selected reference or an empty selection
+  makes the whole message unavailable, custom-name text stays literal and
+  quoted exactly once, the injected authoritative name decoder receives the
+  stored JSON and raw JSON never reaches the message, only the annotation type
+  word is colored, a kinetic stress value reuses the same-projection
+  authorized capacity and omits a zero capacity, the localized template
+  source follows the override policy and a failed lookup stays a controlled
+  default, the bundled Chinese property and inventory examples match the
+  confirmed contract, an exact long count and an explicit zero are retained,
+  a fallback uses the registry localized item name without the raw label
+  literal, the observation quality is preserved without upgrading, and an
+  unknown count or terminal quality is unavailable. It also covers the
+  multi-entry presentation: mixed independent annotations keep each entry's
+  own phrase, action and phrase-only color in one complete message in
+  reference order rather than grouping by type, same-type selections each
+  retain their own phrase once, and a missing secondary annotation fails
+  closed even when every value is present while the compatibility summary
+  never conceals it. Selected root and nested text payloads stay exact literal
+  text — including braces, brackets and percent sequences — without the HUD's
+  short-name reduction clipping them, while a selected record root keeps the
+  established size summary instead of a value dump. The production item
+  decoder flattens nested custom and `ITEM_NAME` styles and events to
+  plain text, quotes only the custom text once beside the trusted
+  localized base translation, keeps an unrenamed or normal variant's
+  localized base unquoted, and the exact-count and quality rules above
+  stay unchanged;
+- `ContentChatLocalizationTest` covers the bundled locale files' complete
+  content vocabulary: every declared content key and custom-name field
+  label/description is present and non-blank, the template carries every
+  required token, the quote, field, item-count and quality keys keep their
+  placeholder counts, the separator is a written connective without a
+  placeholder, and the content key set and placeholder counts stay in parity
+  across locales. All eight bundled locales also carry the multiple and entry
+  template keys: the outer template carries author, target and content and no
+  `{type}`, each entry template carries its own annotation and content exactly
+  once, and all three grammars parse in every locale;
+- `PendingContentChatControllerTest` covers the pending completion controller
+  headlessly: only a newly seen accepted content kind begins, a duplicate
+  pending cannot replace the capture, separate adapter arrivals require every
+  explicit reference and never send a partial list, each reference needs its
+  own annotation, a missing first reference cannot conceal a later denial,
+  a missing, malformed or stale name waits while an explicit denial cancels,
+  health waits for its required authorized maximum, a stale selected section
+  waits and an optional capacity never blocks stress, the inventory gates
+  reject partial, unknown-baseline, grey and status-only observations while a
+  complete zero is accepted, a long count stays exact, a ready inventory still
+  waits for a fresh name and negotiation and then reads the latest count, an
+  unknown inventory policy waits while an explicit denial cancels, reset,
+  removal, eviction, disconnect and changed epoch/view fences discard late
+  data, a positive pending bound fails closed without evicting another
+  capture, cancellation leaves no permanent sent history, reset or clear
+  inside the name or composer callbacks cannot send late output, reentrancy
+  cannot duplicate and the sink runs only after the pending is removed, a
+  throwing sink cannot leave a duplicate while a throwing composer can retry
+  fresh data, revocation or value replacement is revalidated before emission,
+  an exact child revocation cancels the pending capture even while its root
+  value and annotation remain, a revocation during formatting is rechecked
+  before the chat sink,
+  and a clear/rebegin or a new inventory baseline cannot emit the old capture;
+- `PendingContentChatAcceptedStoresTest` drives the controller from real
+  accepted presentation and inventory stores: accepted Basic completes exactly
+  once and a known create never repeats even after a zero local visual
+  deadline, fragmented tracking waits for the committed baseline while preview
+  and status-only readiness and later stream data never produce another line,
+  an invalidated count is grey and cannot be resurrected while a complete zero
+  is authoritative, an accepted reset cancels pending and an old or known new
+  view cannot restart it, and authoritative expiry cancels while the marker
+  store may retain a visual record; its fixture is not production runtime
+  wiring;
+- `ClientPingRuntimeContentReceiptTest` drives the real packet-dispatched
+  runtime, stores and composer with game effects and world/input access as
+  ports: an ordinary receipt is immediate once and a replay does not repeat it,
+  a property content create sounds and chats through the content hook without
+  adding an ordinary line or delaying the sound, a nullable-only selection
+  stays whole while a mixed selection carries only the annotated reference as
+  content authority and emits exactly one content line when its annotated
+  section arrives with the nullable value still server-projected, non-Basic
+  selections must all arrive before the complete current set emits, an
+  inventory preview and partial baselines wait for the committed baseline
+  while later stream data never produces another line, an exact long count
+  stays exact, reset, authoritative expiry, hard removal, eviction and
+  disconnect fence late completion,
+  fallback stale and final deletion cancel while a short visual deadline does
+  not, the original author is retained across a same-ID external locator
+  refresh, a missing authorized name waits while policy revocation or an
+  unavailable game cancels, a suppressed receipt still sounds but chats
+  nothing and malformed selection cannot partially mutate the runtime, current
+  name JSON and raw custom text decode while a missing annotation does not
+  complete, a stale epoch, view or revision cannot complete, an optional
+  stress value does not require capacity and the current mask never exposes a
+  denied capacity, a synchronized sibling supersedes a stale pending without
+  leaking its late values, and receipt callbacks never capture or send. The same
+  runtime wiring also carries the production selected-locale template source
+  through the controller and composer for a multi-property receipt: the bundled
+  Chinese outer template owns the list grammar, a selected-locale per-entry
+  override is used while a fallback-locale override present only in the merged
+  language is never inherited, an entry without an override falls back to the
+  localized entry template, and the single complete message colors only each
+  entry's own annotation phrase and never repeats on a later update.
+
+These are headless model, codec, store and composer seams over recording
+effect, world and input ports. They do not exercise live packet transport or
+loader registration, the Minecraft chat overlay or GUI delivery, actual sound
+playback, resource reload or locale switching, or multiplayer behavior.
 
 ### Capture, wheel and cancellation
 
@@ -360,7 +688,9 @@ unavailable candidate never falls back to the ordinary target; and an abort
 fences a late completion before any release proposal can evaluate it,
 including an abort re-entered from terminal release ports.
 `TargetSnapshotTest` covers snapshot identity, copied capture metadata and frozen
-context construction; `TargetSnapshotBlockClassificationTest` covers explicit
+context construction, and that an ordinary or external block target may carry a
+capture face while other target kinds may not;
+`TargetSnapshotBlockClassificationTest` covers explicit
 and absent block-entity classification metadata; and
 `MinecraftTargetSnapshotFactoryDetailedTest` covers retaining local detail only
 for the matching entity-hit owner. `MinecraftTargetSnapshotFactoryFaceTest`
@@ -375,7 +705,11 @@ after direction/position copies and coordinator completion.
 face identity retention: the captured face survives only when resolution
 preserves the captured ordinary-block identity, duplicate and late-stale
 completions cannot replace an accepted face, and a changed block type or
-position discards it. These are factory and coordinator seams; the complete
+position discards it. For an external candidate the same retention requires the
+exact read binding including the opaque provider locator: a target that merely
+compares equal as a candidate, or a changed provider, registry or stable
+identity, cannot replace the accepted face. These are factory and coordinator
+seams; the complete
 client/server `entity_block` classification path, including synthetic-face
 provenance from every optional producer, remains unexercised.
 
@@ -579,7 +913,11 @@ or resource-fallback scenarios.
 
 `TargetNameComposerTest` covers custom color/italic stripping and base-component
 identity. Its event-named case does not construct click or hover event fixtures,
-so it is not event-specific regression coverage.
+so it is not event-specific regression coverage. `TargetNamePlainTextTest`
+covers the plain-text reduction's UTF-8 byte bound: every cut keeps whole
+supplementary code points and never turns a truncated surrogate into a
+replacement byte, and the presentation text bound admits the maximum whole
+emoji prefix without dropping literal punctuation or adding base text.
 
 `ClientPingRuntimeTest` covers the current-local-store membership predicate
 before and after a same-ID external-locator upsert. Through a recording receipt
@@ -765,7 +1103,21 @@ opaque reference without count authority, partial-batch ordering and freeze
 rules with explicit zero retained, list Back-hover ownership and one-level pop,
 lifecycle and unavailable fences discarding old references and late data,
 missing counts staying unknown while an explicit zero remains selectable, and
-opaque property keys not aliasing another annotation action.
+opaque property keys not aliasing another annotation action. It also covers
+captured-face admission and external-block face retention: a captured face is
+accepted for the block and entity-block target types and rejected for entity
+and location targets; an ordinary external-block target opens the selector and
+releases exactly its own captured target, hit and provider-local face, present
+or absent; and a live precise external-block candidate keeps that face through
+publication, paint and release while the painted context keeps the live ray.
+It also covers the declared content navigation groups: a declared group renders
+as a parent whose focused release commits nothing while an unrelated top-level
+row keeps its established action; grouped member children keep their own
+references, observed values and typed default release; Back returns one level
+and keeps the parent identity; a declared group with no visible member choice
+is omitted instead of becoming a dead selectable root; a nested group path
+renders its subgroups under the declared parent and releases the nested member;
+and a property group path whose declared ancestor chain is missing is rejected.
 `NativeSelectorInputTest` covers the headless input normalization seam: only
 accepted successive window positions become GUI travel, opening, resize, focus
 loss, and reopen reprime without phantom travel, and scroll normalization
@@ -778,8 +1130,51 @@ against a real headless client inventory session: opaque selectable references,
 explicit zero and row quality, folded-row replacement resetting the list, close
 cleanup, reentrant abort during open without reviving the request, and safe
 conversion of a null label to an empty component while unknown non-empty keys
-keep their translation fallback. This is client-session/facade coverage, not
-native input or HUD evidence.
+keep their translation fallback. It also covers the kinetic stress/capacity
+content projection: a locally observed pair needs no preview request and
+formats with the same projection capacity without adding a request, an
+authorized but locally missing capacity is requested exactly once and its
+accepted response enables the percentage context, and a denied capacity is
+neither demanded nor inferred, so the reader is never asked for a field outside
+the accepted mask. It also covers the root kinetic speed projection from a
+locally observed record through the bundled English localized RPM display: a
+driven and a reversed signed effective RPM keep their own value, a stopped
+overstressed record shows its observed zero rather than its nonzero
+theoretical RPM or record size, nested typed rows keep their typed scalar
+labels, a record without a numeric `effective_rpm` keeps the established
+generic record summary instead of an invented RPM value, and the local
+projection adds no preview request. The bridge also covers the content
+ping-type policies: the
+inventory item menu uses the inventory item policy including its
+inventory-only take type while a regular property keeps the property policy
+without take, and the legacy constructor keeps passing the shared policy; and
+an automatic Back entry's localized key resolves through the content adapter
+as a translatable component. The bridge also covers the block-state navigation
+group over a real headless selector session: a locally observed block-state
+record becomes a pure navigation group whose record root is dropped from the
+selectable projection and whose grouped rows are declared; the group parent is
+an actionless branch with no typed release of its own; its state children keep
+their observed references, values and default Ping Type outline color with
+typed releases, including a nested row releasing under the selected Ping Type;
+Back returns one level and the frozen parent identity survives; an empty
+record stays a disabled row rather than a dead selectable root; and an
+unrelated record root keeps its ordinary selectable branch. The bridge also
+covers the Create namespace hierarchy over the same session: every
+create-namespace field and its record descendants join the localized Create
+properties group, whose label resolves through the real language fallback
+including its written ellipsis, while only the kinetic stress, capacity, and
+available-capacity fields nest under the localized Stress group and the
+network and overstress flags and every other Create field stay directly
+selectable under Create; each group parent is an actionless branch whose
+focused release commits nothing and carries no Ping Type color; the grouped
+Stress children keep their own references, observed values and typed default
+release; an empty Create membership declares no group; the declared hierarchy
+keeps its identity across revisions; and Back from the Stress subgroup
+returns one level to the Create menu with the parent identity preserved. An
+exact child-denied kinetic field is omitted from both the locally observed and
+server-backed menus while its root speed record stays selectable and still
+formats RPM. This is client-session/facade coverage, not native input or HUD
+evidence.
 
 `SelectorToggleLabelsTest` covers the client-side settings-toggle label
 resolver headlessly: each of the three target-selection toggles reads only its
@@ -817,29 +1212,64 @@ invalid viewport cannot open; and a reentrant abort inside validation blocks
 every release packet. A nearer same-identity precise contact without a face
 preserves the ordinary press-time inventory face: the ordinary content branch
 still opens with that face, its inventory selection remains enabled, and the
-release selects without a fallback create. `ClientPingDispatchReceiptTest` covers actual-send
-receipt, transport-failure rollback without queueing or refund, empty-tracker
-restoration and preservation of a newer reentrant route receipt.
+release selects without a fallback create. An external-block press with a
+provider-local face opens the selector, sends that frozen face as the inventory
+preview read scope, and releases exactly its own external target.
+`ClientPingDispatchReceiptTest` covers actual-send receipt, transport-failure
+rollback without queueing or refund, empty-tracker restoration and preservation
+of a newer reentrant route receipt.
 `WheelMouseCaptureLifecycleTest` covers owned release and re-grab,
 incoming-screen disposal ordering, an unowned free cursor and reentrant
-disposal. `NativeSelectorMixinContractTest` checks the mapped `MouseHandler`
-callback ABI, the mixin hook descriptors, and that each effective loader
-manifest registers every hook exactly once on the client side.
+disposal. It also covers the selector's own cursor-visibility ownership
+through the recording cursor seam: the operating-system cursor is hidden only
+while the selector actually owns input and is restored on a normal close, on
+the incoming-screen disposal path, and on focus loss; a screen-owned cursor is
+never hidden over; a window-handle replacement drops the old window's hide
+without touching the replacement window; a cursor mode changed by a newer
+owner is never overridden and suppresses re-hiding until a fresh
+selector-owned release or the next hold, and that newer owner is not re-grabbed
+even on a focused close; a mid-hold screen close restores the
+cursor and a later vanilla re-grab while the wheel stays open hides again; an
+owned release enters hidden mode directly from disabled mode and applies the
+captured physical pointer position instead of GLFW's virtual saved position,
+so the visible arrow keeps its physical location, while a vanilla release
+followed by
+an unrelated hide never claims that restore; a focus loss during synchronization
+restores once and can neither hide nor re-grab while the window stays inactive;
+a normal close still re-grabs when the interaction phase publication lags the
+mouse sync; and a reentrant disposal during release, a mode write or cursor
+restore re-entered by that disposal, or a repeated close leaves no stale
+visibility state or second re-grab. `WheelMouseCaptureTest` covers the pure
+press-time grab guard across every interaction phase and screen/focus
+combination: a vanilla mouse press cannot auto-regrab while the selector owns
+input, while screen-open and unfocused presses keep the vanilla grab.
+`NativeSelectorMixinContractTest` checks the mapped
+`MouseHandler` callback ABI, the mixin hook descriptors — including that the
+release redirect targets the real vanilla position-then-mode call and the
+press guard redirects only the auto-grab so raw press and release edges still
+reach the key mapping — and that each effective loader manifest registers
+every hook exactly once on the client side.
 
 These are production-orchestration tests over recording world, cursor, clock
 and transport ports; they are source-reviewed test existence, not a live client
-run, mixin application, GPU submission, or multiplayer verification.
+run, mixin application, native Windows/GLFW cursor or desktop behavior, GPU
+submission, or multiplayer verification.
 
 ### Inventory preview and tracking foundation
 
 The inventory foundation has headless coverage for the preview route and its
 supporting models. `InventoryC2SPacketTest` and `InventoryS2CPacketTest` cover
-request and response codec round trips, bounded text and frame limits,
-corruption rejection, part-range and duplicate-key rejection, and the status
-values; an offer's positive period values round-trip at their upper bounds
+the version-three request and response codec round trips, bounded text and frame
+limits, corruption rejection, part-range and duplicate-key rejection, and the
+status values; the version-three `OPEN` grammar round-trips a native block or an
+uncommitted external candidate with its exact locator, classification and face,
+and rejects a committed external, entity or location target, a wrong protocol
+version, overlong or non-canonical fields, and trailing bytes; an offer's
+positive period values round-trip at their upper bounds
 including `72001` and `Integer.MAX_VALUE`, while zero, out-of-range, and raw
 overlong or noncanonical period encodings are rejected without defaults. `InventoryChecksumsTest` covers the entry checksum model.
-`InventoryStrictDecodeTest` covers raw overflowing request/response frame
+`InventoryStrictDecodeTest` covers the strict version-three `OPEN` grammar on
+raw frames plus raw overflowing request/response frame
 numbers and strict helper rejection of overflowing or noncanonical varints and
 overflowing varlongs; it is codec coverage, not transport or admission evidence.
 `InventoryScannerTest`, `InventoryScanBrokerTest` and `InventoryWireWindowTest`
@@ -895,7 +1325,12 @@ consumers enter, and closing evidence never refunds the current target's paid
 progress. Compatible aliased inputs still share one physical round when normal
 observation admission is full, because the bounded round guard counts physical
 rounds rather than a compatible consumer's references, and per-target-key
-quotas stay independent. A shared physical replacement hands off from a
+quotas stay independent. The owner and frozen face remain part of that source
+key: one original block resolves separately for a different owner or face
+instead of reusing a same-binding shortcut, and retiring an invalid origin
+input invalidates only the handle bound to that input while a different
+owner's and a different face's handles stay active. A shared physical
+replacement hands off from a
 predecessor to its successor: same-owner, same-subject peers skewed across
 periods share the one replacement, a fast peer's accepted successor stays
 serviceable to a slow peer that can consume it without a second physical
@@ -927,7 +1362,15 @@ when cleanup throws, with fatal errors propagated without stranding resources.
 admission order before any source read: rate and channel reject first,
 authoritative target-gone precedes source admission, and the witness and
 annotation steps sit inside production dedicated admission before storage with
-no leaked reservation. `InventoryPublicationIntegrationTest` replays the
+no leaked reservation. It also covers the committed lifecycle around that
+order: the tracking sidecar is installed before the first initial publication
+even with no section intents, a committed publication failure cannot retry,
+re-create, or turn into a retryable rejection, and the sidecar query follows
+the committed tracking lease until removal. `InventoryItemPingTypesTest`
+covers the chest item content policy: the actual chest tag grants the
+inventory-only take type exactly once, a missing or merely name-matching tag
+fails closed, and non-chest items and the regular property policy keep their
+existing types without take. `InventoryPublicationIntegrationTest` replays the
 production publisher's real encoded frames into the client session: a recovery
 fence precedes the baseline snapshot per recipient, a grey baseline is replaced
 without resurrecting an old stream, each recipient's receipt stays isolated, a
@@ -969,7 +1412,35 @@ double-chest preview withdraws its cross-period encoded batch when the original
 hit half becomes a legal single, normal content changes do not rebase or
 recapture a stable cross-period preview, and terminal evidence detects a
 same-alias same-count snapshot-layout change even when access remains
-self-valid.
+self-valid. `SableInventorySourceTest` covers the provider-confirmed external
+inventory source headlessly with recording level, membership and provider
+ports: canonical aliases share only inside the same provider, sub-level, world,
+owner and frozen face, same-registry candidates with different locators neither
+short-circuit resolution nor share invalid retirement, an input-only probe or
+validate failure discards only that alias's own references without retiring the
+origin's completed evidence or refunding its paid target quota, an origin probe
+retires the shared evidence even after the origin consumer has left so a valid
+alias cannot publish a sweep whose originating evidence became invalid, an
+invalid alias during a shared replacement releases its references without
+pinning a stale handoff or blocking the origin's later sweep, each committed
+input keeps its own lease evidence for completed publication, a cached alias
+prefix cannot be consumed after its own point moves even while a shared
+controller stays valid, a provider layout cannot introduce foreign members, a
+foreign chest partner is denied before any state, block entity or content read,
+a same-sub-level double chest keeps the canonical alias and per-member NBT
+without replacing the original external target, release during a contiguous
+save publishes no atomic snapshot, committed evidence invalidates on point
+relocation or release while a fresh existing recovery recaptures, fresh world
+and membership closures are used across ticks, a partial snapshot rejects a
+member topology change without a mixed tail, a committed locator refresh keeps
+the binding while a descriptor scope change or released capture is invalid,
+frozen face, lock and loot safety hold for external chest NBT, a provider
+lookup or last-metadata revocation cannot reach a content read or an
+enumeration handoff so a stale handle cannot replay revoked contents, a
+metadata-denied indexed step charges its attempt without publishing a zero and
+a fresh handle recovers, an indexed enumeration re-checks each read before
+visiting content, and a mismatched detached candidate or wrong resolver
+binding is rejected before any world read.
 `InventoryMinecraftSnapshotCaptureTest` drives the production view and NBT
 capture algorithms against bootstrapped vanilla block entities: a single chest
 and both double-chest members are captured through the real vanilla save path
@@ -1002,15 +1473,34 @@ all members rather than each member alone. NeoForge's
 `CreateVaultInventoryAccessTest` covers the segmented Vault access snapshot
 layout: member order, controller role, member-local visible mappings and layout
 data are preserved, and an invalid current layout exposes no snapshot
-descriptor. `CreateVaultSourceWrapperTest` composes the real lazy
+descriptor; its member-gate variant gates the root, controller and every member
+before world or local reads and re-checks after revocation, including reads
+through an already acquired member or local handler. `CreateVaultSourceWrapperTest` composes the real lazy
 segmented Vault provider with the production common wrapper: a same-controller
 rotation invalidates before the cursor continues, and a fresh handle recovers
-the complete twelve-slot sum. `InventoryPresentationTest`,
+the complete twelve-slot sum. `SableInventoryHandoffTest` covers the production
+preview-to-tracking handoff with recording transports: a preview candidate uses
+a request-scoped quota without a marker key or provider reference, a valid
+selection materializes once, binds the current physical root, witnesses the
+live item and stores committed tracking with a fresh count, a wrong sub-level,
+root, registry or inactive source rejects before the witness with a single
+release and no store, a tampered owner or face binding rejects before
+validation, witness or annotation, same-registry candidates do not cross-bind
+across requests, a selection replay resends the stored result without a second
+materialization, witness or reference, and an invalid source before the first
+tracking publication publishes no quantity while recovery starts a fresh
+baseline. `InventoryPresentationTest`,
 `DedicatedDeliveryBoundaryTest` and `ClientDedicatedDeliveryTest` cover the
 dedicated-delivery boundary: the inventory adapter is negotiated and
 policy-catalogued but never sampled, masked, published or rendered by the
 section machinery. `InventoryItemCodecTest` and `VanillaInventorySourceTest`
-cover the ordinary-block item codec and source. `InventoryClientStoreTest` and
+cover the ordinary-block item codec and source. `ClientInventoryV2Test` keeps
+its historical class name and covers the version-three client preview channel:
+an external candidate captured with a real press-time face is sent verbatim
+with its provider locator and classification and no physical block is invented,
+a capture without a real face or a committed external, entity or location
+target opens no channel, and same-registry candidates with different locators
+do not alias preview requests. `InventoryClientStoreTest` and
 `ClientInventoryTest` cover the client connection session: preview projection
 and its accepted barrier across every part, byte bound and fence, baseline
 assembly, unknown-baseline buffer, checksum comparison and resync scheduling;
@@ -1022,7 +1512,26 @@ baseline buffered before an invalidation completes recovery without readmitting
 the old baseline; and an evicted snapshot or multipart-stream replay cannot
 reopen its closed barrier or suppress repair. `PlatformInventoryServiceContractTest`
 covers the loader service contract, including the optional snapshot-layout
-seam of the platform access bridge. `InventoryGestureTest`, `InventoryListModelTest` and
+seam of the platform access bridge. `PlatformInventoryMemberGateTest` covers
+the default member-gate overload: a denied root is rejected before the
+single-position provider is called, and an admitted root forwards the exact
+level, position and frozen face without widening to another member lookup.
+Fabric and Forge add their own `PlatformInventoryServiceMemberGateTest` in
+their loader test source sets over the actual native wrappers headlessly:
+their storage and handler wrappers re-check membership at lookup and before
+every slot count, slot, blank, amount, resource and enumeration visit, so a
+reentrant revocation between world operations or during a slotted read, an
+indexed or cursorless traversal, or a visitor callback rejects before the next
+world or native call and a stale handle cannot replay; cursorless blank views
+still consume their visited bound without a content read; a revoked cursorless
+step reports unavailable and incomplete with no partial or synthesized entry,
+charges its admitted bound and attempted provider work, and a fresh handle
+recovers; ordinary unguarded contents and conjoined nested guards stay
+unchanged, and fatal lookup or guard failures propagate. Fabric substitutes a
+recording item-variant fixture for the cache mixin and Forge runs headlessly
+with the vanilla Minecraft artifact ahead of the patched one; these
+loader-source-set tests do not launch a loader or register mixins.
+`InventoryGestureTest`, `InventoryListModelTest` and
 `SpatialOverlayRendererTimingTest` cover the client gesture, list ordering and
 freeze, and renderer timing models. `SpatialOverlayTransitionsTest`,
 `SpatialInventoryLayoutTest`, `SpatialOverlayRendererStyleTest`,
@@ -1055,22 +1564,44 @@ stay rigid; the open inventory list centers on its active origin and an item
 submenu keeps the selected row's logical anchor under the same translation; and
 an inactive frame freezes the last displayed exit translation that a quick
 reopen re-aims from. `SpatialOverlayRendererNodeLayoutTest` drives real
-controller snapshots through the production radial-planning, node-layout and
-font-clipping seams: ordinary menus keep the historical single-line bounds and
-floors; every node of a Precise menu — the five type slots including a disabled
-one, and Back — shares that menu's single extent budget, and an independent
-title or target font preference survives while both rows fit; width overflow
-clips the text at its readable scale floor instead of shrinking it, so long
-English and Chinese names, extreme font-size preferences and the smallest
-viewport with large fonts keep nonblank title, detail, Back and disabled-type
-text; frame-collision checks use the actual rounded bounds including the
-disabled border's inclusive endpoint across rotations, submenu-size tiers and
-viewports; clipping preserves the first whole visible styled code point without
-splitting surrogate pairs; and the detail line adds no opacity or admission
-layer while an exit transition retains its detached component and frame
-constraint. These are pure projection, layout, clipping and paint-predicate
-seams: no GuiGraphics, GPU, native callback or gameplay frame is involved, and
-resource-pack font extremes remain a gap.
+controller snapshots through the production radial-planning, node-layout,
+title-clipping and external-preview wrapping seams: ordinary menus keep the
+historical single-line bounds and floors; every node of a Precise menu — the
+five type slots including a disabled one, and Back — shares that menu's single
+frame extent budget, a candidate name never resizes or clips the title frame it
+is previewed beneath, and a title or target font preference stays independent
+while its row has room; a name at or below the 32-visible-code-point cap is
+shown whole and wrapped in the shared Precise width instead of being cut at the
+title button width, while a longer name keeps its first 31 visible code points
+plus one ellipsis; legacy formatting does not consume that visible cap, an
+ellipsis keeps the last retained visible glyph's style, and capping never reads
+the overflow tail while a formatting-only detail allocates no area; capping and
+wrapping preserve whole supplementary code points — including a pair split
+across component segments — whitespace, explicit styles and legacy-resolved
+styles, and a legacy-formatting preview with bold, reset and color sequences
+matches vanilla's resolved visual order and painted styles, while an incomplete
+legacy sequence never crosses a component boundary; the centered preview lines
+paint outside and below the frame at the readable scale floor, a larger title
+font preference can only reduce the preview's clearance and scale down to that
+floor without changing its visible text, the smallest viewport with large fonts
+keeps nonblank title, preview, Back and disabled-type text, and Back-hover
+progress keeps tracing the title frame when a preview is supplied;
+frame-collision checks use the actual rounded bounds including the disabled
+border's inclusive endpoint across rotations, submenu-size tiers and viewports,
+the default six-slot plan keeps sibling previews separated at their readable
+scale, and under the default 200% option font a full rotation sweep with every
+slot selected in both languages, for mixed and fully available menus, keeps
+every preview clear of every sibling frame as well as every sibling preview,
+with the reported bearing-208 29-code-point name re-wrapping only after the
+title frame and gap are reserved while keeping its text complete; the painted
+preview retains every capped glyph, a vertically-fitting constrained title
+clips rather than shrinking its font while a clipped label keeps its component
+style, and the preview adds no opacity or admission layer while an exit
+transition retains its detached component and its painted preview. An overfull
+glyph-width stress case keeps the readable floor and applies no second
+truncation; arbitrary resource-pack font metrics remain a gap, and these are
+pure projection, layout, clipping and paint-predicate seams: no GuiGraphics,
+GPU, native callback or gameplay frame is involved.
 `InventoryTrackingRendererTest`
 projects received tracking data into bounded renderer lines: explicit zero is
 retained, unknown or invalid counts are never synthesized as zero, and status
@@ -1220,8 +1751,10 @@ screen evidence:
 - `SpatialSelectorLocalizationTest` covers the eight bundled locale files and
   the native selector facade's real menu-label keys: every non-blank label the
   headless facade publishes exists and is non-blank in every locale and carries
-  no format placeholder, code-defined toggle and target-type identities are
-  published as keys, and the spatial key set stays aligned across locales; it
+  no format placeholder, the content bridge's Create properties and Stress
+  group label keys exist and are non-blank in every locale, code-defined
+  toggle and target-type identities are published as keys, and the spatial key
+  set stays aligned across locales; it
   does not render or assemble screen labels; and
 - `PresentationSettingsLocalizationTest` covers the eight bundled locale files,
   every presentation key present, non-blank, and with an identical key set
@@ -1279,21 +1812,39 @@ provider-observation and diagnostic evidence:
   dispatch and validation seams with a read-only fake world access: loaded
   non-air state, expected registry and provided-state matching, same-level,
   server-thread, dimension, committed-target, missing-provider, and provider
-  failure gates. Its fake tokens do not establish a real `ServerLevel`, loaded
-  world, or live provider observation;
+  failure gates. It also covers the content dispatch boundary: candidate and
+  committed resolution select only their own provider method, unknown or legacy
+  providers and a new-API `LinkageError` fail soft without materialization,
+  observation or reference allocation, and a candidate read never allocates a
+  provider reference through materialization. Its fake tokens do not establish
+  a real `ServerLevel`, loaded world, or live provider observation;
 - `SableExternalBlockObservationTest` covers the production-called stable-entry
   observation helper selecting the committed tracking ID's current sublevel and
   local position, while leaving entry and reference maps unchanged, and failing
   closed for non-live references, wrong entries, invalid tracking-point state,
   and invalid coordinates. It does not load the Sable API or exercise live
   reflection, sublevels, materialization, persistence, or release;
+- `SableBlockReadSourceTest` covers the production content resolver and
+  stable-entry seams with a recording level-free access: a preview descriptor
+  keeps the original candidate identity separate from the detached physical
+  binding and logical anchor, malformed provider, dimension, registry or
+  locator identities reject before provider access, positive sub-level
+  containment, live identity and loaded state precede any content read, a
+  member outside the resolved sub-level is rejected, and a committed read
+  follows the current tracking point, leaves the reference and entry maps
+  unchanged, and cannot resolve after the reference is released;
 - `SableSupplementalRaycasterTest` covers the production transformed scanner
   with real Companion poses and native shapes but recording sublevel ports:
   translated and rotated hits behind a blocker or after a miss, world-segment
   range under nonuniform scale, detached pose evidence, distinct provider-local
   equivalence, raw-entry and shape-work admission, loaded/invalid-pose gates,
-  selection-policy reuse, removed entries and absent-Sable safety. It does not
-  exercise an installed Sable client, live list/reflection access, server
+  selection-policy reuse, removed entries and absent-Sable safety. It also
+  covers the provider-local native face: a real local hit's own direction is
+  copied while a world approach maps to the provider-local direction after
+  rotation, origin containment and synthetic, inside or unobserved contacts
+  stay faceless, and a nearer same-locator or different-locator contact
+  installs only its own face without changing the frozen ordinary face. It does
+  not exercise an installed Sable client, live list/reflection access, server
   materialization, or inventory reads;
 - `SableRefreshLogGateTest` checks decision state for tested locator or reason
   changes and duplicates, rather than a refresh operation or log sink;
@@ -1306,11 +1857,15 @@ provider-observation and diagnostic evidence:
 - `SablePresentationLogGateTest` checks cadence, capacity, repeated
   failure-class key de-duplication, and throwable identity.
 
-These seams do not load a Sable runtime or establish live provider reflection,
-materialization, tracking-point reference lifecycle, live-sublevel observation
-or refresh, multiplayer, or in-game behavior described by those topic sections.
-The registry and stable-entry tests are narrow production-used observation
-seams with fake access and in-memory state, not live server/world evidence.
+These seams do not load a Sable runtime or establish live provider reflection
+(including the additive content membership discovery), materialization,
+tracking-point reference lifecycle, live-sublevel membership and observation,
+the client-side chunk and prediction gates of a provider-resolved physical
+block, a live multi-member content capability, or refresh, multiplayer,
+GUI, network or in-game behavior described by those topic sections.
+The registry, content resolver and stable-entry tests are narrow
+production-used seams with fake access and in-memory state, not live
+server/world evidence.
 The external model and fallback routes also resolve provider presentation
 independently; therefore this evidence cannot guarantee that provider-local
 multipart or subject-type decisions came from one immutable shared snapshot.
@@ -1417,7 +1972,10 @@ intermediary refmap; Forge and NeoForge use their loader-local official-Mojmap
 configuration instead. This routing identifies existing tasks and artifact
 purposes only; because each loader source set compiles the shared common
 sources, an affected loader `build` is source-set and compile evidence for
-those units, not runtime, transport, or in-game verification. Public build
+those units, not runtime, transport, or in-game verification. Fabric and Forge
+additionally carry a test source set whose headless native-wrapper seam tests
+remain seam evidence only, not loader-launch, mixin-application or in-game
+evidence. Public build
 orientation and commands are listed in the
 [repository README](../../README.md#install-build-and-verify); the tracked
 [geometry pipeline](../architecture/geometry/geometry-pipeline.md) is the public
@@ -1425,7 +1983,10 @@ architecture entry point. Local agent instructions, when present, are
 supplementary execution guidance rather than a public documentation prerequisite.
 
 An inventory entry or static wiring test is not a Gradle execution record.
-Final-state evidence for an implementation change must identify the combined
+No separately configured lint, formatter, or static-analysis task exists; the
+automated checks are the Gradle test tasks and the loader build and
+artifact-identity tasks below. Final-state evidence for an implementation
+change must identify the combined
 tree, commands and results for the affected tests and loader source sets;
 blocked or unrun tests, builds and artifact checks remain explicit gaps in that
 change's report. Earlier runs do not validate subsequent relevant edits.
@@ -1433,6 +1994,8 @@ change's report. Earlier runs do not validate subsequent relevant edits.
 | Module or artifact scope | Task | Purpose |
 | --- | --- | --- |
 | `common` test source set | `:common:test` | Runs the common JUnit Platform tests, including shared behavior and integration seams. |
+| `fabric` test source set | `:fabric:test` | Runs the Fabric JUnit Platform tests for the native platform wrapper seams headlessly. |
+| `forge` test source set | `:forge:test` | Runs the Forge JUnit Platform tests for the native platform wrapper seams headlessly. |
 | `neoforge` test source set | `:neoforge:test` | Runs the NeoForge JUnit Platform tests, including NeoForge-specific resolver coverage. |
 | Affected loader source set | `:fabric:build`, `:forge:build`, or `:neoforge:build` | Builds the affected Fabric, Forge, or NeoForge source set and its loader jar. |
 | All shippable loader artifacts | `verifyModIdentity` | Depends on all three loader `build` tasks, then inspects the expected Fabric, Forge, and NeoForge jars in their loader `build/libs` directories for fork identity. |
@@ -1482,6 +2045,11 @@ The following gaps remain open until direct evidence closes them:
   and recovery, low-frequency limit/failure diagnostics, and real world,
   multiplayer, tick-order and GPU execution remain manual/integration
   scenarios;
+- headless provider-confirmed external inventory coverage is inventoried above,
+  including `SableInventorySourceTest` alias/source independence and the Create
+  Vault member-access tests. No automated test exercises live provider
+  membership, a real loaded sub-level, a real provider layout or capability, or
+  loader/runtime integration;
 - inventory administration and spatial-selector configuration have model,
   persistence, strict wire, draft, catalog and focus-helper seams; live
   administration, native widget input/focus, permission changes, persistence,
@@ -1505,18 +2073,28 @@ The following gaps remain open until direct evidence closes them:
 - live server-settings UI, permission, read-only viewing below the required
   level, request/response, update, and persistence behavior;
 - live presentation policy rule-view read, selector add/remove, whitelist-only
-  change, refresh, feedback, and unsolicited broadcast behavior;
+  change, child deny disclosure and preservation, refresh, feedback, and
+  unsolicited broadcast behavior;
 - direct runtime proof that valid legacy S2C locations and superseded marker S2C
   packets are presentation no-ops, plus live loader registration/network
   transport for the presentation snapshot and policy routes;
 - a live two-sided presentation session: negotiation and reset over a real
-  connection, per-recipient permission projection, policy changes advancing the
-  view, and delivery of Basic/adapter values across the loader transport;
+  connection, per-recipient permission projection, a reset's child deny map
+  pruning retained annotations and default references, policy changes advancing
+  the view, and delivery of Basic/adapter values across the loader transport;
 - external-refresh and client-receipt behavior under live conditions: those
   seams are headless, so no automated test exercises a real Minecraft or Sable
   world (logical anchor or render pose), a loaded sublevel, world-backed
   projection, source sampling cost, packet-level ordering or an authorization
   change between snapshot and delivery, or the rendered client marker;
+- content receipt descriptor, projection, server initial-sending and client
+  acceptance, pending content-chat completion and content chat composition have
+  the headless model, codec, store and port coverage inventoried above. No
+  automated test exercises the receipt descriptor over a live connection or
+  loader transport, the Minecraft chat overlay or GUI delivery, actual sound
+  playback, resource reload or locale switching, or multiplayer; the receipt
+  lifecycle owner is
+  [names and chat](../architecture/rendering/names_chat.md#content-receipt-lifecycle);
 - a live property-upload admission round trip: the admission, recapture,
   override, and creation-rollback seams use fakes, in-memory state, or
   recording references, so no real server world, live provider, external
@@ -1529,13 +2107,21 @@ The following gaps remain open until direct evidence closes them:
   in a live session remains pending rather than established by those tests;
 - installed-Create presentation sampling and display remain unexercised in-game:
   automated seams cover the summary adapter's shape, work and version gates,
-  detached registry-ID aggregation, the constructed ASM field-shape gate for
-  the cached network accessor, and the external-block `observeSource`
-  position/demand/budget route with recording access, but no automated test
-  captures a real Create collector's vault or tank controller/member structure
-  or samples a live block capability; a real Create collector or handler, the
-  applied Create accessor/mixin, the Sable API, and resulting HUD label lines
-  remain pending;
+  detached registry-ID aggregation, the derived available-capacity projection,
+  the constructed ASM field-shape gate for the cached network accessor, the
+  real-loader gate decisions over the actual Create archive bytes, the
+  Create-free cached-kinetic-preview receipt/network/accessor and per-field
+  fallback rules, and the external-block `observeSource`
+  position/demand/budget route and candidate preview entry with recording
+  access, but no automated test runs the production collector's own per-member
+  checks or captures a real Create collector's vault or tank controller/member
+  structure or samples a live block capability; a real Create collector or
+  handler, the applied Create cached-accessor and receipt mixins under a
+  launched game's live loader environment, an installed Create block
+  entity read, the Sable API, an in-game goggles/game-HUD label line, and
+  manual evidence for the freshness of a last-synchronized cached network total
+  remain pending, so a last reliable client sync may be stale until an
+  authoritative recapture;
 - the complete `ServerCore` operation ordering and channel/admission matrix in
   an end-to-end server path;
 - same-ID marker creation after local record deletion in the full client
@@ -1590,6 +2176,18 @@ Sable-specific gaps remain for:
   identity change, unload/reload, no-force-load behavior, and marker/session
   lifetime; the new observation tests use fake world-access tokens or in-memory
   entry/reference maps;
+- the additive content read source against a live Sable runtime: companion
+  containment and unique-id membership reflection, live sub-level identity and
+  loaded-member checks, a live multi-member content capability, and the
+  content-read diagnostics; the client received-chunk and pending-prediction
+  gates on a provider-resolved physical block and content preview through the
+  wheel's content branch in a live client/server session, including the bounded
+  server fallback and its GUI and network delivery, remain unexercised;
+- the provider-confirmed external inventory source against a live Sable runtime
+  and world: live membership and sub-level checks, a real provider layout or
+  capability, member-gate revocation between operations, a live item witness
+  and the preview-to-tracking handoff, and inventory reads on the three
+  supported loaders;
 - provider materialization, tracking-point reference counting, rollback and
   release, including the existing empty-audience cleanup path documented under
   [server validation and materialization](../integrations/sable.md#server-validation-and-materialization);
@@ -1613,24 +2211,24 @@ or because related automated tests exist.
 | --- | --- |
 | Block | Plain `block` versus `entity_block`; `ALL`/`COMPATIBLE`/`VOXEL_SHAPE_ONLY` modes and source fallback; whitelist native glow and fallback; a non-full native shape; same-type state change versus block-type replacement. |
 | Entity | Ordinary entity and dropped item; movement and same-dimension teleportation; death and disappearance; same-dimension world unload/rejoin and runtime-ID reuse in a game session. |
-| Wheel | Short and long press; every sector and border color; independent wheel-underlay and target-frame opacity; frozen target; location fallback; Back-hover dwell, one-level return, and leave/re-entry re-arm under real input; Back progress following the focused Back frame boundary; radial root caller geometry, non-root Back centring, dwell entry and fresh-stroke re-arm under real input; the target-selection settings branch's live ON/OFF toggle labels in the bundled Chinese and English locales, including a setting changed while the wheel key is still held, with the captured target and frozen policy unaffected and the entry border unchanged; the rigid centered view translation across multi-level submenus and a Back return, including small GUI scales, large fonts and the largest submenu size; and the Precise slot frames under real rendering, including a disabled slot and Back, long names clipped at their readable text size, and resource-pack font extremes. |
+| Wheel | Short and long press; every sector and border color; independent wheel-underlay and target-frame opacity; frozen target; location fallback; Back-hover dwell, one-level return, and leave/re-entry re-arm under real input; Back progress following the focused Back frame boundary; radial root caller geometry, non-root Back centring, dwell entry and fresh-stroke re-arm under real input; the target-selection settings branch's live ON/OFF toggle labels in the bundled Chinese and English locales, including a setting changed while the wheel key is still held, with the captured target and frozen policy unaffected and the entry border unchanged; the rigid centered view translation across multi-level submenus and a Back return, including small GUI scales, large fonts and the largest submenu size; and the Precise slot frames and their outside-frame name previews under real rendering, including a disabled slot and Back, a capped long name wrapped below its frame at its readable text size, sibling-preview separation, and resource-pack font extremes; and, on a real Windows GLFW window, the operating-system cursor hidden only while the wheel actually owns input, with its owned release keeping the physical pointer position and the selector's visibility state safely released on close, focus loss, window change, screen takeover, and abort without overriding a newer owner's cursor mode or letting a raw press auto-regrab the mouse; and the content menu's navigation-group hierarchy under real input: entering the block-state group and the Create properties and Stress subgroups, an actionless group parent committing nothing on release, nested-group entry, and a one-level Back return preserving the parent identity. |
 | Precise live capture | Periodic capture while the Precise branch is active and pause on leaving it; a moving target while the ordinary action stays press-frozen; release committing the last actually painted selectable version; a pending refresh keeping the last certified candidate; independent Distant Horizons location completion; and multi-loader live sessions. |
 | Selection policy and input | Live GUI/screen callbacks for selection gating; focus-loss `KeyMapping.releaseAll`, screen-transition and level-instance/dimension discontinuity aborts with late asynchronous completion; loader/gameplay input lifecycle and physical key-repeat behavior on Fabric, Forge, and NeoForge; selection toggles, entity blacklist/default `simulated:honey_glue` rule, and spectator exclusion in a game session. |
 | Movement, death and replacement | Target movement while the wheel is open; entity death or dimension change; block state change or replacement while open. |
-| Naming and chat | Custom-name formatting; localized base names; item naming; phrase-only text color. |
+| Naming and chat | Custom-name formatting and content receipt chat lines in the live chat overlay; localized base names; item naming; phrase-only text color. |
 | Invalid-target feedback | Localized invalid-target message with the `[ping for it]` leading marker on both feedback paths, local pre-commit target loss and the correlated server `TARGET_GONE` rejection; the displayed text and marker come from language resources ([presentation owner](../UI/ping-feedback.md#presentation)). |
 | Cancellation | Cone and nearest-own-marker selection; inability to cancel another player's marker; stale/display-hidden candidate followed by server rejection with no local fallback. |
 | Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location; an owner-online refresh that changes the locator or the anchor; a marker beyond the bounded sampling cache synchronizing its known recipients without a new lease; an older or equal-revision initial arriving after a newer one without rolling back the stored payload; a legitimate policy change between cached projection and delivery; and a legitimate later packet arriving after the refresh. |
 | Marker HUD | Repeated same-target pings from one sender and from several senders while same-target records remain display-active: the target's displayed HUD alpha does not accumulate with the number of same-target records ([invariant owner](../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection)). |
-| Inventory and shared sources (planned) | Preview and tracking on Fabric, Forge, and NeoForge; vanilla single and double chests in a live world (their headless real-NBT capture is inventoried above), hopper, furnace, shulker box, and an unopened loot chest without loot-table generation; a fresh capture after ordinary single- or double-chest contents change; installed Create Vault with a real multi-member topology and a real mod-provided multi-member NBT source; private or unavailable inventories; permission and tag governance; unload/reload and live-world safety invalidation and recovery; block-type replacement versus same-type restore before expiry; different-block invalidation and grey status; hard stop at Ping expiry without recovery afterward; session end; queue overload and coalescing including explicit zero values; a multi-period low-consumption quota completing stably; component-too-long all-variant folding; heartbeat zero mode with repair and status still active; low-frequency limit/failure diagnostics; and an explicit unlimited scan mode keeping finite work and memory guards. |
-| Presentation snapshot | Live v3 negotiation, offer and reset-mask pruning, and reset on Fabric, Forge, and NeoForge; the server-selected mask removing retained and frozen values; permission-gated and per-target-type-policy-gated projection for two recipients of one marker; live property uploads through the approved native content property-selection route (client-first selection, server fallback, and authoritative CREATE validation) recaptured against authoritative world state with whole-create rejection on a wrong-kind, unknown, forbidden, or unavailable selection; rendered default display reference and property HUD lines; live property Ping Type override resolution and tag/registry selector matching against actual block, item, and entity tags; the policy rule-view read and per-target-type mutation route over a real connection, including the permission-3 mutation gate, rule-view revision ordering, and unsolicited broadcast to a second client; the server per-target-type policy page with no property-entry editor; superseded marker C2S/S2C routes mutating nothing; installed-Create kinetic and vault/tank summaries including nested count property selections and the cached stress/capacity accessor path and an absent or untested version registering no Create adapter; and a live validated Sable external-block input through the Create route with unavailable and stale outcomes; and a zero server `scanBudget` under live demand with captures deferred while cached values and staleness semantics are retained. |
+| Inventory and shared sources (planned) | Preview and tracking on Fabric, Forge, and NeoForge; vanilla single and double chests in a live world (their headless real-NBT capture is inventoried above), hopper, furnace, shulker box, and an unopened loot chest without loot-table generation; a fresh capture after ordinary single- or double-chest contents change; installed Create Vault with a real multi-member topology and a real mod-provided multi-member NBT source; provider-confirmed external candidate preview and tracking (candidate and committed bindings, membership scope, live item witness and handoff); private or unavailable inventories; permission and tag governance; unload/reload and live-world safety invalidation and recovery; block-type replacement versus same-type restore before expiry; different-block invalidation and grey status; hard stop at Ping expiry without recovery afterward; session end; queue overload and coalescing including explicit zero values; a multi-period low-consumption quota completing stably; component-too-long all-variant folding; heartbeat zero mode with repair and status still active; low-frequency limit/failure diagnostics; and an explicit unlimited scan mode keeping finite work and memory guards. |
+| Presentation snapshot | Live v5 negotiation, offer and reset-mask pruning, and reset on Fabric, Forge, and NeoForge; the server-selected mask removing retained and frozen values and the reset child deny map pruning retained annotations and default references; permission-gated and per-target-type-policy-gated projection for two recipients of one marker; live property uploads through the approved native content property-selection route (client-first selection, server fallback, and authoritative CREATE validation) recaptured against authoritative world state with whole-create rejection on a wrong-kind, unknown, forbidden, unavailable, or exactly child-denied selection; rendered default display reference and property HUD lines; live property Ping Type override resolution and tag/registry selector matching against actual block, item, and entity tags; the policy rule-view read and per-target-type mutation route over a real connection, including the permission-3 mutation gate, rule-view revision ordering, the disclosed child deny list preserved across field mutations, and unsolicited broadcast to a second client; the server per-target-type policy page with no property-entry editor; superseded marker C2S/S2C routes mutating nothing; installed-Create kinetic and vault/tank summaries including nested count property selections and the cached stress/capacity/available-capacity accessor path, including whether a last-synchronized local total is stale, and an absent or untested version registering no Create adapter; and a live validated Sable external-block input through the Create route, including the uncommitted candidate preview entry, with unavailable and stale outcomes; and a zero server `scanBudget` under live demand with captures deferred while cached values and staleness semantics are retained. |
 | Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live scope-tab and category navigation with leaf Back/Escape and root Done/Escape, a fixed footer with non-covering scrolled content, and per-page scroll/focus retention across back navigation and GUI resize, native widget input dispatch and focus-list traversal after a deferred page transition, and root and leaf pages at small GUI sizes and with long localized labels; one shared server session with a single correlated snapshot request retained across category and scope navigation, loading/permission/unavailable status, and a non-editable snapshot rendering read-only for a viewer below the required level; live permission revocation retaining a read-only leaf view, permission-return draft reset, promotion requesting a fresh snapshot, and reconnect draft behavior; invalid-draft close blocking with routing to the offending category and field; the client configuration file action and confirmation-dialog flows, including the reset warning when a server draft exists; the server Presentation category's per-target-type policy rows with their paired allow/block toggles and editable add/remove, whitelist-only changes, refresh, feedback, and broadcast to another client when permitted, including bounded no-response timeout retry, list-capacity feedback, caret and field focus, and a persistence fault during a mutation; and the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)). |
 | Range | Client/server range combinations in one live pipeline: native minimum, a live long-distance Distant Horizons target, Create/Sable finite-segment reuse and server acceptance, including exact Create surface selection followed by whole-entity server-anchor range rejection. Installed-Sable scenarios are listed below. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |
 | Optional content and rendering | Absent or partially present optional content; Create/Flywheel routes; occlusion and arbitrary camera angles; current shape, offset and seed. |
 | Render entity lookup | A real frame epoch shared by HUD marker updates and optional outlines; fresh non-render lookups after render misses; CPU-frame and allocation measurements for 1, 10, and 50 entity marks in a dense world at high FPS. |
 | Create contraption raycast | Hollow, L-shaped, sparse and non-full-block structures: hit occupied surfaces and pass through holes; front empty AABBs, overlapping structures and intervening world walls: select the nearest actual target; all four transparent/fluid policy combinations including represented waterlogging and partial fluid shapes; controlled rotations, moving and minecart-mounted structures, pitched carriages and gantry forms; current-dimension portal-hidden portions and client-loading data availability; long rays starting inside only broad bounds versus an actual selected shape; hold the key while the camera or structure moves and retain the press-time target; Create-absent, delegate-unavailable, client-reconnect and different Flywheel/outline backend paths; measure large-structure press-edge targeting cost. |
-| Sable external blocks | An installed-Sable client/server session covering [candidate capture and presentation](../integrations/sable.md#client-capture-and-presentation), [server information sampling](../integrations/sable.md#server-information-sampling), and [server materialization and release](../integrations/sable.md#server-validation-and-materialization) after removal, expiry, owner disconnect, and empty-audience cleanup; sublevel rotation/translation and current tracking-point relocation; state or registry identity change; unload/reload, no-force-load behavior, provider reference and marker/session lifetime; names and fail-soft behavior; and multiplayer Create create, refresh, and removal. |
+| Sable external blocks | An installed-Sable client/server session covering [candidate capture and presentation](../integrations/sable.md#client-capture-and-presentation), [server information sampling](../integrations/sable.md#server-information-sampling), and [server materialization and release](../integrations/sable.md#server-validation-and-materialization) after removal, expiry, owner disconnect, and empty-audience cleanup; sublevel rotation/translation and current tracking-point relocation; state or registry identity change; unload/reload, no-force-load behavior, provider reference and marker/session lifetime; client and server content preview reads for an uncommitted candidate and a committed target, including membership and received-chunk/prediction gates; names and fail-soft behavior; and multiplayer Create create, refresh, and removal. |
 
 ## Recording future evidence
 

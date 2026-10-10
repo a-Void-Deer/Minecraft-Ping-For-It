@@ -63,7 +63,8 @@ removed entry keeps only detached paint data for one exit interval and is never
 interactive. Reduced motion collapses the interpolation without changing
 selection. Opacity is split by layer: the wheel opacity preference reaches only
 the visual underlay, while the target opacity preference reaches every
-text-bearing frame together with its label. Neither preference dims the
+text-bearing frame together with its label and, when present, its
+outside-frame name preview. Neither preference dims the
 interaction chrome — the pointer, guides, and trail follow only the transition
 fade. The font-size preferences remain the text inputs; the selector adds no
 separate appearance catalogue, and
@@ -163,9 +164,10 @@ certified candidate is disabled. A focused fixed-type leaf keeps its focus when
 the live target changes. Each available leaf creates its assigned canonical
 candidate using that candidate's own Target Type default Ping Type; release
 follows [Radial release result](#radial-release-result). Each enabled leaf also
-shows its captured candidate's actual display name as a second line beneath the
-fixed type title; a leaf with no captured candidate shows the title alone. The
-name is resolved from the same immutable snapshot that carries the candidate
+shows its captured candidate's actual display name as a preview below its own
+fixed type title frame and outside that frame; a leaf with no captured
+candidate shows the title alone. The name is resolved from the same immutable
+snapshot that carries the candidate
 entries for that paint, so a shown name always belongs to the candidate version
 the same frame exposes, and a newer live publication cannot retarget an already
 painted node. The name follows the candidate's certified lifetime under
@@ -175,8 +177,18 @@ incomplete scan clears it together with the entry. An unavailable name uses the
 established unknown-name fallback, and a Location candidate uses the
 established Here name, under the
 [names and chat](../rendering/names_chat.md) composition rules; the branch adds
-no separate name or appearance preference. The second line stays part of the
-node's text-bearing frame and follows the target text style, and an exit tail
+no separate name or appearance preference. The preview never changes the title
+frame: that frame keeps its own bounds, and the preview is painted below it
+without frame background or border. The preview carries at most 32 visible
+Unicode code points, counted after vanilla legacy formatting; formatting
+sequences do not consume the visible budget. A name of at most 32 visible code
+points is shown whole — wrapped within the width shared by the Precise slots
+at a readable text size rather than cut at the title button's width — while a
+longer name keeps its first 31 visible code points followed by one ellipsis.
+Wrapping and capping preserve whole code points and each code point's explicit
+or legacy-resolved style; a glyph that still exceeds the shared width at that
+readable size is not truncated a second time. The preview moves, scales and
+fades with its node and follows the target opacity layer, and an exit tail
 keeps the name it was painted with. The separate,
 equal-width Back entry is navigation and is never a candidate.
 
@@ -190,6 +202,24 @@ session value store are owned by
 [presentation snapshot](../presentation/presentation_snapshot.md); the
 inventory list's data, status, count and ordering rules are owned by
 [inventory preview and tracking](../presentation/inventory.md).
+
+The content menu presents property entries in a navigation hierarchy. The
+`minecraft:block.state` record summary is an actionless navigation group:
+its nested choices are that record's state property entries, such as
+`snowy:false`, while the summary itself carries no default release action
+and no Ping Type submenu of its own. Every nested state property choice
+keeps its own default release action and its allowed Ping Type submenu.
+Every `create:`-namespace presentation field, and any nested reference to
+one, belongs to a localized Create properties navigation group; generic
+Minecraft properties and the separate inventory item list keep their own
+positions outside it. Within Create properties, the localized Stress group
+contains only `create:kinetic.stress`, `create:kinetic.capacity`, and
+`create:kinetic.available_capacity`, together with any nested reference to
+those fields; `create:kinetic.overstressed` and `create:kinetic.has_network`
+stay directly under Create properties, and the kinetic speed entry remains
+directly selectable there. These groups are pure navigation: they carry no
+property intent, a release while one is focused commits nothing, and Back
+returns one level.
 
 ### Inventory list
 
@@ -243,6 +273,14 @@ horizontal-only delta, and for a zero vertical delta. Only the inventory list
 consumes the vertical scroll amount to move its rows; a radial menu consumes
 the callback without using a scroll value, and a consumed scroll moves no
 pointer. A scroll outside that ownership passes through to vanilla unchanged.
+
+While the selector actually owns input, it hides the operating-system cursor,
+leaving the drawn virtual pointer as the visible pointer and the
+absolute-position input path unchanged. Ending that ownership — closing the
+selector, a window change, focus loss, a screen taking over, or an interaction
+abort — releases the selector's own cursor-visibility state without overriding
+a cursor mode established by a newer owner. Cursor hiding and release neither
+warp the cursor nor change gesture behavior.
 
 ## Cancel Marker selection
 

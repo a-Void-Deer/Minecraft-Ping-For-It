@@ -22,7 +22,7 @@ value store.
 
 ## Route and negotiated session
 
-Presentation values travel on a dedicated versioned route (`presentation-v3`),
+Presentation values travel on a dedicated versioned route (`presentation-v5`),
 independent of the legacy location family and of the superseded authoritative
 marker packet family. All three loaders register the route and dispatch it
 through the common handlers. Client-to-server intents are `HELLO`, `CREATE`,
@@ -40,19 +40,28 @@ A connection reaches presentation readiness in stages:
   client accepts only the first valid offer for the connection, and only after
   its own `HELLO`.
 - The server follows its offer with a `RESET` carrying the epoch, the
-  non-regressing view, and the server-selected authorization mask. The mask is
-  keyed by target type, adapter, and the field IDs the server will send for that
-  target type; it is derived from the accepted server field policy, and the
-  client has no local receive or display filter to intersect. There is no client
-  subscription, no field acknowledgement, and no subscription generation.
+  non-regressing view, the server-selected authorization mask, and the complete
+  per-target-type child deny map. The mask is keyed by target type, adapter, and
+  the field IDs the server will send for that target type; it is derived from
+  the accepted server field policy, and the client has no local receive or
+  display filter to intersect. The child deny map is likewise server-selected
+  and complete: one list per target type, carrying the exact nested references
+  that are not independently selectable or annotatable. A reset whose child
+  deny map omits a target type, names an unknown type, or carries a duplicate,
+  root, or malformed reference is rejected, and the mask and the child deny map
+  are validated before either replaces the previous authorization. There is no
+  client subscription, no field acknowledgement, and no subscription
+  generation.
 - Only a `RESET` for the offered epoch and a non-regressing view turns the
   client ready, enables marker intents, and starts the new view generation. On
   that reset the client prunes its retained values — including values inside a
-  frozen section — to the mask, so a field the server no longer authorizes is
-  deleted rather than displayed; an empty mask authorizes no field.
-  `CREATE`/`REMOVE` intents carry the negotiated epoch and are ignored unless
-  the session is ready for that epoch, and a create carries no client field
-  list.
+  frozen section — to the mask and applies the child deny map, so a field the
+  server no longer authorizes is deleted rather than displayed, a denied
+  reference's annotation is removed, and a default reference naming it is
+  cleared; an empty mask authorizes no field, and a denied child never strips
+  keys from an authorized root record. `CREATE`/`REMOVE` intents carry the
+  negotiated epoch and are ignored unless the session is ready for that epoch,
+  and a create carries no client field list.
 
 `RESET` and the mutation messages are accepted only for the current epoch/view;
 the first accepted `OFFER` establishes the epoch, and stale or off-view messages
@@ -60,7 +69,8 @@ are dropped rather than applied. A schema mismatch removes that adapter from the
 session's compatible manifest. Basic is mandatory: an offer without a compatible
 Basic adapter is rejected, so that connection has no negotiated presentation
 session. The client validates a received section's field kinds and wire bounds
-against the accepted manifest; it applies no allow or deny policy of its own.
+against the accepted manifest; it applies only the advertised reset mask and
+child deny map and no allow or deny policy of its own.
 
 ## Field manifest and value model
 
@@ -80,10 +90,13 @@ field — and carries an explicit stale marker. Section replacements and clears
 are revisioned per adapter: an older revision cannot overwrite a newer value or
 re-create a cleared adapter section, and a section clear deletes neither the
 marker nor another adapter's section. Basic is delivered atomically: the
-created-marker message carries both the canonical marker snapshot and the Basic
-section, and a message without usable Basic is discarded before either part is
-applied. The client also requires the carried marker ID to match the snapshot
-ID.
+created-marker message carries the canonical marker snapshot, the Basic section,
+and the receipt content descriptor, and a message without usable Basic is
+discarded before any part is applied. The client also requires the carried
+marker ID to match the snapshot ID. The descriptor's wire grammar is owned by
+[network protocol](../network/protocol.md);
+its projection policy is owned by
+[Receipt content descriptor](#receipt-content-descriptor).
 
 The settings-UI field catalogue is a read-only view of one metadata source and
 never exposes retained or sampled world values. The server policy page reads
@@ -128,6 +141,7 @@ Basic (`minecraft:basic`, schema 1) is the stable common field set:
 | Field | Kind | Capture |
 | --- | --- | --- |
 | `minecraft:target.name` | text | Composed target name. |
+| `minecraft:target.custom_name` | text | Present custom name as plain text; absent otherwise. |
 | `minecraft:entity.type` | text | Entity type registry ID. |
 | `minecraft:entity.health` | number | Living entity health. |
 | `minecraft:entity.max_health` | number | Living entity maximum health. |
@@ -144,6 +158,18 @@ stored block registry ID and the live block is unavailable. Name composition
 rules, including player, item, custom-name, and localized base forms, are owned
 by [names and chat](../rendering/names_chat.md); denied or malformed names stay
 unavailable and are not displayed.
+
+`minecraft:target.custom_name` is a separate plain-text observation, never a
+reverse parse of the composed name value: it carries the present custom name's
+plain text only when a non-empty custom name exists, and stays absent for a
+missing or empty custom name, for a player or location target, and for a dropped
+item whose contained stack has no custom name; an entity-level custom name never
+substitutes for the stack rule. The composed `minecraft:target.name` keeps its
+established composition and is demanded independently, so neither name field
+forces the other. Both fields derive from one name observation of the same
+target, and an absent custom name is never fabricated as an empty value. It is
+declared enabled by default at permission level zero and remains subject to the
+field policy, mask and permission evaluation like every other Basic field.
 
 Basic fields are declared enabled by default. Under an unrestricted
 per-target-type policy — no matching block selector and no whitelist-only mode —
@@ -170,12 +196,32 @@ in-memory sampling, and is not a new serialized target form.
 For a committed external-block target, a recognized authoritative provider may
 resolve the current live block state and local position for demanded, authorized
 Basic fields. `minecraft:block.state` is captured only when it is demanded and
-the provider observation succeeds. A provider-backed `minecraft:target.name`
-request keeps its existing name-resolution semantics and does not require state
-observation. An unavailable provider, unrecognized provider, uncommitted target,
-wrong dimension, released source, unloaded or mismatched state, or arbitrary
+the provider observation succeeds. A provider-backed name request (the composed
+`minecraft:target.name` or the separate plain `minecraft:target.custom_name`)
+keeps its existing name-resolution semantics and does not require state
+observation; both fields come from the same provider name observation under
+their own demand, and a missing or empty custom name stays absent rather than
+becoming the composed or base name. An unavailable provider, unrecognized
+provider, uncommitted target, wrong dimension, released source, unloaded or
+mismatched state, or arbitrary
 opaque locator is unavailable rather than approximated; sampling does not force
 load provider state or restore a client world.
+
+A provider-confirmed read source is the separate binding used for read-only
+external content sampling. It keeps the original detached target identity and
+carries the provider-confirmed physical local position and the range anchor as
+separate fields: physical read coordinates never replace the target identity,
+and the exact opaque provider locator is part of the binding, so two external
+candidates that compare equal as targets are not interchangeable. A candidate
+binding is resolved only for an uncommitted candidate and a committed binding
+only for an active committed target; resolution and read never materialize a
+target, acquire or release a provider reference, or persist provider state, and
+positive provider membership precedes every field, state or block-entity read,
+including the root position. A committed binding follows the provider's active
+committed source state and ignores a stale locator; a released or missing
+reference cannot resolve. An unavailable provider, unrecognized provider, wrong
+dimension, unloaded member, mismatched expected registry, or unconfirmed
+membership is unavailable rather than approximated.
 
 If demanded external block state cannot be captured, the fresh Basic section is
 not published. The last values that are still demanded remain atomically
@@ -193,7 +239,9 @@ is recomputed independently: a field is sent only when that recipient's session
 manifest includes the field with the same kind, the marker's target-type rule
 set and the recipient's server-derived mask include the field, and the
 recipient's actual vanilla permission level meets the field's required level
-(which a server permission override may replace). A failed or unavailable
+(which a server permission override may replace). A child-denied exact
+reference is never annotated even when its root field is projected, and the
+parent value stays complete. A failed or unavailable
 optional source cannot break Basic or another adapter; the last demanded values
 are retained with a stale marker instead.
 
@@ -209,8 +257,9 @@ presentation values.
 ## Per-target-type field policy
 
 The persisted field policy is server-owned and compiles allow and deny
-selectors for each of the five target types. The persisted shape and the
-field-selector syntax are catalogued in
+selectors plus an exact child deny list for each of the five target types. The
+persisted shape, the field-selector syntax, the child reference form, and the
+semantic child-deny defaults are catalogued in
 [server configuration](../../config/server.md#presentation-policy-object); this
 topic owns policy application:
 
@@ -222,31 +271,51 @@ topic owns policy application:
   before the manifest field's default enablement.
 - In a rule set's whitelist-only mode an unmatched field is denied even when its
   manifest default is enabled.
-- The server derives each recipient's `RESET` mask from this policy; the policy
-  is part of the server's effective configuration fingerprint, and when the
-  fingerprint changes every ready session advances its view and is re-projected
-  rather than keeping values authorized under the previous policy.
-- The client has no receive or display policy. Values excluded by a new mask are
-  deleted on reset, including values inside an expired/frozen snapshot, and
-  re-allowing a field cannot restore deleted values.
+- A child deny reference matches only the exact case-sensitive
+  adapter/field/nonempty-literal-record-path tuple: it covers no descendant, no
+  sibling, and not the root field, and a field allow match never overrides it.
+  Child denial is not root-value redaction: the parent field and its complete
+  value stay authorized and projectable, so an authorized record still formats
+  from all of its entries, while the denied reference is never independently
+  selectable or annotated. A reference naming a missing field or an absent
+  optional adapter is retained but inert.
+- The effective child deny set is the advertised `RESET` map unioned with the
+  fresh policy: a newly denied reference is enforced immediately, while a newly
+  allowed reference stays denied until a new `RESET` re-baselines the advertised
+  view, because the client never widens an advertised map in place.
+- The server derives each recipient's `RESET` mask and child deny map from this
+  policy; the policy is part of the server's effective configuration
+  fingerprint, and when the fingerprint changes — including a child-only change
+  that leaves the mask unchanged — every ready session advances its view and is
+  re-projected rather than keeping values authorized under the previous policy.
+- The client has no receive or display policy of its own. Values excluded by a
+  new mask are deleted on reset, including values inside an expired/frozen
+  snapshot, and re-allowing a field cannot restore deleted values; the reset's
+  child deny map prunes retained annotations and default references under the
+  same no-restore rule.
 
 ## Server policy rule view
 
 The persisted per-target-type field policy is also exposed through its own
-versioned route (`server-presentation-policy-v2`), independent of both the
+versioned route (`server-presentation-policy-v3`), independent of both the
 marker session above and the ordinary server-configuration request/update
 transaction. A read request carries a positive request identifier and is
 answered with all five target-type rule views — each type's white list, black
-list, and whitelist-only flag — the server's in-memory rule-view revision, a
-status, and the recipient's edit hint. Only those selector values are disclosed;
-sampling limits, permission and interval overrides, and every other persisted
-server setting never travel on this route. The client mirror retains all five
-views as connection-scoped metadata even though only the server policy page
-displays them, and the client derives no local filter from them.
+list, whitelist-only flag, and persisted child deny list — the server's
+in-memory rule-view revision, a status, and the recipient's edit hint. Only
+those selector values and child deny references are disclosed; sampling limits,
+permission and interval overrides, and every other persisted server setting
+never travel on this route. The client mirror retains all five views, including
+each type's child deny list, as connection-scoped metadata even though only the
+server policy page displays the editable selector state; the mirror is
+informational, its child deny lists are disclosure only and are not editable
+through this route, and the client derives no local filter from the mirror.
 
 A mutation carries the selected target type and applies one add or remove of a
 single selector, or one whitelist-only assignment, to that type's rule set; a
-mutation naming a missing or unknown target type is rejected without touching
+selector or whitelist-only mutation preserves that type's persisted child deny
+list, and this route never edits child references. A mutation naming a missing
+or unknown target type is rejected without touching
 stored policy. The complete candidate policy is validated before any
 persisted value changes, so an invalid, duplicate, missing, over-capacity, or
 no-op request leaves the stored policy, the revision, and other clients
@@ -281,8 +350,8 @@ Read and mutation authority is owned by
 server-side derivation and enforcement of that check are owned by
 [security](../security.md#server-configuration-update-enforcement). The client
 gates mutation allocation on the authoritative edit hint, but the hint is never
-a credential. Selector grammar and capacity belong to this policy object,
-catalogued in
+a credential. Selector and child-reference grammar and capacity belong to this
+policy object, catalogued in
 [server configuration](../../config/server.md#presentation-policy-object).
 
 ## Client retention and display
@@ -297,12 +366,19 @@ marker. Tombstones and per-marker section history are bounded; when history
 exhausts, the store fails closed instead of discarding the history that prevents
 resurrection. The store resets on a new epoch; a new `RESET` mask prunes retained
 sections to the fields it still authorizes, including values inside a frozen
-section, while an ordinary view generation change clears retained sections and
-leaves frozen values in place.
+section, and applies the reset's child deny map to retained and frozen
+annotations and default references, while an ordinary view generation change
+clears retained sections and leaves frozen values in place. A denied reference
+is removed from annotations and a default reference naming it is cleared, but
+the parent field and its complete value stay; an incoming section's denied
+annotations are dropped before storage, so a later loosening or a later section
+cannot resurrect a denied reference.
 
 There is no client receive or display policy. A UI consumer asks for a marker's
 view and receives an immutable projection of the retained, mask-authorized
-fields per adapter; an empty projection carries no sections. UI consumers never
+fields per adapter; an empty projection carries no sections, and a property
+lookup for a child-denied reference yields nothing even while the parent
+field's value stays visible. UI consumers never
 receive the retained store itself, and registered UI providers
 are manifest-only: a provider supplies at most three short HUD lines (longer
 lines are truncated and blank lines dropped), can narrow the supplied view but
@@ -335,9 +411,12 @@ by [testing and verification](../../testing/verification.md).
   client adds no grant of its own. Manifest metadata such as a field's default
   enablement or label is not a grant by itself, and an unready session, a stale
   view, an unknown field, a target-type mismatch, or a mask exclusion makes the
-  field ineligible. Dedicated adapters, including inventory, are excluded from
-  this preview; inventory's own list, stream and variant rules stay owned by
-  [inventory](inventory.md).
+  field ineligible. The reset's child deny map applies at the same
+  granularity: a denied nested reference is ineligible even when its root field
+  is eligible, is filtered from the content branch's property entries and
+  dispatchable intents, and never becomes a selection. Dedicated adapters,
+  including inventory, are excluded from this preview; inventory's own list,
+  stream and variant rules stay owned by [inventory](inventory.md).
 - **Provenance and precedence.** A value the client already legitimately
   received for the exact target is shown as `CLIENT_SYNCED`; only a field the
   client cannot observe locally may fall back to the bounded server preview,
@@ -359,9 +438,17 @@ by [testing and verification](../../testing/verification.md).
   usable observation — including an unverified constructor/default value or
   missing synchronization evidence — yields no local value, so the field is
   locally unavailable and falls back per field without breaking
-  another field or an unrelated ping. An external target without a safe
-  read-only provider observation stays unavailable; preview never materializes
-  a temporary external target.
+  another field or an unrelated ping. A synchronized entity custom name is a
+  direct literal observation, while a name behind a generic block entity
+  without synchronization evidence is not a local value for either name field,
+  so the unavailable field falls back to the server preview. The plain
+  custom-name field is never reconstructed from the composed name value. An
+  external block is observed only through a provider-confirmed read source
+  ([external-block Basic sampling](#external-block-basic-sampling)); the
+  provider-resolved physical block must still pass the same received-chunk,
+  pending-prediction and expected-registry gates as an ordinary block, and its
+  single safe name observation feeds both name fields under independent demand.
+  Preview never materializes a temporary external target.
 - **Bounded server fallback.** A fallback request carries its own one-shot
   per-target request identity, created before and independent of any Ping,
   marker or inventory identity; no preview Ping is invented. It is rooted in
@@ -376,7 +463,18 @@ by [testing and verification](../../testing/verification.md).
   polling or heartbeat, and no migration onto the inventory route. It reuses the
   established capture helper, so the Basic, create and `SECTION` semantics and
   their global bounds are unchanged and no second capture owner is introduced.
-  Generic source access, capture-result and cost mechanics remain owned by
+  An external-block candidate is first put through the server's nonallocating
+  provider validation and range/type acceptance, and its exact read binding
+  including the opaque provider locator must still match before any provider
+  source read; that read never materializes, acquires or persists provider
+  state, and unconfirmed membership is unavailable rather than approximated.
+  An adapter's preview capture is a separate entry from its committed
+  collection: a candidate-aware adapter may observe an uncommitted target
+  through its safe source, while its committed collection resolves the
+  committed binding and is never widened by preview. The same separation
+  governs a provider property adapter's preview capability and its committed
+  sampling. Generic source access, capture-result and cost
+  mechanics remain owned by
   [shared source capture and sync](shared_sources.md), and wire grammar and
   message identity remain owned by
   [network protocol](../network/protocol.md).
@@ -415,9 +513,12 @@ An uploaded value is not world authority. The server recaptures the current
 authorized world value for every accepted selection from the same authoritative
 capture used for projection: a valid but stale client claim is replaced by the
 actual value, and a selection whose reference is the wrong kind or unknown, or
-whose field or tag is forbidden, or whose source is unavailable, rejects the
-entire create rather than applying partially. After acceptance the marker owns
-the selections and the captured values update with the live world; a nested path
+whose field or tag is forbidden, or whose exact reference is child-denied, or
+whose source is unavailable, rejects the entire create rather than applying
+partially. The exact child predicate is checked in the pre-capture intent pass,
+before any source is sampled, so a denied reference never reaches a collector.
+After acceptance the marker owns the selections and the captured values update
+with the live world; a nested path
 that no longer exists is not fabricated as zero. A selection changes no source
 or entity persistence, and it never changes whole-marker identity, the main ping
 type, marker lifetime, or the winner slot. An admission failure rolls back any
@@ -431,8 +532,9 @@ health to be authorized and captured, a dropped item's `minecraft:item.id`
 formatted with its count, and `minecraft:target.name` for entity-block, block,
 and location targets. The default reference controls the marker's ordinary
   display, may be formatted without a Ping Type, and selects which authorized
-  property the HUD presents first; it does not limit which fields remain available
-  or received, and it is not a legacy marker-shape fallback. For entity-block,
+  property the HUD presents first; it is not a selection and never produces a
+  content receipt; it does not limit which fields remain available or received,
+  and it is not a legacy marker-shape fallback. For entity-block,
   block, and location targets, the `minecraft:target.name` default is consumed by
   the authoritative marker name line rather than added as a second property line.
   The marker name is sent whenever the server authorizes and knows it,
@@ -467,16 +569,63 @@ This target-selector grammar belongs to the property Ping policy and is distinct
 from the field-ID selector grammar of the persisted field policy.
 
 The selectable attributes are code-defined as well: the Basic field set plus
-each applicable adapter's fields, filtered by the server field policy. A Create
+each applicable adapter's fields, filtered by the server field policy and the
+exact child deny list, so a denied nested reference is not offered for selection
+even when its root field is authorized. A Create
 RPM property is offered only for the actual machines the adapter can observe,
 and a count selection still requires its parent field to be authorized.
 Presentation attribute names, default labels, property Ping Type text, and
 formatted values use presentation-owned resource keys, not the whole-marker Ping
 Type phrase or display keys owned by [catalogs](../identity/catalogs.md) and
-[names and chat](../rendering/names_chat.md). Existing marker names, labels, and
-chat are unaffected, and a property the default reference or a non-null
+[names and chat](../rendering/names_chat.md). Whole-marker names and labels keep
+their established meaning, and a property the default reference or a non-null
 annotation selects for display is presented to every authorized viewer without
-requiring a local selection control.
+requiring a local selection control. Only an admitted explicit property Ping
+selection or an active committed inventory selection produces the content
+message family, whose template, wait and fence rules are owned by
+[names and chat](../rendering/names_chat.md#content-message-family).
+
+## Receipt content descriptor
+
+The atomic initial carries, beside the canonical marker snapshot and the Basic
+section, one per-recipient receipt content descriptor: selection metadata only,
+whose referenced content still arrives solely through the existing authorized
+stores. Its exact wire grammar and strict decoding are owned by
+[network protocol](../network/protocol.md#presentation-snapshot-route-presentation-v5);
+the message composition, wait and fence rules are owned by
+[names and chat](../rendering/names_chat.md#content-receipt-lifecycle).
+
+Projection uses the recipient's current fresh authorization: the accepted
+manifest and schema kind, the advertised mask, the exact child deny predicate,
+and the recipient's fresh permission must all include a selected reference, and
+the accepted dedicated inventory route view must include the marker's target
+type for the inventory kind. A recomputed initial for a replayed or refreshed
+marker applies the same current authorization, so a revocation suppresses a
+later delivery.
+
+- No admitted non-null property Ping selection — including a create whose
+  selections are all null-annotation observations — and no active committed
+  inventory tracking yields the whole-marker kind; those null observations stay
+  retained and projected as authorized data rather than being discarded.
+- Only admitted non-null Ping Type selections enter the explicit reference set:
+  the property kind carries exactly the complete set of admitted non-null
+  references in their deterministic order, so a create mixing nullable and
+  annotated selections contributes that full non-null subset only and a partial
+  list is never sent. A null-annotation observation is retained and projected as
+  authorized data but is not an explicit reference.
+- A marker with an active committed inventory tracking association yields the
+  inventory kind, whose values and count arrive only through the dedicated
+  inventory store; the kind is derived from that existing tracking association,
+  not from a second chat metadata cache.
+- For a content kind, any explicit selected reference that is field-denied,
+  child-denied, or incompatible, any denied required formatting dependency of a
+  selected property (the health pair requires its maximum-health field), or a
+  denied Basic target name yields the suppressed kind with no references,
+  hiding the whole content message rather than showing a partial list.
+
+Missing authorized data does not suppress the descriptor: a selected reference
+that is authorized but whose value has not yet arrived still yields its kind,
+and the receipt waits under the names-and-chat lifecycle.
 
 ## Legacy and superseded routes
 
@@ -491,7 +640,7 @@ display name or marker state. The old S2C route is retained only as inert
 ingress, and the retained values/name used for chat and labels come from the
 Basic atomic initial described above.
 
-The `presentation-v3` and `server-presentation-policy-v2` route IDs do not
+The `presentation-v5` and `server-presentation-policy-v3` route IDs do not
 decode the previous presentation or policy wire versions, and no fallback
 decodes them. Whether any exact legacy registration remains registered as inert
 ingress is checked by the source owner; this contract promises no automatic

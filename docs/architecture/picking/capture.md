@@ -20,16 +20,25 @@ confirmed exception: its candidates are captured live from the current camera
 ray while that branch is active
 ([Precise live candidate capture](#precise-live-candidate-capture)).
 
-An ordinary block hit also retains the actual hit face from the press-time
+A concrete block hit also retains the actual hit face from the press-time
 result, and the same-target capture and coordinator path carries that face
-forward. The frozen face is read context for ordinary-block inventory access,
-owned by
+forward. The frozen face is capture-only read context; its use for inventory
+source access is owned by
 [inventory preview and tracking](../presentation/inventory.md#provider-layer-and-safety);
 it is not part of the captured target identity or the marker identity. A miss
 result's direction is arbitrary and is ignored: only a concrete block hit
-establishes a face, and a location fallback never acquires one. Every
-ordinary-block candidate allocated at the same press edge retains its own
-actual hit face under these same rules.
+establishes a face, and a location fallback never acquires one.
+
+An ordinary block face is a world-space hit direction. A provider-confirmed
+external block candidate instead retains the provider-local native hit
+direction: the actual native hit's own face, never a world-transformed
+direction, and never synthesized from a synthetic miss, an inside hit or an
+unobserved containment contact. A frozen face survives only while resolution
+preserves the exact block read binding, including an external candidate's
+opaque provider locator; two external candidates that compare equal as targets
+are not interchangeable and do not share a face. Every block candidate
+allocated at the same press edge retains its own actual hit face under these
+rules.
 
 ## Precise live candidate capture
 

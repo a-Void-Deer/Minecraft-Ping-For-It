@@ -65,6 +65,15 @@ must not be assumed permanently stable. A detached target's external
 coordinates are normalized and cannot serve as physical identity; provider-
 confirmed stable target or source keys are used instead.
 
+A provider-confirmed physical read binding is a domain-owned resolution result,
+not generic identity: it pairs the original detached target with the provider's
+current physical source key, and the generic layer never substitutes detached
+placeholder coordinates, a raw provider locator, or a capture observation for
+that binding. A candidate binding and a committed binding are distinct
+resolutions of the same generic role; the domain decides when a committed
+source follows a current tracking point instead of a stale locator, and when a
+moved source or changed topology invalidates an old observation.
+
 Demand is the server-derived union of already-authorized demand only. Providers
 never observe baselines, HUD state, or inventory fallback policy. Compatible
 views share one physical observation.

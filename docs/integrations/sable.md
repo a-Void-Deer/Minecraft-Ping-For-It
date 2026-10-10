@@ -9,6 +9,12 @@ API shape drift, or a linkage failure disables this integration softly. Ordinary
 entity, block and location pings remain available. There is no cross-dimension
 entity tracking or Immersive Portals behavior here.
 
+The additive content read source has its own discovery gate: an absent or
+drifted content API, including the additive membership discovery that confirms
+a position's containing sub-level, disables only the new content reads and
+preview, while established capture, validation and materialization, leases and
+Basic observation keep their existing lifecycle.
+
 ## Client capture and presentation
 
 Client capture creates an external candidate only after positive Sable
@@ -22,6 +28,21 @@ During server validation, Sable uses its logical pose to derive the external
 validation anchor. Client presentation separately applies the current render
 pose to live local block data. The validation and render-pose roles do not alter
 the candidate or committed identity defined below.
+
+A candidate that came from an actual native block hit carries that
+provider-local hit face; a synthetic miss, an inside hit or an unobserved
+containment contact carries none, and the face is never a world-transformed
+direction. That provider-local face is the frozen read scope for the
+candidate's inventory source access. The face contract is owned by
+[capture](../architecture/picking/capture.md#ordinary-and-asynchronous-capture).
+
+A client content preview resolves a candidate's live local block through
+Sable's client companion: positive sub-level membership and loaded local state
+precede any content read, and the resolved physical block is then subject to
+the same client block-observation gates as an ordinary block. A generic
+block-entity name without synchronization evidence is not a local value and the
+field falls back to the authorized server preview, owned by
+[target content preview](../architecture/presentation/presentation_snapshot.md#target-content-preview).
 
 The current external model route and external fallback independently resolve
 provider presentation. The required shared-subject and subject-type contract,
@@ -57,8 +78,9 @@ distance from the frozen ray origin only when it lies on the frozen world
 segment within the integration's small projection epsilon; a transformed hit
 outside the segment is not counted, and an off-segment deviation beyond that
 epsilon makes the attempt incomplete. A discovered candidate carries positive
-capture-local provider equivalence and keeps the canonical external identity
-unmaterialized under the ordinary
+capture-local provider equivalence, the provider-local native hit face when the
+local native pick actually hit a face, and keeps the canonical external
+identity unmaterialized under the ordinary
 [candidate and committed identity](#candidate-and-committed-identity) contract
 below; the provider ray never materializes a tracking identity itself. This
 path discovers targets only; it reads no inventory and grants no inventory
@@ -131,6 +153,26 @@ requires an active existing reference, and resolves the tracking point's current
 Sable sublevel and local block position. It does not use a stale provider
 locator or the logical-pose world anchor as a substitute for the current local
 position.
+
+The same active-reference rule governs the provider's committed content read
+binding: it resolves the current tracking point's sub-level and local position,
+ignores a stale committed locator, and cannot resolve after the reference is
+released. A candidate content read instead resolves the candidate's own encoded
+locator with positive membership and allocates no tracking reference. Either
+binding keeps the original detached target identity separate from the
+provider-confirmed physical position and logical range anchor, and neither
+force-loads a chunk or sublevel; the generic binding rules are owned by the
+[generic contract](../architecture/presentation/presentation_snapshot.md#external-block-basic-sampling).
+
+The inventory source uses these same bindings. A preview request reads a
+candidate's members only under its provider-confirmed scope, and a tracking
+lease follows the committed tracking point; every member position is gated
+before its state, block entity, capability or content is read. A moved source
+or a changed member topology invalidates the old observation and the next
+successful read starts a fresh baseline, and an expired or released external
+lease is never resurrected by ordinary-block recovery tolerance. Inventory
+identity, read-scope and recovery rules are owned by
+[inventory](../architecture/presentation/inventory.md).
 
 The resolved Sable sublevel must expose the same `ServerLevel` as the marker's
 parent server level. Its local coordinates remain distinct from the logical-pose

@@ -11,7 +11,8 @@ generation is recorded in
 [D0008](../../decisions/D0008-inventory-source-recovery.md).
 
 This is the adopted contract for the confirmed inventory design. Coverage scope
-and pending runtime evidence for the ordinary-block preview and tracking,
+and pending runtime evidence for the ordinary-block and provider-confirmed
+external preview and tracking,
 item-choice create and native input/HUD seams are owned by
 [testing and verification](../../testing/verification.md). The existing
 one-shot capture and whole-section presentation paths keep their present
@@ -38,6 +39,20 @@ including a complete detached snapshot, is evidence about the source, never its
 identity: it does not become the source key, a source-instance generation, or a
 protocol baseline generation. Detecting a destroyed, missing or otherwise
 unavailable source is an invalidity, not an empty result.
+
+An external source identity is the provider scope, the provider-confirmed
+sub-level, the canonical container alias, and the frozen read context of owner
+and face. The original detached target identity stays separate from that
+physical source binding: the provider-confirmed physical position never
+replaces the original target, and a capture observation never becomes the
+source identity. Each external candidate requires its own provider-confirmed
+read binding and validity check; different opaque locators identify different
+candidate read bindings, not necessarily different physical sources. Candidates
+confirmed to share provider, sub-level, dimension, owner and frozen face, and
+canonical container alias may share one physical source; a locator alone does
+not establish physical identity. A committed source is addressed by its active
+lease's current tracking point, so a locator refresh does not create a new
+source and a stale locator is never adopted as the read position.
 
 On invalidity, tracking stops publishing valid updates, discards or cancels
 queued old valid state, and sends the invalidation status. That status is
@@ -68,7 +83,11 @@ expired consumer.
 
 External providers keep their established stable target IDs, leases and removal
 rules. The ordinary-block replacement tolerance neither extends nor revives an
-expired external lease, and it does not rewrite target identity globally.
+expired external lease, and it does not rewrite target identity globally. A
+committed source whose tracking point moved or whose member topology changed
+invalidates the old observation; recovery re-resolves the provider scope and a
+wrong sub-level or tracking point is rejected rather than adopted, and the
+fresh baseline preserves the marker, its hard expiry and the current lease.
 Entity and private-inventory contexts require their own owning contract.
 
 ## Preview
@@ -76,9 +95,10 @@ Entity and private-inventory contexts require their own owning contract.
 Inventory preview and tracking are enabled by default; no separate user
 opt-in switch gates them. Each request still passes the existing server gates:
 target and field permission, range acceptance, lock state, and safe-read
-validation. The foundation preview currently resolves accepted ordinary-block
-targets only; entity, private-inventory, and external-provider contexts report
-unavailable until their owning contracts exist.
+validation. The preview resolves accepted ordinary-block targets and
+uncommitted provider-confirmed external candidates; entity, private-inventory,
+and committed-external contexts report unavailable until their owning contracts
+exist.
 
 Holding the ping key starts a bounded initial inventory preview on a new
 request path; it does not reuse the legacy subscription route. The preview is
@@ -90,8 +110,30 @@ identity. A preview request binds to one bounded server target at open time and
 never changes that target; the authoritative target is derived server-side, and
 no player identity or client-selected item count travels on the request. The
 server assigns bounded opaque entry keys scoped to the request, not item IDs.
-The authoritative handoff from preview to tracking is defined by the owning
-implementation contract; no preview Ping is invented.
+Opening the request runs the existing authority gates plus nonallocating
+provider validation for an external candidate; it creates no TargetKey, marker
+identity, provider reference or tracking state, and its quota identity is the
+preview request rather than a candidate target key.
+
+The preview-to-tracking handoff follows the existing create authority first:
+the server materializes an external candidate once, then binds the preview's
+original input to the committed target through both current provider-confirmed
+physical read bindings. An ordinary block must match its original identity
+exactly; an external candidate's current source and the committed source must
+resolve to the same provider, sub-level, physical root block and registry, so
+same-registry candidates and different hit roots cannot cross-bind. The
+selected item is then witnessed live against the authoritative source, the
+annotation is checked, and retained memory is admitted before the tracking
+lease is stored. Any failure releases the acquired reference and stores
+nothing. The tracking lease keeps the committed input; its first count comes
+from a fresh complete authoritative server-side capture, never the preview
+snapshot or a partial observation, and no preview Ping is invented. The
+committed tracking association is installed after the marker is stored and
+before the created notification is published, so the recipient's atomic initial
+can project the inventory selection kind
+([receipt content descriptor](presentation_snapshot.md#receipt-content-descriptor))
+from this existing tracking association rather than a second chat metadata
+cache.
 
 Choosing one inventory item from the preview and releasing creates a new Ping
 immediately; items are never accumulated into a staged multi-item selection.
@@ -102,8 +144,17 @@ instead of trusted from preview data. That live witness is not authorized by
 the preview snapshot or by any capture observation, and captured data never
 stands in for it. The new Ping's whole-marker type is the
 frozen Target Type's default Ping Type; the chosen Ping Type travels as a
-separate item annotation rather than as the whole-marker type. The annotation's
-quantity starts unknown, and its first authoritative count follows the
+separate item annotation rather than as the whole-marker type. The item
+annotation's eligible Ping Type set is the target's effective
+[property Ping Type policy](presentation_snapshot.md#property-ping) plus one
+known [`take`](../identity/catalogs.md#ping-type-values) entry when the target's
+actual tags carry `#c:chests`; a non-chest target, and every regular property
+selection, keeps the property policy unchanged and never acquires `take`. The
+client's item menu derives its eligible set from the accepted registry's actual
+tags, while the server decides the annotation's allowance from the actual
+provider-confirmed physical block and its live tags, so a client-expected
+registry or a merely claimed tag never authorizes the annotation. The
+annotation's quantity starts unknown, and its first authoritative count follows the
 complete-observation rules in [Tracking](#tracking). The first tracking
 observation uses a fresh authoritative capture; it reuses neither the preview
 snapshot nor its count.
@@ -363,6 +414,15 @@ try a loader item-storage capability, and only for that same selected face; a
 missing or denied selected-face capability is unavailable and never widens to
 a null, unsided, or different face. These failures report unavailable, not an
 empty result.
+
+A provider-confirmed external candidate uses the same frozen local face, one of
+the six block directions, and never an unsided or look-inferred direction. Its
+membership scope is resolved fresh for each operation and is never retained
+across ticks; a stale or cross-tick predicate, a moved source or a changed
+member topology makes the source invalid rather than read. Every supported
+loader's capability route is entered only under that same frozen local face,
+and a capability read is re-checked against the current membership scope, so a
+revoked member or handler is unavailable rather than read.
 
 A double chest is read as the pair, never either half alone. The pair is a
 valid source only when both halves are loaded, share the same container type,

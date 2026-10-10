@@ -29,8 +29,8 @@ Within the `presentation` object, the per-target-type `white`, `black`, and
 `whitelistOnly` rules are changed through the dedicated presentation policy
 route owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md);
-its `minUpdateIntervalTicks`, `scanBudget`, `permissionLevels`, and
-`updateIntervals` members, like `pingDistance`, are configured only by editing
+like `pingDistance`, its `childBlack`, `minUpdateIntervalTicks`, `scanBudget`,
+`permissionLevels`, and `updateIntervals` members are configured only by editing
 the file. The [configuration UI](../UI/settings-screen.md#server-performance-category)
 exposes the remote settings and the presentation policy controls.
 
@@ -58,6 +58,7 @@ by the implementation and are deliberately not mirrored here.
 | `targetTypes` | object mapping each of the five target-type IDs (`dropped_item`, `entity`, `entity_block`, `block`, `location`) to a rule object | Per-target-type field authorization. A missing or malformed target-type entry denies every field of that type instead of widening access. |
 | `targetTypes.<type>.white` | array of selector strings | Allow selectors for that target type. An empty list grants nothing by itself; an advertised field's manifest default still applies unless whitelist-only mode denies it. |
 | `targetTypes.<type>.black` | array of selector strings | Deny selectors for that target type; a matching field is denied unless an allow selector also matches, because an allow match wins. |
+| `targetTypes.<type>.childBlack` | array of child-reference objects | Exact record-child deny references for that target type; each object carries `adapterId`, `fieldId`, and a nonempty `recordPath` array of literal record keys. |
 | `targetTypes.<type>.whitelistOnly` | boolean | When true, a field that matches neither list for that target type is denied even when its manifest default is enabled. |
 | `minUpdateIntervalTicks` | number, ticks | Global minimum sampling interval; an adapter is never polled faster than this or its declared minimum. |
 | `scanBudget` | number | Per-capture source-scan allowance; `0` disables capture. |
@@ -73,10 +74,36 @@ letters, digits, `_`, `-`, `.`, and `*`; the path part may also contain `/`. A
 separator. For example, `create:kinetic.*`, `*:target.name`, and `*:*` are valid
 selectors.
 
+A child reference is one `childBlack` entry: an object with `adapterId`,
+`fieldId`, and a nonempty `recordPath` array of literal record keys; it
+addresses exactly one entry inside a record-valued field. Matching is exact over
+the complete tuple — there is no prefix, wildcard, case-folded, dotted-path, or
+sequence-index form — so a record key is never parsed as selector syntax and a
+sequence element is never addressable. A matching reference denies the addressed
+child entry as an independent presentation entry: it is not offered for property
+selection and carries no property Ping annotation, independently of the
+field-selector outcome, so a top-field allow match cannot re-authorize it and a
+selection or annotation naming it never restores it. It is not a value
+redaction: the parent field stays authorized with its full value, so a denied
+child is not removed from the parent's value, and a root value remains governed
+by the field selectors — the whole `create:kinetic.speed` record, for example,
+can still be authorized and formatted when both of its RPM entries are denied. A
+reference naming a missing field or an absent optional adapter is retained but
+inert, and it never grants access.
+
+By default each target type's rule set denies two child references, and a
+present rule set whose `childBlack` member is absent receives them: the
+`create:presentation` adapter's `create:kinetic.speed` field with record path
+`["effective_rpm"]`, and the same field with record path `["theoretical_rpm"]`.
+An explicit empty array is a deliberate opt-out and stays empty, and an explicit
+nonempty list is retained rather than overwritten. A target-type entry missing
+from the map keeps its deny-all outcome instead of receiving defaults.
+
 Field selectors are evaluated against the marker's exact target type: allow,
 then deny, then the field's manifest default, with an allow match winning over a
 deny match and whitelist-only denying an unmatched field. Evaluation, the
-derived recipient mask, and the client consequence are owned by
+derived recipient mask, child-reference application, and the client consequence
+are owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md#per-target-type-field-policy).
 Property Ping override selectors are a different grammar that matches a
 target's registry ID or tags rather than field IDs; it is owned by
@@ -85,8 +112,9 @@ target's registry ID or tags rather than field IDs; it is owned by
 Allow selectors that fail validation are skipped. A malformed `targetTypes` map
 or a malformed `presentation` object denies every field of every target type,
 while a malformed individual rule object denies only its own target type; an
-invalid deny selector or an over-capacity allow/deny collection denies every
-field of that target type. An invalid permission override or an over-capacity
+invalid deny selector or child reference, or an over-capacity allow, deny, or
+child-reference collection, denies every field of that target type and persists
+that deny-all state durably. An invalid permission override or an over-capacity
 permission-override collection denies every field instead of widening access,
 and the resulting deny-all state is persisted durably. Invalid
 `updateIntervals` entries are skipped; an invalid `updateIntervals` collection
@@ -188,6 +216,12 @@ Illustrative shape only; the values are samples, not defaults:
       "block": {
         "white": ["create:kinetic.*"],
         "black": ["create:inventory.summary"],
+        "childBlack": [
+          {"adapterId": "create:presentation",
+           "fieldId": "create:kinetic.speed", "recordPath": ["effective_rpm"]},
+          {"adapterId": "create:presentation",
+           "fieldId": "create:kinetic.speed", "recordPath": ["theoretical_rpm"]}
+        ],
         "whitelistOnly": false
       },
       "entity": {
