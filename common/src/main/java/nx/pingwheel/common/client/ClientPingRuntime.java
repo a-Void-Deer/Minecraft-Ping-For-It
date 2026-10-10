@@ -998,6 +998,16 @@ public final class ClientPingRuntime {
 		if (contentPreview != null && selectorContent != null && observeInteractionLifecycle()) contentPreview.accept(packet);
 	}
 	public void rePrimeSelectorInput() { if (selectorInput != null) selectorInput.rePrime(); }
+	/** Entry can precede a pending real position callback; validate ownership without replacing its baseline. */
+	public void onMouseCursorEntered() { synchronizeNativeInput(); }
+	public void onVanillaMouseCaptureChanged(boolean grabbing) { wheelMouseCapture.vanillaCaptureChanged(grabbing); rePrimeSelectorInput(); }
+	private final WheelMouseCapture.InputTransition mouseInputTransition = new WheelMouseCapture.InputTransition() {
+		public void before() { rePrimeSelectorInput(); }
+		public void after(double x, double y) {
+			if (selectorInput != null) interactionAccess.inputFrame().ifPresentOrElse(
+				frame -> selectorInput.prime(x, y, frame), selectorInput::rePrime);
+		}
+	};
 	public boolean isSelectorMouseTransition() { return selectorInput != null || wheelMouseCapture.isTransitioning(); }
 	private void synchronizeNativeInput() {
 		if (selectorInput == null) return;
@@ -1082,18 +1092,16 @@ public final class ClientPingRuntime {
 		public CancellationContext cancellation(CapturedRay ray) { return buildCancellationContext(); }
 		public void syncMouse(PingInteractionPhase phase) {
 			if (Game == null) return;
-			boolean before = Game.mouseHandler.isMouseGrabbed();
-			wheelMouseCapture.sync(phase, Game);
-			if (before != Game.mouseHandler.isMouseGrabbed()) rePrimeSelectorInput();
+			wheelMouseCapture.sync(phase, Game, mouseInputTransition);
 		}
-		public void disposeMouse(boolean screenTransition) { wheelMouseCapture.close(Game, screenTransition); rePrimeSelectorInput(); }
+		public void disposeMouse(boolean screenTransition) { wheelMouseCapture.close(Game, screenTransition, mouseInputTransition); rePrimeSelectorInput(); }
 		public Optional<NativeSelectorInput.Frame> inputFrame() {
 			if (Game == null) return Optional.empty();
 			var window = Game.getWindow();
 			if (window.getScreenWidth() <= 0 || window.getScreenHeight() <= 0
 				|| window.getGuiScaledWidth() <= 0 || window.getGuiScaledHeight() <= 0) return Optional.empty();
 			return Optional.of(new NativeSelectorInput.Frame(window.getWindow(), window.getScreenWidth(), window.getScreenHeight(),
-				window.getGuiScaledWidth(), window.getGuiScaledHeight(), Game.isWindowActive(), Game.mouseHandler.isMouseGrabbed()));
+				window.getGuiScaledWidth(), window.getGuiScaledHeight(), Game.isWindowActive(), Game.mouseHandler.isMouseGrabbed(), wheelMouseCapture.ownsInput(Game)));
 		}
 		public SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style) {
 			var view = new SpatialInventoryView("layout", false, List.of(), -1, 0, 1, true, SpatialInventoryView.Status.UNKNOWN, 0, 0);

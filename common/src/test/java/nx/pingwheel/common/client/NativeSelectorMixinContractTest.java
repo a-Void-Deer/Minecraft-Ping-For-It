@@ -37,10 +37,39 @@ class NativeSelectorMixinContractTest {
 		}
 		for (String method : List.of("grabMouse", "releaseMouse", "cursorEntered", "setIgnoreFirstMove"))
 			assertEquals(void.class, MouseHandler.class.getDeclaredMethod(method).getReturnType());
-		for (String field : List.of("accumulatedDX", "accumulatedDY", "xpos", "ypos")) {
+		for (String field : List.of("accumulatedDX", "accumulatedDY")) {
 			assertEquals(double.class, MouseHandler.class.getDeclaredField(field).getType());
 			assertTrue(bridge.fields.stream().anyMatch(value -> value.name.equals(field) && value.desc.equals("D")));
 		}
+		assertFalse(bridge.fields.stream().anyMatch(field -> field.name.equals("xpos") || field.name.equals("ypos")),
+			"scoped disabled release leaves vanilla's centered position bookkeeping intact");
+		assertTrue(WheelMouseCapture.MouseState.class.isAssignableFrom(MouseHandlerMixin.class));
+	}
+	@Test void cursorEntryHookUsesOwnershipAwareDelegateWithoutCancellingVanillaIgnoreFirstMove() throws Exception {
+		ClassNode bridge = readClass(MouseHandlerMixin.class, "MouseHandlerMixin.class");
+		var entryHooks = bridge.methods.stream().filter(method -> annotations(method.visibleAnnotations, method.invisibleAnnotations).stream()
+			.anyMatch(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/Inject;")
+				&& ((List<?>) value(annotation, "method")).contains("cursorEntered"))).toList();
+		assertEquals(1, entryHooks.size()); var hook = entryHooks.getFirst();
+		assertEquals("(Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;)V", hook.desc);
+		var inject = annotations(hook.visibleAnnotations, hook.invisibleAnnotations).stream()
+			.filter(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/Inject;")).findFirst().orElseThrow();
+		assertEquals(List.of("cursorEntered"), value(inject, "method"));
+		assertEquals("HEAD", value((AnnotationNode) ((List<?>) value(inject, "at")).getFirst(), "value"));
+		assertNull(value(inject, "cancellable"), "vanilla must still set ignoreFirstMove");
+		var calls = new ArrayList<MethodInsnNode>();
+		for (var instruction : hook.instructions) if (instruction instanceof MethodInsnNode call) calls.add(call);
+		assertTrue(calls.stream().anyMatch(call -> call.owner.equals("nx/pingwheel/common/client/ClientPingRuntime")
+			&& call.name.equals("onMouseCursorEntered") && call.desc.equals("()V")));
+		assertFalse(calls.stream().anyMatch(call -> call.name.equals("onMouseCaptureChanged")), "entry is not a capture reset");
+		assertEquals(void.class, ClientPingRuntime.class.getDeclaredMethod("onMouseCursorEntered").getReturnType());
+		var resets = bridge.methods.stream().filter(method -> annotations(method.visibleAnnotations, method.invisibleAnnotations).stream()
+			.anyMatch(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/Inject;")
+				&& ((List<?>) value(annotation, "method")).contains("setIgnoreFirstMove"))).toList();
+		assertEquals(1, resets.size());
+		assertTrue(java.util.stream.StreamSupport.stream(resets.getFirst().instructions.spliterator(), false)
+			.anyMatch(instruction -> instruction instanceof MethodInsnNode call && call.name.equals("onMouseCaptureChanged")),
+			"explicit resets retain the old re-prime delegate");
 	}
 	@Test void releaseRedirectTargetsTheActualVanillaWarpThenModeCallAndGrabGuardKeepsRawPressDelivery() throws Exception {
 		ClassNode vanilla = readClass(MouseHandler.class, "MouseHandler.class");
@@ -66,7 +95,18 @@ class NativeSelectorMixinContractTest {
 		for (var instruction : modeAndWarp.instructions) if (instruction instanceof MethodInsnNode call
 			&& call.owner.equals("org/lwjgl/glfw/GLFW")) nativeCalls.add(call.name);
 		assertEquals(List.of("glfwSetCursorPos", "glfwSetInputMode"), nativeCalls,
-			"the position regression fixture relies on the actual 1.21.1 native call ordering");
+			"the scoped disabled release retains the actual 1.21.1 position-before-mode ordering");
+		assertEquals(void.class, WheelMouseCapture.class.getDeclaredMethod("releaseCursor", long.class, int.class, double.class, double.class).getReturnType());
+		for (String boundary : List.of("before", "after")) {
+			var scopeHook = bridge.methods.stream().filter(method -> method.name.equals("pingforit$" + boundary + "Release")).findFirst().orElseThrow();
+			var scopeInject = annotations(scopeHook.visibleAnnotations, scopeHook.invisibleAnnotations).stream()
+				.filter(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/Inject;")).findFirst().orElseThrow();
+			assertEquals(List.of("releaseMouse"), value(scopeInject, "method"));
+			assertEquals(boundary.equals("before") ? "HEAD" : "TAIL", value((AnnotationNode) ((List<?>) value(scopeInject, "at")).getFirst(), "value"));
+			assertTrue(java.util.stream.StreamSupport.stream(scopeHook.instructions.spliterator(), false)
+				.anyMatch(instruction -> instruction instanceof MethodInsnNode call && call.owner.equals("nx/pingwheel/common/client/WheelMouseCapture")
+					&& call.name.equals(boundary + "VanillaRelease")), "nested ordinary releases have their own call scope");
+		}
 
 		var guard = bridge.methods.stream().filter(method -> method.name.equals("pingforit$keepSelectorMouseFree")).findFirst().orElseThrow();
 		var pressRedirect = annotations(guard.visibleAnnotations, guard.invisibleAnnotations).stream()

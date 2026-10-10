@@ -14,17 +14,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /** Raw callback bridge; vanilla absolute-position bookkeeping is never cancelled. */
 @Mixin(MouseHandler.class)
-public abstract class MouseHandlerMixin {
+public abstract class MouseHandlerMixin implements WheelMouseCapture.MouseState {
 	@Shadow @Final private Minecraft minecraft;
 	@Shadow private double accumulatedDX;
 	@Shadow private double accumulatedDY;
-	@Shadow private double xpos;
-	@Shadow private double ypos;
 	@Redirect(method = "releaseMouse", at = @At(value = "INVOKE",
 		target = "Lcom/mojang/blaze3d/platform/InputConstants;grabOrReleaseMouse(JIDD)V"))
 	private void pingforit$releaseCursor(long window, int mode, double x, double y) {
-		var position = WheelMouseCapture.releaseCursor(window, mode, x, y);
-		if (position != null) { xpos = position.x(); ypos = position.y(); }
+		WheelMouseCapture.releaseCursor(window, mode, x, y);
 	}
 	@Redirect(method = "onPress(JIII)V", at = @At(value = "INVOKE",
 		target = "Lnet/minecraft/client/MouseHandler;grabMouse()V"))
@@ -41,16 +38,35 @@ public abstract class MouseHandlerMixin {
 	private void pingforit$selectorScroll(long window, double horizontal, double vertical, CallbackInfo callback) {
 		if (CommonClient.INSTANCE.onMouseScroll(window, horizontal, vertical)) callback.cancel();
 	}
-	@Inject(method = {"grabMouse", "releaseMouse"}, at = @At("HEAD"))
-	private void pingforit$beforeWarp(CallbackInfo callback) {
+	@Inject(method = "grabMouse", at = @At("HEAD"))
+	private void pingforit$beforeGrab(CallbackInfo callback) { pingforit$beforeCapture(true); }
+	@Inject(method = "releaseMouse", at = @At("HEAD"))
+	private void pingforit$beforeRelease(CallbackInfo callback) {
+		WheelMouseCapture.beforeVanillaRelease();
+		pingforit$beforeCapture(false);
+	}
+	private void pingforit$beforeCapture(boolean grabbing) {
+		var runtime = CommonClient.INSTANCE.getPingRuntime();
+		if (runtime != null) runtime.onVanillaMouseCaptureChanged(grabbing);
 		if (CommonClient.INSTANCE.isSelectorMouseTransition()) {
-			accumulatedDX = 0;
-			accumulatedDY = 0;
+			pingforit$clearAccumulatedMovement();
 		}
 		CommonClient.INSTANCE.onMouseCaptureChanged();
 	}
-	@Inject(method = {"grabMouse", "releaseMouse"}, at = @At("TAIL"))
+	@Inject(method = "grabMouse", at = @At("TAIL"))
 	private void pingforit$afterWarp(CallbackInfo callback) { CommonClient.INSTANCE.onMouseCaptureChanged(); }
-	@Inject(method = {"setIgnoreFirstMove", "cursorEntered"}, at = @At("HEAD"))
+	@Inject(method = "releaseMouse", at = @At("TAIL"))
+	private void pingforit$afterRelease(CallbackInfo callback) {
+		WheelMouseCapture.afterVanillaRelease();
+		CommonClient.INSTANCE.onMouseCaptureChanged();
+	}
+	@Inject(method = "setIgnoreFirstMove", at = @At("HEAD"))
 	private void pingforit$reprime(CallbackInfo callback) { CommonClient.INSTANCE.onMouseCaptureChanged(); }
+	@Inject(method = "cursorEntered", at = @At("HEAD"))
+	private void pingforit$cursorEntered(CallbackInfo callback) {
+		var runtime = CommonClient.INSTANCE.getPingRuntime();
+		if (runtime != null) runtime.onMouseCursorEntered();
+	}
+	@Override
+	public void pingforit$clearAccumulatedMovement() { accumulatedDX = 0; accumulatedDY = 0; }
 }

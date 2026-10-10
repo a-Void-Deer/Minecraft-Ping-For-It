@@ -80,7 +80,7 @@ class ClientPingRuntimeInteractionTest {
 
 	private static final class Access implements ClientPingRuntime.InteractionAccess {
 		Object world = new Object(), screen;
-		boolean player = true, focus = true, overlay, grabbed = true, pending, validFrame = true, distantPending, preciseIncomplete;
+		boolean player = true, focus = true, overlay, grabbed = true, pending, validFrame = true, distantPending, preciseIncomplete, nativeOwned = true;
 		String dimension = DIMENSION;
 		int captures, cancellations, resets, disposals;
 		boolean screenDisposal;
@@ -139,7 +139,7 @@ class ClientPingRuntimeInteractionTest {
 		public void disposeMouse(boolean screenTransition) { disposals++; screenDisposal = screenTransition; grabbed = !screenTransition; }
 		public Optional<NativeSelectorInput.Frame> inputFrame() {
 			return validFrame ? Optional.of(new NativeSelectorInput.Frame(frame.window(), frame.windowWidth(), frame.windowHeight(),
-				frame.guiWidth(), frame.guiHeight(), focus, grabbed)) : Optional.empty();
+				frame.guiWidth(), frame.guiHeight(), focus, grabbed, nativeOwned)) : Optional.empty();
 		}
 		public SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style) {
 			return new SpatialSelectorSession.ListGeometry(5, 220, 18, 24, 20, 40);
@@ -422,6 +422,37 @@ class ClientPingRuntimeInteractionTest {
 		f.access.frame = new NativeSelectorInput.Frame(1, 1000, 700, 1000, 700, true, false); f.move(500, 500, 290);
 		assertEquals(before, f.snapshot().radial().pointer()); assertTrue(f.runtime.onMouseScroll(1, 0, 1)); assertFalse(f.runtime.onMouseScroll(2, 0, 1));
 		f.runtime.abortForScreenTransition(); assertTrue(f.access.screenDisposal); assertFalse(f.runtime.onMouseScroll(1, 0, 1));
+	}
+	@Test void cursorEntryPreservesTheOwnedRuntimeBaselineAndExplicitResetStillReprimes() {
+		Fixture f = new Fixture(); f.press(0); f.frame(250, true); f.prime();
+		f.runtime.onMouseCursorEntered(); f.move(10, -5, 260);
+		assertEquals(new SpatialController.Point(10, -5), f.snapshot().radial().pointer());
+		f.runtime.onMouseCursorEntered(); f.move(3, 2, 270);
+		assertEquals(new SpatialController.Point(13, -3), f.snapshot().radial().pointer());
+		f.runtime.rePrimeSelectorInput(); f.move(1000, 1000, 280);
+		assertEquals(new SpatialController.Point(13, -3), f.snapshot().radial().pointer());
+		f.move(3, 2, 290); assertEquals(new SpatialController.Point(16, -1), f.snapshot().radial().pointer());
+	}
+	@Test void cursorEntryDuringNativeHandoffOrInvalidFrameClearsTheRuntimeBaselineWithoutMovementCallback() {
+		Fixture f = new Fixture(); f.press(0); f.frame(250, true); f.prime(); f.move(10, 5, 260);
+		var before = f.snapshot().radial().pointer();
+		f.access.nativeOwned = false; f.runtime.onMouseCursorEntered(); f.access.nativeOwned = true;
+		f.move(1000, 1000, 270); assertEquals(before, f.snapshot().radial().pointer());
+		f.move(3, 2, 280); assertEquals(new SpatialController.Point(before.x() + 3, before.y() + 2), f.snapshot().radial().pointer());
+		before = f.snapshot().radial().pointer();
+		f.access.validFrame = false; f.runtime.onMouseCursorEntered(); f.access.validFrame = true;
+		f.move(1000, 1000, 290); assertEquals(before, f.snapshot().radial().pointer());
+		f.move(3, 2, 300); assertEquals(new SpatialController.Point(before.x() + 3, before.y() + 2), f.snapshot().radial().pointer());
+	}
+	@Test void nativeCaptureHandoffWithoutVanillaGrabChangeGatesBothRuntimeCallbackPaths() {
+		Fixture f = new Fixture(); f.press(0); f.frame(250, true); f.prime(); f.move(10, 5, 260);
+		var before = f.snapshot().radial().pointer(); f.access.nativeOwned = false;
+		f.move(1000, 1000, 270); assertEquals(before, f.snapshot().radial().pointer());
+		assertFalse(f.runtime.onMouseScroll(1, 2, 0)); assertFalse(f.runtime.onMouseScroll(1, 0, 1));
+		assertFalse(f.access.grabbed, "native ownership is independent of vanilla camera capture");
+		f.access.nativeOwned = true; f.prime(); f.move(10, 5, 280);
+		assertEquals(new SpatialController.Point(before.x() + 10, before.y() + 5), f.snapshot().radial().pointer());
+		assertTrue(f.runtime.onMouseScroll(1, 2, 0));
 	}
 	@Test void propertyCreatePreservesAddressObservedValueAnnotationAndWholeMarkerType() {
 		Fixture f = new Fixture(); f.access.snapshot = TargetSnapshotFactory.entity(DIMENSION, new UUID(5, 6), "minecraft:pig");

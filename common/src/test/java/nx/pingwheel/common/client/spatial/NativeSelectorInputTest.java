@@ -18,6 +18,18 @@ class NativeSelectorInputTest {
 		return new NativeSelectorInput.Frame(7, width, 800, guiWidth, 400, focused, grabbed);
 	}
 
+	@Test void nativeOwnershipGatesMovementAndEveryScrollWithoutChangingVanillaCapture() {
+		Sink sink = new Sink(); NativeSelectorInput input = new NativeSelectorInput(sink); input.open();
+		var owned = frame(1200, 600, true, false);
+		input.prime(600, 400, owned); input.onMove(7, 620, 410, owned, 1);
+		var handoff = new NativeSelectorInput.Frame(7, 1200, 800, 600, 400, true, false, false);
+		assertFalse(input.onMove(7, -4000, 3000, handoff, 2));
+		assertFalse(input.onScroll(7, 4, 0, handoff, 3)); assertFalse(input.onScroll(7, 0, 1, handoff, 4));
+		input.prime(-4000, 3000, owned); input.onMove(7, -3980, 3010, owned, 5);
+		assertEquals(List.of(new SpatialController.Point(10, 5), new SpatialController.Point(10, 5)), sink.moves);
+		assertTrue(sink.rows.isEmpty());
+	}
+
 	@Test
 	void onlyAcceptedSuccessiveWindowPositionsBecomeGuiTravel() {
 		Sink sink = new Sink();
