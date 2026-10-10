@@ -16,6 +16,7 @@ import nx.pingwheel.common.client.spatial.SpatialSelectorSession;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.interaction.CapturedPingContext;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.presentation.PresentationBasic;
 import nx.pingwheel.common.presentation.PresentationKineticFormat;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationValue;
@@ -108,10 +109,29 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 		List<PingType> types = propertyTypes.apply(capture);
 		PingType defaultType = types.isEmpty() ? null : types.getFirst();
 		List<SpatialSelectorSession.Property> properties = new ArrayList<>();
+		List<SpatialSelectorSession.ContentGroup> groups = new ArrayList<>();
 		labels.clear();
 		if (preview != null) preview.projection().ifPresent(projection -> {
+			String blockStateStep = null;
+			int blockStateAnchor = -1;
+			Component blockStateLabel = null;
+			PresentationPropertyRef blockStateRef = null;
+			PresentationValue blockStateValue = null;
+			boolean blockStateMember = false;
 			for (var entry : PreviewPropertyEntries.of(projection)) {
 				var ref = entry.ref();
+				if (ref.isRoot() && ref.fieldId().equals(PresentationBasic.BLOCK_STATE)
+					&& entry.observed().value() instanceof PresentationValue.RecordValue record) {
+					Component name = fieldLabel.apply(ref);
+					Component value = propertyLabel(projection, ref, record, name);
+					if (value == null) continue;
+					blockStateStep = propertyKey(ref);
+					blockStateAnchor = properties.size();
+					blockStateLabel = value;
+					blockStateRef = ref;
+					blockStateValue = record;
+					continue;
+				}
 				if (ref.isRoot() && ref.fieldId().equals("minecraft:entity.health")
 					&& projection.property(PresentationPropertyRef.root(ref.adapterId(), "minecraft:entity.max_health")).isEmpty()) continue;
 				String id = propertyKey(ref);
@@ -122,7 +142,23 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 				Component value = propertyLabel(projection, ref, entry.observed().value(), name);
 				if (value == null) continue;
 				labels.put(labelId, value);
-				properties.add(new SpatialSelectorSession.Property(id, labelId, ref, entry.observed().value(), types, defaultType));
+				List<String> groupPath = ref.fieldId().equals(PresentationBasic.BLOCK_STATE) && !ref.recordPath().isEmpty()
+					&& blockStateStep != null ? List.of(blockStateStep) : List.of();
+				if (!groupPath.isEmpty()) blockStateMember = true;
+				properties.add(new SpatialSelectorSession.Property(id, labelId, ref, entry.observed().value(), types, defaultType, groupPath));
+			}
+			if (blockStateAnchor < 0) return;
+			if (blockStateMember) {
+				String labelId = "selector-group:" + blockStateStep;
+				labels.put(labelId, blockStateLabel);
+				groups.add(new SpatialSelectorSession.ContentGroup(List.of(blockStateStep), labelId));
+			} else {
+				// Existing empty-group convention: a disabled row, never a dead selectable root.
+				String id = propertyKey(blockStateRef);
+				String labelId = "selector-property:" + id;
+				labels.put(labelId, blockStateLabel);
+				properties.add(blockStateAnchor, new SpatialSelectorSession.Property(id, labelId, blockStateRef,
+					blockStateValue, List.of(), null, List.of()));
 			}
 		});
 		ClientInventory current = inventory.get();
@@ -152,9 +188,10 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 		}
 		previousInventory = state;
 		var next = new SpatialSelectorSession.ContentProjection<>(fence, revision + 1, reset,
-			Status.READY, properties, list);
+			Status.READY, properties, list, groups);
 		if (previous != null && !reset && Objects.equals(previous.properties(), next.properties())
-			&& Objects.equals(previous.inventory(), next.inventory())) return null;
+			&& Objects.equals(previous.inventory(), next.inventory())
+			&& Objects.equals(previous.groups(), next.groups())) return null;
 		revision++;
 		previous = next;
 		return next;

@@ -2,6 +2,7 @@ package nx.pingwheel.common.client;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,10 +20,13 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.util.FormattedCharSequence;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import nx.pingwheel.common.client.spatial.SelectorIntent;
 import nx.pingwheel.common.client.spatial.SpatialController;
 import nx.pingwheel.common.client.spatial.SpatialMenu;
 import nx.pingwheel.common.client.spatial.SpatialSelectorSession;
+import nx.pingwheel.common.config.SpatialSelectorSettings;
 import nx.pingwheel.common.domain.BlockFace;
+import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.interaction.ActiveInteraction;
@@ -198,8 +202,12 @@ class NativeSelectorContentTest {
 	}
 
 	private static PreviewFieldAccess previewValueReader(Map<String, PresentationValue> values) {
+		return previewValueReader(CREATE, values);
+	}
+
+	private static PreviewFieldAccess previewValueReader(String adapterId, Map<String, PresentationValue> values) {
 		return new PreviewFieldAccess() {
-			@Override public String adapterId() { return CREATE; }
+			@Override public String adapterId() { return adapterId; }
 			@Override public Map<String, Outcome> observe(Target target, Set<String> fields, ReadContext context) {
 				Map<String, Outcome> result = new LinkedHashMap<>();
 				for (String field : fields) {
@@ -412,6 +420,190 @@ class NativeSelectorContentTest {
 		assertNotNull(projection);
 		assertEquals(List.of("request"), projection.inventory().allowedItemTypes().stream().map(type -> type.id()).toList(),
 			"the legacy constructor keeps passing the original shared policy");
+		content.close();
+	}
+
+	private static final String BASIC = "minecraft:basic";
+	private static final String BLOCK_STATE = "minecraft:block.state";
+	private static final SpatialSelectorSession.ListGeometry SELECTOR_GEOMETRY =
+		new SpatialSelectorSession.ListGeometry(4, 180, 17, 23, 19, 85);
+
+	private static PingType ping(String id) { return PingTypeCatalog.builtIn().findById(id).orElseThrow(); }
+
+	private static PresentationPreviewAccess blockStateAccess() {
+		return new PresentationPreviewAccess(1, 1, "entity_block", Map.of(BASIC,
+			new PresentationPreviewAccess.Adapter(1, Map.of(BLOCK_STATE,
+				new PresentationField(BLOCK_STATE, PresentationField.Kind.RECORD, true, 0, BLOCK_STATE)))));
+	}
+
+	private static NativeSelectorContent blockStateContent(Map<String, PresentationValue> state,
+		PreviewContext context, CapturedPingContext capture, Consumer<PresentationPreviewC2SPacket> sender) {
+		var preview = new ClientPresentationPreview(type -> Optional.of(blockStateAccess()), () -> context,
+			List.of(previewValueReader(BASIC, Map.of(BLOCK_STATE, new PresentationValue.RecordValue(state)))),
+			(target, type) -> Optional.empty(), sender);
+		var content = new NativeSelectorContent(capture, preview, () -> null,
+			ignored -> List.of(ping("attention"), ping("danger")), ref -> Component.literal(ref.fieldId()), json -> null);
+		content.begin(context.level);
+		return content;
+	}
+
+	/** One real content bridge and headless selector session over a locally observed block state. */
+	private static final class BlockStateSession {
+		final List<PresentationPreviewC2SPacket> sent = new ArrayList<>();
+		final CapturedPingContext capture = capture();
+		final PreviewContext context = new PreviewContext();
+		final NativeSelectorContent content;
+		final SpatialSelectorSession<ClientInventory.PreviewEntryReference> session;
+
+		BlockStateSession(Map<String, PresentationValue> state) {
+			content = blockStateContent(state, context, capture, sent::add);
+			assertTrue(sent.isEmpty(), "a locally observed block state needs no preview request");
+			session = new SpatialSelectorSession<>(previewTarget(capture), Map.of(),
+				new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), false, 250, true, false),
+				previewFence(content), (target, contentFence) -> content.read(target, contentFence), SELECTOR_GEOMETRY);
+			session.open(0L);
+		}
+
+		SpatialController.MenuView menu() { return session.snapshot().radial().menus().getLast(); }
+		String label(SpatialController.ChoiceView choice) { return content.label(choice.label()).getString(); }
+	}
+
+	private static void moveTo(SpatialSelectorSession<?> session, SpatialController.Point origin, double bearing,
+		double distance, long now) {
+		var pointer = session.snapshot().radial().pointer();
+		double radians = Math.toRadians(bearing);
+		session.moveGui(origin.x() + Math.sin(radians) * distance - pointer.x(),
+			origin.y() - Math.cos(radians) * distance - pointer.y(), now);
+	}
+
+	private static void focus(SpatialSelectorSession<?> session, String choiceId, long now) {
+		var menu = session.snapshot().radial().menus().getLast();
+		var choice = menu.choices().stream().filter(value -> value.id().equals(choiceId)).findFirst().orElseThrow();
+		moveTo(session, menu.origin(), choice.startDegrees() + choice.spanDegrees() / 2,
+			session.snapshot().settings().stroke() * 2.0, now);
+	}
+
+	private static void enter(SpatialSelectorSession<?> session, String choiceId, long now) {
+		int before = session.snapshot().radial().menus().size();
+		focus(session, choiceId, now);
+		session.tick(now + session.snapshot().settings().dwellMillis());
+		assertEquals(before + 1, session.snapshot().radial().menus().size());
+	}
+
+	private static String firstNonBack(SpatialSelectorSession<?> session) {
+		return session.snapshot().radial().menus().getLast().choices().stream()
+			.filter(choice -> !choice.back()).findFirst().orElseThrow().id();
+	}
+
+	@Test void blockStateRecordBecomesAPureNavigationGroupWithoutAnyParentAction() {
+		var fixture = new BlockStateSession(Map.of(
+			"lit", new PresentationValue.Text("true"),
+			"snowy", new PresentationValue.Text("false")));
+		enter(fixture.session, "content", 10L);
+		var parent = fixture.menu().choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow();
+		assertTrue(parent.branch());
+		assertNull(parent.action(), "the group parent carries no whole-record action");
+		assertEquals("minecraft:block.state: 2", fixture.label(parent));
+		focus(fixture.session, parent.id(), 150L);
+		assertInstanceOf(SelectorIntent.None.class, fixture.session.releaseIntent(151L));
+		fixture.content.close();
+	}
+
+	@Test void blockStateGroupChildrenKeepObservedRefsAndTypedReleases() {
+		var fixture = new BlockStateSession(Map.of(
+			"lit", new PresentationValue.Text("true"),
+			"snowy", new PresentationValue.Text("false")));
+		enter(fixture.session, "content", 10L);
+		enter(fixture.session, firstNonBack(fixture.session), 150L);
+		var children = fixture.menu().choices().stream().filter(choice -> !choice.back()).toList();
+		assertEquals(List.of("lit: true", "snowy: false"), children.stream().map(fixture::label).toList());
+		assertEquals(ping("attention").outlineColor(), children.getFirst().outlineColor(),
+			"a grouped state row keeps its default Ping Type outline color");
+		var snowy = children.stream().filter(choice -> "snowy: false".equals(fixture.label(choice))).findFirst().orElseThrow();
+		focus(fixture.session, snowy.id(), 300L);
+		var intent = assertInstanceOf(SelectorIntent.CreateProperty.class, fixture.session.releaseIntent(301L));
+		assertEquals(new PresentationPropertyRef(BASIC, BLOCK_STATE, List.of("snowy")), intent.property().ref());
+		assertEquals(new PresentationValue.Text("false"), intent.property().observedValue());
+		assertEquals("attention", intent.property().pingTypeId(), "direct release keeps the property default annotation");
+		fixture.content.close();
+	}
+
+	@Test void blockStateGroupedRowKeepsAttentionAndDangerAnnotations() {
+		var fixture = new BlockStateSession(Map.of("snowy", new PresentationValue.Text("false")));
+		enter(fixture.session, "content", 10L);
+		enter(fixture.session, firstNonBack(fixture.session), 150L);
+		enter(fixture.session, firstNonBack(fixture.session), 300L);
+		var types = fixture.menu().choices().stream().filter(choice -> !choice.back()).toList();
+		assertEquals(List.of("pingforit.ping_type.attention", "pingforit.ping_type.danger"),
+			types.stream().map(SpatialController.ChoiceView::label).toList());
+		assertEquals(ping("danger").outlineColor(), types.getLast().outlineColor());
+		focus(fixture.session, types.getLast().id(), 450L);
+		var intent = assertInstanceOf(SelectorIntent.CreateProperty.class, fixture.session.releaseIntent(451L));
+		assertEquals(new PresentationPropertyRef(BASIC, BLOCK_STATE, List.of("snowy")), intent.property().ref());
+		assertEquals(new PresentationValue.Text("false"), intent.property().observedValue());
+		assertEquals("danger", intent.property().pingTypeId());
+		fixture.content.close();
+	}
+
+	@Test void blockStateGroupBackReturnsOneLevelAndTheFrozenRowIdentitySurvives() {
+		var fixture = new BlockStateSession(Map.of("snowy", new PresentationValue.Text("false")));
+		enter(fixture.session, "content", 10L);
+		String parent = firstNonBack(fixture.session);
+		enter(fixture.session, parent, 150L);
+		String back = fixture.menu().choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow().id();
+		focus(fixture.session, back, 200L);
+		fixture.session.tick(400L);
+		assertTrue(fixture.menu().menuId().endsWith(":content"), "Back returns one level to the content menu");
+		assertEquals(parent, firstNonBack(fixture.session), "the group parent keeps its identity after the return");
+		fixture.content.close();
+	}
+
+	@Test void emptyBlockStateRecordStaysADisabledRowInsteadOfADeadSelectableRoot() {
+		var fixture = new BlockStateSession(Map.of());
+		enter(fixture.session, "content", 10L);
+		var choice = fixture.menu().choices().stream().filter(value -> !value.back()).findFirst().orElseThrow();
+		assertTrue(choice.disabled(), "an empty record keeps the established disabled empty-group row");
+		assertEquals("minecraft:block.state: 0", fixture.label(choice));
+		focus(fixture.session, choice.id(), 150L);
+		assertInstanceOf(SelectorIntent.None.class, fixture.session.releaseIntent(151L));
+		fixture.content.close();
+	}
+
+	@Test void blockStateBridgeDropsTheRecordRootAndDeclaresTheGroupedRows() {
+		var context = new PreviewContext();
+		var capture = capture();
+		var content = blockStateContent(Map.of(
+			"lit", new PresentationValue.Text("true"),
+			"snowy", new PresentationValue.Text("false")), context, capture, packet -> {});
+		var projection = content.read(previewTarget(capture), previewFence(content));
+		assertNotNull(projection);
+		assertTrue(projection.properties().stream().noneMatch(property -> property.ref().isRoot()),
+			"the record root is no longer a selectable property");
+		var groupPath = projection.properties().getFirst().groupPath();
+		assertEquals(1, groupPath.size());
+		assertFalse(groupPath.getFirst().isBlank());
+		assertTrue(projection.properties().stream().allMatch(property -> property.groupPath().equals(groupPath)));
+		assertEquals(1, projection.groups().size());
+		assertEquals(groupPath, projection.groups().getFirst().path());
+		content.close();
+	}
+
+	@Test void unrelatedRecordRootKeepsItsOrdinarySelectableBranch() {
+		var context = new PreviewContext();
+		var capture = capture();
+		var preview = new ClientPresentationPreview(type -> Optional.of(previewRecordAccess(SPEED)), () -> context,
+			List.of(previewValueReader(Map.of(SPEED, speedRecord(128, 128, true)))),
+			(target, type) -> Optional.empty(), packet -> {});
+		var content = new NativeSelectorContent(capture, preview, () -> null, ignored -> List.of(ping("attention")),
+			ref -> Component.literal(ref.fieldId()), json -> null);
+		content.begin(context.level);
+		var projection = content.read(previewTarget(capture), previewFence(content));
+		var root = projectedProperty(projection, SPEED);
+		assertTrue(root.ref().isRoot());
+		assertTrue(root.groupPath().isEmpty());
+		assertTrue(projection.groups().isEmpty(), "only block state opts into a navigation group");
+		assertEquals(List.of("attention"), root.allowedTypes().stream().map(type -> type.id()).toList(),
+			"an unrelated record root stays a selectable property");
 		content.close();
 	}
 

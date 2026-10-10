@@ -61,13 +61,40 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		public ContentFence { requireId(candidateId); }
 	}
 
-	/** Only already-authorized detached values and effective property Ping Types enter here. */
+	/**
+	 * Only already-authorized detached values and effective property Ping Types
+	 * enter here. {@code groupPath} is the declared navigation-group chain this
+	 * entry renders under; an empty path keeps the established top-level row.
+	 */
 	public record Property(String id, String labelKey, PresentationPropertyRef ref,
-		PresentationValue observedValue, List<PingType> allowedTypes, PingType defaultType) {
+		PresentationValue observedValue, List<PingType> allowedTypes, PingType defaultType, List<String> groupPath) {
 		public Property {
 			requireId(id); Objects.requireNonNull(labelKey); Objects.requireNonNull(ref); Objects.requireNonNull(observedValue);
 			PresentationLimits.validate(observedValue);
 			allowedTypes = checkedTypes(allowedTypes, defaultType);
+			groupPath = List.copyOf(Objects.requireNonNull(groupPath));
+		}
+
+		/** Convenience for a top-level property that renders without a navigation group. */
+		public Property(String id, String labelKey, PresentationPropertyRef ref,
+			PresentationValue observedValue, List<PingType> allowedTypes, PingType defaultType) {
+			this(id, labelKey, ref, observedValue, allowedTypes, defaultType, List.of());
+		}
+	}
+
+	/**
+	 * One declared pure-navigation content group. Its own entry never commits an
+	 * action. {@code path} is the stable group-step chain from the content root,
+	 * one element per nesting level; every property whose {@code groupPath}
+	 * starts with it renders below it. A group with no visible member choice is
+	 * omitted instead of becoming a dead selectable root.
+	 */
+	public record ContentGroup(List<String> path, String labelKey) {
+		public ContentGroup {
+			path = List.copyOf(Objects.requireNonNull(path));
+			Objects.requireNonNull(labelKey);
+			if (path.isEmpty()) throw new IllegalArgumentException("empty content group path");
+			for (String step : path) requireId(step);
 		}
 	}
 
@@ -92,17 +119,38 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	}
 
 	/**
-	 * A complete authorized property projection plus an optional sparse inventory
-	 * batch. An unavailable/invalid/expired update, or reset, clears old rows and
+	 * A complete authorized property projection, its declared pure-navigation
+	 * groups, and an optional sparse inventory batch. An
+	 * unavailable/invalid/expired update, or reset, clears old rows and
 	 * references before applying data. Revision is monotonic within this fence.
+	 * Every property group path must be declared together with its full ancestor
+	 * chain, and a group path that no property references is inert.
 	 */
 	public record ContentProjection<R>(ContentFence fence, long revision, boolean reset, Status status,
-		List<Property> properties, InventoryPreview<R> inventory) {
+		List<Property> properties, InventoryPreview<R> inventory, List<ContentGroup> groups) {
 		public ContentProjection {
 			Objects.requireNonNull(fence); Objects.requireNonNull(status); properties = List.copyOf(properties);
+			groups = List.copyOf(Objects.requireNonNull(groups));
 			Set<String> seen = new HashSet<>();
 			for (Property property : properties)
 				if (!seen.add(property.id())) throw new IllegalArgumentException("duplicate property");
+			Set<List<String>> declared = new HashSet<>();
+			for (ContentGroup group : groups)
+				if (!declared.add(group.path())) throw new IllegalArgumentException("duplicate content group");
+			for (ContentGroup group : groups)
+				for (int depth = 1; depth < group.path().size(); depth++)
+					if (!declared.contains(group.path().subList(0, depth)))
+						throw new IllegalArgumentException("content group parent is not declared");
+			for (Property property : properties)
+				for (int depth = 1; depth <= property.groupPath().size(); depth++)
+					if (!declared.contains(property.groupPath().subList(0, depth)))
+						throw new IllegalArgumentException("property group is not declared");
+		}
+
+		/** Convenience for a projection without navigation groups. */
+		public ContentProjection(ContentFence fence, long revision, boolean reset, Status status,
+			List<Property> properties, InventoryPreview<R> inventory) {
+			this(fence, revision, reset, status, properties, inventory, List.of());
 		}
 	}
 
@@ -394,19 +442,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private List<SpatialMenu.Choice> buildContent() {
 		List<SpatialMenu.Choice> result = new ArrayList<>();
 		if (projection == null) return result;
-		for (Property property : projection.properties()) {
-			String id = contentMenu + ":property:" + menuToken(property.id());
-			if (property.allowedTypes().isEmpty()) { result.add(SpatialMenu.Choice.disabled(id, property.labelKey())); continue; }
-			List<SpatialMenu.Choice> types = new ArrayList<>();
-			for (PingType type : property.allowedTypes()) {
-				String action = id + ":" + type.id();
-				actions.put(action, propertyIntent(property, type));
-				types.add(SpatialMenu.Choice.leaf(action, type.displayKey(), action).withOutlineColor(type.outlineColor()));
-			}
-			actions.put(id, propertyIntent(property, property.defaultType()));
-			result.add(SpatialMenu.Choice.branch(id, property.labelKey(), id, new SpatialMenu(id + ":types", types))
-				.withOutlineColor(property.defaultType().outlineColor()));
-		}
+		result.addAll(buildContentLevel(List.of()));
 		if (preview != null) {
 			if (!inventoryEligible() || unavailable(preview.status()) || preview.allowedItemTypes().isEmpty())
 				result.add(SpatialMenu.Choice.disabled(inventoryMenu, preview.labelKey()));
@@ -417,6 +453,60 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			}
 		}
 		return result;
+	}
+
+	/**
+	 * One level of the content tree. Direct member properties keep their
+	 * established selectable or disabled row in source order; a declared group is
+	 * emitted once, at the position of its first visible descendant, as a pure
+	 * navigation branch with no release action. A group with no visible member
+	 * choice is omitted instead of becoming a dead selectable root.
+	 */
+	private List<SpatialMenu.Choice> buildContentLevel(List<String> levelPath) {
+		List<SpatialMenu.Choice> result = new ArrayList<>();
+		Set<List<String>> emitted = new HashSet<>();
+		for (Property property : projection.properties()) {
+			if (!startsWith(property.groupPath(), levelPath)) continue;
+			if (property.groupPath().size() == levelPath.size()) {
+				result.add(propertyChoice(property));
+				continue;
+			}
+			List<String> childPath = property.groupPath().subList(0, levelPath.size() + 1);
+			if (!emitted.add(childPath)) continue;
+			ContentGroup group = declaredGroup(childPath);
+			if (group == null) continue;
+			List<SpatialMenu.Choice> children = buildContentLevel(childPath);
+			if (children.isEmpty()) continue;
+			String id = groupChoiceId(childPath);
+			result.add(SpatialMenu.Choice.branch(id, group.labelKey(), new SpatialMenu(id + ":menu", children)));
+		}
+		return result;
+	}
+
+	private SpatialMenu.Choice propertyChoice(Property property) {
+		String id = contentMenu + ":property:" + menuToken(property.id());
+		if (property.allowedTypes().isEmpty()) return SpatialMenu.Choice.disabled(id, property.labelKey());
+		List<SpatialMenu.Choice> types = new ArrayList<>();
+		for (PingType type : property.allowedTypes()) {
+			String action = id + ":" + type.id();
+			actions.put(action, propertyIntent(property, type));
+			types.add(SpatialMenu.Choice.leaf(action, type.displayKey(), action).withOutlineColor(type.outlineColor()));
+		}
+		actions.put(id, propertyIntent(property, property.defaultType()));
+		return SpatialMenu.Choice.branch(id, property.labelKey(), id, new SpatialMenu(id + ":types", types))
+			.withOutlineColor(property.defaultType().outlineColor());
+	}
+
+	private ContentGroup declaredGroup(List<String> path) {
+		for (ContentGroup group : projection.groups()) if (group.path().equals(path)) return group;
+		return null;
+	}
+
+	/** Pure-navigation parent identity: stable group steps, distinct from property keys. */
+	private String groupChoiceId(List<String> path) {
+		StringBuilder id = new StringBuilder(contentMenu).append(":group");
+		for (String step : path) id.append(':').append(menuToken(step));
+		return id.toString();
 	}
 
 	private SpatialMenu.Choice targetChoice(String id, String label, CapturedTarget candidate, PingType type) {
@@ -548,4 +638,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	}
 	private static boolean positive(double value) { return Double.isFinite(value) && value > 0; }
 	private static boolean nonNegative(double value) { return Double.isFinite(value) && value >= 0; }
+	private static boolean startsWith(List<String> path, List<String> prefix) {
+		return path.size() >= prefix.size() && path.subList(0, prefix.size()).equals(prefix);
+	}
 }

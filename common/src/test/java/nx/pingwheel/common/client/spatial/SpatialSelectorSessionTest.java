@@ -581,6 +581,133 @@ class SpatialSelectorSessionTest {
 		assertEquals("danger", intent.property().pingTypeId());
 	}
 
+	private static SpatialSelectorSession.Property blockStateProperty(String id, String key, String state) {
+		return new SpatialSelectorSession.Property(id, id,
+			new PresentationPropertyRef("pingforit:basic", "minecraft:block.state", List.of(key)),
+			new PresentationValue.Text(state), List.of(ping("attention"), ping("danger")), ping("attention"), List.of("block-state"));
+	}
+
+	private static SpatialSelectorSession.ContentProjection<String> blockStateProjection(
+		SpatialSelectorSession.CapturedTarget target, List<SpatialSelectorSession.Property> properties) {
+		return new SpatialSelectorSession.ContentProjection<>(fence(target), 1, false, Status.READY, properties, null,
+			List.of(new SpatialSelectorSession.ContentGroup(List.of("block-state"), "state-label")));
+	}
+
+	@Test
+	void contentGroupIsAPureNavigationParentWhileUnrelatedRowsKeepTheirActions() {
+		var target = target("ordinary", "entity_block", true);
+		Content port = new Content();
+		port.next = blockStateProjection(target, List.of(
+			blockStateProperty("snowy", "snowy", "false"),
+			new SpatialSelectorSession.Property("other", "other",
+				PresentationPropertyRef.root("pingforit:basic", "pingforit:other"), new PresentationValue.NumberValue(1),
+				List.of(ping("attention")), ping("attention")),
+			blockStateProperty("lit", "lit", "true")));
+		var session = session(target, Map.of(), false, port);
+		session.open(0); enter(session, "content", 10);
+		var top = current(session).choices();
+		assertEquals(List.of("state-label", "other", "pingforit.spatial.back"),
+			top.stream().map(SpatialController.ChoiceView::label).toList());
+		assertTrue(top.getFirst().branch());
+		assertNull(top.getFirst().action(), "the group parent must not ping the whole record");
+		assertNotNull(top.get(1).action(), "an unrelated top-level row keeps its established action");
+		focus(session, top.getFirst().id(), 150);
+		assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(151),
+			"releasing the focused group parent itself commits nothing");
+	}
+
+	@Test
+	void groupedMemberChildrenKeepTheirOwnRefOldValueAndTypedDefaultRelease() {
+		var target = target("ordinary", "entity_block", true);
+		Content port = new Content();
+		port.next = blockStateProjection(target, List.of(
+			blockStateProperty("snowy", "snowy", "false"), blockStateProperty("lit", "lit", "true")));
+		var session = session(target, Map.of(), false, port);
+		session.open(0); enter(session, "content", 10);
+		String parent = current(session).choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id();
+		enter(session, parent, 150);
+		var children = current(session).choices().stream().filter(choice -> !choice.back()).toList();
+		assertEquals(List.of("snowy", "lit"), children.stream().map(SpatialController.ChoiceView::label).toList());
+		assertEquals(ping("attention").outlineColor(), children.getFirst().outlineColor(),
+			"a grouped member row keeps its default Ping Type outline color");
+		var snowy = children.getFirst();
+		focus(session, snowy.id(), 300);
+		var intent = assertInstanceOf(SelectorIntent.CreateProperty.class, session.releaseIntent(301));
+		assertEquals(new PresentationPropertyRef("pingforit:basic", "minecraft:block.state", List.of("snowy")), intent.property().ref());
+		assertEquals(new PresentationValue.Text("false"), intent.property().observedValue());
+		assertEquals("attention", intent.property().pingTypeId());
+		assertEquals(target.resolvedTarget().targetType().defaultPingType(), intent.mainType());
+	}
+
+	@Test
+	void groupBackNavigationReturnsOneLevelAndKeepsTheSiblingChoices() {
+		var target = target("ordinary", "entity_block", true);
+		Content port = new Content();
+		port.next = blockStateProjection(target, List.of(
+			blockStateProperty("snowy", "snowy", "false"), blockStateProperty("lit", "lit", "true")));
+		var session = session(target, Map.of(), false, port);
+		session.open(0); enter(session, "content", 10);
+		String parent = current(session).choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id();
+		enter(session, parent, 150);
+		String back = current(session).choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow().id();
+		focus(session, back, 200); session.tick(400);
+		assertTrue(current(session).menuId().endsWith(":content"), "Back returns one level to the content menu");
+		assertEquals(parent, current(session).choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id(),
+			"the group parent keeps its identity after the return");
+	}
+
+	@Test
+	void declaredGroupWithoutAnyMemberChoiceIsOmittedInsteadOfDeadSelectableRoot() {
+		var target = target("ordinary", "entity_block", true);
+		Content port = new Content();
+		port.next = new SpatialSelectorSession.ContentProjection<>(fence(target), 1, false, Status.READY,
+			List.of(new SpatialSelectorSession.Property("other", "other",
+				PresentationPropertyRef.root("pingforit:basic", "pingforit:other"), new PresentationValue.NumberValue(1),
+				List.of(ping("attention")), ping("attention"))),
+			null, List.of(new SpatialSelectorSession.ContentGroup(List.of("block-state"), "state-label")));
+		var session = session(target, Map.of(), false, port);
+		session.open(0); enter(session, "content", 10);
+		assertEquals(List.of("other", "pingforit.spatial.back"),
+			current(session).choices().stream().map(SpatialController.ChoiceView::label).toList(),
+			"an empty declared group leaves no focusable parent row");
+	}
+
+	@Test
+	void nestedGroupPathRendersSubgroupsUnderTheirDeclaredParent() {
+		var target = target("ordinary", "entity_block", true);
+		List<String> create = List.of("create"), stress = List.of("create", "stress");
+		Content port = new Content();
+		port.next = new SpatialSelectorSession.ContentProjection<>(fence(target), 1, false, Status.READY, List.of(
+			new SpatialSelectorSession.Property("speed", "speed",
+				PresentationPropertyRef.root("create:presentation", "create:kinetic.speed"), new PresentationValue.NumberValue(64),
+				List.of(ping("attention")), ping("attention"), create),
+			new SpatialSelectorSession.Property("stress", "stress",
+				PresentationPropertyRef.root("create:presentation", "create:kinetic.stress"), new PresentationValue.NumberValue(4),
+				List.of(ping("attention")), ping("attention"), stress)),
+			null, List.of(new SpatialSelectorSession.ContentGroup(create, "create-label"),
+				new SpatialSelectorSession.ContentGroup(stress, "stress-label")));
+		var session = session(target, Map.of(), false, port);
+		session.open(0); enter(session, "content", 10);
+		String createParent = current(session).choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow().id();
+		enter(session, createParent, 150);
+		var children = current(session).choices().stream().filter(choice -> !choice.back()).toList();
+		assertEquals(List.of("speed", "stress-label"), children.stream().map(SpatialController.ChoiceView::label).toList());
+		enter(session, children.getLast().id(), 300);
+		var stressChild = current(session).choices().stream().filter(choice -> !choice.back()).findFirst().orElseThrow();
+		assertEquals("stress", stressChild.label());
+		focus(session, stressChild.id(), 450);
+		var intent = assertInstanceOf(SelectorIntent.CreateProperty.class, session.releaseIntent(451));
+		assertEquals("create:kinetic.stress", intent.property().ref().fieldId());
+		assertEquals(new PresentationValue.NumberValue(4), intent.property().observedValue());
+	}
+
+	@Test
+	void propertyGroupPathWithoutItsDeclaredChainIsRejected() {
+		var target = target("ordinary", "entity_block", true);
+		assertThrows(IllegalArgumentException.class, () -> new SpatialSelectorSession.ContentProjection<>(fence(target), 1,
+			false, Status.READY, List.of(blockStateProperty("snowy", "snowy", "false")), null, List.of()));
+	}
+
 	private static SpatialSelectorSession<String> liveSession(nx.pingwheel.common.interaction.InteractionToken token, Object level) {
 		var ordinary = target("ordinary", "entity", false);
 		var session = new SpatialSelectorSession<String>(ordinary, Map.of(), settings(false),
