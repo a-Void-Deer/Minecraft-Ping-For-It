@@ -93,6 +93,45 @@ class SpatialVisualTrailTest {
 		assertEquals(p(30, 0), trail.points().getLast());
 	}
 
+	@Test void unfinishedHandoffSurvivesOrdinaryExitAndResumesAfterMissingDepartingPaint() {
+		var c = controller(32); var trail = new SpatialVisualTrail<String>(DURATION);
+		frame(trail, c, null, null, 0, false, 32);
+		frame(trail, c, "A", p(100, 0), 10, false, 32);
+		frame(trail, c, "A", p(100, 0), 10 + DURATION / 2, false, 32);
+		var halfway = trail.points();
+		assertEquals(p(50, 0), halfway.getLast());
+		c.release(10 + DURATION / 2);
+		frame(trail, c, null, p(100, 0), 10 + DURATION / 2, false, 32);
+		assertEquals(halfway, trail.points(), "same-clock release keeps the displayed midpoint");
+		frame(trail, c, null, null, 10 + DURATION * 3 / 4, false, 32);
+		assertEquals(halfway, trail.points(), "missing departing paint retains history without a false pose");
+		frame(trail, c, null, p(100, 40), 10 + DURATION * 3 / 4, false, 32);
+		assertEquals(p(84.375, 33.75), trail.points().getLast(), "later paint resumes the original finite interval");
+		frame(trail, c, null, p(120, 60), 10 + DURATION, false, 32);
+		assertEquals(p(120, 60), trail.points().getLast(), "completed interval follows the departing pose");
+		frame(trail, c, null, null, 10 + DURATION * 2, true, 32);
+		assertTrue(trail.points().isEmpty(), "reduced motion exit still clears instead of easing");
+	}
+
+	@Test void unfinishedFollowerSwitchHandoffSurvivesOrdinaryExitTowardTheNewDepartingOwner() {
+		var c = controller(32); var trail = new SpatialVisualTrail<String>(DURATION);
+		frame(trail, c, null, null, 0, false, 32);
+		frame(trail, c, "A", p(100, 0), 10, false, 32);
+		frame(trail, c, "A", p(100, 0), 10 + DURATION, false, 32);
+		assertEquals(p(100, 0), trail.points().getLast());
+		frame(trail, c, "B", p(200, 0), 10 + DURATION + 1, false, 32);
+		frame(trail, c, "B", p(200, 0), 10 + DURATION + 1 + DURATION / 2, false, 32);
+		var halfway = trail.points();
+		assertEquals(p(150, 0), halfway.getLast());
+		c.release(10 + DURATION + 1 + DURATION / 2);
+		frame(trail, c, null, p(200, 0), 10 + DURATION + 1 + DURATION / 2, false, 32);
+		assertEquals(halfway, trail.points(), "same-clock release keeps the B handoff midpoint");
+		frame(trail, c, null, p(200, 40), 10 + DURATION + 1 + DURATION * 3 / 4, false, 32);
+		assertEquals(p(184.375, 33.75), trail.points().getLast(), "eases toward B's moving departing pose");
+		frame(trail, c, null, p(200, 40), 10 + DURATION + 1 + DURATION, false, 32);
+		assertEquals(p(200, 40), trail.points().getLast(), "completed interval follows the departing pose");
+	}
+
 	@Test void reducedMotionExitHardResetReopenRewoundClockAndRapidRetargetRemainBounded() {
 		var c = controller(16); var trail = new SpatialVisualTrail<String>(DURATION);
 		frame(trail, c, null, null, 100, false, 16);

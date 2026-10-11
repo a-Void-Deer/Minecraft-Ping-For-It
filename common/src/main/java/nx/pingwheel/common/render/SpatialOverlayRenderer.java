@@ -747,6 +747,7 @@ public final class SpatialOverlayRenderer {
 				if (chrome != null) states.add(new SpatialOverlayTransitions.State<>(new VisualKey("trail", "radial", ""),
 					chrome.x(), chrome.y(), chrome.scale(), chrome.alpha(), chrome.present(), historicalTrail));
 			}
+			SpatialController.Point trailOrigin = trailOrigin(states, viewport, centerX, centerY, viewX, viewY);
 			if (origin == null && transitions.isEmpty()) {
 				// The exit tail is gone: hard-reset so a later session starts centered.
 				viewOffset.clear();
@@ -790,8 +791,9 @@ public final class SpatialOverlayRenderer {
 					&& (withAlpha(BORDER_COLOR, targetAlpha(state.alpha(), style)) >>> 24) != 0
 					&& (origin == null ? !state.present() && state.key().equals(trail.owner())
 						: state.present() && state.key().equals(desiredOwner))) {
-					// The displayed pose is already rigidly projected: undo this frame's projection exactly once.
-					followerPoint = new SpatialController.Point(displayed.x() - centerX - viewX, displayed.y() - centerY - viewY);
+					// The displayed pose is already rigidly projected: undo exactly the projection
+					// origin the frame's trail paint used, which stays detached during an exit.
+					followerPoint = new SpatialController.Point(displayed.x() - trailOrigin.x(), displayed.y() - trailOrigin.y());
 				}
 				if (state.data() instanceof NodePaint node && acknowledgesNodePaint(state.present(),
 					state.key().owner().equals(activeMenu), state.alpha(), style)
@@ -828,6 +830,25 @@ public final class SpatialOverlayRenderer {
 			? new SpatialOverlayTransitions.State<>(state.key(), viewport.centerX() + viewport.viewX(), viewport.centerY() + viewport.viewY(),
 				state.scale(), state.alpha(), true, state.data())
 			: state;
+	}
+
+	/**
+	 * The exact displayed origin of this frame's detached trail paint. A presented
+	 * menu uses the current GUI center plus the sampled pan; an exit keeps the
+	 * frozen pose. Follower sampling must invert this same origin rather than the
+	 * frame's current GUI center, or a resize during the exit tail displaces the
+	 * committed endpoint by the center delta.
+	 */
+	static SpatialController.Point trailOrigin(List<SpatialOverlayTransitions.State<VisualKey, Paint>> states,
+		SpatialController.Viewport viewport, double centerX, double centerY, double viewX, double viewY) {
+		for (var state : states) {
+			if (state.data() instanceof ChromePaint || state.data() instanceof TrailPaint) {
+				if (!state.present()) return new SpatialController.Point(state.x() + viewX, state.y() + viewY);
+				return viewport == null ? new SpatialController.Point(centerX + viewX, centerY + viewY)
+					: new SpatialController.Point(viewport.centerX() + viewport.viewX(), viewport.centerY() + viewport.viewY());
+			}
+		}
+		return new SpatialController.Point(centerX + viewX, centerY + viewY);
 	}
 
 	/** Called only after successful node paint; actual title visibility is checked separately in the frame path. */

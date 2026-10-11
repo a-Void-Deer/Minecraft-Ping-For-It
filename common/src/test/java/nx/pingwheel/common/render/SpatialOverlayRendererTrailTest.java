@@ -37,6 +37,13 @@ class SpatialOverlayRendererTrailTest {
 		SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> follower(boolean present) {
 			return paints.stream().filter(s -> s.present() == present && s.key().kind().equals("follow")).findFirst().orElseThrow();
 		}
+		SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> follower(String entry, boolean present) {
+			return paints.stream().filter(s -> s.present() == present && s.key().kind().equals("follow") && s.key().entry().equals(entry))
+				.findFirst().orElseThrow();
+		}
+		SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> trailState() {
+			return paints.stream().filter(s -> s.data() instanceof SpatialOverlayRenderer.TrailPaint).findFirst().orElseThrow();
+		}
 		boolean hidden() { return paints.stream().filter(s -> s.data() instanceof SpatialOverlayRenderer.ChromePaint)
 			.map(s -> ((SpatialOverlayRenderer.ChromePaint) s.data()).pointerHidden()).findFirst().orElse(false); }
 	}
@@ -220,6 +227,73 @@ class SpatialOverlayRendererTrailTest {
 			assertEquals(cap, s.trailPoints().size()); assertEquals(cap, c.snapshot().trail().size());
 			assertTrue(painter.hidden()); assertTrue(s.paintedChoiceIds().contains("a"));
 		}
+	}
+
+	@Test void sameClockReleaseKeepsUnfinishedPointerHandoffMidpointInsteadOfJumpingToDepartingPose() {
+		var c = controller(32); var s = new SpatialOverlayRenderer.Session(); var painter = new Painter();
+		frame(s, c, painter, style(false, 32, 50), 0, VIEW, null);
+		c.movePhysical(0, -100, 1);
+		frame(s, c, painter, style(false, 32, 50), 1, VIEW, null);
+		frame(s, c, painter, style(false, 32, 50), 1 + D / 2, VIEW, null);
+		var painted = actual(painter.follower("a", true), VIEW);
+		var expected = p(painted.x() / 2, painted.y() / 2);
+		assertEquals(expected, s.trailPoints().getLast(), "pointer-to-follower handoff is halfway at the half interval");
+		var committed = s.trailPoints();
+		c.release(1 + D / 2);
+		frame(s, c, painter, style(false, 32, 50), 1 + D / 2, VIEW, null);
+		assertEquals(painted, actual(painter.follower("a", false), VIEW), "departing pose freezes at the displayed pose");
+		assertEquals(committed, painter.trail().points(), "the release frame paints the previously committed history");
+		assertEquals(expected, s.trailPoints().getLast(), "same-clock release does not jump to the departing pose");
+	}
+
+	@Test void sameClockReleaseKeepsUnfinishedFollowerSwitchHandoffTowardTheExactDepartingOwner() {
+		var c = controller(32); var s = new SpatialOverlayRenderer.Session(); var painter = new Painter();
+		frame(s, c, painter, style(false, 32, 50), 0, VIEW, null);
+		c.movePhysical(0, -100, 1);
+		frame(s, c, painter, style(false, 32, 50), 1, VIEW, null);
+		frame(s, c, painter, style(false, 32, 50), 1 + D, VIEW, null);
+		var settledA = actual(painter.follower("a", true), VIEW);
+		assertEquals(settledA, s.trailPoints().getLast(), "A settles before the switch");
+		long switched = 1 + D + 1;
+		c.movePhysical(100, 100, switched);
+		frame(s, c, painter, style(false, 32, 50), switched, VIEW, null);
+		assertEquals("b", c.snapshot().focusId());
+		frame(s, c, painter, style(false, 32, 50), switched + D / 2, VIEW, null);
+		var paintedB = actual(painter.follower("b", true), VIEW);
+		var expected = p((settledA.x() + paintedB.x()) / 2, (settledA.y() + paintedB.y()) / 2);
+		assertEquals(expected, s.trailPoints().getLast(), "switch eases from A's displayed endpoint toward B");
+		var committed = s.trailPoints();
+		c.release(switched + D / 2);
+		frame(s, c, painter, style(false, 32, 50), switched + D / 2, VIEW, null);
+		assertEquals(paintedB, actual(painter.follower("b", false), VIEW), "B's departing pose freezes at the displayed pose");
+		assertEquals(committed, s.trailPoints(), "same-clock release does not jump to B's departing pose");
+		assertNotEquals(actual(painter.follower("a", false), VIEW), s.trailPoints().getLast(),
+			"the outgoing A duplicate never owns the departing sample");
+	}
+
+	@Test void releasedUnfinishedHandoffKeepsDetachedTrailOriginAcrossGuiResize() {
+		var c = controller(32); var s = new SpatialOverlayRenderer.Session(); var painter = new Painter();
+		frame(s, c, painter, style(false, 32, 50), 0, VIEW, null);
+		c.movePhysical(0, -100, 1);
+		frame(s, c, painter, style(false, 32, 50), 1, VIEW, null);
+		frame(s, c, painter, style(false, 32, 50), 1 + D / 2, VIEW, null);
+		var painted = actual(painter.follower("a", true), VIEW);
+		var committed = s.trailPoints();
+		assertEquals(p(painted.x() / 2, painted.y() / 2), committed.getLast());
+		c.release(1 + D / 2);
+		var resized = new SpatialController.Viewport(600, 300, 0, 0);
+		frame(s, c, painter, style(false, 32, 50), 1 + D / 2, resized, null);
+		assertEquals(p(200, 150), p(painter.trailState().x(), painter.trailState().y()),
+			"detached trail keeps its exit origin instead of the new GUI center");
+		assertEquals(committed, painter.trail().points(), "the release frame paints the previous committed history");
+		assertEquals(committed, s.trailPoints(), "same-clock release keeps the midpoint under resize");
+		frame(s, c, painter, style(false, 32, 50), 1 + D, resized, null);
+		var departing = p(painter.follower("a", false).x(), painter.follower("a", false).y());
+		assertEquals(200, painter.trailState().x()); assertEquals(150, painter.trailState().y());
+		var endpoint = s.trailPoints().getLast();
+		assertEquals(departing.x(), 200 + endpoint.x(), 1e-9,
+			"reprojected trail endpoint tracks the recorded painted pose, not the new GUI center");
+		assertEquals(departing.y(), 150 + endpoint.y(), 1e-9);
 	}
 
 	@Test void duplicateRoundedSquareCoverageUsesMaximumAlphaEvenForPartialOverlap() {

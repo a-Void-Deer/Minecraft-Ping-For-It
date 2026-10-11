@@ -22,15 +22,17 @@ final class SpatialVisualTrail<K> {
 		this.duration = duration;
 	}
 
-	/** Before historical paint: fence coordinate discontinuities and detach an ordinary exit. */
+	/** Before historical paint: fence coordinate discontinuities and preserve an unfinished exit handoff. */
 	void prepare(SpatialController.Snapshot snapshot, int capacity, long nowNanos, boolean reduced) {
 		if (capacity <= 0 || capacity > 512) throw new IllegalArgumentException("invalid trail bound");
 		this.capacity = capacity;
 		time(nowNanos);
 		boolean nextActive = snapshot != null && snapshot.active();
 		if (!nextActive) {
+			// An ordinary exit keeps the current owner and any unfinished finite handoff:
+			// the departing pose may still move and must continue the same interval.
+			// Only reduced motion, a hard reset, or a new hold clears it.
 			active = false;
-			handoffFrom = null; // Exit follows the exact departing pose, not a reset pointer or handoff target.
 			if (reduced) clear();
 			return;
 		}
@@ -56,7 +58,9 @@ final class SpatialVisualTrail<K> {
 		long nowNanos, boolean reduced) {
 		long now = time(nowNanos);
 		if (!active) {
-			if (owner != null && paintedFollower != null) append(paintedFollower);
+			// Only the exact departing follower's successfully painted pose is a sample. A
+			// missing paint leaves history untouched; a later paint resumes the same clock.
+			if (owner != null && paintedFollower != null) sample(paintedFollower, now, reduced);
 			return;
 		}
 		boolean changed = !Objects.equals(owner, desiredOwner);
