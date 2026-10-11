@@ -301,7 +301,7 @@
   ,"settings.pingforit.spatial_selector.hover_millis": "Délai du retour par survol : %s"
   ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Durée pendant laquelle Retour doit rester focalisé avant de remonter d'un niveau."
   ,"settings.pingforit.spatial_selector.show_trail": "Afficher la trace du geste"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Affiche la trace du pointeur virtuel sans modifier la sélection."
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Affiche la trace partagée du pointeur et de l'option sélectionnée sans modifier la sélection."
   ,"settings.pingforit.spatial_selector.reduce_motion": "Réduire les mouvements du sélecteur"
   ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Réduit les animations du sélecteur sans modifier la durée ni la sélection des gestes."
   ,"pingforit.spatial.inventory.updating": "Mise à jour…"
@@ -395,4 +395,9 @@
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "Nom personnalisé de la cible signalée."
   ,"presentation.pingforit.content.group.create": "Propriétés de Create..."
   ,"presentation.pingforit.content.group.stress": "Charge..."
+  ,"settings.pingforit.spatial_selector.trail_length": "Longueur de la trace : %s"
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Nombre maximal de points conservés pour la trace partagée du pointeur et de l'option sélectionnée ; plus de points permettent une trace plus longue."
+  ,"settings.pingforit.spatial_selector.trail_opacity": "Opacité de la trace : %s"
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Opacité de la seule trace partagée du pointeur et de l'option sélectionnée ; n'atténue ni le menu, ni les options, ni les guides, ni le connecteur."
+  ,"unit.pingforit.points": "%s points"
 }

@@ -548,6 +548,8 @@ public class SettingsScreen extends OptionsSubScreen {
 			case WHEEL_TARGET_FONT_SIZE -> this.addOption(setting, this.getWheelTargetFontSizeOption(), false);
 			case WHEEL_OPTION_FONT_SIZE -> this.addOption(setting, this.getWheelOptionFontSizeOption(), false);
 			case SPATIAL_SHOW_TRAIL -> this.addOption(setting, this.getSpatialShowTrailOption(), false);
+			case SPATIAL_TRAIL_LENGTH -> this.addOption(setting, this.getSpatialTrailLengthOption(), false);
+			case SPATIAL_TRAIL_OPACITY -> this.addOption(setting, this.getSpatialTrailOpacityOption(), false);
 			case SPATIAL_REDUCE_MOTION -> this.addOption(setting, this.getSpatialReduceMotionOption(), false);
 			case WHEEL_HOLD_MILLIS -> this.addOption(setting, this.getWheelHoldMillisOption(), false);
 			case LONG_PRESS_COMPATIBILITY_MODE -> this.addOption(setting, this.getLongPressCompatibilityModeOption(), true);
@@ -2284,6 +2286,28 @@ public class SettingsScreen extends OptionsSubScreen {
 		final var text = LanguageUtils.settings("spatial_selector").path("show_trail");
 		return OptionUtils.ofBool(text.getKey(), selector::isShowTrail, selector::setShowTrail,
 			() -> text.path("tooltip").get());
+	}
+
+	private OptionInstance<Integer> getSpatialTrailLengthOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("trail_length");
+		return OptionUtils.ofInt(text.getKey(), MIN_TRAIL_LENGTH, MAX_TRAIL_LENGTH, TRAIL_LENGTH_STEP,
+			value -> text.get(LanguageUtils.UNIT_POINTS.get(value)),
+			() -> text.path("tooltip").get(),
+			selector::getTrailLength,
+			selector::setTrailLength);
+	}
+
+	private OptionInstance<Integer> getSpatialTrailOpacityOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("trail_opacity");
+		return OptionUtils.ofInt(text.getKey(), MIN_TRAIL_OPACITY, MAX_TRAIL_OPACITY, TRAIL_OPACITY_STEP,
+			value -> value == 0
+				? text.get(CommonComponents.OPTION_OFF)
+				: text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			() -> text.path("tooltip").get(),
+			selector::getTrailOpacity,
+			selector::setTrailOpacity);
 	}
 
 	private OptionInstance<Boolean> getSpatialReduceMotionOption() {

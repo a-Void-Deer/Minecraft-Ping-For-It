@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
+import nx.pingwheel.common.resource.LanguageUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -263,6 +264,8 @@ class ClientConfigLocalizationTest {
 			"settings.pingforit.spatial_selector.submenu_radius_scale",
 			"settings.pingforit.spatial_selector.target_glide",
 			"settings.pingforit.spatial_selector.hover_millis",
+			"settings.pingforit.spatial_selector.trail_length",
+			"settings.pingforit.spatial_selector.trail_opacity",
 			"settings.pingforit.spatial_selector.precise_capture_period_ticks");
 		List<String> booleanLabels = List.of(
 			"settings.pingforit.spatial_selector.hover_enabled",
@@ -291,6 +294,16 @@ class ClientConfigLocalizationTest {
 			}
 			for (String key : booleanLabels) {
 				assertFalse(nonBlankTranslation(json, locale, key).contains("%"), locale + ":" + key);
+			}
+			for (String key : List.of("trail_length", "trail_opacity", "show_trail")) {
+				assertFalse(nonBlankTranslation(json, locale,
+					"settings.pingforit.spatial_selector." + key + ".tooltip").contains("%"), locale + ":" + key);
+			}
+			for (String key : List.of(LanguageUtils.UNIT_POINTS.getKey(), LanguageUtils.UNIT_PERCENT.getKey())) {
+				String unit = nonBlankTranslation(json, locale, key);
+				assertEquals(1, countOccurrences(unit, "%s"), locale + ":" + key);
+				assertFalse(unit.replace("%s", "").replace("%%", "").contains("%"), locale + ":" + key);
+				String.format(java.util.Locale.ROOT, unit, 73);
 			}
 		}
 	}

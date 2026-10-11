@@ -296,7 +296,7 @@
   ,"settings.pingforit.spatial_selector.hover_millis": "Opóźnienie powrotu przez najechanie: %s"
   ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Jak długo Wstecz musi pozostać zaznaczone, zanim wróci o poziom."
   ,"settings.pingforit.spatial_selector.show_trail": "Pokaż ślad gestu"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Pokazuje ślad wirtualnego wskaźnika bez zmiany wyboru."
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Pokazuje wspólny ślad wskaźnika i wybranej opcji bez zmiany wyboru."
   ,"settings.pingforit.spatial_selector.reduce_motion": "Ogranicz ruch selektora"
   ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Ogranicza animacje selektora bez zmiany czasu gestów ani wyboru."
   ,"pingforit.spatial.inventory.updating": "Aktualizowanie…"
@@ -390,4 +390,9 @@
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "Niestandardowa nazwa oznaczonego celu."
   ,"presentation.pingforit.content.group.create": "Właściwości Create..."
   ,"presentation.pingforit.content.group.stress": "Obciążenie..."
+  ,"settings.pingforit.spatial_selector.trail_length": "Długość śladu: %s"
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Maksymalna liczba zachowanych punktów wspólnego śladu wskaźnika i wybranej opcji; więcej punktów pozwala narysować dłuższy ślad."
+  ,"settings.pingforit.spatial_selector.trail_opacity": "Krycie śladu: %s"
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Krycie tylko wspólnego śladu wskaźnika i wybranej opcji; nie przygasza menu, opcji, prowadnic ani łącznika."
+  ,"unit.pingforit.points": "%s pkt"
 }

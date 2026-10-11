@@ -304,7 +304,7 @@
   ,"settings.pingforit.spatial_selector.hover_millis": "Zurück-Hover-Verweildauer: %s"
   ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Wie lange Zurück fokussiert bleiben muss, bevor es eine Ebene zurückgeht."
   ,"settings.pingforit.spatial_selector.show_trail": "Gestenspur anzeigen"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Zeigt die Spur des virtuellen Zeigers, ohne die Auswahl zu verändern."
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Zeigt die gemeinsame Spur von virtuellem Zeiger und gewählter Option, ohne die Auswahl zu verändern."
   ,"settings.pingforit.spatial_selector.reduce_motion": "Auswahlbewegung reduzieren"
   ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Reduziert Auswahlanimationen, ohne Gestenzeit oder Auswahl zu verändern."
   ,"pingforit.spatial.inventory.updating": "Aktualisierung…"
@@ -398,4 +398,9 @@
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "Benutzerdefinierter Name des angepingten Ziels."
   ,"presentation.pingforit.content.group.create": "Create-Eigenschaften..."
   ,"presentation.pingforit.content.group.stress": "Belastung..."
+  ,"settings.pingforit.spatial_selector.trail_length": "Spurlänge: %s"
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Maximale Anzahl gespeicherter Punkte der gemeinsamen Zeiger- und Auswahlspur; mehr Punkte können eine längere Spur zeichnen."
+  ,"settings.pingforit.spatial_selector.trail_opacity": "Spurdeckkraft: %s"
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Deckkraft nur der gemeinsamen Zeiger- und Auswahlspur; dimmt weder Menü, Optionen, Hilfslinien noch Verbindungslinie."
+  ,"unit.pingforit.points": "%s Punkte"
 }

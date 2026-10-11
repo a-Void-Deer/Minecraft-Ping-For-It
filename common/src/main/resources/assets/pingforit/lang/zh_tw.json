@@ -298,7 +298,7 @@
   ,"settings.pingforit.spatial_selector.hover_millis": "返回懸停時長：%s"
   ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "返回項需持續懸停多久才會返回上一層。"
   ,"settings.pingforit.spatial_selector.show_trail": "顯示手勢軌跡"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "顯示虛擬指標軌跡，不改變手勢選擇。"
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "顯示指標與所選選項共用的軌跡，不改變手勢選擇。"
   ,"settings.pingforit.spatial_selector.reduce_motion": "減少選擇器動效"
   ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "減少選擇器動畫，不改變手勢時長或選擇。"
   ,"pingforit.spatial.inventory.updating": "更新中…"
@@ -392,4 +392,9 @@
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "所標記目標的自訂名稱。"
   ,"presentation.pingforit.content.group.create": "Create 屬性..."
   ,"presentation.pingforit.content.group.stress": "應力..."
+  ,"settings.pingforit.spatial_selector.trail_length": "軌跡長度：%s"
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "指標與所選選項共用軌跡保留的最大點數；點數越多，移動足夠時可繪製更長的軌跡。"
+  ,"settings.pingforit.spatial_selector.trail_opacity": "軌跡不透明度：%s"
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "僅控制指標與所選選項共用軌跡的不透明度；不影響轉盤、選項、導引線或連接線。"
+  ,"unit.pingforit.points": "%s 點"
 }

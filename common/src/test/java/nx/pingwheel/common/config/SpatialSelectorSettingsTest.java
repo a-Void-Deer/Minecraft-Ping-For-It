@@ -107,7 +107,11 @@ class SpatialSelectorSettingsTest {
 				SpatialSelectorSettings::clampHoverMillis),
 			new IntBound(SpatialSelectorSettings.MIN_PRECISE_CAPTURE_PERIOD_TICKS,
 				SpatialSelectorSettings.MAX_PRECISE_CAPTURE_PERIOD_TICKS,
-				SpatialSelectorSettings::clampPreciseCapturePeriodTicks))) {
+				SpatialSelectorSettings::clampPreciseCapturePeriodTicks),
+			new IntBound(SpatialSelectorSettings.MIN_TRAIL_LENGTH, SpatialSelectorSettings.MAX_TRAIL_LENGTH,
+				SpatialSelectorSettings::clampTrailLength),
+			new IntBound(SpatialSelectorSettings.MIN_TRAIL_OPACITY, SpatialSelectorSettings.MAX_TRAIL_OPACITY,
+				SpatialSelectorSettings::clampTrailOpacity))) {
 			assertEquals(bound.min(), bound.clamp().applyAsInt(bound.min() - 1));
 			assertEquals(bound.max(), bound.clamp().applyAsInt(bound.max() + 1));
 			assertEquals(bound.min(), bound.clamp().applyAsInt(Integer.MIN_VALUE));
@@ -149,7 +153,8 @@ class SpatialSelectorSettingsTest {
 	void rawJsonValidationAndSnapshotClampAllValuesWithoutResettingBooleanChoices() {
 		SpatialSelectorSettings settings = new Gson().fromJson("""
 			{"deadzone":-1,"stroke":2147483647,"dwellMillis":-1,"rootDistance":2147483647,
-			 "targetGlide":null,"hoverEnabled":true,"hoverMillis":-1,"showTrail":false,"reduceMotion":true}
+			 "targetGlide":null,"hoverEnabled":true,"hoverMillis":-1,"showTrail":false,"reduceMotion":true,
+			 "trailLength":-1,"trailOpacity":2147483647}
 			""", SpatialSelectorSettings.class);
 		SpatialSelectorSettings.Snapshot frozen = settings.snapshot();
 		settings.validate();
@@ -162,6 +167,74 @@ class SpatialSelectorSettingsTest {
 		assertTrue(settings.isHoverEnabled());
 		assertFalse(settings.isShowTrail());
 		assertTrue(settings.isReduceMotion());
+		assertEquals(SpatialSelectorSettings.MIN_TRAIL_LENGTH, settings.getTrailLength());
+		assertEquals(SpatialSelectorSettings.MAX_TRAIL_OPACITY, settings.getTrailOpacity());
+	}
+
+	@Test
+	void trailPreferencesNormalizeMissingNullAndExplicitValuesAndFreezeIntoTheSnapshot() {
+		SpatialSelectorSettings missing = new Gson().fromJson("{}", SpatialSelectorSettings.class);
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, missing.getTrailLength());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, missing.getTrailOpacity());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, missing.snapshot().trailLength());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, missing.snapshot().trailOpacity());
+
+		SpatialSelectorSettings explicitNull = new Gson().fromJson(
+			"{\"trailLength\":null,\"trailOpacity\":null}", SpatialSelectorSettings.class);
+		assertEquals(missing.snapshot(), explicitNull.snapshot(),
+			"Gson must retain initialized primitive values for explicit JSON nulls");
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, explicitNull.getTrailLength());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, explicitNull.getTrailOpacity());
+		explicitNull.validate();
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, explicitNull.getTrailLength());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, explicitNull.getTrailOpacity());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, explicitNull.snapshot().trailLength());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, explicitNull.snapshot().trailOpacity());
+
+		SpatialSelectorSettings explicit = new Gson().fromJson(
+			"{\"trailLength\":64,\"trailOpacity\":0}", SpatialSelectorSettings.class);
+		SpatialSelectorSettings.Snapshot frozen = explicit.snapshot();
+		explicit.validate();
+		assertEquals(frozen, explicit.snapshot());
+		assertEquals(64, frozen.trailLength());
+		assertEquals(0, frozen.trailOpacity());
+		explicit.setTrailLength(SpatialSelectorSettings.MAX_TRAIL_LENGTH);
+		explicit.setTrailOpacity(SpatialSelectorSettings.MAX_TRAIL_OPACITY);
+		assertEquals(64, frozen.trailLength());
+		assertEquals(0, frozen.trailOpacity());
+		assertEquals(SpatialSelectorSettings.MAX_TRAIL_LENGTH, explicit.snapshot().trailLength());
+		assertEquals(SpatialSelectorSettings.MAX_TRAIL_OPACITY, explicit.snapshot().trailOpacity());
+	}
+
+	@Test
+	void trailOpacityZeroStaysAValidExplicitChoiceRatherThanBeingClampedAway() {
+		SpatialSelectorSettings settings = new SpatialSelectorSettings();
+		settings.setTrailOpacity(0);
+		assertEquals(0, settings.getTrailOpacity());
+		assertEquals(0, settings.snapshot().trailOpacity());
+		settings.validate();
+		assertEquals(0, settings.getTrailOpacity());
+	}
+
+	@Test
+	void trailSettersClampIndependentlyAndKeepValuesOutsideTheUiStepGrid() {
+		SpatialSelectorSettings settings = explicitSettings();
+		settings.setTrailOpacity(73);
+		settings.setTrailLength(Integer.MIN_VALUE);
+		assertEquals(SpatialSelectorSettings.MIN_TRAIL_LENGTH, settings.getTrailLength());
+		assertEquals(73, settings.getTrailOpacity());
+		settings.setTrailLength(Integer.MAX_VALUE);
+		assertEquals(SpatialSelectorSettings.MAX_TRAIL_LENGTH, settings.getTrailLength());
+		settings.setTrailLength(64);
+		settings.setTrailOpacity(Integer.MIN_VALUE);
+		assertEquals(0, settings.getTrailOpacity());
+		settings.setTrailOpacity(Integer.MAX_VALUE);
+		assertEquals(SpatialSelectorSettings.MAX_TRAIL_OPACITY, settings.getTrailOpacity());
+		assertEquals(64, settings.getTrailLength());
+		assertEquals(90, settings.getRootDistance());
+		assertEquals(new BigDecimal("1.5"), settings.getTargetGlide());
+		assertTrue(settings.isShowTrail());
+		assertFalse(settings.isReduceMotion());
 	}
 
 	@Test
@@ -178,9 +251,13 @@ class SpatialSelectorSettingsTest {
 		settings.setShowTrail(false);
 		settings.setReduceMotion(true);
 		settings.setSubmenuRadiusScale(new BigDecimal("4"));
+		settings.setTrailLength(512);
+		settings.setTrailOpacity(100);
 
 		assertEquals(new SpatialSelectorSettings.Snapshot(28, 70, 200, 90,
-			new BigDecimal("1.5"), true, 750, true, false), frozen);
+			new BigDecimal("1.5"), true, 750, true, false,
+			SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS,
+			SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE, 64, 25), frozen);
 	}
 
 	@Test
@@ -272,17 +349,33 @@ class SpatialSelectorSettingsTest {
 	}
 
 	@Test
-	void previousSnapshotConstructorFormsDefaultTheSubmenuRadiusScale() {
+	void previousSnapshotConstructorFormsDefaultTheSubmenuRadiusScaleAndTrailPreferences() {
 		SpatialSelectorSettings.Snapshot nine = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
 			new BigDecimal("0.25"), false, 500, true, false);
 		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE.compareTo(nine.submenuRadiusScale()));
 		assertEquals(SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS,
 			nine.preciseCapturePeriodTicks());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, nine.trailLength());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, nine.trailOpacity());
 
 		SpatialSelectorSettings.Snapshot ten = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
 			new BigDecimal("0.25"), false, 500, true, false, 25);
 		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE.compareTo(ten.submenuRadiusScale()));
 		assertEquals(25, ten.preciseCapturePeriodTicks());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, ten.trailLength());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, ten.trailOpacity());
+
+		SpatialSelectorSettings.Snapshot eleven = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			new BigDecimal("0.25"), false, 500, true, false, 25, new BigDecimal("2.0"));
+		assertEquals(25, eleven.preciseCapturePeriodTicks());
+		assertEquals(0, new BigDecimal("2.0").compareTo(eleven.submenuRadiusScale()));
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, eleven.trailLength());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, eleven.trailOpacity());
+
+		SpatialSelectorSettings.Snapshot canonical = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			new BigDecimal("0.25"), false, 500, true, false, 25, new BigDecimal("2.0"), 64, 0);
+		assertEquals(64, canonical.trailLength());
+		assertEquals(0, canonical.trailOpacity());
 	}
 
 	@Test
@@ -298,7 +391,8 @@ class SpatialSelectorSettingsTest {
 	private static SpatialSelectorSettings explicitSettings() {
 		return new Gson().fromJson("""
 			{"deadzone":28,"stroke":70,"dwellMillis":200,"rootDistance":90,"targetGlide":1.5,
-			 "hoverEnabled":true,"hoverMillis":750,"showTrail":true,"reduceMotion":false}
+			 "hoverEnabled":true,"hoverMillis":750,"showTrail":true,"reduceMotion":false,
+			 "trailLength":64,"trailOpacity":25}
 			""", SpatialSelectorSettings.class);
 	}
 

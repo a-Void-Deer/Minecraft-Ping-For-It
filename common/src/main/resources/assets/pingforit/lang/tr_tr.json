@@ -296,7 +296,7 @@
   ,"settings.pingforit.spatial_selector.hover_millis": "Geri bekleme süresi: %s"
   ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Geri dönmeden önce Geri odağının ne kadar süre tutulacağı."
   ,"settings.pingforit.spatial_selector.show_trail": "Hareket izini göster"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Hareket seçimini değiştirmeden sanal işaretçinin izini gösterir."
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Seçimi değiştirmeden işaretçi ve seçili seçeneğin ortak izini gösterir."
   ,"settings.pingforit.spatial_selector.reduce_motion": "Seçici hareketini azalt"
   ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Hareket zamanlamasını veya seçimi değiştirmeden seçici animasyonunu azaltır."
   ,"pingforit.spatial.inventory.updating": "Güncelleniyor…"
@@ -390,4 +390,9 @@
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "İşaretlenen hedefin özel adı."
   ,"presentation.pingforit.content.group.create": "Create özellikleri..."
   ,"presentation.pingforit.content.group.stress": "Yük..."
+  ,"settings.pingforit.spatial_selector.trail_length": "İz uzunluğu: %s"
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "İşaretçi ve seçili seçeneğin ortak izinde saklanan en fazla nokta sayısı; daha fazla nokta daha uzun bir iz çizebilir."
+  ,"settings.pingforit.spatial_selector.trail_opacity": "İz saydamlığı: %s"
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Yalnızca işaretçi ve seçili seçeneğin ortak izinin saydamlığı; menüyü, seçenekleri, kılavuzları veya bağlayıcıyı karartmaz."
+  ,"unit.pingforit.points": "%s nokta"
 }

@@ -20,6 +20,7 @@ public class LanguageUtils {
 	public static final LanguageUtils UNIT_DEGREES = LanguageUtils.of("unit", "degrees");
 	public static final LanguageUtils UNIT_PIXELS = LanguageUtils.of("unit", "pixels");
 	public static final LanguageUtils UNIT_TICKS = LanguageUtils.of("unit", "ticks");
+	public static final LanguageUtils UNIT_POINTS = LanguageUtils.of("unit", "points");
 
 	public static LanguageUtils settings(String key) {
 		return LanguageUtils.of("settings", key);

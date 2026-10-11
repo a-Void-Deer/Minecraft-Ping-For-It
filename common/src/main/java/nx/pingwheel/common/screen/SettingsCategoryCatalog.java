@@ -37,6 +37,8 @@ public final class SettingsCategoryCatalog {
 		WHEEL_TARGET_FONT_SIZE("wheel_target_font_size"),
 		WHEEL_OPTION_FONT_SIZE("wheel_font_size"),
 		SPATIAL_SHOW_TRAIL("spatial_selector.show_trail"),
+		SPATIAL_TRAIL_LENGTH("spatial_selector.trail_length"),
+		SPATIAL_TRAIL_OPACITY("spatial_selector.trail_opacity"),
 		SPATIAL_REDUCE_MOTION("spatial_selector.reduce_motion"),
 		WHEEL_HOLD_MILLIS("wheel_hold_millis"),
 		LONG_PRESS_COMPATIBILITY_MODE("long_press_compatibility_mode"),
@@ -142,6 +144,8 @@ public final class SettingsCategoryCatalog {
 			Setting.WHEEL_TARGET_FONT_SIZE,
 			Setting.WHEEL_OPTION_FONT_SIZE,
 			Setting.SPATIAL_SHOW_TRAIL,
+			Setting.SPATIAL_TRAIL_LENGTH,
+			Setting.SPATIAL_TRAIL_OPACITY,
 			Setting.SPATIAL_REDUCE_MOTION));
 		settings.put(Category.INPUT_INTERACTION, List.of(
 			Setting.WHEEL_HOLD_MILLIS,

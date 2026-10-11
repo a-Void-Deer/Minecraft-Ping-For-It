@@ -309,7 +309,7 @@
   ,"settings.pingforit.spatial_selector.hover_millis": "Back-Hover Dwell: %s"
   ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "How long Back must stay focused before it returns one level."
   ,"settings.pingforit.spatial_selector.show_trail": "Show Gesture Trail"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Show the virtual pointer trail without changing gesture selection."
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Show the shared pointer and selected-option trail without changing gesture selection."
   ,"settings.pingforit.spatial_selector.reduce_motion": "Reduce Selector Motion"
   ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Reduce selector animation without changing gesture timing or selection."
   ,"pingforit.spatial.inventory.updating": "Updating…"
@@ -403,4 +403,9 @@
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "Custom name of the pinged target."
   ,"presentation.pingforit.content.group.create": "Create properties..."
   ,"presentation.pingforit.content.group.stress": "Stress..."
+  ,"settings.pingforit.spatial_selector.trail_length": "Trail Length: %s"
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Maximum retained points in the shared pointer and selected-option trail; a longer history can draw a longer trail."
+  ,"settings.pingforit.spatial_selector.trail_opacity": "Trail Opacity: %s"
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Opacity of the shared pointer and selected-option trail only; it does not dim the wheel, options, guides, or connector."
+  ,"unit.pingforit.points": "%s points"
 }

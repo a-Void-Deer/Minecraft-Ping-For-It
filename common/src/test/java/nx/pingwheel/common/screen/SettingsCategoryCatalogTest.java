@@ -33,6 +33,8 @@ class SettingsCategoryCatalogTest {
 			Setting.WHEEL_TARGET_FONT_SIZE,
 			Setting.WHEEL_OPTION_FONT_SIZE,
 			Setting.SPATIAL_SHOW_TRAIL,
+			Setting.SPATIAL_TRAIL_LENGTH,
+			Setting.SPATIAL_TRAIL_OPACITY,
 			Setting.SPATIAL_REDUCE_MOTION), SettingsCategoryCatalog.settings(Category.WHEEL_APPEARANCE));
 		assertEquals(List.of(
 			Setting.WHEEL_HOLD_MILLIS,

@@ -57,7 +57,7 @@ class SpatialSelectorMigrationTest {
 	@Test
 	void existingVersionMigrationNeverRescalesExplicitQuarterGlide(@TempDir Path directory) throws IOException {
 		var source = legacyRoot(LEGACY);
-		source.add("spatialSelector", JsonParser.parseString("{\"targetGlide\":0.25}"));
+		source.add("spatialSelector", JsonParser.parseString("{\"targetGlide\":0.25,\"trailLength\":64,\"trailOpacity\":0}"));
 		var migrated = update(source, ClientConfig.class, LEGACY, TIMEOUT_TARGET);
 		assertEquals(source.get("spatialSelector"), migrated.get("spatialSelector"));
 		Path path = directory.resolve("legacy.json");
@@ -65,6 +65,10 @@ class SpatialSelectorMigrationTest {
 		var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
 		handler.load();
 		assertLoadedGlideThreshold(handler.getConfig(), 160);
+		assertEquals(64, handler.getConfig().getSpatialSelector().getTrailLength());
+		assertEquals(0, handler.getConfig().getSpatialSelector().getTrailOpacity());
+		assertEquals(64, read(path).getAsJsonObject("spatialSelector").get("trailLength").getAsInt());
+		assertEquals(0, read(path).getAsJsonObject("spatialSelector").get("trailOpacity").getAsInt());
 		assertEquals(0, new java.math.BigDecimal("0.25").compareTo(read(path).getAsJsonObject("spatialSelector")
 			.get("targetGlide").getAsBigDecimal()));
 		assertNoRetiredWheelKeys(read(path));
@@ -185,7 +189,7 @@ class SpatialSelectorMigrationTest {
 		JsonObject source = legacyRoot(LEGACY);
 		JsonObject selector = JsonParser.parseString("""
 			{"targetGlide":1.5,"hoverEnabled":true,"hoverMillis":750,
-			 "rootDistance":90,"unknownPreference":{"enabled":true}}
+			 "rootDistance":90,"trailLength":64,"trailOpacity":73,"unknownPreference":{"enabled":true}}
 			""").getAsJsonObject();
 		source.add("spatialSelector", selector);
 		Files.writeString(path, source.toString(), StandardCharsets.UTF_8);
@@ -199,6 +203,47 @@ class SpatialSelectorMigrationTest {
 		for (var entry : new Gson().toJsonTree(expected).getAsJsonObject().entrySet()) {
 			assertEquals(entry.getValue(), persisted.get(entry.getKey()), entry.getKey());
 		}
+	}
+
+	@Test
+	void sameVersionTrailDefaultsNullAndExplicitValuesNeverRewriteAndRoundTripWithoutMigration(
+		@TempDir Path directory) throws IOException {
+		for (String selectorJson : List.of("", ",\"spatialSelector\":null", ",\"spatialSelector\":{}",
+			",\"spatialSelector\":{\"trailLength\":null,\"trailOpacity\":null}",
+			",\"spatialSelector\":{\"trailLength\":64,\"trailOpacity\":null}",
+			",\"spatialSelector\":{\"trailLength\":null,\"trailOpacity\":0}",
+			",\"spatialSelector\":{\"trailLength\":64,\"trailOpacity\":0,\"unknownPreference\":true}",
+			",\"spatialSelector\":{\"trailLength\":64,\"trailOpacity\":73}")) {
+			Path path = directory.resolve("client.json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37,\"wheelOpacity\":35,\"wheelTargetOpacity\":45,\"unknown\":true"
+				+ selectorJson + "}\n").getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+			int length = selectorJson.contains("\"trailLength\":64") ? 64 : SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH;
+			int opacity = selectorJson.contains("\"trailOpacity\":0") ? 0
+				: selectorJson.contains("\"trailOpacity\":73") ? 73 : SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY;
+			var frozen = handler.getConfig().getSpatialSelector().snapshot();
+			assertEquals(length, frozen.trailLength());
+			assertEquals(opacity, frozen.trailOpacity());
+			assertEquals(37, handler.getConfig().getPingVolume());
+			assertEquals(35, handler.getConfig().getWheelOpacity());
+			assertEquals(45, handler.getConfig().getWheelTargetOpacity());
+			assertArrayEquals(original, Files.readAllBytes(path), "trail defaults are not a load migration");
+			assertTrue(handler.saveSafely());
+			assertArrayEquals(original, Files.readAllBytes(path), "an untouched same-version save is a no-op");
+
+			handler.getConfig().setPingVolume(38);
+			assertTrue(handler.saveSafely());
+			JsonObject persisted = read(path).getAsJsonObject("spatialSelector");
+			assertEquals(length, persisted.get("trailLength").getAsInt());
+			assertEquals(opacity, persisted.get("trailOpacity").getAsInt());
+			var reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			reloaded.load();
+			assertEquals(frozen, reloaded.getConfig().getSpatialSelector().snapshot());
+		}
+		assertNoBackup(directory);
 	}
 
 	@Test
@@ -251,7 +296,7 @@ class SpatialSelectorMigrationTest {
 		SpatialSelectorSettings preferences = new Gson().fromJson("""
 			{"deadzone":28,"stroke":70,"dwellMillis":230,"rootDistance":90,"targetGlide":1.75,
 			 "hoverEnabled":true,"hoverMillis":750,"showTrail":false,"reduceMotion":true,
-			 "preciseCapturePeriodTicks":25}
+			 "preciseCapturePeriodTicks":25,"trailLength":64,"trailOpacity":73}
 			""", SpatialSelectorSettings.class);
 		handler.getConfig().setSpatialSelector(preferences);
 		handler.getConfig().setWheelOpacity(35);

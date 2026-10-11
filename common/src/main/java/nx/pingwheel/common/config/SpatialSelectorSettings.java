@@ -67,6 +67,18 @@ public final class SpatialSelectorSettings {
 	public static final int DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS = 1;
 	public static final int PRECISE_CAPTURE_PERIOD_TICKS_STEP = 1;
 
+	/** Shared pointer/option trail retained-point cap; not a duration or GUI arc length. */
+	public static final int MIN_TRAIL_LENGTH = 16;
+	public static final int MAX_TRAIL_LENGTH = 512;
+	public static final int DEFAULT_TRAIL_LENGTH = 130;
+	public static final int TRAIL_LENGTH_STEP = 1;
+
+	/** Independent trail opacity; zero hides only the trail. */
+	public static final int MIN_TRAIL_OPACITY = 0;
+	public static final int MAX_TRAIL_OPACITY = 100;
+	public static final int DEFAULT_TRAIL_OPACITY = 50;
+	public static final int TRAIL_OPACITY_STEP = 5;
+
 	private int deadzone = DEFAULT_DEADZONE;
 	private int stroke = DEFAULT_STROKE;
 	private int dwellMillis = DEFAULT_DWELL_MILLIS;
@@ -76,6 +88,8 @@ public final class SpatialSelectorSettings {
 	private boolean hoverEnabled = DEFAULT_HOVER_ENABLED;
 	private int hoverMillis = DEFAULT_HOVER_MILLIS;
 	private boolean showTrail = true;
+	private int trailLength = DEFAULT_TRAIL_LENGTH;
+	private int trailOpacity = DEFAULT_TRAIL_OPACITY;
 	private boolean reduceMotion = false;
 	private int preciseCapturePeriodTicks = DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS;
 
@@ -89,6 +103,8 @@ public final class SpatialSelectorSettings {
 		targetGlide = clampTargetGlide(targetGlide);
 		hoverMillis = clampHoverMillis(hoverMillis);
 		preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks);
+		trailLength = clampTrailLength(trailLength);
+		trailOpacity = clampTrailOpacity(trailOpacity);
 	}
 
 	public void setDeadzone(int value) { deadzone = clampDeadzone(value); }
@@ -99,6 +115,8 @@ public final class SpatialSelectorSettings {
 	public void setTargetGlide(BigDecimal value) { targetGlide = clampTargetGlide(value); }
 	public void setHoverMillis(int value) { hoverMillis = clampHoverMillis(value); }
 	public void setPreciseCapturePeriodTicks(int value) { preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(value); }
+	public void setTrailLength(int value) { trailLength = clampTrailLength(value); }
+	public void setTrailOpacity(int value) { trailOpacity = clampTrailOpacity(value); }
 
 	public static int clampDeadzone(int value) {
 		return Math.clamp(value, MIN_DEADZONE, MAX_DEADZONE);
@@ -142,19 +160,42 @@ public final class SpatialSelectorSettings {
 		return Math.clamp(value, MIN_PRECISE_CAPTURE_PERIOD_TICKS, MAX_PRECISE_CAPTURE_PERIOD_TICKS);
 	}
 
+	public static int clampTrailLength(int value) {
+		return Math.clamp(value, MIN_TRAIL_LENGTH, MAX_TRAIL_LENGTH);
+	}
+
+	public static int clampTrailOpacity(int value) {
+		return Math.clamp(value, MIN_TRAIL_OPACITY, MAX_TRAIL_OPACITY);
+	}
+
 	/** Safe even before validation of a deserialized object; does not mutate it. */
 	public Snapshot snapshot() {
 		return new Snapshot(clampDeadzone(deadzone), clampStroke(stroke),
 			clampDwellMillis(dwellMillis), clampRootDistance(rootDistance),
 			clampTargetGlide(targetGlide), hoverEnabled, clampHoverMillis(hoverMillis),
 			showTrail, reduceMotion, clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks),
-			clampSubmenuRadiusScale(submenuRadiusScale));
+			clampSubmenuRadiusScale(submenuRadiusScale),
+			clampTrailLength(trailLength), clampTrailOpacity(trailOpacity));
 	}
 
 	public record Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
 		BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
 		boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
-		BigDecimal submenuRadiusScale) {
+		BigDecimal submenuRadiusScale, int trailLength, int trailOpacity) {
+
+		/**
+		 * Compatibility constructor for callers that predate the trail length and
+		 * opacity; supplies the default retained history and half opacity without
+		 * changing the caller's trail visibility choice.
+		 */
+		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
+			BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+			boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
+			BigDecimal submenuRadiusScale) {
+			this(deadzone, stroke, dwellMillis, rootDistance, targetGlide, hoverEnabled,
+				hoverMillis, showTrail, reduceMotion, preciseCapturePeriodTicks,
+				submenuRadiusScale, DEFAULT_TRAIL_LENGTH, DEFAULT_TRAIL_OPACITY);
+		}
 
 		/**
 		 * Compatibility constructor for callers that predate the submenu radius

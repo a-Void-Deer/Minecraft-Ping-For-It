@@ -208,6 +208,8 @@ class InventorySettingsPersistenceTest {
 		assertTrue(selector.getTargetGlide().compareTo(SpatialSelectorSettings.MIN_TARGET_GLIDE) >= 0);
 		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE
 			.compareTo(selector.getSubmenuRadiusScale()));
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, selector.getTrailLength());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, selector.getTrailOpacity());
 		assertArrayEquals(original, Files.readAllBytes(configPath));
 	}
 
@@ -249,6 +251,43 @@ class InventorySettingsPersistenceTest {
 		assertTrue(selector.has("submenuRadiusScale"));
 		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE
 			.compareTo(selector.get("submenuRadiusScale").getAsBigDecimal()));
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, selector.get("trailLength").getAsInt());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, selector.get("trailOpacity").getAsInt());
+	}
+
+	@Test
+	void clientTrailPreferencesClampOnLoadAndPersistWithoutResettingAppearance(@TempDir Path tempDir) throws IOException {
+		for (int[] values : new int[][] {
+			{Integer.MIN_VALUE, Integer.MAX_VALUE, SpatialSelectorSettings.MIN_TRAIL_LENGTH, SpatialSelectorSettings.MAX_TRAIL_OPACITY},
+			{Integer.MAX_VALUE, Integer.MIN_VALUE, SpatialSelectorSettings.MAX_TRAIL_LENGTH, 0}
+		}) {
+			Path configPath = tempDir.resolve("client.json");
+			byte[] original = ("{\"pingforit-version\":\"" + CURRENT_VERSION
+				+ "\",\"pingVolume\":37,\"wheelOpacity\":35,\"wheelTargetOpacity\":45,\"spatialSelector\":{"
+				+ "\"showTrail\":false,\"rootDistance\":90,\"trailLength\":" + values[0]
+				+ ",\"trailOpacity\":" + values[1] + "}}\n").getBytes(StandardCharsets.UTF_8);
+			Files.write(configPath, original);
+			var handler = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
+			handler.load();
+			SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
+			assertEquals(values[2], selector.getTrailLength());
+			assertEquals(values[3], selector.getTrailOpacity());
+			assertEquals(90, selector.getRootDistance());
+			assertFalse(selector.isShowTrail());
+			assertEquals(37, handler.getConfig().getPingVolume());
+			assertEquals(35, handler.getConfig().getWheelOpacity());
+			assertEquals(45, handler.getConfig().getWheelTargetOpacity());
+			assertArrayEquals(original, Files.readAllBytes(configPath));
+			handler.getConfig().setPingVolume(38);
+			assertTrue(handler.saveSafely());
+			JsonObject persisted = readRoot(configPath).getAsJsonObject("spatialSelector");
+			assertEquals(values[2], persisted.get("trailLength").getAsInt());
+			assertEquals(values[3], persisted.get("trailOpacity").getAsInt());
+			var reloaded = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
+			reloaded.load();
+			assertEquals(selector.snapshot(), reloaded.getConfig().getSpatialSelector().snapshot());
+		}
+		assertFalse(hasBrokenBackup(tempDir));
 	}
 
 	@Test
