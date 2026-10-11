@@ -73,9 +73,15 @@ public final class SpatialController {
 	}
 
 	/** Frozen session parameters supplied by the configuration owner. */
-	public record Tuning(double deadzone, double stroke, long dwellMillis, boolean hoverEnabled, long hoverMillis) {
+	public record Tuning(double deadzone, double stroke, long dwellMillis, boolean hoverEnabled, long hoverMillis,
+		int trailLength) {
+
+		public Tuning(double deadzone, double stroke, long dwellMillis, boolean hoverEnabled, long hoverMillis) {
+			this(deadzone, stroke, dwellMillis, hoverEnabled, hoverMillis, TRAIL_LIMIT);
+		}
 
 		public Tuning {
+			if (trailLength <= 0 || trailLength > 512) throw new IllegalArgumentException("invalid trail bound");
 			if (deadzone < 0.0) {
 				throw new IllegalArgumentException("deadzone must be non-negative");
 			}
@@ -161,8 +167,17 @@ public final class SpatialController {
 		String focusId,
 		List<MenuView> menus,
 		double hoverProgress,
-		double deadzone
+		double deadzone,
+		long trailSequence,
+		long trailEpoch,
+		long trailAlignment,
+		long trailAlignmentSequence
 	) {
+		/** Old projections have no native sample identity; renderers may sample them once per frame. */
+		public Snapshot(boolean active, Point pointer, List<Point> trail, String focusId,
+			List<MenuView> menus, double hoverProgress, double deadzone) {
+			this(active, pointer, trail, focusId, menus, hoverProgress, deadzone, -1L, 0L, 0L, 0L);
+		}
 
 		/** Compatibility form for callers that predate the exposed frozen deadzone. */
 		public Snapshot(boolean active, Point pointer, List<Point> trail, String focusId,
@@ -182,6 +197,10 @@ public final class SpatialController {
 	private double hoverProgress;
 	private Viewport viewport;
 	private long hoverAlignment;
+	private long trailSequence;
+	private long trailEpoch;
+	private long trailAlignment;
+	private long trailAlignmentSequence;
 
 	public SpatialController(SpatialMenu root, Tuning tuning) {
 		this.root = Objects.requireNonNull(root, "root");
@@ -198,8 +217,7 @@ public final class SpatialController {
 	public void start(long nowMillis) {
 		active = true;
 		pointer = confined(new Point(0.0, 0.0));
-		trail.clear();
-		trail.add(pointer);
+		freshTrail();
 		stack.clear();
 
 		Point origin = new Point(0.0, 0.0);
@@ -225,6 +243,8 @@ public final class SpatialController {
 		Point next = confined(pointer);
 		if (next.equals(pointer)) return false;
 		pointer = next;
+		trailAlignment++;
+		trailAlignmentSequence = trailSequence;
 		if (active) {
 			MenuState menu = activeMenu();
 			menu.candidate = null;
@@ -260,11 +280,7 @@ public final class SpatialController {
 		Point effective = movePointer(deltaX, deltaY);
 		if (effective.x() == 0.0 && effective.y() == 0.0) return;
 		menu.traveled += Math.hypot(effective.x(), effective.y());
-		trail.add(pointer);
-
-		if (trail.size() > TRAIL_LIMIT) {
-			trail.remove(0);
-		}
+		appendTrail();
 
 		menu.lastMovement = nowMillis;
 
@@ -437,8 +453,7 @@ public final class SpatialController {
 		if (!active || !activeMenu().surface || !Double.isFinite(deltaX) || !Double.isFinite(deltaY)) return new Point(0.0, 0.0);
 		Point effective = movePointer(deltaX, deltaY);
 		if (effective.x() == 0.0 && effective.y() == 0.0) return effective;
-		trail.add(pointer);
-		if (trail.size() > TRAIL_LIMIT) trail.remove(0);
+		appendTrail();
 		activeMenu().lastMovement = nowMillis;
 		return effective;
 	}
@@ -490,6 +505,7 @@ public final class SpatialController {
 			SpatialMenu next = findMenu(replacement, state.menu.id());
 			if (next == null && !state.external) {
 				stack.subList(index, stack.size()).clear();
+				freshTrail();
 				break;
 			}
 			if (next != null) state.menu = next;
@@ -510,7 +526,8 @@ public final class SpatialController {
 	/** The renderer read model for the current frame. */
 	public Snapshot snapshot() {
 		if (!active) {
-			return new Snapshot(false, pointer, List.of(), null, List.of(), 0.0, tuning.deadzone());
+			return new Snapshot(false, pointer, List.of(), null, List.of(), 0.0, tuning.deadzone(),
+				trailSequence, trailEpoch, trailAlignment, trailAlignmentSequence);
 		}
 
 		List<MenuView> menus = new ArrayList<>();
@@ -540,19 +557,31 @@ public final class SpatialController {
 
 		String focusId = menus.get(menus.size() - 1).focusId();
 		return new Snapshot(true, pointer, List.copyOf(trail), focusId, List.copyOf(menus), hoverProgress,
-			tuning.deadzone());
+			tuning.deadzone(), trailSequence, trailEpoch, trailAlignment, trailAlignmentSequence);
 	}
 
 	private void rebaseInternal(Point point, long nowMillis) {
 		pointer = confined(point);
-		trail.clear();
-		trail.add(pointer);
+		freshTrail();
 		MenuState menu = activeMenu();
 		menu.candidate = null;
 		menu.candidateId = null;
 		menu.lastMovement = nowMillis;
 		setFocus(nowMillis);
 		if (!menu.surface) updateHover(nowMillis);
+	}
+
+	/** Explicit discontinuity plus one seed; never inferred from coincident coordinates. */
+	private void freshTrail() {
+		trailEpoch++;
+		trail.clear();
+		appendTrail();
+	}
+
+	private void appendTrail() {
+		trailSequence++;
+		trail.add(pointer);
+		if (trail.size() > tuning.trailLength()) trail.remove(0);
 	}
 
 	private void endSession() {
@@ -678,6 +707,7 @@ public final class SpatialController {
 		child.enteredAt = nowMillis;
 		child.lastMovement = nowMillis;
 		stack.add(child);
+		freshTrail();
 		setFocus(nowMillis);
 		updateHover(nowMillis, physicalMovement);
 	}
@@ -688,6 +718,7 @@ public final class SpatialController {
 		}
 
 		stack.remove(stack.size() - 1);
+		freshTrail();
 		MenuState parent = activeMenu();
 		parent.focus = focusAt(parent);
 		parent.enteredAt = nowMillis;

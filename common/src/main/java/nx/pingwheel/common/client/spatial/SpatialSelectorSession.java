@@ -248,7 +248,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		list = new InventoryListModel(geometry.visibleRows());
 		gesture = new InventoryGesture(list, settings.targetGlide().doubleValue(), settings.hoverEnabled(), geometry.rowHeight());
 		radial = new SpatialController(buildRoot(), new SpatialController.Tuning(settings.deadzone(), settings.stroke(),
-			settings.dwellMillis(), settings.hoverEnabled(), settings.hoverMillis()));
+			settings.dwellMillis(), settings.hoverEnabled(), settings.hoverMillis(), settings.trailLength()));
 	}
 
 	public boolean open(long nowMillis) {

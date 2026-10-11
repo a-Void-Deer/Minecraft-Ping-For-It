@@ -492,6 +492,28 @@ class SpatialControllerTest {
 		assertEquals(2, controller.snapshot().trail().size());
 	}
 
+	@Test void sampleIdentityAndDiscontinuitiesDistinguishEffectiveInputFromProjectionAndNavigation() {
+		var controller = new SpatialController(root(), new SpatialController.Tuning(12, 20, 10000, false, 500, 17));
+		controller.start(0); controller.constrainPointer(new SpatialController.Viewport(100, 100, 0, 0), 0);
+		var initial = controller.snapshot();
+		controller.movePhysical(1000, 0, 1); var moved = controller.snapshot();
+		assertEquals(initial.trailSequence() + 1, moved.trailSequence());
+		controller.movePhysical(1000, 0, 2); assertEquals(moved, controller.snapshot(), "saturated callbacks are not samples");
+		controller.constrainPointer(new SpatialController.Viewport(100, 100, 10, 0), 3); var corrected = controller.snapshot();
+		assertEquals(moved.trailSequence(), corrected.trailSequence());
+		assertEquals(moved.trailEpoch(), corrected.trailEpoch()); assertTrue(corrected.trailAlignment() > moved.trailAlignment());
+		assertEquals(moved.trailSequence(), corrected.trailAlignmentSequence(), "precise raw-sample fence at correction");
+		controller.rebase(corrected.pointer().x(), corrected.pointer().y(), 4);
+		assertTrue(controller.snapshot().trailEpoch() > corrected.trailEpoch(), "coincident coordinates cannot hide rebase");
+		for (int i = 0; i < 100; i++) controller.movePhysical(i % 2 == 0 ? -1 : 1, 0, 5);
+		assertEquals(17, controller.snapshot().trail().size());
+		long epoch = controller.snapshot().trailEpoch();
+		controller.enterExternal(SpatialMenu.of("external", SpatialMenu.Choice.leaf("x", "x", "x")), 10, 20, 6);
+		assertTrue(controller.snapshot().trailEpoch() > epoch); assertEquals(1, controller.snapshot().trail().size());
+		epoch = controller.snapshot().trailEpoch(); controller.back(7);
+		assertTrue(controller.snapshot().trailEpoch() > epoch); assertEquals(1, controller.snapshot().trail().size());
+	}
+
 	@Test
 	void cancelClearsSessionIdempotentlyAndReleaseStaysIdle() {
 		SpatialController controller = new SpatialController(root(), tuning(180L, false, 500L));

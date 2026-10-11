@@ -648,6 +648,7 @@ public final class ClientPingRuntime {
 	) {
 		InteractionToken token = machine.pressAt(rawPressTimestamp);
 		finishSelector(false);
+		selectorPaint.reset(); // A new hold never inherits the departing hold's visual history or clock.
 		if (!activeInteraction.isCurrent(token)) return Optional.empty();
 		baselineToken = token;
 		baselineHeld = true;
@@ -659,7 +660,7 @@ public final class ClientPingRuntime {
 		selectorNativeDistance = Math.min(config.getRaycastDistance(), selectorPingDistance);
 		selectorStyle = SpatialOverlayRenderer.Style.fromLegacyFontSizes(config.getWheelOpacity(), config.getWheelTargetOpacity(), config.getWheelFontSize(),
 			config.getWheelTargetFontSize(), selectorSettings.rootDistance(), selectorSettings.submenuRadiusScale().doubleValue(),
-			selectorSettings.showTrail(), selectorSettings.reduceMotion());
+			selectorSettings.showTrail(), selectorSettings.reduceMotion(), selectorSettings.trailLength(), selectorSettings.trailOpacity());
 		pendingRay = null;
 		if (pressRay == null) machine.abort();
 		else {

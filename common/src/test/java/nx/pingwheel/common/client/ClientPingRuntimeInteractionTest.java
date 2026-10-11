@@ -93,6 +93,7 @@ class ClientPingRuntimeInteractionTest {
 		final List<PreciseCaptureRefresh.Request> liveRequests = new ArrayList<>();
 		final List<java.util.function.Consumer<PreciseCaptureRefresh.Outcome>> distantCompletions = new ArrayList<>();
 		final List<SelectorIntent.CaptureToggle> toggles = new ArrayList<>();
+		SpatialOverlayRenderer.Style selectorStyle;
 		NativeSelectorInput.Frame frame = new NativeSelectorInput.Frame(1, 2000, 1400, 1000, 700, true, true);
 		public Lifecycle lifecycle() { return new Lifecycle(world, dimension, screen, player, focus, overlay); }
 		public Optional<CapturedRay> capturePressRay() { return Optional.of(ray); }
@@ -142,6 +143,7 @@ class ClientPingRuntimeInteractionTest {
 				frame.guiWidth(), frame.guiHeight(), focus, grabbed, nativeOwned)) : Optional.empty();
 		}
 		public SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style) {
+			selectorStyle = style;
 			return new SpatialSelectorSession.ListGeometry(5, 220, 18, 24, 20, 40);
 		}
 		public void resetInput() { resets++; }
@@ -567,6 +569,27 @@ class ClientPingRuntimeInteractionTest {
 		Fixture f = new Fixture(); f.access.validFrame = false; f.press(0); f.frame(500, true);
 		assertEquals(PingInteractionPhase.PRESSED, f.runtime.phase()); assertTrue(f.runtime.selectorSnapshot().isEmpty());
 		f.release(600); assertEquals(1, f.creates().size()); assertEquals("attention", f.creates().getFirst().pingType());
+	}
+	@Test void frozenTrailPreferencesConfigureActualNativeHistoryAndPaintStyleUntilNextHold() {
+		var settings = ClientConfig.HANDLER.getConfig().getSpatialSelector();
+		int oldLength = settings.getTrailLength(), oldOpacity = settings.getTrailOpacity();
+		boolean oldShown = settings.isShowTrail();
+		try {
+			settings.setTrailLength(19); settings.setTrailOpacity(31); settings.setShowTrail(true);
+			Fixture f = new Fixture(); f.press(0);
+			settings.setTrailLength(512); settings.setTrailOpacity(0); settings.setShowTrail(false);
+			f.frame(250, true); f.prime();
+			// Small alternating callbacks stay in the deadzone and cannot navigate or hit a viewport edge.
+			for (int i = 0; i < 600; i++) f.move(i % 2 == 0 ? 1 : -1, 0, 260);
+			assertEquals(19, f.snapshot().radial().trail().size(), "runtime tuning consumes the frozen cap, not live/default config");
+			assertEquals(31, f.access.selectorStyle.trailOpacityPercent()); assertTrue(f.access.selectorStyle.showTrail());
+			assertEquals(19, f.access.selectorStyle.trailLength(), "native painter and controller share the same bound");
+			f.runtime.abort(); f.press(300); f.frame(550, true); f.prime();
+			for (int i = 0; i < 600; i++) f.move(i % 2 == 0 ? 1 : -1, 0, 560);
+			assertEquals(512, f.snapshot().radial().trail().size(), "new hold adopts edited max cap even with trail disabled");
+			assertEquals(0, f.access.selectorStyle.trailOpacityPercent()); assertFalse(f.access.selectorStyle.showTrail());
+			f.runtime.abort();
+		} finally { settings.setTrailLength(oldLength); settings.setTrailOpacity(oldOpacity); settings.setShowTrail(oldShown); }
 	}
 	@ParameterizedTest @ValueSource(booleans = {false, true})
 	void reentrantAbortInValidatorBlocksEveryReleasePacket(boolean menu) {

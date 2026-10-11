@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
@@ -45,8 +46,8 @@ import nx.pingwheel.common.domain.PingTypeCatalog;
  *
  * <p>Wheel opacity governs only the sector underlay; target opacity governs
  * every text-bearing frame together with its label and external name preview.
- * Neither preference reaches the interaction chrome (pointer, guides, trail):
- * the centre guides follow only their menu's transition fade and dim for an
+	 * Neither preference reaches the pointer, guides or trail. The trail alone has
+	 * an independent opacity; centre guides follow their menu's transition fade and dim for an
  * ancestor menu exactly like that menu's nodes.
  *
  * <p>The controller's geometry is virtual: menu origins and the pointer are
@@ -160,7 +161,16 @@ public final class SpatialOverlayRenderer {
 	 * its own width and height.
 	 */
 	public record Style(int opacityPercent, int targetOpacityPercent, double optionTextScale, double inventoryTextScale,
-		double rootDistance, double submenuRadiusScale, boolean showTrail, boolean reduceMotion) {
+		double rootDistance, double submenuRadiusScale, boolean showTrail, boolean reduceMotion,
+		int trailLength, int trailOpacityPercent) {
+
+		/** Compatibility form; native holds supply their frozen trail preferences explicitly. */
+		public Style(int opacityPercent, int targetOpacityPercent, double optionTextScale, double inventoryTextScale,
+			double rootDistance, double submenuRadiusScale, boolean showTrail, boolean reduceMotion) {
+			this(opacityPercent, targetOpacityPercent, optionTextScale, inventoryTextScale, rootDistance, submenuRadiusScale,
+				showTrail, reduceMotion, nx.pingwheel.common.config.SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH,
+				nx.pingwheel.common.config.SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY);
+		}
 
 		public static final Style NATIVE = new Style(100, 100, 1.0, 1.0, 0.0, 1.0, true, false);
 
@@ -194,6 +204,8 @@ public final class SpatialOverlayRenderer {
 		public Style {
 			opacityPercent = WheelOpacity.clampPercent(opacityPercent);
 			targetOpacityPercent = WheelOpacity.clampPercent(targetOpacityPercent);
+			trailOpacityPercent = WheelOpacity.clampPercent(trailOpacityPercent);
+			if (trailLength <= 0 || trailLength > 512) throw new IllegalArgumentException("invalid trail bound");
 			if (!Double.isFinite(optionTextScale) || optionTextScale <= 0.0
 				|| !Double.isFinite(inventoryTextScale) || inventoryTextScale <= 0.0
 				|| !Double.isFinite(rootDistance) || rootDistance < 0.0
@@ -236,11 +248,23 @@ public final class SpatialOverlayRenderer {
 				WheelLabelLayout.BASE_TEXT_SCALE * optionFontPercent / 100.0,
 				targetFontPercent / 100.0, rootDistance, submenuRadiusScale, showTrail, reduceMotion);
 		}
+
+		public static Style fromLegacyFontSizes(int opacityPercent, int targetOpacityPercent, int optionFontPercent,
+			int targetFontPercent, double rootDistance, double submenuRadiusScale,
+			boolean showTrail, boolean reduceMotion, int trailLength, int trailOpacityPercent) {
+			return new Style(opacityPercent, targetOpacityPercent,
+				WheelLabelLayout.BASE_TEXT_SCALE * optionFontPercent / 100.0,
+				targetFontPercent / 100.0, rootDistance, submenuRadiusScale, showTrail, reduceMotion, trailLength, trailOpacityPercent);
+		}
 	}
 
 	record VisualKey(String kind, String owner, String entry) {}
 	sealed interface Paint permits NodePaint, PanelPaint, RowPaint, HeaderPaint, FooterPaint, ChromePaint,
-		SectorPaint, GuidePaint {}
+		SectorPaint, GuidePaint, TrailPaint {}
+	/** Immutable prior-frame visual history, painted once below every text-bearing surface. */
+	record TrailPaint(List<SpatialController.Point> points) implements Paint {
+		TrailPaint { points = List.copyOf(points); }
+	}
 	/** Current menu origin and frozen circle boundary for the active follower's connector. */
 	record Follower(double originX, double originY, double deadzone) {}
 	/**
@@ -611,6 +635,7 @@ public final class SpatialOverlayRenderer {
 		private final SpatialOverlayTransitions<VisualKey, Paint> transitions =
 			new SpatialOverlayTransitions<>(TRANSITION_NANOS, TRANSITION_CAPACITY, APPEARANCE_SCALE);
 		private final SpatialViewOffset viewOffset = new SpatialViewOffset(TRANSITION_NANOS);
+		private final SpatialVisualTrail<VisualKey> trail = new SpatialVisualTrail<>(TRANSITION_NANOS);
 		private SpatialController.Viewport publishedViewport;
 
 		/** Interaction-frame preparation only: sample the pan once, then paint this immutable projection. */
@@ -638,6 +663,7 @@ public final class SpatialOverlayRenderer {
 
 		public void reset() {
 			transitions.clear();
+			trail.clear();
 			viewOffset.clear();
 			publishedViewport = null;
 			paintedChoiceIds = Set.of();
@@ -693,6 +719,8 @@ public final class SpatialOverlayRenderer {
 			SpatialController.Viewport viewport, double width, double height, FramePainter painter) {
 			paintedChoiceIds = Set.of();
 			List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets = new ArrayList<>();
+			trail.prepare(radial, style.trailLength(), nowNanos, style.reduceMotion());
+			TrailPaint historicalTrail = new TrailPaint(trail.points());
 			double guiWidth = viewport == null ? width : viewport.width();
 			double guiHeight = viewport == null ? height : viewport.height();
 			double centerX = guiWidth / 2.0;
@@ -708,17 +736,28 @@ public final class SpatialOverlayRenderer {
 			if (inventory != null && inventory.open()) {
 				addInventory(targets, inventory, painter.lineHeight(), style, guiWidth, guiHeight);
 			}
-			List<SpatialOverlayTransitions.State<VisualKey, Paint>> states =
-				transitions.update(targets, nowNanos, style.reduceMotion());
+			VisualKey desiredOwner = targets.stream().filter(target -> target.data() instanceof NodePaint node && node.follower() != null)
+				.map(SpatialOverlayTransitions.Target::key).findFirst().orElse(null);
+			List<SpatialOverlayTransitions.State<VisualKey, Paint>> states = new ArrayList<>(
+				transitions.update(targets, nowNanos, style.reduceMotion()));
+			// Share chrome's finite fade/projection, not its payload or topmost paint rank.
+			// No second history or transition-cache entry is needed, even at capacity.
+			if (style.showTrail() && style.trailOpacityPercent() > 0 && !historicalTrail.points().isEmpty()) {
+				var chrome = states.stream().filter(state -> state.data() instanceof ChromePaint).findFirst().orElse(null);
+				if (chrome != null) states.add(new SpatialOverlayTransitions.State<>(new VisualKey("trail", "radial", ""),
+					chrome.x(), chrome.y(), chrome.scale(), chrome.alpha(), chrome.present(), historicalTrail));
+			}
 			if (origin == null && transitions.isEmpty()) {
 				// The exit tail is gone: hard-reset so a later session starts centered.
 				viewOffset.clear();
 				publishedViewport = null;
+				trail.clear();
 			}
 			RowLayout selected = RowLayout.NONE;
 			Set<String> painted = new HashSet<>();
 			String activeMenu = origin == null ? null : radial.menus().getLast().menuId();
 			boolean hidePointer = activeInventoryList(radial, inventory);
+			SpatialController.Point followerPoint = null;
 			for (var state : states.stream().sorted(Comparator.comparingInt(value -> paintRank(value.data()))).toList()) {
 				var displayed = new SpatialOverlayTransitions.State<>(state.key(), state.x() + viewX, state.y() + viewY,
 					state.scale(), state.alpha(), state.present(), state.data());
@@ -728,6 +767,11 @@ public final class SpatialOverlayRenderer {
 					var menu = radial.menus().stream().filter(value -> value.menuId().equals(state.key().owner())).findFirst().orElseThrow();
 					displayed = new SpatialOverlayTransitions.State<>(state.key(), centerX + menu.origin().x() + viewX,
 						centerY + menu.origin().y() + viewY, 1.0, state.alpha(), true, state.data());
+				}
+				if (state.data() instanceof TrailPaint) {
+					displayed = alignChrome(displayed, viewport);
+					if (viewport == null && state.present()) displayed = new SpatialOverlayTransitions.State<>(state.key(),
+						centerX + viewX, centerY + viewY, state.scale(), state.alpha(), true, state.data());
 				}
 				if (state.data() instanceof ChromePaint chrome) {
 					displayed = alignChrome(displayed, viewport);
@@ -742,6 +786,13 @@ public final class SpatialOverlayRenderer {
 				NodeLayout layout = state.data() instanceof NodePaint node
 					? nodeLayout(node, painter::width, painter.lineHeight(), style, painter.splitter()) : null;
 				if (!painter.paint(displayed, layout, style)) continue;
+				if (state.data() instanceof NodePaint && titleFrameIntersectsViewport(displayed, layout, guiWidth, guiHeight)
+					&& (withAlpha(BORDER_COLOR, targetAlpha(state.alpha(), style)) >>> 24) != 0
+					&& (origin == null ? !state.present() && state.key().equals(trail.owner())
+						: state.present() && state.key().equals(desiredOwner))) {
+					// The displayed pose is already rigidly projected: undo this frame's projection exactly once.
+					followerPoint = new SpatialController.Point(displayed.x() - centerX - viewX, displayed.y() - centerY - viewY);
+				}
 				if (state.data() instanceof NodePaint node && acknowledgesNodePaint(state.present(),
 					state.key().owner().equals(activeMenu), state.alpha(), style)
 					&& titleFrameIntersectsViewport(displayed, layout, guiWidth, guiHeight)) {
@@ -754,10 +805,12 @@ public final class SpatialOverlayRenderer {
 				}
 			}
 			paintedChoiceIds = Set.copyOf(painted);
+			trail.commit(radial, desiredOwner, followerPoint, nowNanos, style.reduceMotion());
 			return selected;
 		}
 
 		int retainedSize() { return transitions.retainedSize(); }
+		List<SpatialController.Point> trailPoints() { return trail.points(); }
 	}
 
 	/** Production frame port: the same planned layout is painted and used by its connector. */
@@ -771,7 +824,7 @@ public final class SpatialOverlayRenderer {
 
 	static SpatialOverlayTransitions.State<VisualKey, Paint> alignChrome(
 		SpatialOverlayTransitions.State<VisualKey, Paint> state, SpatialController.Viewport viewport) {
-		return viewport != null && state.present() && state.data() instanceof ChromePaint
+		return viewport != null && state.present() && (state.data() instanceof ChromePaint || state.data() instanceof TrailPaint)
 			? new SpatialOverlayTransitions.State<>(state.key(), viewport.centerX() + viewport.viewX(), viewport.centerY() + viewport.viewY(),
 				state.scale(), state.alpha(), true, state.data())
 			: state;
@@ -903,11 +956,12 @@ public final class SpatialOverlayRenderer {
 	/**
 	 * Layer alpha for one transition state: the sector underlay follows wheel
 	 * opacity, text-bearing frames follow target opacity, and the interaction
-	 * chrome — the pointer, links, trail and the centre guides — follows only
-	 * the transition fade so neither preference can hide them.
+		 * chrome — the pointer, links and centre guides — follows only the transition
+		 * fade. Trail opacity is a separate multiplier applied exactly once.
 	 */
 	static double layerAlpha(Object data, double stateAlpha, Style style) {
 		if (data instanceof SectorPaint) return backdropAlpha(stateAlpha, style);
+		if (data instanceof TrailPaint) return style.showTrail() ? stateAlpha * style.trailOpacityPercent() / 100.0 : 0.0;
 		if (data instanceof GuidePaint || data instanceof ChromePaint) return stateAlpha;
 		return targetAlpha(stateAlpha, style);
 	}
@@ -1003,13 +1057,14 @@ public final class SpatialOverlayRenderer {
 		return Math.min(difference, 360.0 - difference);
 	}
 
-	/** Radial sector backdrops first, then centre guides, then inventory panels, then nodes/chrome. */
+	/** Historical trail lies above underlays/guides but below ALL text-bearing paints. */
 	static int paintRank(Object data) {
 		if (data instanceof SectorPaint) return 0;
 		if (data instanceof GuidePaint) return 1;
-		if (data instanceof PanelPaint) return 2;
-		if (data instanceof ChromePaint) return 4; // current-frame successful nodes decide pointer visibility
-		return 3;
+		if (data instanceof TrailPaint) return 2;
+		if (data instanceof PanelPaint) return 3;
+		if (data instanceof ChromePaint) return 5; // current-frame successful nodes decide pointer visibility
+		return 4;
 	}
 
 	private static void addInventory(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
@@ -1083,11 +1138,13 @@ public final class SpatialOverlayRenderer {
 			return;
 		}
 		if (state.data() instanceof ChromePaint chrome) {
-			if (style.showTrail()) {
-				drawTrail(graphics, chrome.snapshot().trail(), state.x(), state.y(), alpha);
-			}
 			drawMenuLinks(graphics, chrome.snapshot().menus(), state.x(), state.y(), alpha);
 			if (!chrome.pointerHidden()) drawPointer(graphics, chrome.snapshot().pointer(), state.x(), state.y(), alpha);
+			return;
+		}
+		if (state.data() instanceof TrailPaint trail) {
+			for (TrailPixel pixel : trailPixels(trail.points(), state.x(), state.y(), alpha))
+				graphics.fill(pixel.x(), pixel.y(), pixel.x() + 1, pixel.y() + 1, pixel.color());
 			return;
 		}
 		var pose = graphics.pose();
@@ -1497,13 +1554,10 @@ public final class SpatialOverlayRenderer {
 		}
 	}
 
-	private static void drawTrail(
-		GuiGraphics guiGraphics,
-		List<SpatialController.Point> trail,
-		double centerX,
-		double centerY,
-		double alpha
-	) {
+	record TrailPixel(int x, int y, int color) {}
+	/** At most nine pixels per retained point; overlapping rounded squares use max alpha, never additive paint. */
+	static List<TrailPixel> trailPixels(List<SpatialController.Point> trail, double centerX, double centerY, double alpha) {
+		Map<Long, TrailPixel> pixels = new LinkedHashMap<>();
 		int size = trail.size();
 
 		for (int i = 0; i < size; i++) {
@@ -1511,8 +1565,16 @@ public final class SpatialOverlayRenderer {
 			int x = (int) Math.round(centerX + point.x());
 			int y = (int) Math.round(centerY + point.y());
 			double progress = size <= 1 ? 1.0 : (double) i / (size - 1);
-			guiGraphics.fill(x - 1, y - 1, x + 2, y + 2, withAlpha(TRAIL_COLOR, alpha * (0.15 + 0.65 * progress)));
+			int color = withAlpha(TRAIL_COLOR, alpha * (0.15 + 0.65 * progress));
+			if ((color >>> 24) == 0) continue;
+			for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) {
+				int px = x + dx, py = y + dy;
+				long key = ((long) px << 32) | (py & 0xFFFFFFFFL);
+				TrailPixel old = pixels.get(key);
+				if (old == null || (old.color() >>> 24) < (color >>> 24)) pixels.put(key, new TrailPixel(px, py, color));
+			}
 		}
+		return List.copyOf(pixels.values());
 	}
 
 	private static void drawPointer(
