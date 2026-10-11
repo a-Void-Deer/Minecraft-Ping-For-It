@@ -30,7 +30,7 @@ class SpatialSelectorMigrationTest {
 		fresh.load();
 		assertEquals(0, java.math.BigDecimal.ONE.compareTo(read(freshPath).getAsJsonObject("spatialSelector")
 			.get("targetGlide").getAsBigDecimal()));
-		assertLoadedGlideThreshold(fresh.getConfig(), 80);
+		assertLoadedGlideThreshold(fresh.getConfig(), 40);
 		for (String selector : List.of("", ",\"spatialSelector\":null", ",\"spatialSelector\":{}",
 			",\"spatialSelector\":{\"targetGlide\":null}", ",\"spatialSelector\":{\"targetGlide\":0.25}",
 			",\"spatialSelector\":{\"targetGlide\":2}")) {
@@ -40,7 +40,7 @@ class SpatialSelectorMigrationTest {
 			Files.write(path, original);
 			var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
 			handler.load();
-			double threshold = selector.contains(":0.25") ? 320 : selector.contains(":2") ? 40 : 80;
+			double threshold = selector.contains(":0.25") ? 160 : selector.contains(":2") ? 20 : 40;
 			assertLoadedGlideThreshold(handler.getConfig(), threshold);
 			assertEquals(37, handler.getConfig().getPingVolume());
 			assertArrayEquals(original, Files.readAllBytes(path), "default normalization is not a load rewrite");
@@ -48,7 +48,7 @@ class SpatialSelectorMigrationTest {
 			var reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
 			reloaded.load();
 			assertLoadedGlideThreshold(reloaded.getConfig(), threshold);
-			if (threshold == 320) assertEquals(0, new java.math.BigDecimal("0.25").compareTo(
+			if (threshold == 160) assertEquals(0, new java.math.BigDecimal("0.25").compareTo(
 				read(path).getAsJsonObject("spatialSelector").get("targetGlide").getAsBigDecimal()));
 		}
 		assertNoBackup(directory);
@@ -64,7 +64,7 @@ class SpatialSelectorMigrationTest {
 		Files.writeString(path, source.toString(), StandardCharsets.UTF_8);
 		var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
 		handler.load();
-		assertLoadedGlideThreshold(handler.getConfig(), 320);
+		assertLoadedGlideThreshold(handler.getConfig(), 160);
 		assertEquals(0, new java.math.BigDecimal("0.25").compareTo(read(path).getAsJsonObject("spatialSelector")
 			.get("targetGlide").getAsBigDecimal()));
 		assertNoRetiredWheelKeys(read(path));

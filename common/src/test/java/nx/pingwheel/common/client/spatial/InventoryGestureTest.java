@@ -36,6 +36,61 @@ class InventoryGestureTest {
 	}
 
 	@Test
+	void axisConfinementPreservesPointerSelectionAndSubrowTravelAtEitherBoundary() {
+		for (double sign : new double[] {-1, 1}) {
+			var model = listWithRows(40); model.select(20);
+			var gesture = new InventoryGesture(model, 1, false, 20);
+			gesture.begin(sign * 100, 0, leftBack());
+			gesture.moveGui(0, 39);
+			int window = model.windowFirst();
+			var viewport = new SpatialController.Viewport(100, 100, 0, 0);
+			gesture.constrainAxis(viewport);
+			assertEquals(sign < 0 ? -50 : 49, gesture.axisX());
+			assertEquals(sign * 100, gesture.pointerX(), "axis correction alone never moves the pointer");
+			assertEquals(39, gesture.pointerY());
+			assertEquals(20, model.selectedIndex()); assertEquals(window, model.windowFirst());
+			gesture.alignPointer(gesture.axisX(), 39);
+			assertEquals(InventoryGesture.Action.NONE, gesture.moveGui(0, 1));
+			assertEquals(21, model.selectedIndex(), "projection alignment does not clear the almost-row fraction");
+		}
+	}
+
+	@Test
+	void axisConfinementPreservesSignedWheelUnlockAndOrdinaryWheelFraction() {
+		var model = listWithRows(40); model.select(20);
+		var gesture = new InventoryGesture(model, 1, false, 20);
+		gesture.begin(-100, 0, leftBack()); gesture.wheelRows(1.5);
+		gesture.moveGui(0, 10); gesture.moveGui(0, -4); // signed unlock travel = +6
+		gesture.constrainAxis(new SpatialController.Viewport(100, 100, 0, 0));
+		gesture.alignPointer(-50, 6);
+		gesture.moveGui(0, 7); // +13 must remain locked
+		assertEquals(21, model.selectedIndex());
+		gesture.moveGui(0, 1); // +14 unlocks; this sample contributes 0.5 glide pixels
+		gesture.moveGui(0, 38);
+		assertEquals(21, model.selectedIndex());
+		gesture.moveGui(0, 1);
+		assertEquals(22, model.selectedIndex(), "axis alignment preserves the signed unlock remainder");
+		assertEquals(1, gesture.wheelRows(0.5), "ordinary-wheel half-row survives axis correction and glide");
+		assertEquals(23, model.selectedIndex());
+	}
+
+	@Test
+	void axisConfinementKeepsAReachableAxisInsteadOfFollowingIntentionalPointerOffset() {
+		var model = listWithRows(40);
+		var gesture = new InventoryGesture(model, 1, false, 20);
+		gesture.begin(0, 0, leftBack()); gesture.moveGui(20, 0);
+		for (int frame = 0; frame < 3; frame++) {
+			gesture.constrainAxis(new SpatialController.Viewport(100, 100, 0, 0));
+			gesture.alignPointer(20, 0);
+			assertEquals(0, gesture.axisX());
+			assertEquals(InventoryGesture.Action.NONE, gesture.moveGui(0, 0, 1000));
+			assertEquals(0, model.selectedIndex(), "the established reachable side corridor remains in force");
+		}
+		gesture.moveGui(-20, 0); gesture.moveGui(0, 40);
+		assertEquals(1, model.selectedIndex());
+	}
+
+	@Test
 	void forwardGateEmitsForwardAndHoverDisablesDistanceBack() {
 		InventoryListModel model = listWithRows(40);
 		InventoryGesture gesture = new InventoryGesture(model, 0.25, false);
@@ -85,10 +140,10 @@ class InventoryGestureTest {
 		InventoryGesture gesture = new InventoryGesture(model, 1.0, false, 20.0);
 		gesture.begin(0.0, 0.0, leftBack());
 
-		gesture.move(0.0, 79.0);
+		gesture.move(0.0, 39.0);
 		assertEquals(0, model.selectedIndex());
 		gesture.move(0.0, 1.0);
-		assertEquals(1, model.selectedIndex(), "80 native GUI pixels supply the frozen 20px row threshold at 1x");
+		assertEquals(1, model.selectedIndex(), "40 native GUI pixels supply the frozen 20px row threshold at 1x");
 
 		assertEquals(2, gesture.wheelRows(2));
 		assertEquals(3, model.selectedIndex());
@@ -99,7 +154,7 @@ class InventoryGestureTest {
 		assertEquals(InventoryGesture.Action.NONE, gesture.move(0.0, 4.0));
 		assertEquals(3, model.selectedIndex(), "the unlock sample seeds the new glide fraction");
 
-		gesture.move(0.0, 76.0);
+		gesture.move(0.0, 36.0);
 		assertEquals(4, model.selectedIndex());
 	}
 
@@ -140,7 +195,7 @@ class InventoryGestureTest {
 		model.select(20);
 		InventoryGesture gesture = new InventoryGesture(model, 1.0, false, 20.0);
 		gesture.begin(0.0, 0.0, leftBack());
-		gesture.move(0.0, 159.0);
+		gesture.move(0.0, 79.0);
 		assertEquals(21, model.selectedIndex());
 		assertEquals("k21", model.selectedKey());
 		int window = model.windowFirst();
@@ -166,18 +221,18 @@ class InventoryGestureTest {
 		model.select(20);
 		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
 		gesture.begin(0, 500, leftBack());
-		gesture.move(0, 76);
+		gesture.move(0, 36);
 		gesture.move(0, -4);
 		assertEquals(20, model.selectedIndex());
-		gesture.move(0, -76);
-		assertEquals(19, model.selectedIndex(), "opposing 19px is cleared before the new direction accumulates");
-		gesture.move(0, -76);
+		gesture.move(0, -36);
+		assertEquals(19, model.selectedIndex(), "opposing 18px is cleared before the new direction accumulates");
+		gesture.move(0, -36);
 		gesture.move(0, 0);
 		gesture.move(0, -4);
 		assertEquals(18, model.selectedIndex(), "zero samples do not clear a same-direction remainder");
-		gesture.move(0, -76);
+		gesture.move(0, -36);
 		gesture.move(0, 4);
-		gesture.move(0, 76);
+		gesture.move(0, 36);
 		assertEquals(19, model.selectedIndex(), "both reversal directions discard the opposing fraction");
 	}
 
@@ -187,7 +242,7 @@ class InventoryGestureTest {
 			var model = listWithRows(40);
 			var gesture = new InventoryGesture(model, multiplier, false, 20.0);
 			gesture.begin(0, -500, leftBack());
-			double threshold = multiplier == 2.0 ? 40.0 : 320.0;
+			double threshold = multiplier == 2.0 ? 20.0 : 160.0;
 			gesture.move(0, threshold - 1);
 			assertEquals(0, model.selectedIndex());
 			gesture.move(0, 1);
@@ -209,10 +264,10 @@ class InventoryGestureTest {
 					splitGesture.move(0, sign * delta);
 				}
 				batchGesture.move(0, sign * 241);
-				assertEquals(20 + (int) sign * 3, batch.selectedIndex());
+				assertEquals(20 + (int) sign * 6, batch.selectedIndex());
 				assertEquals(batch.selectedIndex(), split.selectedIndex());
-				splitGesture.move(0, sign * 79); batchGesture.move(0, sign * 79);
-				assertEquals(20 + (int) sign * 4, split.selectedIndex());
+				splitGesture.move(0, sign * 39); batchGesture.move(0, sign * 39);
+				assertEquals(20 + (int) sign * 7, split.selectedIndex());
 				assertEquals(batch.selectedIndex(), split.selectedIndex(), "equal whole rows also retain equal sub-row travel");
 			}
 		}
@@ -227,11 +282,11 @@ class InventoryGestureTest {
 			gesture.move(0, 0, travel);
 			assertEquals(39, model.selectedIndex());
 			gesture.move(0, 0, -80);
-			assertEquals(36, model.selectedIndex(), "the first reverse row travel is never paid against overshoot");
+			assertEquals(33, model.selectedIndex(), "the first reverse row travel is never paid against overshoot");
 			gesture.move(0, 0, -travel);
 			assertEquals(0, model.selectedIndex());
 			gesture.move(0, 0, 80);
-			assertEquals(3, model.selectedIndex());
+			assertEquals(6, model.selectedIndex());
 			assertEquals(0, gesture.pointerY());
 		}
 	}
@@ -258,7 +313,7 @@ class InventoryGestureTest {
 		gesture.move(0, 0, -10);
 		gesture.move(0, 0, -4); // signed net -14 unlocks; only this sample glides
 		assertEquals(2, model.selectedIndex());
-		gesture.move(0, 0, -35);
+		gesture.move(0, 0, -15);
 		assertEquals(2, model.selectedIndex());
 		gesture.move(0, 0, -1);
 		assertEquals(1, model.selectedIndex());
@@ -275,7 +330,7 @@ class InventoryGestureTest {
 		gesture.moveGui(30, 0);
 		gesture.moveGui(0, 13);
 		gesture.moveGui(0, 1); // only this sample unlocks, not the former 10px
-		gesture.moveGui(0, 78);
+		gesture.moveGui(0, 38);
 		assertEquals(2, model.selectedIndex());
 		gesture.moveGui(0, 1);
 		assertEquals(3, model.selectedIndex());
@@ -288,7 +343,7 @@ class InventoryGestureTest {
 		gesture.begin(0, 0, leftBack());
 		assertEquals(0, gesture.wheelPixels(76));
 		assertEquals(0, gesture.wheelPixels(-4));
-		gesture.move(0, 79); // independent almost-row glide fraction
+		gesture.move(0, 39); // independent almost-row glide fraction
 		assertEquals(0, gesture.wheelPixels(27));
 		assertEquals(1, gesture.wheelPixels(1));
 		assertEquals(21, model.selectedIndex(), "wheel cancels signed travel normally instead of using glide reversal rules");
@@ -298,12 +353,12 @@ class InventoryGestureTest {
 	void nonfiniteMovementIsInertIncludingIndependentSelectionTravel() {
 		var model = listWithRows(40);
 		var gesture = new InventoryGesture(model, 1.0, true, 20.0);
-		gesture.begin(0, 0, leftBack()); gesture.moveGui(0, 79);
+		gesture.begin(0, 0, leftBack()); gesture.moveGui(0, 39);
 		for (double bad : new double[] {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY}) {
 			assertEquals(InventoryGesture.Action.NONE, gesture.moveGui(bad, 0, 1));
 			assertEquals(InventoryGesture.Action.NONE, gesture.moveGui(0, bad, 1));
 			assertEquals(InventoryGesture.Action.NONE, gesture.moveGui(0, 1, bad));
-			assertEquals(0, gesture.pointerX()); assertEquals(79, gesture.pointerY());
+			assertEquals(0, gesture.pointerX()); assertEquals(39, gesture.pointerY());
 			assertEquals(0, model.selectedIndex());
 		}
 		gesture.moveGui(0, 1);

@@ -102,20 +102,20 @@ class NativeSelectorInputTest {
 		var input = new NativeSelectorInput(session); input.open();
 		input.onMove(7, 100, 100, owned, 364); // prime, not input
 		input.onMove(8, 100, 10000, owned, 365); // foreign window, not a new baseline
-		input.onMove(7, 100, 258, owned, 366); // 158 window px = 79 GUI px
+		input.onMove(7, 100, 178, owned, 366); // 78 window px = 39 GUI px
 		assertEquals("a", session.snapshot().inventory().selectedKey());
-		input.onMove(7, 100, 260, owned, 367);
+		input.onMove(7, 100, 180, owned, 367);
 		assertEquals("b", session.snapshot().inventory().selectedKey());
 		var rescaled = new NativeSelectorInput.Frame(7, 1200, 800, 300, 200, true, false);
 		input.onMove(7, -4000, -4000, rescaled, 368);
 		assertEquals("b", session.snapshot().inventory().selectedKey(), "scale handoff cannot synthesize reverse glide");
-		input.onMove(7, -4000, -3680, rescaled, 369); // 320 window px = 80 GUI px
+		input.onMove(7, -4000, -3840, rescaled, 369); // 160 window px = 40 GUI px
 		assertEquals("c", session.snapshot().inventory().selectedKey());
 		var unowned = new NativeSelectorInput.Frame(7, 1200, 800, 300, 200, true, false, false);
 		assertFalse(input.onMove(7, 5000, 5000, unowned, 370));
 		input.onMove(7, 2000, 2000, rescaled, 371);
 		assertEquals("c", session.snapshot().inventory().selectedKey());
-		input.onMove(7, 2000, 1680, rescaled, 372);
+		input.onMove(7, 2000, 1840, rescaled, 372);
 		assertEquals("b", session.snapshot().inventory().selectedKey(), "native reversal is relative even at a fixed drawn pointer");
 		input.synchronize(new NativeSelectorInput.Frame(7, 1200, 800, 300, 200, false, false));
 		input.onMove(7, -1000, -1000, rescaled, 373);

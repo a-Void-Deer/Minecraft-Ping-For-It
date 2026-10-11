@@ -31,6 +31,43 @@ class SpatialSelectorSessionTest {
 		new SpatialSelectorSession.ListGeometry(4, 180, 17, 23, 19, 85);
 
 	@Test
+	void unreachableAxisCorrectionPreservesSubrowRemainderWithoutAnyProjectionSelection() {
+		var session = openedList(false, new Content());
+		session.moveGui(0, 91, 280); // 23px row, 0.5 user factor: one native row takes 92px
+		var before = session.snapshot();
+		var viewport = new SpatialController.Viewport(100, 100, -510, 0);
+		session.constrainPointer(viewport, 290);
+		assertPointer(session, 460, 49);
+		assertEquals(before.inventory(), session.snapshot().inventory());
+		assertEquals(before.radial().trail(), session.snapshot().radial().trail());
+		assertEquals(current(session).menuId(), before.radial().menus().getLast().menuId());
+		session.constrainPointer(viewport, 291);
+		session.moveGui(0, 1, 300);
+		assertEquals("b", session.snapshot().inventory().selectedKey(), "the almost-row fraction survives axis correction");
+		assertTrue(current(session).menuId().endsWith(":inventory"));
+	}
+
+	@Test
+	void unreachableAxisCorrectionPreservesSignedWheelUnlockAccumulation() {
+		var session = openedList(false, new Content());
+		session.scrollRows(1, 280);
+		session.moveGui(0, 10, 281); session.moveGui(0, -4, 282); // signed unlock = +6
+		var before = session.snapshot();
+		var viewport = new SpatialController.Viewport(100, 100, -510, 0);
+		session.constrainPointer(viewport, 290);
+		assertEquals(before.inventory(), session.snapshot().inventory());
+		assertEquals(before.radial().trail(), session.snapshot().radial().trail());
+		session.moveGui(0, 7, 300); // still locked at +13
+		session.moveGui(0, 1, 310); // +14 unlocks and seeds only this sample's glide
+		session.constrainPointer(viewport, 311);
+		session.moveGui(0, 90, 320);
+		assertEquals("b", session.snapshot().inventory().selectedKey());
+		session.moveGui(0, 1, 330);
+		assertEquals("c", session.snapshot().inventory().selectedKey(), "projection never resets signed unlock travel");
+		assertTrue(current(session).menuId().endsWith(":inventory"));
+	}
+
+	@Test
 	void hugeAuthorizedVerticalTravelGlidesAtSaturationWithoutRawHorizontalNavigation() {
 		var session = openedList(false, new Content());
 		// This fixture opens the list at (360,0). Its displayed axis is x=20.
@@ -49,20 +86,20 @@ class SpatialSelectorSessionTest {
 		session.moveGui(-1, -1, 320);
 		assertPointer(session, 378, 0);
 		assertEquals("c", session.snapshot().inventory().selectedKey(), "first reversal uses only its one-pixel delta");
-		session.moveGui(0, -183, 330);
+		session.moveGui(0, -91, 330);
 		assertEquals("b", session.snapshot().inventory().selectedKey(), "huge forward overshoot leaves no selection debt");
 		session.moveGui(0, -Double.MAX_VALUE, 340);
 		assertEquals("a", session.snapshot().inventory().selectedKey());
-		session.moveGui(0, 184, 350);
+		session.moveGui(0, 92, 350);
 		assertEquals("b", session.snapshot().inventory().selectedKey(), "huge reverse overshoot is consumed as well");
 	}
 
 	@Test
 	void nativeRowHeightUsesAuthorizedVerticalTravelBeyondBothVisibleBounds() {
 		var session = openedList(false, new Content());
-		// The frozen fixture uses 23px rows and explicit 0.5x: one row takes 184px.
+		// The frozen fixture uses 23px rows and explicit 0.5x: one row takes 92px.
 		session.constrainPointer(new SpatialController.Viewport(40, 2, -360, -0.5), 280);
-		session.moveGui(0, 183, 290);
+		session.moveGui(0, 91, 290);
 		assertPointer(session, 360, 0.5);
 		assertEquals("a", session.snapshot().inventory().selectedKey());
 		var atBottom = session.snapshot().radial();
@@ -70,14 +107,14 @@ class SpatialSelectorSessionTest {
 		assertEquals("b", session.snapshot().inventory().selectedKey());
 		assertEquals(atBottom.pointer(), session.snapshot().radial().pointer());
 		assertEquals(atBottom.trail(), session.snapshot().radial().trail());
-		session.moveGui(0, 184, 310);
+		session.moveGui(0, 92, 310);
 		assertEquals("c", session.snapshot().inventory().selectedKey());
 		assertEquals(atBottom.trail(), session.snapshot().radial().trail());
-		session.moveGui(0, -184, 320);
+		session.moveGui(0, -92, 320);
 		assertPointer(session, 360, -0.5);
 		assertEquals("b", session.snapshot().inventory().selectedKey());
 		var atTop = session.snapshot().radial();
-		session.moveGui(0, -184, 330);
+		session.moveGui(0, -92, 330);
 		assertEquals("a", session.snapshot().inventory().selectedKey());
 		assertEquals(atTop.pointer(), session.snapshot().radial().pointer());
 		assertEquals(atTop.trail(), session.snapshot().radial().trail());
@@ -97,25 +134,26 @@ class SpatialSelectorSessionTest {
 		session.moveGui(0, 10, 300);
 		assertEquals("b", session.snapshot().inventory().selectedKey());
 		session.moveGui(0, 4, 310);
-		session.moveGui(0, 179, 320);
+		session.moveGui(0, 87, 320);
 		assertEquals("b", session.snapshot().inventory().selectedKey(), "correction did not contribute to unlock or glide");
 		session.moveGui(0, 1, 330);
 		assertEquals("c", session.snapshot().inventory().selectedKey());
 		assertEquals(trail, session.snapshot().radial().trail());
-		session.moveGui(0, -184, 340);
+		session.moveGui(0, -92, 340);
 		assertEquals("b", session.snapshot().inventory().selectedKey());
 	}
 
 	@Test
-	void alignedBeyondEitherSideGateRawOnlyVerticalTravelCannotNavigate() {
+	void reachableOffAxisPointerSuppressesRawOnlyVerticalTravelWithoutNavigation() {
 		for (boolean hover : List.of(false, true)) {
 			for (double sign : new double[] {-1, 1}) {
 				var session = openedList(hover, new Content());
 				String listMenu = current(session).menuId();
 				var trail = session.snapshot().radial().trail();
-				// A one-pixel viewport aligns the pointer 100px beyond either gate.
-				session.constrainPointer(new SpatialController.Viewport(1, 1, -(360 + sign * 100) - 0.5, -0.5), 280);
-				session.moveGui(sign * Double.MAX_VALUE, 184, 290);
+				session.constrainPointer(new SpatialController.Viewport(401, 1, -360, -0.5), 280);
+				session.moveGui(sign * 50, 0, 281);
+				trail = session.snapshot().radial().trail();
+				session.moveGui(0, 92, 290);
 				assertEquals(listMenu, current(session).menuId());
 				assertEquals(trail, session.snapshot().radial().trail());
 				assertEquals("a", session.snapshot().inventory().selectedKey(), "side-hint and Back-hover suppression remain intact");
@@ -148,9 +186,10 @@ class SpatialSelectorSessionTest {
 			assertEquals("b", session.snapshot().inventory().selectedKey());
 			assertEquals(trail, session.snapshot().radial().trail());
 			assertEquals(listMenu, current(session).menuId());
-			assertTrue(session.snapshot().inventoryView().backAffordance().focused(), "alignment refreshes Back's release gate");
+			assertFalse(session.snapshot().inventoryView().backAffordance().focused(), "unreachable axis follows confinement without inventing Back focus");
 			assertEquals(0, session.snapshot().radial().hoverProgress());
-			assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(291), "resize without movement cannot release a stale item focus");
+			var selected = assertInstanceOf(SelectorIntent.SelectInventory.class, session.releaseIntent(291));
+			assertEquals("opaque:b", selected.reference(), "axis correction preserves the selected item without synthetic travel");
 		}
 	}
 
@@ -159,7 +198,7 @@ class SpatialSelectorSessionTest {
 		var session = openedList(false, new Content());
 		String listMenu = current(session).menuId();
 		var trail = session.snapshot().radial().trail();
-		// Pan clamps the logical pointer 81px toward Forward, but does not enter an item.
+		// Pan confines both the pointer and unreachable gesture axis without navigation.
 		session.constrainPointer(new SpatialController.Viewport(200, 100, -541, 0), 280);
 		assertPointer(session, 441, 0);
 		assertEquals(listMenu, current(session).menuId());
@@ -169,7 +208,9 @@ class SpatialSelectorSessionTest {
 		assertEquals(listMenu, current(session).menuId(), "saturated inward-to-logical-axis input is no effective movement");
 		assertEquals(trail, session.snapshot().radial().trail());
 		session.moveGui(1, 0, 300);
-		assertTrue(current(session).menuId().contains(":item:"), "a real admitted sample uses the corrected side baseline");
+		assertEquals(listMenu, current(session).menuId(), "one admitted pixel cannot inherit the projection's former 81px displacement");
+		session.moveGui(75, 0, 310);
+		assertTrue(current(session).menuId().contains(":item:"), "a fresh full side stroke still enters an item");
 		assertPointer(session, 535, -24);
 		assertEquals(1, session.snapshot().radial().trail().size(), "external row rebase remains confined without a warp stroke");
 	}
@@ -683,9 +724,9 @@ class SpatialSelectorSessionTest {
 		// item-return latch. The eventual actual leave/re-entry below still must.
 		session.constrainPointer(new SpatialController.Viewport(1, 1, -session.snapshot().radial().pointer().x() - 0.5,
 			-session.snapshot().radial().pointer().y() - 0.5), 561);
-		session.moveGui(0, 184, 562);
+		session.moveGui(0, 92, 562);
 		session.constrainPointer(new SpatialController.Viewport(320, 240, 0, 0), 570);
-		assertTrue(session.snapshot().inventoryView().backAffordance().focused(), "projection moves the pointer to the list Back side");
+		assertFalse(session.snapshot().inventoryView().backAffordance().focused(), "axis-only correction keeps the entry corridor reachable");
 		assertEquals(trail, session.snapshot().radial().trail());
 		session.tick(580);
 		session.tick(830);
@@ -693,14 +734,17 @@ class SpatialSelectorSessionTest {
 		assertEquals(0, session.snapshot().radial().hoverProgress());
 		session.constrainPointer(new SpatialController.Viewport(1200, 800, -360, 0), 840);
 		double axis = session.snapshot().radial().pointer().x();
-		session.moveGui(195, 0, 850);
+		session.moveGui(-50, 0, 841);
+		session.tick(1091);
+		assertEquals(listMenu, current(session).menuId(), "projection-only leave must not release the held item-Back latch");
+		session.moveGui(50, 0, 1100);
 		assertFalse(session.snapshot().inventoryView().backAffordance().focused(), "effective physical leave releases the list block");
-		session.moveGui(-195, 0, 860);
-		assertEquals(axis, session.snapshot().radial().pointer().x());
+		session.moveGui(-50, 0, 1110);
+		assertEquals(axis - 50, session.snapshot().radial().pointer().x());
 		assertTrue(session.snapshot().inventoryView().backAffordance().focused());
-		session.tick(1109);
+		session.tick(1359);
 		assertEquals(listMenu, current(session).menuId());
-		session.tick(1110);
+		session.tick(1360);
 		assertTrue(current(session).menuId().endsWith(":content"), "physical re-entry and full dwell pop exactly one level");
 	}
 

@@ -36,7 +36,7 @@ public final class InventoryGesture {
 	private static final double SIDE_HINT = 19.0;
 	private static final double SIDE_EXIT = 76.0;
 	private static final double WHEEL_UNLOCK = 14.0;
-	private static final double INTRINSIC_GLIDE = 0.25;
+	private static final double INTRINSIC_GLIDE = 0.5;
 	private static final double PIXELS_PER_ROW = 9.0;
 	private static final double WHEEL_PIXELS_PER_ROW = 100.0;
 
@@ -221,6 +221,11 @@ public final class InventoryGesture {
 		pointerX = x;
 		pointerY = y;
 		if (backHoverEnabled) backHoverFocused = isBackSideFocused();
+	}
+
+	/** Projection-only axis correction; keeps pointer, fractions and wheel lock untouched. */
+	void constrainAxis(SpatialController.Viewport viewport) {
+		axisX = viewport.confine(new SpatialController.Point(axisX, pointerY)).x();
 	}
 
 	public double axisX() {

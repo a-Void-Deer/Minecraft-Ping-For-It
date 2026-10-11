@@ -24,11 +24,11 @@ class SpatialSelectorSettingsTest {
 			var beforeValidation = settings.snapshot();
 			settings.validate();
 			assertEquals(beforeValidation, settings.snapshot());
-			double threshold = json.contains(":0.25") ? 320 : json.contains(":2") ? 40 : 80;
+			double threshold = json.contains(":0.25") ? 160 : json.contains(":2") ? 20 : 40;
 			assertGlideThreshold(beforeValidation, threshold);
 			assertGlideThreshold(new Gson().fromJson(new Gson().toJson(settings), SpatialSelectorSettings.class).snapshot(), threshold);
 		}
-		assertGlideThreshold(new SpatialSelectorSettings().snapshot(), 80);
+		assertGlideThreshold(new SpatialSelectorSettings().snapshot(), 40);
 	}
 
 	@Test
@@ -36,11 +36,11 @@ class SpatialSelectorSettingsTest {
 		var settings = new Gson().fromJson("{\"targetGlide\":0.25}", SpatialSelectorSettings.class);
 		var savedQuarter = settings.snapshot();
 		settings.setTargetGlide(new BigDecimal("2"));
-		assertGlideThreshold(savedQuarter, 320);
-		assertGlideThreshold(settings.snapshot(), 40);
+		assertGlideThreshold(savedQuarter, 160);
+		assertGlideThreshold(settings.snapshot(), 20);
 		settings.setTargetGlide(null);
-		assertGlideThreshold(settings.snapshot(), 80);
-		assertGlideThreshold(savedQuarter, 320);
+		assertGlideThreshold(settings.snapshot(), 40);
+		assertGlideThreshold(savedQuarter, 160);
 	}
 
 	private static void assertGlideThreshold(SpatialSelectorSettings.Snapshot settings, double threshold) {

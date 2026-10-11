@@ -269,6 +269,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private void alignListPointer() {
 		if (!isListActive()) return;
 		var pointer = radial.snapshot().pointer();
+		if (viewport != null) gesture.constrainAxis(viewport);
 		gesture.alignPointer(pointer.x(), pointer.y());
 		boolean backFocused = settings.hoverEnabled() && gesture.isBackSideFocused();
 		list.setBackHoverFocused(backFocused);
