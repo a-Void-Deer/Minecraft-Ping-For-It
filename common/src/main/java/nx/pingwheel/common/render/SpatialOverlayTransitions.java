@@ -19,8 +19,24 @@ import java.util.Set;
  */
 public final class SpatialOverlayTransitions<K, V> {
 
+	/** A current ray, never angle-eased: only distance along it is animated. */
+	public record Ray(double originX, double originY, double unitX, double unitY) {
+		public Ray {
+			if (!Double.isFinite(originX) || !Double.isFinite(originY)
+				|| !Double.isFinite(unitX) || !Double.isFinite(unitY)
+				|| Math.abs(Math.hypot(unitX, unitY) - 1.0) > 1.0e-9) {
+				throw new IllegalArgumentException("invalid visual ray");
+			}
+		}
+	}
+
 	public record Target<K, V>(K key, double x, double y, double scale, double alpha,
-		double entryX, double entryY, V data) {
+		double entryX, double entryY, V data, Ray ray) {
+
+		public Target(K key, double x, double y, double scale, double alpha,
+			double entryX, double entryY, V data) {
+			this(key, x, y, scale, alpha, entryX, entryY, data, null);
+		}
 
 		public Target {
 			Objects.requireNonNull(key, "key");
@@ -47,13 +63,24 @@ public final class SpatialOverlayTransitions<K, V> {
 		double entryX;
 		double entryY;
 		V data;
+		Ray ray;
+		double radiusFrom;
+		double radiusTo;
+		long radiusBegan;
+		long radiusSampled;
 
 		Node(Target<K, V> target, long now, boolean reduceMotion) {
 			to = pose(target);
-			from = reduceMotion ? to : new Pose(target.entryX(), target.entryY(),
+			from = reduceMotion ? to : new Pose(target.ray() == null ? target.entryX() : 0.0, target.ray() == null ? target.entryY() : 0.0,
 				target.scale() * appearanceScale, 0.0);
 			began = now;
 			updateData(target);
+			ray = target.ray();
+			if (ray != null) {
+				radiusTo = distance(target.x(), target.y(), ray);
+				radiusFrom = reduceMotion ? radiusTo : distance(target.entryX(), target.entryY(), ray);
+				radiusBegan = radiusSampled = now;
+			}
 		}
 
 		void updateData(Target<K, V> target) {
@@ -62,11 +89,66 @@ public final class SpatialOverlayTransitions<K, V> {
 			data = target.data();
 		}
 
-		Pose at(long now) {
+		Pose visualAt(long now) {
 			double fraction = Math.min(1.0, elapsed(now, began) / durationNanos);
 			double eased = fraction * fraction * (3.0 - 2.0 * fraction);
 			return new Pose(lerp(from.x(), to.x(), eased), lerp(from.y(), to.y(), eased),
 				lerp(from.scale(), to.scale(), eased), lerp(from.alpha(), to.alpha(), eased));
+		}
+
+		Pose at(long now) {
+			Pose visual = visualAt(now);
+			if (ray == null) return visual;
+			double radius = radiusAt(now);
+			return new Pose(ray.originX() + ray.unitX() * radius, ray.originY() + ray.unitY() * radius,
+				visual.scale(), visual.alpha());
+		}
+
+		double radiusAt(long now) {
+			double fraction = Math.min(1.0, elapsed(now, radiusBegan) / durationNanos);
+			return lerp(radiusFrom, radiusTo, fraction * fraction * (3.0 - 2.0 * fraction));
+		}
+
+		void retarget(Target<K, V> target, long now, boolean reduceMotion) {
+			Ray nextRay = target.ray();
+			if (nextRay != null) {
+				double current = ray == null ? distance(at(now).x(), at(now).y(), nextRay) : radiusAt(now);
+				double next = distance(target.x(), target.y(), nextRay);
+				if (ray == null) {
+					Pose displayed = at(now);
+					from = new Pose(0.0, 0.0, displayed.scale(), displayed.alpha());
+					to = from;
+				}
+				if (reduceMotion || ray == null || next != radiusTo) {
+					// Continuous moving targets must make time-based progress even when
+					// every frame retargets a finite smoothstep near its zero slope.
+					double fraction = 1.0 - Math.exp(-3.0 * Math.min(1.0, elapsed(now, radiusSampled) / durationNanos));
+					radiusFrom = reduceMotion ? next : lerp(current, next, fraction);
+					radiusTo = next;
+					radiusBegan = now;
+				}
+				radiusSampled = now;
+				ray = nextRay;
+			} else if (ray != null) {
+				from = at(now);
+				to = from;
+				began = now;
+				ray = null;
+			}
+			retarget(pose(target), now, reduceMotion);
+			updateData(target);
+		}
+
+		void exit(long now, boolean reduceMotion) {
+			// Detach the last actual pose, not an old target or a live pointer ray.
+			if (ray != null) {
+				from = at(now);
+				to = from;
+				began = now;
+				ray = null;
+			}
+			retarget(new Pose(entryX, entryY, to.scale() * appearanceScale, 0.0), now, reduceMotion);
+			present = false;
 		}
 
 		void retarget(Pose next, long now, boolean reduceMotion) {
@@ -75,7 +157,7 @@ public final class SpatialOverlayTransitions<K, V> {
 				to = next;
 				began = now;
 			} else if (!next.equals(to)) {
-				from = at(now);
+				from = visualAt(now);
 				to = next;
 				began = now;
 			}
@@ -123,9 +205,7 @@ public final class SpatialOverlayTransitions<K, V> {
 		for (Map.Entry<K, Node> entry : nodes.entrySet()) {
 			Node node = entry.getValue();
 			if (!visible.contains(entry.getKey()) && node.present) {
-				node.retarget(new Pose(node.entryX, node.entryY, node.to.scale() * appearanceScale, 0.0), now,
-					reduceMotion);
-				node.present = false;
+				node.exit(now, reduceMotion);
 			}
 		}
 		if (reduceMotion) {
@@ -147,8 +227,7 @@ public final class SpatialOverlayTransitions<K, V> {
 				node = new Node(target, now, reduceMotion);
 				nodes.put(target.key(), node);
 			} else {
-				node.retarget(pose(target), now, reduceMotion);
-				node.updateData(target);
+				node.retarget(target, now, reduceMotion);
 				node.present = true;
 			}
 		}
@@ -184,7 +263,12 @@ public final class SpatialOverlayTransitions<K, V> {
 	}
 
 	private static <K, V> Pose pose(Target<K, V> target) {
-		return new Pose(target.x(), target.y(), target.scale(), target.alpha());
+		return new Pose(target.ray() == null ? target.x() : 0.0, target.ray() == null ? target.y() : 0.0,
+			target.scale(), target.alpha());
+	}
+
+	private static double distance(double x, double y, Ray ray) {
+		return Math.hypot(x - ray.originX(), y - ray.originY());
 	}
 
 	private static double elapsed(long now, long began) {

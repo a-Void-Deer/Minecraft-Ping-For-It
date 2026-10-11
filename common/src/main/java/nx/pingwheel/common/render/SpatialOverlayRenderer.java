@@ -127,8 +127,9 @@ public final class SpatialOverlayRenderer {
 	 * painted extent. With the selected 1.12 and ordinary 0.95 node scales,
 	 * {@code 2.07 / 2 * 0.68 = 0.7038} stays below the 0.7071 minimum of
 	 * {@code max(|dx|, |dy|)} between adjacent equal-sector nodes, so node
-	 * frames cannot overlap at any menu rotation; the selected node's outward
-	 * push adds further margin. Constrained layout also reserves local pixels
+	 * resting frames cannot overlap at any menu rotation. A selected follower
+	 * leaves that fixed orbit and has no sibling-separation guarantee.
+	 * Constrained layout also reserves local pixels
 	 * for frame rounding and the disabled dashed border's inclusive endpoints.
 	 */
 	static final double PRECISE_NODE_EXTENT_FRACTION = 0.68;
@@ -240,6 +241,8 @@ public final class SpatialOverlayRenderer {
 	record VisualKey(String kind, String owner, String entry) {}
 	sealed interface Paint permits NodePaint, PanelPaint, RowPaint, HeaderPaint, FooterPaint, ChromePaint,
 		SectorPaint, GuidePaint {}
+	/** Current menu origin and frozen circle boundary for the active follower's connector. */
+	record Follower(double originX, double originY, double deadzone) {}
 	/**
 	 * One node's paint payload. {@code targetDetail} is the caller-resolved
 	 * external name preview, or {@code null} for a title-only node. The menu's shared
@@ -247,7 +250,12 @@ public final class SpatialOverlayRenderer {
 	 * an infinite extent keeps ordinary menus unconstrained.
 	 */
 	record NodePaint(SpatialController.ChoiceView choice, Component label, Component targetDetail,
-		boolean selected, double hoverProgress, double maxExtent) implements Paint {
+		boolean selected, double hoverProgress, double maxExtent, Follower follower) implements Paint {
+
+		NodePaint(SpatialController.ChoiceView choice, Component label, Component targetDetail,
+			boolean selected, double hoverProgress, double maxExtent) {
+			this(choice, label, targetDetail, selected, hoverProgress, maxExtent, null);
+		}
 
 		NodePaint(SpatialController.ChoiceView choice, Component label, Component targetDetail,
 			boolean selected, double hoverProgress) {
@@ -270,7 +278,9 @@ public final class SpatialOverlayRenderer {
 		implements Paint {}
 	record FooterPaint(double width, double height, boolean backLeft,
 		SpatialInventoryView.BackAffordance back) implements Paint {}
-	record ChromePaint(SpatialController.Snapshot snapshot) implements Paint {}
+	record ChromePaint(SpatialController.Snapshot snapshot, boolean pointerHidden) implements Paint {
+		ChromePaint(SpatialController.Snapshot snapshot) { this(snapshot, false); }
+	}
 	record SectorPaint(SpatialController.ChoiceView choice, double radius) implements Paint {}
 	/** One straight guide stroke relative to its menu origin. */
 	record GuideLine(double x1, double y1, double x2, double y2) {}
@@ -650,16 +660,35 @@ public final class SpatialOverlayRenderer {
 			Function<SpatialController.ChoiceView, Component> details, Style style, long nowNanos,
 			SpatialController.Viewport viewport) {
 			paintedChoiceIds = Set.of();
-			if (graphics == null || style == null) {
-				return RowLayout.NONE;
-			}
+			if (graphics == null || style == null) return RowLayout.NONE;
 			Font font = font();
-			if (font == null) {
-				return RowLayout.NONE;
-			}
+			if (font == null) return RowLayout.NONE;
+			return drawFrame(radial, inventory, labels, details, style, nowNanos, viewport,
+				graphics.guiWidth(), graphics.guiHeight(), new FramePainter() {
+					public int lineHeight() { return font.lineHeight; }
+					public int width(FormattedText text) { return font.width(text); }
+					public StringSplitter splitter() { return font.getSplitter(); }
+					public boolean paint(SpatialOverlayTransitions.State<VisualKey, Paint> state,
+						NodeLayout layout, Style preference) {
+						SpatialOverlayRenderer.paint(graphics, font, state, preference, layout);
+						return true;
+					}
+					public void connector(GuideLine stroke, double alpha) {
+						line(graphics, stroke.x1(), stroke.y1(), stroke.x2(), stroke.y2(),
+							withAlpha(GUIDE_COLOR, alpha), BORDER_THICKNESS);
+					}
+				});
+		}
+
+		/** Headless production frame seam; paint completion is the sole acknowledgement gate. */
+		RowLayout drawFrame(SpatialController.Snapshot radial, SpatialInventoryView inventory,
+			Function<SpatialController.ChoiceView, Component> labels,
+			Function<SpatialController.ChoiceView, Component> details, Style style, long nowNanos,
+			SpatialController.Viewport viewport, double width, double height, FramePainter painter) {
+			paintedChoiceIds = Set.of();
 			List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets = new ArrayList<>();
-			double guiWidth = viewport == null ? graphics.guiWidth() : viewport.width();
-			double guiHeight = viewport == null ? graphics.guiHeight() : viewport.height();
+			double guiWidth = viewport == null ? width : viewport.width();
+			double guiHeight = viewport == null ? height : viewport.height();
 			double centerX = guiWidth / 2.0;
 			double centerY = guiHeight / 2.0;
 			SpatialController.Point origin = activeOrigin(radial);
@@ -668,10 +697,10 @@ public final class SpatialOverlayRenderer {
 			double viewY = viewport == null ? viewOffset.y() : viewport.viewY();
 			if (radial != null && radial.active()) {
 				addRadial(targets, radial, labels == null ? TRANSLATION_KEY_LABELS : labels, details,
-					centerX, centerY, orbit(graphics), style.rootDistance(), style.submenuRadiusScale());
+					centerX, centerY, orbitFor(Math.min(guiWidth, guiHeight)), style.rootDistance(), style.submenuRadiusScale());
 			}
 			if (inventory != null && inventory.open()) {
-				addInventory(targets, inventory, font, style, guiWidth, guiHeight);
+				addInventory(targets, inventory, painter.lineHeight(), style, guiWidth, guiHeight);
 			}
 			List<SpatialOverlayTransitions.State<VisualKey, Paint>> states =
 				transitions.update(targets, nowNanos, style.reduceMotion());
@@ -683,44 +712,54 @@ public final class SpatialOverlayRenderer {
 			RowLayout selected = RowLayout.NONE;
 			Set<String> painted = new HashSet<>();
 			String activeMenu = origin == null ? null : radial.menus().getLast().menuId();
-			// Sector backdrops and replacement panels may be admitted after
-			// surviving rows, so rank every layer explicitly: radial backdrops,
-			// centre guides, inventory panels, then rows, nodes, and chrome. The
-			// single view translation wraps every layer so the whole pattern
-			// stays rigid.
-			var pose = graphics.pose();
-			pose.pushPose();
-			try {
-				pose.translate(viewX, viewY, 0.0);
-				for (SpatialOverlayTransitions.State<VisualKey, Paint> state : states.stream()
-					.sorted(Comparator.comparingInt(value -> paintRank(value.data()))).toList()) {
-					if (state.present() && state.data() instanceof RowPaint row && row.selected()) {
-						selected = new RowLayout(state.y() + viewY, row.width() * state.scale());
-					}
-					if (renders(state.data(), state.alpha(), style)) {
-						// Chrome follows the interaction projection, not a stale interpolated
-						// GUI center during resize. Node appearance transitions remain visual.
-						var paintState = alignChrome(state, viewport);
-						if (paintState != state) {
-							// Chrome rounds the final displayed coordinates, not C+P before
-							// a fractional pan. All its geometry still uses the same rigid V.
-							pose.pushPose();
-							try {
-								pose.translate(-viewX, -viewY, 0.0);
-								paint(graphics, font, paintState, style);
-							} finally { pose.popPose(); }
-						} else paint(graphics, font, paintState, style);
-						if (state.data() instanceof NodePaint node && acknowledgesNodePaint(state.present(),
-							state.key().owner().equals(activeMenu), state.alpha(), style))
-							painted.add(node.choice().id());
+			boolean hidePointer = false;
+			for (var state : states.stream().sorted(Comparator.comparingInt(value -> paintRank(value.data()))).toList()) {
+				var displayed = new SpatialOverlayTransitions.State<>(state.key(), state.x() + viewX, state.y() + viewY,
+					state.scale(), state.alpha(), state.present(), state.data());
+				if (state.present() && state.data() instanceof GuidePaint) {
+					// A guide is the actual frozen interaction boundary, not a moving
+					// node. Fade it at its current menu origin without scaling its radius.
+					var menu = radial.menus().stream().filter(value -> value.menuId().equals(state.key().owner())).findFirst().orElseThrow();
+					displayed = new SpatialOverlayTransitions.State<>(state.key(), centerX + menu.origin().x() + viewX,
+						centerY + menu.origin().y() + viewY, 1.0, state.alpha(), true, state.data());
+				}
+				if (state.data() instanceof ChromePaint chrome) {
+					displayed = alignChrome(displayed, viewport);
+					displayed = new SpatialOverlayTransitions.State<>(state.key(),
+						viewport == null && state.present() ? centerX + viewX : displayed.x(),
+						viewport == null && state.present() ? centerY + viewY : displayed.y(),
+						state.scale(), state.alpha(), state.present(), new ChromePaint(chrome.snapshot(), hidePointer));
+				}
+				if (state.present() && state.data() instanceof RowPaint row && row.selected())
+					selected = new RowLayout(displayed.y(), row.width() * state.scale());
+				if (!renders(state.data(), state.alpha(), style)) continue;
+				NodeLayout layout = state.data() instanceof NodePaint node
+					? nodeLayout(node, painter::width, painter.lineHeight(), style, painter.splitter()) : null;
+				if (!painter.paint(displayed, layout, style)) continue;
+				if (state.data() instanceof NodePaint node && acknowledgesNodePaint(state.present(),
+					state.key().owner().equals(activeMenu), state.alpha(), style)) {
+					painted.add(node.choice().id());
+					if (node.follower() != null) {
+						hidePointer = true;
+						GuideLine stroke = followerConnector(displayed, layout, viewX, viewY);
+						if (stroke != null) painter.connector(stroke, state.alpha());
 					}
 				}
-			} finally {
-				pose.popPose();
 			}
 			paintedChoiceIds = Set.copyOf(painted);
 			return selected;
 		}
+
+		int retainedSize() { return transitions.retainedSize(); }
+	}
+
+	/** Production frame port: the same planned layout is painted and used by its connector. */
+	interface FramePainter {
+		int lineHeight();
+		int width(FormattedText text);
+		StringSplitter splitter();
+		boolean paint(SpatialOverlayTransitions.State<VisualKey, Paint> state, NodeLayout layout, Style style);
+		void connector(GuideLine line, double alpha);
 	}
 
 	static SpatialOverlayTransitions.State<VisualKey, Paint> alignChrome(
@@ -769,14 +808,58 @@ public final class SpatialOverlayRenderer {
 				add(targets, new VisualKey("sector", menu.menuId(), choice.id()),
 					menuX, menuY, 1.0, alpha, menuX, menuY,
 					new SectorPaint(choice, sectorRadius(baseRadius)));
-				add(targets, new VisualKey("node", menu.menuId(), choice.id()),
-					menuX + Math.sin(bearing) * radius, menuY - Math.cos(bearing) * radius,
-					active ? (selected ? NODE_SELECTED_SCALE : NODE_SCALE) : 0.85, alpha,
-					menuX + Math.sin(bearing) * (radius - 12.0), menuY - Math.cos(bearing) * (radius - 12.0),
-					new NodePaint(choice, labels.apply(choice),
-						details == null ? null : details.apply(choice), selected, snapshot.hoverProgress(), maxExtent));
+				boolean follows = active && selected && actionable(choice) && snapshot.pointer() != null
+					&& Math.hypot(snapshot.pointer().x() - menu.origin().x(),
+						snapshot.pointer().y() - menu.origin().y()) > deadzone;
+				double homeX = menuX + Math.sin(bearing) * radius;
+				double homeY = menuY - Math.cos(bearing) * radius;
+				NodePaint paint = new NodePaint(choice, labels.apply(choice),
+					details == null ? null : details.apply(choice), selected, snapshot.hoverProgress(), maxExtent,
+					follows ? new Follower(menuX, menuY, deadzone) : null);
+				if (follows) {
+					double dx = snapshot.pointer().x() - menu.origin().x();
+					double dy = snapshot.pointer().y() - menu.origin().y();
+					double distance = Math.hypot(dx, dy);
+					targets.add(new SpatialOverlayTransitions.Target<>(new VisualKey("follow", menu.menuId(), choice.id()),
+						centerX + snapshot.pointer().x(), centerY + snapshot.pointer().y(), NODE_SELECTED_SCALE, alpha,
+						homeX, homeY, paint, new SpatialOverlayTransitions.Ray(menuX, menuY, dx / distance, dy / distance)));
+				} else {
+					add(targets, new VisualKey("node", menu.menuId(), choice.id()), homeX, homeY,
+						active ? (selected ? NODE_SELECTED_SCALE : NODE_SCALE) : 0.85, alpha,
+						menuX + Math.sin(bearing) * (radius - 12.0), menuY - Math.cos(bearing) * (radius - 12.0), paint);
+				}
 			}
 		}
+	}
+
+	private static boolean actionable(SpatialController.ChoiceView choice) {
+		return !choice.back() && !choice.disabled() && !choice.reserved() && (choice.action() != null || choice.branch());
+	}
+
+	/** Uses the actual frame pose and its rounded local title bounds, including float GPU scale. */
+	static GuideLine followerConnector(SpatialOverlayTransitions.State<VisualKey, Paint> state,
+		NodeLayout layout, double viewX, double viewY) {
+		NodePaint node = (NodePaint) state.data();
+		Follower follower = node.follower();
+		double originX = follower.originX() + viewX;
+		double originY = follower.originY() + viewY;
+		double dx = state.x() - originX;
+		double dy = state.y() - originY;
+		double radius = Math.hypot(dx, dy);
+		if (!(radius > 0.0)) return null;
+		double ux = dx / radius;
+		double uy = dy / radius;
+		double scale = (float) state.scale();
+		// Looking back from the node centre, whichever axis reaches a frame
+		// boundary first is the near intersection with the current ray.
+		double horizontal = ux == 0.0 ? Double.POSITIVE_INFINITY
+			: (ux > 0.0 ? -layout.left() : layout.right()) * scale / Math.abs(ux);
+		double vertical = uy == 0.0 ? Double.POSITIVE_INFINITY
+			: (uy > 0.0 ? -layout.top() : layout.bottom()) * scale / Math.abs(uy);
+		double near = radius - Math.min(horizontal, vertical);
+		if (near <= follower.deadzone()) return null; // the title covers this segment
+		return new GuideLine(originX + ux * follower.deadzone(), originY + uy * follower.deadzone(),
+			originX + ux * near, originY + uy * near);
 	}
 
 	/**
@@ -906,12 +989,13 @@ public final class SpatialOverlayRenderer {
 		if (data instanceof SectorPaint) return 0;
 		if (data instanceof GuidePaint) return 1;
 		if (data instanceof PanelPaint) return 2;
+		if (data instanceof ChromePaint) return 4; // current-frame successful nodes decide pointer visibility
 		return 3;
 	}
 
 	private static void addInventory(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
-		SpatialInventoryView view, Font font, Style style, double guiWidth, double guiHeight) {
-		SpatialInventoryLayout layout = inventoryLayout(view, guiWidth, guiHeight, font.lineHeight, style);
+		SpatialInventoryView view, int lineHeight, Style style, double guiWidth, double guiHeight) {
+		SpatialInventoryLayout layout = inventoryLayout(view, guiWidth, guiHeight, lineHeight, style);
 		double rowHeight = layout.rowHeight();
 		double headerHeight = layout.headerHeight();
 		double footerHeight = layout.footerHeight();
@@ -962,13 +1046,13 @@ public final class SpatialOverlayRenderer {
 	}
 
 	private static void paint(GuiGraphics graphics, Font font,
-		SpatialOverlayTransitions.State<VisualKey, Paint> state, Style style) {
+		SpatialOverlayTransitions.State<VisualKey, Paint> state, Style style, NodeLayout layout) {
 		double alpha = layerAlpha(state.data(), state.alpha(), style);
 		if (alpha <= 0.0) {
 			return;
 		}
 		if (state.data() instanceof NodePaint node) {
-			drawNode(graphics, font, node, state, style, alpha);
+			drawNode(graphics, font, node, state, alpha, layout);
 			return;
 		}
 		if (state.data() instanceof SectorPaint sector) {
@@ -984,7 +1068,7 @@ public final class SpatialOverlayRenderer {
 				drawTrail(graphics, chrome.snapshot().trail(), state.x(), state.y(), alpha);
 			}
 			drawMenuLinks(graphics, chrome.snapshot().menus(), state.x(), state.y(), alpha);
-			drawPointer(graphics, chrome.snapshot().pointer(), state.x(), state.y(), alpha);
+			if (!chrome.pointerHidden()) drawPointer(graphics, chrome.snapshot().pointer(), state.x(), state.y(), alpha);
 			return;
 		}
 		var pose = graphics.pose();
@@ -1125,13 +1209,12 @@ public final class SpatialOverlayRenderer {
 		Font font,
 		NodePaint node,
 		SpatialOverlayTransitions.State<VisualKey, Paint> state,
-		Style style,
-		double alpha
+		double alpha,
+		NodeLayout layout
 	) {
 		SpatialController.ChoiceView choice = node.choice();
 		boolean selected = node.selected();
 		Component label = nodeLabel(choice, node.label());
-		NodeLayout layout = nodeLayout(node, font::width, font.lineHeight, style, font.getSplitter());
 		int left = layout.left();
 		int top = layout.top();
 		int right = layout.right();
@@ -1556,10 +1639,6 @@ public final class SpatialOverlayRenderer {
 	private static Font font() {
 		Minecraft game = Minecraft.getInstance();
 		return game == null ? null : game.font;
-	}
-
-	private static double orbit(GuiGraphics guiGraphics) {
-		return orbitFor(Math.min(guiGraphics.guiWidth(), guiGraphics.guiHeight()));
 	}
 
 	/** Viewport-derived child orbit, clamped to the half-scale window. */

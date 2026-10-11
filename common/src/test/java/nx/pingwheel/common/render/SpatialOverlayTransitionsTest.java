@@ -192,4 +192,29 @@ class SpatialOverlayTransitionsTest {
 		assertEquals(0.0, fresh.alpha());
 		assertEquals(0.4, only(model.update(List.of(target("new")), 500L, false)).alpha(), 1.0e-12);
 	}
+
+	private static SpatialOverlayTransitions.Target<String, String> rayTarget(double radius, double ux, double uy) {
+		return new SpatialOverlayTransitions.Target<>("follow", 10 + radius * ux, 20 + radius * uy, 2, 0.8,
+			10 + 30 * ux, 20 + 30 * uy, "follow", new SpatialOverlayTransitions.Ray(10, 20, ux, uy));
+	}
+
+	@Test
+	void radialAnimationSharesFiniteTimingWhileDirectionAlwaysUsesTheCurrentRay() {
+		var sparse = model(8); var dense = model(8);
+		var target = rayTarget(100, 1, 0);
+		sparse.update(List.of(target), 0, false); dense.update(List.of(target), 0, false);
+		for (long time = 50; time < 500; time += 50) dense.update(List.of(target), time, false);
+		assertEquals(only(sparse.update(List.of(target), 500, false)), only(dense.update(List.of(target), 500, false)));
+		var turned = only(dense.update(List.of(rayTarget(100, 0, -1)), 500, false));
+		assertEquals(10, turned.x()); assertEquals(-45, turned.y(), 1e-12);
+		assertEquals(0.4, turned.alpha(), 1e-12, "turn does not restart fade");
+		assertEquals(turned, only(dense.update(List.of(rayTarget(100, 0, -1)), 100, false)), "rewind cannot rewind radial easing");
+		var settled = only(dense.update(List.of(rayTarget(100, 0, -1)), 1000, false));
+		assertEquals(10, settled.x()); assertEquals(-80, settled.y()); assertEquals(0.8, settled.alpha());
+		var exiting = only(dense.update(List.of(), 1001, false));
+		assertFalse(exiting.present()); assertEquals(settled.x(), exiting.x()); assertEquals(settled.y(), exiting.y());
+		var resumed = only(dense.update(List.of(rayTarget(100, -1, 0)), 1001, false));
+		assertEquals(-90, resumed.x()); assertEquals(20, resumed.y()); assertTrue(resumed.present());
+		assertEquals(1, dense.retainedSize());
+	}
 }

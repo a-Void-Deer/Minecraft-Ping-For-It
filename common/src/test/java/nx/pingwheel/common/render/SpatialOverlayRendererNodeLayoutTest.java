@@ -83,7 +83,7 @@ class SpatialOverlayRendererNodeLayoutTest {
 	}
 
 	@Test
-	void mixedAndFullyAvailableRotatedMenusKeepActualPaintedFramesSeparated() {
+	void mixedAndFullyAvailableRotatedMenusKeepRestingPaintedFramesSeparated() {
 		double[][] viewports = {{400.0, 240.0}, {480.0, 270.0}, {960.0, 540.0}};
 		int[][] preferences = {{100, 100}, {400, 100}, {100, 500}, {1000, 500}};
 		for (double[] viewport : viewports) {
@@ -363,6 +363,7 @@ class SpatialOverlayRendererNodeLayoutTest {
 				assertEquals(6, nodes.size());
 				assertFramesSeparated(nodes, style, "default mixed six slots");
 				for (int a = 0; a < nodes.size(); a++) {
+					if (((SpatialOverlayRenderer.NodePaint) nodes.get(a).data()).follower() != null) continue;
 					var first = layout((SpatialOverlayRenderer.NodePaint) nodes.get(a).data(), style);
 					if (first.detail() == null) continue;
 					assertPreviewOutside(first);
@@ -370,6 +371,7 @@ class SpatialOverlayRendererNodeLayoutTest {
 					assertTrue(first.detail().width() <= ((SpatialOverlayRenderer.NodePaint) nodes.get(a).data()).maxExtent() + 1.0,
 						"wrapping uses the full shared cell, not an unrelated viewport or title limit");
 					for (int b = a + 1; b < nodes.size(); b++) {
+						if (((SpatialOverlayRenderer.NodePaint) nodes.get(b).data()).follower() != null) continue;
 						if (layout((SpatialOverlayRenderer.NodePaint) nodes.get(b).data(), style).detail() != null) {
 							assertFalse(overlap(detailBounds(nodes.get(a), style), detailBounds(nodes.get(b), style)),
 								"default external previews must not collide: " + a + "/" + b + ", selected " + selected);
@@ -807,9 +809,11 @@ class SpatialOverlayRendererNodeLayoutTest {
 		List<SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>> nodes,
 		SpatialOverlayRenderer.Style style, String scenario) {
 		for (int a = 0; a < nodes.size(); a++) {
+			if (((SpatialOverlayRenderer.NodePaint) nodes.get(a).data()).follower() != null) continue;
 			for (Bounds preview : detailLineBounds(nodes.get(a), style)) {
 				for (int b = 0; b < nodes.size(); b++) {
 					if (a == b) continue;
+					if (((SpatialOverlayRenderer.NodePaint) nodes.get(b).data()).follower() != null) continue;
 					assertFalse(overlap(preview, bounds(nodes.get(b), style)), scenario + ", preview/frame pair " + a + "/" + b);
 					for (Bounds sibling : detailLineBounds(nodes.get(b), style)) {
 						assertFalse(overlap(preview, sibling), scenario + ", preview/preview pair " + a + "/" + b);
@@ -835,8 +839,11 @@ class SpatialOverlayRendererNodeLayoutTest {
 		List<SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>> nodes,
 		SpatialOverlayRenderer.Style style, String scenario) {
 		for (int a = 0; a < nodes.size(); a++) {
+			// Following nodes intentionally leave the collision-free resting orbit.
+			if (((SpatialOverlayRenderer.NodePaint) nodes.get(a).data()).follower() != null) continue;
 			Bounds first = bounds(nodes.get(a), style);
 			for (int b = a + 1; b < nodes.size(); b++) {
+				if (((SpatialOverlayRenderer.NodePaint) nodes.get(b).data()).follower() != null) continue;
 				Bounds second = bounds(nodes.get(b), style);
 				assertFalse(overlap(first, second), scenario + ", overlapping pair " + nodes.get(a).key().entry()
 					+ "/" + nodes.get(b).key().entry() + ": " + first + " / " + second);

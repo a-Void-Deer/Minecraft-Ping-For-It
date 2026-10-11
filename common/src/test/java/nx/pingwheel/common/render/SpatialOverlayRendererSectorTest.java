@@ -92,7 +92,7 @@ class SpatialOverlayRendererSectorTest {
 		assertTrue(panel < node);
 		assertTrue(sector < node);
 		assertTrue(sector < chrome);
-		assertEquals(node, chrome);
+		assertTrue(node < chrome, "current-frame node paint must complete before pointer visibility is decided");
 	}
 
 	@Test
