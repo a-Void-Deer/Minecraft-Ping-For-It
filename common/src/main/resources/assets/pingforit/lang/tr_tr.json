@@ -392,7 +392,7 @@
   ,"presentation.pingforit.content.group.stress": "Yük..."
   ,"settings.pingforit.spatial_selector.trail_length": "İz uzunluğu: %s"
   ,"settings.pingforit.spatial_selector.trail_length.tooltip": "İşaretçi ve seçili seçeneğin ortak izinde saklanan en fazla nokta sayısı; daha fazla nokta daha uzun bir iz çizebilir."
-  ,"settings.pingforit.spatial_selector.trail_opacity": "İz saydamlığı: %s"
-  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Yalnızca işaretçi ve seçili seçeneğin ortak izinin saydamlığı; menüyü, seçenekleri, kılavuzları veya bağlayıcıyı karartmaz."
+  ,"settings.pingforit.spatial_selector.trail_opacity": "İz opaklığı: %s"
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Yalnızca işaretçi ve seçili seçeneğin ortak izinin opaklığı; menüyü, seçenekleri, kılavuzları veya bağlayıcıyı karartmaz."
   ,"unit.pingforit.points": "%s nokta"
 }
