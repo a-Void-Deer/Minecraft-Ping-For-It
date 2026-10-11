@@ -100,6 +100,34 @@ class BackHoverControllerTest {
 	}
 
 	@Test
+	void observedFocusLossDiscardsDwellWithoutReleasingHeldPopBlock() {
+		var controller = new BackHoverController();
+		controller.start(true, 300);
+		controller.update("child", true, 0, false);
+		assertTrue(controller.update("child", true, 300, false).triggerPop());
+		assertFalse(controller.update("parent", false, 350, false).triggerPop());
+		assertFalse(controller.update("parent", true, 400, false).triggerPop());
+		assertEquals(0, controller.update("parent", true, 1000, false).progress());
+		assertFalse(controller.update("parent", true, 1000, true).triggerPop(), "motion inside Back is not a leave");
+		controller.update("parent", false, 1010, true);
+		controller.update("parent", true, 1020, true);
+		assertFalse(controller.update("parent", true, 1319, false).triggerPop());
+		assertTrue(controller.update("parent", true, 1320, false).triggerPop());
+	}
+
+	@Test
+	void observedFocusLossStillDiscardsUncompletedDwell() {
+		var controller = new BackHoverController();
+		controller.start(true, 300);
+		controller.update("child", true, 0, false);
+		assertEquals(0.5, controller.update("child", true, 150, false).progress(), DELTA);
+		controller.update("child", false, 200, false);
+		controller.update("child", true, 250, false);
+		assertFalse(controller.update("child", true, 549, false).triggerPop());
+		assertTrue(controller.update("child", true, 550, false).triggerPop());
+	}
+
+	@Test
 	void switchingFocusedMenuRestartsHoldClock() {
 		BackHoverController controller = new BackHoverController();
 		controller.start(true, 600L);

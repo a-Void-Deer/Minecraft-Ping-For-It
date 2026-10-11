@@ -594,6 +594,39 @@ class SpatialSelectorSessionTest {
 	}
 
 	@Test
+	void viewportCorrectionCannotRearmHeldItemBackOnListButPhysicalLeaveCan() {
+		var session = openedList(true, new Content());
+		session.scrollRows(1, 280);
+		session.moveGui(200, 0, 290);
+		var back = current(session).choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow();
+		focus(session, back.id(), 300);
+		session.tick(550);
+		String listMenu = current(session).menuId();
+		assertTrue(listMenu.endsWith(":inventory"));
+		assertFalse(session.snapshot().inventoryView().backAffordance().focused(), "item return rebases list to its center");
+		var trail = session.snapshot().radial().trail();
+		session.tick(560);
+		session.constrainPointer(new SpatialController.Viewport(320, 240, 0, 0), 570);
+		assertTrue(session.snapshot().inventoryView().backAffordance().focused(), "projection moves the pointer to the list Back side");
+		assertEquals(trail, session.snapshot().radial().trail());
+		session.tick(580);
+		session.tick(830);
+		assertEquals(listMenu, current(session).menuId(), "synthetic list focus must not cascade to content");
+		assertEquals(0, session.snapshot().radial().hoverProgress());
+		session.constrainPointer(new SpatialController.Viewport(1200, 800, -360, 0), 840);
+		double axis = session.snapshot().radial().pointer().x();
+		session.moveGui(195, 0, 850);
+		assertFalse(session.snapshot().inventoryView().backAffordance().focused(), "effective physical leave releases the list block");
+		session.moveGui(-195, 0, 860);
+		assertEquals(axis, session.snapshot().radial().pointer().x());
+		assertTrue(session.snapshot().inventoryView().backAffordance().focused());
+		session.tick(1109);
+		assertEquals(listMenu, current(session).menuId());
+		session.tick(1110);
+		assertTrue(current(session).menuId().endsWith(":content"), "physical re-entry and full dwell pop exactly one level");
+	}
+
+	@Test
 	void inventoryEnteredLeftOfParentUsesRightBackAndLeftForward() {
 		var target = target("ordinary", "entity_block", true);
 		Content port = new Content();

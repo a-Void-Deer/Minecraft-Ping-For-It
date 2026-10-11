@@ -297,7 +297,7 @@ public final class SpatialController {
 				if (turnDegrees(outbound, inbound) >= TURN_MIN_DEGREES
 					&& distance(menu.origin, corner) >= tuning.stroke()) {
 					if (!before.back()) {
-						enterAt(before, corner, nowMillis);
+						enterAt(before, corner, nowMillis, true);
 						return;
 					}
 
@@ -325,7 +325,7 @@ public final class SpatialController {
 			menu.candidateId = null;
 		}
 
-		updateHover(nowMillis);
+		updateHover(nowMillis, true);
 	}
 
 	/**
@@ -450,9 +450,14 @@ public final class SpatialController {
 
 	/** Advances the same hover state across radial/list boundaries; pops at most once. */
 	public boolean updateExternalBack(boolean focused, long nowMillis) {
+		return updateExternalBack(focused, nowMillis, false);
+	}
+
+	/** Only a caller-confirmed effective list movement may release the held Back block. */
+	public boolean updateExternalBack(boolean focused, long nowMillis, boolean physicalMovement) {
 		if (!active || !activeMenu().surface) return false;
 		activeMenu().externalBackFocus = focused;
-		return updateHover(nowMillis);
+		return updateHover(nowMillis, physicalMovement);
 	}
 
 	/** External navigation uses the same one-level pop and fresh-stroke fence. */
@@ -598,9 +603,13 @@ public final class SpatialController {
 	}
 
 	private boolean updateHover(long nowMillis) {
+		return updateHover(nowMillis, false);
+	}
+
+	private boolean updateHover(long nowMillis, boolean physicalMovement) {
 		MenuState menu = activeMenu();
 		boolean backFocused = menu.surface ? menu.externalBackFocus : menu.focus != null && menu.focus.back();
-		Result result = hover.update(menu.menu.id() + ":alignment:" + hoverAlignment, backFocused, nowMillis);
+		Result result = hover.update(menu.menu.id() + ":alignment:" + hoverAlignment, backFocused, nowMillis, physicalMovement);
 
 		if (result.triggerPop()) {
 			hoverProgress = 0.0;
@@ -660,13 +669,17 @@ public final class SpatialController {
 	}
 
 	private void enterAt(Resolved choice, Point origin, long nowMillis) {
+		enterAt(choice, origin, nowMillis, false);
+	}
+
+	private void enterAt(Resolved choice, Point origin, long nowMillis, boolean physicalMovement) {
 		MenuState parent = activeMenu();
 		MenuState child = new MenuState(choice.children(), origin, parent.origin);
 		child.enteredAt = nowMillis;
 		child.lastMovement = nowMillis;
 		stack.add(child);
 		setFocus(nowMillis);
-		updateHover(nowMillis);
+		updateHover(nowMillis, physicalMovement);
 	}
 
 	private boolean pop(long nowMillis) {

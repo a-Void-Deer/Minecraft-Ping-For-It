@@ -84,6 +84,15 @@ public final class BackHoverController {
 	 * @param nowMillis     monotonic client timestamp for this sample
 	 */
 	public Result update(String menuId, boolean backFocused, long nowMillis) {
+		return update(menuId, backFocused, nowMillis, true);
+	}
+
+	/**
+	 * Advances observed focus and dwell independently of the held-pop block.
+	 * Only an effective physical movement may release that block on focus loss;
+	 * projection alignment and stationary timer samples must pass {@code false}.
+	 */
+	public Result update(String menuId, boolean backFocused, long nowMillis, boolean physicalMovement) {
 		Objects.requireNonNull(menuId, "menuId");
 
 		if (!active || !enabled) {
@@ -91,10 +100,10 @@ public final class BackHoverController {
 		}
 
 		if (!backFocused) {
-			// Losing the focus also releases a parent blocked by an earlier pop,
-			// so a deliberate leave/re-entry can arm the next one-level return.
+			// Observed focus loss always discards dwell, but only a deliberate
+			// physical leave releases a parent blocked by an earlier pop.
 			clearFocus();
-			blocked = false;
+			if (physicalMovement) blocked = false;
 			return INERT;
 		}
 

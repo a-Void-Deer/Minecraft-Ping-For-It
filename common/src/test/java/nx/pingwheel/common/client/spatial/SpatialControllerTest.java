@@ -130,7 +130,7 @@ class SpatialControllerTest {
 	}
 
 	@Test
-	void panCorrectionCannotCompleteBackHoverOrReleaseItsHeldFocusBlock() {
+	void panCorrectionRestartsPendingBackHoverDwell() {
 		var controller = enteredContent(true, 400, 200, 210);
 		controller.movePhysical(-50, 0, 220);
 		controller.tick(520);
@@ -143,9 +143,91 @@ class SpatialControllerTest {
 		assertEquals(2, controller.snapshot().menus().size(), "correction cannot complete the stale hover");
 		controller.tick(1020);
 		assertEquals(1, controller.snapshot().menus().size());
-		controller.constrainPointer(new SpatialController.Viewport(200, 300, 0, 0), 1030);
-		controller.tick(3000);
-		assertEquals(1, controller.snapshot().menus().size(), "alignment cannot pay the Back fresh-stroke fence");
+	}
+
+	@ParameterizedTest
+	@CsvSource({"false", "true"})
+	void resizeThenPanCannotRearmHeldBackInNonRootParent(boolean saturatedPhysicalInput) {
+		var controller = returnedToNonRootContentWithHeldBack();
+		var trail = controller.snapshot().trail();
+		controller.constrainPointer(new SpatialController.Viewport(320, 240, 100, 600), 640);
+		assertEquals(new SpatialController.Point(0, -481), controller.snapshot().pointer());
+		assertEquals("content:first", controller.snapshot().focusId(), "resize moves focus out of Back");
+		if (saturatedPhysicalInput) controller.movePhysical(0, 1000, 645);
+		controller.tick(650);
+		controller.constrainPointer(new SpatialController.Viewport(320, 240, -100, 0), 660);
+		assertEquals(new SpatialController.Point(0, -120), controller.snapshot().pointer());
+		assertEquals("content:back", controller.snapshot().focusId(), "pan moves focus back into Back");
+		assertEquals(trail, controller.snapshot().trail(), "corrections and saturated input add no travel");
+		controller.tick(670);
+		controller.tick(1070);
+		assertEquals(2, controller.snapshot().menus().size(), "projection-only leave/re-entry must not pop the non-root parent");
+		assertEquals("content", controller.snapshot().menus().getLast().menuId());
+		assertEquals(0, controller.snapshot().hoverProgress());
+	}
+
+	@Test
+	void effectivePhysicalTurnEntryOutsideBackRearmsHoverAfterCorrection() {
+		var controller = returnedToNonRootContentWithHeldBack();
+		controller.constrainPointer(new SpatialController.Viewport(320, 240, 100, 600), 640);
+		controller.tick(650);
+		controller.constrainPointer(new SpatialController.Viewport(1200, 1400, 100, 600), 690);
+		controller.movePhysical(-50, 0, 700);
+		assertEquals(3, controller.snapshot().menus().size(), "qualified physical turn enters the focused property branch");
+		assertEquals("property:leaf", controller.snapshot().focusId(), "the effective turn leaves Back focus");
+		controller.movePhysical(70, 80, 710);
+		assertEquals("property:back", controller.snapshot().focusId());
+		controller.tick(1109);
+		assertEquals(3, controller.snapshot().menus().size());
+		controller.tick(1110);
+		assertEquals(2, controller.snapshot().menus().size(), "physical turn entry must preserve normal Back rearming");
+	}
+
+	@Test
+	void effectivePhysicalLeaveAndReentryRearmsBackAfterProjectionCorrection() {
+		var controller = returnedToNonRootContentWithHeldBack();
+		controller.constrainPointer(new SpatialController.Viewport(320, 240, 100, 600), 640);
+		controller.tick(650);
+		controller.constrainPointer(new SpatialController.Viewport(320, 240, -100, 0), 660);
+		controller.movePhysical(1, 0, 670);
+		assertEquals("content:back", controller.snapshot().focusId());
+		controller.tick(1070);
+		assertEquals(2, controller.snapshot().menus().size(), "effective motion still inside Back is not a leave");
+		controller.movePhysical(90, 240, 1080);
+		assertEquals("content:second", controller.snapshot().focusId());
+		controller.movePhysical(-91, -239, 1090);
+		assertEquals("content:back", controller.snapshot().focusId());
+		controller.tick(1489);
+		assertEquals(2, controller.snapshot().menus().size(), "genuine re-entry requires the full hover dwell");
+		controller.tick(1490);
+		assertEquals(1, controller.snapshot().menus().size(), "genuine physical leave/re-entry returns exactly one level");
+	}
+
+	private static SpatialController returnedToNonRootContentWithHeldBack() {
+		var property = SpatialMenu.of("property", SpatialMenu.Choice.leaf("property:leaf", "leaf", "leaf"));
+		var content = SpatialMenu.of("content",
+			SpatialMenu.Choice.branch("content:first", "first", property),
+			SpatialMenu.Choice.branch("content:second", "second", SpatialMenu.of("second",
+				SpatialMenu.Choice.leaf("second:leaf", "leaf", "leaf"))));
+		var root = SpatialMenu.of("root", SpatialMenu.Choice.branch("content", "content", content).withSector(90, 55));
+		var controller = new SpatialController(root, new SpatialController.Tuning(10, 40, 100, true, 400));
+		controller.start(0);
+		controller.constrainPointer(new SpatialController.Viewport(1200, 1400, 0, 0), 0);
+		controller.movePhysical(100, 0, 10);
+		controller.tick(110);
+		assertEquals(new SpatialController.Point(100, 0), activeOrigin(controller));
+		controller.movePhysical(-200, -600, 120);
+		assertEquals("content:first", controller.snapshot().focusId());
+		controller.tick(220);
+		assertEquals(3, controller.snapshot().menus().size());
+		assertEquals(new SpatialController.Point(-100, -600), activeOrigin(controller));
+		controller.constrainPointer(new SpatialController.Viewport(1200, 1400, 100, 600), 220);
+		controller.movePhysical(100, 600, 230);
+		assertEquals("property:back", controller.snapshot().focusId());
+		controller.tick(630);
+		assertEquals(2, controller.snapshot().menus().size(), "first hover returns from property to content");
+		assertEquals("content:back", controller.snapshot().focusId(), "parent Back is held across the pop");
+		return controller;
 	}
 
 	private static SpatialController.Tuning tuning(long dwellMillis, boolean hoverEnabled, long hoverMillis) {

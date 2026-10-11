@@ -286,7 +286,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			InventoryGesture.Action navigation = gesture.moveGui(effective.x(), effective.y());
 			boolean backFocused = settings.hoverEnabled() && gesture.isBackSideFocused();
 			list.setBackHoverFocused(backFocused);
-			if (!radial.updateExternalBack(backFocused, nowMillis)) {
+			if (!radial.updateExternalBack(backFocused, nowMillis, true)) {
 				if (navigation == InventoryGesture.Action.BACK) radial.back(nowMillis);
 				else if (navigation == InventoryGesture.Action.FORWARD) enterItem(nowMillis);
 			}
