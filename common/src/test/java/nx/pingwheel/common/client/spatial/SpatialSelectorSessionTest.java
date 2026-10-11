@@ -52,6 +52,17 @@ class SpatialSelectorSessionTest {
 	}
 
 	@Test
+	void frozenSettingsDeadzoneReachesTheRendererReadModel() {
+		var session = session(target("ordinary", "block", true), Map.of(), false, new Content());
+		session.open(0);
+		var snapshot = session.snapshot();
+
+		assertEquals(30.0, snapshot.radial().deadzone(), 1e-12,
+			"the renderer reads the frozen nondefault radius the interaction uses");
+		assertEquals(snapshot.settings().deadzone(), snapshot.radial().deadzone(), 1e-12);
+	}
+
+	@Test
 	void panAndResizeAlignListReleaseFocusWithoutGlideTrailOrAutomaticSideNavigation() {
 		for (boolean hover : List.of(false, true)) {
 			var session = openedList(hover, new Content());

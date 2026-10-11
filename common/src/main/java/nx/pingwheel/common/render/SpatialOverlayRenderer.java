@@ -35,15 +35,19 @@ import nx.pingwheel.common.domain.PingTypeCatalog;
  * <p>Every option is square and straight: options are framed by thin
  * rectangular borders, the pointer is a straight-line crosshair, the trail is a
  * series of small squares, and the Back hover progress is a square perimeter
- * walked in four straight segments. The one curved element is a semi-transparent
- * circular-sector backdrop painted beneath the radial nodes, using each entry's
- * own bearing span; a bearing still only positions a node along a straight
- * guide line.
+ * walked in four straight segments. Two guides sample straight strokes: a
+ * semi-transparent circular-sector backdrop painted beneath the radial nodes,
+ * using each entry's own bearing span, and the centre guides at each menu's
+ * origin — one divider per true shared sector boundary, from the frozen
+ * deadzone circle to that menu's backdrop outer radius, plus the closed circle
+ * at the deadzone radius itself. A bearing still only positions a node along a
+ * straight guide line.
  *
  * <p>Wheel opacity governs only the sector underlay; target opacity governs
-	 * every text-bearing frame together with its label and external name preview. Neither preference reaches
- * the interaction chrome (pointer, guides, trail), which follows only the
- * transition fade.
+ * every text-bearing frame together with its label and external name preview.
+ * Neither preference reaches the interaction chrome (pointer, guides, trail):
+ * the centre guides follow only their menu's transition fade and dim for an
+ * ancestor menu exactly like that menu's nodes.
  *
  * <p>The controller's geometry is virtual: menu origins and the pointer are
  * relative to the gesture origin. Every point is offset by the GUI center, and
@@ -91,6 +95,11 @@ public final class SpatialOverlayRenderer {
 	static final int TRAIL_COLOR = 0x99FFFFFF;
 	static final int SECTOR_BACKGROUND = 0x26FFFFFF;
 
+	/** Fixed angular samples of the closed deadzone circle guide (chord below ~2.1 px at the largest radius). */
+	static final int GUIDE_CIRCLE_SAMPLES = 96;
+	/** Degrees of float slack accepted as one shared boundary between two neighbours. */
+	static final double SHARED_BOUNDARY_TOLERANCE_DEGREES = 1.0e-6;
+
 	static final int BORDER_THICKNESS = 1;
 	static final int ROW_HEIGHT = 12;
 	static final int LIST_WIDTH = 200;
@@ -131,6 +140,7 @@ public final class SpatialOverlayRenderer {
 	private static final long TRANSITION_NANOS = 160_000_000L;
 	private static final int TRANSITION_CAPACITY = 512;
 	private static final double APPEARANCE_SCALE = 0.92;
+	private static final double TWO_PI = Math.PI * 2.0;
 	private static final Session SHARED = new Session();
 
 	/** Main-thread scratch row; backdrop painting must not allocate per frame. */
@@ -228,7 +238,8 @@ public final class SpatialOverlayRenderer {
 	}
 
 	record VisualKey(String kind, String owner, String entry) {}
-	sealed interface Paint permits NodePaint, PanelPaint, RowPaint, HeaderPaint, FooterPaint, ChromePaint, SectorPaint {}
+	sealed interface Paint permits NodePaint, PanelPaint, RowPaint, HeaderPaint, FooterPaint, ChromePaint,
+		SectorPaint, GuidePaint {}
 	/**
 	 * One node's paint payload. {@code targetDetail} is the caller-resolved
 	 * external name preview, or {@code null} for a title-only node. The menu's shared
@@ -261,6 +272,20 @@ public final class SpatialOverlayRenderer {
 		SpatialInventoryView.BackAffordance back) implements Paint {}
 	record ChromePaint(SpatialController.Snapshot snapshot) implements Paint {}
 	record SectorPaint(SpatialController.ChoiceView choice, double radius) implements Paint {}
+	/** One straight guide stroke relative to its menu origin. */
+	record GuideLine(double x1, double y1, double x2, double y2) {}
+	/**
+	 * Straight centre guides of one radial menu: one shared-boundary divider per
+	 * adjacent pair whose end and start meet, plus the closed circle at the
+	 * frozen deadzone radius. Painted at the menu origin and following only the
+	 * menu's transition fade, never the wheel or target opacity preference.
+	 */
+	record GuidePaint(List<GuideLine> boundaries, List<GuideLine> circle) implements Paint {
+		GuidePaint {
+			boundaries = List.copyOf(boundaries);
+			circle = List.copyOf(circle);
+		}
+	}
 
 	/**
 	 * Default radial label contract: {@link SpatialController.ChoiceView#label()}
@@ -660,8 +685,9 @@ public final class SpatialOverlayRenderer {
 			String activeMenu = origin == null ? null : radial.menus().getLast().menuId();
 			// Sector backdrops and replacement panels may be admitted after
 			// surviving rows, so rank every layer explicitly: radial backdrops,
-			// inventory panels, then rows, nodes, and chrome. The single view
-			// translation wraps every layer so the whole pattern stays rigid.
+			// centre guides, inventory panels, then rows, nodes, and chrome. The
+			// single view translation wraps every layer so the whole pattern
+			// stays rigid.
 			var pose = graphics.pose();
 			pose.pushPose();
 			try {
@@ -717,17 +743,27 @@ public final class SpatialOverlayRenderer {
 		add(targets, new VisualKey("chrome", "radial", ""), centerX, centerY, 1.0, 1.0,
 			centerX, centerY, new ChromePaint(snapshot));
 		List<SpatialController.MenuView> menus = snapshot.menus();
+		double deadzone = snapshot.deadzone();
 		for (int i = 0; i < menus.size(); i++) {
 			SpatialController.MenuView menu = menus.get(i);
 			boolean active = i == menus.size() - 1;
 			double menuX = centerX + menu.origin().x();
 			double menuY = centerY + menu.origin().y();
+			double baseRadius = nodeRadius(i, orbit, rootDistance, submenuRadiusScale, false);
+			if (deadzone > 0.0 && !menu.choices().isEmpty()) {
+				// Centre guides are chrome for their own menu: only the menu's
+				// transition fade dims them, and an ancestor menu dims like its
+				// nodes. Their shapes never depend on focus, selection or release.
+				add(targets, new VisualKey("guide", menu.menuId(), ""), menuX, menuY, 1.0,
+					nodeAlpha(active, false, false), menuX, menuY,
+					new GuidePaint(menuBoundaries(menu.choices(), deadzone, sectorRadius(baseRadius)),
+						circleSegments(deadzone)));
+			}
 			double maxExtent = menu.choices().stream().anyMatch(choice -> choice.id().startsWith("precise:"))
 				? preciseNodeExtentBudget(orbit, submenuRadiusScale) : Double.POSITIVE_INFINITY;
 			for (SpatialController.ChoiceView choice : menu.choices()) {
 				double bearing = Math.toRadians(choice.startDegrees() + choice.spanDegrees() / 2.0);
 				boolean selected = active && choice.id().equals(menu.focusId());
-				double baseRadius = nodeRadius(i, orbit, rootDistance, submenuRadiusScale, false);
 				double radius = baseRadius + (selected ? ORBIT_SELECTED_PUSH : 0.0);
 				double alpha = nodeAlpha(active, selected, choice.disabled() || choice.reserved());
 				add(targets, new VisualKey("sector", menu.menuId(), choice.id()),
@@ -765,12 +801,12 @@ public final class SpatialOverlayRenderer {
 	/**
 	 * Layer alpha for one transition state: the sector underlay follows wheel
 	 * opacity, text-bearing frames follow target opacity, and the interaction
-	 * chrome follows only the transition fade so neither preference can hide
-	 * the pointer or its guides.
+	 * chrome — the pointer, links, trail and the centre guides — follows only
+	 * the transition fade so neither preference can hide them.
 	 */
 	static double layerAlpha(Object data, double stateAlpha, Style style) {
 		if (data instanceof SectorPaint) return backdropAlpha(stateAlpha, style);
-		if (data instanceof ChromePaint) return stateAlpha;
+		if (data instanceof GuidePaint || data instanceof ChromePaint) return stateAlpha;
 		return targetAlpha(stateAlpha, style);
 	}
 
@@ -805,11 +841,72 @@ public final class SpatialOverlayRenderer {
 		return nodeRadius + SECTOR_PADDING;
 	}
 
-	/** Radial sector backdrops first, then inventory panels, then every node/chrome layer. */
+	/**
+	 * One boundary divider per adjacent choice pair whose end and start meet at
+	 * the same bearing, drawn from {@code innerRadius} to {@code outerRadius}
+	 * relative to the menu origin. A menu with fewer than two choices has no
+	 * adjacent pair, so a single full disc never gains a phantom divider, and a
+	 * gap between neighbours never gains a line either. Each shared bearing is
+	 * emitted exactly once, including the pair that wraps past bearing 0.
+	 */
+	static List<GuideLine> menuBoundaries(List<SpatialController.ChoiceView> choices,
+		double innerRadius, double outerRadius) {
+		if (choices.size() < 2 || !(innerRadius > 0.0) || !(outerRadius > innerRadius)) {
+			return List.of();
+		}
+		List<GuideLine> boundaries = new ArrayList<>(choices.size());
+		for (int i = 0; i < choices.size(); i++) {
+			SpatialController.ChoiceView choice = choices.get(i);
+			SpatialController.ChoiceView previous = choices.get((i + choices.size() - 1) % choices.size());
+			double start = normalizeDegrees(choice.startDegrees());
+			double previousEnd = normalizeDegrees(previous.startDegrees() + previous.spanDegrees());
+			if (angularDistance(start, previousEnd) > SHARED_BOUNDARY_TOLERANCE_DEGREES) {
+				continue;
+			}
+			double radians = Math.toRadians(start);
+			double sine = Math.sin(radians);
+			double cosine = -Math.cos(radians);
+			boundaries.add(new GuideLine(sine * innerRadius, cosine * innerRadius,
+				sine * outerRadius, cosine * outerRadius));
+		}
+		return List.copyOf(boundaries);
+	}
+
+	/**
+	 * Closed polyline of the deadzone circle around the menu origin, starting
+	 * straight up (bearing 0) and walking clockwise. The last segment returns
+	 * exactly to the first vertex; a non-positive or non-finite radius yields no
+	 * segments.
+	 */
+	static List<GuideLine> circleSegments(double radius) {
+		if (!(radius > 0.0) || !Double.isFinite(radius)) {
+			return List.of();
+		}
+		List<GuideLine> segments = new ArrayList<>(GUIDE_CIRCLE_SAMPLES);
+		for (int i = 0; i < GUIDE_CIRCLE_SAMPLES; i++) {
+			double startRadians = TWO_PI * i / GUIDE_CIRCLE_SAMPLES;
+			double endRadians = i + 1 == GUIDE_CIRCLE_SAMPLES ? 0.0 : TWO_PI * (i + 1) / GUIDE_CIRCLE_SAMPLES;
+			segments.add(new GuideLine(Math.sin(startRadians) * radius, -Math.cos(startRadians) * radius,
+				Math.sin(endRadians) * radius, -Math.cos(endRadians) * radius));
+		}
+		return List.copyOf(segments);
+	}
+
+	private static double normalizeDegrees(double degrees) {
+		return ((degrees % 360.0) + 360.0) % 360.0;
+	}
+
+	private static double angularDistance(double first, double second) {
+		double difference = Math.abs(first - second) % 360.0;
+		return Math.min(difference, 360.0 - difference);
+	}
+
+	/** Radial sector backdrops first, then centre guides, then inventory panels, then nodes/chrome. */
 	static int paintRank(Object data) {
 		if (data instanceof SectorPaint) return 0;
-		if (data instanceof PanelPaint) return 1;
-		return 2;
+		if (data instanceof GuidePaint) return 1;
+		if (data instanceof PanelPaint) return 2;
+		return 3;
 	}
 
 	private static void addInventory(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
@@ -876,6 +973,10 @@ public final class SpatialOverlayRenderer {
 		}
 		if (state.data() instanceof SectorPaint sector) {
 			drawSector(graphics, sector, state, alpha);
+			return;
+		}
+		if (state.data() instanceof GuidePaint guide) {
+			drawGuides(graphics, guide, state, alpha);
 			return;
 		}
 		if (state.data() instanceof ChromePaint chrome) {
@@ -1141,6 +1242,33 @@ public final class SpatialOverlayRenderer {
 			pose.translate(state.x(), state.y(), 0.0);
 			pose.scale((float) state.scale(), (float) state.scale(), 1.0f);
 			fillSector(graphics, sector.radius(), sector.choice().startDegrees(), sector.choice().spanDegrees(), color);
+		} finally {
+			pose.popPose();
+		}
+	}
+
+	/**
+	 * Paints one menu's centre guides as straight one-pixel strokes at the
+	 * menu's own origin, under the same rigid view translation as its backdrop.
+	 * The shared guide grey is already combined with the transition-fade alpha.
+	 */
+	private static void drawGuides(GuiGraphics graphics, GuidePaint guide,
+		SpatialOverlayTransitions.State<VisualKey, Paint> state, double alpha) {
+		int color = withAlpha(GUIDE_COLOR, alpha);
+		if ((color >>> 24) == 0) {
+			return;
+		}
+		var pose = graphics.pose();
+		pose.pushPose();
+		try {
+			pose.translate(state.x(), state.y(), 0.0);
+			pose.scale((float) state.scale(), (float) state.scale(), 1.0f);
+			for (GuideLine boundary : guide.boundaries()) {
+				line(graphics, boundary.x1(), boundary.y1(), boundary.x2(), boundary.y2(), color, BORDER_THICKNESS);
+			}
+			for (GuideLine segment : guide.circle()) {
+				line(graphics, segment.x1(), segment.y1(), segment.x2(), segment.y2(), color, BORDER_THICKNESS);
+			}
 		} finally {
 			pose.popPose();
 		}

@@ -148,15 +148,28 @@ public final class SpatialController {
 		List<ChoiceView> choices
 	) {}
 
-	/** Immutable read model for the renderer. */
+	/**
+	 * Immutable read model for the renderer. {@code deadzone} is the frozen
+	 * session's centre radius in GUI pixels, exposed so the renderer can draw
+	 * the matching deadzone circle and its shared sector boundaries; {@code 0}
+	 * means the caller supplied no radius and no centre guides are drawn.
+	 */
 	public record Snapshot(
 		boolean active,
 		Point pointer,
 		List<Point> trail,
 		String focusId,
 		List<MenuView> menus,
-		double hoverProgress
-	) {}
+		double hoverProgress,
+		double deadzone
+	) {
+
+		/** Compatibility form for callers that predate the exposed frozen deadzone. */
+		public Snapshot(boolean active, Point pointer, List<Point> trail, String focusId,
+			List<MenuView> menus, double hoverProgress) {
+			this(active, pointer, trail, focusId, menus, hoverProgress, 0.0);
+		}
+	}
 
 	private SpatialMenu root;
 	private final Tuning tuning;
@@ -492,7 +505,7 @@ public final class SpatialController {
 	/** The renderer read model for the current frame. */
 	public Snapshot snapshot() {
 		if (!active) {
-			return new Snapshot(false, pointer, List.of(), null, List.of(), 0.0);
+			return new Snapshot(false, pointer, List.of(), null, List.of(), 0.0, tuning.deadzone());
 		}
 
 		List<MenuView> menus = new ArrayList<>();
@@ -521,7 +534,8 @@ public final class SpatialController {
 		}
 
 		String focusId = menus.get(menus.size() - 1).focusId();
-		return new Snapshot(true, pointer, List.copyOf(trail), focusId, List.copyOf(menus), hoverProgress);
+		return new Snapshot(true, pointer, List.copyOf(trail), focusId, List.copyOf(menus), hoverProgress,
+			tuning.deadzone());
 	}
 
 	private void rebaseInternal(Point point, long nowMillis) {
