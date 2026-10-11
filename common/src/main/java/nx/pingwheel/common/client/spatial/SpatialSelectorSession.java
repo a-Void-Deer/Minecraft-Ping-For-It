@@ -282,11 +282,12 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			SpatialController.Point pointer = radial.snapshot().pointer();
 			gesture.alignPointer(pointer.x(), pointer.y());
 			var effective = radial.moveExternalPointer(deltaX, deltaY, nowMillis);
-			if (effective.x() == 0.0 && effective.y() == 0.0) return;
-			InventoryGesture.Action navigation = gesture.moveGui(effective.x(), effective.y());
+			boolean pointerMoved = effective.x() != 0.0 || effective.y() != 0.0;
+			if (!pointerMoved && deltaY == 0.0) return;
+			InventoryGesture.Action navigation = gesture.moveGui(effective.x(), effective.y(), deltaY);
 			boolean backFocused = settings.hoverEnabled() && gesture.isBackSideFocused();
 			list.setBackHoverFocused(backFocused);
-			if (!radial.updateExternalBack(backFocused, nowMillis, true)) {
+			if (pointerMoved && !radial.updateExternalBack(backFocused, nowMillis, true)) {
 				if (navigation == InventoryGesture.Action.BACK) radial.back(nowMillis);
 				else if (navigation == InventoryGesture.Action.FORWARD) enterItem(nowMillis);
 			}

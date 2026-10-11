@@ -5,7 +5,7 @@ import java.util.Objects;
 /**
  * Pure horizontal/vertical gesture adapter for the streamed inventory list.
  *
- * <p>It owns the frozen list geometry ({@code axisX}/{@code glideBaseY}), the
+ * <p>It owns the frozen horizontal list axis and row-height threshold, the
  * virtual pointer, the glide and wheel fractions, the wheel-lock state and the
  * Back/Forward side pair supplied by {@link InventoryListModel#directionFor(double)}.
  * {@link #move(double, double)} emits a navigation {@link Action} when a side
@@ -21,8 +21,8 @@ import java.util.Objects;
  * emits {@link Action#FORWARD} (the caller then enters the selected row's
  * submenu); horizontal motion beyond the hint gate without a navigation
  * suppresses glide; after a wheel step, glide stays locked until vertical
- * movement passes its unlock threshold; glide gains speed away from the
- * baseline and divides by the fixed row size.
+ * movement passes its unlock threshold; relative vertical glide advances at
+ * the frozen row-height threshold, discarding opposing sub-row travel on reversal.
  */
 public final class InventoryGesture {
 
@@ -36,8 +36,7 @@ public final class InventoryGesture {
 	private static final double SIDE_HINT = 19.0;
 	private static final double SIDE_EXIT = 76.0;
 	private static final double WHEEL_UNLOCK = 14.0;
-	private static final double GAIN_DISTANCE = 18.0;
-	private static final double MAX_GAIN = 8.0;
+	private static final double INTRINSIC_GLIDE = 0.25;
 	private static final double PIXELS_PER_ROW = 9.0;
 	private static final double WHEEL_PIXELS_PER_ROW = 100.0;
 
@@ -47,11 +46,11 @@ public final class InventoryGesture {
 	private final double pixelsPerRow;
 
 	private double axisX;
-	private double glideBaseY;
 	private double pointerX;
 	private double pointerY;
 	private double glideRemainder;
 	private double wheelRemainder;
+	private double wheelUnlockTravel;
 	private boolean wheelLocked;
 	private boolean backHoverFocused;
 	private InventoryListModel.Direction direction =
@@ -77,45 +76,53 @@ public final class InventoryGesture {
 		this.pixelsPerRow = pixelsPerRow;
 	}
 
-	/** Enters the list with its frozen axis, vertical baseline and side pair. */
-	public void begin(double axisX, double glideBaseY, InventoryListModel.Direction direction) {
+	/** Enters the list with its frozen axis, initial pointer and side pair. */
+	public void begin(double axisX, double pointerY, InventoryListModel.Direction direction) {
 		this.direction = Objects.requireNonNull(direction, "direction");
 		this.backSign = direction.back() == InventoryListModel.Side.LEFT ? -1.0 : 1.0;
 		this.forwardSign = -this.backSign;
-		rebase(axisX, glideBaseY);
+		rebase(axisX, pointerY);
 	}
 
 	/**
-	 * Re-bases after an item return: the axis, baseline and fractions reset
+	 * Re-bases after an item return: the axis, pointer and fractions reset
 	 * while the model keeps its selected key and window.
 	 */
 	public void rebase(double x, double y) {
 		axisX = x;
-		glideBaseY = y;
 		pointerX = x;
 		pointerY = y;
 		glideRemainder = 0.0;
 		wheelRemainder = 0.0;
+		wheelUnlockTravel = 0.0;
 		wheelLocked = false;
 		backHoverFocused = false;
 	}
 
 	/** Applies one physical delta; returns the navigation the caller must run. */
 	public Action move(double deltaX, double deltaY) {
+		return move(deltaX, deltaY, deltaY);
+	}
+
+	/** Confined pointer travel and independent authorized vertical selection travel. */
+	public Action move(double deltaX, double deltaY, double selectionDeltaY) {
+		if (!Double.isFinite(deltaX) || !Double.isFinite(deltaY) || !Double.isFinite(selectionDeltaY)) return Action.NONE;
+		boolean pointerMoved = deltaX != 0.0 || deltaY != 0.0;
 		pointerX += deltaX;
 		pointerY += deltaY;
 		double side = pointerX - axisX;
 
 		if (backHoverFocused) {
 			glideRemainder = 0.0;
+			wheelUnlockTravel = 0.0;
 			return Action.NONE;
 		}
 
-		if (!backHoverEnabled && side * backSign >= SIDE_EXIT) {
+		if (pointerMoved && !backHoverEnabled && side * backSign >= SIDE_EXIT) {
 			return Action.BACK;
 		}
 
-		if (side * forwardSign >= SIDE_EXIT) {
+		if (pointerMoved && side * forwardSign >= SIDE_EXIT) {
 			return Action.FORWARD;
 		}
 
@@ -124,22 +131,28 @@ public final class InventoryGesture {
 		}
 
 		if (wheelLocked) {
-			glideRemainder += deltaY;
+			// This is signed, unscaled travel, not the direction-cleared glide fraction.
+			wheelUnlockTravel += selectionDeltaY;
 
-			if (Math.abs(glideRemainder) < WHEEL_UNLOCK) {
+			if (Math.abs(wheelUnlockTravel) < WHEEL_UNLOCK) {
 				return Action.NONE;
 			}
 
 			wheelLocked = false;
+			wheelUnlockTravel = 0.0;
 			glideRemainder = 0.0;
 		}
 
-		double gain = 1.0 + Math.min(MAX_GAIN, Math.abs(pointerY - glideBaseY) / GAIN_DISTANCE);
-		glideRemainder += deltaY * gain * glideSensitivity;
-		int steps = (int) (glideRemainder / pixelsPerRow);
+		if ((selectionDeltaY > 0.0 && glideRemainder < 0.0) || (selectionDeltaY < 0.0 && glideRemainder > 0.0)) {
+			glideRemainder = 0.0;
+		}
+		double travel = glideRemainder + selectionDeltaY * (glideSensitivity * INTRINSIC_GLIDE);
+		// Casting saturates attempted rows; modulo consumes all whole travel even
+		// at an endpoint, without banking overshoot or overflowing an int count.
+		int steps = (int) (travel / pixelsPerRow);
+		glideRemainder = Double.isFinite(travel) ? travel % pixelsPerRow : 0.0;
 
 		if (steps != 0) {
-			glideRemainder -= steps * pixelsPerRow;
 			list.glide(steps);
 		}
 
@@ -148,8 +161,14 @@ public final class InventoryGesture {
 
 	/** Native movement computes current-sample Back focus, including deliberate leave. */
 	public Action moveGui(double deltaX, double deltaY) {
+		return moveGui(deltaX, deltaY, deltaY);
+	}
+
+	/** Current-sample Back focus follows only confined pointer travel, never selection travel. */
+	public Action moveGui(double deltaX, double deltaY, double selectionDeltaY) {
+		if (!Double.isFinite(deltaX) || !Double.isFinite(deltaY) || !Double.isFinite(selectionDeltaY)) return Action.NONE;
 		if (backHoverEnabled) backHoverFocused = (pointerX + deltaX - axisX) * backSign >= SIDE_HINT;
-		return move(deltaX, deltaY);
+		return move(deltaX, deltaY, selectionDeltaY);
 	}
 
 	/** Platform-converted row deltas (already divided by its own scroll unit). */
@@ -178,6 +197,7 @@ public final class InventoryGesture {
 
 		wheelRemainder -= rows * WHEEL_PIXELS_PER_ROW;
 		wheelLocked = true;
+		wheelUnlockTravel = 0.0;
 		glideRemainder = 0.0;
 		return list.glide(rows);
 	}
@@ -205,10 +225,6 @@ public final class InventoryGesture {
 
 	public double axisX() {
 		return axisX;
-	}
-
-	public double glideBaseY() {
-		return glideBaseY;
 	}
 
 	public double pointerX() {

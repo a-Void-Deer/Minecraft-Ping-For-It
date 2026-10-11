@@ -7,11 +7,53 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.function.IntUnaryOperator;
 
+import nx.pingwheel.common.client.spatial.InventoryGesture;
+import nx.pingwheel.common.client.spatial.InventoryListModel;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SpatialSelectorSettingsTest {
+
+	@Test
+	void initializedMissingNullAndExplicitGlideValuesDriveTheirOwnRelativeThresholds() {
+		for (String json : List.of("{}", "{\"targetGlide\":null}", "{\"targetGlide\":1}",
+			"{\"targetGlide\":2}", "{\"targetGlide\":0.25}")) {
+			SpatialSelectorSettings settings = new Gson().fromJson(json, SpatialSelectorSettings.class);
+			var beforeValidation = settings.snapshot();
+			settings.validate();
+			assertEquals(beforeValidation, settings.snapshot());
+			double threshold = json.contains(":0.25") ? 320 : json.contains(":2") ? 40 : 80;
+			assertGlideThreshold(beforeValidation, threshold);
+			assertGlideThreshold(new Gson().fromJson(new Gson().toJson(settings), SpatialSelectorSettings.class).snapshot(), threshold);
+		}
+		assertGlideThreshold(new SpatialSelectorSettings().snapshot(), 80);
+	}
+
+	@Test
+	void frozenGlideBehaviorDoesNotFollowLiveChangesOrResetToTheNeutralDefault() {
+		var settings = new Gson().fromJson("{\"targetGlide\":0.25}", SpatialSelectorSettings.class);
+		var savedQuarter = settings.snapshot();
+		settings.setTargetGlide(new BigDecimal("2"));
+		assertGlideThreshold(savedQuarter, 320);
+		assertGlideThreshold(settings.snapshot(), 40);
+		settings.setTargetGlide(null);
+		assertGlideThreshold(settings.snapshot(), 80);
+		assertGlideThreshold(savedQuarter, 320);
+	}
+
+	private static void assertGlideThreshold(SpatialSelectorSettings.Snapshot settings, double threshold) {
+		var list = new InventoryListModel(3);
+		list.open(List.of(new InventoryListModel.Entry("a", "a", 3, null),
+			new InventoryListModel.Entry("b", "b", 2, null)), 0, 0, 180);
+		var gesture = new InventoryGesture(list, settings.targetGlide().doubleValue(), settings.hoverEnabled(), 20);
+		gesture.begin(0, 0, list.direction());
+		gesture.move(0, threshold - 1);
+		assertEquals("a", list.selectedKey());
+		gesture.move(0, 1);
+		assertEquals("b", list.selectedKey());
+	}
 
 	@Test
 	void targetGlideClampsToThePrototypeRange() {

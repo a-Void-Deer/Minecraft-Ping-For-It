@@ -115,23 +115,53 @@ class SpatialOverlayRendererFollowerTest {
 		assertTrue(painter.chrome().pointerHidden(), "capability qualifies before dwell completion");
 	}
 
-	@Test void deadzoneAncestorsInventoryAndInactiveExitCannotHideThePointer() {
+	@Test void activeInventoryListHidesCrosshairUntilRadialMenuRestoresGlobalFeedback() {
 		var painter = new Painter(); var session = new SpatialOverlayRenderer.Session();
-		frame(session, snapshot(leaf("a"), point(0, 0)), painter, REDUCED, 0, VIEW);
-		assertFalse(painter.chrome().pointerHidden()); assertTrue(painter.strokes.isEmpty());
+		var list = new SpatialInventoryView("list", true, List.of(new SpatialInventoryView.Row("row", "Inventory Item", 1L,
+			null, SpatialInventoryView.Status.READY)), 0, 0, 3, true, SpatialInventoryView.Status.READY, 90, 0);
+		var noFrames = new SpatialOverlayRenderer.Style(0, 0, 1, 1, 88, 1, true, true);
 		var ancestors = List.of(menu("root", point(0, 0), "a", List.of(leaf("a"))),
 			menu("list-menu", point(90, 0), null, List.of()));
-		var radial = snapshot(ancestors, point(90, 40));
-		var inventory = new SpatialInventoryView("list", true, List.of(new SpatialInventoryView.Row("row", "Inventory Item", 1L,
-			null, SpatialInventoryView.Status.READY)), 0, 0, 3, true, SpatialInventoryView.Status.READY, 90, 0);
+		var listFrame = snapshot(ancestors, point(90, 40));
+		session.drawFrame(listFrame, list, c -> Component.literal(c.label()), null, noFrames, 0, VIEW, 400, 300, painter);
+		assertTrue(painter.chrome().pointerHidden(), "active list hides the crosshair even with both frame opacity preferences at zero");
+		assertEquals(listFrame.trail(), painter.chrome().snapshot().trail(), "list hiding preserves trail data");
+
+		var itemChoices = List.of(choice("back", null, true, true, false, false), leaf("item-option"));
+		var itemBack = snapshot(List.of(ancestors.getFirst(), ancestors.getLast(),
+			menu("item-menu", point(90, 0), "back", itemChoices)), point(90, 0));
 		painter.clear();
-		session.drawFrame(radial, inventory, c -> Component.literal(c.label()), null, REDUCED, 1, VIEW, 400, 300, painter);
+		session.drawFrame(itemBack, list, c -> Component.literal(c.label()), null, REDUCED, 1, VIEW, 400, 300, painter);
+		assertFalse(painter.chrome().pointerHidden(), "the retained list panel does not hide the pointer at item-menu Back/deadzone");
 		assertTrue(painter.draws.stream().anyMatch(draw -> draw.state().data() instanceof SpatialOverlayRenderer.RowPaint));
-		assertFalse(painter.chrome().pointerHidden()); assertTrue(painter.strokes.isEmpty()); assertTrue(session.paintedChoiceIds().isEmpty());
-		frame(session, snapshot(leaf("a"), point(90, 40)), painter, REDUCED, 2, VIEW);
-		assertTrue(painter.chrome().pointerHidden());
-		frame(session, null, painter, NORMAL, 3, VIEW);
-		assertFalse(painter.chrome().pointerHidden()); assertTrue(painter.strokes.isEmpty()); assertTrue(session.paintedChoiceIds().isEmpty());
+
+		var itemOption = snapshot(List.of(ancestors.getFirst(), ancestors.getLast(),
+			menu("item-menu", point(90, 0), "item-option", itemChoices)), point(90, 40));
+		painter.clear();
+		session.drawFrame(itemOption, list, c -> Component.literal(c.label()), null, REDUCED, 2, VIEW, 400, 300, painter);
+		assertTrue(painter.chrome().pointerHidden(), "an eligible visible item follower keeps the global radial rule");
+		assertEquals(1, painter.strokes.size());
+
+		painter.clear();
+		session.drawFrame(listFrame, list, c -> Component.literal(c.label()), null, noFrames, 3, VIEW, 400, 300, painter);
+		assertTrue(painter.chrome().pointerHidden(), "returning to the active list restores its crosshair hide");
+
+		var parentCenter = snapshot(leaf("parent-option"), point(0, 0));
+		var closedList = new SpatialInventoryView("list", false, list.rows(), 0, 0, 3, true,
+			SpatialInventoryView.Status.READY, 90, 0);
+		painter.clear();
+		session.drawFrame(parentCenter, closedList, c -> Component.literal(c.label()), null, REDUCED,
+			4, VIEW, 400, 300, painter);
+		assertFalse(painter.chrome().pointerHidden(), "leaving the list restores the parent radial deadzone rule immediately");
+		assertTrue(painter.strokes.isEmpty()); assertTrue(session.paintedChoiceIds().contains("parent-option"));
+
+		painter.clear();
+		// Reduced motion removes exit states immediately; normal motion retains
+		// the detached chrome whose list-specific hiding this assertion checks.
+		session.drawFrame(null, closedList, c -> Component.literal(c.label()), null, NORMAL,
+			5, VIEW, 400, 300, painter);
+		assertFalse(painter.chrome().pointerHidden(), "an inactive exit frame does not retain list-specific hiding");
+		assertTrue(painter.strokes.isEmpty()); assertTrue(session.paintedChoiceIds().isEmpty());
 	}
 
 	@Test void everyActualIntermediatePoseTracksCurrentRayAndConnectorEndsOnActualScaledTitle() {

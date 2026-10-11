@@ -393,7 +393,7 @@ public final class InventoryListModel {
 		if (rows.isEmpty()) return 0;
 
 		int current = Math.max(0, selectedIndex());
-		int target = Math.max(0, Math.min(current + steps, rows.size() - 1));
+		int target = (int) Math.max(0L, Math.min((long) current + steps, rows.size() - 1L));
 		int moved = target - current;
 
 		if (moved != 0) {

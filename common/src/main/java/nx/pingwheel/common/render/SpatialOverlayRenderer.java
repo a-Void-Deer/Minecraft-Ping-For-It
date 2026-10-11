@@ -582,6 +582,12 @@ public final class SpatialOverlayRenderer {
 		return radial.menus().getLast().origin();
 	}
 
+	/** An open inventory surface hides the crosshair only while its empty list menu is active. */
+	private static boolean activeInventoryList(SpatialController.Snapshot radial, SpatialInventoryView inventory) {
+		return inventory != null && inventory.open() && radial != null && radial.active() && !radial.menus().isEmpty()
+			&& radial.menus().getLast().choices().isEmpty();
+	}
+
 	/**
 	 * Samples the single rigid view translation for one frame. An active origin
 	 * re-aims the offset at its negation and samples it; a null origin (inactive
@@ -712,7 +718,7 @@ public final class SpatialOverlayRenderer {
 			RowLayout selected = RowLayout.NONE;
 			Set<String> painted = new HashSet<>();
 			String activeMenu = origin == null ? null : radial.menus().getLast().menuId();
-			boolean hidePointer = false;
+			boolean hidePointer = activeInventoryList(radial, inventory);
 			for (var state : states.stream().sorted(Comparator.comparingInt(value -> paintRank(value.data()))).toList()) {
 				var displayed = new SpatialOverlayTransitions.State<>(state.key(), state.x() + viewX, state.y() + viewY,
 					state.scale(), state.alpha(), state.present(), state.data());

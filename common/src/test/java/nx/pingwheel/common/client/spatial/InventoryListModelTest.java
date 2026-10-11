@@ -159,6 +159,20 @@ class InventoryListModelTest {
 	}
 
 	@Test
+	void hugeAttemptedStepsSaturateWithoutOverflowAndReverseImmediately() {
+		var model = opened(3, entry("a", 10), entry("b", 9), entry("c", 8), entry("d", 7));
+		model.select(1);
+		assertEquals(2, model.glide(Integer.MAX_VALUE));
+		assertEquals("d", model.selectedKey());
+		assertEquals(0, model.glide(Integer.MAX_VALUE));
+		assertEquals(-1, model.glide(-1));
+		assertEquals("c", model.selectedKey());
+		assertEquals(-2, model.glide(Integer.MIN_VALUE));
+		assertEquals("a", model.selectedKey());
+		assertEquals(1, model.glide(1));
+	}
+
+	@Test
 	void wheelAccumulatesFractionalRowsAndSuppressesWhileBackHoverFocused() {
 		InventoryListModel model = opened(3, entry("e0", 50), entry("e1", 40), entry("e2", 30), entry("e3", 20), entry("e4", 10));
 
