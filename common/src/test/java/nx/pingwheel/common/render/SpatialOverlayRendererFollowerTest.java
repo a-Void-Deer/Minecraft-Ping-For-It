@@ -6,12 +6,15 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Predicate;
 
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.StringSplitter;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FormattedText;
 import org.junit.jupiter.api.Test;
+import org.joml.Vector4f;
 
 import nx.pingwheel.common.client.spatial.PreciseCaptureRefresh;
 import nx.pingwheel.common.client.spatial.SelectorIntent;
@@ -29,6 +32,7 @@ import nx.pingwheel.common.interaction.cancel.WorldVector;
 import nx.pingwheel.common.interaction.candidate.Candidate;
 import nx.pingwheel.common.interaction.candidate.CaptureEquivalenceKey;
 import nx.pingwheel.common.interaction.candidate.PreciseTargetType;
+import nx.pingwheel.common.interaction.state.SelectorReleaseProposal.Admission;
 import nx.pingwheel.common.math.RaycastPolicy;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -317,18 +321,152 @@ class SpatialOverlayRendererFollowerTest {
 		}
 	}
 
+	@Test void inwardTurnWithinIntentLeafCannotHidePointerWhileIntermediateTitleIsOffscreen() {
+		var child = SpatialMenu.of("intent", SpatialMenu.Choice.leaf("a", "a", "a"),
+			SpatialMenu.Choice.leaf("b", "b", "b"), SpatialMenu.Choice.leaf("c", "c", "c"));
+		var controller = new SpatialController(SpatialMenu.of("root", SpatialMenu.Choice.branch("intent", "intent", child).withSector(90, 35)),
+			new SpatialController.Tuning(12, 20, 1000, false, 500));
+		controller.start(0);
+		controller.enterExternal(child, 80, 0, 1); // Back faces the parent at 270 degrees; c covers [135,225).
+		var view = new SpatialController.Viewport(320, 240, -80, 0);
+		controller.constrainPointer(view, 1);
+		controller.movePhysical(115, 119, 2); // displayed P=(275,239), inside c's [135,225) sector.
+		var initial = controller.snapshot();
+		assertEquals("c", initial.focusId());
+		var selected = initial.menus().getLast().choices().stream().filter(c -> c.id().equals("c")).findFirst().orElseThrow();
+		assertEquals(135, selected.startDegrees()); assertEquals(90, selected.spanDegrees());
+		var renderer = new SpatialOverlayRenderer.Session(); var painter = new Painter();
+		frame(renderer, initial, painter, NORMAL, 0, view);
+		frame(renderer, initial, painter, NORMAL, DURATION, view);
+		assertEquals(275, painter.follower().state().x()); assertEquals(239, painter.follower().state().y());
+		assertTrue(painter.chrome().pointerHidden()); assertTrue(renderer.paintedChoiceIds().contains("c"));
+
+		double dx = Math.sin(Math.toRadians(175)) * 80, dy = -Math.cos(Math.toRadians(175)) * 80;
+		controller.movePhysical(dx - 115, dy - 119, 3);
+		var inward = controller.snapshot();
+		assertEquals("c", inward.focusId()); assertEquals(inward.pointer(), view.confine(inward.pointer()));
+		frame(renderer, inward, painter, NORMAL, DURATION + 16_000_000L, view);
+		var draw = painter.follower();
+		assertEquals(172.49, draw.state().x(), 0.01); assertEquals(262.79, draw.state().y(), 0.01);
+		assertEquals(254.95, nativeTitleBounds(draw)[1], 0.01);
+		assertTrue(nativeTitleBounds(draw)[1] > view.height(), "actual intermediate title is wholly offscreen, not just its target");
+		assertFalse(painter.chrome().pointerHidden(), "successful draw submission alone is not visible pointer feedback");
+		assertFalse(renderer.paintedChoiceIds().contains("c")); assertTrue(painter.strokes.isEmpty());
+		assertEquals(inward.trail(), painter.chrome().snapshot().trail());
+		frame(renderer, inward, painter, NORMAL, DURATION + 80_000_000L, view);
+		draw = painter.follower();
+		assertTrue(draw.state().y() > view.height() && nativeTitleBounds(draw)[1] < view.height(),
+			"an offscreen center is still eligible when its actual title partially intersects");
+		assertTrue(painter.chrome().pointerHidden()); assertTrue(renderer.paintedChoiceIds().contains("c"));
+		frame(renderer, inward, painter, NORMAL, DURATION * 2 + 16_000_000L, view);
+		assertTrue(painter.chrome().pointerHidden()); assertTrue(renderer.paintedChoiceIds().contains("c"));
+	}
+
+	@Test void offscreenPreciseIntermediateFrameCannotReplacePreviouslyPaintedEntityOnRelease() {
+		for (boolean firstPaint : List.of(false, true)) {
+			var token = new ActiveInteraction().begin(); var level = new Object();
+			var settings = new SpatialSelectorSettings.Snapshot(12, 20, 120, 88, new BigDecimal("0.5"), false, 250, true, false);
+			var selector = new SpatialSelectorSession<String>(captured("ordinary", 1), Map.of(), settings,
+				new SpatialSelectorSession.ContentFence(token.sequence(), 42, 53, "ordinary"), (target, fence) -> null,
+				new SpatialSelectorSession.ListGeometry(3, 180, 17, 23, 19, 85));
+			selector.beginLivePrecise(token, level); selector.open(0);
+			focus(selector, "precise", 1); selector.tick(121);
+			assertTrue(selector.updatePrecise(publication(token, level, 1, entity(10), PreciseTargetType.ENTITY), 122));
+			var origin = selector.snapshot().radial().menus().getLast().origin();
+			var view = new SpatialController.Viewport(320, 240, -origin.x(), -origin.y());
+			selector.constrainPointer(view, 122);
+			double dx = 119 * Math.tan(Math.toRadians(27)); // bearing 153 degrees, displayed P=(220.63,239).
+			selector.moveGui(dx, 119, 123);
+			var initial = selector.snapshot();
+			assertEquals("precise:entity", initial.radial().focusId());
+			var choice = initial.radial().menus().getLast().choices().stream().filter(c -> c.id().equals("precise:entity")).findFirst().orElseThrow();
+			assertEquals(135, choice.startDegrees(), 1e-9); assertEquals(60, choice.spanDegrees());
+			var renderer = new SpatialOverlayRenderer.Session(); var painter = new Painter();
+			frame(renderer, initial.radial(), painter, NORMAL, 0, view);
+			frame(renderer, initial.radial(), painter, NORMAL, DURATION, view);
+			assertTrue(painter.chrome().pointerHidden());
+			var previous = initial.preciseFrame().choices().get("precise:entity");
+			if (firstPaint) assertSame(previous, selector.markPresented(initial, renderer.paintedChoiceIds()).orElseThrow().choices().get("precise:entity"));
+			assertTrue(selector.updatePrecise(publication(token, level, 2, entity(20), PreciseTargetType.ENTITY), 124));
+			selector.moveGui(Math.sin(Math.toRadians(175)) * 80 - dx, -Math.cos(Math.toRadians(175)) * 80 - 119, 125);
+			var newer = selector.snapshot();
+			assertEquals("precise:entity", newer.radial().focusId());
+			assertEquals(newer.radial().pointer(), view.confine(newer.radial().pointer()));
+			frame(renderer, newer.radial(), painter, NORMAL, DURATION + 4_000_000L, view);
+			var draw = painter.follower();
+			assertEquals(241.35, nativeTitleBounds(draw)[1], 0.01);
+			assertTrue(nativeTitleBounds(draw)[1] > view.height());
+			assertTrue(draw.layout().detail().top() > draw.layout().bottom(), "the preview is below the already invisible title");
+			assertFalse(painter.chrome().pointerHidden()); assertTrue(painter.strokes.isEmpty());
+			assertFalse(renderer.paintedChoiceIds().contains("precise:entity"), "an accepting painter cannot admit invisible candidate data");
+			selector.markPresented(newer, renderer.paintedChoiceIds());
+			var admitted = selector.presentedPrecise().orElseThrow(); // visible disabled siblings may advance the frame revision.
+			if (firstPaint) {
+				assertSame(previous, admitted.choices().get("precise:entity"));
+				assertSame(initial.preciseFrame().contexts().get(previous.candidateId()), admitted.contexts().get(previous.candidateId()));
+				assertFalse(admitted.contexts().containsKey(newer.preciseFrame().choices().get("precise:entity").candidateId()));
+				var create = assertInstanceOf(SelectorIntent.CreateTarget.class, selector.releaseIntent(126));
+				assertSame(previous, create.candidate()); assertEquals(Admission.PRECISE_PRESENTED, create.admission());
+				assertEquals(admitted.revision(), create.presentationRevision());
+			} else {
+				assertFalse(admitted.choices().containsKey("precise:entity"));
+				assertInstanceOf(SelectorIntent.None.class, selector.releaseIntent(126), "an unseen candidate never gains release authority");
+			}
+		}
+	}
+
+	@Test void actualRoundedFloatTitleIntersectionHandlesEveryGuiEdgeAndFractionalPanForNonFollowers() {
+		// With this font, a one-character unselected title fills local [-7,7) x [-7,8), at float scale 0.95.
+		// Native PoseStack transforms independently establish the boundaries; no visibility helper supplies the oracle.
+		double scale = (float) SpatialOverlayRenderer.NODE_SCALE;
+		double[][] centers = {{-7 * scale, 120}, {-7 * scale + 0.75, 120}, {320 + 7 * scale, 120}, {320 + 7 * scale - 0.75, 120},
+			{160, -8 * scale}, {160, -8 * scale + 0.75}, {160, 240 + 7 * scale}, {160, 240 + 7 * scale - 0.75}};
+		for (int index = 0; index < centers.length; index++) {
+			var view = new SpatialController.Viewport(320, 240, centers[index][0] - 248, centers[index][1] - 120);
+			var renderer = new SpatialOverlayRenderer.Session(); var painter = new Painter();
+			var radial = snapshot(List.of(menu("root", point(0, 0), null, List.of(leaf("a")))), point(0, 0));
+			frame(renderer, radial, painter, NORMAL, 0, view);
+			frame(renderer, radial, painter, NORMAL, DURATION, view);
+			var draw = painter.draws.stream().filter(value -> value.layout() != null && value.state().present()).findFirst().orElseThrow();
+			var bounds = nativeTitleBounds(draw);
+			boolean partial = index % 2 == 1;
+			assertEquals(partial, bounds[0] < 320 && bounds[2] > 0 && bounds[1] < 240 && bounds[3] > 0, "native bounds for edge " + index);
+			assertEquals(partial, renderer.paintedChoiceIds().contains("a"), "positive intersection, not center containment or rounded screen bounds, edge " + index);
+			assertFalse(painter.chrome().pointerHidden(), "resting nodes never hide the pointer");
+		}
+	}
+
+	private static double[] nativeTitleBounds(Draw draw) {
+		var pose = new PoseStack();
+		pose.translate(draw.state().x(), draw.state().y(), 0);
+		pose.scale((float) draw.state().scale(), (float) draw.state().scale(), 1);
+		var first = pose.last().pose().transform(new Vector4f(draw.layout().left(), draw.layout().top(), 0, 1));
+		var last = pose.last().pose().transform(new Vector4f(draw.layout().right(), draw.layout().bottom(), 0, 1));
+		return new double[] {first.x(), first.y(), last.x(), last.y()};
+	}
+
+	private static SpatialSelectorSession.CapturedTarget entity(int id) {
+		return new SpatialSelectorSession.CapturedTarget("entity" + id,
+			new ResolvedTarget(new Target.EntityTarget("minecraft:overworld", new UUID(0, id)), TargetTypeCatalog.builtIn().findById("entity").orElseThrow()),
+			Optional.empty(), Optional.of(new WorldVector(id, 2, 3)));
+	}
+
 	private static SpatialSelectorSession.CapturedTarget captured(String id, int x) {
 		var target = new Target.BlockTarget("minecraft:overworld", x, 2, 3, "minecraft:stone");
 		return new SpatialSelectorSession.CapturedTarget(id, new ResolvedTarget(target, TargetTypeCatalog.builtIn().findById("block").orElseThrow()),
 			Optional.empty(), Optional.of(new WorldVector(x, 2, 3)));
 	}
 	private static PreciseCaptureRefresh.Published publication(InteractionToken token, Object level, long revision, int x) {
+		return publication(token, level, revision, captured("capture", x), PreciseTargetType.BLOCK);
+	}
+	private static PreciseCaptureRefresh.Published publication(InteractionToken token, Object level, long revision,
+		SpatialSelectorSession.CapturedTarget target, PreciseTargetType available) {
 		var inputs = new PreciseCaptureRefresh.Inputs(token, level, CapturedRay.defaultRay(), RaycastPolicy.from(false, false, false), 10, 100);
-		var value = captured("capture", x).resolvedTarget();
-		var candidate = new Candidate(0, value, new WorldVector(x, 2, 3), 1, Optional.empty(), Optional.empty(), CaptureEquivalenceKey.nativeTarget(value.target()));
+		var value = target.resolvedTarget();
+		var candidate = new Candidate(0, value, target.hit().orElseThrow(), 1, Optional.empty(), Optional.empty(), CaptureEquivalenceKey.nativeTarget(value.target()));
 		var slots = new EnumMap<PreciseTargetType, PreciseCaptureRefresh.Slot>(PreciseTargetType.class);
 		for (var type : PreciseTargetType.values()) slots.put(type, new PreciseCaptureRefresh.Slot(revision, inputs,
-			type == PreciseTargetType.BLOCK ? PreciseCaptureRefresh.Outcome.available(candidate) : PreciseCaptureRefresh.Outcome.missing()));
+			type == available ? PreciseCaptureRefresh.Outcome.available(candidate) : PreciseCaptureRefresh.Outcome.missing()));
 		return new PreciseCaptureRefresh.Published(revision, revision, inputs, slots);
 	}
 	private static void focus(SpatialSelectorSession<?> selector, String id, long now) {

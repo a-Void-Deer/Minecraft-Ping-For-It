@@ -680,7 +680,7 @@ public final class SpatialOverlayRenderer {
 				});
 		}
 
-		/** Headless production frame seam; paint completion is the sole acknowledgement gate. */
+		/** Headless production frame seam; successful paint and actual title visibility gate acknowledgement. */
 		RowLayout drawFrame(SpatialController.Snapshot radial, SpatialInventoryView inventory,
 			Function<SpatialController.ChoiceView, Component> labels,
 			Function<SpatialController.ChoiceView, Component> details, Style style, long nowNanos,
@@ -737,7 +737,8 @@ public final class SpatialOverlayRenderer {
 					? nodeLayout(node, painter::width, painter.lineHeight(), style, painter.splitter()) : null;
 				if (!painter.paint(displayed, layout, style)) continue;
 				if (state.data() instanceof NodePaint node && acknowledgesNodePaint(state.present(),
-					state.key().owner().equals(activeMenu), state.alpha(), style)) {
+					state.key().owner().equals(activeMenu), state.alpha(), style)
+					&& titleFrameIntersectsViewport(displayed, layout, guiWidth, guiHeight)) {
 					painted.add(node.choice().id());
 					if (node.follower() != null) {
 						hidePointer = true;
@@ -770,9 +771,21 @@ public final class SpatialOverlayRenderer {
 			: state;
 	}
 
-	/** Called only after successful node paint; detached/ancestor/fully transparent states cannot acknowledge. */
+	/** Called only after successful node paint; actual title visibility is checked separately in the frame path. */
 	static boolean acknowledgesNodePaint(boolean present, boolean activeMenu, double alpha, Style style) {
 		return present && activeMenu && (withAlpha(BORDER_COLOR, targetAlpha(alpha, style)) >>> 24) != 0;
+	}
+
+	/** Clip the actual title frame, not its pointer target, preview or connector. Tangency contributes no area. */
+	static boolean titleFrameIntersectsViewport(SpatialOverlayTransitions.State<VisualKey, Paint> state,
+		NodeLayout layout, double width, double height) {
+		// PoseStack narrows translation and scale to floats before transforming
+		// the rounded local fill bounds. A dashed border can add one endpoint pixel.
+		float x = (float) state.x(), y = (float) state.y(), scale = (float) state.scale();
+		NodePaint node = (NodePaint) state.data();
+		int endpoint = node.choice().disabled() || node.choice().reserved() ? BORDER_THICKNESS : 0;
+		return x + layout.left() * scale < width && x + (layout.right() + endpoint) * scale > 0.0
+			&& y + layout.top() * scale < height && y + (layout.bottom() + endpoint) * scale > 0.0;
 	}
 
 	static void addRadial(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
