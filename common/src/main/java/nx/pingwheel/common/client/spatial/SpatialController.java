@@ -44,6 +44,34 @@ public final class SpatialController {
 	/** A point in controller space (GUI pixels for the renderer). */
 	public record Point(double x, double y) {}
 
+	/** Immutable projection shared by interaction and paint; bounds include the last GUI pixel. */
+	public record Viewport(int width, int height, double viewX, double viewY) {
+		public Viewport {
+			if (width <= 0 || height <= 0 || !Double.isFinite(viewX) || !Double.isFinite(viewY))
+				throw new IllegalArgumentException("viewport must be positive and translation finite");
+		}
+
+		public double centerX() { return width / 2.0; }
+		public double centerY() { return height / 2.0; }
+		public Point confine(Point point) {
+			return new Point(clamp(point.x(), -centerX() - viewX, width - 1.0 - centerX() - viewX),
+				clamp(point.y(), -centerY() - viewY, height - 1.0 - centerY() - viewY));
+		}
+		private Point move(Point point, double dx, double dy) {
+			return new Point(addConfined(point.x(), dx, -centerX() - viewX, width - 1.0 - centerX() - viewX),
+				addConfined(point.y(), dy, -centerY() - viewY, height - 1.0 - centerY() - viewY));
+		}
+		private static double clamp(double value, double min, double max) {
+			return Math.max(min, Math.min(max, value));
+		}
+		private static double addConfined(double value, double delta, double min, double max) {
+			// Compare the remaining distance before adding: finite raw input cannot overflow.
+			if (delta >= max - value) return max;
+			if (delta <= min - value) return min;
+			return value + delta;
+		}
+	}
+
 	/** Frozen session parameters supplied by the configuration owner. */
 	public record Tuning(double deadzone, double stroke, long dwellMillis, boolean hoverEnabled, long hoverMillis) {
 
@@ -139,6 +167,8 @@ public final class SpatialController {
 	private final List<Point> trail = new ArrayList<>();
 	private final List<MenuState> stack = new ArrayList<>();
 	private double hoverProgress;
+	private Viewport viewport;
+	private long hoverAlignment;
 
 	public SpatialController(SpatialMenu root, Tuning tuning) {
 		this.root = Objects.requireNonNull(root, "root");
@@ -154,12 +184,13 @@ public final class SpatialController {
 	/** Starts a fresh session at the root centre with the frozen tuning. */
 	public void start(long nowMillis) {
 		active = true;
-		pointer = new Point(0.0, 0.0);
+		pointer = confined(new Point(0.0, 0.0));
 		trail.clear();
 		trail.add(pointer);
 		stack.clear();
 
-		MenuState rootState = new MenuState(root, pointer, pointer);
+		Point origin = new Point(0.0, 0.0);
+		MenuState rootState = new MenuState(root, origin, origin);
 		rootState.enteredAt = nowMillis;
 		rootState.lastMovement = nowMillis;
 		stack.add(rootState);
@@ -175,16 +206,47 @@ public final class SpatialController {
 		return active;
 	}
 
+	/** Reprojects without input travel, trail, navigation or timer advancement. */
+	public boolean constrainPointer(Viewport viewport, long nowMillis) {
+		this.viewport = Objects.requireNonNull(viewport);
+		Point next = confined(pointer);
+		if (next.equals(pointer)) return false;
+		pointer = next;
+		if (active) {
+			MenuState menu = activeMenu();
+			menu.candidate = null;
+			menu.candidateId = null;
+			menu.traveled = 0.0;
+			menu.enteredAt = nowMillis;
+			menu.lastMovement = nowMillis;
+			hoverAlignment++; // re-arm the timer without releasing Back's held-focus block
+			hoverProgress = 0.0;
+			setFocus(nowMillis);
+		}
+		return true;
+	}
+
+	private Point confined(Point point) { return viewport == null ? point : viewport.confine(point); }
+
+	/** The only input accumulation path, shared by radial and external surfaces. */
+	private Point movePointer(double deltaX, double deltaY) {
+		Point previous = pointer;
+		pointer = viewport == null ? new Point(pointer.x() + deltaX, pointer.y() + deltaY)
+			: viewport.move(pointer, deltaX, deltaY);
+		return new Point(pointer.x() - previous.x(), pointer.y() - previous.y());
+	}
+
 	/** Adds a physical delta to the virtual pointer and refreshes the focus. */
 	public void movePhysical(double deltaX, double deltaY, long nowMillis) {
-		if (!active || (deltaX == 0.0 && deltaY == 0.0)) {
+		if (!active || !Double.isFinite(deltaX) || !Double.isFinite(deltaY) || (deltaX == 0.0 && deltaY == 0.0)) {
 			return;
 		}
 
 		MenuState menu = activeMenu();
 		Point previous = pointer;
-		pointer = new Point(pointer.x() + deltaX, pointer.y() + deltaY);
-		menu.traveled += Math.hypot(deltaX, deltaY);
+		Point effective = movePointer(deltaX, deltaY);
+		if (effective.x() == 0.0 && effective.y() == 0.0) return;
+		menu.traveled += Math.hypot(effective.x(), effective.y());
 		trail.add(pointer);
 
 		if (trail.size() > TRAIL_LIMIT) {
@@ -358,12 +420,19 @@ public final class SpatialController {
 	}
 
 	/** GUI deltas on an external surface do not run radial dwell, turn or retrace. */
-	public void moveExternalPointer(double deltaX, double deltaY, long nowMillis) {
-		if (!active || !activeMenu().surface || (deltaX == 0.0 && deltaY == 0.0)) return;
-		pointer = new Point(pointer.x() + deltaX, pointer.y() + deltaY);
+	public Point moveExternalPointer(double deltaX, double deltaY, long nowMillis) {
+		if (!active || !activeMenu().surface || !Double.isFinite(deltaX) || !Double.isFinite(deltaY)) return new Point(0.0, 0.0);
+		Point effective = movePointer(deltaX, deltaY);
+		if (effective.x() == 0.0 && effective.y() == 0.0) return effective;
 		trail.add(pointer);
 		if (trail.size() > TRAIL_LIMIT) trail.remove(0);
 		activeMenu().lastMovement = nowMillis;
+		return effective;
+	}
+
+	/** Alignment-only list focus refresh; the ordinary tick/move owns hover advancement. */
+	public void alignExternalBack(boolean focused) {
+		if (active && activeMenu().surface) activeMenu().externalBackFocus = focused;
 	}
 
 	/** Advances the same hover state across radial/list boundaries; pops at most once. */
@@ -456,9 +525,9 @@ public final class SpatialController {
 	}
 
 	private void rebaseInternal(Point point, long nowMillis) {
-		pointer = point;
+		pointer = confined(point);
 		trail.clear();
-		trail.add(point);
+		trail.add(pointer);
 		MenuState menu = activeMenu();
 		menu.candidate = null;
 		menu.candidateId = null;
@@ -471,7 +540,7 @@ public final class SpatialController {
 		active = false;
 		stack.clear();
 		trail.clear();
-		pointer = new Point(0.0, 0.0);
+		pointer = confined(new Point(0.0, 0.0));
 		hoverProgress = 0.0;
 		hover.end();
 	}
@@ -517,7 +586,7 @@ public final class SpatialController {
 	private boolean updateHover(long nowMillis) {
 		MenuState menu = activeMenu();
 		boolean backFocused = menu.surface ? menu.externalBackFocus : menu.focus != null && menu.focus.back();
-		Result result = hover.update(menu.menu.id(), backFocused, nowMillis);
+		Result result = hover.update(menu.menu.id() + ":alignment:" + hoverAlignment, backFocused, nowMillis);
 
 		if (result.triggerPop()) {
 			hoverProgress = 0.0;

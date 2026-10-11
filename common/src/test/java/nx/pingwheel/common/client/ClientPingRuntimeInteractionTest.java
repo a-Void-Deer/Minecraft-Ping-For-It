@@ -267,6 +267,31 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(pressRay, f.access.capturedRay); assertEquals(1, f.access.captures); assertEquals(0, f.access.cancellations);
 		assertEquals(0, f.inventory.stats().previewChannels()); assertFalse(f.runtime.hasCompatibilityState());
 	}
+
+	@Test void resizeWithoutCallbackRecomputesFocusBeforeImmediateRelease() {
+		Fixture f = new Fixture();
+		f.access.snapshot = TargetSnapshotFactory.entity(DIMENSION, new UUID(9, 10), "minecraft:zombie");
+		f.press(0); f.frame(250, true); f.prime(); f.move(200, -200, 260);
+		assertEquals("reserved-ne", f.snapshot().radial().focusId());
+		f.access.frame = new NativeSelectorInput.Frame(1, 2000, 1400, 100, 700, true, false);
+		// Do not read a snapshot, deliver a move, or paint after the resize.
+		f.release(270);
+		assertEquals(1, f.creates().size());
+		assertEquals("danger", f.creates().getFirst().pingType(), "the confined x=49,y=-200 focuses Up, not the old diagonal");
+		assertEquals(f.access.snapshot.target(), f.creates().getFirst().target());
+	}
+
+	@Test void nativeRawBaselineContinuesAcrossSaturationAndReversalIsImmediate() {
+		Fixture f = new Fixture(); f.press(0); f.frame(250, true); f.prime();
+		f.move(10000, -10000, 260);
+		assertEquals(new SpatialController.Point(499, -350), f.snapshot().radial().pointer());
+		var trail = f.snapshot().radial().trail();
+		f.move(10000, -10000, 270);
+		assertEquals(trail, f.snapshot().radial().trail());
+		f.move(-1, 2, 280);
+		assertEquals(new SpatialController.Point(498, -348), f.snapshot().radial().pointer());
+		assertEquals(trail.size() + 1, f.snapshot().radial().trail().size());
+	}
 	@Test void pendingReleaseCompletionCannotOpenMenuOrStartHeldPreview() {
 		Fixture f = new Fixture(); f.access.pending = true; f.press(0); f.release(300); f.frame(400, false);
 		assertTrue(f.creates().isEmpty()); assertEquals(0, f.inventory.stats().previewChannels());

@@ -690,6 +690,7 @@ public final class ClientPingRuntime {
 		try {
 			if (machine.phase() == PingInteractionPhase.WHEEL_OPEN && selector != null && baselineToken != null) {
 				var opened = selector;
+				interactionAccess.inputFrame().ifPresent(frame -> constrainSelector(frame, now));
 				var releaseContexts = new LinkedHashMap<>(selectorContexts);
 				opened.presentedPrecise().ifPresent(painted -> releaseContexts.putAll(painted.contexts()));
 				var candidates = Map.copyOf(releaseContexts);
@@ -737,7 +738,8 @@ public final class ClientPingRuntime {
 	) {
 		InteractionToken presented = baselineToken;
 		if (!keyDown && machine.phase() != PingInteractionPhase.WHEEL_OPEN) baselineHeld = false;
-		boolean presentable = interactionAccess.inputFrame().isPresent();
+		var inputFrame = interactionAccess.inputFrame();
+		boolean presentable = inputFrame.isPresent();
 		machine.presentFrameAt(keyDown && presentable, frameTimeMillis);
 		if (selectorContent != null && machine.phase() != PingInteractionPhase.IDLE) {
 			try { selectorContent.tick(); }
@@ -746,7 +748,15 @@ public final class ClientPingRuntime {
 		if (machine.phase() == PingInteractionPhase.WHEEL_OPEN) {
 			baselineMenuOpened = true;
 			if (selector == null) openSelector(frameTimeMillis);
-			if (selector != null && presentable) selector.tick(frameTimeMillis);
+			if (selector != null && presentable) {
+				var frame = inputFrame.orElseThrow();
+				// The interaction frame owns projection publication. Paint consumes it unchanged.
+				long nowNanos = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(frameTimeMillis);
+				selector.constrainPointer(selectorPaint.prepareViewport(selector.snapshot().radial(), frame.guiWidth(), frame.guiHeight(),
+					selectorStyle, nowNanos), frameTimeMillis);
+				selector.tick(frameTimeMillis);
+				selector.constrainPointer(selectorPaint.retargetViewport(selector.snapshot().radial(), selectorStyle, nowNanos), frameTimeMillis);
+			}
 			synchronizePreciseBranch();
 		}
 		// Raw release edges own wheel commit/cancellation.  A stale false key
@@ -891,6 +901,7 @@ public final class ClientPingRuntime {
 			update -> { if (selector == opened && baselineToken == token && interactionAccess.lifecycle().level() == level)
 				opened.updatePrecise(update, timeSource.nowMillis()); });
 		opened.open(now);
+		interactionAccess.inputFrame().ifPresent(frame -> constrainSelector(frame, now));
 		if (selector != opened || context.token() != baselineToken || !activeInteraction.isCurrent(context.token())) return;
 		selectorInput = new NativeSelectorInput(opened);
 		selectorInput.open();
@@ -930,10 +941,15 @@ public final class ClientPingRuntime {
 	}
 
 	public Optional<SpatialSelectorSession.Snapshot> selectorSnapshot() {
+		interactionAccess.inputFrame().ifPresent(frame -> constrainSelector(frame, timeSource.nowMillis()));
 		return selector == null ? Optional.empty() : Optional.of(selector.snapshot());
 	}
+	private void constrainSelector(NativeSelectorInput.Frame frame, long nowMillis) {
+		if (selector != null) selector.constrainPointer(selectorPaint.lastViewport(frame.guiWidth(), frame.guiHeight()), nowMillis);
+	}
 	public void drawSelector(GuiGraphics graphics) {
-		if (interactionAccess.inputFrame().isEmpty()) return;
+		var inputFrame = interactionAccess.inputFrame();
+		if (inputFrame.isEmpty()) return;
 		if (selectorStyle == null || (selector == null && !selectorPaint.isAnimating())) return;
 		var opened = selector;
 		var snapshot = opened == null ? null : opened.snapshot();
@@ -941,7 +957,8 @@ public final class ClientPingRuntime {
 			: new SelectorPreciseTargetLabels(snapshot, selectorTargetNames::resolve)::detail;
 		selectorPaint.drawFrame(graphics, snapshot == null ? null : snapshot.radial(),
 			snapshot == null ? null : snapshot.inventoryView(), this::selectorChoiceLabel, details, selectorStyle,
-			java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeSource.nowMillis()));
+			java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeSource.nowMillis()),
+			snapshot == null ? selectorPaint.lastViewport(inputFrame.get().guiWidth(), inputFrame.get().guiHeight()) : snapshot.viewport());
 		acknowledgeSelectorPaint(opened, snapshot, selectorPaint.paintedChoiceIds());
 	}
 
@@ -1011,18 +1028,25 @@ public final class ClientPingRuntime {
 	public boolean isSelectorMouseTransition() { return selectorInput != null || wheelMouseCapture.isTransitioning(); }
 	private void synchronizeNativeInput() {
 		if (selectorInput == null) return;
-		interactionAccess.inputFrame().ifPresentOrElse(selectorInput::synchronize, selectorInput::rePrime);
+		interactionAccess.inputFrame().ifPresentOrElse(frame -> {
+			constrainSelector(frame, timeSource.nowMillis());
+			selectorInput.synchronize(frame);
+		}, selectorInput::rePrime);
 	}
 	public void onMouseMove(long window, double x, double y) {
 		if (!observeInteractionLifecycle() || selectorInput == null || machine.phase() != PingInteractionPhase.WHEEL_OPEN) return;
-		interactionAccess.inputFrame().ifPresentOrElse(
-			frame -> selectorInput.onMove(window, x, y, frame, timeSource.nowMillis()), selectorInput::rePrime);
+		interactionAccess.inputFrame().ifPresentOrElse(frame -> {
+			long now = timeSource.nowMillis();
+			constrainSelector(frame, now);
+			selectorInput.onMove(window, x, y, frame, now);
+		}, selectorInput::rePrime);
 		synchronizePreciseBranch();
 	}
 	public boolean onMouseScroll(long window, double horizontal, double vertical) {
 		if (!observeInteractionLifecycle() || selectorInput == null || machine.phase() != PingInteractionPhase.WHEEL_OPEN) return false;
 		var frame = interactionAccess.inputFrame();
 		if (frame.isEmpty()) { selectorInput.rePrime(); return false; }
+		constrainSelector(frame.get(), timeSource.nowMillis());
 		return selectorInput.onScroll(window, horizontal, vertical, frame.get(), timeSource.nowMillis());
 	}
 

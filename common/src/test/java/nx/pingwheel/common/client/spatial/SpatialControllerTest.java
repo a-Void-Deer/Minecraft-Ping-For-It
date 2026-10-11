@@ -3,6 +3,8 @@ package nx.pingwheel.common.client.spatial;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -20,6 +22,131 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SpatialControllerTest {
 
 	private static final double DELTA = 1.0e-9;
+
+	@ParameterizedTest
+	@CsvSource({"-1000,0,0,40", "1000,0,100,40", "0,-1000,50.5,0", "0,1000,50.5,79",
+		"-1000,-1000,0,0", "1000,-1000,100,0", "-1000,1000,0,79", "1000,1000,100,79"})
+	void everyEdgeAndCornerUsesInclusivePixelCenters(double dx, double dy, double screenX, double screenY) {
+		var controller = new SpatialController(halfRoot(), tuning(180, false, 500));
+		controller.start(0);
+		controller.constrainPointer(new SpatialController.Viewport(101, 80, 7, -3), 0);
+		controller.rebase(-7, 3, 0); // exact displayed GUI center
+		controller.movePhysical(dx, dy, 10);
+		var pointer = controller.snapshot().pointer();
+		assertEquals(screenX, 57.5 + pointer.x(), DELTA);
+		assertEquals(screenY, 37 + pointer.y(), DELTA);
+	}
+
+	@Test
+	void hugeFiniteInputSaturatesWithoutOverflowAndFirstInwardSampleHasNoDebt() {
+		var controller = new SpatialController(halfRoot(), tuning(180, false, 500));
+		controller.start(0);
+		controller.constrainPointer(new SpatialController.Viewport(100, 80, 0, 0), 0);
+		controller.movePhysical(Double.MAX_VALUE, Double.MAX_VALUE, 10);
+		assertEquals(new SpatialController.Point(49, 39), controller.snapshot().pointer());
+		var saturated = controller.snapshot();
+		controller.movePhysical(Double.MAX_VALUE, Double.MAX_VALUE, 20);
+		assertEquals(saturated, controller.snapshot(), "outward input creates no duplicate trail or timer progression");
+		controller.movePhysical(-1, -2, 30);
+		assertEquals(new SpatialController.Point(48, 37), controller.snapshot().pointer());
+		controller.movePhysical(-Double.MAX_VALUE, -Double.MAX_VALUE, 40);
+		assertEquals(new SpatialController.Point(-50, -40), controller.snapshot().pointer());
+		controller.movePhysical(1, 2, 50);
+		assertEquals(new SpatialController.Point(-49, -38), controller.snapshot().pointer());
+	}
+
+	@Test
+	void nonFiniteDeltasLeaveRadialAndExternalStateUntouched() {
+		var controller = new SpatialController(halfRoot(), tuning(180, false, 500));
+		controller.start(0);
+		controller.constrainPointer(new SpatialController.Viewport(100, 80, 0, 0), 0);
+		for (double bad : List.of(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY)) {
+			var before = controller.snapshot();
+			controller.movePhysical(bad, 10, 10);
+			controller.movePhysical(10, bad, 10);
+			assertEquals(before, controller.snapshot());
+		}
+		controller.useExternalSurface();
+		for (double bad : List.of(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY)) {
+			var before = controller.snapshot();
+			assertEquals(new SpatialController.Point(0, 0), controller.moveExternalPointer(bad, 10, 10));
+			assertEquals(new SpatialController.Point(0, 0), controller.moveExternalPointer(10, bad, 10));
+			assertEquals(before, controller.snapshot());
+		}
+	}
+
+	@Test
+	void saturatedInputDoesNotResetDwellAndClippedTravelCannotPayBackFreshStroke() {
+		var controller = new SpatialController(root(), new SpatialController.Tuning(10, 40, 100, false, 500));
+		controller.start(0);
+		controller.constrainPointer(new SpatialController.Viewport(100, 100, 0, 0), 0);
+		controller.movePhysical(1000, 0, 10);
+		controller.movePhysical(1000, 0, 109);
+		controller.tick(110);
+		assertEquals(2, controller.snapshot().menus().size(), "saturation must not reset the last real movement");
+		controller.back(120);
+		controller.constrainPointer(new SpatialController.Viewport(60, 100, 0, 0), 130);
+		controller.movePhysical(1000, 0, 140);
+		controller.tick(1000);
+		assertEquals(1, controller.snapshot().menus().size(), "outward overshoot is not a fresh stroke");
+	}
+
+	@Test
+	void resizeCorrectionDoesNotEnterOrRetraceOrKeepAStaleTurnCorner() {
+		var controller = new SpatialController(root(), tuning(200, false, 500));
+		controller.start(0);
+		controller.constrainPointer(new SpatialController.Viewport(1000, 600, 0, 0), 0);
+		controller.movePhysical(200, 0, 10);
+		controller.movePhysical(100, 0, 50); // qualifies a turn corner at x=200
+		var trail = controller.snapshot().trail();
+		controller.constrainPointer(new SpatialController.Viewport(620, 600, 200, 0), 60);
+		assertEquals(new SpatialController.Point(109, 0), controller.snapshot().pointer());
+		assertEquals(trail, controller.snapshot().trail(), "projection correction paints no synthetic stroke");
+		controller.movePhysical(0, -5, 70);
+		assertEquals(1, controller.snapshot().menus().size(), "the previous turn corner cannot admit this short segment");
+		controller.tick(1000);
+		assertEquals(1, controller.snapshot().menus().size(), "correction supplied no dwell travel");
+	}
+
+	@Test
+	void externalRebaseStartEndAndBackSnapshotsStayWithinPublishedViewport() {
+		var controller = new SpatialController(root(), tuning(200, false, 500));
+		controller.constrainPointer(new SpatialController.Viewport(100, 80, 100, -100), 0);
+		controller.start(0);
+		assertEquals(new SpatialController.Point(-51, 60), controller.snapshot().pointer());
+		assertEquals(new SpatialController.Point(0, 0), controller.snapshot().menus().getFirst().origin());
+		controller.enterExternal(SpatialMenu.of("external", SpatialMenu.Choice.leaf("x", "x", "x")), 500, -500, 10);
+		assertEquals(new SpatialController.Point(-51, 60), controller.snapshot().pointer());
+		assertEquals(List.of(new SpatialController.Point(-51, 60)), controller.snapshot().trail());
+		controller.rebase(-500, 500, 20);
+		assertEquals(new SpatialController.Point(-150, 139), controller.snapshot().pointer());
+		controller.back(30);
+		controller.constrainPointer(new SpatialController.Viewport(100, 80, 0, 0), 40);
+		assertEquals(new SpatialController.Point(-50, 39), controller.snapshot().pointer());
+		controller.tick(1000);
+		assertEquals(1, controller.snapshot().menus().size());
+		controller.cancel();
+		assertEquals(new SpatialController.Point(0, 0), controller.snapshot().pointer());
+	}
+
+	@Test
+	void panCorrectionCannotCompleteBackHoverOrReleaseItsHeldFocusBlock() {
+		var controller = enteredContent(true, 400, 200, 210);
+		controller.movePhysical(-50, 0, 220);
+		controller.tick(520);
+		assertEquals(0.75, controller.snapshot().hoverProgress(), DELTA);
+		controller.constrainPointer(new SpatialController.Viewport(300, 300, 10, 0), 600);
+		assertEquals(139, controller.snapshot().pointer().x(), DELTA);
+		assertEquals(0, controller.snapshot().pointer().y(), DELTA);
+		assertEquals(0, controller.snapshot().hoverProgress());
+		controller.tick(620);
+		assertEquals(2, controller.snapshot().menus().size(), "correction cannot complete the stale hover");
+		controller.tick(1020);
+		assertEquals(1, controller.snapshot().menus().size());
+		controller.constrainPointer(new SpatialController.Viewport(200, 300, 0, 0), 1030);
+		controller.tick(3000);
+		assertEquals(1, controller.snapshot().menus().size(), "alignment cannot pay the Back fresh-stroke fence");
+	}
 
 	private static SpatialController.Tuning tuning(long dwellMillis, boolean hoverEnabled, long hoverMillis) {
 		return new SpatialController.Tuning(36.0, 110.0, dwellMillis, hoverEnabled, hoverMillis);

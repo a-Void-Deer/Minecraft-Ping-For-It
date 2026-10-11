@@ -185,7 +185,14 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	/** Frozen radial/list frame; session/list keys fence transition identities across opens. */
 	public record Snapshot(boolean active, String sessionKey, SpatialSelectorSettings.Snapshot settings,
 		ContentFence contentFence, Status contentStatus, SpatialController.Snapshot radial,
-		InventoryListModel.Snapshot inventory, SpatialInventoryView inventoryView, PreciseFrame preciseFrame) {}
+		InventoryListModel.Snapshot inventory, SpatialInventoryView inventoryView, PreciseFrame preciseFrame,
+		SpatialController.Viewport viewport) {
+		public Snapshot(boolean active, String sessionKey, SpatialSelectorSettings.Snapshot settings,
+			ContentFence contentFence, Status contentStatus, SpatialController.Snapshot radial,
+			InventoryListModel.Snapshot inventory, SpatialInventoryView inventoryView, PreciseFrame preciseFrame) {
+			this(active, sessionKey, settings, contentFence, contentStatus, radial, inventory, inventoryView, preciseFrame, null);
+		}
+	}
 
 	/** Detached atomic paint payload, including each candidate's own capture ray and generation-scoped ID. */
 	public record PreciseFrame(long revision, Map<String, CapturedTarget> choices, Map<String, CapturedPingContext> contexts) {
@@ -218,6 +225,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private boolean listWasActive;
 	private String itemKey;
 	private double itemAnchorY = Double.NaN;
+	private SpatialController.Viewport viewport;
 
 	/** Precise allocations are copied as-is in catalog order; acquisition/nonreuse is external. */
 	public SpatialSelectorSession(CapturedTarget ordinary, Map<String, CapturedTarget> precise,
@@ -251,14 +259,31 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		return true;
 	}
 
+	/** Publish the frame's exact projection, or updated dimensions with its last published offset. */
+	public void constrainPointer(SpatialController.Viewport viewport, long nowMillis) {
+		this.viewport = Objects.requireNonNull(viewport);
+		radial.constrainPointer(viewport, nowMillis);
+		alignListPointer();
+	}
+
+	private void alignListPointer() {
+		if (!isListActive()) return;
+		var pointer = radial.snapshot().pointer();
+		gesture.alignPointer(pointer.x(), pointer.y());
+		boolean backFocused = settings.hoverEnabled() && gesture.isBackSideFocused();
+		list.setBackHoverFocused(backFocused);
+		radial.alignExternalBack(backFocused);
+	}
+
 	@Override
 	public void moveGui(double deltaX, double deltaY, long nowMillis) {
 		if (!active || !Double.isFinite(deltaX) || !Double.isFinite(deltaY)) return;
 		if (isListActive()) {
 			SpatialController.Point pointer = radial.snapshot().pointer();
 			gesture.alignPointer(pointer.x(), pointer.y());
-			radial.moveExternalPointer(deltaX, deltaY, nowMillis);
-			InventoryGesture.Action navigation = gesture.moveGui(deltaX, deltaY);
+			var effective = radial.moveExternalPointer(deltaX, deltaY, nowMillis);
+			if (effective.x() == 0.0 && effective.y() == 0.0) return;
+			InventoryGesture.Action navigation = gesture.moveGui(effective.x(), effective.y());
 			boolean backFocused = settings.hoverEnabled() && gesture.isBackSideFocused();
 			list.setBackHoverFocused(backFocused);
 			if (!radial.updateExternalBack(backFocused, nowMillis)) {
@@ -313,7 +338,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	public Snapshot snapshot() {
 		issuedPreciseFrame = preciseFrame;
 		return new Snapshot(active, sessionKey, settings, fence,
-			projection == null ? Status.UNKNOWN : projection.status(), radial.snapshot(), list.snapshot(), inventoryView(), preciseFrame);
+			projection == null ? Status.UNKNOWN : projection.status(), radial.snapshot(), list.snapshot(), inventoryView(), preciseFrame, viewport);
 	}
 
 	/** Production live mode starts empty; press-time precise attachments are not installed. */
@@ -575,6 +600,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			itemKey = null;
 			itemAnchorY = Double.NaN;
 			listWasActive = true;
+			alignListPointer();
 		} else listWasActive = false;
 	}
 

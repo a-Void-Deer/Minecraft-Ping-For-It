@@ -30,6 +30,72 @@ class SpatialSelectorSessionTest {
 	private static final SpatialSelectorSession.ListGeometry GEOMETRY =
 		new SpatialSelectorSession.ListGeometry(4, 180, 17, 23, 19, 85);
 
+	@Test
+	void listConsumesOnlyEffectiveDeltaAndSaturatedMovementCannotGlideOrNavigate() {
+		var session = openedList(false, new Content());
+		// This fixture opens the list at (360,0). Its displayed axis is x=20.
+		session.constrainPointer(new SpatialController.Viewport(40, 1, -360, -0.5), 280);
+		assertPointer(session, 360, 0);
+		session.moveGui(0, Double.MAX_VALUE, 290);
+		assertPointer(session, 360, 0);
+		assertEquals("a", session.snapshot().inventory().selectedKey(), "zero effective vertical motion is not glide");
+		assertEquals(1, session.snapshot().radial().trail().size());
+		session.moveGui(Double.MAX_VALUE, 0, 300);
+		assertPointer(session, 379, 0);
+		assertTrue(current(session).menuId().endsWith(":inventory"), "raw overshoot cannot cross the Forward exit gate");
+		var saturated = session.snapshot();
+		session.moveGui(Double.MAX_VALUE, Double.MAX_VALUE, 310);
+		assertEquals(saturated, session.snapshot(), "zero effective input has no gesture, trail or hover effect");
+		session.moveGui(-1, -1, 320);
+		assertPointer(session, 378, 0);
+		assertEquals("a", session.snapshot().inventory().selectedKey(), "first reversal uses only its one-pixel delta");
+	}
+
+	@Test
+	void panAndResizeAlignListReleaseFocusWithoutGlideTrailOrAutomaticSideNavigation() {
+		for (boolean hover : List.of(false, true)) {
+			var session = openedList(hover, new Content());
+			session.scrollRows(1, 280);
+			var trail = session.snapshot().radial().trail();
+			String listMenu = current(session).menuId();
+			// C=(100,50), V=(-200,0): x=360 must become x=299 (screen x=199).
+			session.constrainPointer(new SpatialController.Viewport(200, 100, -200, 0), 290);
+			assertPointer(session, 299, 0);
+			assertEquals("b", session.snapshot().inventory().selectedKey());
+			assertEquals(trail, session.snapshot().radial().trail());
+			assertEquals(listMenu, current(session).menuId());
+			assertTrue(session.snapshot().inventoryView().backAffordance().focused(), "alignment refreshes Back's release gate");
+			assertEquals(0, session.snapshot().radial().hoverProgress());
+			assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(291), "resize without movement cannot release a stale item focus");
+		}
+	}
+
+	@Test
+	void correctedListPointerIsTheNextGestureBaselineWithoutCorrectionTravel() {
+		var session = openedList(false, new Content());
+		String listMenu = current(session).menuId();
+		var trail = session.snapshot().radial().trail();
+		// Pan clamps the logical pointer 81px toward Forward, but does not enter an item.
+		session.constrainPointer(new SpatialController.Viewport(200, 100, -541, 0), 280);
+		assertPointer(session, 441, 0);
+		assertEquals(listMenu, current(session).menuId());
+		assertEquals(trail, session.snapshot().radial().trail());
+		session.moveGui(-10, 0, 290);
+		assertPointer(session, 441, 0);
+		assertEquals(listMenu, current(session).menuId(), "saturated inward-to-logical-axis input is no effective movement");
+		assertEquals(trail, session.snapshot().radial().trail());
+		session.moveGui(1, 0, 300);
+		assertTrue(current(session).menuId().contains(":item:"), "a real admitted sample uses the corrected side baseline");
+		assertPointer(session, 535, -24);
+		assertEquals(1, session.snapshot().radial().trail().size(), "external row rebase remains confined without a warp stroke");
+	}
+
+	private static void assertPointer(SpatialSelectorSession<?> session, double x, double y) {
+		var pointer = session.snapshot().radial().pointer();
+		assertEquals(x, pointer.x(), 1e-9);
+		assertEquals(y, pointer.y(), 1e-9);
+	}
+
 	private static final class Content implements SpatialSelectorSession.ContentPort<String> {
 		SpatialSelectorSession.ContentProjection<String> next;
 		int reads;

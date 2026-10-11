@@ -570,10 +570,35 @@ public final class SpatialOverlayRenderer {
 		private final SpatialOverlayTransitions<VisualKey, Paint> transitions =
 			new SpatialOverlayTransitions<>(TRANSITION_NANOS, TRANSITION_CAPACITY, APPEARANCE_SCALE);
 		private final SpatialViewOffset viewOffset = new SpatialViewOffset(TRANSITION_NANOS);
+		private SpatialController.Viewport publishedViewport;
+
+		/** Interaction-frame preparation only: sample the pan once, then paint this immutable projection. */
+		public SpatialController.Viewport prepareViewport(SpatialController.Snapshot radial, int width, int height,
+			Style style, long nowNanos) {
+			sampleViewOffset(viewOffset, activeOrigin(radial), nowNanos, style.reduceMotion());
+			publishedViewport = new SpatialController.Viewport(width, height, viewOffset.x(), viewOffset.y());
+			return publishedViewport;
+		}
+
+		/** Navigation in that frame re-aims from the sample, without sampling the pan twice. */
+		public SpatialController.Viewport retargetViewport(SpatialController.Snapshot radial, Style style, long nowNanos) {
+			var origin = activeOrigin(radial);
+			if (origin != null) viewOffset.centerOn(origin.x(), origin.y(), nowNanos, style.reduceMotion());
+			publishedViewport = new SpatialController.Viewport(publishedViewport.width(), publishedViewport.height(), viewOffset.x(), viewOffset.y());
+			return publishedViewport;
+		}
+
+		/** Resize/move/release do not advance the animation clock. */
+		public SpatialController.Viewport lastViewport(int width, int height) {
+			return new SpatialController.Viewport(width, height,
+				publishedViewport == null ? viewOffset.x() : publishedViewport.viewX(),
+				publishedViewport == null ? viewOffset.y() : publishedViewport.viewY());
+		}
 
 		public void reset() {
 			transitions.clear();
 			viewOffset.clear();
+			publishedViewport = null;
 			paintedChoiceIds = Set.of();
 		}
 
@@ -591,6 +616,14 @@ public final class SpatialOverlayRenderer {
 		public RowLayout drawFrame(GuiGraphics graphics, SpatialController.Snapshot radial,
 			SpatialInventoryView inventory, Function<SpatialController.ChoiceView, Component> labels,
 			Function<SpatialController.ChoiceView, Component> details, Style style, long nowNanos) {
+			return drawFrame(graphics, radial, inventory, labels, details, style, nowNanos, null);
+		}
+
+		/** Paint the already-published projection without resampling pan or mutating interaction. */
+		public RowLayout drawFrame(GuiGraphics graphics, SpatialController.Snapshot radial,
+			SpatialInventoryView inventory, Function<SpatialController.ChoiceView, Component> labels,
+			Function<SpatialController.ChoiceView, Component> details, Style style, long nowNanos,
+			SpatialController.Viewport viewport) {
 			paintedChoiceIds = Set.of();
 			if (graphics == null || style == null) {
 				return RowLayout.NONE;
@@ -600,12 +633,14 @@ public final class SpatialOverlayRenderer {
 				return RowLayout.NONE;
 			}
 			List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets = new ArrayList<>();
-			double guiWidth = graphics.guiWidth();
-			double guiHeight = graphics.guiHeight();
+			double guiWidth = viewport == null ? graphics.guiWidth() : viewport.width();
+			double guiHeight = viewport == null ? graphics.guiHeight() : viewport.height();
 			double centerX = guiWidth / 2.0;
 			double centerY = guiHeight / 2.0;
 			SpatialController.Point origin = activeOrigin(radial);
-			sampleViewOffset(viewOffset, origin, nowNanos, style.reduceMotion());
+			if (viewport == null) sampleViewOffset(viewOffset, origin, nowNanos, style.reduceMotion());
+			double viewX = viewport == null ? viewOffset.x() : viewport.viewX();
+			double viewY = viewport == null ? viewOffset.y() : viewport.viewY();
 			if (radial != null && radial.active()) {
 				addRadial(targets, radial, labels == null ? TRANSLATION_KEY_LABELS : labels, details,
 					centerX, centerY, orbit(graphics), style.rootDistance(), style.submenuRadiusScale());
@@ -618,6 +653,7 @@ public final class SpatialOverlayRenderer {
 			if (origin == null && transitions.isEmpty()) {
 				// The exit tail is gone: hard-reset so a later session starts centered.
 				viewOffset.clear();
+				publishedViewport = null;
 			}
 			RowLayout selected = RowLayout.NONE;
 			Set<String> painted = new HashSet<>();
@@ -629,14 +665,25 @@ public final class SpatialOverlayRenderer {
 			var pose = graphics.pose();
 			pose.pushPose();
 			try {
-				pose.translate(viewOffset.x(), viewOffset.y(), 0.0);
+				pose.translate(viewX, viewY, 0.0);
 				for (SpatialOverlayTransitions.State<VisualKey, Paint> state : states.stream()
 					.sorted(Comparator.comparingInt(value -> paintRank(value.data()))).toList()) {
 					if (state.present() && state.data() instanceof RowPaint row && row.selected()) {
-						selected = new RowLayout(state.y() + viewOffset.y(), row.width() * state.scale());
+						selected = new RowLayout(state.y() + viewY, row.width() * state.scale());
 					}
 					if (renders(state.data(), state.alpha(), style)) {
-						paint(graphics, font, state, style);
+						// Chrome follows the interaction projection, not a stale interpolated
+						// GUI center during resize. Node appearance transitions remain visual.
+						var paintState = alignChrome(state, viewport);
+						if (paintState != state) {
+							// Chrome rounds the final displayed coordinates, not C+P before
+							// a fractional pan. All its geometry still uses the same rigid V.
+							pose.pushPose();
+							try {
+								pose.translate(-viewX, -viewY, 0.0);
+								paint(graphics, font, paintState, style);
+							} finally { pose.popPose(); }
+						} else paint(graphics, font, paintState, style);
 						if (state.data() instanceof NodePaint node && acknowledgesNodePaint(state.present(),
 							state.key().owner().equals(activeMenu), state.alpha(), style))
 							painted.add(node.choice().id());
@@ -648,6 +695,14 @@ public final class SpatialOverlayRenderer {
 			paintedChoiceIds = Set.copyOf(painted);
 			return selected;
 		}
+	}
+
+	static SpatialOverlayTransitions.State<VisualKey, Paint> alignChrome(
+		SpatialOverlayTransitions.State<VisualKey, Paint> state, SpatialController.Viewport viewport) {
+		return viewport != null && state.present() && state.data() instanceof ChromePaint
+			? new SpatialOverlayTransitions.State<>(state.key(), viewport.centerX() + viewport.viewX(), viewport.centerY() + viewport.viewY(),
+				state.scale(), state.alpha(), true, state.data())
+			: state;
 	}
 
 	/** Called only after successful node paint; detached/ancestor/fully transparent states cannot acknowledge. */

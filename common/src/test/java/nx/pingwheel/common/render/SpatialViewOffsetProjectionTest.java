@@ -25,6 +25,8 @@ import nx.pingwheel.common.render.SpatialInventoryView.Status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
  * Projection invariants of the selector's single rigid view translation, driven
@@ -43,6 +45,99 @@ class SpatialViewOffsetProjectionTest {
 	private static final int FONT_LINE_HEIGHT = 9;
 	private static final SpatialSelectorSession.ListGeometry GEOMETRY =
 		new SpatialSelectorSession.ListGeometry(4, 180, 17, 23, 19, 85);
+
+	@Test
+	void intermediatePanPublishesOneProjectionForConfinementPaintAndRelease() {
+		var controller = controller();
+		var paint = new SpatialOverlayRenderer.Session();
+		controller.constrainPointer(paint.prepareViewport(controller.snapshot(), 400, 300, SpatialOverlayRenderer.Style.NATIVE, 0), 0);
+		controller.enterExternal(child("child"), -60, 0, 1);
+		controller.constrainPointer(paint.prepareViewport(controller.snapshot(), 400, 300, SpatialOverlayRenderer.Style.NATIVE, 0), 1);
+		controller.movePhysical(Double.MAX_VALUE, 0, 2);
+		assertEquals(new SpatialController.Point(199, 0), controller.snapshot().pointer());
+		var before = controller.snapshot();
+		var quarter = paint.prepareViewport(before, 400, 300, SpatialOverlayRenderer.Style.NATIVE, 40_000_000L);
+		assertEquals(9.375, quarter.viewX(), 1e-9, "40ms is one quarter of the actual 160ms pan");
+		assertEquals(before, controller.snapshot(), "sampling render state cannot mutate interaction");
+		controller.constrainPointer(quarter, 40);
+		assertEquals(new SpatialController.Point(189.625, 0), controller.snapshot().pointer());
+		assertEquals(399, quarter.centerX() + quarter.viewX() + controller.snapshot().pointer().x(), 1e-9);
+		var half = paint.prepareViewport(controller.snapshot(), 400, 300, SpatialOverlayRenderer.Style.NATIVE, 80_000_000L);
+		assertEquals(30, half.viewX(), 1e-9);
+		controller.constrainPointer(half, 80);
+		var painted = controller.snapshot();
+		assertEquals(new SpatialController.Point(169, 0), painted.pointer());
+		assertEquals("child:back", painted.focusId());
+		paint.drawFrame(null, painted, null, null, null, SpatialOverlayRenderer.Style.NATIVE, 160_000_000L, half);
+		assertEquals(painted, controller.snapshot(), "paint is not an interaction tick");
+		assertEquals(half, paint.lastViewport(400, 300), "paint/release read the published pan, not its future endpoint");
+		var resized = paint.lastViewport(200, 100);
+		assertEquals(30, resized.viewX());
+		controller.constrainPointer(resized, 81);
+		assertEquals(new SpatialController.Point(69, 0), controller.snapshot().pointer());
+		assertEquals(199, 100 + 30 + controller.snapshot().pointer().x());
+		var result = assertInstanceOf(SpatialController.Release.NoAction.class, controller.release(82));
+		assertEquals("child:back", result.choiceId());
+		assertEquals(SpatialController.Release.NoAction.Reason.NAVIGATION, result.reason());
+	}
+
+	@Test
+	void frameNavigationRetargetsFromItsSingleSampleAndReducedMotionStillSnaps() {
+		for (boolean reduced : List.of(false, true)) {
+			var controller = controller();
+			var paint = new SpatialOverlayRenderer.Session();
+			var style = new SpatialOverlayRenderer.Style(100, 1, 1, true, reduced);
+			paint.prepareViewport(controller.snapshot(), 400, 300, style, 0);
+			controller.enterExternal(child("child"), -60, 0, 1);
+			var entered = paint.retargetViewport(controller.snapshot(), style, 0);
+			assertEquals(reduced ? 60 : 0, entered.viewX());
+			var sampled = paint.prepareViewport(controller.snapshot(), 400, 300, style, 80_000_000L);
+			assertEquals(reduced ? 60 : 30, sampled.viewX());
+			controller.back(80);
+			var returned = paint.retargetViewport(controller.snapshot(), style, 80_000_000L);
+			assertEquals(reduced ? 0 : 30, returned.viewX(), "normal return re-aims from this frame's displayed offset");
+			assertEquals(returned, paint.lastViewport(400, 300));
+		}
+	}
+
+	@Test
+	void pointerChromeUsesSnapshotCenterNotResizeInterpolatedCenter() {
+		var snapshot = new SpatialController.Snapshot(true, new SpatialController.Point(69, 0), List.of(), null, List.of(), 0);
+		var chrome = new SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>(
+			new SpatialOverlayRenderer.VisualKey("chrome", "radial", ""), 200, 150, 1, 1, true,
+			new SpatialOverlayRenderer.ChromePaint(snapshot));
+		var viewport = new SpatialController.Viewport(200, 100, 30, 0);
+		var paint = SpatialOverlayRenderer.alignChrome(chrome, viewport);
+		assertEquals(130, paint.x());
+		assertEquals(50, paint.y());
+		assertEquals(199, paint.x() + snapshot.pointer().x());
+		assertEquals(50, paint.y() + snapshot.pointer().y());
+		assertSame(chrome.data(), paint.data());
+		var outgoing = new SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>(
+			chrome.key(), 200, 150, 1, 1, false, chrome.data());
+		assertSame(outgoing, SpatialOverlayRenderer.alignChrome(outgoing, viewport), "exit geometry is detached paint only");
+	}
+
+	@Test
+	void fractionalPanRoundsTheDisplayedPointerCenterInsideAllFourEdges() {
+		var viewport = new SpatialController.Viewport(101, 81, 9.375, -7.625);
+		var controller = controller();
+		controller.constrainPointer(viewport, 0);
+		for (double[] edge : List.of(new double[] {-1000, 0, 0, 32.875}, new double[] {1000, 0, 100, 32.875},
+			new double[] {0, -1000, 59.875, 0}, new double[] {0, 1000, 59.875, 80})) {
+			controller.rebase(0, 0, 0);
+			controller.movePhysical(edge[0], edge[1], 1);
+			var snapshot = controller.snapshot();
+			var chrome = new SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>(
+				new SpatialOverlayRenderer.VisualKey("chrome", "radial", ""), 200, 150, 1, 1, true,
+				new SpatialOverlayRenderer.ChromePaint(snapshot));
+			var paint = SpatialOverlayRenderer.alignChrome(chrome, viewport);
+			assertEquals(edge[2], paint.x() + snapshot.pointer().x(), 1e-9);
+			assertEquals(edge[3], paint.y() + snapshot.pointer().y(), 1e-9);
+			assertTrue(Math.round(paint.x() + snapshot.pointer().x()) >= 0 && Math.round(paint.x() + snapshot.pointer().x()) <= 100);
+			assertTrue(Math.round(paint.y() + snapshot.pointer().y()) >= 0 && Math.round(paint.y() + snapshot.pointer().y()) <= 80);
+		}
+	}
 
 	private static SpatialMenu controllerRoot() {
 		SpatialMenu types = SpatialMenu.of("content:rpm",

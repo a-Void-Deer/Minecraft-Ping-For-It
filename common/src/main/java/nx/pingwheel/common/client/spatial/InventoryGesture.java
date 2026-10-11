@@ -200,6 +200,7 @@ public final class InventoryGesture {
 	public void alignPointer(double x, double y) {
 		pointerX = x;
 		pointerY = y;
+		if (backHoverEnabled) backHoverFocused = isBackSideFocused();
 	}
 
 	public double axisX() {
