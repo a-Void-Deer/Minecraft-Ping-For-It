@@ -727,6 +727,38 @@ class SpatialControllerTest {
 		assertInstanceOf(SpatialController.Release.Abandoned.class, controller.release(30L));
 	}
 
+	@ParameterizedTest
+	@CsvSource({
+		"496, -16, 88.1523897340054",
+		"-496, 16, 268.1523897340054",
+		"496, 16, 88.1523897340054",
+		"1000.5, 200.25, 20"
+	})
+	void returnPlacementAtNonZeroOriginReconstructsInsideTheInclusiveDeadzone(double originX, double originY,
+		double bearing) {
+		var controller = new SpatialController(SpatialMenu.of("root",
+			SpatialMenu.Choice.leaf("up", "up", "a:up").withSector(0.0, 360.0)),
+			new SpatialController.Tuning(18, 110, 180, false, 500));
+		controller.start(0L);
+		controller.constrainPointer(new SpatialController.Viewport(2400, 1600, 0, 0), 0L);
+		controller.enterExternal(SpatialMenu.of("child", SpatialMenu.Choice.leaf("child:leaf", "leaf", "a:leaf")),
+			originX, originY, 10L);
+
+		double radians = Math.toRadians(bearing);
+		controller.placeReturn(new SpatialController.Point(originX + Math.sin(radians) * 18.0,
+			originY - Math.cos(radians) * 18.0), 20L);
+
+		var returned = controller.snapshot();
+		var origin = returned.menus().getLast().origin();
+		assertEquals(originX, origin.x(), DELTA);
+		assertEquals(originY, origin.y(), DELTA);
+		double distance = Math.hypot(returned.pointer().x() - origin.x(), returned.pointer().y() - origin.y());
+		assertTrue(distance <= 18.0,
+			"the reconstructed absolute point must satisfy the same inclusive deadzone as focus and release");
+		assertNull(returned.focusId(), "the inclusive deadzone admits no immediate activation");
+		assertInstanceOf(SpatialController.Release.Abandoned.class, controller.release(30L));
+	}
+
 	@Test
 	void pendingReturnResolutionCannotPayTheFreshStrokeRequiredByItsPop() {
 		var controller = enteredContent(false, 500L, 200L, 210L);

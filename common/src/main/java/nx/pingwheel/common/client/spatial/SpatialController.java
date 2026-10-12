@@ -626,10 +626,11 @@ public final class SpatialController {
 	 * zero deadzone admits only the origin.
 	 */
 	private Point inclusiveDeadzonePoint(Point origin, Point desired) {
-		double radius = tuning.deadzone();
-		if (!(radius > 0.0)) {
+		double deadzone = tuning.deadzone();
+		if (!(deadzone > 0.0)) {
 			return new Point(origin.x(), origin.y());
 		}
+		double radius = deadzone;
 		double dx = desired.x() - origin.x();
 		double dy = desired.y() - origin.y();
 		double distance = Math.hypot(dx, dy);
@@ -640,7 +641,15 @@ public final class SpatialController {
 			dy *= scale;
 			distance = Math.hypot(dx, dy);
 		}
-		return new Point(origin.x() + dx, origin.y() + dy);
+		double x = origin.x() + dx;
+		double y = origin.y() + dy;
+		// focusAt and release test the reconstructed absolute point, so walk its
+		// representable coordinates inward until that same predicate admits it.
+		while (Math.hypot(x - origin.x(), y - origin.y()) > deadzone) {
+			x = Math.nextAfter(x, origin.x());
+			y = Math.nextAfter(y, origin.y());
+		}
+		return new Point(x, y);
 	}
 
 	/** Projection-only return placement: rebases trail and focus without travel or timers. */

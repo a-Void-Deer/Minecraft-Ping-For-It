@@ -252,7 +252,10 @@ class SpatialSelectorSessionTest {
 			Optional.empty(), face, new CaptureEquivalenceKey.ExternalKey("minecraft:overworld", "sable", "opaque-locator", "minecraft:chest"));
 	}
 	private static SpatialSelectorSettings.Snapshot settings(boolean hover) {
-		return new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), hover, 250, true, false);
+		return settings(hover, 30);
+	}
+	private static SpatialSelectorSettings.Snapshot settings(boolean hover, int deadzone) {
+		return new SpatialSelectorSettings.Snapshot(deadzone, 90, 120, 140, new BigDecimal("0.5"), hover, 250, true, false);
 	}
 	private static SpatialSelectorSession.ContentFence fence(SpatialSelectorSession.CapturedTarget target) {
 		return new SpatialSelectorSession.ContentFence(31, 42, 53, target.candidateId());
@@ -260,6 +263,10 @@ class SpatialSelectorSessionTest {
 	private static SpatialSelectorSession<String> session(SpatialSelectorSession.CapturedTarget target,
 		Map<String, SpatialSelectorSession.CapturedTarget> precise, boolean hover, Content port) {
 		return new SpatialSelectorSession<>(target, precise, settings(hover), fence(target), port, GEOMETRY);
+	}
+	private static SpatialSelectorSession<String> session(SpatialSelectorSession.CapturedTarget target,
+		Map<String, SpatialSelectorSession.CapturedTarget> precise, boolean hover, Content port, int deadzone) {
+		return new SpatialSelectorSession<>(target, precise, settings(hover, deadzone), fence(target), port, GEOMETRY);
 	}
 	private static SpatialController.MenuView current(SpatialSelectorSession<?> session) {
 		return session.snapshot().radial().menus().getLast();
@@ -1143,6 +1150,59 @@ class SpatialSelectorSessionTest {
 		assertNull(session.snapshot().radial().focusId());
 		assertEquals(List.of(session.snapshot().radial().pointer()), session.snapshot().radial().trail(),
 			"resolution rebases the seed without an appended stroke");
+	}
+
+	@Test
+	void pendingContentReturnAtNonZeroOriginStaysInsideTheDeadzoneWhenPropertiesAppear() {
+		var target = target("ordinary", "entity_block", true);
+		Content port = new Content();
+		port.next = inventory(target, 1, false, List.of(row("a", 50L)));
+		var session = session(target, Map.of(), false, port, 18);
+		session.open(0);
+
+		// Content is entered with its origin at the reported nonzero-origin roundoff case.
+		session.constrainPointer(new SpatialController.Viewport(100, 100, -546, 65), 1);
+		assertPointer(session, 496, -16);
+		session.moveGui(5, 0, 2);
+		session.moveGui(-5, 0, 3);
+		session.tick(200);
+		assertTrue(current(session).menuId().endsWith(":content"));
+		var parent = current(session);
+		assertEquals(496.0, parent.origin().x(), 1e-9);
+		assertEquals(-16.0, parent.origin().y(), 1e-9);
+
+		// The inventory surface opens from a projection that can reach its origin.
+		session.constrainPointer(new SpatialController.Viewport(100, 100, -627, 66), 210);
+		String inventory = current(session).choices().stream()
+			.filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
+		enter(session, inventory, 220);
+		assertTrue(session.snapshot().inventory().open());
+
+		// The side Back returns to Content while the projection cannot show the
+		// desired circumference point, so the placement stays pending.
+		session.moveGui(-100, 0, 400);
+		assertTrue(current(session).menuId().endsWith(":content"));
+		assertFalse(session.snapshot().inventory().open());
+		assertEquals(577.0, session.snapshot().radial().pointer().x(), 1e-9);
+
+		// Two property entries appear before the pending point is resolved.
+		session.updateContent(new SpatialSelectorSession.ContentProjection<>(fence(target), 2, false, Status.UPDATING,
+			List.of(
+				new SpatialSelectorSession.Property("value0", "value0",
+					PresentationPropertyRef.root("pingforit:basic", "pingforit:value0"), new PresentationValue.NumberValue(0),
+					List.of(ping("attention")), ping("attention")),
+				new SpatialSelectorSession.Property("value1", "value1",
+					PresentationPropertyRef.root("pingforit:basic", "pingforit:value1"), new PresentationValue.NumberValue(1),
+					List.of(ping("attention")), ping("attention"))),
+			inventory(target, 2, false, List.of(row("a", 50L))).inventory()), 410);
+		session.constrainPointer(new SpatialController.Viewport(1200, 800, 0, 0), 420);
+
+		var returned = session.snapshot().radial();
+		double distance = Math.hypot(returned.pointer().x() - parent.origin().x(),
+			returned.pointer().y() - parent.origin().y());
+		assertTrue(distance <= 18.0, "the resolved absolute point must satisfy the inclusive deadzone predicate");
+		assertNull(current(session).focusId(), "no property may be focused by the resolved return");
+		assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(421));
 	}
 
 	@Test
