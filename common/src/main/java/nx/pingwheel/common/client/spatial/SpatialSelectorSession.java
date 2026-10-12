@@ -581,7 +581,9 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private void synchronizeNavigation(long nowMillis) {
 		boolean hasList = radial.snapshot().menus().stream().anyMatch(menu -> menu.menuId().equals(inventoryMenu));
 		if (!hasList) {
+			boolean listExited = listWasActive;
 			list.close(); listWasActive = false; itemKey = null; itemAnchorY = Double.NaN;
+			if (listExited) returnToContent(nowMillis);
 			return;
 		}
 		if (isListActive()) {
@@ -604,6 +606,30 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			listWasActive = true;
 			alignListPointer();
 		} else listWasActive = false;
+	}
+
+	/**
+	 * After the inventory surface closes, the pointer returns to the parent
+	 * Content menu's inclusive deadzone circumference on the frozen
+	 * InventoryDisplay slot-centre bearing, so a stationary release abandons
+	 * instead of repeating the old direction and the list cannot reopen by
+	 * itself. The controller applies the exact point immediately or retains it
+	 * until the published projection can show it. Only the surface-to-Content
+	 * exit qualifies: an item submenu's Back return stays on the list.
+	 */
+	private void returnToContent(long nowMillis) {
+		SpatialController.MenuView parent = activeMenu();
+		if (parent == null || !contentMenu.equals(parent.menuId())) return;
+		SpatialController.ChoiceView inventory = null;
+		for (SpatialController.ChoiceView choice : parent.choices()) {
+			if (inventoryMenu.equals(choice.id())) { inventory = choice; break; }
+		}
+		if (inventory == null || inventory.disabled() || !(inventory.spanDegrees() > 0.0)) return;
+		double radius = radial.snapshot().deadzone();
+		if (!(radius > 0.0)) return;
+		double radians = Math.toRadians(inventory.startDegrees() + inventory.spanDegrees() / 2.0);
+		radial.placeReturn(new SpatialController.Point(parent.origin().x() + Math.sin(radians) * radius,
+			parent.origin().y() - Math.cos(radians) * radius), nowMillis);
 	}
 
 	private SpatialInventoryView inventoryView() {

@@ -703,6 +703,108 @@ class SpatialControllerTest {
 	}
 
 	@Test
+	void returnPlacementFillsTheInclusiveDeadzoneCircumferenceAndAbandonsOnRelease() {
+		var controller = new SpatialController(root(), tuning(180L, false, 500L));
+		controller.start(0L);
+		controller.constrainPointer(new SpatialController.Viewport(400, 400, 0, 0), 0L);
+		double epoch = controller.snapshot().trailEpoch();
+		double radians = Math.toRadians(33.0);
+		controller.placeReturn(new SpatialController.Point(Math.sin(radians) * 36.0, -Math.cos(radians) * 36.0), 10L);
+		var placed = controller.snapshot();
+		assertEquals(Math.sin(radians) * 36.0, placed.pointer().x(), DELTA);
+		assertEquals(-Math.cos(radians) * 36.0, placed.pointer().y(), DELTA);
+		assertEquals(36.0, Math.hypot(placed.pointer().x(), placed.pointer().y()), 1e-9,
+			"the frozen circumference radius is preserved");
+		assertNull(placed.focusId(), "the inclusive deadzone admits no immediate activation");
+		assertEquals(1, placed.trail().size());
+		assertTrue(placed.trailEpoch() > epoch, "an explicit return starts a fresh trail identity");
+		// A hair outside is corrected inward by the minimal representable step, not a product inset.
+		controller.placeReturn(new SpatialController.Point(36.0 + 1.0e-13, 0.0), 20L);
+		double corrected = Math.hypot(controller.snapshot().pointer().x(), controller.snapshot().pointer().y());
+		assertTrue(corrected <= 36.0, "rounding must land inside the inclusive deadzone");
+		assertEquals(36.0, corrected, 1e-9, "the correction is a rounding step, not a visible inset");
+		assertNull(controller.snapshot().focusId());
+		assertInstanceOf(SpatialController.Release.Abandoned.class, controller.release(30L));
+	}
+
+	@Test
+	void pendingReturnResolutionCannotPayTheFreshStrokeRequiredByItsPop() {
+		var controller = enteredContent(false, 500L, 200L, 210L);
+		SpatialController.Point contentOrigin = activeOrigin(controller);
+		moveToBearing(controller, contentOrigin, 30.0, 130.0, 220L);
+		assertEquals("content:rpm", controller.snapshot().focusId());
+		controller.tick(420L);
+		assertEquals(3, controller.snapshot().menus().size());
+		SpatialController.Point rpmOrigin = activeOrigin(controller);
+		moveToBearing(controller, rpmOrigin, 222.0, 130.0, 430L);
+		assertEquals("content:rpm:back", controller.snapshot().focusId());
+		controller.tick(630L);
+		assertEquals(2, controller.snapshot().menus().size(), "the Back dwell pops exactly one level");
+		// The published projection cannot show the Content deadzone circumference yet.
+		controller.constrainPointer(new SpatialController.Viewport(100, 100, 400, 0), 640L);
+		var confined = controller.snapshot().pointer();
+		var trail = controller.snapshot().trail();
+		controller.placeReturn(new SpatialController.Point(236.0, 0.0), 650L);
+		assertEquals(confined, controller.snapshot().pointer(), "an unreachable return stays pending without travel");
+		assertEquals(trail, controller.snapshot().trail());
+		assertEquals(0.0, controller.snapshot().hoverProgress());
+		controller.constrainPointer(new SpatialController.Viewport(1000, 1000, 0, 0), 660L);
+		var returned = controller.snapshot();
+		assertEquals(new SpatialController.Point(236.0, 0.0), returned.pointer());
+		assertNull(returned.focusId());
+		assertEquals(List.of(returned.pointer()), returned.trail(), "resolution rebases the seed and appends no stroke");
+		controller.tick(1000L);
+		assertEquals(2, controller.snapshot().menus().size(), "projection resolution pays no fresh stroke by itself");
+		// A partial new stroke cannot pay the pop's fence even after dwell.
+		moveToBearing(controller, contentOrigin, 30.0, 96.0, 1010L);
+		controller.tick(1010L + 201L);
+		assertEquals(2, controller.snapshot().menus().size(), "a partial stroke cannot re-enter after a return placement");
+		// The remaining admitted stroke plus dwell re-enters exactly the focused branch.
+		moveToBearing(controller, contentOrigin, 30.0, 146.0, 1220L);
+		controller.tick(1220L + 201L);
+		assertEquals(3, controller.snapshot().menus().size(), "a full fresh stroke plus dwell re-enters");
+	}
+
+	@Test
+	void freshEffectivePhysicalMovementCancelsAPendingReturn() {
+		var controller = enteredContent(false, 500L, 200L, 210L);
+		controller.constrainPointer(new SpatialController.Viewport(100, 100, 200, 0), 220L);
+		controller.placeReturn(new SpatialController.Point(236.0, 0.0), 230L);
+		assertEquals(-151.0, controller.snapshot().pointer().x(), DELTA);
+		controller.movePhysical(-10.0, 0.0, 240L);
+		assertEquals(-161.0, controller.snapshot().pointer().x(), DELTA);
+		controller.constrainPointer(new SpatialController.Viewport(1000, 1000, 0, 0), 250L);
+		assertEquals(-161.0, controller.snapshot().pointer().x(), DELTA,
+			"a fresh physical stroke keeps its own position instead of chasing the abandoned target");
+	}
+
+	@Test
+	void pendingReturnResolutionDoesNotRearmHeldBackOrAppendTrail() {
+		var controller = returnedToNonRootContentWithHeldBack();
+		controller.constrainPointer(new SpatialController.Viewport(100, 100, 200, 0), 640L);
+		var trail = controller.snapshot().trail();
+		controller.placeReturn(new SpatialController.Point(110.0, 0.0), 650L);
+		assertEquals(trail, controller.snapshot().trail(), "a pending return adds no travel or stroke");
+		controller.constrainPointer(new SpatialController.Viewport(1200, 1400, 0, 0), 660L);
+		var returned = controller.snapshot();
+		assertEquals(new SpatialController.Point(110.0, 0.0), returned.pointer());
+		assertNull(returned.focusId());
+		assertEquals(List.of(returned.pointer()), returned.trail(), "resolution rebases the trail seed");
+		var resolved = controller.snapshot();
+		controller.tick(1000L);
+		controller.tick(1400L);
+		assertEquals(2, controller.snapshot().menus().size(), "projection and stationary samples cannot rearm the held Back");
+		assertEquals(resolved.trail(), controller.snapshot().trail(), "no synthetic stroke is appended after the seed");
+		assertEquals(0.0, controller.snapshot().hoverProgress());
+		// A genuine physical leave and re-entry still arms exactly one new return.
+		controller.movePhysical(90.0, 0.0, 1410L);
+		controller.movePhysical(-130.0, 0.0, 1420L);
+		assertEquals("content:back", controller.snapshot().focusId());
+		controller.tick(1821L);
+		assertEquals(1, controller.snapshot().menus().size(), "a deliberate leave/re-entry re-arms the held Back");
+	}
+
+	@Test
 	void rebaseClearsPendingTurnCandidate() {
 		SpatialMenu deep = SpatialMenu.of("deep", SpatialMenu.Choice.leaf("deep:leaf", "leaf", "a:leaf"));
 		SpatialMenu inner = SpatialMenu.of("inner", SpatialMenu.Choice.branch("inner:deep", "deep", deep));

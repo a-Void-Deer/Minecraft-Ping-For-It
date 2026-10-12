@@ -16,14 +16,14 @@ class OptionUtilsDecimalTest {
 	@Test
 	void decimalCodecRoundTripsEveryQuarterStepAndRejectsValuesOutsideTheRange() {
 		OptionInstance<BigDecimal> option = option(new AtomicReference<>(new BigDecimal("1.5")));
-		for (int quarters = 1; quarters <= 12; quarters++) {
+		for (int quarters = 1; quarters <= 80; quarters++) {
 			BigDecimal value = new BigDecimal("0.25").multiply(BigDecimal.valueOf(quarters));
 			var encoded = option.codec().encodeStart(JsonOps.INSTANCE, value).getOrThrow();
 			assertEquals(0, value.compareTo(encoded.getAsBigDecimal()));
 			assertEquals(0, value.compareTo(option.codec().parse(JsonOps.INSTANCE, encoded).getOrThrow()));
 		}
 		assertTrue(option.codec().parse(JsonOps.INSTANCE, new JsonPrimitive(0)).error().isPresent());
-		assertTrue(option.codec().parse(JsonOps.INSTANCE, new JsonPrimitive(4)).error().isPresent());
+		assertTrue(option.codec().parse(JsonOps.INSTANCE, new JsonPrimitive(20.25)).error().isPresent());
 	}
 
 	@Test
@@ -35,7 +35,7 @@ class OptionUtilsDecimalTest {
 	}
 
 	private static OptionInstance<BigDecimal> option(AtomicReference<BigDecimal> value) {
-		return OptionUtils.ofDecimal("test.decimal", new BigDecimal("0.25"), new BigDecimal("3"),
+		return OptionUtils.ofDecimal("test.decimal", new BigDecimal("0.25"), new BigDecimal("20"),
 			new BigDecimal("0.25"), number -> Component.literal(number.toPlainString()),
 			null, value::get, value::set);
 	}

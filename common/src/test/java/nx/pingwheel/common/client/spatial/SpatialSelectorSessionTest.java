@@ -1055,4 +1055,126 @@ class SpatialSelectorSessionTest {
 		assertNull(current(session).focusId());
 		assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(150));
 	}
+
+	/** The retained Content frame directly under an active inventory surface. */
+	private static SpatialController.MenuView retainedParent(SpatialSelectorSession<?> session) {
+		var menus = session.snapshot().radial().menus();
+		return menus.get(menus.size() - 2);
+	}
+
+	/** The frozen InventoryDisplay slot-centre bearing read from the retained parent frame. */
+	private static double inventorySlotBearing(SpatialController.MenuView parent) {
+		var inventory = parent.choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow();
+		return inventory.startDegrees() + inventory.spanDegrees() / 2.0;
+	}
+
+	/** The independently computed circumference point the return placement must reach. */
+	private static SpatialController.Point inventoryDeadzoneTarget(SpatialController.MenuView parent, double deadzone) {
+		double radians = Math.toRadians(inventorySlotBearing(parent));
+		return new SpatialController.Point(parent.origin().x() + Math.sin(radians) * deadzone,
+			parent.origin().y() - Math.cos(radians) * deadzone);
+	}
+
+	@ParameterizedTest
+	@CsvSource({"false, LEFT", "true, LEFT", "false, RIGHT", "true, RIGHT"})
+	void listSideBackReturnPlacesPointerOnTheFrozenInventorySlotDeadzoneForBothBackStyles(boolean hover,
+		InventoryListModel.Side backSide) {
+		var session = openedList(hover, backSide);
+		var parent = retainedParent(session);
+		var expected = inventoryDeadzoneTarget(parent, session.snapshot().radial().deadzone());
+		double backSign = backSide == InventoryListModel.Side.LEFT ? -1.0 : 1.0;
+		if (hover) {
+			session.moveGui(backSign * 50, 0, 290);
+			assertTrue(session.snapshot().inventoryView().backAffordance().focused(), "Back hover precedes the return");
+			session.tick(290 + session.snapshot().settings().hoverMillis() + 1);
+		} else {
+			session.moveGui(backSign * 100, 0, 290);
+		}
+		var returned = session.snapshot().radial();
+		assertEquals(parent.menuId(), current(session).menuId(), "exactly one level returns to Content");
+		assertFalse(session.snapshot().inventory().open());
+		assertPointer(session, expected.x(), expected.y());
+		assertEquals(session.snapshot().settings().deadzone(), Math.hypot(returned.pointer().x() - parent.origin().x(),
+			returned.pointer().y() - parent.origin().y()), 1e-9, "the returned radius is the frozen circumference");
+		assertNull(returned.focusId(), "the inclusive deadzone admits no immediate activation");
+		assertEquals(List.of(returned.pointer()), returned.trail(), "the return rebases the trail seed");
+		session.tick(5000); session.tick(6000);
+		assertEquals(parent.menuId(), current(session).menuId(), "stationary frames cannot reopen the list or navigate");
+		assertFalse(session.snapshot().inventory().open());
+		assertEquals(0.0, session.snapshot().radial().hoverProgress());
+		assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(6001),
+			"a deadzone release abandons instead of repeating the previous direction");
+		assertFalse(session.snapshot().active());
+	}
+
+	@Test
+	void returnedListPointerRequiresAFullFreshStrokeBeforeTheInventoryReopens() {
+		var session = openedList(false, InventoryListModel.Side.LEFT);
+		var parent = retainedParent(session);
+		var expected = inventoryDeadzoneTarget(parent, session.snapshot().radial().deadzone());
+		double bearing = inventorySlotBearing(parent);
+		double deadzone = session.snapshot().radial().deadzone();
+		double stroke = session.snapshot().settings().stroke();
+		long dwell = session.snapshot().settings().dwellMillis();
+		session.moveGui(-100, 0, 290);
+		assertPointer(session, expected.x(), expected.y());
+		moveTo(session, parent.origin(), bearing, deadzone + stroke - 1.0, 300);
+		session.tick(300 + dwell + 1);
+		assertEquals(parent.menuId(), current(session).menuId(), "a partial new stroke cannot pay the pop's fence");
+		assertFalse(session.snapshot().inventory().open());
+		moveTo(session, parent.origin(), bearing, deadzone + stroke, 500);
+		session.tick(500 + dwell + 1);
+		assertTrue(current(session).menuId().endsWith(":inventory"));
+		assertTrue(session.snapshot().inventory().open(), "a full deliberate stroke plus dwell reopens the list");
+	}
+
+	@Test
+	void distantListExitKeepsTheReturnPendingUntilTheProjectionCanShowIt() {
+		var session = openedList(false, new Content());
+		session.constrainPointer(new SpatialController.Viewport(100, 100, -300, 0), 280);
+		session.moveGui(-100, 0, 290);
+		assertTrue(current(session).menuId().endsWith(":content"));
+		assertPointer(session, 250, 0);
+		assertEquals(List.of(session.snapshot().radial().pointer()), session.snapshot().radial().trail(),
+			"the pop rebases one seed and the pending return adds no further stroke");
+		assertFalse(session.snapshot().inventory().open());
+		session.constrainPointer(new SpatialController.Viewport(100, 100, -180, 0), 300);
+		assertPointer(session, 210, 0);
+		assertNull(session.snapshot().radial().focusId());
+		assertEquals(List.of(session.snapshot().radial().pointer()), session.snapshot().radial().trail(),
+			"resolution rebases the seed without an appended stroke");
+	}
+
+	@Test
+	void freshPhysicalMovementCancelsAPendingListReturnWithoutChasingIt() {
+		var session = openedList(false, new Content());
+		session.constrainPointer(new SpatialController.Viewport(100, 100, -300, 0), 280);
+		session.moveGui(-100, 0, 290);
+		assertTrue(current(session).menuId().endsWith(":content"));
+		assertPointer(session, 250, 0);
+		session.moveGui(10, 0, 291);
+		assertPointer(session, 260, 0);
+		session.constrainPointer(new SpatialController.Viewport(100, 100, -180, 0), 300);
+		assertPointer(session, 229, 0);
+		assertTrue(session.snapshot().radial().pointer().x() > 210.0,
+			"the moved pointer is confined by the reprojection instead of warping to the abandoned target");
+		assertTrue(session.snapshot().radial().focusId().endsWith(":inventory"),
+			"the fresh movement continues ordinary navigation instead of the return placement");
+	}
+
+	@Test
+	void itemSubmenuBackReturnStaysOnTheListWithoutAContentReturnPlacement() {
+		var session = openedList(false, new Content());
+		double forward = session.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		session.moveGui(forward * 200, 0, 290);
+		assertTrue(current(session).menuId().contains(":item:"));
+		var back = current(session).choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow();
+		focus(session, back.id(), 300);
+		var beforeReturn = session.snapshot().radial().pointer();
+		session.tick(300 + session.snapshot().settings().dwellMillis() + 1);
+		assertTrue(current(session).menuId().endsWith(":inventory"));
+		assertEquals(beforeReturn, session.snapshot().radial().pointer(),
+			"the item Back return keeps the list pointer instead of the Content deadzone");
+		assertTrue(session.snapshot().inventory().open());
+	}
 }

@@ -1,5 +1,6 @@
 package nx.pingwheel.common.client.spatial;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -89,7 +90,9 @@ class NativeSelectorInputTest {
 				new SpatialSelectorSession.InventoryRow<>("b", "b", 2L, "minecraft:stone", Status.READY, "opaque:b"),
 				new SpatialSelectorSession.InventoryRow<>("c", "c", 1L, "minecraft:stone", Status.READY, "opaque:c")),
 			List.of(attention), attention);
-		var session = new SpatialSelectorSession<>(target, Map.of(), new SpatialSelectorSettings().snapshot(), fence,
+		var preferences = new SpatialSelectorSettings();
+		preferences.setTargetGlide(new BigDecimal("1")); // the explicit calibration factor this native boundary checks
+		var session = new SpatialSelectorSession<>(target, Map.of(), preferences.snapshot(), fence,
 			(ignored, requestedFence) -> new SpatialSelectorSession.ContentProjection<>(fence, 1, false, Status.READY, List.of(), preview),
 			new SpatialSelectorSession.ListGeometry(3, 180, 17, 20, 19, 85));
 		session.open(0); session.moveGui(100, 0, 1); session.tick(181);

@@ -23,24 +23,27 @@ class SpatialSelectorMigrationTest {
 	private static final String LEGACY = "0.4.2-pfi-beta1";
 
 	@Test
-	void freshFilePersistsNeutralGlideAndCurrentMissingNullAndExplicitValuesNeverRewriteOnLoad(
+	void freshFilePersistsTheDefaultGlideAndCurrentMissingNullAndExplicitValuesNeverRewriteOnLoad(
 		@TempDir Path directory) throws IOException {
 		Path freshPath = directory.resolve("fresh.json");
 		var fresh = new ConfigHandler<>(ClientConfig.class, freshPath, TIMEOUT_TARGET);
 		fresh.load();
-		assertEquals(0, java.math.BigDecimal.ONE.compareTo(read(freshPath).getAsJsonObject("spatialSelector")
+		assertEquals(0, new java.math.BigDecimal("1.75").compareTo(read(freshPath).getAsJsonObject("spatialSelector")
 			.get("targetGlide").getAsBigDecimal()));
-		assertLoadedGlideThreshold(fresh.getConfig(), 40);
+		assertLoadedGlideThreshold(fresh.getConfig(), 40.0 / 1.75);
 		for (String selector : List.of("", ",\"spatialSelector\":null", ",\"spatialSelector\":{}",
 			",\"spatialSelector\":{\"targetGlide\":null}", ",\"spatialSelector\":{\"targetGlide\":0.25}",
-			",\"spatialSelector\":{\"targetGlide\":2}")) {
+			",\"spatialSelector\":{\"targetGlide\":2}", ",\"spatialSelector\":{\"targetGlide\":9}")) {
 			Path path = directory.resolve("current.json");
 			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET + "\",\"pingVolume\":37" + selector + "}\n")
 				.getBytes(StandardCharsets.UTF_8);
 			Files.write(path, original);
 			var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
 			handler.load();
-			double threshold = selector.contains(":0.25") ? 160 : selector.contains(":2") ? 20 : 40;
+			double threshold = selector.contains(":0.25") ? 160
+				: selector.contains(":2}") ? 20
+				: selector.contains(":9}") ? 40.0 / 9.0
+				: 40.0 / 1.75;
 			assertLoadedGlideThreshold(handler.getConfig(), threshold);
 			assertEquals(37, handler.getConfig().getPingVolume());
 			assertArrayEquals(original, Files.readAllBytes(path), "default normalization is not a load rewrite");

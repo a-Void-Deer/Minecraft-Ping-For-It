@@ -196,6 +196,7 @@ public final class SpatialController {
 	private final List<MenuState> stack = new ArrayList<>();
 	private double hoverProgress;
 	private Viewport viewport;
+	private Point pendingReturn;
 	private long hoverAlignment;
 	private long trailSequence;
 	private long trailEpoch;
@@ -217,6 +218,7 @@ public final class SpatialController {
 	public void start(long nowMillis) {
 		active = true;
 		pointer = confined(new Point(0.0, 0.0));
+		pendingReturn = null;
 		freshTrail();
 		stack.clear();
 
@@ -240,6 +242,11 @@ public final class SpatialController {
 	/** Reprojects without input travel, trail, navigation or timer advancement. */
 	public boolean constrainPointer(Viewport viewport, long nowMillis) {
 		this.viewport = Objects.requireNonNull(viewport);
+		if (pendingReturn != null && confined(pendingReturn).equals(pendingReturn)) {
+			applyReturn(pendingReturn, nowMillis);
+			pendingReturn = null;
+			return true;
+		}
 		Point next = confined(pointer);
 		if (next.equals(pointer)) return false;
 		pointer = next;
@@ -279,6 +286,7 @@ public final class SpatialController {
 		Point previous = pointer;
 		Point effective = movePointer(deltaX, deltaY);
 		if (effective.x() == 0.0 && effective.y() == 0.0) return;
+		pendingReturn = null; // a fresh effective physical stroke abandons a pending return
 		menu.traveled += Math.hypot(effective.x(), effective.y());
 		appendTrail();
 
@@ -438,6 +446,31 @@ public final class SpatialController {
 		rebaseInternal(new Point(x, y), nowMillis);
 	}
 
+	/**
+	 * Requests an exact return placement at {@code desired}, which the caller
+	 * computes on the active menu's inclusive deadzone circumference. The point
+	 * is corrected inward by at most a few representable steps when floating
+	 * error would place it outside that inclusive deadzone, so focus stays
+	 * empty. When the published projection can already show the exact point it
+	 * is applied immediately; otherwise it is retained as one bounded pending
+	 * target and resolved by later projection updates. Applying or resolving
+	 * the placement rebases the trail and focus without physical travel, timer
+	 * progress or a fresh stroke, and a fresh effective physical movement
+	 * cancels a pending target instead of chasing it.
+	 */
+	public void placeReturn(Point desired, long nowMillis) {
+		if (!active) {
+			return;
+		}
+		Point point = inclusiveDeadzonePoint(activeMenu().origin, desired);
+		if (viewport == null || confined(point).equals(point)) {
+			applyReturn(point, nowMillis);
+			pendingReturn = null;
+		} else {
+			pendingReturn = point;
+		}
+	}
+
 	/** Keeps this controller as the sole pointer and hover owner for a list surface. */
 	public void useExternalSurface() {
 		if (!active) return;
@@ -505,6 +538,7 @@ public final class SpatialController {
 			SpatialMenu next = findMenu(replacement, state.menu.id());
 			if (next == null && !state.external) {
 				stack.subList(index, stack.size()).clear();
+				pendingReturn = null;
 				freshTrail();
 				break;
 			}
@@ -562,6 +596,7 @@ public final class SpatialController {
 
 	private void rebaseInternal(Point point, long nowMillis) {
 		pointer = confined(point);
+		pendingReturn = null;
 		freshTrail();
 		MenuState menu = activeMenu();
 		menu.candidate = null;
@@ -584,10 +619,49 @@ public final class SpatialController {
 		if (trail.size() > tuning.trailLength()) trail.remove(0);
 	}
 
+	/**
+	 * The requested circumference point, corrected inward only by the minimal
+	 * representable steps needed to satisfy the inclusive deadzone under
+	 * floating error. The caller's intended radius is otherwise preserved; a
+	 * zero deadzone admits only the origin.
+	 */
+	private Point inclusiveDeadzonePoint(Point origin, Point desired) {
+		double radius = tuning.deadzone();
+		if (!(radius > 0.0)) {
+			return new Point(origin.x(), origin.y());
+		}
+		double dx = desired.x() - origin.x();
+		double dy = desired.y() - origin.y();
+		double distance = Math.hypot(dx, dy);
+		for (int step = 0; step < 8 && distance > radius; step++) {
+			radius = Math.nextDown(radius);
+			double scale = radius / distance;
+			dx *= scale;
+			dy *= scale;
+			distance = Math.hypot(dx, dy);
+		}
+		return new Point(origin.x() + dx, origin.y() + dy);
+	}
+
+	/** Projection-only return placement: rebases trail and focus without travel or timers. */
+	private void applyReturn(Point point, long nowMillis) {
+		pointer = point;
+		freshTrail();
+		MenuState menu = activeMenu();
+		menu.candidate = null;
+		menu.candidateId = null;
+		menu.traveled = 0.0;
+		menu.enteredAt = nowMillis;
+		menu.lastMovement = nowMillis;
+		setFocus(nowMillis);
+		updateHover(nowMillis);
+	}
+
 	private void endSession() {
 		active = false;
 		stack.clear();
 		trail.clear();
+		pendingReturn = null;
 		pointer = confined(new Point(0.0, 0.0));
 		hoverProgress = 0.0;
 		hover.end();
@@ -703,6 +777,7 @@ public final class SpatialController {
 
 	private void enterAt(Resolved choice, Point origin, long nowMillis, boolean physicalMovement) {
 		MenuState parent = activeMenu();
+		pendingReturn = null;
 		MenuState child = new MenuState(choice.children(), origin, parent.origin);
 		child.enteredAt = nowMillis;
 		child.lastMovement = nowMillis;
@@ -718,6 +793,7 @@ public final class SpatialController {
 		}
 
 		stack.remove(stack.size() - 1);
+		pendingReturn = null;
 		freshTrail();
 		MenuState parent = activeMenu();
 		parent.focus = focusAt(parent);

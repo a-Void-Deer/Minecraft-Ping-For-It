@@ -218,7 +218,7 @@ class InventorySettingsPersistenceTest {
 		Path configPath = tempDir.resolve("client.json");
 		Files.writeString(configPath,
 			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"pingVolume\":37,\"spatialSelector\":{"
-				+ "\"targetGlide\":9,\"submenuRadiusScale\":9,\"hoverEnabled\":true,\"hoverMillis\":10}}\n",
+				+ "\"targetGlide\":21,\"submenuRadiusScale\":9,\"hoverEnabled\":true,\"hoverMillis\":10}}\n",
 			StandardCharsets.UTF_8);
 
 		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
@@ -226,7 +226,7 @@ class InventorySettingsPersistenceTest {
 
 		assertEquals(37, handler.getConfig().getPingVolume());
 		SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
-		assertEquals(0, SpatialSelectorSettings.MAX_TARGET_GLIDE.compareTo(selector.getTargetGlide()));
+		assertEquals(0, new BigDecimal("20").compareTo(selector.getTargetGlide()));
 		assertEquals(0, SpatialSelectorSettings.MAX_SUBMENU_RADIUS_SCALE
 			.compareTo(selector.getSubmenuRadiusScale()));
 		assertEquals(SpatialSelectorSettings.MIN_HOVER_MILLIS, selector.getHoverMillis());
