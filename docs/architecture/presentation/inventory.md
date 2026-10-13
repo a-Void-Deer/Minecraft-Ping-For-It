@@ -265,9 +265,29 @@ conclusion.
 
 ## Item variants and component fallback
 
-Variant identity is the item ID plus the normalized full component set. The
-same item ID with different enchantments, damage or custom name is an
-independent entry and consumes its own quota.
+Variant identity is the item ID plus its canonical persistent component bytes.
+The identity encoding covers the persistent component map, so transient
+component state is not part of variant identity. The same item ID with
+different enchantments, damage or custom name is an independent entry and
+consumes its own quota.
+
+Preview and marked-item tracking carry one bounded serialized persistent
+display value per variant beside the item's registry-id label. The label is the
+registry translation fallback; the transmitted display data is what the client
+resolves into localized ordinary, custom and variant names and into
+component-bearing item icons. Naming and sanitization precedence, including the
+custom-name forms, remain owned by
+[names and chat](../rendering/names_chat.md).
+
+The bounded display is deliberately separate from identity. An oversized
+display degrades through the existing anti-abuse ladder — the full component
+display, then removal of the custom name, item name and lore, then the bare
+stack — and never exceeds the per-item display ceiling; only the fully stripped
+end of that ladder is the component-too-long state below. A restored icon is
+assembled only from components already present in the transmitted display
+value: omitted, transient or unknown component and model data is never
+reconstructed from the identity digest, and the client never rereads a local
+world inventory to restore it.
 
 A "component too long" fallback triggers only when every component has been
 stripped because of size. Omitting only the display component does not change
@@ -341,6 +361,41 @@ tracking, and neither is multiplied per recipient. The server-authoritative
 per-client and global send-byte multipliers scale the byte allowances; they are
 server settings, not a client display scale or UI preference, and their numeric
 ranges and steps stay in implementation and configuration owners.
+
+Two finite server ceilings are separate from the five period send-byte
+multipliers, from the queue bounds and from pending memory: one bounds the
+serialized per-item display value, and one bounds the whole inventory S2C
+frame. The effective pair keeps the reserved metadata headroom. A persisted
+pair conflict is repaired on load with frame priority, while a conflicting
+merged remote pair is rejected atomically; the persisted grids, defaults,
+bounds, and the repair, merge and UI workflow are owned by
+[server configuration](../../config/server.md#inventory-policy-object),
+[changing server configuration](../../architecture/config/changing-server-config.md),
+and the
+[configuration UI](../../UI/settings-screen.md#server-performance-category).
+The wire version and the offer's effective budget fields are owned by the
+[network protocol](../network/protocol.md).
+
+Changing a size ceiling never rewrites marker identity, lifetime, audience or
+source binding. Lowering a ceiling fences obsolete publication first and then
+monotonically reprojects the retained detached display through the existing
+ladder; it does not recapture the container, recompute identity, or discard
+paid scan progress. A complete-size strip uses the existing per-ID fold and
+group replacement, preserving counts and the last completed tracking totals.
+The offer handoff for an updated limit precedes any replacement data: a
+successful handoff publishes the new effective pair before replacement data,
+while a failed handoff leaves the previous data fenced; affected cuts receive
+fresh baseline and state fences, and compatible progress is preserved. Raising
+a ceiling may let a later fresh capture carry fuller data, but it never
+resurrects components omitted from an already retained display.
+
+A client rejects a frame above its accepted size cap before mutating entry
+metadata, counts or revisions, and it discards an incompatible partial without
+losing the marker's existing count state. Whole-entry delivery remains subject
+to the existing independent rate, queue and memory budgets: raising a ceiling
+does not promise entry delivery, and it neither accumulates budget credit nor
+introduces a budget-dependent fallback. The size ceilings add no
+acknowledgement and no byte fragmentation.
 
 The shared scan allowance is configurable and measured in slots. It is charged
 by the parse work that consumes a captured source snapshot, and a source with no

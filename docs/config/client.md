@@ -81,21 +81,33 @@ retained.
 | `spatialSelector.dwellMillis` | number, milliseconds | Dwell threshold before a focused branch entry is entered. |
 | `spatialSelector.rootDistance` | number, GUI pixels | Visual root-menu distance from the center; it does not change the deadzone or entry stroke. |
 | `spatialSelector.submenuRadiusScale` | number, multiplier | Client-local visual multiplier of the viewport-derived non-root radial radius, applied to every radial submenu including an inventory item's radial menu; the root menu's distance and every gesture threshold stay independent, and it freezes into the held gesture's snapshot like the other selector preferences. |
-| `spatialSelector.targetGlide` | number | Vertical glide factor for inventory-row mouse movement; it does not affect the scroll wheel. |
+| `spatialSelector.targetGlide` | number, multiplier | Multiplier over the inventory list's intrinsic vertical glide baseline; it does not affect ordinary-wheel input. The list's delta, threshold, reversal, and navigation behavior is owned by [wheel](../architecture/picking/wheel.md#inventory-list). |
 | `spatialSelector.hoverEnabled` | boolean | Whether sustained Back hover returns one level; opt-in and inert until enabled. |
 | `spatialSelector.hoverMillis` | number, milliseconds | Dwell threshold before Back-hover returns one level. |
-| `spatialSelector.showTrail` | boolean | Whether the virtual-pointer trail is drawn; it does not change gesture selection. |
+| `spatialSelector.showTrail` | boolean | Whether the shared pointer/active-option trail is drawn; false hides both pointer and option trail without changing gesture selection. |
+| `spatialSelector.trailLength` | integer, retained points | Maximum retained points in the shared trail history; a larger retained history can draw a longer trail when sufficient movement exists. |
+| `spatialSelector.trailOpacity` | integer, percent | Independent opacity multiplier applied only to the trail, not the wheel underlay, text-bearing options, guides, or connector. Zero makes the trail fully invisible without changing its history or gesture selection. |
 | `spatialSelector.reduceMotion` | boolean | Reduces selector animation without changing gesture timing or selection. |
 | `spatialSelector.preciseCapturePeriodTicks` | positive integer, ticks | Live candidate capture period for the Precise branch while it is active; the persisted range is 1..50 ticks with default 1. A change applies to the next hold, not to the running one. |
 
 The config model supplies an immutable validated snapshot for one held gesture,
 so editing the live configuration cannot change a gesture already in progress.
+Trail visibility, length, and opacity are frozen in that snapshot; explicit
+persisted values are retained, and missing or `null` members use the model's
+initialized values without a migration that rewrites or rescales them.
 Gesture behavior is owned by
 [wheel](../architecture/picking/wheel.md#headless-spatial-menu-model), which
 also owns the
 [Back-hover return state](../architecture/picking/wheel.md#back-hover-return-state)
-and the model's native-integration boundary; the remaining numeric ranges,
-steps, and defaults remain implementation values.
+and the model's native-integration boundary. The config model's initialized
+target-glide default is an implementation-chosen non-neutral factor rather than
+the neutral multiplier; the neutral multiplier preserves the intrinsic glide
+baseline exactly rather than disabling glide. A missing or explicit `null`
+member uses the initialized default; an explicit factor is retained rather than
+rescaled, while an out-of-range factor normalizes under the same numeric-bound
+handling as the other selector preferences; no schema migration rewrites an
+explicit value. Numeric ranges, steps, and defaults remain implementation
+values.
 
 ### Block display lists
 

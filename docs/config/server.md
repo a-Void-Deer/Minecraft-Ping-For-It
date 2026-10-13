@@ -22,7 +22,7 @@ validation, numeric bounds, and fallbacks; those implementation values are
 deliberately not mirrored here.
 
 The five top-level fields other than `pingDistance` and `presentation`, and the
-nineteen `inventory` administration settings, can also be changed over the
+twenty-one `inventory` administration settings, can also be changed over the
 client/server connection through
 [changing server configuration](../architecture/config/changing-server-config.md).
 Within the `presentation` object, the per-target-type `white`, `black`, and
@@ -45,13 +45,13 @@ exposes the remote settings and the presentation policy controls.
 | `syncDuration` | number, seconds | Server-held marker synchronization lifetime used for an accepted create's frozen expiry. | Server-authoritative. A valid positive duration after validation; it has no zero sentinel. Lifetime behavior is owned by [marker lifecycle](../architecture/authority/marker_lifecycle.md). |
 | `pingDistance` | number, blocks | Server acceptance range measured from the requester's eye to the authoritative target anchor. | Server-authoritative acceptance setting. It is not a client advertised capture cap; capture composition and acceptance are owned by [range](../architecture/picking/range.md). |
 | `presentation` | object | Per-target-type presentation field policy, sampling limits, and permission/interval overrides for the versioned presentation snapshot. | Server-authoritative. Projection, authorization, and demand-driven capture are owned by [presentation snapshot](../architecture/presentation/presentation_snapshot.md); the nested shape is catalogued below. |
-| `inventory` | object | Server-authoritative inventory preview and tracking budgets, caps, and independent send-byte multipliers. | Server-authoritative. Budget, unlimited-mode, multiplier, and tracking-deadline semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md); the nested shape is catalogued below. |
+| `inventory` | object | Server-authoritative inventory preview and tracking budgets, caps, independent send-byte multipliers, and the finite display/frame size scalars. | Server-authoritative. Budget, unlimited-mode, multiplier, size-scalar, and tracking-deadline semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md); the nested shape is catalogued below. |
 
 ## Presentation policy object
 
 The `presentation` object persists one rule set per target type; the client
 file has no presentation policy shape. Numeric bounds and defaults are applied
-by the implementation and are deliberately not mirrored here.
+by the implementation.
 
 | Member | JSON form | Meaning |
 | --- | --- | --- |
@@ -128,17 +128,19 @@ is owned by
 ## Inventory policy object
 
 The `inventory` object persists the shared scan-work allowance, the single
-pending-memory bound, and the separate preview and tracking budgets. The
-existing `physicalSlotsPerTick` key is retained: supported detached snapshot
-capture and copying do not consume its slot allowance; decoding and parsing the
-captured snapshot are charged, while unsupported live fallback is charged by
-the slots it reads. The source-specific accounting contract is owned by
+pending-memory bound, the separate preview and tracking budgets, and the two
+finite display/frame size scalars. The existing `physicalSlotsPerTick` key is
+retained: supported detached snapshot capture and copying do not consume its
+slot allowance; decoding and parsing the captured snapshot are charged, while
+unsupported live fallback is charged by the slots it reads. The source-specific
+accounting contract is owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md)
 and [shared source capture and sync](../architecture/presentation/shared_sources.md).
 Every cap is either a positive finite value or an explicit unlimited mode;
 periods, resynchronization cooldown, pending memory and heartbeat have no
-unlimited mode. There is no tracking-duration member: the tracking deadline
-follows the Ping's own marker lifetime, owned by
+unlimited mode, and the two display/frame size scalars are finite-only. There
+is no tracking-duration member: the tracking deadline follows the Ping's own
+marker lifetime, owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md).
 
 Numeric bounds, grids and defaults are applied by the implementation and are
@@ -157,6 +159,8 @@ array or an unbounded work loop.
 | --- | --- | --- |
 | `physicalSlotsPerTick` | limit object | Shared scan-work allowance per tick: snapshot decode/parsing and unsupported live slot reads consume it; supported detached snapshot capture and copying do not. Unlimited removes only the configurable cap; finite work and memory guards and both logical quotas remain in force. |
 | `pendingMemoryMiB` | number, MiB | Single finite server-wide pending-memory bound covering preview and tracking together. It is not a per-queue bound and has no unlimited mode. |
+| `displayByteMultiplier` | number, multiplier | Finite scalar scaling one item's serialized display payload from its existing display base. It has no unlimited mode and is not one of the five send-byte multipliers. |
+| `frameByteMultiplier` | number, multiplier | Finite scalar scaling the whole encoded inventory S2C frame from its existing frame base. It has no unlimited mode and is not one of the five send-byte multipliers. |
 | `preview` | object | Preview accounting; the members below. |
 | `preview.periodTicks` | number, ticks | Preview accounting period. |
 | `preview.maxVariantsPerClientPeriod` | limit object | Per-client variant-category quota. |
@@ -184,13 +188,31 @@ multipliers are independent: the preview client and global multipliers and the
 tracking stream, snapshot and global multipliers each control only their own
 scope, and a multiplier is a server-authoritative accounting scale rather than
 a client display preference. The snapshot multiplier is the single multiplier
-behind both the per-fragment cap and the per-client period total.
+behind both the per-fragment cap and the per-client period total. The two
+display/frame size scalars are not multiplier objects: each is a finite plain
+number with no unlimited mode, normalized on its own code-defined grid.
 
 Missing nested objects and missing members receive model defaults. Finite
 values are clamped into their confirmed ranges; multipliers are normalized
 onto their quantized piecewise grids with exact arithmetic so no off-grid value
 or byte drift is persisted. Out-of-range persisted values clamp without
 resetting unrelated fields, and the additive object needs no version migration.
+
+The two display/frame size scalars form a validated pair. On load both are
+normalized onto their code-defined grids with the frame taking priority: the
+display value is lowered to the greatest compatible display-grid value whose
+payload plus the reserved metadata space fits the frame, and the frame is never
+raised to resolve a conflict. A missing or null scalar uses its model default,
+unrelated members are preserved, and the additive members trigger no file
+migration. An oversized display payload keeps its bounded degradation fallback
+as an anti-abuse behavior owned by
+[inventory preview and tracking](../architecture/presentation/inventory.md#item-variants-and-component-fallback),
+and raising either size ceiling does not raise period throughput or the memory
+budgets. A remote update that selects either scalar is validated against the
+merged authoritative pair; a conflicting pair is rejected rather than repaired
+by mutating an unselected member, so the load-time normalization above is the
+explicit repair path for a persisted conflict. The remote transaction is owned
+by [changing server configuration](../architecture/config/changing-server-config.md).
 
 ## Version marker
 
@@ -236,6 +258,8 @@ Illustrative shape only; the values are samples, not defaults:
   "inventory": {
     "physicalSlotsPerTick": {"unlimited": false, "value": 512},
     "pendingMemoryMiB": 8,
+    "displayByteMultiplier": 0.75,
+    "frameByteMultiplier": 1.25,
     "preview": {
       "clientByteMultiplier": {"unlimited": false, "value": 0.5},
       "globalByteMultiplier": {"unlimited": true, "value": 1}

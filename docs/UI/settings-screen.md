@@ -49,7 +49,9 @@ The client scope has seven categories:
   Targets, and Mark Fluids.
 - **Wheel Appearance**: Root Menu Distance, Submenu Size, Wheel Opacity, Wheel
   Target Opacity, Wheel Target Font Size, Wheel Option Font Size, Show Gesture
-  Trail, and Reduce Selector Motion.
+  Trail, Trail Length, Trail Opacity, and Reduce Selector Motion. Trail Length
+  controls retained trail points; Trail Opacity controls only the trail's
+  visibility strength, independently of wheel and target opacity.
 - **Input Interaction**: Wheel Hold Time, Long-Press
   Compatibility Mode, Compatibility Time Slice, and Cancel Cone Half-Angle,
   followed by a Spatial selector gestures subgroup with Center Deadzone, Entry
@@ -68,14 +70,15 @@ The server scope has five categories:
 - **Send Rate**: Regeneration Time and Rate Limit.
 - **Marker Duration**: Sync Duration.
 - **Performance**: a Shared inventory budgets subgroup with Physical Slots per
-  Tick and Pending Memory; an Inventory preview subgroup with Preview Period,
-  Preview Variants per Client Period, Preview Slots per Client, Preview Slots
-  Server-wide, Preview Targets per Client, Preview Client Byte Multiplier, and
-  Preview Global Byte Multiplier; and an Inventory tracking subgroup with
-  Tracking Period, Tracking Variants per Target, Tracking Slots per Target,
-  Tracking Slots Server-wide, Tracking Stream Byte Multiplier, Tracking
-  Snapshot Byte Multiplier, Tracking Global Byte Multiplier, Resync Cooldown,
-  Heartbeat Cadence, and Byte Smoothing Window.
+  Tick, Pending Memory, Display Byte Size, and Frame Byte Size; an Inventory
+  preview subgroup with Preview Period, Preview Variants per Client Period,
+  Preview Slots per Client, Preview Slots Server-wide, Preview Targets per
+  Client, Preview Client Byte Multiplier, and Preview Global Byte Multiplier;
+  and an Inventory tracking subgroup with Tracking Period, Tracking Variants
+  per Target, Tracking Slots per Target, Tracking Slots Server-wide, Tracking
+  Stream Byte Multiplier, Tracking Snapshot Byte Multiplier, Tracking Global
+  Byte Multiplier, Resync Cooldown, Heartbeat Cadence, and Byte Smoothing
+  Window.
 - **Server Presentation**: Server Policy.
 
 The category structure supports later categories; it defines no configuration
@@ -95,15 +98,28 @@ user-facing reload control.
 The Performance category exposes the inventory administration controls in three
 plain-text, non-interactive subgroups: Shared inventory budgets, Inventory
 preview, and Inventory tracking. Each control is one atomic leaf: a numeric
-field holds the finite value, and a cap or multiplier also has a
-finite/unlimited mode control. The mode is independent of the finite text, so
-switching a row to unlimited never discards the finite value, including text
-that is currently invalid. Multiplier fields and the pending-memory field offer
-native step buttons that use the confirmed grids and steps without
-floating-point rounding. The persisted keys, bounds, grid normalization, and
-unlimited semantics are owned by
-[server configuration](../config/server.md#inventory-policy-object) and
+field holds the finite value, and each cap or multiplier that has an unlimited
+mode also carries a finite/unlimited mode control. The mode is independent of
+the finite text, so switching a row to unlimited never discards the finite
+value, including text that is currently invalid. The multiplier fields that
+have an unlimited mode, and the pending-memory field, offer native step buttons
+that use the confirmed grids and steps without floating-point rounding. The
+persisted keys, bounds, grid normalization, and unlimited semantics are owned
+by [server configuration](../config/server.md#inventory-policy-object) and
 [inventory preview and tracking](../architecture/presentation/inventory.md).
+
+The two inventory byte-size controls are sliders shown as physical KiB sizes
+while their persisted form remains the finite display and frame size scalars
+owned by [server configuration](../config/server.md#inventory-policy-object).
+The display slider's maximum follows the current frame value; lowering the
+frame can lower the display value in the same atomic adjustment, which updates
+both leaves and recomputes their dirty bits against the authoritative snapshot,
+and shows a polite localized notice; the screen never raises the frame by
+itself to fit a display value. These two leaves have no
+unlimited mode. The server's merged-pair validation, including its rejection of
+a conflicting pair without mutating an unselected member, and the
+no-acknowledgement transaction are owned by
+[changing server configuration](../architecture/config/changing-server-config.md).
 
 These controls belong to the shared ordinary server settings session and its
 correlated snapshot, not to a separate inventory session; the draft, close, and
@@ -189,7 +205,7 @@ so the screen does not promise that the server applied or persisted an update.
 
 The ordinary server settings are one shared session within the screen, not a
 per-category or per-visit section. This session covers the Channel & Players,
-Send Rate, Marker Duration, and Performance categories, including the nineteen
+Send Rate, Marker Duration, and Performance categories, including the twenty-one
 inventory administration leaves. Entering the server scope shows its overview
 and requests the current server configuration when the client holds a live
 connection and the session holds no loaded or in-flight snapshot. The loaded
@@ -223,13 +239,13 @@ are inert unless `canEdit` holds. Each control recomputes dirty bits against the
 authoritative snapshot. The original numeric fields must parse as non-negative
 integers; each inventory leaf parses under its own kind, range, and grid. An
 empty, malformed, out-of-range, or off-grid draft remains dirty but makes the
-update plan unavailable. An inventory cap or multiplier is one leaf: its
-unlimited mode is independent of its finite text, and toggling the mode never
-discards the finite text, including text that is currently invalid. A draft
-that returns every edited value to its authoritative value has no dirty bits
-and produces no update plan. Thus no-change and invalid-draft states do not
-dispatch a settings update merely because a page is open. The field-masked
-merge and the no-update-result consequence are owned by
+update plan unavailable. An inventory cap or multiplier that has an unlimited
+mode is one leaf: its unlimited mode is independent of its finite text, and
+toggling the mode never discards the finite text, including text that is
+currently invalid. A draft that returns every edited value to its authoritative
+value has no dirty bits and produces no update plan. Thus no-change and
+invalid-draft states do not dispatch a settings update merely because a page is
+open. The field-masked merge and the no-update-result consequence are owned by
 [changing server configuration](../architecture/config/changing-server-config.md#no-update-result).
 
 Category, scope-tab, and overview navigation neither dispatches an update nor

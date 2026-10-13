@@ -41,8 +41,8 @@ protocol, and registering a superseded route does not re-enable its effect.
 | Presentation `PresentationS2CPacket` (S2C): `OFFER`, `RESET`, `CREATED`, `SECTION`, `REMOVED`, `WINNER`, `REJECT` | Fabric, Forge, and NeoForge common client handler. | Accepted marker creation, removal, and winner changes are projected per recipient; a rejection is sent only to its requester. | Accepted only for the negotiated session epoch/view. The atomic Basic initial, receipt content descriptor, default display reference, retained values, mask and child-deny pruning, and legacy-name boundary are owned by [presentation snapshot](../presentation/presentation_snapshot.md); marker record state and visual lifetime are owned by [client marker state](../markers/client-state.md); rejection presentation remains owned by [ping feedback](../../UI/ping-feedback.md). Corrupt packets, or packets received without a runtime, are safely dropped. |
 | Presentation policy `ServerPresentationPolicyC2SPacket` (C2S): `READ`, `ADD_WHITE`, `REMOVE_WHITE`, `ADD_BLACK`, `REMOVE_BLACK`, `SET_WHITELIST_ONLY` | Fabric, Forge, and NeoForge common server handler. | The versioned route carries the correlated read of all five per-target-type rule views, each including its persisted child deny list, and the bounded selector and whitelist-only mutations for a selected target type, which leave the child deny list unchanged. Disclosure, revision, transaction, and broadcast semantics are owned by [presentation snapshot](../presentation/presentation_snapshot.md); authority and server-side enforcement are owned by [server configuration authority](../authority/server-config.md) and [security](../security.md#server-configuration-update-enforcement). | Not applicable on C2S. |
 | Presentation policy `ServerPresentationPolicyS2CPacket` (S2C) | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped rule-view mirror under the correlation and revision rules owned by [presentation snapshot](../presentation/presentation_snapshot.md); it does not mutate marker state, overlay/outline state, or presentation field values. |
-| Inventory `InventoryC2SPacket` (C2S): `HELLO`, `OPEN`, `CLOSE`, `RESYNC`, `SELECT` | Fabric, Forge, and NeoForge common server handler. | `HELLO` creates or renews the per-player preview session and answers with an offer of server-selected periods plus the inventory target-type policy view; every other kind runs only under the session epoch and the current presentation epoch/view fence. `OPEN` binds one bounded preview request to a server-validated ordinary block target or uncommitted external provider candidate with its carried real local face, `CLOSE` releases it, `RESYNC` schedules a corrective resend (a marker id selects a tracked Ping), and `SELECT` resolves one opaque retained entry reference under its baseline/state fences into a correlated selection outcome. The request carries no player identity, item count, or client-supplied authoritative target. Inventory domain semantics are owned by [inventory](../presentation/inventory.md). | Not applicable on C2S. |
-| Inventory `InventoryS2CPacket` (S2C): `OFFER`, `POLICY`, `SELECTED`, `REJECT`, `PREVIEW`, `SNAPSHOT`, `STREAM`, `STATUS`, `HEARTBEAT` | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped inventory session only under the negotiated epoch and the current presentation epoch/view: `OFFER` establishes the epoch and periods, `POLICY` carries the inventory target-type policy view, `SELECTED`/`REJECT` are accepted only against a pending commit with the matching request id, `PREVIEW` is request-scoped, and `SNAPSHOT`/`STREAM`/`STATUS`/`HEARTBEAT` are marker-scoped tracking frames. Coverage and pending runtime evidence for native input and HUD consumption of the session are owned by [testing and verification](../../testing/verification.md). Inventory domain semantics are owned by [inventory](../presentation/inventory.md). |
+| Inventory `InventoryC2SPacket` (C2S): `HELLO`, `OPEN`, `CLOSE`, `RESYNC`, `SELECT` | Fabric, Forge, and NeoForge common server handler. | `HELLO` creates or renews the per-player preview session and answers with an offer of server-selected periods, the effective display and frame byte budgets, and the inventory target-type policy view; every other kind runs only under the session epoch and the current presentation epoch/view fence. `OPEN` binds one bounded preview request to a server-validated ordinary block target or uncommitted external provider candidate with its carried real local face, `CLOSE` releases it, `RESYNC` schedules a corrective resend (a marker id selects a tracked Ping), and `SELECT` resolves one opaque retained entry reference under its baseline/state fences into a correlated selection outcome. The request carries no player identity, item count, or client-supplied authoritative target. Inventory domain semantics are owned by [inventory](../presentation/inventory.md). | Not applicable on C2S. |
+| Inventory `InventoryS2CPacket` (S2C): `OFFER`, `POLICY`, `SELECTED`, `REJECT`, `PREVIEW`, `SNAPSHOT`, `STREAM`, `STATUS`, `HEARTBEAT` | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped inventory session only under the negotiated epoch and the current presentation epoch/view: `OFFER` establishes the epoch, the periods, and the effective display and frame byte budgets, `POLICY` carries the inventory target-type policy view, `SELECTED`/`REJECT` are accepted only against a pending commit with the matching request id, `PREVIEW` is request-scoped, and `SNAPSHOT`/`STREAM`/`STATUS`/`HEARTBEAT` are marker-scoped tracking frames. Coverage and pending runtime evidence for native input and HUD consumption of the session are owned by [testing and verification](../../testing/verification.md). Inventory domain semantics are owned by [inventory](../presentation/inventory.md). |
 | Presentation preview `PresentationPreviewC2SPacket` (C2S): `READ`, `CANCEL` | Fabric, Forge, and NeoForge common server handler. | A bounded one-shot hint, not a subscription or authority: `READ` asks only for presentation fields the client cannot observe locally and is answered only under the current accepted presentation epoch/view and an accepted adapter schema and field authorization; `CANCEL` withdraws the pending request. It creates no marker, lease, winner slot, or lifetime. Field authorization, provenance, and fallback are owned by [presentation snapshot](../presentation/presentation_snapshot.md). | Not applicable on C2S. |
 | Presentation preview `PresentationPreviewS2CPacket` (S2C): `RESULT`, `UNAVAILABLE`, `DEFERRED`, `REJECTED` | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted only against the current request authorization: `RESULT` carries one framed presentation section that stays undecoded until the accepted adapter schema and field authorization are available, and the control statuses carry no section. Corrupt packets are safely dropped. Field authorization, provenance, and fallback are owned by [presentation snapshot](../presentation/presentation_snapshot.md). |
 | Server-configuration `ServerConfigRequestC2SPacket` (C2S) | Fabric, Forge, and NeoForge common server handler. | Carries one positive request identifier and asks for the server's current authoritative configuration snapshot; any connected player may send one. The response is correlated to that identifier. Transaction semantics are owned by [changing server configuration](../config/changing-server-config.md). | Not applicable on C2S. |
@@ -85,12 +85,15 @@ trailing bytes are rejected rather than normalized. The descriptor never
 carries values, annotations, item counts, content types, or client-uploaded
 content; those remain in the existing authorized stores.
 
-## Inventory preview/tracking route (`inventory-v3`)
+## Inventory preview/tracking route (`inventory-v4`)
 
-The dedicated inventory route (`pingforit-c2s:inventory-v3` client-to-server
-and `pingforit-s2c:inventory-v3` server-to-client) carries preview and tracking
+The dedicated inventory route (`pingforit-c2s:inventory-v4` client-to-server
+and `pingforit-s2c:inventory-v4` server-to-client) carries preview and tracking
 requests and responses, parallel to `presentation-v5` and
-`server-presentation-policy-v3`. Every frame declares protocol version three.
+`server-presentation-policy-v3`. Every frame declares protocol version four.
+The request-side frame grammar and its bound are unchanged from the
+version-three inventory route; the response side adds the effective size
+budgets.
 `HELLO` is the epoch-zero handshake; every other request runs under the
 negotiated nonzero epoch and a non-negative request id, and only while the
 current presentation epoch/view fence matches. `OFFER` and `POLICY` are
@@ -118,9 +121,15 @@ correlated by request and commit id, so a repeated `SELECT` for a commit id
 replays the stored outcome instead of re-running the selection.
 
 Server messages: `OFFER(epoch, previewPeriodTicks, trackingPeriodTicks,
-resyncMinPeriods, heartbeatPeriods)` establishes the epoch and the
-server-selected periods, where an explicit zero heartbeat period disables the
-periodic heartbeat; `POLICY` carries the inventory target-type policy view.
+resyncMinPeriods, heartbeatPeriods, effectiveDisplayBytes, effectiveFrameBytes)`
+establishes the epoch, the server-selected periods, and the effective display
+and frame byte budgets, where an explicit zero heartbeat period disables the
+periodic heartbeat. The two budgets are the exact legal size-scale pair on the
+shared inventory size grids that keeps the reserved metadata relationship;
+their values, grids and reserve remain owned by
+[server configuration](../../config/server.md#inventory-policy-object) and
+[inventory](../presentation/inventory.md). `POLICY` carries the inventory
+target-type policy view.
 `PREVIEW`, `SNAPSHOT` and `STREAM` each carry one fragment under an independent
 `(epoch, requestId, markerId, baselineId)` identity plus `statusRevision`,
 `watermark`, `partIndex`/`partCount`, `completeScan`, a status, a checksum, and
@@ -138,10 +147,14 @@ trailing bytes are rejected. Status values are `UPDATING`, `READY`,
 
 Byte accounting on this route counts the whole encoded inventory frame —
 including its header, kind and entry framing — and excludes compression and the
-underlying Minecraft transport. The frame, entry-payload and per-entry bounds
-are enforced during encoding and rejected during decoding before any large
-allocation. The `inventory-v3` route ID is version-bound: it does not decode an
-earlier inventory wire version, and no fallback reinterprets one. Route
+underlying Minecraft transport. The frame has a fixed absolute decode ceiling
+and a negotiated server effective cap carried by `OFFER`; the server writes
+under its effective display and frame budgets, and the whole-frame,
+entry-payload and per-entry bounds are enforced during encoding and rejected
+during decoding before any large allocation. An entry display value has its own
+absolute decode bound, independent of the effective display budget. The
+`inventory-v4` route ID is version-bound: it does not decode the version-three
+inventory wire shape, and no fallback reinterprets one. Route
 registration and grammar remain owned here; the dedicated adapter's delivery
 boundary is owned by
 [presentation snapshot](../presentation/presentation_snapshot.md#dedicated-delivery-adapters),
@@ -180,12 +193,12 @@ are owned by [presentation snapshot](../presentation/presentation_snapshot.md),
 and the [wheel](../picking/wheel.md) owns the branch's native presentation
 while [capture](../picking/capture.md) owns the interaction abort.
 
-## Server-configuration routes (`server-config-request-v2`, `server-config-update-v2`, `server-config-snapshot-v2`)
+## Server-configuration routes (`server-config-request-v3`, `server-config-update-v3`, `server-config-snapshot-v3`)
 
-The server-configuration surface travels on three dedicated version-two route
-IDs (`pingforit-c2s:server-config-request-v2`,
-`pingforit-c2s:server-config-update-v2`, and
-`pingforit-s2c:server-config-snapshot-v2`), separate from the presentation
+The server-configuration surface travels on three dedicated version-three route
+IDs (`pingforit-c2s:server-config-request-v3`,
+`pingforit-c2s:server-config-update-v3`, and
+`pingforit-s2c:server-config-snapshot-v3`), separate from the presentation
 policy route and the inventory routes. The
 request and update routes are client-to-server; the snapshot route is
 server-to-client. A request carries one positive request identifier and asks
@@ -197,8 +210,9 @@ update result.
 
 Numbers on these routes are canonical non-negative varints: overflow,
 overlong, and non-canonical encodings are rejected, booleans are strict, the
-inventory administration payload is fixed-shape and consumed to its exact end,
-and trailing bytes are rejected in full before any value is applied. The route
+inventory administration payload is fixed-shape, supplies every catalogued
+inventory leaf, and is consumed to its exact end, and trailing bytes are
+rejected in full before any value is applied. The route
 IDs are version-bound: they do not decode an earlier server-configuration wire
 version, and no fallback reinterprets one. Route registration and grammar
 remain owned here; the disclosed field catalogue is owned by

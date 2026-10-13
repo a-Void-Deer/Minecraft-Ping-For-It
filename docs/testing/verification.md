@@ -55,11 +55,11 @@ The current suite covers:
 Marker-store, packet, and update tests provide recipient-scoped state and
 channel-mode transport seams, but do not establish the complete `ServerCore`
 ordering and channel/admission matrix in a live client/server path. Loader
-registration of the legacy, presentation-v5, presentation-policy, inventory-v3,
-presentation-preview-v1, server-configuration-v2, and superseded marker routes
+registration of the legacy, presentation-v5, presentation-policy, inventory-v4,
+presentation-preview-v1, server-configuration-v3, and superseded marker routes
 is confirmed by source inspection for Fabric, Forge, and NeoForge;
 `ModIdentityTest` pins the fork identity, packet-ID namespaces, and the
-versioned presentation-v5, inventory-v3, policy-v3, and server-configuration-v2
+versioned presentation-v5, inventory-v4, policy-v3, and server-configuration-v3
 route IDs; focused packet tests pin those families' version boundaries and
 codec shapes, and `PresentationPreviewWiringTest` statically confirms the
 preview codec registration and main-thread handoff on every loader. These
@@ -811,17 +811,43 @@ session, release-admission and paint-admission seams:
   presentation revision; unpainted, wrong-revision, other-context and
   press-ray proposals produce no action, and the presentation fence rejects a
   wrong token, dimension or old revision and is revoked by abort;
-- `ClientPingRuntimeInteractionTest` drives the live branch through the
+- `ClientPingRuntimeInteractionTest` drives the precise branch through the
   runtime ports: an ordinary press stays frozen while the precise branch's
   live target changes, entering the branch starts the live request, release
   consumes the last painted candidate without an ordinary recapture or a
   release-time cast, and an unpainted newer target still releases the painted
-  one; and
-- `SpatialOverlayRendererPresentationTest` covers the paint-admission
-  predicates only: detached exit data, ancestor nodes, first-appearance or
+  one;
+- `SpatialOverlayRendererPresentationTest` covers the isolated paint-admission
+  predicates: detached exit data, ancestor nodes, first-appearance or
   quantized-zero paint, and a backdrop or pointer alone cannot acknowledge a
   candidate, and absent graphics acknowledge nothing and start no transition;
-  and
+- `SpatialOverlayRendererFollowerTest` drives the production frame path through
+  recording paint and font-metrics ports. Only an enabled action leaf, typed
+  property branch, or pure navigation group in the active radial menu follows
+  the pointer before dwell; Back, disabled, reserved, and actionless leaves do
+  not, nor do deadzone focus, ancestor menus, inventory rows, or detached exit
+  paint hide the pointer. Across intermediate frames the follower stays
+  collinear with the current pointer ray while its radial position eases as the
+  pointer target changes, remains bounded under repeated retargeting, settles
+  after a finite transition, and honors reduced motion and focus/exit handoffs.
+  Its connector begins at the frozen
+  deadzone boundary and ends at the near edge of the actual scaled title frame;
+  it is omitted when that frame overlaps the deadzone, follows transition alpha,
+  and ignores both opacity preferences. Only a successfully painted, visible,
+  current active node hides the crosshair and acknowledges its choice; trail
+  state remains independent, while outgoing duplicates, transparent or
+  quantized-zero nodes, omitted or failed paints cannot hide or acknowledge.
+  An intermediate eased follower may be wholly offscreen even while its pointer
+  target is confined: only a positive intersection of the transformed title
+  frame admits crosshair hiding, connector drawing and choice acknowledgement.
+  Independent PoseStack geometry checks reject tangency and admit positive
+  partial intersections at all four viewport edges under fractional pan. The
+  real Precise release handoff rejects an invisible current version both when
+  no older candidate was admitted and when it must retain an older painted
+  admission; an outgoing duplicate or unpainted newer publication cannot
+  replace the last successfully painted candidate. These are production-frame
+  checks with recording ports, not
+  `GuiGraphics` or GPU submission; and
 - `SelectorPreciseTargetLabelsTest` covers the Precise detail-label resolver
   headlessly: every enabled Precise leaf names its own captured candidate from
   the exact snapshot it is bound to, a broad slot keeps the candidate's
@@ -834,7 +860,8 @@ session, release-admission and paint-admission seams:
   renderer wiring, or GPU submission.
 
 These are allocation, capture, native-shape, enumeration, refresh-controller,
-session, paint-admission and runtime-port seams; the period key's config and
+session, paint-admission, production-frame recording-painter and runtime-port
+seams; the period key's config and
 persistence coverage is inventoried above, and the transformed Sable scanner
 has its own evidence below. Real GPU/render submission, game-world and chunk
 lifecycle, provider behavior, multiplayer, loader input callbacks, and
@@ -947,10 +974,30 @@ two multiplier grids normalize piecewise values, the five byte multipliers
 stay independent and control only their own scope, the snapshot fragment and
 per-client period scopes stay equal, unlimited byte multipliers stay finite,
 the step helpers cross boundaries and saturate, pending-memory steps follow the
-piecewise grid, and independent defaults do not alias.
+piecewise grid, and independent defaults do not alias. The two finite size
+leaves normalize on their own exact quarter-multiplier grids and repair a
+conflicting pair downward with frame priority and the reserved metadata
+headroom while never raising the frame, and they remain independent of the five
+send-byte multipliers; `InventorySizeScaleTest` covers the ordered legal
+positions and their exact byte and quanta conversion, half-up normalization,
+pair legality, frame-priority reconcile and ordered position stepping.
 `SpatialSelectorSettingsTest` covers the spatial-selector settings snapshot and
-bounds: target-glide, hover, deadzone, stroke, dwell, root-distance, and
-submenu-radius-scale clamping saturate on both sides, the distance and timing
+bounds: a missing, null or fresh-file target-glide setting initializes the
+implementation's non-neutral configured default, while the neutral multiplier
+remains an explicit case that preserves the intrinsic list-glide baseline.
+Explicit factors, including a valid off-grid value, stay literal rather than
+snapping to the step grid, out-of-range factors clamp to the confirmed range,
+and each factor drives its own relative row threshold through validation,
+round-trip and a frozen gesture snapshot; a live preference edit does not
+change the already-frozen gesture, and a later null reset returns to the
+configured default rather than the neutral factor. The updated glide
+calibration exercises the neutral factor against the updated intrinsic baseline
+and explicit faster and slower factors against their relative row thresholds.
+This records the calibration coverage, not a numeric tuning catalogue. An
+explicit saved factor remains literal in the tested version upgrade rather than
+being mass-rescaled.
+Hover, deadzone, stroke, dwell, root-distance, and submenu-radius-scale
+clamping saturate on both sides, the distance and timing
 clamps stay exact over their whole valid interval, the spatial distance defaults
 and bounds preserve their half-scale relationship, null and out-of-range nested
 values validate without throwing, the opt-in Back-hover default stays disabled,
@@ -963,7 +1010,11 @@ frozen snapshot clamp every value without resetting boolean choices, a frozen
 session snapshot never follows later config edits, root distance and gesture
 preferences stay independent in both mutation directions, and fresh defaults do
 not alias another client's mutable preferences. `SpatialSelectorMigrationTest`
-covers the
+also covers missing, null and explicit target-glide settings retaining their
+model semantics without a same-version load rewrite: a fresh file persists the
+configured non-neutral default, a same-version load and save keep an explicit
+factor unchanged, and a version-boundary migration preserves an explicit
+multiplier without rescaling. It covers the
 release-boundary migrations that remove only obsolete wheel keys without
 injecting defaults: the exact boundaries and pre-target versions retire the old
 wheel radius keys and the retired wheel timeout key while unknown root data and
@@ -981,15 +1032,23 @@ failed write retains usable in-memory preferences and a retry discards the
 stale source before migration. `InventorySettingsPersistenceTest` covers additive
 defaults without rewriting a current-version file, older-version migration
 writing the nested inventory object while preserving user data, explicit
-unlimited round trips, out-of-range values clamping without resetting
-unrelated fields or producing a broken backup, the future-version guard
-leaving defaults in memory and refusing to save, and the client
+unlimited round trips, missing, null and out-of-range size scalars normalizing
+with frame priority while an explicit size scalar round-trips and an
+unlimited-wrapped size scalar rejects the file, out-of-range values clamping
+without resetting unrelated fields or producing a broken backup, the
+future-version guard leaving defaults in memory and refusing to save, and the
+client
 spatial-selector keys defaulting and clamping, including the submenu radius
 scale's missing-member default, out-of-range clamp without resetting unrelated
 fields, serialized key, and persisted round trip, and the precise capture
-period's persisted round trip. These are model and persistence
-seams only: no server-administration path, remote change route, settings-UI
-exposure, scheduler consumption or native selector integration exercises them.
+period's persisted round trip. Trail length and opacity coverage includes
+Gson-initialized missing/null values, retained explicit zero and 73 opacity
+values, frozen snapshot values, unchanged same-version bytes on load, an
+untouched save as a no-op, and round-trip persistence. A target-version
+upgrade preserves explicit values and unknown nested selector data. These are
+model and persistence seams only: no server-administration path, remote change
+route, settings-widget interaction, scheduler consumption or full client
+selector runtime is exercised.
 
 ### Shared source identity and capture results
 
@@ -1010,9 +1069,14 @@ model: an exact long beyond double precision survives the domain byte codec
 while the legacy double form cannot represent it; a domain display value larger
 than the generic presentation text bound is carried independently and rejected
 by that generic bound; construction and access copy caller bytes and maps;
-opaque values compare by their bytes; the exact opaque value bound is admitted
-and one more rejected; invalid values, keys, and codecs are rejected; the
-opaque page bound is independent of the record-value entry bound; and a
+an untagged value keeps the ordinary value bound while a value tagged through
+a closed, code-owned allowance admits only that allowance's fixed identity and
+larger bound, and a tagged value must match the fragment's codec identity even
+when the carried bytes are small or empty; the carried size is readable without
+copying; opaque values compare by their bytes; the exact ordinary opaque value
+bound is admitted and one more rejected; invalid values, keys, and codecs are
+rejected; the opaque page bound is independent of the record-value entry
+bound; and a
 readable capture result carries the opaque payload while unavailable and
 invalid results reject a payload. These are model seams only: no real source
 step, provider read, shared-consumer accounting, transport or running server
@@ -1023,13 +1087,14 @@ path exercises them.
 `BackHoverControllerTest` covers the headless Back-hover timing model: progress
 before the threshold never triggers, the threshold triggers exactly once and a
 held focus never repeats, leaving and re-entering restarts the clock, a parent
-Back stays blocked while held and re-arms only after focus loss, switching the
-focused menu restarts the clock, a rewound clock clamps instead of resetting
-the baseline, `end` clears the timer and block idempotently and a fresh session
-is unblocked, a disabled session never arms or triggers, updates before start
-are inert, and the hover parameters are frozen at session start. It is a
-standalone model seam: no native screen, input route, renderer, or in-game
-timing is exercised.
+Back stays blocked through held focus, observed focus loss, and motion within
+Back; only an effective physical leave followed by re-entry permits rearming.
+Switching the focused menu restarts the clock, a rewound clock clamps instead
+of resetting the baseline, `end` clears the timer and block idempotently and a
+fresh session is unblocked, a disabled session never arms or triggers, updates
+before start are inert, and the hover parameters are frozen at session start.
+It is a standalone model seam: no native screen, input route, renderer, or
+in-game timing is exercised.
 
 ### Shared source access contract
 
@@ -1084,6 +1149,39 @@ sibling spans that tile. The same headless controller model covers
 qualified-turn entry at a corner and reverse-stroke retrace, including that a
 disabled branch cannot be entered by turn and a row-anchored external menu does
 not retrace.
+The same model owns the viewport projection: the logical pointer is clamped to
+the inclusive GUI pixel centers of the current viewport under the frame's rigid
+translation, including every edge and corner and fractional pan offsets, while
+raw finite input saturates without overflow. Only effective movement counts:
+outward input spent at the boundary adds no overshoot debt, trail point or
+timer progress, a reversal moves the pointer at once, and non-finite deltas
+leave radial and external state untouched. The root-floor case protects
+pending dwell; separately, a resize or pan correction cannot complete pending
+dwell or enter a branch. A non-root held-Back regression confirms that
+projection-only leave/re-entry and saturated zero-effective movement cannot
+re-arm an already-fired held Back, while effective physical leave/re-entry and
+qualified-turn movement preserve legitimate rearming. Rebase, start, end and
+Back snapshots stay inside the published viewport. The explicit return
+placement is covered as its own seam: the placed pointer keeps the frozen
+inclusive-deadzone circumference radius and admits no focus, and a stationary
+release abandons; the reconstructed absolute point stays inside the same
+inclusive deadzone predicate used by focus and release, including at nonzero
+and mirrored origins; an unreachable placement stays pending without travel,
+trail growth or timer progress until the projection can show it, and resolution
+pays no fresh stroke by itself; a partial new stroke cannot pay the pop's
+fresh-stroke requirement while a full stroke plus dwell re-enters; a fresh
+effective physical movement cancels a pending placement instead of chasing it;
+and resolution or projection cannot re-arm an already-fired held Back or
+append a joining stroke, while a deliberate physical leave and re-entry still
+arms one return.
+That model also exposes the renderer-facing sample identity that separates
+effective input from projection and navigation: only effective pointer movement
+advances the sample sequence, a saturated callback is not a sample, a projection
+or resize correction advances a separate alignment identity and fences the
+sequence without adding a trail point or a synthetic stroke, an explicit rebase
+changes the discontinuity identity even at coincident coordinates, and entering
+or returning from an external menu starts a fresh identity. The frozen per-hold
+bound caps the published trail.
 It is a standalone model seam: no native screen, renderer, input callback,
 configuration, or world-candidate source is exercised.
 
@@ -1118,12 +1216,43 @@ and keeps the parent identity; a declared group with no visible member choice
 is omitted instead of becoming a dead selectable root; a nested group path
 renders its subgroups under the declared parent and releases the nested member;
 and a property group path whose declared ancestor chain is missing is rejected.
+The session also consumes only the confined effective delta: saturated or
+zero-effective confined input cannot glide the list or cross its side navigation
+gates, but authorized native vertical travel can select rows and unlock a wheel
+lock while the confined pointer remains at a viewport edge. Pointer alignment
+from a pan or resize does not glide, select, add a trail point, advance hover,
+trigger automatic side navigation, or release stale item focus; the corrected
+pointer is the next gesture baseline without correction travel. Side actions
+and held-Back rearming require effective confined pointer movement; horizontal
+displacement determines the side and focus, never raw-only vertical selection
+travel. The frozen session settings deadzone reaches the controller read model
+unchanged from the value consumed by the renderer, including a non-default
+radius. The shared item-to-list Back latch
+honors the same distinction: alignment after item return cannot cascade, but
+effective physical leave and re-entry permits a later one-level return. The
+list-exit return is covered for both Back styles and both entry sides: exactly
+one level returns to Content with the pointer on the frozen inventory-slot
+deadzone circumference at the frozen radius, no immediate focus and a single
+rebased trail seed; stationary frames cannot reopen the list or navigate, and
+a deadzone release abandons; a partial new stroke cannot pay the pop's
+fresh-stroke requirement while a full deliberate stroke plus dwell reopens the
+list; a distant exit keeps the return pending until the projection can show
+it, including across Content property updates before resolution, and it still
+resolves idle without focusing a choice or releasing an action; a fresh
+physical movement cancels the pending return without chasing it; and the
+item-submenu Back return stays on the list without a Content placement.
 `NativeSelectorInputTest` covers the headless input normalization seam: only
-accepted successive window positions become GUI travel, opening, resize, focus
-loss, and reopen reprime without phantom travel, and scroll normalization
-occurs once only while owned without moving the pointer. These are headless
-model and input-normalization seams: no native screen, renderer, input
-callback, world-candidate source, or in-game integration is exercised.
+accepted successive virtual window positions become GUI travel; opening,
+resize, focus loss, and reopen reprime without phantom travel; settled-coordinate
+priming preserves the next real movement; actual native ownership gates movement
+and every scroll callback independently of the vanilla grab flag; and scroll
+normalization occurs once only while owned without moving the pointer. Through
+the selector session, owned GUI-scaled native vertical movement continues list
+glide at confined edges and the first real reversed movement applies immediately
+after a scale handoff, while unowned samples and handoff priming add no travel.
+These are headless model and input-normalization seams: no native screen,
+renderer, input callback, world-candidate source, or in-game integration is
+exercised.
 
 `NativeSelectorContentTest` additionally exercises the production content bridge
 against a real headless client inventory session: opaque selectable references,
@@ -1215,40 +1344,57 @@ still opens with that face, its inventory selection remains enabled, and the
 release selects without a fallback create. An external-block press with a
 provider-local face opens the selector, sends that frozen face as the inventory
 preview read scope, and releases exactly its own external target.
+It also covers a native-only ownership handoff without a vanilla grab-state
+change: both runtime movement and scroll paths stop accepting selector input,
+and re-priming after reacquisition preserves the next real movement.
+A window resize with no delivered move callback, snapshot read or paint still
+recomputes the confined focus before an immediate release, so the release
+resolves the new confined sector rather than the pre-resize diagonal, and a
+saturated native raw baseline continues from the boundary with its first
+reversal sample applied at once.
+The runtime also freezes the trail preferences with the hold: the controller's
+retained-history bound and the paint style's trail visibility, length, and
+opacity all come from the press-time snapshot, a live edit during the hold
+changes neither the retained history nor the painted style, and the next hold
+adopts the edited values with the painter and controller sharing one bound.
 `ClientPingDispatchReceiptTest` covers actual-send receipt, transport-failure
 rollback without queueing or refund, empty-tracker restoration and preservation
 of a newer reentrant route receipt.
-`WheelMouseCaptureLifecycleTest` covers owned release and re-grab,
-incoming-screen disposal ordering, an unowned free cursor and reentrant
-disposal. It also covers the selector's own cursor-visibility ownership
-through the recording cursor seam: the operating-system cursor is hidden only
-while the selector actually owns input and is restored on a normal close, on
-the incoming-screen disposal path, and on focus loss; a screen-owned cursor is
-never hidden over; a window-handle replacement drops the old window's hide
-without touching the replacement window; a cursor mode changed by a newer
-owner is never overridden and suppresses re-hiding until a fresh
-selector-owned release or the next hold, and that newer owner is not re-grabbed
-even on a focused close; a mid-hold screen close restores the
-cursor and a later vanilla re-grab while the wheel stays open hides again; an
-owned release enters hidden mode directly from disabled mode and applies the
-captured physical pointer position instead of GLFW's virtual saved position,
-so the visible arrow keeps its physical location, while a vanilla release
-followed by
-an unrelated hide never claims that restore; a focus loss during synchronization
-restores once and can neither hide nor re-grab while the window stays inactive;
-a normal close still re-grabs when the interaction phase publication lags the
-mouse sync; and a reentrant disposal during release, a mode write or cursor
-restore re-entered by that disposal, or a repeated close leaves no stale
-visibility state or second re-grab. `WheelMouseCaptureTest` covers the pure
-press-time grab guard across every interaction phase and screen/focus
-combination: a vanilla mouse press cannot auto-regrab while the selector owns
-input, while screen-open and unfocused presses keep the vanilla grab.
-`NativeSelectorMixinContractTest` checks the mapped
-`MouseHandler` callback ABI, the mixin hook descriptors — including that the
-release redirect targets the real vanilla position-then-mode call and the
-press guard redirects only the auto-grab so raw press and release edges still
-reach the key mapping — and that each effective loader manifest registers
-every hook exactly once on the client side.
+`WheelMouseCaptureLifecycleTest` covers native `DISABLED` ownership with the
+vanilla grab flag false through a recording cursor seam. Its fixture separates
+confined physical coordinates from unbounded virtual callback coordinates:
+movement beyond all four window boundaries produces exact scaled GUI deltas
+without modeled physical escape or camera motion. Acquisition and handoff
+priming exclude transition resets while counting the first real movement once;
+delayed cursor entry after `DISABLED` acquisition, with no synthetic position
+callback or immediately before the first real callback, preserves the settled
+baseline and counts that movement once. Repeated synchronization neither resets
+the pointer nor drops travel. It also covers a normal close reclaiming the
+vanilla grab exactly once even before idle phase publication versus an initially
+free pointer closing without a grab;
+clearing pending look at close; a screen-owned cursor never being acquired;
+every owned scroll callback being consumed, including horizontal-only and zero
+vertical deltas, while transition callbacks remain unowned; and ownership
+fences at focus loss, incoming-screen HEAD disposal, window replacement, a
+different native-mode owner, or a vanilla re-grab in the same `DISABLED` mode.
+A fresh vanilla release can reestablish ownership without a normal-mode cycle,
+while callback-observed handoffs and reentrant acquisition, disposal or restore
+cannot revive stale claims, overwrite a newer owner or cause a second re-grab.
+These are recording-seam checks of the
+[mouse-ownership contract](../architecture/picking/wheel.md#mouse-ownership).
+`WheelMouseCaptureTest` covers the pure lifecycle action matrix and press-time
+grab guard across every interaction phase and screen/focus combination: a
+vanilla mouse press cannot auto-regrab an open selector while screen-open and
+unfocused presses keep the vanilla grab.
+`NativeSelectorMixinContractTest` checks the mapped `MouseHandler` callback
+ABI, accumulated-look field types and scoped release handoff hooks, and the
+mixin hook descriptors — including a dedicated non-cancelling cursor-entry
+delegate separate from the explicit reset delegate, the release redirect to the
+actual vanilla position-before-mode call and the narrow press-time auto-grab
+guard preserving raw press and release delivery to the key mapping — and that
+each effective loader manifest registers the hook bridge exactly once on the
+client side. Runtime cursor entry validates native ownership and frame validity,
+clearing/re-priming the baseline when either is invalid.
 
 These are production-orchestration tests over recording world, cursor, clock
 and transport ports; they are source-reviewed test existence, not a live client
@@ -1259,16 +1405,31 @@ submission, or multiplayer verification.
 
 The inventory foundation has headless coverage for the preview route and its
 supporting models. `InventoryC2SPacketTest` and `InventoryS2CPacketTest` cover
-the version-three request and response codec round trips, bounded text and frame
+the version-four request and response codec round trips, bounded text and frame
 limits, corruption rejection, part-range and duplicate-key rejection, and the
-status values; the version-three `OPEN` grammar round-trips a native block or an
+status values, and reject version-three frames on the version-four route; the
+version-four `OPEN` grammar round-trips a native block or an
 uncommitted external candidate with its exact locator, classification and face,
 and rejects a committed external, entity or location target, a wrong protocol
 version, overlong or non-canonical fields, and trailing bytes; an offer's
 positive period values round-trip at their upper bounds
 including `72001` and `Integer.MAX_VALUE`, while zero, out-of-range, and raw
-overlong or noncanonical period encodings are rejected without defaults. `InventoryChecksumsTest` covers the entry checksum model.
-`InventoryStrictDecodeTest` covers the strict version-three `OPEN` grammar on
+overlong or noncanonical period encodings are rejected without defaults; the
+offer's effective display and frame budgets round-trip as an exact legal pair,
+while off-grid budgets and a pair without the reserved metadata headroom are
+rejected without defaults, and an effective write rejects a display beyond the
+configured cap and an illegal pair; the whole frame budget includes its header
+and absolute decode bound and rejects one byte more, and the absolute display
+envelope round-trips at its absolute bound. At the display/wire boundary, a
+real registry-aware single-item JSON payload at the maximum display bound
+round-trips under a legal frame offer, while one byte over that display, a
+frame too small, and two maximum entries that overflow the frame are rejected
+with the destination left atomic; exact measurement matches an independent
+vanilla UTF codec for every response kind and maximal multibyte entries,
+allocates no display-sized buffers, and scales its workspace with the actual
+packet, and a failed write preserves the existing destination bytes and
+indices. `InventoryChecksumsTest` covers the entry checksum model.
+`InventoryStrictDecodeTest` covers the strict version-four `OPEN` grammar on
 raw frames plus raw overflowing request/response frame
 numbers and strict helper rejection of overflowing or noncanonical varints and
 overflowing varlongs; it is codec coverage, not transport or admission evidence.
@@ -1340,7 +1501,17 @@ successors detach their handoff, and closing, retiring or merging peers cancel
 handoff-only references without dropping independently owned old publication
 evidence or refunding paid target progress; a successor's cached-validity
 admission defers before provider work and cannot authorize an invalid cached
-successor. Handoff completion and close leave no reserved or retained leak.
+successor. Handoff completion and close leave no reserved or retained leak. A
+configured display cap threads into new observations and an invalid requested
+cap normalizes into the bounded range; lowering reprojects retained metadata
+monotonically through a bounded, deferrable pass that keeps its cursor with no
+ticket or progress loss, and a later increase cannot resurrect an omitted
+display through the same snapshot. A released completed sweep ends its
+deferred tightening pass while keeping the cumulative change and fold summary,
+a tighter ceiling mid-pass restarts the walk from the first retained slot, the
+still-referenced encoded page stays charged until its round is released, and
+closing a consumer during a deferred pass leaves no workspace and rejects
+later work.
 `InventorySourceSnapshotTest` covers the source-access snapshot preparation and
 decode seam headlessly: capture stays lazy until preparation and the prepared
 route is fixed for the handle lifetime; explicit atomic-detached evidence
@@ -1397,11 +1568,38 @@ selected item is rejected at one bounded witness without an automatic retry; a
 failed prepared create releases its sidecar reservations; an invalid
 preview releases its physical round so unrelated work can progress; positive
 resync periods at the integer maximum stay exact in an existing session; and an
-actual resync at those periods rejects an immediate repeat without overflow.
+actual resync at those periods rejects an immediate repeat without overflow. A
+superseded oversized preview selection during a pending cap reconciliation is
+answered with the recorded bounded `REJECT` without consuming the fresh preview
+attempt, so the fresh reference after rebaseline still creates from the same
+preview; a cap-induced fold carries the last completed all-ID total into the
+retained completed projection instead of the exact selected count, and new
+recipients initialize from that folded state.
+`InventoryReconfigurationTest` drives the whole live cap-change flow through
+the real backend, publisher, wire and client endpoint: a higher configured cap
+captures and delivers the full retained display; lowering gates item data until
+the updated offer hands off, then rebaselines preview and tracking; a
+superseded lower offer cannot unblock after the pair returns higher; partial
+stripping keeps the exact variant key and count while complete stripping folds
+all variants using the last completed all-ID total; deferred reprojection keeps
+the gate, recovers, and rejects a stale select; pending-cut and cap-fold resync
+cases run through the production path; multibyte displays are measured in
+UTF-8 bytes; and the deferred-pass cleanup assertions execute unchanged in the
+heavy and combined runs.
 `InventorySyncPublisherTest` covers the production publisher headlessly: the
 same-recipient per-period SNAPSHOT byte total spans multiple targets, revoke
 and memory defer encode and send nothing, and an indivisible oversized preview
-batch terminates incomplete instead of waiting forever.
+batch terminates incomplete instead of waiting forever. Retained entry versions
+are owned by object identity and stay charged while any offered, delivered,
+pending or admitted reference remains, so a delivered version survives a gated
+replacement or a group replacement until the group commits, admitted-only
+versions release on withdrawal, and repeated replacement returns to a stable
+current-version charge. A data workspace that cannot be admitted refuses before
+host encoding and is retried without changing the display, and a tiny control
+refuses insufficient memory before measurement. The bounded control drain is
+reentrant-safe: cancelled or closed queued controls are skipped, callback-added
+or replacement work waits for a later drain, and an already-accepted control is
+never retried after a callback failure.
 `InventoryMinecraftSourcesTest` composes the
 production source wrapper with a recording platform view: a same-alias topology
 change invalidates before the cursor continues, a fresh observation recovers
@@ -1412,7 +1610,9 @@ double-chest preview withdraws its cross-period encoded batch when the original
 hit half becomes a legal single, normal content changes do not rebase or
 recapture a stable cross-period preview, and terminal evidence detects a
 same-alias same-count snapshot-layout change even when access remains
-self-valid. `SableInventorySourceTest` covers the provider-confirmed external
+self-valid. A live catalogue adopts the effective display cap and tightens
+monotonically, snapshot capture adopts the source catalogue ceiling, and an
+effective display cap below the legal minimum is rejected. `SableInventorySourceTest` covers the provider-confirmed external
 inventory source headlessly with recording level, membership and provider
 ports: canonical aliases share only inside the same provider, sub-level, world,
 owner and frozen face, same-registry candidates with different locators neither
@@ -1465,7 +1665,12 @@ empty-face observations; a consuming custom counter schema whose mutation
 cannot corrupt long counts beyond double precision; payload and decode
 workspace reserved at capture; depth, cycle, node and array bounds failing
 closed before deep copy; and detached, immutable exported tags with close
-rejecting later reads. `InventorySnapshotLayoutTest` covers the detached
+rejecting later reads. The configured display cap is adopted at capture and
+tightens monotonically: a larger component JSON survives under the raised cap,
+a tightening before the first read keeps the lazy decode at the tighter ceiling
+without resurrecting the old display, a runtime tightening preserves the
+partial decode cursor, and an invalid or below-minimum cap never mutates the
+snapshot. `InventorySnapshotLayoutTest` covers the detached
 layout model: positions, lists and nested mappings are detached and immutable,
 structural members invent no slots, duplicate positions and invalid or
 duplicate per-segment mappings are rejected, and the total visible bound spans
@@ -1494,8 +1699,23 @@ baseline. `InventoryPresentationTest`,
 dedicated-delivery boundary: the inventory adapter is negotiated and
 policy-catalogued but never sampled, masked, published or rendered by the
 section machinery. `InventoryItemCodecTest` and `VanillaInventorySourceTest`
-cover the ordinary-block item codec and source. `ClientInventoryV2Test` keeps
-its historical class name and covers the version-three client preview channel:
+cover the ordinary-block item codec and source: canonical persistent component
+identity with sorted bounded canonical bytes and digest-collision rejection,
+partial display omission keeping identity without claiming component fallback,
+and complete size-driven stripping claiming fallback only with size evidence.
+`InventoryItemDisplayProjectionTest` covers the configured display cap: a
+configured cap preserves a display beyond the default bound and keeps the size
+evidence when complete stripping is required, reprojection keeps fitting
+displays and falls back honestly, the cap changes neither canonical identity nor
+its bounds, a minimum cap projects real fixtures and rejects smaller caps, and
+monotone tightening reprojects retained displays and never re-expands them.
+`InventoryDomainCodecTest` covers the closed code-owned inventory observation
+codec: the absolute display envelope round-trips within its bound, a display
+beyond the absolute bound is rejected before encoding, a wide display length is
+checked against the bound and the remaining input before allocation, the
+empty/null/trailing rules are unchanged, and inventory values stay isolated to
+the adopted codec identity. `ClientInventoryV2Test` keeps
+its historical class name and covers the version-four client preview channel:
 an external candidate captured with a real press-time face is sent verbatim
 with its provider locator and classification and no physical block is invented,
 a capture without a real face or a committed external, entity or location
@@ -1510,7 +1730,44 @@ tracking closed-watermark barrier closes only after every accepted distinct
 part and a deferred heartbeat is rechecked once the cut closes; a future
 baseline buffered before an invalidation completes recovery without readmitting
 the old baseline; and an evicted snapshot or multipart-stream replay cannot
-reopen its closed barrier or suppress repair. `PlatformInventoryServiceContractTest`
+reopen its closed barrier or suppress repair. The negotiated effective caps are
+enforced at admission: an oversized data frame or entry display is rejected
+before any metadata, count, revision, watermark or baseline mutation, a lowered
+same-epoch offer fences incompatible partial cuts and unknown buffers while
+keeping compatible progress, committed counts and closed digests, a
+metadata-only revision updates the display without changing the closed
+checksum, an increase keeps stripped state and only later accepted data adds
+detail back, a wrong-epoch offer cannot widen the accepted caps, delayed
+old-cap frames cannot mutate, and the display cap is measured in exact UTF-8
+bytes rather than characters.
+
+`ClientItemDisplayTest` covers the client item-display decode seam: transmitted
+encoded display data decodes into an owned render stack while malformed,
+unknown or oversized data falls back to the registry key and bare stack without
+raw text; an identity mismatch between the decoded payload and the supplied
+item id falls back; the decoded stack keeps enchantments, glint override,
+custom data and custom model data and is always count one regardless of the
+encoded source count; a normal variant keeps its stack-dependent localized name
+while custom and item-name forms use the chat composition with flattened plain
+text; the bounded access-order cache refreshes recency, evicts the least
+recently resolved variant under pressure, stays within its entry and byte
+bounds, resets on registry or explicit reset, and never hands out a mutable
+cached render stack; same-id variants stay distinct while identical payloads
+reuse a template without aliasing; transmitted component removals survive the
+retained naming and render stacks; and real vanilla delayed and warmed-inline
+unresolved profile callbacks resolve owned working stacks without changing the
+retained transmitted profile, name or display. `SpatialInventoryRowDisplayTest`,
+the inventory-bridge cases of `NativeSelectorContentTest`, and
+`SpatialInventoryLayoutTest` carry that display through the native bridge into
+the painted row projection: encoded display data survives both compatibility
+projections, the row hands native rendering an owned count-one stack carrying
+the transmitted components that cannot corrupt the next frame, custom names use
+the shared quoted composition, and missing data falls back to the bare stack
+and registry key without raw data. These are headless CPU, codec and
+native-painter seams over real vanilla constructor verification,
+resolvable-profile resolution and checked-executor handoff with only
+network/session and main-thread executor ports: no GPU rendering, external
+profile HTTP or live screen is exercised. `PlatformInventoryServiceContractTest`
 covers the loader service contract, including the optional snapshot-layout
 seam of the platform access bridge. `PlatformInventoryMemberGateTest` covers
 the default member-gate overload: a denied root is rejected before the
@@ -1531,9 +1788,46 @@ unchanged, and fatal lookup or guard failures propagate. Fabric substitutes a
 recording item-variant fixture for the cache mixin and Forge runs headlessly
 with the vanilla Minecraft artifact ahead of the patched one; these
 loader-source-set tests do not launch a loader or register mixins.
-`InventoryGestureTest`, `InventoryListModelTest` and
-`SpatialOverlayRendererTimingTest` cover the client gesture, list ordering and
-freeze, and renderer timing models. `SpatialOverlayTransitionsTest`,
+`InventoryGestureTest` covers relative vertical glide with a frozen row threshold,
+split and batched movement independent of starting or aligned pointer Y,
+rebase resetting the glide fraction while preserving selection and
+window, and reversals in both directions discarding opposing sub-row glide
+travel. Wheel unlock uses its separate signed, unscaled travel and only the
+unlocking sample begins glide; Back-hover suppression clears partial unlock
+travel, while ordinary scroll keeps its independent signed fraction across
+reversal and glide. The updated calibration tests an explicit neutral factor
+against the intrinsic baseline and explicit faster and slower factors against
+their relative row thresholds, independent of the configured non-neutral
+default; this records calibration coverage, not a numeric
+tuning catalogue. The model also covers huge finite endpoint travel with immediate
+reverse movement and no overshoot debt, and non-finite movement as inert.
+`InventoryListModelTest` covers sorted initial rows and stable ordering, selection
+and row-window clamping, and huge attempted row steps saturating without integer
+overflow and reversing immediately. These are model tests; the session and native
+input coverage above exercises authorized glide against a confined pointer.
+`SpatialInventoryNavigationIntegrationTest` drives the headless native-input
+adapter and a real selector session through production inventory layout,
+viewport preparation/retargeting and frame rendering with a recording painter.
+It covers list entry from reachable viewport corners, centering pan and scale
+handoff, vertical glide and reversal at confined edges in both directions,
+normal and reduced motion, both forward-side orientations, selection painting
+after a streamed view update, and item-Back return followed by resize while
+preserving the selected key and row window and keeping vertical-only input on
+the list. Session and gesture seams also verify that viewport correction
+preserves partial glide, signed wheel-unlock and ordinary-wheel fractions, wheel
+lock, selection, trail and the held-Back latch. The same fixture also covers
+the list-exit return placement through the real native-input and session path
+with viewport preparation and retargeting: both Back styles, normal and reduced
+motion, an oblique inventory-slot entry, other GUI scales and deadzone radii,
+a resize that leaves the return pending until reprojection can show it with
+reduced motion snapping it at once, a fresh real input cancelling the pending
+return instead of chasing it, and a full deliberate stroke plus dwell reopening
+the list. The fixture does not instantiate
+the complete `ClientPingRuntime`, a GLFW window, `GuiGraphics`, or GPU submission;
+native-window/gameplay confirmation of inventory-axis reachability after the
+item-Back resize handoff remains pending.
+`SpatialOverlayRendererTimingTest` covers renderer timing models.
+`SpatialOverlayTransitionsTest`,
 `SpatialInventoryLayoutTest`, `SpatialOverlayRendererStyleTest`,
 `SpatialOverlayRendererSectorTest`, `SpatialOverlayRendererBorderTest` and
 `SpatialSquareProgressTest` cover the CPU
@@ -1550,6 +1844,69 @@ root distance and legacy forms unchanged, and selected offsets; the square
 progress walk's last-painted extents and the inventory footer's immutable
 back-affordance state; and sector scanline geometry, adjacent-sector tiling,
 shared disabled/reserved alpha, and paint ordering;
+`SpatialOverlayRendererGuideTest` covers the radial center guides headlessly:
+one divider per true shared boundary, each emitted exactly once, across the
+root's unequal spans, equal spans including Back, and the pair wrapping past
+zero, while a single full disc or a gap between neighbors gains no phantom
+divider; the closed deadzone circle as a clockwise polyline at the frozen
+radius, with a non-positive or non-finite radius yielding none; non-default
+frozen deadzones reaching that geometry through the controller read model;
+guides placed at each menu's own origin under the rigid translation,
+with an ancestor menu's guides dimming with that menu and a child menu's guides
+on the child origin; and guide alpha following only the menu's own transition
+fade, independent of both opacity preferences and of focus, selection or
+release, with reduced motion and the exit tail handled by the shared transition
+model, painted after the sector underlay and before the inventory panels. Every
+endpoint is checked against geometry computed independently in the test; no
+painted stroke, GuiGraphics or GPU submission is claimed.
+`SpatialOverlayRendererFollowerTest` additionally drives list and item-submenu
+frames through the production renderer: an active inventory list hides the
+crosshair even when frame opacity is zero, an item submenu at Back/deadzone uses
+the radial pointer rule rather than inheriting list hiding, an eligible visible
+item follower can hide it, and returning to the list or leaving for the parent
+restores the applicable behavior. The list trail remains independent; inactive
+exit paint does not retain list-specific hiding. These checks use recording
+paint/metrics ports, not `GuiGraphics` or GPU submission.
+`SpatialVisualTrailTest` covers the production shared-history model headlessly:
+one bounded history serves both the logical pointer and the certified
+follower; native raw pointer batches are consumed once and follower-era samples
+never replay on return; an ownership change or an interrupted owner starts from
+the last displayed endpoint through a finite handoff that reaches the current
+target, while a settled owner samples its target without a second lag filter; a
+projection correction fences old points while keeping post-correction callbacks
+and adds no stroke, an explicit rebase starts fresh by identity even at
+coincident coordinates, and a rigid pan alone appends nothing; reduced motion, a
+hard reset, a quick reopen, a rewound clock, and rapid retargeting stay bounded;
+and a missing departing paint freezes the history while `clear` empties it.
+`SpatialOverlayRendererTrailTest` drives the actual production paint/commit
+order with independently recorded node centres: the painted payload is an
+immutable history taken before this frame's node paints and committed after
+them, painted above the sector underlay and guides and below every
+text-bearing paint, so the history committed after this frame's paints enters
+the next frame's payload, with handoff endpoints easing toward the certified
+painted centre; only a successful paint of the actual animated pose with
+a visible title frame admits a follower sample, while a failed paint, a
+disabled or Back focus, an omitted active node, or an actual offscreen pose
+cannot certify a predicted owner or borrow a detached duplicate; an inventory
+list continues the logical pointer trail and its rows never own it, and a
+list-to-item rebase is not a joining stroke; a fractional projection change or
+rigid pan appends nothing, and trail visibility and its independent opacity
+reach only the trail; an ordinary release fades with the exact departing
+follower key without acknowledgement, connectors, or a snap to the origin, and
+a new hold or reset discards the history; the retained bound holds under rapid
+retargeting without changing paint admission; and overlapping rounded-square
+pixels take maximum alpha with no duplicate coverage. An interrupted
+pointer-to-follower or follower-to-follower handoff survives an ordinary
+same-clock release and continues its original finite interval toward that
+departing key's moving painted pose, never the outgoing duplicate's, while a
+missing departing paint retains the displayed history and a later paint resumes
+the same interval without retiming; only reduced motion, a hard reset, or a new
+hold clears it. The release frame still paints the previously committed
+immutable history, and a GUI resize during the exit tail reprojects from the
+actual detached trail origin, so the committed endpoint matches the recorded
+painted pose instead of being displaced by the new GUI center. These are
+production-frame recording-painter and CPU-model seams, not `GuiGraphics`, GPU,
+GLFW-window, or multiplayer evidence.
 `SpatialOverlayRendererBorderTest` projects the real facade's typed border
 color in both focus states, keeps the untyped and legacy `ping:` action
 fallbacks, and retains the detached color through the exit transition.
@@ -1563,7 +1920,16 @@ return — projecting onto the GUI center while pointer, trail and menu vectors
 stay rigid; the open inventory list centers on its active origin and an item
 submenu keeps the selected row's logical anchor under the same translation; and
 an inactive frame freezes the last displayed exit translation that a quick
-reopen re-aims from. `SpatialOverlayRendererNodeLayoutTest` drives real
+reopen re-aims from. The interaction frame publishes that projection once, and
+confinement, paint, release and resize read it unchanged: an intermediate pan
+sample confines the pointer and the displayed pointer center stays within the
+inclusive GUI pixel bounds even at fractional offsets; paint neither resamples
+the pan nor mutates interaction; navigation inside the frame re-aims from its
+single sample and snaps under reduced motion; a resize reuses the last
+published offset; and the pointer chrome follows the published center rather
+than a stale interpolated GUI center, while an exit-transition chrome state
+keeps its detached paint geometry.
+`SpatialOverlayRendererNodeLayoutTest` drives real
 controller snapshots through the production radial-planning, node-layout,
 title-clipping and external-preview wrapping seams: ordinary menus keep the
 historical single-line bounds and floors; every node of a Precise menu — the
@@ -1586,12 +1952,12 @@ font preference can only reduce the preview's clearance and scale down to that
 floor without changing its visible text, the smallest viewport with large fonts
 keeps nonblank title, preview, Back and disabled-type text, and Back-hover
 progress keeps tracing the title frame when a preview is supplied;
-frame-collision checks use the actual rounded bounds including the disabled
-border's inclusive endpoint across rotations, submenu-size tiers and viewports,
-the default six-slot plan keeps sibling previews separated at their readable
-scale, and under the default 200% option font a full rotation sweep with every
-slot selected in both languages, for mixed and fully available menus, keeps
-every preview clear of every sibling frame as well as every sibling preview,
+resting-layout frame-collision checks use the actual rounded bounds including
+the disabled border's inclusive endpoint across rotations, submenu-size tiers
+and viewports, the default plan keeps resting sibling previews separated at a
+readable scale, and under the default 200% option font a full rotation
+sweep with every slot selected in both languages, for mixed and fully available
+menus, keeps resting previews clear of sibling frames and previews,
 with the reported bearing-208 29-code-point name re-wrapping only after the
 title frame and gap are reserved while keeping its text complete; the painted
 preview retains every capped glyph, a vertically-fitting constrained title
@@ -1599,13 +1965,16 @@ clips rather than shrinking its font while a clipped label keeps its component
 style, and the preview adds no opacity or admission layer while an exit
 transition retains its detached component and its painted preview. An overfull
 glyph-width stress case keeps the readable floor and applies no second
-truncation; arbitrary resource-pack font metrics remain a gap, and these are
-pure projection, layout, clipping and paint-predicate seams: no GuiGraphics,
-GPU, native callback or gameplay frame is involved.
+truncation; arbitrary resource-pack font metrics remain a gap. A selected
+follower intentionally leaves the resting layout, so these collision guarantees
+do not apply to its moving frame or preview. These are pure projection, layout,
+clipping and production-frame recording-painter seams: no `GuiGraphics`, GPU,
+native callback or gameplay frame is involved.
 `InventoryTrackingRendererTest`
-projects received tracking data into bounded renderer lines: explicit zero is
-retained, unknown or invalid counts are never synthesized as zero, and status
-and grey state stay explicit. These are headless runtime, model and
+projects received tracking data into bounded renderer lines: only received tracking data supplies bounded item lines, explicit zero
+is retained, unknown or invalid counts are never synthesized as zero, status
+and grey state stay explicit, and the tracking annotation resolves the shared
+localized name policy rather than the raw label. These are headless runtime, model and
 production-seam tests over recording providers and transports, plus a headless
 real-vanilla-NBT capture of a single chest and both double-chest members.
 Snapshot atomicity is modeled for the snapshot-capable branch: the capture
@@ -1638,20 +2007,25 @@ do not establish the live settings UI, permission changes over a connection,
 actual packet exchange, or persistence behavior in a running client/server
 session.
 
-`InventoryConfigValuesTest` covers the nineteen-leaf admin inventory value
+`InventoryConfigValuesTest` covers the twenty-one-leaf admin inventory value
 model: each leaf's merge preserves every unselected current value and stays
-independent of the rate-limit, channel, and sync fields; an invalid leaf
+independent of the rate-limit, channel, and sync fields; the two finite size
+leaves are exact scalar multipliers with no unlimited mode, a selected pair is
+accepted only when both leaves are present and legal, and an invalid merged
+pair rejects atomically without touching unselected leaves; an invalid leaf
 rejects the whole mixed update and unsafe snapshots fail closed without
 defaulting; each leaf converts to and from its persisted member without
 aliasing; missing, null, off-grid, and unexpected-unlimited values are unsafe
 without substitution; and unsafe current or missing updates never report an
-applied transaction. `ServerInventoryConfigPacketsTest` covers the strict v2
-administration wire: the v2 request, update, and snapshot routes; every leaf
-and explicit unlimited finite value round-tripping; every legal grid value
-exact on the wire; truncation, old-prefix, and trailing data rejecting without
-throwing; an invalid encoded leaf or malformed mode rejecting the whole packet;
-and off-grid quanta, unknown masks, missing inventory, nonpositive caps, and
-out-of-range scalars failing closed without clamping. `ServerConfigVarNumbersTest`
+applied transaction. `ServerInventoryConfigPacketsTest` covers the strict v3
+administration wire: the v3 request, update, and snapshot routes; every leaf
+and explicit unlimited finite value round-tripping; the two finite size leaves
+carrying one exact quarter-multiplier quanta value with no unlimited flag and
+every legal grid value exact on the wire; truncation, old-prefix, and trailing
+data rejecting without throwing; an invalid encoded leaf or malformed mode
+rejecting the whole packet; and off-grid, zero and overflowing quanta, unknown
+masks, missing inventory, nonpositive caps, and out-of-range scalars failing
+closed without clamping. `ServerConfigVarNumbersTest`
 covers canonical integer and positive correlation boundaries, truncation,
 overflow, signed-width and noncanonical encodings, malformed update/snapshot
 numbers failing closed before service mutation or view publication, and legal
@@ -1661,7 +2035,15 @@ leaf not erasing other invalid drafts or permitting partial updates; read-only
 values visible but every edit inert; unlimited leaves retaining finite text;
 decimal parsing and stepped boundaries; the session lifecycle across
 navigation, permission revocation, and disconnect; and unsafe or stale
-responses neither installing a view nor overwriting drafts. These are headless
+responses neither installing a view nor overwriting drafts. The two size leaves
+use ordered slider positions with exact physical endpoints, the frame slider
+caps the display slider and lowers it atomically with a dual dirty mark and an
+adjustment notice, every size edit entry point reconciles the pair and none
+emits an invalid pair plan, valid display text edits clamp to the
+frame-compatible maximum, raising the frame never raises the display, malformed
+size text stays visible and blocks the plan, the notice clears on revert and
+snapshot refresh, and the size leaves have no unlimited mode and ignore
+read-only edits. These are headless
 model and wire seams: no `ServerCore` or live administration path exercises
 them.
 
@@ -1690,10 +2072,13 @@ screen evidence:
   retains a viewable snapshot while forcing the scope overview without one;
 - `SettingsCategoryCatalogTest` covers exactly-once placement of every existing
   control in the approved category order and immutable per-category lists,
-  including the client scope without a presentation category, the client
+  including the trail controls in Wheel Appearance, the client scope without a
+  presentation category, the client
   Performance category exposing exactly the precise capture period control, the
   server Presentation category, and the server Performance category exposing
-  every inventory leaf exactly once and only in the server scope; it does not
+  every inventory leaf exactly once and only in the server scope, with the two
+  size leaves placed in the shared inventory budgets group after pending memory;
+  it does not
   cover full-width layout flags or
   actual widget placement;
 - `PresentationFieldOutcomeTest` covers the server policy role: the advertised
@@ -1729,6 +2114,20 @@ screen evidence:
   unknown widget is a no-op, and a lower row or keyboard-origin reveal does not
   reset the top; it does not construct a native widget list or exercise mouse
   dispatch;
+- `InventorySizeOptionTest` covers the size slider codec and keyboard seam:
+  every ordered position round-trips through the slider codec, positions address
+  physical sizes rather than wire quanta, the label uses the localized
+  physical-KiB unit, a varying maximum is respected across rebuilds, read-only
+  sliders ignore keyboard adjustment, held arrow keys keep adjusting through a
+  slider replacement while an ordinary focus loss clears the adjustment mode,
+  and real-width arrow steps accumulate to the next legal position across a
+  rebuild while fraction-only moves never call the model; it is a headless
+  helper seam and does not render a screen or exercise mouse drag or live widget
+  focus;
+- `OptionUtilsDecimalTest` covers the decimal option codec's confirmed range
+  and grid: every confirmed grid step round-trips exactly through encode and
+  parse without floating-point drift, and zero or an out-of-range value is
+  rejected;
 - `ClientConfigLocalizationTest` covers the eight bundled locale files and the
   settings, category-navigation, server-status, entity-block-mode, and
   target-gone resource keys, their required format placeholders, the category
@@ -1736,14 +2135,17 @@ screen evidence:
   external-list tooltips, the independent wheel and target opacity labels, the
   retired wheel timeout key's removal, and the complete spatial-selector
   preference key set with its wheel-options group heading, including the
-  precise capture period, with their tooltips and numeric/boolean placeholder
-  rules; it checks required key presence per locale rather than a
+  precise capture period, trail controls and tooltips, and numeric/boolean
+  placeholder rules; point and percent unit placeholders are also checked for
+  every bundled locale. It checks required key presence per locale rather than a
   full-translation guarantee, and does not
   render or assemble screen labels;
 - `InventorySettingsLocalizationTest` covers the eight bundled locale files,
   the inventory settings label and tooltip key set, the performance category
-  entrance, the inventory group headings, and the shared inventory range
-  placeholder; it does not render or assemble screen labels;
+  entrance, the inventory group headings, the shared inventory range
+  placeholder, and the two size sliders' physical-KiB labels and adjustment
+  notice with their placeholder rules; it does not render or assemble screen
+  labels;
 - `SpatialInventoryLocalizationTest` covers the eight bundled locale files, the
   renderer-referenced inventory keys, every inventory status label as a
   non-formatted literal, and inventory key-set alignment across locales; it
@@ -2036,8 +2438,11 @@ The following gaps remain open until direct evidence closes them:
   expiry/delete/RESYNC seam but no per-tick no-early-expiry proof or live
   roundtrip; the publisher's cross-target period accounting is headless for
   SNAPSHOT bytes only; the zero-heartbeat publication seam exercises watermark
-  and repair without asserting the absence of a periodic HEARTBEAT. Full
-  all-variant folding, variant quotas, a real provider resolver and
+  and repair without asserting the absence of a periodic HEARTBEAT. A maximum
+  legal display value through the production server identity catalogue and its
+  queue and budget admission remains unproven, as do transport-asynchronous
+  heap retention and a live heap soak. Full all-variant folding, variant
+  quotas, a real provider resolver and
   recovery-probe expiry, the hard stop at Ping expiry, a fresh capture after
   ordinary single- or double-chest contents change, a multi-period
   low-consumption quota completing stably, a real mod-provided multi-member NBT
@@ -2211,7 +2616,7 @@ or because related automated tests exist.
 | --- | --- |
 | Block | Plain `block` versus `entity_block`; `ALL`/`COMPATIBLE`/`VOXEL_SHAPE_ONLY` modes and source fallback; whitelist native glow and fallback; a non-full native shape; same-type state change versus block-type replacement. |
 | Entity | Ordinary entity and dropped item; movement and same-dimension teleportation; death and disappearance; same-dimension world unload/rejoin and runtime-ID reuse in a game session. |
-| Wheel | Short and long press; every sector and border color; independent wheel-underlay and target-frame opacity; frozen target; location fallback; Back-hover dwell, one-level return, and leave/re-entry re-arm under real input; Back progress following the focused Back frame boundary; radial root caller geometry, non-root Back centring, dwell entry and fresh-stroke re-arm under real input; the target-selection settings branch's live ON/OFF toggle labels in the bundled Chinese and English locales, including a setting changed while the wheel key is still held, with the captured target and frozen policy unaffected and the entry border unchanged; the rigid centered view translation across multi-level submenus and a Back return, including small GUI scales, large fonts and the largest submenu size; and the Precise slot frames and their outside-frame name previews under real rendering, including a disabled slot and Back, a capped long name wrapped below its frame at its readable text size, sibling-preview separation, and resource-pack font extremes; and, on a real Windows GLFW window, the operating-system cursor hidden only while the wheel actually owns input, with its owned release keeping the physical pointer position and the selector's visibility state safely released on close, focus loss, window change, screen takeover, and abort without overriding a newer owner's cursor mode or letting a raw press auto-regrab the mouse; and the content menu's navigation-group hierarchy under real input: entering the block-state group and the Create properties and Stress subgroups, an actionless group parent committing nothing on release, nested-group entry, and a one-level Back return preserving the parent identity. |
+| Wheel | Short and long press; every sector and border color; independent wheel-underlay and target-frame opacity; frozen target; location fallback; Back-hover dwell, one-level return, and leave/re-entry re-arm under real input; Back progress following the focused Back frame boundary; radial root caller geometry, non-root Back centring, dwell entry and fresh-stroke re-arm under real input; the target-selection settings branch's live ON/OFF toggle labels in the bundled Chinese and English locales, including a setting changed while the wheel key is still held, with the captured target and frozen policy unaffected and the entry border unchanged; the rigid centered view translation across multi-level submenus and a Back return, including small GUI scales, large fonts, the largest submenu size, and a GUI-scale or window-size change while the translation is still interpolating; inventory-list glide and wheel unlock at the viewport edges, direction reversal, the active-list versus item-submenu pointer visibility at GUI scales, post-item-Back axis reachability after resize, and the list-exit return pointer placement under a real pan or resize; and the Precise slot frames and their outside-frame name previews under real rendering, including a disabled slot and Back, a capped long name wrapped below its frame at its readable text size, sibling-preview separation, and resource-pack font extremes; the painted center-guide strokes at real GUI scales, including the closed deadzone circle and the shared-boundary dividers under an in-progress pan and a resize; the focused eligible action or property-branch follower and its connector from the deadzone boundary to the scaled title frame under real GUI rendering, including shared-trail ownership handoff and return, its historical paint below text, exit fade versus a new-hold or abort clear, and opacity-layer behavior plus pointer-edge, sibling-collision and game-feel assessment; and, on a real Windows GLFW window, native `DISABLED` confinement and hidden physical pointer while the wheel owns input with the vanilla grab flag false, repeated long motion across every window border without escape or lost virtual travel, raw mouse input enabled and disabled (including briefly during list glide), raw press/release delivery without auto-regrab, focus loss and Alt-Tab, window replacement, screen handoffs and abort without overriding a newer cursor owner, and close-camera stability after unprocessed motion; and the content menu's navigation-group hierarchy under real input: entering the block-state group and the Create properties and Stress subgroups, an actionless group parent committing nothing on release, nested-group entry, and a one-level Back return preserving the parent identity; and restored component-bearing inventory-row icons and names under real rendering. |
 | Precise live capture | Periodic capture while the Precise branch is active and pause on leaving it; a moving target while the ordinary action stays press-frozen; release committing the last actually painted selectable version; a pending refresh keeping the last certified candidate; independent Distant Horizons location completion; and multi-loader live sessions. |
 | Selection policy and input | Live GUI/screen callbacks for selection gating; focus-loss `KeyMapping.releaseAll`, screen-transition and level-instance/dimension discontinuity aborts with late asynchronous completion; loader/gameplay input lifecycle and physical key-repeat behavior on Fabric, Forge, and NeoForge; selection toggles, entity blacklist/default `simulated:honey_glue` rule, and spectator exclusion in a game session. |
 | Movement, death and replacement | Target movement while the wheel is open; entity death or dimension change; block state change or replacement while open. |
@@ -2220,9 +2625,9 @@ or because related automated tests exist.
 | Cancellation | Cone and nearest-own-marker selection; inability to cancel another player's marker; stale/display-hidden candidate followed by server rejection with no local fallback. |
 | Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location; an owner-online refresh that changes the locator or the anchor; a marker beyond the bounded sampling cache synchronizing its known recipients without a new lease; an older or equal-revision initial arriving after a newer one without rolling back the stored payload; a legitimate policy change between cached projection and delivery; and a legitimate later packet arriving after the refresh. |
 | Marker HUD | Repeated same-target pings from one sender and from several senders while same-target records remain display-active: the target's displayed HUD alpha does not accumulate with the number of same-target records ([invariant owner](../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection)). |
-| Inventory and shared sources (planned) | Preview and tracking on Fabric, Forge, and NeoForge; vanilla single and double chests in a live world (their headless real-NBT capture is inventoried above), hopper, furnace, shulker box, and an unopened loot chest without loot-table generation; a fresh capture after ordinary single- or double-chest contents change; installed Create Vault with a real multi-member topology and a real mod-provided multi-member NBT source; provider-confirmed external candidate preview and tracking (candidate and committed bindings, membership scope, live item witness and handoff); private or unavailable inventories; permission and tag governance; unload/reload and live-world safety invalidation and recovery; block-type replacement versus same-type restore before expiry; different-block invalidation and grey status; hard stop at Ping expiry without recovery afterward; session end; queue overload and coalescing including explicit zero values; a multi-period low-consumption quota completing stably; component-too-long all-variant folding; heartbeat zero mode with repair and status still active; low-frequency limit/failure diagnostics; and an explicit unlimited scan mode keeping finite work and memory guards. |
+| Inventory and shared sources (planned) | Preview and tracking on Fabric, Forge, and NeoForge; vanilla single and double chests in a live world (their headless real-NBT capture is inventoried above), hopper, furnace, shulker box, and an unopened loot chest without loot-table generation; a fresh capture after ordinary single- or double-chest contents change; installed Create Vault with a real multi-member topology and a real mod-provided multi-member NBT source; provider-confirmed external candidate preview and tracking (candidate and committed bindings, membership scope, live item witness and handoff); private or unavailable inventories; permission and tag governance; unload/reload and live-world safety invalidation and recovery; block-type replacement versus same-type restore before expiry; different-block invalidation and grey status; hard stop at Ping expiry without recovery afterward; session end; queue overload and coalescing including explicit zero values; a multi-period low-consumption quota completing stably; component-too-long all-variant folding; heartbeat zero mode with repair and status still active; low-frequency limit/failure diagnostics; an explicit unlimited scan mode keeping finite work and memory guards; and restored transmitted component icons and variant names in a live preview or tracking view. |
 | Presentation snapshot | Live v5 negotiation, offer and reset-mask pruning, and reset on Fabric, Forge, and NeoForge; the server-selected mask removing retained and frozen values and the reset child deny map pruning retained annotations and default references; permission-gated and per-target-type-policy-gated projection for two recipients of one marker; live property uploads through the approved native content property-selection route (client-first selection, server fallback, and authoritative CREATE validation) recaptured against authoritative world state with whole-create rejection on a wrong-kind, unknown, forbidden, unavailable, or exactly child-denied selection; rendered default display reference and property HUD lines; live property Ping Type override resolution and tag/registry selector matching against actual block, item, and entity tags; the policy rule-view read and per-target-type mutation route over a real connection, including the permission-3 mutation gate, rule-view revision ordering, the disclosed child deny list preserved across field mutations, and unsolicited broadcast to a second client; the server per-target-type policy page with no property-entry editor; superseded marker C2S/S2C routes mutating nothing; installed-Create kinetic and vault/tank summaries including nested count property selections and the cached stress/capacity/available-capacity accessor path, including whether a last-synchronized local total is stale, and an absent or untested version registering no Create adapter; and a live validated Sable external-block input through the Create route, including the uncommitted candidate preview entry, with unavailable and stale outcomes; and a zero server `scanBudget` under live demand with captures deferred while cached values and staleness semantics are retained. |
-| Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live scope-tab and category navigation with leaf Back/Escape and root Done/Escape, a fixed footer with non-covering scrolled content, and per-page scroll/focus retention across back navigation and GUI resize, native widget input dispatch and focus-list traversal after a deferred page transition, and root and leaf pages at small GUI sizes and with long localized labels; one shared server session with a single correlated snapshot request retained across category and scope navigation, loading/permission/unavailable status, and a non-editable snapshot rendering read-only for a viewer below the required level; live permission revocation retaining a read-only leaf view, permission-return draft reset, promotion requesting a fresh snapshot, and reconnect draft behavior; invalid-draft close blocking with routing to the offending category and field; the client configuration file action and confirmation-dialog flows, including the reset warning when a server draft exists; the server Presentation category's per-target-type policy rows with their paired allow/block toggles and editable add/remove, whitelist-only changes, refresh, feedback, and broadcast to another client when permitted, including bounded no-response timeout retry, list-capacity feedback, caret and field focus, and a persistence fault during a mutation; and the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)). |
+| Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live scope-tab and category navigation with leaf Back/Escape and root Done/Escape, a fixed footer with non-covering scrolled content, and per-page scroll/focus retention across back navigation and GUI resize, native widget input dispatch and focus-list traversal after a deferred page transition, and root and leaf pages at small GUI sizes and with long localized labels; one shared server session with a single correlated snapshot request retained across category and scope navigation, loading/permission/unavailable status, and a non-editable snapshot rendering read-only for a viewer below the required level; live permission revocation retaining a read-only leaf view, permission-return draft reset, promotion requesting a fresh snapshot, and reconnect draft behavior; invalid-draft close blocking with routing to the offending category and field; the client configuration file action and confirmation-dialog flows, including the reset warning when a server draft exists; the server Presentation category's per-target-type policy rows with their paired allow/block toggles and editable add/remove, whitelist-only changes, refresh, feedback, and broadcast to another client when permitted, including bounded no-response timeout retry, list-capacity feedback, caret and field focus, and a persistence fault during a mutation; and the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)); and the coupled Display Byte Size and Frame Byte Size sliders with their live cap-change adjustment notice under real screen input. |
 | Range | Client/server range combinations in one live pipeline: native minimum, a live long-distance Distant Horizons target, Create/Sable finite-segment reuse and server acceptance, including exact Create surface selection followed by whole-entity server-anchor range rejection. Installed-Sable scenarios are listed below. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |
 | Optional content and rendering | Absent or partially present optional content; Create/Flywheel routes; occlusion and arbitrary camera angles; current shape, offset and seed. |

@@ -26,7 +26,8 @@ configure this interaction; their removal and migration are owned by
 
 ## Native selector presentation
 
-The selector keeps square nodes and straight interaction guides: options are
+The selector keeps square nodes and straight interaction guides, with the
+sector underlay and the center circle as its only curved elements: options are
 framed by rectangular borders, the pointer is a straight crosshair, the trail
 is a series of small squares, menu guides are straight lines, and the
 Back-hover progress traces the focused Back frame's actual boundary. A radial
@@ -34,6 +35,15 @@ menu may place a semi-transparent circular sector under each entry to make its
 bearing and angular span legible and to support label contrast. This sector is
 a visual underlay; it does not round or replace the node, pointer, trail, guide,
 or Back-hover geometry, and it does not change focus or release selection.
+
+Each radial menu also draws center guides at its own origin: one closed circle
+of the frozen center deadzone's radius — the deadzone's actual boundary,
+not a circle at half that radius — and one straight divider on every actual
+shared boundary between adjacent sectors, from that circle out to the outer
+radius of that menu's sector underlay. The dividers follow the real sector
+boundaries, including the root's unequal spans and the boundaries of any Back,
+disabled or reserved entry. The center guides are interaction chrome,
+independent of the wheel-underlay and target opacity preferences.
 
 The root presents the fixed eight-sector layout:
 
@@ -65,12 +75,52 @@ selection. Opacity is split by layer: the wheel opacity preference reaches only
 the visual underlay, while the target opacity preference reaches every
 text-bearing frame together with its label and, when present, its
 outside-frame name preview. Neither preference dims the
-interaction chrome — the pointer, guides, and trail follow only the transition
-fade. The font-size preferences remain the text inputs; the selector adds no
-separate appearance catalogue, and
+interaction chrome — the pointer and guides follow only the transition fade,
+while the trail also uses its independent trail-opacity preference. The trail
+is painted above the underlay and below every text-bearing frame, label, and
+name preview; its opacity preference does not dim the guides or follower
+connector. The font-size preferences remain the text inputs; the selector adds
+no separate appearance catalogue, and
 [client configuration](../../config/client.md#press-wheel-and-cancellation-interaction)
 owns those keys and meanings. The trail and root distance are visual only and
 never change gesture thresholds or selection.
+
+While the active menu's focused entry is an enabled action or branch that is
+neither Back nor reserved, the crosshair is hidden and that entry's node
+follows the pointer: the node stays on the ray from the menu origin through
+the hidden pointer, so the circle center, the pointer and the node stay
+collinear, and a connector line joins the center circle's boundary to the near
+edge of the node's actual scaled title frame only when the frame leaves an
+uncovered segment between it and the circle. The node's radial distance eases
+with the existing transition and reduced motion, and a return to rest uses
+that same transition. Focus alone qualifies the entry — whether it is a branch
+awaiting its dwell or turn entry, or an action a release would commit — with
+no fully elapsed timer needed. Only the active menu's own node, successfully
+painted with at least part of its actual title frame visible in the viewport,
+can hide the crosshair: an inventory row, an ancestor menu, or a node that
+failed to paint or is fully transparent never triggers this feedback. Hiding
+the crosshair leaves the trail and its preference unaffected, and the screen
+confinement guarantees only the pointer center on screen; a following frame or
+label is not guaranteed to stay wholly inside the screen.
+
+The trail is one bounded visual history shared by the pointer and the active
+followed option, not separate overlapping trails. When an eligible option
+gains focus, ownership transfers smoothly from the logical pointer; switching
+focus between eligible options transfers to the newly focused option, while
+leaving eligible focus transfers back to the logical pointer. These transfers
+use the existing finite selector transition and honor reduced motion. While an
+option owns the trail, its samples use the center of the node as actually
+painted after its animation, not the raw pointer target. The transfer keeps one
+common projected history and does not paint duplicate overlapping histories
+that amplify alpha. If a new owner has not yet been painted, the trail may show
+the last committed history until a painted position is available. Deadzone or
+Back focus, inventory-list mode, submenu changes, or other focus changes end
+the current option's ownership as appropriate; inventory rows are never trail
+owners, and the hidden pointer on the list continues its logical pointer trail.
+Pointer rebases and corrections caused only by projection or viewport changes
+do not add a synthetic connecting stroke. On ordinary release the trail fades
+with its departing owner rather than snapping to the root; a hard abort or a
+new hold discards the prior history.
 
 ## Submenu centering and view translation
 
@@ -90,9 +140,25 @@ translation instead of snapping back to the center, so the exit tail does not
 jump; a screen, world, or connection discontinuity discards the retained
 translation instead.
 
+The pointer is confined under the same translation the frame paints: before
+any gesture is evaluated, the logical pointer is clamped to the inclusive GUI
+pixel centers of the viewport, so the drawn pointer stays on screen. Confined
+movement counts as gesture travel and adds trail points. Inventory-list
+vertical glide is the exception: it uses the authorized GUI-scaled native
+vertical delta even when the confined pointer is against the top or bottom
+edge, without moving the pointer or adding trail travel. A correction produced
+only by a changed projection or a resize is not gesture input: it does not
+glide the list, add trail travel, side-navigate, advance dwell, re-arm held
+Back, or trigger an interaction gate. It can update the confined pointer's
+focus, which a later release resolves. The native virtual positions stay
+unbounded, incremental and continuously tracked — movement spent beyond the
+boundary is discarded rather than banked, so a reversal moves the pointer at
+once with no stored overshoot. The rest of the pattern keeps the rigid
+translation while the clamp holds the pointer at the screen boundary.
+
 The translation is smoothly interpolated like the other selector transitions,
-and reduced motion snaps it immediately. It is visual only and never changes
-gesture thresholds, focus, or release selection.
+and reduced motion snaps it immediately. It does not change gesture thresholds
+or selection rules; projection-only corrections do not count as gesture input.
 
 ## Radial release result
 
@@ -112,8 +178,10 @@ The down (180) cancel entry activates
 
 The model is headless: it owns no clock, renderer, configuration or Minecraft
 input, and the caller supplies monotonic timestamps, deltas and the frozen
-settings snapshot. The virtual pointer is the only pointer state; physical
-mouse deltas are added to it, and the bounded trail is what a renderer draws.
+settings snapshot. The virtual pointer is the only logical pointer state;
+physical mouse deltas are added to it. The renderer draws the bounded shared
+trail history according to the active pointer or followed-option ownership in
+[native selector presentation](#native-selector-presentation).
 A focused branch is entered by one of two admitted gestures. A stationary dwell
 enters it after the dwell threshold, requiring prior pointer travel beyond the
 stroke distance plus an additional minimum travel. A qualified direction turn
@@ -236,6 +304,45 @@ while the Back side is focused leaves without committing. Count, ordering,
 folding and item-selection semantics are owned by
 [inventory preview and tracking](../presentation/inventory.md#preview).
 
+When the list returns to the parent Content menu, the session places the
+sole logical pointer on the circumference of that menu's center deadzone, in
+the frozen direction of the inventory-display entry center; that exact
+circumference point belongs to the idle deadzone, so the return alone neither
+refocuses that entry nor commits anything. This programmatic placement is not
+physical gesture travel: it neither re-arms held Back nor counts toward the
+fresh-stroke requirement, and it adds no joining stroke to the trail
+([Back-hover return state](#back-hover-return-state),
+[headless spatial menu model](#headless-spatial-menu-model)). Both the
+Back-stroke and Back-hover returns use this placement. The viewport
+confinement still applies while the parent menu's translation settles: a
+desired point that is temporarily outside the viewport resolves as the
+projection makes it reachable, and fresh effective physical input supersedes
+the automatic alignment.
+
+The list advances rows by accumulating signed, GUI-scaled native vertical mouse
+delta at the intrinsic glide baseline scaled by the frozen target-glide
+preference, with each row advancing at the frozen row-height threshold; the
+multiplier's initialized meaning is owned by
+[client configuration](../../config/client.md#spatial-selector-interaction).
+The selected row's position does not accelerate the glide. When vertical input
+reverses direction, an opposing sub-row remainder is discarded before movement
+accumulates in the new direction; zero vertical input does not reverse it.
+Entering or leaving the list for an item submenu, and returning from that
+submenu, rebase the relevant gesture accumulation without changing the selected
+item or the visible list window. Only effective confined pointer movement, in
+either axis, can trigger the horizontal side-hint or Back/Forward-side
+navigation gates; horizontal displacement determines the side and focus.
+Zero-effective travel from a saturated pointer does neither nor re-arms held
+Back. Vertical glide is not general gesture travel: it adds no trail points
+and cannot trigger side navigation or re-arm held Back. On the list, the drawn
+crosshair is hidden as presentation only; the logical pointer trail continues
+to follow the frozen trail preference. An item's radial submenu and a return to
+the parent follow the
+[ordinary radial crosshair and trail rules](#native-selector-presentation)
+rather than forcing the crosshair visible, so a qualifying painted follower can
+hide it there as well. Fractional ordinary-wheel input and its existing
+wheel-lock behavior are unchanged by list gliding.
+
 ### Target-selection settings
 
 The settings branch exposes the three target-selection toggles. The toggle
@@ -252,35 +359,44 @@ captured target and the hold's frozen policy remain unaffected.
 
 ## Mouse ownership
 
-The selector releases mouse capture only while it is actually open and no
-client screen is open. It re-grabs the mouse only when that capture was
-released by the selector and no screen is open. Live ownership synchronization
-defers while a screen is open, and disposal may relinquish pending selector
-ownership rather than stealing the cursor from a screen or another owner.
+The selector releases the vanilla mouse grab only while it is actually open
+and no client screen is open. It re-grabs the mouse only when that grab was
+released by the selector and no screen is open; an initially free pointer is
+restored without grabbing. Live ownership synchronization defers while a screen
+is open, and disposal may relinquish pending selector ownership rather than
+stealing the cursor from a screen or another owner. Native disabled-mode
+ownership is separate from that entitlement: it neither establishes nor
+preserves ownership of the vanilla grab.
 
-The native input adapter converts absolute window mouse positions into owned
-GUI deltas and exposes no screen facade. Mouse movement never cancels vanilla's
-absolute-position bookkeeping; the selector only reads positions for its own
-GUI deltas. A window, scale, focus or capture change, a re-prime, or a cursor
-warp resets the sample baseline and contributes no movement or action. The
-screen-transition abort rule remains owned by
-[capture](capture.md#interaction-lifecycle-aborts) and is unchanged.
+While the selector owns input for its current window — ownership is active,
+the window is focused, and the mouse is not grabbed — it owns that window's
+native disabled cursor mode: the physical pointer is hidden and confined, and
+the selector receives continuous unbounded virtual cursor positions. The
+vanilla mouse-grab flag remains false, so camera look remains isolated. The
+selector draws its own virtual pointer and derives its owned GUI deltas from
+scaled successive changes of those virtual positions, with camera sensitivity
+never applied. The native mode transition, its virtual-coordinate reset, and
+grab, focus, window and scale handoffs are primed so the selector's first
+samples contribute no artificial travel; no per-frame recenter or reset
+occurs. Raw mouse-button press and release edges continue to reach the
+selector; only vanilla's automatic press-time re-grab is narrowly suppressed
+while the wheel is open, and an ordinary close may re-grab under that
+entitlement. The native input adapter exposes no screen facade, and the
+selector only reads virtual positions for its own GUI deltas.
 
-While the selector owns input for its current window — ownership is active, the
-window is focused, and the mouse is not grabbed — every scroll callback is
+While the selector owns input for its current window, every scroll callback is
 consumed before vanilla can act on it, including in radial mode, for a
 horizontal-only delta, and for a zero vertical delta. Only the inventory list
 consumes the vertical scroll amount to move its rows; a radial menu consumes
 the callback without using a scroll value, and a consumed scroll moves no
 pointer. A scroll outside that ownership passes through to vanilla unchanged.
 
-While the selector actually owns input, it hides the operating-system cursor,
-leaving the drawn virtual pointer as the visible pointer and the
-absolute-position input path unchanged. Ending that ownership — closing the
-selector, a window change, focus loss, a screen taking over, or an interaction
-abort — releases the selector's own cursor-visibility state without overriding
-a cursor mode established by a newer owner. Cursor hiding and release neither
-warp the cursor nor change gesture behavior.
+Ending that ownership — closing the selector, a window change, focus loss, a
+screen taking over, or an interaction abort — releases the selector's own cursor
+mode without overriding a mode established by a newer owner. Native ownership
+and its release neither move the drawn pointer nor change gesture behavior. The
+screen-transition abort rule remains owned by
+[capture](capture.md#interaction-lifecycle-aborts) and is unchanged.
 
 ## Cancel Marker selection
 
@@ -329,7 +445,9 @@ perimeter. At the dwell threshold the model reports one return trigger and then
 blocks the same held
 focus, so a single sustained focus never cascades through several levels — even
 when the menu changes to the parent and the focus stays in the Back direction.
-The block is released when the Back focus is lost, and a deliberate leave and
+The block is released only when effective physical movement takes focus out of
+Back; projection-only or stationary focus loss and outward movement saturated
+at zero effective travel leave it blocked. A deliberate physical leave and
 re-entry arms exactly one new return. Switching the focused menu restarts the
 dwell clock. A rewound clock keeps its original baseline and reports the
 minimum instead of restarting. Ending the interaction clears the timer and the

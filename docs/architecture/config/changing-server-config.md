@@ -22,12 +22,14 @@ The remote update surface contains the five top-level fields:
 - `rateLimit`; and
 - `syncDuration`;
 
-plus the nineteen `inventory` administration settings catalogued by
+plus `inventory` administration settings catalogued by
 [server configuration](../../config/server.md#inventory-policy-object). Each
-inventory cap or multiplier is one atomic leaf: its unlimited flag and its
-retained finite value are selected and replaced together, and the value is
-handled exactly on its confirmed grid rather than through binary floating-point
-arithmetic.
+inventory cap or multiplier that has an unlimited mode is one atomic leaf: its
+unlimited flag and its retained finite value are selected and replaced
+together, and the value is handled exactly on its confirmed grid rather than
+through binary floating-point arithmetic. The two finite display/frame size
+scalars have no unlimited flag: each is a single finite leaf selected and
+replaced as one value.
 
 `pingDistance` is explicitly outside this transaction. It is a JSON-only
 server setting catalogued by [server configuration](../../config/server.md) and
@@ -48,7 +50,7 @@ is produced are UI planning details owned by
 
 The per-target-type presentation field policy is read and changed through its own
 versioned route, not through this server-configuration transaction. The selector
-route never travels on the version-2 server-configuration request, snapshot, or
+route never travels on the version-3 server-configuration request, snapshot, or
 update routes and does not extend or replace the update surface; exact route
 identifiers and wire grammar are owned by
 [network protocol](../network/protocol.md). Its rule-view disclosure,
@@ -63,9 +65,10 @@ A snapshot request carries a positive request identifier and asks for the
 server's current authoritative values; it is not an edit, and any connected
 player may send one. The snapshot covers the complete remote surface — the five
 top-level fields and every inventory administration leaf, including each cap's
-or multiplier's retained finite value — and is accepted or rejected as one
-whole. The response is bound to that identifier. A response is accepted only
-while the initiating request is still pending on the same connection, the
+or multiplier's retained finite value and the two finite size scalars — and is
+accepted or rejected as one whole. The response is bound to that identifier. A
+response is accepted only while the initiating request is still pending on the
+same connection, the
 snapshot is non-null and safe, and the response's positive identifier exactly
 matches that pending identifier. A response that arrives after closing,
 disconnecting, permission revocation, or a later opening is stale and is
@@ -100,6 +103,16 @@ A malformed, missing, unknown, or zero field selection has no effect. If no
 current authoritative snapshot exists when a valid update arrives, the merge
 produces no result and no mutation.
 
+The masked merge also validates the two display/frame size scalars as a pair:
+each selected scalar is merged with the current authoritative value of the
+other, and the merged pair is checked before any assignment. A conflicting
+merged pair rejects the whole update atomically: the update is not applied, no
+unselected leaf is adjusted, and the authoritative snapshot is left untouched.
+This transaction boundary is distinct from file-load normalization, which is
+owned by [server configuration](../../config/server.md#inventory-policy-object)
+and resolves a persisted conflict by lowering the display value under frame
+priority.
+
 ## Server apply order and persistence
 
 The packet-facing server path processes an update in this order:
@@ -113,7 +126,7 @@ The packet-facing server path processes an update in this order:
 4. for an applied update, the selected fields are assigned, the configuration
    is validated, and a persistence write is attempted.
 
-The version-2 server-configuration payloads are fixed-shape and consumed to
+The version-3 server-configuration payloads are fixed-shape and consumed to
 their exact end: a payload with trailing bytes, or a superseded shorter shape
 that does not supply every inventory leaf, is structurally invalid and is
 rejected in full rather than reinterpreted as a valid prefix. Exact route
