@@ -144,14 +144,25 @@ public final class SpatialController {
 		Integer outlineColor
 	) {}
 
-	/** One menu of the current ancestor path. */
+	/**
+	 * One menu of the current ancestor path. {@code entryChoiceId} is the
+	 * parent menu's choice that opened this menu, or {@code null} for the root
+	 * and for a caller-pushed external menu; it is read-only ancestry metadata
+	 * for presentation, never selection or release state.
+	 */
 	public record MenuView(
 		String menuId,
 		Point origin,
 		Point parentOrigin,
 		String focusId,
-		List<ChoiceView> choices
-	) {}
+		List<ChoiceView> choices,
+		String entryChoiceId
+	) {
+		/** Compatibility form predating the ancestry edge; a caller-built view has no radial entry. */
+		public MenuView(String menuId, Point origin, Point parentOrigin, String focusId, List<ChoiceView> choices) {
+			this(menuId, origin, parentOrigin, focusId, choices, null);
+		}
+	}
 
 	/**
 	 * Immutable read model for the renderer. {@code deadzone} is the frozen
@@ -585,7 +596,8 @@ public final class SpatialController {
 					choice.outlineColor()));
 			}
 
-			menus.add(new MenuView(state.menu.id(), state.origin, state.parentOrigin, focusId, List.copyOf(choices)));
+			menus.add(new MenuView(state.menu.id(), state.origin, state.parentOrigin, focusId, List.copyOf(choices),
+				state.entryChoiceId));
 		}
 
 		String focusId = menus.get(menus.size() - 1).focusId();
@@ -787,6 +799,7 @@ public final class SpatialController {
 		MenuState parent = activeMenu();
 		pendingReturn = null;
 		MenuState child = new MenuState(choice.children(), origin, parent.origin);
+		child.entryChoiceId = choice.id();
 		child.enteredAt = nowMillis;
 		child.lastMovement = nowMillis;
 		stack.add(child);
@@ -944,6 +957,8 @@ public final class SpatialController {
 		boolean external;
 		boolean surface;
 		boolean externalBackFocus;
+		/** Parent-menu choice that opened this menu; null for the root and external pushes. */
+		String entryChoiceId;
 
 		MenuState(SpatialMenu menu, Point origin, Point parentOrigin) {
 			this.menu = menu;

@@ -38,9 +38,9 @@ class InventoryC2SPacketTest {
 	}
 
 	@Test
-	void routeAndKindsAreVersionedInventoryV4() {
-		assertEquals(4, InventoryC2SPacket.VERSION);
-		assertEquals("pingforit-c2s:inventory-v4", InventoryC2SPacket.PACKET_ID.toString());
+	void routeAndKindsAreVersionedInventoryV1() {
+		assertEquals(1, InventoryC2SPacket.VERSION);
+		assertEquals("pingforit-c2s:inventory-v1", InventoryC2SPacket.PACKET_ID.toString());
 		assertEquals(List.of(InventoryC2SPacket.Kind.HELLO, InventoryC2SPacket.Kind.OPEN,
 			InventoryC2SPacket.Kind.CLOSE, InventoryC2SPacket.Kind.RESYNC,
 			InventoryC2SPacket.Kind.SELECT), Arrays.asList(InventoryC2SPacket.Kind.values()));
@@ -176,16 +176,16 @@ class InventoryC2SPacketTest {
 			buf.release();
 		}
 
-		assertTrue(new InventoryC2SPacket(InventoryC2SPacket.Kind.HELLO, 1, 0L, 0L,
-			null, null, null, null, null).isCorrupt());
+		assertTrue(new InventoryC2SPacket(InventoryC2SPacket.Kind.HELLO, InventoryC2SPacket.VERSION + 1, 0L, 0L,
+			null, null, null, null, null).isCorrupt(), "an unsupported protocol value is corrupt");
 	}
 
 	@Test
-	void oldInventoryV2FramesAreRejectedOnTheV3Route() {
+	void previousInventoryV4FramesAreRejectedOnTheV1Route() {
 		FriendlyByteBuf buf = buffer();
 		try {
 			MarkerPacketCodec.writeEnum(buf, InventoryC2SPacket.Kind.HELLO);
-			buf.writeVarInt(2);
+			buf.writeVarInt(4);
 			buf.writeLong(0L);
 			buf.writeLong(0L);
 			buf.writeLong(0L);
@@ -213,7 +213,12 @@ class InventoryC2SPacketTest {
 			MarkerPacketCodec.writeEnum(buf, InventoryC2SPacket.Kind.SELECT);
 			buf.writeVarInt(InventoryC2SPacket.VERSION);
 			buf.writeLong(1L);
+			buf.writeLong(0L);
+			buf.writeLong(0L);
 			buf.writeLong(2L);
+			buf.writeLong(3L);
+			buf.writeLong(4L);
+			buf.writeLong(5L);
 			buf.writeUtf("a".repeat(257), 512);
 			buf.writeUtf("minecraft:stone", 512);
 			buf.writeUtf("attention", 512);

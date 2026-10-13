@@ -87,9 +87,9 @@ class OpaqueKeyedPayloadTest {
 
 	@Test
 	void codeOwnedAllowanceAdmitsOnlyItsFixedIdAndBound() {
-		var token = CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V2;
+		var token = CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V1;
 
-		assertEquals("pingforit:inventory.observation.v2", token.id());
+		assertEquals("pingforit:inventory.observation.v1", token.id());
 		assertEquals(133120, token.bound());
 		var tagged = CaptureResult.OpaqueValue.forCodec(token, new byte[token.bound()]);
 		assertEquals(token.bound(), tagged.size());
@@ -107,7 +107,7 @@ class OpaqueKeyedPayloadTest {
 
 	@Test
 	void taggedValuesMustMatchTheFragmentCodecEvenWhenSmallOrEmpty() {
-		var token = CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V2;
+		var token = CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V1;
 		var small = CaptureResult.OpaqueValue.forCodec(token, new byte[] {1});
 		var empty = CaptureResult.OpaqueValue.forCodec(token, new byte[0]);
 
@@ -130,7 +130,7 @@ class OpaqueKeyedPayloadTest {
 		source[0] = 9;
 
 		assertEquals(3, value.size(), "the size reflects the constructed bytes, not the caller array");
-		var tagged = CaptureResult.OpaqueValue.forCodec(CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V2,
+		var tagged = CaptureResult.OpaqueValue.forCodec(CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V1,
 			new byte[] {1, 2, 3});
 		assertEquals(value, tagged, "equality is byte content, independent of the admitting form");
 		assertEquals(value.hashCode(), tagged.hashCode());

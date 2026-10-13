@@ -37,6 +37,7 @@ class SpatialInventoryNavigationIntegrationTest {
 	private static final class Painter implements SpatialOverlayRenderer.FramePainter {
 		private static final StringSplitter FONT = new StringSplitter((point, style) -> 6.0f);
 		final List<String> selectedRows = new ArrayList<>();
+		final List<String> paintedNodes = new ArrayList<>();
 		boolean pointerHidden;
 		public int lineHeight() { return 9; }
 		public int width(FormattedText text) { return (int) Math.ceil(FONT.stringWidth(text)); }
@@ -45,12 +46,14 @@ class SpatialInventoryNavigationIntegrationTest {
 			SpatialOverlayRenderer.NodeLayout layout, SpatialOverlayRenderer.Style style) {
 			if (state.present() && state.data() instanceof SpatialOverlayRenderer.RowPaint row && row.selected())
 				selectedRows.add(row.row().key());
+			if (state.present() && state.data() instanceof SpatialOverlayRenderer.NodePaint node)
+				paintedNodes.add(node.choice().id());
 			if (state.present() && state.data() instanceof SpatialOverlayRenderer.ChromePaint chrome)
 				pointerHidden = chrome.pointerHidden();
 			return true;
 		}
 		public void connector(SpatialOverlayRenderer.GuideLine line, double alpha) {}
-		void clear() { selectedRows.clear(); pointerHidden = false; }
+		void clear() { selectedRows.clear(); paintedNodes.clear(); pointerHidden = false; }
 	}
 
 	private static final class Fixture {
@@ -453,7 +456,7 @@ class SpatialInventoryNavigationIntegrationTest {
 	@ParameterizedTest
 	@CsvSource({"false, 0", "true, 3"})
 	void returnedPointerReopensTheListOnlyAfterAFullDeliberateStrokeAndDwell(boolean hover, int properties) {
-		var f = new Fixture(320, 240, "1", false, properties, SpatialSelectorSettings.DEFAULT_DEADZONE, hover);
+		var f = new Fixture(320, 240, "1", false, properties, 18, hover);
 		f.openList(true);
 		var parent = f.retainedParent();
 		var expected = f.inventoryDeadzoneTarget(parent);
@@ -475,5 +478,42 @@ class SpatialInventoryNavigationIntegrationTest {
 		f.frame(f.now + f.settings.dwellMillis() + 1);
 		assertTrue(f.menu().menuId().endsWith(":inventory"));
 		assertTrue(f.snapshot().inventory().open(), "a full deliberate stroke plus dwell reopens the list");
+	}
+
+	@Test
+	void contentAndRootAncestorsKeepTheirBreadcrumbsWhileTheItemSubmenuKeepsTheListPanel() {
+		var f = new Fixture(320, 240, "1", true, 3, 18, false);
+		f.openList(false);
+		f.frame(f.now + 1);
+
+		var menus = f.snapshot().radial().menus();
+		assertEquals(3, menus.size());
+		assertNull(menus.get(0).entryChoiceId(), "the root has no parent entry");
+		assertEquals("content", menus.get(1).entryChoiceId());
+		String inventoryId = menus.get(2).menuId();
+		assertEquals(inventoryId, menus.get(2).entryChoiceId(), "the list surface records the content entry that opened it");
+		String contentBack = menus.get(1).choices().stream().filter(SpatialController.ChoiceView::back)
+			.findFirst().orElseThrow().id();
+
+		assertTrue(f.painter.paintedNodes.contains("content"), "the root keeps only its content breadcrumb");
+		assertTrue(f.painter.paintedNodes.contains(inventoryId), "the content keeps its inventory breadcrumb");
+		assertTrue(f.painter.paintedNodes.contains(contentBack), "the content keeps its Back navigation");
+		assertTrue(f.painter.paintedNodes.stream().noneMatch(id -> id.contains(":property:")),
+			"hidden content options are not planned");
+		assertTrue(f.painter.paintedNodes.stream().noneMatch(id -> List.of("danger", "precise", "intent", "settings",
+			"cancel-marker", "reserved-ne", "reserved-se").contains(id)), "hidden root options are not planned");
+		assertEquals(3, menus.get(1).choices().stream().filter(choice -> choice.id().contains(":property:")).count(),
+			"the logical content choices are never removed");
+
+		double forward = f.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		f.move(forward * 80, 0, f.now + 1);
+		f.settle();
+		assertTrue(f.menu().menuId().contains(":item:"), "a forward stroke opens the item submenu");
+		f.frame(f.now + 1);
+		assertEquals(List.of("k0"), f.painter.selectedRows, "the inventory list stays painted under the item submenu");
+		assertTrue(f.painter.paintedNodes.contains(inventoryId), "the content ancestor keeps its inventory breadcrumb");
+		assertTrue(f.painter.paintedNodes.stream().noneMatch(id -> id.contains(":property:")));
+		assertEquals(3, f.snapshot().radial().menus().get(1).choices().stream()
+			.filter(choice -> choice.id().contains(":property:")).count(), "navigation remains complete");
 	}
 }

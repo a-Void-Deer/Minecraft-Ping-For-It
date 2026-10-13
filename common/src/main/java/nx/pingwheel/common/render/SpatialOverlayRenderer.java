@@ -58,6 +58,15 @@ import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
  * anchors keep their controller-space relationships. GUI scaling of physical
  * input is owned by the future actor; this class only paints in GUI space.
  *
+ * <p>While the active menu's focused entry is an eligible action or branch, that
+ * node scales to the selection scale and its current-menu siblings shrink to the
+ * resting sibling scale; Back, disabled, reserved and deadzone focus keep the
+ * established selected/unselected resting scales. Each ancestor of the active
+ * path keeps only the breadcrumb entry that opened the next child plus its Back
+ * navigation, so every other sibling frame and sector leaves planning and fades
+ * through the ordinary exit; the controller's logical choices and selection
+ * geometry are never changed by this presentation filter.
+ *
  * <p>{@link #drawFrame} is the complete-frame entry point: it transitions radial
  * nodes, list content and outgoing content together with caller-owned time and
  * style. An empty/inactive frame fades out; keep drawing while {@link #isAnimating}
@@ -113,6 +122,16 @@ public final class SpatialOverlayRenderer {
 	/** Transition scales of the active menu's focused and unfocused nodes. */
 	static final double NODE_SELECTED_SCALE = 1.12;
 	static final double NODE_SCALE = 0.95;
+	/**
+	 * Selection scaling while the active menu's focused entry is an eligible
+	 * action or branch: that node and every current-menu sibling. Back, disabled
+	 * and reserved focus keeps the established {@link #NODE_SELECTED_SCALE} and
+	 * {@link #NODE_SCALE} resting appearance.
+	 */
+	static final double NODE_FOCUSED_SCALE = 1.2;
+	static final double NODE_FOCUSED_SIBLING_SCALE = 0.85;
+	/** Ancestor menus keep the established dimmed resting scale. */
+	static final double NODE_ANCESTOR_SCALE = 0.85;
 	/** Horizontal and vertical inset of node text inside its frame. */
 	static final double NODE_TEXT_INSET = 4.0;
 	/** Total vertical padding of the title frame: three pixels above and below. */
@@ -894,21 +913,28 @@ public final class SpatialOverlayRenderer {
 		for (int i = 0; i < menus.size(); i++) {
 			SpatialController.MenuView menu = menus.get(i);
 			boolean active = i == menus.size() - 1;
+			// An ancestor keeps only the choice that opened the next child plus its
+			// Back navigation; hidden sibling frames and sectors leave planning and
+			// fade through the ordinary exit without ever becoming interactive.
+			List<SpatialController.ChoiceView> visible = active ? menu.choices()
+				: breadcrumbChoices(menu, menus.get(i + 1).entryChoiceId());
+			boolean focusScaling = active && focusedActionable(menu);
 			double menuX = centerX + menu.origin().x();
 			double menuY = centerY + menu.origin().y();
 			double baseRadius = nodeRadius(i, orbit, rootDistance, submenuRadiusScale, false);
-			if (deadzone > 0.0 && !menu.choices().isEmpty()) {
+			if (deadzone > 0.0 && !visible.isEmpty()) {
 				// Centre guides are chrome for their own menu: only the menu's
 				// transition fade dims them, and an ancestor menu dims like its
-				// nodes. Their shapes never depend on focus, selection or release.
+				// nodes. Hidden options contribute no divider; the deadzone circle
+				// stays the defined centre guide of the remaining wheel.
 				add(targets, new VisualKey("guide", menu.menuId(), ""), menuX, menuY, 1.0,
 					nodeAlpha(active, false, false), menuX, menuY,
-					new GuidePaint(menuBoundaries(menu.choices(), deadzone, sectorRadius(baseRadius)),
+					new GuidePaint(menuBoundaries(visible, deadzone, sectorRadius(baseRadius)),
 						circleSegments(deadzone)));
 			}
-			double maxExtent = menu.choices().stream().anyMatch(choice -> choice.id().startsWith("precise:"))
+			double maxExtent = visible.stream().anyMatch(choice -> choice.id().startsWith("precise:"))
 				? preciseNodeExtentBudget(orbit, submenuRadiusScale) : Double.POSITIVE_INFINITY;
-			for (SpatialController.ChoiceView choice : menu.choices()) {
+			for (SpatialController.ChoiceView choice : visible) {
 				double bearing = Math.toRadians(choice.startDegrees() + choice.spanDegrees() / 2.0);
 				boolean selected = active && choice.id().equals(menu.focusId());
 				double radius = baseRadius + (selected ? ORBIT_SELECTED_PUSH : 0.0);
@@ -929,15 +955,50 @@ public final class SpatialOverlayRenderer {
 					double dy = snapshot.pointer().y() - menu.origin().y();
 					double distance = Math.hypot(dx, dy);
 					targets.add(new SpatialOverlayTransitions.Target<>(new VisualKey("follow", menu.menuId(), choice.id()),
-						centerX + snapshot.pointer().x(), centerY + snapshot.pointer().y(), NODE_SELECTED_SCALE, alpha,
+						centerX + snapshot.pointer().x(), centerY + snapshot.pointer().y(), NODE_FOCUSED_SCALE, alpha,
 						homeX, homeY, paint, new SpatialOverlayTransitions.Ray(menuX, menuY, dx / distance, dy / distance)));
 				} else {
 					add(targets, new VisualKey("node", menu.menuId(), choice.id()), homeX, homeY,
-						active ? (selected ? NODE_SELECTED_SCALE : NODE_SCALE) : 0.85, alpha,
+						nodeScale(active, selected, focusScaling), alpha,
 						menuX + Math.sin(bearing) * (radius - 12.0), menuY - Math.cos(bearing) * (radius - 12.0), paint);
 				}
 			}
 		}
+	}
+
+	/**
+	 * Ancestor levels of the active path keep only the entry choice that leads to
+	 * the next child plus Back navigation. The controller still owns the complete
+	 * logical menu, so this filter changes presentation only; a caller-built view
+	 * without a radial entry keeps its Back choices alone.
+	 */
+	static List<SpatialController.ChoiceView> breadcrumbChoices(SpatialController.MenuView menu, String childEntryChoiceId) {
+		List<SpatialController.ChoiceView> visible = new ArrayList<>(2);
+		for (SpatialController.ChoiceView choice : menu.choices()) {
+			if (choice.back() || choice.id().equals(childEntryChoiceId)) visible.add(choice);
+		}
+		return visible;
+	}
+
+	/** Whether the active menu's focused entry is an enabled action or branch. */
+	static boolean focusedActionable(SpatialController.MenuView menu) {
+		String focusId = menu.focusId();
+		if (focusId == null) return false;
+		for (SpatialController.ChoiceView choice : menu.choices()) {
+			if (focusId.equals(choice.id())) return actionable(choice);
+		}
+		return false;
+	}
+
+	/**
+	 * Active-menu node scale: an eligible focused entry selects the 1.2/0.85
+	 * presentation, while Back, disabled, reserved and deadzone focus keep the
+	 * established selected/unselected resting scales. Ancestors never scale up.
+	 */
+	static double nodeScale(boolean active, boolean selected, boolean focusedActionable) {
+		if (!active) return NODE_ANCESTOR_SCALE;
+		if (focusedActionable) return selected ? NODE_FOCUSED_SCALE : NODE_FOCUSED_SIBLING_SCALE;
+		return selected ? NODE_SELECTED_SCALE : NODE_SCALE;
 	}
 
 	private static boolean actionable(SpatialController.ChoiceView choice) {

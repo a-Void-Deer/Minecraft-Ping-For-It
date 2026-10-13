@@ -42,10 +42,10 @@ public record ServerPresentationPolicyS2CPacket(
 	boolean canEdit,
 	Map<String, RulesView> rules
 ) implements IPacket {
-	public static final int VERSION = 3;
+	public static final int VERSION = 1;
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		S2C_NAMESPACE,
-		"server-presentation-policy-v3");
+		"server-presentation-policy-v1");
 	public static final Type<ServerPresentationPolicyS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	/** Maximum encoded size of one selector; the accepted grammar is ASCII. */

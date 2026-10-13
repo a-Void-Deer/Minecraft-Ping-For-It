@@ -14,7 +14,7 @@ import nx.pingwheel.common.presentation.source.CaptureResult;
 /** Code-owned detached encoding; it never uses SECTION values or doubles for counts. */
 public final class InventoryDomainCodec {
 	/** The code-owned observation allowance adopted by this domain codec. */
-	public static final CaptureResult.OpaqueCodec CODEC = CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V2;
+	public static final CaptureResult.OpaqueCodec CODEC = CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V1;
 	/** The fragment codec id; it equals the adopted token id. */
 	public static final String ID = CODEC.id();
 	/** Total observation envelope: the absolute display budget plus its bounded entry metadata. */

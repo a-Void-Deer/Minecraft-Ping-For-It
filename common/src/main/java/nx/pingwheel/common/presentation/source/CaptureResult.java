@@ -197,7 +197,7 @@ public record CaptureResult(
 		 * Detached inventory observation codec. The bound envelopes the
 		 * absolute 128 KiB display budget plus its bounded entry metadata.
 		 */
-		INVENTORY_OBSERVATION_V2("pingforit:inventory.observation.v2", 133120);
+		INVENTORY_OBSERVATION_V1("pingforit:inventory.observation.v1", 133120);
 
 		private final String id;
 		private final int bound;

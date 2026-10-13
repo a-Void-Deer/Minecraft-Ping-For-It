@@ -186,7 +186,7 @@ class SpatialOverlayRendererFollowerTest {
 			assertTrue(painter.chrome().pointerHidden());
 			if (frame >= 20) {
 				assertEquals(1, state.alpha(), "moving radius/direction never restarts the appearance fade");
-				assertEquals(SpatialOverlayRenderer.NODE_SELECTED_SCALE, state.scale());
+				assertEquals(SpatialOverlayRenderer.NODE_FOCUSED_SCALE, state.scale(), 1.0e-12);
 			}
 			var line = painter.strokes.getFirst().line();
 			assertEquals(12, Math.hypot(line.x1() - ox, line.y1() - oy), 1e-9);
@@ -378,7 +378,8 @@ class SpatialOverlayRendererFollowerTest {
 		frame(renderer, inward, painter, NORMAL, DURATION + 16_000_000L, view);
 		var draw = painter.follower();
 		assertEquals(172.49, draw.state().x(), 0.01); assertEquals(262.79, draw.state().y(), 0.01);
-		assertEquals(254.95, nativeTitleBounds(draw)[1], 0.01);
+		assertEquals(draw.state().y() + draw.layout().top() * (float) draw.state().scale(),
+			nativeTitleBounds(draw)[1], 0.01, "the painted title uses the focused scale");
 		assertTrue(nativeTitleBounds(draw)[1] > view.height(), "actual intermediate title is wholly offscreen, not just its target");
 		assertFalse(painter.chrome().pointerHidden(), "successful draw submission alone is not visible pointer feedback");
 		assertFalse(renderer.paintedChoiceIds().contains("c")); assertTrue(painter.strokes.isEmpty());
@@ -424,7 +425,8 @@ class SpatialOverlayRendererFollowerTest {
 			assertEquals(newer.radial().pointer(), view.confine(newer.radial().pointer()));
 			frame(renderer, newer.radial(), painter, NORMAL, DURATION + 4_000_000L, view);
 			var draw = painter.follower();
-			assertEquals(241.35, nativeTitleBounds(draw)[1], 0.01);
+			assertEquals(draw.state().y() + draw.layout().top() * (float) draw.state().scale(),
+				nativeTitleBounds(draw)[1], 0.01, "the painted title uses the focused scale");
 			assertTrue(nativeTitleBounds(draw)[1] > view.height());
 			assertTrue(draw.layout().detail().top() > draw.layout().bottom(), "the preview is below the already invisible title");
 			assertFalse(painter.chrome().pointerHidden()); assertTrue(painter.strokes.isEmpty());

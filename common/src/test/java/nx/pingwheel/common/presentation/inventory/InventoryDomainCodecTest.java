@@ -70,8 +70,10 @@ class InventoryDomainCodecTest {
 			null, false);
 		var encoded = InventoryDomainCodec.encode(item);
 
+		assertEquals("pingforit:inventory.observation.v1", InventoryDomainCodec.ID,
+			"the domain codec adopts the version-one observation descriptor");
 		assertThrows(IllegalArgumentException.class, () -> new CaptureResult.OpaqueKeyedFragment(
-			"pingforit:inventory.observation.v1", Map.of("k", encoded)));
+			"pingforit:inventory.observation.v2", Map.of("k", encoded)));
 		assertEquals(encoded, new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, Map.of("k", encoded))
 			.entries().get("k"));
 		assertEquals(item, InventoryDomainCodec.decode(encoded));

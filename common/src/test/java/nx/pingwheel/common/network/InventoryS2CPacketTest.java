@@ -178,9 +178,11 @@ class InventoryS2CPacketTest {
 	}
 
 	@Test
-	void routeVersionKindsAndStatusAreInventoryV4() {
-		assertEquals(4, InventoryS2CPacket.VERSION);
-		assertEquals("pingforit-s2c:inventory-v4", InventoryS2CPacket.PACKET_ID.toString());
+	void routeVersionKindsAndStatusAreInventoryV1() {
+		assertEquals(1, InventoryS2CPacket.VERSION);
+		assertEquals(InventoryC2SPacket.VERSION, InventoryS2CPacket.VERSION,
+			"both inventory directions declare one protocol version");
+		assertEquals("pingforit-s2c:inventory-v1", InventoryS2CPacket.PACKET_ID.toString());
 		assertEquals(List.of(InventoryS2CPacket.Kind.OFFER, InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.SELECTED, InventoryS2CPacket.Kind.REJECT, InventoryS2CPacket.Kind.PREVIEW,
 			InventoryS2CPacket.Kind.SNAPSHOT, InventoryS2CPacket.Kind.STREAM,
 			InventoryS2CPacket.Kind.STATUS, InventoryS2CPacket.Kind.HEARTBEAT),
@@ -193,11 +195,11 @@ class InventoryS2CPacketTest {
 	}
 
 	@Test
-	void oldInventoryV3FramesAreRejectedOnTheV4Route() {
+	void previousInventoryV4FramesAreRejectedOnTheV1Route() {
 		FriendlyByteBuf frame = buffer();
 		try {
 			MarkerPacketCodec.writeEnum(frame, InventoryS2CPacket.Kind.OFFER);
-			frame.writeVarInt(3);
+			frame.writeVarInt(4);
 			frame.writeLong(1L);
 			frame.writeLong(0L);
 			frame.writeLong(100L);
@@ -206,6 +208,8 @@ class InventoryS2CPacketTest {
 			frame.writeVarInt(40);
 			frame.writeVarInt(5);
 			frame.writeVarInt(0);
+			frame.writeVarInt(InventoryLimits.DISPLAY_BASE_BYTES);
+			frame.writeVarInt(InventoryLimits.FRAME_BASE_BYTES);
 			assertTrue(InventoryS2CPacket.readSafe(frame).isCorrupt());
 		} finally {
 			frame.release();

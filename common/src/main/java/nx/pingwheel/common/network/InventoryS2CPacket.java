@@ -18,7 +18,7 @@ import java.util.Set;
 import static nx.pingwheel.common.Global.S2C_NAMESPACE;
 
 /**
- * Version-four inventory preview and tracking responses. {@code OFFER} carries the
+ * Version-one inventory preview and tracking responses. {@code OFFER} carries the
  * server-selected periods plus the effective display and frame budgets and
  * nothing else; {@code PREVIEW}, {@code SNAPSHOT} and {@code STREAM} carry one
  * immutable entry fragment under an independent epoch/request/marker/baseline
@@ -41,7 +41,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	public enum Kind { OFFER, POLICY, SELECTED, REJECT, PREVIEW, SNAPSHOT, STREAM, STATUS, HEARTBEAT }
 	public enum Status { UPDATING, READY, UNCERTAIN, INCOMPLETE, UNAVAILABLE, INVALID, EXPIRED, COMPONENT_TOO_LONG }
 
-	public static final int VERSION = 4;
+	public static final int VERSION = 1;
 	public static final int MAX_ENTRIES = 128;
 	/** Absolute whole-frame guard: the largest legal server frame budget. */
 	public static final int MAX_FRAME_BYTES = InventoryLimits.MAX_FRAME_BYTES;
@@ -58,7 +58,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	public static final int MAX_KEY_BYTES = 256;
 	public static final int MAX_ITEM_ID_BYTES = 256;
 	public static final int MAX_LABEL_BYTES = 1024;
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "inventory-v4");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "inventory-v1");
 	public static final Type<InventoryS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 	private static final String[] POLICY_WIRE_ORDER = { "block", "dropped_item", "entity", "entity_block", "location" };
 

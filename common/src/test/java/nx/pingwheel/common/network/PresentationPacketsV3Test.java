@@ -36,13 +36,47 @@ class PresentationPacketsV3Test {
 	}
 
 	@Test
-	void versionFiveHasNoSubscribeKindAndUsesNewRouteIds() {
-		assertEquals(5, PresentationC2SPacket.VERSION);
-		assertEquals(5, PresentationS2CPacket.VERSION);
-		assertEquals("pingforit-c2s:presentation-v5", PresentationC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-s2c:presentation-v5", PresentationS2CPacket.PACKET_ID.toString());
+	void versionOneHasNoSubscribeKindAndUsesV1RouteIds() {
+		assertEquals(1, PresentationC2SPacket.VERSION);
+		assertEquals(1, PresentationS2CPacket.VERSION);
+		assertEquals(PresentationC2SPacket.VERSION, PresentationS2CPacket.VERSION,
+			"both presentation directions declare one protocol version");
+		assertEquals("pingforit-c2s:presentation-v1", PresentationC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:presentation-v1", PresentationS2CPacket.PACKET_ID.toString());
 		assertEquals(List.of(PresentationC2SPacket.Kind.HELLO, PresentationC2SPacket.Kind.CREATE,
 			PresentationC2SPacket.Kind.REMOVE), Arrays.asList(PresentationC2SPacket.Kind.values()));
+	}
+
+	@Test
+	void previousPresentationVersionFramesAreRejectedOnBothDirections() {
+		FriendlyByteBuf request = buffer();
+		try {
+			request.writeEnum(PresentationC2SPacket.Kind.HELLO);
+			request.writeVarInt(5);
+			request.writeLong(0L);
+			request.writeVarInt(0);
+			assertTrue(PresentationC2SPacket.readSafe(request).isCorrupt(),
+				"the previous protocol value is rejected on the request direction");
+			assertEquals(0, request.readableBytes());
+		} finally {
+			request.release();
+		}
+
+		FriendlyByteBuf response = buffer();
+		try {
+			response.writeEnum(PresentationS2CPacket.Kind.REMOVED);
+			response.writeVarInt(5);
+			response.writeLong(1L);
+			response.writeLong(1L);
+			response.writeLong(0L);
+			MarkerPacketCodec.writeMarkerId(response, new MarkerId(9L));
+			response.writeEnum(MarkerRemovalReason.EXPIRED);
+			assertTrue(PresentationS2CPacket.readSafe(response).isCorrupt(),
+				"the previous protocol value is rejected on the response direction");
+			assertEquals(0, response.readableBytes());
+		} finally {
+			response.release();
+		}
 	}
 
 	@Test

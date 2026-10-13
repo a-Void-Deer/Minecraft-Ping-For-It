@@ -41,7 +41,7 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 	public static final int VERSION = PresentationC2SPacket.VERSION;
 	/** The shared clientbound custom-payload body bound every loader route observes. */
 	public static final int MAX_S2C_BODY_BYTES = 1048576;
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "presentation-v5");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "presentation-v1");
 	public static final Type<PresentationS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public PresentationS2CPacket {

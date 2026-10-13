@@ -547,10 +547,29 @@ class SpatialControllerTest {
 		assertEquals("external", externalView.menuId());
 		assertEquals(2, externalView.choices().size(), "non-root menu gains one automatic Back entry");
 		assertTrue(externalView.choices().stream().anyMatch(SpatialController.ChoiceView::back));
+		assertNull(externalView.entryChoiceId(), "an externally pushed menu carries no radial entry");
 
 		SpatialController.ChoiceView leaf = externalView.choices().get(0);
 		moveToBearing(controller, externalView.origin(), leaf.startDegrees() + leaf.spanDegrees() / 2.0, 120.0, 30L);
 		assertEquals("external:up", controller.snapshot().focusId());
+	}
+
+	@Test
+	void menuViewsExposeTheRadialEntryChoiceOfEachPushedLevel() {
+		SpatialController controller = enteredContent(false, 500L, 200L, 210L);
+		var content = controller.snapshot().menus();
+		assertNull(content.get(0).entryChoiceId(), "the root has no parent entry");
+		assertEquals("content", content.get(1).entryChoiceId(), "content records the root choice that opened it");
+
+		SpatialController.Point contentOrigin = activeOrigin(controller);
+		moveToBearing(controller, contentOrigin, 30.0, 150.0, 220L);
+		assertEquals("content:rpm", controller.snapshot().focusId());
+		controller.tick(430L);
+
+		var menus = controller.snapshot().menus();
+		assertEquals(3, menus.size());
+		assertEquals("content:rpm", menus.get(2).entryChoiceId(), "each level records its own opening choice");
+		assertEquals("content", menus.get(1).entryChoiceId(), "an ancestor keeps its original entry edge");
 	}
 
 	@Test

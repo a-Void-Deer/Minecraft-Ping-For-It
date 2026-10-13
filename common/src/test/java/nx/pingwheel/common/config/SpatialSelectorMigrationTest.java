@@ -267,6 +267,41 @@ class SpatialSelectorMigrationTest {
 	}
 
 	@Test
+	void sameVersionDeadzoneDefaultsNullAndExplicitValuesNeverRewriteAndPersistWithoutRescaling(
+		@TempDir Path directory) throws IOException {
+		Path freshPath = directory.resolve("fresh.json");
+		var fresh = new ConfigHandler<>(ClientConfig.class, freshPath, TIMEOUT_TARGET);
+		fresh.load();
+		assertEquals(SpatialSelectorSettings.DEFAULT_DEADZONE,
+			read(freshPath).getAsJsonObject("spatialSelector").get("deadzone").getAsInt(),
+			"a fresh file persists the current default deadzone");
+
+		for (String selectorJson : List.of("", ",\"spatialSelector\":null", ",\"spatialSelector\":{}",
+			",\"spatialSelector\":{\"deadzone\":null}", ",\"spatialSelector\":{\"deadzone\":18}",
+			",\"spatialSelector\":{\"deadzone\":12}", ",\"spatialSelector\":{\"deadzone\":32}")) {
+			Path path = directory.resolve("client.json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET + "\",\"pingVolume\":37"
+				+ selectorJson + "}\n").getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+			int deadzone = selectorJson.contains("\"deadzone\":18") ? 18
+				: selectorJson.contains("\"deadzone\":12") ? 12
+				: selectorJson.contains("\"deadzone\":32") ? 32
+				: SpatialSelectorSettings.DEFAULT_DEADZONE;
+			assertEquals(deadzone, handler.getConfig().getSpatialSelector().snapshot().deadzone(),
+				"a valid saved deadzone is retained without rescaling");
+			assertArrayEquals(original, Files.readAllBytes(path), "deadzone defaults are not a load rewrite");
+			assertTrue(handler.saveSafely());
+			assertArrayEquals(original, Files.readAllBytes(path), "an untouched same-version save is a no-op");
+			var reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			reloaded.load();
+			assertEquals(deadzone, reloaded.getConfig().getSpatialSelector().snapshot().deadzone());
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
 	void preTargetWritebackKeepsOldRadiusDataUntilTheTargetUpgrade(@TempDir Path directory) throws IOException {
 		Path path = directory.resolve("client.json");
 		JsonObject source = legacyRoot(LEGACY);

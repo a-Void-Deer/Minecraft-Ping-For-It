@@ -141,7 +141,7 @@ class SpatialSelectorSettingsTest {
 	void halfScaleDistanceDefaultsAndBoundsStayInsideTheirClamps() {
 		// The selector keeps the confirmed half-scale geometry, with the entry
 		// stroke default reduced independently to the requested 50 pixels.
-		assertEquals(18, SpatialSelectorSettings.DEFAULT_DEADZONE);
+		assertEquals(24, SpatialSelectorSettings.DEFAULT_DEADZONE);
 		assertEquals(50, SpatialSelectorSettings.DEFAULT_STROKE);
 		assertEquals(55, SpatialSelectorSettings.DEFAULT_ROOT_DISTANCE);
 		assertEquals(12, SpatialSelectorSettings.MIN_DEADZONE);
@@ -157,6 +157,33 @@ class SpatialSelectorSettingsTest {
 		assertEquals(SpatialSelectorSettings.DEFAULT_ROOT_DISTANCE,
 			SpatialSelectorSettings.clampRootDistance(SpatialSelectorSettings.DEFAULT_ROOT_DISTANCE));
 		assertTrue(SpatialSelectorSettings.MIN_STROKE > SpatialSelectorSettings.MAX_DEADZONE);
+	}
+
+	@Test
+	void deadzoneDefaultsToTwentyFourAndValidSavedValuesAreRetainedWithoutRescaling() {
+		assertEquals(24, new SpatialSelectorSettings().getDeadzone());
+		assertEquals(24, new SpatialSelectorSettings().snapshot().deadzone());
+
+		SpatialSelectorSettings missing = new Gson().fromJson("{}", SpatialSelectorSettings.class);
+		assertEquals(24, missing.getDeadzone());
+		assertEquals(24, missing.snapshot().deadzone());
+
+		SpatialSelectorSettings explicitNull = new Gson().fromJson("{\"deadzone\":null}", SpatialSelectorSettings.class);
+		explicitNull.validate();
+		assertEquals(24, explicitNull.getDeadzone(), "an explicit JSON null keeps the initialized default");
+		assertEquals(24, explicitNull.snapshot().deadzone());
+
+		for (int saved : List.of(18, SpatialSelectorSettings.MIN_DEADZONE, SpatialSelectorSettings.MAX_DEADZONE)) {
+			SpatialSelectorSettings explicit = new Gson().fromJson("{\"deadzone\":" + saved + "}",
+				SpatialSelectorSettings.class);
+			SpatialSelectorSettings.Snapshot frozen = explicit.snapshot();
+			explicit.validate();
+			assertEquals(saved, explicit.getDeadzone(), "a valid saved deadzone is retained without rescaling");
+			assertEquals(saved, explicit.snapshot().deadzone());
+			assertEquals(frozen, explicit.snapshot());
+			explicit.setDeadzone(SpatialSelectorSettings.DEFAULT_DEADZONE);
+			assertEquals(saved, frozen.deadzone(), "a held snapshot keeps its frozen deadzone");
+		}
 	}
 
 	@Test

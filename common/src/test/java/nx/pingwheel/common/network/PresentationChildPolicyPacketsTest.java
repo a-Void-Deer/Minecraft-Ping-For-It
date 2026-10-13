@@ -21,7 +21,7 @@ class PresentationChildPolicyPacketsTest {
 		"create:kinetic.speed", List.of("effective_rpm"));
 	private static FriendlyByteBuf buffer() { return new FriendlyByteBuf(Unpooled.buffer()); }
 	private static void header(FriendlyByteBuf buf) {
-		buf.writeEnum(PresentationS2CPacket.Kind.RESET); buf.writeVarInt(5);
+		buf.writeEnum(PresentationS2CPacket.Kind.RESET); buf.writeVarInt(PresentationS2CPacket.VERSION);
 		buf.writeLong(91); buf.writeLong(2); buf.writeLong(0); buf.writeVarInt(0); // empty field mask
 	}
 	private static void rawChildren(FriendlyByteBuf buf, Map<String, List<PresentationPropertyRef>> children) {
@@ -59,7 +59,7 @@ class PresentationChildPolicyPacketsTest {
 	}
 
 	@Test void resetRejectsMissingUnknownDuplicateRootAndOverCapacityChildMetadata() {
-		rejectedReset(buf -> {}); // v4 RESET cannot decode as v5
+		rejectedReset(buf -> {}); // a RESET without the child deny map cannot decode
 		rejectedReset(buf -> buf.writeVarInt(0));
 		var missing = new LinkedHashMap<>(PresentationS2CPacket.emptyChildBlack()); missing.remove("entity");
 		rejectedReset(buf -> rawChildren(buf, missing));
@@ -118,7 +118,7 @@ class PresentationChildPolicyPacketsTest {
 		} finally { buf.release(); }
 	}
 
-	@Test void policyV3CarriesCompleteChildListAndExplicitOptOut() {
+	@Test void policyCarriesCompleteChildListAndExplicitOptOut() {
 		var rules = new LinkedHashMap<>(ServerPresentationPolicyS2CPacket.defaultRules());
 		rules.put("block", new RulesView(List.of("create:*"), List.of("minecraft:*"), true, List.of(CHILD)));
 		rules.put("entity", new RulesView(List.of(), List.of(), false, List.of()));
@@ -127,7 +127,7 @@ class PresentationChildPolicyPacketsTest {
 			var decoded = ServerPresentationPolicyS2CPacket.readSafe(buf); assertFalse(decoded.isCorrupt()); assertEquals(rules, decoded.rules());
 		} finally { buf.release(); }
 	}
-	@Test void policyV3RejectsMalformedChildListsAndMissingOldWireList() {
+	@Test void policyRejectsMalformedChildListsAndMissingOldWireList() {
 		for (Consumer<FriendlyByteBuf> child : List.<Consumer<FriendlyByteBuf>>of(
 			buf -> {}, buf -> { buf.writeVarInt(129); },
 			buf -> { buf.writeVarInt(2); PresentationCodec.writePropertyRef(buf, CHILD); PresentationCodec.writePropertyRef(buf, CHILD); },
@@ -145,7 +145,7 @@ class PresentationChildPolicyPacketsTest {
 			for (String type : PresentationSettings.TARGET_TYPE_IDS) {
 				old.writeUtf(type); old.writeVarInt(0); old.writeVarInt(0); old.writeBoolean(false);
 			}
-			assertTrue(ServerPresentationPolicyS2CPacket.readSafe(old).isCorrupt(), "a complete old v2 rule frame cannot be reinterpreted as child-empty v3");
+			assertTrue(ServerPresentationPolicyS2CPacket.readSafe(old).isCorrupt(), "a complete rule frame without child deny lists cannot be reinterpreted as child-empty");
 		} finally { old.release(); }
 	}
 	@Test void maximalPolicyViewFitsExistingTransportWithoutTruncation() {

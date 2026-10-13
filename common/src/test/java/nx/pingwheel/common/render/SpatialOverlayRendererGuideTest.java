@@ -146,14 +146,23 @@ class SpatialOverlayRendererGuideTest {
 
 	@Test
 	void ancestorGuidesDimWithTheirMenuAndChildGuidesSitOnTheChildOrigin() {
-		SpatialController controller = controller(22.0);
 		SpatialMenu child = SpatialMenu.of("child",
 			SpatialMenu.Choice.leaf("a", "a", "a"),
 			SpatialMenu.Choice.leaf("b", "b", "b"),
 			SpatialMenu.Choice.leaf("c", "c", "c"));
-		controller.enterExternal(child, 120.0, 0.0, 1L);
+		SpatialMenu rootMenu = SpatialMenu.of("root",
+			SpatialMenu.Choice.branch("content", "Content", child).withSector(90.0, 55.0));
+		SpatialController controller = new SpatialController(rootMenu,
+			new SpatialController.Tuning(22.0, 50.0, 180L, false, 500L));
+		controller.start(0L);
+		controller.movePhysical(120.0, 0.0, 10L);
+		assertEquals("content", controller.snapshot().focusId(), "precondition: the breadcrumb entry is focused");
+		controller.tick(200L);
 		SpatialController.Snapshot snapshot = controller.snapshot();
 		assertEquals(2, snapshot.menus().size());
+		assertEquals(new SpatialController.Point(120.0, 0.0), snapshot.menus().getLast().origin());
+		assertEquals("content", snapshot.menus().getLast().entryChoiceId(),
+			"the child records the radial choice that opened it");
 
 		var targets = targets(snapshot);
 		var root = guide(targets, "root");

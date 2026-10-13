@@ -24,7 +24,7 @@ public final class SpatialSelectorSettings {
 
 	public static final int MIN_DEADZONE = 12;
 	public static final int MAX_DEADZONE = 32;
-	public static final int DEFAULT_DEADZONE = 18;
+	public static final int DEFAULT_DEADZONE = 24;
 	public static final int DEADZONE_STEP = 1;
 
 	public static final int MIN_STROKE = 40;
