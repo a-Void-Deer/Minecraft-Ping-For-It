@@ -61,6 +61,9 @@ public final class SpatialSelectorSettings {
 	public static final int DEFAULT_HOVER_MILLIS = 500;
 	public static final boolean DEFAULT_HOVER_ENABLED = false;
 
+	/** Content property/item intent menus are opt-in and disabled by default. */
+	public static final boolean DEFAULT_CONTENT_INTENT_ENABLED = false;
+
 	/** Precise live-capture period in ticks; one tick captures without an interval. */
 	public static final int MIN_PRECISE_CAPTURE_PERIOD_TICKS = 1;
 	public static final int MAX_PRECISE_CAPTURE_PERIOD_TICKS = 50;
@@ -92,6 +95,7 @@ public final class SpatialSelectorSettings {
 	private int trailOpacity = DEFAULT_TRAIL_OPACITY;
 	private boolean reduceMotion = false;
 	private int preciseCapturePeriodTicks = DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS;
+	private boolean contentIntentEnabled = DEFAULT_CONTENT_INTENT_ENABLED;
 
 	/** Clamps numeric preferences independently, without changing boolean choices. */
 	public void validate() {
@@ -175,13 +179,28 @@ public final class SpatialSelectorSettings {
 			clampTargetGlide(targetGlide), hoverEnabled, clampHoverMillis(hoverMillis),
 			showTrail, reduceMotion, clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks),
 			clampSubmenuRadiusScale(submenuRadiusScale),
-			clampTrailLength(trailLength), clampTrailOpacity(trailOpacity));
+			clampTrailLength(trailLength), clampTrailOpacity(trailOpacity),
+			contentIntentEnabled);
 	}
 
 	public record Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
 		BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
 		boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
-		BigDecimal submenuRadiusScale, int trailLength, int trailOpacity) {
+		BigDecimal submenuRadiusScale, int trailLength, int trailOpacity,
+		boolean contentIntentEnabled) {
+
+		/**
+		 * Compatibility constructor for callers that predate the content-intent
+		 * toggle; the confirmed default keeps the direct Attention annotation.
+		 */
+		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
+			BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+			boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
+			BigDecimal submenuRadiusScale, int trailLength, int trailOpacity) {
+			this(deadzone, stroke, dwellMillis, rootDistance, targetGlide, hoverEnabled,
+				hoverMillis, showTrail, reduceMotion, preciseCapturePeriodTicks,
+				submenuRadiusScale, trailLength, trailOpacity, DEFAULT_CONTENT_INTENT_ENABLED);
+		}
 
 		/**
 		 * Compatibility constructor for callers that predate the trail length and

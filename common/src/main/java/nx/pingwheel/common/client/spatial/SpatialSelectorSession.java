@@ -234,6 +234,10 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private boolean listWasActive;
 	private String itemKey;
 	private double itemAnchorY = Double.NaN;
+	private double itemClearance;
+	private long returnSequence;
+	private double returnTranslationX;
+	private double returnTranslationY;
 	private SpatialController.Viewport viewport;
 
 	/** Precise allocations are copied as-is in catalog order; acquisition/nonreuse is external. */
@@ -255,6 +259,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		contentMenu = sessionKey + ":content";
 		inventoryMenu = contentMenu + ":inventory";
 		list = new InventoryListModel(geometry.visibleRows());
+		itemClearance = geometry.childClearance();
 		gesture = new InventoryGesture(list, settings.targetGlide().doubleValue(), settings.hoverEnabled(), geometry.rowHeight());
 		radial = new SpatialController(buildRoot(), new SpatialController.Tuning(settings.deadzone(), settings.stroke(),
 			settings.dwellMillis(), settings.hoverEnabled(), settings.hoverMillis(), settings.trailLength()));
@@ -289,15 +294,14 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	public void moveGui(double deltaX, double deltaY, long nowMillis) {
 		if (!active || !Double.isFinite(deltaX) || !Double.isFinite(deltaY)) return;
 		if (isListActive()) {
-			SpatialController.Point pointer = radial.snapshot().pointer();
-			gesture.alignPointer(pointer.x(), pointer.y());
-			var effective = radial.moveExternalPointer(deltaX, deltaY, nowMillis);
-			boolean pointerMoved = effective.x() != 0.0 || effective.y() != 0.0;
-			if (!pointerMoved && deltaY == 0.0) return;
-			InventoryGesture.Action navigation = gesture.moveGui(effective.x(), effective.y(), deltaY);
+			// List input never moves the logical pointer; the gesture owns a
+			// bounded horizontal accumulator and independent vertical glide.
+			double before = gesture.horizontalTravel();
+			InventoryGesture.Action navigation = gesture.moveGui(deltaX, deltaY);
+			boolean effectiveHorizontal = gesture.horizontalTravel() != before;
 			boolean backFocused = settings.hoverEnabled() && gesture.isBackSideFocused();
 			list.setBackHoverFocused(backFocused);
-			if (pointerMoved && !radial.updateExternalBack(backFocused, nowMillis, true)) {
+			if (!radial.updateExternalBack(backFocused, nowMillis, effectiveHorizontal)) {
 				if (navigation == InventoryGesture.Action.BACK) radial.back(nowMillis);
 				else if (navigation == InventoryGesture.Action.FORWARD) enterItem(nowMillis);
 			}
@@ -328,7 +332,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		if (update.reset() || unavailable || update.inventory() == null || unavailable(update.inventory().status())) {
 			rows.clear();
 			list.close();
-			if (itemKey != null && itemMenu().equals(activeMenuId())) radial.back(nowMillis);
+			if (itemKey != null && itemMenu().equals(activeMenuId())) radial.backProgrammatically(nowMillis);
 		}
 		projection = unavailable ? new ContentProjection<>(fence, revision, true, update.status(), List.of(), null) : update;
 		preview = projection.inventory();
@@ -339,7 +343,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		}
 		radial.replaceRoot(buildRoot(), nowMillis);
 		if (itemKey != null && itemMenu().equals(activeMenuId())) {
-			if (!rows.containsKey(itemKey) || preview == null || preview.allowedItemTypes().isEmpty()) radial.back(nowMillis);
+			if (!rows.containsKey(itemKey) || preview == null || preview.allowedItemTypes().isEmpty()) radial.backProgrammatically(nowMillis);
 			else radial.replaceExternalMenu(buildItemMenu(itemKey), nowMillis);
 		}
 		synchronizeNavigation(nowMillis);
@@ -413,7 +417,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		String preciseFocus = livePrecise ? radial.snapshot().focusId() : null;
 		if (isListActive()) {
 			if (!gesture.isBackSideFocused() && preview != null && list.selectedKey() != null)
-				result = inventoryIntent(list.selectedKey(), preview.defaultItemType());
+				result = inventoryIntent(list.selectedKey(), directItemType());
 			radial.cancel();
 		} else if (radial.release(nowMillis) instanceof SpatialController.Release.Committed committed) {
 			result = actions.getOrDefault(committed.action(), new SelectorIntent.None<>());
@@ -522,6 +526,15 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private SpatialMenu.Choice propertyChoice(Property property) {
 		String id = contentMenu + ":property:" + menuToken(property.id());
 		if (property.allowedTypes().isEmpty()) return SpatialMenu.Choice.disabled(id, property.labelKey());
+		if (!settings.contentIntentEnabled()) {
+			// Frozen OFF: one Attention-annotated leaf keeps the original
+			// ref/value and the whole-marker Target-Type default. A disallowed
+			// or missing Attention never falls back to another annotation.
+			PingType attention = attentionType(property.allowedTypes());
+			if (attention == null) return SpatialMenu.Choice.disabled(id, property.labelKey());
+			actions.put(id, propertyIntent(property, attention));
+			return SpatialMenu.Choice.leaf(id, property.labelKey(), id).withOutlineColor(attention.outlineColor());
+		}
 		List<SpatialMenu.Choice> types = new ArrayList<>();
 		for (PingType type : property.allowedTypes()) {
 			String action = id + ":" + type.id();
@@ -574,25 +587,70 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	}
 
 	private void enterItem(long nowMillis) {
-		if (list.selectedKey() == null || preview == null) return;
-		SpatialInventoryView view = inventoryView();
-		SpatialInventoryLayout layout = geometry.layout(view);
+		if (!settings.contentIntentEnabled() || list.selectedKey() == null || preview == null) return;
+		SpatialInventoryLayout layout = listLayout();
 		double y = layout.rowCenterY(list.selectedIndex());
 		if (!Double.isFinite(y)) return;
 		double sign = list.direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
 		SpatialController.Point anchor = new SpatialController.Point(layout.centerX(), y);
-		SpatialController.Point origin = new SpatialController.Point(anchor.x() + sign * (layout.width() / 2 + geometry.childClearance()), y);
+		SpatialController.Point origin = new SpatialController.Point(anchor.x() + sign * (layout.width() / 2 + itemClearance), y);
 		itemKey = list.selectedKey();
 		itemAnchorY = y;
 		radial.enterExternal(buildItemMenu(itemKey), origin, anchor, nowMillis);
 	}
 
+	/**
+	 * Prepares the frozen item-menu clearance before the first possible entry
+	 * and on every effective change. A positive finite distance from the panel's
+	 * forward edge to the item-menu centre is required; the renderer owns the
+	 * formula. While an item submenu is active, the frozen key and row anchor
+	 * stay and only the external placement is repositioned.
+	 */
+	public void updateItemClearance(double clearance, long nowMillis) {
+		if (!Double.isFinite(clearance) || !(clearance > 0.0))
+			throw new IllegalArgumentException("item clearance must be positive and finite");
+		if (clearance == itemClearance) return;
+		itemClearance = clearance;
+		if (!isItemActive()) return;
+		InventoryListModel.Snapshot state = list.snapshot();
+		double sign = state.direction().forward() == InventoryListModel.Side.RIGHT ? 1.0 : -1.0;
+		double axisX = state.axisX();
+		radial.repositionExternal(new SpatialController.Point(axisX + sign * (geometry.width() / 2.0 + clearance), itemAnchorY),
+			new SpatialController.Point(axisX, itemAnchorY), nowMillis);
+	}
+
+	/**
+	 * Consumes the controller's cumulative user-return notification after any
+	 * potentially navigating operation. A return to the still-retained list
+	 * rigidly translates the frozen panel geometry and cached row anchor by the
+	 * applied vector before the item-to-list mode sync rebases the gesture.
+	 *
+	 * @return whether a new user return was observed (even for a zero vector)
+	 */
+	private boolean consumeUserReturn() {
+		SpatialController.UserReturnPlacement placement = radial.userReturnPlacement();
+		if (placement.sequence() == returnSequence) return false;
+		double deltaX = placement.totalTranslation().x() - returnTranslationX;
+		double deltaY = placement.totalTranslation().y() - returnTranslationY;
+		returnSequence = placement.sequence();
+		returnTranslationX = placement.totalTranslation().x();
+		returnTranslationY = placement.totalTranslation().y();
+		if (isListActive() && list.isOpen()) {
+			list.translate(deltaX, deltaY);
+			if (Double.isFinite(itemAnchorY)) itemAnchorY += deltaY;
+		}
+		return true;
+	}
+
 	private void synchronizeNavigation(long nowMillis) {
+		boolean userReturn = consumeUserReturn();
 		boolean hasList = radial.snapshot().menus().stream().anyMatch(menu -> menu.menuId().equals(inventoryMenu));
 		if (!hasList) {
 			boolean listExited = listWasActive;
 			list.close(); listWasActive = false; itemKey = null; itemAnchorY = Double.NaN;
-			if (listExited) returnToContent(nowMillis);
+			// A user return already rigidly placed the returned parent at the
+			// pointer; only a programmatic exit keeps the old circumference path.
+			if (listExited && !userReturn) returnToContent(nowMillis);
 			return;
 		}
 		if (isListActive()) {
@@ -604,6 +662,13 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 				gesture.begin(menu.origin().x(), menu.origin().y(), list.direction());
 				radial.useExternalSurface();
 				radial.rebase(menu.origin().x(), menu.origin().y(), nowMillis);
+			} else if (userReturn) {
+				// Item-to-list return: the model was translated by the applied
+				// rigid vector; rebase the gesture without reopening the model.
+				SpatialController.Point pointer = radial.snapshot().pointer();
+				gesture.rebase(pointer.x(), pointer.y());
+				list.setBackHoverFocused(false);
+				radial.alignExternalBack(false);
 			} else if (!listWasActive) {
 				SpatialController.Point pointer = radial.snapshot().pointer();
 				gesture.rebase(pointer.x(), pointer.y());
@@ -643,18 +708,85 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 
 	private SpatialInventoryView inventoryView() {
 		InventoryListModel.Snapshot state = list.snapshot();
+		SpatialInventoryView view = new SpatialInventoryView(listKey(), active && state.open(), paintRows(),
+			state.selectedIndex(), state.windowFirst(), geometry.visibleRows(),
+			state.direction().back() == InventoryListModel.Side.LEFT, previewStatus(), state.axisX(), state.glideBaseY());
+		boolean backFocused = isListActive() && gesture.isBackSideFocused();
+		view = view.withBackAffordance(backFocused, backFocused ? radial.snapshot().hoverProgress() : 0.0);
+		if (itemKey != null) view = view.withSelectedRowCenterY(itemAnchorY);
+		return view.withNavigation(isItemActive() ? itemKey : null, forwardAvailable(), selectedRowCommittable());
+	}
+
+	private List<SpatialInventoryView.Row> paintRows() {
 		List<SpatialInventoryView.Row> paintRows = new ArrayList<>();
-		for (InventoryListModel.Entry entry : state.entries()) {
+		for (InventoryListModel.Entry entry : list.snapshot().entries()) {
 			InventoryRow<R> row = rows.get(entry.key());
 			if (row != null) paintRows.add(new SpatialInventoryView.Row(row.key(), row.label(), row.count(), row.itemId(), row.displayJson(), row.quality()));
 		}
-		String listKey = inventoryMenu + ":" + fence.requestId() + ":" + fence.previewSession();
-		SpatialInventoryView view = new SpatialInventoryView(listKey, active && state.open(), paintRows, state.selectedIndex(), state.windowFirst(),
-			geometry.visibleRows(), state.direction().back() == InventoryListModel.Side.LEFT,
-			preview == null ? Status.UNKNOWN : preview.status(), state.axisX(), state.glideBaseY());
-		boolean backFocused = isListActive() && gesture.isBackSideFocused();
-		view = view.withBackAffordance(backFocused, backFocused ? radial.snapshot().hoverProgress() : 0.0);
-		return itemKey == null ? view : view.withSelectedRowCenterY(itemAnchorY);
+		return paintRows;
+	}
+
+	/** Complete logical panel layout; navigation flags are never layout inputs. */
+	private SpatialInventoryLayout listLayout() {
+		InventoryListModel.Snapshot state = list.snapshot();
+		SpatialInventoryView bare = new SpatialInventoryView(listKey(), active && state.open(), paintRows(),
+			state.selectedIndex(), state.windowFirst(), geometry.visibleRows(),
+			state.direction().back() == InventoryListModel.Side.LEFT, previewStatus(), state.axisX(), state.glideBaseY());
+		return geometry.layout(bare);
+	}
+
+	private String listKey() {
+		return inventoryMenu + ":" + fence.requestId() + ":" + fence.previewSession();
+	}
+
+	private Status previewStatus() {
+		return preview == null ? Status.UNKNOWN : preview.status();
+	}
+
+	/**
+	 * Frozen direct-release annotation for a selected row: the whole-marker
+	 * default when content intent is ON, otherwise the authorized Attention
+	 * annotation. Missing authorization stays null instead of inventing one.
+	 */
+	private PingType directItemType() {
+		if (preview == null || unavailable(preview.status())) return null;
+		if (settings.contentIntentEnabled()) return preview.defaultItemType();
+		return attentionType(preview.allowedItemTypes());
+	}
+
+	private static PingType attentionType(List<PingType> allowedTypes) {
+		for (PingType type : allowedTypes) if ("attention".equals(type.id())) return type;
+		return null;
+	}
+
+	/**
+	 * True only when the frozen content-intent toggle is ON and the current
+	 * selected row can actually enter its item menu under the existing
+	 * preview/selection gates. Back focus does not remove this affordance.
+	 */
+	private boolean forwardAvailable() {
+		if (!settings.contentIntentEnabled() || !isListActive() || !list.isOpen()) return false;
+		String key = list.selectedKey();
+		if (key == null || !rows.containsKey(key) || preview == null || unavailable(preview.status())
+			|| preview.allowedItemTypes().isEmpty()) return false;
+		return Double.isFinite(listLayout().rowCenterY(list.selectedIndex()));
+	}
+
+	/**
+	 * Direct release of the selected row would yield an inventory intent under
+	 * the current preview/reference/annotation gates and no Back focus. It can
+	 * remain true while the toggle is OFF and Forward is unavailable.
+	 */
+	private boolean selectedRowCommittable() {
+		if (!isListActive() || !list.isOpen() || gesture.isBackSideFocused()) return false;
+		String key = list.selectedKey();
+		if (key == null || !rows.containsKey(key)) return false;
+		PingType type = directItemType();
+		return type != null && preview != null && preview.allowedItemTypes().contains(type);
+	}
+
+	private boolean isItemActive() {
+		return active && itemKey != null && itemMenu().equals(activeMenuId());
 	}
 
 	private List<InventoryListModel.Entry> listEntries(List<InventoryRow<R>> batch) {

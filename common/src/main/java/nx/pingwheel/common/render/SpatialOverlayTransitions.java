@@ -31,11 +31,18 @@ public final class SpatialOverlayTransitions<K, V> {
 	}
 
 	public record Target<K, V>(K key, double x, double y, double scale, double alpha,
-		double entryX, double entryY, V data, Ray ray) {
+		double entryX, double entryY, V data, Ray ray, double backgroundAlpha) {
 
+		/** Historical form: the background coverage starts at the foreground alpha. */
+		public Target(K key, double x, double y, double scale, double alpha,
+			double entryX, double entryY, V data, Ray ray) {
+			this(key, x, y, scale, alpha, entryX, entryY, data, ray, alpha);
+		}
+
+		/** Historical form without a current ray. */
 		public Target(K key, double x, double y, double scale, double alpha,
 			double entryX, double entryY, V data) {
-			this(key, x, y, scale, alpha, entryX, entryY, data, null);
+			this(key, x, y, scale, alpha, entryX, entryY, data, null, alpha);
 		}
 
 		public Target {
@@ -43,17 +50,29 @@ public final class SpatialOverlayTransitions<K, V> {
 			Objects.requireNonNull(data, "data");
 			if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(entryX)
 				|| !Double.isFinite(entryY) || !Double.isFinite(scale) || scale <= 0.0
-				|| !Double.isFinite(alpha) || alpha < 0.0 || alpha > 1.0) {
+				|| !Double.isFinite(alpha) || alpha < 0.0 || alpha > 1.0
+				|| !Double.isFinite(backgroundAlpha) || backgroundAlpha < 0.0 || backgroundAlpha > 1.0) {
 				throw new IllegalArgumentException("invalid visual target");
 			}
 		}
 	}
 
-	/** A detached paint state; exiting states are never interactive. */
+	/**
+	 * A detached paint state; exiting states are never interactive. The
+	 * independent {@code backgroundAlpha} is a normalized coverage in
+	 * {@code [0, 1]}, never a paint multiplier.
+	 */
 	public record State<K, V>(K key, double x, double y, double scale, double alpha,
-		boolean present, V data) {}
+		boolean present, V data, double backgroundAlpha) {
 
-	private record Pose(double x, double y, double scale, double alpha) {}
+		/** Historical form: the background coverage starts at the foreground alpha. */
+		public State(K key, double x, double y, double scale, double alpha,
+			boolean present, V data) {
+			this(key, x, y, scale, alpha, present, data, alpha);
+		}
+	}
+
+	private record Pose(double x, double y, double scale, double alpha, double backgroundAlpha) {}
 
 	private final class Node {
 		Pose from;
@@ -72,7 +91,7 @@ public final class SpatialOverlayTransitions<K, V> {
 		Node(Target<K, V> target, long now, boolean reduceMotion) {
 			to = pose(target);
 			from = reduceMotion ? to : new Pose(target.ray() == null ? target.entryX() : 0.0, target.ray() == null ? target.entryY() : 0.0,
-				target.scale() * appearanceScale, 0.0);
+				target.scale() * appearanceScale, 0.0, 0.0);
 			began = now;
 			updateData(target);
 			ray = target.ray();
@@ -93,7 +112,8 @@ public final class SpatialOverlayTransitions<K, V> {
 			double fraction = Math.min(1.0, elapsed(now, began) / durationNanos);
 			double eased = fraction * fraction * (3.0 - 2.0 * fraction);
 			return new Pose(lerp(from.x(), to.x(), eased), lerp(from.y(), to.y(), eased),
-				lerp(from.scale(), to.scale(), eased), lerp(from.alpha(), to.alpha(), eased));
+				lerp(from.scale(), to.scale(), eased), lerp(from.alpha(), to.alpha(), eased),
+				lerp(from.backgroundAlpha(), to.backgroundAlpha(), eased));
 		}
 
 		Pose at(long now) {
@@ -101,7 +121,7 @@ public final class SpatialOverlayTransitions<K, V> {
 			if (ray == null) return visual;
 			double radius = radiusAt(now);
 			return new Pose(ray.originX() + ray.unitX() * radius, ray.originY() + ray.unitY() * radius,
-				visual.scale(), visual.alpha());
+				visual.scale(), visual.alpha(), visual.backgroundAlpha());
 		}
 
 		double radiusAt(long now) {
@@ -116,7 +136,7 @@ public final class SpatialOverlayTransitions<K, V> {
 				double next = distance(target.x(), target.y(), nextRay);
 				if (ray == null) {
 					Pose displayed = at(now);
-					from = new Pose(0.0, 0.0, displayed.scale(), displayed.alpha());
+					from = new Pose(0.0, 0.0, displayed.scale(), displayed.alpha(), displayed.backgroundAlpha());
 					to = from;
 				}
 				if (reduceMotion || ray == null || next != radiusTo) {
@@ -147,7 +167,7 @@ public final class SpatialOverlayTransitions<K, V> {
 				began = now;
 				ray = null;
 			}
-			retarget(new Pose(entryX, entryY, to.scale() * appearanceScale, 0.0), now, reduceMotion);
+			retarget(new Pose(entryX, entryY, to.scale() * appearanceScale, 0.0, 0.0), now, reduceMotion);
 			present = false;
 		}
 
@@ -160,6 +180,24 @@ public final class SpatialOverlayTransitions<K, V> {
 				from = visualAt(now);
 				to = next;
 				began = now;
+			}
+		}
+
+		void synchronizePosition() {
+			// A non-input relayout must not combine old Cartesian anchors with
+			// new paint geometry. Keep the finite scale/coverage interval intact;
+			// a follower already uses its current ray and keeps radial easing.
+			if (ray == null) from = new Pose(to.x(), to.y(), from.scale(), from.alpha(), from.backgroundAlpha());
+		}
+
+		void translateGeometry(double x, double y) {
+			entryX += x;
+			entryY += y;
+			if (ray == null) {
+				from = translated(from, x, y);
+				to = translated(to, x, y);
+			} else {
+				ray = new Ray(ray.originX() + x, ray.originY() + y, ray.unitX(), ray.unitY());
 			}
 		}
 	}
@@ -183,6 +221,12 @@ public final class SpatialOverlayTransitions<K, V> {
 
 	/** Empty targets fade an inactive overlay; keep calling until {@link #isEmpty()}. */
 	public List<State<K, V>> update(List<Target<K, V>> targets, long nowNanos, boolean reduceMotion) {
+		return update(targets, nowNanos, reduceMotion, false);
+	}
+
+	/** Renderer relayout: commit all presented Cartesian anchors together, without snapping the visual channels. */
+	List<State<K, V>> update(List<Target<K, V>> targets, long nowNanos, boolean reduceMotion,
+		boolean synchronizeGeometry) {
 		Objects.requireNonNull(targets, "targets");
 		long now = hasTime ? Math.max(lastTime, nowNanos) : nowNanos;
 		hasTime = true;
@@ -230,6 +274,7 @@ public final class SpatialOverlayTransitions<K, V> {
 				node.retarget(target, now, reduceMotion);
 				node.present = true;
 			}
+			if (synchronizeGeometry) node.synchronizePosition();
 		}
 
 		List<State<K, V>> states = new ArrayList<>(nodes.size());
@@ -240,7 +285,7 @@ public final class SpatialOverlayTransitions<K, V> {
 				if (node.present == present) {
 					Pose pose = node.at(now);
 					states.add(new State<>(entry.getKey(), pose.x(), pose.y(), pose.scale(), pose.alpha(),
-						node.present, node.data));
+						node.present, node.data, pose.backgroundAlpha()));
 				}
 			}
 		}
@@ -255,6 +300,12 @@ public final class SpatialOverlayTransitions<K, V> {
 		return nodes.isEmpty();
 	}
 
+	/** A shared GUI-center rebase, including detached paint, with no animation/input time or channel change. */
+	void translateGeometry(double deltaX, double deltaY) {
+		if (!Double.isFinite(deltaX) || !Double.isFinite(deltaY)) throw new IllegalArgumentException("invalid geometry translation");
+		for (Node node : nodes.values()) node.translateGeometry(deltaX, deltaY);
+	}
+
 	/** Hard disposal (disconnect/screen/world change), not the normal visual exit. */
 	public void clear() {
 		nodes.clear();
@@ -264,7 +315,11 @@ public final class SpatialOverlayTransitions<K, V> {
 
 	private static <K, V> Pose pose(Target<K, V> target) {
 		return new Pose(target.ray() == null ? target.x() : 0.0, target.ray() == null ? target.y() : 0.0,
-			target.scale(), target.alpha());
+			target.scale(), target.alpha(), target.backgroundAlpha());
+	}
+
+	private static Pose translated(Pose pose, double x, double y) {
+		return new Pose(pose.x() + x, pose.y() + y, pose.scale(), pose.alpha(), pose.backgroundAlpha());
 	}
 
 	private static double distance(double x, double y, Ray ray) {

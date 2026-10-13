@@ -79,11 +79,18 @@ class SpatialInventoryNavigationIntegrationTest {
 		}
 
 		Fixture(int width, int height, String glide, boolean reduced, int propertyCount, int deadzone, boolean hover) {
+			this(width, height, glide, reduced, propertyCount, deadzone, hover, true);
+		}
+
+		/** {@code contentIntent} selects the frozen property/item intent behavior explicitly. */
+		Fixture(int width, int height, String glide, boolean reduced, int propertyCount, int deadzone, boolean hover,
+			boolean contentIntent) {
 			var preferences = new SpatialSelectorSettings();
 			preferences.setTargetGlide(new BigDecimal(glide));
 			preferences.setReduceMotion(reduced);
 			preferences.setDeadzone(deadzone);
 			preferences.setHoverEnabled(hover);
+			preferences.setContentIntentEnabled(contentIntent);
 			settings = preferences.snapshot();
 			style = new SpatialOverlayRenderer.Style(100, 100, 1, 1, settings.rootDistance(),
 				settings.submenuRadiusScale().doubleValue(), settings.showTrail(), settings.reduceMotion());
@@ -373,25 +380,22 @@ class SpatialInventoryNavigationIntegrationTest {
 		"true, true, 3, 18, 320, 240",
 		"false, false, 0, 30, 200, 160",
 		"true, false, 3, 30, 200, 160"})
-	void listExitReturnsToTheFrozenInventorySlotDeadzoneForBothBackStylesAndMotionModes(
+	void listUserReturnKeepsThePointerAtTheTriggerAndMovesTheParentCentreThere(
 		boolean hover, boolean reduced, int properties, int deadzone, int width, int height) {
 		var f = new Fixture(width, height, "1", reduced, properties, deadzone, hover);
 		f.openList(true);
-		var parent = f.retainedParent();
-		var expected = f.inventoryDeadzoneTarget(parent);
+		var trigger = f.snapshot().radial().pointer();
 		f.leaveListBySideBack();
 		f.settle();
 		var returned = f.snapshot().radial();
-		assertEquals(parent.menuId(), f.menu().menuId(), "exactly one level returns to Content");
+		assertTrue(f.menu().menuId().endsWith(":content"), "exactly one level returns to Content");
 		assertFalse(f.snapshot().inventory().open());
-		assertNull(returned.focusId(), "the inclusive deadzone admits no immediate activation");
-		assertEquals(expected.x(), returned.pointer().x(), 1e-6);
-		assertEquals(expected.y(), returned.pointer().y(), 1e-6);
-		assertEquals(f.settings.deadzone(), Math.hypot(returned.pointer().x() - parent.origin().x(),
-			returned.pointer().y() - parent.origin().y()), 1e-6, "the returned radius is the frozen circumference");
-		assertEquals(List.of(returned.pointer()), returned.trail(), "the explicit return rebases the trail seed");
+		assertEquals(trigger, returned.pointer(), "the user return leaves the pointer at the trigger");
+		assertEquals(trigger, f.menu().origin(), "the returned parent is rigidly translated to the pointer");
+		assertNull(returned.focusId(), "the shared centre is inside the frozen deadzone");
+		assertEquals(List.of(returned.pointer()), returned.trail(), "the return seeds exactly one point");
 		f.frame(f.now + f.settings.dwellMillis() * 3);
-		assertEquals(parent.menuId(), f.menu().menuId(), "stationary frames cannot reopen the list or navigate");
+		assertTrue(f.menu().menuId().endsWith(":content"), "stationary frames cannot reopen the list or navigate");
 		assertFalse(f.snapshot().inventory().open());
 		assertEquals(0.0, f.snapshot().radial().hoverProgress(), "stationary frames do not rearm Back");
 		assertInstanceOf(SelectorIntent.None.class, f.session.releaseIntent(f.now + 1),
@@ -401,83 +405,105 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@ParameterizedTest
 	@CsvSource({"false, false", "true, false", "false, true", "true, true"})
-	void distantListExitKeepsTheReturnPendingUntilTheReprojectedParentCanShowIt(boolean hover, boolean reduced) {
+	void listUserReturnNeverResolvesThroughTheOldCircumferencePlacement(boolean hover, boolean reduced) {
 		var f = new Fixture(1000, 700, "1", reduced, 0, SpatialSelectorSettings.DEFAULT_DEADZONE, hover);
 		f.openList(true);
 		f.resize(320, 240);
 		f.settle();
-		var parent = f.retainedParent();
-		var expected = f.inventoryDeadzoneTarget(parent);
+		var trigger = f.snapshot().radial().pointer();
 		f.leaveListBySideBack();
-		assertEquals(parent.menuId(), f.menu().menuId());
-		var pending = f.snapshot().radial();
+		assertTrue(f.menu().menuId().endsWith(":content"));
 		assertFalse(f.snapshot().inventory().open());
-		if (hover && reduced) {
-			assertEquals(expected.x(), pending.pointer().x(), 1e-6,
-				"reduced motion snaps the reprojection and resolves the return at once");
-		} else {
-			assertTrue(Math.abs(pending.pointer().x() - expected.x()) > 1.0,
-				"the old list-centred projection cannot show the parent circumference yet");
-		}
-		f.settle();
 		var returned = f.snapshot().radial();
-		assertEquals(expected.x(), returned.pointer().x(), 1e-6);
-		assertEquals(expected.y(), returned.pointer().y(), 1e-6);
-		assertNull(returned.focusId(), "the resolved return lands inside the inclusive deadzone");
-		assertEquals(List.of(returned.pointer()), returned.trail(), "projection resolution rebases the seed");
-		f.frame(f.now + f.settings.dwellMillis() * 3);
-		assertEquals(parent.menuId(), f.menu().menuId(), "projection and stationary frames cannot rearm or navigate");
+		assertEquals(trigger, returned.pointer(), "the user return leaves the pointer at the trigger");
+		assertEquals(trigger, f.menu().origin(), "the parent is already at the pointer, not a pending circumference");
+		assertNull(returned.focusId());
+		assertEquals(List.of(returned.pointer()), returned.trail(), "no deferred placement stroke is appended");
+		f.settle();
+		var settled = f.snapshot().radial();
+		assertEquals(trigger, settled.pointer(), "no deferred placement target is chased");
 		assertEquals(0.0, f.snapshot().radial().hoverProgress());
 		assertInstanceOf(SelectorIntent.None.class, f.session.releaseIntent(f.now + 1));
 		assertFalse(f.session.snapshot().active());
 	}
 
 	@Test
-	void freshPhysicalMovementCancelsAPendingListReturnInsteadOfChasingIt() {
+	void freshPhysicalMovementAfterAListUserReturnContinuesFromTheReturnedCentre() {
 		var f = new Fixture(1000, 700, "1", false, 0, SpatialSelectorSettings.DEFAULT_DEADZONE, false);
 		f.openList(true);
 		f.resize(320, 240);
 		f.settle();
-		var parent = f.retainedParent();
-		var expected = f.inventoryDeadzoneTarget(parent);
+		var trigger = f.snapshot().radial().pointer();
 		f.leaveListBySideBack();
-		var pending = f.snapshot().radial();
-		assertTrue(Math.abs(pending.pointer().x() - expected.x()) > 1.0, "precondition: the return is still pending");
-		f.move(10, 0, f.now + 1); // a fresh effective physical stroke cancels the pending return
-		assertEquals(pending.pointer().x() + 10.0, f.snapshot().radial().pointer().x(), 1e-9);
-		f.settle();
-		var view = f.snapshot().viewport();
-		var confined = f.snapshot().radial().pointer();
-		assertEquals(view.width() - 1.0 - view.centerX() - view.viewX(), confined.x(), 1e-9,
-			"the physically moved pointer is confined by the reprojection instead of warping to the old target");
-		assertTrue(confined.x() > expected.x() + 1.0, "the abandoned target is not chased");
+		assertTrue(f.menu().menuId().endsWith(":content"));
+		assertEquals(trigger, f.snapshot().radial().pointer());
+		f.move(10, 0, f.now + 1);
+		var expected = f.snapshot().viewport().confine(new SpatialController.Point(trigger.x() + 10.0, trigger.y()));
+		assertEquals(expected, f.snapshot().radial().pointer(),
+			"fresh physical movement continues from the returned centre");
 	}
 
 	@ParameterizedTest
 	@CsvSource({"false, 0", "true, 3"})
-	void returnedPointerReopensTheListOnlyAfterAFullDeliberateStrokeAndDwell(boolean hover, int properties) {
+	void returnedCentreReopensTheListOnlyAfterAFullDeliberateStrokeAndDwell(boolean hover, int properties) {
 		var f = new Fixture(320, 240, "1", false, properties, 18, hover);
 		f.openList(true);
-		var parent = f.retainedParent();
-		var expected = f.inventoryDeadzoneTarget(parent);
-		double bearing = f.inventorySlotBearing(parent);
 		f.leaveListBySideBack();
 		f.settle();
+		var parent = f.menu();
 		assertNull(f.snapshot().radial().focusId(), "precondition: the return sits inside the deadzone");
-		assertEquals(expected.x(), f.snapshot().radial().pointer().x(), 1e-6);
+		double bearing = f.inventorySlotBearing(parent);
 		double radians = Math.toRadians(bearing);
-		double deadzone = f.settings.deadzone();
 		double stroke = f.settings.stroke();
-		f.moveTo(parent.origin().x() + Math.sin(radians) * (deadzone + stroke - 1.0),
-			parent.origin().y() - Math.cos(radians) * (deadzone + stroke - 1.0), f.now + 1);
+		f.moveTo(parent.origin().x() + Math.sin(radians) * (stroke - 1.0),
+			parent.origin().y() - Math.cos(radians) * (stroke - 1.0), f.now + 1);
 		f.frame(f.now + f.settings.dwellMillis() + 1);
-		assertEquals(parent.menuId(), f.menu().menuId(), "a partial new stroke cannot pay the pop's fresh-stroke fence");
+		assertTrue(f.menu().menuId().endsWith(":content"), "a partial new stroke cannot pay the pop's fresh-stroke fence");
 		assertFalse(f.snapshot().inventory().open());
-		f.moveTo(parent.origin().x() + Math.sin(radians) * (deadzone + stroke),
-			parent.origin().y() - Math.cos(radians) * (deadzone + stroke), f.now + 1);
+		f.moveTo(parent.origin().x() + Math.sin(radians) * (stroke + 1.0),
+			parent.origin().y() - Math.cos(radians) * (stroke + 1.0), f.now + 1);
 		f.frame(f.now + f.settings.dwellMillis() + 1);
 		assertTrue(f.menu().menuId().endsWith(":inventory"));
 		assertTrue(f.snapshot().inventory().open(), "a full deliberate stroke plus dwell reopens the list");
+	}
+
+	@Test
+	void offContentIntentKeepsOrdinaryRowsAndNoForwardOrRetainedKey() {
+		var f = new Fixture(320, 240, "1", false, 0, SpatialSelectorSettings.DEFAULT_DEADZONE, false, false);
+		f.openList(false);
+		var view = f.snapshot().inventoryView();
+		assertNull(view.retainedRowKey());
+		assertFalse(view.forwardAvailable(), "OFF has no item Forward entry or hint");
+		assertTrue(view.selectedRowCommittable(), "direct release is still eligible under OFF");
+		double forward = f.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		f.move(forward * 100, 0, f.now + 1);
+		assertTrue(f.menu().menuId().endsWith(":inventory"), "the frozen OFF toggle keeps Forward inert");
+		var intent = assertInstanceOf(SelectorIntent.SelectInventory.class, f.session.releaseIntent(f.now + 1));
+		assertEquals("opaque:k0", intent.reference());
+		assertEquals("attention", intent.itemType().id());
+	}
+
+	@Test
+	void itemClearanceUpdatesRepositionTheActiveItemMenuWithoutPointerOrTrailTravel() {
+		var f = new Fixture(320, 240, "1", false, 3, SpatialSelectorSettings.DEFAULT_DEADZONE, false);
+		f.openList(false);
+		double forward = f.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		f.move(forward * 80, 0, f.now + 1);
+		var item = f.menu();
+		assertTrue(item.menuId().contains(":item:"));
+		double axis = f.snapshot().inventory().axisX();
+		var before = f.snapshot().radial();
+
+		f.session.updateItemClearance(140, f.now + 1);
+
+		var moved = f.menu();
+		assertTrue(moved.menuId().contains(":item:"));
+		assertEquals(axis + forward * (f.geometry.width() / 2 + 140), moved.origin().x(), 1e-9);
+		assertEquals(item.origin().y(), moved.origin().y(), 1e-9, "the frozen row anchor is kept");
+		var after = f.snapshot().radial();
+		assertEquals(before.pointer(), after.pointer(), "a pure metric update moves no pointer");
+		assertEquals(before.trail(), after.trail(), "a pure metric update adds no trail");
+		assertEquals(0.0, after.hoverProgress());
 	}
 
 	@Test

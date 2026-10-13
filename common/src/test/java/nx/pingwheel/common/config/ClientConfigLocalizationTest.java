@@ -270,7 +270,8 @@ class ClientConfigLocalizationTest {
 		List<String> booleanLabels = List.of(
 			"settings.pingforit.spatial_selector.hover_enabled",
 			"settings.pingforit.spatial_selector.show_trail",
-			"settings.pingforit.spatial_selector.reduce_motion");
+			"settings.pingforit.spatial_selector.reduce_motion",
+			"settings.pingforit.spatial_selector.content_intent_enabled");
 		Set<String> expectedKeys = new java.util.HashSet<>();
 		for (String key : java.util.stream.Stream.concat(formattedLabels.stream(), booleanLabels.stream()).toList()) {
 			expectedKeys.add(key);

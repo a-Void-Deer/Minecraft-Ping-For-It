@@ -275,6 +275,15 @@ public final class ClientPingRuntime {
 		void disposeMouse(boolean screenTransition);
 		Optional<NativeSelectorInput.Frame> inputFrame();
 		SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style);
+		/**
+		 * Distance from the inventory panel's forward edge to the item-menu
+		 * centre. The headless compatibility fallback uses the port's explicit
+		 * list geometry; production overrides it with the renderer's measured
+		 * metric so no session-owned formula exists.
+		 */
+		default double itemMenuClearance(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame) {
+			return listGeometry(style).childClearance();
+		}
 		void resetInput();
 		void applyToggle(SelectorIntent.CaptureToggle toggle, long timeMillis);
 	}
@@ -751,6 +760,7 @@ public final class ClientPingRuntime {
 			if (selector == null) openSelector(frameTimeMillis);
 			if (selector != null && presentable) {
 				var frame = inputFrame.orElseThrow();
+				prepareItemClearance(frame, frameTimeMillis);
 				// The interaction frame owns projection publication. Paint consumes it unchanged.
 				long nowNanos = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(frameTimeMillis);
 				selector.constrainPointer(selectorPaint.prepareViewport(selector.snapshot().radial(), frame.guiWidth(), frame.guiHeight(),
@@ -946,7 +956,17 @@ public final class ClientPingRuntime {
 		return selector == null ? Optional.empty() : Optional.of(selector.snapshot());
 	}
 	private void constrainSelector(NativeSelectorInput.Frame frame, long nowMillis) {
-		if (selector != null) selector.constrainPointer(selectorPaint.lastViewport(frame.guiWidth(), frame.guiHeight()), nowMillis);
+		if (selector == null) return;
+		prepareItemClearance(frame, nowMillis);
+		selector.constrainPointer(selectorPaint.lastViewport(frame.guiWidth(), frame.guiHeight()), nowMillis);
+	}
+	/**
+	 * Interaction geometry is measured before viewport confinement and before
+	 * move/scroll/release/tick paths; draw remains only a consumer.
+	 */
+	private void prepareItemClearance(NativeSelectorInput.Frame frame, long nowMillis) {
+		if (selector == null || selectorStyle == null) return;
+		selector.updateItemClearance(interactionAccess.itemMenuClearance(selectorStyle, frame), nowMillis);
 	}
 	public void drawSelector(GuiGraphics graphics) {
 		var inputFrame = interactionAccess.inputFrame();
@@ -1133,7 +1153,15 @@ public final class ClientPingRuntime {
 			var layout = SpatialOverlayRenderer.inventoryLayout(view, 0, 0, Game.font.lineHeight, style);
 			int rows = Math.max(1, (int) ((Game.getWindow().getGuiScaledHeight() - layout.headerHeight() - layout.footerHeight())
 				/ layout.rowHeight()));
-			return SpatialSelectorSession.ListGeometry.fromLayout(rows, layout, selectorSettings.deadzone());
+			double clearance = measuredItemMenuClearance(style, Game.getWindow().getGuiScaledWidth(), Game.getWindow().getGuiScaledHeight());
+			return SpatialSelectorSession.ListGeometry.fromLayout(rows, layout, clearance);
+		}
+		public double itemMenuClearance(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame) {
+			return measuredItemMenuClearance(style, frame.guiWidth(), frame.guiHeight());
+		}
+		private double measuredItemMenuClearance(SpatialOverlayRenderer.Style style, int guiWidth, int guiHeight) {
+			double backLabelWidth = Game.font.width(Component.translatable("pingforit.spatial.back"));
+			return SpatialOverlayRenderer.itemMenuClearance(guiWidth, guiHeight, Game.font.lineHeight, backLabelWidth, style);
 		}
 		public void resetInput() {
 			if (abortingScreenTransition) InputUtils.resetPingInteraction();

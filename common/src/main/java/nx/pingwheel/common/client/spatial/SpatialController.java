@@ -18,12 +18,11 @@ import nx.pingwheel.common.client.spatial.BackHoverController.Result;
  * deadzone means abandon, and release is the only operation that commits an
  * action.
  *
- * <p>Entering a focused branch is currently done by the stationary dwell tick
- * ({@link #tick(long)}); the qualified-turn entry path from the prototype is
- * intentionally not implemented in this unit. Return is delegated to the
- * existing {@link BackHoverController} when hover is enabled and otherwise by a
- * Back dwell, and a pop always arms {@code freshStrokeRequired} so a stationary
- * pointer cannot re-enter immediately.
+ * <p>A focused branch admits a stationary dwell or a qualified direction turn.
+ * User returns align the retained pattern with the pointer and always arm
+ * {@code freshStrokeRequired}; programmatic returns preserve the old placement.
+ * Hover-enabled returns share one {@link BackHoverController} across menus and
+ * external surfaces, so alignment cannot release a held Back block.
  *
  * <p>Nothing here touches Minecraft, a renderer, configuration, or an input
  * callback; {@link Snapshot} is the read model a rectangular renderer consumes.
@@ -42,6 +41,9 @@ public final class SpatialController {
 
 	/** A point in controller space (GUI pixels for the renderer). */
 	public record Point(double x, double y) {}
+
+	/** Bounded cumulative placement notification; a zero-distance user return still advances the sequence. */
+	public record UserReturnPlacement(long sequence, Point totalTranslation) {}
 
 	/** Immutable projection shared by interaction and paint; bounds include the last GUI pixel. */
 	public record Viewport(int width, int height, double viewX, double viewY) {
@@ -212,6 +214,7 @@ public final class SpatialController {
 	private long trailEpoch;
 	private long trailAlignment;
 	private long trailAlignmentSequence;
+	private UserReturnPlacement userReturnPlacement = new UserReturnPlacement(0L, new Point(0.0, 0.0));
 
 	public SpatialController(SpatialMenu root, Tuning tuning) {
 		this.root = Objects.requireNonNull(root, "root");
@@ -229,6 +232,7 @@ public final class SpatialController {
 		active = true;
 		pointer = confined(new Point(0.0, 0.0));
 		pendingReturn = null;
+		userReturnPlacement = new UserReturnPlacement(0L, new Point(0.0, 0.0));
 		freshTrail();
 		stack.clear();
 
@@ -247,6 +251,11 @@ public final class SpatialController {
 
 	public boolean isActive() {
 		return active;
+	}
+
+	/** Placement changes since this hold began, independent of stack-depth and pointer-sample changes. */
+	public UserReturnPlacement userReturnPlacement() {
+		return userReturnPlacement;
 	}
 
 	/** Reprojects without input travel, trail, navigation or timer advancement. */
@@ -447,6 +456,36 @@ public final class SpatialController {
 		rebaseInternal(origin, nowMillis);
 	}
 
+	/**
+	 * Relayouts only the active caller-pushed menu, without pointer input,
+	 * navigation or timer advancement. An effective placement change restarts
+	 * the pending dwell at the new geometry even when the focused choice is
+	 * unchanged; repeating an unchanged relayout cannot postpone that dwell.
+	 * Accumulated travel, the fresh-stroke fence and the held Back block stay
+	 * untouched.
+	 */
+	public void repositionExternal(Point origin, Point parentOrigin, long nowMillis) {
+		if (!active || !activeMenu().external) return;
+		Objects.requireNonNull(origin, "origin");
+		Objects.requireNonNull(parentOrigin, "parentOrigin");
+		MenuState menu = activeMenu();
+		boolean placementChanged = !origin.equals(menu.origin) || !parentOrigin.equals(menu.parentOrigin);
+		menu.origin = origin;
+		menu.parentOrigin = parentOrigin;
+		menu.candidate = null;
+		menu.candidateId = null;
+		if (placementChanged) {
+			// setFocus alone only restarts the clock when the choice identity
+			// changes, so the same focused choice could otherwise pop on the
+			// stale deadline after its geometry moved.
+			menu.enteredAt = nowMillis;
+			menu.lastMovement = nowMillis;
+		}
+		hoverAlignment++; // the next hover sample starts at the new geometry; the held block stays intact
+		hoverProgress = 0.0;
+		setFocus(nowMillis);
+	}
+
 	/** Moves the virtual pointer without physical travel (external rebase). */
 	public void rebase(double x, double y, long nowMillis) {
 		if (!active) {
@@ -518,9 +557,14 @@ public final class SpatialController {
 		return updateHover(nowMillis, physicalMovement);
 	}
 
-	/** External navigation uses the same one-level pop and fresh-stroke fence. */
+	/** User navigation aligns the returned parent with the unchanged pointer and arms a fresh stroke. */
 	public boolean back(long nowMillis) {
 		return active && pop(nowMillis);
+	}
+
+	/** Data revocation and other programmatic navigation keep the old placement and focus semantics. */
+	public boolean backProgrammatically(long nowMillis) {
+		return active && pop(nowMillis, false);
 	}
 
 	/** Refreshes an active row's allowed annotations without moving its origin. */
@@ -809,14 +853,34 @@ public final class SpatialController {
 	}
 
 	private boolean pop(long nowMillis) {
+		return pop(nowMillis, true);
+	}
+
+	private boolean pop(long nowMillis, boolean userReturn) {
 		if (stack.size() < 2) {
 			return false;
 		}
 
 		stack.remove(stack.size() - 1);
 		pendingReturn = null;
-		freshTrail();
 		MenuState parent = activeMenu();
+		if (userReturn) {
+			Point returnedOrigin = parent.origin;
+			Point delta = new Point(pointer.x() - returnedOrigin.x(), pointer.y() - returnedOrigin.y());
+			for (MenuState retained : stack) {
+				retained.origin = translateForReturn(retained.origin, returnedOrigin, delta);
+				retained.parentOrigin = translateForReturn(retained.parentOrigin, returnedOrigin, delta);
+				retained.candidate = null;
+				retained.candidateId = null;
+			}
+			Point total = userReturnPlacement.totalTranslation();
+			userReturnPlacement = new UserReturnPlacement(userReturnPlacement.sequence() + 1L,
+				new Point(total.x() + delta.x(), total.y() + delta.y()));
+			parent.externalBackFocus = false;
+			hoverAlignment++;
+			hoverProgress = 0.0;
+		}
+		freshTrail();
 		parent.focus = focusAt(parent);
 		parent.enteredAt = nowMillis;
 		parent.lastMovement = nowMillis;
@@ -825,6 +889,12 @@ public final class SpatialController {
 		parent.candidate = null;
 		parent.candidateId = null;
 		return true;
+	}
+
+	private Point translateForReturn(Point point, Point returnedOrigin, Point delta) {
+		// Keep coincident anchors exactly coincident even when subtraction/addition rounds differently.
+		if (point.equals(returnedOrigin)) return pointer;
+		return new Point(point.x() + delta.x(), point.y() + delta.y());
 	}
 
 	private List<Resolved> displayedChoices(MenuState menu) {
@@ -944,8 +1014,8 @@ public final class SpatialController {
 	private static final class MenuState {
 
 		SpatialMenu menu;
-		final Point origin;
-		final Point parentOrigin;
+		Point origin;
+		Point parentOrigin;
 		Resolved focus;
 		long enteredAt;
 		long lastMovement;

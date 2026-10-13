@@ -133,24 +133,40 @@ class SpatialOverlayRendererTrailTest {
 		s.reset(); assertTrue(s.trailPoints().isEmpty()); assertEquals(0, s.retainedSize());
 	}
 
-	@Test void inventoryRowsNeverOwnHistoryAndTrailPaintPrecedesPanelsHeadersRowsAndFooters() {
+	@Test void activeInventoryListHidesEveryTrailPaintWhileItemRadialKeepsTheSharedHistoryBelowText() {
 		var c = controller(16); c.enterExternal(SpatialMenu.of("list"), 0, 0, 1); c.useExternalSurface();
 		var s = new SpatialOverlayRenderer.Session(); var painter = new Painter();
 		var list = new SpatialInventoryView("list", true, List.of(new SpatialInventoryView.Row("row", "Item", 1L, null,
 			SpatialInventoryView.Status.READY)), 0, 0, 3, true, SpatialInventoryView.Status.READY, 0, 0);
-		frame(s, c, painter, style(true, 16, 50), 0, VIEW, list);
-		c.moveExternalPointer(4, 7, 2); c.moveExternalPointer(3, 8, 3);
-		frame(s, c, painter, style(true, 16, 50), 1, VIEW, list);
+		// A prior tail already paints without the list; the active list surface
+		// still hides all of it and inventory rows never own history.
+		frame(s, c, painter, style(true, 16, 50), 0, VIEW, null);
+		c.moveExternalPointer(4, 7, 2);
+		frame(s, c, painter, style(true, 16, 50), 1, VIEW, null);
+		assertTrue(painter.paints.stream().anyMatch(state -> state.data() instanceof SpatialOverlayRenderer.TrailPaint),
+			"precondition: a prior tail paints while no list surface is active");
+		c.moveExternalPointer(3, 8, 3);
+		frame(s, c, painter, style(true, 16, 50), 2, VIEW, list);
 		assertEquals(List.of(p(0, 0), p(4, 7), p(7, 15)), s.trailPoints()); assertTrue(painter.hidden());
+		assertTrue(painter.paints.stream().noneMatch(state -> state.data() instanceof SpatialOverlayRenderer.TrailPaint),
+			"the active list hides its own trail and any prior tail");
+		assertTrue(painter.paints.stream().anyMatch(state -> state.data() instanceof SpatialOverlayRenderer.PanelPaint),
+			"the list chrome still paints");
+		c.enterExternal(SpatialMenu.of("item", SpatialMenu.Choice.leaf("item", "item", "item")), 30, 20, 4);
+		painter.clear();
+		frame(s, c, painter, style(true, 16, 50), 3, VIEW, list);
+		assertEquals(List.of(p(30, 20)), s.trailPoints(), "list to item rebase is not a joining stroke");
+		assertFalse(painter.hidden(), "the item radial keeps the ordinary crosshair rule");
+		frame(s, c, painter, style(true, 16, 50), 4, VIEW, list);
+		assertEquals(List.of(p(30, 20)), painter.trail().points(), "the next frame paints the new epoch's committed seed");
 		int trail = java.util.stream.IntStream.range(0, painter.paints.size()).filter(i -> painter.paints.get(i).data() instanceof SpatialOverlayRenderer.TrailPaint).findFirst().orElseThrow();
 		for (int i = 0; i < painter.paints.size(); i++) {
 			var data = painter.paints.get(i).data();
+			if (data instanceof SpatialOverlayRenderer.NodePaint) assertTrue(i > trail, "title and external name above trail");
+			if (data instanceof SpatialOverlayRenderer.SectorPaint) assertTrue(i < trail);
 			if (data instanceof SpatialOverlayRenderer.PanelPaint || data instanceof SpatialOverlayRenderer.HeaderPaint
 				|| data instanceof SpatialOverlayRenderer.RowPaint || data instanceof SpatialOverlayRenderer.FooterPaint) assertTrue(i > trail);
 		}
-		c.enterExternal(SpatialMenu.of("item", SpatialMenu.Choice.leaf("item", "item", "item")), 30, 20, 4);
-		frame(s, c, painter, style(true, 16, 50), 2, VIEW, list);
-		assertEquals(List.of(p(30, 20)), s.trailPoints(), "list to item rebase is not a joining stroke");
 	}
 
 	@Test void rigidViewportPanDoesNotAppendSamplesAndOpacityAndVisibilityReachOnlyTrail() {

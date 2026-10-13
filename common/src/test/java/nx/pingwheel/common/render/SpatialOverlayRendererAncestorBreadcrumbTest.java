@@ -12,6 +12,7 @@ import nx.pingwheel.common.client.spatial.SpatialController;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -166,9 +167,23 @@ class SpatialOverlayRendererAncestorBreadcrumbTest {
 	private static SpatialOverlayRenderer.GuidePaint guide(
 		List<SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>> targets,
 		String owner) {
+		return (SpatialOverlayRenderer.GuidePaint) guideTarget(targets, owner).data();
+	}
+
+	private static SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> guideTarget(
+		List<SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>> targets,
+		String owner) {
 		return targets.stream().filter(target -> target.data() instanceof SpatialOverlayRenderer.GuidePaint
 			&& target.key().owner().equals(owner))
-			.map(target -> (SpatialOverlayRenderer.GuidePaint) target.data()).findFirst().orElseThrow();
+			.findFirst().orElseThrow();
+	}
+
+	private static SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> node(
+		List<SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>> targets,
+		String owner, String id) {
+		return targets.stream().filter(target -> target.data() instanceof SpatialOverlayRenderer.NodePaint node
+			&& target.key().owner().equals(owner) && node.choice().id().equals(id))
+			.findFirst().orElseThrow();
 	}
 
 	@Test
@@ -177,9 +192,11 @@ class SpatialOverlayRendererAncestorBreadcrumbTest {
 		var targets = targets(snapshot);
 
 		assertEquals(List.of("content"), nodeIds(targets, "root"));
-		assertEquals(List.of("content"), sectorIds(targets, "root"));
+		assertTrue(sectorIds(targets, "root").isEmpty(),
+			"the ancestor breadcrumb frame is planned without its sector underlay");
 		assertEquals(List.of("child", "content:back"), nodeIds(targets, "content"));
-		assertEquals(List.of("child", "content:back"), sectorIds(targets, "content"));
+		assertEquals(List.of("content:back"), sectorIds(targets, "content"),
+			"only the ancestor Back entry keeps its sector underlay");
 		assertFalse(nodeIds(targets, "content").contains("disabled"),
 			"the disabled sibling frame is hidden from the settled ancestor plan");
 		assertFalse(sectorIds(targets, "content").contains("disabled"),
@@ -211,14 +228,24 @@ class SpatialOverlayRendererAncestorBreadcrumbTest {
 		frame(session, contentActive, painter, STYLE, 0);
 		frame(session, contentActive, painter, STYLE, DURATION);
 		assertEquals(SpatialOverlayRenderer.nodeAlpha(true, false, false), painter.present("other").state().alpha(), 1.0e-9);
+		double oldChildX = painter.present("child").state().x();
+		double oldChildY = painter.present("child").state().y();
+		assertTrue(oldChildX > CENTER_X, "the active parent branch starts on its ordinary orbit");
 
 		frame(session, childActive, painter, STYLE, DURATION + 1);
 		assertTrue(painter.exiting("other").state().alpha() > 0.0, "the hidden sibling fades through the ordinary exit");
 		assertTrue(painter.hasPresent("child"), "the content breadcrumb stays");
 		assertTrue(painter.hasPresent("content:back"), "the ancestor Back stays");
 		assertTrue(painter.hasPresent("content"), "the root breadcrumb stays");
+		assertEquals(oldChildX, painter.present("child").state().x(), "entry retarget starts at the displayed orbit");
+		frame(session, childActive, painter, STYLE, DURATION + 1 + DURATION / 2);
+		assertEquals((oldChildX + CENTER_X) / 2, painter.present("child").state().x(), 1.0e-9,
+			"the retained frame transitions from its old pose to its own origin, not another orbital target");
+		assertEquals((oldChildY + CENTER_Y) / 2, painter.present("child").state().y(), 1.0e-9);
 
 		frame(session, childActive, painter, STYLE, DURATION * 2 + 1);
+		assertEquals(CENTER_X, painter.present("child").state().x());
+		assertEquals(CENTER_Y, painter.present("child").state().y());
 		assertFalse(painter.hasAny("other"), "the exit tail is bounded");
 		assertTrue(session.paintedChoiceIds().contains("child:leaf"));
 		assertFalse(session.paintedChoiceIds().contains("other"), "a hidden ancestor never acknowledges");
@@ -288,5 +315,68 @@ class SpatialOverlayRendererAncestorBreadcrumbTest {
 		frame(reduced, parentActive, reducedPainter, REDUCED, 2);
 		assertEquals(disabledAlpha, reducedPainter.present("disabled").state().alpha(), 1.0e-9);
 		assertEquals(disabledAlpha, reducedPainter.presentSector("disabled").state().alpha(), 1.0e-9);
+	}
+
+	@Test
+	void distinctOriginAncestorsKeepTheirOwnFrameOriginsWithoutSectorsFollowersOrAcknowledgement() {
+		double rootOriginX = -40.0, rootOriginY = 20.0;
+		double contentOriginX = 35.0, contentOriginY = -25.0;
+		var root = new SpatialController.MenuView("root", p(rootOriginX, rootOriginY), p(0, 0), null, List.of(
+			choice("content", null, false, false, false, true, 90, 55),
+			choice("danger", "action:danger", false, false, false, false, 0, 55)), null);
+		var content = new SpatialController.MenuView("content", p(contentOriginX, contentOriginY), p(rootOriginX, rootOriginY), null, List.of(
+			choice("child", null, false, false, false, true, 0, 120),
+			choice("other", "action:other", false, false, false, false, 120, 120),
+			choice("content:back", null, true, false, false, false, 240, 120)), "content");
+		var child = new SpatialController.MenuView("child", p(120.0, 60.0), p(contentOriginX, contentOriginY), null, List.of(
+			choice("child:leaf", "action:leaf", false, false, false, false, 0, 180)), "child");
+		var radial = snapshot(List.of(root, content, child), p(0, 0));
+		var targets = targets(radial);
+
+		// Each level is placed with its own controller origin; no ancestor borrows
+		// the child origin and no ancestor frame carries a current pointer ray.
+		var rootBreadcrumb = node(targets, "root", "content");
+		assertEquals(160.0, rootBreadcrumb.x(), 1.0e-9, "GUI center plus the root origin, with no orbital offset");
+		assertEquals(170.0, rootBreadcrumb.y(), 1.0e-9);
+		assertEquals(rootBreadcrumb.x(), rootBreadcrumb.entryX(), "appearance and detached exit keep the same own-origin anchor");
+		assertEquals(rootBreadcrumb.y(), rootBreadcrumb.entryY());
+		assertNull(rootBreadcrumb.ray(), "an ancestor breadcrumb never follows the active pointer");
+
+		var contentBreadcrumb = node(targets, "content", "child");
+		assertEquals(235.0, contentBreadcrumb.x(), 1.0e-9,
+			"the content breadcrumb stays on the content menu's own origin, not the child's");
+		assertEquals(125.0, contentBreadcrumb.y(), 1.0e-9);
+		assertEquals(contentBreadcrumb.x(), contentBreadcrumb.entryX());
+		assertEquals(contentBreadcrumb.y(), contentBreadcrumb.entryY());
+		double backBearing = Math.toRadians(300.0);
+		var contentBack = node(targets, "content", "content:back");
+		assertEquals(CENTER_X + contentOriginX + Math.sin(backBearing) * 32.0, contentBack.x(), 1.0e-9);
+		assertEquals(CENTER_Y + contentOriginY - Math.cos(backBearing) * 32.0, contentBack.y(), 1.0e-9);
+		assertNull(contentBack.ray(), "an ancestor Back never owns the active follower");
+
+		assertTrue(sectorIds(targets, "root").isEmpty(),
+			"the root breadcrumb frame is planned without its sector underlay");
+		assertEquals(List.of("content:back"), sectorIds(targets, "content"),
+			"the ancestor Back keeps its sector and the breadcrumb sector stays omitted");
+
+		var rootGuide = guideTarget(targets, "root");
+		assertEquals(CENTER_X + rootOriginX, rootGuide.x(), 1.0e-9);
+		assertEquals(CENTER_Y + rootOriginY, rootGuide.y(), 1.0e-9);
+		var contentGuide = guideTarget(targets, "content");
+		assertEquals(CENTER_X + contentOriginX, contentGuide.x(), 1.0e-9);
+		assertEquals(CENTER_Y + contentOriginY, contentGuide.y(), 1.0e-9);
+
+		var session = new SpatialOverlayRenderer.Session();
+		var painter = new Painter();
+		frame(session, radial, painter, REDUCED, 0);
+		assertTrue(session.paintedChoiceIds().contains("child:leaf"), "only the active menu acknowledges");
+		assertFalse(session.paintedChoiceIds().contains("content"), "a breadcrumb never acknowledges");
+		assertTrue(painter.hasPresent("content:back"), "the ancestor Back stays painted");
+		assertEquals(160.0, painter.present("content").state().x());
+		assertEquals(170.0, painter.present("content").state().y());
+		frame(session, null, painter, STYLE, 1);
+		frame(session, null, painter, STYLE, 1 + DURATION / 2);
+		assertEquals(160.0, painter.exiting("content").state().x(), "a breadcrumb exit does not drift back to its old orbit");
+		assertEquals(170.0, painter.exiting("content").state().y());
 	}
 }

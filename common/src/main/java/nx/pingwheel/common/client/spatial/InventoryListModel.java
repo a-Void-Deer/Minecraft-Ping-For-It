@@ -165,6 +165,20 @@ public final class InventoryListModel {
 	}
 
 	/**
+	 * Rigid user-return translation: moves only the frozen panel axis and base
+	 * row origin. Entries, selected key, window, ordering/discovery state,
+	 * wheel remainder, status and side orientation are preserved.
+	 */
+	public void translate(double deltaX, double deltaY) {
+		if (!Double.isFinite(deltaX) || !Double.isFinite(deltaY)) {
+			return;
+		}
+
+		axisX += deltaX;
+		glideBaseY += deltaY;
+	}
+
+	/**
 	 * Merges a streamed batch. Existing keys are updated in place and never
 	 * reorder. New keys re-sort the whole list while the player has not
 	 * scrolled, and are internally sorted then appended once the player has.

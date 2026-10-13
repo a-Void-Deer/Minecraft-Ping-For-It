@@ -95,7 +95,9 @@ class SpatialViewOffsetProjectionTest {
 			assertEquals(reduced ? 60 : 30, sampled.viewX());
 			controller.back(80);
 			var returned = paint.retargetViewport(controller.snapshot(), style, 80_000_000L);
-			assertEquals(reduced ? 0 : 30, returned.viewX(), "normal return re-aims from this frame's displayed offset");
+			assertEquals(new SpatialController.Point(-60, 0), SpatialOverlayRenderer.activeOrigin(controller.snapshot()),
+				"user return aligns the root with the unchanged trigger pointer");
+			assertEquals(reduced ? 60 : 30, returned.viewX(), "normal return re-aims from this frame's displayed offset");
 			assertEquals(returned, paint.lastViewport(400, 300));
 		}
 	}
@@ -199,15 +201,17 @@ class SpatialViewOffsetProjectionTest {
 
 		assertTrue(controller.back(3 * DURATION));
 		var returnedChild = SpatialOverlayRenderer.activeOrigin(controller.snapshot());
-		assertEquals(child, returnedChild);
+		assertEquals(new SpatialController.Point(90.0, 25.0), returnedChild, "user return aligns the child with the pointer");
+		assertEquals(new SpatialController.Point(60.0, 65.0), controller.snapshot().menus().getFirst().origin(),
+			"the retained root receives the same rigid translation");
 		assertCenteredAt(offset, returnedChild, 3 * DURATION);
 
 		assertTrue(controller.back(4 * DURATION));
 		var returnedRoot = SpatialOverlayRenderer.activeOrigin(controller.snapshot());
-		assertEquals(root, returnedRoot);
+		assertEquals(new SpatialController.Point(90.0, 25.0), returnedRoot, "the next user return aligns the root at that pointer");
 		assertCenteredAt(offset, returnedRoot, 4 * DURATION);
-		assertEquals(0.0, offset.x());
-		assertEquals(0.0, offset.y());
+		assertEquals(-90.0, offset.x());
+		assertEquals(-25.0, offset.y());
 	}
 
 	@Test
@@ -244,9 +248,10 @@ class SpatialViewOffsetProjectionTest {
 		SpatialOverlayRenderer.sampleViewOffset(offset, child, 80L, false);
 		assertEquals(-30.0, offset.x(), 1.0e-12);
 
-		SpatialOverlayRenderer.sampleViewOffset(offset, null, 100L, false);
+		controller.cancel();
+		SpatialOverlayRenderer.sampleViewOffset(offset, SpatialOverlayRenderer.activeOrigin(controller.snapshot()), 100L, false);
 		assertEquals(-30.0, offset.x(), 1.0e-12, "an inactive frame does not advance the visible offset");
-		assertTrue(controller.back(120L));
+		controller.start(120L);
 		root = SpatialOverlayRenderer.activeOrigin(controller.snapshot());
 		SpatialOverlayRenderer.sampleViewOffset(offset, root, 120L, false);
 		assertEquals(-30.0, offset.x(), 1.0e-12, "reopening preserves the last displayed offset in that frame");
@@ -352,7 +357,8 @@ class SpatialViewOffsetProjectionTest {
 	}
 
 	private static SpatialSelectorSettings.Snapshot settings() {
-		return new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), false, 250, true, false);
+		return new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), false, 250, true, false,
+			1, new BigDecimal("1.5"), 130, 50, true);
 	}
 
 	private static SpatialSelectorSession.ContentFence fence(SpatialSelectorSession.CapturedTarget target) {

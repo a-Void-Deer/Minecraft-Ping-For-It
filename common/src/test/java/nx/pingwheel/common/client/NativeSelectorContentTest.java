@@ -497,6 +497,13 @@ class NativeSelectorContentTest {
 	private static final SpatialSelectorSession.ListGeometry SELECTOR_GEOMETRY =
 		new SpatialSelectorSession.ListGeometry(4, 180, 17, 23, 19, 85);
 
+	/** Explicit content-intent ON for property-branch fixtures; never a compatibility default. */
+	private static SpatialSelectorSettings.Snapshot intentSettings() {
+		return new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), false, 250, true, false,
+			SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE,
+			SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, true);
+	}
+
 	private static PingType ping(String id) { return PingTypeCatalog.builtIn().findById(id).orElseThrow(); }
 
 	private static PresentationPreviewAccess blockStateAccess() {
@@ -528,7 +535,7 @@ class NativeSelectorContentTest {
 			content = blockStateContent(state, context, capture, sent::add);
 			assertTrue(sent.isEmpty(), "a locally observed block state needs no preview request");
 			session = new SpatialSelectorSession<>(previewTarget(capture), Map.of(),
-				new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), false, 250, true, false),
+				intentSettings(),
 				previewFence(content), (target, contentFence) -> content.read(target, contentFence), SELECTOR_GEOMETRY);
 			session.open(0L);
 		}
@@ -744,7 +751,7 @@ class NativeSelectorContentTest {
 			content = createContent(values, context, capture, sent::add, inventory);
 			assertTrue(sent.isEmpty(), "locally observed create content needs no preview request");
 			session = new SpatialSelectorSession<>(previewTarget(capture), Map.of(),
-				new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), false, 250, true, false),
+				intentSettings(),
 				previewFence(content), (target, contentFence) -> content.read(target, contentFence), SELECTOR_GEOMETRY);
 			session.open(0L);
 		}

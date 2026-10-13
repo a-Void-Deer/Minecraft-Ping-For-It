@@ -37,7 +37,7 @@ class SpatialSelectorSessionTest {
 		var before = session.snapshot();
 		var viewport = new SpatialController.Viewport(100, 100, -510, 0);
 		session.constrainPointer(viewport, 290);
-		assertPointer(session, 460, 49);
+		assertPointer(session, 460, 0);
 		assertEquals(before.inventory(), session.snapshot().inventory());
 		assertEquals(before.radial().trail(), session.snapshot().radial().trail());
 		assertEquals(current(session).menuId(), before.radial().menus().getLast().menuId());
@@ -68,30 +68,31 @@ class SpatialSelectorSessionTest {
 	}
 
 	@Test
-	void hugeAuthorizedVerticalTravelGlidesAtSaturationWithoutRawHorizontalNavigation() {
+	void hugeAuthorizedVerticalTravelGlidesAtSaturationWithoutViewportSideTravel() {
 		var session = openedList(false, new Content());
 		// This fixture opens the list at (360,0). Its displayed axis is x=20.
 		session.constrainPointer(new SpatialController.Viewport(40, 1, -360, -0.5), 280);
 		assertPointer(session, 360, 0);
 		session.moveGui(0, Double.MAX_VALUE, 290);
-		assertPointer(session, 360, 0);
-		assertEquals("c", session.snapshot().inventory().selectedKey(), "authorized finite vertical travel reaches the end even with zero pointer travel");
+		assertPointer(session, 360, 0, "fixed list input never moves the logical pointer");
+		assertEquals("c", session.snapshot().inventory().selectedKey(),
+			"authorized finite vertical travel reaches the end with zero pointer travel");
 		assertEquals(1, session.snapshot().radial().trail().size());
-		session.moveGui(Double.MAX_VALUE, 0, 300);
-		assertPointer(session, 379, 0);
-		assertTrue(current(session).menuId().endsWith(":inventory"), "raw overshoot cannot cross the Forward exit gate");
 		var saturated = session.snapshot();
-		session.moveGui(Double.MAX_VALUE, Double.MAX_VALUE, 310);
-		assertEquals(saturated, session.snapshot(), "attempted rows at the endpoint do not move the pointer, trail or hover");
-		session.moveGui(-1, -1, 320);
-		assertPointer(session, 378, 0);
-		assertEquals("c", session.snapshot().inventory().selectedKey(), "first reversal uses only its one-pixel delta");
-		session.moveGui(0, -91, 330);
-		assertEquals("b", session.snapshot().inventory().selectedKey(), "huge forward overshoot leaves no selection debt");
+		session.moveGui(0, Double.MAX_VALUE, 310);
+		assertEquals(saturated, session.snapshot(), "attempted rows at the endpoint change no pointer, trail or selection");
+		session.moveGui(0, -1, 320);
+		assertEquals("c", session.snapshot().inventory().selectedKey());
 		session.moveGui(0, -Double.MAX_VALUE, 340);
-		assertEquals("a", session.snapshot().inventory().selectedKey());
+		assertEquals("a", session.snapshot().inventory().selectedKey(), "huge reverse overshoot reaches the top");
 		session.moveGui(0, 92, 350);
-		assertEquals("b", session.snapshot().inventory().selectedKey(), "huge reverse overshoot is consumed as well");
+		assertTrue(session.snapshot().inventory().selectedIndex() >= 1,
+			"a fresh 92px stroke glides again without inheriting the reverse overshoot");
+		session.moveGui(0, -Double.MAX_VALUE, 360);
+		assertEquals("a", session.snapshot().inventory().selectedKey());
+		session.moveGui(0, -92, 370);
+		assertEquals("a", session.snapshot().inventory().selectedKey(), "an attempted row at the top endpoint is not banked");
+		assertTrue(current(session).menuId().endsWith(":inventory"), "vertical saturation never navigates");
 	}
 
 	@Test
@@ -100,7 +101,7 @@ class SpatialSelectorSessionTest {
 		// The frozen fixture uses 23px rows and explicit 0.5x: one row takes 92px.
 		session.constrainPointer(new SpatialController.Viewport(40, 2, -360, -0.5), 280);
 		session.moveGui(0, 91, 290);
-		assertPointer(session, 360, 0.5);
+		assertPointer(session, 360, 0);
 		assertEquals("a", session.snapshot().inventory().selectedKey());
 		var atBottom = session.snapshot().radial();
 		session.moveGui(0, 1, 300);
@@ -111,7 +112,7 @@ class SpatialSelectorSessionTest {
 		assertEquals("c", session.snapshot().inventory().selectedKey());
 		assertEquals(atBottom.trail(), session.snapshot().radial().trail());
 		session.moveGui(0, -92, 320);
-		assertPointer(session, 360, -0.5);
+		assertPointer(session, 360, 0);
 		assertEquals("b", session.snapshot().inventory().selectedKey());
 		var atTop = session.snapshot().radial();
 		session.moveGui(0, -92, 330);
@@ -153,11 +154,15 @@ class SpatialSelectorSessionTest {
 				session.constrainPointer(new SpatialController.Viewport(401, 1, -360, -0.5), 280);
 				session.moveGui(sign * 50, 0, 281);
 				trail = session.snapshot().radial().trail();
-				session.moveGui(0, 92, 290);
+				session.moveGui(0, 92, 281); // same timestamp isolates raw selection travel from elapsed dwell
 				assertEquals(listMenu, current(session).menuId());
 				assertEquals(trail, session.snapshot().radial().trail());
 				assertEquals("a", session.snapshot().inventory().selectedKey(), "side-hint and Back-hover suppression remain intact");
 				assertEquals(0, session.snapshot().radial().hoverProgress(), "raw travel never advances Back hover");
+				session.tick(290);
+				assertEquals(hover && sign < 0 ? 9.0 / 250.0 : 0.0,
+					session.snapshot().radial().hoverProgress(), 1e-12,
+					"genuine Back focus still accrues elapsed stationary dwell");
 			}
 		}
 	}
@@ -194,31 +199,36 @@ class SpatialSelectorSessionTest {
 	}
 
 	@Test
-	void correctedListPointerIsTheNextGestureBaselineWithoutCorrectionTravel() {
+	void viewportCorrectionNeverFabricatesSideProgressButAFreshRawStrokeStillEntersAnItem() {
 		var session = openedList(false, new Content());
 		String listMenu = current(session).menuId();
 		var trail = session.snapshot().radial().trail();
-		// Pan confines both the pointer and unreachable gesture axis without navigation.
+		// Pan confines the pointer and unreachable gesture axis without navigation.
 		session.constrainPointer(new SpatialController.Viewport(200, 100, -541, 0), 280);
 		assertPointer(session, 441, 0);
 		assertEquals(listMenu, current(session).menuId());
 		assertEquals(trail, session.snapshot().radial().trail());
 		session.moveGui(-10, 0, 290);
-		assertPointer(session, 441, 0);
-		assertEquals(listMenu, current(session).menuId(), "saturated inward-to-logical-axis input is no effective movement");
+		assertPointer(session, 441, 0, "fixed list input never moves the logical pointer");
+		assertEquals(listMenu, current(session).menuId(), "confinement and a small inward sample stay below the hint gate");
 		assertEquals(trail, session.snapshot().radial().trail());
 		session.moveGui(1, 0, 300);
-		assertEquals(listMenu, current(session).menuId(), "one admitted pixel cannot inherit the projection's former 81px displacement");
-		session.moveGui(75, 0, 310);
-		assertTrue(current(session).menuId().contains(":item:"), "a fresh full side stroke still enters an item");
+		assertEquals(listMenu, current(session).menuId(), "the projection's former displacement is never inherited as progress");
+		session.moveGui(85, 0, 310); // -10 + 1 + 85 = 76: the exit gate needs the full raw stroke
+		assertTrue(current(session).menuId().contains(":item:"), "a full fresh raw stroke still enters an item");
 		assertPointer(session, 535, -24);
-		assertEquals(1, session.snapshot().radial().trail().size(), "external row rebase remains confined without a warp stroke");
+		assertEquals(1, session.snapshot().radial().trail().size(), "external row rebase seeds exactly one point");
 	}
 
 	private static void assertPointer(SpatialSelectorSession<?> session, double x, double y) {
 		var pointer = session.snapshot().radial().pointer();
 		assertEquals(x, pointer.x(), 1e-9);
 		assertEquals(y, pointer.y(), 1e-9);
+	}
+	private static void assertPointer(SpatialSelectorSession<?> session, double x, double y, String message) {
+		var pointer = session.snapshot().radial().pointer();
+		assertEquals(x, pointer.x(), 1e-9, message);
+		assertEquals(y, pointer.y(), 1e-9, message);
 	}
 
 	private static final class Content implements SpatialSelectorSession.ContentPort<String> {
@@ -254,8 +264,17 @@ class SpatialSelectorSessionTest {
 	private static SpatialSelectorSettings.Snapshot settings(boolean hover) {
 		return settings(hover, 30);
 	}
+	/** Explicit content-intent ON for the established property/item intent fixtures. */
 	private static SpatialSelectorSettings.Snapshot settings(boolean hover, int deadzone) {
-		return new SpatialSelectorSettings.Snapshot(deadzone, 90, 120, 140, new BigDecimal("0.5"), hover, 250, true, false);
+		return new SpatialSelectorSettings.Snapshot(deadzone, 90, 120, 140, new BigDecimal("0.5"), hover, 250, true, false,
+			SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE,
+			SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, true);
+	}
+	/** Explicit content-intent OFF for the default direct-Attention fixtures. */
+	private static SpatialSelectorSettings.Snapshot settingsOff(boolean hover, int deadzone) {
+		return new SpatialSelectorSettings.Snapshot(deadzone, 90, 120, 140, new BigDecimal("0.5"), hover, 250, true, false,
+			SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE,
+			SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, false);
 	}
 	private static SpatialSelectorSession.ContentFence fence(SpatialSelectorSession.CapturedTarget target) {
 		return new SpatialSelectorSession.ContentFence(31, 42, 53, target.candidateId());
@@ -267,6 +286,10 @@ class SpatialSelectorSessionTest {
 	private static SpatialSelectorSession<String> session(SpatialSelectorSession.CapturedTarget target,
 		Map<String, SpatialSelectorSession.CapturedTarget> precise, boolean hover, Content port, int deadzone) {
 		return new SpatialSelectorSession<>(target, precise, settings(hover, deadzone), fence(target), port, GEOMETRY);
+	}
+	/** Explicit content-intent OFF with an enabled Back-hover variant when requested. */
+	private static SpatialSelectorSession<String> sessionOff(SpatialSelectorSession.CapturedTarget target, boolean hover, Content port) {
+		return new SpatialSelectorSession<>(target, Map.of(), settingsOff(hover, 30), fence(target), port, GEOMETRY);
 	}
 	private static SpatialController.MenuView current(SpatialSelectorSession<?> session) {
 		return session.snapshot().radial().menus().getLast();
@@ -747,7 +770,7 @@ class SpatialSelectorSessionTest {
 		session.moveGui(50, 0, 1100);
 		assertFalse(session.snapshot().inventoryView().backAffordance().focused(), "effective physical leave releases the list block");
 		session.moveGui(-50, 0, 1110);
-		assertEquals(axis - 50, session.snapshot().radial().pointer().x());
+		assertEquals(axis, session.snapshot().radial().pointer().x());
 		assertTrue(session.snapshot().inventoryView().backAffordance().focused());
 		session.tick(1359);
 		assertEquals(listMenu, current(session).menuId());
@@ -1075,20 +1098,12 @@ class SpatialSelectorSessionTest {
 		return inventory.startDegrees() + inventory.spanDegrees() / 2.0;
 	}
 
-	/** The independently computed circumference point the return placement must reach. */
-	private static SpatialController.Point inventoryDeadzoneTarget(SpatialController.MenuView parent, double deadzone) {
-		double radians = Math.toRadians(inventorySlotBearing(parent));
-		return new SpatialController.Point(parent.origin().x() + Math.sin(radians) * deadzone,
-			parent.origin().y() - Math.cos(radians) * deadzone);
-	}
-
 	@ParameterizedTest
 	@CsvSource({"false, LEFT", "true, LEFT", "false, RIGHT", "true, RIGHT"})
-	void listSideBackReturnPlacesPointerOnTheFrozenInventorySlotDeadzoneForBothBackStyles(boolean hover,
+	void listSideBackUserReturnKeepsThePointerAtTheTriggerAndMovesTheParentCentreThere(boolean hover,
 		InventoryListModel.Side backSide) {
 		var session = openedList(hover, backSide);
-		var parent = retainedParent(session);
-		var expected = inventoryDeadzoneTarget(parent, session.snapshot().radial().deadzone());
+		var trigger = session.snapshot().radial().pointer();
 		double backSign = backSide == InventoryListModel.Side.LEFT ? -1.0 : 1.0;
 		if (hover) {
 			session.moveGui(backSign * 50, 0, 290);
@@ -1098,13 +1113,13 @@ class SpatialSelectorSessionTest {
 			session.moveGui(backSign * 100, 0, 290);
 		}
 		var returned = session.snapshot().radial();
-		assertEquals(parent.menuId(), current(session).menuId(), "exactly one level returns to Content");
+		var parent = current(session);
+		assertTrue(parent.menuId().endsWith(":content"), "exactly one level returns to Content");
 		assertFalse(session.snapshot().inventory().open());
-		assertPointer(session, expected.x(), expected.y());
-		assertEquals(session.snapshot().settings().deadzone(), Math.hypot(returned.pointer().x() - parent.origin().x(),
-			returned.pointer().y() - parent.origin().y()), 1e-9, "the returned radius is the frozen circumference");
-		assertNull(returned.focusId(), "the inclusive deadzone admits no immediate activation");
-		assertEquals(List.of(returned.pointer()), returned.trail(), "the return rebases the trail seed");
+		assertEquals(trigger, returned.pointer(), "the user return leaves the pointer at the trigger");
+		assertEquals(trigger, parent.origin(), "the returned parent is rigidly translated to the pointer");
+		assertNull(returned.focusId(), "the shared centre is inside the frozen deadzone");
+		assertEquals(List.of(returned.pointer()), returned.trail(), "the return seeds exactly one trail point");
 		session.tick(5000); session.tick(6000);
 		assertEquals(parent.menuId(), current(session).menuId(), "stationary frames cannot reopen the list or navigate");
 		assertFalse(session.snapshot().inventory().open());
@@ -1115,111 +1130,234 @@ class SpatialSelectorSessionTest {
 	}
 
 	@Test
-	void returnedListPointerRequiresAFullFreshStrokeBeforeTheInventoryReopens() {
+	void returnedListCentreRequiresAFullFreshStrokeBeforeTheInventoryReopens() {
 		var session = openedList(false, InventoryListModel.Side.LEFT);
-		var parent = retainedParent(session);
-		var expected = inventoryDeadzoneTarget(parent, session.snapshot().radial().deadzone());
+		session.moveGui(-100, 0, 290);
+		assertTrue(current(session).menuId().endsWith(":content"));
+		var parent = current(session);
 		double bearing = inventorySlotBearing(parent);
-		double deadzone = session.snapshot().radial().deadzone();
 		double stroke = session.snapshot().settings().stroke();
 		long dwell = session.snapshot().settings().dwellMillis();
-		session.moveGui(-100, 0, 290);
-		assertPointer(session, expected.x(), expected.y());
-		moveTo(session, parent.origin(), bearing, deadzone + stroke - 1.0, 300);
+		moveTo(session, parent.origin(), bearing, stroke - 1.0, 300);
 		session.tick(300 + dwell + 1);
-		assertEquals(parent.menuId(), current(session).menuId(), "a partial new stroke cannot pay the pop's fence");
+		assertEquals(parent.menuId(), current(session).menuId(), "a partial new stroke cannot pay the pop's fresh-stroke fence");
 		assertFalse(session.snapshot().inventory().open());
-		moveTo(session, parent.origin(), bearing, deadzone + stroke, 500);
+		moveTo(session, parent.origin(), bearing, stroke, 500);
 		session.tick(500 + dwell + 1);
 		assertTrue(current(session).menuId().endsWith(":inventory"));
 		assertTrue(session.snapshot().inventory().open(), "a full deliberate stroke plus dwell reopens the list");
 	}
 
 	@Test
-	void distantListExitKeepsTheReturnPendingUntilTheProjectionCanShowIt() {
+	void listUserReturnNeverUsesTheOldCircumferenceEvenUnderDistantProjection() {
 		var session = openedList(false, new Content());
 		session.constrainPointer(new SpatialController.Viewport(100, 100, -300, 0), 280);
+		var trigger = session.snapshot().radial().pointer();
 		session.moveGui(-100, 0, 290);
 		assertTrue(current(session).menuId().endsWith(":content"));
-		assertPointer(session, 250, 0);
-		assertEquals(List.of(session.snapshot().radial().pointer()), session.snapshot().radial().trail(),
-			"the pop rebases one seed and the pending return adds no further stroke");
 		assertFalse(session.snapshot().inventory().open());
+		var returned = session.snapshot().radial();
+		var parent = current(session);
+		assertEquals(trigger, returned.pointer(), "the user return leaves the pointer at the trigger");
+		assertEquals(trigger, parent.origin(), "the retained parent is rigidly translated to the pointer");
+		assertNull(returned.focusId(), "the shared centre is inside the frozen deadzone");
+		assertEquals(List.of(returned.pointer()), returned.trail(), "the pop seeds exactly one point");
+		// No pending circumference placement exists: a later projection change
+		// re-confines the pointer normally instead of chasing the old slot.
 		session.constrainPointer(new SpatialController.Viewport(100, 100, -180, 0), 300);
-		assertPointer(session, 210, 0);
-		assertNull(session.snapshot().radial().focusId());
-		assertEquals(List.of(session.snapshot().radial().pointer()), session.snapshot().radial().trail(),
-			"resolution rebases the seed without an appended stroke");
+		assertEquals(229.0, session.snapshot().radial().pointer().x(), 1e-9,
+			"the pointer never warps to the old inventory-slot circumference");
 	}
 
 	@Test
-	void pendingContentReturnAtNonZeroOriginStaysInsideTheDeadzoneWhenPropertiesAppear() {
+	void programmaticItemRevocationDoesNotTranslateRetainedOrigins() {
+		var target = target("ordinary", "entity_block", true);
+		var session = openedList(false, new Content());
+		var contentBefore = retainedParent(session);
+		double forward = session.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		session.moveGui(forward * 200, 0, 290);
+		assertTrue(current(session).menuId().contains(":item:"));
+
+		assertTrue(session.updateContent(inventory(target, 2, true, List.of(row("other", 5L))), 300));
+
+		var contentAfter = retainedParent(session);
+		assertEquals(contentBefore.menuId(), contentAfter.menuId());
+		assertEquals(contentBefore.origin(), contentAfter.origin(), "a programmatic pop applies no rigid translation");
+		assertTrue(current(session).menuId().endsWith(":inventory"));
+		assertTrue(session.snapshot().inventory().open());
+		assertEquals("other", session.snapshot().inventory().selectedKey());
+		assertEquals(current(session).origin().x(), session.snapshot().inventory().axisX(), 1e-9,
+			"a reopened list takes the unchanged menu origin instead of a user-return translation");
+	}
+
+	@Test
+	void freshPhysicalMovementAfterAUserReturnContinuesFromTheReturnedCentre() {
+		var session = openedList(false, new Content());
+		session.constrainPointer(new SpatialController.Viewport(100, 100, -180, 0), 280);
+		var trigger = session.snapshot().radial().pointer();
+		session.moveGui(-100, 0, 290);
+		assertTrue(current(session).menuId().endsWith(":content"));
+		assertEquals(trigger, session.snapshot().radial().pointer());
+		session.moveGui(-10, 0, 291);
+		assertEquals(trigger.x() - 10.0, session.snapshot().radial().pointer().x(), 1e-9,
+			"fresh physical movement continues from the returned centre");
+		assertNull(session.snapshot().radial().focusId(),
+			"the small movement stays inside the deadzone around the returned parent");
+	}
+
+	@Test
+	void contentIntentOffTurnsAPropertyIntoAnAttentionLeafWithTheWholeMarkerDefault() {
+		var target = target("ordinary", "dropped_item", false);
+		Content port = new Content();
+		var ref = PresentationPropertyRef.root("pingforit:basic", "pingforit:health");
+		port.next = new SpatialSelectorSession.ContentProjection<>(fence(target), 1, false, Status.READY,
+			List.of(new SpatialSelectorSession.Property("health", "health", ref, new PresentationValue.NumberValue(7.5),
+				List.of(ping("attention"), ping("danger")), ping("attention"))), null);
+		var session = sessionOff(target, false, port);
+		session.open(0); enter(session, "content", 10);
+		var choice = current(session).choices().stream().filter(value -> !value.back()).findFirst().orElseThrow();
+		assertFalse(choice.branch(), "OFF keeps no property intent branch");
+		assertNotNull(choice.action());
+		assertEquals(ping("attention").outlineColor(), choice.outlineColor(), "the Attention border is kept");
+		focus(session, choice.id(), 150);
+		var intent = assertInstanceOf(SelectorIntent.CreateProperty.class, session.releaseIntent(151));
+		assertEquals(ref, intent.property().ref());
+		assertEquals(new PresentationValue.NumberValue(7.5), intent.property().observedValue());
+		assertEquals("attention", intent.property().pingTypeId());
+		assertEquals("loot", intent.mainType().id(), "the whole-marker Target-Type default stays unchanged");
+	}
+
+	@Test
+	void contentIntentOffDisablesPropertiesWithoutAuthorizedAttentionInsteadOfFallingBack() {
+		var target = target("ordinary", "entity", false);
+		Content port = new Content();
+		port.next = new SpatialSelectorSession.ContentProjection<>(fence(target), 1, false, Status.READY, List.of(
+			new SpatialSelectorSession.Property("danger-only", "danger-only",
+				PresentationPropertyRef.root("pingforit:basic", "pingforit:danger"), new PresentationValue.NumberValue(1),
+				List.of(ping("danger")), ping("danger")),
+			new SpatialSelectorSession.Property("empty", "empty",
+				PresentationPropertyRef.root("pingforit:basic", "pingforit:empty"), new PresentationValue.NumberValue(2),
+				List.of(), null)), null);
+		var session = sessionOff(target, false, port);
+		session.open(0); enter(session, "content", 10);
+		var choices = current(session).choices().stream().filter(value -> !value.back()).toList();
+		assertEquals(2, choices.size());
+		for (var choice : choices) {
+			assertTrue(choice.disabled(), choice.id());
+			assertNull(choice.action(), "no fallback annotation is invented");
+		}
+		focus(session, choices.getFirst().id(), 150);
+		assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(151));
+	}
+
+	@Test
+	void contentIntentOffDirectListReleaseUsesAttentionAndKeepsTheWholeMarkerDefault() {
+		var target = target("ordinary", "dropped_item", false);
+		Content port = new Content();
+		port.next = inventory(target, 1, false, List.of(row("a", 50L)));
+		var session = sessionOff(target, false, port);
+		session.open(0); enter(session, "content", 10);
+		String id = current(session).choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
+		enter(session, id, 150);
+		assertTrue(session.snapshot().inventory().open());
+		var view = session.snapshot().inventoryView();
+		assertNull(view.retainedRowKey());
+		assertFalse(view.forwardAvailable(), "OFF has no item Forward entry or hint");
+		assertTrue(view.selectedRowCommittable(), "direct release is still eligible under OFF");
+		var intent = assertInstanceOf(SelectorIntent.SelectInventory.class, session.releaseIntent(300));
+		assertEquals("opaque:a", intent.reference());
+		assertEquals("attention", intent.itemType().id());
+		assertEquals("loot", intent.mainType().id(), "the whole-marker Loot default is preserved");
+	}
+
+	@Test
+	void contentIntentOffForwardStrokeNeverOpensAnItemSubmenu() {
 		var target = target("ordinary", "entity_block", true);
 		Content port = new Content();
 		port.next = inventory(target, 1, false, List.of(row("a", 50L)));
-		var session = session(target, Map.of(), false, port, 18);
-		session.open(0);
-
-		// Content is entered with its origin at the reported nonzero-origin roundoff case.
-		session.constrainPointer(new SpatialController.Viewport(100, 100, -546, 65), 1);
-		assertPointer(session, 496, -16);
-		session.moveGui(5, 0, 2);
-		session.moveGui(-5, 0, 3);
-		session.tick(200);
-		assertTrue(current(session).menuId().endsWith(":content"));
-		var parent = current(session);
-		assertEquals(496.0, parent.origin().x(), 1e-9);
-		assertEquals(-16.0, parent.origin().y(), 1e-9);
-
-		// The inventory surface opens from a projection that can reach its origin.
-		session.constrainPointer(new SpatialController.Viewport(100, 100, -627, 66), 210);
-		String inventory = current(session).choices().stream()
-			.filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
-		enter(session, inventory, 220);
+		var session = sessionOff(target, false, port);
+		session.open(0); enter(session, "content", 10);
+		String id = current(session).choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
+		enter(session, id, 150);
+		double forward = session.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		session.moveGui(forward * 200, 0, 290);
+		assertTrue(current(session).menuId().endsWith(":inventory"), "the frozen OFF toggle keeps Forward inert");
+		assertFalse(session.snapshot().inventoryView().forwardAvailable());
 		assertTrue(session.snapshot().inventory().open());
-
-		// The side Back returns to Content while the projection cannot show the
-		// desired circumference point, so the placement stays pending.
-		session.moveGui(-100, 0, 400);
-		assertTrue(current(session).menuId().endsWith(":content"));
-		assertFalse(session.snapshot().inventory().open());
-		assertEquals(577.0, session.snapshot().radial().pointer().x(), 1e-9);
-
-		// Two property entries appear before the pending point is resolved.
-		session.updateContent(new SpatialSelectorSession.ContentProjection<>(fence(target), 2, false, Status.UPDATING,
-			List.of(
-				new SpatialSelectorSession.Property("value0", "value0",
-					PresentationPropertyRef.root("pingforit:basic", "pingforit:value0"), new PresentationValue.NumberValue(0),
-					List.of(ping("attention")), ping("attention")),
-				new SpatialSelectorSession.Property("value1", "value1",
-					PresentationPropertyRef.root("pingforit:basic", "pingforit:value1"), new PresentationValue.NumberValue(1),
-					List.of(ping("attention")), ping("attention"))),
-			inventory(target, 2, false, List.of(row("a", 50L))).inventory()), 410);
-		session.constrainPointer(new SpatialController.Viewport(1200, 800, 0, 0), 420);
-
-		var returned = session.snapshot().radial();
-		double distance = Math.hypot(returned.pointer().x() - parent.origin().x(),
-			returned.pointer().y() - parent.origin().y());
-		assertTrue(distance <= 18.0, "the resolved absolute point must satisfy the inclusive deadzone predicate");
-		assertNull(current(session).focusId(), "no property may be focused by the resolved return");
-		assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(421));
 	}
 
 	@Test
-	void freshPhysicalMovementCancelsAPendingListReturnWithoutChasingIt() {
+	void contentIntentOnExposesForwardAndTheFrozenRetainedRowKey() {
 		var session = openedList(false, new Content());
-		session.constrainPointer(new SpatialController.Viewport(100, 100, -300, 0), 280);
-		session.moveGui(-100, 0, 290);
-		assertTrue(current(session).menuId().endsWith(":content"));
-		assertPointer(session, 250, 0);
-		session.moveGui(10, 0, 291);
-		assertPointer(session, 260, 0);
-		session.constrainPointer(new SpatialController.Viewport(100, 100, -180, 0), 300);
-		assertPointer(session, 229, 0);
-		assertTrue(session.snapshot().radial().pointer().x() > 210.0,
-			"the moved pointer is confined by the reprojection instead of warping to the abandoned target");
-		assertTrue(session.snapshot().radial().focusId().endsWith(":inventory"),
-			"the fresh movement continues ordinary navigation instead of the return placement");
+		var listView = session.snapshot().inventoryView();
+		assertNull(listView.retainedRowKey());
+		assertTrue(listView.forwardAvailable());
+		assertTrue(listView.selectedRowCommittable());
+		double forward = session.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		session.moveGui(forward * 200, 0, 290);
+		var itemView = session.snapshot().inventoryView();
+		assertEquals("a", itemView.retainedRowKey(), "the frozen item key is exposed while its submenu is active");
+		assertEquals(3, itemView.rows().size(), "the full window stays in the paint model");
+		assertFalse(itemView.forwardAvailable());
+		assertFalse(itemView.selectedRowCommittable(), "direct list release is not active behind the item submenu");
+	}
+
+	@Test
+	void backFocusRemovesOnlyCommittabilityNotTheForwardAffordance() {
+		var session = openedList(false, new Content());
+		double back = session.snapshot().inventory().direction().back() == InventoryListModel.Side.LEFT ? -1 : 1;
+		session.moveGui(back * 50, 0, 290);
+		var view = session.snapshot().inventoryView();
+		assertTrue(view.backAffordance().focused());
+		assertTrue(view.forwardAvailable(), "Back focus alone does not remove the Forward hint");
+		assertFalse(view.selectedRowCommittable(), "Back focus makes direct release ineligible");
+	}
+
+	@Test
+	void emptySelectionIsNeverCommittableInEitherMode() {
+		var target = target("ordinary", "entity_block", true);
+		Content port = new Content();
+		port.next = inventory(target, 1, false, List.of());
+		var session = sessionOff(target, false, port);
+		session.open(0); enter(session, "content", 10);
+		String id = current(session).choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
+		enter(session, id, 150);
+		var view = session.snapshot().inventoryView();
+		assertTrue(session.snapshot().inventory().open());
+		assertNull(view.retainedRowKey());
+		assertFalse(view.forwardAvailable());
+		assertFalse(view.selectedRowCommittable(), "an empty list is never committable");
+	}
+
+	@Test
+	void itemClearanceUpdateRepositionsTheActiveItemAndIsInertBeforeEntry() {
+		var session = openedList(false, new Content());
+		session.updateItemClearance(120, 290); // before entry: caches only
+		double forward = session.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		session.moveGui(forward * 200, 0, 291);
+		var item = current(session);
+		assertTrue(item.menuId().contains(":item:"));
+		double axis = session.snapshot().inventory().axisX();
+		assertEquals(axis + forward * (GEOMETRY.width() / 2 + 120), item.origin().x(), 1e-9,
+			"entry uses the prepared clearance metric");
+		var pointer = session.snapshot().radial().pointer();
+		var trail = session.snapshot().radial().trail();
+
+		session.updateItemClearance(160, 300);
+		var moved = current(session);
+		assertTrue(moved.menuId().contains(":item:"));
+		assertEquals(axis + forward * (GEOMETRY.width() / 2 + 160), moved.origin().x(), 1e-9);
+		assertEquals(item.origin().y(), moved.origin().y(), 1e-9, "the frozen row anchor is kept");
+		assertEquals(pointer, session.snapshot().radial().pointer(), "a pure metric update moves no pointer");
+		assertEquals(trail, session.snapshot().radial().trail(), "a pure metric update adds no trail");
+		assertEquals(0.0, session.snapshot().radial().hoverProgress(), "a pure metric update pays no hover travel");
+
+		var stable = session.snapshot().radial();
+		session.updateItemClearance(160, 301);
+		assertEquals(stable, session.snapshot().radial(), "an unchanged metric is inert");
+		assertThrows(IllegalArgumentException.class, () -> session.updateItemClearance(0.0, 302));
+		assertThrows(IllegalArgumentException.class, () -> session.updateItemClearance(Double.NaN, 303));
+		assertThrows(IllegalArgumentException.class, () -> session.updateItemClearance(Double.POSITIVE_INFINITY, 304));
 	}
 
 	@Test

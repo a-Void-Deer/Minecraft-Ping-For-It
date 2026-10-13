@@ -193,6 +193,46 @@ class SpatialOverlayTransitionsTest {
 		assertEquals(0.4, only(model.update(List.of(target("new")), 500L, false)).alpha(), 1.0e-12);
 	}
 
+	@Test
+	void synchronizedRelayoutCommitsAnchorsTogetherButKeepsScaleAndBothCoverageChannelsEasing() {
+		var model = model(8);
+		model.update(List.of(target("a")), 0L, true);
+		var moved = new SpatialOverlayTransitions.Target<>("a", 100.0, 80.0, 1.0, 0.2,
+			90.0, 70.0, "resized geometry", null, 0.4);
+		var first = only(model.update(List.of(moved), 100L, false, true));
+		assertEquals(100.0, first.x());
+		assertEquals(80.0, first.y());
+		assertEquals(2.0, first.scale(), "relayout does not snap scale");
+		assertEquals(0.8, first.alpha());
+		assertEquals(0.8, first.backgroundAlpha());
+		var half = only(model.update(List.of(moved), 600L, false));
+		assertEquals(100.0, half.x(), "an unchanged next frame cannot resume the old Cartesian interpolation");
+		assertEquals(80.0, half.y());
+		assertEquals(1.5, half.scale());
+		assertEquals(0.5, half.alpha(), 1.0e-12);
+		assertEquals(0.6, half.backgroundAlpha(), 1.0e-12);
+	}
+
+	@Test
+	void sharedGeometryRebaseKeepsDetachedPaintAndCurrentFollowerOnTheSameCenterWithoutAdvancingTime() {
+		var model = model(8);
+		model.update(List.of(target("a"), rayTarget(100, 1, 0)), 0, true);
+		model.update(List.of(rayTarget(100, 1, 0)), 100, false);
+		model.translateGeometry(30, -20);
+		var states = model.update(List.of(new SpatialOverlayTransitions.Target<>("follow", 140, 0, 2, 0.8,
+			70, 0, "follow", new SpatialOverlayTransitions.Ray(40, 0, 1, 0))), 100, false);
+		var detached = states.stream().filter(state -> state.key().equals("a")).findFirst().orElseThrow();
+		assertFalse(detached.present());
+		assertEquals(50, detached.x());
+		assertEquals(20, detached.y());
+		assertEquals(0.8, detached.alpha());
+		assertEquals(0.8, detached.backgroundAlpha());
+		var follower = states.stream().filter(state -> state.key().equals("follow")).findFirst().orElseThrow();
+		assertEquals(140, follower.x());
+		assertEquals(0, follower.y());
+		assertEquals(0.8, follower.alpha());
+	}
+
 	private static SpatialOverlayTransitions.Target<String, String> rayTarget(double radius, double ux, double uy) {
 		return new SpatialOverlayTransitions.Target<>("follow", 10 + radius * ux, 20 + radius * uy, 2, 0.8,
 			10 + 30 * ux, 20 + 30 * uy, "follow", new SpatialOverlayTransitions.Ray(10, 20, ux, uy));

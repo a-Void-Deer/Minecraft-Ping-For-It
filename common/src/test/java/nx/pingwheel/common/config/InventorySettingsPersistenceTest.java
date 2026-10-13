@@ -329,6 +329,8 @@ class InventorySettingsPersistenceTest {
 			.compareTo(selector.get("submenuRadiusScale").getAsBigDecimal()));
 		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, selector.get("trailLength").getAsInt());
 		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, selector.get("trailOpacity").getAsInt());
+		assertTrue(selector.has("contentIntentEnabled"));
+		assertFalse(selector.get("contentIntentEnabled").getAsBoolean());
 	}
 
 	@Test

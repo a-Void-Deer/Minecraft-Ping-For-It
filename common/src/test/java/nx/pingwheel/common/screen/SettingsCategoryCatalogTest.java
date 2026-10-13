@@ -47,7 +47,8 @@ class SettingsCategoryCatalogTest {
 			Setting.SPATIAL_DWELL_MILLIS,
 			Setting.SPATIAL_TARGET_GLIDE,
 			Setting.SPATIAL_HOVER_ENABLED,
-			Setting.SPATIAL_HOVER_MILLIS), SettingsCategoryCatalog.settings(Category.INPUT_INTERACTION));
+			Setting.SPATIAL_HOVER_MILLIS,
+			Setting.SPATIAL_CONTENT_INTENT_ENABLED), SettingsCategoryCatalog.settings(Category.INPUT_INTERACTION));
 		assertEquals(List.of(
 			Setting.CHANNEL,
 			Setting.PING_VOLUME,

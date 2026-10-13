@@ -13,7 +13,21 @@ import java.util.Objects;
  */
 public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 	int selectedIndex, int windowFirst, int visibleRows, boolean backLeft, Status status,
-	double axisX, double glideBaseY, double selectedRowCenterY, BackAffordance backAffordance) {
+	double axisX, double glideBaseY, double selectedRowCenterY, BackAffordance backAffordance,
+	String retainedRowKey, boolean forwardAvailable, boolean selectedRowCommittable) {
+
+	/**
+	 * Compatibility constructor for independent paint callers that predate the
+	 * navigation availability fields; a valid selected row is assumed
+	 * committable until the owner supplies explicit values.
+	 */
+	public SpatialInventoryView(String listKey, boolean open, List<Row> rows,
+		int selectedIndex, int windowFirst, int visibleRows, boolean backLeft, Status status,
+		double axisX, double glideBaseY, double selectedRowCenterY, BackAffordance backAffordance) {
+		this(listKey, open, rows, selectedIndex, windowFirst, visibleRows, backLeft, status,
+			axisX, glideBaseY, selectedRowCenterY, backAffordance, null, true,
+			validSelectedIndex(selectedIndex, rows) && (backAffordance == null || !backAffordance.focused()));
+	}
 
 	/** Compatibility constructor without list-Back focus/progress. */
 	public SpatialInventoryView(String listKey, boolean open, List<Row> rows,
@@ -49,13 +63,32 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 	 */
 	public SpatialInventoryView withSelectedRowCenterY(double centerRelativeY) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows,
-			backLeft, status, axisX, glideBaseY, centerRelativeY, backAffordance);
+			backLeft, status, axisX, glideBaseY, centerRelativeY, backAffordance,
+			retainedRowKey, forwardAvailable, selectedRowCommittable);
 	}
 
 	/** Caller supplies timer output; rendering owns no hover timer or navigation. */
 	public SpatialInventoryView withBackAffordance(boolean focused, double progress) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows,
-			backLeft, status, axisX, glideBaseY, selectedRowCenterY, new BackAffordance(focused, progress));
+			backLeft, status, axisX, glideBaseY, selectedRowCenterY, new BackAffordance(focused, progress),
+			retainedRowKey, forwardAvailable, selectedRowCommittable);
+	}
+
+	/**
+	 * Explicit session-owned navigation availability. {@code retainedRowKey} is
+	 * the frozen item key while that item's submenu is active, otherwise null;
+	 * {@code forwardAvailable} and {@code selectedRowCommittable} are the
+	 * session's own gates and are never reconstructed from paint rows.
+	 */
+	public SpatialInventoryView withNavigation(String retainedRowKey, boolean forwardAvailable,
+		boolean selectedRowCommittable) {
+		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows,
+			backLeft, status, axisX, glideBaseY, selectedRowCenterY, backAffordance,
+			retainedRowKey, forwardAvailable, selectedRowCommittable);
+	}
+
+	private static boolean validSelectedIndex(int selectedIndex, List<Row> rows) {
+		return selectedIndex >= 0 && rows != null && selectedIndex < rows.size();
 	}
 
 	public record BackAffordance(boolean focused, double progress) {

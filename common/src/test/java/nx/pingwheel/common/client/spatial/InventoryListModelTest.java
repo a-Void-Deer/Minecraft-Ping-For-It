@@ -328,4 +328,35 @@ class InventoryListModelTest {
 		model.applyBatch(List.of(entry("new", 100)));
 		assertEquals(List.of("a", "b", "new"), keys(model));
 	}
+
+	@Test
+	void translateMovesOnlyFrozenPanelGeometryAndPreservesTheWholeModel() {
+		InventoryListModel model = opened(3, entry("a", 10), entry("b", 20), entry("c", 30));
+		model.glide(1);
+		assertEquals(0, model.wheel(0.25f));
+		model.setStatus(InventoryListModel.Status.COMPLETE);
+		var before = model.snapshot();
+
+		model.translate(37.5, -18.25);
+		var after = model.snapshot();
+
+		assertEquals(before.axisX() + 37.5, after.axisX(), 1e-12);
+		assertEquals(before.glideBaseY() - 18.25, after.glideBaseY(), 1e-12);
+		assertEquals(before.entries(), after.entries(), "translation never reorders or updates rows");
+		assertEquals(before.selectedIndex(), after.selectedIndex());
+		assertEquals(before.selectedKey(), after.selectedKey());
+		assertEquals(before.windowFirst(), after.windowFirst());
+		assertEquals(before.direction(), after.direction());
+		assertEquals(before.status(), after.status());
+
+		model.translate(Double.NaN, 1.0);
+		model.translate(1.0, Double.POSITIVE_INFINITY);
+		assertEquals(after.axisX(), model.snapshot().axisX(), 1e-12, "non-finite deltas are inert");
+		assertEquals(after.glideBaseY(), model.snapshot().glideBaseY(), 1e-12);
+
+		assertTrue(model.applyBatch(List.of(entry("d", 5))));
+		assertEquals(List.of("c", "b", "a", "d"), keys(model), "the scroll freeze and discovery order survive translation");
+		assertEquals(1, model.wheel(0.75f), "the fractional wheel remainder survives translation");
+		assertEquals("a", model.selectedKey());
+	}
 }

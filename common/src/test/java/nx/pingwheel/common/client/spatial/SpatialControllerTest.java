@@ -151,12 +151,12 @@ class SpatialControllerTest {
 		var controller = returnedToNonRootContentWithHeldBack();
 		var trail = controller.snapshot().trail();
 		controller.constrainPointer(new SpatialController.Viewport(320, 240, 100, 600), 640);
-		assertEquals(new SpatialController.Point(0, -481), controller.snapshot().pointer());
+		assertEquals(new SpatialController.Point(-100, -481), controller.snapshot().pointer());
 		assertEquals("content:first", controller.snapshot().focusId(), "resize moves focus out of Back");
 		if (saturatedPhysicalInput) controller.movePhysical(0, 1000, 645);
 		controller.tick(650);
-		controller.constrainPointer(new SpatialController.Viewport(320, 240, -100, 0), 660);
-		assertEquals(new SpatialController.Point(0, -120), controller.snapshot().pointer());
+		controller.constrainPointer(new SpatialController.Viewport(320, 240, 0, 0), 660);
+		assertEquals(new SpatialController.Point(-100, -120), controller.snapshot().pointer());
 		assertEquals("content:back", controller.snapshot().focusId(), "pan moves focus back into Back");
 		assertEquals(trail, controller.snapshot().trail(), "corrections and saturated input add no travel");
 		controller.tick(670);
@@ -188,7 +188,7 @@ class SpatialControllerTest {
 		var controller = returnedToNonRootContentWithHeldBack();
 		controller.constrainPointer(new SpatialController.Viewport(320, 240, 100, 600), 640);
 		controller.tick(650);
-		controller.constrainPointer(new SpatialController.Viewport(320, 240, -100, 0), 660);
+		controller.constrainPointer(new SpatialController.Viewport(320, 240, 0, 0), 660);
 		controller.movePhysical(1, 0, 670);
 		assertEquals("content:back", controller.snapshot().focusId());
 		controller.tick(1070);
@@ -226,7 +226,11 @@ class SpatialControllerTest {
 		assertEquals("property:back", controller.snapshot().focusId());
 		controller.tick(630);
 		assertEquals(2, controller.snapshot().menus().size(), "first hover returns from property to content");
-		assertEquals("content:back", controller.snapshot().focusId(), "parent Back is held across the pop");
+		assertEquals(new SpatialController.Point(0, 0), activeOrigin(controller));
+		assertNull(controller.snapshot().focusId(), "user return lands at the returned origin");
+		// A non-input rebase can expose parent Back again, but cannot release the shared held block.
+		controller.rebase(-100, 0, 631);
+		assertEquals("content:back", controller.snapshot().focusId());
 		return controller;
 	}
 
@@ -421,7 +425,8 @@ class SpatialControllerTest {
 		assertEquals(2, controller.snapshot().menus().size(), "back dwell must wait for the frozen threshold");
 		controller.tick(420L);
 		assertEquals(1, controller.snapshot().menus().size(), "back dwell pops exactly one level");
-		assertEquals("content", controller.snapshot().focusId(), "root focus matches the pointer direction after pop");
+		assertEquals(controller.snapshot().pointer(), activeOrigin(controller), "the root aligns with the Back trigger");
+		assertNull(controller.snapshot().focusId(), "a user return leaves the pointer in the returned deadzone");
 	}
 
 	@Test
@@ -848,8 +853,8 @@ class SpatialControllerTest {
 		SpatialController.Point rpmOrigin = activeOrigin(controller);
 		moveToBearing(controller, rpmOrigin, 222.0, 130.0, 430L);
 		assertEquals("content:rpm:back", controller.snapshot().focusId());
-		controller.tick(630L);
-		assertEquals(2, controller.snapshot().menus().size(), "the Back dwell pops exactly one level");
+		assertTrue(controller.backProgrammatically(630L));
+		assertEquals(2, controller.snapshot().menus().size(), "a programmatic pop preserves the placement being tested");
 		// The published projection cannot show the Content deadzone circumference yet.
 		controller.constrainPointer(new SpatialController.Viewport(100, 100, 400, 0), 640L);
 		var confined = controller.snapshot().pointer();
@@ -893,11 +898,11 @@ class SpatialControllerTest {
 		var controller = returnedToNonRootContentWithHeldBack();
 		controller.constrainPointer(new SpatialController.Viewport(100, 100, 200, 0), 640L);
 		var trail = controller.snapshot().trail();
-		controller.placeReturn(new SpatialController.Point(110.0, 0.0), 650L);
+		controller.placeReturn(new SpatialController.Point(10.0, 0.0), 650L);
 		assertEquals(trail, controller.snapshot().trail(), "a pending return adds no travel or stroke");
 		controller.constrainPointer(new SpatialController.Viewport(1200, 1400, 0, 0), 660L);
 		var returned = controller.snapshot();
-		assertEquals(new SpatialController.Point(110.0, 0.0), returned.pointer());
+		assertEquals(new SpatialController.Point(10.0, 0.0), returned.pointer());
 		assertNull(returned.focusId());
 		assertEquals(List.of(returned.pointer()), returned.trail(), "resolution rebases the trail seed");
 		var resolved = controller.snapshot();
@@ -942,5 +947,495 @@ class SpatialControllerTest {
 
 		controller.movePhysical(5.0, 0.0, 280L);
 		assertEquals(2, controller.snapshot().menus().size(), "rebase must not leave a phantom turn corner");
+	}
+
+	@ParameterizedTest
+	@CsvSource({"explicit,175,0", "retrace,130,0", "dwell,80,40", "turn,80,60", "hover,150,0"})
+	void everyRadialUserReturnAlignsRootAtTheAdmittedTriggerAndImmediateReleaseAbandons(
+		String path, double triggerX, double triggerY) {
+		var controller = enteredContent(path.equals("hover"), 400, 200, 210);
+		long epoch = controller.snapshot().trailEpoch();
+		switch (path) {
+			case "explicit" -> {
+				controller.movePhysical(-25, 0, 220);
+				assertTrue(controller.back(230));
+			}
+			case "retrace" -> controller.movePhysical(-70, 0, 220);
+			case "dwell" -> {
+				controller.movePhysical(-120, 40, 220); // Back, outside the narrow retrace corridor
+				assertEquals("content:back", controller.snapshot().focusId());
+				controller.tick(420);
+			}
+			case "turn" -> {
+				controller.movePhysical(-120, 40, 220);
+				assertEquals("content:back", controller.snapshot().focusId());
+				controller.movePhysical(0, 20, 260); // a qualified turn, still outside the retrace corridor
+			}
+			case "hover" -> {
+				controller.movePhysical(-50, 0, 220);
+				controller.tick(620);
+			}
+			default -> throw new AssertionError("unknown return path");
+		}
+		var returned = controller.snapshot();
+		var trigger = returned.pointer();
+		assertEquals(1, returned.menus().size(), "each trigger removes only one child");
+		assertEquals(triggerX, trigger.x(), DELTA, "return never moves the admitted trigger pointer");
+		assertEquals(triggerY, trigger.y(), DELTA);
+		assertEquals(trigger, returned.menus().getFirst().origin());
+		assertEquals(trigger, returned.menus().getFirst().parentOrigin(), "the root anchor translates too");
+		assertEquals(new SpatialController.UserReturnPlacement(1, trigger), controller.userReturnPlacement());
+		assertNull(returned.focusId());
+		assertEquals(List.of(trigger), returned.trail(), "a return seeds an epoch without a joining segment");
+		assertTrue(returned.trailEpoch() > epoch);
+		controller.tick(10_000);
+		assertEquals(1, controller.snapshot().menus().size(), "idle frames cannot reopen the departed child");
+		assertInstanceOf(SpatialController.Release.Abandoned.class, controller.release(10_001));
+	}
+
+	@Test
+	void retraceUsesTheConfinedPointerBeforeAligningTheRoot() {
+		var controller = enteredContent(false, 500, 200, 210);
+		controller.constrainPointer(new SpatialController.Viewport(200, 200, -200, 0), 220);
+		controller.movePhysical(-Double.MAX_VALUE, 0, 230);
+		var returned = controller.snapshot();
+		assertEquals(100, returned.pointer().x(), DELTA, "only the admitted boundary point returns");
+		assertEquals(0, returned.pointer().y(), DELTA);
+		assertEquals(returned.pointer(), activeOrigin(controller));
+		assertEquals(new SpatialController.UserReturnPlacement(1, returned.pointer()),
+			controller.userReturnPlacement());
+		assertEquals(List.of(returned.pointer()), returned.trail());
+	}
+
+	@Test
+	void nestedUserReturnsRigidlyTranslateEveryAncestorAndIndependentRowAnchor() {
+		var controller = new SpatialController(root(), tuning(200, false, 500));
+		controller.start(0);
+		controller.movePhysical(200, 0, 10);
+		controller.tick(210);
+		controller.movePhysical(80, -160, 220);
+		controller.tick(420);
+		assertEquals(3, controller.snapshot().menus().size());
+		assertEquals("content:rpm", controller.snapshot().menus().getLast().entryChoiceId());
+		controller.enterExternal(SpatialMenu.of("list"), new SpatialController.Point(430, -95),
+			new SpatialController.Point(280, -120), 430);
+		controller.useExternalSurface();
+		controller.alignExternalBack(true);
+		controller.enterExternal(SpatialMenu.of("item", SpatialMenu.Choice.leaf("item:leaf", "leaf", "a:leaf")),
+			new SpatialController.Point(550, -85), new SpatialController.Point(430, -85), 440);
+		var before = controller.snapshot();
+		assertTrue(controller.back(450));
+		var returned = controller.snapshot();
+		assertRigidReturn(before, returned, new SpatialController.Point(120, 10));
+		assertEquals(new SpatialController.Point(400, -110), returned.menus().getLast().parentOrigin(),
+			"the retained row anchor is translated, not replaced with the previous radial origin");
+		assertNull(returned.focusId(), "the returned list clears stale external Back focus");
+		assertEquals(new SpatialController.UserReturnPlacement(1, new SpatialController.Point(120, 10)),
+			controller.userReturnPlacement());
+		assertTrue(controller.back(460));
+		assertRigidReturn(returned, controller.snapshot(), new SpatialController.Point(150, 65));
+		assertEquals(new SpatialController.UserReturnPlacement(2, new SpatialController.Point(270, 75)),
+			controller.userReturnPlacement());
+		assertTrue(controller.back(470));
+		assertTrue(controller.back(480));
+		assertEquals(new SpatialController.Point(550, -85), activeOrigin(controller));
+		assertEquals(new SpatialController.UserReturnPlacement(4, new SpatialController.Point(550, -85)),
+			controller.userReturnPlacement(), "successive vectors accumulate across nested and root returns");
+		assertInstanceOf(SpatialController.Release.Abandoned.class, controller.release(490));
+	}
+
+	private static void assertRigidReturn(SpatialController.Snapshot before, SpatialController.Snapshot after,
+		SpatialController.Point delta) {
+		assertEquals(before.menus().size() - 1, after.menus().size());
+		assertEquals(before.pointer(), after.pointer());
+		assertEquals(after.pointer(), after.menus().getLast().origin());
+		assertEquals(List.of(after.pointer()), after.trail());
+		assertTrue(after.trailEpoch() > before.trailEpoch());
+		for (int index = 0; index < after.menus().size(); index++) {
+			var oldMenu = before.menus().get(index);
+			var newMenu = after.menus().get(index);
+			assertEquals(oldMenu.origin().x() + delta.x(), newMenu.origin().x(), DELTA);
+			assertEquals(oldMenu.origin().y() + delta.y(), newMenu.origin().y(), DELTA);
+			assertEquals(oldMenu.parentOrigin().x() + delta.x(), newMenu.parentOrigin().x(), DELTA);
+			assertEquals(oldMenu.parentOrigin().y() + delta.y(), newMenu.parentOrigin().y(), DELTA);
+			assertEquals(oldMenu.origin().x() - oldMenu.parentOrigin().x(),
+				newMenu.origin().x() - newMenu.parentOrigin().x(), DELTA);
+			assertEquals(oldMenu.origin().y() - oldMenu.parentOrigin().y(),
+				newMenu.origin().y() - newMenu.parentOrigin().y(), DELTA);
+			assertEquals(oldMenu.menuId(), newMenu.menuId());
+			assertEquals(oldMenu.entryChoiceId(), newMenu.entryChoiceId());
+			assertEquals(oldMenu.choices().size(), newMenu.choices().size());
+			for (int choice = 0; choice < oldMenu.choices().size(); choice++) {
+				var oldChoice = oldMenu.choices().get(choice);
+				var newChoice = newMenu.choices().get(choice);
+				assertEquals(oldChoice.id(), newChoice.id());
+				assertEquals(oldChoice.label(), newChoice.label());
+				assertEquals(oldChoice.action(), newChoice.action());
+				assertEquals(oldChoice.back(), newChoice.back());
+				assertEquals(oldChoice.branch(), newChoice.branch());
+				assertEquals(oldChoice.disabled(), newChoice.disabled());
+				assertEquals(oldChoice.reserved(), newChoice.reserved());
+				assertEquals(oldChoice.outlineColor(), newChoice.outlineColor());
+				assertEquals(oldChoice.startDegrees(), newChoice.startDegrees(), DELTA);
+				assertEquals(oldChoice.spanDegrees(), newChoice.spanDegrees(), DELTA);
+			}
+		}
+	}
+
+	@Test
+	void incrementalRetraceFromANonRootChildCannotCascadeWithoutANewReverseStroke() {
+		var leaf = SpatialMenu.of("leaf", SpatialMenu.Choice.leaf("leaf:action", "leaf", "a:leaf"));
+		var parent = SpatialMenu.of("parent", SpatialMenu.Choice.branch("parent:child", "child", leaf));
+		var root = SpatialMenu.of("root", SpatialMenu.Choice.branch("root:parent", "parent", parent).withSector(90, 360));
+		var controller = new SpatialController(root, new SpatialController.Tuning(10, 40, 100, false, 400));
+		controller.start(0);
+		controller.movePhysical(200, 0, 10);
+		controller.tick(110);
+		controller.movePhysical(200, 0, 120);
+		controller.tick(220);
+		assertEquals(3, controller.snapshot().menus().size());
+		for (int sample = 1; sample <= 67; sample++) controller.movePhysical(-1, 0, 230 + sample);
+		assertEquals(3, controller.snapshot().menus().size());
+		controller.movePhysical(-1, 0, 298);
+		assertEquals(2, controller.snapshot().menus().size());
+		assertEquals(new SpatialController.Point(332, 0), activeOrigin(controller));
+		assertEquals(new SpatialController.Point(132, 0), controller.snapshot().menus().getFirst().origin());
+		controller.tick(10_000);
+		assertEquals(2, controller.snapshot().menus().size(), "a stationary non-root return cannot cascade");
+		for (int sample = 1; sample <= 67; sample++) controller.movePhysical(-1, 0, 10_000 + sample);
+		assertEquals(2, controller.snapshot().menus().size(), "the next level requires its own full retrace distance");
+		controller.movePhysical(-1, 0, 10_068);
+		assertEquals(1, controller.snapshot().menus().size());
+		assertEquals(new SpatialController.Point(264, 0), activeOrigin(controller));
+		assertEquals(new SpatialController.UserReturnPlacement(2, new SpatialController.Point(264, 0)),
+			controller.userReturnPlacement());
+	}
+
+	@Test
+	void programmaticReturnKeepsPlacementAndOldFocusWithoutAUserNotification() {
+		var controller = enteredContent(false, 500, 200, 210);
+		controller.movePhysical(-50, 0, 220);
+		var before = controller.snapshot();
+		assertTrue(controller.backProgrammatically(230));
+		var returned = controller.snapshot();
+		assertEquals(before.pointer(), returned.pointer());
+		assertEquals(before.menus().getFirst().origin(), activeOrigin(controller));
+		assertEquals(before.menus().getFirst().parentOrigin(), returned.menus().getFirst().parentOrigin());
+		assertEquals("content", returned.focusId(), "the untranslated root still focuses the old pointer direction");
+		assertEquals(new SpatialController.UserReturnPlacement(0, new SpatialController.Point(0, 0)),
+			controller.userReturnPlacement());
+		controller.tick(10_000);
+		assertEquals(1, controller.snapshot().menus().size(), "the old programmatic fresh-stroke fence remains");
+		var release = assertInstanceOf(SpatialController.Release.NoAction.class, controller.release(10_001));
+		assertEquals(SpatialController.Release.NoAction.Reason.BRANCH_WITHOUT_ACTION, release.reason());
+	}
+
+	@Test
+	void rootPruningPreservesAlreadyTranslatedPlacementAndDoesNotReportAnotherUserReturn() {
+		var controller = enteredContent(false, 500, 200, 210);
+		controller.movePhysical(-70, 0, 220);
+		controller.movePhysical(200, 0, 230);
+		controller.tick(430);
+		assertEquals(2, controller.snapshot().menus().size());
+		var before = controller.snapshot();
+		var notification = controller.userReturnPlacement();
+		controller.replaceRoot(SpatialMenu.of("root",
+			SpatialMenu.Choice.leaf("danger", "danger", "ping:danger").withSector(0, 55)), 440);
+		assertEquals(1, controller.snapshot().menus().size());
+		assertEquals(before.pointer(), controller.snapshot().pointer());
+		assertEquals(before.menus().getFirst().origin(), activeOrigin(controller));
+		assertEquals(notification, controller.userReturnPlacement());
+	}
+
+	@Test
+	void zeroDistanceReturnStillNotifiesAndOnlyStartResetsTheCumulativePlacement() {
+		var controller = new SpatialController(root(), tuning(200, false, 500));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("external", SpatialMenu.Choice.leaf("x", "x", "a:x")), 100, 20, 10);
+		controller.rebase(0, 0, 20);
+		long epoch = controller.snapshot().trailEpoch();
+		assertTrue(controller.back(30));
+		var notification = new SpatialController.UserReturnPlacement(1, new SpatialController.Point(0, 0));
+		assertEquals(notification, controller.userReturnPlacement());
+		assertTrue(controller.snapshot().trailEpoch() > epoch, "a zero vector is still a navigation discontinuity");
+		assertFalse(controller.back(40));
+		assertFalse(controller.backProgrammatically(40));
+		controller.enterExternal(SpatialMenu.of("external"), 200, 10, 50);
+		controller.repositionExternal(new SpatialController.Point(220, 10), new SpatialController.Point(10, 10), 60);
+		assertTrue(controller.backProgrammatically(70));
+		controller.placeReturn(new SpatialController.Point(10, 0), 80);
+		assertEquals(notification, controller.userReturnPlacement(), "non-user operations never produce a notification");
+		controller.cancel();
+		assertEquals(notification, controller.userReturnPlacement(), "an ended hold's notification remains observable");
+		controller.start(90);
+		assertEquals(new SpatialController.UserReturnPlacement(0, new SpatialController.Point(0, 0)),
+			controller.userReturnPlacement());
+		assertEquals(new SpatialController.Point(0, 0), activeOrigin(controller));
+	}
+
+	@Test
+	void userReturnDiscardsPendingProgrammaticPlacementBeforeAProjectionCanResolveIt() {
+		var controller = new SpatialController(root(), tuning(200, false, 500));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("external"), 200, 0, 10);
+		controller.constrainPointer(new SpatialController.Viewport(100, 100, 200, 0), 20);
+		controller.placeReturn(new SpatialController.Point(236, 0), 30);
+		var pointer = controller.snapshot().pointer();
+		assertTrue(controller.back(40));
+		assertEquals(pointer, activeOrigin(controller));
+		var returned = controller.snapshot();
+		controller.constrainPointer(new SpatialController.Viewport(1000, 1000, 0, 0), 50);
+		assertEquals(returned, controller.snapshot(), "a stale pending target cannot move the new user-return placement");
+	}
+
+	@Test
+	void userReturnImmediateReleaseAbandonsEvenWhenTheOldRootDirectionWasAnAction() {
+		var controller = new SpatialController(halfRoot(), tuning(200, false, 400));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("child"), 120, 0, 10);
+		assertTrue(controller.back(20));
+		assertEquals(new SpatialController.Point(120, 0), controller.snapshot().pointer());
+		assertEquals(controller.snapshot().pointer(), activeOrigin(controller));
+		assertInstanceOf(SpatialController.Release.Abandoned.class, controller.release(20),
+			"the old root's right-side action cannot leak through an immediate user-return release");
+	}
+
+	@Test
+	void fractionalNestedReturnCoincidesExactlyEvenWithAZeroDeadzone() {
+		var controller = new SpatialController(root(), new SpatialController.Tuning(0, 40, 100, false, 400));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("parent"), 1000.5, -200.25, 10);
+		controller.enterExternal(SpatialMenu.of("child"), 0.1, 0.2, 20);
+		var pointer = controller.snapshot().pointer();
+		assertTrue(controller.back(30));
+		assertEquals(pointer, controller.snapshot().pointer());
+		assertEquals(pointer, activeOrigin(controller), "rounding must not leave the returned pointer outside a zero deadzone");
+		assertNull(controller.snapshot().focusId());
+		assertInstanceOf(SpatialController.Release.Abandoned.class, controller.release(40));
+	}
+
+	@ParameterizedTest
+	@CsvSource({"false", "true"})
+	void externalSurfaceUserBackAlignsTheRootWithoutMovingItsFixedPointer(boolean hoverReturn) {
+		var controller = new SpatialController(root(), tuning(200, true, 400));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("list"), 120, 30, 10);
+		controller.useExternalSurface();
+		var pointer = controller.snapshot().pointer();
+		if (hoverReturn) {
+			assertFalse(controller.updateExternalBack(true, 20));
+			assertTrue(controller.updateExternalBack(true, 420));
+		} else assertTrue(controller.back(20));
+		assertEquals(1, controller.snapshot().menus().size());
+		assertEquals(pointer, controller.snapshot().pointer());
+		assertEquals(pointer, activeOrigin(controller));
+		assertEquals(new SpatialController.UserReturnPlacement(1, pointer), controller.userReturnPlacement());
+		assertEquals(List.of(pointer), controller.snapshot().trail());
+		assertInstanceOf(SpatialController.Release.Abandoned.class, controller.release(430));
+	}
+
+	@Test
+	void programmaticItemPopKeepsTheReturnedSurfacePlacementAndExternalBackFocus() {
+		var controller = new SpatialController(root(), tuning(200, true, 400));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("list"), 100, 0, 10);
+		controller.useExternalSurface();
+		controller.alignExternalBack(true);
+		controller.enterExternal(SpatialMenu.of("item", SpatialMenu.Choice.leaf("item:leaf", "leaf", "a:leaf")),
+			200, 0, 20);
+		assertTrue(controller.backProgrammatically(30));
+		assertEquals(new SpatialController.Point(200, 0), controller.snapshot().pointer());
+		assertEquals(new SpatialController.Point(100, 0), activeOrigin(controller));
+		assertEquals("list:back", controller.snapshot().focusId(), "the old programmatic surface focus is not cleared");
+		assertEquals(new SpatialController.UserReturnPlacement(0, new SpatialController.Point(0, 0)),
+			controller.userReturnPlacement());
+	}
+
+	@Test
+	void externalRelayoutRestartsPendingHoverWithoutPointerTravelTrailOrImmediatePop() {
+		var controller = new SpatialController(root(), tuning(200, true, 400));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("external", SpatialMenu.Choice.leaf("x", "x", "a:x")), 200, 0, 10);
+		controller.movePhysical(-50, 0, 20);
+		controller.tick(320);
+		assertEquals(0.75, controller.snapshot().hoverProgress(), DELTA);
+		var before = controller.snapshot();
+		var notification = controller.userReturnPlacement();
+		controller.repositionExternal(new SpatialController.Point(300, 0), new SpatialController.Point(100, 0), 600);
+		var relaid = controller.snapshot();
+		assertEquals(2, relaid.menus().size(), "relayout after an old deadline cannot itself pop");
+		assertEquals(before.pointer(), relaid.pointer());
+		assertEquals(before.trail(), relaid.trail());
+		assertEquals(before.trailSequence(), relaid.trailSequence());
+		assertEquals(before.trailEpoch(), relaid.trailEpoch());
+		assertEquals(before.trailAlignment(), relaid.trailAlignment());
+		assertEquals(before.trailAlignmentSequence(), relaid.trailAlignmentSequence());
+		assertEquals(new SpatialController.Point(300, 0), activeOrigin(controller));
+		assertEquals(new SpatialController.Point(100, 0), relaid.menus().getLast().parentOrigin());
+		assertEquals("external:back", relaid.focusId());
+		assertEquals(0, relaid.hoverProgress());
+		assertEquals(notification, controller.userReturnPlacement());
+		controller.tick(620);
+		controller.tick(1019);
+		assertEquals(2, controller.snapshot().menus().size(), "the new alignment requires a full fresh hover");
+		controller.tick(1020);
+		assertEquals(1, controller.snapshot().menus().size());
+		assertEquals(before.pointer(), activeOrigin(controller));
+	}
+
+	@Test
+	void externalRelayoutRestartsPendingBackDwellAtTheNewGeometryWhenHoverDisabled() {
+		var controller = new SpatialController(root(), tuning(200, false, 400));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("external"), 200, 0, 10);
+		moveToBearing(controller, new SpatialController.Point(200, 0), 270.0, 130.0, 20);
+		assertEquals("external:back", controller.snapshot().focusId(), "helper precondition: Back is focused");
+		var before = controller.snapshot();
+		var notification = controller.userReturnPlacement();
+
+		controller.repositionExternal(new SpatialController.Point(260, 0), new SpatialController.Point(60, 0), 210);
+		var relaid = controller.snapshot();
+		assertEquals("external:back", relaid.focusId(), "the same Back choice stays focused across the relayout");
+		assertEquals(2, relaid.menus().size(), "relayout after an old deadline cannot itself pop");
+		assertEquals(new SpatialController.Point(260, 0), activeOrigin(controller));
+		assertEquals(new SpatialController.Point(60, 0), relaid.menus().getLast().parentOrigin());
+		assertEquals(before.pointer(), relaid.pointer(), "relayout moves no pointer input");
+		assertEquals(before.trail(), relaid.trail(), "relayout appends no trail sample");
+		assertEquals(before.trailSequence(), relaid.trailSequence());
+		assertEquals(before.trailEpoch(), relaid.trailEpoch());
+		assertEquals(before.trailAlignment(), relaid.trailAlignment());
+		assertEquals(notification, controller.userReturnPlacement(), "relayout is not a navigation");
+
+		controller.tick(220);
+		assertEquals(2, controller.snapshot().menus().size(), "a same-focus relayout restarts the pending Back dwell");
+		controller.tick(409);
+		assertEquals(2, controller.snapshot().menus().size(), "the fresh dwell still waits for its full threshold");
+		controller.tick(410);
+		assertEquals(1, controller.snapshot().menus().size(),
+			"preserved physical travel qualifies once the fresh dwell elapses");
+		assertEquals(before.pointer(), activeOrigin(controller), "the user return aligns the root at the admitted trigger");
+		assertEquals(new SpatialController.UserReturnPlacement(1, before.pointer()),
+			controller.userReturnPlacement(), "only the actual return advances the notification");
+	}
+
+	@Test
+	void noOpExternalRelayoutDoesNotRestartAnEligibleBackDwell() {
+		var controller = new SpatialController(root(), tuning(200, false, 400));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("external"), 200, 0, 10);
+		moveToBearing(controller, new SpatialController.Point(200, 0), 270.0, 130.0, 20);
+		assertEquals("external:back", controller.snapshot().focusId());
+
+		controller.repositionExternal(new SpatialController.Point(200, 0), new SpatialController.Point(0, 0), 210);
+		assertEquals("external:back", controller.snapshot().focusId());
+		controller.tick(220);
+		assertEquals(1, controller.snapshot().menus().size(),
+			"an unchanged placement must not postpone the pending dwell past its deadline");
+	}
+
+	@Test
+	void externalRelayoutReevaluatesFocusButCannotSupplyBranchTravel() {
+		var child = SpatialMenu.of("child", SpatialMenu.Choice.leaf("leaf", "leaf", "a:leaf"));
+		var controller = new SpatialController(root(), tuning(200, false, 400));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("external", SpatialMenu.Choice.branch("branch", "branch", child)), 200, 0, 10);
+		var before = controller.snapshot();
+		controller.repositionExternal(new SpatialController.Point(80, 0), new SpatialController.Point(-120, 0), 20);
+		assertEquals("branch", controller.snapshot().focusId(), "focus follows geometry without moving the pointer");
+		assertEquals(before.pointer(), controller.snapshot().pointer());
+		assertEquals(before.trail(), controller.snapshot().trail());
+		controller.tick(10_000);
+		assertEquals(2, controller.snapshot().menus().size(), "relayout beyond the stroke radius pays no dwell travel");
+	}
+
+	@Test
+	void externalRelayoutClearsAStaleTurnCornerEvenWhenChoiceFocusIsUnchanged() {
+		var child = SpatialMenu.of("child", SpatialMenu.Choice.leaf("leaf", "leaf", "a:leaf"));
+		var controller = new SpatialController(root(), tuning(200, false, 400));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("external", SpatialMenu.Choice.branch("branch", "branch", child)), 200, 0, 10);
+		controller.movePhysical(120, 0, 20);
+		controller.movePhysical(10, 0, 60); // pending corner at (320,0)
+		controller.repositionExternal(new SpatialController.Point(330, -120), new SpatialController.Point(330, -320), 70);
+		assertEquals("branch", controller.snapshot().focusId());
+		controller.movePhysical(5, 0, 80);
+		assertEquals(2, controller.snapshot().menus().size(), "the short new segment cannot use the stale corner");
+	}
+
+	@Test
+	void externalRelayoutCannotPayAReturnsFreshStrokeButPreservesRealPartialTravel() {
+		var child = SpatialMenu.of("child", SpatialMenu.Choice.leaf("leaf", "leaf", "a:leaf"));
+		var controller = new SpatialController(root(), tuning(200, false, 400));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("external", SpatialMenu.Choice.branch("branch", "branch", child)), 200, 0, 10);
+		controller.enterExternal(SpatialMenu.of("item"), 300, 0, 20);
+		assertTrue(controller.back(30));
+		controller.movePhysical(60, 0, 40);
+		var before = controller.snapshot();
+		controller.repositionExternal(new SpatialController.Point(230, 0), new SpatialController.Point(0, 0), 50);
+		assertEquals(before.pointer(), controller.snapshot().pointer());
+		assertEquals(before.trail(), controller.snapshot().trail());
+		controller.tick(1000);
+		assertEquals(2, controller.snapshot().menus().size(), "geometry alone cannot top up a partial fresh stroke");
+		controller.movePhysical(50, 0, 1010);
+		controller.tick(1210);
+		assertEquals(3, controller.snapshot().menus().size(), "the preserved real partial stroke plus new physical travel admits entry");
+	}
+
+	@Test
+	void externalRelayoutIsInertForInactiveRootAndOrdinaryRadialMenus() {
+		var controller = new SpatialController(root(), tuning(200, false, 400));
+		var before = controller.snapshot();
+		controller.repositionExternal(new SpatialController.Point(50, 60), new SpatialController.Point(10, 20), 0);
+		assertEquals(before, controller.snapshot());
+		controller.start(0);
+		before = controller.snapshot();
+		controller.repositionExternal(new SpatialController.Point(50, 60), new SpatialController.Point(10, 20), 10);
+		assertEquals(before, controller.snapshot());
+		controller.movePhysical(200, 0, 20);
+		controller.tick(220);
+		before = controller.snapshot();
+		controller.repositionExternal(new SpatialController.Point(50, 60), new SpatialController.Point(10, 20), 230);
+		assertEquals(before, controller.snapshot());
+	}
+
+	@Test
+	void itemHoverReturnAndExternalRelayoutPreserveTheSharedHeldBackBlock() {
+		var controller = new SpatialController(root(), new SpatialController.Tuning(10, 40, 100, true, 400));
+		controller.start(0);
+		controller.enterExternal(SpatialMenu.of("list"), 100, 0, 10);
+		controller.useExternalSurface();
+		controller.alignExternalBack(true);
+		controller.enterExternal(SpatialMenu.of("item", SpatialMenu.Choice.leaf("item:leaf", "leaf", "a:leaf")),
+			new SpatialController.Point(200, 0), new SpatialController.Point(100, 0), 20);
+		controller.movePhysical(-50, 0, 30);
+		controller.tick(430);
+		assertEquals(2, controller.snapshot().menus().size());
+		assertEquals(new SpatialController.Point(150, 0), activeOrigin(controller));
+		assertNull(controller.snapshot().focusId(), "item return clears the list's old Back focus");
+		assertFalse(controller.updateExternalBack(true, 440));
+		controller.tick(840);
+		var returned = controller.snapshot();
+		var notification = controller.userReturnPlacement();
+		controller.repositionExternal(new SpatialController.Point(160, 20), new SpatialController.Point(50, 0), 850);
+		assertEquals(returned.pointer(), controller.snapshot().pointer());
+		assertEquals(returned.trail(), controller.snapshot().trail());
+		controller.tick(1250);
+		assertFalse(controller.updateExternalBack(false, 1260, false), "non-input focus loss is not a physical leave");
+		controller.repositionExternal(new SpatialController.Point(140, -20), new SpatialController.Point(50, 0), 1270);
+		assertFalse(controller.updateExternalBack(true, 1280, false));
+		controller.tick(1680);
+		assertEquals(2, controller.snapshot().menus().size(), "held Back cannot cascade through relayout or projection focus");
+		assertEquals(0, controller.snapshot().hoverProgress());
+		assertEquals(notification, controller.userReturnPlacement());
+		controller.updateExternalBack(false, 1690, true);
+		controller.updateExternalBack(true, 1700, true);
+		controller.tick(2099);
+		assertEquals(2, controller.snapshot().menus().size());
+		controller.tick(2100);
+		assertEquals(1, controller.snapshot().menus().size(), "a genuine physical leave/re-entry still returns once");
+		assertEquals(new SpatialController.Point(150, 0), activeOrigin(controller));
+		assertEquals(new SpatialController.UserReturnPlacement(2, new SpatialController.Point(150, 0)),
+			controller.userReturnPlacement());
 	}
 }

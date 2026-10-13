@@ -402,6 +402,50 @@ class SpatialSelectorMigrationTest {
 		assertNoBackup(directory);
 	}
 
+	@Test
+	void sameVersionContentIntentMissingNullAndExplicitValuesNeverRewrite(@TempDir Path directory) throws IOException {
+		for (String selectorJson : List.of("", ",\"spatialSelector\":null", ",\"spatialSelector\":{}",
+			",\"spatialSelector\":{\"contentIntentEnabled\":null}",
+			",\"spatialSelector\":{\"contentIntentEnabled\":true}",
+			",\"spatialSelector\":{\"contentIntentEnabled\":false}")) {
+			Path path = directory.resolve("client.json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37" + selectorJson + "}\n").getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+			boolean expected = selectorJson.contains(":true");
+			assertEquals(expected, handler.getConfig().getSpatialSelector().isContentIntentEnabled());
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"content-intent defaults and explicit values are not a load rewrite");
+			assertTrue(handler.saveSafely());
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"an untouched same-version save is a no-op");
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void explicitContentIntentChoicePersistsAndResetRestoresTheDisabledDefault(@TempDir Path directory)
+		throws IOException {
+		Path path = directory.resolve("client.json");
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		handler.load();
+		handler.getConfig().getSpatialSelector().setContentIntentEnabled(true);
+		assertTrue(handler.saveSafely());
+		assertTrue(read(path).getAsJsonObject("spatialSelector").get("contentIntentEnabled").getAsBoolean());
+
+		ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		reloaded.load();
+		assertTrue(reloaded.getConfig().getSpatialSelector().isContentIntentEnabled());
+		assertTrue(reloaded.getConfig().getSpatialSelector().snapshot().contentIntentEnabled());
+
+		reloaded.resetToDefaults();
+		assertFalse(reloaded.getConfig().getSpatialSelector().isContentIntentEnabled());
+		assertFalse(read(path).getAsJsonObject("spatialSelector").get("contentIntentEnabled").getAsBoolean(),
+			"reset persists the disabled content-intent default");
+	}
+
 	private static JsonObject legacyRoot(String version) {
 		JsonObject root = JsonParser.parseString("""
 			{"wheelInnerRadius":63,"wheelOuterRadius":231,"wheelOpacity":35,

@@ -169,6 +169,40 @@ class NativeSelectorInputTest {
 	}
 
 	@Test
+	void endlessAlternatingGuiCallbacksCannotDriftTheFixedListPointerOrSelection() {
+		var target = new SpatialSelectorSession.CapturedTarget("ordinary", new ResolvedTarget(
+			new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"),
+			TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow()), Optional.of(BlockFace.NORTH), Optional.empty());
+		var fence = new SpatialSelectorSession.ContentFence(31, 42, 53, "ordinary");
+		var attention = PingTypeCatalog.builtIn().findById("attention").orElseThrow();
+		var preview = new SpatialSelectorSession.InventoryPreview<String>("inventory", Status.READY,
+			List.of(new SpatialSelectorSession.InventoryRow<>("a", "a", 3L, "minecraft:stone", Status.READY, "opaque:a"),
+				new SpatialSelectorSession.InventoryRow<>("b", "b", 2L, "minecraft:stone", Status.READY, "opaque:b")),
+			List.of(attention), attention);
+		var preferences = new SpatialSelectorSettings();
+		preferences.setTargetGlide(new BigDecimal("1"));
+		var session = new SpatialSelectorSession<>(target, Map.of(), preferences.snapshot(), fence,
+			(ignored, requestedFence) -> new SpatialSelectorSession.ContentProjection<>(fence, 1, false, Status.READY, List.of(), preview),
+			new SpatialSelectorSession.ListGeometry(3, 180, 17, 20, 19, 85));
+		session.open(0); session.moveGui(100, 0, 1); session.tick(181);
+		session.moveGui(100, 0, 182); session.tick(362);
+		assertTrue(session.snapshot().inventory().open());
+		var before = session.snapshot().radial();
+
+		var owned = frame(1200, 600, true, false);
+		var input = new NativeSelectorInput(session);
+		input.open(); input.prime(600, 400, owned);
+		for (int sample = 0; sample < 2000; sample++) {
+			input.onMove(7, 600 + (sample % 2 == 0 ? 2 : 0), 400, owned, 400L + sample);
+		}
+
+		assertEquals(before.pointer(), session.snapshot().radial().pointer(), "endless callbacks never move the fixed pointer");
+		assertEquals(before.trail(), session.snapshot().radial().trail(), "list input appends no trail");
+		assertEquals("a", session.snapshot().inventory().selectedKey());
+		assertEquals(0.0, session.snapshot().radial().hoverProgress());
+	}
+
+	@Test
 	void scrollNormalizationOccursOnceOnlyWhenOwnedAndDoesNotMovePointer() {
 		Sink sink = new Sink();
 		NativeSelectorInput input = new NativeSelectorInput(sink);

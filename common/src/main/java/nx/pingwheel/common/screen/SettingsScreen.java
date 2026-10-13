@@ -593,6 +593,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			case SPATIAL_TARGET_GLIDE -> this.addOption(setting, this.getSpatialTargetGlideOption(), true);
 			case SPATIAL_HOVER_ENABLED -> this.addOption(setting, this.getSpatialHoverEnabledOption(), true);
 			case SPATIAL_HOVER_MILLIS -> this.addOption(setting, this.getSpatialHoverMillisOption(), false);
+			case SPATIAL_CONTENT_INTENT_ENABLED -> this.addOption(setting, this.getSpatialContentIntentEnabledOption(), false);
 			case PRECISE_CAPTURE_PERIOD_TICKS -> this.addOption(setting, this.getPreciseCapturePeriodTicksOption(), false);
 			case CHANNEL -> this.addChannelRow();
 			case PING_VOLUME -> this.addOption(setting, this.getPingVolumeOption(), false);
@@ -2356,6 +2357,13 @@ public class SettingsScreen extends OptionsSubScreen {
 		return OptionUtils.ofInt(text.getKey(), MIN_HOVER_MILLIS, MAX_HOVER_MILLIS, HOVER_MILLIS_STEP,
 			value -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
 			() -> text.path("tooltip").get(), selector::getHoverMillis, selector::setHoverMillis);
+	}
+
+	private OptionInstance<Boolean> getSpatialContentIntentEnabledOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("content_intent_enabled");
+		return OptionUtils.ofBool(text.getKey(), selector::isContentIntentEnabled, selector::setContentIntentEnabled,
+			() -> text.path("tooltip").get());
 	}
 
 	private OptionInstance<Integer> getPreciseCapturePeriodTicksOption() {

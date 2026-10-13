@@ -5,9 +5,16 @@ import java.util.Objects;
 /**
  * Pure horizontal/vertical gesture adapter for the streamed inventory list.
  *
- * <p>It owns the frozen horizontal list axis and row-height threshold, the
- * virtual pointer, the glide and wheel fractions, the wheel-lock state and the
- * Back/Forward side pair supplied by {@link InventoryListModel#directionFor(double)}.
+ * <p>The physical list input never moves the logical pointer: both pointer axes
+ * stay fixed while the list is active. This adapter owns a bounded signed
+ * horizontal progress accumulator instead, the frozen row-height threshold, the
+ * glide and wheel fractions, the wheel-lock state and the Back/Forward side
+ * pair supplied by {@link InventoryListModel#directionFor(double)}. Each
+ * admitted GUI sample classifies its horizontal delta against an inclusive
+ * {@code 25} degree cone around the vertical axis; inside the cone the sample's
+ * dx is ignored while its dy and all previously accumulated progress survive.
+ * Outside the cone the dx accumulates, saturating at the existing side-exit
+ * distance and discarding overshoot so an immediate reversal acts at once.
  * {@link #move(double, double)} emits a navigation {@link Action} when a side
  * gate is crossed and otherwise feeds vertical glide rows into
  * {@link InventoryListModel#glide(int)}; {@link #wheelPixels(double)} and
@@ -19,10 +26,13 @@ import java.util.Objects;
  * glide and wheel entirely; with hover disabled a Back-side stroke past the
  * exit gate emits {@link Action#BACK}; a Forward-side stroke past the exit gate
  * emits {@link Action#FORWARD} (the caller then enters the selected row's
- * submenu); horizontal motion beyond the hint gate without a navigation
+ * submenu); horizontal progress beyond the hint gate without a navigation
  * suppresses glide; after a wheel step, glide stays locked until vertical
  * movement passes its unlock threshold; relative vertical glide advances at
- * the frozen row-height threshold, discarding opposing sub-row travel on reversal.
+ * the frozen row-height threshold, discarding opposing sub-row travel on
+ * reversal. Only a sample that actually changes the horizontal accumulator may
+ * trigger navigation or count as physical movement for a caller's held-Back
+ * release; vertical-only, cone-filtered and already-saturated samples cannot.
  */
 public final class InventoryGesture {
 
@@ -39,6 +49,7 @@ public final class InventoryGesture {
 	private static final double INTRINSIC_GLIDE = 0.5;
 	private static final double PIXELS_PER_ROW = 9.0;
 	private static final double WHEEL_PIXELS_PER_ROW = 100.0;
+	private static final double CONE_TANGENT = Math.tan(Math.toRadians(25.0));
 
 	private final InventoryListModel list;
 	private final double glideSensitivity;
@@ -48,6 +59,7 @@ public final class InventoryGesture {
 	private double axisX;
 	private double pointerX;
 	private double pointerY;
+	private double horizontalProgress;
 	private double glideRemainder;
 	private double wheelRemainder;
 	private double wheelUnlockTravel;
@@ -85,13 +97,15 @@ public final class InventoryGesture {
 	}
 
 	/**
-	 * Re-bases after an item return: the axis, pointer and fractions reset
-	 * while the model keeps its selected key and window.
+	 * Re-bases after an item return: the axis, legacy pointer copy, fractions
+	 * and horizontal progress reset while the model keeps its selected key and
+	 * window.
 	 */
 	public void rebase(double x, double y) {
 		axisX = x;
 		pointerX = x;
 		pointerY = y;
+		horizontalProgress = 0.0;
 		glideRemainder = 0.0;
 		wheelRemainder = 0.0;
 		wheelUnlockTravel = 0.0;
@@ -107,10 +121,14 @@ public final class InventoryGesture {
 	/** Confined pointer travel and independent authorized vertical selection travel. */
 	public Action move(double deltaX, double deltaY, double selectionDeltaY) {
 		if (!Double.isFinite(deltaX) || !Double.isFinite(deltaY) || !Double.isFinite(selectionDeltaY)) return Action.NONE;
-		boolean pointerMoved = deltaX != 0.0 || deltaY != 0.0;
-		pointerX += deltaX;
-		pointerY += deltaY;
-		double side = pointerX - axisX;
+
+		double contribution = deltaX;
+		if (deltaY != 0.0 && Math.abs(deltaX) <= Math.abs(deltaY) * CONE_TANGENT) contribution = 0.0;
+		double previousProgress = horizontalProgress;
+		horizontalProgress = Math.clamp(horizontalProgress + contribution, -SIDE_EXIT, SIDE_EXIT);
+		boolean effectiveHorizontal = horizontalProgress != previousProgress;
+
+		if (backHoverEnabled) backHoverFocused = horizontalProgress * backSign >= SIDE_HINT;
 
 		if (backHoverFocused) {
 			glideRemainder = 0.0;
@@ -118,15 +136,15 @@ public final class InventoryGesture {
 			return Action.NONE;
 		}
 
-		if (pointerMoved && !backHoverEnabled && side * backSign >= SIDE_EXIT) {
+		if (effectiveHorizontal && !backHoverEnabled && horizontalProgress * backSign >= SIDE_EXIT) {
 			return Action.BACK;
 		}
 
-		if (pointerMoved && side * forwardSign >= SIDE_EXIT) {
+		if (effectiveHorizontal && horizontalProgress * forwardSign >= SIDE_EXIT) {
 			return Action.FORWARD;
 		}
 
-		if (Math.abs(side) > SIDE_HINT) {
+		if (Math.abs(horizontalProgress) > SIDE_HINT) {
 			return Action.NONE;
 		}
 
@@ -159,15 +177,13 @@ public final class InventoryGesture {
 		return Action.NONE;
 	}
 
-	/** Native movement computes current-sample Back focus, including deliberate leave. */
+	/** Native movement computes current-sample Back focus from the accumulator. */
 	public Action moveGui(double deltaX, double deltaY) {
 		return moveGui(deltaX, deltaY, deltaY);
 	}
 
-	/** Current-sample Back focus follows only confined pointer travel, never selection travel. */
+	/** Current-sample Back focus follows only effective filtered horizontal progress. */
 	public Action moveGui(double deltaX, double deltaY, double selectionDeltaY) {
-		if (!Double.isFinite(deltaX) || !Double.isFinite(deltaY) || !Double.isFinite(selectionDeltaY)) return Action.NONE;
-		if (backHoverEnabled) backHoverFocused = (pointerX + deltaX - axisX) * backSign >= SIDE_HINT;
 		return move(deltaX, deltaY, selectionDeltaY);
 	}
 
@@ -211,19 +227,30 @@ public final class InventoryGesture {
 		return backHoverFocused;
 	}
 
-	/** Same gate used by movement and release; no facade-owned tuning duplicate. */
+	/** Same gate used by movement and release; derived from the accumulator. */
 	public boolean isBackSideFocused() {
-		return (pointerX - axisX) * backSign >= SIDE_HINT;
+		return horizontalProgress * backSign >= SIDE_HINT;
 	}
 
-	/** Import the controller's sole logical pointer after a move or rebase. */
+	/**
+	 * Signed accumulated horizontal progress, bounded to the side-exit
+	 * distance. The session compares it before and after a sample to decide
+	 * whether that sample was effective physical list movement.
+	 */
+	public double horizontalTravel() {
+		return horizontalProgress;
+	}
+
+	/**
+	 * Imports the controller's logical pointer for the legacy read model only.
+	 * It never re-imports pointer drift into navigation, progress or focus.
+	 */
 	public void alignPointer(double x, double y) {
 		pointerX = x;
 		pointerY = y;
-		if (backHoverEnabled) backHoverFocused = isBackSideFocused();
 	}
 
-	/** Projection-only axis correction; keeps pointer, fractions and wheel lock untouched. */
+	/** Projection-only axis correction; keeps progress, fractions and wheel lock untouched. */
 	void constrainAxis(SpatialController.Viewport viewport) {
 		axisX = viewport.confine(new SpatialController.Point(axisX, pointerY)).x();
 	}

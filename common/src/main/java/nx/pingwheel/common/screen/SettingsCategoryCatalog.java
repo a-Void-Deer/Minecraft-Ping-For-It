@@ -50,6 +50,7 @@ public final class SettingsCategoryCatalog {
 		SPATIAL_TARGET_GLIDE("spatial_selector.target_glide"),
 		SPATIAL_HOVER_ENABLED("spatial_selector.hover_enabled"),
 		SPATIAL_HOVER_MILLIS("spatial_selector.hover_millis"),
+		SPATIAL_CONTENT_INTENT_ENABLED("spatial_selector.content_intent_enabled"),
 		PRECISE_CAPTURE_PERIOD_TICKS("spatial_selector.precise_capture_period_ticks"),
 		CHANNEL("channel"),
 		PING_VOLUME("ping_volume"),
@@ -159,7 +160,8 @@ public final class SettingsCategoryCatalog {
 			Setting.SPATIAL_DWELL_MILLIS,
 			Setting.SPATIAL_TARGET_GLIDE,
 			Setting.SPATIAL_HOVER_ENABLED,
-			Setting.SPATIAL_HOVER_MILLIS));
+			Setting.SPATIAL_HOVER_MILLIS,
+			Setting.SPATIAL_CONTENT_INTENT_ENABLED));
 		settings.put(Category.CHANNEL_NOTICES, List.of(
 			Setting.CHANNEL,
 			Setting.PING_VOLUME,

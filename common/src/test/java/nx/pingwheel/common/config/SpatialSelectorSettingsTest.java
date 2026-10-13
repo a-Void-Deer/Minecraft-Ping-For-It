@@ -108,6 +108,63 @@ class SpatialSelectorSettingsTest {
 	}
 
 	@Test
+	void contentIntentDefaultsToDisabledForFreshMissingAndNullValues() {
+		assertFalse(SpatialSelectorSettings.DEFAULT_CONTENT_INTENT_ENABLED);
+		assertFalse(new SpatialSelectorSettings().isContentIntentEnabled());
+		assertFalse(new SpatialSelectorSettings().snapshot().contentIntentEnabled());
+
+		SpatialSelectorSettings missing = new Gson().fromJson("{}", SpatialSelectorSettings.class);
+		assertFalse(missing.isContentIntentEnabled());
+		assertFalse(missing.snapshot().contentIntentEnabled());
+
+		SpatialSelectorSettings explicitNull = new Gson().fromJson(
+			"{\"contentIntentEnabled\":null}", SpatialSelectorSettings.class);
+		explicitNull.validate();
+		assertFalse(explicitNull.isContentIntentEnabled());
+		assertFalse(explicitNull.snapshot().contentIntentEnabled());
+	}
+
+	@Test
+	void explicitContentIntentChoicesAreRetainedAndFreezeIntoTheSnapshot() {
+		for (boolean saved : List.of(false, true)) {
+			SpatialSelectorSettings settings = new Gson().fromJson(
+				"{\"contentIntentEnabled\":" + saved + "}", SpatialSelectorSettings.class);
+			assertEquals(saved, settings.isContentIntentEnabled());
+			SpatialSelectorSettings.Snapshot frozen = settings.snapshot();
+			assertEquals(saved, frozen.contentIntentEnabled());
+
+			settings.setContentIntentEnabled(!saved);
+			assertEquals(saved, frozen.contentIntentEnabled(),
+				"a held snapshot keeps its frozen content-intent choice");
+			assertEquals(!saved, settings.snapshot().contentIntentEnabled(),
+				"snapshot() supplies the live content-intent choice");
+		}
+	}
+
+	@Test
+	void previousSnapshotConstructorFormsDefaultTheContentIntentChoice() {
+		SpatialSelectorSettings.Snapshot nine = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			new BigDecimal("0.25"), false, 500, true, false);
+		assertFalse(nine.contentIntentEnabled());
+
+		SpatialSelectorSettings.Snapshot ten = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			new BigDecimal("0.25"), false, 500, true, false, 25);
+		assertFalse(ten.contentIntentEnabled());
+
+		SpatialSelectorSettings.Snapshot eleven = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			new BigDecimal("0.25"), false, 500, true, false, 25, new BigDecimal("2.0"));
+		assertFalse(eleven.contentIntentEnabled());
+
+		SpatialSelectorSettings.Snapshot thirteen = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			new BigDecimal("0.25"), false, 500, true, false, 25, new BigDecimal("2.0"), 64, 0);
+		assertFalse(thirteen.contentIntentEnabled());
+
+		SpatialSelectorSettings.Snapshot canonical = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			new BigDecimal("0.25"), false, 500, true, false, 25, new BigDecimal("2.0"), 64, 0, true);
+		assertTrue(canonical.contentIntentEnabled());
+	}
+
+	@Test
 	void distanceAndTimingClampsKeepTheValidIntervalAndSaturateOnBothSides() {
 		for (IntBound bound : List.of(
 			new IntBound(SpatialSelectorSettings.MIN_DEADZONE, SpatialSelectorSettings.MAX_DEADZONE,

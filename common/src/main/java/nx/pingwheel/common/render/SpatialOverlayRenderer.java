@@ -48,6 +48,15 @@ import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
 	 * an independent opacity; centre guides follow their menu's transition fade and dim for an
  * ancestor menu exactly like that menu's nodes.
  *
+ * <p>Every fill additionally carries an independent normalized background
+ * coverage through the transition model: the sector underlay contributes 30%
+ * and every text-bearing box or panel contributes 60% of its base paint,
+ * multiplied by the background emphasis, the structural ancestor/disabled
+ * dimming, the state's own coverage transition and only that layer's opacity
+ * preference, and rounded once at the end. The foreground alpha, its
+ * 0.8/0.35 dimming, the disabled/reserved factor, borders, icons, text,
+ * acknowledgement and scale rules are unaffected by that channel.
+ *
  * <p>The controller's geometry is virtual: menu origins and the pointer are
  * relative to the gesture origin. Every point is offset by the GUI center, and
  * while a menu is active the whole overlay additionally receives one rigid
@@ -155,6 +164,24 @@ public final class SpatialOverlayRenderer {
 	static final double MAX_FRAME_MILLIS = 100.0;
 	static final double ANCESTOR_ALPHA = 0.35;
 	static final double DISABLED_ALPHA_FACTOR = 0.5;
+	/**
+	 * Normalized background coverage of one entry: 30% for a sector underlay and
+	 * 60% for a text-bearing title box, panel, header or selected-row overlay.
+	 * The percentage is applied before the focus emphasis so the endpoint byte
+	 * keeps its fractional half.
+	 */
+	static final int SECTOR_BACKGROUND_PERCENT = 30;
+	static final int BOX_BACKGROUND_PERCENT = 60;
+	/** Background emphasis behind an eligible focused action or branch. */
+	static final double SECTOR_FOCUSED_GAIN = 1.4;
+	static final double BOX_FOCUSED_GAIN = 1.5;
+	static final double BACKGROUND_SIBLING_GAIN = 0.4;
+	/** Inventory panel/header/selected-row coverage gains of an active or inactive list. */
+	static final double INVENTORY_ACTIVE_GAIN = 1.4;
+	static final double INVENTORY_IDLE_GAIN = 0.7;
+	/** Clearance metric: the outer-coverage factor and a conservative rounding margin. */
+	static final double CLEARANCE_OUTER_FACTOR = 1.1;
+	static final double CLEARANCE_ROUNDING_MARGIN = 2.0;
 
 	private static final long TRANSITION_NANOS = 160_000_000L;
 	private static final int TRANSITION_CAPACITY = 512;
@@ -318,7 +345,13 @@ public final class SpatialOverlayRenderer {
 	record HeaderPaint(double width, double height, String position, SpatialInventoryView.Status status)
 		implements Paint {}
 	record FooterPaint(double width, double height, boolean backLeft,
-		SpatialInventoryView.BackAffordance back) implements Paint {}
+		SpatialInventoryView.BackAffordance back, boolean forwardAvailable) implements Paint {
+
+		/** Historical form: independent paint callers always showed the Forward hint. */
+		FooterPaint(double width, double height, boolean backLeft, SpatialInventoryView.BackAffordance back) {
+			this(width, height, backLeft, back, true);
+		}
+	}
 	record ChromePaint(SpatialController.Snapshot snapshot, boolean pointerHidden) implements Paint {
 		ChromePaint(SpatialController.Snapshot snapshot) { this(snapshot, false); }
 	}
@@ -671,6 +704,15 @@ public final class SpatialOverlayRenderer {
 		private final SpatialViewOffset viewOffset = new SpatialViewOffset(TRANSITION_NANOS);
 		private final SpatialVisualTrail<VisualKey> trail = new SpatialVisualTrail<>(TRANSITION_NANOS);
 		private SpatialController.Viewport publishedViewport;
+		/** One prior geometry sample, not a second animation/history or an input baseline. */
+		private FrameGeometry frameGeometry;
+
+		private record FrameGeometry(double width, double height, String itemMenu, SpatialController.Point itemOrigin) {
+			boolean relayoutFrom(FrameGeometry previous) {
+				return previous != null && (width != previous.width || height != previous.height
+					|| itemMenu != null && itemMenu.equals(previous.itemMenu) && !itemOrigin.equals(previous.itemOrigin));
+			}
+		}
 
 		/** Interaction-frame preparation only: sample the pan once, then paint this immutable projection. */
 		public SpatialController.Viewport prepareViewport(SpatialController.Snapshot radial, int width, int height,
@@ -700,6 +742,7 @@ public final class SpatialOverlayRenderer {
 			trail.clear();
 			viewOffset.clear();
 			publishedViewport = null;
+			frameGeometry = null;
 			paintedChoiceIds = Set.of();
 		}
 
@@ -752,6 +795,9 @@ public final class SpatialOverlayRenderer {
 			Function<SpatialController.ChoiceView, Component> details, Style style, long nowNanos,
 			SpatialController.Viewport viewport, double width, double height, FramePainter painter) {
 			paintedChoiceIds = Set.of();
+			// The active empty list surface hides the crosshair and every trail
+			// paint; an item radial keeps the ordinary pointer/trail rules.
+			boolean listActive = activeInventoryList(radial, inventory);
 			List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets = new ArrayList<>();
 			trail.prepare(radial, style.trailLength(), nowNanos, style.reduceMotion());
 			TrailPaint historicalTrail = new TrailPaint(trail.points());
@@ -760,6 +806,19 @@ public final class SpatialOverlayRenderer {
 			double centerX = guiWidth / 2.0;
 			double centerY = guiHeight / 2.0;
 			SpatialController.Point origin = activeOrigin(radial);
+			var geometry = new FrameGeometry(guiWidth, guiHeight,
+				origin != null && inventory != null && inventory.open() && inventory.retainedRowKey() != null
+					? radial.menus().getLast().menuId() : null, origin);
+			boolean relayout = geometry.relayoutFrom(frameGeometry);
+			if (frameGeometry != null && (guiWidth != frameGeometry.width() || guiHeight != frameGeometry.height())
+				&& (origin != null || inventory != null && inventory.open())) {
+				// Every cached pose is absolute GUI space. Rebase that entire pattern,
+				// including detached stream/mode tails, before retargeting to the new
+				// GUI center; otherwise an old panel/sector can use a different center.
+				transitions.translateGeometry((guiWidth - frameGeometry.width()) / 2.0,
+					(guiHeight - frameGeometry.height()) / 2.0);
+			}
+			frameGeometry = origin == null && (inventory == null || !inventory.open()) ? null : geometry;
 			if (viewport == null) sampleViewOffset(viewOffset, origin, nowNanos, style.reduceMotion());
 			double viewX = viewport == null ? viewOffset.x() : viewport.viewX();
 			double viewY = viewport == null ? viewOffset.y() : viewport.viewY();
@@ -768,18 +827,25 @@ public final class SpatialOverlayRenderer {
 					centerX, centerY, orbitFor(Math.min(guiWidth, guiHeight)), style.rootDistance(), style.submenuRadiusScale());
 			}
 			if (inventory != null && inventory.open()) {
-				addInventory(targets, inventory, painter.lineHeight(), style, guiWidth, guiHeight);
+				addInventory(targets, inventory, painter.lineHeight(), style, guiWidth, guiHeight, listActive);
 			}
 			VisualKey desiredOwner = targets.stream().filter(target -> target.data() instanceof NodePaint node && node.follower() != null)
 				.map(SpatialOverlayTransitions.Target::key).findFirst().orElse(null);
 			List<SpatialOverlayTransitions.State<VisualKey, Paint>> states = new ArrayList<>(
-				transitions.update(targets, nowNanos, style.reduceMotion()));
+				// Radius/font payloads and logical guides/rays already use this frame's
+				// geometry. Commit every presented layout anchor on a resize or item
+				// clearance relayout in the same update; easing old anchors separately
+				// would let a new sector or Back frame cover the still-old panel.
+				// The shared pan and all non-position channels keep their transitions.
+				transitions.update(targets, nowNanos, style.reduceMotion(), relayout));
 			// Share chrome's finite fade/projection, not its payload or topmost paint rank.
 			// No second history or transition-cache entry is needed, even at capacity.
-			if (style.showTrail() && style.trailOpacityPercent() > 0 && !historicalTrail.points().isEmpty()) {
+			if (style.showTrail() && style.trailOpacityPercent() > 0 && !historicalTrail.points().isEmpty()
+				&& !listActive) {
 				var chrome = states.stream().filter(state -> state.data() instanceof ChromePaint).findFirst().orElse(null);
 				if (chrome != null) states.add(new SpatialOverlayTransitions.State<>(new VisualKey("trail", "radial", ""),
-					chrome.x(), chrome.y(), chrome.scale(), chrome.alpha(), chrome.present(), historicalTrail));
+					chrome.x(), chrome.y(), chrome.scale(), chrome.alpha(), chrome.present(), historicalTrail,
+					chrome.backgroundAlpha()));
 			}
 			SpatialController.Point trailOrigin = trailOrigin(states, viewport, centerX, centerY, viewX, viewY);
 			if (origin == null && transitions.isEmpty()) {
@@ -791,33 +857,42 @@ public final class SpatialOverlayRenderer {
 			RowLayout selected = RowLayout.NONE;
 			Set<String> painted = new HashSet<>();
 			String activeMenu = origin == null ? null : radial.menus().getLast().menuId();
-			boolean hidePointer = activeInventoryList(radial, inventory);
+			boolean hidePointer = listActive;
+			String retainedRowKey = inventory == null ? null : inventory.retainedRowKey();
 			SpatialController.Point followerPoint = null;
 			for (var state : states.stream().sorted(Comparator.comparingInt(value -> paintRank(value.data()))).toList()) {
+				// While an item submenu is active every other row, including its
+				// detached exit tail, is suppressed: only the entered item row paints.
+				if (retainedRowKey != null && state.data() instanceof RowPaint row
+					&& !retainedRowKey.equals(row.row().key())) {
+					continue;
+				}
 				var displayed = new SpatialOverlayTransitions.State<>(state.key(), state.x() + viewX, state.y() + viewY,
-					state.scale(), state.alpha(), state.present(), state.data());
+					state.scale(), state.alpha(), state.present(), state.data(), state.backgroundAlpha());
 				if (state.present() && state.data() instanceof GuidePaint) {
 					// A guide is the actual frozen interaction boundary, not a moving
 					// node. Fade it at its current menu origin without scaling its radius.
 					var menu = radial.menus().stream().filter(value -> value.menuId().equals(state.key().owner())).findFirst().orElseThrow();
 					displayed = new SpatialOverlayTransitions.State<>(state.key(), centerX + menu.origin().x() + viewX,
-						centerY + menu.origin().y() + viewY, 1.0, state.alpha(), true, state.data());
+						centerY + menu.origin().y() + viewY, 1.0, state.alpha(), true, state.data(), state.backgroundAlpha());
 				}
 				if (state.data() instanceof TrailPaint) {
 					displayed = alignChrome(displayed, viewport);
 					if (viewport == null && state.present()) displayed = new SpatialOverlayTransitions.State<>(state.key(),
-						centerX + viewX, centerY + viewY, state.scale(), state.alpha(), true, state.data());
+						centerX + viewX, centerY + viewY, state.scale(), state.alpha(), true, state.data(),
+						state.backgroundAlpha());
 				}
 				if (state.data() instanceof ChromePaint chrome) {
 					displayed = alignChrome(displayed, viewport);
 					displayed = new SpatialOverlayTransitions.State<>(state.key(),
 						viewport == null && state.present() ? centerX + viewX : displayed.x(),
 						viewport == null && state.present() ? centerY + viewY : displayed.y(),
-						state.scale(), state.alpha(), state.present(), new ChromePaint(chrome.snapshot(), hidePointer));
+						state.scale(), state.alpha(), state.present(), new ChromePaint(chrome.snapshot(), hidePointer),
+						state.backgroundAlpha());
 				}
 				if (state.present() && state.data() instanceof RowPaint row && row.selected())
 					selected = new RowLayout(displayed.y(), row.width() * state.scale());
-				if (!renders(state.data(), state.alpha(), style)) continue;
+				if (!renders(state.data(), state.alpha(), state.backgroundAlpha(), style)) continue;
 				NodeLayout layout = state.data() instanceof NodePaint node
 					? nodeLayout(node, painter::width, painter.lineHeight(), style, painter.splitter()) : null;
 				if (!painter.paint(displayed, layout, style)) continue;
@@ -862,7 +937,7 @@ public final class SpatialOverlayRenderer {
 		SpatialOverlayTransitions.State<VisualKey, Paint> state, SpatialController.Viewport viewport) {
 		return viewport != null && state.present() && (state.data() instanceof ChromePaint || state.data() instanceof TrailPaint)
 			? new SpatialOverlayTransitions.State<>(state.key(), viewport.centerX() + viewport.viewX(), viewport.centerY() + viewport.viewY(),
-				state.scale(), state.alpha(), true, state.data())
+				state.scale(), state.alpha(), true, state.data(), state.backgroundAlpha())
 			: state;
 	}
 
@@ -906,18 +981,18 @@ public final class SpatialOverlayRenderer {
 		SpatialController.Snapshot snapshot, Function<SpatialController.ChoiceView, Component> labels,
 		Function<SpatialController.ChoiceView, Component> details,
 		double centerX, double centerY, double orbit, double rootDistance, double submenuRadiusScale) {
-		add(targets, new VisualKey("chrome", "radial", ""), centerX, centerY, 1.0, 1.0,
+		add(targets, new VisualKey("chrome", "radial", ""), centerX, centerY, 1.0, 1.0, 0.0,
 			centerX, centerY, new ChromePaint(snapshot));
 		List<SpatialController.MenuView> menus = snapshot.menus();
 		double deadzone = snapshot.deadzone();
 		for (int i = 0; i < menus.size(); i++) {
 			SpatialController.MenuView menu = menus.get(i);
 			boolean active = i == menus.size() - 1;
+			String childEntry = active ? null : menus.get(i + 1).entryChoiceId();
 			// An ancestor keeps only the choice that opened the next child plus its
 			// Back navigation; hidden sibling frames and sectors leave planning and
 			// fade through the ordinary exit without ever becoming interactive.
-			List<SpatialController.ChoiceView> visible = active ? menu.choices()
-				: breadcrumbChoices(menu, menus.get(i + 1).entryChoiceId());
+			List<SpatialController.ChoiceView> visible = active ? menu.choices() : breadcrumbChoices(menu, childEntry);
 			boolean focusScaling = active && focusedActionable(menu);
 			double menuX = centerX + menu.origin().x();
 			double menuY = centerY + menu.origin().y();
@@ -928,7 +1003,7 @@ public final class SpatialOverlayRenderer {
 				// nodes. Hidden options contribute no divider; the deadzone circle
 				// stays the defined centre guide of the remaining wheel.
 				add(targets, new VisualKey("guide", menu.menuId(), ""), menuX, menuY, 1.0,
-					nodeAlpha(active, false, false), menuX, menuY,
+					nodeAlpha(active, false, false), 0.0, menuX, menuY,
 					new GuidePaint(menuBoundaries(visible, deadzone, sectorRadius(baseRadius)),
 						circleSegments(deadzone)));
 			}
@@ -938,15 +1013,26 @@ public final class SpatialOverlayRenderer {
 				double bearing = Math.toRadians(choice.startDegrees() + choice.spanDegrees() / 2.0);
 				boolean selected = active && choice.id().equals(menu.focusId());
 				double radius = baseRadius + (selected ? ORBIT_SELECTED_PUSH : 0.0);
-				double alpha = nodeAlpha(active, selected, choice.disabled() || choice.reserved());
-				add(targets, new VisualKey("sector", menu.menuId(), choice.id()),
-					menuX, menuY, 1.0, alpha, menuX, menuY,
-					new SectorPaint(choice, sectorRadius(baseRadius)));
+				boolean disabledOrReserved = choice.disabled() || choice.reserved();
+				double alpha = nodeAlpha(active, selected, disabledOrReserved);
+				double structural = backgroundStructural(active, disabledOrReserved);
+				double sectorCoverage = backgroundCoverage(SECTOR_BACKGROUND_PERCENT,
+					backgroundGain(active, selected, focusScaling, SECTOR_FOCUSED_GAIN), structural);
+				double boxCoverage = backgroundCoverage(BOX_BACKGROUND_PERCENT,
+					backgroundGain(active, selected, focusScaling, BOX_FOCUSED_GAIN), structural);
+				// The ancestor entry that opened the next child keeps its frame but
+				// never its sector underlay; Back frames and underlays stay.
+				if (active || choice.back() || !choice.id().equals(childEntry)) {
+					add(targets, new VisualKey("sector", menu.menuId(), choice.id()),
+						menuX, menuY, 1.0, alpha, sectorCoverage, menuX, menuY,
+						new SectorPaint(choice, sectorRadius(baseRadius)));
+				}
 				boolean follows = active && selected && actionable(choice) && snapshot.pointer() != null
 					&& Math.hypot(snapshot.pointer().x() - menu.origin().x(),
 						snapshot.pointer().y() - menu.origin().y()) > deadzone;
-				double homeX = menuX + Math.sin(bearing) * radius;
-				double homeY = menuY - Math.cos(bearing) * radius;
+				boolean breadcrumb = !active && !choice.back() && choice.id().equals(childEntry);
+				double homeX = breadcrumb ? menuX : menuX + Math.sin(bearing) * radius;
+				double homeY = breadcrumb ? menuY : menuY - Math.cos(bearing) * radius;
 				NodePaint paint = new NodePaint(choice, labels.apply(choice),
 					details == null ? null : details.apply(choice), selected, snapshot.hoverProgress(), maxExtent,
 					follows ? new Follower(menuX, menuY, deadzone) : null);
@@ -956,11 +1042,13 @@ public final class SpatialOverlayRenderer {
 					double distance = Math.hypot(dx, dy);
 					targets.add(new SpatialOverlayTransitions.Target<>(new VisualKey("follow", menu.menuId(), choice.id()),
 						centerX + snapshot.pointer().x(), centerY + snapshot.pointer().y(), NODE_FOCUSED_SCALE, alpha,
-						homeX, homeY, paint, new SpatialOverlayTransitions.Ray(menuX, menuY, dx / distance, dy / distance)));
+						homeX, homeY, paint, new SpatialOverlayTransitions.Ray(menuX, menuY, dx / distance, dy / distance),
+						boxCoverage));
 				} else {
 					add(targets, new VisualKey("node", menu.menuId(), choice.id()), homeX, homeY,
-						nodeScale(active, selected, focusScaling), alpha,
-						menuX + Math.sin(bearing) * (radius - 12.0), menuY - Math.cos(bearing) * (radius - 12.0), paint);
+						nodeScale(active, selected, focusScaling), alpha, boxCoverage,
+						breadcrumb ? menuX : menuX + Math.sin(bearing) * (radius - 12.0),
+						breadcrumb ? menuY : menuY - Math.cos(bearing) * (radius - 12.0), paint);
 				}
 			}
 		}
@@ -1040,6 +1128,66 @@ public final class SpatialOverlayRenderer {
 		return disabledOrReserved ? alpha * DISABLED_ALPHA_FACTOR : alpha;
 	}
 
+	/**
+	 * Background emphasis of one entry. Only an eligible focused action or branch
+	 * activates the mode: the focused entry takes its own gain and every other
+	 * entry of that menu the sibling gain; Back, disabled, reserved and deadzone
+	 * focus keep every entry at the resting gain. Ancestor levels rest.
+	 */
+	static double backgroundGain(boolean active, boolean selected, boolean focusedActionable, double focusedGain) {
+		if (!active || !focusedActionable) return 1.0;
+		return selected ? focusedGain : BACKGROUND_SIBLING_GAIN;
+	}
+
+	/**
+	 * Structural background dimming: an ancestor keeps {@link #ANCESTOR_ALPHA}
+	 * and a disabled or reserved entry multiplies {@link #DISABLED_ALPHA_FACTOR}.
+	 * The foreground's unselected 0.8 factor is deliberately not applied again.
+	 */
+	static double backgroundStructural(boolean active, boolean disabledOrReserved) {
+		double structural = active ? 1.0 : ANCESTOR_ALPHA;
+		return disabledOrReserved ? structural * DISABLED_ALPHA_FACTOR : structural;
+	}
+
+	/**
+	 * Normalized background coverage of one fill. The percentage stays
+	 * fractional until the final byte packing, so the 60% focused endpoint keeps
+	 * its exact half and rounds to 230 rather than 229.
+	 */
+	static double backgroundCoverage(double basePercent, double gain, double structural) {
+		return basePercent * gain * structural / 100.0;
+	}
+
+	/**
+	 * Final background alpha byte: exactly one rounding of
+	 * {@code 255 * coverage * opacity percent}. The base paint's own alpha byte is
+	 * never pre-rounded and a gain above one is never clamped into it.
+	 */
+	static int backgroundChannel(double coverage, double opacityPercent) {
+		double bounded = clamp(coverage, 0.0, 1.0);
+		return (int) Math.round(255.0 * bounded * clamp(opacityPercent, 0.0, 100.0) / 100.0);
+	}
+
+	/** Background fill of one base colour; its RGB is kept and its alpha byte is recomputed. */
+	static int withBackgroundAlpha(int baseColor, double coverage, double opacityPercent) {
+		return (backgroundChannel(coverage, opacityPercent) << 24) | (baseColor & 0x00FFFFFF);
+	}
+
+	/**
+	 * Background coverage of one transition state after its layer's own opacity
+	 * knob: wheel opacity reaches only the sector underlay, target opacity only
+	 * the text-bearing panel, header, row and box fills. Chrome, guides and the
+	 * trail have no background layer.
+	 */
+	static double backgroundLayerAlpha(Object data, double stateBackgroundAlpha, Style style) {
+		if (data instanceof SectorPaint) return stateBackgroundAlpha * style.opacityPercent() / 100.0;
+		if (data instanceof NodePaint || data instanceof PanelPaint
+			|| data instanceof HeaderPaint || data instanceof RowPaint) {
+			return stateBackgroundAlpha * style.targetOpacityPercent() / 100.0;
+		}
+		return 0.0;
+	}
+
 	/** Wheel opacity reaches only the sector underlay. */
 	static double backdropAlpha(double stateAlpha, Style style) {
 		return stateAlpha * style.opacityPercent() / 100.0;
@@ -1072,7 +1220,18 @@ public final class SpatialOverlayRenderer {
 	 * its own guard, including the font-color transparency protection.
 	 */
 	static boolean renders(Object data, double stateAlpha, Style style) {
-		return layerAlpha(data, stateAlpha, style) > 0.0;
+		return renders(data, stateAlpha, 0.0, style);
+	}
+
+	/**
+	 * Paint admission of one state: either channel may keep the layer visible.
+	 * A bright background still paints while the foreground alpha is zero, and a
+	 * visible foreground still paints while the background coverage is zero; a
+	 * layer whose data has no background contributes no second gate.
+	 */
+	static boolean renders(Object data, double stateAlpha, double stateBackgroundAlpha, Style style) {
+		return layerAlpha(data, stateAlpha, style) > 0.0
+			|| backgroundLayerAlpha(data, stateBackgroundAlpha, style) > 0.0;
 	}
 
 	/**
@@ -1165,7 +1324,7 @@ public final class SpatialOverlayRenderer {
 	}
 
 	private static void addInventory(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
-		SpatialInventoryView view, int lineHeight, Style style, double guiWidth, double guiHeight) {
+		SpatialInventoryView view, int lineHeight, Style style, double guiWidth, double guiHeight, boolean listActive) {
 		SpatialInventoryLayout layout = inventoryLayout(view, guiWidth, guiHeight, lineHeight, style);
 		double rowHeight = layout.rowHeight();
 		double headerHeight = layout.headerHeight();
@@ -1173,23 +1332,48 @@ public final class SpatialOverlayRenderer {
 		double x = layout.centerX();
 		double y = layout.centerY();
 		String owner = view.listKey();
-		add(targets, new VisualKey("panel", owner, Integer.toString(layout.count())), x, y, 1.0, 1.0, x, y + 8.0,
-			new PanelPaint(layout.width(), layout.height(), layout.headerHeight()));
+		// An empty active list still emphasizes its panel and header; under an item
+		// submenu the list drops to the resting inventory coverage.
+		double surfaceCoverage = backgroundCoverage(BOX_BACKGROUND_PERCENT,
+			listActive ? INVENTORY_ACTIVE_GAIN : INVENTORY_IDLE_GAIN, 1.0);
+		add(targets, new VisualKey("panel", owner, Integer.toString(layout.count())), x, y, 1.0, 1.0, surfaceCoverage,
+			x, y + 8.0, new PanelPaint(layout.width(), layout.height(), layout.headerHeight()));
 		String position = view.selectedIndex() >= 0 && view.selectedIndex() < view.rows().size()
 			? (view.selectedIndex() + 1) + " / " + view.rows().size() : "";
 		double headerY = y - layout.height() / 2.0 + headerHeight / 2.0;
-		add(targets, new VisualKey("header", owner, view.status().name()), x, headerY, 1.0, 1.0, x, headerY + 4.0,
-			new HeaderPaint(layout.width(), headerHeight, position, view.status()));
+		add(targets, new VisualKey("header", owner, view.status().name()), x, headerY, 1.0, 1.0, surfaceCoverage,
+			x, headerY + 4.0, new HeaderPaint(layout.width(), headerHeight, position, view.status()));
+		// The complete window, header and footer keep their full layout; while an
+		// item submenu is active only the entered row is planned at all.
+		String retainedRowKey = view.retainedRowKey();
 		for (int i = layout.first(); i < layout.first() + layout.count(); i++) {
 			SpatialInventoryView.Row row = view.rows().get(i);
+			if (retainedRowKey != null && !retainedRowKey.equals(row.key())) {
+				continue;
+			}
 			double rowY = layout.rowCenterY(i);
-			add(targets, new VisualKey("row", owner, row.key()), x, rowY, 1.0, 1.0, x, rowY + 6.0,
-				new RowPaint(row, layout.width(), rowHeight, i == view.selectedIndex(),
+			boolean selected = i == view.selectedIndex();
+			double rowCoverage = selected
+				? backgroundCoverage(BOX_BACKGROUND_PERCENT, selectedRowGain(view, listActive), 1.0) : 0.0;
+			add(targets, new VisualKey("row", owner, row.key()), x, rowY, 1.0, 1.0, rowCoverage, x, rowY + 6.0,
+				new RowPaint(row, layout.width(), rowHeight, selected,
 					view.status().grey() || row.quality().grey()));
 		}
 		double footerY = y + layout.height() / 2.0 - footerHeight / 2.0;
-		add(targets, new VisualKey("footer", owner, ""), x, footerY, 1.0, 1.0, x, footerY + 4.0,
-			new FooterPaint(layout.width(), footerHeight, view.backLeft(), view.backAffordance()));
+		add(targets, new VisualKey("footer", owner, ""), x, footerY, 1.0, 1.0, 0.0, x, footerY + 4.0,
+			new FooterPaint(layout.width(), footerHeight, view.backLeft(), view.backAffordance(),
+				view.forwardAvailable()));
+	}
+
+	/**
+	 * Selected-row background gain: only an active list whose selected row is
+	 * committable and whose Back affordance is unfocused emphasizes. The
+	 * session-owned committability is never reconstructed from Forward
+	 * availability or the grey status.
+	 */
+	static double selectedRowGain(SpatialInventoryView view, boolean listActive) {
+		return listActive && view.selectedRowCommittable() && !view.backAffordance().focused()
+			? INVENTORY_ACTIVE_GAIN : INVENTORY_IDLE_GAIN;
 	}
 
 	/**
@@ -1211,23 +1395,61 @@ public final class SpatialOverlayRenderer {
 			LIST_WIDTH, textHeight * 2.0 + 8.0, rowHeight, textHeight + 6.0);
 	}
 
+	/**
+	 * Sole renderer-owned clearance metric: the distance from the inventory
+	 * panel's forward edge to the item menu's centre at which the item menu's
+	 * geometry and its toward-panel Back frame stay clear of the panel.
+	 *
+	 * <p>The result is at least the larger of {@code 1.1 * outerSectorRadius} —
+	 * the non-root item orbit including the selected push and its sector focus
+	 * margin — and the pushed Back-node centre distance plus the rounded title
+	 * frame's larger half extent at the maximum existing Back scale
+	 * ({@link #NODE_SELECTED_SCALE}; Back is never an eligible 1.2 follower)
+	 * plus a conservative rounding margin. The caller measures the actual
+	 * localized Back label; its frame uses the option text scale, never the
+	 * inventory scale, the deadzone or a fixture width. Session and runtime may
+	 * only consume the resulting distance.
+	 */
+	public static double itemMenuClearance(int guiWidth, int guiHeight, int fontLineHeight,
+		double backLabelWidth, Style style) {
+		if (guiWidth <= 0 || guiHeight <= 0) {
+			throw new IllegalArgumentException("gui dimensions must be positive");
+		}
+		if (fontLineHeight <= 0) {
+			throw new IllegalArgumentException("fontLineHeight must be positive");
+		}
+		if (!Double.isFinite(backLabelWidth) || backLabelWidth < 0.0) {
+			throw new IllegalArgumentException("back label width must be finite and non-negative");
+		}
+		double orbit = orbitFor(Math.min(guiWidth, guiHeight));
+		double backCenter = nodeRadius(1, orbit, 0.0, style.submenuRadiusScale(), true);
+		double outerBound = CLEARANCE_OUTER_FACTOR * sectorRadius(backCenter);
+		NodeLayout back = nodeLayout(backLabelWidth, fontLineHeight, style.optionTextScale());
+		double halfExtent = Math.max(Math.max(Math.abs(back.left()), back.right()),
+			Math.max(Math.abs(back.top()), back.bottom()));
+		double backBound = backCenter + halfExtent * NODE_SELECTED_SCALE + CLEARANCE_ROUNDING_MARGIN;
+		return Math.max(outerBound, backBound);
+	}
+
 	private static void add(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
-		VisualKey key, double x, double y, double scale, double alpha, double entryX, double entryY, Paint paint) {
-		targets.add(new SpatialOverlayTransitions.Target<>(key, x, y, scale, alpha, entryX, entryY, paint));
+		VisualKey key, double x, double y, double scale, double alpha, double backgroundAlpha,
+		double entryX, double entryY, Paint paint) {
+		targets.add(new SpatialOverlayTransitions.Target<>(key, x, y, scale, alpha, entryX, entryY, paint, null, backgroundAlpha));
 	}
 
 	private static void paint(GuiGraphics graphics, Font font,
 		SpatialOverlayTransitions.State<VisualKey, Paint> state, Style style, NodeLayout layout) {
 		double alpha = layerAlpha(state.data(), state.alpha(), style);
-		if (alpha <= 0.0) {
+		double background = backgroundLayerAlpha(state.data(), state.backgroundAlpha(), style);
+		if (alpha <= 0.0 && background <= 0.0) {
 			return;
 		}
 		if (state.data() instanceof NodePaint node) {
-			drawNode(graphics, font, node, state, alpha, layout);
+			drawNode(graphics, font, node, state, alpha, layout, style);
 			return;
 		}
 		if (state.data() instanceof SectorPaint sector) {
-			drawSector(graphics, sector, state, alpha);
+			drawSector(graphics, sector, state, style);
 			return;
 		}
 		if (state.data() instanceof GuidePaint guide) {
@@ -1254,11 +1476,13 @@ public final class SpatialOverlayRenderer {
 				int top = (int) Math.round(-panel.height() / 2.0);
 				int right = (int) Math.round(panel.width() / 2.0);
 				int bottom = (int) Math.round(panel.height() / 2.0);
-				graphics.fill(left, top, right, bottom, withAlpha(PANEL_BACKGROUND, alpha));
-				graphics.fill(left, top, right, top + (int) Math.round(panel.headerHeight()), withAlpha(PANEL_HEADER_BACKGROUND, alpha));
+				int fill = withBackgroundAlpha(PANEL_BACKGROUND, state.backgroundAlpha(), style.targetOpacityPercent());
+				graphics.fill(left, top, right, bottom, fill);
+				graphics.fill(left, top, right, top + (int) Math.round(panel.headerHeight()),
+					withBackgroundAlpha(PANEL_HEADER_BACKGROUND, state.backgroundAlpha(), style.targetOpacityPercent()));
 				strokeRect(graphics, left, top, right, bottom, withAlpha(BORDER_COLOR, alpha));
 			} else if (state.data() instanceof RowPaint row) {
-				paintRow(graphics, font, row, style.inventoryTextScale(), alpha);
+				paintRow(graphics, font, row, style, alpha, state.backgroundAlpha());
 			} else if (state.data() instanceof HeaderPaint header) {
 				double left = -header.width() / 2.0 + 4.0;
 				double top = -header.height() / 2.0 + 3.0;
@@ -1282,13 +1506,19 @@ public final class SpatialOverlayRenderer {
 				int backColor = footer.back().focused() && state.present() ? TEXT_COLOR : TEXT_DIMMED_COLOR;
 				double leftWidth = footer.backLeft() ? backAvailable : available;
 				double leftX = -footer.width() / 2.0 + 4.0 + (footer.backLeft() ? squareSize + 4.0 : 0.0);
-				drawFittedText(graphics, font, left, leftX, y, leftWidth, style.inventoryTextScale(),
-					footer.backLeft() ? backColor : TEXT_DIMMED_COLOR, alpha);
+				// The Forward hint exists only while the item entry is available; the
+				// Back hint keeps its label and its focused progress square.
+				if (footer.backLeft() || footer.forwardAvailable()) {
+					drawFittedText(graphics, font, left, leftX, y, leftWidth, style.inventoryTextScale(),
+						footer.backLeft() ? backColor : TEXT_DIMMED_COLOR, alpha);
+				}
 				double rightAvailable = footer.backLeft() ? available : backAvailable;
 				double rightWidth = Math.min(rightAvailable, font.width(right) * style.inventoryTextScale());
 				double rightEdge = footer.width() / 2.0 - 4.0 - (footer.backLeft() ? 0.0 : squareSize + 4.0);
-				drawFittedText(graphics, font, right, rightEdge - rightWidth, y, rightAvailable,
-					style.inventoryTextScale(), footer.backLeft() ? TEXT_DIMMED_COLOR : backColor, alpha);
+				if (!footer.backLeft() || footer.forwardAvailable()) {
+					drawFittedText(graphics, font, right, rightEdge - rightWidth, y, rightAvailable,
+						style.inventoryTextScale(), footer.backLeft() ? TEXT_DIMMED_COLOR : backColor, alpha);
+				}
 				if (footer.back().focused() && state.present()) {
 					int squareX = (int) Math.round(footer.backLeft() ? -footer.width() / 2.0 + 4.0
 						: footer.width() / 2.0 - 4.0 - squareSize);
@@ -1304,16 +1534,14 @@ public final class SpatialOverlayRenderer {
 		}
 	}
 
-	private static void paintRow(GuiGraphics graphics, Font font, RowPaint paint, double textScale, double alpha) {
+	private static void paintRow(GuiGraphics graphics, Font font, RowPaint paint, Style style,
+		double alpha, double backgroundAlpha) {
 		SpatialInventoryView.Row row = paint.row();
+		double textScale = style.inventoryTextScale();
 		int left = (int) Math.round(-paint.width() / 2.0);
 		int right = (int) Math.round(paint.width() / 2.0);
 		int top = (int) Math.round(-paint.height() / 2.0);
-		int bottom = (int) Math.round(paint.height() / 2.0);
-		if (paint.selected()) {
-			graphics.fill(left + 1, top, right - 1, bottom, withAlpha(ROW_SELECTED_BACKGROUND, alpha));
-			graphics.fill(left + 1, top, left + 2, bottom, withAlpha(BORDER_SELECTED_FALLBACK, alpha));
-		}
+		paintRowFills(paint, style, alpha, backgroundAlpha, graphics::fill);
 		double textLeft = left + 5.0;
 		ClientItemDisplay.Display display = rowDisplay(row);
 		ItemStack stack = display.stack();
@@ -1335,6 +1563,24 @@ public final class SpatialOverlayRenderer {
 				textTop + font.lineHeight * textScale + 1.0, right - 4.0 - textLeft,
 				textScale, TEXT_DISABLED_COLOR, alpha);
 		}
+	}
+
+	/** The production row decoration draw seam, in the row's already-transformed local coordinates. */
+	@FunctionalInterface
+	interface FillPainter {
+		void fill(int left, int top, int right, int bottom, int color);
+	}
+
+	static void paintRowFills(RowPaint paint, Style style, double alpha, double backgroundAlpha, FillPainter painter) {
+		int left = (int) Math.round(-paint.width() / 2.0);
+		int right = (int) Math.round(paint.width() / 2.0);
+		int top = (int) Math.round(-paint.height() / 2.0);
+		int bottom = (int) Math.round(paint.height() / 2.0);
+		int background = withBackgroundAlpha(ROW_SELECTED_BACKGROUND, backgroundAlpha, style.targetOpacityPercent());
+		// Selection changes the foreground immediately, but the old overlay keeps
+		// drawing until its independent displayed coverage quantizes to zero.
+		if ((background >>> 24) != 0) painter.fill(left + 1, top, right - 1, bottom, background);
+		if (paint.selected()) painter.fill(left + 1, top, left + 2, bottom, withAlpha(BORDER_SELECTED_FALLBACK, alpha));
 	}
 
 	private static void drawClippedText(GuiGraphics graphics, Font font, Component label, double x, double y,
@@ -1384,7 +1630,8 @@ public final class SpatialOverlayRenderer {
 		NodePaint node,
 		SpatialOverlayTransitions.State<VisualKey, Paint> state,
 		double alpha,
-		NodeLayout layout
+		NodeLayout layout,
+		Style style
 	) {
 		SpatialController.ChoiceView choice = node.choice();
 		boolean selected = node.selected();
@@ -1400,8 +1647,11 @@ public final class SpatialOverlayRenderer {
 		try {
 			pose.translate(state.x(), state.y(), 0.0);
 			pose.scale((float) state.scale(), (float) state.scale(), 1.0f);
+			// Independent background coverage: the box's 60% layer by itself,
+			// never multiplied into the foreground border/text alpha below.
 			guiGraphics.fill(left, top, right, bottom,
-				withAlpha(selected ? NODE_SELECTED_BACKGROUND : NODE_BACKGROUND, alpha));
+				withBackgroundAlpha(selected ? NODE_SELECTED_BACKGROUND : NODE_BACKGROUND,
+					state.backgroundAlpha(), style.targetOpacityPercent()));
 
 			int borderColor = nodeBorderColor(choice, selected);
 
@@ -1488,8 +1738,8 @@ public final class SpatialOverlayRenderer {
 	}
 
 	private static void drawSector(GuiGraphics graphics, SectorPaint sector,
-		SpatialOverlayTransitions.State<VisualKey, Paint> state, double alpha) {
-		int color = withAlpha(SECTOR_BACKGROUND, alpha);
+		SpatialOverlayTransitions.State<VisualKey, Paint> state, Style style) {
+		int color = withBackgroundAlpha(SECTOR_BACKGROUND, state.backgroundAlpha(), style.opacityPercent());
 		if ((color >>> 24) == 0) {
 			return;
 		}
