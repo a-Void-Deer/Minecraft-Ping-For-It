@@ -38,7 +38,6 @@ public final class SpatialController {
 	private static final double TURN_MIN_DEGREES = 40.0;
 	private static final double RETRACE_MIN_DISTANCE = 68.0;
 	private static final double RETRACE_RATIO = 0.56;
-	private static final double RETRACE_PROGRESS_STEP = 2.0;
 	private static final double RETRACE_LATERAL_LIMIT = 16.0;
 
 	/** A point in controller space (GUI pixels for the renderer). */
@@ -908,8 +907,11 @@ public final class SpatialController {
 		double previousToward = (previousX * directionX + previousY * directionY) / length;
 		double sideways = Math.abs(offsetX * directionY - offsetY * directionX) / length;
 
+		// Any strictly parent-directed progress qualifies, so incremental samples
+		// accumulate to the same net distance as one large reverse stroke; zero,
+		// tangential and outward samples add no progress.
 		return toward >= Math.min(RETRACE_MIN_DISTANCE, length * RETRACE_RATIO)
-			&& toward > previousToward + RETRACE_PROGRESS_STEP
+			&& toward > previousToward
 			&& sideways <= RETRACE_LATERAL_LIMIT;
 	}
 

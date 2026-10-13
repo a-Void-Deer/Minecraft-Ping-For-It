@@ -703,6 +703,65 @@ class SpatialControllerTest {
 	}
 
 	@Test
+	void incrementalSubStepReverseSamplesPopExactlyOnceAtTheNetDistance() {
+		SpatialController controller = enteredContent(false, 500L, 200L, 210L);
+
+		for (int sample = 1; sample <= 67; sample++) {
+			controller.movePhysical(-1.0, 0.0, 220L + sample);
+		}
+		assertEquals(2, controller.snapshot().menus().size(), "one pixel below the net return distance is not enough");
+
+		controller.movePhysical(-1.0, 0.0, 288L);
+		assertEquals(1, controller.snapshot().menus().size(),
+			"the incremental sample reaching the net distance pops exactly one level");
+
+		for (int sample = 0; sample < 20; sample++) {
+			controller.movePhysical(-1.0, 0.0, 289L + sample);
+		}
+		assertEquals(1, controller.snapshot().menus().size(), "further reverse samples cannot pop another level");
+	}
+
+	@Test
+	void exactTwoPixelReverseSamplePopsOnceTheNetDistanceIsReached() {
+		SpatialController controller = enteredContent(false, 500L, 200L, 210L);
+
+		controller.movePhysical(-66.0, 0.0, 220L);
+		assertEquals(2, controller.snapshot().menus().size(), "66 px is below the net return distance");
+
+		controller.movePhysical(-2.0, 0.0, 230L);
+		assertEquals(1, controller.snapshot().menus().size(),
+			"an exact two-pixel sample is positive progress once the net distance is reached");
+	}
+
+	@Test
+	void zeroReverseTangentialAndOutOfCorridorMovementCannotPopAtTheThreshold() {
+		SpatialController controller = enteredContent(false, 500L, 200L, 210L);
+
+		controller.movePhysical(-80.0, 20.0, 220L);
+		assertEquals(2, controller.snapshot().menus().size(), "sideways beyond the corridor is not a return");
+		controller.movePhysical(0.0, -5.0, 230L);
+		assertEquals(2, controller.snapshot().menus().size(), "tangential movement adds no parent-directed progress");
+		controller.movePhysical(10.0, 0.0, 240L);
+		assertEquals(2, controller.snapshot().menus().size(), "outward movement cannot pop");
+		controller.movePhysical(0.0, 0.0, 250L);
+		assertEquals(2, controller.snapshot().menus().size(), "a zero delta is not a sample");
+
+		controller.movePhysical(-10.0, 0.0, 260L);
+		assertEquals(1, controller.snapshot().menus().size(),
+			"a strictly parent-directed sample inside the corridor pops at the net distance");
+	}
+
+	@Test
+	void hoverModeReverseStrokeDoesNotUseTheRetraceShortcut() {
+		SpatialController controller = enteredContent(true, 5000L, 200L, 210L);
+
+		controller.movePhysical(-120.0, 0.0, 220L);
+
+		assertEquals(2, controller.snapshot().menus().size(), "hover mode owns Back instead of retracing");
+		assertEquals("content:back", controller.snapshot().focusId());
+	}
+
+	@Test
 	void returnPlacementFillsTheInclusiveDeadzoneCircumferenceAndAbandonsOnRelease() {
 		var controller = new SpatialController(root(), tuning(180L, false, 500L));
 		controller.start(0L);

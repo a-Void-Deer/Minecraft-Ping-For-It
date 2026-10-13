@@ -130,6 +130,45 @@ class NativeSelectorInputTest {
 	}
 
 	@Test
+	void fractionalNativeDeltasAccumulateIntoExactlyOneParentReturn() {
+		var target = new SpatialSelectorSession.CapturedTarget("ordinary", new ResolvedTarget(
+			new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"),
+			TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow()), Optional.of(BlockFace.NORTH), Optional.empty());
+		var fence = new SpatialSelectorSession.ContentFence(31, 42, 53, "ordinary");
+		var attention = PingTypeCatalog.builtIn().findById("attention").orElseThrow();
+		var preview = new SpatialSelectorSession.InventoryPreview<String>("inventory", Status.READY,
+			List.of(new SpatialSelectorSession.InventoryRow<>("a", "a", 3L, "minecraft:stone", Status.READY, "opaque:a")),
+			List.of(attention), attention);
+		var preferences = new SpatialSelectorSettings();
+		preferences.setDeadzone(18); // explicit geometry and timing, not an accidental default
+		preferences.setStroke(50);
+		preferences.setDwellMillis(180);
+		preferences.setHoverEnabled(false);
+		var session = new SpatialSelectorSession<String>(target, Map.of(), preferences.snapshot(), fence,
+			(ignored, requestedFence) -> new SpatialSelectorSession.ContentProjection<>(fence, 1, false, Status.READY,
+				List.of(), preview),
+			new SpatialSelectorSession.ListGeometry(3, 180, 17, 20, 19, 85));
+		session.open(0); session.moveGui(200, 0, 1); session.tick(181);
+		assertEquals(2, session.snapshot().radial().menus().size(), "helper precondition: content entered");
+
+		var owned = new NativeSelectorInput.Frame(7, 1200, 800, 600, 400, true, false);
+		var input = new NativeSelectorInput(session);
+		input.open();
+		input.prime(600, 400, owned); // priming the cursor warp contributes no travel
+		for (int windowPixel = 1; windowPixel <= 136; windowPixel++) {
+			input.onMove(7, 600 - windowPixel, 400, owned, 182L + windowPixel); // one window pixel is half a GUI pixel
+		}
+
+		var returned = session.snapshot().radial();
+		assertEquals(1, returned.menus().size(), "fractional native samples accumulate into one return");
+		assertEquals(132.0, returned.pointer().x(), 1e-9, "the pointer stops exactly at the net return distance");
+		for (int windowPixel = 1; windowPixel <= 40; windowPixel++) {
+			input.onMove(7, 600 - 136 - windowPixel, 400, owned, 318L + windowPixel);
+		}
+		assertEquals(1, session.snapshot().radial().menus().size(), "further reverse samples cannot pop another level");
+	}
+
+	@Test
 	void scrollNormalizationOccursOnceOnlyWhenOwnedAndDoesNotMovePointer() {
 		Sink sink = new Sink();
 		NativeSelectorInput input = new NativeSelectorInput(sink);
