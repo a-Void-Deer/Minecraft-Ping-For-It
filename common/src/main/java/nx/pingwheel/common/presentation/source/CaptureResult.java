@@ -185,29 +185,95 @@ public record CaptureResult(
 	}
 
 	/**
+	 * The closed, code-owned allowance of approved opaque value codecs. Each
+	 * token fixes one stable codec id and its own engineering byte bound; a
+	 * caller can never supply an arbitrary id, size, or descriptor. A value
+	 * admitted by a token is valid only inside an
+	 * {@link OpaqueKeyedFragment} whose {@code codecId} names the same token.
+	 */
+	public enum OpaqueCodec {
+
+		/**
+		 * Detached inventory observation codec. The bound envelopes the
+		 * absolute 128 KiB display budget plus its bounded entry metadata.
+		 */
+		INVENTORY_OBSERVATION_V2("pingforit:inventory.observation.v2", 133120);
+
+		private final String id;
+		private final int bound;
+
+		OpaqueCodec(String id, int bound) {
+			this.id = id;
+			this.bound = bound;
+		}
+
+		/** The fixed codec id carried by an opaque fragment. */
+		public String id() {
+			return id;
+		}
+
+		/** The engineering byte bound for one value of this codec. */
+		public int bound() {
+			return bound;
+		}
+	}
+
+	/**
 	 * Deep-detached immutable opaque bytes. Construction copies the caller's
 	 * array and every access returns a fresh copy, so neither the producer nor
 	 * any consumer can mutate a carried payload. The generic layer never
 	 * interprets these bytes: the owning codec identified by
 	 * {@link OpaqueKeyedFragment#codecId()} defines their meaning and keeps its
 	 * own stricter domain bounds.
+	 *
+	 * <p>An ordinary value is admitted by the engineering value bound alone. A
+	 * value tagged through {@link #forCodec} is instead admitted by exactly one
+	 * {@link OpaqueCodec} allowance, and {@link OpaqueKeyedFragment} rejects a
+	 * tagged value whose codec does not match its fragment codec id even when
+	 * the carried bytes are small or empty.
 	 */
-	public record OpaqueValue(byte[] bytes) {
+	public static final class OpaqueValue {
 
-		/** Engineering guard for one opaque value; not a product or wire value. */
+		/** Engineering guard for one untagged opaque value; not a product or wire value. */
 		static final int MAX_VALUE_BYTES = 8192;
 
-		public OpaqueValue {
+		private final byte[] bytes;
+		private final OpaqueCodec codec;
+
+		public OpaqueValue(byte[] bytes) {
+			this(bytes, null);
+		}
+
+		private OpaqueValue(byte[] bytes, OpaqueCodec codec) {
 			Objects.requireNonNull(bytes, "bytes");
-			if (bytes.length > MAX_VALUE_BYTES)
+			if (bytes.length > (codec == null ? MAX_VALUE_BYTES : codec.bound()))
 				throw new IllegalArgumentException("opaque value exceeds the value bound");
-			bytes = bytes.clone();
+			this.bytes = bytes.clone();
+			this.codec = codec;
+		}
+
+		/**
+		 * Admits one value under a code-owned allowance. The token fixes both
+		 * the accepted id and the byte bound; no caller-chosen size exists.
+		 */
+		public static OpaqueValue forCodec(OpaqueCodec codec, byte[] bytes) {
+			Objects.requireNonNull(codec, "codec");
+			return new OpaqueValue(bytes, codec);
 		}
 
 		/** A fresh copy; callers can never mutate the carried bytes. */
-		@Override
 		public byte[] bytes() {
 			return bytes.clone();
+		}
+
+		/** The carried size, without copying. */
+		public int size() {
+			return bytes.length;
+		}
+
+		/** The code-owned allowance that admitted this value, or null for the ordinary form. */
+		public OpaqueCodec codec() {
+			return codec;
 		}
 
 		@Override
@@ -218,6 +284,11 @@ public record CaptureResult(
 		@Override
 		public int hashCode() {
 			return Arrays.hashCode(bytes);
+		}
+
+		@Override
+		public String toString() {
+			return "OpaqueValue[size=" + bytes.length + (codec == null ? "" : ", codec=" + codec.id()) + "]";
 		}
 	}
 
@@ -232,7 +303,9 @@ public record CaptureResult(
 	 *
 	 * <p>{@code codecId} names a code-registered encoding, not a dynamic plugin
 	 * type. A missing key means unchanged or unknown, never zero, and an
-	 * explicit value stays explicit.
+	 * explicit value stays explicit. A value tagged with an {@link OpaqueCodec}
+	 * allowance is accepted only when its token id equals {@code codecId}; the
+	 * ordinary untagged form keeps its value-bound behavior.
 	 */
 	public record OpaqueKeyedFragment(String codecId, Map<String, OpaqueValue> entries) implements CapturePayload {
 
@@ -252,6 +325,9 @@ public record CaptureResult(
 			for (Map.Entry<String, OpaqueValue> entry : entries.entrySet()) {
 				String key = SourceKey.requireToken(entry.getKey(), "opaque key");
 				OpaqueValue value = Objects.requireNonNull(entry.getValue(), "opaque value");
+				if (value.codec() != null && !value.codec().id().equals(codecId)) {
+					throw new IllegalArgumentException("opaque value codec does not match the fragment codec");
+				}
 				copy.put(key, value);
 			}
 			entries = Map.copyOf(copy);

@@ -25,6 +25,7 @@ import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec;
 import nx.pingwheel.common.presentation.InventoryItemPingTypes;
 import nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources;
 import nx.pingwheel.common.presentation.minecraft.PresentationServer;
@@ -48,8 +49,13 @@ public final class InventoryServer {
 		reset();
 		active = server;
 		epochSeed = Math.addExact(epochSeed, 2048);
-		var runtime = new InventoryRuntime(input -> InventoryMinecraftSources.resolve(server, input), ServerConfig.HANDLER.getConfig().getInventory().pendingMemoryBytes());
-		backend = new InventoryBackend(new Host(server, runtime), runtime, epochSeed);
+		InventoryRuntime.DisplayReprojector reprojector = (display, displayBytes) ->
+			InventoryItemCodec.reproject(display, server.registryAccess(), displayBytes);
+		var runtime = new InventoryRuntime(
+			(input, displayBytes) -> InventoryMinecraftSources.resolve(server, input, displayBytes),
+			ServerConfig.HANDLER.getConfig().getInventory().pendingMemoryBytes(),
+			reprojector);
+		backend = new InventoryBackend(new Host(server, runtime, reprojector), runtime, epochSeed);
 	}
 
 	public static void reset() {
@@ -83,7 +89,8 @@ public final class InventoryServer {
 		return backend != null && backend.tracksInventory(marker);
 	}
 
-	private record Host(MinecraftServer server, InventoryRuntime runtime) implements InventoryBackend.Host {
+	private record Host(MinecraftServer server, InventoryRuntime runtime, InventoryRuntime.DisplayReprojector reprojector) implements InventoryBackend.Host {
+		@Override public Optional<InventoryRuntime.DisplayReprojector> displayReprojector() { return Optional.of(reprojector); }
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) {
 			return PresentationServer.inventoryPolicy(player).map(p -> new InventoryBackend.Policy(p.epoch(), p.view(), p.types()));
 		}

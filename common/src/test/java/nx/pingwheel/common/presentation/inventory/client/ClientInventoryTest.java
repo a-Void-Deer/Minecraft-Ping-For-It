@@ -69,8 +69,24 @@ class ClientInventoryTest {
 		return new InventoryS2CPacket.Offer(10, 20, 3, 5);
 	}
 
+	private static InventoryS2CPacket.Offer settings(int displayBytes, int frameBytes) {
+		return new InventoryS2CPacket.Offer(10, 20, 3, 5, displayBytes, frameBytes);
+	}
+
 	private void offer() {
 		session.accept(InventoryS2CPacket.offer(EPOCH, settings()));
+	}
+
+	private void offer(InventoryS2CPacket.Offer settings) {
+		session.accept(InventoryS2CPacket.offer(EPOCH, settings));
+	}
+
+	private static InventoryS2CPacket.Entry displayEntry(String key, long count, long revision, String displayJson) {
+		return new InventoryS2CPacket.Entry(key, "minecraft:stone", key, displayJson, count, revision, false, null);
+	}
+
+	private List<String> trackedKeys() {
+		return session.tracking(markerId).entries().stream().map(ClientInventory.EntryView::key).toList();
 	}
 
 	private InventoryS2CPacket data(InventoryS2CPacket.Kind kind, long baseline, long revision, int partIndex,
@@ -202,7 +218,7 @@ class ClientInventoryTest {
 	@Test
 	void previewReplacementGrowthRespectsByteBound() {
 		long requestId = session.open(target());
-		offer();
+		offer(settings(4096, InventoryS2CPacket.MAX_FRAME_BYTES));
 		sent.clear();
 
 		String display = "d".repeat(4096);
@@ -994,5 +1010,231 @@ class ClientInventoryTest {
 		assertEquals(1, session.stats().invalidPackets());
 		assertEquals(1L, session.stats().staleEpochPackets(), "a second offer is ignored without an epoch error");
 		assertEquals(0, session.stats().trackedChannels());
+	}
+
+	@Test
+	void negotiatedCapsRejectOversizedDataBeforeAnyStateMutation() {
+		offer(settings(1024, 8192));
+		receive(snapshot(0, 1, List.of(displayEntry("a", 3L, 1L, "d".repeat(512)))));
+		assertTrue(session.tracking(markerId).complete());
+		ClientInventory.Tracking before = session.tracking(markerId);
+		long acceptedBefore = session.stats().acceptedPackets();
+
+		List<InventoryS2CPacket.Entry> wide = new ArrayList<>();
+		for (int i = 0; i < 8; i++)
+			wide.add(displayEntry("w" + i, 1L, 2L, "d".repeat(1024)));
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, WATERMARK + 1L, wide));
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, WATERMARK + 2L,
+			List.of(displayEntry("d", 1L, 3L, "d".repeat(1025)))));
+
+		ClientInventory.Tracking after = session.tracking(markerId);
+		assertEquals(2L, session.stats().capRejectedPackets(), "one frame over the frame cap and one display over the display cap");
+		assertEquals(acceptedBefore, session.stats().acceptedPackets(), "rejected frames are never accepted");
+		assertEquals(before.watermark(), after.watermark());
+		assertEquals(before.statusRevision(), after.statusRevision());
+		assertEquals(before.baselineId(), after.baselineId());
+		assertEquals(1, after.entries().size());
+		assertEquals(3L, after.entries().getFirst().count());
+		assertEquals("d".repeat(512), after.entries().getFirst().displayJson());
+	}
+
+	@Test
+	void effectiveDisplayCapMeasuresUtf8BytesNotCharacters() {
+		offer(settings(1024, 8192));
+		receive(snapshot(0, 1, List.of(displayEntry("a", 1L, 1L, null))));
+		long acceptedBefore = session.stats().acceptedPackets();
+
+		String twoByte = "\u00e9".repeat(700);
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, WATERMARK + 1L,
+			List.of(displayEntry("a", 2L, 2L, twoByte))));
+
+		assertEquals(1L, session.stats().capRejectedPackets(), "700 characters are 1400 UTF-8 bytes");
+		assertEquals(acceptedBefore, session.stats().acceptedPackets());
+		assertEquals(1L, trackedEntry("a").count(), "the byte-oversized replacement did not apply");
+		assertNull(trackedEntry("a").displayJson());
+
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, WATERMARK + 2L,
+			List.of(displayEntry("a", 2L, 2L, "d".repeat(1024)))));
+		assertEquals(2L, trackedEntry("a").count(), "an exact-cap display still fits");
+		assertEquals("d".repeat(1024), trackedEntry("a").displayJson());
+	}
+
+	@Test
+	void defaultCapsStillAcceptOrdinaryFrames() {
+		offer();
+		receive(snapshot(0, 2, List.of(entry("a", 3L, 1L))));
+		receive(snapshot(1, 2, List.of(entry("b", 5L, 1L))));
+
+		assertTrue(session.tracking(markerId).complete());
+		assertEquals(2, session.tracking(markerId).entries().size());
+		assertEquals(0L, session.stats().capRejectedPackets());
+		assertEquals(2L, session.stats().acceptedPackets(), "both data frames were admitted");
+	}
+
+	@Test
+	void loweredOfferFencesIncompatiblePartialCutsAndKeepsCommittedCounts() {
+		offer();
+		MarkerId other = new MarkerId(8L);
+		receive(snapshot(0, 2, List.of(displayEntry("big", 7L, 1L, "d".repeat(4096)), entry("small", 3L, 1L))));
+		receive(snapshot(1, 2, List.of()));
+		assertTrue(session.tracking(markerId).complete());
+		receive(data(InventoryS2CPacket.Kind.SNAPSHOT, 9L, 2L, 0, 2, 20L,
+			List.of(displayEntry("huge", 9L, 1L, "d".repeat(2048)))));
+		receive(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, EPOCH, 2L, other, 12L, 1L, 5L,
+			0, 1, true, InventoryS2CPacket.Status.READY, 0L, List.of(displayEntry("other-huge", 4L, 1L, "d".repeat(2048)))));
+		receive(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, EPOCH, 2L, other, 13L, 1L, 5L,
+			0, 1, true, InventoryS2CPacket.Status.READY, 0L, List.of(entry("other-small", 4L, 1L))));
+		assertEquals(2, session.stats().unknownSessions());
+		long fencedBefore = session.stats().capFencedStates();
+
+		offer(settings(1024, 8192));
+
+		assertTrue(session.stats().capFencedStates() > fencedBefore, "lowering fences incompatible cuts");
+		assertTrue(session.tracking(markerId).complete());
+		assertEquals(7L, trackedEntry("big").count(), "the authoritative count is retained");
+		assertNull(trackedEntry("big").displayJson(), "the oversized display payload is discarded");
+		assertEquals(3L, trackedEntry("small").count());
+		assertEquals(WATERMARK, session.tracking(markerId).watermark(), "no partial cut advanced the committed watermark");
+		assertEquals(1, session.stats().unknownSessions(), "only the compatible unknown channel remains");
+
+		receive(data(InventoryS2CPacket.Kind.SNAPSHOT, 9L, 2L, 1, 2, 20L, List.of(entry("late", 5L, 2L))));
+		assertEquals(List.of("big", "small"), trackedKeys(), "the discarded partial cut never commits");
+		assertEquals(7L, trackedEntry("big").count());
+
+		receive(data(InventoryS2CPacket.Kind.SNAPSHOT, 10L, 3L, 0, 1, 30L,
+			List.of(displayEntry("big", 8L, 2L, "d".repeat(512)), entry("small", 3L, 2L))));
+		assertTrue(session.tracking(markerId).complete(), "a new fence commits the capped replacement");
+		assertEquals(8L, trackedEntry("big").count());
+		assertEquals("d".repeat(512), trackedEntry("big").displayJson());
+	}
+
+	@Test
+	void delayedOldFrameBeyondLoweredCapsCannotMutate() {
+		offer();
+		receive(snapshot(0, 1, List.of(displayEntry("big", 7L, 1L, "d".repeat(4096)))));
+		InventoryS2CPacket delayed = data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 6L,
+			List.of(displayEntry("big", 99L, 2L, "d".repeat(4096))));
+
+		offer(settings(1024, 8192));
+		long acceptedBefore = session.stats().acceptedPackets();
+		receive(delayed);
+
+		assertEquals(1L, session.stats().capRejectedPackets());
+		assertEquals(acceptedBefore, session.stats().acceptedPackets());
+		assertEquals(7L, trackedEntry("big").count());
+		assertEquals(WATERMARK, session.tracking(markerId).watermark());
+		assertNull(trackedEntry("big").displayJson(), "the lowered cap already fenced the old display");
+
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 6L,
+			List.of(displayEntry("big", 9L, 2L, "d".repeat(512)))));
+		assertEquals(9L, trackedEntry("big").count(), "a fitting retry applies");
+		assertEquals("d".repeat(512), trackedEntry("big").displayJson());
+	}
+
+	@Test
+	void sameEpochOfferIncreaseKeepsStateAndOnlyFutureDataAddsDetails() {
+		offer();
+		receive(snapshot(0, 1, List.of(displayEntry("big", 7L, 1L, "d".repeat(4096)))));
+		offer(settings(1024, 8192));
+		assertNull(trackedEntry("big").displayJson());
+
+		offer(settings(8192, 65536));
+
+		assertEquals(7L, trackedEntry("big").count());
+		assertNull(trackedEntry("big").displayJson(), "a raised cap never restores fenced metadata");
+		assertEquals(0L, session.stats().capRejectedPackets());
+
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, 6L,
+			List.of(displayEntry("big", 7L, 2L, "d".repeat(4096)))));
+		assertEquals("d".repeat(4096), trackedEntry("big").displayJson(),
+			"only a future accepted revision restores the display");
+	}
+
+	@Test
+	void wrongEpochOfferCannotWidenAcceptedCaps() {
+		offer(settings(1024, 8192));
+		long acceptedBefore = session.stats().acceptedPackets();
+
+		session.accept(InventoryS2CPacket.offer(EPOCH + 1L,
+			settings(InventoryS2CPacket.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES)));
+
+		assertEquals(EPOCH, session.epoch(), "the session epoch is unchanged");
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, WATERMARK,
+			List.of(displayEntry("wide", 1L, 1L, "d".repeat(1025)))));
+		assertEquals(1L, session.stats().capRejectedPackets(), "the wrong-epoch offer did not widen the caps");
+		assertEquals(acceptedBefore, session.stats().acceptedPackets());
+	}
+
+	@Test
+	void resetClearsEffectiveCapsAndPendingAssembly() {
+		offer(settings(1024, 8192));
+		receive(snapshot(0, 2, List.of(displayEntry("a", 1L, 1L, null))));
+		assertFalse(session.tracking(markerId).complete());
+
+		session.reset();
+
+		assertFalse(session.ready());
+		assertTrue(session.tracking(markerId).entries().isEmpty());
+		offer();
+
+		receive(snapshot(0, 1, List.of(displayEntry("big", 4L, 1L, "d".repeat(4096)))));
+		assertTrue(session.tracking(markerId).complete());
+		assertEquals(4L, trackedEntry("big").count());
+		assertEquals("d".repeat(4096), trackedEntry("big").displayJson(),
+			"the reset cleared the lowered effective caps");
+		assertEquals(0L, session.stats().capRejectedPackets());
+	}
+
+	@Test
+	void oversizedClassificationKeepsEpochAndSolicitationFences() {
+		offer(settings(1024, 8192));
+		long staleBefore = session.stats().staleEpochPackets();
+		long fencedBefore = session.stats().fencedPackets();
+
+		receive(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, EPOCH + 1L, 1L, markerId, BASELINE, REVISION,
+			WATERMARK, 0, 1, true, InventoryS2CPacket.Status.READY, 0L,
+			List.of(displayEntry("wide", 1L, 1L, "d".repeat(1025)))));
+		receive(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, EPOCH, 1L, new MarkerId(99L), BASELINE, REVISION,
+			WATERMARK, 0, 1, true, InventoryS2CPacket.Status.READY, 0L,
+			List.of(displayEntry("wide", 1L, 1L, "d".repeat(1025)))));
+		receive(previewData(999L, BASELINE, REVISION, WATERMARK, 0, 1, true, InventoryS2CPacket.Status.READY,
+			List.of(displayEntry("wide", 1L, 1L, "d".repeat(1025)))));
+
+		assertEquals(staleBefore + 1L, session.stats().staleEpochPackets(), "a wrong epoch stays an epoch fence");
+		assertEquals(fencedBefore + 2L, session.stats().fencedPackets(), "unsolicited data stays a solicitation fence");
+		assertEquals(0L, session.stats().capRejectedPackets(), "oversized unsolicited data is not a cap verdict");
+	}
+
+	@Test
+	void metadataOnlyRevisionUpdatesDisplayWithoutChangingTheClosedChecksum() {
+		commitTwoEntries();
+		sent.clear();
+
+		receive(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, WATERMARK + 1L,
+			List.of(displayEntry("a", 3L, 2L, "{\"id\":\"minecraft:stone\"}"))));
+
+		assertEquals("{\"id\":\"minecraft:stone\"}", trackedEntry("a").displayJson());
+		assertEquals(3L, trackedEntry("a").count(), "a metadata-only revision keeps the quantity");
+		receive(heartbeat(checksum(entry("a", 3L, 1L), entry("b", 5L, 1L)), WATERMARK + 1L));
+		assertTrue(sent.isEmpty(), "the display payload is outside the closed checksum");
+	}
+
+	@Test
+	void loweredOfferKeepsCompatiblePartialProgressAndCommittedChannels() {
+		offer();
+		MarkerId other = new MarkerId(8L);
+		receive(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, EPOCH, 2L, other, BASELINE, REVISION, WATERMARK,
+			0, 1, true, InventoryS2CPacket.Status.READY, 0L, List.of(displayEntry("other", 6L, 1L, "d".repeat(512)))));
+		receive(snapshot(0, 2, List.of(entry("a", 3L, 1L), entry("b", 5L, 1L))));
+
+		offer(settings(1024, 8192));
+
+		receive(snapshot(1, 2, List.of(entry("c", 7L, 1L))));
+
+		ClientInventory.Tracking tracking = session.tracking(markerId);
+		assertTrue(tracking.complete(), "a compatible partial baseline still commits after the lowering");
+		assertEquals(List.of("a", "b", "c"), trackedKeys());
+		assertEquals(WATERMARK, tracking.watermark());
+		assertEquals(6L, session.tracking(other).entries().getFirst().count(), "an unrelated channel is untouched");
 	}
 }

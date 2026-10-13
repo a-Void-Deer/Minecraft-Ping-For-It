@@ -1,33 +1,38 @@
 package nx.pingwheel.common.network;
 
+import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.config.InventoryLimits;
+import nx.pingwheel.common.config.InventorySizeScale;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.MarkerRejectReason;
 import org.jetbrains.annotations.NotNull;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 
 import static nx.pingwheel.common.Global.S2C_NAMESPACE;
 
 /**
- * Version-three inventory preview and tracking responses. {@code OFFER} carries the
- * server-selected periods and nothing else; {@code PREVIEW}, {@code SNAPSHOT}
- * and {@code STREAM} carry one immutable entry fragment under an independent
- * epoch/request/marker/baseline identity; {@code STATUS} carries the
- * authoritative inventory state; {@code HEARTBEAT} carries only checksum and
- * watermark progress. Entry text is hard-bounded (256-byte key and item id,
- * 1024-byte label, 4096-byte display JSON), the whole encoded frame is capped
- * at {@link #MAX_FRAME_BYTES}, and decode rejects unknown enums, invalid part
- * ranges, duplicate keys, negative counts, trailing bytes, and oversized frames
- * before any large allocation.
+ * Version-four inventory preview and tracking responses. {@code OFFER} carries the
+ * server-selected periods plus the effective display and frame budgets and
+ * nothing else; {@code PREVIEW}, {@code SNAPSHOT} and {@code STREAM} carry one
+ * immutable entry fragment under an independent epoch/request/marker/baseline
+ * identity; {@code STATUS} carries the authoritative inventory state;
+ * {@code HEARTBEAT} carries only checksum and watermark progress.
+ *
+ * <p>Entry text is hard-bounded (256-byte key and item id, 1024-byte label,
+ * 128 KiB display JSON) and the whole encoded frame is capped at the absolute
+ * 512 KiB guard. A server writes under its effective display and frame budgets
+ * through the explicit overload; the legacy {@link #write(FriendlyByteBuf)}
+ * stays absolute-safe because an effective budget never exceeds the absolute
+ * guards. Decode rejects unknown enums, invalid part ranges, duplicate keys,
+ * negative counts, trailing bytes, and oversized frames before any large
+ * allocation.
  */
 public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long requestId, MarkerId markerId,
 	long baselineId, long statusRevision, long watermark, int partIndex, int partCount, boolean completeScan,
@@ -36,30 +41,53 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	public enum Kind { OFFER, POLICY, SELECTED, REJECT, PREVIEW, SNAPSHOT, STREAM, STATUS, HEARTBEAT }
 	public enum Status { UPDATING, READY, UNCERTAIN, INCOMPLETE, UNAVAILABLE, INVALID, EXPIRED, COMPONENT_TOO_LONG }
 
-	public static final int VERSION = 3;
+	public static final int VERSION = 4;
 	public static final int MAX_ENTRIES = 128;
-	public static final int MAX_FRAME_BYTES = 32768;
-	public static final int MAX_ENTRY_BYTES = 8192;
+	/** Absolute whole-frame guard: the largest legal server frame budget. */
+	public static final int MAX_FRAME_BYTES = InventoryLimits.MAX_FRAME_BYTES;
+	/** Absolute per-entry display guard: the largest legal display budget. */
+	public static final int MAX_DISPLAY_BYTES = InventoryLimits.MAX_DISPLAY_BYTES;
+	/** Metadata reserve inside the per-entry envelope; it covers every fixed entry field and its framing. */
+	private static final int ENTRY_METADATA_RESERVE_BYTES = 2048;
+	/**
+	 * Safe per-entry envelope: the absolute display budget plus a metadata
+	 * reserve that covers every fixed entry field, its framing, and the
+	 * optional ping-type text. A reservation must never understate one entry.
+	 */
+	public static final int MAX_ENTRY_BYTES = MAX_DISPLAY_BYTES + ENTRY_METADATA_RESERVE_BYTES;
 	public static final int MAX_KEY_BYTES = 256;
 	public static final int MAX_ITEM_ID_BYTES = 256;
 	public static final int MAX_LABEL_BYTES = 1024;
-	public static final int MAX_DISPLAY_BYTES = 4096;
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "inventory-v3");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "inventory-v4");
 	public static final Type<InventoryS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
+	private static final String[] POLICY_WIRE_ORDER = { "block", "dropped_item", "entity", "entity_block", "location" };
 
 	/**
-	 * Server-selected periods within the shared inventory settings ranges. An
-	 * explicit heartbeat zero disables the periodic heartbeat; preview and
-	 * tracking use the shared period range, and resynchronization stays within
-	 * its positive minimum.
+	 * Server-selected periods plus the effective display and frame byte budgets
+	 * within the shared inventory settings ranges. An explicit heartbeat zero
+	 * disables the periodic heartbeat; preview and tracking use the shared
+	 * period range, and resynchronization stays within its positive minimum.
+	 * The budget pair must be an exact legal size-scale pair that keeps the
+	 * fixed metadata reserve.
 	 */
-	public record Offer(int previewPeriodTicks, int trackingPeriodTicks, int resyncMinPeriods, int heartbeatPeriods) {
+	public record Offer(int previewPeriodTicks, int trackingPeriodTicks, int resyncMinPeriods, int heartbeatPeriods,
+		int effectiveDisplayBytes, int effectiveFrameBytes) {
+
+		/** Legacy Java default: the 1x pair (4 KiB display, 32 KiB frame); not a wire-compatibility claim. */
+		public Offer(int previewPeriodTicks, int trackingPeriodTicks, int resyncMinPeriods, int heartbeatPeriods) {
+			this(previewPeriodTicks, trackingPeriodTicks, resyncMinPeriods, heartbeatPeriods,
+				InventoryLimits.DISPLAY_BASE_BYTES, InventoryLimits.FRAME_BASE_BYTES);
+		}
+
 		public Offer {
 			if (periodOutOfRange(previewPeriodTicks) || periodOutOfRange(trackingPeriodTicks)
 				|| resyncMinPeriods < InventoryLimits.MIN_RESYNC_PERIODS
 				|| heartbeatPeriods < InventoryLimits.MIN_HEARTBEAT_PERIODS
 				|| heartbeatPeriods > InventoryLimits.MAX_HEARTBEAT_PERIODS) {
 				throw new IllegalArgumentException("inventory offer periods");
+			}
+			if (!legalSizePair(effectiveDisplayBytes, effectiveFrameBytes)) {
+				throw new IllegalArgumentException("inventory offer size pair");
 			}
 		}
 	}
@@ -158,52 +186,160 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 			watermark, 0, 1, false, null, checksum, List.of(), null);
 	}
 
+	/** Legacy absolute-safe write: the absolute display and frame guards. */
 	@Override public void write(FriendlyByteBuf buf) {
-		FriendlyByteBuf frame = new FriendlyByteBuf(Unpooled.buffer(256, MAX_FRAME_BYTES + MAX_ENTRY_BYTES));
+		write(buf, MAX_DISPLAY_BYTES, MAX_FRAME_BYTES);
+	}
+
+	/**
+	 * Writes one frame under explicit effective server budgets. The pair must be
+	 * a legal size-scale pair that keeps the fixed metadata reserve, and every
+	 * entry display must fit the effective display budget.
+	 */
+	public void write(FriendlyByteBuf buf, int displayBytes, int frameBytes) {
+		// Validate and measure before allocating. Exactly one fixed-capacity
+		// scratch array: no payload buffer, growth copies or temporary UTF arrays.
+		int size = encodedSize(displayBytes, frameBytes);
+		FriendlyByteBuf frame = new FriendlyByteBuf(Unpooled.buffer(size, size));
 		try {
-			writeFrame(frame);
-			if (frame.readableBytes() > MAX_FRAME_BYTES) {
-				throw new IllegalArgumentException("Inventory frame exceeds budget");
-			}
+			writeFrame(frame, displayBytes, frameBytes);
+			if (frame.readableBytes() != size) throw new IllegalStateException("Inventory frame measurement mismatch");
 			buf.writeBytes(frame);
 		} finally {
 			frame.release();
 		}
 	}
 
-	private void writeFrame(FriendlyByteBuf buf) {
-		MarkerPacketCodec.writeEnum(buf, kind);
+	/**
+	 * Exact encoded frame length under explicit effective budgets, usable for
+	 * admission before any allocation or destination write. No codec buffers,
+	 * UTF arrays, stream/sort results or measurement objects are allocated.
+	 * Throws when the frame exceeds the effective budget, matching the write path.
+	 */
+	public int encodedSize(int displayBytes, int frameBytes) {
+		requireBudgets(displayBytes, frameBytes);
+		int size = enumSize(kind) + varIntSize(protocol) + 32;
+		size += switch (kind) {
+			case POLICY -> {
+				int policy = varIntSize(allowedTypes.size());
+				for (int i = 0; i < POLICY_WIRE_ORDER.length; i++)
+					if (allowedTypes.contains(POLICY_WIRE_ORDER[i])) policy += textSize(POLICY_WIRE_ORDER[i], 256);
+				yield policy;
+			}
+			case SELECTED, REJECT -> 8 + markerSize() + (kind == Kind.REJECT ? enumSize(rejection) : 0);
+			case OFFER -> varIntSize(offer.previewPeriodTicks()) + varIntSize(offer.trackingPeriodTicks())
+				+ varIntSize(offer.resyncMinPeriods()) + varIntSize(offer.heartbeatPeriods())
+				+ varIntSize(offer.effectiveDisplayBytes()) + varIntSize(offer.effectiveFrameBytes());
+			case PREVIEW, SNAPSHOT, STREAM -> {
+				int payload = entriesSize(entries, displayBytes);
+				yield markerSize() + 24 + varIntSize(partIndex) + varIntSize(partCount) + 1
+					+ enumSize(status) + 8 + varIntSize(payload) + payload;
+			}
+			case STATUS -> markerSize() + 24 + enumSize(status) + 8;
+			case HEARTBEAT -> markerSize() + 32;
+		};
+		if (size > frameBytes) throw new IllegalArgumentException("Inventory frame exceeds budget");
+		return size;
+	}
+
+	/**
+	 * Bounded synchronous write/handoff workspace, separate from wire bytes.
+	 * One exact scratch frame plus a fresh destination's old and new backing
+	 * arrays may coexist during growth. Each destination capacity is bounded
+	 * by twice the body (the small initial capacity is in the fixed allowance).
+	 * Also covers ByteBuf/wrapper/index bookkeeping. Pre-existing transport
+	 * buffers are transport-owned, not fresh publisher workspace.
+	 * Measurement itself needs no workspace. Transport-owned asynchronous
+	 * storage after handoff remains the transport's responsibility.
+	 */
+	public long encodingWorkspace(int displayBytes, int frameBytes) {
+		return 1024L + 5L * encodedSize(displayBytes, frameBytes);
+	}
+
+	private int markerSize() { return markerId == null ? 1 : 9; }
+	private static int varIntSize(int value) {
+		int size = 1;
+		while ((value & ~0x7f) != 0) { value >>>= 7; size++; }
+		return size;
+	}
+	private static int textSize(String value, int maxChars) {
+		int bytes = utf8Length(value);
+		if (value.length() > maxChars || bytes > 3L * maxChars) throw new IllegalArgumentException("inventory UTF size");
+		return varIntSize(bytes) + bytes;
+	}
+	private static int enumSize(Enum<?> value) { return textSize(value.name(), MarkerPacketCodec.MAX_ID_LENGTH); }
+	private static int entriesSize(List<Entry> entries, int displayBytes) {
+		int size = varIntSize(entries.size());
+		for (int index = 0; index < entries.size(); index++) {
+			Entry entry = entries.get(index);
+			int entrySize = 29 + textSize(entry.key(), MAX_KEY_BYTES) + textSize(entry.itemId(), MAX_ITEM_ID_BYTES)
+				+ textSize(entry.label(), MAX_LABEL_BYTES);
+			if (entry.displayJson() != null) {
+				if (utf8Length(entry.displayJson()) > displayBytes) throw new IllegalArgumentException("inventory display json");
+				entrySize += textSize(entry.displayJson(), displayBytes);
+			}
+			if (entry.quality() != null) entrySize += enumSize(entry.quality());
+			if (entry.itemPingType() != null) entrySize += textSize(entry.itemPingType(), 256);
+			if (entrySize > MAX_ENTRY_BYTES) throw new IllegalArgumentException("inventory entry size");
+			size += entrySize;
+		}
+		return size;
+	}
+	private static void writeText(FriendlyByteBuf buf, String value, int maxChars) {
+		int bytes = utf8Length(value);
+		textSize(value, maxChars);
+		buf.writeVarInt(bytes);
+		// FriendlyByteBuf.writeUtf allocates a 3*chars temporary. Write directly
+		// into our premeasured unpooled frame with Netty's exact UTF reservation.
+		ByteBufUtil.reserveAndWriteUtf8(buf.unwrap(), value, bytes);
+	}
+	private static void writeEnum(FriendlyByteBuf buf, Enum<?> value) {
+		writeText(buf, value.name(), MarkerPacketCodec.MAX_ID_LENGTH);
+	}
+	private void writeMarkerId(FriendlyByteBuf buf) {
+		buf.writeBoolean(markerId != null);
+		if (markerId != null) buf.writeLong(markerId.value());
+	}
+
+	private void writeFrame(FriendlyByteBuf buf, int displayBytes, int frameBytes) {
+		writeEnum(buf, kind);
 		buf.writeVarInt(protocol);
 		buf.writeLong(epoch);
 		buf.writeLong(requestId);
 		buf.writeLong(presentationEpoch);
 		buf.writeLong(view);
 		switch (kind) {
-			case POLICY -> { buf.writeVarInt(allowedTypes.size()); for (String type : allowedTypes.stream().sorted().toList()) buf.writeUtf(type, 256); }
+			case POLICY -> {
+				buf.writeVarInt(allowedTypes.size());
+				for (int i = 0; i < POLICY_WIRE_ORDER.length; i++)
+					if (allowedTypes.contains(POLICY_WIRE_ORDER[i])) writeText(buf, POLICY_WIRE_ORDER[i], 256);
+			}
 			case SELECTED, REJECT -> {
-				buf.writeLong(commitId); MarkerPacketCodec.writeOptionalMarkerId(buf, Optional.ofNullable(markerId));
-				if (kind == Kind.REJECT) MarkerPacketCodec.writeEnum(buf, rejection);
+				buf.writeLong(commitId); writeMarkerId(buf);
+				if (kind == Kind.REJECT) writeEnum(buf, rejection);
 			}
 			case OFFER -> {
 				buf.writeVarInt(offer.previewPeriodTicks());
 				buf.writeVarInt(offer.trackingPeriodTicks());
 				buf.writeVarInt(offer.resyncMinPeriods());
 				buf.writeVarInt(offer.heartbeatPeriods());
+				buf.writeVarInt(offer.effectiveDisplayBytes());
+				buf.writeVarInt(offer.effectiveFrameBytes());
 			}
 			case PREVIEW, SNAPSHOT, STREAM -> {
-				MarkerPacketCodec.writeOptionalMarkerId(buf, Optional.ofNullable(markerId));
-				writeData(buf);
+				writeMarkerId(buf);
+				writeData(buf, displayBytes, frameBytes);
 			}
 			case STATUS -> {
-				MarkerPacketCodec.writeOptionalMarkerId(buf, Optional.ofNullable(markerId));
+				writeMarkerId(buf);
 				buf.writeLong(baselineId);
 				buf.writeLong(statusRevision);
 				buf.writeLong(watermark);
-				MarkerPacketCodec.writeEnum(buf, status);
+				writeEnum(buf, status);
 				buf.writeLong(checksum);
 			}
 			case HEARTBEAT -> {
-				MarkerPacketCodec.writeOptionalMarkerId(buf, Optional.ofNullable(markerId));
+				writeMarkerId(buf);
 				buf.writeLong(baselineId);
 				buf.writeLong(statusRevision);
 				buf.writeLong(watermark);
@@ -212,16 +348,16 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 		}
 	}
 
-	private void writeData(FriendlyByteBuf buf) {
+	private void writeData(FriendlyByteBuf buf, int displayBytes, int frameBytes) {
 		buf.writeLong(baselineId);
 		buf.writeLong(statusRevision);
 		buf.writeLong(watermark);
 		buf.writeVarInt(partIndex);
 		buf.writeVarInt(partCount);
 		buf.writeBoolean(completeScan);
-		MarkerPacketCodec.writeEnum(buf, status);
+		writeEnum(buf, status);
 		buf.writeLong(checksum);
-		writeEntries(buf, entries);
+		writeEntries(buf, entries, displayBytes, frameBytes);
 	}
 
 	private static InventoryS2CPacket decode(FriendlyByteBuf buf) {
@@ -306,48 +442,44 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	}
 
 	private static Offer readOffer(FriendlyByteBuf buf) {
-		return new Offer(StrictPacketCodec.readVarInt(buf), StrictPacketCodec.readVarInt(buf), StrictPacketCodec.readVarInt(buf), StrictPacketCodec.readVarInt(buf));
+		return new Offer(StrictPacketCodec.readVarInt(buf), StrictPacketCodec.readVarInt(buf),
+			StrictPacketCodec.readVarInt(buf), StrictPacketCodec.readVarInt(buf),
+			StrictPacketCodec.readVarInt(buf), StrictPacketCodec.readVarInt(buf));
 	}
 	private static MarkerId readMarkerId(FriendlyByteBuf buf) {
 		return StrictPacketCodec.readBoolean(buf) ? new MarkerId(buf.readLong()) : null;
 	}
 
-	private static void writeEntries(FriendlyByteBuf buf, List<Entry> entries) {
-		FriendlyByteBuf payload = new FriendlyByteBuf(Unpooled.buffer(256, MAX_FRAME_BYTES + MAX_ENTRY_BYTES));
-		try {
-			payload.writeVarInt(entries.size());
-			for (Entry entry : entries) {
-				writeEntry(payload, entry);
-				if (payload.readableBytes() > MAX_FRAME_BYTES) {
-					throw new IllegalArgumentException("Inventory entries exceed frame budget");
-				}
-			}
-			buf.writeVarInt(payload.readableBytes());
-			buf.writeBytes(payload);
-		} finally {
-			payload.release();
-		}
+	private static void writeEntries(FriendlyByteBuf buf, List<Entry> entries, int displayBytes, int frameBytes) {
+		int size = entriesSize(entries, displayBytes);
+		if (size > frameBytes) throw new IllegalArgumentException("Inventory entries exceed frame budget");
+		buf.writeVarInt(size);
+		buf.writeVarInt(entries.size());
+		for (int index = 0; index < entries.size(); index++) writeEntry(buf, entries.get(index), displayBytes);
 	}
 
-	private static void writeEntry(FriendlyByteBuf buf, Entry entry) {
-		buf.writeUtf(entry.key(), MAX_KEY_BYTES);
-		buf.writeUtf(entry.itemId(), MAX_ITEM_ID_BYTES);
-		buf.writeUtf(entry.label(), MAX_LABEL_BYTES);
+	private static void writeEntry(FriendlyByteBuf buf, Entry entry, int displayBytes) {
+		writeText(buf, entry.key(), MAX_KEY_BYTES);
+		writeText(buf, entry.itemId(), MAX_ITEM_ID_BYTES);
+		writeText(buf, entry.label(), MAX_LABEL_BYTES);
 		buf.writeBoolean(entry.displayJson() != null);
 		if (entry.displayJson() != null) {
-			buf.writeUtf(entry.displayJson(), MAX_DISPLAY_BYTES);
+			if (utf8Length(entry.displayJson()) > displayBytes) {
+				throw new IllegalArgumentException("inventory display json");
+			}
+			writeText(buf, entry.displayJson(), displayBytes);
 		}
 		buf.writeLong(entry.count());
 		buf.writeLong(entry.itemRevision());
 		buf.writeBoolean(entry.fallback());
 		buf.writeBoolean(entry.quality() != null);
 		if (entry.quality() != null) {
-			MarkerPacketCodec.writeEnum(buf, entry.quality());
+			writeEnum(buf, entry.quality());
 		}
 		buf.writeLong(entry.groupRevision());
 		buf.writeBoolean(entry.replaceGroup());
 		buf.writeBoolean(entry.itemPingType() != null);
-		if (entry.itemPingType() != null) buf.writeUtf(entry.itemPingType(), 256);
+		if (entry.itemPingType() != null) writeText(buf, entry.itemPingType(), 256);
 	}
 
 	private static List<Entry> readEntries(FriendlyByteBuf buf) {
@@ -385,7 +517,8 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 		String key = StrictPacketCodec.readUtf(buf, MAX_KEY_BYTES);
 		String itemId = StrictPacketCodec.readUtf(buf, MAX_ITEM_ID_BYTES);
 		String label = StrictPacketCodec.readUtf(buf, MAX_LABEL_BYTES);
-		String displayJson = StrictPacketCodec.readBoolean(buf) ? StrictPacketCodec.readUtf(buf, MAX_DISPLAY_BYTES) : null;
+		String displayJson = StrictPacketCodec.readBoolean(buf)
+			? StrictPacketCodec.readUtf(buf, MAX_DISPLAY_BYTES, MAX_DISPLAY_BYTES) : null;
 		long count = buf.readLong();
 		long itemRevision = buf.readLong();
 		boolean fallback = StrictPacketCodec.readBoolean(buf);
@@ -406,11 +539,26 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	}
 
 	private static int utf8Length(String value) {
-		return value.getBytes(StandardCharsets.UTF_8).length;
+		return ByteBufUtil.utf8Bytes(value);
 	}
 
 	private static boolean periodOutOfRange(int ticks) {
 		return ticks < InventoryLimits.MIN_PERIOD_TICKS || ticks > InventoryLimits.MAX_PERIOD_TICKS;
+	}
+
+	/** True only for an exact legal size-scale pair that keeps the fixed metadata reserve. */
+	private static boolean legalSizePair(int displayBytes, int frameBytes) {
+		int displayQuantum = InventoryLimits.DISPLAY_BASE_BYTES / 4, frameQuantum = InventoryLimits.FRAME_BASE_BYTES / 4;
+		return displayBytes > 0 && frameBytes > 0 && displayBytes % displayQuantum == 0 && frameBytes % frameQuantum == 0
+			&& InventorySizeScale.DISPLAY.isLegalQuanta(displayBytes / displayQuantum)
+			&& InventorySizeScale.FRAME.isLegalQuanta(frameBytes / frameQuantum)
+			&& displayBytes + (long) InventoryLimits.FRAME_METADATA_RESERVE_BYTES <= frameBytes;
+	}
+
+	private static void requireBudgets(int displayBytes, int frameBytes) {
+		if (!legalSizePair(displayBytes, frameBytes)) {
+			throw new IllegalArgumentException("inventory frame size pair");
+		}
 	}
 
 	private boolean validParts() {

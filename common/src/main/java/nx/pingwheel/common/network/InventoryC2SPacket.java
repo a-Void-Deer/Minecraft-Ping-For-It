@@ -14,7 +14,7 @@ import java.util.Optional;
 import static nx.pingwheel.common.Global.C2S_NAMESPACE;
 
 /**
- * Version-three inventory preview and tracking requests. {@code HELLO} is the
+ * Version-four inventory preview and tracking requests. {@code HELLO} is the
  * epoch-zero handshake; every other kind runs under the negotiated nonzero
  * epoch and carries a non-negative request id. {@code OPEN} binds that request
  * to one bounded server target for preview without exposing a player UUID: a
@@ -26,21 +26,24 @@ import static nx.pingwheel.common.Global.C2S_NAMESPACE;
  * authoritative target is derived server-side from the request. No trusted
  * item count or player identity is part of this family.
  *
- * <p>The {@code SELECT} text fields use the shared 256-cap UTF id encoding, so
- * a request frame is bounded by construction; a wrong protocol, an unknown
- * enum name, a negative request id, an overlong target field, an invalid
- * boolean, a non-canonical number, or trailing bytes is rejected by decode and
- * falls back to the corrupt no-arg instance through {@link #readSafe}.
+ * <p>The request frame grammar and its 4096-byte bound are unchanged from the
+ * previous inventory route version; the version-bound route id is the only
+ * request-side change. The {@code SELECT} text fields use the shared 256-cap
+ * UTF id encoding, so a request frame is bounded by construction; a wrong
+ * protocol, an unknown enum name, a negative request id, an overlong target
+ * field, an invalid boolean, a non-canonical number, or trailing bytes is
+ * rejected by decode and falls back to the corrupt no-arg instance through
+ * {@link #readSafe}.
  */
 public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long requestId, Target target,
 	MarkerId markerId, String entryKey, String itemId, String pingType, long presentationEpoch, long view,
 	BlockFace face, long commitId, long baselineId, long stateRevision) implements IPacket {
 	public enum Kind { HELLO, OPEN, CLOSE, RESYNC, SELECT }
 
-	public static final int VERSION = 3;
+	public static final int VERSION = 4;
 	public static final int MAX_ID_BYTES = MarkerPacketCodec.MAX_ID_LENGTH;
 	public static final int MAX_FRAME_BYTES = 4096;
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "inventory-v3");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "inventory-v4");
 	public static final Type<InventoryC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public InventoryC2SPacket {
@@ -171,7 +174,7 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 		return value;
 	}
 	/**
-	 * Strict version-three {@code OPEN} target grammar: one native block or one
+	 * Strict version-four {@code OPEN} target grammar: one native block or one
 	 * uncommitted external provider candidate with bounded provider, expected
 	 * registry, opaque locator, and strict classification. Entity, location,
 	 * committed external, unknown variant, overlong, and non-canonical fields
@@ -199,7 +202,7 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 		throw new IllegalArgumentException("Unknown inventory block target variant");
 	}
 
-	/** A version-three OPEN target is one native block or one uncommitted external candidate. */
+	/** A version-four OPEN target is one native block or one uncommitted external candidate. */
 	private static boolean openTarget(Target target) {
 		return target instanceof Target.BlockTarget
 			|| (target instanceof Target.ExternalBlockTarget external && external.isCandidate());

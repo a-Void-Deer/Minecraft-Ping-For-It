@@ -6,15 +6,9 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-import com.google.gson.JsonElement;
-import com.google.gson.JsonParser;
-import com.mojang.serialization.JsonOps;
-
 import net.minecraft.core.HolderLookup;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.world.item.ItemStack;
 
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.PingTypeCatalog;
@@ -28,6 +22,7 @@ import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.client.PresentationPropertyFormatter;
 import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
 
 /**
  * Component-level content-message composer for the first-receipt content
@@ -146,38 +141,15 @@ public final class ContentChatComposer {
 
 	/**
 	 * Production item decoder: the server-bounded single-item display JSON,
-	 * decoded to the exact variant's display name. Custom component data is
-	 * flattened before localized quoting beside the trusted base translation;
-	 * incoming descendant styles and events never enter chat. Empty means the
-	 * caller uses the entry's registry localized name fallback instead.
+	 * decoded to the exact variant's display name through the shared client
+	 * display projection. Custom component data is flattened before localized
+	 * quoting beside the trusted base translation; incoming descendant styles
+	 * and events never enter chat. Empty means the caller uses the entry's
+	 * registry localized name fallback instead.
 	 */
 	public static Function<String, Optional<Component>> itemDisplayDecoder(HolderLookup.Provider registryAccess) {
 		Objects.requireNonNull(registryAccess, "registryAccess");
-		return json -> {
-			if (json == null || json.isBlank()) return Optional.empty();
-			try {
-				JsonElement element = JsonParser.parseString(json);
-				return ItemStack.SINGLE_ITEM_CODEC
-					.parse(registryAccess.createSerializationContext(JsonOps.INSTANCE), element)
-					.result()
-					.filter(stack -> !stack.isEmpty())
-					.map(ContentChatComposer::itemDisplayName);
-			} catch (RuntimeException malformed) {
-				return Optional.empty();
-			}
-		};
-	}
-
-	private static Component itemDisplayName(ItemStack stack) {
-		Component base = Component.translatable(stack.getDescriptionId());
-		Component custom = stack.get(DataComponents.CUSTOM_NAME);
-		// ITEM_NAME is also server-provided component data, not a trusted registry name.
-		if (custom == null) custom = stack.get(DataComponents.ITEM_NAME);
-		// Keep the item implementation's normal localized variant name when no
-		// untrusted name override is present (for example, a potion's base name).
-		if (custom == null) return stack.getItem().getName(stack);
-		Component quoted = Component.translatable(ContentChatTemplate.QUOTE_KEY, Component.literal(custom.getString()));
-		return Component.translatable(ContentChatTemplate.CUSTOM_ITEM_NAME_KEY, quoted, base);
+		return json -> ClientItemDisplay.decode(registryAccess, json).map(ClientItemDisplay::displayName);
 	}
 
 	/**

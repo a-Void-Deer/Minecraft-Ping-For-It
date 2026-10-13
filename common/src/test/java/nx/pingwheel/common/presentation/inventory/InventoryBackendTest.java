@@ -218,4 +218,18 @@ class InventoryBackendTest {
 			assertEquals(Long.MAX_VALUE, marker.expiresAtTick());
 		}
 	}
+	@Test void advertisedOfferCarriesTheEffectiveSizePairAndPreviewFramesStayWithinIt() {
+		try (Fixture f = new Fixture()) {
+			f.settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(2));
+			f.settings.setFrameByteMultiplier(java.math.BigDecimal.valueOf(2));
+			f.open();
+			var offer = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OFFER).reduce((a, b) -> b).orElseThrow().offer();
+			assertEquals(8192, offer.effectiveDisplayBytes());
+			assertEquals(65536, offer.effectiveFrameBytes());
+			var data = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).toList();
+			assertFalse(data.isEmpty());
+			assertTrue(data.stream().allMatch(p -> p.encodedSize(offer.effectiveDisplayBytes(), offer.effectiveFrameBytes()) <= offer.effectiveFrameBytes()),
+				"live frames are written under the advertised effective pair");
+		}
+	}
 }

@@ -25,7 +25,7 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 	}
 
 	public enum Kind {
-		INTEGER, LIMIT, CLIENT_MULTIPLIER, GLOBAL_MULTIPLIER
+		INTEGER, LIMIT, CLIENT_MULTIPLIER, GLOBAL_MULTIPLIER, DISPLAY_SIZE_MULTIPLIER, FRAME_SIZE_MULTIPLIER
 	}
 
 	/** Stable leaf bits; the original five administration bits remain unchanged. */
@@ -49,7 +49,11 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 		TRACKING_RESYNC_MIN_PERIODS(21, Kind.INTEGER, InventoryLimits.MIN_RESYNC_PERIODS, Integer.MAX_VALUE),
 		TRACKING_HEARTBEAT_PERIODS(22, Kind.INTEGER, InventoryLimits.MIN_HEARTBEAT_PERIODS, InventoryLimits.MAX_HEARTBEAT_PERIODS),
 		/** Rolling excess-byte smoothing, not the unknown-baseline buffer window. */
-		TRACKING_GRACE_PERIODS(23, Kind.INTEGER, InventoryLimits.MIN_GRACE_PERIODS, InventoryLimits.MAX_GRACE_PERIODS);
+		TRACKING_GRACE_PERIODS(23, Kind.INTEGER, InventoryLimits.MIN_GRACE_PERIODS, InventoryLimits.MAX_GRACE_PERIODS),
+		/** Finite-only display budget multiplier on the display size scale. */
+		DISPLAY_BYTE_MULTIPLIER(24, Kind.DISPLAY_SIZE_MULTIPLIER, 0, 0),
+		/** Finite-only frame budget multiplier on the frame size scale. */
+		FRAME_BYTE_MULTIPLIER(25, Kind.FRAME_SIZE_MULTIPLIER, 0, 0);
 
 		private final int mask;
 		private final Kind kind;
@@ -67,17 +71,31 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 		public Kind kind() { return kind; }
 		public int minimum() { return minimum; }
 		public int maximum() { return maximum; }
-		public boolean supportsUnlimited() { return kind != Kind.INTEGER; }
+		/** Only the existing cap and send-byte multiplier kinds carry an unlimited mode. */
+		public boolean supportsUnlimited() {
+			return kind == Kind.LIMIT || kind == Kind.CLIENT_MULTIPLIER || kind == Kind.GLOBAL_MULTIPLIER;
+		}
+		/** True for the five send-byte multipliers, not for the two size scales. */
 		public boolean isMultiplier() { return kind == Kind.CLIENT_MULTIPLIER || kind == Kind.GLOBAL_MULTIPLIER; }
+		public boolean isSizeScale() {
+			return kind == Kind.DISPLAY_SIZE_MULTIPLIER || kind == Kind.FRAME_SIZE_MULTIPLIER;
+		}
 		public ByteMultiplierGrid grid() {
 			if (!isMultiplier()) throw new IllegalStateException("not a multiplier: " + this);
 			return kind == Kind.CLIENT_MULTIPLIER ? ByteMultiplierGrid.CLIENT : ByteMultiplierGrid.GLOBAL;
+		}
+		public InventorySizeScale sizeScale() {
+			if (!isSizeScale()) throw new IllegalStateException("not a size scale: " + this);
+			return kind == Kind.DISPLAY_SIZE_MULTIPLIER ? InventorySizeScale.DISPLAY : InventorySizeScale.FRAME;
 		}
 
 		/** Network values must already be safe; persisted-file defaulting/clamping is separate. */
 		public boolean isSafe(Value supplied) {
 			if (supplied == null || supplied.value() == null || supplied.unlimited() && !supportsUnlimited()) return false;
 			BigDecimal value = supplied.value();
+			if (isSizeScale()) {
+				return sizeScale().isLegal(value);
+			}
 			if (isMultiplier()) {
 				return value.compareTo(grid().minimum()) >= 0
 					&& value.compareTo(grid().maximum()) <= 0
@@ -96,7 +114,7 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 			if (text == null || text.isEmpty()) return Optional.empty();
 			try {
 				BigDecimal value;
-				if (isMultiplier()) {
+				if (isMultiplier() || isSizeScale()) {
 					// Bound text before decimal parsing; exponents and non-finite spellings are not UI numbers.
 					if (text.length() > 32 || !text.matches("(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)")) return Optional.empty();
 					value = new BigDecimal(text);
@@ -129,6 +147,8 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 		var tracking = settings.getTracking();
 		values.put(Field.PHYSICAL_SLOTS_PER_TICK, copy(settings.getPhysicalSlotsPerTick()));
 		values.put(Field.PENDING_MEMORY_MIB, Value.scalar(settings.getPendingMemoryMiB()));
+		values.put(Field.DISPLAY_BYTE_MULTIPLIER, new Value(false, settings.getDisplayByteMultiplier()));
+		values.put(Field.FRAME_BYTE_MULTIPLIER, new Value(false, settings.getFrameByteMultiplier()));
 		values.put(Field.PREVIEW_PERIOD_TICKS, Value.scalar(preview.getPeriodTicks()));
 		values.put(Field.PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD, copy(preview.getMaxVariantsPerClientPeriod()));
 		values.put(Field.PREVIEW_MAX_SLOTS_PER_CLIENT, copy(preview.getMaxSlotsPerClient()));
@@ -157,6 +177,19 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 		return true;
 	}
 
+	/**
+	 * True when both size leaves are present, finite and satisfy the
+	 * frame-priority pair rule. This is validated after a masked merge, never
+	 * by silently adjusting an unselected leaf.
+	 */
+	public boolean isSizePairCompatible() {
+		Value display = value(Field.DISPLAY_BYTE_MULTIPLIER);
+		Value frame = value(Field.FRAME_BYTE_MULTIPLIER);
+		return display != null && frame != null
+			&& !display.unlimited() && !frame.unlimited()
+			&& InventorySizeScale.isPairLegal(display.value(), frame.value());
+	}
+
 	public InventoryConfigValues with(Field field, Value value) {
 		var copy = new EnumMap<Field, Value>(Field.class);
 		copy.putAll(fields);
@@ -182,6 +215,8 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 		var tracking = settings.getTracking();
 		settings.setPhysicalSlotsPerTick(limit(Field.PHYSICAL_SLOTS_PER_TICK));
 		settings.setPendingMemoryMiB(integer(Field.PENDING_MEMORY_MIB));
+		settings.setDisplayByteMultiplier(value(Field.DISPLAY_BYTE_MULTIPLIER).value());
+		settings.setFrameByteMultiplier(value(Field.FRAME_BYTE_MULTIPLIER).value());
 		preview.setPeriodTicks(integer(Field.PREVIEW_PERIOD_TICKS));
 		preview.setMaxVariantsPerClientPeriod(limit(Field.PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD));
 		preview.setMaxSlotsPerClient(limit(Field.PREVIEW_MAX_SLOTS_PER_CLIENT));

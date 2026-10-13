@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -82,6 +83,58 @@ class OpaqueKeyedPayloadTest {
 		assertEquals(CaptureResult.OpaqueValue.MAX_VALUE_BYTES, atBound.bytes().length);
 		assertThrows(IllegalArgumentException.class,
 			() -> new CaptureResult.OpaqueValue(new byte[CaptureResult.OpaqueValue.MAX_VALUE_BYTES + 1]));
+	}
+
+	@Test
+	void codeOwnedAllowanceAdmitsOnlyItsFixedIdAndBound() {
+		var token = CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V2;
+
+		assertEquals("pingforit:inventory.observation.v2", token.id());
+		assertEquals(133120, token.bound());
+		var tagged = CaptureResult.OpaqueValue.forCodec(token, new byte[token.bound()]);
+		assertEquals(token.bound(), tagged.size());
+		assertEquals(token, tagged.codec());
+		assertThrows(IllegalArgumentException.class,
+			() -> CaptureResult.OpaqueValue.forCodec(token, new byte[token.bound() + 1]));
+		assertThrows(NullPointerException.class, () -> CaptureResult.OpaqueValue.forCodec(null, new byte[0]));
+
+		var ordinary = new CaptureResult.OpaqueValue(new byte[CaptureResult.OpaqueValue.MAX_VALUE_BYTES]);
+		assertNull(ordinary.codec());
+		assertEquals(CaptureResult.OpaqueValue.MAX_VALUE_BYTES, ordinary.size());
+		assertThrows(IllegalArgumentException.class,
+			() -> new CaptureResult.OpaqueValue(new byte[CaptureResult.OpaqueValue.MAX_VALUE_BYTES + 1]));
+	}
+
+	@Test
+	void taggedValuesMustMatchTheFragmentCodecEvenWhenSmallOrEmpty() {
+		var token = CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V2;
+		var small = CaptureResult.OpaqueValue.forCodec(token, new byte[] {1});
+		var empty = CaptureResult.OpaqueValue.forCodec(token, new byte[0]);
+
+		assertEquals(small, new CaptureResult.OpaqueKeyedFragment(token.id(), Map.of("test:item/0", small))
+			.entries().get("test:item/0"));
+		assertThrows(IllegalArgumentException.class,
+			() -> new CaptureResult.OpaqueKeyedFragment("test:inventory.items.v1", Map.of("test:item/0", small)));
+		assertThrows(IllegalArgumentException.class,
+			() -> new CaptureResult.OpaqueKeyedFragment("test:inventory.items.v1", Map.of("test:item/0", empty)));
+
+		var ordinary = new CaptureResult.OpaqueValue(new byte[] {1});
+		assertEquals(ordinary, new CaptureResult.OpaqueKeyedFragment("test:inventory.items.v1",
+			Map.of("test:item/0", ordinary)).entries().get("test:item/0"));
+	}
+
+	@Test
+	void sizeIsAllocationFreeAndEqualityStaysByteContentBased() {
+		byte[] source = {1, 2, 3};
+		var value = new CaptureResult.OpaqueValue(source);
+		source[0] = 9;
+
+		assertEquals(3, value.size(), "the size reflects the constructed bytes, not the caller array");
+		var tagged = CaptureResult.OpaqueValue.forCodec(CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V2,
+			new byte[] {1, 2, 3});
+		assertEquals(value, tagged, "equality is byte content, independent of the admitting form");
+		assertEquals(value.hashCode(), tagged.hashCode());
+		assertNotEquals(value, new CaptureResult.OpaqueValue(new byte[] {1, 2, 4}));
 	}
 
 	@Test

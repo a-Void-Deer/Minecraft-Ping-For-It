@@ -15,20 +15,18 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.StringSplitter;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FormattedText;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 
 import nx.pingwheel.common.client.spatial.InventoryListModel;
 import nx.pingwheel.common.client.spatial.SpatialController;
 import nx.pingwheel.common.client.wheel.WheelLabelLayout;
 import nx.pingwheel.common.domain.PingTypeCatalog;
+import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
 
 /**
  * Native Minecraft overlay for the spatial selector read models.
@@ -555,14 +553,31 @@ public final class SpatialOverlayRenderer {
 	/** Projection preserving the list owner's viewport, ordering and selection. */
 	public static SpatialInventoryView inventoryView(String listKey, InventoryListModel model,
 		Map<String, String> itemIds, SpatialInventoryView.Status status) {
-		return inventoryView(listKey, model.snapshot(), model.visibleRows(), itemIds, status);
+		return inventoryView(listKey, model, itemIds, null, status);
+	}
+
+	/**
+	 * Projection preserving the list owner's viewport, ordering and selection
+	 * with each row's server-bounded encoded display value. Both maps are keyed
+	 * by row key; a missing entry keeps the native registry-name fallback.
+	 */
+	public static SpatialInventoryView inventoryView(String listKey, InventoryListModel model,
+		Map<String, String> itemIds, Map<String, String> displayJson, SpatialInventoryView.Status status) {
+		return inventoryView(listKey, model.snapshot(), model.visibleRows(), itemIds, displayJson, status);
 	}
 
 	public static SpatialInventoryView inventoryView(String listKey, InventoryListModel.Snapshot snapshot,
 		int visibleRows, Map<String, String> itemIds, SpatialInventoryView.Status status) {
+		return inventoryView(listKey, snapshot, visibleRows, itemIds, null, status);
+	}
+
+	public static SpatialInventoryView inventoryView(String listKey, InventoryListModel.Snapshot snapshot,
+		int visibleRows, Map<String, String> itemIds, Map<String, String> displayJson, SpatialInventoryView.Status status) {
 		List<SpatialInventoryView.Row> rows = snapshot.entries().stream().map(entry ->
 			new SpatialInventoryView.Row(entry.key(), entry.label(), entry.count(),
-				itemIds == null ? null : itemIds.get(entry.key()), SpatialInventoryView.Status.fromName(entry.quality())))
+				itemIds == null ? null : itemIds.get(entry.key()),
+				displayJson == null ? null : displayJson.get(entry.key()),
+				SpatialInventoryView.Status.fromName(entry.quality())))
 			.toList();
 		return new SpatialInventoryView(listKey, snapshot.open(), rows, snapshot.selectedIndex(), snapshot.windowFirst(),
 			visibleRows, snapshot.direction().back() == InventoryListModel.Side.LEFT, status, snapshot.axisX(), snapshot.glideBaseY());
@@ -1239,7 +1254,8 @@ public final class SpatialOverlayRenderer {
 			graphics.fill(left + 1, top, left + 2, bottom, withAlpha(BORDER_SELECTED_FALLBACK, alpha));
 		}
 		double textLeft = left + 5.0;
-		ItemStack stack = itemStack(row.itemId());
+		ClientItemDisplay.Display display = rowDisplay(row);
+		ItemStack stack = display.stack();
 		if (!stack.isEmpty()) {
 			float tint = paint.grey() ? 0.65f : 1.0f;
 			SpatialItemIconRenderer.draw(graphics, stack, (int) textLeft, -ITEM_ICON_SIZE / 2, tint, (float) alpha);
@@ -1249,7 +1265,7 @@ public final class SpatialOverlayRenderer {
 		double quantityWidth = font.width(quantity) * textScale;
 		double textTop = top + 2.0;
 		int textColor = paint.grey() ? TEXT_DISABLED_COLOR : paint.selected() ? TEXT_COLOR : TEXT_DIMMED_COLOR;
-		drawClippedText(graphics, font, Component.literal(row.label()), textLeft, textTop,
+		drawClippedText(graphics, font, display.name(), textLeft, textTop,
 			Math.max(0.0, right - 8.0 - quantityWidth - textLeft), textScale, textColor, alpha);
 		drawText(graphics, font, quantity, right - 4.0 - quantityWidth, textTop, textScale, textColor, alpha);
 		String qualityKey = row.quality().translationKey();
@@ -1718,24 +1734,19 @@ public final class SpatialOverlayRenderer {
 		return BORDER_SELECTED_FALLBACK;
 	}
 
-	private static ItemStack itemStack(String itemId) {
-		if (itemId == null || itemId.isBlank()) {
-			return ItemStack.EMPTY;
-		}
+	/**
+	 * Production row display seam: the same resolution the row paint path uses.
+	 * The encoded display value is decoded with the current client registry
+	 * context, and a missing or failed value keeps the native bare stack and
+	 * registry translation key.
+	 */
+	static ClientItemDisplay.Display rowDisplay(SpatialInventoryView.Row row) {
+		return ClientItemDisplay.resolve(row.itemId(), row.label(), row.displayJson());
+	}
 
-		ResourceLocation id = ResourceLocation.tryParse(itemId);
-
-		if (id == null) {
-			return ItemStack.EMPTY;
-		}
-
-		Item item = BuiltInRegistries.ITEM.get(id);
-
-		if (item == null || item == Items.AIR) {
-			return ItemStack.EMPTY;
-		}
-
-		return new ItemStack(item);
+	/** Explicit-registry form of the row display seam, used by headless tests. */
+	static ClientItemDisplay.Display rowDisplay(SpatialInventoryView.Row row, HolderLookup.Provider registryAccess) {
+		return ClientItemDisplay.resolve(registryAccess, row.itemId(), row.label(), row.displayJson());
 	}
 
 	private static Font font() {

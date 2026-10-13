@@ -6,6 +6,7 @@ import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.config.InventoryConfigValues.Field;
 import nx.pingwheel.common.config.InventoryConfigValues.Value;
+import nx.pingwheel.common.config.InventorySizeScale;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -19,17 +20,23 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerInventoryConfigPacketsTest {
 	@Test
 	void routesVersionTheWholeAdministrationTransaction() {
-		assertEquals("pingforit-c2s:server-config-request-v2", ServerConfigRequestC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-c2s:server-config-update-v2", ServerConfigUpdateC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-s2c:server-config-snapshot-v2", ServerConfigSnapshotS2CPacket.PACKET_ID.toString());
+		assertEquals("pingforit-c2s:server-config-request-v3", ServerConfigRequestC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-c2s:server-config-update-v3", ServerConfigUpdateC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:server-config-snapshot-v3", ServerConfigSnapshotS2CPacket.PACKET_ID.toString());
 	}
 
 	@ParameterizedTest
 	@EnumSource(Field.class)
 	void everyLeafAndExplicitUnlimitedFiniteValueRoundTrip(Field selected) {
 		var inventory = InventoryConfigValues.defaults();
-		Value supplied = selected.isMultiplier() ? new Value(true, selected.grid().minimum())
-			: new Value(selected.supportsUnlimited(), BigDecimal.valueOf(selected.maximum()));
+		Value supplied;
+		if (selected.isSizeScale()) {
+			supplied = new Value(false, selected.sizeScale().maximumMultiplier());
+		} else if (selected.isMultiplier()) {
+			supplied = new Value(true, selected.grid().minimum());
+		} else {
+			supplied = new Value(selected.supportsUnlimited(), BigDecimal.valueOf(selected.maximum()));
+		}
 		inventory = inventory.with(selected, supplied);
 		var snapshot = new ServerConfigSnapshotS2CPacket(77, true, ChannelMode.TEAM_ONLY, false, 0, 9, 23, inventory);
 		var update = new ServerConfigUpdateC2SPacket(new ServerConfigUpdate(selected.mask(), ChannelMode.AUTO, true, 1, 2, 3, inventory));
@@ -49,6 +56,74 @@ class ServerInventoryConfigPacketsTest {
 			assertEquals(value, roundTrip(packet, ServerConfigUpdateC2SPacket::readSafe).inventory().value(field).value());
 			if (value.compareTo(field.grid().maximum()) == 0) break;
 		}
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = Field.class, names = {"DISPLAY_BYTE_MULTIPLIER", "FRAME_BYTE_MULTIPLIER"})
+	void allLegalSizeScaleValuesRemainExactOnTheWire(Field field) {
+		for (BigDecimal value : field.sizeScale().legalValues()) {
+			var inventory = InventoryConfigValues.defaults().with(field, new Value(false, value));
+			var packet = new ServerConfigUpdateC2SPacket(field.mask(), ChannelMode.AUTO, true, 0, 0, 7, inventory);
+			var decoded = roundTrip(packet, ServerConfigUpdateC2SPacket::readSafe);
+			assertEquals(0, value.compareTo(decoded.inventory().value(field).value()), value.toPlainString());
+			assertFalse(decoded.inventory().value(field).unlimited());
+		}
+	}
+
+	@Test
+	void sizeScaleMaximumQuantaRoundTripAsExactQuarterMultipliers() {
+		assertEquals(128, InventorySizeScale.DISPLAY.quantaOf(InventorySizeScale.DISPLAY.maximumMultiplier()));
+		assertEquals(64, InventorySizeScale.FRAME.quantaOf(InventorySizeScale.FRAME.maximumMultiplier()));
+		var inventory = InventoryConfigValues.defaults()
+			.with(Field.DISPLAY_BYTE_MULTIPLIER, new Value(false, InventorySizeScale.DISPLAY.maximumMultiplier()))
+			.with(Field.FRAME_BYTE_MULTIPLIER, new Value(false, InventorySizeScale.FRAME.maximumMultiplier()));
+		var snapshot = new ServerConfigSnapshotS2CPacket(9L, true, ChannelMode.AUTO, true, 1000, 5, 23, inventory);
+		var decoded = roundTrip(snapshot, ServerConfigSnapshotS2CPacket::readSafe);
+		assertEquals(inventory, decoded.inventory());
+		assertEquals(131072, InventorySizeScale.DISPLAY.bytes(
+			decoded.inventory().value(Field.DISPLAY_BYTE_MULTIPLIER).value()));
+		assertEquals(524288, InventorySizeScale.FRAME.bytes(
+			decoded.inventory().value(Field.FRAME_BYTE_MULTIPLIER).value()));
+	}
+
+	@Test
+	void sizeScaleLeavesRejectZeroOffGridOverflowAndUnlimitedFlagBytes() {
+		for (int illegal : new int[] {0, 9, 34, 129, 1 << 20}) {
+			var buf = updatePrefix(Field.DISPLAY_BYTE_MULTIPLIER.mask());
+			for (Field field : Field.values()) {
+				if (field.supportsUnlimited()) buf.writeBoolean(false);
+				buf.writeVarInt(field == Field.DISPLAY_BYTE_MULTIPLIER ? illegal : encodedDefault(field));
+			}
+			assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt(), "display quanta " + illegal);
+			assertEquals(0, buf.readableBytes());
+			buf.release();
+		}
+		for (int illegal : new int[] {0, 65, 1 << 20}) {
+			var buf = updatePrefix(Field.FRAME_BYTE_MULTIPLIER.mask());
+			for (Field field : Field.values()) {
+				if (field.supportsUnlimited()) buf.writeBoolean(false);
+				buf.writeVarInt(field == Field.FRAME_BYTE_MULTIPLIER ? illegal : encodedDefault(field));
+			}
+			assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt(), "frame quanta " + illegal);
+			assertEquals(0, buf.readableBytes());
+			buf.release();
+		}
+
+		// A size-scale leaf carries no unlimited boolean; an extra v2-style flag byte
+		// shifts the fixed shape and the payload is rejected as a whole.
+		var buf = updatePrefix(Field.DISPLAY_BYTE_MULTIPLIER.mask());
+		for (Field field : Field.values()) {
+			if (field.supportsUnlimited()) buf.writeBoolean(false);
+			if (field == Field.DISPLAY_BYTE_MULTIPLIER) {
+				buf.writeBoolean(true);
+				buf.writeVarInt(4);
+			} else {
+				buf.writeVarInt(encodedDefault(field));
+			}
+		}
+		assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt());
+		assertEquals(0, buf.readableBytes());
+		buf.release();
 	}
 
 	@Test
@@ -100,7 +175,7 @@ class ServerInventoryConfigPacketsTest {
 		}
 		assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt());
 		buf.release();
-		var unknown = new ServerConfigUpdateC2SPacket(1 << 24, ChannelMode.AUTO, true, 0, 0, 7);
+		var unknown = new ServerConfigUpdateC2SPacket(1 << 26, ChannelMode.AUTO, true, 0, 0, 7);
 		assertTrue(roundTrip(unknown, ServerConfigUpdateC2SPacket::readSafe).isCorrupt());
 		assertTrue(new ServerConfigSnapshotS2CPacket(1, true, ChannelMode.AUTO, true, 0, 0, 7, null).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 0, 0, 7, null).isCorrupt());
@@ -130,6 +205,7 @@ class ServerInventoryConfigPacketsTest {
 
 	private static int encodedDefault(Field field) {
 		Value value = InventoryConfigValues.defaults().value(field);
+		if (field.isSizeScale()) return field.sizeScale().quantaOf(value.value());
 		return field.isMultiplier() ? field.grid().quantaOf(value.value()) : value.value().intValueExact();
 	}
 	private static FriendlyByteBuf buffer() { return new FriendlyByteBuf(Unpooled.buffer()); }

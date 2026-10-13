@@ -13,9 +13,18 @@ import static org.junit.jupiter.api.Assertions.*;
 class InventorySyncPublisherTest {
 	static class Transport implements InventorySyncPublisher.Transport {
 		final List<InventoryS2CPacket> sent = new ArrayList<>(); boolean authorized = true; int encoded;
+		boolean failNextSend;
+		final List<int[]> measuredCaps = new ArrayList<>();
 		@Override public boolean authorized(SyncPublisher.Context context) { return authorized; }
 		@Override public int encodedBytes(InventoryS2CPacket packet) { encoded++; return bytes(packet); }
-		@Override public void send(UUID player, InventoryS2CPacket packet) { sent.add(packet); }
+		@Override public int encodedBytes(InventoryS2CPacket packet, int displayBytes, int frameBytes) {
+			measuredCaps.add(new int[] { displayBytes, frameBytes });
+			return InventorySyncPublisher.Transport.super.encodedBytes(packet, displayBytes, frameBytes);
+		}
+		@Override public void send(UUID player, InventoryS2CPacket packet) {
+			if (failNextSend) { failNextSend = false; throw new IllegalStateException("application send seam backpressure"); }
+			sent.add(packet);
+		}
 	}
 	static int bytes(InventoryS2CPacket packet) { var buf = new FriendlyByteBuf(Unpooled.buffer()); try { packet.write(buf); return buf.readableBytes(); } finally { buf.release(); } }
 	static SyncPublisher.Context context(String id, long baseline) { return new SyncPublisher.Context(id, new UUID(1, 1), "100/1", 1, baseline); }
@@ -123,5 +132,363 @@ class InventorySyncPublisherTest {
 			assertEquals(InventoryS2CPacket.Status.INCOMPLETE, transport.sent.getLast().status());
 			assertFalse(transport.sent.getLast().completeScan()); assertTrue(transport.sent.getLast().entries().isEmpty());
 		}
+	}
+	@Test void controlOfferAndSmallDataFlowUnderOneMiBAndAllWorkspacesRelease() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(1024 * 1024);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); UUID recipient = new UUID(1, 1);
+			assertEquals(4096, publisher.effectiveDisplayBytes()); assertEquals(32768, publisher.effectiveFrameBytes());
+			assertTrue(publisher.control(recipient, InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 16)).stamp(100, 1)));
+			publisher.drainControls();
+			assertEquals(InventoryS2CPacket.Kind.OFFER, transport.sent.getFirst().kind());
+			var context = context("tracking/1", 1);
+			assertTrue(publisher.register(context, route(new MarkerId(1), "target")));
+			publish(publisher, context, capture(1, 1, 2500)); publisher.drain();
+			assertTrue(transport.sent.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && p.entries().size() == 1),
+				"a default small cut still sends under the minimum finite pending memory");
+			publisher.cancel(context);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void retainedOverCapEntryIsFencedAndAnExactEffectiveCapEntryIsAccepted() {
+		var settings = InventorySettings.serverDefaults();
+		settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(0.25));
+		var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings);
+			assertEquals(1024, publisher.effectiveDisplayBytes()); assertEquals(32768, publisher.effectiveFrameBytes());
+			var context = context("tracking/1", 1);
+			assertTrue(publisher.register(context, route(new MarkerId(1), "target")));
+			publish(publisher, context, capture(1, 1, 4096));
+			assertTrue(publisher.oversized(context), "a retained entry beyond the effective display cap is fenced");
+			assertEquals(List.of("k0"), publisher.oversizedKeys(context));
+			publisher.drain();
+			assertTrue(transport.sent.stream().noneMatch(p -> !p.entries().isEmpty()), "an over-cap retained entry is never handed off");
+			publisher.cancel(context);
+			var replacement = context("tracking/1", 2);
+			assertTrue(publisher.register(replacement, route(new MarkerId(1), "target")));
+			publish(publisher, replacement, capture(1, 1, 1024));
+			assertFalse(publisher.oversized(replacement));
+			publisher.drain();
+			var sent = transport.sent.stream().filter(p -> !p.entries().isEmpty()).findFirst().orElseThrow();
+			assertEquals(1024, sent.entries().getFirst().displayJson().length());
+			assertTrue(sent.encodedSize(publisher.effectiveDisplayBytes(), publisher.effectiveFrameBytes()) <= publisher.effectiveFrameBytes(),
+				"an exact-cap frame is measured under the configured pair");
+			publisher.cancel(replacement);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void measurementUsesTheAdvertisedEffectiveCapsForControlsAndData() {
+		var settings = InventorySettings.serverDefaults();
+		settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(2));
+		settings.setFrameByteMultiplier(java.math.BigDecimal.valueOf(2));
+		var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings);
+			assertEquals(8192, publisher.effectiveDisplayBytes()); assertEquals(65536, publisher.effectiveFrameBytes());
+			UUID recipient = new UUID(1, 1);
+			var advertised = publisher.offer(5, 3, 5, 16);
+			assertEquals(8192, advertised.effectiveDisplayBytes()); assertEquals(65536, advertised.effectiveFrameBytes());
+			assertTrue(publisher.control(recipient, InventoryS2CPacket.offer(7, advertised).stamp(100, 1)));
+			publisher.drainControls();
+			var context = context("tracking/1", 1);
+			assertTrue(publisher.register(context, route(new MarkerId(1), "target")));
+			publish(publisher, context, capture(1, 1, 2500)); publisher.drain();
+			assertFalse(transport.measuredCaps.isEmpty());
+			assertTrue(transport.measuredCaps.stream().allMatch(caps -> caps[0] == 8192 && caps[1] == 65536),
+				"every control and data handoff is measured under the advertised pair");
+			assertTrue(transport.sent.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.OFFER && p.offer().effectiveDisplayBytes() == 8192));
+			publisher.cancel(context);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void controlFramesAreNotHandedOffWhenTheyFailTheConfiguredMeasurement() {
+		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16000000);
+		class StrictTransport extends Transport {
+			boolean strict = true;
+			@Override public int encodedBytes(InventoryS2CPacket packet, int displayBytes, int frameBytes) {
+				if (strict && packet.kind() == InventoryS2CPacket.Kind.OFFER) throw new IllegalArgumentException("control frame exceeds the configured budget");
+				return super.encodedBytes(packet, displayBytes, frameBytes);
+			}
+		}
+		var transport = new StrictTransport();
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); UUID recipient = new UUID(1, 1);
+			assertTrue(publisher.control(recipient, InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 16)).stamp(100, 1)));
+			publisher.drainControls();
+			assertTrue(transport.sent.isEmpty(), "a control frame is subject to the same configured measurement");
+			transport.strict = false; publisher.drainControls();
+			assertEquals(InventoryS2CPacket.Kind.OFFER, transport.sent.getFirst().kind());
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void failedOfferHandoffKeepsTheDataGateAndSuccessfulHandoffRunsTheCallbackOnce() {
+		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16000000);
+		class GatedTransport extends Transport {
+			boolean blockOffer;
+			@Override public void send(UUID recipient, InventoryS2CPacket packet) {
+				if (blockOffer && packet.kind() == InventoryS2CPacket.Kind.OFFER) throw new IllegalStateException("offer seam backpressure");
+				super.send(recipient, packet);
+			}
+		}
+		var transport = new GatedTransport();
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); UUID recipient = new UUID(1, 1);
+			int[] handoffs = {0};
+			publisher.setControlHandoff((player, packet) -> { handoffs[0]++; return true; });
+			publisher.gateData(recipient);
+			var context = context("preview/1", 1);
+			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null)));
+			publish(publisher, context, capture(1, 1, 2500));
+			publisher.drain();
+			assertTrue(transport.sent.isEmpty(), "gated item data is never handed off");
+			transport.blockOffer = true;
+			assertTrue(publisher.control(recipient, InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 16)).stamp(100, 1)));
+			publisher.drainControls();
+			assertEquals(0, handoffs[0], "a failed transport handoff never invokes the callback");
+			assertTrue(publisher.dataGated(recipient));
+			publisher.drain();
+			assertTrue(transport.sent.stream().noneMatch(p -> !p.entries().isEmpty()));
+			transport.blockOffer = false; publisher.drainControls();
+			assertEquals(1, handoffs[0]); assertFalse(publisher.dataGated(recipient));
+			publisher.drain();
+			assertTrue(transport.sent.stream().anyMatch(p -> !p.entries().isEmpty()), "an authorized handoff releases the data gate");
+			publisher.drain(); publisher.drainControls();
+			assertEquals(1, handoffs[0], "the callback runs once per successful control handoff");
+			publisher.cancel(context);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void perFrameWorkspacesAreReleasedOnDeferFailureRetryAndCancel() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings);
+			var context = context("preview/1", 1);
+			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null)));
+			publish(publisher, context, capture(1, 1, 2500));
+			memory.setCap(memory.retained()); publisher.drain();
+			assertTrue(transport.sent.isEmpty(), "no handoff without workspace room");
+			assertEquals(0, memory.reserved(), "a deferred frame releases its whole workspace");
+			memory.setCap(16000000);
+			transport.failNextSend = true; publisher.drain();
+			assertEquals(0, memory.reserved(), "a throwing transport releases its workspace; the same immutable part retries");
+			assertTrue(publisher.pending(context));
+			publisher.advance(5, settings); publisher.drain();
+			assertTrue(transport.sent.stream().anyMatch(p -> !p.entries().isEmpty()));
+			publisher.cancel(context);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void largeAllowedFrameIsRefusedWhenTheIndependentFragmentBudgetIsTooSmall() {
+		var settings = InventorySettings.serverDefaults();
+		settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(0.25)));
+		var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings);
+			var context = context("tracking/1", 1);
+			assertTrue(publisher.register(context, route(new MarkerId(1), "target")));
+			publish(publisher, context, capture(1, 1, 4096));
+			publisher.drain();
+			assertTrue(transport.sent.stream().noneMatch(p -> !p.entries().isEmpty()), "a frame beyond the independent fragment budget is not handed off");
+			assertTrue(publisher.pending(context));
+			settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.one());
+			publisher.advance(3, settings); publisher.drain();
+			assertTrue(transport.sent.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && !p.entries().isEmpty()),
+				"the same retained cut sends once its independent budget allows");
+			publisher.cancel(context);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void withdrawDropsAQueuedCutAndControlPendingTracksTheHandoff() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings);
+			var context = context("preview/1", 1);
+			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null)));
+			publish(publisher, context, capture(1, 1, 2500));
+			assertTrue(publisher.controlPending(context), "a published preview control waits for its handoff");
+			publisher.drain();
+			assertFalse(publisher.controlPending(context), "the handoff clears the pending control");
+			assertTrue(transport.sent.stream().anyMatch(p -> !p.entries().isEmpty()));
+			publish(publisher, context, capture(2, 1, 2501));
+			assertTrue(publisher.pending(context));
+			int before = transport.sent.size();
+			publisher.withdraw(context);
+			assertFalse(publisher.pending(context), "withdraw refunds the queued cut");
+			publisher.drain();
+			assertTrue(transport.sent.subList(before, transport.sent.size()).stream().noneMatch(p -> !p.entries().isEmpty()),
+				"a withdrawn cut is never handed off");
+			publisher.cancel(context);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void deliveredVersionStaysChargedWhileItsReplacementIsGatedAndWithdrawn() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("tracking/1", 1);
+			assertTrue(publisher.register(context, route(new MarkerId(1), "target")));
+			publish(publisher, context, capture(1, 1, 2500)); publisher.drain();
+			long delivered = memory.retained();
+			publisher.gateData(context.recipient());
+			publish(publisher, context, capture(2, 1, 10));
+			assertTrue(memory.retained() > delivered, "both the old delivered JSON and the new offered entry are retained");
+			long both = memory.retained();
+			publisher.drain(); publisher.withdraw(context);
+			assertEquals(both, memory.retained(), "withdraw removes queued work, not either retained version");
+			publish(publisher, context, capture(3, 1, 11));
+			assertEquals(both + 3, memory.retained(), "an unreferenced intermediate offer releases its ticket");
+			publisher.releaseData(context.recipient()); publisher.advance(3, settings); publisher.drain();
+			assertTrue(memory.retained() < delivered, "the old delivered version releases only after handoff commits");
+			long latest = memory.retained();
+			for (int revision = 4; revision < 24; revision++) {
+				publish(publisher, context, capture(revision, 1, revision % 2 == 0 ? 10 : 11));
+				publisher.advance(revision * 3L, settings); publisher.drain();
+			}
+			assertEquals(latest, memory.retained(), "historical versions cannot accumulate tickets");
+			publisher.rebase(context, 2);
+			assertEquals(4096 + 1024, memory.retained(), "rebase releases every entry version and retains only state and current wire scope");
+			publisher.cancel(new SyncPublisher.Context(context.consumerId(), context.recipient(), context.sessionView(), 2, context.baseline()));
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void groupReplacementKeepsDeliveredVariantsChargedUntilTheGroupCommits() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("tracking/1", 1);
+			assertTrue(publisher.register(context, route(new MarkerId(1), "target")));
+			publish(publisher, context, capture(1, 2, 2500)); publisher.drain();
+			long variants = memory.retained(); publisher.gateData(context.recipient());
+			var item = InventoryDomainCodec.encode(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "fold"), 1, "stone", null, true));
+			var result = new CaptureResult(Optional.of(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, Map.of("fold", item))),
+				new CaptureResult.Coverage("inventory", 2, 2, OptionalLong.of(2)), CaptureResult.Availability.READABLE,
+				CaptureResult.Completeness.COMPLETE, CaptureResult.Consistency.EVENTUAL, Optional.empty(), Optional.empty());
+			publish(publisher, context, result);
+			assertTrue(memory.retained() > variants, "removing offered variants cannot release still-delivered variants");
+			publisher.releaseData(context.recipient()); publisher.advance(3, settings); publisher.drain();
+			assertTrue(memory.retained() < variants, "a committed replacement retires the old delivered group");
+			publisher.cancel(context);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void admittedVersionsRemainChargedUntilWithdrawAndOfferedVersionsSurvive() {
+		var settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25)));
+		var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("tracking/1", 1); publisher.register(context, route(new MarkerId(1), "target"));
+			publish(publisher, context, capture(1, 3, 2500)); publisher.drain();
+			long admitted = memory.retained();
+			publish(publisher, context, capture(2, 3, 10));
+			assertTrue(memory.retained() > admitted, "immutable admitted parts still own the old entries");
+			publisher.withdraw(context);
+			assertTrue(memory.retained() < admitted, "withdraw releases admitted-only versions, not latest offers");
+			publisher.cancel(context);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void tinyControlRefusesInsufficientEncodingMemoryBeforeMeasurement() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var recipient = context("control", 1).recipient();
+			assertTrue(publisher.control(recipient, InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1)));
+			memory.setCap(memory.retained() + 128); publisher.drainControls();
+			assertTrue(transport.measuredCaps.isEmpty(), "128 bytes cannot admit the actual encoding workspace, even for OFFER");
+			assertTrue(transport.sent.isEmpty()); assertEquals(0, memory.reserved());
+			memory.setCap(1024 * 1024); publisher.drainControls(); assertEquals(1, transport.sent.size());
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void reentrantControlCancellationAndCloseDoNotSendCancelledWork() {
+		for (boolean close : List.of(false, true)) {
+			var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+			try (var publisher = new InventorySyncPublisher(memory, transport)) {
+				publisher.advance(0, settings); var recipient = context("control", 1).recipient();
+				assertTrue(publisher.control(recipient, InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1)));
+				assertTrue(publisher.control(recipient, InventoryS2CPacket.policy(7, 100, 1, Set.of("block"))));
+				int[] callbacks = {0};
+				publisher.setControlHandoff((player, packet) -> {
+					callbacks[0]++; if (close) publisher.close(); else publisher.cancelControls(player); return false;
+				});
+				assertDoesNotThrow(publisher::drainControls);
+				assertEquals(1, transport.sent.size()); assertEquals(1, callbacks[0]);
+				assertEquals(close ? 0 : 1024, memory.retained(), "accepted/cancelled controls refund exactly once");
+			}
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+		}
+	}
+	@Test void callbackAddedControlsWaitForNextDrainAndCallbackFailureDoesNotRetryAcceptedWork() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var recipient = context("control", 1).recipient(); publisher.gateData(recipient);
+			var offer = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
+			var policy = InventoryS2CPacket.policy(7, 100, 1, Set.of("block"));
+			assertTrue(publisher.control(recipient, offer)); assertTrue(publisher.control(recipient, policy));
+			int[] callbacks = {0};
+			publisher.setControlHandoff((player, packet) -> {
+				callbacks[0]++; if (packet.kind() == InventoryS2CPacket.Kind.OFFER) assertTrue(publisher.control(player, offer));
+				throw new IllegalStateException("callback failed after transport accepted");
+			});
+			assertDoesNotThrow(publisher::drainControls);
+			assertEquals(List.of(offer, policy), transport.sent, "new callback work cannot extend the current drain");
+			assertEquals(2, callbacks[0]); assertTrue(publisher.dataGated(recipient));
+			publisher.setControlHandoff((player, packet) -> true); publisher.drainControls();
+			assertEquals(List.of(offer, policy, offer), transport.sent); assertFalse(publisher.dataGated(recipient));
+			publisher.drainControls(); assertEquals(3, transport.sent.size());
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void callbackReplacedControlsAndRecursiveDrainsDeferNewWork() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var recipient = context("control", 1).recipient();
+			var offer = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
+			var policy = InventoryS2CPacket.policy(7, 100, 1, Set.of("block"));
+			var replacement = InventoryS2CPacket.policy(7, 100, 2, Set.of("entity"));
+			assertTrue(publisher.control(recipient, offer)); assertTrue(publisher.control(recipient, policy));
+			publisher.setControlHandoff((player, packet) -> {
+				assertEquals(1024 + 4096, memory.retained(), "accepted control was refunded before callback");
+				assertTrue(publisher.control(player, replacement)); publisher.drainControls(); return false;
+			});
+			publisher.drainControls(); assertEquals(List.of(offer), transport.sent, "replaced/callback-added controls wait even under recursion");
+			publisher.setControlHandoff(null); publisher.drainControls();
+			assertEquals(List.of(offer, replacement), transport.sent); assertEquals(1024, memory.retained());
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void admittedGroupVariantsReleaseOnWithdrawButDeliveredVariantsDoNot() {
+		var settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25)));
+		var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("tracking/1", 1); publisher.register(context, route(new MarkerId(1), "target"));
+			publish(publisher, context, capture(1, 3, 2500)); publisher.drain();
+			long variants = memory.retained();
+			var item = InventoryDomainCodec.encode(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "fold"), 3, "stone", null, true));
+			var result = new CaptureResult(Optional.of(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, Map.of("fold", item))),
+				new CaptureResult.Coverage("inventory", 2, 3, OptionalLong.of(3)), CaptureResult.Availability.READABLE,
+				CaptureResult.Completeness.COMPLETE, CaptureResult.Consistency.EVENTUAL, Optional.empty(), Optional.empty());
+			publish(publisher, context, result);
+			assertTrue(memory.retained() > variants, "offered-group removal does not uncharge the immutable baseline");
+			publisher.withdraw(context); assertTrue(memory.retained() < variants, "admitted-only old group versions now release");
+			assertFalse(publisher.pending(context)); publisher.cancel(context);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void largeDataWorkspaceRefusesBeforeHostEncodingAndRetriesWithoutChangingItsDisplay() {
+		var settings = InventorySettings.serverDefaults(); settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(2));
+		settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(2)));
+		var transport = new Transport(); var memory = new RetainedMemoryLedger(1024 * 1024);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("tracking/1", 1); publisher.register(context, route(new MarkerId(1), "target"));
+			publish(publisher, context, capture(1, 1, 8192));
+			long paddingBytes = memory.remaining() - 12000;
+			var padding = memory.tryReserve(paddingBytes).orElseThrow(); padding.commit(paddingBytes);
+			publisher.drain();
+			assertTrue(transport.sent.stream().allMatch(p -> p.entries().isEmpty()));
+			assertEquals(1, transport.measuredCaps.size(), "only the small fence reached measurement, never data");
+			assertEquals(0, memory.reserved()); padding.close();
+			publisher.advance(3, settings); publisher.drain();
+			assertEquals(8192, transport.sent.stream().filter(p -> !p.entries().isEmpty()).findFirst().orElseThrow().entries().getFirst().displayJson().length());
+			publisher.cancel(context);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
 }

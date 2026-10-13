@@ -21,6 +21,7 @@ import net.minecraft.nbt.ShortTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 
+import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.InventoryDomainCodec;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
@@ -49,6 +50,7 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 	private InventoryItemCodec.Catalog catalog;
 	private final int slots;
 	private final long accountedBytes;
+	private int displayBytes;
 	private boolean closed;
 
 	/** Explicit finite engineering cap; large NBT is rejected rather than truncated. */
@@ -58,18 +60,28 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 		return add(FIXED_ALLOWANCE_BYTES, add(multiply(visibleSlots, SLOT_ALLOWANCE_BYTES), multiply(memberCount, MEMBER_ALLOWANCE_BYTES)));
 	}
 
+	/** Uses the backward-compatible default 4 KiB display projection. */
+	public static InventoryNbtSnapshot create(InventorySnapshotLayout layout, BlockPos originalTarget,
+		List<Tag> payloads, HolderLookup.Provider registries, long memoryLimitBytes) {
+		return create(layout, originalTarget, payloads, registries, memoryLimitBytes, InventoryItemCodec.MAX_DISPLAY_BYTES);
+	}
+
 	/**
 	 * Payload order is member order, then each member's segment order. The
 	 * factory accepts every segment or none and performs no ItemStack decoding.
 	 * All trees are measured with checked long arithmetic before any deep copy.
+	 * {@code displayBytes} is the validated effective display ceiling the lazy
+	 * decode catalogue will adopt; it is only ever lowered afterwards.
 	 */
 	public static InventoryNbtSnapshot create(InventorySnapshotLayout layout, BlockPos originalTarget,
-		List<Tag> payloads, HolderLookup.Provider registries, long memoryLimitBytes) {
+		List<Tag> payloads, HolderLookup.Provider registries, long memoryLimitBytes, int displayBytes) {
 		Objects.requireNonNull(layout, "layout");
 		Objects.requireNonNull(originalTarget, "originalTarget");
 		Objects.requireNonNull(payloads, "payloads");
 		Objects.requireNonNull(registries, "registries");
 		if (memoryLimitBytes < 0) throw new IllegalArgumentException("negative snapshot memory limit");
+		if (displayBytes < InventoryItemCodec.minimumDisplayBytes() || displayBytes > InventoryLimits.MAX_DISPLAY_BYTES)
+			throw new IllegalArgumentException("display byte cap is out of range");
 		if (layout.members().stream().noneMatch(member -> member.position().equals(originalTarget))) throw new IllegalArgumentException("original target is not a snapshot member");
 
 		List<InventorySnapshotLayout.Segment> topology = new ArrayList<>();
@@ -96,17 +108,18 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 		long accounted = add(fixed, multiply(guard.bytes, TREE_COPY_FACTOR));
 		SegmentState[] segments = new SegmentState[topology.size()];
 		for (int i = 0; i < segments.length; i++) segments[i] = new SegmentState(topology.get(i), payloads.get(i).copy(), counters[i]);
-		return new InventoryNbtSnapshot(layout, originalTarget.immutable(), registries, segments, slots, accounted);
+		return new InventoryNbtSnapshot(layout, originalTarget.immutable(), registries, segments, slots, accounted, displayBytes);
 	}
 
 	private InventoryNbtSnapshot(InventorySnapshotLayout layout, BlockPos originalTarget, HolderLookup.Provider registries,
-		SegmentState[] segments, int slots, long accountedBytes) {
+		SegmentState[] segments, int slots, long accountedBytes, int displayBytes) {
 		this.layout = layout;
 		this.originalTarget = originalTarget;
 		this.registries = registries;
 		this.segments = segments;
 		this.slots = slots;
 		this.accountedBytes = accountedBytes;
+		this.displayBytes = displayBytes;
 		segmentBySlot = new int[slots];
 		visibleBySlot = new int[slots];
 		int cursor = 0;
@@ -125,6 +138,21 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 	@Override public int slots() { requireOpen(); return slots; }
 	@Override public long retainedBytes() { return closed ? 0L : accountedBytes; }
 	@Override public InventorySourceAccess.SnapshotEvidence evidence() { return InventorySourceAccess.SnapshotEvidence.ATOMIC_DETACHED; }
+	@Override public int displayBytes() { requireOpen(); return displayBytes; }
+
+	/**
+	 * Monotone ceiling: a later configuration increase never expands retained
+	 * metadata. An existing lazy catalogue is reprojected at the tighter ceiling;
+	 * a catalogue created later simply adopts it.
+	 */
+	@Override public void tightenDisplay(int displayBytes) {
+		requireOpen();
+		if (displayBytes < InventoryItemCodec.minimumDisplayBytes() || displayBytes > InventoryLimits.MAX_DISPLAY_BYTES)
+			throw new IllegalArgumentException("display byte cap is out of range");
+		if (displayBytes >= this.displayBytes) return;
+		this.displayBytes = displayBytes;
+		if (catalog != null) catalog.tightenDisplay(displayBytes);
+	}
 
 	@Override public InventoryDomainCodec.Item read(int index) {
 		requireOpen();
@@ -140,7 +168,7 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 		}
 		if (entry == null) throw new InventorySnapshotSchemas.ReadFailureException("snapshot counter returned no observation");
 		if (entry.isEmpty()) return null;
-		if (catalog == null) catalog = new InventoryItemCodec.Catalog(registries);
+		if (catalog == null) catalog = new InventoryItemCodec.Catalog(registries, displayBytes);
 		var encoded = catalog.encode(entry.exemplar());
 		var display = encoded.display();
 		return new InventoryDomainCodec.Item(encoded.key(), entry.amount(), display.label(), display.displayJson(), display.componentsStripped());

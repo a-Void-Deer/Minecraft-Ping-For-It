@@ -1,18 +1,33 @@
 package nx.pingwheel.common.network;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
+import com.mojang.serialization.JsonOps;
 import io.netty.buffer.Unpooled;
+import net.minecraft.SharedConstants;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.CustomData;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.domain.MarkerId;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -21,6 +36,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InventoryS2CPacketTest {
 	private static final long BIG = (1L << 53) + 1;
+	/** Smallest legal frame-scale budget for a 128 KiB display: display + metadata reserve on the frame grid. */
+	private static final int MAX_FRAME_FOR_MAX_DISPLAY = 136 * 1024;
+
+	@BeforeAll
+	static void bootstrap() {
+		SharedConstants.tryDetectVersion();
+		Bootstrap.bootStrap();
+	}
 
 	private static FriendlyByteBuf buffer() {
 		return new FriendlyByteBuf(Unpooled.buffer());
@@ -117,6 +140,12 @@ class InventoryS2CPacketTest {
 	}
 
 	private static FriendlyByteBuf offerFrame(int preview, int tracking, int resync, int heartbeat) {
+		return offerFrame(preview, tracking, resync, heartbeat, InventoryLimits.DISPLAY_BASE_BYTES,
+			InventoryLimits.FRAME_BASE_BYTES);
+	}
+
+	private static FriendlyByteBuf offerFrame(int preview, int tracking, int resync, int heartbeat, int displayBytes,
+		int frameBytes) {
 		FriendlyByteBuf frame = buffer();
 		MarkerPacketCodec.writeEnum(frame, InventoryS2CPacket.Kind.OFFER);
 		frame.writeVarInt(InventoryS2CPacket.VERSION);
@@ -127,6 +156,8 @@ class InventoryS2CPacketTest {
 		frame.writeVarInt(tracking);
 		frame.writeVarInt(resync);
 		frame.writeVarInt(heartbeat);
+		frame.writeVarInt(displayBytes);
+		frame.writeVarInt(frameBytes);
 		return frame;
 	}
 
@@ -141,13 +172,15 @@ class InventoryS2CPacketTest {
 		frame.writeVarInt(40);
 		frame.writeBytes(resync);
 		frame.writeVarInt(0);
+		frame.writeVarInt(InventoryLimits.DISPLAY_BASE_BYTES);
+		frame.writeVarInt(InventoryLimits.FRAME_BASE_BYTES);
 		return frame;
 	}
 
 	@Test
-	void routeVersionKindsAndStatusAreInventoryV3() {
-		assertEquals(3, InventoryS2CPacket.VERSION);
-		assertEquals("pingforit-s2c:inventory-v3", InventoryS2CPacket.PACKET_ID.toString());
+	void routeVersionKindsAndStatusAreInventoryV4() {
+		assertEquals(4, InventoryS2CPacket.VERSION);
+		assertEquals("pingforit-s2c:inventory-v4", InventoryS2CPacket.PACKET_ID.toString());
 		assertEquals(List.of(InventoryS2CPacket.Kind.OFFER, InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.SELECTED, InventoryS2CPacket.Kind.REJECT, InventoryS2CPacket.Kind.PREVIEW,
 			InventoryS2CPacket.Kind.SNAPSHOT, InventoryS2CPacket.Kind.STREAM,
 			InventoryS2CPacket.Kind.STATUS, InventoryS2CPacket.Kind.HEARTBEAT),
@@ -160,11 +193,11 @@ class InventoryS2CPacketTest {
 	}
 
 	@Test
-	void oldInventoryV2FramesAreRejectedOnTheV3Route() {
+	void oldInventoryV3FramesAreRejectedOnTheV4Route() {
 		FriendlyByteBuf frame = buffer();
 		try {
 			MarkerPacketCodec.writeEnum(frame, InventoryS2CPacket.Kind.OFFER);
-			frame.writeVarInt(2);
+			frame.writeVarInt(3);
 			frame.writeLong(1L);
 			frame.writeLong(0L);
 			frame.writeLong(100L);
@@ -187,8 +220,16 @@ class InventoryS2CPacketTest {
 		assertEquals(InventoryS2CPacket.Kind.OFFER, decoded.kind());
 		assertEquals(BIG, decoded.epoch());
 		assertEquals(offer, decoded.offer());
+		assertEquals(InventoryLimits.DISPLAY_BASE_BYTES, decoded.offer().effectiveDisplayBytes(),
+			"the legacy Java constructor keeps the 1x display budget");
+		assertEquals(InventoryLimits.FRAME_BASE_BYTES, decoded.offer().effectiveFrameBytes(),
+			"the legacy Java constructor keeps the 1x frame budget");
 		assertNull(decoded.markerId());
 		assertEquals(List.of(), decoded.entries());
+
+		InventoryS2CPacket.Offer configured = new InventoryS2CPacket.Offer(20, 40, 5, 0,
+			InventoryLimits.MAX_DISPLAY_BYTES, InventoryLimits.MAX_FRAME_BYTES);
+		assertEquals(configured, roundTrip(InventoryS2CPacket.offer(BIG, configured)).offer());
 
 		InventoryS2CPacket.Offer highest = new InventoryS2CPacket.Offer(InventoryLimits.MAX_PERIOD_TICKS,
 			InventoryLimits.MAX_PERIOD_TICKS, Integer.MAX_VALUE,
@@ -208,6 +249,38 @@ class InventoryS2CPacketTest {
 		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20, 40, 5,
 			InventoryLimits.MAX_HEARTBEAT_PERIODS + 1));
 		assertTrue(InventoryS2CPacket.offer(BIG, null).isCorrupt());
+	}
+
+	@Test
+	void offerRejectsOffGridBudgetsAndAPairWithoutTheMetadataReserve() {
+		// 9216 bytes (9 KiB) is not on the display scale; 4096 bytes (0.25 KiB) is below the frame scale.
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20, 40, 5, 0, 9216,
+			InventoryLimits.FRAME_BASE_BYTES));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20, 40, 5, 0,
+			InventoryLimits.DISPLAY_BASE_BYTES, 4096));
+		// A legal pair still fails when display + fixed reserve exceeds the frame.
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20, 40, 5, 0,
+			InventoryLimits.FRAME_BASE_BYTES, InventoryLimits.FRAME_BASE_BYTES));
+		assertDoesNotThrow(() -> new InventoryS2CPacket.Offer(20, 40, 5, 0, 4096, 8192));
+	}
+
+	@Test
+	void offerDecodeRejectsOffGridBudgetsWithoutDefaults() {
+		FriendlyByteBuf buf = offerFrame(20, 40, 5, 0, 9216, InventoryLimits.FRAME_BASE_BYTES);
+		try {
+			InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
+			assertTrue(decoded.isCorrupt());
+			assertNull(decoded.offer());
+		} finally {
+			buf.release();
+		}
+
+		buf = offerFrame(20, 40, 5, 0, InventoryLimits.FRAME_BASE_BYTES, InventoryLimits.FRAME_BASE_BYTES);
+		try {
+			assertTrue(InventoryS2CPacket.readSafe(buf).isCorrupt());
+		} finally {
+			buf.release();
+		}
 	}
 
 	@Test
@@ -342,7 +415,7 @@ class InventoryS2CPacketTest {
 	void entryTextCapsAndCountsAreEnforced() {
 		String maxKey = "k".repeat(256);
 		InventoryS2CPacket.Entry max = new InventoryS2CPacket.Entry(maxKey, maxKey, "l".repeat(1024),
-			"d".repeat(4096), BIG, BIG + 1, true, InventoryS2CPacket.Status.READY);
+			"d".repeat(InventoryS2CPacket.MAX_DISPLAY_BYTES), BIG, BIG + 1, true, InventoryS2CPacket.Status.READY);
 		InventoryS2CPacket decoded = roundTrip(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, BIG, BIG,
 			new MarkerId(BIG), 0, 0, 0, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of(max)));
 		assertEquals(max, decoded.entries().get(0));
@@ -354,7 +427,7 @@ class InventoryS2CPacketTest {
 		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Entry("k",
 			"minecraft:stone", "l".repeat(1025), null, 0, 0, false, null));
 		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Entry("k",
-			"minecraft:stone", "Stone", "d".repeat(4097), 0, 0, false, null));
+			"minecraft:stone", "Stone", "d".repeat(InventoryS2CPacket.MAX_DISPLAY_BYTES + 1), 0, 0, false, null));
 		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Entry(" ",
 			"minecraft:stone", "Stone", null, 0, 0, false, null));
 		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Entry("k",
@@ -383,14 +456,226 @@ class InventoryS2CPacketTest {
 			new MarkerId(1L), 0, 0, 0, 0, 1, true, InventoryS2CPacket.Status.READY, 0, oversized);
 		FriendlyByteBuf buf = buffer();
 		try {
-			assertThrows(IllegalArgumentException.class, () -> packet.write(buf));
+			assertThrows(IllegalArgumentException.class,
+				() -> packet.write(buf, InventoryLimits.DISPLAY_BASE_BYTES, InventoryLimits.FRAME_BASE_BYTES));
+			assertEquals(0, buf.readableBytes());
 		} finally {
 			buf.release();
 		}
 	}
 
 	@Test
+	void absoluteDisplayEnvelopeRoundTripsAtTheAbsoluteBound() {
+		InventoryS2CPacket.Entry envelope = new InventoryS2CPacket.Entry("k", "minecraft:stone", "Stone",
+			"d".repeat(InventoryS2CPacket.MAX_DISPLAY_BYTES), BIG, BIG + 1, false, null);
+		InventoryS2CPacket.Entry worstCase = new InventoryS2CPacket.Entry("k".repeat(256), "i".repeat(256),
+			"l".repeat(1024), "d".repeat(InventoryS2CPacket.MAX_DISPLAY_BYTES), BIG, BIG + 2, true,
+			InventoryS2CPacket.Status.COMPONENT_TOO_LONG, BIG + 3, true, "p".repeat(256));
+
+		assertEquals(InventoryLimits.MAX_FRAME_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES);
+		assertEquals(InventoryLimits.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_DISPLAY_BYTES);
+		assertTrue(InventoryS2CPacket.MAX_ENTRY_BYTES >= InventoryS2CPacket.MAX_DISPLAY_BYTES + 1024,
+			"the entry envelope never understates metadata plus display");
+
+		for (InventoryS2CPacket.Entry entry : List.of(envelope, worstCase)) {
+			InventoryS2CPacket packet = InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, BIG, BIG,
+				new MarkerId(BIG), 0, 0, 0, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of(entry));
+			FriendlyByteBuf buf = buffer();
+			try {
+				packet.write(buf);
+				assertTrue(buf.readableBytes() <= InventoryS2CPacket.MAX_FRAME_BYTES);
+				InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
+				assertFalse(decoded.isCorrupt());
+				assertEquals(List.of(entry), decoded.entries());
+			} finally {
+				buf.release();
+			}
+		}
+	}
+
+	@Test
+	void maximumDisplayRealItemPayloadRoundTripsAtTheOfferEffectiveBoundary() {
+		DisplayFixture fixture = maximumDisplayFixture(Items.STONE, InventoryS2CPacket.MAX_DISPLAY_BYTES);
+		assertEquals(InventoryS2CPacket.MAX_DISPLAY_BYTES, utf8(fixture.json()), "independent UTF-8 measurement");
+		assertEquals(InventoryS2CPacket.MAX_DISPLAY_BYTES, io.netty.buffer.ByteBufUtil.utf8Bytes(fixture.json()),
+			"the wire UTF codec agrees on the exact byte count");
+
+		ItemStack parsed = parseSingleItem(fixture.json());
+		assertEquals(1, parsed.getCount(), "the display payload is a count-one item");
+		assertEquals(Items.STONE, parsed.getItem());
+		CompoundTag payload = parsed.get(DataComponents.CUSTOM_DATA).copyTag();
+		assertEquals(42, payload.getInt("marker"), "persistent custom data survives the real item codec");
+		assertEquals(fixture.data(), payload.getString("data"), "the multibyte custom text is exact");
+
+		InventoryS2CPacket.Offer effective = roundTrip(InventoryS2CPacket.offer(BIG,
+			new InventoryS2CPacket.Offer(20, 40, 5, 0, InventoryS2CPacket.MAX_DISPLAY_BYTES, MAX_FRAME_FOR_MAX_DISPLAY))).offer();
+		assertEquals(InventoryS2CPacket.MAX_DISPLAY_BYTES, effective.effectiveDisplayBytes());
+		assertEquals(MAX_FRAME_FOR_MAX_DISPLAY, effective.effectiveFrameBytes());
+
+		InventoryS2CPacket.Entry entry = new InventoryS2CPacket.Entry("variant", "minecraft:stone", "Stone",
+			fixture.json(), BIG, BIG + 1, false, null);
+		InventoryS2CPacket packet = InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, BIG, BIG + 2,
+			new MarkerId(BIG + 3), BIG + 4, BIG + 5, BIG + 6, 0, 1, true, InventoryS2CPacket.Status.READY, BIG + 7,
+			List.of(entry));
+		int measured = packet.encodedSize(effective.effectiveDisplayBytes(), effective.effectiveFrameBytes());
+		assertTrue(measured > InventoryS2CPacket.MAX_DISPLAY_BYTES && measured <= MAX_FRAME_FOR_MAX_DISPLAY,
+			"the maximum display plus its metadata fits the configured 136 KiB frame");
+
+		FriendlyByteBuf buf = buffer();
+		try {
+			packet.write(buf, effective.effectiveDisplayBytes(), effective.effectiveFrameBytes());
+			assertEquals(measured, buf.readableBytes(), "exact measurement equals the actual wire bytes");
+			InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
+			assertFalse(decoded.isCorrupt());
+			assertEquals(packet, decoded);
+			assertEquals(fixture.json(), decoded.entries().get(0).displayJson(), "the display data is preserved byte for byte");
+			assertEquals(BIG, decoded.entries().get(0).count(), "the exact long count is preserved");
+			ItemStack decodedStack = parseSingleItem(decoded.entries().get(0).displayJson());
+			assertEquals(1, decodedStack.getCount(), "the decoded payload is still a count-one item");
+			assertEquals(payload, decodedStack.get(DataComponents.CUSTOM_DATA).copyTag(),
+				"the decoded components equal the observed persistent custom data");
+		} finally {
+			buf.release();
+		}
+	}
+
+	@Test
+	void maximumDisplayRealItemPayloadBoundaryRejectsOneByteOverAndAFrameTooSmall() {
+		DisplayFixture over = maximumDisplayFixture(Items.STONE, InventoryS2CPacket.MAX_DISPLAY_BYTES + 1);
+		assertEquals(InventoryS2CPacket.MAX_DISPLAY_BYTES + 1, utf8(over.json()));
+		assertEquals(1, parseSingleItem(over.json()).getCount(),
+			"the over-bound fixture is still a valid count-one item payload");
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Entry("variant", "minecraft:stone",
+			"Stone", over.json(), 1L, 1L, false, null));
+
+		FriendlyByteBuf overBuf = streamFrame(0, 1, entriesPayload(payload -> {
+			payload.writeVarInt(1);
+			payload.writeUtf("variant", 256);
+			payload.writeUtf("minecraft:stone", 256);
+			payload.writeUtf("Stone", 1024);
+			payload.writeBoolean(true);
+			payload.writeUtf(over.json(), InventoryS2CPacket.MAX_DISPLAY_BYTES + 1);
+			payload.writeLong(1L);
+			payload.writeLong(1L);
+			payload.writeBoolean(false);
+			payload.writeBoolean(false);
+			payload.writeLong(0L);
+			payload.writeBoolean(false);
+			payload.writeBoolean(false);
+		}));
+		try {
+			assertTrue(InventoryS2CPacket.readSafe(overBuf).isCorrupt(),
+				"one byte over the absolute display bound is rejected on decode");
+		} finally {
+			overBuf.release();
+		}
+
+		DisplayFixture stone = maximumDisplayFixture(Items.STONE, InventoryS2CPacket.MAX_DISPLAY_BYTES);
+		DisplayFixture dirt = maximumDisplayFixture(Items.DIRT, InventoryS2CPacket.MAX_DISPLAY_BYTES);
+		InventoryS2CPacket.Entry stoneEntry = new InventoryS2CPacket.Entry("stone", "minecraft:stone", "Stone",
+			stone.json(), 1L, 1L, false, null);
+		InventoryS2CPacket.Entry dirtEntry = new InventoryS2CPacket.Entry("dirt", "minecraft:dirt", "Dirt",
+			dirt.json(), 1L, 1L, false, null);
+		InventoryS2CPacket single = InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, BIG, BIG + 1,
+			new MarkerId(BIG + 2), BIG + 3, BIG + 4, BIG + 5, 0, 1, true, InventoryS2CPacket.Status.READY, BIG + 6,
+			List.of(stoneEntry));
+		InventoryS2CPacket tooLarge = InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, BIG, BIG + 1,
+			new MarkerId(BIG + 2), BIG + 3, BIG + 4, BIG + 5, 0, 1, true, InventoryS2CPacket.Status.READY, BIG + 6,
+			List.of(stoneEntry, dirtEntry));
+		assertTrue(single.encodedSize(InventoryS2CPacket.MAX_DISPLAY_BYTES, MAX_FRAME_FOR_MAX_DISPLAY)
+			<= MAX_FRAME_FOR_MAX_DISPLAY, "one maximum display entry fits the configured frame");
+		assertThrows(IllegalArgumentException.class,
+			() -> tooLarge.encodedSize(InventoryS2CPacket.MAX_DISPLAY_BYTES, MAX_FRAME_FOR_MAX_DISPLAY),
+			"two maximum displays exceed the configured frame");
+
+		FriendlyByteBuf frameBuf = buffer();
+		try {
+			assertThrows(IllegalArgumentException.class,
+				() -> tooLarge.write(frameBuf, InventoryS2CPacket.MAX_DISPLAY_BYTES, MAX_FRAME_FOR_MAX_DISPLAY));
+			assertEquals(0, frameBuf.readableBytes(), "an over-budget frame writes nothing to the destination");
+		} finally {
+			frameBuf.release();
+		}
+	}
+
+	@Test
+	void configuredFrameBudgetIsExactAndRejectsOneByteMore() {
+		int displayBytes = InventoryLimits.MAX_DISPLAY_BYTES;
+		int frameBytes = InventoryLimits.MAX_FRAME_BYTES;
+		List<InventoryS2CPacket.Entry> probe = new ArrayList<>();
+		for (int i = 0; i < 3; i++) {
+			probe.add(new InventoryS2CPacket.Entry("k" + i, "minecraft:stone", "Stone",
+				"d".repeat(displayBytes), 1L, 1L, false, null));
+		}
+		probe.add(new InventoryS2CPacket.Entry("k3", "minecraft:stone", "Stone", "d".repeat(130000), 1L, 1L, false, null));
+
+		int probeSize = InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1L, 1L, new MarkerId(1L), 0, 0, 0, 0,
+			1, true, InventoryS2CPacket.Status.READY, 0, probe).encodedSize(displayBytes, frameBytes);
+		int exactDisplay = 130000 + (frameBytes - probeSize);
+		assertTrue(exactDisplay >= 130000 && exactDisplay <= displayBytes, "the probe leaves adjustable room");
+
+		List<InventoryS2CPacket.Entry> exactEntries = new ArrayList<>(probe.subList(0, 3));
+		exactEntries.add(new InventoryS2CPacket.Entry("k3", "minecraft:stone", "Stone", "d".repeat(exactDisplay),
+			1L, 1L, false, null));
+		InventoryS2CPacket exact = InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1L, 1L, new MarkerId(1L),
+			0, 0, 0, 0, 1, true, InventoryS2CPacket.Status.READY, 0, exactEntries);
+		assertEquals(frameBytes, exact.encodedSize(displayBytes, frameBytes));
+
+		FriendlyByteBuf buf = buffer();
+		try {
+			exact.write(buf, displayBytes, frameBytes);
+			assertEquals(frameBytes, buf.readableBytes(), "the exact configured frame is written at its budget");
+			InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
+			assertFalse(decoded.isCorrupt());
+			assertEquals(exactEntries, decoded.entries());
+		} finally {
+			buf.release();
+		}
+
+		List<InventoryS2CPacket.Entry> overEntries = new ArrayList<>(probe.subList(0, 3));
+		overEntries.add(new InventoryS2CPacket.Entry("k3", "minecraft:stone", "Stone",
+			"d".repeat(exactDisplay + 1), 1L, 1L, false, null));
+		InventoryS2CPacket over = InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1L, 1L, new MarkerId(1L),
+			0, 0, 0, 0, 1, true, InventoryS2CPacket.Status.READY, 0, overEntries);
+		FriendlyByteBuf overBuf = buffer();
+		try {
+			assertThrows(IllegalArgumentException.class, () -> over.encodedSize(displayBytes, frameBytes));
+			assertThrows(IllegalArgumentException.class, () -> over.write(overBuf, displayBytes, frameBytes));
+			assertEquals(0, overBuf.readableBytes(), "an over-budget frame writes nothing to the destination");
+		} finally {
+			overBuf.release();
+		}
+	}
+
+	@Test
+	void effectiveWriteRejectsADisplayBeyondTheConfiguredCapAndAnIllegalPair() {
+		InventoryS2CPacket packet = InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1L, 1L, new MarkerId(1L),
+			0, 0, 0, 0, 1, true, InventoryS2CPacket.Status.READY, 0,
+			List.of(new InventoryS2CPacket.Entry("k", "minecraft:stone", "Stone", "d".repeat(4097), 1L, 1L, false, null)));
+
+		FriendlyByteBuf buf = buffer();
+		try {
+			assertThrows(IllegalArgumentException.class,
+				() -> packet.write(buf, InventoryLimits.DISPLAY_BASE_BYTES, InventoryLimits.FRAME_BASE_BYTES));
+			assertThrows(IllegalArgumentException.class,
+				() -> packet.write(buf, 9216, InventoryLimits.FRAME_BASE_BYTES));
+			assertEquals(0, buf.readableBytes());
+		} finally {
+			buf.release();
+		}
+
+		FriendlyByteBuf legacyBuf = buffer();
+		try {
+			packet.write(legacyBuf);
+			assertTrue(legacyBuf.readableBytes() > 0, "the legacy absolute-safe write admits the larger display");
+		} finally {
+			legacyBuf.release();
+		}
+	}
+
+	@Test
 	void entireFrameBudgetIncludesHeaderAndDecodeBound() {
+		int frameBytes = InventoryLimits.FRAME_BASE_BYTES;
 		List<InventoryS2CPacket.Entry> nearBound = new ArrayList<>();
 		for (int i = 0; i < 7; i++) {
 			nearBound.add(new InventoryS2CPacket.Entry("k" + i, "minecraft:stone", "l".repeat(1024),
@@ -400,8 +685,8 @@ class InventoryS2CPacketTest {
 			new MarkerId(1L), 0, 0, 0, 0, 1, true, InventoryS2CPacket.Status.READY, 0, nearBound);
 		FriendlyByteBuf buf = buffer();
 		try {
-			accepted.write(buf);
-			assertTrue(buf.readableBytes() <= InventoryS2CPacket.MAX_FRAME_BYTES);
+			accepted.write(buf, InventoryLimits.DISPLAY_BASE_BYTES, frameBytes);
+			assertTrue(buf.readableBytes() <= frameBytes);
 			InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
 			assertFalse(decoded.isCorrupt());
 			assertEquals(nearBound, decoded.entries());
@@ -418,7 +703,8 @@ class InventoryS2CPacketTest {
 			new MarkerId(1L), 0, 0, 0, 0, 1, true, InventoryS2CPacket.Status.READY, 0, overBound);
 		FriendlyByteBuf over = buffer();
 		try {
-			assertThrows(IllegalArgumentException.class, () -> rejected.write(over));
+			assertThrows(IllegalArgumentException.class,
+				() -> rejected.write(over, InventoryLimits.DISPLAY_BASE_BYTES, frameBytes));
 			assertEquals(0, over.readableBytes());
 		} finally {
 			over.release();
@@ -426,7 +712,7 @@ class InventoryS2CPacketTest {
 
 		buf = streamFrame(0, 1, new byte[InventoryS2CPacket.MAX_FRAME_BYTES]);
 		try {
-			assertTrue(InventoryS2CPacket.readSafe(buf).isCorrupt());
+			assertTrue(InventoryS2CPacket.readSafe(buf).isCorrupt(), "the absolute decode guard precedes allocation");
 		} finally {
 			buf.release();
 		}
@@ -562,5 +848,152 @@ class InventoryS2CPacketTest {
 			1L, 1L, null, 0, 0, 0, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of()));
 		assertThrows(IllegalArgumentException.class, () -> InventoryS2CPacket.data(InventoryS2CPacket.Kind.STATUS,
 			1L, 1L, null, 0, 0, 0, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of()));
+	}
+
+	@Test void exactMeasurementMatchesIndependentVanillaUtfCodecForEveryKindAndMaximalMultibyteEntries() {
+		var max = new InventoryS2CPacket.Entry("é".repeat(128), "中".repeat(85), "😀".repeat(256),
+			"é中😀".repeat(14563) + "éé", Long.MAX_VALUE, Long.MAX_VALUE, true,
+			InventoryS2CPacket.Status.COMPONENT_TOO_LONG, Long.MAX_VALUE, true, "é".repeat(128));
+		assertEquals(InventoryS2CPacket.MAX_DISPLAY_BYTES - 1, io.netty.buffer.ByteBufUtil.utf8Bytes(max.displayJson()));
+		var entries = List.of(max, entry("plain", "minecraft:stone", 0, 0),
+			new InventoryS2CPacket.Entry("surrogates", "minecraft:stone", "\ud800\ud800\udc00", "\ud800é\udc00", 1, 1, false, null));
+		var packets = List.of(
+			InventoryS2CPacket.offer(1, new InventoryS2CPacket.Offer(72000, 72000, Integer.MAX_VALUE, 0)),
+			InventoryS2CPacket.policy(1, 100, 1, java.util.Set.of("location", "entity_block", "dropped_item", "block", "entity")),
+			InventoryS2CPacket.selected(1, 2, 3, new MarkerId(4), null),
+			InventoryS2CPacket.selected(1, 2, 3, null, nx.pingwheel.common.marker.MarkerRejectReason.TARGET_GONE),
+			InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 1, 2, null, 3, 4, 5, 127, 128, true, InventoryS2CPacket.Status.READY, 6, entries),
+			InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, 1, 2, new MarkerId(4), 3, 4, 5, 128, 129, true, InventoryS2CPacket.Status.UNCERTAIN, 6, entries),
+			InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1, 2, new MarkerId(4), 3, 4, 5, 0, 1, false, InventoryS2CPacket.Status.UPDATING, 6, List.of()),
+			InventoryS2CPacket.status(1, 2, new MarkerId(4), 3, 4, 5, InventoryS2CPacket.Status.INVALID, 6),
+			InventoryS2CPacket.heartbeat(1, 2, new MarkerId(4), 3, 4, 5, 6));
+		for (var packet : packets) {
+			var vanilla = buffer(); var actual = buffer();
+			try {
+				writeVanillaFrame(vanilla, packet);
+				assertEquals(vanilla.readableBytes(), packet.encodedSize(InventoryS2CPacket.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES), packet.kind().name());
+				packet.write(actual);
+				assertEquals(vanilla, actual, "the allocation-bounded writer preserves the actual wire bytes");
+			} finally { vanilla.release(); actual.release(); }
+		}
+	}
+
+	@Test void measurementAllocatesNoDisplaySizedBuffersAndWorkspaceScalesWithActualPacket() {
+		var small = InventoryS2CPacket.offer(1, new InventoryS2CPacket.Offer(5, 3, 5, 0));
+		var large = InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1, 0, new MarkerId(1), 1, 1, 1, 0, 1,
+			true, InventoryS2CPacket.Status.READY, 0, List.of(new InventoryS2CPacket.Entry("k", "minecraft:stone", "Stone",
+			"中".repeat(43690) + "é", 1, 1, false, null)));
+		assertTrue(small.encodingWorkspace(4096, 32768) < 2048, "tiny controls never reserve an absolute frame mirror");
+		assertTrue(large.encodingWorkspace(InventoryS2CPacket.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES)
+			> 2L * large.encodedSize(InventoryS2CPacket.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES));
+		var bean = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
+		assertTrue(bean.isThreadAllocatedMemorySupported()); bean.setThreadAllocatedMemoryEnabled(true);
+		int checksum = 0;
+		for (int i = 0; i < 200; i++) checksum += large.encodedSize(InventoryS2CPacket.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES);
+		long thread = Thread.currentThread().threadId(), before = bean.getThreadAllocatedBytes(thread);
+		for (int i = 0; i < 64; i++) checksum += large.encodedSize(InventoryS2CPacket.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES);
+		long allocated = bean.getThreadAllocatedBytes(thread) - before;
+		assertTrue(checksum > 0); assertEquals(0, allocated, "warmed exact measurement allocates no objects or byte buffers");
+	}
+
+	@Test void failedWritePreservesExistingDestinationBytesAndIndices() {
+		var packet = InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1, 0, new MarkerId(1), 1, 1, 1, 0, 1,
+			true, InventoryS2CPacket.Status.READY, 0, List.of(new InventoryS2CPacket.Entry("k", "minecraft:stone", "Stone",
+			"d".repeat(4097), 1, 1, false, null)));
+		var destination = buffer();
+		try {
+			destination.writeInt(0x12345678); destination.readerIndex(1);
+			assertThrows(IllegalArgumentException.class, () -> packet.write(destination, 4096, 32768));
+			assertEquals(1, destination.readerIndex()); assertEquals(4, destination.writerIndex());
+			assertEquals(0x12345678, destination.getInt(0));
+		} finally { destination.release(); }
+	}
+
+	/**
+	 * Real registry-backed single-item JSON sized exactly in UTF-8 bytes. The
+	 * persistent custom data carries multibyte text, and the item codec itself
+	 * produced the string; callers re-parse it against the fixture contract.
+	 *
+	 * <p>This is a display/wire fixture only. Its canonical persistent bytes
+	 * exceed the item codec's internal 64 KiB identity guard, so it makes no
+	 * claim about an admissible server capture identity or the retained
+	 * catalogue bound; those remain owned by the inventory item codec.
+	 */
+	private static DisplayFixture maximumDisplayFixture(Item item, int targetBytes) {
+		ItemStack probe = new ItemStack(item);
+		CompoundTag payload = new CompoundTag();
+		payload.putInt("marker", 42);
+		payload.putString("data", "");
+		probe.set(DataComponents.CUSTOM_DATA, CustomData.of(payload));
+		int missing = targetBytes - utf8(encodeSingleItem(probe));
+		assertTrue(missing > 0, "the target size must exceed the bare item JSON");
+		String data = "a".repeat(missing % 9) + "é中😀".repeat(missing / 9);
+		payload.putString("data", data);
+		probe.set(DataComponents.CUSTOM_DATA, CustomData.of(payload));
+		String json = encodeSingleItem(probe);
+		assertEquals(targetBytes, utf8(json), "the fixture is sized exactly in UTF-8 bytes");
+		return new DisplayFixture(json, data);
+	}
+
+	private record DisplayFixture(String json, String data) {}
+
+	private static String encodeSingleItem(ItemStack stack) {
+		return ItemStack.SINGLE_ITEM_CODEC
+			.encodeStart(RegistryAccess.EMPTY.createSerializationContext(JsonOps.INSTANCE), stack)
+			.result().map(JsonElement::toString).orElseThrow();
+	}
+
+	private static ItemStack parseSingleItem(String json) {
+		return ItemStack.SINGLE_ITEM_CODEC
+			.parse(RegistryAccess.EMPTY.createSerializationContext(JsonOps.INSTANCE), JsonParser.parseString(json))
+			.result().orElseThrow();
+	}
+
+	private static int utf8(String value) {
+		return value.getBytes(StandardCharsets.UTF_8).length;
+	}
+
+	/** Independent reference uses the vanilla UTF writer and a separate framed payload. */
+	private static void writeVanillaFrame(FriendlyByteBuf buf, InventoryS2CPacket packet) {
+		MarkerPacketCodec.writeEnum(buf, packet.kind()); buf.writeVarInt(packet.protocol());
+		buf.writeLong(packet.epoch()); buf.writeLong(packet.requestId()); buf.writeLong(packet.presentationEpoch()); buf.writeLong(packet.view());
+		switch (packet.kind()) {
+			case OFFER -> {
+				var offer = packet.offer(); buf.writeVarInt(offer.previewPeriodTicks()); buf.writeVarInt(offer.trackingPeriodTicks());
+				buf.writeVarInt(offer.resyncMinPeriods()); buf.writeVarInt(offer.heartbeatPeriods());
+				buf.writeVarInt(offer.effectiveDisplayBytes()); buf.writeVarInt(offer.effectiveFrameBytes());
+			}
+			case POLICY -> {
+				buf.writeVarInt(packet.allowedTypes().size());
+				for (String type : packet.allowedTypes().stream().sorted().toList()) buf.writeUtf(type, 256);
+			}
+			case SELECTED, REJECT -> {
+				buf.writeLong(packet.commitId()); MarkerPacketCodec.writeOptionalMarkerId(buf, Optional.ofNullable(packet.markerId()));
+				if (packet.kind() == InventoryS2CPacket.Kind.REJECT) MarkerPacketCodec.writeEnum(buf, packet.rejection());
+			}
+			case STATUS, HEARTBEAT, PREVIEW, SNAPSHOT, STREAM -> {
+				MarkerPacketCodec.writeOptionalMarkerId(buf, Optional.ofNullable(packet.markerId()));
+				buf.writeLong(packet.baselineId()); buf.writeLong(packet.statusRevision()); buf.writeLong(packet.watermark());
+				boolean data = packet.kind() == InventoryS2CPacket.Kind.PREVIEW || packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT || packet.kind() == InventoryS2CPacket.Kind.STREAM;
+				if (data) { buf.writeVarInt(packet.partIndex()); buf.writeVarInt(packet.partCount()); buf.writeBoolean(packet.completeScan()); }
+				if (packet.kind() != InventoryS2CPacket.Kind.HEARTBEAT) MarkerPacketCodec.writeEnum(buf, packet.status());
+				buf.writeLong(packet.checksum());
+				if (data) {
+					var payload = buffer();
+					try {
+						payload.writeVarInt(packet.entries().size());
+						for (var entry : packet.entries()) {
+							payload.writeUtf(entry.key(), 256); payload.writeUtf(entry.itemId(), 256); payload.writeUtf(entry.label(), 1024);
+							payload.writeBoolean(entry.displayJson() != null); if (entry.displayJson() != null) payload.writeUtf(entry.displayJson(), InventoryS2CPacket.MAX_DISPLAY_BYTES);
+							payload.writeLong(entry.count()); payload.writeLong(entry.itemRevision()); payload.writeBoolean(entry.fallback());
+							payload.writeBoolean(entry.quality() != null); if (entry.quality() != null) MarkerPacketCodec.writeEnum(payload, entry.quality());
+							payload.writeLong(entry.groupRevision()); payload.writeBoolean(entry.replaceGroup()); payload.writeBoolean(entry.itemPingType() != null);
+							if (entry.itemPingType() != null) payload.writeUtf(entry.itemPingType(), 256);
+						}
+						buf.writeVarInt(payload.readableBytes()); buf.writeBytes(payload);
+					} finally { payload.release(); }
+				}
+			}
+		}
 	}
 }

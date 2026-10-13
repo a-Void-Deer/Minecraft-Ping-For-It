@@ -27,6 +27,7 @@ import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.InventoryConfigValues.Field;
+import nx.pingwheel.common.config.InventorySizeScale;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.SpatialSelectorSettings;
 import nx.pingwheel.common.config.TeamColorMode;
@@ -48,6 +49,7 @@ import nx.pingwheel.common.screen.SettingsNavigationModel.Page;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Scope;
 
 import java.lang.ref.WeakReference;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -56,6 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -93,6 +96,8 @@ public class SettingsScreen extends OptionsSubScreen {
 	private boolean syncingScopeTab;
 	private boolean resetConfirmationHandled;
 	private boolean suppressSaveOnClose;
+	private boolean sizeSliderEditPending;
+	private final InventorySizeOption.AdjustmentState sizeSliderAdjustment = new InventorySizeOption.AdjustmentState();
 	private MutableComponent serverValidationMessage;
 
 	private final ServerPresentationPolicyState.ChangeListener presentationPolicyListener =
@@ -215,7 +220,16 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-		return this.inputActions.dispatch(() -> this.dispatchKeyPressed(keyCode, scanCode, modifiers));
+		final boolean handled = this.inputActions.dispatch(() -> this.dispatchKeyPressed(keyCode, scanCode, modifiers));
+		this.rebuildAfterSizeSliderEdit();
+		return handled;
+	}
+
+	@Override
+	public boolean mouseReleased(double mouseX, double mouseY, int button) {
+		final boolean handled = this.inputActions.dispatch(() -> super.mouseReleased(mouseX, mouseY, button));
+		this.rebuildAfterSizeSliderEdit();
+		return handled;
 	}
 
 	private boolean dispatchKeyPressed(int keyCode, int scanCode, int modifiers) {
@@ -408,6 +422,9 @@ public class SettingsScreen extends OptionsSubScreen {
 		if (saveCurrentState) {
 			this.saveCurrentViewState();
 		}
+		if (!this.sizeSliderAdjustment.isCarrying()) {
+			this.sizeSliderAdjustment.clear();
+		}
 		this.flushOptionWidgets();
 		// Capture the live caret/selection before the widgets are cleared; the
 		// pure draft model owns the values until the fields are recreated.
@@ -442,6 +459,21 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.updateChrome();
 		this.repositionElements();
 		this.restoreCurrentViewState();
+	}
+
+	/**
+	 * A frame size edit changes the display slider's maximum and can change the
+	 * inline adjustment notice. The native slider must not be replaced
+	 * mid-drag, so the rebuild happens after the gesture's final input dispatch
+	 * instead of inside the value callback. Its keyboard adjustment mode is
+	 * carried through the replacement, so held arrow keys keep adjusting.
+	 */
+	private void rebuildAfterSizeSliderEdit() {
+		if (!this.sizeSliderEditPending) {
+			return;
+		}
+		this.sizeSliderEditPending = false;
+		this.sizeSliderAdjustment.carry(() -> this.rebuildPage(true));
 	}
 
 	private void updateChrome() {
@@ -1630,6 +1662,10 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private void addServerInventoryRow(Setting setting) {
 		final Field inventoryField = setting.inventoryField();
+		if (inventoryField.isSizeScale()) {
+			this.addServerSizeScaleSlider(setting);
+			return;
+		}
 		final String key = setting.id();
 		this.flushPendingHalfWidthRow();
 		final var label = new StringWidget(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH,
@@ -1665,6 +1701,60 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.addInventoryStepButton(setting, field, false);
 			this.addInventoryStepButton(setting, field, true);
 		}
+	}
+
+	/**
+	 * The two size leaves are ordered-position sliders shown as physical KiB
+	 * sizes. The display maximum follows the current frame draft; the model
+	 * reconciles a lowering frame edit atomically and records the inline notice.
+	 */
+	private void addServerSizeScaleSlider(Setting setting) {
+		final Field field = setting.inventoryField();
+		final InventorySizeScale scale = field.sizeScale();
+		final IntSupplier maximumPosition = field == Field.DISPLAY_BYTE_MULTIPLIER
+			? this.serverSettings::maximumDisplayPosition
+			: () -> scale.legalValues().size() - 1;
+		final var slider = InventorySizeOption.slider(
+			LanguageUtils.settings(setting.id()),
+			scale,
+			maximumPosition,
+			() -> LanguageUtils.settings(setting.id()).path("tooltip").get(),
+			() -> scale.valueAt(this.serverSettings.sizeScalePosition(field)),
+			value -> this.onSizeScaleSliderChanged(field, value),
+			this.sizeSliderAdjustment);
+		slider.active = this.serverSettings.canEdit();
+		this.addFullWidth(setting.id(), slider);
+		if (field == Field.FRAME_BYTE_MULTIPLIER) {
+			this.addSizeAdjustmentNotice();
+		}
+	}
+
+	private void onSizeScaleSliderChanged(Field field, BigDecimal value) {
+		this.serverValidationMessage = null;
+		this.serverSettings.setSizeScalePosition(field, field.sizeScale().indexOf(value));
+		// The label, the display maximum, and the adjustment notice are rebuilt
+		// once the native gesture has finished.
+		this.sizeSliderEditPending = true;
+	}
+
+	/** The polite inline notice that explains a frame-priority display reduction. */
+	private void addSizeAdjustmentNotice() {
+		final var adjustment = this.serverSettings.sizeAdjustment();
+		if (adjustment == null) {
+			return;
+		}
+		this.flushPendingHalfWidthRow();
+		final var notice = new StringWidget(
+			0,
+			0,
+			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
+			SettingsScreenLayout.ROW_HEIGHT,
+			LanguageUtils.settings("inventory").path("size_adjusted").get(
+				InventorySizeOption.kibLabel(InventorySizeScale.DISPLAY, adjustment.displayMultiplier()),
+				InventorySizeOption.kibLabel(InventorySizeScale.FRAME, adjustment.frameMultiplier())).withStyle(ChatFormatting.YELLOW),
+			this.font).alignLeft();
+		notice.active = false;
+		this.settingsList.addSmall(notice, null);
 	}
 
 	private Component inventoryLimitMode(Field field) {

@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
@@ -19,6 +20,7 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.LockCode;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -290,4 +292,73 @@ class InventoryMinecraftSourcesTest {
 			assertTrue(consumer.invalidated()); assertEquals(1, captures.get());
 		}
 	}
+	@Test void liveCatalogueAdoptsTheEffectiveCapAndTightensMonotonically() {
+		var catalog = new InventoryItemCodec.Catalog(RegistryAccess.EMPTY, 32768);
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"), new UUID(6, 6), BlockFace.NORTH);
+		ItemStack stack = new ItemStack(Items.STONE, 4);
+		CompoundTag data = new CompoundTag();
+		data.putString("payload", "x".repeat(6000));
+		stack.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
+		var access = new IPlatformInventoryService.Access() {
+			@Override public Optional<String> alias() { return Optional.empty(); }
+			@Override public boolean valid() { return true; }
+			@Override public boolean stableCursor() { return true; }
+			@Override public int slots() { return 1; }
+			@Override public OptionalLong version() { return OptionalLong.empty(); }
+			@Override public IPlatformInventoryService.Entry read(int slot) { return new IPlatformInventoryService.Entry(stack, 4); }
+			@Override public boolean visit(int limit, java.util.function.Consumer<IPlatformInventoryService.Entry> visitor) { throw new AssertionError("indexed provider"); }
+		};
+		var view = new InventoryMinecraftSources.View("same-controller-alias", List.of(), List.of(), access);
+		InventorySourceAccess.Source source = new InventoryMinecraftSources.Source(input, view, () -> true, () -> view,
+			entry -> {
+				var encoded = catalog.encode(entry.exemplar());
+				return new InventoryDomainCodec.Item(encoded.key(), entry.amount(), encoded.display().label(), encoded.display().displayJson(), encoded.display().componentsStripped());
+			}, (InventoryMinecraftSources.SourceWorld) null, null, 32768, catalog::tightenDisplay);
+		assertEquals(32768, source.displayBytes());
+		var before = source.read(0);
+		assertTrue(utf8(before.displayJson()) > InventoryItemCodec.MAX_DISPLAY_BYTES, "the effective cap keeps the real component JSON");
+		source.tightenDisplay(4096);
+		assertEquals(4096, source.displayBytes());
+		var tightened = source.read(0);
+		assertEquals(before.key(), tightened.key(), "tightening never recomputes identity");
+		assertEquals(4L, tightened.count());
+		assertTrue(utf8(tightened.displayJson()) <= 4096);
+		assertTrue(tightened.stripped());
+		source.tightenDisplay(32768); // an increase is ignored
+		assertEquals(4096, source.displayBytes());
+		assertEquals(tightened.displayJson(), source.read(0).displayJson(), "raising the cap never resurrects the omitted component");
+	}
+	@Test void effectiveDisplayCapBoundaryRejectsBelowTheOneKiBLegalMinimum() {
+		assertEquals(1024, InventoryItemCodec.minimumDisplayBytes(), "the legal effective minimum is the 1 KiB display cap");
+		assertEquals(1024, InventoryMinecraftSources.requireDisplayBytes(1024));
+		assertThrows(IllegalArgumentException.class, () -> InventoryMinecraftSources.requireDisplayBytes(1023));
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"), new UUID(7, 7), BlockFace.NORTH);
+		var view = new InventoryMinecraftSources.View("boundary-alias", List.of(), List.of(), null);
+		assertThrows(IllegalArgumentException.class, () -> new InventoryMinecraftSources.Source(input, view, () -> true, () -> view,
+			entry -> { throw new AssertionError("cap boundary only"); }, (InventoryMinecraftSources.SourceWorld) null, null, 1023, ignored -> {}));
+		InventorySourceAccess.Source source = new InventoryMinecraftSources.Source(input, view, () -> true, () -> view,
+			entry -> { throw new AssertionError("cap boundary only"); }, (InventoryMinecraftSources.SourceWorld) null, null, 1024, ignored -> {});
+		assertEquals(1024, source.displayBytes());
+		assertThrows(IllegalArgumentException.class, () -> source.tightenDisplay(1023));
+		assertEquals(1024, source.displayBytes(), "a rejected tightening leaves the source ceiling unchanged");
+		source.close();
+	}
+	@Test void snapshotCaptureAdoptsTheSourceCatalogueCeiling() {
+		var world = new ChestWorld();
+		var catalog = new InventoryItemCodec.Catalog(RegistryAccess.EMPTY, 32768);
+		var view = InventoryMinecraftSources.view(world, world.input, (pos, face) -> Optional.empty());
+		var source = new InventoryMinecraftSources.Source(world.input, view, () -> true,
+			() -> InventoryMinecraftSources.view(world, world.input, (pos, face) -> Optional.empty()),
+			entry -> {
+				if (entry.isEmpty()) return null;
+				var encoded = catalog.encode(entry.exemplar());
+				return new InventoryDomainCodec.Item(encoded.key(), entry.amount(), encoded.display().label(), encoded.display().displayJson(), encoded.display().componentsStripped());
+			}, world, null, 32768, catalog::tightenDisplay);
+		var snapshot = source.snapshotPlan().orElseThrow().capture().orElseThrow();
+		try (snapshot) { assertEquals(32768, snapshot.displayBytes()); }
+		source.tightenDisplay(4096);
+		var tightened = source.snapshotPlan().orElseThrow().capture().orElseThrow();
+		try (tightened) { assertEquals(4096, tightened.displayBytes()); }
+	}
+	static int utf8(String value) { return value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length; }
 }

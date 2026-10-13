@@ -30,6 +30,20 @@ public final class StrictPacketCodec {
 		return value;
 	}
 
+	/**
+	 * Bounded UTF read with an explicit encoded-byte cap: the declared length
+	 * is rejected against the byte cap and the remaining input before any
+	 * string allocation, so an oversized field never materializes.
+	 */
+	public static String readUtf(FriendlyByteBuf buf, int maxChars, int maxBytes) {
+		int length = readVarInt(buf);
+		if (length < 0 || length > maxBytes || length > buf.readableBytes())
+			throw new IllegalArgumentException("invalid UTF length");
+		String value = buf.readCharSequence(length, StandardCharsets.UTF_8).toString();
+		if (value.length() > maxChars) throw new IllegalArgumentException("invalid UTF size");
+		return value;
+	}
+
 	public static <E extends Enum<E>> E readEnum(FriendlyByteBuf buf, Class<E> type) {
 		return Enum.valueOf(type, readUtf(buf, MarkerPacketCodec.MAX_ID_LENGTH));
 	}

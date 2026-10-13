@@ -98,11 +98,20 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		}
 	}
 
-	/** Count is display-only; null is unknown, never synthesized to zero or sent. */
-	public record InventoryRow<R>(String key, String label, Long count, String itemId, Status quality, R reference) {
+	/**
+	 * Count is display-only; null is unknown, never synthesized to zero or sent.
+	 * {@code displayJson} is the immutable server-bounded encoded display value;
+	 * null keeps the native registry-name fallback.
+	 */
+	public record InventoryRow<R>(String key, String label, Long count, String itemId, String displayJson, Status quality, R reference) {
 		public InventoryRow {
 			requireId(key); Objects.requireNonNull(label); Objects.requireNonNull(quality); Objects.requireNonNull(reference);
 			if (count != null && count < 0) throw new IllegalArgumentException("negative display count");
+		}
+
+		/** Compatibility form without encoded display data. */
+		public InventoryRow(String key, String label, Long count, String itemId, Status quality, R reference) {
+			this(key, label, count, itemId, null, quality, reference);
 		}
 	}
 
@@ -637,7 +646,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		List<SpatialInventoryView.Row> paintRows = new ArrayList<>();
 		for (InventoryListModel.Entry entry : state.entries()) {
 			InventoryRow<R> row = rows.get(entry.key());
-			if (row != null) paintRows.add(new SpatialInventoryView.Row(row.key(), row.label(), row.count(), row.itemId(), row.quality()));
+			if (row != null) paintRows.add(new SpatialInventoryView.Row(row.key(), row.label(), row.count(), row.itemId(), row.displayJson(), row.quality()));
 		}
 		String listKey = inventoryMenu + ":" + fence.requestId() + ":" + fence.previewSession();
 		SpatialInventoryView view = new SpatialInventoryView(listKey, active && state.open(), paintRows, state.selectedIndex(), state.windowFirst(),

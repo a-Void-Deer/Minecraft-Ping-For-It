@@ -417,6 +417,43 @@ class InventoryPreviewServerTest {
 		assertEquals(0, f.host.reads);
 	}
 
+	@Test
+	void configuredOfferAdvertisesEffectiveCapsAndAnOversizedEntryFencesInsteadOfEncoding() {
+		Fixture f = new Fixture(stack(STONE, 1));
+		f.settings.setDisplayByteMultiplier(new java.math.BigDecimal("0.25"));
+		f.open(1);
+		InventoryS2CPacket offer = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OFFER).findFirst().orElseThrow();
+		assertEquals(1024, offer.offer().effectiveDisplayBytes());
+		assertEquals(32768, offer.offer().effectiveFrameBytes());
+		f.host.json = "d".repeat(4096);
+		f.server.tick(0, f.settings);
+		List<InventoryS2CPacket> data = f.data();
+		assertFalse(data.isEmpty());
+		assertEquals(InventoryS2CPacket.Status.INCOMPLETE, data.getLast().status(), "an entry beyond the configured display cap terminates incomplete instead of crashing the encoder");
+		assertTrue(data.stream().allMatch(packet -> packet.entries().isEmpty()));
+	}
+
+	@Test void encodingWorkspaceIsAdmittedBeforeHostMeasurementAndReleasedAfterThrowingSend() throws ReflectiveOperationException {
+		Fixture f = new Fixture(stack(STONE, 1)); f.hello();
+		f.settings.setPendingMemoryMiB(1);
+		var retained = f.server.getClass().getDeclaredField("retainedBytes"); retained.setAccessible(true);
+		long actual = retainedBytes(f.server); retained.setLong(f.server, f.settings.pendingMemoryBytes() - 128);
+		int measurements = f.host.measurements, sends = f.host.packets.size();
+		f.server.handle(PLAYER, InventoryC2SPacket.hello(), 20, f.settings);
+		assertEquals(measurements, f.host.measurements, "128 bytes cannot admit even the small control codec/handoff");
+		assertEquals(sends, f.host.packets.size());
+		retained.setLong(f.server, actual); f.host.failSend = true;
+		f.host.measurementProbe = () -> {
+			try { assertTrue(retainedBytes(f.server) > actual, "host measurement runs inside its workspace charge"); }
+			catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+		};
+		f.server.tick(21, f.settings);
+		assertTrue(f.host.measurements > measurements); assertEquals(actual, retainedBytes(f.server), "throwing send refunds workspace");
+		f.host.failSend = false; f.server.tick(24, f.settings);
+		assertEquals(sends + 1, f.host.packets.size()); assertEquals(actual, retainedBytes(f.server));
+		f.server.reset(); assertEquals(0, retainedBytes(f.server));
+	}
+
 	private static InventoryScanner.Stack stack(InventoryScanner.Key key, long count) {
 		return new InventoryScanner.Stack(key, count);
 	}
@@ -490,10 +527,13 @@ class InventoryPreviewServerTest {
 	private static final class FakeHost implements InventoryPreviewServer.Host {
 		final List<InventoryScanner.Stack> values;
 		final List<InventoryS2CPacket> packets = new ArrayList<>();
-		int reads, resolutions;
+		int reads, resolutions, measurements;
+		boolean failSend;
+		Runnable measurementProbe = () -> {};
 		int failAt = -1;
 		boolean allowed = true;
 		UUID deniedPlayer;
+		String json;
 		FakeHost(List<InventoryScanner.Stack> values) { this.values = values; }
 		@Override public Optional<InventoryPreviewServer.Resolved> resolve(UUID player, Target target) {
 			resolutions++;
@@ -509,13 +549,20 @@ class InventoryPreviewServerTest {
 				}
 			};
 			return Optional.of(new InventoryPreviewServer.Resolved(new SourceKey("fixture", "inventory", "chest", "public"), source,
-				key -> new InventoryPreviewServer.Display(key.itemId(), key.itemId(), null, false)));
+				key -> new InventoryPreviewServer.Display(key.itemId(), key.itemId(), json, false)));
 		}
 		@Override public int encodedBytes(InventoryS2CPacket packet) {
 			FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
 			try { packet.write(buffer); return buffer.readableBytes(); }
 			finally { buffer.release(); }
 		}
-		@Override public void send(UUID player, InventoryS2CPacket packet) { packets.add(packet); }
+		@Override public int encodedBytes(InventoryS2CPacket packet, int displayBytes, int frameBytes) {
+			measurements++; measurementProbe.run();
+			return InventoryPreviewServer.Host.super.encodedBytes(packet, displayBytes, frameBytes);
+		}
+		@Override public void send(UUID player, InventoryS2CPacket packet) {
+			if (failSend) throw new IllegalStateException("host backpressure");
+			packets.add(packet);
+		}
 	}
 }

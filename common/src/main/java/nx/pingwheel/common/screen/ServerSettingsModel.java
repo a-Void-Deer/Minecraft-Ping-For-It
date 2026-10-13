@@ -7,6 +7,7 @@ import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.config.InventoryConfigValues.Field;
 import nx.pingwheel.common.config.InventoryConfigValues.Value;
 import nx.pingwheel.common.config.InventorySettings;
+import nx.pingwheel.common.config.InventorySizeScale;
 
 import java.math.BigDecimal;
 import java.util.EnumMap;
@@ -35,6 +36,7 @@ public final class ServerSettingsModel {
 	private String syncDuration = "";
 	private final EnumMap<Field, String> inventoryText = new EnumMap<>(Field.class);
 	private final EnumMap<Field, Boolean> inventoryUnlimited = new EnumMap<>(Field.class);
+	private SizeAdjustment sizeAdjustment;
 	private int dirtyFields;
 
 	public ServerSettingsModel(boolean clientPermission) {
@@ -123,9 +125,24 @@ public final class ServerSettingsModel {
 		return inventoryUnlimited.getOrDefault(field, false);
 	}
 
+	/**
+	 * Records a draft text edit. A valid size-scale value is applied through the
+	 * frame-priority pair rule instead of being stored raw; malformed or
+	 * off-grid size text stays visible and invalid for correction.
+	 */
 	public void setInventoryText(Field field, String text) {
 		if (!canEdit()) return;
-		inventoryText.put(field, text);
+		if (field.isSizeScale()) {
+			var parsed = field.parse(text, false);
+			if (parsed.isPresent()) {
+				applySizeScaleValue(field, parsed.orElseThrow().value());
+			} else {
+				inventoryText.put(field, text);
+				sizeAdjustment = null;
+			}
+		} else {
+			inventoryText.put(field, text);
+		}
 		recomputeDirtyFields();
 	}
 
@@ -136,6 +153,90 @@ public final class ServerSettingsModel {
 		recomputeDirtyFields();
 	}
 
+	/** The most recent frame-priority display adjustment, or null when none is shown. */
+	public record SizeAdjustment(BigDecimal displayMultiplier, BigDecimal frameMultiplier) {
+	}
+
+	/**
+	 * The ordered size-scale slider position of a leaf's current draft value.
+	 * Positions address the ordered legal values, never the quarter-multiplier
+	 * wire quanta; a malformed draft falls back to the authoritative value and a
+	 * missing snapshot to the scale default.
+	 */
+	public int sizeScalePosition(Field field) {
+		return field.sizeScale().indexOf(currentSizeMultiplier(field));
+	}
+
+	/**
+	 * The largest display slider position compatible with the current frame
+	 * draft. The frame budget keeps priority and is never raised by the display.
+	 */
+	public int maximumDisplayPosition() {
+		return InventorySizeScale.DISPLAY.indexOf(
+			InventorySizeScale.maximumDisplayMultiplier(currentSizeMultiplier(Field.FRAME_BYTE_MULTIPLIER)));
+	}
+
+	/**
+	 * Applies an ordered size-scale slider position through the frame-priority
+	 * pair rule: a frame value lowers the display when needed, and a display
+	 * value is clamped to the frame-compatible maximum. Both leaves and the
+	 * notice are updated atomically.
+	 */
+	public void setSizeScalePosition(Field field, int position) {
+		if (!canEdit() || !field.isSizeScale()) return;
+		applySizeScaleValue(field, field.sizeScale().valueAt(position));
+		recomputeDirtyFields();
+	}
+
+	/**
+	 * The single supported size-scale write seam. A frame value reconciles the
+	 * pair with frame priority; a display value is clamped to the largest
+	 * compatible value. A malformed opposite draft stays visible and blocks the
+	 * plan instead of being overwritten.
+	 */
+	private void applySizeScaleValue(Field field, BigDecimal value) {
+		if (field == Field.FRAME_BYTE_MULTIPLIER) {
+			var displayDraft = inventoryDraftValue(Field.DISPLAY_BYTE_MULTIPLIER);
+			if (displayDraft.isEmpty()) {
+				// The malformed display draft remains editable and invalid; the
+				// frame value is applied without inventing a replacement display.
+				inventoryText.put(Field.FRAME_BYTE_MULTIPLIER, value.toPlainString());
+				sizeAdjustment = null;
+				return;
+			}
+			var pair = InventorySizeScale.reconcile(displayDraft.orElseThrow().value(), value);
+			inventoryText.put(Field.DISPLAY_BYTE_MULTIPLIER, pair.displayMultiplier().toPlainString());
+			inventoryText.put(Field.FRAME_BYTE_MULTIPLIER, pair.frameMultiplier().toPlainString());
+			sizeAdjustment = pair.displayReduced()
+				? new SizeAdjustment(pair.displayMultiplier(), pair.frameMultiplier())
+				: null;
+		} else {
+			BigDecimal maximum = InventorySizeScale.maximumDisplayMultiplier(
+				currentSizeMultiplier(Field.FRAME_BYTE_MULTIPLIER));
+			inventoryText.put(field, value.min(maximum).toPlainString());
+			sizeAdjustment = null;
+		}
+	}
+
+	/** The current frame-priority adjustment notice, or null when none is shown. */
+	public SizeAdjustment sizeAdjustment() {
+		return sizeAdjustment;
+	}
+
+	private BigDecimal currentSizeMultiplier(Field field) {
+		if (!field.isSizeScale()) {
+			throw new IllegalArgumentException("not a size scale: " + field);
+		}
+		var parsed = inventoryDraftValue(field);
+		if (parsed.isPresent()) {
+			return parsed.orElseThrow().value();
+		}
+		if (authoritative != null) {
+			return authoritative.inventory().value(field).value();
+		}
+		return field.sizeScale().defaultMultiplier();
+	}
+
 	/** Native step buttons use the confirmed piecewise grids without floating-point rounding. */
 	public void stepInventoryValue(Field field, boolean forward) {
 		if (!canEdit()) return;
@@ -144,6 +245,8 @@ public final class ServerSettingsModel {
 		BigDecimal value = parsed.orElseThrow().value();
 		if (field.isMultiplier()) {
 			value = forward ? field.grid().next(value) : field.grid().previous(value);
+		} else if (field.isSizeScale()) {
+			value = forward ? field.sizeScale().next(value) : field.sizeScale().previous(value);
 		} else {
 			int current = value.intValueExact();
 			int step = field == Field.PENDING_MEMORY_MIB
@@ -400,6 +503,7 @@ public final class ServerSettingsModel {
 			inventoryText.put(field, value.value().toPlainString());
 			inventoryUnlimited.put(field, value.unlimited());
 		}
+		sizeAdjustment = null;
 	}
 
 	private void clearDraft() {
@@ -410,6 +514,7 @@ public final class ServerSettingsModel {
 		syncDuration = "";
 		inventoryText.clear();
 		inventoryUnlimited.clear();
+		sizeAdjustment = null;
 	}
 
 	private void recomputeDirtyFields() {

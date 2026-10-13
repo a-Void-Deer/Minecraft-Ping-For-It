@@ -328,6 +328,20 @@ public final class InventoryClientStore {
 		return true;
 	}
 
+	/**
+	 * Discards a pending fragmented baseline without touching committed values,
+	 * the accepted fence or the channel's invalidity. A later begin starts a
+	 * fresh assembly, so a fenced partial cut can never commit.
+	 */
+	public boolean discardAssembly(Channel channel) {
+		Objects.requireNonNull(channel, "channel");
+		ChannelState state = channels.get(channel);
+		if (state == null || state.assembly == null)
+			return false;
+		state.assembly = null;
+		return true;
+	}
+
 	/** Removes the channel and all of its state. */
 	public void expire(Channel channel) {
 		Objects.requireNonNull(channel, "channel");

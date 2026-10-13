@@ -401,4 +401,30 @@ class InventoryClientStoreTest {
 		assertTrue(store.invalidate(channel, 4L));
 		assertTrue(store.isInvalid(channel));
 	}
+
+	@Test
+	void discardAssemblyDropsOnlyThePendingBaselineAndKeepsTheCommittedFence() {
+		var store = new InventoryClientStore(4, 16L, 4);
+		var channel = Channel.tracked(1L);
+		store.snapshot(channel, 5L, 1L, map("a", value(3L, 1L)));
+		store.beginSnapshot(channel, 9L, 3L, 2, 10L);
+		store.part(channel, 9L, 3L, 0, map("b", value(4L, 0L)), 11L);
+
+		assertTrue(store.discardAssembly(channel));
+
+		assertFalse(store.assembling(channel));
+		assertEquals(3L, store.values(channel).get("a").count(), "committed values are preserved");
+		assertEquals(5L, store.baselineId(channel));
+		assertEquals(1L, store.statusRevision(channel));
+		assertEquals(Outcome.APPLIED, store.apply(channel, 5L, 1L, map("a", value(5L, 2L))),
+			"the committed fence still applies updates");
+
+		assertEquals(PartOutcome.STARTED, store.beginSnapshot(channel, 9L, 3L, 2, 20L),
+			"a fresh begin after the discard starts a clean assembly");
+		assertEquals(PartOutcome.ACCEPTED, store.part(channel, 9L, 3L, 0, map("b", value(4L, 0L)), 21L));
+		assertEquals(PartOutcome.COMMITTED, store.part(channel, 9L, 3L, 1, map("c", value(5L, 0L)), 22L));
+		assertEquals(2, store.values(channel).size(), "only the fresh assembly committed");
+		assertFalse(store.discardAssembly(channel));
+		assertFalse(store.discardAssembly(Channel.tracked(2L)));
+	}
 }

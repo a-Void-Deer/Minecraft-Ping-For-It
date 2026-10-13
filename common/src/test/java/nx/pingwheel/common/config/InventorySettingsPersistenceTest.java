@@ -175,6 +175,82 @@ class InventorySettingsPersistenceTest {
 	}
 
 	@Test
+	void sizeScaleScalarsRoundTripAndMissingKeysGainDefaultsWithoutRewrite(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("server.json");
+		byte[] original = ("{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"rateLimit\":3}\n")
+			.getBytes(StandardCharsets.UTF_8);
+		Files.write(configPath, original);
+
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+		InventorySettings loaded = handler.getConfig().getInventory();
+		assertEquals(0, BigDecimal.ONE.compareTo(loaded.getDisplayByteMultiplier()));
+		assertEquals(0, BigDecimal.ONE.compareTo(loaded.getFrameByteMultiplier()));
+		assertEquals(4096, loaded.effectiveDisplayBytes());
+		assertEquals(32768, loaded.effectiveFrameBytes());
+		assertArrayEquals(original, Files.readAllBytes(configPath));
+
+		loaded.setDisplayByteMultiplier(new BigDecimal("2.5"));
+		loaded.setFrameByteMultiplier(new BigDecimal("4.25"));
+		assertTrue(handler.saveSafely());
+		JsonObject inventory = readRoot(configPath).getAsJsonObject("inventory");
+		assertEquals(0, new BigDecimal("2.5").compareTo(inventory.get("displayByteMultiplier").getAsBigDecimal()));
+		assertEquals(0, new BigDecimal("4.25").compareTo(inventory.get("frameByteMultiplier").getAsBigDecimal()));
+
+		ConfigHandler<ServerConfig> reloaded = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		reloaded.load();
+		assertEquals(0, new BigDecimal("2.5")
+			.compareTo(reloaded.getConfig().getInventory().getDisplayByteMultiplier()));
+		assertEquals(0, new BigDecimal("4.25")
+			.compareTo(reloaded.getConfig().getInventory().getFrameByteMultiplier()));
+	}
+
+	@Test
+	void nullAndOutOfRangeSizeScalarsNormalizeWithFramePriority(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("server.json");
+		Files.writeString(configPath,
+			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"rateLimit\":3,\"inventory\":{"
+				+ "\"displayByteMultiplier\":32,\"frameByteMultiplier\":1,\"pendingMemoryMiB\":9}}\n",
+			StandardCharsets.UTF_8);
+
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+
+		InventorySettings inventory = handler.getConfig().getInventory();
+		assertEquals(0, new BigDecimal("7.5").compareTo(inventory.getDisplayByteMultiplier()));
+		assertEquals(0, BigDecimal.ONE.compareTo(inventory.getFrameByteMultiplier()));
+		assertEquals(9, inventory.getPendingMemoryMiB());
+		assertEquals(30720, inventory.effectiveDisplayBytes());
+		assertEquals(32768, inventory.effectiveFrameBytes());
+
+		Path nullPath = tempDir.resolve("null-server.json");
+		Files.writeString(nullPath,
+			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"inventory\":{"
+				+ "\"displayByteMultiplier\":null,\"frameByteMultiplier\":null}}\n",
+			StandardCharsets.UTF_8);
+		ConfigHandler<ServerConfig> nullHandler = new ConfigHandler<>(ServerConfig.class, nullPath, CURRENT_VERSION);
+		nullHandler.load();
+		assertEquals(0, BigDecimal.ONE.compareTo(nullHandler.getConfig().getInventory().getDisplayByteMultiplier()));
+		assertEquals(0, BigDecimal.ONE.compareTo(nullHandler.getConfig().getInventory().getFrameByteMultiplier()));
+	}
+
+	@Test
+	void unlimitedWrappedSizeScalarIsRejectedAsAnInvalidFile(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("server.json");
+		Files.writeString(configPath,
+			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"inventory\":{"
+				+ "\"displayByteMultiplier\":{\"unlimited\":true,\"value\":4}}}\n",
+			StandardCharsets.UTF_8);
+
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		handler.load();
+
+		assertEquals(0, BigDecimal.ONE.compareTo(handler.getConfig().getInventory().getDisplayByteMultiplier()));
+		assertEquals(0, BigDecimal.ONE.compareTo(handler.getConfig().getInventory().getFrameByteMultiplier()));
+		assertFalse(hasBrokenBackup(tempDir));
+	}
+
+	@Test
 	void futureVersionInventoryFileIsNeverRewrittenAndDefaultsStayInMemory(@TempDir Path tempDir) throws IOException {
 		Path configPath = tempDir.resolve("server.json");
 		byte[] original = ("{\"pingforit-version\":\"3.0.0-pfi-beta1\",\"inventory\":{"

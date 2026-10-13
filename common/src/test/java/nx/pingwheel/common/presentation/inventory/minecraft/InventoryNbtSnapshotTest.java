@@ -1,6 +1,7 @@
 package nx.pingwheel.common.presentation.inventory.minecraft;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
@@ -27,8 +28,15 @@ import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import nx.pingwheel.common.config.InventorySettings;
+import nx.pingwheel.common.domain.BlockFace;
+import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.platform.IPlatformInventoryService;
+import nx.pingwheel.common.presentation.inventory.InventoryDomainCodec;
+import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
+import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
+import nx.pingwheel.common.presentation.source.SourceKey;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -402,6 +410,139 @@ class InventoryNbtSnapshotTest {
 		assertThrows(IllegalStateException.class, () -> snapshot.payload(0));
 		assertThrows(IllegalStateException.class, snapshot::layout);
 	}
+
+	@Test
+	void effectiveDisplayCapKeepsLargeComponentJsonAndTighteningNeverResurrects() {
+		ItemStack stack = new ItemStack(Items.STONE, 5);
+		CompoundTag data = new CompoundTag();
+		data.putString("payload", "x".repeat(6000));
+		stack.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
+		var topology = layout(List.of(member(BlockPos.ZERO, segment(1, List.of(0)))));
+		var expected = new InventoryItemCodec.Catalog(RegistryAccess.EMPTY, 32768).encode(stack);
+		try (var snapshot = InventoryNbtSnapshot.create(topology, BlockPos.ZERO, List.of(list(encodedEntry(0, stack))),
+			RegistryAccess.EMPTY, InventoryNbtSnapshot.memoryUpperBound(1, 1), 32768)) {
+			assertEquals(32768, snapshot.displayBytes());
+			var observed = snapshot.read(0);
+			assertEquals(5L, observed.count());
+			assertEquals(expected.key(), observed.key(), "identity stays the canonical variant");
+			assertEquals(expected.display().displayJson(), observed.displayJson(), "a configured higher cap keeps component JSON above 4 KiB");
+			assertTrue(utf8(observed.displayJson()) > InventoryItemCodec.MAX_DISPLAY_BYTES);
+			assertFalse(observed.stripped());
+			snapshot.tightenDisplay(4096);
+			assertEquals(4096, snapshot.displayBytes());
+			var tightened = snapshot.read(0);
+			assertEquals(5L, tightened.count());
+			assertEquals(expected.key(), tightened.key(), "tightening never recomputes identity");
+			assertTrue(utf8(tightened.displayJson()) <= 4096);
+			assertTrue(tightened.stripped(), "complete stripping stays component-too-long evidence");
+			snapshot.tightenDisplay(32768); // an increase is ignored
+			assertEquals(4096, snapshot.displayBytes());
+			var afterIncrease = snapshot.read(0);
+			assertEquals(tightened.displayJson(), afterIncrease.displayJson(), "the same snapshot never resurrects the omitted component");
+		}
+	}
+
+	@Test
+	void displayCapBoundaryRejectsBelowTheOneKiBLegalMinimumAndInvalidTighteningNeverMutates() {
+		assertEquals(1024, InventoryItemCodec.minimumDisplayBytes(), "the legal effective minimum is the 1 KiB display cap");
+		var topology = layout(List.of(member(BlockPos.ZERO, segment(1, List.of(0)))));
+		ItemStack stack = new ItemStack(Items.STONE, 4);
+		assertThrows(IllegalArgumentException.class, () -> InventoryNbtSnapshot.create(topology, BlockPos.ZERO,
+			List.of(list(encodedEntry(0, stack))), RegistryAccess.EMPTY, InventoryNbtSnapshot.memoryUpperBound(1, 1), 1023));
+		try (var snapshot = InventoryNbtSnapshot.create(topology, BlockPos.ZERO, List.of(list(encodedEntry(0, stack))),
+			RegistryAccess.EMPTY, InventoryNbtSnapshot.memoryUpperBound(1, 1), 1024)) {
+			assertEquals(1024, snapshot.displayBytes());
+			var before = snapshot.read(0);
+			assertEquals(4L, before.count());
+			assertThrows(IllegalArgumentException.class, () -> snapshot.tightenDisplay(1023));
+			assertEquals(1024, snapshot.displayBytes(), "a rejected tightening leaves the snapshot ceiling unchanged");
+			assertEquals(before, snapshot.read(0), "a rejected tightening never rewrites retained metadata");
+		}
+	}
+
+	@Test
+	void lazyDecodeAdoptsATighterCeilingLoweredBeforeFirstRead() {
+		ItemStack stack = new ItemStack(Items.STONE, 2);
+		CompoundTag data = new CompoundTag();
+		data.putString("payload", "x".repeat(6000));
+		stack.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
+		var topology = layout(List.of(member(BlockPos.ZERO, segment(1, List.of(0)))));
+		try (var snapshot = InventoryNbtSnapshot.create(topology, BlockPos.ZERO, List.of(list(encodedEntry(0, stack))),
+			RegistryAccess.EMPTY, InventoryNbtSnapshot.memoryUpperBound(1, 1), 32768)) {
+			snapshot.tightenDisplay(4096);
+			var observed = snapshot.read(0);
+			assertEquals(2L, observed.count());
+			assertTrue(utf8(observed.displayJson()) <= 4096, "the lazy catalogue adopts the tighter ceiling before its first decode");
+			assertTrue(observed.stripped());
+		}
+	}
+
+	@Test
+	void runtimeTighteningPreservesPartialDecodeCursorAndNeverResurrectsThroughTheSameSnapshot() {
+		ItemStack stack = new ItemStack(Items.STONE, 5);
+		CompoundTag data = new CompoundTag();
+		data.putString("payload", "x".repeat(6000));
+		stack.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
+		var topology = layout(List.of(member(BlockPos.ZERO, segment(3, range(3)))));
+		ListTag payload = list(encodedEntry(0, stack), encodedEntry(1, stack), encodedEntry(2, stack));
+		var settings = InventorySettings.serverDefaults();
+		settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(8)); // 32 KiB display scale
+		var snapshot = InventoryNbtSnapshot.create(topology, BlockPos.ZERO, List.of(payload), RegistryAccess.EMPTY,
+			InventoryNbtSnapshot.memoryUpperBound(3, 1), 32768);
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"),
+			new UUID(9, 9), BlockFace.NORTH);
+		var source = new InventorySourceAccess.Source() {
+			private int displayBytes = 32768;
+			@Override public SourceKey key() { return new SourceKey("test", "inventory", "nbt", input.viewKey()); }
+			@Override public boolean valid() { return true; }
+			@Override public boolean stableCursor() { return true; }
+			@Override public int slots() { return 3; }
+			@Override public InventoryDomainCodec.Item read(int slot) { throw new AssertionError("snapshot route only"); }
+			@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
+				return Optional.of(new InventorySourceAccess.SnapshotPlan() {
+					@Override public long memoryUpperBoundBytes() { return InventoryNbtSnapshot.memoryUpperBound(3, 1); }
+					@Override public Optional<InventorySourceAccess.InventorySnapshot> capture() { return Optional.of(snapshot); }
+				});
+			}
+			@Override public int displayBytes() { return displayBytes; }
+			@Override public void tightenDisplay(int displayBytes) {
+				if (displayBytes >= this.displayBytes) return;
+				this.displayBytes = displayBytes;
+				snapshot.tightenDisplay(displayBytes);
+			}
+		};
+		try (var runtime = new InventoryRuntime((resolved, displayBytes) -> Optional.of(source), 16_000_000,
+			(retained, displayBytes) -> InventoryItemCodec.reproject(retained, RegistryAccess.EMPTY, displayBytes))) {
+			runtime.advance(0, settings);
+			var consumer = runtime.attach(input, new InventoryRuntime.PreviewSubject(input.readOwner())).orElseThrow();
+			var first = runtime.step(consumer, 1).orElseThrow();
+			assertEquals(1, first.slots().size());
+			assertEquals(1, first.result().coverage().scanned());
+			assertTrue(utf8(first.slots().get(0).displayJson()) > InventoryItemCodec.MAX_DISPLAY_BYTES,
+				"the configured cap preserves the component JSON");
+			settings.setDisplayByteMultiplier(java.math.BigDecimal.ONE); runtime.advance(1, settings);
+			var lowered = runtime.reprojectDisplays(consumer, 4096);
+			assertEquals(InventoryRuntime.ReprojectionStatus.COMPLETED, lowered.status());
+			assertEquals(1, lowered.changedKeys().size(), "the already decoded slot is reprojected");
+			assertEquals(List.of("minecraft:stone"), lowered.foldIds());
+			assertEquals(4096, snapshot.displayBytes());
+			var second = runtime.step(consumer, 1).orElseThrow();
+			assertEquals(1, second.slots().size());
+			assertEquals(2, second.result().coverage().scanned(), "partial decode continues without a cursor reset");
+			assertEquals(5L, second.slots().get(0).count());
+			assertTrue(utf8(second.slots().get(0).displayJson()) <= 4096, "later lazy decode adopts the tighter ceiling");
+			settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(8)); runtime.advance(2, settings);
+			assertEquals(InventoryRuntime.ReprojectionStatus.UNCHANGED, runtime.reprojectDisplays(consumer, 32768).status());
+			var third = runtime.step(consumer, 1).orElseThrow();
+			assertEquals(3, third.result().coverage().scanned());
+			assertEquals(5L, third.slots().get(0).count());
+			assertEquals(second.slots().get(0).displayJson(), third.slots().get(0).displayJson(),
+				"an increase never resurrects the omitted component through the same snapshot");
+			assertTrue(third.slots().get(0).stripped());
+		}
+	}
+
+	private static int utf8(String value) { return value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length; }
 
 	private static void assertReadFailure(Tag payload, int localSlots) {
 		var topology = layout(List.of(member(BlockPos.ZERO, segment(localSlots, range(localSlots)))));

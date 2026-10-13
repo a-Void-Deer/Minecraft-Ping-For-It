@@ -261,6 +261,39 @@ class InventorySettingsTest {
 	}
 
 	@Test
+	void sizePairNormalizationRepairsDisplayDownwardWithFramePriority() {
+		InventorySettings settings = InventorySettings.serverDefaults();
+		settings.setPendingMemoryMiB(7);
+		settings.setDisplayByteMultiplier(new BigDecimal("32"));
+		settings.setFrameByteMultiplier(new BigDecimal("1"));
+		settings.validate();
+
+		assertEquals(0, new BigDecimal("7.5").compareTo(settings.getDisplayByteMultiplier()));
+		assertEquals(0, BigDecimal.ONE.compareTo(settings.getFrameByteMultiplier()));
+		assertEquals(30720, settings.effectiveDisplayBytes());
+		assertEquals(32768, settings.effectiveFrameBytes());
+		assertEquals(7, settings.getPendingMemoryMiB());
+	}
+
+	@Test
+	void sizePairNormalizationDefaultsNullsAndNeverRaisesTheFrame() {
+		InventorySettings settings = InventorySettings.serverDefaults();
+		settings.setDisplayByteMultiplier(null);
+		settings.setFrameByteMultiplier(null);
+		settings.validate();
+		assertEquals(0, BigDecimal.ONE.compareTo(settings.getDisplayByteMultiplier()));
+		assertEquals(0, BigDecimal.ONE.compareTo(settings.getFrameByteMultiplier()));
+
+		settings.setDisplayByteMultiplier(new BigDecimal("9999"));
+		settings.setFrameByteMultiplier(new BigDecimal("0.25"));
+		settings.validate();
+		assertEquals(0, new BigDecimal("1.5").compareTo(settings.getDisplayByteMultiplier()));
+		assertEquals(0, new BigDecimal("0.25").compareTo(settings.getFrameByteMultiplier()));
+		assertEquals(6144, settings.effectiveDisplayBytes());
+		assertEquals(8192, settings.effectiveFrameBytes());
+	}
+
+	@Test
 	void independentDefaultsDoNotAliasNestedState() {
 		InventorySettings first = InventorySettings.serverDefaults();
 		InventorySettings second = InventorySettings.serverDefaults();

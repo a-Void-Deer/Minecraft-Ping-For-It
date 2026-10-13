@@ -38,6 +38,33 @@ class InventorySettingsLocalizationTest {
 		}
 	}
 
+	@Test
+	void sizeSlidersExposePhysicalKiBLabelsAndTheAdjustmentNoticeInEveryLocale() throws IOException {
+		for (String locale : LOCALES) {
+			JsonObject root = read(locale);
+			for (String key : List.of(
+				"settings.pingforit.inventory.display_byte_multiplier",
+				"settings.pingforit.inventory.display_byte_multiplier.tooltip",
+				"settings.pingforit.inventory.frame_byte_multiplier",
+				"settings.pingforit.inventory.frame_byte_multiplier.tooltip",
+				"settings.pingforit.inventory.size_adjusted",
+				"unit.pingforit.kib")) {
+				assertTrue(root.has(key), locale + ": " + key);
+				assertTrue(root.get(key).isJsonPrimitive(), locale + ": " + key);
+				assertFalse(root.get(key).getAsString().isBlank(), locale + ": " + key);
+			}
+			assertEquals(1, placeholders(root, "settings.pingforit.inventory.display_byte_multiplier"), locale);
+			assertEquals(1, placeholders(root, "settings.pingforit.inventory.frame_byte_multiplier"), locale);
+			assertEquals(2, placeholders(root, "settings.pingforit.inventory.size_adjusted"), locale);
+			assertEquals(1, placeholders(root, "unit.pingforit.kib"), locale);
+			assertFalse(root.get("unit.pingforit.kib").getAsString().replace("%s", "").isBlank(), locale);
+		}
+	}
+
+	private static int placeholders(JsonObject root, String key) {
+		return root.get(key).getAsString().split("%s", -1).length - 1;
+	}
+
 	private static Set<String> inventoryKeys(JsonObject root) {
 		return root.keySet().stream().filter(key -> key.startsWith("settings.pingforit.inventory.")
 			|| key.startsWith("settings.pingforit.category.performance")

@@ -38,9 +38,9 @@ class InventoryC2SPacketTest {
 	}
 
 	@Test
-	void routeAndKindsAreVersionedInventoryV3() {
-		assertEquals(3, InventoryC2SPacket.VERSION);
-		assertEquals("pingforit-c2s:inventory-v3", InventoryC2SPacket.PACKET_ID.toString());
+	void routeAndKindsAreVersionedInventoryV4() {
+		assertEquals(4, InventoryC2SPacket.VERSION);
+		assertEquals("pingforit-c2s:inventory-v4", InventoryC2SPacket.PACKET_ID.toString());
 		assertEquals(List.of(InventoryC2SPacket.Kind.HELLO, InventoryC2SPacket.Kind.OPEN,
 			InventoryC2SPacket.Kind.CLOSE, InventoryC2SPacket.Kind.RESYNC,
 			InventoryC2SPacket.Kind.SELECT), Arrays.asList(InventoryC2SPacket.Kind.values()));

@@ -12,6 +12,7 @@ import java.util.function.Function;
 
 import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec;
 import nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
@@ -25,11 +26,53 @@ public final class InventoryRuntime implements AutoCloseable {
 	private static final int MAX_RETAINED_ROUNDS = MAX_ROUNDS * 2; // bounded replacement headroom for completed evidence leases
 	private static final long CONSUMER_MEMORY = 4096;
 	private static final long ROUND_MEMORY = 4096 + 262144 + 32768; // provider catalog and bounded logical subject history
+	private static final int REPROJECT_BATCH = 64; // bounded retained-metadata walk per tightening call
+	private static final long PAGE_FIXED_BYTES = 4096L, PAGE_WORKSPACE_FIXED = 8192L;
+	/**
+	 * Metadata above the display budget in one encoded observation, derived from
+	 * the codec's own envelope so a measured page reservation never charges the
+	 * absolute display bound to a small payload.
+	 */
+	private static final int ENTRY_METADATA_BYTES = InventoryDomainCodec.MAX_BYTES - InventoryDomainCodec.MAX_DISPLAY_BYTES;
 	public sealed interface Subject permits PreviewSubject, TrackingSubject {}
 	public record PreviewSubject(UUID client) implements Subject {}
 	public record TrackingSubject(TargetKey target) implements Subject {}
 	public record Observation(CaptureResult result, List<InventoryDomainCodec.Item> slots) {
 		public Observation { slots = java.util.Collections.unmodifiableList(new ArrayList<>(slots)); }
+	}
+	/** Server-thread source resolver; every new observation receives the authoritative display ceiling. */
+	@FunctionalInterface
+	public interface SourceResolver {
+		Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int displayBytes);
+	}
+	/**
+	 * Registry-aware detached display reprojection port. Production supplies the
+	 * real item codec through the server host; a headless runtime without a
+	 * registry port keeps retained slot metadata unchanged.
+	 */
+	@FunctionalInterface
+	public interface DisplayReprojector {
+		InventoryItemCodec.Display reproject(InventoryItemCodec.Display retained, int displayBytes);
+		static DisplayReprojector none() { return (retained, displayBytes) -> retained; }
+	}
+	/** Coherent outcome of one bounded tightening request. */
+	public enum ReprojectionStatus { UNCHANGED, COMPLETED, DEFERRED }
+	/**
+	 * Change summary of a bounded tightening operation. {@code changedKeys} and
+	 * {@code foldIds} are cumulative for the consumer since the first tightening
+	 * below its adopted ceiling, so a caller may union them across DEFERRED
+	 * calls; {@code foldIds} names item ids whose retained display now carries
+	 * complete component stripping, and the caller decides folding.
+	 */
+	public record Reprojection(ReprojectionStatus status, int displayBytes,
+		List<InventoryScanner.Key> changedKeys, List<String> foldIds) {
+		public Reprojection {
+			changedKeys = List.copyOf(changedKeys);
+			foldIds = List.copyOf(foldIds);
+		}
+		static Reprojection unchanged(int displayBytes) {
+			return new Reprojection(ReprojectionStatus.UNCHANGED, displayBytes, List.of(), List.of());
+		}
 	}
 	public final class Consumer implements AutoCloseable {
 		private final InventorySourceInput input;
@@ -94,14 +137,26 @@ public final class InventoryRuntime implements AutoCloseable {
 		Observation failureObservation;
 		int references;
 		int scanners; // consumer scans plus bounded physical handoff leases
+		int appliedBytes; // ceiling fully walked over this round's decoded slots
+		int passCeiling; // target of the active tightening pass
+		int reprojectCursor; // bounded tightening walk position over decoded slots
+		int reprojectEnd; // slots.size() frozen at pass start; later slots are already tightened
+		boolean passActive;
+		int pageCount; // page commits ever appended, so a settled swap keeps their fixed overhead
+		boolean pagesChanged;
+		boolean pagesSettled;
+		Set<InventoryScanner.Key> tightenedKeys;
+		Set<String> tightenedFoldIds;
 		Round successor;
 		final Set<Round> predecessors = new java.util.LinkedHashSet<>();
 		boolean closed;
-		Round(SourceKey key, InventorySourceInput input, InventorySourceAccess.InventoryHandle handle, RetainedMemoryLedger.Ticket memory, long tick, long sequence, boolean tracking) {
+		Round(SourceKey key, InventorySourceInput input, InventorySourceAccess.InventoryHandle handle, RetainedMemoryLedger.Ticket memory, long tick, long sequence, boolean tracking, int displayBytes) {
 			this.key = key; this.input = input; this.handle = handle; this.memory = memory; startedTick = tick; this.sequence = sequence; trackingObservation = tracking;
+			this.appliedBytes = displayBytes;
 		}
 	}
-	private final Function<InventorySourceInput, Optional<InventorySourceAccess.Source>> resolver;
+	private final SourceResolver resolver;
+	private final DisplayReprojector reprojector;
 	private final List<Consumer> consumers = new ArrayList<>();
 	private final Map<SourceKey, Round> rounds = new LinkedHashMap<>();
 	private int retainedRounds;
@@ -116,16 +171,29 @@ public final class InventoryRuntime implements AutoCloseable {
 	private final Map<Subject, RetainedMemoryLedger.Ticket> logicalMemory = new LinkedHashMap<>();
 	private int previewGlobal, trackingGlobal;
 
+	/** Existing resolver-only callers keep the default 4 KiB catalogue and a headless no-op reprojection port. */
 	public InventoryRuntime(Function<InventorySourceInput, Optional<InventorySourceAccess.Source>> resolver, long memoryBytes) {
-		this.resolver = resolver; memory = new RetainedMemoryLedger(memoryBytes);
+		this((input, displayBytes) -> resolver.apply(input), memoryBytes, DisplayReprojector.none());
+	}
+	public InventoryRuntime(SourceResolver resolver, long memoryBytes) {
+		this(resolver, memoryBytes, DisplayReprojector.none());
+	}
+	public InventoryRuntime(SourceResolver resolver, long memoryBytes, DisplayReprojector reprojector) {
+		this.resolver = java.util.Objects.requireNonNull(resolver, "resolver");
+		this.reprojector = java.util.Objects.requireNonNull(reprojector, "reprojector");
+		memory = new RetainedMemoryLedger(memoryBytes);
 	}
 	public RetainedMemoryLedger memory() { return memory; }
 	public boolean selectionPresent(InventorySourceInput input, InventorySelection selection, int witness) {
-		int bound = (int) Math.min(physicalRemaining(), Math.min(InventorySourceAccess.MAX_STEP, Math.max(0, (memory.remaining() - ROUND_MEMORY) / InventoryDomainCodec.MAX_BYTES)));
+		int displayCap = effectiveDisplayCap();
+		long slotWorkspace = slotWorkspaceBytes(displayCap);
+		int bound = (int) Math.min(physicalRemaining(), Math.min(InventorySourceAccess.MAX_STEP, Math.max(0, (memory.remaining() - ROUND_MEMORY) / slotWorkspace)));
 		if (bound == 0) return false;
-		var workspace = memory.tryReserve(ROUND_MEMORY + bound * (long) InventoryDomainCodec.MAX_BYTES);
+		var workspace = memory.tryReserve(checkedAdd(ROUND_MEMORY, checkedMultiply(bound, slotWorkspace)));
 		if (workspace.isEmpty()) return false;
-		try (var held = workspace.get()) { return new InventorySourceAccess(input, resolver).selectionPresent(selection, witness, bound, physical); }
+		try (var held = workspace.get()) {
+			return new InventorySourceAccess(input, i -> resolve(i, displayCap)).selectionPresent(selection, witness, bound, physical);
+		}
 	}
 	public <T> Optional<T> preflight(java.util.function.Supplier<Optional<T>> work) {
 		var ticket = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
@@ -153,6 +221,35 @@ public final class InventoryRuntime implements AutoCloseable {
 		return Math.max(0, Math.min(physical.remaining(InventorySourceAccess.PHYSICAL),
 			settings.effectivePhysicalSlotsPerTick() - physical.used(InventorySourceAccess.PHYSICAL)));
 	}
+	/** Authoritative effective display ceiling for new observations; validated and clamped. */
+	private int effectiveDisplayCap() {
+		InventorySettings current = settings;
+		if (current == null) return InventoryDomainCodec.MAX_DISPLAY_BYTES;
+		return clampDisplayBytes((int) current.effectiveDisplayBytes());
+	}
+	private Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input) {
+		return resolve(input, effectiveDisplayCap());
+	}
+	private Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int displayBytes) {
+		return resolver.resolve(input, displayBytes);
+	}
+	/** One encoded observation's true upper bound at a validated display ceiling. */
+	private static long slotWorkspaceBytes(int displayBytes) {
+		long entry = Math.min(InventoryDomainCodec.MAX_BYTES, displayBytes + (long) ENTRY_METADATA_BYTES);
+		return checkedAdd(checkedMultiply(entry, 2L), 512L);
+	}
+	private static int clampDisplayBytes(int displayBytes) {
+		return Math.clamp(displayBytes, InventoryItemCodec.minimumDisplayBytes(), InventoryDomainCodec.MAX_DISPLAY_BYTES);
+	}
+	private static long utf8Bytes(String value) { return value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length; }
+	private static long checkedAdd(long first, long second) {
+		try { return Math.addExact(first, second); }
+		catch (ArithmeticException overflow) { throw new IllegalStateException("inventory accounting overflow"); }
+	}
+	private static long checkedMultiply(long first, long second) {
+		try { return Math.multiplyExact(first, second); }
+		catch (ArithmeticException overflow) { throw new IllegalStateException("inventory accounting overflow"); }
+	}
 	public Optional<Consumer> attach(InventorySourceInput input, Subject subject) {
 		if (consumers.size() >= MAX_CONSUMERS) return Optional.empty();
 		var admission = memory.tryReserve(CONSUMER_MEMORY);
@@ -176,7 +273,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (ticket.isEmpty()) return Optional.empty();
 		try (var grant = ticket.get()) {
 			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-			try (var source = resolver.apply(input).orElse(null)) {
+			try (var source = resolve(input).orElse(null)) {
 				boolean valid = source != null && source.valid();
 				if (!valid) retireInvalid(input);
 				return Optional.of(valid);
@@ -253,7 +350,8 @@ public final class InventoryRuntime implements AutoCloseable {
 			boolean ownsReservation = true;
 			SourceAccess.Handle openedHandle = null;
 			try {
-				var access = new InventorySourceAccess(consumer.input, resolver);
+				int displayCap = effectiveDisplayCap();
+				var access = new InventorySourceAccess(consumer.input, i -> resolve(i, displayCap));
 				var scope = new SourceAccess.ReadScope(consumer.input.viewKey(), Set.of("pingforit:inventory.items"));
 				var resolved = access.resolve(MinecraftBlockReadSources.detached(consumer.input.target()), scope, physical);
 				if (!(resolved instanceof SourceAccess.ResolveResult.Available available)) {
@@ -291,7 +389,7 @@ public final class InventoryRuntime implements AutoCloseable {
 						return InventorySourceAccess.Preparation.UNAVAILABLE; // canonical view topology changed, not admission pressure
 					}
 					retained.get().commit(ROUND_MEMORY);
-					round = new Round(available.descriptor().key(), consumer.input, (InventorySourceAccess.InventoryHandle) started.handle(), retained.get(), tick, ++roundSequence, consumer.subject instanceof TrackingSubject);
+					round = new Round(available.descriptor().key(), consumer.input, (InventorySourceAccess.InventoryHandle) started.handle(), retained.get(), tick, ++roundSequence, consumer.subject instanceof TrackingSubject, displayCap);
 					retainedRounds++;
 					scanningRounds++;
 					rounds.put(round.key, round);
@@ -436,9 +534,10 @@ public final class InventoryRuntime implements AutoCloseable {
 			return Optional.of(new Observation(result, List.of()));
 		}
 		if (consumer.cursor >= round.slots.size() && (round.last == null || round.last.completeness() == CaptureResult.Completeness.CONTINUE)) {
-			int memoryBound = (int) Math.min(available, Math.max(0, (memory.remaining() - 8192) / (InventoryDomainCodec.MAX_BYTES * 2L)));
+			long slotWorkspace = slotWorkspaceBytes(round.handle.displayBytes());
+			int memoryBound = (int) Math.min(available, Math.max(0, (memory.remaining() - PAGE_WORKSPACE_FIXED) / slotWorkspace));
 			if (memoryBound == 0) return Optional.empty();
-			var workspace = memory.tryReserve((memoryBound * (long) InventoryDomainCodec.MAX_BYTES * 2) + 8192);
+			var workspace = memory.tryReserve(checkedAdd(checkedMultiply(memoryBound, slotWorkspace), PAGE_WORKSPACE_FIXED));
 			if (workspace.isEmpty()) return Optional.empty();
 			boolean retainedPage = false;
 			try {
@@ -454,7 +553,7 @@ public final class InventoryRuntime implements AutoCloseable {
 				}
 				if (!zeroCostEmptyCompletion(zeroResult)) { workspace.get().close(); return Optional.empty(); }
 				round.last = zeroResult;
-				workspace.get().commit(4096); round.pages.add(workspace.get()); retainedPage = true;
+				workspace.get().commit(PAGE_FIXED_BYTES); round.pages.add(workspace.get()); round.pageCount++; retainedPage = true;
 			}
 			if (bounded == 0) {
 				// Snapshot handles may report an empty COMPLETE observation without scan allowance;
@@ -482,11 +581,13 @@ public final class InventoryRuntime implements AutoCloseable {
 				page.entries().entrySet().stream().sorted(java.util.Comparator.comparingInt(e -> Integer.parseInt(e.getKey())))
 					.forEach(e -> round.slots.add(InventoryDomainCodec.decode(e.getValue())));
 			}
-			long retainedBytes = 4096;
+			long retainedBytes = PAGE_FIXED_BYTES;
 			if (round.last.payload().orElse(null) instanceof CaptureResult.OpaqueKeyedFragment page)
-				for (var value : page.entries().values()) retainedBytes += value.bytes().length * 2L + 256;
+				for (var value : page.entries().values())
+					retainedBytes = checkedAdd(retainedBytes, checkedAdd(checkedMultiply(value.size(), 2L), 256L));
 			workspace.get().commit(retainedBytes);
 			round.pages.add(workspace.get());
+			round.pageCount++;
 			retainedPage = true;
 			}
 			} finally { if (!retainedPage) workspace.get().close(); }
@@ -573,11 +674,23 @@ public final class InventoryRuntime implements AutoCloseable {
 			// Completed publication needs only bounded local evidence, not decoded pages or quota history.
 			try { round.handle.releaseCapturedData(); }
 			finally {
-				round.pages.forEach(RetainedMemoryLedger.Ticket::close); round.pages.clear();
-				round.slots.clear(); round.paid.clear(); round.last = null;
+				releaseDecodedData(round);
 				rounds.remove(round.key, round);
 			}
 		}
+	}
+	/**
+	 * Drops a round's decoded pages and quota history while its cumulative
+	 * tightening summary stays available to consumers. A round without decoded
+	 * slots has no walk position to resume and no page ticket to settle, so an
+	 * active pass is ended here; otherwise a later tightening call would index
+	 * a released page with stale bounds.
+	 */
+	private static void releaseDecodedData(Round round) {
+		round.pages.forEach(RetainedMemoryLedger.Ticket::close); round.pages.clear();
+		round.slots.clear(); round.paid.clear(); round.last = null;
+		round.passActive = false; round.reprojectCursor = 0; round.reprojectEnd = 0;
+		round.pagesChanged = false; round.pagesSettled = true;
 	}
 	private void releaseReference(Round round) {
 		if (--round.references == 0) { closeRound(round); return; }
@@ -633,8 +746,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		Error fatal = null;
 		try { round.handle.close(); } catch (Error failure) { fatal = failure; }
 		finally {
-			round.pages.forEach(RetainedMemoryLedger.Ticket::close); round.memory.close(); rounds.remove(round.key, round); retainedRounds--;
-			round.pages.clear(); round.slots.clear(); round.paid.clear(); round.last = null;
+			round.memory.close(); rounds.remove(round.key, round); retainedRounds--;
+			releaseDecodedData(round);
 		}
 		try { releaseHandoff(round); }
 		catch (Error failure) {
@@ -692,6 +805,148 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 		if (fatal != null) throw fatal;
 	}
+	/**
+	 * Bounded monotone tightening of one consumer's already captured display
+	 * metadata. It never restarts the consumer, re-reads a source, recomputes a
+	 * variant key or changes a count: retained display values are reprojected at
+	 * the tighter ceiling through the registry-aware detached port, and the lazy
+	 * snapshot/live catalogue ceiling is lowered so a later decode cannot
+	 * re-expand. Work is bounded by a measured retained workspace reservation
+	 * before any allocation and a fixed slot batch per call; {@code DEFERRED}
+	 * means work remains and the caller must block data until it completes.
+	 */
+	public Reprojection reprojectDisplays(Consumer consumer, int displayBytes) {
+		int ceiling = clampDisplayBytes(displayBytes);
+		if (consumer == null || consumer.closed || consumer.invalidated()) return Reprojection.unchanged(ceiling);
+		var targets = new ArrayList<Round>(2);
+		if (consumer.round != null && !consumer.round.closed) targets.add(consumer.round);
+		if (consumer.completedRound != null && consumer.completedRound != consumer.round && !consumer.completedRound.closed)
+			targets.add(consumer.completedRound);
+		boolean pending = false, worked = false;
+		for (Round round : targets) {
+			// Lower the catalogue ceiling first so slots appended by an in-progress
+			// sweep are already tightened and never need this walk.
+			if (round.passActive && ceiling < round.passCeiling) {
+				// A lower ceiling restarts the pass: earlier items may still exceed it.
+				round.handle.tightenDisplay(ceiling);
+				round.passCeiling = ceiling;
+				round.reprojectCursor = 0;
+				round.reprojectEnd = round.slots.size();
+				worked = true;
+			} else if (!round.passActive && round.appliedBytes > ceiling) {
+				round.handle.tightenDisplay(ceiling);
+				round.passActive = true;
+				round.passCeiling = ceiling;
+				round.reprojectCursor = 0;
+				round.reprojectEnd = round.slots.size();
+				worked = true;
+			}
+			if (round.passActive) {
+				int end = Math.min(round.reprojectEnd, round.reprojectCursor + REPROJECT_BATCH);
+				if (round.reprojectCursor < end) {
+					worked = true;
+					if (!reprojectSlots(round, round.passCeiling, end)) { pending = true; continue; }
+				}
+				if (round.reprojectCursor < round.reprojectEnd) { pending = true; continue; }
+				round.passActive = false;
+				round.appliedBytes = round.passCeiling;
+			}
+			if (round.pagesChanged && !round.pagesSettled) {
+				worked = true;
+				if (!settlePages(round)) pending = true;
+			}
+		}
+		if (pending) return new Reprojection(ReprojectionStatus.DEFERRED, ceiling, changedKeys(targets), foldIds(targets));
+		return new Reprojection(worked ? ReprojectionStatus.COMPLETED : ReprojectionStatus.UNCHANGED, ceiling,
+			changedKeys(targets), foldIds(targets));
+	}
+
+	/** Reprojects one measured batch; false defers before any allocation or cursor movement. */
+	private boolean reprojectSlots(Round round, int ceiling, int end) {
+		long workspaceBound = PAGE_WORKSPACE_FIXED;
+		for (int index = round.reprojectCursor; index < end; index++) {
+			InventoryDomainCodec.Item item = round.slots.get(index);
+			if (item == null || item.displayJson() == null) continue;
+			long bytes = utf8Bytes(item.displayJson());
+			if (bytes > ceiling) workspaceBound = checkedAdd(workspaceBound, bytes);
+		}
+		if (workspaceBound == PAGE_WORKSPACE_FIXED) {
+			round.reprojectCursor = end; // nothing in this batch exceeds the ceiling
+			return true;
+		}
+		var workspace = memory.tryReserve(workspaceBound);
+		if (workspace.isEmpty()) return false;
+		try (var reserved = workspace.get()) {
+			long measured = PAGE_WORKSPACE_FIXED;
+			for (int index = round.reprojectCursor; index < end; index++) {
+				InventoryDomainCodec.Item item = round.slots.get(index);
+				if (item == null || item.displayJson() == null || utf8Bytes(item.displayJson()) <= ceiling) continue;
+				var retained = new InventoryItemCodec.Display(item.key().itemId(), item.label(), item.displayJson(), item.stripped());
+				var projected = reprojector.reproject(retained, ceiling);
+				if (projected.equals(retained)) continue;
+				round.slots.set(index, new InventoryDomainCodec.Item(item.key(), item.count(),
+					projected.label(), projected.displayJson(), projected.componentsStripped()));
+				round.pagesChanged = true;
+				round.pagesSettled = false;
+				if (round.tightenedKeys == null) {
+					round.tightenedKeys = new java.util.LinkedHashSet<>();
+					round.tightenedFoldIds = new java.util.LinkedHashSet<>();
+				}
+				round.tightenedKeys.add(item.key());
+				if (projected.componentsStripped()) round.tightenedFoldIds.add(item.key().itemId());
+				measured = checkedAdd(measured, utf8Bytes(projected.displayJson()));
+			}
+			reserved.commit(measured);
+		}
+		round.reprojectCursor = end;
+		return true;
+	}
+
+	/** Replaces the round's page tickets at the measured tighter cost, holding the new grant before releasing the old. */
+	private boolean settlePages(Round round) {
+		if (round.pages.isEmpty()) { round.pagesSettled = true; return true; } // released data retains no ticket to swap
+		long measured = checkedMultiply(round.pageCount, PAGE_FIXED_BYTES);
+		for (InventoryDomainCodec.Item item : round.slots) measured = checkedAdd(measured, itemRetainedBytes(item));
+		// The latest encoded page stays referenced by round.last as retained
+		// completion evidence even after its decoded display is tightened, so its
+		// measured cost stays charged until the page tickets are next settled or
+		// the round is released.
+		if (round.last != null && round.last.payload().orElse(null) instanceof CaptureResult.OpaqueKeyedFragment page)
+			for (var value : page.entries().values())
+				measured = checkedAdd(measured, checkedAdd(checkedMultiply(value.size(), 2L), 256L));
+		var replacement = memory.tryReserve(measured);
+		if (replacement.isEmpty()) return false;
+		replacement.get().commit(measured);
+		round.pages.forEach(RetainedMemoryLedger.Ticket::close);
+		round.pages.clear();
+		round.pages.add(replacement.get());
+		round.pagesSettled = true;
+		return true;
+	}
+
+	private static List<InventoryScanner.Key> changedKeys(List<Round> rounds) {
+		var keys = new java.util.LinkedHashSet<InventoryScanner.Key>();
+		for (Round round : rounds) if (round.tightenedKeys != null) keys.addAll(round.tightenedKeys);
+		return List.copyOf(keys);
+	}
+
+	private static List<String> foldIds(List<Round> rounds) {
+		var ids = new java.util.LinkedHashSet<String>();
+		for (Round round : rounds) if (round.tightenedFoldIds != null) ids.addAll(round.tightenedFoldIds);
+		return List.copyOf(ids);
+	}
+
+	/** Mirrors the page commit's measured formula over decoded metadata. */
+	private static long itemRetainedBytes(InventoryDomainCodec.Item item) {
+		if (item == null) return 256L;
+		long encoded = 8L + (item.displayJson() == null ? 0L : 4L + utf8Bytes(item.displayJson()));
+		encoded = checkedAdd(encoded, checkedAdd(2L, utf8Bytes(item.key().itemId())));
+		encoded = checkedAdd(encoded, checkedAdd(2L, utf8Bytes(item.key().componentsKey())));
+		encoded = checkedAdd(encoded, checkedAdd(2L, utf8Bytes(item.label())));
+		encoded = checkedAdd(encoded, 2L); // display-present and stripped flags
+		return checkedAdd(checkedMultiply(encoded, 2L), 256L);
+	}
+
 	private void clearLogical(boolean preview) {
 		logicalUsed.keySet().removeIf(s -> (s instanceof PreviewSubject) == preview);
 		var iterator = logicalMemory.entrySet().iterator();

@@ -114,7 +114,7 @@ public final class ClientInventory {
 	public record Stats(int previewChannels, int trackedChannels, int unknownSessions, int tombstones,
 		int invalidPackets, long staleEpochPackets, long fencedPackets, long boundRejects,
 		long droppedUnknownSessions, long expiredUnknownSessions, long repairRequests, long acceptedPackets,
-		int helloAttempts, boolean ready, long epoch) {}
+		long capRejectedPackets, long capFencedStates, int helloAttempts, boolean ready, long epoch) {}
 
 	private static final class PreviewState {
 		final long requestId;
@@ -239,6 +239,9 @@ public final class ClientInventory {
 	private final Map<MarkerId, Long> tombstones = new LinkedHashMap<>();
 
 	private InventoryS2CPacket.Offer offer;
+	/** Accepted effective byte caps of the current OFFER; zero before the first OFFER. */
+	private int effectiveDisplayBytes;
+	private int effectiveFrameBytes;
 	private long epoch;
 	private long ticks;
 	private long nextRequestId = 1L;
@@ -257,6 +260,8 @@ public final class ClientInventory {
 	private long expiredUnknownSessions;
 	private long repairRequests;
 	private long acceptedPackets;
+	private long capRejectedPackets;
+	private long capFencedStates;
 
 	public ClientInventory(Consumer<IPacket> sender) {
 		this.sender = Objects.requireNonNull(sender, "sender");
@@ -336,6 +341,8 @@ public final class ClientInventory {
 		unknown.clear();
 		tombstones.clear();
 		offer = null;
+		effectiveDisplayBytes = 0;
+		effectiveFrameBytes = 0;
 		epoch = 0L;
 		ticks = 0L;
 		nextRequestId = 1L;
@@ -464,7 +471,7 @@ public final class ClientInventory {
 	public Stats stats() {
 		return new Stats(previews.size(), tracking.size(), unknown.size(), tombstones.size(), invalidPackets,
 			staleEpochPackets, fencedPackets, boundRejects, droppedUnknownSessions, expiredUnknownSessions,
-			 repairRequests, acceptedPackets, helloAttempts, ready(), epoch);
+			 repairRequests, acceptedPackets, capRejectedPackets, capFencedStates, helloAttempts, ready(), epoch);
 	}
 
 	/**
@@ -504,6 +511,8 @@ public final class ClientInventory {
 			return;
 		}
 		if (packet.markerId() != null && (!knownMarkers.containsKey(packet.markerId()) || !allowedTypes.contains(knownMarkers.get(packet.markerId())))) { fencedPackets++; return; }
+		if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW && !previews.containsKey(packet.requestId())) { fencedPackets++; return; }
+		if (isData(packet.kind()) && !withinEffectiveCaps(packet, effectiveDisplayBytes, effectiveFrameBytes)) { capRejectedPackets++; return; }
 		acceptedPackets++;
 		switch (packet.kind()) {
 			case PREVIEW -> acceptPreview(packet);
@@ -515,15 +524,127 @@ public final class ClientInventory {
 	}
 
 	private void acceptOffer(InventoryS2CPacket packet) {
-		if (packet.offer() == null || (offered && packet.epoch() != epoch)
+		InventoryS2CPacket.Offer next = packet.offer();
+		if (next == null || (offered && packet.epoch() != epoch)
 			|| presentationEpoch != 0 && (packet.presentationEpoch() != presentationEpoch || packet.view() != presentationView))
 			return;
+		InventoryS2CPacket.Offer previous = offer;
 		offered = true;
 		epoch = packet.epoch();
-		offer = packet.offer();
+		offer = next;
+		if (previous == null) {
+			effectiveDisplayBytes = next.effectiveDisplayBytes();
+			effectiveFrameBytes = next.effectiveFrameBytes();
+		} else {
+			applyEffectiveCaps(next);
+		}
 		for (PreviewState state : previews.values()) {
 			if (!state.sent && ready() && allowedTypes.contains(state.targetType))
 				sendOpen(state);
+		}
+	}
+
+	/**
+	 * Applies one same-epoch OFFER's effective caps. A lowered display or frame
+	 * cap fences only state that cannot fit the new caps; an equal or raised cap
+	 * changes nothing and never restores omitted metadata, so only future
+	 * accepted server data adds details back.
+	 */
+	private void applyEffectiveCaps(InventoryS2CPacket.Offer next) {
+		int display = next.effectiveDisplayBytes();
+		int frame = next.effectiveFrameBytes();
+		if (display < effectiveDisplayBytes || frame < effectiveFrameBytes)
+			fenceIncompatibleState(display, frame);
+		effectiveDisplayBytes = display;
+		effectiveFrameBytes = frame;
+	}
+
+	/**
+	 * Lowering lifecycle: incompatible partial cuts, unknown-baseline buffers
+	 * and oversized display metadata are fenced while committed quantities,
+	 * marker association, lifetime and compatible progress stay. A committed
+	 * view keeps its key, label, quality and authoritative count and loses only
+	 * the display payload the new cap cannot carry.
+	 */
+	private void fenceIncompatibleState(int displayBytes, int frameBytes) {
+		for (PreviewState state : previews.values()) {
+			if (stripOversizedDisplays(state.entries, displayBytes)) {
+				state.bytes = metadataBytes(state.entries);
+				capFencedStates++;
+			}
+		}
+		for (TrackingState state : tracking.values()) {
+			if (state.pending != null && !batchWithinCaps(state.pending, displayBytes, frameBytes)) {
+				state.pending = null;
+				store.discardAssembly(state.channel);
+				capFencedStates++;
+			}
+			var batches = state.batches.entrySet().iterator();
+			while (batches.hasNext()) {
+				var batch = batches.next();
+				if (batchWithinCaps(batch.getValue(), displayBytes, frameBytes))
+					continue;
+				state.batchBytes -= batch.getValue().bytes;
+				batches.remove();
+				capFencedStates++;
+			}
+			if (stripOversizedDisplays(state.metadata, displayBytes))
+				capFencedStates++;
+		}
+		var sessions = unknown.entrySet().iterator();
+		while (sessions.hasNext()) {
+			UnknownSession session = sessions.next().getValue();
+			for (InventoryS2CPacket fragment : session.fragments) {
+				if (withinEffectiveCaps(fragment, displayBytes, frameBytes))
+					continue;
+				sessions.remove();
+				capFencedStates++;
+				break;
+			}
+		}
+	}
+
+	/** Discards only the display payload of a view whose JSON exceeds the new cap. */
+	private static boolean stripOversizedDisplays(Map<String, EntryView> views, int displayBytes) {
+		boolean changed = false;
+		for (Map.Entry<String, EntryView> entry : views.entrySet()) {
+			EntryView view = entry.getValue();
+			if (view.displayJson() == null || utf8Length(view.displayJson()) <= displayBytes)
+				continue;
+			entry.setValue(new EntryView(view.key(), view.itemId(), view.label(), null, view.count(),
+				view.fallback(), view.quality(), view.itemPingType()));
+			changed = true;
+		}
+		return changed;
+	}
+
+	private static boolean batchWithinCaps(TrackingBatch batch, int displayBytes, int frameBytes) {
+		for (InventoryS2CPacket part : batch.parts.values())
+			if (!withinEffectiveCaps(part, displayBytes, frameBytes))
+				return false;
+		return true;
+	}
+
+	/** True only for the kinds that carry entry data under the effective caps. */
+	private static boolean isData(InventoryS2CPacket.Kind kind) {
+		return kind == InventoryS2CPacket.Kind.PREVIEW || kind == InventoryS2CPacket.Kind.SNAPSHOT
+			|| kind == InventoryS2CPacket.Kind.STREAM;
+	}
+
+	/**
+	 * Exact encoded-frame admission under the accepted caps, measured with the
+	 * packet's own writer grammar. A frame or a single display field over the
+	 * accepted caps is refused before any session state changes; the retention
+	 * estimates never stand in for wire bytes.
+	 */
+	private static boolean withinEffectiveCaps(InventoryS2CPacket packet, int displayBytes, int frameBytes) {
+		if (displayBytes <= 0 || frameBytes <= 0)
+			return true;
+		try {
+			packet.encodedSize(displayBytes, frameBytes);
+			return true;
+		} catch (IllegalArgumentException overCap) {
+			return false;
 		}
 	}
 

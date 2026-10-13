@@ -8,7 +8,7 @@ import nx.pingwheel.common.config.InventoryConfigValues.Value;
 import java.math.BigDecimal;
 import java.util.EnumMap;
 
-/** Fixed-shape v2 administration payload. No strings, defaults or mutable config objects cross it. */
+/** Fixed-shape v3 administration payload. No strings, defaults or mutable config objects cross it. */
 final class ServerInventoryConfigCodec {
 	private ServerInventoryConfigCodec() {}
 
@@ -17,9 +17,18 @@ final class ServerInventoryConfigCodec {
 		for (Field field : Field.values()) {
 			boolean unlimited = field.supportsUnlimited() && readBoolean(buf);
 			int encoded = ServerConfigVarNumbers.readInt(buf);
-			BigDecimal value = field.isMultiplier()
-				? field.grid().quantum().multiply(BigDecimal.valueOf(encoded))
-				: BigDecimal.valueOf(encoded);
+			BigDecimal value;
+			if (field.isSizeScale()) {
+				// The size scales have no unlimited flag: the value is a positive canonical
+				// integer number of quarter-multipliers and off-grid quanta are rejected,
+				// never normalized.
+				if (encoded <= 0) throw new IllegalArgumentException("invalid size multiplier quanta");
+				value = field.sizeScale().fromQuanta(encoded);
+			} else if (field.isMultiplier()) {
+				value = field.grid().quantum().multiply(BigDecimal.valueOf(encoded));
+			} else {
+				value = BigDecimal.valueOf(encoded);
+			}
 			var supplied = new Value(unlimited, value);
 			if (!field.isSafe(supplied)) throw new IllegalArgumentException("invalid inventory setting");
 			values.put(field, supplied);
@@ -32,7 +41,13 @@ final class ServerInventoryConfigCodec {
 		for (Field field : Field.values()) {
 			Value value = inventory.value(field);
 			if (field.supportsUnlimited()) buf.writeBoolean(value.unlimited());
-			buf.writeVarInt(field.isMultiplier() ? field.grid().quantaOf(value.value()) : value.value().intValueExact());
+			if (field.isSizeScale()) {
+				buf.writeVarInt(field.sizeScale().quantaOf(value.value()));
+			} else if (field.isMultiplier()) {
+				buf.writeVarInt(field.grid().quantaOf(value.value()));
+			} else {
+				buf.writeVarInt(value.value().intValueExact());
+			}
 		}
 	}
 

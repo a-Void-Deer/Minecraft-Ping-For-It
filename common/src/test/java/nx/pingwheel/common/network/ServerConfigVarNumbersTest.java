@@ -16,12 +16,14 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerConfigVarNumbersTest {
-	// Independent fixed-shape wire fixture: physical-only mask, safe ordinary fields,
-	// positive scalar/cap values and exact 1x multiplier quanta. No codec writes it.
+	// Independent fixed-shape v3 wire fixture: physical-only mask, safe ordinary
+	// fields, positive scalar/cap values and exact 1x multiplier quanta. The two
+	// size-scale leaves carry one quarter-multiplier quanta varint and no
+	// unlimited flag. No codec writes it.
 	private static final byte[] UPDATE = hex(
 		"20 00 01 01 01 07 "
 			+ "00 01 01 01 00 01 00 01 00 01 00 01 00 04 00 08 "
-			+ "01 00 01 00 01 00 01 00 04 00 04 00 08 01 01 01");
+			+ "01 00 01 00 01 00 01 00 04 00 04 00 08 01 01 01 04 04");
 	private static final byte[] SNAPSHOT = concat(hex("01 01"), UPDATE, 1, UPDATE.length - 1);
 
 	@ParameterizedTest
@@ -96,13 +98,13 @@ class ServerConfigVarNumbersTest {
 	}
 
 	@ParameterizedTest
-	@ValueSource(ints = {0, 1, 3, 4, 5, 7, 8, 9, 11, 13, 15, 17, 19, 21, 22, 24, 26, 28, 30, 32, 34, 35, 36, 37})
+	@ValueSource(ints = {0, 1, 3, 4, 5, 7, 8, 9, 11, 13, 15, 17, 19, 21, 22, 24, 26, 28, 30, 32, 34, 35, 36, 37, 38, 39})
 	void everyUpdateVariableIntRejectsOverflowWithoutServiceMutation(int offset) {
 		assertRejectedUpdate(replace(UPDATE, offset, hex("81 80 80 80 10")));
 	}
 
 	@ParameterizedTest
-	@ValueSource(ints = {2, 4, 5, 6, 8, 9, 10, 12, 14, 16, 18, 20, 22, 23, 25, 27, 29, 31, 33, 35, 36, 37, 38})
+	@ValueSource(ints = {2, 4, 5, 6, 8, 9, 10, 12, 14, 16, 18, 20, 22, 23, 25, 27, 29, 31, 33, 35, 36, 37, 38, 39, 40})
 	void everySnapshotVariableIntRejectsOverflowRatherThanPublishingAView(int offset) {
 		var buf = buffer(replace(SNAPSHOT, offset, hex("81 80 80 80 10")));
 		try {

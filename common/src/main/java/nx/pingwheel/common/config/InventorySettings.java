@@ -13,7 +13,9 @@ import java.math.BigDecimal;
  * separate preview and tracking accounting. Every cap is either a positive
  * finite value or an explicit unlimited mode; the five send-byte multipliers
  * are independent, exact grid values, and all derived byte amounts are
- * computed from code-owned bases.
+ * computed from code-owned bases. The display and frame size multipliers are
+ * finite-only exact {@link InventorySizeScale} values whose pair keeps the
+ * frame budget above the display budget plus its fixed metadata reserve.
  *
  * <p>There is no tracking-duration setting here: the tracking deadline is the
  * Ping's own marker lifetime. Periods, resynchronization cooldown, heartbeat
@@ -24,6 +26,8 @@ import java.math.BigDecimal;
  * "inventory": {
  *   "physicalSlotsPerTick": {"unlimited": false, "value": 1024},
  *   "pendingMemoryMiB": 16,
+ *   "displayByteMultiplier": 1,
+ *   "frameByteMultiplier": 1,
  *   "preview": {
  *     "periodTicks": 5,
  *     "maxVariantsPerClientPeriod": {"unlimited": false, "value": 32},
@@ -58,6 +62,10 @@ public final class InventorySettings {
 	private IntLimit physicalSlotsPerTick = IntLimit.finite(InventoryLimits.DEFAULT_PHYSICAL_SLOTS_PER_TICK);
 	/** Single finite server-wide pending-memory bound for preview and tracking together, MiB. */
 	private int pendingMemoryMiB = InventoryLimits.DEFAULT_PENDING_MEMORY_MIB;
+	/** Finite display budget multiplier on the display size scale; no unlimited mode. */
+	private BigDecimal displayByteMultiplier = BigDecimal.ONE;
+	/** Finite frame budget multiplier on the frame size scale; no unlimited mode. */
+	private BigDecimal frameByteMultiplier = BigDecimal.ONE;
 	private Preview preview = new Preview();
 	private Tracking tracking = new Tracking();
 
@@ -77,6 +85,9 @@ public final class InventorySettings {
 			pendingMemoryMiB,
 			InventoryLimits.MIN_PENDING_MEMORY_MIB,
 			InventoryLimits.MAX_PENDING_MEMORY_MIB);
+		var sizePair = InventorySizeScale.reconcile(displayByteMultiplier, frameByteMultiplier);
+		displayByteMultiplier = sizePair.displayMultiplier();
+		frameByteMultiplier = sizePair.frameMultiplier();
 		if (preview == null) preview = new Preview();
 		preview.validate();
 		if (tracking == null) tracking = new Tracking();
@@ -90,6 +101,18 @@ public final class InventorySettings {
 
 	public long pendingMemoryBytes() {
 		return pendingMemoryMiB * 1024L * 1024L;
+	}
+
+	/** Effective display byte budget: the exact display size scale applied to its base. */
+	public long effectiveDisplayBytes() {
+		return InventorySizeScale.DISPLAY.bytes(
+			InventorySizeScale.DISPLAY.normalize(displayByteMultiplier));
+	}
+
+	/** Effective frame byte budget: the exact frame size scale applied to its base. */
+	public long effectiveFrameBytes() {
+		return InventorySizeScale.FRAME.bytes(
+			InventorySizeScale.FRAME.normalize(frameByteMultiplier));
 	}
 
 	/** Preview per-client period bytes: 4 KiB scaled by the preview client multiplier. */

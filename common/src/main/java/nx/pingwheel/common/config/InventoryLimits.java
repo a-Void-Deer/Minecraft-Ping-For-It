@@ -6,10 +6,11 @@ package nx.pingwheel.common.config;
  *
  * <p>These constants are implementation values, not a second product
  * catalogue. Product ranges that the settings UI and documentation own are the
- * multiplier grids in {@link ByteMultiplierGrid}, the finite memory range and
- * the heartbeat range; the guards below exist only so an explicit unlimited
- * mode can never become {@code Integer.MAX_VALUE} arithmetic, an unbounded
- * array or an unbounded work loop.
+ * multiplier grids in {@link ByteMultiplierGrid} and the two size scales in
+ * {@link InventorySizeScale}, the finite memory range and the heartbeat range;
+ * the guards below exist only so an explicit unlimited mode can never become
+ * {@code Integer.MAX_VALUE} arithmetic, an unbounded array or an unbounded
+ * work loop.
  */
 public final class InventoryLimits {
 
@@ -69,6 +70,27 @@ public final class InventoryLimits {
 	public static final int TRACKING_SNAPSHOT_BASE_BYTES = 16 * 1024;
 	/** Tracking global period byte base, scaled by the global byte multiplier. */
 	public static final int TRACKING_GLOBAL_BASE_BYTES = 16 * 1024;
+
+	/**
+	 * Display byte base scaled by the finite display size multiplier. The
+	 * legal display values are the confirmed KiB grid, so this base always
+	 * yields an exact integer byte amount.
+	 */
+	public static final int DISPLAY_BASE_BYTES = 4 * 1024;
+	/**
+	 * Frame byte base scaled by the finite frame size multiplier; frame values
+	 * step by a quarter multiplier, which is exactly 8 KiB on this base.
+	 */
+	public static final int FRAME_BASE_BYTES = 32 * 1024;
+	/**
+	 * Fixed metadata reserve the frame budget must keep above the display
+	 * budget: {@code displayBytes + reserve <= frameBytes}.
+	 */
+	public static final int FRAME_METADATA_RESERVE_BYTES = 2 * 1024;
+	/** Largest legal display budget in bytes (128 KiB). */
+	public static final int MAX_DISPLAY_BYTES = 128 * 1024;
+	/** Largest legal frame budget in bytes (512 KiB). */
+	public static final int MAX_FRAME_BYTES = 512 * 1024;
 
 	/** The preview send queue holds four global server period byte amounts. */
 	public static final int PREVIEW_QUEUE_GLOBAL_PERIODS = 4;

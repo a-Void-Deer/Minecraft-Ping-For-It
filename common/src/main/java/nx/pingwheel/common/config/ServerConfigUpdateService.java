@@ -24,6 +24,10 @@ public final class ServerConfigUpdateService {
 			return new Result(false, authoritative);
 		}
 
-		return new Result(true, update.applyTo(authoritative));
+		final var merged = update.appliedTo(authoritative);
+		if (merged.isEmpty()) {
+			return new Result(false, authoritative);
+		}
+		return new Result(true, merged.get());
 	}
 }

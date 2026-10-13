@@ -56,6 +56,7 @@ import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Operation;
 import nx.pingwheel.common.presentation.client.ServerPresentationPolicyState;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.platform.IPlatformContextService;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
@@ -151,6 +152,9 @@ public class CommonClient {
 			inventory.reset();
 			inventory = null;
 		}
+		// Connection-scoped display decode cache; the next connection decodes
+		// against its own registry context instead of reusing old variants.
+		ClientItemDisplay.reset();
 		SERVER_PRESENTATION_POLICY_STATE.resetForDisconnect();
 		MarkerOverlayState.INSTANCE.clear();
 		EntityOutlineState.INSTANCE.clear();

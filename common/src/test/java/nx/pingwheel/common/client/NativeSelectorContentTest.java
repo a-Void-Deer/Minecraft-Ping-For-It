@@ -11,13 +11,18 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import com.mojang.serialization.JsonOps;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import nx.pingwheel.common.client.spatial.SelectorIntent;
@@ -434,6 +439,39 @@ class NativeSelectorContentTest {
 		assertEquals(List.of("attention", "take"),
 			projection.inventory().allowedItemTypes().stream().map(type -> type.id()).toList(),
 			"the inventory item menu uses the inventory item policy");
+		content.close();
+	}
+
+	@Test void inventoryDisplayJsonSurvivesTheBridgeIntoThePaintedRowProjection() {
+		List<IPacket> sent = new ArrayList<>(); var inventory = new ClientInventory(sent::add); ready(inventory);
+		var context = new PreviewContext();
+		var capture = capture();
+		var content = new NativeSelectorContent(capture, null, () -> inventory, ignored -> List.of(ping("attention")),
+			ref -> Component.literal(ref.fieldId()), json -> Component.literal("Chest"));
+		content.begin(context.level);
+		ItemStack stack = new ItemStack(Items.GUNPOWDER);
+		stack.set(DataComponents.CUSTOM_NAME, Component.literal("Named"));
+		String encoded = ItemStack.SINGLE_ITEM_CODEC
+			.encodeStart(RegistryAccess.EMPTY.createSerializationContext(JsonOps.INSTANCE), stack)
+			.result().orElseThrow().toString();
+		inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, content.requestId(), null, 9, 1, 1, 0, 1, true,
+			InventoryS2CPacket.Status.READY, 0, List.of(new InventoryS2CPacket.Entry("exact", "minecraft:gunpowder",
+				"item.minecraft.gunpowder", encoded, 1, 1, false, null))).stamp(100, 1));
+		var session = new SpatialSelectorSession<>(previewTarget(capture), Map.of(),
+			new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), false, 250, true, false),
+			previewFence(content), (target, contentFence) -> content.read(target, contentFence), SELECTOR_GEOMETRY);
+		session.open(0L);
+		enter(session, "content", 10L);
+		String listChoice = session.snapshot().radial().menus().getLast().choices().stream()
+			.filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
+		enter(session, listChoice, 150L);
+
+		var row = session.snapshot().inventoryView().rows().stream()
+			.filter(value -> value.key().equals("exact")).findFirst().orElseThrow();
+		assertEquals("minecraft:gunpowder", row.itemId());
+		assertEquals(encoded, row.displayJson(), "the encoded display value survives the bridge and the paint projection");
+		assertEquals(1L, row.count());
+		assertEquals(Status.READY, row.quality());
 		content.close();
 	}
 

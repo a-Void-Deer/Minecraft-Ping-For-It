@@ -5,6 +5,7 @@ import java.util.List;
 import net.minecraft.network.chat.Component;
 import net.minecraft.client.gui.GuiGraphics;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 
@@ -20,12 +21,16 @@ public final class InventoryTrackingRenderer {
 		List<Line> result = new ArrayList<>();
 		for (var entry : tracking.entries()) {
 			if (result.size() == 3) break;
-			if (entry.label() == null || entry.label().isBlank()) continue;
+			// The shared projection decodes the same server-bounded display value
+			// and name policy the inventory list uses; a missing or malformed
+			// value falls back to the registry translation key.
+			String name = ClientItemDisplay.resolve(entry.itemId(), entry.label(), entry.displayJson()).name().getString();
+			if (name.isBlank()) continue;
 			InventoryS2CPacket.Status quality = entry.fallback() ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : entry.quality();
 			var status = SpatialInventoryView.Status.fromName(tracking.status().name());
 			var rowStatus = quality == null ? SpatialInventoryView.Status.READY : SpatialInventoryView.Status.fromName(quality.name());
 			String key = rowStatus != SpatialInventoryView.Status.READY ? rowStatus.translationKey() : status.translationKey();
-			String safe = entry.label().replaceAll("[\\p{Cntrl}]", " ").strip();
+			String safe = name.replaceAll("[\\p{Cntrl}]", " ").strip();
 			result.add(new Line(safe.substring(0, Math.min(64, safe.length())), entry.count() < 0 ? null : entry.count(), entry.itemPingType(), key,
 				tracking.grey() || status.grey() || rowStatus.grey()));
 		}

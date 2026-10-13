@@ -112,15 +112,86 @@ class InventoryConfigValuesTest {
 	}
 
 	@Test
-	void maskIsExactlyNineteenNewLeavesAndFiveOriginalFields() {
+	void maskIsExactlyTwentyOneNewLeavesAndFiveOriginalFields() {
 		int mask = 0;
 		for (Field field : Field.values()) {
 			assertEquals(0, mask & field.mask());
 			mask |= field.mask();
 		}
-		assertEquals(19, Field.values().length);
-		assertEquals(((1 << 24) - 1) & ~31, mask);
-		assertEquals((1 << 24) - 1, ServerConfigUpdate.ALL_FIELDS);
+		assertEquals(21, Field.values().length);
+		assertEquals(((1 << 26) - 1) & ~31, mask);
+		assertEquals((1 << 26) - 1, ServerConfigUpdate.ALL_FIELDS);
+		assertEquals(Field.DISPLAY_BYTE_MULTIPLIER.mask(), ServerConfigUpdate.INVENTORY_DISPLAY_BYTE_MULTIPLIER);
+		assertEquals(Field.FRAME_BYTE_MULTIPLIER.mask(), ServerConfigUpdate.INVENTORY_FRAME_BYTE_MULTIPLIER);
+	}
+
+	@Test
+	void sizeScaleLeavesAreFiniteExactScalarsAndUnlimitedIsRejected() {
+		var defaults = InventoryConfigValues.defaults();
+		assertEquals(new Value(false, BigDecimal.ONE), defaults.value(Field.DISPLAY_BYTE_MULTIPLIER));
+		assertEquals(new Value(false, BigDecimal.ONE), defaults.value(Field.FRAME_BYTE_MULTIPLIER));
+		assertFalse(Field.DISPLAY_BYTE_MULTIPLIER.supportsUnlimited());
+		assertFalse(Field.FRAME_BYTE_MULTIPLIER.supportsUnlimited());
+		assertFalse(Field.DISPLAY_BYTE_MULTIPLIER.isSafe(new Value(true, BigDecimal.ONE)));
+		assertFalse(Field.FRAME_BYTE_MULTIPLIER.isSafe(new Value(true, BigDecimal.ONE)));
+		assertFalse(Field.DISPLAY_BYTE_MULTIPLIER.isSafe(new Value(false, null)));
+		assertTrue(Field.DISPLAY_BYTE_MULTIPLIER.isSafe(new Value(false, new BigDecimal("32"))));
+		assertFalse(Field.DISPLAY_BYTE_MULTIPLIER.isSafe(new Value(false, new BigDecimal("4.25"))));
+		assertFalse(Field.DISPLAY_BYTE_MULTIPLIER.isSafe(new Value(false, new BigDecimal("0.125"))));
+		assertTrue(Field.FRAME_BYTE_MULTIPLIER.isSafe(new Value(false, new BigDecimal("16"))));
+		assertFalse(Field.FRAME_BYTE_MULTIPLIER.isSafe(new Value(false, new BigDecimal("16.25"))));
+	}
+
+	@Test
+	void pairCompatibilityRequiresBothLeavesAndTheFrameMetadataReserve() {
+		assertTrue(InventoryConfigValues.defaults().isSizePairCompatible());
+		var largeDisplay = InventoryConfigValues.defaults()
+			.with(Field.DISPLAY_BYTE_MULTIPLIER, new Value(false, new BigDecimal("32")));
+		assertFalse(largeDisplay.isSizePairCompatible());
+		assertTrue(largeDisplay.with(Field.FRAME_BYTE_MULTIPLIER, new Value(false, new BigDecimal("4.25")))
+			.isSizePairCompatible());
+	}
+
+	@Test
+	void invalidMergedSizePairIsRejectedAtomicallyWithoutTouchingUnselectedLeaves() {
+		var current = InventoryConfigValues.defaults()
+			.with(Field.DISPLAY_BYTE_MULTIPLIER, new Value(false, new BigDecimal("2")))
+			.with(Field.FRAME_BYTE_MULTIPLIER, new Value(false, new BigDecimal("2")))
+			.with(Field.TRACKING_HEARTBEAT_PERIODS, Value.scalar(7));
+		var snapshot = new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 23, current);
+		// Selecting an 8 KiB frame leaves the current 8 KiB display one reserve over.
+		var replacement = current.with(Field.FRAME_BYTE_MULTIPLIER, new Value(false, new BigDecimal("0.25")));
+		var update = new ServerConfigUpdate(
+			Field.FRAME_BYTE_MULTIPLIER.mask(), ChannelMode.DISABLED, false, 1, 2, 3, replacement);
+
+		var result = ServerConfigUpdateService.apply(true, snapshot, update);
+		assertFalse(result.applied());
+		assertEquals(snapshot, result.snapshot());
+		assertEquals(new Value(false, new BigDecimal("2")),
+			result.snapshot().inventory().value(Field.DISPLAY_BYTE_MULTIPLIER));
+		assertEquals(new Value(false, new BigDecimal("2")),
+			result.snapshot().inventory().value(Field.FRAME_BYTE_MULTIPLIER));
+		assertEquals(Value.scalar(7), result.snapshot().inventory().value(Field.TRACKING_HEARTBEAT_PERIODS));
+		assertSame(snapshot, update.applyTo(snapshot));
+	}
+
+	@Test
+	void selectedBothSizeLeavesWithAValidPairAreAccepted() {
+		var current = InventoryConfigValues.defaults();
+		var snapshot = new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 23, current);
+		var replacement = current
+			.with(Field.DISPLAY_BYTE_MULTIPLIER, new Value(false, new BigDecimal("32")))
+			.with(Field.FRAME_BYTE_MULTIPLIER, new Value(false, new BigDecimal("4.25")));
+		var update = new ServerConfigUpdate(
+			Field.DISPLAY_BYTE_MULTIPLIER.mask() | Field.FRAME_BYTE_MULTIPLIER.mask(),
+			ChannelMode.AUTO, true, 1000, 5, 23, replacement);
+
+		var result = ServerConfigUpdateService.apply(true, snapshot, update);
+		assertTrue(result.applied());
+		assertEquals(new Value(false, new BigDecimal("32")),
+			result.snapshot().inventory().value(Field.DISPLAY_BYTE_MULTIPLIER));
+		assertEquals(new Value(false, new BigDecimal("4.25")),
+			result.snapshot().inventory().value(Field.FRAME_BYTE_MULTIPLIER));
 	}
 
 	@Test
@@ -137,6 +208,7 @@ class InventoryConfigValuesTest {
 
 	private static Value different(InventoryConfigValues values, Field field) {
 		Value current = values.value(field);
+		if (field.isSizeScale()) return new Value(false, field.sizeScale().next(current.value()));
 		return field.isMultiplier() ? new Value(true, field.grid().next(current.value()))
 			: new Value(field.supportsUnlimited(), current.value().add(BigDecimal.ONE));
 	}

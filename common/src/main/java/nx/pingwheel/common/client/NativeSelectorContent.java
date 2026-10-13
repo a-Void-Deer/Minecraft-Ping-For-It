@@ -194,7 +194,8 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 			for (var entry : state.entries()) {
 				var reference = references.get(entry.key());
 				if (reference != null) rows.add(new SpatialSelectorSession.InventoryRow<>(entry.key(), entry.label(),
-						entry.count() < 0 ? null : entry.count(), entry.itemId(), entry.fallback() ? Status.COMPONENT_TOO_LONG
+						entry.count() < 0 ? null : entry.count(), entry.itemId(), entry.displayJson(),
+						entry.fallback() ? Status.COMPONENT_TOO_LONG
 							: entry.quality() == null ? Status.READY : Status.fromName(entry.quality().name()), reference));
 			}
 			Status status = state.completeScan() && state.status() == InventoryS2CPacket.Status.READY ? Status.READY

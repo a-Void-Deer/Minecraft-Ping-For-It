@@ -1,6 +1,5 @@
 package nx.pingwheel.common.presentation.inventory;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,6 +12,7 @@ import java.util.function.Function;
 
 import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.config.InventorySettings;
+import nx.pingwheel.common.config.InventorySizeScale;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
@@ -37,7 +37,12 @@ public final class InventoryPreviewServer {
 	public interface Host {
 		/** Includes current target, permission, lock, loot and loaded-chunk checks, even for cached sends. */
 		Optional<Resolved> resolve(UUID player, Target target);
+		/** Host measurement port kept for compatibility; admission uses the effective-budget overload. */
 		int encodedBytes(InventoryS2CPacket packet);
+		/** Allocation-free exact size; overrides must use the same bounded codec. */
+		default int encodedBytes(InventoryS2CPacket packet, int displayBytes, int frameBytes) {
+			return packet.encodedSize(displayBytes, frameBytes);
+		}
 		void send(UUID player, InventoryS2CPacket packet);
 	}
 
@@ -50,12 +55,13 @@ public final class InventoryPreviewServer {
 	private static final long HELLO_INTERVAL = 20;
 	// Conservative retained-object admission, separate from the logical encoded queue ceiling.
 	private static final long REQUEST_MEMORY = 1024;
-	private static final long ENTRY_MEMORY = 2L * InventoryS2CPacket.MAX_ENTRY_BYTES + 1536;
 	// Includes the progress index, whose peak capacity is bounded by this session's MAX_TARGETS.
 	private static final long SESSION_MEMORY = 1024;
 	private static final long CLIENT_PROGRESS_MEMORY = 256;
-	private static final int FRAME_WORKSPACE = 2 * (InventoryS2CPacket.MAX_FRAME_BYTES + InventoryS2CPacket.MAX_ENTRY_BYTES);
-	private static final int ENTRY_UPPER_BYTES = InventoryS2CPacket.MAX_ENTRY_BYTES + 128;
+	/** Conservative fixed framing upper bounds for measured packet reservations; never a frame budget. */
+	private static final int FRAME_FIXED_BYTES = 128, ENTRY_FIXED_BYTES = 64;
+	/** Non-display entry envelope: every bounded text field, fixed field and its framing. */
+	private static final int ENTRY_METADATA_BYTES = InventoryS2CPacket.MAX_ENTRY_BYTES - InventoryS2CPacket.MAX_DISPLAY_BYTES;
 
 	private final Host host;
 	private final Map<UUID, Session> sessions = new LinkedHashMap<>();
@@ -71,6 +77,7 @@ public final class InventoryPreviewServer {
 	private int physicalSlots;
 	private int rotation;
 	private InventorySettings settings;
+	private int displayBytes = InventoryLimits.DISPLAY_BASE_BYTES, frameBytes = InventoryLimits.FRAME_BASE_BYTES;
 
 	public InventoryPreviewServer(Host host, long firstEpoch) {
 		this.host = Objects.requireNonNull(host);
@@ -85,7 +92,7 @@ public final class InventoryPreviewServer {
 		Session session = sessions.get(player);
 		if (packet.kind() == InventoryC2SPacket.Kind.HELLO) {
 			if (session == null) {
-				if (sessions.size() >= MAX_SESSIONS || nextEpoch == Long.MAX_VALUE || !room(SESSION_MEMORY + FRAME_WORKSPACE)) return;
+				if (sessions.size() >= MAX_SESSIONS || nextEpoch == Long.MAX_VALUE || !room(SESSION_MEMORY)) return;
 				session = new Session(player, nextEpoch++);
 				sessions.put(player, session);
 				retainedBytes += SESSION_MEMORY;
@@ -149,6 +156,9 @@ public final class InventoryPreviewServer {
 	private void advance(long tick, InventorySettings settings) {
 		if (tick < currentTick) throw new IllegalArgumentException("inventory clock moved backwards");
 		this.settings = Objects.requireNonNull(settings);
+		var sizePair = InventorySizeScale.reconcile(settings.getDisplayByteMultiplier(), settings.getFrameByteMultiplier());
+		displayBytes = (int) InventorySizeScale.DISPLAY.bytes(sizePair.displayMultiplier());
+		frameBytes = (int) InventorySizeScale.FRAME.bytes(sizePair.frameMultiplier());
 		if (tick != currentTick) {
 			currentTick = tick;
 			physicalSlots = 0;
@@ -168,7 +178,7 @@ public final class InventoryPreviewServer {
 		Request existing = session.requests.get(id);
 		if (existing != null) return; // A request identity never changes its target.
 		if (session.requests.size() >= Math.min(MAX_TARGETS, settings.getPreview().effectiveMaxTargetsPerClient())
-			|| !room(REQUEST_MEMORY + FRAME_WORKSPACE)) return;
+			|| !room(REQUEST_MEMORY)) return;
 		Request request = new Request(id, target);
 		session.requests.put(id, request);
 		retainedBytes += REQUEST_MEMORY;
@@ -200,7 +210,10 @@ public final class InventoryPreviewServer {
 		if (request.round == null) {
 			Round round = rounds.get(resolved.key());
 			ClientProgress progress = round == null ? null : session.claimedProgress.get(round);
-			if (progress == null && !room(CLIENT_PROGRESS_MEMORY + FRAME_WORKSPACE)) return;
+			// A claim is admitted only while its own retained cost and one session's
+			// retained headroom both fit, so a deferred claim can resume without
+			// starving concurrent session admission.
+			if (progress == null && !room(CLIENT_PROGRESS_MEMORY + SESSION_MEMORY)) return;
 			if (round == null) {
 				if (rounds.size() >= MAX_ROUNDS) return;
 				round = new Round(resolved);
@@ -229,15 +242,18 @@ public final class InventoryPreviewServer {
 		int logical = Math.min(limit(settings.getPreview().effectiveMaxSlotsPerClient()) - session.slots,
 			limit(settings.getPreview().effectiveMaxSlotsServer()) - globalSlots);
 		long queueRoom = settings.previewQueueBytes() - queuedBytes;
-		// Reserve a whole-entry upper bound for every potentially discovered/changed slot before reading.
-		int grant = (int) Math.min(Math.min(paidAvailable + Math.max(0, logical), 128), Math.max(0, queueRoom / ENTRY_UPPER_BYTES));
+		long entryUpper = entryFrameBytes();
+		// Reserve a measured whole-entry upper bound for every potentially discovered/changed slot before reading.
+		int grant = (int) Math.min(Math.min(paidAvailable + Math.max(0, logical), 128), Math.max(0, queueRoom / entryUpper));
 		int freeEntries = request.entryCapacity - request.observed.size();
-		long affordableEntries = Math.max(0, (settings.pendingMemoryBytes() - retainedBytes - FRAME_WORKSPACE) / ENTRY_MEMORY);
+		long affordableEntries = Math.max(0, (settings.pendingMemoryBytes() - retainedBytes - entryUpper) / entryCapacityBytes());
 		if (request.entryCapacity < MAX_ENTRIES) grant = (int) Math.min(grant, freeEntries + affordableEntries);
 		if (grant == 0) return;
 		int capacity = Math.min(MAX_ENTRIES, request.observed.size() + grant);
 		if (capacity > request.entryCapacity) {
-			retainedBytes += (capacity - request.entryCapacity) * ENTRY_MEMORY;
+			long charged = (capacity - request.entryCapacity) * entryCapacityBytes();
+			retainedBytes += charged;
+			request.entryMemory += charged;
 			request.entryCapacity = capacity;
 		}
 		int needed = Math.max(0, cursor + grant - round.broker.scanned());
@@ -293,10 +309,12 @@ public final class InventoryPreviewServer {
 
 	private void flush(Session session, Request request) {
 		while (!request.pending.isEmpty() && session.variants < limit(settings.getPreview().effectiveMaxVariantsPerClientPeriod())) {
-			if (!room(FRAME_WORKSPACE)) return;
 			Entry entry = request.pending.values().iterator().next();
 			InventoryS2CPacket packet = preview(session, request, Status.UPDATING, false, List.of(entry));
-			int bytes = host.encodedBytes(packet);
+			if (!roomFor(packet)) return;
+			int bytes;
+			try { bytes = measure(packet); }
+			catch (IllegalArgumentException oversized) { invalidate(request, Status.INCOMPLETE); return; }
 			if (bytes > dataCapacity(settings.previewClientPeriodBytes()) || bytes > dataCapacity(settings.previewGlobalPeriodBytes())) {
 				invalidate(request, Status.INCOMPLETE);
 				return;
@@ -337,7 +355,7 @@ public final class InventoryPreviewServer {
 	private void sendOffer(Session session) {
 		InventoryS2CPacket.Offer offer = new InventoryS2CPacket.Offer(settings.getPreview().getPeriodTicks(),
 			settings.getTracking().getPeriodTicks(), settings.getTracking().getResyncMinPeriods(),
-			settings.getTracking().getHeartbeatPeriods());
+			settings.getTracking().getHeartbeatPeriods(), displayBytes, frameBytes);
 		if (send(session, InventoryS2CPacket.offer(session.epoch, offer), true)) {
 			session.offerPending = false;
 			session.offered = true;
@@ -345,13 +363,19 @@ public final class InventoryPreviewServer {
 	}
 
 	private boolean send(Session session, InventoryS2CPacket packet, boolean control) {
-		if (!room(FRAME_WORKSPACE)) return false;
-		int bytes = host.encodedBytes(packet);
+		if (!roomFor(packet)) return false;
+		int bytes;
+		try { bytes = measure(packet); }
+		catch (IllegalArgumentException oversized) { return false; }
 		return sendMeasured(session, packet, bytes, control);
 	}
 
 	private boolean sendMeasured(Session session, InventoryS2CPacket packet, int bytes, boolean control) {
 		if (bytes < 0 || bytes > InventoryS2CPacket.MAX_FRAME_BYTES) throw new IllegalArgumentException("inventory frame size");
+		long workspace = packet.encodingWorkspace(displayBytes, frameBytes);
+		if (!room(workspace)) return false;
+		retainedBytes += workspace;
+		try {
 		long clientReserve = control ? 0 : Math.max(0, reserve(settings.previewClientPeriodBytes()) - session.controls);
 		long serverReserve = control ? 0 : Math.max(0, reserve(settings.previewGlobalPeriodBytes()) - globalControls);
 		if (bytes > settings.previewClientPeriodBytes() - session.bytes - clientReserve
@@ -362,23 +386,49 @@ public final class InventoryPreviewServer {
 		// A throwing send may have handed off data; charge conservatively and retry the same immutable value.
 		try { host.send(session.player, packet); return true; }
 		catch (RuntimeException transportFailure) { return false; }
+		} finally { retainedBytes -= workspace; }
 	}
 
 	private boolean room(long bytes) { return bytes <= settings.pendingMemoryBytes() - retainedBytes; }
+	private boolean roomFor(InventoryS2CPacket packet) {
+		// Absolute measurement admits inspection of an effective-oversized value;
+		// measure then rejects it through the existing incomplete/status path.
+		return room(packet.encodingWorkspace(InventoryS2CPacket.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES));
+	}
+	private int measure(InventoryS2CPacket packet) {
+		long workspace = packet.encodingWorkspace(displayBytes, frameBytes);
+		retainedBytes += workspace;
+		try { return host.encodedBytes(packet, displayBytes, frameBytes); }
+		finally { retainedBytes -= workspace; }
+	}
+	private long entryCapacityBytes() { return (long) ENTRY_METADATA_BYTES + displayBytes; }
+	private long entryFrameBytes() { return FRAME_FIXED_BYTES + (long) ENTRY_FIXED_BYTES + entryCapacityBytes(); }
 	private static int limit(int value) { return Math.min(value, InventoryLimits.INTERNAL_COUNT_LIMIT_GUARD); }
 	private static long reserve(long base) { return Math.min(base, 128 + base / 16); }
 	private static long dataCapacity(long base) { return base - reserve(base); }
 	private static long queueCost(Entry entry) {
 		return 128L + utf8(entry.key()) + utf8(entry.itemId()) + utf8(entry.label()) + utf8(entry.displayJson());
 	}
-	private static int utf8(String value) { return value == null ? 0 : value.getBytes(StandardCharsets.UTF_8).length; }
+	/** Allocation-free UTF-8 byte length; unpaired surrogates count conservatively. */
+	private static long utf8(String value) {
+		if (value == null) return 0;
+		long bytes = 0;
+		for (int index = 0; index < value.length(); index++) {
+			char current = value.charAt(index);
+			if (current < 0x80) bytes += 1;
+			else if (current < 0x800) bytes += 2;
+			else if (Character.isHighSurrogate(current) && index + 1 < value.length() && Character.isLowSurrogate(value.charAt(index + 1))) { bytes += 4; index++; }
+			else bytes += 3;
+		}
+		return bytes;
+	}
 
 	private void close(Session session, long id) {
 		Request request = session.requests.remove(id);
 		if (request == null) return;
 		for (Entry entry : request.pending.values()) queuedBytes -= queueCost(entry);
 		releaseRound(request);
-		retainedBytes -= REQUEST_MEMORY + request.entryCapacity * ENTRY_MEMORY;
+		retainedBytes -= REQUEST_MEMORY + request.entryMemory;
 	}
 
 	private void releaseRound(Request request) {
@@ -426,6 +476,8 @@ public final class InventoryPreviewServer {
 		long lastResync = Long.MIN_VALUE;
 		boolean statusPending = true;
 		int entryCapacity;
+		/** Exactly the bytes charged for this request's entry capacity; refunded only on close. */
+		long entryMemory;
 		Request(long id, Target target) { this.id = id; this.target = target; }
 	}
 

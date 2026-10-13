@@ -21,6 +21,7 @@ import java.util.Set;
 import java.util.function.Function;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.JsonOps;
 
@@ -44,6 +45,8 @@ import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.world.item.ItemStack;
 
+import nx.pingwheel.common.config.InventoryLimits;
+import nx.pingwheel.common.config.InventorySizeScale;
 import nx.pingwheel.common.presentation.inventory.InventoryScanner;
 
 /**
@@ -59,9 +62,9 @@ import nx.pingwheel.common.presentation.inventory.InventoryScanner;
  * that reuses a digest instead of merging two variants.
  *
  * <p>The display projection is deliberately separate from identity. It is a
- * single-count {@link ItemStack#SINGLE_ITEM_CODEC} JSON form bounded to
- * {@link #MAX_DISPLAY_BYTES}; when it is too large, display-only components may
- * be omitted without changing identity, and
+ * single-count {@link ItemStack#SINGLE_ITEM_CODEC} JSON form bounded to a
+ * validated effective display byte cap; when it is too large, display-only
+ * components may be omitted without changing identity, and
  * {@link Display#componentsStripped()} is set only when every component of the
  * observed stack was dropped because of the size bound. Only server-owned
  * strings and bounded bytes leave this class.
@@ -69,15 +72,46 @@ import nx.pingwheel.common.presentation.inventory.InventoryScanner;
  * <p>The catalog retains canonical identity bytes once per component digest and
  * each display value once per variant key under finite entry and retained-byte
  * guards; exceeding a guard reports the source unavailable instead of
- * truncating or emptying the catalog.
+ * truncating or emptying the catalog. A retained display never expands later:
+ * lowering the effective cap reprojects the retained values, and an
+ * already-known key keeps its retained projection even after a later cap
+ * increase.
  */
 public final class InventoryItemCodec {
 
 	/** Internal guard for one canonical component payload; not a product value. */
 	public static final int MAX_CANONICAL_BYTES = 65536;
 
-	/** Internal guard for one display JSON string; not a product value. */
+	/**
+	 * Established inventory item id bound: the same 256 UTF-8 byte limit the
+	 * domain codec and the inventory wire apply. A display item id must be able
+	 * to travel through both, so the bound is enforced here as well.
+	 */
+	private static final int MAX_ITEM_ID_BYTES = 256;
+
+	/**
+	 * Default display JSON projection cap in bytes. It is the backward-
+	 * compatible 4 KiB projection used until a caller supplies a validated
+	 * effective cap; it is not the absolute display bound.
+	 */
 	public static final int MAX_DISPLAY_BYTES = 4096;
+
+	/**
+	 * Smallest legal effective display cap: the display scale minimum applied
+	 * to its base. At or above this cap every projected form, including the
+	 * bounded bare fallback, is guaranteed to fit, so a smaller cap is rejected
+	 * instead of inventing an oversized output.
+	 */
+	private static final int MIN_DISPLAY_BYTES =
+		(int) InventorySizeScale.DISPLAY.bytes(InventorySizeScale.DISPLAY.minimumMultiplier());
+
+	/**
+	 * The shared lower bound for every effective display ceiling, so other
+	 * ceiling owners never repeat an independent minimum.
+	 */
+	public static int minimumDisplayBytes() {
+		return MIN_DISPLAY_BYTES;
+	}
 
 	/**
 	 * Default catalogue variant cap. Finite and aligned with the 256-entry
@@ -100,12 +134,19 @@ public final class InventoryItemCodec {
 
 	private InventoryItemCodec() {}
 
-	/** Detached display value; {@code label} is a registry translation key. */
+	/**
+	 * Detached display value; {@code label} is a registry translation key. The
+	 * item id must be a non-blank inventory id within the established 256
+	 * UTF-8 byte bound, so a bounded bare fallback can never be oversized.
+	 */
 	public record Display(String itemId, String label, String displayJson, boolean componentsStripped) {
 		public Display {
 			Objects.requireNonNull(itemId, "itemId");
 			Objects.requireNonNull(label, "label");
 			Objects.requireNonNull(displayJson, "displayJson");
+			if (itemId.isBlank() || utf8Bytes(itemId) > MAX_ITEM_ID_BYTES) {
+				throw new IllegalArgumentException("inventory display item id");
+			}
 		}
 	}
 
@@ -145,24 +186,37 @@ public final class InventoryItemCodec {
 		private final HolderLookup.Provider registries;
 		private final int maxEntries;
 		private final long maxRetainedBytes;
+		/** Retained display ceiling; it is only ever lowered, never raised. */
+		private int displayBytes;
 		private final Map<String, byte[]> canonicalByDigest = new HashMap<>();
 		private final Set<String> conflicts = new HashSet<>();
 		private final Map<InventoryScanner.Key, Display> displays = new LinkedHashMap<>();
 		private long retainedBytes;
 
-		/** Uses the finite default entry and retained-byte guards. */
+		/** Uses the finite default entry and retained-byte guards and the default 4 KiB display cap. */
 		public Catalog(HolderLookup.Provider registries) {
-			this(registries, DEFAULT_MAX_ENTRIES, DEFAULT_MAX_RETAINED_BYTES);
+			this(registries, DEFAULT_MAX_ENTRIES, DEFAULT_MAX_RETAINED_BYTES, MAX_DISPLAY_BYTES);
+		}
+
+		/** Uses the finite default entry and retained-byte guards with a validated effective display cap. */
+		public Catalog(HolderLookup.Provider registries, int displayBytes) {
+			this(registries, DEFAULT_MAX_ENTRIES, DEFAULT_MAX_RETAINED_BYTES, displayBytes);
+		}
+
+		/** Uses the default 4 KiB display cap; kept for existing callers until the live cap is threaded. */
+		public Catalog(HolderLookup.Provider registries, int maxEntries, long maxRetainedBytes) {
+			this(registries, maxEntries, maxRetainedBytes, MAX_DISPLAY_BYTES);
 		}
 
 		/**
 		 * Caller-specified finite guards. {@code maxEntries} bounds both the
 		 * variant keys and the distinct component digests; {@code
 		 * maxRetainedBytes} bounds the retained canonical and display bytes
-		 * together. Unlimited is not a sentinel here: both guards are positive
-		 * finite numbers.
+		 * together; {@code displayBytes} is the validated effective display
+		 * projection cap. Unlimited is not a sentinel here: the guards are
+		 * positive finite numbers.
 		 */
-		public Catalog(HolderLookup.Provider registries, int maxEntries, long maxRetainedBytes) {
+		public Catalog(HolderLookup.Provider registries, int maxEntries, long maxRetainedBytes, int displayBytes) {
 			this.registries = Objects.requireNonNull(registries, "registries");
 			if (maxEntries < 1) throw new IllegalArgumentException("maxEntries must be positive");
 			if (maxRetainedBytes < 1) {
@@ -170,6 +224,7 @@ public final class InventoryItemCodec {
 			}
 			this.maxEntries = maxEntries;
 			this.maxRetainedBytes = maxRetainedBytes;
+			this.displayBytes = requireDisplayBytes(displayBytes);
 		}
 
 		/** Live read-only view; entries appear as stacks are encoded. */
@@ -180,6 +235,33 @@ public final class InventoryItemCodec {
 		/** Retained canonical plus display bytes; package-visible accounting. */
 		long retainedBytes() {
 			return retainedBytes;
+		}
+
+		/** The current retained display ceiling in bytes. */
+		public int displayBytes() {
+			return displayBytes;
+		}
+
+		/**
+		 * Lowers the retained display ceiling and reprojects every retained
+		 * display at the new cap, without recomputing variant keys or canonical
+		 * maps. A value at or above the current ceiling is ignored, so a later
+		 * configuration increase never expands already-retained metadata.
+		 */
+		public void tightenDisplay(int displayBytes) {
+			int ceiling = requireDisplayBytes(displayBytes);
+			if (ceiling >= this.displayBytes) return;
+			long refund = 0L;
+			for (Map.Entry<InventoryScanner.Key, Display> entry : displays.entrySet()) {
+				Display previous = entry.getValue();
+				Display tightened = reproject(previous, registries, ceiling);
+				if (!tightened.equals(previous)) {
+					refund += displayCharge(previous) - displayCharge(tightened);
+					entry.setValue(tightened);
+				}
+			}
+			this.displayBytes = ceiling;
+			retainedBytes -= refund;
 		}
 
 		public Encoded encode(ItemStack stack) {
@@ -193,7 +275,16 @@ public final class InventoryItemCodec {
 			byte[] canonical = canonicalComponents(registries, detached);
 			String componentsKey = digest(canonical);
 			InventoryScanner.Key key = new InventoryScanner.Key(itemId, componentsKey);
-			Display display = display(detached, registries);
+			Display retained = displays.get(key);
+			if (retained != null) {
+				// A known key keeps its retained projection: a later ceiling
+				// increase never expands already-retained metadata. The digest
+				// is still re-registered so a different payload under the same
+				// digest fails instead of merging.
+				registerCanonical(canonicalByDigest, conflicts, componentsKey, canonical);
+				return new Encoded(key, retained);
+			}
+			Display display = display(detached, registries, displayBytes);
 			retain(componentsKey, canonical, key, display);
 			return new Encoded(key, display);
 		}
@@ -365,49 +456,115 @@ public final class InventoryItemCodec {
 	}
 
 	/**
-	 * Bounded display projection. Identity is computed from the full component
-	 * set before this step; display-only components may be omitted to fit the
-	 * bound without changing identity. {@link Display#componentsStripped()} is
-	 * set only when the observed stack carried components, the size bound was
-	 * the observed cause, and every component was dropped; a naturally
-	 * componentless stack, a partial display omission, and an encoding failure
-	 * without size evidence all keep it false.
+	 * Bounded display projection at the default 4 KiB cap. Identity is computed
+	 * from the full component set before this step; display-only components may
+	 * be omitted to fit the bound without changing identity.
+	 * {@link Display#componentsStripped()} is set only when the observed stack
+	 * carried components, the size bound was the observed cause, and every
+	 * component was dropped; a naturally componentless stack, a partial display
+	 * omission, and an encoding failure without size evidence all keep it
+	 * false.
 	 */
 	static Display display(ItemStack stack, HolderLookup.Provider registries) {
 		Objects.requireNonNull(registries, "registries");
-		return display(stack, itemStack -> encodeDisplay(itemStack, registries));
+		return display(stack, itemStack -> encodeDisplay(itemStack, registries), MAX_DISPLAY_BYTES);
+	}
+
+	/** Bounded display projection at a validated effective display cap. */
+	static Display display(ItemStack stack, HolderLookup.Provider registries, int displayBytes) {
+		Objects.requireNonNull(registries, "registries");
+		return display(stack, itemStack -> encodeDisplay(itemStack, registries), displayBytes);
 	}
 
 	/** Encoder seam deciding the bounded projection and the fallback metadata. */
 	static Display display(ItemStack stack, Function<ItemStack, Optional<String>> encode) {
+		return display(stack, encode, MAX_DISPLAY_BYTES);
+	}
+
+	/** Encoder seam at a validated effective cap. */
+	static Display display(ItemStack stack, Function<ItemStack, Optional<String>> encode, int displayBytes) {
 		Objects.requireNonNull(stack, "stack");
 		Objects.requireNonNull(encode, "encode");
+		requireDisplayBytes(displayBytes);
 		String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
 		String label = stack.getDescriptionId();
 		ItemStack single = stack.copyWithCount(1);
 		boolean hadComponents = !single.getComponentsPatch().isEmpty();
 
 		Optional<String> full = encode.apply(single);
-		if (full.isPresent() && !exceedsDisplayBound(full.get())) {
+		if (full.isPresent() && !exceedsDisplayBound(full.get(), displayBytes)) {
 			return new Display(itemId, label, full.get(), false);
 		}
-		boolean sizeEvidence = full.isPresent() && exceedsDisplayBound(full.get());
+		boolean sizeEvidence = full.isPresent() && exceedsDisplayBound(full.get(), displayBytes);
 
 		ItemStack reduced = single.copy();
 		reduced.remove(DataComponents.CUSTOM_NAME);
 		reduced.remove(DataComponents.ITEM_NAME);
 		reduced.remove(DataComponents.LORE);
 		Optional<String> reducedJson = encode.apply(reduced);
-		if (reducedJson.isPresent() && !exceedsDisplayBound(reducedJson.get())) {
+		if (reducedJson.isPresent() && !exceedsDisplayBound(reducedJson.get(), displayBytes)) {
 			boolean allComponentsStripped = hadComponents && reduced.getComponentsPatch().isEmpty();
 			return new Display(itemId, label, reducedJson.get(), sizeEvidence && allComponentsStripped);
 		}
-		sizeEvidence |= reducedJson.isPresent() && exceedsDisplayBound(reducedJson.get());
+		sizeEvidence |= reducedJson.isPresent() && exceedsDisplayBound(reducedJson.get(), displayBytes);
 
 		String json = encode.apply(new ItemStack(stack.getItem()))
-			.filter(value -> !exceedsDisplayBound(value))
-			.orElseGet(() -> "{\"id\":\"" + itemId + "\"}");
+			.filter(value -> !exceedsDisplayBound(value, displayBytes))
+			.orElseGet(() -> bareJson(itemId, displayBytes));
 		return new Display(itemId, label, json, sizeEvidence && hadComponents);
+	}
+
+	/**
+	 * Re-projects one retained display at a validated effective cap using the
+	 * same bounded projection ladder as a fresh observation. A display that
+	 * already fits is returned unchanged. The retained JSON is decoded with the
+	 * real single-item codec and must describe the retained item id; a parse
+	 * failure or identity mismatch falls back to the bounded bare form without
+	 * inventing the component-too-long quality, while known size evidence is
+	 * preserved. No JSON key is deleted by hand: the ladder always runs through
+	 * the real item codec.
+	 */
+	public static Display reproject(Display retained, HolderLookup.Provider registries, int displayBytes) {
+		Objects.requireNonNull(retained, "retained");
+		Objects.requireNonNull(registries, "registries");
+		requireDisplayBytes(displayBytes);
+		if (utf8Bytes(retained.displayJson()) <= displayBytes) return retained;
+
+		Optional<ItemStack> parsed = decodeDisplay(retained.displayJson(), registries)
+			.filter(stack -> retained.itemId().equals(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString()));
+		if (parsed.isEmpty()) {
+			return new Display(retained.itemId(), retained.label(), bareJson(retained.itemId(), displayBytes),
+				retained.componentsStripped());
+		}
+
+		Display projected = display(parsed.get(), registries, displayBytes);
+		if (projected.componentsStripped() || !retained.componentsStripped()) return projected;
+		return new Display(projected.itemId(), projected.label(), projected.displayJson(), true);
+	}
+
+	private static Optional<ItemStack> decodeDisplay(String json, HolderLookup.Provider registries) {
+		try {
+			JsonElement element = JsonParser.parseString(json);
+			return ItemStack.SINGLE_ITEM_CODEC
+				.parse(registries.createSerializationContext(JsonOps.INSTANCE), element)
+				.result()
+				.filter(stack -> !stack.isEmpty());
+		} catch (RuntimeException malformed) {
+			return Optional.empty();
+		}
+	}
+
+	/**
+	 * The bounded bare projection. It is the final fallback of both the fresh
+	 * and the re-projection ladder, so it must fit the admitted cap or be
+	 * rejected; it never returns an oversized form.
+	 */
+	private static String bareJson(String itemId, int displayBytes) {
+		String bare = "{\"id\":\"" + itemId + "\"}";
+		if (utf8Bytes(bare) > displayBytes) {
+			throw new IllegalArgumentException("inventory display cannot be projected within the cap");
+		}
+		return bare;
 	}
 
 	private static Optional<String> encodeDisplay(ItemStack stack, HolderLookup.Provider registries) {
@@ -416,8 +573,21 @@ public final class InventoryItemCodec {
 		return encoded.result().map(JsonElement::toString);
 	}
 
-	private static boolean exceedsDisplayBound(String json) {
-		return utf8Bytes(json) > MAX_DISPLAY_BYTES;
+	/**
+	 * The one validated effective display cap range: the display scale's
+	 * smallest legal cap through the absolute display budget. Any byte cap in
+	 * that range is accepted; the confirmed configuration grid stays enforced
+	 * by its own owner.
+	 */
+	private static int requireDisplayBytes(int displayBytes) {
+		if (displayBytes < MIN_DISPLAY_BYTES || displayBytes > InventoryLimits.MAX_DISPLAY_BYTES) {
+			throw new IllegalArgumentException("display byte cap is out of range");
+		}
+		return displayBytes;
+	}
+
+	private static boolean exceedsDisplayBound(String json, int displayBytes) {
+		return utf8Bytes(json) > displayBytes;
 	}
 
 	private static long displayCharge(Display display) {

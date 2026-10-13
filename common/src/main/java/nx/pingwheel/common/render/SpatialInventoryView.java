@@ -65,13 +65,22 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 		}
 	}
 
-	/** Null count is missing, not zero. No display count is created by the renderer. */
-	public record Row(String key, String label, Long count, String itemId, Status quality) {
+	/**
+	 * Null count is missing, not zero. No display count is created by the
+	 * renderer. {@code displayJson} is the immutable server-bounded encoded
+	 * display value; null keeps the native registry-name fallback.
+	 */
+	public record Row(String key, String label, Long count, String itemId, String displayJson, Status quality) {
 
 		public Row {
 			Objects.requireNonNull(key, "key");
 			Objects.requireNonNull(label, "label");
 			Objects.requireNonNull(quality, "quality");
+		}
+
+		/** Compatibility form without encoded display data. */
+		public Row(String key, String label, Long count, String itemId, Status quality) {
+			this(key, label, count, itemId, null, quality);
 		}
 	}
 

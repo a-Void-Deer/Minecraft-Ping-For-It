@@ -2,7 +2,7 @@ package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
 
-/** Canonical non-negative v2 administration numbers, checked before any narrowing shift. */
+/** Canonical non-negative server-configuration administration numbers, checked before any narrowing shift. */
 final class ServerConfigVarNumbers {
 	private ServerConfigVarNumbers() {}
 

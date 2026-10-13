@@ -32,6 +32,7 @@ import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.ChestType;
+import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.integration.externalblock.BlockReadSource;
@@ -110,23 +111,43 @@ public final class InventoryMinecraftSources {
 		catch (RuntimeException | LinkageError unavailable) { return false; }
 	}
 
+	/** The one validated effective display cap range; every catalogue and snapshot ceiling passes here. */
+	static int requireDisplayBytes(int displayBytes) {
+		if (displayBytes < InventoryItemCodec.minimumDisplayBytes() || displayBytes > InventoryLimits.MAX_DISPLAY_BYTES)
+			throw new IllegalArgumentException("display byte cap is out of range");
+		return displayBytes;
+	}
+
+	/** Existing callers keep the backward-compatible default 4 KiB display projection. */
 	public static Optional<InventorySourceAccess.Source> resolve(MinecraftServer server, InventorySourceInput input) {
+		return resolve(server, input, InventoryItemCodec.MAX_DISPLAY_BYTES);
+	}
+
+	/**
+	 * New live and snapshot observations build their variant catalogue at the
+	 * authoritative effective display ceiling. The ceiling is a validated
+	 * caller-supplied value, never a global static or client preference.
+	 */
+	public static Optional<InventorySourceAccess.Source> resolve(MinecraftServer server, InventorySourceInput input, int displayBytes) {
 		if (!server.isSameThread()) return Optional.empty();
+		requireDisplayBytes(displayBytes);
 		var dimension = ResourceLocation.tryParse(input.target().dimensionId());
 		ServerLevel level = dimension == null ? null : server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
 		ServerPlayer owner = server.getPlayerList().getPlayer(input.readOwner());
 		if (level == null || owner == null) return Optional.empty();
 		try {
 			Supplier<ServerPlayer> ownerSupplier = () -> server.getPlayerList().getPlayer(input.readOwner());
-			var catalog = new InventoryItemCodec.Catalog(level.registryAccess());
+			var catalog = new InventoryItemCodec.Catalog(level.registryAccess(), displayBytes);
 			Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec = entry -> item(catalog, entry);
 			if (input.target() instanceof Target.ExternalBlockTarget external) {
-				return resolveExternal(input, () -> bindExternal(server, ownerSupplier, external), server::isSameThread, codec);
+				return resolveExternal(input, () -> bindExternal(server, ownerSupplier, external), server::isSameThread, codec,
+					displayBytes, catalog::tightenDisplay);
 			}
 			ServerWorld world = new ServerWorld(level, ownerSupplier);
 			ProviderAccessLookup providers = (pos, face) -> IPlatformInventoryService.INSTANCE.find(level, pos, face);
 			View view = view(world, input, providers);
-			return Optional.of(new Source(input, view, server::isSameThread, () -> view(world, input, providers), codec, world, null));
+			return Optional.of(new Source(input, view, server::isSameThread, () -> view(world, input, providers), codec, world, null,
+				displayBytes, catalog::tightenDisplay));
 		} catch (RuntimeException | LinkageError unavailable) { return Optional.empty(); }
 	}
 
@@ -151,12 +172,20 @@ public final class InventoryMinecraftSources {
 	static Optional<InventorySourceAccess.Source> resolveExternal(InventorySourceInput input,
 		ExternalBindingResolver bindings, BooleanSupplier onThread,
 		Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec) {
+		return resolveExternal(input, bindings, onThread, codec, InventoryItemCodec.MAX_DISPLAY_BYTES, ignored -> {});
+	}
+
+	static Optional<InventorySourceAccess.Source> resolveExternal(InventorySourceInput input,
+		ExternalBindingResolver bindings, BooleanSupplier onThread,
+		Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
+		int displayBytes, java.util.function.IntConsumer tightenDisplay) {
 		if (!(input.target() instanceof Target.ExternalBlockTarget) || !onThread.getAsBoolean()) return Optional.empty();
+		requireDisplayBytes(displayBytes);
 		try {
 			ExternalBinding first = bindings.resolve().orElse(null);
 			if (first == null || !InventorySourceInput.sameBinding(input.target(), first.descriptor().target())) return Optional.empty();
 			View view = view(first.world(), input, new PhysicalRead(first.descriptor().blockTarget(), input.face(), first::contains), first.providers());
-			return Optional.of(new ExternalSource(input, first, bindings, onThread, codec, view));
+			return Optional.of(new ExternalSource(input, first, bindings, onThread, codec, view, displayBytes, tightenDisplay));
 		} catch (RuntimeException | LinkageError unavailable) { return Optional.empty(); }
 	}
 
@@ -309,6 +338,8 @@ public final class InventoryMinecraftSources {
 		private final Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture;
 		private final int originalSlots;
 		private final boolean originalStableCursor;
+		private final java.util.function.IntConsumer tightenDisplay;
+		private int displayBytes;
 		private IPlatformInventoryService.Access liveAccess;
 		private boolean closed;
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
@@ -324,11 +355,28 @@ public final class InventoryMinecraftSources {
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
 			SourceWorld world, Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture) {
+			this(input, original, onThread, liveView, codec, world, testSnapshotCapture,
+				InventoryItemCodec.MAX_DISPLAY_BYTES, ignored -> {});
+		}
+		/** Production seam: the catalogue ceiling and its monotone tightening hook are caller-owned. */
+		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
+			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
+			SourceWorld world, Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture,
+			int displayBytes, java.util.function.IntConsumer tightenDisplay) {
 			this.input = input; this.original = original; this.onThread = onThread; this.liveView = liveView; this.codec = codec;
 			this.world = world; this.testSnapshotCapture = testSnapshotCapture;
+			this.displayBytes = requireDisplayBytes(displayBytes);
+			this.tightenDisplay = Objects.requireNonNull(tightenDisplay, "tightenDisplay");
 			originalSlots = original.access == null ? original.slots.size() : original.access.slots();
 			originalStableCursor = original.access == null || original.access.stableCursor();
 			liveAccess = original.access;
+		}
+		@Override public int displayBytes() { return displayBytes; }
+		@Override public void tightenDisplay(int displayBytes) {
+			int ceiling = requireDisplayBytes(displayBytes);
+			if (ceiling >= this.displayBytes) return;
+			this.displayBytes = ceiling;
+			tightenDisplay.accept(ceiling);
 		}
 		@Override public SourceKey key() { return new SourceKey(original.access == null ? "minecraft" : "pingforit", "block_inventory", original.identity, input.viewKey()); }
 		@Override public boolean valid() {
@@ -364,7 +412,7 @@ public final class InventoryMinecraftSources {
 					if (testSnapshotCapture != null) return testSnapshotCapture.get();
 					if (world == null) return Optional.empty();
 					return captureNbt(input, new PhysicalRead(input.ordinaryTarget().orElseThrow(), input.face(), ignored -> true),
-						original, world, Source.this::valid, upperBound);
+						original, world, Source.this::valid, upperBound, displayBytes);
 				}
 			});
 		}
@@ -391,7 +439,7 @@ public final class InventoryMinecraftSources {
 	 * member is gated before its state, block entity, capability or content read.
 	 */
 	static Optional<InventorySourceAccess.InventorySnapshot> captureNbt(InventorySourceInput input, PhysicalRead physical,
-		View view, SourceWorld world, BooleanSupplier valid, long upperBound) {
+		View view, SourceWorld world, BooleanSupplier valid, long upperBound, int displayBytes) {
 		InventorySnapshotLayout layout = view.snapshotLayout;
 		if (world == null || layout == null) return Optional.empty();
 		if (!world.onServerThread()) throw new IllegalStateException("snapshot owner or server thread unavailable");
@@ -436,7 +484,7 @@ public final class InventoryMinecraftSources {
 		List<BlockEntity> afterSave = precheckMembers(layout, world, physical.memberGate());
 		if (!members.equals(afterSave) || !valid.getAsBoolean()) throw new IllegalStateException("snapshot source topology changed during save");
 		return Optional.of(InventoryNbtSnapshot.create(layout,
-			new BlockPos(physical.position().x(), physical.position().y(), physical.position().z()), payloads, world.registries(), upperBound));
+			new BlockPos(physical.position().x(), physical.position().y(), physical.position().z()), payloads, world.registries(), upperBound, displayBytes));
 	}
 
 	private static List<BlockEntity> precheckMembers(InventorySnapshotLayout layout, SourceWorld world, Predicate<BlockPos> memberGate) {
@@ -517,10 +565,13 @@ public final class InventoryMinecraftSources {
 		private final int slots;
 		private final boolean stableCursor;
 		private final boolean capability;
+		private final java.util.function.IntConsumer tightenDisplay;
+		private int displayBytes;
 		private boolean closed;
 
 		ExternalSource(InventorySourceInput input, ExternalBinding first, ExternalBindingResolver bindings,
-			BooleanSupplier onThread, Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec, View view) {
+			BooleanSupplier onThread, Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec, View view,
+			int displayBytes, java.util.function.IntConsumer tightenDisplay) {
 			this.input = input;
 			this.descriptor = first.descriptor();
 			this.bindings = bindings;
@@ -533,7 +584,16 @@ public final class InventoryMinecraftSources {
 			this.slots = view.access == null ? view.slots.size() : view.access.slots();
 			this.stableCursor = view.access == null || view.access.stableCursor();
 			this.capability = view.access != null;
+			this.displayBytes = requireDisplayBytes(displayBytes);
+			this.tightenDisplay = Objects.requireNonNull(tightenDisplay, "tightenDisplay");
 			requireMembers(new Current(first, view));
+		}
+		@Override public int displayBytes() { return displayBytes; }
+		@Override public void tightenDisplay(int displayBytes) {
+			int ceiling = requireDisplayBytes(displayBytes);
+			if (ceiling >= this.displayBytes) return;
+			this.displayBytes = ceiling;
+			tightenDisplay.accept(ceiling);
 		}
 
 		/** Provider-confirmed sub-level scope plus the canonical alias; never the raw locator. */
@@ -597,7 +657,7 @@ public final class InventoryMinecraftSources {
 					Current current = current();
 					BlockReadSource live = current.binding().descriptor();
 					return captureNbt(input, new PhysicalRead(live.blockTarget(), input.face(), current.binding()::contains),
-						current.view(), current.binding().world(), ExternalSource.this::valid, upperBound);
+						current.view(), current.binding().world(), ExternalSource.this::valid, upperBound, displayBytes);
 				}
 			});
 		}

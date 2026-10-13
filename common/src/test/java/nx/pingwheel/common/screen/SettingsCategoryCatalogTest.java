@@ -1,5 +1,6 @@
 package nx.pingwheel.common.screen;
 
+import nx.pingwheel.common.config.InventoryConfigValues.Field;
 import nx.pingwheel.common.screen.SettingsCategoryCatalog.Setting;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 import org.junit.jupiter.api.Test;
@@ -88,8 +89,37 @@ class SettingsCategoryCatalogTest {
 	@Test
 	void performanceExposesEveryInventoryLeafExactlyOnceInServerScopeOnly() {
 		var performance = SettingsCategoryCatalog.settings(Category.PERFORMANCE);
-		assertEquals(java.util.Arrays.asList(nx.pingwheel.common.config.InventoryConfigValues.Field.values()),
-			performance.stream().map(Setting::inventoryField).toList());
+		// The shared inventory budgets subgroup is declared before the preview
+		// and tracking subgroups, and the display/frame size sliders sit with
+		// the other shared budgets rather than at the end of the catalogue.
+		assertEquals(List.of(
+			Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK,
+			Setting.INVENTORY_PENDING_MEMORY_MIB,
+			Setting.INVENTORY_DISPLAY_BYTE_MULTIPLIER,
+			Setting.INVENTORY_FRAME_BYTE_MULTIPLIER,
+			Setting.INVENTORY_PREVIEW_PERIOD_TICKS,
+			Setting.INVENTORY_PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD,
+			Setting.INVENTORY_PREVIEW_MAX_SLOTS_PER_CLIENT,
+			Setting.INVENTORY_PREVIEW_MAX_SLOTS_SERVER,
+			Setting.INVENTORY_PREVIEW_MAX_TARGETS_PER_CLIENT,
+			Setting.INVENTORY_PREVIEW_CLIENT_BYTE_MULTIPLIER,
+			Setting.INVENTORY_PREVIEW_GLOBAL_BYTE_MULTIPLIER,
+			Setting.INVENTORY_TRACKING_PERIOD_TICKS,
+			Setting.INVENTORY_TRACKING_MAX_VARIANTS_PER_TARGET,
+			Setting.INVENTORY_TRACKING_MAX_SLOTS_PER_TARGET,
+			Setting.INVENTORY_TRACKING_MAX_SLOTS_SERVER,
+			Setting.INVENTORY_TRACKING_STREAM_BYTE_MULTIPLIER,
+			Setting.INVENTORY_TRACKING_SNAPSHOT_BYTE_MULTIPLIER,
+			Setting.INVENTORY_TRACKING_GLOBAL_BYTE_MULTIPLIER,
+			Setting.INVENTORY_TRACKING_RESYNC_MIN_PERIODS,
+			Setting.INVENTORY_TRACKING_HEARTBEAT_PERIODS,
+			Setting.INVENTORY_TRACKING_GRACE_PERIODS),
+			performance);
+		var covered = EnumSet.noneOf(Field.class);
+		for (Setting setting : performance) {
+			covered.add(setting.inventoryField());
+		}
+		assertEquals(EnumSet.allOf(Field.class), covered);
 		for (Category category : Category.values()) {
 			if (category != Category.PERFORMANCE) {
 				assertEquals(0, SettingsCategoryCatalog.settings(category).stream()

@@ -40,6 +40,8 @@ public record ServerConfigUpdate(
 	public static final int INVENTORY_TRACKING_RESYNC_MIN_PERIODS = InventoryConfigValues.Field.TRACKING_RESYNC_MIN_PERIODS.mask();
 	public static final int INVENTORY_TRACKING_HEARTBEAT_PERIODS = InventoryConfigValues.Field.TRACKING_HEARTBEAT_PERIODS.mask();
 	public static final int INVENTORY_TRACKING_GRACE_PERIODS = InventoryConfigValues.Field.TRACKING_GRACE_PERIODS.mask();
+	public static final int INVENTORY_DISPLAY_BYTE_MULTIPLIER = InventoryConfigValues.Field.DISPLAY_BYTE_MULTIPLIER.mask();
+	public static final int INVENTORY_FRAME_BYTE_MULTIPLIER = InventoryConfigValues.Field.FRAME_BYTE_MULTIPLIER.mask();
 	public static final int ALL_INVENTORY_FIELDS = InventoryConfigValues.allFieldMask();
 	public static final int ALL_FIELDS = DEFAULT_CHANNEL_MODE
 		| PLAYER_TRACKING_ENABLED
@@ -114,14 +116,30 @@ public record ServerConfigUpdate(
 	/**
 	 * Applies only the fields selected by the bitmask.  Untouched fields come
 	 * from the authoritative snapshot, so concurrent edits to another field are
-	 * preserved.
+	 * preserved.  A rejected update is returned as the unchanged current
+	 * snapshot; callers that must distinguish rejection use {@link #appliedTo}.
 	 */
 	public ServerConfigSnapshot applyTo(ServerConfigSnapshot current) {
+		return appliedTo(current).orElse(current);
+	}
+
+	/**
+	 * Applies only the fields selected by the bitmask and then validates the
+	 * merged display/frame size pair against the current authoritative values.
+	 * An invalid merged pair is rejected atomically: no unselected leaf is
+	 * adjusted and no assignment is produced.
+	 */
+	public Optional<ServerConfigSnapshot> appliedTo(ServerConfigSnapshot current) {
 		if (!isValid() || current == null || !current.isSafe()) {
-			return current;
+			return Optional.empty();
 		}
 
-		return new ServerConfigSnapshot(
+		var mergedInventory = current.inventory().merge(changedFields, inventory);
+		if (!mergedInventory.isSizePairCompatible()) {
+			return Optional.empty();
+		}
+
+		return Optional.of(new ServerConfigSnapshot(
 			current.canEdit(),
 			(changedFields & DEFAULT_CHANNEL_MODE) != 0 ? defaultChannelMode : current.defaultChannelMode(),
 			(changedFields & PLAYER_TRACKING_ENABLED) != 0 ? playerTrackingEnabled : current.playerTrackingEnabled(),
@@ -130,6 +148,6 @@ public record ServerConfigUpdate(
 			(changedFields & SYNC_DURATION) != 0
 				? ServerConfigBounds.clampSyncDuration(syncDuration)
 				: current.syncDuration(),
-			current.inventory().merge(changedFields, inventory));
+			mergedInventory));
 	}
 }

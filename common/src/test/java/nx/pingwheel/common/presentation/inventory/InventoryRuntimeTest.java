@@ -10,6 +10,7 @@ import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import org.junit.jupiter.api.Test;
@@ -826,5 +827,274 @@ class InventoryRuntimeTest {
 			fast.close(); slow.close(); assertEquals(2, closes.get()); assertEquals(1024, runtime.memory().retained());
 		}
 		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@Test void authoritativeCapThreadsIntoNewObservationsAndLoweringReprojectsRetainedMetadataMonotonically() {
+		var settings = InventorySettings.serverDefaults();
+		settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(8)); // 32 KiB display scale
+		var owner = new UUID(20, 20);
+		var resolvedCaps = new java.util.ArrayList<Integer>();
+		var bigJson = "{\"id\":\"minecraft:stone\",\"components\":{\"minecraft:custom_data\":{\"p\":\"" + "x".repeat(6000) + "\"}}}";
+		var items = List.of(
+			new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "big"), 3, "stone", bigJson, false),
+			new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:dirt", "plain"), 1, "dirt", null, false));
+		var reprojections = new AtomicInteger();
+		InventoryRuntime.DisplayReprojector port = (retained, displayBytes) -> {
+			reprojections.incrementAndGet();
+			assertEquals(4096, displayBytes);
+			assertEquals("minecraft:stone", retained.itemId());
+			assertEquals("stone", retained.label());
+			return new InventoryItemCodec.Display(retained.itemId(), retained.label(), "{\"id\":\"minecraft:stone\"}", true);
+		};
+		try (var runtime = new InventoryRuntime((input, displayBytes) -> {
+			resolvedCaps.add(displayBytes);
+			return Optional.of(new Source(input, new AtomicInteger(), 2) {
+				@Override public InventoryDomainCodec.Item read(int slot) { return items.get(slot); }
+			});
+		}, 16_000_000, port)) {
+			runtime.advance(0, settings);
+			var a = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			var b = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			var c = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			var first = runtime.step(a).orElseThrow();
+			assertEquals(List.of(32768), resolvedCaps, "new observations receive the authoritative effective cap");
+			assertEquals(bigJson, first.slots().get(0).displayJson(), "a configured higher cap preserves component JSON above 4 KiB");
+			assertEquals(0, reprojections.get());
+			settings.setDisplayByteMultiplier(java.math.BigDecimal.ONE); runtime.advance(1, settings);
+			var lowered = runtime.reprojectDisplays(a, (int) settings.effectiveDisplayBytes());
+			assertEquals(InventoryRuntime.ReprojectionStatus.COMPLETED, lowered.status());
+			assertEquals(List.of(new InventoryScanner.Key("minecraft:stone", "big")), lowered.changedKeys());
+			assertEquals(List.of("minecraft:stone"), lowered.foldIds(), "complete stripping is reported as fold need, not folded locally");
+			assertEquals(1, reprojections.get());
+			var tightened = runtime.step(b).orElseThrow();
+			assertEquals("{\"id\":\"minecraft:stone\"}", tightened.slots().get(0).displayJson());
+			assertEquals(new InventoryScanner.Key("minecraft:stone", "big"), tightened.slots().get(0).key(), "tightening never recomputes identity");
+			assertEquals(3L, tightened.slots().get(0).count());
+			assertEquals("stone", tightened.slots().get(0).label());
+			assertTrue(tightened.slots().get(0).stripped());
+			int before = reprojections.get();
+			assertEquals(InventoryRuntime.ReprojectionStatus.UNCHANGED, runtime.reprojectDisplays(a, 4096).status(), "the same cap is a no-op");
+			assertEquals(before, reprojections.get(), "repeated same cap does no extra work");
+			settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(8)); runtime.advance(2, settings);
+			assertEquals(InventoryRuntime.ReprojectionStatus.UNCHANGED, runtime.reprojectDisplays(a, 32768).status(), "an increase is ignored");
+			var afterRaise = runtime.step(c).orElseThrow();
+			assertEquals("{\"id\":\"minecraft:stone\"}", afterRaise.slots().get(0).displayJson(), "raising the cap never resurrects old omitted components");
+			assertEquals(3L, afterRaise.slots().get(0).count());
+			assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void reprojectionMemoryDeferKeepsCursorAndLeavesNoTicketsOrProgressLoss() {
+		var settings = InventorySettings.serverDefaults();
+		settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(8));
+		var owner = new UUID(21, 21);
+		var bigJson = "d".repeat(6000);
+		var items = List.of(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "big"), 5, "stone", bigJson, false));
+		var portCalls = new AtomicInteger();
+		InventoryRuntime.DisplayReprojector port = (retained, displayBytes) -> {
+			portCalls.incrementAndGet();
+			return new InventoryItemCodec.Display(retained.itemId(), retained.label(), "{\"id\":\"" + retained.itemId() + "\"}", retained.componentsStripped());
+		};
+		try (var runtime = new InventoryRuntime((input, displayBytes) -> Optional.of(new Source(input, new AtomicInteger(), 1) {
+			@Override public InventoryDomainCodec.Item read(int slot) { return items.get(slot); }
+		}), 16_000_000, port)) {
+			runtime.advance(0, settings);
+			var consumer = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			assertEquals(bigJson, runtime.step(consumer).orElseThrow().slots().get(0).displayJson());
+			settings.setDisplayByteMultiplier(java.math.BigDecimal.ONE); runtime.advance(1, settings);
+			long held = runtime.memory().remaining() - 2048;
+			var pin = runtime.memory().tryReserve(held).orElseThrow();
+			var deferred = runtime.reprojectDisplays(consumer, 4096);
+			assertEquals(InventoryRuntime.ReprojectionStatus.DEFERRED, deferred.status());
+			assertEquals(0, portCalls.get(), "memory admission precedes any decode or allocation");
+			assertEquals(held, runtime.memory().reserved(), "a denied tightening holds no extra ticket");
+			assertTrue(deferred.changedKeys().isEmpty());
+			pin.close();
+			assertEquals(0, runtime.memory().reserved());
+			var completed = runtime.reprojectDisplays(consumer, 4096);
+			assertEquals(InventoryRuntime.ReprojectionStatus.COMPLETED, completed.status());
+			assertEquals(1, completed.changedKeys().size());
+			assertEquals(1, portCalls.get(), "the deferred batch is retried once, without losing progress");
+			assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void invalidRequestedDisplayCapNormalizesIntoTheBoundedRange() {
+		assertEquals(1024, InventoryItemCodec.minimumDisplayBytes(), "the legal effective minimum is the 1 KiB display cap");
+		var settings = InventorySettings.serverDefaults();
+		var owner = new UUID(22, 22);
+		var tightenedCaps = new java.util.ArrayList<Integer>();
+		try (var runtime = new InventoryRuntime((input, displayBytes) -> Optional.of(new Source(input, new AtomicInteger(), 1) {
+			@Override public void tightenDisplay(int displayBytes) { tightenedCaps.add(displayBytes); }
+		}), 16_000_000)) {
+			runtime.advance(0, settings);
+			var consumer = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			runtime.step(consumer).orElseThrow();
+			var belowMinimum = runtime.reprojectDisplays(consumer, 1023);
+			assertEquals(1024, belowMinimum.displayBytes(),
+				"a requested cap below the legal minimum normalizes to the minimum instead of reaching the source");
+			assertEquals(InventoryRuntime.ReprojectionStatus.COMPLETED, belowMinimum.status());
+			var aboveMaximum = runtime.reprojectDisplays(consumer, InventoryDomainCodec.MAX_DISPLAY_BYTES + 1);
+			assertEquals(InventoryDomainCodec.MAX_DISPLAY_BYTES, aboveMaximum.displayBytes(),
+				"a requested cap above the absolute bound normalizes to the bound");
+			assertEquals(InventoryRuntime.ReprojectionStatus.UNCHANGED, aboveMaximum.status(),
+				"normalizing upward never raises retained metadata");
+			assertEquals(List.of(1024), tightenedCaps, "only the normalized tightening reaches the source");
+		}
+	}
+	/** Distinct variant keys whose display JSON exceeds the default 4 KiB cap. */
+	static List<InventoryDomainCodec.Item> bigItems(int slots, String displayJson) {
+		var items = new java.util.ArrayList<InventoryDomainCodec.Item>();
+		for (int index = 0; index < slots; index++)
+			items.add(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "variant-" + index), 1, "stone", displayJson, false));
+		return items;
+	}
+	/** Live source whose read result honors the display cap its resolver received, like a real catalogue. */
+	static class CappedSource extends Source {
+		final List<InventoryDomainCodec.Item> items;
+		int cap;
+		CappedSource(InventorySourceInput input, List<InventoryDomainCodec.Item> items, int cap) {
+			super(input, new AtomicInteger(), items.size());
+			this.items = items; this.cap = cap;
+		}
+		@Override public InventoryDomainCodec.Item read(int slot) {
+			var item = items.get(slot);
+			return item.displayJson().getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= cap ? item
+				: new InventoryDomainCodec.Item(item.key(), item.count(), item.label(), "{\"id\":\"" + item.key().itemId() + "\"}", true);
+		}
+		@Override public int displayBytes() { return cap; }
+		@Override public void tightenDisplay(int displayBytes) { if (displayBytes < cap) cap = displayBytes; }
+	}
+	@Test void releasedCompletedSweepEndsItsDeferredTighteningPassAndKeepsTheCumulativeSummary() {
+		var settings = InventorySettings.serverDefaults();
+		settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(8)); // 32 KiB display scale
+		var owner = new UUID(23, 23);
+		int slots = 100;
+		var bigJson = "{\"id\":\"minecraft:stone\",\"components\":{\"minecraft:custom_data\":{\"p\":\"" + "x".repeat(8000) + "\"}}}";
+		var items = bigItems(slots, bigJson);
+		var reprojections = new AtomicInteger();
+		InventoryRuntime.DisplayReprojector port = (retained, displayBytes) -> {
+			reprojections.incrementAndGet();
+			return new InventoryItemCodec.Display(retained.itemId(), retained.label(), "{\"id\":\"" + retained.itemId() + "\"}", true);
+		};
+		try (var runtime = new InventoryRuntime((input, displayBytes) -> Optional.of(new CappedSource(input, items, displayBytes)),
+			16_000_000, port)) {
+			runtime.advance(0, settings);
+			var consumer = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+			int observed = 0;
+			for (int call = 0; call < 2; call++) observed += runtime.step(consumer).orElseThrow().slots().size();
+			assertEquals(slots, observed);
+			consumer.retainCompleted();
+			settings.setDisplayByteMultiplier(java.math.BigDecimal.ONE); runtime.advance(1, settings);
+			var deferred = runtime.reprojectDisplays(consumer, 4096);
+			assertEquals(InventoryRuntime.ReprojectionStatus.DEFERRED, deferred.status(), "a retained page larger than one bounded batch defers");
+			assertFalse(deferred.changedKeys().isEmpty());
+			assertTrue(deferred.changedKeys().size() < slots, "the deferred pass reports only the batch it already walked");
+			assertEquals(0, runtime.memory().reserved(), "a deferred batch holds no workspace ticket");
+			consumer.restart(); // the last scanner releases decoded pages; the completed evidence stays
+			assertEquals(Optional.of(true), runtime.probe(consumer), "completed evidence stays serviceable after its pages are released");
+			assertEquals(0, runtime.memory().reserved());
+			int before = reprojections.get();
+			var resumed = assertDoesNotThrow(() -> runtime.reprojectDisplays(consumer, 4096), "a released page never resumes a stale walk");
+			assertNotEquals(InventoryRuntime.ReprojectionStatus.DEFERRED, resumed.status());
+			assertTrue(resumed.changedKeys().containsAll(deferred.changedKeys()), "the cumulative change summary survives the release");
+			assertTrue(resumed.foldIds().containsAll(deferred.foldIds()), "the cumulative fold summary survives the release");
+			assertEquals(before, reprojections.get(), "a released page performs no further reprojection");
+			runtime.advance(2, settings);
+			int fresh = 0;
+			for (int call = 0; call < 2; call++) fresh += runtime.step(consumer).orElseThrow().slots().size();
+			assertEquals(slots, fresh);
+			var continuation = runtime.reprojectDisplays(consumer, 4096);
+			assertNotEquals(InventoryRuntime.ReprojectionStatus.DEFERRED, continuation.status());
+			assertTrue(continuation.changedKeys().containsAll(deferred.changedKeys()), "a new observation keeps the earlier cumulative summary");
+			assertTrue(continuation.foldIds().containsAll(deferred.foldIds()));
+			assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void aTighterCeilingMidPassRestartsTheWalkFromTheFirstRetainedSlot() {
+		var settings = InventorySettings.serverDefaults();
+		settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(8)); // 32 KiB display scale
+		var owner = new UUID(24, 24);
+		int slots = 70;
+		var bigJson = "{\"id\":\"minecraft:stone\",\"components\":{\"minecraft:custom_data\":{\"p\":\"" + "x".repeat(9000) + "\"}}}";
+		var projectedJson = "{\"id\":\"minecraft:stone\",\"p\":\"" + "y".repeat(6000) + "\"}";
+		var items = bigItems(slots, bigJson);
+		var retainedJson = new java.util.ArrayList<String>();
+		InventoryRuntime.DisplayReprojector port = (retained, displayBytes) -> {
+			retainedJson.add(retained.displayJson());
+			return new InventoryItemCodec.Display(retained.itemId(), retained.label(), projectedJson, retained.componentsStripped());
+		};
+		try (var runtime = new InventoryRuntime((input, displayBytes) -> Optional.of(new Source(input, new AtomicInteger(), slots) {
+			@Override public InventoryDomainCodec.Item read(int slot) { return items.get(slot); }
+		}), 16_000_000, port)) {
+			runtime.advance(0, settings);
+			var consumer = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+			int observed = 0;
+			for (int call = 0; call < 2; call++) observed += runtime.step(consumer).orElseThrow().slots().size();
+			assertEquals(slots, observed);
+			settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(2)); runtime.advance(1, settings); // 8 KiB
+			var first = runtime.reprojectDisplays(consumer, 8192);
+			assertFalse(first.changedKeys().isEmpty(), "the first tightening reprojects retained displays");
+			settings.setDisplayByteMultiplier(java.math.BigDecimal.ONE); runtime.advance(2, settings); // 4 KiB, tighter mid-pass
+			retainedJson.clear();
+			var outcome = runtime.reprojectDisplays(consumer, 4096);
+			assertFalse(retainedJson.isEmpty(), "a tighter ceiling restarts the walk over earlier slots");
+			assertEquals(projectedJson, retainedJson.getFirst(), "the restarted walk starts at the first retained slot, never a stale cursor");
+			for (int call = 0; outcome.status() == InventoryRuntime.ReprojectionStatus.DEFERRED && call < slots; call++)
+				outcome = runtime.reprojectDisplays(consumer, 4096);
+			assertNotEquals(InventoryRuntime.ReprojectionStatus.DEFERRED, outcome.status());
+			assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void tighteningKeepsTheRetainedEncodedPageChargedUntilTheRoundIsReleased() {
+		var settings = InventorySettings.serverDefaults();
+		settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(8)); // 32 KiB display scale
+		var owner = new UUID(25, 25);
+		var bigJson = "{\"id\":\"minecraft:stone\",\"components\":{\"minecraft:custom_data\":{\"p\":\"" + "x".repeat(12000) + "\"}}}";
+		var big = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "big"), 3, "stone", bigJson, false);
+		long encoded = InventoryDomainCodec.encode(big).size();
+		InventoryRuntime.DisplayReprojector port = (retained, displayBytes) ->
+			new InventoryItemCodec.Display(retained.itemId(), retained.label(), "{\"id\":\"" + retained.itemId() + "\"}", true);
+		try (var runtime = new InventoryRuntime((input, displayBytes) -> Optional.of(new Source(input, new AtomicInteger(), 1) {
+			@Override public InventoryDomainCodec.Item read(int slot) { return big; }
+		}), 16_000_000, port)) {
+			runtime.advance(0, settings);
+			var consumer = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			assertEquals(1, runtime.step(consumer).orElseThrow().slots().size());
+			long chargedWithPage = runtime.memory().retained();
+			settings.setDisplayByteMultiplier(java.math.BigDecimal.ONE); runtime.advance(1, settings);
+			var lowered = runtime.reprojectDisplays(consumer, 4096);
+			assertEquals(InventoryRuntime.ReprojectionStatus.COMPLETED, lowered.status());
+			long chargedAfterTightening = runtime.memory().retained();
+			assertTrue(chargedWithPage - chargedAfterTightening < encoded,
+				"the encoded page stays charged while round.last retains it; tightening refunds only the decoded display");
+			assertEquals(0, runtime.memory().reserved());
+			consumer.close();
+			assertEquals(1024, runtime.memory().retained(), "releasing the round drops the retained payload with its ticket");
+			assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void closingAConsumerWithADeferredTighteningPassLeavesNoWorkspaceAndRejectsLaterWork() {
+		var settings = InventorySettings.serverDefaults();
+		settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(8)); // 32 KiB display scale
+		var owner = new UUID(26, 26);
+		int slots = 70;
+		var bigJson = "{\"id\":\"minecraft:stone\",\"components\":{\"minecraft:custom_data\":{\"p\":\"" + "x".repeat(8000) + "\"}}}";
+		var items = bigItems(slots, bigJson);
+		InventoryRuntime.DisplayReprojector port = (retained, displayBytes) ->
+			new InventoryItemCodec.Display(retained.itemId(), retained.label(), "{\"id\":\"" + retained.itemId() + "\"}", true);
+		try (var runtime = new InventoryRuntime((input, displayBytes) -> Optional.of(new Source(input, new AtomicInteger(), slots) {
+			@Override public InventoryDomainCodec.Item read(int slot) { return items.get(slot); }
+		}), 16_000_000, port)) {
+			runtime.advance(0, settings);
+			var consumer = runtime.attach(input(owner), new InventoryRuntime.TrackingSubject(TargetKey.from(TARGET))).orElseThrow();
+			int observed = 0;
+			for (int call = 0; call < 2; call++) observed += runtime.step(consumer).orElseThrow().slots().size();
+			assertEquals(slots, observed);
+			settings.setDisplayByteMultiplier(java.math.BigDecimal.ONE); runtime.advance(1, settings);
+			assertEquals(InventoryRuntime.ReprojectionStatus.DEFERRED, runtime.reprojectDisplays(consumer, 4096).status());
+			consumer.close();
+			assertEquals(1024, runtime.memory().retained(), "cancelling a deferred pass releases its round and pages, not the paid quota");
+			assertEquals(0, runtime.memory().reserved());
+			assertEquals(InventoryRuntime.ReprojectionStatus.UNCHANGED, runtime.reprojectDisplays(consumer, 4096).status());
+			assertEquals(0, runtime.memory().reserved());
+		}
 	}
 }

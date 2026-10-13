@@ -56,7 +56,7 @@ class InventoryStrictDecodeTest {
 		try {
 			rejectsResponse(original, 0); original.readUtf(256); rejectsResponse(original, original.readerIndex());
 			original.readVarInt(); original.skipBytes(32);
-			for (int i = 0; i < 4; i++) { rejectsResponse(original, original.readerIndex()); original.readVarInt(); }
+			for (int i = 0; i < 6; i++) { rejectsResponse(original, original.readerIndex()); original.readVarInt(); }
 		} finally { original.release(); }
 		original = frame(InventoryS2CPacket.policy(1, 100, 1, Set.of("entity_block")));
 		try {

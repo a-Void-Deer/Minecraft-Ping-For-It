@@ -79,6 +79,28 @@ class SpatialInventoryLayoutTest {
 	}
 
 	@Test
+	void encodedDisplaySurvivesBothCompatibilityProjectionsWithoutChangingTheOldApi() {
+		var model = new InventoryListModel(2);
+		model.open(List.of(new InventoryListModel.Entry("a", "A", 4L, "READY"),
+			new InventoryListModel.Entry("b", "B", 3L, "UNCERTAIN")), 30.0, -10.0, 90.0);
+		String encoded = "{\"id\":\"minecraft:stone\"}";
+
+		var legacy = SpatialOverlayRenderer.inventoryView("preview:42", model, Map.of("a", "minecraft:stone"), Status.READY);
+		assertNull(legacy.rows().getFirst().displayJson(), "the compatibility form keeps its native-name fallback");
+
+		var carried = SpatialOverlayRenderer.inventoryView("preview:42", model, Map.of("a", "minecraft:stone"),
+			Map.of("a", encoded), Status.READY);
+		assertEquals("minecraft:stone", carried.rows().getFirst().itemId());
+		assertEquals(encoded, carried.rows().getFirst().displayJson());
+		assertNull(carried.rows().get(1).displayJson(), "a row without a supplied value keeps the fallback");
+
+		var snapshot = SpatialOverlayRenderer.inventoryView("preview:43", model.snapshot(), 2,
+			Map.of("a", "minecraft:stone"), Map.of("a", encoded), Status.READY);
+		assertEquals(encoded, snapshot.rows().getFirst().displayJson());
+		assertEquals(2, snapshot.visibleRows());
+	}
+
+	@Test
 	void modelProjectionDoesNotSortRecountOrChooseItsOwnViewport() {
 		var model = new InventoryListModel(2);
 		model.open(List.of(new InventoryListModel.Entry("a", "A", 4L, "READY"),

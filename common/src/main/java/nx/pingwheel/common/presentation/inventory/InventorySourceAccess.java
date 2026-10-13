@@ -66,6 +66,10 @@ public final class InventorySourceAccess implements SourceAccess {
 		int slots();
 		InventoryDomainCodec.Item read(int index);
 		long retainedBytes();
+		/** Effective display ceiling of this snapshot's lazy decode catalogue. */
+		default int displayBytes() { return InventoryDomainCodec.MAX_DISPLAY_BYTES; }
+		/** Lowers the lazy decode ceiling so a later decode never re-expands; an increase is ignored. */
+		default void tightenDisplay(int displayBytes) {}
 		/** Atomicity evidence of this completed capture; unknown stays uncertain. */
 		default SnapshotEvidence evidence() { return SnapshotEvidence.UNKNOWN; }
 		@Override default void close() {}
@@ -87,6 +91,14 @@ public final class InventorySourceAccess implements SourceAccess {
 		boolean evidenceValid();
 		/** Drops detached capture data when no scanner needs it; keeps source evidence until close. */
 		void releaseCapturedData();
+		/** Effective display ceiling of this handle's live or captured catalogue; the absolute bound when unknown. */
+		default int displayBytes() { return InventoryDomainCodec.MAX_DISPLAY_BYTES; }
+		/**
+		 * Lowers the retained display ceiling of this handle's already captured or
+		 * live source metadata, so later decode cannot re-expand; an increase is
+		 * ignored. The bounded per-catalogue work stays inside the domain catalog.
+		 */
+		default void tightenDisplay(int displayBytes) {}
 	}
 
 	public interface Source extends AutoCloseable {
@@ -98,6 +110,10 @@ public final class InventorySourceAccess implements SourceAccess {
 		default OptionalLong version() { return OptionalLong.empty(); }
 		/** Empty keeps the source on its existing live route. */
 		default Optional<SnapshotPlan> snapshotPlan() { return Optional.empty(); }
+		/** Effective display ceiling of this source's retained catalogue; the absolute bound when unknown. */
+		default int displayBytes() { return InventoryDomainCodec.MAX_DISPLAY_BYTES; }
+		/** Lowers the retained display ceiling of this source's catalogue; an increase is ignored. */
+		default void tightenDisplay(int displayBytes) {}
 		/** Cursorless sources must count every visited view, including empty views. */
 		default Page enumerate(int limit) { throw new UnsupportedOperationException("no enumeration"); }
 		@Override default void close() {}
@@ -194,6 +210,18 @@ public final class InventorySourceAccess implements SourceAccess {
 		@Override public java.util.Set<String> demand() { return scope.demand(); }
 		@Override public boolean evidenceValid() { return !closed && source.valid(); }
 		@Override public void releaseCapturedData() { releaseRetained(); }
+		@Override public int displayBytes() {
+			InventorySnapshot captured = snapshot;
+			return captured != null ? captured.displayBytes() : source.displayBytes();
+		}
+		@Override public void tightenDisplay(int displayBytes) {
+			if (closed) return;
+			InventorySnapshot captured = snapshot;
+			if (captured != null) captured.tightenDisplay(displayBytes);
+			// The live catalogue is kept consistent even when a snapshot route is
+			// already fixed; tightening an unused catalogue is a bounded no-op.
+			source.tightenDisplay(displayBytes);
+		}
 
 		/**
 		 * One lazy, memory-bounded detached capture. The plan's upper bound is
