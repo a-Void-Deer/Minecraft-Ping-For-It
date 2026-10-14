@@ -159,27 +159,12 @@ accepted creation; the final snapshot de-duplicates the list.
 | Empty channel | `AUTO` | No team-context admission gate | Include the sender plus online other players whose stored channel is also empty and who are in the same context, including the precise no-context equivalence below. |
 | Empty channel | `GLOBAL` | No team-context admission gate | Include the sender plus every online player whose stored channel is also empty; team/context is not additionally applied. |
 
-For empty-channel `AUTO` and permitted `TEAM_ONLY`, "same context" is the
-predicate defined below, not a broad statement that two players are both
-nominally teamed:
-
-1. Each player selects a Voice Chat group ID when one is available; otherwise
-   it selects an eligible FTB Teams ID. If the sender has such a selected ID,
-   the other player must have the same selected UUID. The comparison is UUID
-   equality; it does not add a source-kind check.
-2. If only the other player has a selected Voice/FTB ID, they are not in the
-   same context.
-3. If neither has a selected Voice/FTB ID, compare vanilla scoreboard-team
-   references directly. Equal team references match; two `null` references
-   therefore match. In particular, `NONE` versus `NONE` is equivalent for this
-   predicate when neither player has a Voice group, eligible FTB team, or
-   vanilla team.
-
-The `TEAM_ONLY` admission gate identifies the sender's context in this priority
-order: Voice Chat, FTB Teams, vanilla team, then `NONE`. FTB personal/player
-teams and unavailable or fail-soft optional integrations yield no selected
-FTB/Voice context. `GLOBAL` and a non-empty channel do not consult this
-predicate.
+For empty-channel `AUTO` and permitted `TEAM_ONLY`, "same context" is defined
+by vanilla scoreboard-team references: equal references match, and two `null`
+references also match. Thus, `NONE` versus `NONE` is equivalent for this
+predicate when neither player has a scoreboard team. The `TEAM_ONLY` admission
+gate identifies the sender's context as their vanilla scoreboard team or
+`NONE`. `GLOBAL` and a non-empty channel do not consult this predicate.
 
 The server assigns arrival/expiry state and synchronizes the accepted marker as
 described by [marker lifecycle](marker_lifecycle.md). Channel switches and
