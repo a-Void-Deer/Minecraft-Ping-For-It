@@ -199,6 +199,7 @@ public final class InventorySettings {
 
 	static IntLimit validatedLimit(IntLimit limit, int defaultValue) {
 		if (limit == null) return IntLimit.finite(defaultValue);
+		limit.restoreMissingValue(defaultValue);
 		limit.validate();
 		return limit;
 	}

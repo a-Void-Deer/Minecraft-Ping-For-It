@@ -87,7 +87,13 @@ public class ConfigHandler <T extends IConfig> {
 		BackupWriter backupWriter,
 		String modVersion,
 		AtomicConfigWriter atomicConfigWriter) {
-		this.gson = new GsonBuilder().setPrettyPrinting().create();
+		this.gson = new GsonBuilder()
+			.setPrettyPrinting()
+			// IntLimit carries its model default in the owning field, so a
+			// persisted object that omits or nulls the finite value needs
+			// presence-aware parsing before InventorySettings validation.
+			.registerTypeAdapter(IntLimit.class, new IntLimitDeserializer())
+			.create();
 		this.configType = Objects.requireNonNull(configType, "configType");
 		this.configPath = Objects.requireNonNull(configPath, "configPath");
 		this.backupWriter = Objects.requireNonNull(backupWriter, "backupWriter");
