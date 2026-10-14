@@ -4,7 +4,7 @@
 
 Confirmed product decision for planned inventory tracking. This record explains
 the intended boundary; it does not implement inventory tracking and does not
-assert that the current presentation-v3 route or any existing subsystem already
+assert that the presentation route or any existing subsystem already
 carries inventory status, revision or baseline behavior. Execution and behavior
 contract updates, and coverage evidence, are tasks of implementation. The
 confirmed boundaries are now adopted by

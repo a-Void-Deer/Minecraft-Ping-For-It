@@ -53,7 +53,7 @@ The root presents the fixed eight-sector layout:
 | 45 | 35 | Reserved placeholder, disabled |
 | 90 | 55 | Content |
 | 135 | 35 | Reserved placeholder, disabled |
-| 180 | 55 | Cancel |
+| 180 | 55 | Unping |
 | 225 | 35 | Precise |
 | 270 | 55 | Intent |
 | 315 | 35 | Target-selection settings |
@@ -71,10 +71,22 @@ Position, opacity and scale are smoothly interpolated for an unchanged entry,
 for appearance and disappearance, and across a radial/list mode switch. A
 removed entry keeps only detached paint data for one exit interval and is never
 interactive. Reduced motion collapses the interpolation without changing
-selection. Opacity is split by layer: the wheel opacity preference reaches only
-the visual underlay, while the target opacity preference reaches every
-text-bearing frame together with its label and, when present, its
-outside-frame name preview. Neither preference dims the
+selection. A sector underlay's and a text-bearing frame's background coverage
+is an independent interpolated channel: it follows the same appearance, exit,
+rewind, retention, detached-exit and reduced-motion rules as the rest of the
+transition, so either the foreground or the background alone can keep an entry
+painted. While an enabled action or branch entry holds focus, that entry's own
+sector and frame background are enhanced and the menu's other entries'
+backgrounds are dimmed; an idle menu, Back, disabled or reserved focus, and the
+deadzone keep the established base coverage, with the ancestor and
+disabled/reserved base treatments retained, and inventory-list surfaces follow
+their own coverage rules below. Opacity is split by layer: the wheel opacity
+preference scales only the sector underlay's background coverage, while the
+target opacity preference scales only the text-bearing frames' background
+coverage; the foreground composition (node alpha, text, borders, icons, the
+acknowledgement and the focused/sibling scale emphasis) keeps its existing
+preferences and layering, and an entry stays painted while either its
+foreground or its background is visible. Neither preference dims the
 interaction chrome — the pointer and guides follow only the transition fade,
 while the trail also uses its independent trail-opacity preference. The trail
 is painted above the underlay and below every text-bearing frame, label, and
@@ -96,12 +108,23 @@ with the existing transition and reduced motion, and a return to rest uses
 that same transition. Focus alone qualifies the entry — whether it is a branch
 awaiting its dwell or turn entry, or an action a release would commit — with
 no fully elapsed timer needed. Only the active menu's own node, successfully
-painted with at least part of its actual title frame visible in the viewport,
-can hide the crosshair: an inventory row, an ancestor menu, or a node that
-failed to paint or is fully transparent never triggers this feedback. Hiding
+painted with at least part of its actual scaled title frame visible in the
+viewport, can hide the crosshair or acknowledge its focused choice: a Precise
+leaf's candidate is acknowledged only from that painted frame, and an inventory
+row, an ancestor menu, or a node that failed to paint or is fully transparent
+never triggers this feedback. Hiding
 the crosshair leaves the trail and its preference unaffected, and the screen
 confinement guarantees only the pointer center on screen; a following frame or
 label is not guaranteed to stay wholly inside the screen.
+
+While that same eligible focus is active, the selector emphasizes the focused
+entry and de-emphasizes that menu's sibling entries by visual scale. The
+emphasis engages on focus alone, with no dwell or turn required, and it changes
+only the painted scale: hit geometry, dwell and turn thresholds, and release
+resolution keep their frozen values. Back, disabled, or reserved focus, the
+deadzone, and an idle menu keep every entry at its resting appearance, and
+inventory-list rows are never affected by this mode. The emphasis and its
+return to rest follow the existing scale interpolation and reduced motion.
 
 The trail is one bounded visual history shared by the pointer and the active
 followed option, not separate overlapping trails. When an eligible option
@@ -114,11 +137,14 @@ painted after its animation, not the raw pointer target. The transfer keeps one
 common projected history and does not paint duplicate overlapping histories
 that amplify alpha. If a new owner has not yet been painted, the trail may show
 the last committed history until a painted position is available. Deadzone or
-Back focus, inventory-list mode, submenu changes, or other focus changes end
-the current option's ownership as appropriate; inventory rows are never trail
-owners, and the hidden pointer on the list continues its logical pointer trail.
-Pointer rebases and corrections caused only by projection or viewport changes
-do not add a synthetic connecting stroke. On ordinary release the trail fades
+Back focus, submenu changes, or other focus changes end the current option's
+ownership as appropriate; inventory rows are never trail owners. While the
+inventory list surface itself is active, no trail is painted at all, including
+a prior tail, and an item's radial menu returns to the ordinary crosshair,
+follower and trail rules. Mode handoffs start a fresh trail epoch without a
+joining stroke. Pointer rebases, user-return translations and corrections
+caused only by projection or viewport changes do not add a synthetic
+connecting stroke. On ordinary release the trail fades
 with its departing owner rather than snapping to the root; a hard abort or a
 new hold discards the prior history.
 
@@ -131,19 +157,42 @@ selected row's anchor. The translation is one rigid value for the entire
 pattern: ancestor menus, the pointer, the trail, the interaction guides, and
 the inventory list all move by that same value, so the pattern never shears.
 
-The logical geometry does not change: parent-child menu placement and the
-inventory list's row anchoring are unchanged, and the translation only projects
-that controller space onto the screen. After a Back return the parent menu is
-the active menu and is centered again; the root's zero origin leaves the
-established center unchanged. A normal exit keeps the last displayed
-translation instead of snapping back to the center, so the exit tail does not
-jump; a screen, world, or connection discontinuity discards the retained
-translation instead.
+A programmatic pop changes no logical geometry: parent-child menu placement
+and the inventory list's row anchoring are preserved, and the translation only
+projects that controller space onto the screen. A user's one-level return
+instead aligns the returned parent with the logical pointer: once the
+trigger's physical input is admitted and the pointer confined, one level is
+removed and every retained menu origin and parent/row anchor is rigidly
+translated by exactly the vector from the returned parent's origin to the
+pointer, so the returned parent's origin lands on the pointer while the
+pointer itself stays where the trigger left it. Every
+retained parent-child placement vector, every entry choice that opened a
+level, and the list's selected key, window, ordering, discovery state and side
+orientation are preserved by that translation; only the placement moves, and a
+zero-distance alignment is still a user return. The root begins each hold at
+its zero origin, so opening the selector leaves the established center
+unchanged; after a user return within the same hold the retained root origin
+moves with the pattern, and the existing view translation then centers
+whichever origin is active, so the established GUI-center contract is
+unchanged and no screen-pixel anchor or native warp is added. A user return
+clears any stale turn candidate or pending automatic placement, resets the
+returned parent's travel, arms its fresh-stroke requirement, seeds a fresh
+trail epoch, clears the list's Back-side focus when the return lands back on a
+menu surface, and leaves the shared held-Back block as it was; when the
+returned parent is a radial menu, an immediate release at the returned origin
+is a deadzone release and abandons with no action. A programmatic return such
+as data revocation or root pruning keeps the old placement and is not user
+travel. A normal exit keeps the last
+displayed translation instead of snapping back to the center, so the exit tail
+does not jump; a screen, world, or connection discontinuity discards the
+retained translation instead.
 
 The pointer is confined under the same translation the frame paints: before
 any gesture is evaluated, the logical pointer is clamped to the inclusive GUI
 pixel centers of the viewport, so the drawn pointer stays on screen. Confined
-movement counts as gesture travel and adds trail points. Inventory-list
+movement counts as gesture travel and adds trail points, except while the
+inventory list surface is active, where physical list input never moves the
+pointer ([inventory list](#inventory-list)). Inventory-list
 vertical glide is the exception: it uses the authorized GUI-scaled native
 vertical delta even when the confined pointer is against the top or bottom
 edge, without moving the pointer or adding trail travel. A correction produced
@@ -156,9 +205,35 @@ boundary is discarded rather than banked, so a reversal moves the pointer at
 once with no stored overshoot. The rest of the pattern keeps the rigid
 translation while the clamp holds the pointer at the screen boundary.
 
+A non-input relayout of the active caller-pushed external menu or of an item
+menu, such as from a GUI resize or an updated item-menu clearance, updates
+that menu's placement, re-evaluates focus and restarts any pending hover dwell
+at the new geometry, while preserving the held Back block; it pays no stroke,
+trail or timer progress, and only the unchanged viewport confinement may
+subsequently correct the pointer.
+
 The translation is smoothly interpolated like the other selector transitions,
 and reduced motion snaps it immediately. It does not change gesture thresholds
 or selection rules; projection-only corrections do not count as gesture input.
+
+While a radial child menu is active, each ancestor radial menu keeps only the
+entry through which the active path descends, together with its Back
+affordance (frame and sector) and its navigation guides and links; the
+ancestor's other option frames and the sector underlays that correspond to
+them, including disabled and reserved ones, are hidden. The retained
+breadcrumb entry is no longer a follower: its frame is placed at that
+ancestor's own origin, and its own sector underlay is hidden along with its
+siblings'. Each ancestor level applies this independently, and every retained
+frame targets its own level's origin. The Content menu keeps its
+inventory-display entry as the breadcrumb when the inventory list opens, and
+the list itself stays visible while an item's radial submenu is open. The
+hidden frames and sectors fade out and back in with the existing
+appearance/disappearance transition, and reduced motion snaps; returning
+restores the ancestor's full appearance. A hidden ancestor entry remains a
+logical menu choice with unchanged geometry, but it is never interactive: it
+can commit no action, and neither a hidden entry nor an ancestor or detached
+frame acknowledges a focused choice or a Precise candidate or owns the active
+follower.
 
 ## Radial release result
 
@@ -179,8 +254,10 @@ The down (180) cancel entry activates
 The model is headless: it owns no clock, renderer, configuration or Minecraft
 input, and the caller supplies monotonic timestamps, deltas and the frozen
 settings snapshot. The virtual pointer is the only logical pointer state;
-physical mouse deltas are added to it. The renderer draws the bounded shared
-trail history according to the active pointer or followed-option ownership in
+physical mouse deltas are added to it, except under the inventory list's
+fixed-pointer input handling ([inventory list](#inventory-list)). The renderer
+draws the bounded shared trail history according to the active pointer or
+followed-option ownership in
 [native selector presentation](#native-selector-presentation).
 A focused branch is entered by one of two admitted gestures. A stationary dwell
 enters it after the dwell threshold, requiring prior pointer travel beyond the
@@ -195,7 +272,7 @@ neither admitted gesture enters no branch, and a rebase or focus change clears
 any pending turn corner. A focused Back uses the same dwell when hover is
 disabled and the [Back-hover](#back-hover-return-state) state when hover is
 enabled. With hover disabled, a reverse stroke back toward the parent origin
-pops one radial level; row-anchored external menus do not retrace. A pop arms a
+pops one radial level; row-anchored external menus do not retrace. A user pop arms a
 fresh-stroke requirement so a stationary pointer cannot re-enter the same
 submenu immediately; a new full stroke plus dwell, or a qualified turn after
 that stroke, is required. Cancel ends the session without an action and is
@@ -271,12 +348,35 @@ session value store are owned by
 inventory list's data, status, count and ordering rules are owned by
 [inventory preview and tracking](../presentation/inventory.md).
 
+Whether the content hierarchy offers its additional property and item Ping
+Type menus is frozen per hold from the client's content-intent preference
+([client configuration](../../config/client.md#spatial-selector-interaction)).
+While it is enabled, every otherwise selectable property carries its allowed
+Ping Type submenu, and the inventory list's item rows can open their item
+menu. While it is disabled, each otherwise selectable property becomes a
+terminal leaf whose release commits that property with the Attention
+annotation, using its original reference and observed value; pure navigation
+groups stay actionless branches; the list offers no item menu and no Forward
+affordance; and a direct release of a selected row commits the item with the
+Attention annotation, under the item annotation's eligible set owned by
+[inventory preview and tracking](../presentation/inventory.md#preview). In
+both modes the whole-marker Ping Type remains the frozen Target Type's
+default, the Attention annotation is a property or item annotation rather
+than the marker's whole-marker type, and the root Intent and Precise branches
+are unchanged. The Attention annotation must be present in the entry's
+authorized allowed Ping Type set; an empty or disallowed set leaves the entry
+disabled and commits nothing instead of substituting another annotation or
+inventing permission. The preference freezes with the hold's snapshot, while
+the ordinary live preview, reference and release authorization fences remain
+live and are never frozen or bypassed.
+
 The content menu presents property entries in a navigation hierarchy. The
 `minecraft:block.state` record summary is an actionless navigation group:
 its nested choices are that record's state property entries, such as
 `snowy:false`, while the summary itself carries no default release action
 and no Ping Type submenu of its own. Every nested state property choice
-keeps its own default release action and its allowed Ping Type submenu.
+keeps its own default release action and, while content intent is enabled,
+its allowed Ping Type submenu.
 Every `create:`-namespace presentation field, and any nested reference to
 one, belongs to a localized Create properties navigation group; generic
 Minecraft properties and the separate inventory item list keep their own
@@ -295,52 +395,101 @@ The content branch's inventory preview opens a square list surface. Navigation
 is parent-relative: the selected row's Y is the child origin for that row's
 item menu, so an item submenu is anchored to its row rather than the list
 center, and its pointer rebase starts a fresh trail without a synthetic stroke.
-The list's Back/Forward sides are frozen when it opens from the parent menu
-bearing: Back is placed on the side that faces the parent, and a vertical
-parent keeps Back on the left. A Forward stroke enters the selected row's item
-menu; a Back stroke or Back-hover returns one level. A release with a selected
-row commits through the inventory owner's single-item create path; a release
-while the Back side is focused leaves without committing. Count, ordering,
-folding and item-selection semantics are owned by
+The item menu's center is measured outward from the inventory panel's forward
+edge by a clearance that keeps the child menu's outer sector and the child
+menu's actual localized Back title frame disjoint from the panel: the
+edge-to-center minimum is at least the child menu's outer sector radius and
+also covers the measured extent of that Back frame toward the panel, so
+neither the sector underlay nor the full Back frame, not merely its label
+text, can intersect the panel. The measurement follows the current GUI
+dimensions; a GUI resize updates the placement through the non-input relayout
+described in
+[submenu centering and view translation](#submenu-centering-and-view-translation),
+so the disjointness holds across the resize's first and intermediate frames,
+not only at settled geometry. The list's Back/Forward sides are frozen when
+it opens from the parent menu bearing: Back is placed on the side that faces
+the parent, and a vertical parent keeps Back on the left. A Forward stroke enters the selected row's item menu while content intent is
+enabled, and has no effect while it is disabled ([Content](#content)). A Back
+stroke or Back-hover returns one level. A release with a selected row commits
+through the inventory owner's single-item create path under the frozen
+content-intent mode; a release while the Back side is focused leaves without
+committing. Count, ordering, folding and item-selection semantics are owned by
 [inventory preview and tracking](../presentation/inventory.md#preview).
 
-When the list returns to the parent Content menu, the session places the
-sole logical pointer on the circumference of that menu's center deadzone, in
-the frozen direction of the inventory-display entry center; that exact
-circumference point belongs to the idle deadzone, so the return alone neither
-refocuses that entry nor commits anything. This programmatic placement is not
-physical gesture travel: it neither re-arms held Back nor counts toward the
-fresh-stroke requirement, and it adds no joining stroke to the trail
+While the list is the active surface, the inventory panel and its existing
+header overlay are emphasized, including while the list is empty; the
+established selected-row overlay is emphasized only while a direct release of
+that row could commit an inventory intent and the Back side is not focused.
+The existing panel, header and selected-row fill stacking and their
+non-background alpha are retained, and no previously unfilled unselected row
+gains a fill. While an item's radial submenu is open, the list beneath it is
+not the active surface and is presented unfocused.
+
+While an item's submenu is active, the list paints only the entered row,
+identified by the item key frozen when that submenu opened rather than by the
+current selected index; the complete row model, selection, visible window,
+layout, panel, header and footer remain as they were, and returning restores
+the other window rows through the existing appearance transitions. That
+filtering is paint-only: it never shrinks or re-sorts the model, rewrites the
+selection or collapses the panel. While content intent is disabled there is no
+item submenu and every ordinary row paints.
+
+A user Back from the list, by Back stroke or Back-hover, returns to the parent
+Content menu through the general user-return alignment
+([submenu centering and view translation](#submenu-centering-and-view-translation)):
+the retained pattern, including the still-open list's placement, is rigidly
+translated so the returned Content origin lands on the pointer, and the list
+keeps its selected key, window, ordering, discovery state and side orientation.
+The old programmatic placement, the logical pointer on the circumference of
+the returned menu's center deadzone in the frozen direction of the
+inventory-display entry center, is retained only for a programmatic return
+such as data revocation or root pruning. That placement belongs to the idle
+deadzone, so it neither refocuses the entry nor commits anything; it is not
+physical gesture travel, does not re-arm held Back or count toward the
+fresh-stroke requirement, and adds no joining stroke to the trail
 ([Back-hover return state](#back-hover-return-state),
-[headless spatial menu model](#headless-spatial-menu-model)). Both the
-Back-stroke and Back-hover returns use this placement. The viewport
+[headless spatial menu model](#headless-spatial-menu-model)). The viewport
 confinement still applies while the parent menu's translation settles: a
 desired point that is temporarily outside the viewport resolves as the
 projection makes it reachable, and fresh effective physical input supersedes
 the automatic alignment.
 
-The list advances rows by accumulating signed, GUI-scaled native vertical mouse
-delta at the intrinsic glide baseline scaled by the frozen target-glide
-preference, with each row advancing at the frozen row-height threshold; the
-multiplier's initialized meaning is owned by
+While the list surface is active, physical list input never moves the logical
+pointer: both pointer axes stay fixed and are not warped, rebased or recentered
+by list travel, and only the unchanged viewport confinement may still correct
+the pointer. Vertical row glide and horizontal side navigation are independent
+accumulators fed from the same admitted raw GUI samples. The list advances rows
+by accumulating each sample's signed vertical component at the intrinsic glide
+baseline scaled by the frozen target-glide preference, with each row advancing
+at the frozen row-height threshold; the multiplier's initialized meaning is
+owned by
 [client configuration](../../config/client.md#spatial-selector-interaction).
 The selected row's position does not accelerate the glide. When vertical input
 reverses direction, an opposing sub-row remainder is discarded before movement
 accumulates in the new direction; zero vertical input does not reverse it.
-Entering or leaving the list for an item submenu, and returning from that
-submenu, rebase the relevant gesture accumulation without changing the selected
-item or the visible list window. Only effective confined pointer movement, in
-either axis, can trigger the horizontal side-hint or Back/Forward-side
-navigation gates; horizontal displacement determines the side and focus.
-Zero-effective travel from a saturated pointer does neither nor re-arms held
-Back. Vertical glide is not general gesture travel: it adds no trail points
-and cannot trigger side navigation or re-arm held Back. On the list, the drawn
-crosshair is hidden as presentation only; the logical pointer trail continues
-to follow the frozen trail preference. An item's radial submenu and a return to
-the parent follow the
-[ordinary radial crosshair and trail rules](#native-selector-presentation)
-rather than forcing the crosshair visible, so a qualifying painted follower can
-hide it there as well. Fractional ordinary-wheel input and its existing
+Horizontal side intent accumulates bounded signed horizontal progress,
+independent of the fixed pointer, up to the existing side-exit distance with
+overshoot discarded rather than banked, so a reversal acts at once. Each
+admitted sample is classified before accumulation: when a sample has a nonzero
+vertical component and its horizontal component is small relative to it, inside
+the vertical-intent cone, the sample's horizontal component is ignored while
+its vertical component and any previously accumulated horizontal progress are
+retained; outside the cone, horizontal progress accumulates safely. Only
+effective filtered horizontal progress can trigger the side hint, the
+Back/Forward-side navigation gates or a physical release of held Back; a
+vertical-only, cone-filtered or saturated sample cannot. Actual retained side
+progress outside the side-hint corridor keeps the established suppression of
+vertical glide, and a projection-only or resize correction cannot create that
+suppression. Entering or leaving the list for an item submenu, and returning
+from that submenu, rebase the relevant gesture accumulation without changing
+the selected item or the visible list window; the item-to-list return also
+translates the retained list placement by the user-return vector. Vertical
+glide is not general gesture travel: it adds no trail points and cannot trigger
+side navigation or re-arm held Back. On the list, the drawn crosshair is hidden as presentation only. An item's
+radial submenu and a return to the parent follow the
+[ordinary radial crosshair rules](#native-selector-presentation) rather than
+forcing the crosshair visible, so a qualifying painted follower can hide it
+there as well. Fractional ordinary-wheel input and its existing
 wheel-lock behavior are unchanged by list gliding.
 
 ### Target-selection settings

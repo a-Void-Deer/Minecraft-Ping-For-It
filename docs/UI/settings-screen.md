@@ -56,7 +56,10 @@ The client scope has seven categories:
   Compatibility Mode, Compatibility Time Slice, and Cancel Cone Half-Angle,
   followed by a Spatial selector gestures subgroup with Center Deadzone, Entry
   Stroke Length, Entry Dwell, Inventory Vertical Mouse Sensitivity, Require
-  Sustained Hover to Return, and Back-Hover Dwell.
+  Sustained Hover to Return, Back-Hover Dwell, and Content Intent Selection.
+  The Content Intent Selection toggle enables the additional property and
+  inventory-item Ping Type selection menus in the Content hierarchy; its
+  tooltip states that a change applies to the next hold.
 - **Channel & Notices**: Ping Channel, Ping Volume, and Configuration Notice
   Size.
 - **Rendering & Config**: Entity Block Geometry and the configuration-file

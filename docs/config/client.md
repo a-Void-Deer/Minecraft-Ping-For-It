@@ -89,6 +89,7 @@ retained.
 | `spatialSelector.trailOpacity` | integer, percent | Independent opacity multiplier applied only to the trail, not the wheel underlay, text-bearing options, guides, or connector. Zero makes the trail fully invisible without changing its history or gesture selection. |
 | `spatialSelector.reduceMotion` | boolean | Reduces selector animation without changing gesture timing or selection. |
 | `spatialSelector.preciseCapturePeriodTicks` | positive integer, ticks | Live candidate capture period for the Precise branch while it is active; the persisted range is 1..50 ticks with default 1. A change applies to the next hold, not to the running one. |
+| `spatialSelector.contentIntentEnabled` | boolean | Whether the Content hierarchy offers its additional property and inventory-item Ping Type selection menus; while disabled, an otherwise selectable property or a directly released inventory item requests the Attention annotation instead, without changing the whole-marker Ping Type. Frozen into the held gesture's snapshot like the other selector preferences. |
 
 The config model supplies an immutable validated snapshot for one held gesture,
 so editing the live configuration cannot change a gesture already in progress.

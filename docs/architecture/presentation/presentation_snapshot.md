@@ -22,7 +22,7 @@ value store.
 
 ## Route and negotiated session
 
-Presentation values travel on a dedicated versioned route (`presentation-v5`),
+Presentation values travel on a dedicated versioned route (`presentation-v1`),
 independent of the legacy location family and of the superseded authoritative
 marker packet family. All three loaders register the route and dispatch it
 through the common handlers. Client-to-server intents are `HELLO`, `CREATE`,
@@ -297,7 +297,7 @@ topic owns policy application:
 ## Server policy rule view
 
 The persisted per-target-type field policy is also exposed through its own
-versioned route (`server-presentation-policy-v3`), independent of both the
+versioned route (`server-presentation-policy-v1`), independent of both the
 marker session above and the ordinary server-configuration request/update
 transaction. A read request carries a positive request identifier and is
 answered with all five target-type rule views — each type's white list, black
@@ -591,7 +591,7 @@ The atomic initial carries, beside the canonical marker snapshot and the Basic
 section, one per-recipient receipt content descriptor: selection metadata only,
 whose referenced content still arrives solely through the existing authorized
 stores. Its exact wire grammar and strict decoding are owned by
-[network protocol](../network/protocol.md#presentation-snapshot-route-presentation-v5);
+[network protocol](../network/protocol.md#presentation-snapshot-route-presentation-v1);
 the message composition, wait and fence rules are owned by
 [names and chat](../rendering/names_chat.md#content-receipt-lifecycle).
 
@@ -640,8 +640,8 @@ display name or marker state. The old S2C route is retained only as inert
 ingress, and the retained values/name used for chat and labels come from the
 Basic atomic initial described above.
 
-The `presentation-v5` and `server-presentation-policy-v3` route IDs do not
-decode the previous presentation or policy wire versions, and no fallback
+The `presentation-v1` and `server-presentation-policy-v1` route IDs do not
+decode another presentation or policy wire version, and no fallback
 decodes them. Whether any exact legacy registration remains registered as inert
 ingress is checked by the source owner; this contract promises no automatic
 decode or compatibility shim for a previous wire version.

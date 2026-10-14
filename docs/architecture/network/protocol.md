@@ -49,13 +49,13 @@ protocol, and registering a superseded route does not re-enable its effect.
 | Server-configuration `ServerConfigUpdateC2SPacket` (C2S) | Fabric, Forge, and NeoForge common server handler. | Carries a changed-field mask and the fixed-shape configuration values as a one-way mutation request with no acknowledgement or update result. Authority and enforcement are owned by [server configuration authority](../authority/server-config.md) and [security](../security.md#server-configuration-update-enforcement); the transaction is owned by [changing server configuration](../config/changing-server-config.md). | Not applicable on C2S. |
 | Server-configuration `ServerConfigSnapshotS2CPacket` (S2C) | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted only while the initiating request is still pending on the same connection and the positive identifier matches it; the snapshot covers the complete remote surface and is accepted or rejected as one whole. Transaction semantics are owned by [changing server configuration](../config/changing-server-config.md). |
 
-## Presentation snapshot route (`presentation-v5`)
+## Presentation snapshot route (`presentation-v1`)
 
-The presentation snapshot route (`pingforit-c2s:presentation-v5` client-to-server
-and `pingforit-s2c:presentation-v5` server-to-client) carries the session
+The presentation snapshot route (`pingforit-c2s:presentation-v1` client-to-server
+and `pingforit-s2c:presentation-v1` server-to-client) carries the session
 negotiation and marker mutation frames listed above. Every frame declares
-protocol version five, and the route ID is version-bound: it does not decode the
-version-four presentation wire shape, and no fallback reinterprets one.
+protocol version one, and the route ID is version-bound: it does not decode
+another presentation wire version, and no fallback reinterprets one.
 Session negotiation, manifest, mask, child deny, projection and
 receipt-descriptor policy remain owned by
 [presentation snapshot](../presentation/presentation_snapshot.md); this section
@@ -85,15 +85,13 @@ trailing bytes are rejected rather than normalized. The descriptor never
 carries values, annotations, item counts, content types, or client-uploaded
 content; those remain in the existing authorized stores.
 
-## Inventory preview/tracking route (`inventory-v4`)
+## Inventory preview/tracking route (`inventory-v1`)
 
-The dedicated inventory route (`pingforit-c2s:inventory-v4` client-to-server
-and `pingforit-s2c:inventory-v4` server-to-client) carries preview and tracking
-requests and responses, parallel to `presentation-v5` and
-`server-presentation-policy-v3`. Every frame declares protocol version four.
-The request-side frame grammar and its bound are unchanged from the
-version-three inventory route; the response side adds the effective size
-budgets.
+The dedicated inventory route (`pingforit-c2s:inventory-v1` client-to-server
+and `pingforit-s2c:inventory-v1` server-to-client) carries preview and tracking
+requests and responses, parallel to `presentation-v1` and
+`server-presentation-policy-v1`. Every frame declares protocol version one.
+The response side carries the effective size budgets.
 `HELLO` is the epoch-zero handshake; every other request runs under the
 negotiated nonzero epoch and a non-negative request id, and only while the
 current presentation epoch/view fence matches. `OFFER` and `POLICY` are
@@ -153,8 +151,8 @@ under its effective display and frame budgets, and the whole-frame,
 entry-payload and per-entry bounds are enforced during encoding and rejected
 during decoding before any large allocation. An entry display value has its own
 absolute decode bound, independent of the effective display budget. The
-`inventory-v4` route ID is version-bound: it does not decode the version-three
-inventory wire shape, and no fallback reinterprets one. Route
+`inventory-v1` route ID is version-bound: it does not decode another inventory
+wire version, and no fallback reinterprets one. Route
 registration and grammar remain owned here; the dedicated adapter's delivery
 boundary is owned by
 [presentation snapshot](../presentation/presentation_snapshot.md#dedicated-delivery-adapters),
@@ -165,8 +163,8 @@ and inventory status, zero/fallback, baseline and budget semantics are owned by
 
 The dedicated presentation preview route (`pingforit-c2s:presentation-preview-v1`
 and `pingforit-s2c:presentation-preview-v1`) carries the wheel's one-shot
-content hint and its response, parallel to `presentation-v5` and
-`server-presentation-policy-v3`. Every frame declares protocol version one and
+content hint and its response, parallel to `presentation-v1` and
+`server-presentation-policy-v1`. Every frame declares protocol version one and
 is bound to the current accepted presentation epoch and view plus a positive
 request id. `READ` carries one target, its target type, one adapter id, and the
 non-empty requested field ids; it asks only for fields the client cannot
