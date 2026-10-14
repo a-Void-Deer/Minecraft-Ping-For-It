@@ -1,7 +1,7 @@
 package nx.pingwheel.common.integration;
 
 public enum TeamContext {
-	NONE, VANILLA_TEAM, FTB_TEAMS, VOICE_CHAT;
+	NONE, VANILLA_TEAM;
 
 	@Override
 	public String toString() {

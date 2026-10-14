@@ -27,9 +27,6 @@
 		],
 		"modmenu": [
 			"nx.pingwheel.fabric.integration.ModMenuIntegration"
-		],
-		"voicechat": [
-			"nx.pingwheel.common.integration.VoiceChatIntegration"
 		]
 	},
 	"mixins": [

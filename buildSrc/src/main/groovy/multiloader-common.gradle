@@ -38,17 +38,6 @@ repositories {
         )
         filter { includeGroup("org.parchmentmc.data") }
     }
-    exclusiveContent {
-        forRepository {
-            maven {
-                name "Cursemaven"
-                url "https://cursemaven.com"
-            }
-        }
-        filter {
-            includeGroup "curse.maven"
-        }
-    }
     maven {
         name = "BlameJared"
         url = "https://maven.blamejared.com"
@@ -56,10 +45,6 @@ repositories {
     maven {
         name = "Modrinth"
         url = "https://api.modrinth.com/maven"
-    }
-    maven {
-        name = "Simple Voice Chat"
-        url = "https://maven.maxhenkel.de/repository/public"
     }
     maven {
         name = "RyanHCode Maven"
@@ -77,14 +62,6 @@ dependencies {
     // Distant Horizons
     // https://modrinth.com/mod/distanthorizonsapi
     compileOnly "maven.modrinth:DistantHorizonsApi:${distanthorizons_api_version}"
-
-    // Simple Voice Chat
-    // https://modrepo.de/minecraft/voicechat/api/getting_started
-    compileOnly "de.maxhenkel.voicechat:voicechat-api:${voicechat_api_version}"
-
-    // FTB Teams
-    // https://www.curseforge.com/minecraft/mc-mods/ftb-teams-forge
-    compileOnly "curse.maven:ftbteams-404468:${ftbteams_version}"
 
     // Sable
     // https://github.com/ryanhcode/sable-companion

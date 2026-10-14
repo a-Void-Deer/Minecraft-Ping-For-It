@@ -55,8 +55,6 @@
 	"settings.pingforit.rate_limit.tooltip": "Máximo de usos de ping en la ventana de regeneración.",
 
 	"value.pingforit.vanilla_team": "Equipo Vanilla",
-	"value.pingforit.ftb_teams": "Equipos FTB",
-	"value.pingforit.voice_chat": "Chat de voz",
 	"value.pingforit.always": "Siempre",
 	"value.pingforit.compact": "Compacto",
 	"value.pingforit.hold": "Mantener",

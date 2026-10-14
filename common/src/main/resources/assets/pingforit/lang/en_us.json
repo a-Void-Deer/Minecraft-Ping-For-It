@@ -61,8 +61,6 @@
 	"settings.pingforit.sync_duration.tooltip": "How long newly-created markers remain active on the server.",
 
 	"value.pingforit.vanilla_team": "Vanilla Team",
-	"value.pingforit.ftb_teams": "FTB Teams",
-	"value.pingforit.voice_chat": "Voice Chat",
 	"value.pingforit.always": "Always",
 	"value.pingforit.compact": "Compact",
 	"value.pingforit.hold": "Hold",
