@@ -41,10 +41,14 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.server.Services;
 import net.minecraft.server.players.GameProfileCache;
 import net.minecraft.world.entity.EquipmentSlotGroup;
+import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.BundleContents;
+import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.CustomModelData;
+import net.minecraft.world.item.component.ItemContainerContents;
 import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.component.ResolvableProfile;
 import net.minecraft.world.item.enchantment.Enchantment;
@@ -60,6 +64,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import nx.pingwheel.common.chat.ContentChatTemplate;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -116,22 +121,23 @@ class ClientItemDisplayTest {
 	}
 
 	@Test
-	void missingOrBlankEncodedDataKeepsTheRegistryKeyAndBareStack() {
+	void missingOrBlankEncodedDataKeepsTheRegistryKeyWithoutAPrototypeIcon() {
 		var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "item.minecraft.stone", null);
-		assertEquals(Items.STONE, display.stack().getItem());
-		assertEquals(1, display.stack().getCount());
-		assertTrue(display.stack().getComponentsPatch().isEmpty(), "the native fallback carries no components");
+		assertTrue(display.stack().isEmpty(), "missing display data never authorizes prototype reconstruction");
 		assertEquals("item.minecraft.stone", contents(display.name()).getKey());
 
 		for (String blank : List.of("", "   ")) {
 			var blankDisplay = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "item.minecraft.stone", blank);
-			assertEquals(Items.STONE, blankDisplay.stack().getItem());
+			assertTrue(blankDisplay.stack().isEmpty());
 			assertEquals("item.minecraft.stone", contents(blankDisplay.name()).getKey());
 		}
 
 		var absent = ClientItemDisplay.resolve(RegistryAccess.EMPTY, null, null, null);
 		assertTrue(absent.stack().isEmpty());
 		assertEquals("", absent.name().getString(), "a missing label never fabricates a translation key");
+		var noRegistry = ClientItemDisplay.resolve(null, "minecraft:stone", "item.minecraft.stone", json(new ItemStack(Items.STONE)));
+		assertTrue(noRegistry.stack().isEmpty());
+		assertEquals("item.minecraft.stone", contents(noRegistry.name()).getKey());
 	}
 
 	@Test
@@ -140,9 +146,9 @@ class ClientItemDisplayTest {
 			"{\"id\":\"pingforit:missing_item\"}",
 			"{\"id\":\"minecraft:stone\",\"components\":{\"pingforit:missing_component\":1}}")) {
 			var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "item.minecraft.stone", malformed);
-			assertEquals(Items.STONE, display.stack().getItem(), malformed);
-			assertTrue(display.stack().getComponentsPatch().isEmpty(), malformed);
+			assertTrue(display.stack().isEmpty(), malformed);
 			assertEquals("item.minecraft.stone", contents(display.name()).getKey(), malformed);
+			assertTrue(ClientItemDisplay.decode(RegistryAccess.EMPTY, malformed).isEmpty(), malformed);
 		}
 
 		// The approved wire bound is the decode guard; an oversized payload is
@@ -152,12 +158,199 @@ class ClientItemDisplayTest {
 		String oversizedJson = json(oversized);
 		assertTrue(oversizedJson.length() > InventoryS2CPacket.MAX_DISPLAY_BYTES);
 		var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "item.minecraft.stone", oversizedJson);
-		assertEquals(Items.STONE, display.stack().getItem());
+		assertTrue(display.stack().isEmpty());
 		assertNull(display.stack().get(DataComponents.CUSTOM_NAME), "the oversized custom name never reaches the icon stack");
 		assertEquals("item.minecraft.stone", contents(display.name()).getKey());
 		assertEquals(0, ClientItemDisplay.cachedEntryCount());
 		assertTrue(ClientItemDisplay.decode(RegistryAccess.EMPTY, oversizedJson).isEmpty(),
 			"the shared decode applies the wire bound to the chat path as well");
+	}
+
+	@Test
+	void validOrdinaryDisplayStillReturnsACountOneIconAndLocalizedName() {
+		ItemStack stone = new ItemStack(Items.STONE);
+		stone.remove(DataComponents.LORE);
+		var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "fallback.label", json(stone));
+		assertFalse(display.stack().isEmpty());
+		assertEquals(Items.STONE, display.stack().getItem());
+		assertEquals(1, display.stack().getCount());
+		assertEquals("block.minecraft.stone", contents(display.name()).getKey());
+	}
+
+	@Test
+	void omittedLoreAndShulkerContentsNeverReturnThroughDecodeFailureFallback() {
+		ItemStack shulker = new ItemStack(Items.SHULKER_BOX);
+		assertNotNull(shulker.get(DataComponents.LORE), "vanilla provides an inherited Lore component");
+		assertNotNull(shulker.get(DataComponents.CONTAINER), "vanilla provides an inherited container component");
+		shulker.remove(DataComponents.LORE);
+		shulker.remove(DataComponents.CONTAINER);
+		String projected = json(shulker);
+		var valid = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:shulker_box", "block.minecraft.shulker_box", projected);
+		assertFalse(valid.stack().isEmpty());
+		assertNull(valid.stack().get(DataComponents.LORE));
+		assertNull(valid.stack().get(DataComponents.CONTAINER));
+		for (String failed : new String[] { null, projected.substring(0, projected.length() - 1),
+			projected + " ".repeat(InventoryS2CPacket.MAX_DISPLAY_BYTES + 1) }) {
+			var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:shulker_box", "block.minecraft.shulker_box", failed);
+			assertTrue(display.stack().isEmpty());
+			assertNull(display.stack().get(DataComponents.LORE));
+			assertNull(display.stack().get(DataComponents.CONTAINER));
+			assertEquals("block.minecraft.shulker_box", contents(display.name()).getKey());
+		}
+	}
+
+	@Test
+	void unsafeIconKeepsItsTransmittedNameAndCodecOnlyChatName(@TempDir Path tempDir) {
+		installVanillaProfileSeam(tempDir, UUID.randomUUID(), "Herobrine", Runnable::run);
+		SkullBlockEntity.fetchGameProfile("herobrine").join();
+		ItemStack head = new ItemStack(Items.PLAYER_HEAD);
+		ResolvableProfile profile = new ResolvableProfile(Optional.of("herobrine"), Optional.empty(), new PropertyMap());
+		head.set(DataComponents.PROFILE, profile);
+		head.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("must not render"))));
+		String encoded = json(head);
+		for (int resolve = 0; resolve < 2; resolve++) {
+			var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:player_head", "fallback.label", encoded);
+			assertTrue(display.stack().isEmpty(), "actual Lore makes the icon unavailable");
+			assertEquals("block.minecraft.player_head.named", contents(display.name()).getKey());
+			assertEquals("herobrine", contents(display.name()).getArgs()[0], "empty icon does not suppress transmitted profile text");
+			assertRetainedProfile(encoded, profile);
+			ItemStack chat = ClientItemDisplay.decode(RegistryAccess.EMPTY, encoded).orElseThrow();
+			assertEquals(profile, chat.get(DataComponents.PROFILE));
+			assertEquals("herobrine", contents(ClientItemDisplay.displayName(chat)).getArgs()[0]);
+		}
+	}
+
+	@Test
+	void nestedContainerBundleProjectileAndFoodValuesCannotExposeProhibitedData() {
+		ItemStack lore = new ItemStack(Items.STONE);
+		lore.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("nested secret"))));
+		ItemStack fullShulker = new ItemStack(Items.BLUE_SHULKER_BOX);
+		fullShulker.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(List.of(new ItemStack(Items.DIAMOND))));
+		for (ItemStack nested : List.of(lore, fullShulker)) {
+			for (ItemStack outer : nestedHolders(nested)) {
+				String id = BuiltInRegistries.ITEM.getKey(outer.getItem()).toString();
+				var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback.label", json(outer));
+				assertTrue(display.stack().isEmpty(), id);
+				assertEquals(ContentChatTemplate.CUSTOM_ITEM_NAME_KEY, contents(display.name()).getKey(),
+					"terminal icon availability never removes a successfully decoded name");
+			}
+		}
+		ItemStack redacted = new ItemStack(Items.BLUE_SHULKER_BOX);
+		redacted.remove(DataComponents.LORE);
+		redacted.remove(DataComponents.CONTAINER);
+		for (ItemStack outer : nestedHolders(redacted)) {
+			String id = BuiltInRegistries.ITEM.getKey(outer.getItem()).toString();
+			assertFalse(ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback.label", json(outer)).stack().isEmpty(),
+				"non-shulker containers, bundles and other safe nested displays remain eligible: " + id);
+		}
+		ItemStack nestedBundle = nestedHolders(lore).get(1);
+		ItemStack chest = nestedHolders(nestedBundle).get(0);
+		assertTrue(ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:chest", "fallback.label", json(chest)).stack().isEmpty(),
+			"the safety check follows nested stacks beyond the first item holder");
+	}
+
+	private static List<ItemStack> nestedHolders(ItemStack nested) {
+		ItemStack chest = new ItemStack(Items.CHEST);
+		chest.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(List.of(nested)));
+		ItemStack bundle = new ItemStack(Items.BUNDLE);
+		bundle.set(DataComponents.BUNDLE_CONTENTS, new BundleContents(List.of(nested)));
+		ItemStack crossbow = new ItemStack(Items.CROSSBOW);
+		crossbow.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.of(List.of(nested)));
+		ItemStack food = new ItemStack(Items.APPLE);
+		food.set(DataComponents.FOOD, new FoodProperties(1, 0.1F, false, 1.6F, Optional.of(nested), List.of()));
+		List<ItemStack> holders = List.of(chest, bundle, crossbow, food);
+		for (ItemStack holder : holders) holder.set(DataComponents.CUSTOM_NAME, Component.literal("retained name"));
+		return holders;
+	}
+
+	@Test
+	void terminalProjectileSafetyAddsNoCopiedProfileCallbacksBeyondNestedDecode(@TempDir Path tempDir) {
+		UUID headId = UUID.randomUUID();
+		ResolvableProfile transmitted = new ResolvableProfile(Optional.empty(), Optional.of(headId), new PropertyMap());
+		ItemStack head = new ItemStack(Items.PLAYER_HEAD);
+		head.set(DataComponents.PROFILE, transmitted);
+		ItemStack lore = new ItemStack(Items.STONE);
+		lore.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("prohibited later projectile"))));
+		String laterLore = projectileJson(List.of(head, lore));
+		head.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("prohibited head Lore"))));
+		String headLore = projectileJson(List.of(head));
+
+		// Build fixtures before installing the service: ChargedProjectiles.of
+		// itself copies. Warm the future, but leave every checked-executor
+		// callback queued so native nested heads remain genuinely unresolved.
+		BlockingQueue<Runnable> callbacks = installVanillaProfileSeam(tempDir, headId, "ResolvedName");
+		SkullBlockEntity.fetchGameProfile(headId).join();
+		InventoryResidentAccess raw = InventoryResidentAccess.load();
+		for (String encoded : List.of(headLore, laterLore)) {
+			ClientItemDisplay.reset();
+			callbacks.clear();
+			ItemStack baseline = ClientItemDisplay.decode(RegistryAccess.EMPTY, encoded).orElseThrow();
+			int decodeCallbacks = callbacks.size();
+			assertEquals(1, decodeCallbacks, "the unchanged native nested codec already queues one head callback");
+			ChargedProjectiles projectiles = baseline.get(DataComponents.CHARGED_PROJECTILES);
+			ItemStack original = raw.projectiles(projectiles).getFirst();
+			assertEquals(transmitted, original.get(DataComponents.PROFILE));
+			assertFalse(original.get(DataComponents.PROFILE).isResolved());
+
+			// Positive control: accessing the original vanilla transforming list
+			// starts a second callback on a disposable copy before Lore is read.
+			ItemStack copied = projectiles.getItems().getFirst();
+			assertNotSame(original, copied);
+			assertEquals(decodeCallbacks + 1, callbacks.size(), "the copying getter must expose the reviewed defect");
+			callbacks.remove().run();
+			assertTrue(original.get(DataComponents.PROFILE).isResolved(), "the baseline callback targets the decoded nested head");
+			assertFalse(copied.get(DataComponents.PROFILE).isResolved(), "the copy has a separate pending callback");
+			callbacks.remove().run();
+			assertTrue(copied.get(DataComponents.PROFILE).isResolved());
+
+			var terminal = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:crossbow", "fallback.label", encoded);
+			assertTrue(terminal.stack().isEmpty());
+			assertEquals("item.minecraft.crossbow", contents(terminal.name()).getKey());
+			assertEquals(decodeCallbacks, callbacks.size(), "terminal safety adds no callbacks beyond native nested decoding");
+			assertEquals(1, ClientItemDisplay.cachedEntryCount());
+			int misses = ClientItemDisplay.decodeMisses();
+			for (int hit = 0; hit < 3; hit++) {
+				assertTrue(ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:crossbow", "fallback.label", encoded).stack().isEmpty());
+				assertEquals(misses, ClientItemDisplay.decodeMisses());
+				assertEquals(decodeCallbacks, callbacks.size(), "cache hits never repeat copied-profile work");
+			}
+		}
+	}
+
+	@Test
+	void ordinaryProjectilesKeepTheirSupportedNestedDisplayContents() {
+		ItemStack arrow = new ItemStack(Items.ARROW, 3);
+		arrow.set(DataComponents.CUSTOM_NAME, Component.literal("kept projectile"));
+		arrow.set(DataComponents.CUSTOM_MODEL_DATA, new CustomModelData(9));
+		String encoded = projectileJson(List.of(arrow));
+		for (int resolve = 0; resolve < 2; resolve++) {
+			var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:crossbow", "fallback.label", encoded);
+			assertFalse(display.stack().isEmpty());
+			assertEquals(1, display.stack().getCount());
+			var nested = InventoryResidentAccess.load().projectiles(display.stack().get(DataComponents.CHARGED_PROJECTILES));
+			assertEquals(1, nested.size());
+			assertEquals(Items.ARROW, nested.getFirst().getItem());
+			assertEquals(3, nested.getFirst().getCount());
+			assertEquals("kept projectile", nested.getFirst().get(DataComponents.CUSTOM_NAME).getString());
+			assertEquals(new CustomModelData(9), nested.getFirst().get(DataComponents.CUSTOM_MODEL_DATA));
+		}
+	}
+
+	private static String projectileJson(List<ItemStack> projectiles) {
+		ItemStack crossbow = new ItemStack(Items.CROSSBOW);
+		crossbow.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.of(projectiles));
+		return json(crossbow);
+	}
+
+	@Test
+	void malformedNestedStackCannotRecoverToAnOuterPrototype() {
+		String malformed = "{\"id\":\"minecraft:chest\",\"components\":{\"!minecraft:lore\":{},"
+			+ "\"minecraft:container\":[{\"slot\":0,\"item\":{\"id\":\"pingforit:missing_item\"}}]}}";
+		var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:chest", "block.minecraft.chest", malformed);
+		assertTrue(display.stack().isEmpty());
+		assertEquals("block.minecraft.chest", contents(display.name()).getKey());
+		assertTrue(ClientItemDisplay.decode(RegistryAccess.EMPTY, malformed).isEmpty());
+		assertEquals(0, ClientItemDisplay.cachedEntryCount());
 	}
 
 	@Test
@@ -227,13 +420,13 @@ class ClientItemDisplayTest {
 		assertEquals(1, decoded.getCount());
 
 		// A registry context without the dynamic enchantment registry cannot
-		// resolve that component, so the whole value fails soft to the bare
-		// stack instead of half-decoding the variant.
+		// resolve that component, so the icon is unavailable instead of
+		// half-decoding the variant or reconstructing prototype defaults.
 		var withoutEnchantments = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:diamond_sword",
 			"item.minecraft.diamond_sword", encoded);
 		assertFalse(withoutEnchantments.stack().isEnchanted());
-		assertEquals(Items.DIAMOND_SWORD, withoutEnchantments.stack().getItem());
-		assertTrue(withoutEnchantments.stack().getComponentsPatch().isEmpty());
+		assertTrue(withoutEnchantments.stack().isEmpty());
+		assertEquals("item.minecraft.diamond_sword", contents(withoutEnchantments.name()).getKey());
 
 		ItemStack overridden = new ItemStack(Items.STONE);
 		overridden.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
@@ -390,12 +583,9 @@ class ClientItemDisplayTest {
 		String diamondJson = json(diamond), stoneJson = json(stone);
 
 		// The decoded diamond must not be accepted under a stone selection
-		// identity; the icon and the name fall back together to the supplied
-		// item and label.
+		// identity; the icon becomes unavailable and the name uses the supplied label.
 		var mismatched = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "item.minecraft.stone", diamondJson);
-		assertEquals(Items.STONE, mismatched.stack().getItem());
-		assertEquals(1, mismatched.stack().getCount());
-		assertTrue(mismatched.stack().getComponentsPatch().isEmpty(), "the mismatch keeps the bare supplied-item stack");
+		assertTrue(mismatched.stack().isEmpty(), "the mismatch never reconstructs the supplied item's prototype");
 		assertEquals("item.minecraft.stone", contents(mismatched.name()).getKey(),
 			"the mismatch keeps the supplied label, never the decoded custom name");
 		assertEquals(0, ClientItemDisplay.cachedEntryCount(), "a mismatched decode is never cached");

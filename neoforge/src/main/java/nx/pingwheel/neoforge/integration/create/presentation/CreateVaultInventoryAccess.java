@@ -11,6 +11,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.neoforged.neoforge.items.IItemHandler;
+import net.neoforged.neoforge.items.ItemStackHandler;
 import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotSchemas;
@@ -48,6 +49,7 @@ public final class CreateVaultInventoryAccess {
 		int length() throws ReflectiveOperationException;
 		Direction.Axis axis() throws ReflectiveOperationException;
 		IItemHandler local() throws ReflectiveOperationException;
+		default boolean auditedLocal(IItemHandler handler) { return nativeLocal(handler); }
 	}
 	/** Per-operation scope checks, including reads through an already acquired member or local handler. */
 	private record GatedWorld(World delegate, Predicate<BlockPos> memberGate) implements World {
@@ -72,6 +74,9 @@ public final class CreateVaultInventoryAccess {
 			world.require(pos);
 			return new GatedHandler(world, pos, delegate.local());
 		}
+		@Override public boolean auditedLocal(IItemHandler handler) {
+			world.require(pos); return delegate.auditedLocal(handler instanceof GatedHandler gated ? gated.delegate() : handler);
+		}
 	}
 	private record GatedHandler(GatedWorld world, BlockPos pos, IItemHandler delegate) implements IItemHandler {
 		@Override public int getSlots() { world.require(pos); return delegate.getSlots(); }
@@ -85,13 +90,27 @@ public final class CreateVaultInventoryAccess {
 			throw new UnsupportedOperationException("read-only Vault inventory");
 		}
 	}
+	private static boolean nativeLocal(IItemHandler handler) {
+		return nativeLocal(handler, nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess.load());
+	}
+	static boolean nativeLocal(IItemHandler handler, nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess raw) {
+		return handler instanceof ItemStackHandler
+			&& IPlatformInventoryService.ResidentReads.inherits(handler, ItemStackHandler.class, "getSlots")
+			&& IPlatformInventoryService.ResidentReads.inherits(handler, ItemStackHandler.class, "getStackInSlot", int.class)
+			&& IPlatformInventoryService.ResidentReads.inherits(handler, ItemStackHandler.class, "validateSlotIndex", int.class)
+			&& IPlatformInventoryService.ResidentReads.nativeStacks(IPlatformInventoryService.ResidentReads.field(handler,
+				ItemStackHandler.class, "stacks", net.minecraft.core.NonNullList.class), raw);
+	}
 	static Optional<IPlatformInventoryService.Access> find(World world, BlockPos original, Direction face) {
 		if (face == null) return Optional.empty();
 		try { return Optional.of(new Segmented(world, original, layout(world, original))); }
 		catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) { return Optional.empty(); }
 	}
 	private record Layout(BlockPos controller, int width, int length, Direction.Axis axis, List<BlockPos> members, List<Integer> slotCounts, int slots) {}
-	private static Object call(BlockEntity entity, String name) throws ReflectiveOperationException { return entity.getClass().getMethod(name).invoke(entity); }
+	private static Object call(BlockEntity entity, String name) throws ReflectiveOperationException {
+		IPlatformInventoryService.ResidentReads.requireReflectionShape(entity.getClass(), name);
+		return entity.getClass().getMethod(name).invoke(entity);
+	}
 	private record MinecraftWorld(ServerLevel level) implements World {
 		@Override public String dimension() { return level.dimension().location().toString(); }
 		@Override public Member loaded(BlockPos pos) {
@@ -168,6 +187,45 @@ public final class CreateVaultInventoryAccess {
 		@Override public int slots() { return expected.slots; }
 		@Override public boolean stableCursor() { return true; }
 		@Override public OptionalLong version() { return OptionalLong.empty(); }
+		@Override public boolean supportsDetachedSlotCapture() {
+			if (!valid()) return false;
+			try {
+				for (BlockPos pos : expected.members()) { Member member = world.loaded(pos); if (!member.auditedLocal(member.local())) return false; }
+				return valid();
+			} catch (ReflectiveOperationException failure) { throw new IllegalStateException("Vault resident graph unavailable", failure); }
+		}
+		@Override public IPlatformInventoryService.ResidentEntry readResident(int slot) {
+			if (!valid()) throw new IllegalStateException("Vault topology changed");
+			java.util.Objects.checkIndex(slot, slots());
+			try {
+				for (int index = 0; index < expected.members.size(); index++) {
+					int count = expected.slotCounts.get(index);
+					if (slot < count) {
+						BlockPos position = expected.members.get(index);
+						Member member = world.loaded(position); IItemHandler live = member.local();
+						member.auditedLocal(live); // classify before getter; false is LIVE/EXTERNAL_TRUST, not atomic
+						if (live.getSlots() != count) throw new IllegalStateException("Vault local mapping changed");
+						var stack = live.getStackInSlot(slot);
+						// Callback-free post-getter gate: only world member membership is
+						// rechecked here, never a provider metadata getter that could reuse
+						// the returned stack. The caller consumes the value synchronously and
+						// runs the final all-member validation after that freeze.
+						requireMembersHeld();
+						return IPlatformInventoryService.ResidentReads.stack(stack);
+					}
+					slot -= count;
+				}
+			} catch (ReflectiveOperationException failure) { throw new IllegalStateException("Vault local resident read unavailable", failure); }
+			throw new IllegalStateException("Vault resident mapping changed");
+		}
+		/** Every frozen member position still resolves under the current member gate. */
+		private void requireMembersHeld() {
+			try {
+				for (BlockPos position : expected.members()) world.loaded(position);
+			} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+				throw new IllegalStateException("Vault authority or topology revoked during resident read", unavailable);
+			}
+		}
 		@Override public IPlatformInventoryService.Entry read(int slot) {
 			if (!valid()) throw new IllegalStateException("Vault topology changed");
 			java.util.Objects.checkIndex(slot, slots());

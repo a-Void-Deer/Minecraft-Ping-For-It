@@ -3,7 +3,11 @@ package nx.pingwheel.common.network;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.InventoryConfigValues;
+import nx.pingwheel.common.config.InventoryConfigValues.Field;
+import nx.pingwheel.common.config.InventoryConfigValues.Value;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
+import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.ServerConfigUpdateService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -11,6 +15,9 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HexFormat;
+import java.util.Arrays;
+import java.math.BigDecimal;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -19,11 +26,12 @@ class ServerConfigVarNumbersTest {
 	// Independent fixed-shape v3 wire fixture: physical-only mask, safe ordinary
 	// fields, positive scalar/cap values and exact 1x multiplier quanta. The two
 	// size-scale leaves carry one quarter-multiplier quanta varint and no
-	// unlimited flag. No codec writes it.
+	// unlimited flag. The final strict notice byte is appended without changing any
+	// original offsets. No codec writes it.
 	private static final byte[] UPDATE = hex(
 		"20 00 01 01 01 07 "
 			+ "00 01 01 01 00 01 00 01 00 01 00 01 00 04 00 08 "
-			+ "01 00 01 00 01 00 01 00 04 00 04 00 08 01 01 01 04 04");
+			+ "01 00 01 00 01 00 01 00 04 00 04 00 08 01 01 01 04 04 01");
 	private static final byte[] SNAPSHOT = concat(hex("01 01"), UPDATE, 1, UPDATE.length - 1);
 
 	@ParameterizedTest
@@ -139,6 +147,96 @@ class ServerConfigVarNumbersTest {
 			assertEquals(Integer.MAX_VALUE, packet.msToRegenerate());
 			assertEquals(Integer.MAX_VALUE, packet.inventory().toSettings().getPhysicalSlotsPerTick().getValue());
 			assertTrue(ServerConfigUpdateService.apply(true, current(), packet.update()).applied());
+		} finally { buf.release(); }
+	}
+
+	@Test
+	void independentFixturesPinOriginalBytesPlusOneNoticeByteAndUnchangedRequest() {
+		var inventory = InventoryConfigValues.defaults();
+		for (Field field : Field.values()) {
+			inventory = inventory.with(field, new Value(false, BigDecimal.ONE));
+		}
+		assertEncoding(UPDATE, new ServerConfigUpdateC2SPacket(32, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
+		assertEncoding(SNAPSHOT, new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
+		assertEncoding(hex("01"), new ServerConfigRequestC2SPacket(1L));
+		byte[] falseUpdate = replace(UPDATE, UPDATE.length - 1, hex("00"));
+		byte[] falseSnapshot = replace(SNAPSHOT, SNAPSHOT.length - 1, hex("00"));
+		assertEncoding(falseUpdate, new ServerConfigUpdateC2SPacket(32, ChannelMode.AUTO, true, 1, 1, 7, inventory, false));
+		assertEncoding(falseSnapshot, new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 1, 7, inventory, false));
+		for (boolean enabled : new boolean[] {false, true}) {
+			var buf = buffer(enabled ? UPDATE.clone() : falseUpdate.clone());
+			try {
+				var packet = ServerConfigUpdateC2SPacket.readSafe(buf);
+				assertFalse(packet.isCorrupt());
+				assertEquals(enabled, packet.update().budgetDelayNotificationsEnabled());
+				assertEquals(inventory, packet.inventory());
+				assertEquals(0, buf.readableBytes());
+			} finally { buf.release(); }
+			buf = buffer(enabled ? SNAPSHOT.clone() : falseSnapshot.clone());
+			try {
+				var packet = ServerConfigSnapshotS2CPacket.readSafe(buf);
+				assertFalse(packet.isCorrupt());
+				assertEquals(enabled, packet.snapshot().budgetDelayNotificationsEnabled());
+				assertEquals(inventory, packet.inventory());
+				assertEquals(0, buf.readableBytes());
+			} finally { buf.release(); }
+		}
+	}
+
+	@Test
+	void independentRawShapesRejectEveryTruncationMissingFlagMalformedFlagAndTrailingBytes() {
+		assertStrictShape(UPDATE, ServerConfigUpdateC2SPacket::readSafe);
+		assertStrictShape(SNAPSHOT, ServerConfigSnapshotS2CPacket::readSafe);
+		for (String invalid : new String[] {"02", "ff"}) {
+			assertRejectedUpdate(replace(UPDATE, UPDATE.length - 1, hex(invalid)));
+		}
+	}
+
+	@Test
+	void rawNoticeMaskBit26AppliesFalseWhileBit27RemainsUnknown() {
+		byte[] raw = replace(replace(UPDATE, UPDATE.length - 1, hex("00")), 0, hex("80 80 80 20"));
+		var buf = buffer(raw);
+		try {
+			var packet = ServerConfigUpdateC2SPacket.readSafe(buf);
+			assertFalse(packet.isCorrupt());
+			assertEquals(ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED, packet.changedFields());
+			var result = ServerConfigUpdateService.apply(true, current(), packet.update());
+			assertTrue(result.applied());
+			assertFalse(result.snapshot().budgetDelayNotificationsEnabled());
+			assertEquals(current().inventory(), result.snapshot().inventory());
+			assertEquals(current().rateLimit(), result.snapshot().rateLimit());
+			assertEquals(0, buf.readableBytes());
+		} finally { buf.release(); }
+		assertRejectedUpdate(replace(UPDATE, 0, hex("80 80 80 40")));
+	}
+
+	private static <T extends IPacket> void assertStrictShape(byte[] raw, Function<FriendlyByteBuf, T> reader) {
+		for (int length = 0; length < raw.length; length++) {
+			assertCorruptAndDrained(Arrays.copyOf(raw, length), reader);
+		}
+		for (String invalid : new String[] {"02", "ff"}) {
+			assertCorruptAndDrained(replace(raw, raw.length - 1, hex(invalid)), reader);
+		}
+		for (byte trailing : new byte[] {0, 1, 2, (byte) 255}) {
+			byte[] extended = Arrays.copyOf(raw, raw.length + 1);
+			extended[raw.length] = trailing;
+			assertCorruptAndDrained(extended, reader);
+		}
+	}
+	private static <T extends IPacket> void assertCorruptAndDrained(byte[] raw, Function<FriendlyByteBuf, T> reader) {
+		var buf = buffer(raw);
+		try {
+			assertTrue(reader.apply(buf).isCorrupt());
+			assertEquals(0, buf.readableBytes());
+		} finally { buf.release(); }
+	}
+	private static void assertEncoding(byte[] expected, IPacket packet) {
+		var buf = new FriendlyByteBuf(Unpooled.buffer());
+		try {
+			packet.write(buf);
+			byte[] actual = new byte[buf.readableBytes()];
+			buf.readBytes(actual);
+			assertArrayEquals(expected, actual);
 		} finally { buf.release(); }
 	}
 

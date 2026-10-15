@@ -94,6 +94,7 @@ class ServerInventoryConfigPacketsTest {
 				if (field.supportsUnlimited()) buf.writeBoolean(false);
 				buf.writeVarInt(field == Field.DISPLAY_BYTE_MULTIPLIER ? illegal : encodedDefault(field));
 			}
+			buf.writeBoolean(true);
 			assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt(), "display quanta " + illegal);
 			assertEquals(0, buf.readableBytes());
 			buf.release();
@@ -104,6 +105,7 @@ class ServerInventoryConfigPacketsTest {
 				if (field.supportsUnlimited()) buf.writeBoolean(false);
 				buf.writeVarInt(field == Field.FRAME_BYTE_MULTIPLIER ? illegal : encodedDefault(field));
 			}
+			buf.writeBoolean(true);
 			assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt(), "frame quanta " + illegal);
 			assertEquals(0, buf.readableBytes());
 			buf.release();
@@ -121,6 +123,7 @@ class ServerInventoryConfigPacketsTest {
 				buf.writeVarInt(encodedDefault(field));
 			}
 		}
+		buf.writeBoolean(true);
 		assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt());
 		assertEquals(0, buf.readableBytes());
 		buf.release();
@@ -151,6 +154,7 @@ class ServerInventoryConfigPacketsTest {
 			if (field.supportsUnlimited()) buf.writeBoolean(false);
 			buf.writeVarInt(field == bad ? -1 : encodedDefault(field));
 		}
+		buf.writeBoolean(true);
 		assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt());
 		assertEquals(0, buf.readableBytes());
 		buf.release();
@@ -160,6 +164,7 @@ class ServerInventoryConfigPacketsTest {
 				if (field.supportsUnlimited()) buf.writeByte(field == bad ? 2 : 0);
 				buf.writeVarInt(encodedDefault(field));
 			}
+			buf.writeBoolean(true);
 			assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt());
 			buf.release();
 		}
@@ -173,9 +178,10 @@ class ServerInventoryConfigPacketsTest {
 			// 17 client quanta = 4.25, beyond the quarter-step region.
 			buf.writeVarInt(field == Field.PREVIEW_CLIENT_BYTE_MULTIPLIER ? 17 : encodedDefault(field));
 		}
+		buf.writeBoolean(true);
 		assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt());
 		buf.release();
-		var unknown = new ServerConfigUpdateC2SPacket(1 << 26, ChannelMode.AUTO, true, 0, 0, 7);
+		var unknown = new ServerConfigUpdateC2SPacket(1 << 27, ChannelMode.AUTO, true, 0, 0, 7);
 		assertTrue(roundTrip(unknown, ServerConfigUpdateC2SPacket::readSafe).isCorrupt());
 		assertTrue(new ServerConfigSnapshotS2CPacket(1, true, ChannelMode.AUTO, true, 0, 0, 7, null).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 0, 0, 7, null).isCorrupt());
@@ -191,6 +197,7 @@ class ServerInventoryConfigPacketsTest {
 				if (encoded.supportsUnlimited()) buf.writeBoolean(false);
 				buf.writeVarInt(encoded == field ? 0 : encodedDefault(encoded));
 			}
+			buf.writeBoolean(true);
 			assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt(), field.name());
 			buf.release();
 		}
@@ -199,6 +206,7 @@ class ServerInventoryConfigPacketsTest {
 			if (field.supportsUnlimited()) buf.writeBoolean(false);
 			buf.writeVarInt(field == Field.TRACKING_HEARTBEAT_PERIODS ? field.maximum() + 1 : encodedDefault(field));
 		}
+		buf.writeBoolean(true);
 		assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt());
 		buf.release();
 	}

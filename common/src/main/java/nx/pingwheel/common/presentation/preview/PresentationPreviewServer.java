@@ -12,6 +12,14 @@ import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayEvent;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayState;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Module;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Quantity;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Reason;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Unit;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.WorkItem;
 
 /** Packet ingress only queues. The host drains with the remaining SECTION tick allowance. */
 public final class PresentationPreviewServer {
@@ -33,17 +41,36 @@ public final class PresentationPreviewServer {
 				throw new IllegalArgumentException("preview capture outcome");
 		}
 	}
-	private record Queued(PresentationPreviewC2SPacket request, long tick, int schema) {}
+	private static final class Queued {
+		final PresentationPreviewC2SPacket request;
+		final long tick;
+		final int schema;
+		long reasonCycle;
+		int reasons;
+		boolean observed;
+		Queued(PresentationPreviewC2SPacket request, long tick, int schema) {
+			this.request = request; this.tick = tick; this.schema = schema;
+		}
+		PresentationPreviewC2SPacket request() { return request; }
+		long tick() { return tick; }
+		int schema() { return schema; }
+	}
 	private static final class Connection {
 		long epoch, highWater, nextRequestTick;
 		final Map<String, Long> nextAdapterTick = new HashMap<>();
 	}
 	private final Host host;
+	private final BudgetDelaySink delays;
+	private DelayState delayState = DelayState.IDLE;
 	private final Map<UUID, Connection> connections = new HashMap<>();
 	private final Map<UUID, Queued> queued = new LinkedHashMap<>();
-	public PresentationPreviewServer(Host host) { this.host = Objects.requireNonNull(host); }
+	public PresentationPreviewServer(Host host) { this(host, BudgetDelaySink.NONE); }
+	public PresentationPreviewServer(Host host, BudgetDelaySink delays) {
+		this.host = Objects.requireNonNull(host); this.delays = delays == null ? BudgetDelaySink.NONE : delays;
+	}
+	public DelayState delayState() { return delayState; }
 	public void disconnect(UUID player) { queued.remove(player); connections.remove(player); }
-	public void reset() { queued.clear(); connections.clear(); }
+	public void reset() { queued.clear(); connections.clear(); delayState = DelayState.IDLE; }
 	public int queuedCount() { return queued.size(); }
 	private Optional<PresentationPreviewAccess> access(UUID player, PresentationPreviewC2SPacket request) {
 		try {
@@ -83,8 +110,13 @@ public final class PresentationPreviewServer {
 	}
 	/** Returns consumed capture attempts; the supplied work is debited exactly once. */
 	public int drain(long tick, PresentationAdapter.CaptureBudget work, int remainingCaptures) {
+		return drain(tick, work, remainingCaptures, tick, System.nanoTime());
+	}
+	/** The SECTION owner closes the shared presentation cycle after this residual drain. */
+	public int drain(long tick, PresentationAdapter.CaptureBudget work, int remainingCaptures, long cycleId, long nowNanos) {
 		if (tick < 0 || remainingCaptures < 0) throw new IllegalArgumentException("preview tick budget");
 		int used = 0;
+		boolean eligible = false, waiting = false, delayed = false;
 		Iterator<Map.Entry<UUID, Queued>> iterator = queued.entrySet().iterator();
 		while (iterator.hasNext()) {
 			var entry = iterator.next(); var request = entry.getValue().request(); UUID player = entry.getKey();
@@ -96,14 +128,24 @@ public final class PresentationPreviewServer {
 			if (adapter == null || adapter.schema() != entry.getValue().schema()
 				|| !adapter.fields().keySet().containsAll(request.fields())) { iterator.remove(); continue; }
 			Connection state = connections.get(player);
-			if (tick < state.nextAdapterTick.getOrDefault(request.adapterId(), 0L)) continue;
-			// Request lookup overhead and collector work share the same configured per-call bound.
-			int allowance = Math.min(Math.max(0, host.scanBudget()) - 1, work.remaining() - 1);
-			if (used >= remainingCaptures || allowance < 1) continue;
-			work.scan(); used++;
+			if (tick < state.nextAdapterTick.getOrDefault(request.adapterId(), 0L)) { waiting = true; continue; }
 			if (state.nextAdapterTick.size() >= 32 && !state.nextAdapterTick.containsKey(request.adapterId())) {
 				iterator.remove(); continue;
 			}
+			eligible = true;
+			// Request overhead, validation and at least one observation unit must be
+			// admitted together. A partial validation grant must not discard the request.
+			int configured = Math.max(0, host.scanBudget());
+			int allowance = Math.min(configured - 1, work.remaining() - 1);
+			int reasons = 0;
+			if (used >= remainingCaptures) reasons |= Reason.CAPTURE_COUNT.bit();
+			if (configured == 0) reasons |= Reason.CAPTURE_DISABLED.bit();
+			else if (configured < 3) reasons |= Reason.PER_CALL_ALLOWANCE.bit();
+			if (work.remaining() < 3) reasons |= Reason.SOURCE_WORK.bit();
+			if (reasons != 0) {
+				delayed = true; observe(entry.getValue(), player, cycleId, nowNanos, reasons); continue;
+			}
+			work.scan(); used++;
 			state.nextAdapterTick.put(request.adapterId(), add(tick, Math.max(1, host.intervalTicks(player, request.adapterId()))));
 			var budget = new PresentationAdapter.CaptureBudget(allowance);
 			Capture captured;
@@ -133,7 +175,22 @@ public final class PresentationPreviewServer {
 				new PresentationSection(section.adapterId(), section.schema(), projected, false))); }
 			catch (RuntimeException | LinkageError unavailable) { reply(player, request, adapter.schema(), PresentationPreviewS2CPacket.Status.UNAVAILABLE); }
 		}
+		delayState = delayed ? DelayState.DELAYED : eligible ? DelayState.HEALTHY : waiting ? DelayState.NEUTRAL : DelayState.IDLE;
 		return used;
+	}
+	private void observe(Queued pending, UUID player, long cycle, long now, int refused) {
+		if (!pending.observed || pending.reasonCycle != cycle) {
+			pending.observed = true; pending.reasonCycle = cycle; pending.reasons = 0;
+		}
+		int added = refused & ~pending.reasons;
+		if (added == 0) return;
+		boolean first = pending.reasons == 0; pending.reasons |= added;
+		var request = pending.request();
+		try { delays.observe(new DelayEvent(Module.PRESENTATION, cycle, now,
+			new WorkItem("request:" + player + ":" + request.requestId() + ":" + request.adapterId(),
+				"property preview request=" + request.requestId() + " adapter=" + request.adapterId()
+					+ " dimension=" + request.target().dimensionId()), first, added, Quantity.of(Unit.REQUEST_ADAPTER, 1))); }
+		catch (RuntimeException | LinkageError ignored) {}
 	}
 	private void reply(UUID player, PresentationPreviewC2SPacket request, int schema, PresentationPreviewS2CPacket.Status status) {
 		var current = access(player, request).orElse(null);

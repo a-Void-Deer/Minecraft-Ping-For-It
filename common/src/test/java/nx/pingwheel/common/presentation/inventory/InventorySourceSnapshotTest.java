@@ -44,7 +44,7 @@ class InventorySourceSnapshotTest {
 			InventorySourceAccess.PROBES, 8L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.MAX_PROVIDER_WORK_PER_TICK));
 	}
 
-	private static InventorySourceAccess.InventoryHandle open(TestSource source, CostLedger ledger) {
+	private static InventorySourceAccess.InventoryHandle open(InventorySourceAccess.Source source, CostLedger ledger) {
 		var access = new InventorySourceAccess(INPUT, i -> Optional.of(source));
 		var scope = new SourceAccess.ReadScope(INPUT.viewKey(), Set.of("pingforit:inventory.items"));
 		var target = INPUT.ordinaryTarget().orElseThrow();
@@ -63,6 +63,66 @@ class InventorySourceSnapshotTest {
 		var payload = (CaptureResult.OpaqueKeyedFragment) result.payload().orElseThrow();
 		assertEquals(InventoryDomainCodec.ID, payload.codecId());
 		return payload.entries();
+	}
+
+	private interface DerivedSource extends InventorySourceAccess.Source {}
+	private interface DerivedTightener extends InventorySourceAccess.Source {
+		@Override default void tightenDisplay(int cap) { throw new AssertionError("unadmitted subinterface parser"); }
+	}
+	private static class InheritedNoOpSource implements DerivedSource {
+		@Override public SourceKey key() { return new SourceKey("test", "inventory", "defaults", INPUT.viewKey()); }
+		@Override public boolean valid() { return true; }
+		@Override public boolean stableCursor() { return true; }
+		@Override public int slots() { return 0; }
+		@Override public InventoryDomainCodec.Item read(int slot) { throw new AssertionError("no read during metadata query"); }
+	}
+	private static class OpaqueParent extends InheritedNoOpSource {
+		@Override public void tightenDisplay(int cap) { throw new AssertionError("unadmitted inherited parser"); }
+	}
+	private static final class OpaqueChild extends OpaqueParent {}
+	private static final class OpaqueInterfaceSource extends InheritedNoOpSource implements DerivedTightener {}
+
+	@Test void inheritedNoOpEvidenceDoesNotTrustSuperclassOrSubinterfaceOverrides() {
+		try (var plain = open(new InheritedNoOpSource(), grant(0));
+			var inheritedOverride = open(new OpaqueChild(), grant(0));
+			var interfaceOverride = open(new OpaqueInterfaceSource(), grant(0))) {
+			assertEquals(InventoryReprojectionSummary.UNKNOWN, new InheritedNoOpSource().reprojectionSummary(1024),
+				"the interface default alone is not a certificate for arbitrary overrides");
+			assertEquals(InventoryReprojectionSummary.EMPTY, plain.reprojectionSummary(1024));
+			assertEquals(InventoryReprojectionSummary.EMPTY, plain.reprojectionSummary(1024), "reuse per-owner evidence");
+			assertEquals(InventoryReprojectionSummary.UNKNOWN, inheritedOverride.reprojectionSummary(1024));
+			assertEquals(InventoryReprojectionSummary.UNKNOWN, interfaceOverride.reprojectionSummary(1024));
+		}
+	}
+
+	@Test void handleSummaryIncludesIndependentSourceAndSnapshotInputsWithoutDecoding() {
+		String json = "{\"id\":\"minecraft:stone\"}";
+		var one = new InventoryReprojectionSummary.Builder().entries(1).input(json).build();
+		var tightens = new AtomicInteger();
+		var snapshot = new InventorySourceAccess.InventorySnapshot() {
+			@Override public int slots() { return 1; }
+			@Override public long retainedBytes() { return 512; }
+			@Override public InventoryDomainCodec.Item read(int index) { throw new AssertionError("summary cannot decode"); }
+			@Override public InventoryReprojectionSummary reprojectionSummary(int cap) { return one; }
+			@Override public void tightenDisplay(int cap) { tightens.incrementAndGet(); }
+		};
+		var source = new InheritedNoOpSource() {
+			@Override public InventoryReprojectionSummary reprojectionSummary(int cap) { return one; }
+			@Override public void tightenDisplay(int cap) { tightens.incrementAndGet(); }
+			@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
+				return Optional.of(new TestPlan(512, () -> Optional.of(snapshot)));
+			}
+		};
+		var memory = new RetainedMemoryLedger(512);
+		try (var handle = open(source, grant(0))) {
+			assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(memory));
+			var summary = handle.reprojectionSummary(1024);
+			assertEquals(2, summary.entries()); assertEquals(2, summary.parserCalls());
+			assertEquals(2 * one.inputBytes(), summary.inputBytes()); assertEquals(2 * one.parserWorkUnits(), summary.parserWorkUnits());
+			assertEquals(one.maxInputBytes(), summary.maxInputBytes()); assertEquals(2 * one.replacementBytes(), summary.replacementBytes());
+			assertEquals(0, tightens.get(), "metadata never dispatches the operation");
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
 
 	@Test
@@ -92,6 +152,18 @@ class InventorySourceSnapshotTest {
 		assertEquals(0, memory.retained());
 		assertEquals(0, memory.reserved());
 		assertEquals(1, source.closes.get());
+	}
+
+	@Test void captureWideStructuralExhaustionIsIncompleteAndReleasesTheWholeReservation() {
+		var source = new TestSource();
+		source.plan = new TestPlan(4096, () -> { throw new nx.pingwheel.common.presentation.inventory.minecraft.InventoryObservationSnapshot.LimitException("structure"); });
+		var memory = new RetainedMemoryLedger(4096);
+		try (var handle = open(source, grant(0))) {
+			assertEquals(InventorySourceAccess.Preparation.INCOMPLETE, handle.prepareSnapshot(memory));
+			assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+			var result = step(handle, grant(0)); assertEquals(CaptureResult.Completeness.INCOMPLETE, result.completeness());
+			assertTrue(result.payload().isEmpty()); assertEquals(0, source.liveReads.get());
+		}
 	}
 
 	@Test

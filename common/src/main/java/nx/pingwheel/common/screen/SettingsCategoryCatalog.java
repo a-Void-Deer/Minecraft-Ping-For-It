@@ -63,6 +63,7 @@ public final class SettingsCategoryCatalog {
 		RATE_LIMIT("rate_limit"),
 		SYNC_DURATION("sync_duration"),
 		PRESENTATION_SERVER_POLICY("presentation_server_policy"),
+		BUDGET_DELAY_NOTIFICATIONS_ENABLED("budget_delay_notifications_enabled"),
 		INVENTORY_PHYSICAL_SLOTS_PER_TICK(Field.PHYSICAL_SLOTS_PER_TICK),
 		INVENTORY_PENDING_MEMORY_MIB(Field.PENDING_MEMORY_MIB),
 		INVENTORY_DISPLAY_BYTE_MULTIPLIER(Field.DISPLAY_BYTE_MULTIPLIER),
@@ -113,6 +114,14 @@ public final class SettingsCategoryCatalog {
 	/** Returns the immutable control order for one leaf category. */
 	public static List<Setting> settings(Category category) {
 		return SETTINGS.get(category);
+	}
+
+	/** Finds the first invalid inventory control, skipping non-inventory Performance settings. */
+	public static Setting firstInvalidInventorySetting(int invalidMask) {
+		return settings(Category.PERFORMANCE).stream()
+			.filter(setting -> setting.inventoryField() != null)
+			.filter(setting -> (invalidMask & setting.inventoryField().mask()) != 0)
+			.findFirst().orElse(null);
 	}
 
 	/**
@@ -178,7 +187,8 @@ public final class SettingsCategoryCatalog {
 			Setting.RATE_LIMIT));
 		settings.put(Category.MARKER_DURATION, List.of(Setting.SYNC_DURATION));
 		settings.put(Category.PERFORMANCE, Arrays.stream(Setting.values())
-			.filter(setting -> setting.inventoryField() != null).toList());
+			.filter(setting -> setting == Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED
+				|| setting.inventoryField() != null).toList());
 		settings.put(Category.SERVER_PRESENTATION, List.of(Setting.PRESENTATION_SERVER_POLICY));
 		return Map.copyOf(settings);
 	}

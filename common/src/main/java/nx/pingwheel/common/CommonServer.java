@@ -70,6 +70,7 @@ public class CommonServer {
 	}
 	public void onServerStopped(MinecraftServer server) {
 		nx.pingwheel.common.presentation.minecraft.PresentationServer.stopped(server);
+		nx.pingwheel.common.presentation.minecraft.BudgetDelayMonitoring.stopped(server);
 	}
 
 	public void onInventoryPacket(MinecraftServer server, ServerPlayer player, InventoryC2SPacket packet) {

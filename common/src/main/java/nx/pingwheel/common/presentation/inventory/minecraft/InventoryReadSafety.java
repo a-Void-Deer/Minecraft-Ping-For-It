@@ -14,7 +14,13 @@ public final class InventoryReadSafety {
 		if (entity instanceof RandomizableContainer randomizable && randomizable.getLootTable() != null) return false;
 		if (entity instanceof BaseContainerBlockEntity) {
 			if (!(entity instanceof BaseContainerLockAccessor access)) return false;
-			return access.pingforit$inventoryLock().unlocksWith(heldKey);
+			var lock = access.pingforit$inventoryLock();
+			if (lock == null) return false;
+			// An empty lock key is already readable; it must not allocate a root
+			// budget for repeated per-slot frozen-topology checks.
+			if (lock.key().isEmpty()) return true;
+			return InventoryItemCodec.lockMatchesResident(heldKey, lock.key(),
+				InventoryItemBudget.root(InventoryItemCodec.minimumDisplayBytes()));
 		}
 		return true;
 	}

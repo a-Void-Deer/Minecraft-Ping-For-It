@@ -29,6 +29,7 @@ import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec;
 import nx.pingwheel.common.presentation.InventoryItemPingTypes;
 import nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources;
 import nx.pingwheel.common.presentation.minecraft.PresentationServer;
+import nx.pingwheel.common.presentation.minecraft.BudgetDelayMonitoring;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
 import nx.pingwheel.common.core.ServerCore;
 import nx.pingwheel.common.domain.MarkerId;
@@ -49,13 +50,14 @@ public final class InventoryServer {
 		reset();
 		active = server;
 		epochSeed = Math.addExact(epochSeed, 2048);
+		var sink = BudgetDelayMonitoring.sink(server);
 		InventoryRuntime.DisplayReprojector reprojector = (display, displayBytes) ->
 			InventoryItemCodec.reproject(display, server.registryAccess(), displayBytes);
 		var runtime = new InventoryRuntime(
 			(input, displayBytes) -> InventoryMinecraftSources.resolve(server, input, displayBytes),
 			ServerConfig.HANDLER.getConfig().getInventory().pendingMemoryBytes(),
-			reprojector);
-		backend = new InventoryBackend(new Host(server, runtime, reprojector), runtime, epochSeed);
+			reprojector, sink);
+		backend = new InventoryBackend(new Host(server, runtime, reprojector), runtime, epochSeed, sink);
 	}
 
 	public static void reset() {

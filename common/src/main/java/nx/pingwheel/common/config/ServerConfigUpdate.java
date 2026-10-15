@@ -14,7 +14,8 @@ public record ServerConfigUpdate(
 	int msToRegenerate,
 	int rateLimit,
 	int syncDuration,
-	InventoryConfigValues inventory
+	InventoryConfigValues inventory,
+	boolean budgetDelayNotificationsEnabled
 ) {
 	public static final int DEFAULT_CHANNEL_MODE = 1;
 	public static final int PLAYER_TRACKING_ENABLED = 1 << 1;
@@ -43,12 +44,14 @@ public record ServerConfigUpdate(
 	public static final int INVENTORY_DISPLAY_BYTE_MULTIPLIER = InventoryConfigValues.Field.DISPLAY_BYTE_MULTIPLIER.mask();
 	public static final int INVENTORY_FRAME_BYTE_MULTIPLIER = InventoryConfigValues.Field.FRAME_BYTE_MULTIPLIER.mask();
 	public static final int ALL_INVENTORY_FIELDS = InventoryConfigValues.allFieldMask();
+	public static final int BUDGET_DELAY_NOTIFICATIONS_ENABLED = 1 << 26;
 	public static final int ALL_FIELDS = DEFAULT_CHANNEL_MODE
 		| PLAYER_TRACKING_ENABLED
 		| MS_TO_REGENERATE
 		| RATE_LIMIT
 		| SYNC_DURATION
-		| ALL_INVENTORY_FIELDS;
+		| ALL_INVENTORY_FIELDS
+		| BUDGET_DELAY_NOTIFICATIONS_ENABLED;
 
 	public ServerConfigUpdate(
 		int changedFields,
@@ -66,6 +69,14 @@ public record ServerConfigUpdate(
 		int msToRegenerate, int rateLimit, int syncDuration) {
 		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
 			syncDuration, InventoryConfigValues.defaults());
+	}
+
+	/** Source-compatible constructor; existing Java callers enable administrator notices. */
+	public ServerConfigUpdate(
+		int changedFields, ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, InventoryConfigValues inventory) {
+		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, inventory, true);
 	}
 
 	public boolean isValid() {
@@ -102,6 +113,14 @@ public record ServerConfigUpdate(
 	public static Optional<ServerConfigUpdate> validated(
 		int changedFields, ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
 		int msToRegenerate, int rateLimit, int syncDuration, InventoryConfigValues inventory) {
+		return validated(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate,
+			rateLimit, syncDuration, inventory, true);
+	}
+
+	public static Optional<ServerConfigUpdate> validated(
+		int changedFields, ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, InventoryConfigValues inventory,
+		boolean budgetDelayNotificationsEnabled) {
 		var update = new ServerConfigUpdate(
 			changedFields,
 			defaultChannelMode,
@@ -109,7 +128,8 @@ public record ServerConfigUpdate(
 			msToRegenerate,
 			rateLimit,
 			syncDuration,
-			inventory);
+			inventory,
+			budgetDelayNotificationsEnabled);
 		return update.isValid() ? Optional.of(update) : Optional.empty();
 	}
 
@@ -148,6 +168,8 @@ public record ServerConfigUpdate(
 			(changedFields & SYNC_DURATION) != 0
 				? ServerConfigBounds.clampSyncDuration(syncDuration)
 				: current.syncDuration(),
-			mergedInventory));
+			mergedInventory,
+			(changedFields & BUDGET_DELAY_NOTIFICATIONS_ENABLED) != 0
+				? budgetDelayNotificationsEnabled : current.budgetDelayNotificationsEnabled()));
 	}
 }

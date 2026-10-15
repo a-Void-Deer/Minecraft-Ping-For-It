@@ -37,6 +37,7 @@ import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.preview.PresentationPreviewAccess;
 import nx.pingwheel.common.presentation.preview.PresentationPreviewLimits;
 import nx.pingwheel.common.presentation.preview.PresentationPreviewServer;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 import static org.junit.jupiter.api.Assertions.*;
@@ -407,5 +408,44 @@ class PresentationServerPreviewTest {
 		assertEquals(1, queue.drain(PresentationPreviewLimits.MIN_REQUEST_TICKS, new PresentationAdapter.CaptureBudget(4), 1));
 		assertEquals(PresentationPreviewS2CPacket.Status.RESULT, host.sent.getLast().status());
 		assertTrue(session.sent.isEmpty()); assertEquals(0, session.revision);
+	}
+	@Test void productionPreviewWaitsForCompleteAdmissionThenObservesRestoredResidualAllowance() {
+		var host = new QueueHost(); var events = new ArrayList<BudgetDelaySink.DelayEvent>();
+		var queue = new PresentationPreviewServer(host, new BudgetDelaySink() {
+			public void observe(DelayEvent event) { events.add(event); }
+			public void state(BudgetDelaySink.Module module, long cycle, long now, DelayState state) { fail("tick owns state"); }
+			public void endCycle(BudgetDelaySink.Module module, long cycle, long now) { fail("tick owns end"); }
+		});
+		assertTrue(queue.handle(PLAYER, request(1, PresentationBasic.ID, Set.of(PresentationBasic.BLOCK_STATE)), 0));
+		assertEquals(0, queue.drain(0, new PresentationAdapter.CaptureBudget(2), 1, 0, 0));
+		assertTrue(host.events.isEmpty(), "insufficient residual observation work cannot run even validation");
+		assertEquals(1, queue.queuedCount());
+		assertEquals(BudgetDelaySink.Reason.SOURCE_WORK.bit(), events.getFirst().newReasonBits());
+		assertEquals(BudgetDelaySink.Unit.REQUEST_ADAPTER, events.getFirst().quantity().unit());
+		assertEquals(1, queue.drain(1, new PresentationAdapter.CaptureBudget(3), 1, 1, 1));
+		assertEquals(List.of("validate", "basic", "send"), host.events);
+		assertEquals(BudgetDelaySink.DelayState.HEALTHY, queue.delayState());
+		assertEquals(PresentationPreviewS2CPacket.Status.RESULT, host.sent.getFirst().status());
+		assertTrue(host.session.sent.isEmpty());
+	}
+	@Test void finalSharedCycleStateAggregatesFairDiscoveryAndPreviewBeforeOneEndDespiteDiagnosticFailures() {
+		var host = new QueueHost(); var calls = new ArrayList<String>();
+		var sink = new BudgetDelaySink() {
+			public void observe(DelayEvent event) { calls.add("observe"); }
+			public void state(BudgetDelaySink.Module module, long cycle, long now, DelayState state) {
+				assertEquals(BudgetDelaySink.Module.PRESENTATION, module); assertEquals(99, cycle);
+				calls.add("state:" + state); throw new LinkageError("logging unavailable");
+			}
+			public void endCycle(BudgetDelaySink.Module module, long cycle, long now) { calls.add("end"); }
+		};
+		var queue = new PresentationPreviewServer(host, sink);
+		assertTrue(queue.handle(PLAYER, request(1, PresentationBasic.ID, Set.of(PresentationBasic.BLOCK_STATE)), 0));
+		queue.drain(0, new PresentationAdapter.CaptureBudget(0), 0, 99, 0);
+		PresentationServer.finishPresentationCycle(sink, 99, 0, BudgetDelaySink.DelayState.NEUTRAL, queue);
+		assertEquals(List.of("observe", "state:DELAYED", "end"), calls);
+		assertEquals(BudgetDelaySink.DelayState.NEUTRAL, PresentationServer.combineState(
+			BudgetDelaySink.DelayState.NEUTRAL, BudgetDelaySink.DelayState.IDLE), "an empty preview page cannot clear an incomplete fair sweep");
+		assertEquals(BudgetDelaySink.DelayState.DELAYED, PresentationServer.combineState(
+			BudgetDelaySink.DelayState.DELAYED, BudgetDelaySink.DelayState.HEALTHY));
 	}
 }

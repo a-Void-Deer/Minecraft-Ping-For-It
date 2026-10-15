@@ -346,7 +346,7 @@ class InventorySyncPublisherTest {
 			}
 			assertEquals(latest, memory.retained(), "historical versions cannot accumulate tickets");
 			publisher.rebase(context, 2);
-			assertEquals(4096 + 1024, memory.retained(), "rebase releases every entry version and retains only state and current wire scope");
+			assertEquals(registrationCost() + 1024, memory.retained(), "rebase releases every entry version and retains the prepaid state slab and current wire scope");
 			publisher.cancel(new SyncPublisher.Context(context.consumerId(), context.recipient(), context.sessionView(), 2, context.baseline()));
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
@@ -354,17 +354,17 @@ class InventorySyncPublisherTest {
 	@Test void groupReplacementKeepsDeliveredVariantsChargedUntilTheGroupCommits() {
 		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
 		try (var publisher = new InventorySyncPublisher(memory, transport)) {
-			publisher.advance(0, settings); var context = context("tracking/1", 1);
-			assertTrue(publisher.register(context, route(new MarkerId(1), "target")));
-			publish(publisher, context, capture(1, 2, 2500)); publisher.drain();
+			publisher.advance(0, settings); var context = context("preview/1", 1);
+			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null)));
+			publish(publisher, context, capture(1, 2, 100)); publisher.drain();
 			long variants = memory.retained(); publisher.gateData(context.recipient());
-			var item = InventoryDomainCodec.encode(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "fold"), 1, "stone", null, true));
+			var item = InventoryDomainCodec.encode(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", ""), 1, "stone", null, true));
 			var result = new CaptureResult(Optional.of(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, Map.of("fold", item))),
 				new CaptureResult.Coverage("inventory", 2, 2, OptionalLong.of(2)), CaptureResult.Availability.READABLE,
 				CaptureResult.Completeness.COMPLETE, CaptureResult.Consistency.EVENTUAL, Optional.empty(), Optional.empty());
 			publish(publisher, context, result);
 			assertTrue(memory.retained() > variants, "removing offered variants cannot release still-delivered variants");
-			publisher.releaseData(context.recipient()); publisher.advance(3, settings); publisher.drain();
+			publisher.releaseData(context.recipient()); publisher.advance(5, settings); publisher.drain();
 			assertTrue(memory.retained() < variants, "a committed replacement retires the old delivered group");
 			publisher.cancel(context);
 		}
@@ -396,6 +396,29 @@ class InventorySyncPublisherTest {
 			memory.setCap(1024 * 1024); publisher.drainControls(); assertEquals(1, transport.sent.size());
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void refusedOfferReplacementWithdrawsTheOldOfferAndExactCancellationCannotRemoveANewerResult() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var recipient = context("control", 1).recipient(); publisher.gateData(recipient);
+			var old = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
+			var latest = InventoryS2CPacket.offer(7, publisher.offer(5, 9, 5, 0)).stamp(100, 1);
+			assertTrue(publisher.control(recipient, old));
+			memory.setCap(0); assertFalse(publisher.control(recipient, latest));
+			assertEquals(0, memory.retained(), "a refused refresh leaves no superseded queued OFFER");
+			memory.setCap(16000000); publisher.drainControls();
+			assertTrue(transport.sent.isEmpty()); assertTrue(publisher.dataGated(recipient));
+			assertTrue(publisher.control(recipient, latest)); publisher.drainControls();
+			assertEquals(List.of(latest), transport.sent);
+			var retired = InventoryS2CPacket.selected(7, 1, 1, null, nx.pingwheel.common.marker.MarkerRejectReason.INVALID_REQUEST).stamp(100, 1);
+			var replacement = retired.stamp(100, 2);
+			assertTrue(publisher.control(recipient, retired)); assertTrue(publisher.control(recipient, replacement));
+			publisher.cancelControl(recipient, retired); publisher.drainControls();
+			assertEquals(List.of(latest, replacement), transport.sent, "cancellation uses the exact bounded result owner");
+			assertTrue(publisher.control(recipient, retired)); publisher.cancelControl(recipient, retired); publisher.drainControls();
+			assertEquals(2, transport.sent.size()); assertEquals(0, memory.reserved());
+		}
+		assertEquals(0, memory.retained());
 	}
 	@Test void reentrantControlCancellationAndCloseDoNotSendCancelledWork() {
 		for (boolean close : List.of(false, true)) {
@@ -454,23 +477,160 @@ class InventorySyncPublisherTest {
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
-	@Test void admittedGroupVariantsReleaseOnWithdrawButDeliveredVariantsDoNot() {
+	@Test void admittedGroupRetirementRequiresFreshTrackingBaselineAndReleasesAdmittedOnlyVersions() {
 		var settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25)));
 		var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
 		try (var publisher = new InventorySyncPublisher(memory, transport)) {
 			publisher.advance(0, settings); var context = context("tracking/1", 1); publisher.register(context, route(new MarkerId(1), "target"));
 			publish(publisher, context, capture(1, 3, 2500)); publisher.drain();
 			long variants = memory.retained();
-			var item = InventoryDomainCodec.encode(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "fold"), 3, "stone", null, true));
+			assertTrue(publisher.retireGroup(context, "minecraft:stone"));
+			assertTrue(memory.retained() < variants, "retirement cancels admitted-only versions immediately");
+			long retired = memory.retained();
+			var item = InventoryDomainCodec.encode(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", ""), 3, "stone", null, true));
 			var result = new CaptureResult(Optional.of(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, Map.of("fold", item))),
 				new CaptureResult.Coverage("inventory", 2, 3, OptionalLong.of(3)), CaptureResult.Availability.READABLE,
 				CaptureResult.Completeness.COMPLETE, CaptureResult.Consistency.EVENTUAL, Optional.empty(), Optional.empty());
-			publish(publisher, context, result);
-			assertTrue(memory.retained() > variants, "offered-group removal does not uncharge the immutable baseline");
-			publisher.withdraw(context); assertTrue(memory.retained() < variants, "admitted-only old group versions now release");
+			assertInstanceOf(SyncPublisher.Outcome.Rejected.class, publisher.publish(result,
+				new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, Set.of("fold")), context,
+				new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L))));
+			assertEquals(retired, memory.retained(), "a stranded tracking cut must be fenced by the Backend before replacement");
+			publisher.withdraw(context);
 			assertFalse(publisher.pending(context)); publisher.cancel(context);
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+
+	static CaptureResult entries(long watermark, Map<String, InventoryDomainCodec.Item> items) {
+		Map<String, CaptureResult.OpaqueValue> payload = new LinkedHashMap<>();
+		items.forEach((key, item) -> payload.put(key, InventoryDomainCodec.encode(item)));
+		return new CaptureResult(Optional.of(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, payload)),
+			new CaptureResult.Coverage("inventory", watermark, items.size(), OptionalLong.of(items.size())), CaptureResult.Availability.READABLE,
+			CaptureResult.Completeness.COMPLETE, CaptureResult.Consistency.VERIFIED, Optional.empty(), Optional.empty());
+	}
+	static long registrationCost() {
+		var memory = new RetainedMemoryLedger(16_000_000);
+		try (var publisher = new InventorySyncPublisher(memory, new Transport())) {
+			assertTrue(publisher.register(context("measure", 1), route(null, "measure")));
+			return memory.retained();
+		}
+	}
+
+	@Test void retirementSlabIsPaidAtRegistrationAndCannotGrowBeyondItsAdmittedOwner() {
+		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16_000_000); var transport = new Transport();
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("preview/metadata", 1);
+			assertTrue(publisher.register(context, route(null, "preview"))); long owner = memory.retained();
+			assertTrue(owner < settings.pendingMemoryBytes(), "finite metadata leaves default room for real item work");
+			memory.setCap(owner);
+			// Request-lifetime retirement allowance, independent of 128-row wire frames.
+			for (int i = 0; i < 256; i++) assertFalse(publisher.retireGroup(context, "test:item_" + i));
+			assertEquals(owner, memory.retained(), "all retirement indexes were paid BEFORE the cap became full");
+			assertEquals(0, memory.reserved());
+			assertThrows(IllegalStateException.class, () -> publisher.retireGroup(context, "test:beyond_lifetime_bound"));
+			publisher.status(context, InventoryS2CPacket.Status.READY); publisher.drain();
+			assertTrue(transport.sent.isEmpty(), "unreplaced retirement cannot become a completed digest");
+			publisher.cancel(context); assertEquals(0, memory.retained());
+		}
+	}
+
+	@Test void restageAdmissionPaysForPeakOverlapAndRefusedPersistentTicketsLeaveLatestOffersRetryable() throws Exception {
+		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16_000_000); var transport = new Transport();
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("preview/overlap", 1);
+			assertTrue(publisher.register(context, route(null, "preview")));
+			var stone = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "exact"), 5, "stone", null, false);
+			var dirt = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:dirt", "exact"), 1, "dirt", null, false);
+			publish(publisher, context, entries(1, Map.of("stone", stone, "dirt", dirt))); publisher.drain();
+			var latest = new InventoryDomainCodec.Item(dirt.key(), 99, "dirt", null, false);
+			publish(publisher, context, entries(2, Map.of("dirt", latest)));
+			transport.failNextSend = true; publisher.drain(); // immutable latest dirt cut remains admitted
+			assertFalse(publisher.retireGroup(context, "minecraft:stone"));
+			var statesField = InventorySyncPublisher.class.getDeclaredField("states"); statesField.setAccessible(true);
+			Object state = ((Map<?, ?>) statesField.get(publisher)).values().iterator().next();
+			var entryField = state.getClass().getDeclaredField("entryMemory"); entryField.setAccessible(true);
+			var ownership = (Map<?, ?>) entryField.get(state); int versions = ownership.size();
+			long held = memory.retained(); int start = transport.sent.size();
+			var aggregate = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", ""), 12, "stone", null, true);
+			var replacement = entries(3, Map.of("aggregate", aggregate));
+			// Admit decoding/index workspace but leave no room for persistent entry
+			// tickets. Invoke the model helper, rather than copying its coefficients.
+			var workspace = InventorySyncPublisher.class.getDeclaredMethod("publicationWorkspace", state.getClass(), CaptureResult.OpaqueKeyedFragment.class); workspace.setAccessible(true);
+			long temporary = (long) workspace.invoke(null, state, replacement.payload().orElseThrow());
+			for (int retry = 0; retry < 2; retry++) {
+				memory.setCap(held + temporary);
+				assertInstanceOf(SyncPublisher.Outcome.Deferred.class, publisher.publish(replacement,
+					new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, Set.of("aggregate")), context,
+					new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L))));
+				assertEquals(versions, ownership.size()); assertEquals(held, memory.retained()); assertEquals(0, memory.reserved());
+			}
+			memory.setCap(16_000_000); publish(publisher, context, replacement);
+			assertTrue(memory.retained() > held, "old delivered versions and accepted replacements overlap");
+			memory.setCap(16_000_000); publisher.advance(5, settings); publisher.drain();
+			var sent = transport.sent.subList(start, transport.sent.size()).stream().flatMap(packet -> packet.entries().stream()).toList();
+			assertTrue(sent.stream().anyMatch(entry -> entry.itemId().equals("minecraft:dirt") && entry.count() == 99));
+			assertTrue(sent.stream().anyMatch(entry -> entry.fallback() && entry.count() == 12));
+			assertTrue(sent.stream().noneMatch(entry -> entry.itemId().equals("minecraft:stone") && !entry.fallback()));
+			publisher.cancel(context);
+			assertTrue(((Map<?, ?>) statesField.get(publisher)).isEmpty(), "cancel releases the context");
+			assertTrue(ownership.isEmpty(), "cancel releases retained entry versions");
+			var batchField = state.getClass().getDeclaredField("batchMemory"); batchField.setAccessible(true);
+			assertNull(batchField.get(state), "cancel releases the immutable batch owner");
+			assertEquals(1024, memory.retained(), "recipient wire accounting survives context cancellation for its period");
+			assertEquals(0, memory.reserved());
+			publisher.advance(10, settings);
+			assertEquals(0, memory.retained(), "the next preview accounting period releases its wire subject");
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+
+	@Test void incompleteControlDoesNotClearRetirementOrAuthorizeOldExactAndCompletionTraffic() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16_000_000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("tracking/1", 1); publisher.register(context, route(new MarkerId(1), "target"));
+			publish(publisher, context, capture(1, 2, 10)); transport.failNextSend = true; publisher.drain();
+			assertTrue(publisher.retireGroup(context, "minecraft:stone"));
+			publisher.status(context, InventoryS2CPacket.Status.INCOMPLETE); int start = transport.sent.size(); publisher.advance(3, settings); publisher.drain();
+			var failure = transport.sent.subList(start, transport.sent.size()); assertEquals(2, failure.size(), "initial fence must not consume the waiting INCOMPLETE status");
+			assertEquals(InventoryS2CPacket.Status.UPDATING, failure.getFirst().status()); assertEquals(InventoryS2CPacket.Status.INCOMPLETE, failure.getLast().status());
+			assertTrue(failure.stream().allMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.STATUS && packet.entries().isEmpty() && packet.watermark() == 0 && packet.checksum() == 0));
+			assertTrue(publisher.retireGroup(context, "minecraft:stone"), "failure control does not clear the required fresh baseline");
+			publisher.status(context, InventoryS2CPacket.Status.READY); start = transport.sent.size(); publisher.advance(6, settings); publisher.drain();
+			assertEquals(start, transport.sent.size(), "success control and heartbeats remain fenced until valid replacement lifecycle");
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+
+	@Test void retirementFencesPendingAndAdmittedExactBeforeReplacementMemoryAdmissionAndRestagesLatestUnrelatedValues() {
+		for (boolean admitted : List.of(false, true)) {
+			var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16_000_000);
+			try (var publisher = new InventorySyncPublisher(memory, transport)) {
+				publisher.advance(0, settings); var context = context("preview/1", 1);
+				publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "preview", null));
+				var stone = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "exact"), 5, "stone", null, false);
+				var dirt = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:dirt", "exact"), 1, "dirt", null, false);
+				publish(publisher, context, entries(1, Map.of("stone", stone, "dirt", dirt)));
+				if (admitted) { transport.failNextSend = true; publisher.drain(); }
+				var latest = new InventoryDomainCodec.Item(dirt.key(), 99, "dirt", null, false);
+				publish(publisher, context, entries(2, Map.of("dirt", latest)));
+				assertFalse(publisher.retireGroup(context, "minecraft:stone"));
+				int start = transport.sent.size();
+				var aggregate = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", ""), 12, "stone", null, true);
+				var replacement = entries(3, Map.of("aggregate", aggregate));
+				memory.setCap(memory.retained());
+				assertInstanceOf(SyncPublisher.Outcome.Deferred.class, publisher.publish(replacement,
+					new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, Set.of("aggregate")), context,
+					new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L))));
+				memory.setCap(16_000_000); publisher.advance(5, settings); publisher.drain();
+				assertEquals(start, transport.sent.size(), "retirement alone cannot send the obsolete cut or its completion");
+				publish(publisher, context, replacement); publisher.drain();
+				var sent = transport.sent.subList(start, transport.sent.size());
+				assertTrue(sent.stream().flatMap(packet -> packet.entries().stream()).noneMatch(entry -> entry.itemId().equals("minecraft:stone") && !entry.fallback()));
+				assertTrue(sent.stream().flatMap(packet -> packet.entries().stream()).anyMatch(entry -> entry.itemId().equals("minecraft:dirt") && entry.count() == 99));
+				assertTrue(sent.stream().flatMap(packet -> packet.entries().stream()).anyMatch(entry -> entry.fallback() && entry.count() == 12));
+			}
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+		}
 	}
 	@Test void largeDataWorkspaceRefusesBeforeHostEncodingAndRetriesWithoutChangingItsDisplay() {
 		var settings = InventorySettings.serverDefaults(); settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(2));

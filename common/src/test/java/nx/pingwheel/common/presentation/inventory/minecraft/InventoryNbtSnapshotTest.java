@@ -6,6 +6,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
+import com.google.gson.JsonParser;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
@@ -34,6 +35,7 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.InventoryDomainCodec;
 import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
+import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
 import nx.pingwheel.common.presentation.source.SourceKey;
@@ -293,7 +295,10 @@ class InventoryNbtSnapshotTest {
 			var observed = snapshot.read(0);
 			assertEquals(7L, observed.count());
 			assertEquals(expected.key(), observed.key(), "native saved custom data retains full variant identity");
-			assertEquals(expected.display().displayJson(), observed.displayJson());
+			// JSON object member order is not identity and is not stable across
+			// detached save/copy; structure and values must match exactly.
+			assertEquals(JsonParser.parseString(expected.display().displayJson()),
+				JsonParser.parseString(observed.displayJson()), "display JSON structure");
 			assertFalse(observed.stripped());
 		}
 	}
@@ -313,7 +318,7 @@ class InventoryNbtSnapshotTest {
 			assertEquals(5L, customItem.count());
 			assertNotEquals(plainItem.key(), customItem.key());
 			assertFalse(plainItem.stripped());
-			assertTrue(customItem.stripped());
+			assertFalse(customItem.aggregateRequired(), "display omission does not fold an admitted complete identity");
 			assertTrue(customItem.displayJson().contains("minecraft:stone"));
 		}
 	}
@@ -434,7 +439,7 @@ class InventoryNbtSnapshotTest {
 			assertEquals(5L, tightened.count());
 			assertEquals(expected.key(), tightened.key(), "tightening never recomputes identity");
 			assertTrue(utf8(tightened.displayJson()) <= 4096);
-			assertTrue(tightened.stripped(), "complete stripping stays component-too-long evidence");
+			assertFalse(tightened.aggregateRequired(), "display omission preserves complete exact identity");
 			snapshot.tightenDisplay(32768); // an increase is ignored
 			assertEquals(4096, snapshot.displayBytes());
 			var afterIncrease = snapshot.read(0);
@@ -469,11 +474,12 @@ class InventoryNbtSnapshotTest {
 		var topology = layout(List.of(member(BlockPos.ZERO, segment(1, List.of(0)))));
 		try (var snapshot = InventoryNbtSnapshot.create(topology, BlockPos.ZERO, List.of(list(encodedEntry(0, stack))),
 			RegistryAccess.EMPTY, InventoryNbtSnapshot.memoryUpperBound(1, 1), 32768)) {
+			assertSame(InventoryReprojectionSummary.EMPTY, snapshot.reprojectionSummary(4096), "unread NBT has no retained display parser input");
 			snapshot.tightenDisplay(4096);
 			var observed = snapshot.read(0);
 			assertEquals(2L, observed.count());
 			assertTrue(utf8(observed.displayJson()) <= 4096, "the lazy catalogue adopts the tighter ceiling before its first decode");
-			assertTrue(observed.stripped());
+			assertFalse(observed.aggregateRequired());
 		}
 	}
 
@@ -505,6 +511,7 @@ class InventoryNbtSnapshotTest {
 				});
 			}
 			@Override public int displayBytes() { return displayBytes; }
+			@Override public InventoryReprojectionSummary reprojectionSummary(int ceiling) { return InventoryReprojectionSummary.EMPTY; }
 			@Override public void tightenDisplay(int displayBytes) {
 				if (displayBytes >= this.displayBytes) return;
 				this.displayBytes = displayBytes;
@@ -524,7 +531,7 @@ class InventoryNbtSnapshotTest {
 			var lowered = runtime.reprojectDisplays(consumer, 4096);
 			assertEquals(InventoryRuntime.ReprojectionStatus.COMPLETED, lowered.status());
 			assertEquals(1, lowered.changedKeys().size(), "the already decoded slot is reprojected");
-			assertEquals(List.of("minecraft:stone"), lowered.foldIds());
+			assertTrue(lowered.foldIds().isEmpty(), "display-only changes never request folding");
 			assertEquals(4096, snapshot.displayBytes());
 			var second = runtime.step(consumer, 1).orElseThrow();
 			assertEquals(1, second.slots().size());
@@ -538,7 +545,7 @@ class InventoryNbtSnapshotTest {
 			assertEquals(5L, third.slots().get(0).count());
 			assertEquals(second.slots().get(0).displayJson(), third.slots().get(0).displayJson(),
 				"an increase never resurrects the omitted component through the same snapshot");
-			assertTrue(third.slots().get(0).stripped());
+			assertFalse(third.slots().get(0).stripped());
 		}
 	}
 

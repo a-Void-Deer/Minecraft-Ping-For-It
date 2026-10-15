@@ -24,12 +24,13 @@ import net.minecraft.nbt.Tag;
 import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.InventoryDomainCodec;
+import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 
 /**
- * Complete per-member detached NBT capture. The caller establishes all-member
- * source safety and topology before and after this contiguous factory call;
- * this model supplies detachment evidence, never a fabricated source version.
+ * Caller-trusted extension for complete per-member detached NBT payloads, not
+ * automatic production extraction or certification of arbitrary Counter/CODEC
+ * behavior. The caller owns source safety and frozen semantic dependencies.
  */
 public final class InventoryNbtSnapshot implements InventorySourceAccess.InventorySnapshot {
 
@@ -100,7 +101,11 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 		InventorySnapshotSchemas.Counter[] counters = new InventorySnapshotSchemas.Counter[topology.size()];
 		for (int i = 0; i < payloads.size(); i++) {
 			counters[i] = InventorySnapshotSchemas.counter(topology.get(i).schemaId());
-			guard.measure(Objects.requireNonNull(payloads.get(i), "payload"), 0);
+			Tag payload = Objects.requireNonNull(payloads.get(i), "payload");
+			// Caller-trusted extension, not automatic production extraction. Guard
+			// exact backing/capacity/cycles before TreeGuard or native copy traverses.
+			preflightNative(payload, displayBytes);
+			guard.measure(payload, 0);
 		}
 		// One persistent tree plus isolated read/export, decoded component and
 		// component-encoding tree workspace. Lazy indexes and catalog storage are
@@ -134,11 +139,15 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 	public InventorySnapshotLayout layout() { requireOpen(); return layout; }
 	public BlockPos originalTarget() { requireOpen(); return originalTarget; }
 	/** Caller-owned defensive copy; no mutable internal tag escapes. */
-	public Tag payload(int segment) { requireOpen(); return segments[segment].payload.copy(); }
+	public Tag payload(int segment) { requireOpen(); return isolated(segments[segment].payload); }
 	@Override public int slots() { requireOpen(); return slots; }
 	@Override public long retainedBytes() { return closed ? 0L : accountedBytes; }
 	@Override public InventorySourceAccess.SnapshotEvidence evidence() { return InventorySourceAccess.SnapshotEvidence.ATOMIC_DETACHED; }
 	@Override public int displayBytes() { requireOpen(); return displayBytes; }
+	@Override public InventoryReprojectionSummary reprojectionSummary(int displayBytes) {
+		requireOpen(); InventoryMinecraftSources.requireDisplayBytes(displayBytes);
+		return displayBytes >= this.displayBytes || catalog == null ? InventoryReprojectionSummary.EMPTY : catalog.reprojectionSummary(displayBytes);
+	}
 
 	/**
 	 * Monotone ceiling: a later configuration increase never expands retained
@@ -150,11 +159,17 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 		if (displayBytes < InventoryItemCodec.minimumDisplayBytes() || displayBytes > InventoryLimits.MAX_DISPLAY_BYTES)
 			throw new IllegalArgumentException("display byte cap is out of range");
 		if (displayBytes >= this.displayBytes) return;
-		this.displayBytes = displayBytes;
 		if (catalog != null) catalog.tightenDisplay(displayBytes);
+		this.displayBytes = displayBytes;
 	}
 
 	@Override public InventoryDomainCodec.Item read(int index) {
+		return readOwned(index, null); // Caller-trusted direct extension entrypoint.
+	}
+	@Override public InventoryDomainCodec.Item read(int index, InventoryCatalogAdmission admission) {
+		return readOwned(index, Objects.requireNonNull(admission));
+	}
+	private InventoryDomainCodec.Item readOwned(int index, InventoryCatalogAdmission admission) {
 		requireOpen();
 		Objects.checkIndex(index, slots);
 		SegmentState segment = segments[segmentBySlot[index]];
@@ -164,12 +179,15 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 			if (segment.items == null) segment.items = InventorySnapshotSchemas.index(segment.payload, segment.topology.localSlots(), segment.topology.visibleSlots());
 			entry = segment.items.read(visible, registries);
 		} else {
-			entry = segment.counter.read(segment.payload.copy(), segment.topology.visibleSlots().get(visible), segment.topology.localSlots(), registries);
+			entry = segment.counter.read(isolated(segment.payload), segment.topology.visibleSlots().get(visible), segment.topology.localSlots(), registries);
 		}
 		if (entry == null) throw new InventorySnapshotSchemas.ReadFailureException("snapshot counter returned no observation");
 		if (entry.isEmpty()) return null;
 		if (catalog == null) catalog = new InventoryItemCodec.Catalog(registries, displayBytes);
-		var encoded = catalog.encode(entry.exemplar());
+		// Counter/decoder internals stay caller-trusted. Owned returned-stack
+		// freezing and Catalog processing use the consuming Runtime's live grant.
+		var encoded = admission == null ? catalog.encode(entry.exemplar())
+			: catalog.encode(entry.exemplar(), InventoryItemBudget.root(displayBytes), admission);
 		var display = encoded.display();
 		return new InventoryDomainCodec.Item(encoded.key(), entry.amount(), display.label(), display.displayJson(), display.componentsStripped());
 	}
@@ -188,6 +206,19 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 	}
 
 	private void requireOpen() { if (closed) throw new IllegalStateException("inventory snapshot is closed"); }
+	private Tag isolated(Tag payload) { preflightNative(payload, displayBytes); return payload.copy(); }
+
+	private static void preflightNative(Tag payload, int displayBytes) {
+		var budget = InventoryItemBudget.root(displayBytes); budget.begin(displayBytes);
+		try {
+			var bounds = new InventoryComponentBounds(budget, InventoryResidentAccess.load());
+			// This is only a native shape/capacity/cycle gate for the trusted
+			// extension's copy. It is not A1's missing native copy certificate or
+			// a new claim about arbitrary subsequent counter/decoder work.
+			bounds.nbt(payload);
+		} catch (InventoryItemBudget.RootLimitException failure) { throw new LimitException("native snapshot payload refused"); }
+		finally { budget.end(); }
+	}
 
 	public static final class LimitException extends IllegalStateException {
 		public LimitException(String reason) { super(reason); }

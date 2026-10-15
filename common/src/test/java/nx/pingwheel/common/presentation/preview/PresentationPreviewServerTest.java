@@ -12,6 +12,12 @@ import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayEvent;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayState;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Module;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Reason;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Unit;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -90,5 +96,60 @@ class PresentationPreviewServerTest {
 		assertEquals(1, server.drain(0, new PresentationAdapter.CaptureBudget(10), 2));
 		assertEquals(0, server.drain(1, new PresentationAdapter.CaptureBudget(10), 2));
 		assertEquals(1, host.events.stream().filter("read"::equals).count());
+	}
+	private static class Sink implements BudgetDelaySink {
+		final List<DelayEvent> events = new ArrayList<>();
+		public void observe(DelayEvent event) { events.add(event); }
+		public void state(Module module, long cycle, long now, DelayState state) { fail("presentation tick owns final state"); }
+		public void endCycle(Module module, long cycle, long now) { fail("preview must not close the shared cycle"); }
+	}
+	@Test void monitoringReportsOnlyActualDueAuthorizedRefusalAndDeduplicatesReasonsPerRequestCycle() {
+		Host host = new Host(); var sink = new Sink(); var server = new PresentationPreviewServer(host, sink);
+		assertTrue(server.handle(PLAYER, request(1), 0));
+		assertEquals(0, server.drain(0, new PresentationAdapter.CaptureBudget(1), 0, 10, 50));
+		assertEquals(DelayState.DELAYED, server.delayState());
+		assertEquals(1, sink.events.size());
+		assertEquals(Reason.CAPTURE_COUNT.bit() | Reason.SOURCE_WORK.bit(), sink.events.getFirst().newReasonBits());
+		assertTrue(sink.events.getFirst().firstItemObservation());
+		assertEquals(Unit.REQUEST_ADAPTER, sink.events.getFirst().quantity().unit());
+		server.drain(0, new PresentationAdapter.CaptureBudget(1), 0, 10, 51);
+		assertEquals(1, sink.events.size(), "same refused request/reasons are not counted twice in one shared cycle");
+		assertEquals(1, server.drain(0, new PresentationAdapter.CaptureBudget(8), 1, 10, 52));
+		assertEquals(DelayState.HEALTHY, server.delayState()); assertEquals(1, host.sent.size());
+		server.drain(1, new PresentationAdapter.CaptureBudget(0), 0, 11, 53);
+		assertEquals(DelayState.IDLE, server.delayState()); assertEquals(1, sink.events.size());
+	}
+	@Test void monitoringExcludesCadenceRevocationExpiryUnavailableAndTransportRefusal() {
+		Host host = new Host() {
+			@Override public int intervalTicks(UUID player, String adapter) { return 100; }
+			@Override public PresentationPreviewServer.Capture capture(UUID player, PresentationPreviewC2SPacket request,
+				PresentationPreviewAccess authorization, PresentationAdapter.CaptureBudget budget) { return null; }
+			@Override public boolean send(UUID player, PresentationPreviewS2CPacket packet) { return false; }
+		};
+		var sink = new Sink(); var server = new PresentationPreviewServer(host, sink);
+		server.handle(PLAYER, request(1), 0); assertEquals(1, server.drain(0, new PresentationAdapter.CaptureBudget(10), 1, 0, 0));
+		assertEquals(DelayState.HEALTHY, server.delayState()); assertTrue(sink.events.isEmpty());
+		server.handle(PLAYER, request(2), PresentationPreviewLimits.MIN_REQUEST_TICKS);
+		server.drain(PresentationPreviewLimits.MIN_REQUEST_TICKS, new PresentationAdapter.CaptureBudget(0), 0, 1, 1);
+		assertEquals(DelayState.NEUTRAL, server.delayState()); assertTrue(sink.events.isEmpty());
+		host.access = ClientPresentationPreviewTest.access(1, Set.of());
+		server.drain(101, new PresentationAdapter.CaptureBudget(0), 0, 2, 2);
+		assertEquals(DelayState.IDLE, server.delayState()); assertTrue(sink.events.isEmpty());
+		host.access = ClientPresentationPreviewTest.access(1, Set.of(FIELD));
+		server.handle(PLAYER, request(3), 200);
+		server.drain(200 + PresentationPreviewLimits.REQUEST_TICKS, new PresentationAdapter.CaptureBudget(0), 0, 3, 3);
+		assertEquals(DelayState.IDLE, server.delayState()); assertTrue(sink.events.isEmpty());
+	}
+	@Test void insufficientPerCallAllowanceRetainsAcceptedRequestUntilRestoredWithoutValidationRead() {
+		int[] configured = {2};
+		Host host = new Host() { @Override public int scanBudget() { return configured[0]; } };
+		var sink = new Sink(); var server = new PresentationPreviewServer(host, sink);
+		assertTrue(server.handle(PLAYER, request(1), 0));
+		assertEquals(0, server.drain(0, new PresentationAdapter.CaptureBudget(10), 2, 0, 0));
+		assertEquals(1, server.queuedCount()); assertFalse(host.events.contains("read"));
+		assertEquals(Reason.PER_CALL_ALLOWANCE.bit(), sink.events.getFirst().newReasonBits());
+		configured[0] = 3;
+		assertEquals(1, server.drain(1, new PresentationAdapter.CaptureBudget(10), 2, 1, 1));
+		assertEquals(0, server.queuedCount()); assertEquals(DelayState.HEALTHY, server.delayState());
 	}
 }

@@ -21,6 +21,7 @@ import nx.pingwheel.common.config.InventorySizeScale;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -70,7 +71,7 @@ class InventoryItemDisplayProjectionTest {
 	}
 
 	@Test
-	void completeStrippingAtAConfiguredCapKeepsTheSizeEvidence() {
+	void completeDisplayStrippingAtAConfiguredCapKeepsExactIdentity() {
 		CompoundTag payload = new CompoundTag();
 		payload.putString("data", "x".repeat(2048));
 		ItemStack customData = new ItemStack(Items.STONE);
@@ -79,8 +80,8 @@ class InventoryItemDisplayProjectionTest {
 		var catalog = new InventoryItemCodec.Catalog(RegistryAccess.EMPTY, minimumDisplayCap());
 		var encoded = catalog.encode(customData);
 
-		assertTrue(encoded.display().componentsStripped(),
-			"every component was dropped because the projection exceeded the configured cap");
+		assertFalse(encoded.display().aggregateRequired(), "display cap never folds identity");
+		assertFalse(encoded.key().componentsKey().isEmpty());
 		assertTrue(utf8Length(encoded.display().displayJson()) <= minimumDisplayCap());
 		assertTrue(encoded.display().displayJson().contains("minecraft:stone"));
 	}
@@ -113,36 +114,29 @@ class InventoryItemDisplayProjectionTest {
 	}
 
 	@Test
-	void reprojectKeepsFittingDisplaysAndFallsBackHonestly() {
+	void reprojectKeepsSafeFittingDisplaysAndPreservesUnavailableIdentity() {
 		int minimum = minimumDisplayCap();
 		var fits = new InventoryItemCodec.Display("minecraft:stone", "block.minecraft.stone",
-			"{\"id\":\"minecraft:stone\"}", false);
+			"{\"id\":\"minecraft:stone\",\"components\":{\"!minecraft:lore\":{}}}", false);
+		assertTrue(utf8Length(fits.displayJson()) <= minimum);
 		assertSame(fits, InventoryItemCodec.reproject(fits, RegistryAccess.EMPTY, minimum));
 
 		var invalid = new InventoryItemCodec.Display("minecraft:stone", "block.minecraft.stone",
 			"x".repeat(2048), false);
-		var fallback = InventoryItemCodec.reproject(invalid, RegistryAccess.EMPTY, minimum);
-		assertEquals("minecraft:stone", fallback.itemId());
-		assertEquals("{\"id\":\"minecraft:stone\"}", fallback.displayJson());
-		assertFalse(fallback.componentsStripped(), "a parse failure never invents component-too-long");
-		assertTrue(utf8Length(fallback.displayJson()) <= minimum);
+		assertUnavailableDisplayPreservesIdentity(invalid, minimum);
 
 		var known = new InventoryItemCodec.Display("minecraft:stone", "block.minecraft.stone",
 			"x".repeat(2048), true);
-		assertTrue(InventoryItemCodec.reproject(known, RegistryAccess.EMPTY, minimum).componentsStripped(),
-			"known size evidence survives the fallback");
+		assertUnavailableDisplayPreservesIdentity(known, minimum);
 
-		// A real oversized component fixture whose decoded identity disagrees with the retained item id.
+		// A real oversized component fixture whose serialized id disagrees with the retained item id.
 		var mismatched = new InventoryItemCodec.Display("minecraft:stone", "block.minecraft.stone",
 			oversizedJson(Items.DIRT), false);
-		var mismatchFallback = InventoryItemCodec.reproject(mismatched, RegistryAccess.EMPTY, minimum);
-		assertEquals("{\"id\":\"minecraft:stone\"}", mismatchFallback.displayJson(),
-			"a decoded identity that disagrees with the retained item id is not adopted");
-		assertTrue(utf8Length(mismatchFallback.displayJson()) <= minimum);
+		assertUnavailableDisplayPreservesIdentity(mismatched, minimum);
 
 		assertThrows(IllegalArgumentException.class,
 			() -> InventoryItemCodec.reproject(fits, RegistryAccess.EMPTY, minimum - 1),
-			"a cap below the legal effective minimum is rejected instead of producing an oversized bare form");
+			"a cap below the legal effective minimum is rejected even for a fitting display");
 		assertThrows(IllegalArgumentException.class,
 			() -> InventoryItemCodec.reproject(fits, RegistryAccess.EMPTY, InventoryLimits.MAX_DISPLAY_BYTES + 1));
 	}
@@ -177,8 +171,9 @@ class InventoryItemDisplayProjectionTest {
 		customData.set(DataComponents.CUSTOM_DATA, CustomData.of(payload));
 		var catalog = new InventoryItemCodec.Catalog(RegistryAccess.EMPTY, minimum);
 		var encoded = catalog.encode(customData);
-		assertTrue(encoded.display().componentsStripped());
-		assertEquals("{\"id\":\"minecraft:stone\"}", encoded.display().displayJson());
+		assertFalse(encoded.display().aggregateRequired());
+		assertTrue(encoded.display().displayJson().contains("!minecraft:custom_data"));
+		assertTrue(encoded.display().displayJson().contains("!minecraft:lore"));
 		assertTrue(utf8Length(encoded.display().displayJson()) <= minimum,
 			"the bare fallback never exceeds the legal minimum cap");
 
@@ -190,7 +185,7 @@ class InventoryItemDisplayProjectionTest {
 	}
 
 	@Test
-	void displayItemIdBoundKeepsBareFallbacksWithinTheAdmittedCap() {
+	void displayItemIdBoundAdmitsSafeMaximumDisplaysWithoutReconstructingMalformedInput() {
 		int minimum = minimumDisplayCap();
 
 		// Reviewer counterexample: the unbounded public item id would have produced a bare
@@ -208,19 +203,20 @@ class InventoryItemDisplayProjectionTest {
 		assertThrows(IllegalArgumentException.class, () -> new InventoryItemCodec.Display(
 			unicodeOverBound, "block.minecraft.stone", "{\"id\":\"minecraft:stone\"}", false));
 
-		// A blank item id never becomes a bogus bare fallback.
+		// A blank item id is invalid metadata, independently of display availability.
 		assertThrows(IllegalArgumentException.class, () -> new InventoryItemCodec.Display(
 			" ", "block.minecraft.stone", "{\"id\":\"minecraft:stone\"}", false));
 
-		// A valid maximum id still falls back honestly and its envelope fits the minimum cap.
+		// A suppression-bearing maximum-id envelope fits; malformed bytes remain unavailable.
 		var maxId = "minecraft:" + "a".repeat(246);
 		assertEquals(256, utf8Length(maxId));
-		var maxDisplay = new InventoryItemCodec.Display(maxId, "block.minecraft.stone", "x".repeat(2048), false);
-		var maxFallback = InventoryItemCodec.reproject(maxDisplay, RegistryAccess.EMPTY, minimum);
-		assertEquals("{\"id\":\"" + maxId + "\"}", maxFallback.displayJson());
-		assertTrue(utf8Length(maxFallback.displayJson()) <= minimum,
+		var maxFits = new InventoryItemCodec.Display(maxId, "block.minecraft.stone",
+			"{\"id\":\"" + maxId + "\",\"components\":{\"!minecraft:lore\":{}}}", false);
+		assertTrue(utf8Length(maxFits.displayJson()) <= minimum,
 			"the valid maximum id envelope fits the minimum cap");
-		assertFalse(maxFallback.componentsStripped(), "a parse failure never invents component-too-long");
+		assertSame(maxFits, InventoryItemCodec.reproject(maxFits, RegistryAccess.EMPTY, minimum));
+		var maxDisplay = new InventoryItemCodec.Display(maxId, "block.minecraft.stone", "x".repeat(2048), false);
+		assertUnavailableDisplayPreservesIdentity(maxDisplay, minimum);
 	}
 
 	@Test
@@ -240,6 +236,29 @@ class InventoryItemDisplayProjectionTest {
 	/** The same authoritative minimum the codec enforces: the display scale's smallest legal cap. */
 	private static int minimumDisplayCap() {
 		return (int) InventorySizeScale.DISPLAY.bytes(InventorySizeScale.DISPLAY.minimumMultiplier());
+	}
+
+	private static void assertUnavailableDisplayPreservesIdentity(InventoryItemCodec.Display retained, int cap) {
+		var projected = InventoryItemCodec.reproject(retained, RegistryAccess.EMPTY, cap);
+		assertNull(projected.displayJson(), "unsafe retained data never reconstructs a bare display");
+		assertEquals(retained.itemId(), projected.itemId());
+		assertEquals(retained.label(), projected.label());
+		assertEquals(retained.aggregateRequired(), projected.aggregateRequired(),
+			"display availability neither folds exact identity nor clears a known aggregate");
+
+		// Opaque identity bytes: display replacement must not decode or recompute them.
+		byte[] canonical = retained.aggregateRequired() ? null : new byte[] {1, 2, 3};
+		var mode = retained.aggregateRequired() ? InventoryIdentityMode.ALL_VARIANTS : InventoryIdentityMode.EXACT;
+		var detached = new InventoryDetachedItem(retained.itemId(), mode, retained, canonical,
+			2L * retained.displayJson().length() + (canonical == null ? 0 : canonical.length));
+		var replacement = detached.withDisplay(projected);
+		assertEquals(mode, replacement.identityMode());
+		assertSame(canonical, replacement.canonicalForCatalog(), "reprojection keeps the exact canonical payload");
+		var original = new InventoryItemCodec.Catalog(RegistryAccess.EMPTY, cap).intern(detached);
+		var reprojected = new InventoryItemCodec.Catalog(RegistryAccess.EMPTY, cap).intern(replacement);
+		assertEquals(original.key(), reprojected.key(), "unavailable display keeps the same exact or aggregate key");
+		assertEquals(retained.aggregateRequired(), reprojected.key().componentsKey().isEmpty());
+		assertEquals(projected, reprojected.display());
 	}
 
 	/** Real fixture: a stack whose JSON display exceeds the minimum cap because of a large component. */

@@ -546,6 +546,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		for (Setting setting : SettingsCategoryCatalog.settings(category)) {
 			if (setting == Setting.SPATIAL_DEADZONE) this.addSubgroup("spatial_selector");
+			if (setting == Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED) this.addSubgroup("monitoring");
 			if (setting == Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK) this.addSubgroup("inventory_shared");
 			if (setting == Setting.INVENTORY_PREVIEW_PERIOD_TICKS) this.addSubgroup("inventory_preview");
 			if (setting == Setting.INVENTORY_TRACKING_PERIOD_TICKS) this.addSubgroup("inventory_tracking");
@@ -605,6 +606,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			}
 			case DEFAULT_CHANNEL_MODE -> this.addServerChannelModeButton();
 			case PLAYER_TRACKING_ENABLED -> this.addServerPlayerTrackingButton();
+			case BUDGET_DELAY_NOTIFICATIONS_ENABLED -> this.addServerBudgetDelayNotificationsButton();
 			case MS_TO_REGENERATE -> this.addServerIntegerRow(setting);
 			case RATE_LIMIT -> this.addServerIntegerRow(setting);
 			case SYNC_DURATION -> this.addServerIntegerRow(setting);
@@ -1616,6 +1618,16 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addFullWidth(Setting.PLAYER_TRACKING_ENABLED.id(), button);
 	}
 
+	private void addServerBudgetDelayNotificationsButton() {
+		final var button = this.createServerValueButton(
+			Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED.id(),
+			() -> LanguageUtils.of("value",
+				this.serverSettings.budgetDelayNotificationsEnabled() ? "enabled" : "disabled").get(),
+			this.serverSettings::toggleBudgetDelayNotifications);
+		button.active = this.serverSettings.canEdit();
+		this.addFullWidth(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED.id(), button);
+	}
+
 	private void addServerIntegerRow(Setting setting) {
 		final String key = setting.id();
 		final String tooltipKey = key + ".tooltip";
@@ -1916,10 +1928,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		} else if ((invalidMask & ServerConfigUpdate.SYNC_DURATION) != 0) {
 			target = this.serverSyncDurationField;
 		} else {
-			target = SettingsCategoryCatalog.settings(Category.PERFORMANCE).stream()
-				.filter(setting -> (invalidMask & setting.inventoryField().mask()) != 0)
-				.map(setting -> this.keyedWidgets.get(setting.id())).filter(java.util.Objects::nonNull)
-				.findFirst().orElse(null);
+			final Setting invalid = SettingsCategoryCatalog.firstInvalidInventorySetting(invalidMask);
+			target = invalid == null ? null : this.keyedWidgets.get(invalid.id());
 		}
 		if (target != null) {
 			this.clearFocus();

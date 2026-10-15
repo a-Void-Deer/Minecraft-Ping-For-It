@@ -7,9 +7,11 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 
 import nx.pingwheel.common.domain.MarkerId;
@@ -32,8 +34,7 @@ import nx.pingwheel.common.presentation.PresentationPropertySelection;
  *
  * <h2>Determinism</h2>
  *
- * <p>Markers are held internally in a {@link LinkedHashMap} (insertion order,
- * which matches ascending {@link MarkerId} because ids are monotonic), and
+ * <p>Markers are held internally in a {@link TreeMap} (ascending id order), and
  * every marker list handed to callers is sorted by ascending {@link MarkerId}.
  *
  * <p>Winner changes are reported per {@code (targetKey, recipient)} pair and
@@ -54,7 +55,7 @@ import nx.pingwheel.common.presentation.PresentationPropertySelection;
 public final class ServerMarkerStore {
 
 	private final MarkerIdSource idSource;
-	private final Map<MarkerId, ServerMarker> markers = new LinkedHashMap<>();
+	private final NavigableMap<MarkerId, ServerMarker> markers = new TreeMap<>();
 
 	public ServerMarkerStore(MarkerIdSource idSource) {
 		this.idSource = Objects.requireNonNull(idSource, "idSource");
@@ -235,6 +236,39 @@ public final class ServerMarkerStore {
 		Objects.requireNonNull(id, "id");
 
 		return Optional.ofNullable(markers.get(id));
+	}
+
+	/** Greatest currently active id, or -1 for an empty population. */
+	public synchronized long highWaterId() {
+		return markers.isEmpty() ? -1 : markers.lastKey().value();
+	}
+
+	/** Detached canonical discovery result. The cursor does not require its marker to remain active. */
+	public record MarkerPage(List<ServerMarker> markers, long afterId, boolean complete) {
+		public MarkerPage { markers = List.copyOf(markers); }
+	}
+
+	/**
+	 * Bounded ascending discovery within a previously captured high-water. -1
+	 * precedes id zero; ordered successors avoid arithmetic at Long.MAX_VALUE.
+	 * Neither paging nor completion checks enumerate the complete population.
+	 */
+	public synchronized MarkerPage pageAfter(long afterExclusive, long highWaterInclusive, int limit) {
+		if (afterExclusive < -1 || highWaterInclusive < -1 || afterExclusive > highWaterInclusive || limit <= 0)
+			throw new IllegalArgumentException("marker page bounds");
+		if (highWaterInclusive == -1) return new MarkerPage(List.of(), afterExclusive, true);
+		var remaining = afterExclusive == -1 ? markers : markers.tailMap(new MarkerId(afterExclusive), false);
+		var iterator = remaining.entrySet().iterator();
+		List<ServerMarker> page = new ArrayList<>(Math.min(limit, markers.size()));
+		long after = afterExclusive;
+		while (page.size() < limit && iterator.hasNext()) {
+			var entry = iterator.next();
+			if (entry.getKey().value() > highWaterInclusive) return new MarkerPage(page, after, true);
+			page.add(entry.getValue());
+			after = entry.getKey().value();
+		}
+		boolean complete = !iterator.hasNext() || iterator.next().getKey().value() > highWaterInclusive;
+		return new MarkerPage(page, after, complete);
 	}
 
 	/**

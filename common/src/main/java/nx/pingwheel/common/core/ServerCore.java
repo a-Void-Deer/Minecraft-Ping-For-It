@@ -51,6 +51,7 @@ import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService;
+import nx.pingwheel.common.presentation.minecraft.BudgetDelayMonitoring;
 import nx.pingwheel.common.presentation.minecraft.PresentationServer;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryServer;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
@@ -130,6 +131,7 @@ public class ServerCore {
 	 * remain to synchronize after a reset, so this is a plain drop.
 	 */
 	public static synchronized void initMarkers() {
+		BudgetDelayMonitoring.reset();
 		PresentationServer.reset();
 		InventoryServer.reset();
 		if (ACTIVE_SERVER != null && MARKER_STORE != null) {
@@ -170,6 +172,7 @@ public class ServerCore {
 
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
 		ACTIVE_SERVER = server;
+		BudgetDelayMonitoring.sink(server);
 		PresentationServer.activate(server);
 		InventoryServer.activate(server);
 
@@ -356,6 +359,9 @@ public class ServerCore {
 		}
 
 		if (inventoryCandidate != null) config.setInventory(inventoryCandidate);
+		if ((update.changedFields() & ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED) != 0) {
+			config.setBudgetDelayNotificationsEnabled(update.budgetDelayNotificationsEnabled());
+		}
 		config.validate();
 		ServerConfig.HANDLER.save();
 	}
@@ -808,6 +814,7 @@ public class ServerCore {
 			refreshExternalMarkers(server);
 		}
 		InventoryServer.tick(server);
+		BudgetDelayMonitoring.finishTick(server);
 	}
 
 	/**

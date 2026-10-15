@@ -54,7 +54,7 @@ import nx.pingwheel.common.presentation.source.SourceKey;
  *
  * <p>The source holds no world object between reads: each read re-resolves the
  * container, revalidates type, loaded state, lock and loot, and only then
- * detaches a stack copy for the codec. The display catalog is the only cache
+ * immediately freezes the resident through the bounded item seam. The display catalog is the only cache
  * and it stores detached variant identity only.
  */
 public final class VanillaInventorySource {
@@ -86,25 +86,32 @@ public final class VanillaInventorySource {
 	 * unavailable containers yield {@link Optional#empty()} rather than a guess.
 	 */
 	public static Optional<Resolved> resolve(MinecraftServer server, ServerPlayer player, Target target) {
+		return resolveOwned(server, player, target, null); // Standalone legacy scanner remains caller-trusted.
+	}
+	/** Caller holds scratch/work, including grant metadata, for the resolved scanner's read lifetime. */
+	public static Optional<Resolved> resolve(MinecraftServer server, ServerPlayer player, Target target, InventoryCatalogAdmission admission) {
+		return resolveOwned(server, player, target, Objects.requireNonNull(admission));
+	}
+	private static Optional<Resolved> resolveOwned(MinecraftServer server, ServerPlayer player, Target target, InventoryCatalogAdmission admission) {
 		Objects.requireNonNull(server, "server");
 		Objects.requireNonNull(player, "player");
 		Objects.requireNonNull(target, "target");
 		ServerLevel level = level(server, target.dimensionId());
 		if (level == null) return Optional.empty();
 
-		if (target instanceof Target.BlockTarget block) return resolveBlock(level, player, block);
-		if (target instanceof Target.EntityTarget entity) return resolveEntity(level, player, entity);
+		if (target instanceof Target.BlockTarget block) return resolveBlock(level, player, block, admission);
+		if (target instanceof Target.EntityTarget entity) return resolveEntity(level, player, entity, admission);
 		return Optional.empty();
 	}
 
 	private static Optional<Resolved> resolveBlock(ServerLevel level, ServerPlayer player,
-		Target.BlockTarget target) {
+		Target.BlockTarget target, InventoryCatalogAdmission admission) {
 		BlockPos pos = new BlockPos(target.x(), target.y(), target.z());
 		if (!level.isLoaded(pos)) return Optional.empty();
 		BlockState state = level.getBlockState(pos);
 		if (!blockId(state.getBlock()).equals(target.blockRegistryId())) return Optional.empty();
 
-		Source source = new Source(level, player, target);
+		Source source = new Source(level, player, target, admission);
 		try {
 			source.container();
 		} catch (SourceUnavailableException unavailable) {
@@ -115,7 +122,7 @@ public final class VanillaInventorySource {
 	}
 
 	private static Optional<Resolved> resolveEntity(ServerLevel level, ServerPlayer player,
-		Target.EntityTarget target) {
+		Target.EntityTarget target, InventoryCatalogAdmission admission) {
 		if (!(target.locator() instanceof EntityLocator.UUID uuid)) return Optional.empty();
 		Entity entity = level.getEntity(uuid.value());
 		if (entity == null || entity.isRemoved()) return Optional.empty();
@@ -127,7 +134,7 @@ public final class VanillaInventorySource {
 
 		String stableId = entityStableId(level.dimension().location().toString(), entity.getUUID(),
 			BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
-		Source source = new Source(level, player, target);
+		Source source = new Source(level, player, target, admission);
 		return resolved(target, ENTITY_KIND, stableId, source);
 	}
 
@@ -223,11 +230,13 @@ public final class VanillaInventorySource {
 		private final ServerPlayer player;
 		private final Target original;
 		private final InventoryItemCodec.Catalog catalog;
+		private final InventoryCatalogAdmission admission;
 
-		Source(ServerLevel level, ServerPlayer player, Target original) {
+		Source(ServerLevel level, ServerPlayer player, Target original, InventoryCatalogAdmission admission) {
 			this.level = level;
 			this.player = player;
 			this.original = original;
+			this.admission = admission;
 			this.catalog = new InventoryItemCodec.Catalog(level.registryAccess());
 		}
 
@@ -257,10 +266,15 @@ public final class VanillaInventorySource {
 			if (slot >= container.getContainerSize()) {
 				throw new SourceUnavailableException("slot index is out of range");
 			}
-			ItemStack stack = container.getItem(slot).copy();
-			if (stack.isEmpty()) return null;
-			InventoryItemCodec.Encoded encoded = catalog.encode(stack);
-			return new InventoryScanner.Stack(encoded.key(), stack.getCount());
+			ItemStack stack = container.getItem(slot);
+			var resident = nx.pingwheel.common.platform.IPlatformInventoryService.ResidentReads.stack(stack);
+			if (resident.amount() == 0) return null;
+			long amount = resident.amount();
+			var detached = InventoryItemCodec.freeze(new InventoryResidentItem.Stack(stack),
+				level.registryAccess(), catalog.displayBytes(), InventoryItemBudget.root(catalog.displayBytes()));
+			InventoryItemCodec.Encoded encoded = admission == null ? catalog.intern(detached) : catalog.intern(detached, admission);
+			container(); // Recheck all source safety before the detached handoff.
+			return new InventoryScanner.Stack(encoded.key(), amount);
 		}
 
 		private Container container() {

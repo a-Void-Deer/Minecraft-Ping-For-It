@@ -13,6 +13,14 @@ java {
     withJavadocJar()
 }
 
+// Common Mixin sources keep the @author/@reason Javadoc metadata required by
+// the Mixin overwrite checker. @author is a standard Javadoc tag, but @reason
+// is not; register it as a custom block tag so every javadoc task that includes
+// the common sources keeps full doclint validation instead of failing on it.
+tasks.named("javadoc", Javadoc).configure {
+	options.addStringOption('tag', 'reason:a:Reason:')
+}
+
 repositories {
     mavenCentral()
     // https://docs.gradle.org/current/userguide/declaring_repositories.html#declaring_content_exclusively_found_in_one_repository

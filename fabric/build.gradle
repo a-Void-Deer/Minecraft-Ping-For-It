@@ -32,6 +32,7 @@ test {
 }
 
 loom {
+    accessWidenerPath = file("src/main/resources/pingforit.accesswidener")
     runs {
         client {
             client()

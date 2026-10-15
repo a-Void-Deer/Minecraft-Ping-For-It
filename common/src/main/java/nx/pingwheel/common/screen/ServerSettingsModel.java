@@ -31,6 +31,7 @@ public final class ServerSettingsModel {
 	private ServerConfigSnapshot authoritative;
 	private ChannelMode defaultChannelMode;
 	private boolean playerTrackingEnabled;
+	private boolean budgetDelayNotificationsEnabled;
 	private String msToRegenerate = "";
 	private String rateLimit = "";
 	private String syncDuration = "";
@@ -103,6 +104,10 @@ public final class ServerSettingsModel {
 
 	public boolean playerTrackingEnabled() {
 		return playerTrackingEnabled;
+	}
+
+	public boolean budgetDelayNotificationsEnabled() {
+		return budgetDelayNotificationsEnabled;
 	}
 
 	public String msToRegenerateText() {
@@ -420,6 +425,15 @@ public final class ServerSettingsModel {
 		recomputeDirtyFields();
 	}
 
+	public void toggleBudgetDelayNotifications() {
+		if (!canEdit()) {
+			return;
+		}
+
+		budgetDelayNotificationsEnabled = !budgetDelayNotificationsEnabled;
+		recomputeDirtyFields();
+	}
+
 	public void setRateLimitText(String value) {
 		if (!canEdit()) {
 			return;
@@ -485,7 +499,8 @@ public final class ServerSettingsModel {
 			parseNonNegative(msToRegenerate).orElseThrow(),
 			parseNonNegative(rateLimit).orElseThrow(),
 			parseNonNegative(syncDuration).orElseThrow(),
-			new InventoryConfigValues(inventory)));
+			new InventoryConfigValues(inventory),
+			budgetDelayNotificationsEnabled));
 	}
 
 	public void markClean() {
@@ -495,6 +510,7 @@ public final class ServerSettingsModel {
 	private void copyAuthoritativeToDraft() {
 		defaultChannelMode = authoritative.defaultChannelMode();
 		playerTrackingEnabled = authoritative.playerTrackingEnabled();
+		budgetDelayNotificationsEnabled = authoritative.budgetDelayNotificationsEnabled();
 		msToRegenerate = Integer.toString(authoritative.msToRegenerate());
 		rateLimit = Integer.toString(authoritative.rateLimit());
 		syncDuration = Integer.toString(authoritative.syncDuration());
@@ -509,6 +525,7 @@ public final class ServerSettingsModel {
 	private void clearDraft() {
 		defaultChannelMode = null;
 		playerTrackingEnabled = false;
+		budgetDelayNotificationsEnabled = false;
 		msToRegenerate = "";
 		rateLimit = "";
 		syncDuration = "";
@@ -529,6 +546,9 @@ public final class ServerSettingsModel {
 		}
 		if (playerTrackingEnabled != authoritative.playerTrackingEnabled()) {
 			fields |= ServerConfigUpdate.PLAYER_TRACKING_ENABLED;
+		}
+		if (budgetDelayNotificationsEnabled != authoritative.budgetDelayNotificationsEnabled()) {
+			fields |= ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED;
 		}
 		if (!matchesAuthoritative(msToRegenerate, authoritative.msToRegenerate())) {
 			fields |= ServerConfigUpdate.MS_TO_REGENERATE;

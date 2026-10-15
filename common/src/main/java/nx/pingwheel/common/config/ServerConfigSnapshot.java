@@ -13,7 +13,8 @@ public record ServerConfigSnapshot(
 	int msToRegenerate,
 	int rateLimit,
 	int syncDuration,
-	InventoryConfigValues inventory
+	InventoryConfigValues inventory,
+	boolean budgetDelayNotificationsEnabled
 ) {
 	public ServerConfigSnapshot(
 		boolean canEdit,
@@ -37,6 +38,14 @@ public record ServerConfigSnapshot(
 			syncDuration, InventoryConfigValues.defaults());
 	}
 
+	/** Source-compatible constructor; existing Java callers enable administrator notices. */
+	public ServerConfigSnapshot(
+		boolean canEdit, ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, InventoryConfigValues inventory) {
+		this(canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, inventory, true);
+	}
+
 	public static ServerConfigSnapshot from(ServerConfig config, boolean canEdit) {
 		return new ServerConfigSnapshot(
 			canEdit,
@@ -45,7 +54,8 @@ public record ServerConfigSnapshot(
 			safeNonNegative(config.getMsToRegenerate()),
 			safeNonNegative(config.getRateLimit()),
 			ServerConfigBounds.clampSyncDuration(config.getSyncDuration()),
-			InventoryConfigValues.from(config.getInventory()));
+			InventoryConfigValues.from(config.getInventory()),
+			config.isBudgetDelayNotificationsEnabled());
 	}
 
 	public ServerConfigSnapshot withCanEdit(boolean canEdit) {
@@ -56,7 +66,8 @@ public record ServerConfigSnapshot(
 			msToRegenerate,
 			rateLimit,
 			syncDuration,
-			inventory);
+			inventory,
+			budgetDelayNotificationsEnabled);
 	}
 
 	public boolean isSafe() {

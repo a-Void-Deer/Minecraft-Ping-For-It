@@ -120,7 +120,7 @@ class InventoryConfigValuesTest {
 		}
 		assertEquals(21, Field.values().length);
 		assertEquals(((1 << 26) - 1) & ~31, mask);
-		assertEquals((1 << 26) - 1, ServerConfigUpdate.ALL_FIELDS);
+		assertEquals((1 << 27) - 1, ServerConfigUpdate.ALL_FIELDS);
 		assertEquals(Field.DISPLAY_BYTE_MULTIPLIER.mask(), ServerConfigUpdate.INVENTORY_DISPLAY_BYTE_MULTIPLIER);
 		assertEquals(Field.FRAME_BYTE_MULTIPLIER.mask(), ServerConfigUpdate.INVENTORY_FRAME_BYTE_MULTIPLIER);
 	}

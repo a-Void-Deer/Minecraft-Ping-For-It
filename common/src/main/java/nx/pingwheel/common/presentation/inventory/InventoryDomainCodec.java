@@ -27,7 +27,10 @@ public final class InventoryDomainCodec {
 			Objects.requireNonNull(label);
 			if (count < 0 || utf8(label) > 1024 || (displayJson != null && utf8(displayJson) > MAX_DISPLAY_BYTES))
 				throw new IllegalArgumentException("inventory observation bounds");
+			if (stripped != key.componentsKey().isEmpty()) throw new IllegalArgumentException("inventory identity mode/key mismatch");
 		}
+		/** Final inventory-v1 bit: aggregate identity, never display simplification. */
+		public boolean aggregateRequired() { return stripped; }
 	}
 	private InventoryDomainCodec() {}
 

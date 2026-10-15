@@ -8,6 +8,8 @@ import java.util.OptionalLong;
 import java.util.function.Function;
 
 import nx.pingwheel.common.presentation.PresentationAdapter;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryCatalogAdmission;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
@@ -54,7 +56,21 @@ public final class InventorySourceAccess implements SourceAccess {
 	 */
 	public interface SnapshotPlan {
 		long memoryUpperBoundBytes();
+		default nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost validationCost() {
+			return new nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost(0, 0, 0);
+		}
+		/** Cumulative allocation is independent of the peak/retained memory reservation. */
+		default long validationAllocationUpperBoundBytes() { return 0; }
+		default long attemptedValidationAllocationBytes() { return 0; }
+		default long attemptedValidationWorkUnits() { return 0; }
+		/** Metadata only; C admits capture work separately from retained memory. */
+		default int physicalReadUpperBound() { return 0; }
+		default long itemWorkUpperBoundUnits() { return 0; }
+		/** Includes empty and throwing getters; never refunded by capture rollback. */
+		default int attemptedPhysicalReads() { return 0; }
 		Optional<InventorySnapshot> capture();
+		/** Caller-supplied finite subledger; native plans debit it before callbacks. */
+		default Optional<InventorySnapshot> capture(nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance allowance) { return capture(); }
 	}
 
 	/**
@@ -65,9 +81,13 @@ public final class InventorySourceAccess implements SourceAccess {
 	public interface InventorySnapshot extends AutoCloseable {
 		int slots();
 		InventoryDomainCodec.Item read(int index);
+		/** Caller holds NEW read scratch and prepaid work; compatibility callbacks remain trusted. */
+		default InventoryDomainCodec.Item read(int index, InventoryCatalogAdmission admission) { return read(index); }
 		long retainedBytes();
 		/** Effective display ceiling of this snapshot's lazy decode catalogue. */
 		default int displayBytes() { return InventoryDomainCodec.MAX_DISPLAY_BYTES; }
+		/** O(1) cached detached cost; the handle separately proves an inherited no-op when this is unknown. */
+		default InventoryReprojectionSummary reprojectionSummary(int displayBytes) { return InventoryReprojectionSummary.UNKNOWN; }
 		/** Lowers the lazy decode ceiling so a later decode never re-expands; an increase is ignored. */
 		default void tightenDisplay(int displayBytes) {}
 		/** Atomicity evidence of this completed capture; unknown stays uncertain. */
@@ -81,42 +101,101 @@ public final class InventorySourceAccess implements SourceAccess {
 	 * the source offers no usable snapshot support.
 	 */
 	public interface InventoryHandle extends SourceAccess.Handle {
+		/** One cumulative allowance for every item consumed by this step, never retained by the handle. */
+		default StepOutcome step(CostLedger ledger, InventoryCatalogAdmission admission) { return step(ledger); }
+		/** Admit before prepareSnapshot, including its initial/final source.valid calls. */
+		default nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost discoveryValidationCost() {
+			return new nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost(0, 0, 0);
+		}
 		/**
 		 * Resolves the route once. A successful snapshot keeps its measured
 		 * reservation charged until its captured data is released or the handle
 		 * closes; a retryable memory defer leaves the route unresolved without capture.
 		 */
 		Preparation prepareSnapshot(RetainedMemoryLedger memory);
+		default Preparation prepareSnapshot(RetainedMemoryLedger memory,
+			nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance discovery) { return prepareSnapshot(memory); }
 		/** Validates this observation's retained source evidence, even after its terminal step; never reads items. */
 		boolean evidenceValid();
 		/** Drops detached capture data when no scanner needs it; keeps source evidence until close. */
 		void releaseCapturedData();
 		/** Effective display ceiling of this handle's live or captured catalogue; the absolute bound when unknown. */
 		default int displayBytes() { return InventoryDomainCodec.MAX_DISPLAY_BYTES; }
+		/** Cached detached cost of the exact callbacks invoked by tightenDisplay, queried under the fixed metadata grant. */
+		default InventoryReprojectionSummary reprojectionSummary(int displayBytes) { return InventoryReprojectionSummary.UNKNOWN; }
 		/**
 		 * Lowers the retained display ceiling of this handle's already captured or
 		 * live source metadata, so later decode cannot re-expand; an increase is
-		 * ignored. The bounded per-catalogue work stays inside the domain catalog.
+		 * ignored. The detached cost summary covers all callbacks invoked here.
 		 */
 		default void tightenDisplay(int displayBytes) {}
 	}
 
 	public interface Source extends AutoCloseable {
+		/** Pure metadata, available before any validation/discovery callback. */
+		default nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost discoveryValidationCost() {
+			return new nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost(0, 0, 0);
+		}
 		SourceKey key();
 		boolean valid();
+		default boolean valid(nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance allowance) { return valid(); }
 		boolean stableCursor();
 		int slots();
 		InventoryDomainCodec.Item read(int slot);
+		/** Additive admitted route; existing external callbacks keep their original contract. */
+		default InventoryDomainCodec.Item read(int slot, InventoryCatalogAdmission admission) { return read(slot); }
+		default boolean matchesSelection(int slot, InventorySelection selection, InventoryCatalogAdmission admission) {
+			return matchesSelection(slot, selection);
+		}
+		default boolean matchesSelection(int slot, InventorySelection selection) {
+			return InventorySourceAccess.matchesSelection(read(slot), selection);
+		}
+		default SelectionWitness observeSelection(int limit, InventorySelection selection) {
+			if (limit < 0) throw new IllegalArgumentException("negative observation limit");
+			Page page = enumerate(limit);
+			if (page.slots().size() > limit) throw new IllegalStateException("provider exceeded selection allowance");
+			return new SelectionWitness(page.slots().stream().anyMatch(item -> InventorySourceAccess.matchesSelection(item, selection)), page.slots().size());
+		}
+		default SelectionWitness observeSelection(int limit, InventorySelection selection, InventoryCatalogAdmission admission) {
+			return observeSelection(limit, selection);
+		}
 		default OptionalLong version() { return OptionalLong.empty(); }
 		/** Empty keeps the source on its existing live route. */
 		default Optional<SnapshotPlan> snapshotPlan() { return Optional.empty(); }
+		default Optional<SnapshotPlan> snapshotPlan(nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance allowance) { return snapshotPlan(); }
 		/** Effective display ceiling of this source's retained catalogue; the absolute bound when unknown. */
 		default int displayBytes() { return InventoryDomainCodec.MAX_DISPLAY_BYTES; }
+		/**
+		 * Pure cached metadata; no world/provider/slot reads or JSON parse may run
+		 * here. UNKNOWN does not label an overriding tightener free: the handle
+		 * can only recover EMPTY by proving the unchanged inherited no-op.
+		 */
+		default InventoryReprojectionSummary reprojectionSummary(int displayBytes) { return InventoryReprojectionSummary.UNKNOWN; }
 		/** Lowers the retained display ceiling of this source's catalogue; an increase is ignored. */
 		default void tightenDisplay(int displayBytes) {}
 		/** Cursorless sources must count every visited view, including empty views. */
 		default Page enumerate(int limit) { throw new UnsupportedOperationException("no enumeration"); }
+		default Page enumerate(int limit, InventoryCatalogAdmission admission) { return enumerate(limit); }
 		@Override default void close() {}
+	}
+	public record SelectionWitness(boolean present, int visited) {
+		public SelectionWitness { if (visited < 0) throw new IllegalArgumentException("negative selection visits"); }
+	}
+	/**
+	 * Owned synchronous cursorless failure, including the failing visit. Only an
+	 * observer that knows the physical prefix may supply this evidence; opaque
+	 * provider failures keep the conservative whole-grant settlement. Stackless,
+	 * with one scalar beyond Throwable's fields (88 modeled bytes), allocated at
+	 * most once per failed operation under the caller's fixed read workspace.
+	 */
+	public static final class CursorlessReadFailure extends RuntimeException {
+		private final int attemptedVisits;
+		public CursorlessReadFailure(int attemptedVisits, Throwable failure) {
+			super(null, Objects.requireNonNull(failure), false, false);
+			if (attemptedVisits < 0 || attemptedVisits > MAX_SLOTS) throw new IllegalArgumentException("cursorless attempted visits");
+			this.attemptedVisits = attemptedVisits;
+		}
+		public int attemptedVisits() { return attemptedVisits; }
 	}
 	public record Page(java.util.List<InventoryDomainCodec.Item> slots, boolean complete) {
 		public Page { slots = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(slots)); }
@@ -131,6 +210,15 @@ public final class InventorySourceAccess implements SourceAccess {
 	}
 	/** Immediate authority check at a retained slot witness, or one bounded cursorless observation. */
 	public boolean selectionPresent(InventorySelection selection, int witness, int observationBound, CostLedger ledger) {
+		return selectionPresentOwned(selection, witness, observationBound, ledger, null);
+	}
+	/** The same caller-backed allowance follows the entire live witness. */
+	public boolean selectionPresent(InventorySelection selection, int witness, int observationBound, CostLedger ledger,
+		InventoryCatalogAdmission admission) {
+		return selectionPresentOwned(selection, witness, observationBound, ledger, Objects.requireNonNull(admission));
+	}
+	private boolean selectionPresentOwned(InventorySelection selection, int witness, int observationBound, CostLedger ledger,
+		InventoryCatalogAdmission catalog) {
 		int limit = (int) Math.min(observationBound, Math.min(ledger.remaining(PHYSICAL), Math.max(0, ledger.remaining(PROVIDER_WORK) / PROVIDER_CALL_WORK - 1)));
 		if (limit == 0 || witness < 0 || witness >= MAX_SLOTS) return false;
 		var admission = ledger.tryReserve(Map.of(PHYSICAL, (long) limit, PROBES, 1L, PROVIDER_WORK, (limit + 1L) * PROVIDER_CALL_WORK));
@@ -142,19 +230,23 @@ public final class InventorySourceAccess implements SourceAccess {
 				if (source.stableCursor()) {
 					if (witness >= source.slots()) return false;
 					used = 1;
-					return matchesSelection(source.read(witness), selection);
+					return catalog == null ? source.matchesSelection(witness, selection) : source.matchesSelection(witness, selection, catalog);
 				}
 				used = limit;
-				Page page = source.enumerate(limit);
-				if (page.slots().size() > limit) return false;
-				used = page.slots().size();
-				return page.slots().stream().anyMatch(item -> matchesSelection(item, selection));
+				SelectionWitness observed = catalog == null ? source.observeSelection(limit, selection) : source.observeSelection(limit, selection, catalog);
+				if (observed.visited() > limit) return false;
+				used = observed.visited();
+				return observed.present();
+			} catch (CursorlessReadFailure failure) {
+				used = Math.min(limit, failure.attemptedVisits());
+				return false;
 			} catch (RuntimeException | LinkageError unavailable) { return false; }
 			finally { ticket.commit(Map.of(PHYSICAL, (long) used, PROBES, 1L, PROVIDER_WORK, (used + 1L) * PROVIDER_CALL_WORK)); }
 		}
 	}
 	private static boolean matchesSelection(InventoryDomainCodec.Item item, InventorySelection selection) {
-		return item != null && item.count() > 0 && (selection.aggregate() ? item.key().itemId().equals(selection.itemId()) : item.key().equals(selection.exact()));
+		return item != null && item.count() > 0 && (selection.aggregate() ? item.key().itemId().equals(selection.itemId())
+			: !item.aggregateRequired() && item.key().equals(selection.exact()));
 	}
 	@Override public ResolveResult resolve(PresentationAdapter.DetachedTarget target, ReadScope scope, CostLedger ledger) {
 		if (!scope.viewKey().equals(input.viewKey()) || !matches(target)) return ResolveResult.Unresolved.UNSUPPORTED;
@@ -193,6 +285,8 @@ public final class InventorySourceAccess implements SourceAccess {
 		private final Descriptor descriptor;
 		private final ReadScope scope;
 		private final Source source;
+		private final InventoryDisplayProjection sourceProjection = new InventoryDisplayProjection();
+		private final InventoryDisplayProjection snapshotProjection = new InventoryDisplayProjection();
 		private int cursor, expected = -1;
 		private boolean closed, terminal, versionStable = true;
 		private OptionalLong firstVersion = OptionalLong.empty();
@@ -207,12 +301,19 @@ public final class InventorySourceAccess implements SourceAccess {
 			this.input = input; this.descriptor = descriptor; this.scope = scope; this.source = source;
 		}
 		@Override public Descriptor descriptor() { return descriptor; }
+		@Override public nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost discoveryValidationCost() { return source.discoveryValidationCost(); }
 		@Override public java.util.Set<String> demand() { return scope.demand(); }
 		@Override public boolean evidenceValid() { return !closed && source.valid(); }
 		@Override public void releaseCapturedData() { releaseRetained(); }
 		@Override public int displayBytes() {
 			InventorySnapshot captured = snapshot;
 			return captured != null ? captured.displayBytes() : source.displayBytes();
+		}
+		@Override public InventoryReprojectionSummary reprojectionSummary(int displayBytes) {
+			if (closed) return InventoryReprojectionSummary.EMPTY;
+			InventorySnapshot captured = snapshot;
+			InventoryReprojectionSummary live = sourceProjection.summary(source, Source.class, source.reprojectionSummary(displayBytes));
+			return captured == null ? live : snapshotProjection.summary(captured, InventorySnapshot.class, captured.reprojectionSummary(displayBytes)).plus(live);
 		}
 		@Override public void tightenDisplay(int displayBytes) {
 			if (closed) return;
@@ -229,14 +330,19 @@ public final class InventorySourceAccess implements SourceAccess {
 		 * that reservation only when it is a valid subset of the bound.
 		 */
 		@Override public Preparation prepareSnapshot(RetainedMemoryLedger memory) {
+			return prepareSnapshot(memory, new nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance(discoveryValidationCost()));
+		}
+		@Override public Preparation prepareSnapshot(RetainedMemoryLedger memory,
+			nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance discovery) {
 			Objects.requireNonNull(memory, "memory");
+			Objects.requireNonNull(discovery, "discovery");
 			if (closed) return Preparation.UNAVAILABLE;
 			if (preparation != null) return preparation;
 			InventorySnapshot captured = null;
 			RetainedMemoryLedger.Ticket reserved = null;
 			try {
-				if (!source.valid()) return settle(Preparation.INVALID);
-				SnapshotPlan plan = source.snapshotPlan().orElse(null);
+				if (!source.valid(discovery)) return settle(Preparation.INVALID);
+				SnapshotPlan plan = source.snapshotPlan(discovery).orElse(null);
 				if (plan == null) return settleLiveRoute();
 				long upperBound = plan.memoryUpperBoundBytes();
 				if (upperBound < 0L) {
@@ -252,7 +358,7 @@ public final class InventorySourceAccess implements SourceAccess {
 				reserved = admission.get();
 				captured = plan.capture().orElse(null);
 				if (captured == null) return settleLiveRoute();
-				if (!source.valid()) return settle(Preparation.INVALID);
+				if (!source.valid(discovery)) return settle(Preparation.INVALID);
 				int slots = captured.slots();
 				long retained = captured.retainedBytes();
 				if (slots < 0 || slots > MAX_SLOTS || retained < 0L || retained > upperBound) {
@@ -272,6 +378,10 @@ public final class InventorySourceAccess implements SourceAccess {
 				this.preparation = Preparation.READY;
 				this.planDeferred = false;
 				return Preparation.READY;
+			} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException
+				| nx.pingwheel.common.presentation.inventory.minecraft.InventoryObservationSnapshot.LimitException failure) {
+				InventoryCaptureDiagnostics.boundExceeded(input, "capture-work-or-structure");
+				return settle(Preparation.INCOMPLETE);
 			} catch (RuntimeException | LinkageError failure) {
 				InventoryCaptureDiagnostics.captureFailed(input, failure);
 				return settle(Preparation.UNAVAILABLE);
@@ -297,14 +407,20 @@ public final class InventorySourceAccess implements SourceAccess {
 		}
 
 		@Override public StepOutcome step(CostLedger ledger) {
+			return stepOwned(ledger, null);
+		}
+		@Override public StepOutcome step(CostLedger ledger, InventoryCatalogAdmission admission) {
+			return stepOwned(ledger, Objects.requireNonNull(admission));
+		}
+		private StepOutcome stepOwned(CostLedger ledger, InventoryCatalogAdmission catalog) {
 			if (closed || terminal) return new StepOutcome.Deferred();
 			if (preparation != null && preparation != Preparation.READY) {
 				terminal = true;
 				return terminalFailure(preparation);
 			}
-			if (snapshot != null) return snapshotStep(ledger);
+			if (snapshot != null) return snapshotStep(ledger, catalog);
 			if (planDeferred) return new StepOutcome.Deferred();
-			return liveStep(ledger);
+			return liveStep(ledger, catalog);
 		}
 
 		/** Terminal preparation failures become one explicit captured result, never a forever defer. */
@@ -321,7 +437,7 @@ public final class InventorySourceAccess implements SourceAccess {
 		}
 
 		/** Consumes retained snapshot data with the existing admission, revalidation and attempted-read charge. */
-		private StepOutcome snapshotStep(CostLedger ledger) {
+		private StepOutcome snapshotStep(CostLedger ledger, InventoryCatalogAdmission catalog) {
 			try {
 				int slots = snapshotSlots;
 				int allowance = slots == 0 ? 0
@@ -346,13 +462,18 @@ public final class InventorySourceAccess implements SourceAccess {
 						Map<String, CaptureResult.OpaqueValue> page = new LinkedHashMap<>();
 						while (cursor < Math.min(slots, MAX_SLOTS) && used < allowance) {
 							used++; // An attempted snapshot read still consumes its admission.
-							var item = snapshot.read(cursor);
+							var item = catalog == null ? snapshot.read(cursor) : snapshot.read(cursor, catalog);
 							page.put(Integer.toString(cursor++), InventoryDomainCodec.encode(item));
 						}
 						boolean complete = cursor == slots;
 						terminal = complete || cursor == MAX_SLOTS;
 						return snapshotCaptured(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, page), CaptureResult.Availability.READABLE,
 							complete ? CaptureResult.Completeness.COMPLETE : terminal ? CaptureResult.Completeness.INCOMPLETE : CaptureResult.Completeness.CONTINUE);
+					} catch (InventoryItemBudget.CaptureLimitException exhausted) {
+						InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace");
+						terminal = true;
+						releaseRetained();
+						return snapshotCaptured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
 					} catch (RuntimeException | LinkageError unavailable) {
 						InventoryCaptureDiagnostics.snapshotStepFailed(input, unavailable);
 						terminal = true;
@@ -382,7 +503,7 @@ public final class InventorySourceAccess implements SourceAccess {
 				Optional.empty()));
 		}
 
-		private StepOutcome liveStep(CostLedger ledger) {
+		private StepOutcome liveStep(CostLedger ledger, InventoryCatalogAdmission catalog) {
 			int allowance = (int) Math.min(MAX_STEP, Math.min(ledger.remaining(PHYSICAL), Math.max(0, ledger.remaining(PROVIDER_WORK) / PROVIDER_CALL_WORK - 1)));
 			if (allowance == 0) return new StepOutcome.Deferred();
 			var admission = ledger.tryReserve(Map.of(PHYSICAL, (long) allowance, PROBES, 1L, PROVIDER_WORK, (allowance + 1L) * PROVIDER_CALL_WORK));
@@ -396,7 +517,7 @@ public final class InventorySourceAccess implements SourceAccess {
 					boolean complete;
 					if (!source.stableCursor()) {
 						used = allowance; // throwing enumeration may have traversed its whole grant
-						Page enumerated = source.enumerate(allowance);
+						Page enumerated = catalog == null ? source.enumerate(allowance) : source.enumerate(allowance, catalog);
 						if (enumerated.slots().size() > allowance) throw new IllegalStateException("provider exceeded admitted enumeration");
 						used = enumerated.slots().size();
 						for (var item : enumerated.slots()) page.put(Integer.toString(cursor++), InventoryDomainCodec.encode(item));
@@ -407,7 +528,7 @@ public final class InventorySourceAccess implements SourceAccess {
 						if (expected < 0 || source.slots() != expected) throw new IllegalStateException("slot view changed");
 						while (cursor < Math.min(expected, MAX_SLOTS) && used < allowance) {
 							used++; // An attempted throwing read still consumes its admission.
-							var item = source.read(cursor);
+							var item = catalog == null ? source.read(cursor) : source.read(cursor, catalog);
 							page.put(Integer.toString(cursor++), InventoryDomainCodec.encode(item));
 						}
 						complete = cursor == expected;
@@ -416,6 +537,18 @@ public final class InventorySourceAccess implements SourceAccess {
 					versionStable &= firstVersion.isPresent() && source.version().equals(firstVersion);
 					return captured(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, page), CaptureResult.Availability.READABLE,
 						complete ? CaptureResult.Completeness.COMPLETE : terminal ? CaptureResult.Completeness.INCOMPLETE : CaptureResult.Completeness.CONTINUE);
+				} catch (CursorlessReadFailure failure) {
+					used = Math.min(allowance, failure.attemptedVisits());
+					terminal = true;
+					if (failure.getCause() instanceof InventoryItemBudget.CaptureLimitException) {
+						InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace");
+						return captured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
+					}
+					return captured(null, CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
+				} catch (InventoryItemBudget.CaptureLimitException exhausted) {
+					InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace");
+					terminal = true;
+					return captured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
 				} catch (RuntimeException | LinkageError unavailable) {
 					terminal = true;
 					return captured(null, CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);

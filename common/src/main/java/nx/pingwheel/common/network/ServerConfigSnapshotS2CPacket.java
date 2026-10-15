@@ -20,7 +20,8 @@ public record ServerConfigSnapshotS2CPacket(
 	int msToRegenerate,
 	int rateLimit,
 	int syncDuration,
-	InventoryConfigValues inventory
+	InventoryConfigValues inventory,
+	boolean budgetDelayNotificationsEnabled
 ) implements IPacket {
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		S2C_NAMESPACE,
@@ -46,6 +47,14 @@ public record ServerConfigSnapshotS2CPacket(
 			syncDuration, InventoryConfigValues.defaults());
 	}
 
+	/** Source compatibility only; the complete v3 wire shape includes the notice flag. */
+	public ServerConfigSnapshotS2CPacket(long requestId, boolean canEdit, ChannelMode defaultChannelMode,
+		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration,
+		InventoryConfigValues inventory) {
+		this(requestId, canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, inventory, true);
+	}
+
 	/** Invalid values are used only by safe-decoding fallback. */
 	public ServerConfigSnapshotS2CPacket() {
 		this(-1L, false, null, false, -1, -1, -1, null);
@@ -61,7 +70,8 @@ public record ServerConfigSnapshotS2CPacket(
 			snapshot.msToRegenerate(),
 			snapshot.rateLimit(),
 			snapshot.syncDuration(),
-			snapshot.inventory());
+			snapshot.inventory(),
+			snapshot.budgetDelayNotificationsEnabled());
 	}
 
 	public ServerConfigSnapshotS2CPacket(FriendlyByteBuf buf) {
@@ -73,7 +83,14 @@ public record ServerConfigSnapshotS2CPacket(
 			ServerConfigVarNumbers.readInt(buf),
 			ServerConfigVarNumbers.readInt(buf),
 			ServerConfigVarNumbers.readInt(buf),
-			ServerInventoryConfigCodec.readComplete(buf));
+			ServerInventoryConfigCodec.read(buf),
+			readNotificationsEnabled(buf));
+	}
+
+	private static boolean readNotificationsEnabled(FriendlyByteBuf buf) {
+		boolean enabled = ServerInventoryConfigCodec.readBoolean(buf);
+		ServerInventoryConfigCodec.requireEnd(buf);
+		return enabled;
 	}
 
 	@Override
@@ -86,6 +103,7 @@ public record ServerConfigSnapshotS2CPacket(
 		buf.writeVarInt(rateLimit);
 		buf.writeVarInt(syncDuration);
 		ServerInventoryConfigCodec.write(buf, inventory);
+		buf.writeBoolean(budgetDelayNotificationsEnabled);
 	}
 
 	@Override
@@ -107,7 +125,8 @@ public record ServerConfigSnapshotS2CPacket(
 			msToRegenerate,
 			rateLimit,
 			syncDuration,
-			inventory);
+			inventory,
+			budgetDelayNotificationsEnabled);
 	}
 
 	public ResourceLocation getId() {

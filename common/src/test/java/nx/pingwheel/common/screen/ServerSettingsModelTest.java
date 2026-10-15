@@ -1,6 +1,7 @@
 package nx.pingwheel.common.screen;
 
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import org.junit.jupiter.api.Test;
@@ -409,6 +410,100 @@ class ServerSettingsModelTest {
 		assertTrue(model.applySnapshot(freshRequestId, EDITABLE));
 		assertTrue(model.canEdit());
 		assertFalse(model.accessDenied());
+	}
+
+	@Test
+	void noticeOnlyPlanTracksFalseAndToggleBackIsClean() {
+		var model = new ServerSettingsModel(true);
+		long requestId = model.beginExpansion();
+		assertTrue(model.applySnapshot(requestId, EDITABLE));
+		assertTrue(model.budgetDelayNotificationsEnabled());
+		model.toggleBudgetDelayNotifications();
+		assertFalse(model.budgetDelayNotificationsEnabled());
+		assertEquals(ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED, model.dirtyFields());
+		assertEquals(0, model.invalidFieldMask());
+		var plan = model.updatePlan().orElseThrow();
+		assertEquals(ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED, plan.changedFields());
+		assertFalse(plan.budgetDelayNotificationsEnabled());
+		assertEquals(EDITABLE.inventory(), plan.inventory());
+		assertEquals(EDITABLE.rateLimit(), plan.rateLimit());
+		model.toggleBudgetDelayNotifications();
+		assertTrue(model.budgetDelayNotificationsEnabled());
+		assertFalse(model.dirty());
+		assertTrue(model.updatePlan().isEmpty());
+	}
+
+	@Test
+	void falseSnapshotStaysFalseThroughOtherEditsAndReadOnlyTogglesAreInert() {
+		var disabled = disabledNotices(true);
+		var model = new ServerSettingsModel(true);
+		long requestId = model.beginExpansion();
+		assertTrue(model.applySnapshot(requestId, disabled));
+		assertFalse(model.budgetDelayNotificationsEnabled());
+		model.setRateLimitText("99");
+		var plan = model.updatePlan().orElseThrow();
+		assertFalse(plan.budgetDelayNotificationsEnabled());
+		assertEquals(ServerConfigUpdate.RATE_LIMIT, plan.changedFields());
+		model.toggleBudgetDelayNotifications();
+		assertTrue(model.budgetDelayNotificationsEnabled());
+		model.setClientPermission(false);
+		assertFalse(model.budgetDelayNotificationsEnabled());
+		assertFalse(model.dirty());
+		assertTrue(model.canView());
+		model.toggleBudgetDelayNotifications();
+		assertFalse(model.budgetDelayNotificationsEnabled());
+		model.setClientPermission(true);
+		assertTrue(model.canEdit());
+		assertFalse(model.budgetDelayNotificationsEnabled());
+		model.toggleBudgetDelayNotifications();
+		assertEquals(ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED, model.updatePlan().orElseThrow().changedFields());
+		assertTrue(model.updatePlan().orElseThrow().budgetDelayNotificationsEnabled());
+
+		for (boolean permission : new boolean[] {false, true}) {
+			var viewer = new ServerSettingsModel(permission);
+			long viewId = viewer.beginExpansion();
+			assertTrue(viewer.applySnapshot(viewId, disabled.withCanEdit(false)));
+			assertTrue(viewer.canView());
+			assertFalse(viewer.canEdit());
+			viewer.toggleBudgetDelayNotifications();
+			assertFalse(viewer.budgetDelayNotificationsEnabled());
+			assertFalse(viewer.dirty());
+			assertTrue(viewer.updatePlan().isEmpty());
+		}
+	}
+
+	@Test
+	void noticeDraftResetCorrelationAndDisconnectFenceOldValues() {
+		var model = new ServerSettingsModel(true);
+		long first = model.beginExpansion();
+		assertFalse(model.applySnapshot(first + 1, disabledNotices(true)));
+		assertFalse(model.canView());
+		assertTrue(model.applySnapshot(first, EDITABLE));
+		model.toggleBudgetDelayNotifications();
+		assertFalse(model.applySnapshot(first, disabledNotices(true)));
+		assertTrue(model.dirty());
+		model.markClean();
+		assertFalse(model.budgetDelayNotificationsEnabled());
+		assertFalse(model.dirty());
+		assertTrue(model.updatePlan().isEmpty());
+		model.collapseAndDiscard();
+		assertTrue(model.budgetDelayNotificationsEnabled());
+		long second = model.beginExpansion();
+		assertFalse(model.applySnapshot(first, EDITABLE));
+		assertTrue(model.applySnapshot(second, disabledNotices(true)));
+		assertFalse(model.budgetDelayNotificationsEnabled());
+		model.toggleBudgetDelayNotifications();
+		model.resetForDisconnect();
+		assertFalse(model.budgetDelayNotificationsEnabled());
+		assertFalse(model.canView());
+		assertFalse(model.dirty());
+		assertFalse(model.applySnapshot(second, EDITABLE));
+		assertTrue(model.updatePlan().isEmpty());
+	}
+
+	private static ServerConfigSnapshot disabledNotices(boolean canEdit) {
+		return new ServerConfigSnapshot(canEdit, ChannelMode.AUTO, true, 1000, 5, 7,
+			InventoryConfigValues.defaults(), false);
 	}
 
 	@Test

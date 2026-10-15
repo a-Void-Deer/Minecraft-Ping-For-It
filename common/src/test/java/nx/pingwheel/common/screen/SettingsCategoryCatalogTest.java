@@ -1,6 +1,7 @@
 package nx.pingwheel.common.screen;
 
 import nx.pingwheel.common.config.InventoryConfigValues.Field;
+import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.screen.SettingsCategoryCatalog.Setting;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,7 @@ import java.util.EnumSet;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SettingsCategoryCatalogTest {
@@ -94,6 +96,7 @@ class SettingsCategoryCatalogTest {
 		// and tracking subgroups, and the display/frame size sliders sit with
 		// the other shared budgets rather than at the end of the catalogue.
 		assertEquals(List.of(
+			Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED,
 			Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK,
 			Setting.INVENTORY_PENDING_MEMORY_MIB,
 			Setting.INVENTORY_DISPLAY_BYTE_MULTIPLIER,
@@ -118,7 +121,7 @@ class SettingsCategoryCatalogTest {
 			performance);
 		var covered = EnumSet.noneOf(Field.class);
 		for (Setting setting : performance) {
-			covered.add(setting.inventoryField());
+			if (setting.inventoryField() != null) covered.add(setting.inventoryField());
 		}
 		assertEquals(EnumSet.allOf(Field.class), covered);
 		for (Category category : Category.values()) {
@@ -128,5 +131,18 @@ class SettingsCategoryCatalogTest {
 			}
 		}
 		assertThrows(UnsupportedOperationException.class, () -> performance.clear());
+	}
+
+	@Test
+	void invalidInventoryRoutingSkipsMonitoringAndKeepsExistingInventoryOrder() {
+		assertNull(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED.inventoryField());
+		assertNull(SettingsCategoryCatalog.firstInvalidInventorySetting(ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED));
+		assertNull(SettingsCategoryCatalog.firstInvalidInventorySetting(0));
+		assertEquals(Setting.INVENTORY_DISPLAY_BYTE_MULTIPLIER,
+			SettingsCategoryCatalog.firstInvalidInventorySetting(ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED
+				| Field.DISPLAY_BYTE_MULTIPLIER.mask() | Field.PREVIEW_PERIOD_TICKS.mask()));
+		for (Field field : Field.values()) {
+			assertEquals(field, SettingsCategoryCatalog.firstInvalidInventorySetting(field.mask()).inventoryField());
+		}
 	}
 }

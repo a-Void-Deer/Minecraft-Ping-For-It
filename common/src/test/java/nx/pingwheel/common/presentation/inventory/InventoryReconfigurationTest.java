@@ -62,7 +62,9 @@ class InventoryReconfigurationTest {
 		CompoundTag payload = new CompoundTag();
 		payload.putString("data", marker.repeat(bytes));
 		stack.set(DataComponents.CUSTOM_DATA, CustomData.of(payload));
-		return new InventoryItemCodec.Catalog(RegistryAccess.EMPTY, InventoryLimits.MAX_DISPLAY_BYTES).encode(stack).display().displayJson();
+		// Independently bounded display fixture. Native item admission may simplify
+		// large resident identities; these tests exercise retained JSON reprojection.
+		return ItemStack.SINGLE_ITEM_CODEC.encodeStart(RegistryAccess.EMPTY.createSerializationContext(com.mojang.serialization.JsonOps.INSTANCE), stack).result().orElseThrow().toString();
 	}
 
 	/** Real JSON whose display-only custom name can be dropped while a small component stays. */
@@ -72,7 +74,7 @@ class InventoryReconfigurationTest {
 		CompoundTag payload = new CompoundTag();
 		payload.putString("data", "x".repeat(dataBytes));
 		stack.set(DataComponents.CUSTOM_DATA, CustomData.of(payload));
-		return new InventoryItemCodec.Catalog(RegistryAccess.EMPTY, InventoryLimits.MAX_DISPLAY_BYTES).encode(stack).display().displayJson();
+		return ItemStack.SINGLE_ITEM_CODEC.encodeStart(RegistryAccess.EMPTY.createSerializationContext(com.mojang.serialization.JsonOps.INSTANCE), stack).result().orElseThrow().toString();
 	}
 
 	static InventoryDomainCodec.Item item(String variant, long count, String json) {
@@ -122,7 +124,12 @@ class InventoryReconfigurationTest {
 
 	static class Source implements InventorySourceAccess.Source {
 		final InventorySourceInput input; final AtomicInteger reads; final List<InventoryDomainCodec.Item> slots;
-		Source(InventorySourceInput input, AtomicInteger reads, List<InventoryDomainCodec.Item> slots) { this.input = input; this.reads = reads; this.slots = slots; }
+		int cap;
+		Source(InventorySourceInput input, AtomicInteger reads, List<InventoryDomainCodec.Item> slots, int cap) { this.input = input; this.reads = reads; this.slots = slots; this.cap = cap; }
+		@Override public int displayBytes() { return cap; }
+		// Tightening only updates cap; the fixture has no catalogue or source-side parser callback.
+		@Override public InventoryReprojectionSummary reprojectionSummary(int ceiling) { return InventoryReprojectionSummary.EMPTY; }
+		@Override public void tightenDisplay(int ceiling) { cap = Math.min(cap, ceiling); }
 		@Override public SourceKey key() { return new SourceKey("test", "inventory", "reconfig-container", input.viewKey()); }
 		@Override public boolean valid() { return true; }
 		@Override public boolean stableCursor() { return true; }
@@ -142,7 +149,7 @@ class InventoryReconfigurationTest {
 		final InventoryBackend backend;
 		Fixture() {
 			InventoryRuntime.DisplayReprojector port = (display, cap) -> InventoryItemCodec.reproject(display, RegistryAccess.EMPTY, cap);
-			backend = new InventoryBackend(host, new InventoryRuntime((i, cap) -> Optional.of(new Source(i, reads, slots)), 16_000_000, port), 1);
+			backend = new InventoryBackend(host, new InventoryRuntime((i, cap) -> Optional.of(new Source(i, reads, slots, cap)), 16_000_000, port), 1);
 		}
 		void begin() {
 			settings.getPreview().setPeriodTicks(1000); settings.getTracking().setPeriodTicks(1000);
@@ -241,6 +248,7 @@ class InventoryReconfigurationTest {
 			f.host.failOffers = true;
 			int change = f.host.packets.size();
 			f.tick(); f.tick();
+			f.handle(A, InventoryC2SPacket.resync(f.host.epoch(A), 1).stamp(100, 1));
 			assertTrue(f.host.offerAttempts >= 2, "the new OFFER is retried while its transport handoff keeps failing");
 			assertTrue(f.host.after(A, change).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW
 				|| p.kind() == InventoryS2CPacket.Kind.SNAPSHOT || p.kind() == InventoryS2CPacket.Kind.STREAM),
@@ -259,15 +267,16 @@ class InventoryReconfigurationTest {
 			var replacement = frames.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId())).findFirst().orElseThrow();
 			assertEquals(status.baselineId(), replacement.baselineId());
 			assertNotEquals(oldBaseline, replacement.baselineId());
-			assertTrue(replacement.entries().getFirst().fallback(), "complete size stripping folds the all-ID total");
-			assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, replacement.entries().getFirst().quality());
+			assertFalse(replacement.entries().getFirst().fallback(), "complete display stripping preserves exact identity");
+			assertEquals(InventoryS2CPacket.Status.UNCERTAIN, replacement.entries().getFirst().quality());
 			assertEquals(5, replacement.entries().getFirst().count());
 
 			var fence = frames.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.entries().isEmpty()).findFirst().orElseThrow();
 			var replacementPreview = frames.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
 			assertTrue(frames.indexOf(fence) < frames.indexOf(replacementPreview), "the fresh empty PREVIEW fence precedes replacement data");
-			assertTrue(replacementPreview.entries().getFirst().fallback());
-			assertTrue(replacementPreview.entries().getFirst().replaceGroup());
+			assertFalse(replacementPreview.entries().getFirst().fallback());
+			assertFalse(replacementPreview.entries().getFirst().replaceGroup());
+			assertEquals(reference.entries().getFirst().key(), replacementPreview.entries().getFirst().key());
 			assertEquals(5, replacementPreview.entries().getFirst().count());
 
 			assertEquals(1, f.host.store.size());
@@ -280,7 +289,7 @@ class InventoryReconfigurationTest {
 			assertEquals(5, tracking.entries().getFirst().count());
 			var previewView = endpoint.client.preview(1);
 			assertFalse(previewView.entries().isEmpty());
-			assertTrue(previewView.entries().getFirst().fallback());
+			assertFalse(previewView.entries().getFirst().fallback());
 			assertEquals(5, previewView.entries().getFirst().count());
 		}
 	}
@@ -315,7 +324,7 @@ class InventoryReconfigurationTest {
 		}
 	}
 
-	@Test void fullComponentStrippingFoldsAllVariantsUsingTheLastCompleteTotal() {
+	@Test void fullDisplayStrippingPreservesBothExactVariantsAndTheLastCompletedSelectedCount() {
 		try (Fixture f = new Fixture()) {
 			f.scaleBudgets(4);
 			f.settings.setDisplayByteMultiplier(BigDecimal.valueOf(2));
@@ -343,24 +352,57 @@ class InventoryReconfigurationTest {
 			for (int i = 0; i < 8; i++) f.tick();
 			var frames = f.host.after(A, change);
 			var replacement = frames.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId())).findFirst().orElseThrow();
-			assertTrue(replacement.entries().getFirst().fallback());
-			assertEquals(7, replacement.entries().getFirst().count(), "the fold uses the last complete all-ID total, never an in-progress partial count");
-			assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, replacement.entries().getFirst().quality());
+			assertFalse(replacement.entries().getFirst().fallback());
+			assertEquals(5, replacement.entries().getFirst().count(), "display omission keeps the completed selected count, never the all-ID total");
+			assertEquals(InventoryS2CPacket.Status.UNCERTAIN, replacement.entries().getFirst().quality());
 
 			var replacementPreview = frames.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
-			assertEquals(1, replacementPreview.entries().size(), "all variants of a folded id merge into one entry");
-			assertTrue(replacementPreview.entries().getFirst().replaceGroup());
-			assertEquals(7, replacementPreview.entries().getFirst().count());
-			assertTrue(replacementPreview.entries().getFirst().fallback());
+			assertEquals(1, replacementPreview.entries().size(), "each exact variant keeps its own bounded part");
+			assertFalse(replacementPreview.entries().getFirst().replaceGroup());
+			var previewEntries = frames.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW).flatMap(p -> p.entries().stream()).toList();
+			assertEquals(Set.of(2L, 5L), previewEntries.stream().map(InventoryS2CPacket.Entry::count).collect(java.util.stream.Collectors.toSet()));
+			assertTrue(previewEntries.stream().noneMatch(InventoryS2CPacket.Entry::fallback));
 
-			// A later cap increase never resurrects the omitted exact variants.
+			// A later cap increase never resurrects the omitted display data.
 			int raised = f.host.packets.size();
 			f.settings.setDisplayByteMultiplier(BigDecimal.valueOf(2));
 			f.settings.setFrameByteMultiplier(BigDecimal.valueOf(2));
 			for (int i = 0; i < 4; i++) f.tick();
 			var afterRaise = f.host.after(A, raised);
-			assertTrue(afterRaise.stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()
-				&& !p.entries().getFirst().fallback()), "an increase never resurrects retained omitted variants");
+			assertTrue(afterRaise.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW).flatMap(p -> p.entries().stream())
+				.noneMatch(entry -> entry.displayJson() != null && (entry.displayJson().contains("a".repeat(5000)) || entry.displayJson().contains("b".repeat(5000)))), "an increase never resurrects retained omitted display");
+		}
+	}
+
+	@Test void actualIdentityRefusalDuringPartialTrackingKeepsCompletedAllIdEvidenceAcrossRecipientResyncAndExpiry() {
+		try (Fixture f = new Fixture()) {
+			f.slots = List.of(item("selected", 5, null), item("other", 7, null), filler("minecraft:dirt", "filler", 1));
+			f.begin(); var reference = f.previewFrames().stream().filter(packet -> packet.entries().getFirst().count() == 5).findFirst().orElseThrow();
+			f.settings.getTracking().setPeriodTicks(1); f.handle(A, f.select(1, reference)); f.tick();
+			var marker = f.host.store.allMarkers().getFirst(); var a = new Endpoint(A, MarkerSnapshot.from(marker)); var b = new Endpoint(B, MarkerSnapshot.from(marker));
+			a.drain(f.host); b.drain(f.host); assertEquals(5, a.client.tracking(marker.id()).entries().getFirst().count());
+			long oldA = a.client.tracking(marker.id()).baselineId(), oldB = b.client.tracking(marker.id()).baselineId();
+			var slots = new ArrayList<InventoryDomainCodec.Item>();
+			slots.add(new InventoryDomainCodec.Item(new InventoryScanner.Key(ITEM_ID, ""), 20, "stone", null, true));
+			for (int i = 0; i < 30; i++) slots.add(filler("minecraft:dirt", "filler" + i, 1));
+			slots.add(item("selected", 3, null)); f.slots = slots;
+			f.settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
+			for (int i = 0; i < 4; i++) f.tick();
+			a.drain(f.host); b.drain(f.host);
+			assertTrue(a.client.tracking(marker.id()).entries().getFirst().fallback());
+			assertEquals(12, a.client.tracking(marker.id()).entries().getFirst().count(), "retirement uses last completed all-ID evidence, never the partial 20");
+			assertNotEquals(oldA, a.client.tracking(marker.id()).baselineId()); assertNotEquals(oldB, b.client.tracking(marker.id()).baselineId());
+			long foldedB = b.client.tracking(marker.id()).baselineId();
+			f.handle(A, InventoryC2SPacket.resync(f.host.epoch(A), 0, marker.id()).stamp(100, 1)); f.tick();
+			a.drain(f.host); b.drain(f.host);
+			assertEquals(12, a.client.tracking(marker.id()).entries().getFirst().count()); assertTrue(a.client.tracking(marker.id()).entries().getFirst().fallback());
+			assertEquals(foldedB, b.client.tracking(marker.id()).baselineId(), "A's repair never resets B");
+			for (int i = 0; i < 40; i++) f.tick(); a.drain(f.host); b.drain(f.host);
+			assertEquals(23, a.client.tracking(marker.id()).entries().getFirst().count());
+			assertEquals(23, b.client.tracking(marker.id()).entries().getFirst().count());
+			assertEquals(400, marker.expiresAtTick()); assertEquals(InventoryRuntimeTest.TARGET, marker.target());
+			f.backend.handle(A, InventoryC2SPacket.close(f.host.epoch(A), 1).stamp(100, 1), 399, f.settings);
+			f.backend.tick(400, f.settings); int reads = f.reads.get(); f.backend.tick(500, f.settings); assertEquals(reads, f.reads.get());
 		}
 	}
 
@@ -369,6 +411,7 @@ class InventoryReconfigurationTest {
 		try (Fixture f = new Fixture()) {
 			runtime = f.backend.runtime();
 			f.scaleBudgets(32);
+			f.settings.setPendingMemoryMiB(64);
 			f.settings.setDisplayByteMultiplier(BigDecimal.valueOf(16));
 			f.settings.setFrameByteMultiplier(BigDecimal.valueOf(16));
 			var slots = new ArrayList<InventoryDomainCodec.Item>();
@@ -384,19 +427,19 @@ class InventoryReconfigurationTest {
 			f.settings.setDisplayByteMultiplier(BigDecimal.ONE);
 			f.settings.setFrameByteMultiplier(BigDecimal.ONE);
 			int change = f.host.packets.size();
-			f.tick(); // detect + OFFER handoff
-			f.tick(); // measured reprojection attempt defers
+			f.tick(); // detect + refused OFFER enqueue
+			f.tick(); // the bounded refresh intent still waits for memory
 			assertEquals(0, f.backend.runtime().memory().reserved(), "a deferred reprojection leaks no workspace ticket");
 			assertTrue(f.host.after(A, change).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()),
 				"the data gate stays closed while reprojection is deferred");
 
 			// Recovering the memory budget completes the same reprojection and reopens the gate.
-			f.settings.setPendingMemoryMiB(8);
+			f.settings.setPendingMemoryMiB(64);
 			for (int i = 0; i < 8; i++) f.tick();
 			var frames = f.host.after(A, change);
 			var replacement = frames.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
-			assertTrue(replacement.entries().getFirst().fallback());
-			assertEquals(11, replacement.entries().getFirst().count());
+			assertFalse(replacement.entries().getFirst().fallback());
+			assertEquals(1, replacement.entries().getFirst().count());
 
 			// A SELECT against the pre-reconfiguration fence is stale and never creates a marker.
 			f.handle(A, f.select(1, reference));
@@ -463,8 +506,8 @@ class InventoryReconfigurationTest {
 			int change = f.host.packets.size();
 			for (int i = 0; i < 8; i++) f.tick();
 			var replacement = f.host.after(A, change).stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
-			assertTrue(replacement.entries().getFirst().fallback(),
-				"the byte cap, not the character count, decides complete stripping");
+			assertFalse(replacement.entries().getFirst().fallback(), "the byte cap simplifies display without changing identity");
+			assertTrue(utf8(replacement.entries().getFirst().displayJson()) <= 4096);
 		}
 	}
 
@@ -526,9 +569,10 @@ class InventoryReconfigurationTest {
 		}
 	}
 
-	@Test void deferredPendingCutSelectIsRejectedAndTheFoldedReferenceStillCreates() {
+	@Test void deferredPendingCutSelectIsRejectedAndTheSimplifiedExactReferenceStillCreates() throws Exception {
 		try (Fixture f = new Fixture()) {
 			f.scaleBudgets(32);
+			f.settings.setPendingMemoryMiB(64);
 			f.settings.setDisplayByteMultiplier(BigDecimal.valueOf(16));
 			f.settings.setFrameByteMultiplier(BigDecimal.valueOf(16));
 			var slots = new ArrayList<InventoryDomainCodec.Item>();
@@ -553,38 +597,56 @@ class InventoryReconfigurationTest {
 			f.handle(A, f.select(1, reference));
 			f.tick();
 			assertEquals(0, f.host.store.size(), "a SELECT during DEFERRED reprojection never installs an oversized tracking presentation");
-			var rejected = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.REJECT || p.kind() == InventoryS2CPacket.Kind.SELECTED)
-				.reduce((a, b) -> b).orElseThrow();
-			assertEquals(InventoryS2CPacket.Kind.REJECT, rejected.kind());
-			assertEquals(1, rejected.commitId());
+			assertTrue(f.backend.runtime().memory().remaining() < 0);
+			assertEquals(0, f.backend.runtime().memory().reserved());
+			assertTrue(f.host.after(A, change).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.REJECT || p.kind() == InventoryS2CPacket.Kind.SELECTED),
+				"the recorded result's wire enqueue waits for resource recovery");
+			var sessionsField = InventoryBackend.class.getDeclaredField("sessions"); sessionsField.setAccessible(true);
+			Object session = ((Map<?, ?>) sessionsField.get(f.backend)).get(A);
+			var commitsField = session.getClass().getDeclaredField("commits"); commitsField.setAccessible(true);
+			Object result = ((Map<?, ?>) commitsField.get(session)).get(1L);
+			assertNotNull(result, "the bounded committed-result owner survives refused queue admission");
+			var pendingField = result.getClass().getDeclaredField("pending"); pendingField.setAccessible(true);
+			var queuedField = result.getClass().getDeclaredField("queued"); queuedField.setAccessible(true);
+			var packetField = result.getClass().getDeclaredField("packet"); packetField.setAccessible(true);
+			assertTrue(pendingField.getBoolean(result)); assertFalse(queuedField.getBoolean(result));
+			assertEquals(InventoryS2CPacket.Kind.REJECT, ((InventoryS2CPacket) packetField.get(result)).kind());
 			assertTrue(f.host.after(A, change).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT));
 
 			// Recovering the memory budget completes the same reprojection.
-			f.settings.setPendingMemoryMiB(8);
+			f.settings.setPendingMemoryMiB(64);
 			for (int i = 0; i < 8; i++) f.tick();
+			var rejected = f.host.after(A, change).stream().map(InventoryPublicationIntegrationTest::wire)
+				.filter(p -> p.kind() == InventoryS2CPacket.Kind.REJECT || p.kind() == InventoryS2CPacket.Kind.SELECTED).toList();
+			assertEquals(1, rejected.size(), "the stored outcome retries without another SELECT and clears after handoff");
+			assertEquals(InventoryS2CPacket.Kind.REJECT, rejected.getFirst().kind());
+			assertEquals(1, rejected.getFirst().commitId());
+			assertEquals(reference.requestId(), rejected.getFirst().requestId());
+			assertFalse(pendingField.getBoolean(result)); assertFalse(queuedField.getBoolean(result));
+			assertEquals(0, f.host.store.size(), "delivering a recorded rejection never retries CREATE");
 			var replacement = f.host.after(A, change).stream()
 				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty())
 				.findFirst().orElseThrow();
 			var entry = replacement.entries().getFirst();
-			assertTrue(entry.fallback(), "complete size stripping folds the all-ID total");
-			assertEquals(11, entry.count());
-			assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, entry.quality());
+			assertFalse(entry.fallback(), "complete display stripping preserves the exact reference");
+			assertEquals(1, entry.count());
+			assertEquals(InventoryS2CPacket.Status.UNCERTAIN, entry.quality());
 
-			// The remaining unused attempt still creates from the folded replacement reference.
+			// The remaining unused attempt still creates from the fresh exact replacement reference.
 			f.handle(A, f.select(2, replacement));
-			assertEquals(1, f.host.store.size(), "the fresh folded reference after the replacement baseline still creates the Ping");
+			assertEquals(1, f.host.store.size(), "the fresh exact reference after the replacement baseline still creates the Ping");
 			var marker = f.host.store.allMarkers().getFirst();
 			f.tick();
 			var snapshot = f.host.packets.stream()
 				.filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId()))
 				.reduce((a, b) -> b).orElseThrow();
-			assertTrue(snapshot.entries().getFirst().fallback(), "the installed tracking never claims an exact oversized presentation");
-			assertEquals(11, snapshot.entries().getFirst().count());
-			assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, snapshot.entries().getFirst().quality());
+			assertFalse(snapshot.entries().getFirst().fallback(), "the installed tracking keeps its exact selected identity");
+			assertEquals(1, snapshot.entries().getFirst().count());
+			assertEquals(InventoryS2CPacket.Status.UNCERTAIN, snapshot.entries().getFirst().quality());
 		}
 	}
 
-	@Test void resyncAfterCapFoldBeforeTheNextCompleteSweepKeepsTheLastCompletedAllIdTotal() {
+	@Test void resyncAfterDisplayTighteningBeforeTheNextCompleteSweepKeepsTheLastCompletedExactCount() {
 		try (Fixture f = new Fixture()) {
 			f.scaleBudgets(4);
 			f.settings.setDisplayByteMultiplier(BigDecimal.valueOf(2));
@@ -629,18 +691,17 @@ class InventoryReconfigurationTest {
 			var replacement = f.host.after(A, resyncMark).stream()
 				.filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId()))
 				.findFirst().orElseThrow();
-			assertTrue(replacement.entries().getFirst().fallback(),
-				"RESYNC keeps the retained completed fold instead of reverting to the exact selected count");
-			assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, replacement.entries().getFirst().quality());
-			assertEquals(7, replacement.entries().getFirst().count(), "the fold keeps the last completed all-ID total");
+			assertFalse(replacement.entries().getFirst().fallback(), "RESYNC preserves exact selected identity after display tightening");
+			assertEquals(InventoryS2CPacket.Status.UNCERTAIN, replacement.entries().getFirst().quality());
+			assertEquals(5, replacement.entries().getFirst().count(), "the last completed exact count survives a partial sweep");
 
 			// The completing sweep publishes the same single folded total, never a group double count.
 			for (int i = 0; i < 4; i++) f.tick();
 			var latest = f.host.after(A, resyncMark).stream()
 				.filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId()))
 				.reduce((a, b) -> b).orElseThrow();
-			assertEquals(7, latest.entries().getFirst().count());
-			assertTrue(latest.entries().getFirst().fallback());
+			assertEquals(5, latest.entries().getFirst().count());
+			assertFalse(latest.entries().getFirst().fallback());
 			assertEquals(1, f.host.store.size());
 			assertEquals(marker.id(), f.host.store.allMarkers().getFirst().id());
 			assertEquals(400, f.host.store.allMarkers().getFirst().expiresAtTick());
@@ -649,9 +710,9 @@ class InventoryReconfigurationTest {
 			var tracking = endpoint.client.tracking(marker.id());
 			assertTrue(tracking.complete());
 			assertEquals(1, tracking.entries().size(), "the folded group replaces the exact variant instead of double counting");
-			assertEquals(7, tracking.entries().getFirst().count());
-			assertTrue(tracking.entries().getFirst().fallback());
-			assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, tracking.entries().getFirst().quality());
+			assertEquals(5, tracking.entries().getFirst().count());
+			assertFalse(tracking.entries().getFirst().fallback());
+			assertEquals(InventoryS2CPacket.Status.UNCERTAIN, tracking.entries().getFirst().quality());
 		}
 	}
 }

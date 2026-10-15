@@ -1,0 +1,14 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "nx.pingwheel.fabric.mixin.inventory",
+	"compatibilityLevel": "JAVA_21",
+	"mixins": [
+		"SingleStackStorageResidentInvoker",
+		"InventorySlotResidentAccessor",
+		"InventoryStorageResidentAccessor"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

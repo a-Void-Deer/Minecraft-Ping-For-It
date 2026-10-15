@@ -31,13 +31,19 @@ import static org.junit.jupiter.api.Assertions.*;
  * Production row-seam coverage: the paint path resolves each row's encoded
  * display value into the count-one icon stack and localized name through the
  * shared {@link ClientItemDisplay} projection, while a missing or failed value
- * keeps the native bare stack and the registry translation key.
+ * keeps an empty icon and the registry translation key.
  */
 class SpatialInventoryRowDisplayTest {
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
 	@BeforeEach void clearCache() { ClientItemDisplay.reset(); }
+
+	@Test void aggregateQualityUsesAllVariantsWhileExactBareDisplayHasNoQualityLabel() {
+		assertEquals("pingforit.spatial.inventory.all_variants", SpatialInventoryView.Status.COMPONENT_TOO_LONG.translationKey());
+		assertTrue(SpatialInventoryView.Status.COMPONENT_TOO_LONG.grey());
+		assertNull(row("minecraft:stone", "block.minecraft.stone", null).quality().translationKey());
+	}
 
 	private static String json(ItemStack stack) {
 		return ItemStack.SINGLE_ITEM_CODEC
@@ -81,19 +87,17 @@ class SpatialInventoryRowDisplayTest {
 	}
 
 	@Test
-	void rowSeamFallsBackToTheBareStackAndRegistryKeyWithoutRawData() {
+	void rowSeamKeepsTheRegistryKeyWithoutAPrototypeIconOrRawData() {
 		for (String malformed : List.of("{not json", "{\"id\":\"pingforit:missing_item\"}")) {
 			ClientItemDisplay.Display display = SpatialOverlayRenderer.rowDisplay(
 				row("minecraft:diamond_sword", "item.minecraft.diamond_sword", malformed), RegistryAccess.EMPTY);
-			assertEquals(Items.DIAMOND_SWORD, display.stack().getItem(), malformed);
-			assertTrue(display.stack().getComponentsPatch().isEmpty(), malformed);
+			assertTrue(display.stack().isEmpty(), malformed);
 			assertEquals("item.minecraft.diamond_sword", contents(display.name()).getKey(), malformed);
 		}
 
 		ClientItemDisplay.Display missing = SpatialOverlayRenderer.rowDisplay(
 			row("minecraft:diamond_sword", "item.minecraft.diamond_sword", null), RegistryAccess.EMPTY);
-		assertEquals(Items.DIAMOND_SWORD, missing.stack().getItem());
-		assertEquals(1, missing.stack().getCount());
+		assertTrue(missing.stack().isEmpty());
 		assertEquals("item.minecraft.diamond_sword", contents(missing.name()).getKey(),
 			"a row without encoded display data keeps the registry translation key fallback");
 	}

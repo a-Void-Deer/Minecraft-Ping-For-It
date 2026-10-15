@@ -33,6 +33,7 @@ import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.presentation.*;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryServer;
 import nx.pingwheel.common.presentation.preview.PresentationPreviewAccess;
@@ -52,7 +53,10 @@ public final class PresentationServer {
 	private static final Map<Long, Lease> LEASES = new LinkedHashMap<>();
 	private static MinecraftServer activeServer;
 	private static PresentationRegistry registry = new PresentationRegistry();
-	private static int cursor;
+	private static PresentationFairSampler sampler = new PresentationFairSampler();
+	private static UUID baselineRecipient;
+	private static long observationSerial;
+	private static BudgetDelaySink delaySink = BudgetDelaySink.NONE;
 	private static String policyFingerprint = "";
 	private static PresentationPreviewServer previews;
 
@@ -68,6 +72,9 @@ public final class PresentationServer {
 		Set<String> inventoryTypes = Set.of();
 		long view;
 		long revision;
+		long authorizationCut = -1;
+		long baselineAfter = -1, baselineHighWater = -1;
+		boolean baselinePending;
 		boolean ready;
 		Session(long epoch, Map<String, Integer> schemas, Map<String, List<PresentationField>> manifest) {
 			this.epoch = epoch; this.schemas = Map.copyOf(schemas); this.manifest = Map.copyOf(manifest);
@@ -77,12 +84,16 @@ public final class PresentationServer {
 	static final class SentMarker {
 		final String ownerName;
 		final Map<String, PresentationSection> sections = new HashMap<>();
+		long deliveredView;
 		SentMarker(String ownerName) { this.ownerName = ownerName; }
 	}
 	static final class Source {
+		enum Observation { NEVER, SUCCESS, FAILED, CLEARED }
 		PresentationSection value;
 		Set<String> demand = Set.of();
 		long nextSample;
+		long successfulSerial;
+		Observation observation = Observation.NEVER;
 		Source(String id, int schema) { value = PresentationSection.empty(id, schema); }
 	}
 	static final class Lease {
@@ -94,10 +105,12 @@ public final class PresentationServer {
 
 	public static void activate(MinecraftServer server) {
 		if (activeServer == server) return;
-		SESSIONS.clear(); LEASES.clear(); cursor = 0;
+		SESSIONS.clear(); LEASES.clear(); sampler = new PresentationFairSampler(); baselineRecipient = null;
+		observationSerial = 0;
 		if (previews != null) previews.reset();
 		activeServer = server;
-		previews = new PresentationPreviewServer(new MinecraftPresentationPreview(server));
+		delaySink = BudgetDelayMonitoring.sink(server);
+		previews = new PresentationPreviewServer(new MinecraftPresentationPreview(server), delaySink);
 		registry = new PresentationRegistry();
 		registry.register(new BasicManifest());
 		registry.register(InventoryPresentation.INSTANCE);
@@ -115,6 +128,8 @@ public final class PresentationServer {
 		if (previews != null) previews.reset();
 		previews = null;
 		SESSIONS.clear(); LEASES.clear(); activeServer = null; registry = new PresentationRegistry();
+		sampler = new PresentationFairSampler(); baselineRecipient = null; observationSerial = 0;
+		delaySink = BudgetDelaySink.NONE;
 	}
 
 	/** Authenticated server-thread ingress only queues; it performs no target/source observation. */
@@ -172,17 +187,15 @@ public final class PresentationServer {
 		session.inventoryTypes = inventoryTypes(player, session);
 		session.view++;
 		session.ready = true;
-		session.sent.clear();
 		send(player, PresentationS2CPacket.reset(session.epoch, session.view, session.mask, session.childBlack));
 		long tick = activeServer.getTickCount();
-		cachedBaseline(LEASES.values(), tick, player.getUUID(), lease -> {
-			sendInitial(player, session, lease);
-			publish(player, session, lease);
-		});
+		startBaseline(session, store);
 		sendWinnerBaseline(session, player.getUUID(), tick, store, packet -> send(player, packet));
 	}
 
 	/** The negotiated baseline replays retained values; it never enters the source sampler. */
+	// Compatibility seam for the existing focused cached-replay fixtures. Live
+	// negotiation/reset uses bounded canonical baselineTick discovery instead.
 	static void cachedBaseline(Collection<Lease> leases, long tick, UUID recipient,
 		java.util.function.Consumer<Lease> delivery) {
 		for (Lease lease : leases) {
@@ -191,12 +204,50 @@ public final class PresentationServer {
 		}
 	}
 
-	/**
-	 * Replays the authoritative recipient-scoped winner for every target key that
-	 * has an active marker visible to {@code recipient}, after the record/value
-	 * baseline. It reads only the current marker store: no source observation, no
-	 * lease allocation, and no fabricated marker record.
-	 */
+	static void startBaseline(Session session, ServerMarkerStore store) {
+		session.baselineAfter = -1;
+		session.baselineHighWater = store.highWaterId();
+		session.baselinePending = true;
+	}
+
+	/** One shared discovery allowance, rotating recipients after each canonical inspection. */
+	static UUID baselineTick(ServerMarkerStore store, Map<UUID, Session> sessions, UUID lastRecipient,
+		long tick, int allowance, Predicate<UUID> online,
+		java.util.function.BiConsumer<UUID, ServerMarker> deliver) {
+		if (allowance < 0) throw new IllegalArgumentException("baseline allowance");
+		NavigableMap<UUID, Session> pending = new TreeMap<>();
+		sessions.forEach((recipient, session) -> {
+			if (session.ready && session.baselinePending && online.test(recipient)) pending.put(recipient, session);
+		});
+		while (allowance > 0 && !pending.isEmpty()) {
+			UUID recipient = lastRecipient == null ? pending.firstKey() : pending.higherKey(lastRecipient);
+			if (recipient == null) recipient = pending.firstKey();
+			Session session = pending.get(recipient);
+			var page = store.pageAfter(session.baselineAfter, session.baselineHighWater, 1);
+			if (!page.markers().isEmpty()) {
+				allowance--;
+				ServerMarker marker = page.markers().get(0);
+				if (marker.expiresAtTick() > tick && marker.recipients().contains(recipient)) deliver.accept(recipient, marker);
+			}
+			session.baselineAfter = page.afterId();
+			if (page.complete()) { session.baselinePending = false; pending.remove(recipient); }
+			lastRecipient = recipient;
+		}
+		return lastRecipient;
+	}
+
+	static void pruneSession(Session session, ServerMarkerStore store, Function<String, PresentationAdapter> adapters,
+		java.util.function.BiFunction<ServerMarker, PresentationAdapter, Set<String>> fresh) {
+		var iterator = session.sent.entrySet().iterator();
+		while (iterator.hasNext()) {
+			var entry = iterator.next();
+			ServerMarker marker = store.find(new MarkerId(entry.getKey())).orElse(null);
+			if (marker == null) { iterator.remove(); continue; }
+			pruneKnown(session, marker, adapters, adapter -> fresh.apply(marker, adapter));
+		}
+	}
+
+	/** Winner-before-record converges as bounded canonical record pages arrive. */
 	static void sendWinnerBaseline(Session session, UUID recipient, long tick, ServerMarkerStore store,
 		java.util.function.Consumer<PresentationS2CPacket> delivery) {
 		if (!session.ready) return;
@@ -218,7 +269,6 @@ public final class PresentationServer {
 		boolean first = lease == null;
 		if (first) {
 			lease = new Lease(marker, ownerName);
-			rememberLease(LEASES, lease);
 		} else { lease.marker = marker; lease.ownerName = ownerName; }
 		if (first) {
 			long tick = server.getTickCount();
@@ -230,17 +280,23 @@ public final class PresentationServer {
 				if (neutral == null || neutral.stale()) continue;
 				Source source = lease.sources.computeIfAbsent(adapter.adapterId(), id -> new Source(id, adapter.schema()));
 				source.value = neutral;
+				source.observation = Source.Observation.SUCCESS;
+				source.successfulSerial = nextObservationSerial();
 				source.demand = Set.copyOf(neutral.fields().keySet());
-				source.nextSample = tick + settings().interval(adapter.adapterId(), adapter.minUpdateIntervalTicks());
+				source.nextSample = addTick(tick, settings().interval(adapter.adapterId(), adapter.minUpdateIntervalTicks()));
 			}
 			PresentationAdapter.CaptureBudget budget = new PresentationAdapter.CaptureBudget(settings().scanBudget());
 			if (!lease.sources.containsKey(PresentationBasic.ID)) capture(server, lease, budget, 1, true);
+			// Creation is independent paid initial work, not a second eviction owner.
+			sampler.rememberInitial(LEASES, lease);
 		}
 		for (UUID recipient : marker.recipients()) {
 			ServerPlayer player = server.getPlayerList().getPlayer(recipient); Session session = SESSIONS.get(recipient);
 			if (player != null && session != null && session.ready) {
-				sendInitial(player, session, lease);
-				if (!sourceSeeds.isEmpty()) publish(player, session, lease);
+				if (sourceSeeds.isEmpty()) sendInitial(player, session, lease);
+				else sendBaseline(session, lease, registry,
+					adapter -> allowed(player, session, adapter, marker.targetType().id()),
+					packet -> send(player, packet), InventoryServer.tracksInventory(marker.id()), effectiveInventoryTypes(player, session));
 			}
 		}
 	}
@@ -331,14 +387,14 @@ public final class PresentationServer {
 			Session session = sessions.get(recipient);
 			if (session != null && session.ready && online.test(recipient)) {
 				SentMarker sent = session.sent.get(marker.id().value());
-				if (sent != null) delivery.accept(recipient, sent);
+				if (sent != null && sent.deliveredView == session.view) delivery.accept(recipient, sent);
 			}
 		}
 	}
 
 	public static void tick(MinecraftServer server, ServerMarkerStore store) {
 		activate(server);
-		List<ServerMarker> markers = store.allMarkers();
+		long tick = server.getTickCount();
 		String nextPolicy = settings().fingerprint();
 		boolean policyChanged = !nextPolicy.equals(policyFingerprint);
 		policyFingerprint = nextPolicy;
@@ -356,56 +412,42 @@ public final class PresentationServer {
 			session.childBlack = effectiveChildBlack;
 			session.inventoryTypes = dedicated;
 			session.view++;
-			Map<Long, SentMarker> previouslySent = new HashMap<>(session.sent);
-			session.sent.clear();
+			session.authorizationCut = observationSerial;
+			pruneSession(session, store, registry::get, (marker, adapter) ->
+				allowed(player, session, adapter, marker.targetType().id()));
 			send(player, PresentationS2CPacket.reset(session.epoch, session.view, effective, effectiveChildBlack));
-			cachedBaseline(LEASES.values(), server.getTickCount(), player.getUUID(), lease -> {
-				sendInitial(player, session, lease);
-				publish(player, session, lease);
-			});
-			// The sampling cap does not remove an already-delivered marker from the
-			// authoritative audience: re-baseline its own cached projection after reset.
-			for (ServerMarker marker : markers) {
-				SentMarker old = previouslySent.get(marker.id().value());
-				if (old == null || LEASES.containsKey(marker.id().value())
-					|| marker.expiresAtTick() <= server.getTickCount()
-					|| !marker.recipients().contains(player.getUUID())) continue;
-				PresentationAdapter basic = registry.get(PresentationBasic.ID);
-				sendCachedInitial(session, marker, old.ownerName, basic, old.sections.get(PresentationBasic.ID),
-					allowed(player, session, basic, marker.targetType().id()), packet -> send(player, packet),
-					adapter -> allowed(player, session, adapter, marker.targetType().id()),
-					InventoryServer.tracksInventory(marker.id()), effectiveInventoryTypes(player, session));
-				for (PresentationAdapter adapter : registry.sectionAdapters()) {
-					if (adapter.adapterId().equals(PresentationBasic.ID) || !session.schemas.containsKey(adapter.adapterId())) continue;
-					PresentationSection cached = old.sections.get(adapter.adapterId());
-					if (cached != null) publishCached(player, session, marker, adapter, cached);
-				}
-			}
+			startBaseline(session, store);
 			sendWinnerBaseline(session, player.getUUID(), server.getTickCount(), store, packet -> send(player, packet));
 		}
-		Set<Long> active = new HashSet<>();
-		for (ServerMarker marker : markers) {
-			active.add(marker.id().value());
-			Lease lease = LEASES.get(marker.id().value());
-			if (lease != null) lease.marker = marker;
-		}
-		LEasesWithoutMarkers(active);
-		List<Lease> leases = new ArrayList<>(LEASES.values());
+		baselineRecipient = baselineTick(store, SESSIONS, baselineRecipient, tick, 256,
+			recipient -> server.getPlayerList().getPlayer(recipient) != null, (recipient, marker) -> {
+				ServerPlayer player = server.getPlayerList().getPlayer(recipient);
+				Session session = SESSIONS.get(recipient);
+				Lease lease = LEASES.get(marker.id().value());
+				if (lease == null) lease = new Lease(marker, ownerName(server, session, marker));
+				else lease.marker = marker;
+				sendBaseline(session, lease, registry,
+					adapter -> allowed(player, session, adapter, marker.targetType().id()),
+					packet -> send(player, packet), InventoryServer.tracksInventory(marker.id()), effectiveInventoryTypes(player, session));
+			});
 		PresentationAdapter.CaptureBudget work = new PresentationAdapter.CaptureBudget(MAX_CAPTURE_WORK_PER_TICK);
-		sampleTick(leases, cursor, server.getTickCount(), work, MAX_CAPTURES_PER_TICK,
-			(lease, sharedWork, remainingCaptures) -> capture(server, lease, sharedWork, remainingCaptures, false), lease -> {
+		long now = BudgetDelayMonitoring.nowNanos();
+		PresentationFairSampler.Result sampled = sampler.tick(store, LEASES, registry, settings(), tick, work,
+			MAX_CAPTURES_PER_TICK, (marker, adapter) -> demanded(server, marker, adapter),
+			(marker, demand) -> basic(server, marker, demand), marker -> ownerName(server, null, marker), lease -> {
 			for (UUID recipient : lease.marker.recipients()) {
 				Session session = SESSIONS.get(recipient); ServerPlayer player = server.getPlayerList().getPlayer(recipient);
 				if (player != null && session != null && session.ready) publish(player, session, lease);
 			}
-		}, previews);
-		if (!leases.isEmpty()) cursor = (cursor + 1) % leases.size();
+		}, delaySink, now);
+		if (previews != null) previews.drain(tick, work, MAX_CAPTURES_PER_TICK - sampled.captures(), tick, now);
+		finishPresentationCycle(delaySink, tick, now, sampled.state(), previews);
 	}
 
 	@FunctionalInterface interface LeaseCapture {
 		int capture(Lease lease, PresentationAdapter.CaptureBudget work, int remainingCaptures);
 	}
-	/** Production tick sequencing: previews receive exactly the residual lease allowance, even without leases. */
+	/** Compatibility sequencing seam; the live tick uses the resumable canonical sampler. */
 	static void sampleTick(List<Lease> leases, int cursor, long tick, PresentationAdapter.CaptureBudget work,
 		int captures, LeaseCapture capture, java.util.function.Consumer<Lease> publish, PresentationPreviewServer previews) {
 		for (int i = 0; i < leases.size(); i++) {
@@ -417,26 +459,47 @@ public final class PresentationServer {
 		if (previews != null) previews.drain(tick, work, captures);
 	}
 
-	private static void LEasesWithoutMarkers(Set<Long> active) {
-		LEasesRemoveIfAbsent(active);
+	static BudgetDelaySink.DelayState combineState(BudgetDelaySink.DelayState first, BudgetDelaySink.DelayState second) {
+		if (first == BudgetDelaySink.DelayState.DELAYED || second == BudgetDelaySink.DelayState.DELAYED)
+			return BudgetDelaySink.DelayState.DELAYED;
+		if (first == BudgetDelaySink.DelayState.NEUTRAL) return first;
+		if (first == BudgetDelaySink.DelayState.HEALTHY || second == BudgetDelaySink.DelayState.HEALTHY)
+			return BudgetDelaySink.DelayState.HEALTHY;
+		return second;
 	}
-	private static void LEasesRemoveIfAbsent(Set<Long> active) {
-		LEASES.keySet().removeIf(id -> !active.contains(id));
+	static void finishPresentationCycle(BudgetDelaySink sink, long cycle, long now,
+		BudgetDelaySink.DelayState sampled, PresentationPreviewServer previews) {
+		if (sink == null) sink = BudgetDelaySink.NONE;
+		BudgetDelaySink.DelayState state = previews == null ? sampled : combineState(sampled, previews.delayState());
+		try { sink.state(BudgetDelaySink.Module.PRESENTATION, cycle, now, state); }
+		catch (RuntimeException | LinkageError ignored) {}
+		try { sink.endCycle(BudgetDelaySink.Module.PRESENTATION, cycle, now); }
+		catch (RuntimeException | LinkageError ignored) {}
+	}
+
+	private static String ownerName(MinecraftServer server, Session session, ServerMarker marker) {
+		SentMarker sent = session == null ? null : session.sent.get(marker.id().value());
+		if (sent != null) return sent.ownerName;
+		ServerPlayer owner = server.getPlayerList().getPlayer(marker.owner());
+		return owner == null ? "" : owner.getGameProfile().getName();
+	}
+
+	private static Set<String> demanded(MinecraftServer server, ServerMarker marker, PresentationAdapter adapter) {
+		Set<String> demand = new LinkedHashSet<>();
+		for (UUID recipient : marker.recipients()) {
+			Session session = SESSIONS.get(recipient);
+			ServerPlayer player = server.getPlayerList().getPlayer(recipient);
+			if (session != null && session.ready && player != null)
+				demand.addAll(projectionAllowed(session, marker, adapter,
+					allowed(player, session, adapter, marker.targetType().id())));
+		}
+		return Set.copyOf(demand);
 	}
 
 	private static int capture(MinecraftServer server, Lease lease, PresentationAdapter.CaptureBudget work,
 		int remainingCaptures, boolean initial) {
 		return captureSources(lease, registry, settings(), server.getTickCount(), work, remainingCaptures, initial,
-			adapter -> {
-				Set<String> demand = new HashSet<>();
-				for (UUID recipient : lease.marker.recipients()) {
-					Session session = SESSIONS.get(recipient);
-					ServerPlayer player = server.getPlayerList().getPlayer(recipient);
-					if (session != null && session.ready && player != null)
-						demand.addAll(allowed(player, session, adapter, lease.marker.targetType().id()));
-				}
-				return demand;
-			}, demand -> basic(server, lease.marker, demand));
+			adapter -> demanded(server, lease.marker, adapter), demand -> basic(server, lease.marker, demand));
 	}
 
 	/** Production sampler with detached demand and Basic observation ports for headless regression checks. */
@@ -448,30 +511,70 @@ public final class PresentationServer {
 		for (PresentationAdapter adapter : adapters.sectionAdapters()) {
 			if (initial && !adapter.adapterId().equals(PresentationBasic.ID)) continue;
 			Set<String> demand = demands.apply(adapter);
-			Source source = lease.sources.computeIfAbsent(adapter.adapterId(), id -> new Source(id, adapter.schema()));
-			if (demand.isEmpty()) { source.value = PresentationSection.empty(adapter.adapterId(), adapter.schema()); source.demand = Set.of(); continue; }
-			// Insufficient work or disabled capture is a deferral, not an unavailable observation.
-			if (captures >= remainingCaptures || tick < source.nextSample || policy.scanBudget() == 0
-				|| work.remaining() == 0 || (!adapter.adapterId().equals(PresentationBasic.ID) && work.remaining() < 2)) continue;
-			work.scan();
+			Source source = sourceFor(lease, adapter, policy, false);
+			if (demand.isEmpty()) { clearDemand(source, adapter); continue; }
+			if (tick < source.nextSample || captureRefusal(adapter, policy, work, remainingCaptures - captures) != 0) continue;
+			captureSource(lease, adapter, policy, tick, work, demand, basicCapture);
 			captures++;
-			source.nextSample = tick + policy.interval(adapter.adapterId(), adapter.minUpdateIntervalTicks());
-			PresentationSection value = null;
-			try {
-				if (adapter.adapterId().equals(PresentationBasic.ID)) value = basicCapture.apply(demand);
-				else {
-					int allowance = Math.min(policy.scanBudget(), work.remaining());
-					PresentationAdapter.CaptureBudget budget = new PresentationAdapter.CaptureBudget(allowance);
-					try { value = adapter.collect(detached(lease.marker.target()), Set.copyOf(demand), budget); }
-					finally { for (int used = allowance - budget.remaining(); used > 0; used--) work.scan(); }
-				}
-			} catch (RuntimeException | LinkageError ignored) { value = null; }
-			try { value = sanitize(adapter, value, demand); }
-			catch (RuntimeException | LinkageError ignored) { value = null; }
-			source.value = transition(adapter.adapterId(), adapter.schema(), source.value, demand, value);
-			source.demand = Set.copyOf(demand);
 		}
 		return captures;
+	}
+
+	static Source sourceFor(Lease lease, PresentationAdapter adapter, PresentationSettings policy, boolean seedFloor) {
+		return lease.sources.computeIfAbsent(adapter.adapterId(), id -> {
+			Source source = new Source(id, adapter.schema());
+			if (seedFloor && (id.equals(PresentationBasic.ID) || lease.marker.properties().stream()
+				.anyMatch(selection -> selection.ref().adapterId().equals(id))))
+				source.nextSample = addTick(lease.marker.arrivalTick(), policy.interval(id, adapter.minUpdateIntervalTicks()));
+			return source;
+		});
+	}
+
+	static void clearDemand(Source source, PresentationAdapter adapter) {
+		// An unobserved, undemanded adapter needs neither a replacement nor residency.
+		if (source.observation == Source.Observation.NEVER && source.value.fields().isEmpty()) return;
+		source.value = PresentationSection.empty(adapter.adapterId(), adapter.schema());
+		source.demand = Set.of(); source.observation = Source.Observation.CLEARED;
+	}
+
+	static int captureRefusal(PresentationAdapter adapter, PresentationSettings policy,
+		PresentationAdapter.CaptureBudget work, int remainingCaptures) {
+		int reasons = 0;
+		if (remainingCaptures <= 0) reasons |= BudgetDelaySink.Reason.CAPTURE_COUNT.bit();
+		if (policy.scanBudget() == 0) reasons |= BudgetDelaySink.Reason.CAPTURE_DISABLED.bit();
+		if (work.remaining() < (adapter.adapterId().equals(PresentationBasic.ID) ? 1 : 2))
+			reasons |= BudgetDelaySink.Reason.SOURCE_WORK.bit();
+		return reasons;
+	}
+
+	static void captureSource(Lease lease, PresentationAdapter adapter, PresentationSettings policy, long tick,
+		PresentationAdapter.CaptureBudget work, Set<String> demand,
+		Function<Set<String>, PresentationSection> basicCapture) {
+		Source source = sourceFor(lease, adapter, policy, false);
+		work.scan();
+		source.nextSample = addTick(tick, policy.interval(adapter.adapterId(), adapter.minUpdateIntervalTicks()));
+		PresentationSection value = null;
+		try {
+			if (adapter.adapterId().equals(PresentationBasic.ID)) value = basicCapture.apply(demand);
+			else {
+				int allowance = Math.min(policy.scanBudget(), work.remaining());
+				PresentationAdapter.CaptureBudget budget = new PresentationAdapter.CaptureBudget(allowance);
+				try { value = adapter.collect(detached(lease.marker.target()), Set.copyOf(demand), budget); }
+				finally { for (int used = allowance - budget.remaining(); used > 0; used--) work.scan(); }
+			}
+		} catch (RuntimeException | LinkageError ignored) { value = null; }
+		try { value = sanitize(adapter, value, demand); }
+		catch (RuntimeException | LinkageError ignored) { value = null; }
+		source.value = transition(adapter.adapterId(), adapter.schema(), source.value, demand, value);
+		source.observation = value == null || value.stale() ? Source.Observation.FAILED : Source.Observation.SUCCESS;
+		if (source.observation == Source.Observation.SUCCESS) source.successfulSerial = nextObservationSerial();
+		source.demand = Set.copyOf(demand);
+	}
+
+	static long addTick(long tick, long delay) { return tick > Long.MAX_VALUE - delay ? Long.MAX_VALUE : tick + delay; }
+	private static long nextObservationSerial() {
+		if (observationSerial != Long.MAX_VALUE) observationSerial++;
+		return observationSerial;
 	}
 
 	static PresentationSection retainStale(String adapterId, int schema,
@@ -605,8 +708,73 @@ public final class PresentationServer {
 	private static PresentationSection project(ServerPlayer player, Session session, PresentationAdapter adapter, Lease lease) {
 		Source source = lease.sources.get(adapter.adapterId());
 		String targetType = lease.marker.targetType().id();
-		return project(adapter, source == null ? null : source.value,
-			allowed(player, session, adapter, targetType), lease.marker.properties(), childAllowed(session, targetType));
+		return recipientProjection(session, lease.marker, adapter, source,
+			allowed(player, session, adapter, targetType));
+	}
+
+	static Set<String> projectionAllowed(Session session, ServerMarker marker, PresentationAdapter adapter, Set<String> fresh) {
+		if (!Objects.equals(session.schemas.get(adapter.adapterId()), adapter.schema())) return Set.of();
+		Set<String> advertised = session.mask.getOrDefault(marker.targetType().id(), Map.of())
+			.getOrDefault(adapter.adapterId(), Set.of());
+		Set<String> result = new LinkedHashSet<>();
+		for (PresentationField field : adapter.fields()) {
+			if (fresh.contains(field.id()) && advertised.contains(field.id())
+				&& session.manifest.getOrDefault(adapter.adapterId(), List.of()).stream()
+					.anyMatch(accepted -> accepted.id().equals(field.id()) && accepted.kind() == field.kind())) result.add(field.id());
+		}
+		return Set.copyOf(result);
+	}
+
+	/** Deletes revoked recipient state in place before any neutral cache replay. */
+	static void pruneKnown(Session session, ServerMarker marker, Function<String, PresentationAdapter> adapters,
+		Function<PresentationAdapter, Set<String>> fresh) {
+		SentMarker known = session.sent.get(marker.id().value());
+		if (known == null) return;
+		for (var entry : known.sections.entrySet()) {
+			PresentationAdapter adapter = adapters.apply(entry.getKey());
+			PresentationSection prior = entry.getValue();
+			PresentationSection pruned = adapter == null ? PresentationSection.empty(prior.adapterId(), prior.schema())
+				: pruneProjection(adapter, prior, projectionAllowed(session, marker, adapter, fresh.apply(adapter)),
+					childAllowed(session, marker.targetType().id()));
+			if (!pruned.fields().keySet().equals(prior.fields().keySet()) || !pruned.annotations().equals(prior.annotations()))
+				session.authorizationCut = Math.max(session.authorizationCut, observationSerial);
+			entry.setValue(pruned);
+		}
+	}
+
+	private static PresentationSection pruneProjection(PresentationAdapter adapter, PresentationSection prior,
+		Set<String> allowed, Predicate<PresentationPropertyRef> childAllowed) {
+		PresentationSection fields = project(adapter, prior, allowed, List.of(), childAllowed);
+		Map<PresentationPropertyRef, String> annotations = new LinkedHashMap<>();
+		prior.annotations().forEach((ref, ping) -> {
+			if (allowed.contains(ref.fieldId()) && childAllowed.test(ref) && ref.resolve(fields) != null) annotations.put(ref, ping);
+		});
+		return new PresentationSection(adapter.adapterId(), adapter.schema(), fields.fields(), prior.stale(), annotations);
+	}
+
+	static PresentationSection recipientProjection(Session session, ServerMarker marker, PresentationAdapter adapter,
+		Source source, Set<String> fresh) {
+		Set<String> allowed = projectionAllowed(session, marker, adapter, fresh);
+		SentMarker known = session.sent.get(marker.id().value());
+		PresentationSection prior = known == null ? null : known.sections.get(adapter.adapterId());
+		Predicate<PresentationPropertyRef> child = childAllowed(session, marker.targetType().id());
+		if (source == null || source.observation == Source.Observation.NEVER) {
+			if (prior != null) return pruneProjection(adapter, prior, allowed, child);
+			return new PresentationSection(adapter.adapterId(), adapter.schema(), Map.of(), true);
+		}
+		if (source.observation == Source.Observation.CLEARED) return PresentationSection.empty(adapter.adapterId(), adapter.schema());
+		if (source.observation == Source.Observation.FAILED && prior != null) {
+			PresentationSection retained = pruneProjection(adapter, prior, allowed, child);
+			return new PresentationSection(adapter.adapterId(), adapter.schema(), retained.fields(), true, retained.annotations());
+		}
+		boolean old = known != null && session.authorizationCut >= 0 && source.successfulSerial <= session.authorizationCut;
+		if (old) {
+			Set<String> retainedKeys = prior == null ? Set.of() : prior.fields().keySet();
+			Set<String> narrowed = new LinkedHashSet<>(allowed); narrowed.retainAll(retainedKeys);
+			Set<PresentationPropertyRef> retainedRefs = prior == null ? Set.of() : prior.annotations().keySet();
+			return project(adapter, source.value, narrowed, marker.properties(), ref -> child.test(ref) && retainedRefs.contains(ref));
+		}
+		return project(adapter, source.value, allowed, marker.properties(), child);
 	}
 
 	private static void sendInitial(ServerPlayer player, Session session, Lease lease) {
@@ -646,12 +814,57 @@ public final class PresentationServer {
 		Function<PresentationAdapter, Set<String>> freshAuthorization,
 		boolean inventoryTracked, Set<String> freshInventoryTypes) {
 		Source source = lease.sources.get(basic.adapterId());
-		sendCachedInitial(session, lease.marker, lease.ownerName, basic,
-			source == null ? null : source.value, allowed, delivery, freshAuthorization,
+		pruneKnown(session, lease.marker, id -> id.equals(basic.adapterId()) ? basic : registry.get(id),
+			adapter -> adapter.adapterId().equals(basic.adapterId()) ? allowed : freshAuthorization.apply(adapter));
+		sendProjectedInitial(session, lease.marker, lease.ownerName, basic,
+			recipientProjection(session, lease.marker, basic, source, allowed), allowed, delivery, freshAuthorization,
 			inventoryTracked, freshInventoryTypes);
 	}
 
 	static void sendCachedInitial(Session session, ServerMarker marker, String ownerName,
+		PresentationAdapter basic, PresentationSection cached, Set<String> allowed,
+		java.util.function.Consumer<PresentationS2CPacket> delivery,
+		Function<PresentationAdapter, Set<String>> freshAuthorization,
+		boolean inventoryTracked, Set<String> freshInventoryTypes) {
+		pruneKnown(session, marker, id -> id.equals(basic.adapterId()) ? basic : registry.get(id),
+			adapter -> adapter.adapterId().equals(basic.adapterId()) ? allowed : freshAuthorization.apply(adapter));
+		// This path owns only the recipient's delivered projection, never a
+		// successful neutral observation. Keep its retained annotations verbatim.
+		SentMarker known = session.sent.get(marker.id().value());
+		PresentationSection retained = known == null ? cached : known.sections.get(basic.adapterId());
+		PresentationSection projected = retained == null
+			? new PresentationSection(basic.adapterId(), basic.schema(), Map.of(), true)
+			: pruneProjection(basic, retained, projectionAllowed(session, marker, basic, allowed),
+				childAllowed(session, marker.targetType().id()));
+		sendProjectedInitial(session, marker, ownerName, basic, projected,
+			allowed, delivery, freshAuthorization, inventoryTracked, freshInventoryTypes);
+	}
+
+	/** Read-free, Basic-first replay. A first baseline's optional projections precede sent-state insertion. */
+	static void sendBaseline(Session session, Lease lease, PresentationRegistry adapters,
+		Function<PresentationAdapter, Set<String>> fresh, java.util.function.Consumer<PresentationS2CPacket> delivery,
+		boolean inventoryTracked, Set<String> freshInventoryTypes) {
+		pruneKnown(session, lease.marker, adapters::get, fresh);
+		SentMarker prior = session.sent.get(lease.marker.id().value());
+		Map<String, PresentationSection> optional = new LinkedHashMap<>();
+		for (PresentationAdapter adapter : adapters.sectionAdapters()) {
+			if (adapter.adapterId().equals(PresentationBasic.ID) || !session.schemas.containsKey(adapter.adapterId())) continue;
+			Source source = lease.sources.get(adapter.adapterId());
+			if ((source == null || source.observation == Source.Observation.NEVER)
+				&& (prior == null || !prior.sections.containsKey(adapter.adapterId()))) continue;
+			optional.put(adapter.adapterId(), recipientProjection(session, lease.marker, adapter, source, fresh.apply(adapter)));
+		}
+		PresentationAdapter basic = adapters.get(PresentationBasic.ID);
+		sendProjectedInitial(session, lease.marker, lease.ownerName, basic,
+			recipientProjection(session, lease.marker, basic, lease.sources.get(basic.adapterId()), fresh.apply(basic)),
+			fresh.apply(basic), delivery, fresh, inventoryTracked, freshInventoryTypes);
+		SentMarker sent = session.sent.get(lease.marker.id().value());
+		if (sent == null || sent.deliveredView != session.view) return;
+		optional.forEach((id, projected) -> sendProjectedSection(session, lease.marker.id(), adapters.get(id), projected,
+			sent.sections, delivery));
+	}
+
+	private static void sendProjectedInitial(Session session, ServerMarker marker, String ownerName,
 		PresentationAdapter basic, PresentationSection cached, Set<String> allowed,
 		java.util.function.Consumer<PresentationS2CPacket> delivery,
 		Function<PresentationAdapter, Set<String>> freshAuthorization,
@@ -661,14 +874,28 @@ public final class PresentationServer {
 		if (defaultRef == null) return;
 		// A semantically valid Basic capture may exceed the encoded field bounds;
 		// degrade to the established empty stale section instead of throwing here.
-		PresentationSection projected = PresentationCodec.bounded(project(basic,
-			cached, allowed, marker.properties(), childAllowed(session, marker.targetType().id())));
+		PresentationSection projected = PresentationCodec.bounded(cached);
 		PresentationReceiptContent content = receipt(session, marker, basic, allowed, freshAuthorization,
 			inventoryTracked, freshInventoryTypes);
+		// Old-cache replay may retain a selected Basic value after its annotation
+		// was pruned. Do not promise that selection in the atomic initial until a
+		// fresh capture restores the annotation; genuinely absent values still wait.
+		if (content.kind() == PresentationReceiptContent.Kind.PROPERTIES) {
+			for (PresentationPropertyRef ref : content.selectedRefs()) {
+				if (basic.adapterId().equals(ref.adapterId()) && ref.resolve(projected) != null
+					&& projected.annotations().get(ref) == null) {
+					content = PresentationReceiptContent.suppressed();
+					break;
+				}
+			}
+		}
+		SentMarker prior = session.sent.get(marker.id().value());
+		String deliveredOwner = prior == null ? ownerName : prior.ownerName;
 		delivery.accept(PresentationS2CPacket.created(session.epoch, session.view,
-			++session.revision, MarkerSnapshot.from(marker), ownerName, defaultRef, content, projected));
-		session.sent.computeIfAbsent(marker.id().value(), id -> new SentMarker(ownerName))
-			.sections.put(PresentationBasic.ID, projected);
+			++session.revision, MarkerSnapshot.from(marker), deliveredOwner, defaultRef, content, projected));
+		SentMarker sent = session.sent.computeIfAbsent(marker.id().value(), id -> new SentMarker(deliveredOwner));
+		sent.sections.put(PresentationBasic.ID, projected);
+		sent.deliveredView = session.view;
 	}
 
 	/**
@@ -726,34 +953,34 @@ public final class PresentationServer {
 	private static void publish(ServerPlayer player, Session session, Lease lease) {
 		SentMarker marker = session.sent.get(lease.marker.id().value());
 		Map<String, PresentationSection> sent = marker == null ? null : marker.sections;
-		if (sent == null) return; // Never backfill another connection's initial marker.
+		if (sent == null || marker.deliveredView != session.view) return;
+		Map<String, PresentationSection> beforePruning = new HashMap<>(sent);
+		pruneKnown(session, lease.marker, registry::get,
+			adapter -> allowed(player, session, adapter, lease.marker.targetType().id()));
 		for (PresentationAdapter adapter : registry.sectionAdapters()) {
 			if (!session.schemas.containsKey(adapter.adapterId())) continue;
 			PresentationSection projected = project(player, session, adapter, lease);
-			if (projected.equals(sent.get(adapter.adapterId()))) continue;
+			Source source = lease.sources.get(adapter.adapterId());
+			if (!sent.containsKey(adapter.adapterId()) && (source == null || source.observation == Source.Observation.NEVER)) continue;
+			if (projected.equals(beforePruning.get(adapter.adapterId()))) continue;
 			sendProjectedSection(player, session, lease.marker.id(), adapter, projected, sent);
 		}
 	}
 
-	private static void publishCached(ServerPlayer player, Session session, ServerMarker marker,
-		PresentationAdapter adapter, PresentationSection cached) {
-		SentMarker known = session.sent.get(marker.id().value());
-		if (known == null) return;
-		PresentationSection projected = project(adapter, cached,
-			allowed(player, session, adapter, marker.targetType().id()), marker.properties(),
-			childAllowed(session, marker.targetType().id()));
-		sendProjectedSection(player, session, marker.id(), adapter, projected, known.sections);
-	}
-
 	private static void sendProjectedSection(ServerPlayer player, Session session, MarkerId markerId,
 		PresentationAdapter adapter, PresentationSection projected, Map<String, PresentationSection> sent) {
+		sendProjectedSection(session, markerId, adapter, projected, sent, packet -> send(player, packet));
+	}
+	static void sendProjectedSection(Session session, MarkerId markerId, PresentationAdapter adapter,
+		PresentationSection projected, Map<String, PresentationSection> sent,
+		java.util.function.Consumer<PresentationS2CPacket> delivery) {
 		try {
-			send(player, PresentationS2CPacket.section(session.epoch, session.view,
+			delivery.accept(PresentationS2CPacket.section(session.epoch, session.view,
 				++session.revision, markerId, projected));
 			sent.put(adapter.adapterId(), projected);
 		} catch (RuntimeException oversized) {
 			PresentationSection empty = new PresentationSection(adapter.adapterId(), adapter.schema(), Map.of(), true);
-			send(player, PresentationS2CPacket.section(session.epoch, session.view,
+			delivery.accept(PresentationS2CPacket.section(session.epoch, session.view,
 				++session.revision, markerId, empty));
 			sent.put(adapter.adapterId(), empty);
 		}
@@ -837,7 +1064,11 @@ public final class PresentationServer {
 	}
 	public static boolean inventoryKnows(UUID player, MarkerId marker) {
 		Session session = SESSIONS.get(player);
-		return session != null && session.ready && session.sent.containsKey(marker.value());
+		return inventoryKnows(session, marker);
+	}
+	static boolean inventoryKnows(Session session, MarkerId marker) {
+		SentMarker sent = session == null ? null : session.sent.get(marker.value());
+		return session != null && session.ready && sent != null && sent.deliveredView == session.view;
 	}
 	private static Set<String> inventoryTypes(ServerPlayer player, Session session) {
 		if (!Objects.equals(session.schemas.get(InventoryPresentation.ADAPTER_ID), InventoryPresentation.SCHEMA)) return Set.of();

@@ -28,6 +28,7 @@ import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.PresentationPropertyPingTypes;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.presentation.inventory.InventoryDomainCodec;
+import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
 import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
 import nx.pingwheel.common.presentation.inventory.InventoryScanner;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
@@ -98,9 +99,9 @@ class SableInventoryHandoffTest {
 					new MarkerAnchor(900, 901, 902)));
 			} catch (IllegalArgumentException mismatch) { return null; }
 		}
-		Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input) {
+		Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int displayBytes) {
 			Binding binding = binding(input);
-			return binding == null ? Optional.empty() : Optional.of(new Source(input, binding.route));
+			return binding == null ? Optional.empty() : Optional.of(new Source(input, binding.route, displayBytes));
 		}
 
 		void open(long requestId, Target target) {
@@ -129,7 +130,14 @@ class SableInventoryHandoffTest {
 	private static final class Source implements InventorySourceAccess.Source {
 		private final InventorySourceInput input;
 		private final Route route;
-		Source(InventorySourceInput input, Route route) { this.input = input; this.route = route; }
+		private int displayBytes;
+		Source(InventorySourceInput input, Route route, int displayBytes) {
+			this.input = input; this.route = route; this.displayBytes = displayBytes;
+		}
+		@Override public int displayBytes() { return displayBytes; }
+		// Every read has a null display; tightening owns only this scalar, not a catalogue or parser.
+		@Override public InventoryReprojectionSummary reprojectionSummary(int ceiling) { return InventoryReprojectionSummary.EMPTY; }
+		@Override public void tightenDisplay(int ceiling) { displayBytes = Math.min(displayBytes, ceiling); }
 		@Override public SourceKey key() {
 			return new SourceKey(PROVIDER, "block_inventory", route.subLevel + "/" + route.x + "," + route.y + "," + route.z,
 				input.viewKey());
@@ -259,6 +267,38 @@ class SableInventoryHandoffTest {
 		@Override public void send(UUID player, InventoryS2CPacket packet) {
 			assertFalse(packet.isCorrupt(), packet.toString());
 			packets.add(packet); recipients.add(player);
+		}
+	}
+
+	@Test void fixtureNullDisplaysHonorResolverCapAndTightenWithoutProviderReadsOrReexpansion() {
+		try (var f = new Fixture()) {
+			Route route = f.route("a", "sublevel-a", 1, 2, 3, "minecraft:chest", 7);
+			var input = new InventorySourceInput(f.candidate("a"), A, BlockFace.NORTH);
+			try (var source = f.resolve(input, 8192).orElseThrow()) {
+				assertEquals(8192, source.displayBytes(), "the resolver adopts the requested cap at creation");
+				assertTrue(source.snapshotPlan().isEmpty(), "this fixture uses live reads, never a detached freeze");
+				assertEquals(0, route.reads.get(), "resolution and capability metadata read no provider items");
+				var before = source.read(0);
+				assertNull(before.displayJson(), "the actual fixture payload justifies its finite display promise");
+				assertEquals(7, before.count());
+				assertFalse(before.aggregateRequired());
+				assertEquals(InventoryReprojectionSummary.EMPTY, source.reprojectionSummary(4096));
+				source.tightenDisplay(4096);
+				assertEquals(4096, source.displayBytes());
+				source.tightenDisplay(8192);
+				assertEquals(4096, source.displayBytes(), "an increase cannot re-expand the retained ceiling");
+				assertEquals(1, route.reads.get(), "summary and tightening perform no provider reads");
+				route.count = 11;
+				var after = source.read(0);
+				assertNull(after.displayJson());
+				assertEquals(before.key(), after.key());
+				assertEquals(11, after.count(), "the cap promise never freezes live quantities");
+				assertEquals(2, route.reads.get());
+			}
+			try (var fresh = f.resolve(input, 12288).orElseThrow()) {
+				assertEquals(12288, fresh.displayBytes(), "a new resolution uses its own requested cap");
+				assertEquals(2, route.reads.get(), "a new source does not capture or read an item");
+			}
 		}
 	}
 
@@ -421,20 +461,27 @@ class SableInventoryHandoffTest {
 			f.open(1, f.candidate("a")); f.open(2, f.candidate("b")); f.tick(0);
 			assertEquals(3, f.preview(1).entries().getFirst().count());
 			assertEquals(11, f.preview(2).entries().getFirst().count());
+			assertEquals(1, b.reads.get());
 			f.host.materializeRoute = ignored -> b;
 			f.select(1, 1, "request", 1);
 			assertEquals(1, f.host.materializeCalls.get());
 			assertEquals(1, f.host.releaseCalls.get());
 			assertEquals(0, f.host.store.size(), "same-registry candidate a cannot bind to b's physical root");
 			assertEquals(1, a.reads.get(), "the failed request never witnesses the other request's source");
+			assertEquals(1, b.reads.get(), "the rejected cross-binding reads neither candidate");
 			f.select(2, 2, "request", 2);
 			assertEquals(2, f.host.materializeCalls.get());
 			assertEquals(1, f.host.releaseCalls.get(), "the matching second request keeps its reference");
 			assertEquals(1, f.host.store.size());
 			var marker = f.host.store.allMarkers().getFirst();
 			assertEquals(f.stableId(b), ((Target.ExternalBlockTarget) marker.target()).stableTargetId());
+			assertEquals(2, b.reads.get(), "the matching request performs exactly one fresh live witness");
 			f.tick(3);
 			assertEquals(11, f.snapshot(marker.id()).entries().getFirst().count());
+			assertEquals(3, b.reads.get(), "tracking reads afresh rather than reusing the preview or witness");
+			assertEquals(1, a.reads.get(), "the first request remains an independent retained preview");
+			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SELECTED
+				&& p.requestId() == 2 && p.commitId() == 2 && marker.id().equals(p.markerId())));
 		}
 	}
 

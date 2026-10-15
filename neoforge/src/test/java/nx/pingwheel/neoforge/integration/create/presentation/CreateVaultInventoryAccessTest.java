@@ -10,11 +10,107 @@ import net.minecraft.world.item.Items;
 import net.neoforged.neoforge.items.IItemHandler;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotSchemas;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CreateVaultInventoryAccessTest {
+	private static final nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess RAW = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess() {
+		@Override public java.util.List<?> nonNullList(net.minecraft.core.NonNullList<?> value) {
+			try { var field = net.minecraft.core.NonNullList.class.getDeclaredField("list"); field.setAccessible(true); return (java.util.List<?>) field.get(value); }
+			catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+		}
+	};
+	@Test void residentLocalHandlersNeverSerializeAndOnContentsChangedOnlyOverridesQualify() {
+		class Local extends net.neoforged.neoforge.items.ItemStackHandler {
+			Local() { super(1); }
+			@Override protected void onContentsChanged(int slot) { /* same write-only override as tested Vault */ }
+			@Override public net.minecraft.nbt.CompoundTag serializeNBT(net.minecraft.core.HolderLookup.Provider registries) { throw new AssertionError("serialize trap"); }
+		}
+		World world = World.pair(); var first = new Local(); var second = new Local();
+		first.setStackInSlot(0, new ItemStack(Items.STONE, 2)); second.setStackInSlot(0, new ItemStack(Items.DIRT, 5));
+		world.members.get(BlockPos.ZERO).handler = first; world.members.get(new BlockPos(1, 0, 0)).handler = second;
+		assertThrows(AssertionError.class, () -> first.serializeNBT(net.minecraft.core.RegistryAccess.EMPTY)); // positive control
+		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
+		assertTrue(access.supportsDetachedSlotCapture());
+		assertSame(first.getStackInSlot(0), ((nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem.Stack) access.readResident(0).item()).resident());
+		assertEquals(5, access.readResident(1).amount());
+		world.members.remove(new BlockPos(1, 0, 0)); assertThrows(IllegalStateException.class, () -> access.readResident(0));
+	}
+	@Test void residentHandoffRechecksEveryMemberAfterTheLastContentGetter() {
+		World world = World.pair(); var allowed = new java.util.HashSet<>(world.members.keySet());
+		var other = new BlockPos(1, 0, 0);
+		world.members.get(BlockPos.ZERO).handler = new Handler(1) {
+			@Override public ItemStack getStackInSlot(int slot) { allowed.remove(other); return new ItemStack(Items.STONE); }
+		};
+		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH, allowed::contains).orElseThrow();
+		assertThrows(IllegalStateException.class, () -> access.readResident(0));
+	}
+	@Test void threeLayoutsPerSlotAndFixedDiscoveryPassesConsumeTheAdmittedAllocation() {
+		World world = World.pair();
+		for (var member : world.members.values()) member.handler = new net.neoforged.neoforge.items.ItemStackHandler(2);
+		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
+		var layout = access.snapshotLayout().orElseThrow();
+		world.controllerReads = 0;
+		var allowance = new InventoryValidationBudget.Allowance(
+			InventoryValidationBudget.discovery(layout, true, true, 0).plus(InventoryValidationBudget.capture(layout, true, true, 0)));
+		// Independent source sequence: four validations (4 layouts each), three
+		// fixed supports calls (2 each), then n supports+read handoffs (3 each).
+		for (int pass = 0; pass < 4; pass++) {
+			allowance.debit(InventoryValidationBudget.view(layout, true));
+			for (int call = 0; call < 4; call++) assertTrue(access.valid());
+		}
+		for (int pass = 0; pass < 3; pass++) {
+			allowance.debit(InventoryValidationBudget.supported(layout, true, true));
+			assertTrue(access.supportsDetachedSlotCapture());
+		}
+		for (int slot = 0; slot < access.slots(); slot++) {
+			allowance.debit(InventoryValidationBudget.read(layout, true, true));
+			assertTrue(access.supportsDetachedSlotCapture()); access.readResident(slot);
+		}
+		assertEquals(3 * 4 + 22, world.controllerReads, "each layout independently visits the master isController once");
+		assertTrue(allowance.attemptedAllocationBytes() >= world.controllerReads * InventoryValidationBudget.vaultLayout(2).allocationBytes());
+		long before = world.controllerReads;
+		var tiny = new InventoryValidationBudget.Allowance(new InventoryValidationBudget.Cost(0, Long.MAX_VALUE, Long.MAX_VALUE));
+		assertThrows(IllegalStateException.class, () -> {
+			tiny.debit(InventoryValidationBudget.supported(layout, true, true)); access.supportsDetachedSlotCapture();
+		});
+		assertEquals(before, world.controllerReads, "refusal happens before the next layout, even in capability preflight");
+		assertTrue(access.supportsDetachedSlotCapture());
+		assertEquals(before + 2, world.controllerReads, "positive control: the same preflight allocates twice without the debit");
+	}
+	@Test void reusableResidentReachesTheSynchronousConsumerBeforeAnyHandlerMetadataCallback() {
+		World world = World.pair();
+		class Reusing extends Handler {
+			final ItemStack scratch = new ItemStack(Items.STONE, 7);
+			int metadataCalls, metadataAtRead; boolean returned;
+			Reusing() { super(1); }
+			@Override public int getSlots() { metadataCalls++; if (returned) scratch.setCount(0); return 1; }
+			@Override public ItemStack getStackInSlot(int slot) {
+				scratch.setCount(7); returned = true; metadataAtRead = metadataCalls; return scratch;
+			}
+		}
+		var handler = new Reusing(); world.members.get(BlockPos.ZERO).handler = handler;
+		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
+		assertFalse(access.supportsDetachedSlotCapture(), "the overridden getter remains LIVE/EXTERNAL_TRUST");
+		ItemStack[] consumed = new ItemStack[1];
+		var observed = access.observeResident(1, entry -> {
+			assertEquals(handler.metadataAtRead, handler.metadataCalls, "no provider metadata may run before synchronous consumption/freezing");
+			assertEquals(7L, entry.amount());
+			var resident = ((nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem.Stack) entry.item()).resident();
+			assertSame(handler.scratch, resident); assertEquals(7, resident.getCount());
+			consumed[0] = resident.copy(); // detached stand-in for the common freezer, tested separately
+			return true;
+		});
+		assertEquals(1, observed.visited());
+		assertTrue(access.valid(), "all-member topology validation still runs after consumption");
+		assertTrue(handler.metadataCalls > handler.metadataAtRead);
+		assertTrue(handler.scratch.isEmpty(), "positive control: the next metadata callback reuses the temporary stack");
+		assertEquals(7, consumed[0].getCount()); assertSame(Items.STONE, consumed[0].getItem());
+		world.members.get(new BlockPos(1, 0, 0)).controller = new BlockPos(9, 0, 0);
+		assertFalse(access.valid(), "a final all-member relation change must still reject publication");
+	}
 	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
 	static class Handler implements IItemHandler {
 		final ItemStack[] stacks;
@@ -37,16 +133,19 @@ class CreateVaultInventoryAccessTest {
 		@Override public int length() { return length; }
 		@Override public Direction.Axis axis() { return axis; }
 		@Override public IItemHandler local() { localCalls++; return handler; }
+		@Override public boolean auditedLocal(IItemHandler handler) { return CreateVaultInventoryAccess.nativeLocal(handler, RAW); }
 	}
 	static class World implements CreateVaultInventoryAccess.World {
-		final Map<BlockPos, Member> members = new HashMap<>(); int probes;
+		final Map<BlockPos, Member> members = new HashMap<>(); int probes, controllerReads;
 		final List<BlockPos> loadedPositions = new java.util.ArrayList<>();
 		java.util.function.Consumer<BlockPos> afterLoaded = ignored -> {};
 		@Override public String dimension() { return "minecraft:overworld"; }
 		@Override public Member loaded(BlockPos pos) {
 			probes++; loadedPositions.add(pos); Member member = members.get(pos); if (member == null) throw new IllegalStateException("unloaded"); afterLoaded.accept(pos); return member;
 		}
-		static World pair() { var world = new World(); var first = new Member(); first.master = true; world.members.put(BlockPos.ZERO, first); world.members.put(new BlockPos(1, 0, 0), new Member()); return world; }
+		static World pair() { var world = new World(); var first = new Member() {
+			@Override public boolean isController() { world.controllerReads++; return super.isController(); }
+		}; first.master = true; world.members.put(BlockPos.ZERO, first); world.members.put(new BlockPos(1, 0, 0), new Member()); return world; }
 	}
 	@Test void aliasesAreCanonicalFromEitherHalfAndEveryReadReacquiresLocalInventory() {
 		World world = World.pair(); var first = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();

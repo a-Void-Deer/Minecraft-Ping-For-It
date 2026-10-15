@@ -24,6 +24,8 @@ public class ServerConfig implements IConfig {
 	PresentationSettings presentation = PresentationSettings.serverDefaults();
 	/** Server-authoritative inventory preview/tracking budgets; additive object with defaults. */
 	InventorySettings inventory = InventorySettings.serverDefaults();
+	/** Controls administrator budget-delay messages only; WARN diagnostics remain enabled. */
+	boolean budgetDelayNotificationsEnabled = true;
 
 	public PresentationSettings getPresentation() {
 		return presentation;

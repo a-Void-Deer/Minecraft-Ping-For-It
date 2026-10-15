@@ -131,7 +131,7 @@ class InventoryItemCodecTest {
 	}
 
 	@Test
-	void completeComponentStrippingClaimsFallbackOnlyWhenSizeIsTheObservedCause() {
+	void completeDisplayStrippingNeverClaimsIdentityAggregation() {
 		InventoryItemCodec.Catalog catalog = new InventoryItemCodec.Catalog(RegistryAccess.EMPTY);
 		CompoundTag payload = new CompoundTag();
 		payload.putString("data", "x".repeat(InventoryItemCodec.MAX_DISPLAY_BYTES + 512));
@@ -139,8 +139,9 @@ class InventoryItemCodecTest {
 		customData.set(DataComponents.CUSTOM_DATA, CustomData.of(payload));
 
 		InventoryItemCodec.Encoded encoded = catalog.encode(customData);
-		assertTrue(encoded.display().componentsStripped(),
-			"every component was dropped because the encoded projection exceeded the bound");
+		assertFalse(encoded.display().aggregateRequired(),
+			"complete display omission cannot change safely admitted identity");
+		assertFalse(encoded.key().componentsKey().isEmpty());
 		assertTrue(utf8Length(encoded.display().displayJson()) <= InventoryItemCodec.MAX_DISPLAY_BYTES);
 		assertTrue(encoded.display().displayJson().contains("minecraft:stone"));
 	}
@@ -156,35 +157,15 @@ class InventoryItemCodecTest {
 	}
 
 	@Test
-	void displayFallbackFlagRequiresSizeEvidenceAndCompleteStripping() {
-		Function<ItemStack, Optional<String>> oversizedWithComponents = stack ->
-			Optional.of(stack.getComponentsPatch().isEmpty()
-				? "{\"id\":\"minecraft:stone\"}"
-				: "x".repeat(InventoryItemCodec.MAX_DISPLAY_BYTES + 1));
-
-		ItemStack customData = new ItemStack(Items.STONE);
-		customData.set(DataComponents.CUSTOM_DATA, CustomData.of(new CompoundTag()));
-		assertTrue(InventoryItemCodec.display(customData, oversizedWithComponents).componentsStripped());
-
-		ItemStack named = new ItemStack(Items.STONE);
-		named.set(DataComponents.CUSTOM_NAME, Component.literal("named"));
-		named.set(DataComponents.CUSTOM_DATA, CustomData.of(new CompoundTag()));
-		Function<ItemStack, Optional<String>> oversizedOnlyWithName = stack ->
-			Optional.of(stack.get(DataComponents.CUSTOM_NAME) != null
-				? "x".repeat(InventoryItemCodec.MAX_DISPLAY_BYTES + 1)
-				: "{\"id\":\"minecraft:stone\"}");
-		assertFalse(InventoryItemCodec.display(named, oversizedOnlyWithName).componentsStripped(),
-			"partial display omission keeps the exact identity and the flag clear");
-
-		Function<ItemStack, Optional<String>> failingWithComponents = stack ->
-			stack.getComponentsPatch().isEmpty()
-				? Optional.of("{\"id\":\"minecraft:stone\"}")
-				: Optional.empty();
-		assertFalse(InventoryItemCodec.display(customData, failingWithComponents).componentsStripped(),
-			"an encoding failure is not size evidence");
-
-		assertFalse(InventoryItemCodec.display(new ItemStack(Items.STONE), oversizedWithComponents)
-			.componentsStripped());
+	void unsafeIdentityUsesNoDigestAndMandatoryDefaultSuppression() {
+		var custom = CustomData.of(new CompoundTag());
+		custom.getUnsafe().putByteArray("resident", new byte[100000]);
+		var stack = new ItemStack(Items.STONE);
+		stack.set(DataComponents.CUSTOM_DATA, custom);
+		var encoded = new InventoryItemCodec.Catalog(RegistryAccess.EMPTY).encode(stack);
+		assertTrue(encoded.display().aggregateRequired());
+		assertEquals("", encoded.key().componentsKey(), "unsafe identity has no fake exact digest");
+		assertTrue(encoded.display().displayJson().contains("!minecraft:lore"));
 	}
 
 	@Test

@@ -439,7 +439,7 @@ class ContentChatComposerTest {
 			Component.literal("Steve"), Component.literal("Chest"),
 			entry("{\"id\":\"minecraft:gunpowder\"}", 5L, true, null),
 			json -> Optional.empty(), templates("{content}")).orElseThrow();
-		assertEquals("pingforit.spatial.inventory.component_too_long",
+		assertEquals("pingforit.spatial.inventory.all_variants",
 			translatableKey(argComponent(findTranslatable(fallback, ContentChatTemplate.QUALITY_KEY), 1)),
 			"a component-fallback aggregate never claims an exact variant");
 

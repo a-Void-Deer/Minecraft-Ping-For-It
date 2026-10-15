@@ -143,7 +143,7 @@ class SpatialInventoryLayoutTest {
 		assertEquals(Set.of("pingforit.spatial.inventory.updating", "pingforit.spatial.inventory.unknown",
 			"pingforit.spatial.inventory.uncertain", "pingforit.spatial.inventory.incomplete",
 			"pingforit.spatial.inventory.unavailable", "pingforit.spatial.inventory.invalid",
-			"pingforit.spatial.inventory.component_too_long", "pingforit.spatial.inventory.expired"), keys);
+			"pingforit.spatial.inventory.all_variants", "pingforit.spatial.inventory.expired"), keys);
 		assertNull(Status.READY.translationKey());
 		assertEquals(Status.UNKNOWN, Status.fromName(null));
 		assertEquals(Status.UNKNOWN, Status.fromName("unsupported-quality"));

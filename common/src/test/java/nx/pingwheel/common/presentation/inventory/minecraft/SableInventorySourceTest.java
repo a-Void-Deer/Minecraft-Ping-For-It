@@ -87,10 +87,10 @@ class SableInventorySourceTest {
 	}
 
 	private static class Chest extends ChestBlockEntity implements BaseContainerLockAccessor {
-		LockCode lock = LockCode.NO_LOCK; int saves, reads; Runnable afterSave;
+		LockCode lock = LockCode.NO_LOCK; int saves, reads; Runnable afterSave, afterRead;
 		Chest(BlockPos pos, BlockState state, int count) { super(pos, state); setItem(0, new ItemStack(Items.STONE, count)); }
 		@Override public LockCode pingforit$inventoryLock() { return lock; }
-		@Override public ItemStack getItem(int slot) { reads++; return super.getItem(slot); }
+		@Override public ItemStack getItem(int slot) { reads++; var value = super.getItem(slot); if (afterRead != null) afterRead.run(); return value; }
 		@Override protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
 			saves++; super.saveAdditional(tag, registries); if (afterSave != null) afterSave.run();
 		}
@@ -135,6 +135,7 @@ class SableInventorySourceTest {
 				@Override public boolean onServerThread() { current(epoch); return onThread; }
 				@Override public ItemStack heldKey() { current(epoch); return world.key; }
 				@Override public HolderLookup.Provider registries() { current(epoch); return RegistryAccess.EMPTY; }
+				@Override public boolean audited(net.minecraft.world.Container container) { return container instanceof Chest; } // recording fixture only
 			};
 		}
 		Optional<InventoryMinecraftSources.ExternalBinding> binding(InventorySourceInput input) {
@@ -157,6 +158,13 @@ class SableInventorySourceTest {
 						@Override public OptionalLong version() { return OptionalLong.empty(); }
 						@Override public IPlatformInventoryService.Entry read(int slot) {
 							current(epoch); capabilityReads.incrementAndGet(); route.afterRead.run(); return new IPlatformInventoryService.Entry(new ItemStack(Items.STONE), route.count);
+						}
+						@Override public IPlatformInventoryService.ResidentEntry readResident(int slot) {
+							current(epoch); capabilityReads.incrementAndGet(); route.afterRead.run();
+							return new IPlatformInventoryService.ResidentEntry(new InventoryResidentItem.Stack(new ItemStack(Items.STONE)), route.count);
+						}
+						@Override public IPlatformInventoryService.ResidentVisit observeResident(int limit, IPlatformInventoryService.ResidentVisitor visitor) {
+							enumerations.incrementAndGet(); return IPlatformInventoryService.Access.super.observeResident(limit, visitor);
 						}
 						@Override public IPlatformInventoryService.Budgeted observe(int limit) { enumerations.incrementAndGet(); return IPlatformInventoryService.Access.super.observe(limit); }
 						@Override public boolean visit(int limit, java.util.function.Consumer<IPlatformInventoryService.Entry> consumer) { throw new AssertionError("indexed source"); }
@@ -206,7 +214,7 @@ class SableInventorySourceTest {
 			var cb = runtime.attach(b, new InventoryRuntime.PreviewSubject(OWNER)).orElseThrow();
 			assertEquals(3, runtime.step(ca, 1).orElseThrow().slots().getFirst().count());
 			assertEquals(11, runtime.step(cb, 1).orElseThrow().slots().getFirst().count());
-			assertEquals(1, first.saves); assertEquals(1, second.saves);
+			assertEquals(0, first.saves + second.saves); assertEquals(27, first.reads); assertEquals(27, second.reads);
 			runtime.retireInvalid(a); assertTrue(ca.invalidated()); assertFalse(cb.invalidated()); assertEquals(Optional.of(true), runtime.probe(cb));
 		}
 	}
@@ -354,7 +362,7 @@ class SableInventorySourceTest {
 		assertFalse(world.stateReads.contains(other)); assertFalse(world.entityReads.contains(other));
 		assertEquals(0, first.saves + second.saves + first.reads + second.reads);
 	}
-	@Test void sameSublevelDoubleChestUsesCanonicalAliasAndPerMemberNbtWithoutReplacingOriginalExternalTarget() {
+	@Test void sameSublevelDoubleChestUsesCanonicalAliasAndPerMemberResidentsWithoutReplacingOriginalExternalTarget() {
 		Fixture fixture = new Fixture(); World world = new World();
 		BlockState left = Blocks.CHEST.defaultBlockState().setValue(ChestBlock.FACING, Direction.EAST).setValue(ChestBlock.TYPE, ChestType.LEFT);
 		BlockPos other = BlockPos.ZERO.relative(ChestBlock.getConnectedDirection(left));
@@ -363,15 +371,15 @@ class SableInventorySourceTest {
 		fixture.bind("left", world, BlockPos.ZERO, "same-sublevel"); fixture.bind("right", world, other, "same-sublevel");
 		var original = candidate(DIMENSION, "minecraft:chest", "right");
 		try (var root = fixture.resolve(candidate(DIMENSION, "minecraft:chest", "left")).orElseThrow();
-			var hit = fixture.resolve(original).orElseThrow(); var snapshot = (InventoryNbtSnapshot) hit.snapshotPlan().orElseThrow().capture().orElseThrow()) {
+			var hit = fixture.resolve(original).orElseThrow(); var snapshot = (InventoryObservationSnapshot) hit.snapshotPlan().orElseThrow().capture().orElseThrow()) {
 			assertEquals(root.key(), hit.key()); assertEquals(54, snapshot.slots()); assertEquals(other, snapshot.originalTarget());
 			assertEquals(List.of(BlockPos.ZERO, other), snapshot.layout().members().stream().map(InventorySnapshotLayout.Member::position).toList());
 			assertEquals(3, snapshot.read(0).count()); assertEquals(7, snapshot.read(27).count());
-			assertEquals(1, first.saves); assertEquals(1, second.saves); assertEquals(0, first.reads + second.reads);
+			assertEquals(0, first.saves + second.saves); assertEquals(27, first.reads); assertEquals(27, second.reads);
 			assertEquals("right", ((Target.ExternalBlockTarget) original.target()).providerLocator()); assertTrue(original.ordinaryTarget().isEmpty());
 		}
 	}
-	@Test void releaseDuringContiguousNbtSaveCannotPublishAtomicSnapshotOrReadLaterRevokedMember() {
+	@Test void releaseDuringResidentCaptureCannotPublishAtomicSnapshotOrReadLaterRevokedMember() {
 		Fixture fixture = new Fixture(); World world = new World();
 		BlockState left = Blocks.CHEST.defaultBlockState().setValue(ChestBlock.FACING, Direction.EAST).setValue(ChestBlock.TYPE, ChestType.LEFT);
 		BlockPos other = BlockPos.ZERO.relative(ChestBlock.getConnectedDirection(left));
@@ -379,9 +387,9 @@ class SableInventorySourceTest {
 		world.put(BlockPos.ZERO, left, first); world.put(other, second.getBlockState(), second);
 		Route route = new Route(world, BlockPos.ZERO, "sublevel"); fixture.points.put("point", route);
 		try (var source = fixture.resolve(committed("minecraft:chest", "point", "stale")).orElseThrow()) {
-			first.afterSave = () -> route.active = false;
+			first.afterRead = () -> route.active = false;
 			assertThrows(IllegalStateException.class, () -> source.snapshotPlan().orElseThrow().capture());
-			assertEquals(1, first.saves); assertEquals(0, second.saves, "revoked member is not saved after the earlier provider call");
+			assertEquals(0, first.saves + second.saves); assertEquals(1, first.reads); assertEquals(0, second.reads, "revoked member is not read");
 			assertFalse(source.valid());
 		}
 	}
@@ -398,7 +406,7 @@ class SableInventorySourceTest {
 				var consumer = runtime.attach(input, new InventoryRuntime.TrackingSubject(TargetKey.from(input.target()))).orElseThrow();
 				var completed = runtime.step(consumer).orElseThrow(); assertEquals(CaptureResult.Completeness.COMPLETE, completed.result().completeness());
 				assertEquals(3, completed.slots().getFirst().count()); consumer.retainCompleted(); consumer.restart();
-				assertEquals(1, old.saves); fixture.tick = 1; runtime.advance(1, settings);
+				assertEquals(0, old.saves); assertEquals(27, old.reads); fixture.tick = 1; runtime.advance(1, settings);
 				if (release) route.active = false; else route.pos = moved;
 				if (!release) assertTrue(runtime.validate(input), "a fresh legal source does not authorize old completed evidence");
 				assertEquals(Optional.of(false), runtime.probe(consumer), "send-time probe uses the retained physical descriptor");
@@ -411,7 +419,7 @@ class SableInventorySourceTest {
 				fixture.tick = 5; runtime.advance(5, settings); consumer.restart();
 				var recovered = runtime.step(consumer).orElseThrow(); assertEquals(CaptureResult.Completeness.COMPLETE, recovered.result().completeness());
 				assertEquals(release ? 3 : 19, recovered.slots().getFirst().count());
-				assertEquals(release ? 2 : 1, old.saves); assertEquals(release ? 0 : 1, replacement.saves);
+				assertEquals(0, old.saves + replacement.saves); assertEquals(release ? 54 : 27, old.reads); assertEquals(release ? 0 : 27, replacement.reads);
 			}
 			assertEquals(0, runtime.memory().reserved()); assertEquals(0, runtime.memory().retained());
 		}
@@ -433,7 +441,7 @@ class SableInventorySourceTest {
 		try (var source = fixture.resolve(candidate(DIMENSION, "minecraft:chest", "chest")).orElseThrow()) {
 			var plan = source.snapshotPlan().orElseThrow(); fixture.tick++;
 			try (var snapshot = plan.capture().orElseThrow()) {
-				assertEquals(4, snapshot.read(0).count()); assertEquals(1, chest.saves); assertEquals(0, chest.reads);
+				assertEquals(4, snapshot.read(0).count()); assertEquals(0, chest.saves); assertEquals(27, chest.reads);
 			}
 		}
 	}
@@ -442,13 +450,15 @@ class SableInventorySourceTest {
 		Fixture fixture = new Fixture(); World world = new World(); SidedChest chest = new SidedChest(BlockPos.ZERO, 8);
 		chest.mapping = new int[] {0, 1}; world.put(BlockPos.ZERO, chest.getBlockState(), chest);
 		fixture.bind("a", world, BlockPos.ZERO, "sublevel"); var input = candidate(DIMENSION, "minecraft:chest", "a");
-		var memory = new RetainedMemoryLedger(8_000_000);
+		long bound;
+		try (var source = fixture.resolve(input).orElseThrow()) { bound = source.snapshotPlan().orElseThrow().memoryUpperBoundBytes(); }
+		var memory = new RetainedMemoryLedger(bound);
 		try (var handle = open(fixture, input)) {
 			assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(memory));
 			assertEquals(CaptureResult.Completeness.CONTINUE, step(handle, 1).completeness());
 			fixture.tick = 1; chest.mapping = new int[] {1, 0};
 			var changed = step(handle, 1); assertEquals(CaptureResult.Availability.INVALID, changed.availability()); assertTrue(changed.payload().isEmpty());
-			assertFalse(handle.evidenceValid()); assertEquals(1, chest.saves); assertEquals(0, chest.reads);
+			assertFalse(handle.evidenceValid()); assertEquals(0, chest.saves); assertEquals(2, chest.reads);
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 		try (var fresh = open(fixture, input)) {
@@ -456,7 +466,7 @@ class SableInventorySourceTest {
 			var recovered = step(fresh, 2); assertEquals(CaptureResult.Completeness.COMPLETE, recovered.completeness());
 			var page = ((CaptureResult.OpaqueKeyedFragment) recovered.payload().orElseThrow()).entries();
 			assertNull(InventoryDomainCodec.decode(page.get("0"))); assertEquals(8, InventoryDomainCodec.decode(page.get("1")).count());
-			assertEquals(2, chest.saves);
+			assertEquals(0, chest.saves); assertEquals(4, chest.reads);
 		}
 	}
 
@@ -488,7 +498,7 @@ class SableInventorySourceTest {
 		chest.setLootTable(null); chest.mapping = new int[0];
 		try (var source = fixture.resolve(input).orElseThrow(); var snapshot = source.snapshotPlan().orElseThrow().capture().orElseThrow()) {
 			assertEquals(0, snapshot.slots()); assertEquals(InventorySourceAccess.SnapshotEvidence.ATOMIC_DETACHED, snapshot.evidence());
-			assertEquals(Direction.NORTH, chest.lastFace); assertEquals(1, chest.saves);
+			assertEquals(Direction.NORTH, chest.lastFace); assertEquals(0, chest.saves); assertEquals(0, chest.reads);
 		}
 	}
 

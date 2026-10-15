@@ -79,6 +79,17 @@ class InventoryDomainCodecTest {
 		assertEquals(item, InventoryDomainCodec.decode(encoded));
 	}
 
+	@Test void finalLegacyBitRequiresAnAggregateKeyAndRetainsTheSameGrammar() {
+		var aggregate = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", ""), 3,
+			"stone", null, true);
+		assertTrue(aggregate.aggregateRequired());
+		assertEquals(aggregate, InventoryDomainCodec.decode(InventoryDomainCodec.encode(aggregate)));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryDomainCodec.Item(
+			new InventoryScanner.Key("minecraft:stone", "digest"), 1, "stone", null, true));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryDomainCodec.Item(
+			new InventoryScanner.Key("minecraft:stone", ""), 1, "stone", null, false));
+	}
+
 	private static CaptureResult.OpaqueValue value(byte[] bytes) {
 		return CaptureResult.OpaqueValue.forCodec(InventoryDomainCodec.CODEC, bytes);
 	}

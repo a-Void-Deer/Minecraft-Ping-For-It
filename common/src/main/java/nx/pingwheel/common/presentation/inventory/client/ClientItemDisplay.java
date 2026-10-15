@@ -22,12 +22,19 @@ import net.minecraft.core.component.TypedDataComponent;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.food.FoodProperties;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.BundleContents;
+import net.minecraft.world.item.component.ChargedProjectiles;
+import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.item.component.ItemLore;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
 
 import nx.pingwheel.common.chat.ContentChatTemplate;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess;
 
 /**
  * Shared client-side projection of one server-bounded inventory display value.
@@ -38,13 +45,13 @@ import nx.pingwheel.common.network.InventoryS2CPacket;
  * context and derives the display name, so the inventory list rows and the
  * tracking annotations cannot drift apart. Decoding never reads a world,
  * chest, entity or server object, and a missing, malformed, oversized or
- * registry-unknown value fails softly to the native bare stack plus the
- * registry translation key.
+ * registry-unknown value fails softly to an empty icon plus the registry
+ * translation key. A failed display never authorizes prototype reconstruction.
  *
  * <p>Decoding is identity-aware: the decoded registry ID must equal the
- * supplied opaque item ID, otherwise the value fails soft to the supplied item
- * and label instead of showing an icon that disagrees with the selection
- * identity. The codec-only {@link #decode} stays available without an expected
+ * supplied opaque item ID, otherwise the value fails soft to an empty icon
+ * and the supplied label instead of showing an icon that disagrees with the
+ * selection identity. The codec-only {@link #decode} stays available without an expected
  * ID for the chat path.
  *
  * <p>Decoded count-one values are retained privately as an immutable
@@ -53,8 +60,8 @@ import nx.pingwheel.common.network.InventoryS2CPacket;
  * resolves once per world-render frame. The snapshot is decoded directly with
  * the same public grammar as {@link ItemStack#SINGLE_ITEM_CODEC}
  * ({@link ItemStack#ITEM_NON_AIR_CODEC} plus {@link DataComponentPatch#CODEC}),
- * so no {@link ItemStack} exists while the transmitted values are captured and
- * the item load-verification hook cannot replace an unresolved player-head
+ * so no outer {@link ItemStack} exists while the transmitted values are captured and
+ * the outer item load-verification hook cannot replace its unresolved player-head
  * PROFILE inside retained state, even when a warmed profile cache lets the
  * hook's completed future run inline. Every resolve then composes the display
  * name from a separate non-verifying naming stack built from the same
@@ -62,6 +69,10 @@ import nx.pingwheel.common.network.InventoryS2CPacket;
  * stack through the real constructor, where the native callback may resolve a
  * PROFILE as usual. The transmitted identity and the name derived from it
  * therefore stay stable across resolves and cache hits.
+ * Native component codecs can still construct nested stacks and start their
+ * callbacks during decoding; this outer-stack isolation does not establish
+ * recursive PROFILE isolation. Icon safety observes supported nested values
+ * without copying them or starting additional load-verification work.
  *
  * <p>The cache is main-thread confined, access-ordered so a hit refreshes
  * recency and the least recently resolved snapshot is evicted first, bounded
@@ -75,8 +86,9 @@ public final class ClientItemDisplay {
 
 	/**
 	 * Resolved display projection: an independently owned count-one working
-	 * stack plus its localized name. Mutating or resolving the stack never
-	 * changes the helper's retained snapshot, a later resolution or another
+	 * stack, or EMPTY when unavailable, plus its independently resolved localized
+	 * name. Mutating or resolving the stack never changes the helper's retained
+	 * snapshot, a later resolution or another
 	 * caller's result.
 	 */
 	public record Display(ItemStack stack, Component name) {
@@ -90,6 +102,8 @@ public final class ClientItemDisplay {
 	public static final int MAX_CACHE_ENTRIES = ClientInventory.MAX_PREVIEW_ENTRIES;
 	/** Aligned with the preview byte bound; the payload guard itself stays the wire bound. */
 	public static final long MAX_CACHE_BYTES = ClientInventory.MAX_PREVIEW_BYTES;
+	private static final int MAX_ICON_DEPTH = 48;
+	private static final InventoryResidentAccess RAW = InventoryResidentAccess.load();
 
 	private record CacheKey(String itemId, String displayJson) {}
 
@@ -97,11 +111,11 @@ public final class ClientItemDisplay {
 	 * The exact {@link ItemStack#SINGLE_ITEM_CODEC} grammar — non-air item
 	 * holder under {@code id} plus the optional persistent component patch under
 	 * {@code components} — decoded straight into the retained snapshot. No
-	 * {@link ItemStack} is constructed while decoding, so the item
+	 * outer {@link ItemStack} is constructed while decoding, so its item
 	 * load-verification hook cannot run before the transmitted values are
 	 * captured. Registry-aware patch decoding, component removals, transient
 	 * rejection, unknown-type failure and non-air validation all stay owned by
-	 * the shared constituent codecs.
+	 * the shared constituent codecs, including native nested-stack construction.
 	 */
 	private static final Codec<Snapshot> SNAPSHOT_CODEC = RecordCodecBuilder.create(instance -> instance.group(
 		ItemStack.ITEM_NON_AIR_CODEC.fieldOf("id").forGetter(Snapshot::item),
@@ -111,8 +125,8 @@ public final class ClientItemDisplay {
 	/**
 	 * Immutable transmitted identity of one decoded variant: the registry item
 	 * holder plus the exact component patch the server encoded, removals
-	 * included. No constructed stack is retained, so the item
-	 * load-verification callback cannot capture retained state.
+	 * included. No constructed outer stack is retained, so its item
+	 * load-verification callback cannot capture the retained outer PROFILE.
 	 */
 	private record Snapshot(Holder<Item> item, DataComponentPatch patch) {
 		/**
@@ -164,8 +178,8 @@ public final class ClientItemDisplay {
 
 	/**
 	 * Resolves one row or annotation display from the current client level
-	 * registry context. Null or unavailable registry access keeps the native
-	 * fallback instead of throwing.
+	 * registry context. Null or unavailable registry access keeps an empty icon
+	 * and the supplied label instead of throwing.
 	 */
 	public static Display resolve(String itemId, String label, String displayJson) {
 		return resolve(currentRegistryAccess(), itemId, label, displayJson);
@@ -174,23 +188,38 @@ public final class ClientItemDisplay {
 	/**
 	 * Resolves one display against an explicit registry context. A null context,
 	 * any decode failure or a decoded registry ID that disagrees with the
-	 * supplied item ID falls back to the bare supplied item stack and the
+	 * supplied item ID falls back to an empty icon and the
 	 * registry translation key.
 	 */
 	public static Display resolve(HolderLookup.Provider registryAccess, String itemId, String label, String displayJson) {
 		Optional<Snapshot> snapshot = transmitted(registryAccess, itemId, displayJson);
 		if (snapshot.isPresent()) {
-			// The retained snapshot stays private and untargetable by the
+			// The retained outer PROFILE stays untargetable by the outer
 			// native load-verification callback. The name is composed first
 			// from the non-verifying naming stack, then the render stack is
 			// built through the real constructor: a callback that runs inline
 			// on the render stack can resolve a PROFILE there, but it can no
 			// longer change the retained transmission or this name.
-			Component name = displayName(snapshot.get().namingStack());
-			ItemStack working = snapshot.get().workingStack();
-			return new Display(working, name);
+			Component name;
+			ItemStack naming;
+			try {
+				naming = snapshot.get().namingStack();
+				name = displayName(naming);
+			} catch (RuntimeException unavailable) {
+				return new Display(ItemStack.EMPTY, fallbackName(label));
+			}
+			try {
+				// Native nested codecs also apply item prototypes. Refuse the
+				// entire icon if any effective nested value restores redacted data;
+				// this does not remove the independently composed text.
+				if (!safeIcon(naming, 0)) return new Display(ItemStack.EMPTY, name);
+				ItemStack working = snapshot.get().workingStack();
+				return new Display(safeIcon(working, 0) ? working : ItemStack.EMPTY, name);
+			} catch (RuntimeException unavailable) {
+				return new Display(ItemStack.EMPTY, name);
+			}
 		}
-		return new Display(nativeStack(itemId), fallbackName(label));
+		return new Display(ItemStack.EMPTY, fallbackName(label));
 	}
 
 	/**
@@ -204,7 +233,11 @@ public final class ClientItemDisplay {
 	 * a failed decode.
 	 */
 	public static Optional<ItemStack> decode(HolderLookup.Provider registryAccess, String json) {
-		return decodeSnapshot(registryAccess, json).map(Snapshot::namingStack);
+		try {
+			return decodeSnapshot(registryAccess, json).map(Snapshot::namingStack);
+		} catch (RuntimeException unavailable) {
+			return Optional.empty();
+		}
 	}
 
 	/**
@@ -299,8 +332,9 @@ public final class ClientItemDisplay {
 
 	/**
 	 * Decodes one server-bounded display JSON into the immutable transmitted
-	 * snapshot through {@link #SNAPSHOT_CODEC}; no constructed stack exists for
-	 * the item load-verification hook to capture.
+	 * snapshot through {@link #SNAPSHOT_CODEC}; no constructed outer stack exists
+	 * for its item load-verification hook to capture. Native component codecs
+	 * may construct and verify nested stacks before eligibility is known.
 	 */
 	private static Optional<Snapshot> decodeSnapshot(HolderLookup.Provider registryAccess, String json) {
 		if (registryAccess == null || json == null || json.isBlank()) {
@@ -352,19 +386,33 @@ public final class ClientItemDisplay {
 		return 64L + utf8Length(key.displayJson()) + (key.itemId() == null ? 0L : utf8Length(key.itemId()));
 	}
 
-	private static ItemStack nativeStack(String itemId) {
-		if (itemId == null || itemId.isBlank()) {
-			return ItemStack.EMPTY;
+	/** Checks effective values, including defaults materialized by nested native codecs. */
+	private static boolean safeIcon(ItemStack stack, int depth) {
+		if (depth > MAX_ICON_DEPTH) return false;
+		if (stack.isEmpty()) return true;
+		ItemLore lore = stack.get(DataComponents.LORE);
+		if (lore != null && !lore.lines().isEmpty()) return false;
+		ItemContainerContents container = stack.get(DataComponents.CONTAINER);
+		if (container != null) {
+			boolean shulker = stack.getItem() instanceof BlockItem blockItem
+				&& blockItem.getBlock() instanceof ShulkerBoxBlock;
+			for (ItemStack nested : container.nonEmptyItems()) {
+				if (shulker || !safeIcon(nested, depth + 1)) return false;
+			}
 		}
-		ResourceLocation id = ResourceLocation.tryParse(itemId);
-		if (id == null) {
-			return ItemStack.EMPTY;
+		BundleContents bundle = stack.get(DataComponents.BUNDLE_CONTENTS);
+		if (bundle != null) {
+			for (ItemStack nested : bundle.items()) if (!safeIcon(nested, depth + 1)) return false;
 		}
-		Item item = BuiltInRegistries.ITEM.get(id);
-		if (item == null || item == Items.AIR) {
-			return ItemStack.EMPTY;
+		ChargedProjectiles projectiles = stack.get(DataComponents.CHARGED_PROJECTILES);
+		if (projectiles != null) {
+			// getItems() lazily copies stacks and runs native load verification.
+			// Observe the supported holder's raw field before deciding eligibility,
+			// so an eventual terminal result never starts disposable PROFILE work.
+			for (ItemStack nested : RAW.projectiles(projectiles)) if (!safeIcon(nested, depth + 1)) return false;
 		}
-		return new ItemStack(item);
+		FoodProperties food = stack.get(DataComponents.FOOD);
+		return food == null || food.usingConvertsTo().isEmpty() || safeIcon(food.usingConvertsTo().get(), depth + 1);
 	}
 
 	private static Component fallbackName(String label) {

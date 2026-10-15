@@ -126,7 +126,7 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 		INCOMPLETE("incomplete", true),
 		UNAVAILABLE("unavailable", true),
 		INVALID("invalid", true),
-		COMPONENT_TOO_LONG("component_too_long", true),
+		COMPONENT_TOO_LONG("all_variants", true),
 		EXPIRED("expired", true);
 
 		private final String suffix;

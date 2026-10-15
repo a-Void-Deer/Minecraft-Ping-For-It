@@ -303,7 +303,7 @@ public final class ContentChatComposer {
 	private static String qualitySuffix(InventoryS2CPacket.Status quality) {
 		return switch (quality) {
 			case UNCERTAIN -> "uncertain";
-			case COMPONENT_TOO_LONG -> "component_too_long";
+			case COMPONENT_TOO_LONG -> "all_variants";
 			default -> null;
 		};
 	}

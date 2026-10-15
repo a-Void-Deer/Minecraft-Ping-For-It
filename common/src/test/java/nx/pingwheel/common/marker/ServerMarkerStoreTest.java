@@ -666,4 +666,54 @@ class ServerMarkerStoreTest {
 		assertTrue(store.removeOwnedBy(OWNER).removals().isEmpty());
 		assertTrue(store.winnerFor(TargetKey.from(entityTarget(UUID.randomUUID())), RECIPIENT_A).isEmpty());
 	}
+
+	@Test void canonicalPagesAreBoundedImmutableAndSkipHolesWithoutExtendingCapturedHighWater() {
+		ServerMarkerStore store = newStore();
+		assertEquals(-1, store.highWaterId());
+		assertTrue(store.pageAfter(-1, -1, 2).complete());
+		Target shared = entityTarget(new UUID(0, 999));
+		for (int i = 0; i < 7; i++) create(store, shared, i, 100, RECIPIENT_A);
+		long high = store.highWaterId();
+		var first = store.pageAfter(-1, high, 2);
+		assertEquals(List.of(new MarkerId(0), new MarkerId(1)), winnerIds(first.markers()));
+		assertEquals(1, first.afterId());
+		assertTrue(!first.complete());
+		assertThrows(UnsupportedOperationException.class, () -> first.markers().clear());
+		store.removeByServer(new MarkerId(1), MarkerRemovalReason.CANCELLED); // cursor itself disappeared
+		store.removeByServer(new MarkerId(2), MarkerRemovalReason.CANCELLED);
+		store.removeByServer(new MarkerId(5), MarkerRemovalReason.CANCELLED);
+		create(store, shared, 20, 100, RECIPIENT_A); // id 7 must wait for a new sweep
+		var second = store.pageAfter(first.afterId(), high, 2);
+		assertEquals(List.of(new MarkerId(3), new MarkerId(4)), winnerIds(second.markers()));
+		assertTrue(!second.complete());
+		var last = store.pageAfter(second.afterId(), high, 2);
+		assertEquals(List.of(new MarkerId(6)), winnerIds(last.markers()));
+		assertTrue(last.complete());
+		assertTrue(store.pageAfter(last.afterId(), high, 2).markers().isEmpty());
+		assertEquals(new MarkerId(7), store.winnerFor(TargetKey.from(shared), RECIPIENT_A).orElseThrow().id(),
+			"canonical discovery never changes winner selection");
+		assertEquals(2, first.markers().size(), "returned pages are detached from deletion");
+	}
+
+	@Test void canonicalPageSupportsMaximumIdAndRejectsInvalidBounds() {
+		ServerMarkerStore store = new ServerMarkerStore(new MarkerIdSource(Long.MAX_VALUE - 1));
+		Target target = entityTarget(new UUID(0, 991));
+		create(store, target, 0, 100, RECIPIENT_A);
+		create(store, target, 1, 100, RECIPIENT_A);
+		assertEquals(Long.MAX_VALUE, store.highWaterId());
+		var first = store.pageAfter(-1, Long.MAX_VALUE, 1);
+		assertEquals(Long.MAX_VALUE - 1, first.afterId());
+		assertTrue(!first.complete());
+		var last = store.pageAfter(first.afterId(), Long.MAX_VALUE, 1);
+		assertEquals(Long.MAX_VALUE, last.afterId());
+		assertTrue(last.complete());
+		assertTrue(store.pageAfter(Long.MAX_VALUE, Long.MAX_VALUE, 1).complete());
+		assertTrue(store.pageAfter(Long.MAX_VALUE, Long.MAX_VALUE, 1).markers().isEmpty());
+		assertThrows(IllegalArgumentException.class, () -> store.pageAfter(-2, 3, 1));
+		assertThrows(IllegalArgumentException.class, () -> store.pageAfter(-1, -2, 1));
+		assertThrows(IllegalArgumentException.class, () -> store.pageAfter(3, 2, 1));
+		assertThrows(IllegalArgumentException.class, () -> store.pageAfter(-1, 3, 0));
+		store.clear();
+		assertEquals(-1, store.highWaterId());
+	}
 }

@@ -11,6 +11,7 @@ mixin {
 
 minecraft {
     mappings channel: "official", version: minecraft_version
+    accessTransformers file("../common/src/main/resources/META-INF/accesstransformer.cfg")
 
     reobf = false
     copyIdeResources = true

@@ -73,6 +73,7 @@ class PresentationServerReceiptTest {
 		var lease = new PresentationServer.Lease(marker, "Owner");
 		var source = new PresentationServer.Source(BASIC, 1);
 		source.value = cachedBasic();
+		source.observation = PresentationServer.Source.Observation.SUCCESS;
 		lease.sources.put(BASIC, source);
 		return lease;
 	}

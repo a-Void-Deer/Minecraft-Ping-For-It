@@ -54,7 +54,8 @@ class PresentationServerRefreshTest {
 	}
 
 	private static PresentationServer.Session readySession() {
-		var session = new PresentationServer.Session(37, Map.of(BASIC, 1), Map.of());
+		var session = new PresentationServer.Session(37, Map.of(BASIC, 1), Map.of(BASIC, PresentationBasic.fields()));
+		session.mask = Map.of("entity_block", Map.of(BASIC, Set.of(NAME)));
 		session.ready = true;
 		session.view = 1;
 		return session;
@@ -62,6 +63,7 @@ class PresentationServerRefreshTest {
 
 	private static PresentationServer.SentMarker sentMarker(String ownerName, PresentationSection basic) {
 		var sent = new PresentationServer.SentMarker(ownerName);
+		sent.deliveredView = 1;
 		sent.sections.put(BASIC, basic);
 		return sent;
 	}
@@ -82,6 +84,7 @@ class PresentationServerRefreshTest {
 		var lease = new PresentationServer.Lease(first, "Cached owner");
 		var source = new PresentationServer.Source(BASIC, 1);
 		source.value = cached();
+		source.observation = PresentationServer.Source.Observation.SUCCESS;
 		source.nextSample = 250;
 		lease.sources.put(BASIC, source);
 		var known = readySession();
@@ -117,6 +120,7 @@ class PresentationServerRefreshTest {
 		var lease = new PresentationServer.Lease(marker(11, "before", new MarkerAnchor(1, 2, 3), List.of(VIEWER)), "Owner");
 		var source = new PresentationServer.Source(BASIC, 1);
 		source.value = cached();
+		source.observation = PresentationServer.Source.Observation.SUCCESS;
 		lease.sources.put(BASIC, source);
 		var session = readySession();
 		session.sent.put(lease.marker.id().value(), sentMarker("Owner", cached()));
@@ -152,6 +156,7 @@ class PresentationServerRefreshTest {
 		var ephemeral = new PresentationServer.Lease(previous, "Original owner");
 		var source = new PresentationServer.Source(BASIC, 1);
 		source.value = cached();
+		source.observation = PresentationServer.Source.Observation.SUCCESS;
 		ephemeral.sources.put(BASIC, source);
 		PresentationServer.sendInitial(ready, ephemeral, basicAdapter, Set.of(NAME), deliveries::add);
 		assertEquals(1, deliveries.size());
@@ -190,8 +195,10 @@ class PresentationServerRefreshTest {
 			annotated.arrivalTick(), annotated.expiresAtTick(), annotated.recipients(), annotated.properties());
 		var first = readySession();
 		var second = readySession();
-		first.sent.put(annotated.id().value(), sentMarker("Owner", cached()));
-		second.sent.put(annotated.id().value(), sentMarker("Owner", cached()));
+		var prior = new PresentationSection(BASIC, 1, cached().fields(), false,
+			Map.of(PresentationPropertyRef.root(BASIC, NAME), "danger"));
+		first.sent.put(annotated.id().value(), sentMarker("Owner", prior));
+		second.sent.put(annotated.id().value(), sentMarker("Owner", prior));
 		var delivered = new java.util.LinkedHashMap<UUID, PresentationS2CPacket>();
 		PresentationServer.refreshMarker(next, Map.of(), new BasicAdapter(), 100,
 			Map.of(VIEWER, first, OTHER, second), recipient -> true,
@@ -213,6 +220,7 @@ class PresentationServerRefreshTest {
 				id == 40 ? List.of(OTHER) : List.of(VIEWER)), "Owner");
 			var basic = new PresentationServer.Source(BASIC, 1);
 			basic.value = cached();
+			basic.observation = PresentationServer.Source.Observation.SUCCESS;
 			basic.nextSample = 0; // Every source is due; HELLO must still replay only the cache.
 			lease.sources.put(BASIC, basic);
 			leases.add(lease);
@@ -363,6 +371,7 @@ class PresentationServerRefreshTest {
 		var lease = new PresentationServer.Lease(older.marker(), "Owner");
 		var source = new PresentationServer.Source(BASIC, 1);
 		source.value = cached();
+		source.observation = PresentationServer.Source.Observation.SUCCESS;
 		source.nextSample = 250;
 		lease.sources.put(BASIC, source);
 		var session = readySession();
@@ -429,6 +438,7 @@ class PresentationServerRefreshTest {
 		var lease = new PresentationServer.Lease(created.marker(), "Owner");
 		var source = new PresentationServer.Source(BASIC, 1);
 		source.value = cached();
+		source.observation = PresentationServer.Source.Observation.SUCCESS;
 		lease.sources.put(BASIC, source);
 		var session = readySession();
 		var deliveries = new ArrayList<PresentationS2CPacket>();
@@ -460,6 +470,7 @@ class PresentationServerRefreshTest {
 		var lease = new PresentationServer.Lease(created.marker(), "Owner");
 		var source = new PresentationServer.Source(BASIC, 1);
 		source.value = cached();
+		source.observation = PresentationServer.Source.Observation.SUCCESS;
 		lease.sources.put(BASIC, source);
 		var session = readySession();
 		var deliveries = new ArrayList<PresentationS2CPacket>();
