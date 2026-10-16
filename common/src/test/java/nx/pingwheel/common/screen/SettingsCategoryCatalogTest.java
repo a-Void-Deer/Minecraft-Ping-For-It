@@ -41,6 +41,8 @@ class SettingsCategoryCatalogTest {
 			Setting.SPATIAL_REDUCE_MOTION), SettingsCategoryCatalog.settings(Category.WHEEL_APPEARANCE));
 		assertEquals(List.of(
 			Setting.WHEEL_HOLD_MILLIS,
+			Setting.SPATIAL_GESTURE_SKIP_HOLD_ENABLED,
+			Setting.SPATIAL_GESTURE_SKIP_HOLD_MILLIS,
 			Setting.LONG_PRESS_COMPATIBILITY_MODE,
 			Setting.LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
 			Setting.CANCEL_HALF_CONE_ANGLE_DEGREES,

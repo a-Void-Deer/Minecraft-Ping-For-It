@@ -328,7 +328,12 @@ class SpatialSelectorSessionTest {
 		session.open(0);
 		enter(session, "content", 10);
 		String id = current(session).choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
-		enter(session, id, 150);
+		// Keep these list-input fixtures at their explicit (360, 0) axis;
+		// entering Content diagonally must not change their viewport preconditions.
+		var pointer = session.snapshot().radial().pointer();
+		session.moveGui(360 - pointer.x(), -pointer.y(), 150);
+		assertEquals(id, session.snapshot().radial().focusId());
+		session.tick(150 + session.snapshot().settings().dwellMillis());
 		assertTrue(session.snapshot().inventory().open());
 		return session;
 	}
@@ -336,16 +341,15 @@ class SpatialSelectorSessionTest {
 		if (backSide == InventoryListModel.Side.LEFT) return openedList(hover, new Content());
 		var target = target("ordinary", "entity_block", true);
 		Content port = new Content();
-		var properties = java.util.stream.IntStream.range(0, 3).mapToObj(index ->
-			new SpatialSelectorSession.Property("value" + index, "value" + index,
-				PresentationPropertyRef.root("pingforit:basic", "pingforit:value" + index), new PresentationValue.NumberValue(index),
-				List.of(ping("attention")), ping("attention"))).toList();
-		port.next = new SpatialSelectorSession.ContentProjection<>(fence(target), 1, false, Status.UPDATING, properties,
-			inventory(target, 1, false, List.of(row("a", 50L), row("b", 30L), row("c", 10L))).inventory());
+		port.next = inventory(target, 1, false, List.of(row("a", 50L), row("b", 30L), row("c", 10L)));
 		var session = session(target, Map.of(), hover, port);
 		session.open(0); enter(session, "content", 10);
 		String id = current(session).choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
-		enter(session, id, 150);
+		// With only inventory and Back, the right-preferring inventory half-circle
+		// still includes 350 degrees: a real reachable left-side entry.
+		moveTo(session, current(session).origin(), 350, session.snapshot().settings().stroke() * 2.0, 150);
+		assertEquals(id, session.snapshot().radial().focusId());
+		session.tick(150 + session.snapshot().settings().dwellMillis());
 		assertEquals(backSide, session.snapshot().inventory().direction().back());
 		return session;
 	}
@@ -356,7 +360,7 @@ class SpatialSelectorSessionTest {
 		var session = session(target, Map.of(), false, new Content());
 		session.open(0);
 		var choices = current(session).choices();
-		assertEquals(List.of("danger", "reserved-ne", "content", "reserved-se", "cancel-marker", "precise", "intent", "settings"),
+		assertEquals(List.of("danger", "content", "reserved-ne", "reserved-se", "cancel-marker", "precise", "intent", "settings"),
 			choices.stream().map(SpatialController.ChoiceView::id).toList());
 		assertTrue(choices.getFirst().disabled(), "entity-block disallows whole-marker danger");
 		assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(1));
@@ -368,6 +372,88 @@ class SpatialSelectorSessionTest {
 		intent.open(0); enter(intent, "intent", 10);
 		assertEquals(target.resolvedTarget().targetType().pingTypes().stream().map(type -> "intent:" + type.id()).toList(),
 			current(intent).choices().stream().filter(choice -> !choice.back()).map(SpatialController.ChoiceView::id).toList());
+	}
+
+	private static SpatialSelectorSession.ContentProjection<String> layoutProjection(
+		SpatialSelectorSession.CapturedTarget target, int topLevelCount, boolean withInventory) {
+		var properties = new java.util.ArrayList<SpatialSelectorSession.Property>();
+		var groups = new java.util.ArrayList<SpatialSelectorSession.ContentGroup>();
+		for (int index = 0; index < topLevelCount; index++) {
+			List<String> path = index % 2 == 0 ? List.of() : List.of("group" + index);
+			if (!path.isEmpty()) groups.add(new SpatialSelectorSession.ContentGroup(path, "group" + index));
+			properties.add(new SpatialSelectorSession.Property("value" + index, "value" + index,
+				PresentationPropertyRef.root("pingforit:basic", "pingforit:value" + index), new PresentationValue.NumberValue(index),
+				List.of(ping("attention"), ping("danger")), ping("attention"), path));
+		}
+		return new SpatialSelectorSession.ContentProjection<>(fence(target), 1, false, Status.READY, properties,
+			withInventory ? inventory(target, 1, false, List.of(row("a", 5L))).inventory() : null, groups);
+	}
+
+	@Test
+	void realUpperRightThenRightGestureFindsInventoryAcrossPropertyGroupCountsAndDisabledState() {
+		for (int count = 0; count <= 10; count++) {
+			for (double entryBearing : new double[] {27.5, 35, 45, 55, 62.4999}) {
+				for (boolean disabled : List.of(false, true)) {
+					var target = target("ordinary", "entity_block", !disabled);
+					Content port = new Content(); port.next = layoutProjection(target, count, true);
+					var session = session(target, Map.of(), false, port);
+					session.open(0);
+					moveTo(session, current(session).origin(), entryBearing, 180, 10);
+					assertEquals("content", current(session).focusId(), "the actual root admits upper-right Content input");
+					session.tick(130);
+					var menu = current(session);
+					assertTrue(menu.menuId().endsWith(":content"));
+					var inventory = menu.choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow();
+					assertEquals(disabled, inventory.disabled());
+					var labels = java.util.stream.IntStream.range(0, count).mapToObj(index ->
+						(index % 2 == 0 ? "value" : "group") + index).toList();
+					assertEquals(labels, menu.choices().stream().filter(choice -> !choice.back() && !choice.id().equals(inventory.id()))
+						.map(SpatialController.ChoiceView::label).toList(), "properties and navigation groups keep their relative order");
+					var back = menu.choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow();
+					assertEquals(entryBearing + 180, (back.startDegrees() + back.spanDegrees() / 2) % 360, 1e-9);
+					session.moveGui(180, 0, 150); // the requested second stroke is exactly right, not the slot centre
+					assertEquals(inventory.id(), session.snapshot().radial().focusId());
+					session.tick(270);
+					assertEquals(!disabled, session.snapshot().inventory().open());
+					assertEquals(disabled ? 2 : 3, session.snapshot().radial().menus().size());
+					if (disabled) assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(271));
+					else {
+						assertEquals(InventoryListModel.Side.RIGHT, session.snapshot().inventory().direction().forward());
+						assertEquals(inventory.id(), current(session).entryChoiceId(), "breadcrumb follows the resolved inventory choice");
+					}
+				}
+			}
+		}
+	}
+
+	@Test
+	void missingInventoryLeavesTheDeclaredContentGeometryAndNestedTypeMenusUnchanged() {
+		for (int count = 1; count <= 6; count++) {
+			var target = target("ordinary", "entity_block", true);
+			Content port = new Content(); port.next = layoutProjection(target, count, false);
+			var session = session(target, Map.of(), false, port);
+			session.open(0); enter(session, "content", 10);
+			var menu = current(session);
+			assertEquals(count + 1, menu.choices().size());
+			for (int index = 0; index < count; index++) {
+				var choice = menu.choices().get(index);
+				assertEquals((index % 2 == 0 ? "value" : "group") + index, choice.label());
+				assertEquals(360.0 / (count + 1), choice.spanDegrees(), 1e-9);
+				double expectedCentre = (225 + (index + 1) * 360.0 / (count + 1)) % 360;
+				assertEquals(expectedCentre, (choice.startDegrees() + choice.spanDegrees() / 2) % 360, 1e-9);
+			}
+		}
+		var target = target("ordinary", "entity_block", true);
+		Content port = new Content(); port.next = layoutProjection(target, 3, true);
+		var session = session(target, Map.of(), false, port);
+		session.open(0); enter(session, "content", 10);
+		var group = current(session).choices().stream().filter(choice -> choice.label().equals("group1")).findFirst().orElseThrow();
+		enter(session, group.id(), 150);
+		var member = current(session).choices().getFirst();
+		assertEquals(List.of("value1", "pingforit.spatial.back"), current(session).choices().stream().map(SpatialController.ChoiceView::label).toList());
+		enter(session, member.id(), 300);
+		assertEquals(List.of(member.id() + ":attention", member.id() + ":danger", current(session).menuId() + ":back"),
+			current(session).choices().stream().map(SpatialController.ChoiceView::id).toList(), "nested Ping Types retain their own order");
 	}
 
 	@Test
@@ -780,19 +866,7 @@ class SpatialSelectorSessionTest {
 
 	@Test
 	void inventoryEnteredLeftOfParentUsesRightBackAndLeftForward() {
-		var target = target("ordinary", "entity_block", true);
-		Content port = new Content();
-		var properties = java.util.stream.IntStream.range(0, 3).mapToObj(index ->
-			new SpatialSelectorSession.Property("value" + index, "value" + index,
-				PresentationPropertyRef.root("pingforit:basic", "pingforit:value" + index), new PresentationValue.NumberValue(index),
-				List.of(ping("attention")), ping("attention"))).toList();
-		port.next = new SpatialSelectorSession.ContentProjection<>(fence(target), 1, false, Status.UPDATING, properties,
-			new SpatialSelectorSession.InventoryPreview<>("inventory", Status.UPDATING, List.of(row("a", 5L)),
-				List.of(ping("attention")), ping("attention")));
-		var session = session(target, Map.of(), false, port);
-		session.open(0); enter(session, "content", 10);
-		String inventory = current(session).choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
-		enter(session, inventory, 150);
+		var session = openedList(false, InventoryListModel.Side.RIGHT);
 		assertEquals(InventoryListModel.Side.RIGHT, session.snapshot().inventory().direction().back());
 		assertEquals(InventoryListModel.Side.LEFT, session.snapshot().inventory().direction().forward());
 		double axis = session.snapshot().inventory().axisX();

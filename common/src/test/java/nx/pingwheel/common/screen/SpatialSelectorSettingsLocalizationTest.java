@@ -72,6 +72,23 @@ class SpatialSelectorSettingsLocalizationTest {
 			"the confirmed Chinese content-intent label is exact");
 	}
 
+	@Test void gestureShortcutAndMinimumTimeAreLocalizedInEveryBundledLocale() throws IOException {
+		for (String locale : LOCALES) {
+			JsonObject json = read(locale);
+			String prefix = "settings.pingforit.spatial_selector.gesture_skip_hold_";
+			String label = nonBlank(json, locale, prefix + "enabled");
+			String tooltip = nonBlank(json, locale, prefix + "enabled.tooltip");
+			String timing = nonBlank(json, locale, prefix + "millis");
+			String timingTooltip = nonBlank(json, locale, prefix + "millis.tooltip");
+			assertFalse(label.contains("%")); assertFalse(tooltip.contains("%"));
+			assertEquals(1, timing.split("%s", -1).length - 1, "numeric label has exactly one value slot: " + locale);
+			assertFalse(timingTooltip.contains("%"));
+			assertTrue(lowered(tooltip).contains(NEXT_HOLD_MARKERS.get(locale)));
+			assertTrue(lowered(timingTooltip).contains(NEXT_HOLD_MARKERS.get(locale)));
+		}
+		assertEquals("手势跳过长按", nonBlank(read("zh_cn"), "zh_cn", "settings.pingforit.spatial_selector.gesture_skip_hold_enabled"));
+	}
+
 	@Test
 	void contentIntentKeysExistInEveryBundledLocaleWithoutStaleVariants() throws IOException {
 		Set<String> expected = Set.of(LABEL_KEY, TOOLTIP_KEY);

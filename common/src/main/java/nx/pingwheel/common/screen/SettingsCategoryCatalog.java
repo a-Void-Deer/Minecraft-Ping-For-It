@@ -41,6 +41,8 @@ public final class SettingsCategoryCatalog {
 		SPATIAL_TRAIL_OPACITY("spatial_selector.trail_opacity"),
 		SPATIAL_REDUCE_MOTION("spatial_selector.reduce_motion"),
 		WHEEL_HOLD_MILLIS("wheel_hold_millis"),
+		SPATIAL_GESTURE_SKIP_HOLD_ENABLED("spatial_selector.gesture_skip_hold_enabled"),
+		SPATIAL_GESTURE_SKIP_HOLD_MILLIS("spatial_selector.gesture_skip_hold_millis"),
 		LONG_PRESS_COMPATIBILITY_MODE("long_press_compatibility_mode"),
 		LONG_PRESS_COMPATIBILITY_SLICE_MILLIS("long_press_compatibility_slice_millis"),
 		CANCEL_HALF_CONE_ANGLE_DEGREES("cancel_half_cone_angle_degrees"),
@@ -161,6 +163,8 @@ public final class SettingsCategoryCatalog {
 			Setting.SPATIAL_REDUCE_MOTION));
 		settings.put(Category.INPUT_INTERACTION, List.of(
 			Setting.WHEEL_HOLD_MILLIS,
+			Setting.SPATIAL_GESTURE_SKIP_HOLD_ENABLED,
+			Setting.SPATIAL_GESTURE_SKIP_HOLD_MILLIS,
 			Setting.LONG_PRESS_COMPATIBILITY_MODE,
 			Setting.LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
 			Setting.CANCEL_HALF_CONE_ANGLE_DEGREES,

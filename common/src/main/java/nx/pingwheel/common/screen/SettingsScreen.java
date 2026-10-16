@@ -585,6 +585,8 @@ public class SettingsScreen extends OptionsSubScreen {
 			case SPATIAL_TRAIL_OPACITY -> this.addOption(setting, this.getSpatialTrailOpacityOption(), false);
 			case SPATIAL_REDUCE_MOTION -> this.addOption(setting, this.getSpatialReduceMotionOption(), false);
 			case WHEEL_HOLD_MILLIS -> this.addOption(setting, this.getWheelHoldMillisOption(), false);
+			case SPATIAL_GESTURE_SKIP_HOLD_ENABLED -> this.addOption(setting, this.getGestureSkipHoldEnabledOption(), true);
+			case SPATIAL_GESTURE_SKIP_HOLD_MILLIS -> this.addOption(setting, this.getGestureSkipHoldMillisOption(), false);
 			case LONG_PRESS_COMPATIBILITY_MODE -> this.addOption(setting, this.getLongPressCompatibilityModeOption(), true);
 			case LONG_PRESS_COMPATIBILITY_SLICE_MILLIS -> this.addOption(setting, this.getLongPressCompatibilitySliceMillisOption(), true);
 			case CANCEL_HALF_CONE_ANGLE_DEGREES -> this.addOption(setting, this.getCancelHalfConeAngleDegreesOption(), true);
@@ -616,6 +618,8 @@ public class SettingsScreen extends OptionsSubScreen {
 	private void addOption(Setting setting, OptionInstance<?> option, boolean fullWidth) {
 		final int width = fullWidth ? SettingsScreenLayout.LARGE_WIDGET_WIDTH : SettingsScreenLayout.SMALL_WIDGET_WIDTH;
 		final AbstractWidget widget = option.createButton(Game.options, 0, 0, width);
+		if (setting == Setting.SPATIAL_GESTURE_SKIP_HOLD_ENABLED || setting == Setting.SPATIAL_GESTURE_SKIP_HOLD_MILLIS)
+			widget.active = !config.isLongPressCompatibilityMode();
 		if (fullWidth) {
 			this.addFullWidth(setting.id(), widget);
 		} else {
@@ -2288,7 +2292,10 @@ public class SettingsScreen extends OptionsSubScreen {
 		final var text = LanguageUtils.settings("long_press_compatibility_mode");
 		return OptionUtils.ofBool(text.getKey(),
 			config::isLongPressCompatibilityMode,
-			config::setLongPressCompatibilityMode,
+			enabled -> {
+				config.setLongPressCompatibilityMode(enabled);
+				this.inputActions.runAfterDispatch(() -> this.rebuildPage(true));
+			},
 			() -> text.path("tooltip").get());
 	}
 
@@ -2316,6 +2323,20 @@ public class SettingsScreen extends OptionsSubScreen {
 		return OptionUtils.ofDecimal(text.getKey(), MIN_SUBMENU_RADIUS_SCALE, MAX_SUBMENU_RADIUS_SCALE, SUBMENU_RADIUS_SCALE_STEP,
 			value -> text.get(Component.literal(value.stripTrailingZeros().toPlainString() + "×")),
 			() -> text.path("tooltip").get(), selector::getSubmenuRadiusScale, selector::setSubmenuRadiusScale);
+	}
+
+	private OptionInstance<Boolean> getGestureSkipHoldEnabledOption() {
+		final var text = LanguageUtils.settings("spatial_selector").path("gesture_skip_hold_enabled");
+		return OptionUtils.ofBool(text.getKey(), config::isGestureSkipHoldEnabled, config::setGestureSkipHoldEnabled,
+			() -> text.path("tooltip").get());
+	}
+
+	private OptionInstance<Integer> getGestureSkipHoldMillisOption() {
+		var selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("gesture_skip_hold_millis");
+		return OptionUtils.ofInt(text.getKey(), MIN_GESTURE_SKIP_HOLD_MILLIS, MAX_GESTURE_SKIP_HOLD_MILLIS,
+			GESTURE_SKIP_HOLD_MILLIS_STEP, value -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
+			() -> text.path("tooltip").get(), selector::getGestureSkipHoldMillis, selector::setGestureSkipHoldMillis);
 	}
 
 	private OptionInstance<Integer> spatialDistanceOption(String key, int min, int max, int step,

@@ -18,6 +18,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.client.spatial.NativeSelectorInput;
+import nx.pingwheel.common.client.spatial.GestureSkipHold;
 import nx.pingwheel.common.client.spatial.SpatialController;
 import nx.pingwheel.common.client.spatial.SpatialSelectorSession;
 import nx.pingwheel.common.client.spatial.SelectorIntent;
@@ -63,19 +64,28 @@ class ClientPingRuntimeInteractionTest {
 	private static final TargetSnapshot BEHIND_ITEM = TargetSnapshotFactory.entity(DIMENSION, new UUID(5, 6), "minecraft:item");
 	private int oldHold, oldSlice;
 	private boolean oldCompatibility;
+	private boolean oldGesture;
+	private int oldGestureMillis, oldDeadzone;
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 	@BeforeEach void settings() {
 		var config = ClientConfig.HANDLER.getConfig();
 		oldHold = config.getWheelHoldMillis();
 		oldSlice = config.getLongPressCompatibilitySliceMillis(); oldCompatibility = config.isLongPressCompatibilityMode();
+		oldGesture = config.getSpatialSelector().isGestureSkipHoldEnabled();
+		oldGestureMillis = config.getSpatialSelector().getGestureSkipHoldMillis();
+		oldDeadzone = config.getSpatialSelector().getDeadzone();
 		config.setWheelHoldMillis(250);
 		config.setLongPressCompatibilityMode(false); config.setLongPressCompatibilitySliceMillis(125);
+		config.setGestureSkipHoldEnabled(false); config.getSpatialSelector().setGestureSkipHoldMillis(75);
 	}
 	@AfterEach void restoreSettings() {
 		var config = ClientConfig.HANDLER.getConfig();
 		config.setWheelHoldMillis(oldHold);
 		config.setLongPressCompatibilitySliceMillis(oldSlice); config.setLongPressCompatibilityMode(oldCompatibility);
+		config.getSpatialSelector().setGestureSkipHoldEnabled(oldGesture);
+		config.getSpatialSelector().setGestureSkipHoldMillis(oldGestureMillis);
+		config.getSpatialSelector().setDeadzone(oldDeadzone);
 	}
 
 	private static final class Access implements ClientPingRuntime.InteractionAccess {
@@ -90,15 +100,18 @@ class ClientPingRuntimeInteractionTest {
 		WorldVector supplementHit = new WorldVector(5, 5, 5);
 		final List<Runnable> completions = new ArrayList<>();
 		CapturedRay capturedRay, cancellationRay;
+		InteractionToken capturedToken;
 		final List<PreciseCaptureRefresh.Request> liveRequests = new ArrayList<>();
 		final List<java.util.function.Consumer<PreciseCaptureRefresh.Outcome>> distantCompletions = new ArrayList<>();
 		final List<SelectorIntent.CaptureToggle> toggles = new ArrayList<>();
 		SpatialOverlayRenderer.Style selectorStyle;
 		NativeSelectorInput.Frame frame = new NativeSelectorInput.Frame(1, 2000, 1400, 1000, 700, true, true);
+		double mouseX = 1000, mouseY = 700;
+		public Optional<GestureSkipHold.Position> mousePosition() { return Optional.of(new GestureSkipHold.Position(mouseX, mouseY)); }
 		public Lifecycle lifecycle() { return new Lifecycle(world, dimension, screen, player, focus, overlay); }
 		public Optional<CapturedRay> capturePressRay() { return Optional.of(ray); }
 		public void capture(InteractionToken token, CapturedRay pressRay, ClientPingRuntime.CaptureCompletion completion) {
-			captures++; capturedRay = pressRay;
+			captures++; capturedRay = pressRay; capturedToken = token;
 			TargetSnapshot frozen = surface(snapshot, new WorldVector(1, 2, 3));
 			var evidence = supplements.stream().map(value -> surface(value, supplementHit))
 				.map(value -> new CandidateEvidence(value, FrozenCandidateAcquisition.distance(pressRay.origin(), value.candidateHit().orElseThrow().worldHit()))).toList();
@@ -226,10 +239,11 @@ class ClientPingRuntimeInteractionTest {
 		SpatialSelectorSession.Snapshot snapshot() { return runtime.selectorSnapshot().orElseThrow(); }
 		SpatialController.MenuView menu() { return snapshot().radial().menus().getLast(); }
 		double rawX = 1000, rawY = 700;
-		void prime() { runtime.onMouseMove(1, rawX, rawY); }
+		void prime() { access.mouseX = rawX; access.mouseY = rawY; runtime.onMouseMove(1, rawX, rawY); }
 		void move(double dx, double dy, long time) {
 			now = time; rawX += dx * access.frame.windowWidth() / access.frame.guiWidth();
-			rawY += dy * access.frame.windowHeight() / access.frame.guiHeight(); runtime.onMouseMove(1, rawX, rawY);
+			rawY += dy * access.frame.windowHeight() / access.frame.guiHeight();
+			access.mouseX = rawX; access.mouseY = rawY; runtime.onMouseMove(1, rawX, rawY);
 		}
 		void focus(String choiceId, long time) {
 			var menu = menu(); var choice = menu.choices().stream().filter(value -> value.id().equals(choiceId)).findFirst().orElseThrow();
@@ -270,11 +284,191 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(0, f.inventory.stats().previewChannels()); assertFalse(f.runtime.hasCompatibilityState());
 	}
 
+	@Test void gestureWaitsUntilExactMinimumFrameWithoutAnotherMoveAndKeepsPressTarget() {
+		ClientConfig.HANDLER.getConfig().setGestureSkipHoldEnabled(true);
+		Fixture f = new Fixture();
+		var pressed = TargetSnapshotFactory.entity(DIMENSION, new UUID(9, 10), "minecraft:zombie");
+		f.access.snapshot = pressed; f.press(0); var ray = f.access.capturedRay;
+		f.move(0, -30, 10); f.frame(74, true);
+		assertEquals(PingInteractionPhase.PRESSED, f.runtime.phase()); assertTrue(f.access.grabbed);
+		f.access.snapshot = STONE; f.access.ray = new CapturedRay(new WorldVector(10, 20, 30), new WorldVector(1, 0, 0));
+		f.frame(75, true);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase()); assertFalse(f.access.grabbed);
+		assertEquals(new SpatialController.Point(0, -30), f.snapshot().radial().pointer());
+		assertEquals(2, f.snapshot().radial().trail().size());
+		f.release(80);
+		assertEquals(pressed.target(), f.creates().getFirst().target()); assertEquals(1, f.access.captures);
+		assertEquals(ray, f.access.capturedRay);
+	}
+
+	@Test void gestureUsesStrictFrozenDeadzoneAndLateCrossingWhileOrdinaryHoldRemainsIndependent() {
+		var config = ClientConfig.HANDLER.getConfig(); config.setGestureSkipHoldEnabled(true);
+		config.getSpatialSelector().setDeadzone(24);
+		Fixture f = new Fixture(); f.press(0);
+		config.getSpatialSelector().setDeadzone(12); config.getSpatialSelector().setGestureSkipHoldMillis(200);
+		f.move(24, 0, 10); f.frame(75, true);
+		assertEquals(PingInteractionPhase.PRESSED, f.runtime.phase(), "deadzone equality is not a gesture");
+		f.move(0.5, 0, 90); assertTrue(f.runtime.selectorSnapshot().isEmpty(), "moves cannot fabricate a present frame");
+		f.frame(90, true); assertEquals(new SpatialController.Point(24.5, 0), f.snapshot().radial().pointer());
+		assertEquals(24, f.snapshot().settings().deadzone()); assertEquals(75, f.snapshot().settings().gestureSkipHoldMillis());
+		f.runtime.abort(); f.press(100); f.frame(349, true); assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		f.frame(350, true); assertTrue(f.runtime.selectorSnapshot().isPresent(), "ordinary threshold needs no gesture travel");
+	}
+
+	@Test void returningToDeadzoneAndFastShortFlickBothKeepTheDefaultTap() {
+		ClientConfig.HANDLER.getConfig().setGestureSkipHoldEnabled(true);
+		Fixture returned = new Fixture(); returned.press(0); returned.move(100, 0, 10); returned.move(-100, 0, 20); returned.frame(75, true);
+		assertTrue(returned.runtime.selectorSnapshot().isEmpty()); returned.release(80); assertEquals(1, returned.creates().size());
+		Fixture flick = new Fixture(); flick.press(0); flick.move(0, -100, 10); flick.release(20);
+		flick.move(100, -100, 25); flick.frame(75, true);
+		assertTrue(flick.runtime.selectorSnapshot().isEmpty()); assertEquals(1, flick.creates().size());
+		flick.press(100); flick.frame(175, true);
+		assertTrue(flick.runtime.selectorSnapshot().isEmpty(), "neither held nor post-release input leaks into the next press");
+		flick.move(0, -30, 180); flick.frame(180, true);
+		assertEquals(new SpatialController.Point(0, -30), flick.snapshot().radial().pointer());
+		assertEquals(1, flick.creates().size());
+	}
+
+	@Test void fullPreOpenBufferReplaysExactly4096SamplesOnlyOnce() {
+		ClientConfig.HANDLER.getConfig().setGestureSkipHoldEnabled(true);
+		Fixture f = new Fixture(); f.press(0);
+		for (int i = 0; i < 4095; i++) f.move(i % 2 == 0 ? 1 : -1, 0, 10);
+		f.move(-1, -30, 10); f.frame(75, true);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase());
+		assertEquals(new SpatialController.Point(0, -30), f.snapshot().radial().pointer());
+		assertEquals(4097, f.snapshot().radial().trailSequence(), "one seed plus every admitted sample, without compression");
+		f.frame(76, true); assertEquals(4097, f.snapshot().radial().trailSequence(), "the next frame cannot replay the handoff");
+		assertTrue(f.creates().isEmpty());
+	}
+
+	@Test void overflowPreservesTheOriginalCaptureTokenAndHoldTimerButOrdinaryOpeningStartsAtCenter() {
+		var config = ClientConfig.HANDLER.getConfig(); config.setGestureSkipHoldEnabled(true);
+		Fixture f = new Fixture(); f.access.pending = true; f.press(100);
+		var token = f.access.capturedToken; var ray = f.access.capturedRay;
+		for (int i = 0; i < 4096; i++) f.move(i % 2 == 0 ? 1 : -1, 0, 110);
+		f.move(0, -30, 110); f.frame(175, true);
+		assertEquals(PingInteractionPhase.PRESSED, f.runtime.phase()); assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertTrue(f.creates().isEmpty()); assertTrue(f.errors.isEmpty()); assertEquals(1, f.access.captures);
+		f.move(-100, 0, 180); f.access.completions.getFirst().run(); f.frame(349, true);
+		assertTrue(f.runtime.selectorSnapshot().isEmpty(), "ready capture and later movement cannot revive the shortcut");
+		assertTrue(f.creates().isEmpty()); assertTrue(f.access.grabbed);
+		f.frame(350, true);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase(), "ordinary hold is still measured from the original press");
+		assertEquals(token.sequence(), f.snapshot().contentFence().selectorSession());
+		assertEquals(ray, f.access.capturedRay); assertEquals(1, f.access.captures);
+		assertEquals(new SpatialController.Point(0, 0), f.snapshot().radial().pointer());
+		assertEquals(List.of(new SpatialController.Point(0, 0)), f.snapshot().radial().trail());
+		assertEquals(1, f.snapshot().radial().trailSequence(), "no recorded prefix or tail reaches the ordinary selector");
+		assertTrue(config.isGestureSkipHoldEnabled(), "fallback is local to this hold, not a preference edit");
+		f.move(1000, 1000, 360); assertEquals(new SpatialController.Point(0, 0), f.snapshot().radial().pointer());
+		f.move(2, 3, 370); assertEquals(new SpatialController.Point(2, 3), f.snapshot().radial().pointer());
+	}
+
+	@ParameterizedTest @ValueSource(booleans = {false, true})
+	void overflowReleaseStillCreatesExactlyOneDefaultAndTheNextPressCanUseTheGesture(boolean pending) {
+		var config = ClientConfig.HANDLER.getConfig(); config.setGestureSkipHoldEnabled(true);
+		Fixture f = new Fixture(); f.access.pending = pending; f.press(0);
+		for (int i = 0; i < 4096; i++) f.move(i % 2 == 0 ? 1 : -1, 0, 10);
+		f.move(0, -30, 10); f.frame(75, true);
+		assertTrue(f.runtime.selectorSnapshot().isEmpty()); assertTrue(f.creates().isEmpty());
+		f.release(80); f.move(-100, -100, 90); f.frame(100, true);
+		assertTrue(f.runtime.selectorSnapshot().isEmpty()); assertEquals(pending ? 0 : 1, f.creates().size());
+		if (pending) { f.access.completions.getFirst().run(); f.frame(110, false); }
+		f.release(120); f.frame(130, false);
+		assertEquals(1, f.creates().size()); assertEquals("attention", f.creates().getFirst().pingType());
+		assertEquals(CHEST.target(), f.creates().getFirst().target()); assertEquals(1, f.access.captures);
+		assertTrue(config.isGestureSkipHoldEnabled());
+		f.access.pending = false; f.press(200); f.move(0, -30, 210); f.frame(275, true);
+		assertEquals(new SpatialController.Point(0, -30), f.snapshot().radial().pointer());
+		assertEquals(2, f.access.captures); assertEquals(1, f.creates().size());
+	}
+
+	@Test void disabledAndCompatibilityModesNeverAdmitTheGestureEvenForVirtualHolds() {
+		Fixture disabled = new Fixture(); disabled.press(0); disabled.move(100, 0, 10); disabled.frame(100, true);
+		assertTrue(disabled.runtime.selectorSnapshot().isEmpty()); disabled.runtime.abort();
+		var config = ClientConfig.HANDLER.getConfig(); config.setGestureSkipHoldEnabled(true); config.setLongPressCompatibilityMode(true);
+		// Even an unvalidated nested write cannot activate a compatibility baseline.
+		config.getSpatialSelector().setGestureSkipHoldEnabled(true);
+		Fixture compatible = new Fixture(); compatible.press(0); compatible.move(100, 0, 10); compatible.frame(100, true);
+		assertTrue(compatible.runtime.selectorSnapshot().isEmpty()); compatible.release(110);
+		compatible.press(120); compatible.release(121); compatible.move(100, 0, 130); compatible.frame(200, false);
+		assertTrue(compatible.runtime.selectorSnapshot().isEmpty()); assertEquals(1, compatible.creates().size());
+		compatible.runtime.abort();
+	}
+
+	@Test void captureAndValidHeldViewportStillGateGestureOpeningAndReleaseAlwaysWins() {
+		ClientConfig.HANDLER.getConfig().setGestureSkipHoldEnabled(true);
+		Fixture f = new Fixture(); f.access.pending = true; f.press(0); f.move(0, -30, 10); f.frame(75, true);
+		assertTrue(f.runtime.selectorSnapshot().isEmpty()); f.access.completions.getFirst().run();
+		f.access.validFrame = false; f.frame(80, true); assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		f.access.validFrame = true; f.frame(90, true); assertEquals(new SpatialController.Point(0, -30), f.snapshot().radial().pointer());
+		Fixture released = new Fixture(); released.access.pending = true; released.press(0); released.move(0, -30, 10);
+		released.frame(75, true); released.release(80); released.access.completions.getFirst().run(); released.frame(90, true);
+		assertTrue(released.runtime.selectorSnapshot().isEmpty()); released.frame(100, false);
+		assertEquals(1, released.creates().size());
+	}
+
+	@Test void preOpenTrajectoryPaysStrokeAndTurnInOrderOnceAndNativeHandoffAddsNoJump() {
+		ClientConfig.HANDLER.getConfig().setGestureSkipHoldEnabled(true);
+		Fixture f = new Fixture(); f.press(0); f.move(-100, 0, 10); f.move(0, -20, 60); f.frame(75, true);
+		assertEquals(2, f.snapshot().radial().menus().size(), "a pre-open right-angle turn enters Intent, not just its final bearing");
+		assertEquals("intent", f.snapshot().radial().menus().getLast().entryChoiceId());
+		assertEquals(new SpatialController.Point(-100, 0), f.menu().origin());
+		var before = f.snapshot().radial().pointer(); var trail = f.snapshot().radial().trail();
+		f.frame(76, true); assertEquals(before, f.snapshot().radial().pointer()); assertEquals(trail, f.snapshot().radial().trail());
+		f.move(1000, 1000, 80); assertEquals(before, f.snapshot().radial().pointer(), "first owned callback primes after the native reset");
+		f.move(2, 3, 90); assertEquals(new SpatialController.Point(before.x() + 2, before.y() + 3), f.snapshot().radial().pointer());
+		f.access.nativeOwned = false; f.move(1000, 1000, 100); before = f.snapshot().radial().pointer();
+		f.access.nativeOwned = true; f.move(1000, 1000, 110); assertEquals(before, f.snapshot().radial().pointer());
+		f.move(1, 2, 120); assertEquals(new SpatialController.Point(before.x() + 1, before.y() + 2), f.snapshot().radial().pointer());
+	}
+
+	@Test void preOpenStrokeStillPaysDwellAfterOpeningInsteadOfOnlySeedingTheFinalPointer() {
+		ClientConfig.HANDLER.getConfig().setGestureSkipHoldEnabled(true);
+		Fixture f = new Fixture(); f.press(0); f.move(-100, 0, 10); f.frame(75, true);
+		assertEquals(1, f.snapshot().radial().menus().size());
+		assertEquals(List.of(new SpatialController.Point(0, 0), new SpatialController.Point(-100, 0)), f.snapshot().radial().trail());
+		f.frame(189, true); assertEquals(1, f.snapshot().radial().menus().size());
+		f.frame(190, true); assertEquals(2, f.snapshot().radial().menus().size());
+		assertEquals("intent", f.menu().entryChoiceId());
+	}
+
+	@Test void frameObservedReleaseAndMidHoldCompatibilityEnableDiscardThePendingGesture() {
+		var config = ClientConfig.HANDLER.getConfig(); config.setGestureSkipHoldEnabled(true);
+		Fixture released = new Fixture(); released.access.pending = true; released.press(0); released.move(0, -100, 10);
+		released.frame(50, false); released.access.completions.getFirst().run(); released.frame(75, true);
+		assertTrue(released.runtime.selectorSnapshot().isEmpty()); released.frame(80, false); assertEquals(1, released.creates().size());
+		Fixture compatible = new Fixture(); compatible.press(0); compatible.move(0, -100, 10);
+		config.setLongPressCompatibilityMode(true); compatible.frame(75, true);
+		assertTrue(compatible.runtime.selectorSnapshot().isEmpty()); compatible.frame(250, true);
+		assertEquals(new SpatialController.Point(0, 0), compatible.snapshot().radial().pointer(), "compatibility discarded the pre-open path");
+		compatible.runtime.abort();
+	}
+
+	@ParameterizedTest @ValueSource(strings = {"reset", "screen", "focus", "level", "dimension"})
+	void abortedGestureAndOldCaptureCannotLeakIntoANewHold(String reason) {
+		ClientConfig.HANDLER.getConfig().setGestureSkipHoldEnabled(true);
+		Fixture f = new Fixture(); f.access.pending = true; f.press(0); f.move(0, -100, 10);
+		var late = f.access.completions.getFirst();
+		switch (reason) {
+			case "reset" -> f.runtime.abort();
+			case "screen" -> { f.access.screen = new Object(); f.frame(20, true); f.access.screen = null; f.frame(21, false); }
+			case "focus" -> { f.access.focus = false; f.frame(20, true); f.access.focus = true; }
+			case "level" -> { f.access.world = new Object(); f.frame(20, true); }
+			case "dimension" -> { f.access.dimension = "minecraft:the_nether"; f.frame(20, true); }
+			default -> throw new AssertionError();
+		}
+		f.access.pending = false; f.press(100); late.run(); f.frame(175, true);
+		assertTrue(f.runtime.selectorSnapshot().isEmpty()); assertTrue(f.creates().isEmpty());
+		f.move(0, -30, 180); f.frame(180, true);
+		assertEquals(new SpatialController.Point(0, -30), f.snapshot().radial().pointer());
+	}
+
 	@Test void resizeWithoutCallbackRecomputesFocusBeforeImmediateRelease() {
 		Fixture f = new Fixture();
 		f.access.snapshot = TargetSnapshotFactory.entity(DIMENSION, new UUID(9, 10), "minecraft:zombie");
 		f.press(0); f.frame(250, true); f.prime(); f.move(200, -200, 260);
-		assertEquals("reserved-ne", f.snapshot().radial().focusId());
+		assertEquals("content", f.snapshot().radial().focusId());
 		f.access.frame = new NativeSelectorInput.Frame(1, 2000, 1400, 100, 700, true, false);
 		// Do not read a snapshot, deliver a move, or paint after the resize.
 		f.release(270);

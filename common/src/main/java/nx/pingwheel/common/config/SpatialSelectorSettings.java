@@ -64,6 +64,11 @@ public final class SpatialSelectorSettings {
 	/** Content property/item intent menus are opt-in and disabled by default. */
 	public static final boolean DEFAULT_CONTENT_INTENT_ENABLED = false;
 
+	public static final int MIN_GESTURE_SKIP_HOLD_MILLIS = 25;
+	public static final int MAX_GESTURE_SKIP_HOLD_MILLIS = 200;
+	public static final int DEFAULT_GESTURE_SKIP_HOLD_MILLIS = 75;
+	public static final int GESTURE_SKIP_HOLD_MILLIS_STEP = 5;
+
 	/** Precise live-capture period in ticks; one tick captures without an interval. */
 	public static final int MIN_PRECISE_CAPTURE_PERIOD_TICKS = 1;
 	public static final int MAX_PRECISE_CAPTURE_PERIOD_TICKS = 50;
@@ -96,6 +101,8 @@ public final class SpatialSelectorSettings {
 	private boolean reduceMotion = false;
 	private int preciseCapturePeriodTicks = DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS;
 	private boolean contentIntentEnabled = DEFAULT_CONTENT_INTENT_ENABLED;
+	private boolean gestureSkipHoldEnabled = false;
+	private int gestureSkipHoldMillis = DEFAULT_GESTURE_SKIP_HOLD_MILLIS;
 
 	/** Clamps numeric preferences independently, without changing boolean choices. */
 	public void validate() {
@@ -109,6 +116,7 @@ public final class SpatialSelectorSettings {
 		preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks);
 		trailLength = clampTrailLength(trailLength);
 		trailOpacity = clampTrailOpacity(trailOpacity);
+		gestureSkipHoldMillis = clampGestureSkipHoldMillis(gestureSkipHoldMillis);
 	}
 
 	public void setDeadzone(int value) { deadzone = clampDeadzone(value); }
@@ -121,6 +129,11 @@ public final class SpatialSelectorSettings {
 	public void setPreciseCapturePeriodTicks(int value) { preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(value); }
 	public void setTrailLength(int value) { trailLength = clampTrailLength(value); }
 	public void setTrailOpacity(int value) { trailOpacity = clampTrailOpacity(value); }
+	public void setGestureSkipHoldMillis(int value) { gestureSkipHoldMillis = clampGestureSkipHoldMillis(value); }
+
+	public static int clampGestureSkipHoldMillis(int value) {
+		return Math.clamp(value, MIN_GESTURE_SKIP_HOLD_MILLIS, MAX_GESTURE_SKIP_HOLD_MILLIS);
+	}
 
 	public static int clampDeadzone(int value) {
 		return Math.clamp(value, MIN_DEADZONE, MAX_DEADZONE);
@@ -180,14 +193,24 @@ public final class SpatialSelectorSettings {
 			showTrail, reduceMotion, clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks),
 			clampSubmenuRadiusScale(submenuRadiusScale),
 			clampTrailLength(trailLength), clampTrailOpacity(trailOpacity),
-			contentIntentEnabled);
+			contentIntentEnabled, gestureSkipHoldEnabled, clampGestureSkipHoldMillis(gestureSkipHoldMillis));
 	}
 
 	public record Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
 		BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
 		boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
 		BigDecimal submenuRadiusScale, int trailLength, int trailOpacity,
-		boolean contentIntentEnabled) {
+		boolean contentIntentEnabled, boolean gestureSkipHoldEnabled, int gestureSkipHoldMillis) {
+
+		/** Previous snapshot forms keep the opt-in gesture shortcut disabled. */
+		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
+			BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+			boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
+			BigDecimal submenuRadiusScale, int trailLength, int trailOpacity, boolean contentIntentEnabled) {
+			this(deadzone, stroke, dwellMillis, rootDistance, targetGlide, hoverEnabled,
+				hoverMillis, showTrail, reduceMotion, preciseCapturePeriodTicks, submenuRadiusScale,
+				trailLength, trailOpacity, contentIntentEnabled, false, DEFAULT_GESTURE_SKIP_HOLD_MILLIS);
+		}
 
 		/**
 		 * Compatibility constructor for callers that predate the content-intent

@@ -95,7 +95,7 @@ class NativeSelectorInputTest {
 		var session = new SpatialSelectorSession<>(target, Map.of(), preferences.snapshot(), fence,
 			(ignored, requestedFence) -> new SpatialSelectorSession.ContentProjection<>(fence, 1, false, Status.READY, List.of(), preview),
 			new SpatialSelectorSession.ListGeometry(3, 180, 17, 20, 19, 85));
-		session.open(0); session.moveGui(100, 0, 1); session.tick(181);
+		session.open(0); session.moveGui(100, -100, 1); session.tick(181);
 		session.moveGui(100, 0, 182); session.tick(362);
 		assertTrue(session.snapshot().inventory().open());
 		double axis = session.snapshot().radial().pointer().x();
@@ -148,22 +148,25 @@ class NativeSelectorInputTest {
 			(ignored, requestedFence) -> new SpatialSelectorSession.ContentProjection<>(fence, 1, false, Status.READY,
 				List.of(), preview),
 			new SpatialSelectorSession.ListGeometry(3, 180, 17, 20, 19, 85));
-		session.open(0); session.moveGui(200, 0, 1); session.tick(181);
+		session.open(0); session.moveGui(200, -200, 1); session.tick(181);
 		assertEquals(2, session.snapshot().radial().menus().size(), "helper precondition: content entered");
 
 		var owned = new NativeSelectorInput.Frame(7, 1200, 800, 600, 400, true, false);
 		var input = new NativeSelectorInput(session);
 		input.open();
 		input.prime(600, 400, owned); // priming the cursor warp contributes no travel
-		for (int windowPixel = 1; windowPixel <= 136; windowPixel++) {
-			input.onMove(7, 600 - windowPixel, 400, owned, 182L + windowPixel); // one window pixel is half a GUI pixel
+		for (int windowPixel = 1; windowPixel <= 96; windowPixel++) {
+			input.onMove(7, 600 - windowPixel, 400 + windowPixel, owned, 182L + windowPixel); // each axis advances half a GUI pixel
 		}
+		assertEquals(2, session.snapshot().radial().menus().size(), "96 diagonal samples remain below the net return distance");
+		input.onMove(7, 503, 497, owned, 279L);
 
 		var returned = session.snapshot().radial();
 		assertEquals(1, returned.menus().size(), "fractional native samples accumulate into one return");
-		assertEquals(132.0, returned.pointer().x(), 1e-9, "the pointer stops exactly at the net return distance");
+		assertEquals(151.5, returned.pointer().x(), 1e-9, "the first diagonal sample crossing the net return distance returns");
+		assertEquals(-151.5, returned.pointer().y(), 1e-9);
 		for (int windowPixel = 1; windowPixel <= 40; windowPixel++) {
-			input.onMove(7, 600 - 136 - windowPixel, 400, owned, 318L + windowPixel);
+			input.onMove(7, 503 - windowPixel, 497 + windowPixel, owned, 279L + windowPixel);
 		}
 		assertEquals(1, session.snapshot().radial().menus().size(), "further reverse samples cannot pop another level");
 	}
@@ -184,7 +187,7 @@ class NativeSelectorInputTest {
 		var session = new SpatialSelectorSession<>(target, Map.of(), preferences.snapshot(), fence,
 			(ignored, requestedFence) -> new SpatialSelectorSession.ContentProjection<>(fence, 1, false, Status.READY, List.of(), preview),
 			new SpatialSelectorSession.ListGeometry(3, 180, 17, 20, 19, 85));
-		session.open(0); session.moveGui(100, 0, 1); session.tick(181);
+		session.open(0); session.moveGui(100, -100, 1); session.tick(181);
 		session.moveGui(100, 0, 182); session.tick(362);
 		assertTrue(session.snapshot().inventory().open());
 		var before = session.snapshot().radial();

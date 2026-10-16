@@ -419,13 +419,15 @@ public class ConfigHandler <T extends IConfig> {
 		List.of("white", "black", "whitelistOnly");
 
 	/**
-	 * Same-version raw-shape normalization. Only exact obsolete shapes are
-	 * rewritten: the legacy flat server policy is copied to every target type
+	 * Same-version raw-shape and preference reconciliation. Only exact obsolete
+	 * shapes or an explicitly conflicting client gesture pair are rewritten:
+	 * the legacy flat server policy is copied to every target type
 	 * when the new map is absent, the new map wins and drops the flat keys when
 	 * present, and the removed client presentation keys are stripped. A future or
 	 * unrecognized shape is preserved for the version guard, and no unrelated
 	 * user data is touched. Returns a non-null description only when the raw root
-	 * changed, so an untouched file is never rewritten.
+	 * changed, so an untouched file is never rewritten. Client gesture
+	 * reconciliation also uses this preservation base and changed-source guard.
 	 */
 	private String normalizeRawShape(JsonObject root) {
 		if (configType == ServerConfig.class) {
@@ -433,12 +435,25 @@ public class ConfigHandler <T extends IConfig> {
 		}
 
 		if (configType == ClientConfig.class) {
-			return removeKeys(root, REMOVED_CLIENT_PRESENTATION_KEYS)
-				? "presentation: obsolete client field policy keys removed"
-				: null;
+			boolean changed = removeKeys(root, REMOVED_CLIENT_PRESENTATION_KEYS);
+			// Reconcile only an explicit conflicting pair, through the same guarded
+			// writeback as other normalization. Future/protected files never reach it.
+			if (isTrue(root.get("longPressCompatibilityMode")) && root.has("spatialSelector")
+				&& root.get("spatialSelector").isJsonObject()) {
+				JsonObject selector = root.getAsJsonObject("spatialSelector");
+				if (isTrue(selector.get("gestureSkipHoldEnabled"))) {
+					selector.addProperty("gestureSkipHoldEnabled", false);
+					changed = true;
+				}
+			}
+			return changed ? "client: obsolete policy or conflicting gesture preference normalized" : null;
 		}
 
 		return null;
+	}
+
+	private static boolean isTrue(JsonElement value) {
+		return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean() && value.getAsBoolean();
 	}
 
 	private static String normalizeServerPresentationShape(JsonObject root) {

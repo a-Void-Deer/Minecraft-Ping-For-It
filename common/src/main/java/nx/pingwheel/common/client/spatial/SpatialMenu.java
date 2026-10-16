@@ -19,14 +19,34 @@ import java.util.Objects;
  * {@link Choice#withSector(double, double)} (for example the eight-way
  * cardinal-55 / diagonal-35 layout). Every non-root menu computes equal sectors
  * from its actual entry count, including the automatically appended Back
- * entry, so no caller geometry is duplicated. {@code bearing} is degrees,
+ * entry, so no caller geometry is duplicated. An optional preferred bearing
+ * moves one choice between those equal non-Back slots without rotating them.
+ * {@code bearing} is degrees,
  * {@code 0} is up and positive is clockwise.
  */
-public record SpatialMenu(String id, List<Choice> choices) {
+public record SpatialMenu(String id, List<Choice> choices, PreferredBearing preferredBearing) {
 
 	public SpatialMenu {
 		Objects.requireNonNull(id, "id");
 		choices = List.copyOf(Objects.requireNonNull(choices, "choices"));
+	}
+
+	/** Ordinary menus keep their declared order without a bearing preference. */
+	public SpatialMenu(String id, List<Choice> choices) {
+		this(id, choices, null);
+	}
+
+	/** A non-root choice prefers the containing slot, or the nearest non-Back slot when Back contains the bearing. */
+	public record PreferredBearing(String choiceId, double degrees) {
+		public PreferredBearing {
+			Objects.requireNonNull(choiceId, "choiceId");
+			if (!Double.isFinite(degrees)) throw new IllegalArgumentException("preferred bearing must be finite");
+		}
+	}
+
+	/** The preference is inert at the root or when the designated choice is absent. */
+	public SpatialMenu withPreferredBearing(String choiceId, double degrees) {
+		return new SpatialMenu(id, choices, new PreferredBearing(choiceId, degrees));
 	}
 
 	/** Convenience factory for a menu with the given ordered entries. */

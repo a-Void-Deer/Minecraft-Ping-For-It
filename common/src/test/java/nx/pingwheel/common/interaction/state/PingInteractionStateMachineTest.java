@@ -57,6 +57,33 @@ class PingInteractionStateMachineTest {
 		assertTrue(h.machine.currentToken().isEmpty());
 	}
 
+	@Test void explicitAlternativeEligibilityStillRequiresReadyHeldUnreleasedCurrentCapture() {
+		Harness h = harness(); var token = h.press();
+		h.machine.presentFrameAt(true, 75, true); assertEquals(PingInteractionPhase.PRESSED, h.machine.phase());
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.machine.presentFrameAt(false, 76, true); assertEquals(PingInteractionPhase.PRESSED, h.machine.phase());
+		h.machine.presentFrameAt(true, 77, true); assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+		assertSame(token, h.machine.currentToken().orElseThrow());
+	}
+
+	@Test void pendingReleaseCannotBeRetroactivelyOpenedByAlternativeOrOrdinaryEligibility() {
+		Harness h = harness(); var token = h.press();
+		h.machine.updateAt(false, WheelSelection.NONE, emptyContext(), 20);
+		h.complete(token, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.machine.presentFrameAt(true, 300, true); assertEquals(PingInteractionPhase.PRESSED, h.machine.phase());
+		assertTrue(h.machine.updateAt(false, WheelSelection.NONE, emptyContext(), 301).isPresent());
+		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
+	}
+
+	@Test void alternativeEligibilityDoesNotSurviveAbortOrGrantAFutureOrdinaryHold() {
+		Harness h = harness(); var old = h.press(); h.machine.abort();
+		h.complete(old, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.machine.presentFrameAt(true, 75, true); assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
+		h.clock.now = 100; var fresh = h.press(); h.complete(fresh, TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0));
+		h.machine.presentFrameAt(true, 175, false); assertEquals(PingInteractionPhase.PRESSED, h.machine.phase());
+		h.machine.presentFrameAt(true, 400, false); assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
+	}
+
 	@Test
 	void backdatedPhysicalPressStartsHoldFromSuppliedMonotonicTimestamp() {
 		Harness h = harness();

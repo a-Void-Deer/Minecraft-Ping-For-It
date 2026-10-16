@@ -469,9 +469,10 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		actions.put("cancel-marker", new SelectorIntent.CancelOwnMarker<>());
 		return SpatialMenu.of(sessionKey + ":root",
 			dangerChoice.withSector(0, 55),
-			SpatialMenu.Choice.reserved("reserved-ne", "pingforit.spatial.reserved").withSector(45, 35),
 			(content.isEmpty() ? SpatialMenu.Choice.disabled("content", "pingforit.spatial.content")
-				: SpatialMenu.Choice.branch("content", "pingforit.spatial.content", new SpatialMenu(contentMenu, content))).withSector(90, 55),
+				: SpatialMenu.Choice.branch("content", "pingforit.spatial.content",
+					new SpatialMenu(contentMenu, content).withPreferredBearing(inventoryMenu, 90))).withSector(45, 35),
+			SpatialMenu.Choice.reserved("reserved-ne", "pingforit.spatial.reserved").withSector(90, 55),
 			SpatialMenu.Choice.reserved("reserved-se", "pingforit.spatial.reserved").withSector(135, 35),
 			SpatialMenu.Choice.leaf("cancel-marker", "pingforit.spatial.cancel", "cancel-marker").withSector(180, 55),
 			SpatialMenu.Choice.branch("precise", "pingforit.spatial.precise", new SpatialMenu(sessionKey + ":precise", candidates)).withSector(225, 35),

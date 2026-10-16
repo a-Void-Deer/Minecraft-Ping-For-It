@@ -809,8 +809,10 @@ class NativeSelectorContentTest {
 			enter(fixture.session, "content", 10L);
 			var top = fixture.menu().choices();
 			assertEquals(List.of("Create properties...", "minecraft:block.state: 1", "minecraft:entity.type: minecraft:chest",
-				"Chest", "Inventory items", "Back"), top.stream().map(fixture::label).toList(),
-				"generic fields and the inventory list stay outside the Create group");
+				"Chest", "Back"), top.stream().filter(choice -> !choice.id().endsWith(":inventory")).map(fixture::label).toList(),
+				"generic fields stay outside the Create group in their declared relative order");
+			assertEquals(List.of("Inventory items"), top.stream().filter(choice -> choice.id().endsWith(":inventory"))
+				.map(fixture::label).toList(), "the inventory entry stays directly under Content regardless of its preferred slot");
 			var create = top.getFirst();
 			assertTrue(create.branch());
 			assertNull(create.action(), "the Create group parent carries no property intent");

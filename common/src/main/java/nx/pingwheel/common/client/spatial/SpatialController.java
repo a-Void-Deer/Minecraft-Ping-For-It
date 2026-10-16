@@ -761,7 +761,7 @@ public final class SpatialController {
 		double bearing = Math.round(normalize(Math.toDegrees(Math.atan2(dx, -dy))) * 1.0e8) / 1.0e8;
 
 		for (Resolved choice : displayedChoices(menu)) {
-			if (normalize(bearing - choice.startDegrees()) < choice.spanDegrees()) {
+			if (containsBearing(bearing, choice.startDegrees(), choice.spanDegrees())) {
 				return choice;
 			}
 		}
@@ -909,46 +909,71 @@ public final class SpatialController {
 			return resolved;
 		}
 
+		List<SpatialMenu.Choice> choices = new ArrayList<>(menu.menu.choices());
 		int backIndex = -1;
 
-		for (int i = 0; i < menu.menu.choices().size(); i++) {
-			if (menu.menu.choices().get(i).back()) {
+		for (int i = 0; i < choices.size(); i++) {
+			if (choices.get(i).back()) {
 				backIndex = i;
 				break;
 			}
 		}
 
-		boolean hasBack = backIndex >= 0;
-		int count = menu.menu.choices().size() + (hasBack ? 0 : 1);
+		if (backIndex < 0) {
+			backIndex = choices.size();
+			choices.add(SpatialMenu.Choice.back(menu.menu.id() + ":back"));
+		}
+		int count = choices.size();
 		double span = 360.0 / count;
 		double parentBearing = bearing(menu.origin, menu.parentOrigin);
 		// The Back sector (explicit, wherever the caller placed it, or appended
-		// last) stays centred on the parent bearing; every sibling keeps its
-		// order and equal span.
-		int anchorIndex = hasBack ? backIndex : count - 1;
-		double start = normalize(parentBearing - (anchorIndex + 0.5) * span);
+		// last) stays centred on the parent bearing. A preference can reorder
+		// non-Back choices, but never moves these equal geometry slots.
+		double start = normalize(parentBearing - (backIndex + 0.5) * span);
+		preferBearing(choices, menu.menu.preferredBearing(), start, span);
 		int index = 0;
 
-		for (SpatialMenu.Choice choice : menu.menu.choices()) {
+		for (SpatialMenu.Choice choice : choices) {
 			resolved.add(resolve(choice, normalize(start + index * span), span));
 			index++;
 		}
 
-		if (!hasBack) {
-			resolved.add(new Resolved(
-				menu.menu.id() + ":back",
-				"pingforit.spatial.back",
-				null,
-				null,
-				true,
-				false,
-				false,
-				normalize(start + index * span),
-				span,
-				null));
-		}
-
 		return resolved;
+	}
+
+	private static void preferBearing(List<SpatialMenu.Choice> choices, SpatialMenu.PreferredBearing preference,
+		double start, double span) {
+		if (preference == null) return;
+		int source = -1, target = -1;
+		double closest = Double.POSITIVE_INFINITY;
+		for (int index = 0; index < choices.size(); index++) {
+			SpatialMenu.Choice choice = choices.get(index);
+			if (choice.back()) continue;
+			if (choice.id().equals(preference.choiceId())) source = index;
+			double slotStart = normalize(start + index * span);
+			// Use the hit-test convention at an equal-distance boundary: the
+			// start-inclusive slot owns the exact preferred direction.
+			double distance = containsBearing(preference.degrees(), slotStart, span) ? -1.0
+				: turnDegrees(normalize(preference.degrees()), normalize(slotStart + span / 2.0));
+			if (distance < closest) {
+				closest = distance;
+				target = index;
+			}
+		}
+		if (source < 0 || source == target) return;
+		SpatialMenu.Choice preferred = choices.get(source);
+		int step = Integer.compare(target, source);
+		for (int index = source; index != target;) {
+			int next = index + step;
+			while (choices.get(next).back()) next += step;
+			choices.set(index, choices.get(next));
+			index = next;
+		}
+		choices.set(target, preferred);
+	}
+
+	private static boolean containsBearing(double bearing, double start, double span) {
+		return normalize(bearing - start) < span;
 	}
 
 	private static Resolved resolve(SpatialMenu.Choice choice, double startDegrees, double spanDegrees) {

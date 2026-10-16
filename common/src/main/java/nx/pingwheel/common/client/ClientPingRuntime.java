@@ -69,6 +69,7 @@ import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.PingInteractionStateMachine;
 import nx.pingwheel.common.interaction.state.SelectorReleaseProposal;
 import nx.pingwheel.common.client.spatial.NativeSelectorInput;
+import nx.pingwheel.common.client.spatial.GestureSkipHold;
 import nx.pingwheel.common.client.spatial.SelectorIntent;
 import nx.pingwheel.common.client.spatial.SpatialController;
 import nx.pingwheel.common.client.spatial.SpatialSelectorSession;
@@ -237,6 +238,7 @@ public final class ClientPingRuntime {
 	private NativeSelectorContent selectorContent;
 	private SpatialSelectorSession<ClientInventory.PreviewEntryReference> selector;
 	private NativeSelectorInput selectorInput;
+	private final GestureSkipHold gestureSkipHold = new GestureSkipHold();
 	private final SpatialOverlayRenderer.Session selectorPaint = new SpatialOverlayRenderer.Session();
 	private final Map<String, CapturedPingContext> selectorContexts = new LinkedHashMap<>();
 	private SpatialSelectorSettings.Snapshot selectorSettings;
@@ -274,6 +276,7 @@ public final class ClientPingRuntime {
 		void syncMouse(PingInteractionPhase phase);
 		void disposeMouse(boolean screenTransition);
 		Optional<NativeSelectorInput.Frame> inputFrame();
+		default Optional<GestureSkipHold.Position> mousePosition() { return Optional.empty(); }
 		SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style);
 		/**
 		 * Distance from the inventory panel's forward edge to the item-menu
@@ -664,6 +667,9 @@ public final class ClientPingRuntime {
 		baselineMenuOpened = false;
 		ClientConfig config = ClientConfig.HANDLER.getConfig();
 		selectorSettings = config.getSpatialSelector().snapshot();
+		if (config.isGestureSkipHoldEnabled()) {
+			gestureSkipHold.begin(rawPressTimestamp, selectorSettings.gestureSkipHoldMillis(), selectorSettings.deadzone());
+		}
 		selectorPolicy = raycastPolicy(config);
 		selectorPingDistance = config.getPingDistance();
 		selectorNativeDistance = Math.min(config.getRaycastDistance(), selectorPingDistance);
@@ -678,6 +684,11 @@ public final class ClientPingRuntime {
 			catch (RuntimeException | LinkageError failure) { if (baselineToken == token) baselineAbort(); throw failure; }
 		}
 		interactionAccess.syncMouse(machine.phase());
+		// A previous screen/selector may relinquish native ownership during sync;
+		// sample the settled press baseline rather than that owner's coordinates.
+		if (baselineToken == token && gestureSkipHold.active())
+			interactionAccess.inputFrame().ifPresent(frame -> interactionAccess.mousePosition().ifPresent(position ->
+				gestureSkipHold.onMove(frame.window(), position.x(), position.y(), frame, rawPressTimestamp)));
 		return Optional.empty();
 	}
 
@@ -693,6 +704,7 @@ public final class ClientPingRuntime {
 	private LongPressCompatibilityController.BaselineOutcome baselineRelease() {
 		InteractionToken releasing = baselineToken;
 		baselineHeld = false;
+		gestureSkipHold.reset();
 		if (preciseRefresh != null) preciseRefresh.leave();
 		long now = timeSource.nowMillis();
 		Optional<PingInteractionAction> action;
@@ -750,7 +762,10 @@ public final class ClientPingRuntime {
 		if (!keyDown && machine.phase() != PingInteractionPhase.WHEEL_OPEN) baselineHeld = false;
 		var inputFrame = interactionAccess.inputFrame();
 		boolean presentable = inputFrame.isPresent();
-		machine.presentFrameAt(keyDown && presentable, frameTimeMillis);
+		if (!baselineHeld || ClientConfig.HANDLER.getConfig().isLongPressCompatibilityMode()) gestureSkipHold.reset();
+		inputFrame.ifPresentOrElse(gestureSkipHold::synchronize, gestureSkipHold::rePrime);
+		machine.presentFrameAt(keyDown && presentable, frameTimeMillis,
+			baselineHeld && gestureSkipHold.eligible(frameTimeMillis));
 		if (selectorContent != null && machine.phase() != PingInteractionPhase.IDLE) {
 			try { selectorContent.tick(); }
 			catch (RuntimeException | LinkageError unavailable) { logger.debug("selector content update unavailable"); }
@@ -911,8 +926,16 @@ public final class ClientPingRuntime {
 			interactionAccess::capturePrecise, interactionAccess::capturePreciseDistant,
 			update -> { if (selector == opened && baselineToken == token && interactionAccess.lifecycle().level() == level)
 				opened.updatePrecise(update, timeSource.nowMillis()); });
-		opened.open(now);
-		interactionAccess.inputFrame().ifPresent(frame -> constrainSelector(frame, now));
+		boolean replay = gestureSkipHold.active();
+		var trajectory = gestureSkipHold.take();
+		// Keep sample timing and corners, not merely the final pointer. This only
+		// seeds gesture history; machine eligibility still belongs to this frame.
+		opened.open(replay ? trajectory.pressTimeMillis() : now);
+		interactionAccess.inputFrame().ifPresent(frame -> constrainSelector(frame, replay ? trajectory.pressTimeMillis() : now));
+		if (replay) for (var sample : trajectory.samples()) {
+			if (selector != opened || context.token() != baselineToken || !activeInteraction.isCurrent(context.token())) return;
+			opened.moveGui(sample.deltaX(), sample.deltaY(), sample.timeMillis());
+		}
 		if (selector != opened || context.token() != baselineToken || !activeInteraction.isCurrent(context.token())) return;
 		selectorInput = new NativeSelectorInput(opened);
 		selectorInput.open();
@@ -935,6 +958,7 @@ public final class ClientPingRuntime {
 	}
 
 	private void finishSelector(boolean hard) {
+		gestureSkipHold.reset();
 		if (preciseRefresh != null) preciseRefresh.end();
 		preciseRefresh = null;
 		if (baselineToken != null) activeInteraction.invalidate(baselineToken);
@@ -1035,7 +1059,10 @@ public final class ClientPingRuntime {
 	public void onPresentationPreview(PresentationPreviewS2CPacket packet) {
 		if (contentPreview != null && selectorContent != null && observeInteractionLifecycle()) contentPreview.accept(packet);
 	}
-	public void rePrimeSelectorInput() { if (selectorInput != null) selectorInput.rePrime(); }
+	public void rePrimeSelectorInput() {
+		if (selectorInput != null) selectorInput.rePrime();
+		gestureSkipHold.rePrime();
+	}
 	/** Entry can precede a pending real position callback; validate ownership without replacing its baseline. */
 	public void onMouseCursorEntered() { synchronizeNativeInput(); }
 	public void onVanillaMouseCaptureChanged(boolean grabbing) { wheelMouseCapture.vanillaCaptureChanged(grabbing); rePrimeSelectorInput(); }
@@ -1048,14 +1075,27 @@ public final class ClientPingRuntime {
 	};
 	public boolean isSelectorMouseTransition() { return selectorInput != null || wheelMouseCapture.isTransitioning(); }
 	private void synchronizeNativeInput() {
-		if (selectorInput == null) return;
+		if (selectorInput == null) {
+			interactionAccess.inputFrame().ifPresentOrElse(gestureSkipHold::synchronize, gestureSkipHold::rePrime);
+			return;
+		}
 		interactionAccess.inputFrame().ifPresentOrElse(frame -> {
 			constrainSelector(frame, timeSource.nowMillis());
 			selectorInput.synchronize(frame);
 		}, selectorInput::rePrime);
 	}
 	public void onMouseMove(long window, double x, double y) {
-		if (!observeInteractionLifecycle() || selectorInput == null || machine.phase() != PingInteractionPhase.WHEEL_OPEN) return;
+		if (!observeInteractionLifecycle()) return;
+		if (selectorInput == null) {
+			if (!baselineHeld || baselineToken == null || !activeInteraction.isCurrent(baselineToken)
+				|| machine.phase() != PingInteractionPhase.PRESSED || ClientConfig.HANDLER.getConfig().isLongPressCompatibilityMode()) {
+				gestureSkipHold.reset(); return;
+			}
+			interactionAccess.inputFrame().ifPresentOrElse(frame ->
+				gestureSkipHold.onMove(window, x, y, frame, timeSource.nowMillis()), gestureSkipHold::rePrime);
+			return;
+		}
+		if (machine.phase() != PingInteractionPhase.WHEEL_OPEN) return;
 		interactionAccess.inputFrame().ifPresentOrElse(frame -> {
 			long now = timeSource.nowMillis();
 			constrainSelector(frame, now);
@@ -1147,6 +1187,9 @@ public final class ClientPingRuntime {
 				|| window.getGuiScaledWidth() <= 0 || window.getGuiScaledHeight() <= 0) return Optional.empty();
 			return Optional.of(new NativeSelectorInput.Frame(window.getWindow(), window.getScreenWidth(), window.getScreenHeight(),
 				window.getGuiScaledWidth(), window.getGuiScaledHeight(), Game.isWindowActive(), Game.mouseHandler.isMouseGrabbed(), wheelMouseCapture.ownsInput(Game)));
+		}
+		public Optional<GestureSkipHold.Position> mousePosition() {
+			return Game == null ? Optional.empty() : Optional.of(new GestureSkipHold.Position(Game.mouseHandler.xpos(), Game.mouseHandler.ypos()));
 		}
 		public SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style) {
 			var view = new SpatialInventoryView("layout", false, List.of(), -1, 0, 1, true, SpatialInventoryView.Status.UNKNOWN, 0, 0);

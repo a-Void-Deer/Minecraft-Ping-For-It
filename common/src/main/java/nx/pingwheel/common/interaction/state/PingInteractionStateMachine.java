@@ -442,7 +442,8 @@ public final class PingInteractionStateMachine {
 	 * Advances presentation-only timing from one GUI/render frame.
 	 *
 	 * <p>This method may open the wheel once a capture-ready interaction has
-	 * reached the long-press threshold. It never validates a target, consumes a
+	 * reached the long-press threshold (or the caller supplies explicit alternative
+	 * eligibility at the frame boundary). It never validates a target, consumes a
 	 * wheel selection, or emits an action. The press timestamp remains the
 	 * baseline even when the capture arrived asynchronously after the threshold.
 	 *
@@ -469,6 +470,11 @@ public final class PingInteractionStateMachine {
 	 * between two clock reads.
 	 */
 	public void presentFrameAt(boolean keyDown, long observedTimeMillis) {
+		presentFrameAt(keyDown, observedTimeMillis, false);
+	}
+
+	/** An explicit alternative eligibility never changes the frozen ordinary hold timer. */
+	public void presentFrameAt(boolean keyDown, long observedTimeMillis, boolean alternativeOpenEligible) {
 		if (phase == PingInteractionPhase.IDLE) {
 			return;
 		}
@@ -493,13 +499,13 @@ public final class PingInteractionStateMachine {
 			return;
 		}
 
-		if (!keyDown || capture.isEmpty()) {
+		if (!keyDown || releaseObserved || capture.isEmpty()) {
 			return;
 		}
 
 		long elapsed = now - pressTimeMillis;
 
-		if (elapsed >= longPressMillis) {
+		if (elapsed >= longPressMillis || alternativeOpenEligible) {
 			openWheel(capture.get());
 		}
 	}

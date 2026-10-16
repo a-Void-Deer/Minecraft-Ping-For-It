@@ -170,6 +170,20 @@ public class ClientConfig implements IConfig {
 		this.configurationNoticeSize = ClientConfigBounds.clampConfigurationNoticeSize(configurationNoticeSize);
 	}
 
+	public void setLongPressCompatibilityMode(boolean enabled) {
+		longPressCompatibilityMode = enabled;
+		if (enabled && spatialSelector != null) spatialSelector.setGestureSkipHoldEnabled(false);
+	}
+
+	public boolean isGestureSkipHoldEnabled() {
+		return !longPressCompatibilityMode && spatialSelector != null && spatialSelector.isGestureSkipHoldEnabled();
+	}
+
+	public void setGestureSkipHoldEnabled(boolean enabled) {
+		if (spatialSelector == null) spatialSelector = new SpatialSelectorSettings();
+		spatialSelector.setGestureSkipHoldEnabled(enabled && !longPressCompatibilityMode);
+	}
+
 	public void setWheelTargetOpacity(int wheelTargetOpacity) {
 		this.wheelTargetOpacity = ClientConfigBounds.clampWheelTargetOpacity(wheelTargetOpacity);
 	}
@@ -215,6 +229,7 @@ public class ClientConfig implements IConfig {
 
 		if (spatialSelector == null) spatialSelector = new SpatialSelectorSettings();
 		spatialSelector.validate();
+		if (longPressCompatibilityMode) spatialSelector.setGestureSkipHoldEnabled(false);
 
 		final int suppliedWheelHoldMillis = wheelHoldMillis;
 		final int suppliedLongPressCompatibilitySliceMillis = longPressCompatibilitySliceMillis;
@@ -306,6 +321,7 @@ public class ClientConfig implements IConfig {
 
 	@Override
 	public void onUpdate() {
+		if (longPressCompatibilityMode && spatialSelector != null) spatialSelector.setGestureSkipHoldEnabled(false);
 		blockDisplayPolicy = BlockDisplayPolicy.compile(blockDisplayWhitelist, blockShapeBlacklist);
 		LOGGER.debug(
 			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, cancelHalfConeAngleDegrees=%d, wheelOpacity=%d, wheelTargetOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d, spatialSelector=%s"

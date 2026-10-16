@@ -257,6 +257,7 @@ class ClientConfigLocalizationTest {
 	@Test
 	void everyBundledLocaleContainsTheSpatialSelectorSettings() throws IOException {
 		List<String> formattedLabels = List.of(
+			"settings.pingforit.spatial_selector.gesture_skip_hold_millis",
 			"settings.pingforit.spatial_selector.deadzone",
 			"settings.pingforit.spatial_selector.stroke",
 			"settings.pingforit.spatial_selector.dwell_millis",
@@ -268,6 +269,7 @@ class ClientConfigLocalizationTest {
 			"settings.pingforit.spatial_selector.trail_opacity",
 			"settings.pingforit.spatial_selector.precise_capture_period_ticks");
 		List<String> booleanLabels = List.of(
+			"settings.pingforit.spatial_selector.gesture_skip_hold_enabled",
 			"settings.pingforit.spatial_selector.hover_enabled",
 			"settings.pingforit.spatial_selector.show_trail",
 			"settings.pingforit.spatial_selector.reduce_motion",

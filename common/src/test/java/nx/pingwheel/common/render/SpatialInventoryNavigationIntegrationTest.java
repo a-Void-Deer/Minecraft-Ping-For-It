@@ -38,6 +38,8 @@ class SpatialInventoryNavigationIntegrationTest {
 		private static final StringSplitter FONT = new StringSplitter((point, style) -> 6.0f);
 		final List<String> selectedRows = new ArrayList<>();
 		final List<String> paintedNodes = new ArrayList<>();
+		final List<SpatialOverlayRenderer.NodePaint> nodes = new ArrayList<>();
+		final List<SpatialOverlayRenderer.SectorPaint> sectors = new ArrayList<>();
 		boolean pointerHidden;
 		public int lineHeight() { return 9; }
 		public int width(FormattedText text) { return (int) Math.ceil(FONT.stringWidth(text)); }
@@ -46,14 +48,17 @@ class SpatialInventoryNavigationIntegrationTest {
 			SpatialOverlayRenderer.NodeLayout layout, SpatialOverlayRenderer.Style style) {
 			if (state.present() && state.data() instanceof SpatialOverlayRenderer.RowPaint row && row.selected())
 				selectedRows.add(row.row().key());
-			if (state.present() && state.data() instanceof SpatialOverlayRenderer.NodePaint node)
+			if (state.present() && state.data() instanceof SpatialOverlayRenderer.NodePaint node) {
 				paintedNodes.add(node.choice().id());
+				nodes.add(node);
+			}
+			if (state.present() && state.data() instanceof SpatialOverlayRenderer.SectorPaint sector) sectors.add(sector);
 			if (state.present() && state.data() instanceof SpatialOverlayRenderer.ChromePaint chrome)
 				pointerHidden = chrome.pointerHidden();
 			return true;
 		}
 		public void connector(SpatialOverlayRenderer.GuideLine line, double alpha) {}
-		void clear() { selectedRows.clear(); paintedNodes.clear(); pointerHidden = false; }
+		void clear() { selectedRows.clear(); paintedNodes.clear(); nodes.clear(); sectors.clear(); pointerHidden = false; }
 	}
 
 	private static final class Fixture {
@@ -204,11 +209,17 @@ class SpatialInventoryNavigationIntegrationTest {
 			frame(now + settings.dwellMillis());
 			assertEquals(depth - 1, snapshot().radial().menus().size());
 		}
-		void openList(boolean edge) {
+		void openList(boolean edge) { openList(edge, false); }
+		void openList(boolean edge, boolean leftEntry) {
 			enter("content", edge ? nativeFrame.guiWidth() : settings.stroke() * 2);
 			settle();
 			String list = menu().choices().stream().filter(value -> value.id().endsWith(":inventory")).findFirst().orElseThrow().id();
-			enter(list, edge ? nativeFrame.guiWidth() : settings.stroke() * 2);
+			if (leftEntry) {
+				// With no properties the inventory half-circle includes 350 degrees.
+				// It is a reachable real-menu left entry even though right is preferred.
+				double distance = edge ? nativeFrame.guiWidth() : settings.stroke() * 2;
+				enterAt(list, Math.sin(Math.toRadians(350)) * distance, -Math.cos(Math.toRadians(350)) * distance);
+			} else enter(list, edge ? nativeFrame.guiWidth() : settings.stroke() * 2);
 			settle();
 			assertTrue(snapshot().inventory().open());
 			assertTrue(menu().choices().isEmpty(), "inventory external surface is active");
@@ -237,12 +248,54 @@ class SpatialInventoryNavigationIntegrationTest {
 		}
 	}
 
+	@Test
+	void nativeUpperRightThenExactlyRightUsesTheSameEqualInventorySectorForHitFollowerAndPaint() {
+		var f = new Fixture(1000, 700, "1", true, 2, 18, false);
+		f.move(140, -140, 10);
+		assertEquals("content", f.snapshot().radial().focusId());
+		f.move(120, 0, 50); // qualified upper-right -> right turn, without a Content dwell
+		var content = f.menu();
+		assertTrue(content.menuId().endsWith(":content"), "the physical turn enters Content at its actual corner");
+		assertEquals(new SpatialController.Point(140, -140), content.origin());
+		var inventory = content.choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow();
+		assertEquals(90, inventory.startDegrees(), 1e-9, "the half-open boundary selects the clockwise equal slot");
+		assertEquals(90, inventory.spanDegrees(), 1e-9);
+		assertEquals(135, inventory.startDegrees() + inventory.spanDegrees() / 2, 1e-9,
+			"the preference never rotates a slot centre to the desired bearing");
+		var back = content.choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow();
+		assertEquals(225, back.startDegrees() + back.spanDegrees() / 2, 1e-9, "Back still faces the actual root origin");
+
+		assertEquals(inventory.id(), f.snapshot().radial().focusId(), "the actual native second stroke is exactly right");
+		f.frame(f.now + 1);
+		var focused = f.menu().choices().stream().filter(choice -> choice.id().equals(inventory.id())).findFirst().orElseThrow();
+		var sector = f.painter.sectors.stream().filter(paint -> paint.choice().id().equals(inventory.id())).findFirst().orElseThrow();
+		var node = f.painter.nodes.stream().filter(paint -> paint.choice().id().equals(inventory.id())).findFirst().orElseThrow();
+		assertEquals(focused, sector.choice(), "sector paint receives the exact controller-resolved hit geometry");
+		assertEquals(focused, node.choice(), "node and follower share that resolved choice");
+		assertNotNull(node.follower(), "inventory follows before branch dwell completes");
+		assertTrue(f.painter.pointerHidden);
+
+		// A turn opens the child at its corner but does not pay that child's
+		// own minimum travel; continue the same right stroke before dwelling.
+		f.move(20, 0, f.now + 20);
+		assertEquals(inventory.id(), f.snapshot().radial().focusId());
+		f.frame(f.now + f.settings.dwellMillis() + 1);
+		assertTrue(f.snapshot().inventory().open(), "the same focused entry opens the list");
+		assertEquals(InventoryListModel.Side.RIGHT, f.snapshot().inventory().direction().forward());
+		assertEquals(inventory.id(), f.menu().entryChoiceId());
+		var breadcrumb = f.painter.nodes.stream().filter(paint -> paint.choice().id().equals(inventory.id())).findFirst().orElseThrow();
+		assertNull(breadcrumb.follower(), "the entered inventory choice becomes the ordinary ancestor breadcrumb");
+		assertEquals(inventory.startDegrees(), breadcrumb.choice().startDegrees());
+		assertEquals(inventory.spanDegrees(), breadcrumb.choice().spanDegrees());
+	}
+
 	@ParameterizedTest
-	@CsvSource({"1, false, 0", "0.25, false, 0", "1, true, 0", "0.25, true, 0",
-		"1, false, 3", "0.25, false, 3", "1, true, 3", "0.25, true, 3"})
-	void nativeVerticalTravelSelectsAndPaintsBothDirectionsFromTheMiddleAtGuiEdges(String glide, boolean reduced, int properties) {
-		var f = new Fixture(320, 240, glide, reduced, properties);
-		f.openList(true);
+	@CsvSource({"1, false, false", "0.25, false, false", "1, true, false", "0.25, true, false",
+		"1, false, true", "0.25, false, true", "1, true, true", "0.25, true, true"})
+	void nativeVerticalTravelSelectsAndPaintsBothDirectionsFromTheMiddleAtGuiEdges(String glide, boolean reduced, boolean leftEntry) {
+		var f = new Fixture(320, 240, glide, reduced, 0);
+		f.openList(true, leftEntry);
+		assertEquals(leftEntry ? InventoryListModel.Side.LEFT : InventoryListModel.Side.RIGHT, f.snapshot().inventory().direction().forward());
 		f.move(0, -1000, f.now + 1);
 		f.assertSelected(0); // the first row cannot go up
 		f.scroll(15); f.assertSelected(15);
@@ -329,11 +382,12 @@ class SpatialInventoryNavigationIntegrationTest {
 	}
 
 	@ParameterizedTest
-	@CsvSource({"1, false, 0", "0.25, false, 0", "1, true, 0", "0.25, true, 0",
-		"1, false, 3", "0.25, false, 3", "1, true, 3", "0.25, true, 3"})
-	void itemReturnThenResizeCannotLeaveTheVerticalGestureAxisPermanentlyOutsideTheViewport(String glide, boolean reduced, int properties) {
-		var f = new Fixture(1000, 700, glide, reduced, properties);
-		f.openList(false); f.scroll(15); f.assertSelected(15);
+	@CsvSource({"1, false, false", "0.25, false, false", "1, true, false", "0.25, true, false",
+		"1, false, true", "0.25, false, true", "1, true, true", "0.25, true, true"})
+	void itemReturnThenResizeCannotLeaveTheVerticalGestureAxisPermanentlyOutsideTheViewport(String glide, boolean reduced, boolean leftEntry) {
+		var f = new Fixture(1000, 700, glide, reduced, 0);
+		f.openList(false, leftEntry); f.scroll(15); f.assertSelected(15);
+		assertEquals(leftEntry ? InventoryListModel.Side.LEFT : InventoryListModel.Side.RIGHT, f.snapshot().inventory().direction().forward());
 		double forward = f.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
 		f.move(forward * 80, 0, f.now + 1);
 		assertTrue(f.menu().menuId().contains(":item:"));
@@ -376,10 +430,10 @@ class SpatialInventoryNavigationIntegrationTest {
 	@CsvSource({
 		"false, false, 0, 18, 320, 240",
 		"true, false, 0, 18, 320, 240",
-		"false, true, 3, 18, 320, 240",
-		"true, true, 3, 18, 320, 240",
+		"false, true, 7, 18, 320, 240",
+		"true, true, 7, 18, 320, 240",
 		"false, false, 0, 30, 200, 160",
-		"true, false, 3, 30, 200, 160"})
+		"true, false, 7, 30, 200, 160"})
 	void listUserReturnKeepsThePointerAtTheTriggerAndMovesTheParentCentreThere(
 		boolean hover, boolean reduced, int properties, int deadzone, int width, int height) {
 		var f = new Fixture(width, height, "1", reduced, properties, deadzone, hover);
@@ -444,7 +498,7 @@ class SpatialInventoryNavigationIntegrationTest {
 	}
 
 	@ParameterizedTest
-	@CsvSource({"false, 0", "true, 3"})
+	@CsvSource({"false, 0", "true, 7"})
 	void returnedCentreReopensTheListOnlyAfterAFullDeliberateStrokeAndDwell(boolean hover, int properties) {
 		var f = new Fixture(320, 240, "1", false, properties, 18, hover);
 		f.openList(true);
