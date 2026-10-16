@@ -25,7 +25,7 @@ The generic owner-result rules, native kernel and capture metadata are owned by
 [entity-local picking](../architecture/picking/local_geometry.md) and
 the rejected coarse-bound alternative is explained by
 [D0006](../decisions/D0006-exact-owned-geometry.md). Manual scenarios are owned by
-[verification](../testing/verification.md#pending-manual-and-integration-matrix).
+[verification](../testing/verification/manual-integration.md#pending-manual-and-integration-matrix).
 
 ## Create entity-outline source
 
@@ -248,7 +248,7 @@ no Create adapter or an unavailable/stale section, and Basic, the base Sable
 integration, and unrelated pings keep working. Loader registration, version
 gates, and the cached-accessor shape gate have unit and ASM-node seam coverage
 only; no installed-Create in-game presentation scenario has run yet, as
-recorded in [verification](../testing/verification.md).
+recorded in [verification](../testing/verification/integrations.md#create-presentation-adapters).
 
 ## Vault inventory provider
 
@@ -310,5 +310,5 @@ target; only presentation selects the master rendering form.
 ## Verification boundary
 
 Build and automated-coverage evidence is owned by
-[verification](../testing/verification.md), including the
-[pending Create gameplay and performance scenarios](../testing/verification.md#pending-manual-and-integration-matrix).
+[verification](../testing/verification/README.md), including the
+[pending Create gameplay and performance scenarios](../testing/verification/manual-integration.md#pending-manual-and-integration-matrix).

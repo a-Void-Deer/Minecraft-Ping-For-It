@@ -8,7 +8,7 @@ and their timing relation is owned by [long-press timing](long-press.md).
 
 > **Dispatch-boundary evidence.** The create-only dispatch gate for both paths
 > is covered by the declined-create regressions inventoried in
-> [testing and verification](../../testing/verification.md#capture-wheel-and-cancellation).
+> [testing and verification](../../testing/verification/interaction.md#capture-wheel-and-cancellation).
 
 ## Observed mode and slice
 

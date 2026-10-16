@@ -196,4 +196,4 @@ restart a pending receipt or repeat a resolved one; only a genuinely new local
 membership follows the original new-marker rule. A locally elapsed visual
 deadline is not server expiry and does not by itself cancel or complete the
 receipt. Coverage and pending runtime evidence for live chat delivery and
-logging are owned by [testing and verification](../../testing/verification.md).
+logging are owned by [testing and verification](../../testing/verification/presentation.md#content-receipt-chat-and-pending-completion).

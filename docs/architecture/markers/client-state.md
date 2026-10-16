@@ -84,7 +84,7 @@ resurrect the marker in that session; the eviction-tombstone retention rule is
 owned by
 [presentation snapshot](../presentation/presentation_snapshot.md#client-retention-and-display).
 Automated coverage of the complete production orchestration remains a gap
-tracked in [verification](../../testing/verification.md).
+tracked in [verification](../../testing/verification/identity-authority.md).
 
 The fallback branches above are state-specific. A visually expired
 `SYNCHRONIZED` record remains stored until its own fallback deadline is due; at

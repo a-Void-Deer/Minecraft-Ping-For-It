@@ -176,4 +176,4 @@ Disconnect cleanup is the only audience mutation, and it is owned by
 policy for remaining recipients.
 
 Coverage and gaps for this contract are inventoried in
-[testing and verification](../../testing/verification.md).
+[testing and verification](../../testing/verification/identity-authority.md).

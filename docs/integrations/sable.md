@@ -49,7 +49,7 @@ provider presentation. The required shared-subject and subject-type contract,
 and the fact that a single immutable frame snapshot is not currently
 guaranteed for those provider-local decisions, are recorded in
 [presentation subjects](../architecture/rendering/presentation_subjects.md) and the
-[verification inventory](../testing/verification.md#sable-integration-coverage).
+[verification inventory](../testing/verification/integrations.md#sable-integration-coverage).
 
 ## Supplemental transformed-behind discovery
 
@@ -204,4 +204,4 @@ Related contracts: [target identity](../architecture/identity/target_model.md),
 [presentation subjects](../architecture/rendering/presentation_subjects.md),
 [server validation](../architecture/authority/target_validation.md),
 [server authority decision](../decisions/D0004-server-authority.md), and
-[Sable coverage and pending scenarios](../testing/verification.md#sable-integration-coverage).
+[Sable coverage and pending scenarios](../testing/verification/integrations.md#sable-integration-coverage).

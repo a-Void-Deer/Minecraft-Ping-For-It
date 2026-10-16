@@ -59,4 +59,4 @@ ignored or abandon its exact interaction without affecting a newer one.
 [server authority](D0004-server-authority.md).
 
 Coverage and pending integration evidence are owned by
-[verification](../testing/verification.md#capture-wheel-and-cancellation).
+[verification](../testing/verification/interaction.md#capture-wheel-and-cancellation).

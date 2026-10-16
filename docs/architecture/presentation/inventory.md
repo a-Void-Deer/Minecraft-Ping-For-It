@@ -14,7 +14,7 @@ This is the adopted contract for the confirmed inventory design. Coverage scope
 and pending runtime evidence for the ordinary-block and provider-confirmed
 external preview and tracking,
 item-choice create and native input/HUD seams are owned by
-[testing and verification](../../testing/verification.md). The existing
+[testing and verification](../../testing/verification/inventory.md). The existing
 one-shot capture and whole-section presentation paths keep their present
 semantics, and the existing server gates for permission, range, lock state and
 safe reads are unchanged. Wire routes and message families are owned by

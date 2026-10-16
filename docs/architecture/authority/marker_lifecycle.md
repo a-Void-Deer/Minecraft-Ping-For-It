@@ -37,4 +37,4 @@ affected authoritative winner slots as specified by
 [ping winner](ping_winner.md).
 
 Evidence for the server-store and lifecycle seams is consolidated in
-[testing and verification](../../testing/verification.md).
+[testing and verification](../../testing/verification/identity-authority.md).

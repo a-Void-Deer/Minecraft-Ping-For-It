@@ -135,7 +135,7 @@ and must distinguish invalidation, recovery, hard-stop invalidation and
 per-recipient resynchronization. Existing marker, presentation and provider
 owners keep their current semantics; this record adds an explanatory boundary
 only. Coverage evidence and the pending-scenario inventory remain owned by
-[testing and verification](../testing/verification.md) and are updated by the
+[testing and verification](../testing/verification/inventory.md) and are updated by the
 implementation, not by this decision.
 
 ## Related docs
@@ -148,4 +148,4 @@ implementation, not by this decision.
 [inventory preview and tracking](../architecture/presentation/inventory.md),
 [network protocol](../architecture/network/protocol.md),
 [Sable integration](../integrations/sable.md), and
-[testing and verification](../testing/verification.md).
+[testing and verification](../testing/verification/inventory.md).

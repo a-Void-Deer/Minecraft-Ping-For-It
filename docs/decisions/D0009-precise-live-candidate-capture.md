@@ -66,4 +66,4 @@ behavior is unchanged.
 [selection policy](../architecture/picking/selection_policy.md),
 [client configuration](../config/client.md),
 [D0005](D0005-press-time-capture.md), and
-[verification](../testing/verification.md).
+[verification](../testing/verification/interaction.md#precise-live-candidate-capture).

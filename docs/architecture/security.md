@@ -100,4 +100,4 @@ Do not add toast or action-bar feedback for rate or integration failures. The
 required local invalid-target message, including its color and chat output, is
 separately specified in [ping feedback](../UI/ping-feedback.md). These are
 established product boundaries, not evidence of a completed security audit;
-coverage limitations remain in [verification](../testing/verification.md).
+coverage limitations remain in [verification](../testing/verification/README.md).

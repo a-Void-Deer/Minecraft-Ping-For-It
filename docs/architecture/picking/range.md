@@ -122,4 +122,4 @@ ordinary lifecycle contract.
 ## Evidence and remaining verification
 
 Automated coverage and remaining end-to-end scenarios are owned by
-[verification](../../testing/verification.md#capture-and-acceptance-range).
+[verification](../../testing/verification/interaction.md#capture-and-acceptance-range).

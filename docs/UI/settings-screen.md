@@ -300,9 +300,9 @@ determines the reset result;
 protection and persistence policy.
 
 Pending manual external-edit and UI checks are in the
-[verification matrix](../testing/verification.md#pending-manual-and-integration-matrix).
+[verification matrix](../testing/verification/manual-integration.md#pending-manual-and-integration-matrix).
 
 ## Evidence boundary
 
 The evidence for the server-settings snapshot and update seams is maintained in
-[testing and verification](../testing/verification.md#server-settings-snapshots-and-updates).
+[testing and verification](../testing/verification/configuration-ui.md#server-settings-snapshots-and-updates).

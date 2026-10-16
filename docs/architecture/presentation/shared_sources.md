@@ -7,7 +7,7 @@ server-side source-access contract, the detached source-key and capture-result
 models, the cost ledgers, and the sync publisher are integrated through the
 production runtime, source wrapper and publisher seams. Coverage scope and
 pending runtime evidence are owned by
-[testing and verification](../../testing/verification.md). The existing
+[testing and verification](../../testing/verification/shared-sources.md). The existing
 one-shot adapter capture path, the per-marker cache, and whole-section
 replacement keep their present semantics on their current routes, and this
 adoption does not rewrite those routes.

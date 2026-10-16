@@ -3,7 +3,7 @@
 > **Coverage.** This topic states the adopted native-selector interaction.
 > Coverage scope and pending runtime evidence for its headless controller,
 > session, candidate-allocation, transition/renderer and native input seams are
-> owned by [testing and verification](../../testing/verification.md).
+> owned by [testing and verification](../../testing/verification/interaction.md).
 
 ## Opening and selection
 
@@ -610,4 +610,4 @@ The preference keys and their local authority are owned by
 [client configuration](../../config/client.md#spatial-selector-interaction);
 their numeric range, step, and default remain implementation values. Coverage
 for the native screen and input integration and game-feel validation is owned
-by [testing and verification](../../testing/verification.md).
+by [testing and verification](../../testing/verification/interaction.md).

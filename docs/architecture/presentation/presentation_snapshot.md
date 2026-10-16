@@ -461,7 +461,7 @@ presentation, navigation, selection input and lifecycle, and
 interaction abort; this section owns the preview's field authorization,
 provenance and fallback mechanics. This is the adopted contract for the
 confirmed preview design; coverage scope and pending runtime evidence are owned
-by [testing and verification](../../testing/verification.md).
+by [testing and verification](../../testing/verification/presentation.md#target-content-preview).
 
 - **Field authorization.** A preview value is eligible only under the current
   accepted presentation epoch and view. The field must be included by the
@@ -708,4 +708,4 @@ decode or compatibility shim for a previous wire version.
 ## Evidence
 
 Existing coverage inventory and remaining integration gaps are owned by
-[testing and verification](../../testing/verification.md).
+[testing and verification](../../testing/verification/presentation.md).

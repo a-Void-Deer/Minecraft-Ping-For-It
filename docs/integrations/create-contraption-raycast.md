@@ -95,6 +95,6 @@ Snapshotting and scanning are approximately linear in captured entries plus nati
 Discovery still depends on Create's entity bounds. Native selection shapes and Create transforms do not promise pixel-perfect agreement with GPU-rendered meshes or every render-only minecart correction.
 
 Automated coverage is inventoried in
-[verification](../testing/verification.md#exact-entity-local-picking-and-create-raycast-seams);
-the [pending manual matrix](../testing/verification.md#pending-manual-and-integration-matrix)
+[verification](../testing/verification/interaction.md#exact-entity-local-picking-and-create-raycast-seams);
+the [pending manual matrix](../testing/verification/manual-integration.md#pending-manual-and-integration-matrix)
 owns the Create gameplay and performance scenarios.

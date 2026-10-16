@@ -6,7 +6,7 @@ Confirmed decision. It defines the purpose boundary and
 oracle requirements for automated tests; it is not a coverage inventory and
 does not assert that every existing test already satisfies it. Coverage and
 known gaps remain owned by
-[testing and verification](../testing/verification.md).
+[testing and verification](../testing/verification/README.md).
 
 ## Decision
 
@@ -113,7 +113,7 @@ it guards so later readers can judge the necessity instead of the spelling.
 This record explains test purpose and oracle boundaries; product behavior
 remains owned by the linked topic documents.
 
-[Testing and verification](../testing/verification.md),
+[Testing and verification](../testing/verification/README.md),
 [client configuration](../config/client.md),
 [server configuration](../config/server.md),
 [network protocol](../architecture/network/protocol.md),

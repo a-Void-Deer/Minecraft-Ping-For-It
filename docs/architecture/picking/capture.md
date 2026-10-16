@@ -134,7 +134,7 @@ boundary, and compatibility-specific transition behavior are owned by
 [long-press compatibility](../input/long-press-compatibility.md).
 
 Coverage and remaining input-lifecycle scenarios are inventoried in
-[verification](../../testing/verification.md#capture-wheel-and-cancellation).
+[verification](../../testing/verification/interaction.md#capture-wheel-and-cancellation).
 
 ## Integration and authority boundaries
 
