@@ -66,3 +66,7 @@ Require implementation subagents to report possible documentation changes instea
 Decide whether those changes are needed, then either update the documentation yourself or assign a documentation-only subagent.
 
 If not sure whether something should be recorded, or where it should be, **ask the user** to help you make decision.
+
+## User Queries
+
+Users may ask you to explain documentation. When explaining, answer based on both documentation and code implementation, and for each point, give at least one in-game example or scenario to illustrate the point.
