@@ -110,11 +110,14 @@ external target, an entity or location target, a missing face, an overlong or
 non-canonical field, a wrong protocol version, and trailing bytes are rejected
 rather than reinterpreted. `CLOSE(epoch, requestId)` releases that request.
 `RESYNC(epoch, requestId[, markerId])` schedules a corrective resend: a marker
-id selects a tracked Ping, while an absent marker id addresses the request
-session. `SELECT(epoch, requestId, commitId, baselineId, stateRevision,
-entryKey, pingType)` carries one opaque retained entry reference and the
-commit/baseline/state fences; the server derives the authoritative target and
-count from its own retained reference and answers `SELECTED` or `REJECT`
+id exclusively selects tracked-Ping repair, with no request fallback even if
+that marker is unknown. An absent marker id addresses the already-open preview
+request's retained cumulative projection and status under the
+[inventory replay contract](../presentation/inventory.md#request-scoped-corrective-replay),
+not a new capture or negotiation. `SELECT(epoch, requestId, commitId, baselineId,
+stateRevision, entryKey, pingType)` carries one opaque retained entry reference
+and the commit/baseline/state fences; the server derives the authoritative
+target and count from its own retained reference and answers `SELECTED` or `REJECT`
 correlated by request and commit id, so a repeated `SELECT` for a commit id
 replays the stored outcome instead of re-running the selection.
 
@@ -206,11 +209,54 @@ connection. An update carries a changed-field mask and the fixed-shape
 configuration values as a one-way mutation request with no acknowledgement or
 update result.
 
-Numbers on these routes are canonical non-negative varints: overflow,
-overlong, and non-canonical encodings are rejected, booleans are strict, the
-inventory administration payload is fixed-shape, supplies every catalogued
-inventory leaf, and is consumed to its exact end, and trailing bytes are
-rejected in full before any value is applied. The route
+The complete packet bodies have this fixed order:
+
+```text
+REQUEST  = requestId
+UPDATE   = changedFields, defaultChannelMode, playerTrackingEnabled,
+           msToRegenerate, rateLimit, syncDuration, inventory,
+           budgetDelayNotificationsEnabled
+SNAPSHOT = requestId, canEdit, defaultChannelMode, playerTrackingEnabled,
+           msToRegenerate, rateLimit, syncDuration, inventory,
+           budgetDelayNotificationsEnabled
+```
+
+`requestId` is a positive canonical varlong. The mask, channel-mode ordinal
+(`AUTO`, `DISABLED`, `GLOBAL`, `TEAM_ONLY` in that order), and the original
+numeric settings are canonical non-negative varints. Booleans occupy exactly
+one byte, `0` or `1`. `inventory` supplies all leaves, regardless of the update
+mask, in this order:
+
+```text
+physicalSlotsPerTick, pendingMemoryMiB,
+preview.periodTicks, preview.maxVariantsPerClientPeriod,
+preview.maxSlotsPerClient, preview.maxSlotsServer, preview.maxTargetsPerClient,
+preview.clientByteMultiplier, preview.globalByteMultiplier,
+tracking.periodTicks, tracking.maxVariantsPerTarget,
+tracking.maxSlotsPerTarget, tracking.maxSlotsServer,
+tracking.streamByteMultiplier, tracking.snapshotByteMultiplier,
+tracking.globalByteMultiplier, tracking.resyncMinPeriods,
+tracking.heartbeatPeriods, tracking.gracePeriods,
+displayByteMultiplier, frameByteMultiplier
+```
+
+Each inventory leaf that supports unlimited mode carries its strict boolean
+flag followed by a varint retaining its finite value; finite-only leaves carry
+only their varint. Integer leaves encode their integer value, send-byte
+multipliers encode exact grid quanta, and the two size scalars encode positive
+quarter-multiplier quanta. Legal forms, grids and relationships belong to
+[server configuration](../../config/server.md#inventory-policy-object).
+The final strict `budgetDelayNotificationsEnabled` byte follows the complete
+inventory block in both UPDATE and SNAPSHOT; REQUEST has no added field.
+The field mask and its monitoring bit are owned by
+[changing server configuration](../config/changing-server-config.md#update-surface).
+
+Overflow, overlong or non-canonical numbers, invalid enum ordinals or inventory
+values, unknown mask bits, missing fields, non-boolean bytes, and trailing bytes
+are rejected in full before any value is applied. Exact-end validation follows
+the final boolean, not the inventory block. A superseded shorter UPDATE or
+SNAPSHOT without that boolean is corrupt rather than defaulted or accepted as
+a prefix; safe rejection drains the frame. The route
 IDs are version-bound: they do not decode an earlier server-configuration wire
 version, and no fallback reinterprets one. Route registration and grammar
 remain owned here; the disclosed field catalogue is owned by

@@ -72,7 +72,8 @@ The server scope has five categories:
 - **Channel & Players**: Default Channel Mode and Player Tracking.
 - **Send Rate**: Regeneration Time and Rate Limit.
 - **Marker Duration**: Sync Duration.
-- **Performance**: a Shared inventory budgets subgroup with Physical Slots per
+- **Performance**: a Monitoring subgroup with Budget Delay Notifications; a
+  Shared inventory budgets subgroup with Physical Slots per
   Tick, Pending Memory, Display Byte Size, and Frame Byte Size; an Inventory
   preview subgroup with Preview Period, Preview Variants per Client Period,
   Preview Slots per Client, Preview Slots Server-wide, Preview Targets per
@@ -98,7 +99,13 @@ user-facing reload control.
 
 ## Server performance category
 
-The Performance category exposes the inventory administration controls in three
+The Performance category begins with a plain-text, non-interactive Monitoring
+subgroup and a full-width Budget Delay Notifications server-value toggle. Its
+tooltip distinguishes administrator messages from WARN diagnostics; value
+semantics and the persisted key are owned by
+[server configuration](../config/server.md#persisted-fields).
+
+The inventory administration controls follow in three
 plain-text, non-interactive subgroups: Shared inventory budgets, Inventory
 preview, and Inventory tracking. Each control is one atomic leaf: a numeric
 field holds the finite value, and each cap or multiplier that has an unlimited
@@ -208,13 +215,13 @@ so the screen does not promise that the server applied or persisted an update.
 
 The ordinary server settings are one shared session within the screen, not a
 per-category or per-visit section. This session covers the Channel & Players,
-Send Rate, Marker Duration, and Performance categories, including the twenty-one
-inventory administration leaves. Entering the server scope shows its overview
-and requests the current server configuration when the client holds a live
-connection and the session holds no loaded or in-flight snapshot. The loaded
-snapshot, the draft, and any in-flight request are retained across scope-tab
-switches and category navigation; entering an ordinary server category does
-not request another snapshot. The separate Server
+Send Rate, Marker Duration, and Performance categories, including the monitoring
+toggle and the twenty-one inventory administration leaves. Entering the server
+scope shows its overview and requests the current server configuration when the
+client holds a live connection and the session holds no loaded or in-flight
+snapshot. The loaded snapshot, the draft, and any in-flight request are retained
+across scope-tab switches and category navigation; entering an ordinary server
+category does not request another snapshot. The separate Server
 Presentation category is not part of this session; its policy snapshot and
 status follow the independent workflow described in
 [Server presentation category](#server-presentation-category).

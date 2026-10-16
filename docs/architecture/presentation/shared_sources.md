@@ -82,10 +82,12 @@ Capabilities are independent. The mode (one-shot or resumable) is separate from
 the independent capabilities of a stable cursor, a stable version, and an
 atomic snapshot; a one-shot read is not automatically atomic. Atomic snapshot
 evidence requires a complete detached capture made in one contiguous
-server-thread operation; a tick number, a single generic live step, or a stable
-cursor does not establish it. A real source version is independent evidence:
-it is never fabricated when absent, and it does not by itself make a capture
-atomic.
+server-thread operation, with the semantic dependencies needed for later
+interpretation frozen as well. Detached payload bytes alone do not certify
+arbitrary later counter or decoder behavior. A tick number, a single generic
+live step, or a stable cursor does not establish atomicity. A real source version
+is independent evidence: it is never fabricated when absent, and it does not by
+itself make a capture atomic.
 
 A world object or provider handle lives only on the server thread, inside the
 server-local handle, and only for as long as the handle is needed. Cursor state
@@ -201,9 +203,21 @@ claimProgress(policySubject, watermark, boundedCoverage)
 Admission precedes reading and allocation. A reservation covers one step or the
 upper bound of a bounded call, and controlled access is charged by measured
 actual use rather than self-report. A later report cannot undo an over-budget
-access. The mechanism cannot preempt a provider call and does not guarantee
-wall-clock time: it continues only while progress can be safely bounded, and
-reports unavailable explicitly when it cannot be.
+access. Owned copying, conversion, encoding and hashing require admission before
+they run, including workspace and internal allocations and traversal of audited
+native or provider calls. Output-size measurement after a call is not a bound on
+that call's work or allocation.
+
+These guarantees cover the pipeline's owned processing and explicitly audited
+call graphs, not pre-existing resident world storage, unrelated game work, total
+JVM heap, GC or wall-clock time. Memory charges are a conservative cost model,
+not a measurement of total JVM allocation. The mechanism cannot preempt an
+arbitrary third-party call. Where the domain explicitly retains an
+external-trusted route, admission bounds invocation count while that call's
+internals remain outside certified work and allocation; returned-data processing
+still obeys the guard. External trust alone is not atomicity evidence. Work
+outside that explicit trust boundary must be safely bounded or report
+unavailable.
 
 Units are owned by code. Inventory's charged unit is the slot: consuming a
 captured snapshot's parse statistics spends the shared scan allowance and the
@@ -328,3 +342,76 @@ The generic `cancel` and `rebase` tools do not make ordinary-block inventory
 rules apply to entities or external leases. Other content types do not
 automatically gain heartbeat, expiry, or recovery policy because a domain
 chooses them.
+
+## Budget-delay monitoring
+
+Monitoring distinguishes resource-delayed accepted work from normal scheduling
+and source availability. Its modules are presentation (including property
+preview), `inventory_preview`, and `inventory_tracking`. Only actually
+authorized, due, accepted work refused by a budget or retained-resource guard
+counts as delayed. Cadence waits, no demand or audience, permission denial,
+unsafe or unavailable sources, ordinary negotiation, fences and handoffs, and
+ordinary bounded-page continuation do not establish overload. A continuation
+alone is not evidence of resource pressure, and a failed optional capture is
+not an inferred budget refusal. Rejected admission, permanently discarded
+oversized data and transport refusal are not retryable budget-delay events;
+an unserviceable frame is reportable only while real accepted pending work
+remains, without promising that the next cycle will succeed.
+
+A presentation cycle is one completed shared tick allowance, including its
+residual property-preview work; it adds no separate preview budget and does not
+mislabel independent initial-create capture as periodic spending. Inventory
+cycles and work units are owned by
+[inventory](inventory.md#budgets-queues-and-memory). Each module emits one WARN
+for every closed accounting cycle that observed resource delay, even if that
+work later resolved in the same cycle. Empty skipped cycles emit no synthetic
+warning, and WARN is not throttled by the administrator-message interval.
+
+Diagnostics report accurately observed deferred work, its limiting reasons and
+separate units, never a mixed-unit total. One work item's observation is counted
+once per cycle; additional limiting reasons do not duplicate that item or its
+quantity. Shared physical work is not multiplied by consumers or recipients,
+while independently blocked logical or publication stages may be separate work
+items for the same target. A bounded summary shows at most ten work-item
+descriptions and an extra observed-work count: that count is the observed items
+not displayed, not unique targets or an estimate of unvisited server backlog.
+Unknown quantities remain unknown, and saturated counters are lower bounds,
+not fabricated exact totals. Diagnostic context is detached and bounded; it
+contains no source lookup, world object, sampled field/item content or raw NBT.
+Monitoring performs no capture, provider or world read. Recoverable diagnostic
+or notice failures cannot change accounting, cadence, publication or authority;
+fatal resource failures are not swallowed.
+
+Continuous delay is evaluated from fresh server-tick evidence with monotonic
+real time, not TPS or game ticks. Outstanding resource-blocked work remains
+delayed until progress clears its limiting resource, cancellation, expiry or
+revocation; a not-yet-due content capture does not hide separately delayed
+publication or control work. A healthy eligible opportunity without outstanding
+delay, or no eligible demand and no outstanding delay, clears the streak.
+Ordinary neutral waits neither start nor clear it, advance no delay evidence,
+and are not eligible to dispatch a notice. Incomplete discovery cannot prove
+global health or idleness while eligible sweep members remain unconsidered; unseen
+work is not counted as observed delay either.
+
+After at least ten continuous real seconds of evidenced delay, when messages
+are enabled and cooldown permits, the server sends one consolidated
+administrator notice for the currently qualified modules to eligible recipients.
+A global five-real-minute cooldown follows a successfully delivered notice,
+not separate cooldowns per module or recipient. No eligible recipient or a
+failed handoff consumes no delivered-notice cooldown, and elapsed time without
+another observed delayed tick cannot trigger a notice. The server-owned switch
+is catalogued by
+[server configuration](../../config/server.md#persisted-fields): disabling
+messages leaves WARN, accounting and delay evidence active. Live setting changes
+preserve cooldown; replacing or stopping the server lifetime clears monitoring
+state.
+
+Recipients are online players with vanilla permission greater than level two
+(levels three and four), or the authoritative integrated-server host; dedicated
+servers have no host exception, and a player qualifying both ways receives the
+notice once. Notice eligibility grants no settings-edit authority. The notice
+is a localized vanilla system message, not a mod packet, action bar, toast or
+marker chat, and is not filtered by ping channel or marker-chat settings. It
+names the affected modules and advises review of server budgets and blacklist
+policy without target details or private inventory content. Source-failure and
+optional-integration diagnostics keep their independent semantics.

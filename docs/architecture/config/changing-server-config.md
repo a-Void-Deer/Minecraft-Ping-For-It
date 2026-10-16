@@ -14,13 +14,14 @@ the marker lifetime that consumes `syncDuration`
 
 ## Update surface
 
-The remote update surface contains the five top-level fields:
+The remote update surface contains these top-level fields:
 
-- `defaultChannelMode`;
-- `playerTrackingEnabled`;
-- `msToRegenerate`;
-- `rateLimit`; and
-- `syncDuration`;
+- `defaultChannelMode`
+- `playerTrackingEnabled`
+- `msToRegenerate`
+- `rateLimit`
+- `syncDuration`
+- `budgetDelayNotificationsEnabled`
 
 plus `inventory` administration settings catalogued by
 [server configuration](../../config/server.md#inventory-policy-object). Each
@@ -37,9 +38,22 @@ consumed by the [range](../picking/range.md) acceptance contract. The
 presentation sampling members are likewise file-only and are not carried here;
 the per-target-type field policy has its own route described below.
 
-The transaction carries a field selection plus the current values. The
-selection is a bit mask with one stable bit per surface leaf: the five original
-bits are unchanged and every inventory administration setting has its own bit.
+The transaction carries a changed-field selection together with the complete
+remote-surface values. The selection is a bit mask with one stable bit per
+surface leaf; it identifies the fields to update, not their values. Bit positions
+are numbered from zero, starting at the least significant bit:
+
+| Bit position | Selected leaf |
+| --- | --- |
+| 0 | `defaultChannelMode` |
+| 1 | `playerTrackingEnabled` |
+| 2 | `msToRegenerate` |
+| 3 | `rateLimit` |
+| 4 | `syncDuration` |
+| 5–25 | The twenty-one `inventory` leaves, in their fixed [wire order](../network/protocol.md#server-configuration-routes-server-config-request-v3-server-config-update-v3-server-config-snapshot-v3). |
+| 26 | `budgetDelayNotificationsEnabled` |
+
+The inventory-only mask contains exactly bits 5–25. No bit above 26 is valid.
 The mask identifies which leaves the sender changed; it is not a partial
 snapshot. A missing, zero, unknown, or malformed selection, or an otherwise
 invalid update, performs no mutation. Which fields become dirty and when a plan
@@ -63,7 +77,7 @@ or mutate is owned by
 
 A snapshot request carries a positive request identifier and asks for the
 server's current authoritative values; it is not an edit, and any connected
-player may send one. The snapshot covers the complete remote surface — the five
+player may send one. The snapshot covers the complete remote surface —
 top-level fields and every inventory administration leaf, including each cap's
 or multiplier's retained finite value and the two finite size scalars — and is
 accepted or rejected as one whole. The response is bound to that identifier. A
@@ -98,7 +112,7 @@ rate-limit-only update therefore does not replace the channel mode,
 player-tracking flag, regeneration interval, synchronization duration, or any
 inventory administration value, and a synchronization-duration-only update
 likewise leaves the other selected-surface fields intact; an inventory-only
-update leaves all five top-level fields at their current authoritative values.
+update leaves all top-level fields at their current authoritative values.
 A malformed, missing, unknown, or zero field selection has no effect. If no
 current authoritative snapshot exists when a valid update arrives, the merge
 produces no result and no mutation.

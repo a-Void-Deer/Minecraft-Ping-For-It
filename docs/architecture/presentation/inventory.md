@@ -182,6 +182,34 @@ lose another key's latest value and must not repackage duplicates. Preview
 selection references support both normal and component-fallback forms, and
 component identity must work in both.
 
+### Request-scoped corrective replay
+
+A `RESYNC` without a marker ID schedules a corrective replay for that open
+preview request. It reconstructs the currently authorized cumulative retained
+projection, including earlier discovered entries rather than only the latest
+sparse batch, and its truthful status. The replay keeps the same baseline,
+state fence, opaque entry keys and selection references, with a strictly newer
+publication watermark. It is not a new capture, a new `OPEN`, a repeated
+selection, or an `OFFER` renegotiation, and creates no marker or tracking state.
+
+The negotiated tracking-period resynchronization cooldown applies per open
+request, and repeated repairs coalesce into bounded waiting work. Repair does
+not restart an admitted publication, its completion controls, or the original
+scan cursor; the initial scan may continue while replay waits. Current
+authorization, source validity, size-cap reconciliation, pending admitted
+publication, and the existing work, memory, queue and byte budgets still gate
+replay. Repair cannot unblock fenced data or bypass an updated size offer.
+Unknown, never-opened, closed or purged requests allocate no replacement
+session. Marker-bearing repair dispatch is exclusive under the
+[network protocol](../network/protocol.md#inventory-previewtracking-route-inventory-v1).
+
+A partial retained observation remains partial, with its actual quality and
+completion state; replay cannot turn missing or not-yet-seen data into zero. A
+completed empty observation remains an explicit empty result. Before any
+observation, the request remains updating and its existing initial scan
+continues. An invalid terminal request replays invalid status without valid
+quantities, resurrected selection references or a restarted capture.
+
 ## Tracking
 
 Tracking is a snapshot plus an absolute stream of the Ping's selected items,
@@ -266,10 +294,14 @@ conclusion.
 ## Item variants and component fallback
 
 Variant identity is the item ID plus its canonical persistent component bytes.
-The identity encoding covers the persistent component map, so transient
-component state is not part of variant identity. The same item ID with
-different enchantments, damage or custom name is an independent entry and
-consumes its own quota.
+The identity encoding covers the effective persistent component map after
+applying prototype defaults and explicit removals, under the native
+persistent-codec semantics. Exactness means that persistent encoding, including
+its native copy or projection semantics, not preservation of every raw resident
+field or hidden runtime chain. Transient component state is not part of variant
+identity. The same item ID with different persistent enchantments, damage or
+custom name is an independent entry and consumes its own quota when its
+identity is safe to encode.
 
 Preview and marked-item tracking carry one bounded serialized persistent
 display value per variant beside the item's registry-id label. The label is the
@@ -279,61 +311,85 @@ component-bearing item icons. Naming and sanitization precedence, including the
 custom-name forms, remain owned by
 [names and chat](../rendering/names_chat.md).
 
-The bounded display is deliberately separate from identity. An oversized
-display degrades through the existing anti-abuse ladder — the full component
-display, then removal of the custom name, item name and lore, then the bare
-stack — and never exceeds the per-item display ceiling; only the fully stripped
-end of that ladder is the component-too-long state below. A restored icon is
-assembled only from components already present in the transmitted display
-value: omitted, transient or unknown component and model data is never
-reconstructed from the identity digest, and the client never rereads a local
-world inventory to restore it.
+The bounded display is deliberately separate from identity. Display always
+omits actual Lore and the contents of shulker-box items, regardless of size,
+including those in nested items or inherited prototype defaults. These display
+omissions do not remove data from an otherwise safe exact identity or fold its
+variants. Non-shulker container contents and bundle contents remain eligible
+for bounded display; the same omission applies to any shulker item nested
+inside them. This item-display rule does not hide the readable inventory of a
+placed shulker box.
 
-A "component too long" fallback triggers only when every component has been
-stripped because of size. Omitting only the display component does not change
-identity, and a naturally componentless item needs no fallback and is not
-marked as component-too-long. Within one Snapshot ID, all variants of that item
-ID — including variants that were not initially selected — merge into a total
-with the grey component-too-long presentation, and the merge persists until a
-new snapshot. This all-ID variant sweep remains subject to permissions, and an
-incomplete scan must not claim an aggregate total. That persistence and reset
-rule belongs to tracking. Preview folding is scoped to the current preview
-request: closing that request ends the fold, and a reopened preview starts a
-fresh scan that may choose exact or folded presentation for the same item ID
-again; the handoff to tracking preserves both the same-ID all-variant fold and
-full variant identity.
+After those omissions, an oversized display degrades through the existing
+anti-abuse ladder — the remaining component display, then removal of the custom
+name and item name, then the bare stack — and never exceeds the per-item
+display ceiling. Display simplification, even to the bare stack, does not change
+exact keys, identity mode or counts. A naturally componentless item likewise
+needs no fallback. A restored icon is assembled only from the transmitted
+display projection: omitted values must not reappear through prototype defaults,
+the identity digest or a local world-inventory read. Omitted, transient or
+unknown component and model data is not reconstructed.
 
-The recommended engineering design is an atomic per-ID replacement or
-tombstone that prevents double counting and isolates old variant streams. Any
-allowlist, key, hash, or reassembly hard cap is an engineering choice and is not
-defined here.
+Only an unsafe or oversized complete persistent identity requires the grey
+"All variants" aggregate; a display cap or display-only reprojection never
+does. A modded registry ID alone does not require fallback. Unsafe or oversized
+nested persistent data affects the outer entry's identity and therefore its
+item-ID group. The aggregate still requires a trustworthy item ID and
+authoritative amount: a failed source read is unavailable, not an empty entry or
+an invented aggregate. The existing `COMPONENT_TOO_LONG` status
+identifier denotes this aggregate identity mode. Its bare-item display represents
+the group rather than any particular variant.
+
+Within one Snapshot ID, all variants of that item ID — including previously
+observed exact entries, unselected variants and variants discovered later —
+belong to one aggregate, and the fold persists until a new snapshot. Replacement
+accounts for each source entry once, retires the old exact selection references,
+and fences old exact data and queued streams. A stale exact reference is
+rejected, never reinterpreted as an aggregate selection. An exact live witness
+requires its safe complete identity; an aggregate live witness requires the same
+item ID and a positive authoritative amount. This all-ID sweep remains subject
+to permissions, and an incomplete scan must not claim an aggregate total.
+Preview folding is scoped to the current preview request: closing that request
+ends the fold, and a reopened preview starts a fresh scan that may choose exact
+or folded presentation for the same item ID again. A valid handoff preserves
+the selected exact or aggregate meaning under the existing fresh tracking-capture
+rules; it does not retarget retired references.
 
 ## Detached snapshot capture and schema
 
-Each supported inventory source is captured into complete detached NBT; that
-inventory capture provides the atomic-snapshot evidence. Ordinary vanilla
-container snapshots are therefore verified without requiring a source version.
-The generic atomicity, version evidence and later decoding rules are owned by
+Capture uses mixed bounded extraction. Ordinary-container snapshot routes and
+the tested Vault locals use detached slot observations, not automatic full
+block-entity saves trimmed afterward. Special formats require an explicit
+bounded inventory-only extraction adapter. A source without such a snapshot
+route retains its allowed live capability route, not an automatic
+atomic-snapshot upgrade. The generic atomicity, version evidence and
+later consumption rules are owned by
 [shared sources](shared_sources.md#capture-results). The shared scan allowance
 charges consumption of the captured data, not this inventory capture; cost
 accounting is owned by [shared sources](shared_sources.md#cost-accounting).
 
 A Minecraft block-entity inventory is retained per member: each member keeps
-only its inventory-related NBT together with a structure envelope that keeps
-the member positions and identity, the controller or layout relationship, the
-segments, and the frozen-face slot mapping. A multi-member source is never
-flattened into a structureless tag or a single total. The default supported
-shapes are the ordinary single block and the vanilla double chest; additional
-member structure exists only through explicitly registered member providers,
-and arbitrary mod multipart discovery is not promised. Client presentation
-subjects never establish or widen the server inventory structure or permission:
-a door, bed or other multipart render form, including a large waterwheel form,
-is client presentation only.
+only its detached inventory observations together with a structure envelope
+that keeps the member positions and identity, the controller or layout
+relationship, the segments, and the frozen-face slot mapping. A multi-member
+source is never flattened into a structureless tag or a single total. The
+default supported shapes are the ordinary single block and the vanilla double
+chest; additional member structure exists only through explicitly registered
+member providers, and arbitrary mod multipart discovery is not promised. Client
+presentation subjects never establish or widen the server inventory structure or permission.
 
-The default block-entity candidates are a root `Items` list and an
-`Inventory.Items` list, whose wrapper may also carry `Size`; other fields and
-custom counts require an adapter port, and no arbitrary NBT recursion guess is
-performed. A 1.21.1 item entry is its ID, count and components. Present
+The existing NBT snapshot extension and custom `Counter` registration remain
+caller-trusted and lazy. A counter runs on consuming reads, not at capture,
+receives an isolated payload copy, and retains member-local slot mapping and
+authoritative long amounts. Registration or a field-path descriptor alone
+neither authorizes full-save discovery nor certifies arbitrary counter/decoder
+work or atomic item semantics. A concrete special adapter must supply its own
+bounded extraction and the capture evidence required by the shared contract.
+
+For supplied NBT snapshots, the recognized item shapes are a root `Items` list
+and an `Inventory.Items` list, whose wrapper may also carry `Size`; other fields
+and custom counts require an adapter port, and no arbitrary NBT recursion guess
+is performed. A 1.21.1 item entry is its ID, count and components. Present
 candidates with an ambiguous reading are never summed, and a missing candidate
 is never an empty result: the ambiguity is recorded as a diagnostic and the
 source falls back to its unsupported live route. An explicitly empty recognized
@@ -350,7 +406,7 @@ keeps its existing live route, whose completed non-atomic observations may
 remain uncertain. Temporary memory pressure may defer a capture and must not be
 reported as a completed or empty snapshot. Limit and failure events keep fixed
 work, the structure guard and the finite shared memory, and are logged at low
-frequency with the reason and the source context; raw NBT is never dumped.
+frequency with the reason and the source contextd.
 
 ## Budgets, queues and memory
 
@@ -380,8 +436,9 @@ Changing a size ceiling never rewrites marker identity, lifetime, audience or
 source binding. Lowering a ceiling fences obsolete publication first and then
 monotonically reprojects the retained detached display through the existing
 ladder; it does not recapture the container, recompute identity, or discard
-paid scan progress. A complete-size strip uses the existing per-ID fold and
-group replacement, preserving counts and the last completed tracking totals.
+paid scan progress. Even a complete display strip preserves exact identity,
+selection meaning, counts and the last completed tracking totals; it cannot
+initiate a per-ID fold or undo an existing aggregate.
 The offer handoff for an updated limit precedes any replacement data: a
 successful handoff publishes the new effective pair before replacement data,
 while a failed handoff leaves the previous data fenced; affected cuts receive
@@ -402,11 +459,14 @@ by the parse work that consumes a captured source snapshot, and a source with no
 snapshot support keeps its live route and is charged by its live slots. Snapshot
 capture, copy and freeze are bounded instead by fixed work, the structure guard,
 and the finite shared memory; capture is never a free or unbounded operation.
-The allowance guarantees no provider wall-clock time, and provider calls need
-their own independent safety bound. An unlimited mode is an explicit mode that
-removes only the configurable slot cap: the finite internal work and memory
-guard and both logical quotas survive, and unlimited is never implemented as a
-sentinel, integer overflow, unbounded array, or unbounded work loop.
+Owned item processing and audited calls obey the pre-copy, encoding and hashing
+admission boundary owned by
+[shared accounting](shared_sources.md#cost-accounting). The live compatibility
+trust boundary is owned by [provider safety](#provider-layer-and-safety). An
+unlimited mode is an explicit mode that removes only the configurable slot cap:
+the finite internal work and memory guard and both logical quotas survive, and
+unlimited is never implemented as a sentinel, integer overflow, unbounded array,
+or unbounded work loop.
 
 Pending memory is a single finite server-wide bound covering preview and
 tracking together, configurable to a finite hard cap; it is not a per-queue
@@ -438,6 +498,17 @@ reset per fragment or per target, and the per-fragment cap is not a separate
 free allowance. The initial push for a new Ping is exempt only from the
 resynchronization cooldown, never from the byte budget.
 
+Budget-delay monitoring observes preview and tracking in their separate
+accounting periods, not once per ingress request, tick or fragment. Shared
+physical/decode slots are counted once for the attempted shared work; logical
+consumption is counted for its client or target quota subject, not multiplied
+by recipients. Known remaining slots come from the owned observation's coverage
+and consumed cursor, including empty slots; without known coverage the quantity
+is unknown. Publication reports its actual entry, frame or measured-byte work,
+not an inferred slot count. The event, warning, continuous-delay and notice
+semantics are owned by
+[shared sources](shared_sources.md#budget-delay-monitoring).
+
 ## Provider layer and safety
 
 The provider layer covers the vanilla container and worldly-container contracts,
@@ -449,6 +520,21 @@ registry ID, and its version, loaded-member, controller-alias and
 per-member-layout rules are owned by
 [Create integration](../../integrations/create.md#vault-inventory-provider). It
 is not a general container solution and does not cover every container.
+
+Audited adapters preserve the selected face, ordered member and segment-local
+slot layout, and the provider's authoritative long amount independently of an
+item exemplar's stack count. Certification follows the concrete read graph and
+its helpers and delegates; compatible inherited or composed implementations may
+qualify, while an interface or registry namespace alone neither certifies nor
+excludes a provider. A wrapper never widens the underlying member or face scope.
+
+Existing unverified mod-provider live support remains available under explicit
+external trust in the provider's getter and lookup internals. Its admitted call
+count, guarded returned-data processing and uncertified internals follow the
+[shared accounting boundary](shared_sources.md#cost-accounting); known bridge
+conversions are not exempted as external callbacks. This live compatibility
+route does not upgrade eventual evidence to an atomic snapshot. A throwing or
+denied getter is unavailable, never an empty inventory.
 
 Ordinary-block inventory source access is face-scoped. Every preview, tracking
 and recovery read uses the face frozen at press time by
@@ -506,7 +592,7 @@ The same safety rules apply to recovery probing.
 ## Status presentation
 
 Inventory status is presented separately from item data: updating, unknown,
-uncertain, incomplete, unavailable, invalid, component-too-long, and expired
+uncertain, incomplete, unavailable, invalid, All variants, and expired
 are distinct states with their own semantics. An inventory with no stable
 cursor that cannot finish enumerating within its admitted hard budget ends as
 incomplete, and preview and HUD present that incompleteness explicitly; a

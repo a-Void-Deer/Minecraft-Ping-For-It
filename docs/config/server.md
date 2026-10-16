@@ -21,8 +21,8 @@ The server configuration object is the typed persisted schema. It applies live
 validation, numeric bounds, and fallbacks; those implementation values are
 deliberately not mirrored here.
 
-The five top-level fields other than `pingDistance` and `presentation`, and the
-twenty-one `inventory` administration settings, can also be changed over the
+The six top-level scalar fields other than `pingDistance`, and the twenty-one
+`inventory` administration settings, can also be changed over the
 client/server connection through
 [changing server configuration](../architecture/config/changing-server-config.md).
 Within the `presentation` object, the per-target-type `white`, `black`, and
@@ -43,6 +43,7 @@ exposes the remote settings and the presentation policy controls.
 | `msToRegenerate` | number, milliseconds | Regeneration interval used by the send-rate policy that the server publishes to clients. | Server-authoritative. Rate semantics are owned by [rate policy](../architecture/config/rate-limit.md). |
 | `rateLimit` | number | Send-rate allowance used by the server's per-player create limiter and published to clients as a courtesy policy. | Server-authoritative. Rate semantics are owned by [rate policy](../architecture/config/rate-limit.md). |
 | `syncDuration` | number, seconds | Server-held marker synchronization lifetime used for an accepted create's frozen expiry. | Server-authoritative. A valid positive duration after validation; it has no zero sentinel. Lifetime behavior is owned by [marker lifecycle](../architecture/authority/marker_lifecycle.md). |
+| `budgetDelayNotificationsEnabled` | boolean | Enables administrator system messages for continuously resource-delayed work; disabling it does not disable WARN diagnostics. | Server-authoritative. Message eligibility, timing and lifetime behavior are owned by [shared source monitoring](../architecture/presentation/shared_sources.md#budget-delay-monitoring). |
 | `pingDistance` | number, blocks | Server acceptance range measured from the requester's eye to the authoritative target anchor. | Server-authoritative acceptance setting. It is not a client advertised capture cap; capture composition and acceptance are owned by [range](../architecture/picking/range.md). |
 | `presentation` | object | Per-target-type presentation field policy, sampling limits, and permission/interval overrides for the versioned presentation snapshot. | Server-authoritative. Projection, authorization, and demand-driven capture are owned by [presentation snapshot](../architecture/presentation/presentation_snapshot.md); the nested shape is catalogued below. |
 | `inventory` | object | Server-authoritative inventory preview and tracking budgets, caps, independent send-byte multipliers, and the finite display/frame size scalars. | Server-authoritative. Budget, unlimited-mode, multiplier, size-scalar, and tracking-deadline semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md); the nested shape is catalogued below. |
@@ -222,7 +223,7 @@ grammar, comparison, migration, protection, and recovery rules are owned by
 
 ## Example
 
-Illustrative shape only; the values are samples, not defaults:
+Illustrative shape only.
 
 ```json
 {
@@ -232,6 +233,7 @@ Illustrative shape only; the values are samples, not defaults:
   "msToRegenerate": 250,
   "rateLimit": 10,
   "syncDuration": 15,
+  "budgetDelayNotificationsEnabled": true,
   "pingDistance": 128,
   "presentation": {
     "targetTypes": {

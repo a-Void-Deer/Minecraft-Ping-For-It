@@ -230,20 +230,79 @@ extends the marker lifetime.
 
 ## Server capture and per-recipient projection
 
-The server keeps a world-lifetime lease per active marker and samples sources on
-the server thread. Sampling is demand-driven and bounded: a per-tick work and
-capture budget bounds source scans, the field policy and each adapter's declared
-interval bound how often a source is polled, and a configured interval can only
-raise an adapter's declared minimum, never lower it. Each recipient's projection
-is recomputed independently: a field is sent only when that recipient's session
-manifest includes the field with the same kind, the marker's target-type rule
-set and the recipient's server-derived mask include the field, and the
-recipient's actual vanilla permission level meets the field's required level
-(which a server permission override may replace). A child-denied exact
+The canonical active marker population defines sampling eligibility, not the
+bounded heavy observation cache. Cache capacity does not reject an otherwise
+valid create or permanently exclude an overflow marker from sampling; marker
+admission authority remains owned by
+[target validation](../authority/target_validation.md). Sources are sampled on
+the server thread with bounded discovery, retained cache and per-tick work and
+capture allowances. Each continuously eligible marker and demanded section
+adapter receives repeated fair service opportunities while ticks advance,
+populations are finite at each sweep boundary, and sufficient positive grants
+can service the collectors. A resource-deferred marker/adapter turn resumes
+without restarting earlier adapters, and new creates or metadata refreshes do
+not reset progress through the active population. Dedicated adapters retain
+their independent delivery path.
+
+The field policy and each adapter's declared interval bound how often a source
+is polled; a configured interval can only raise an adapter's declared minimum,
+never lower it. Resumable turns and age-safe cache residency preserve that
+minimum cadence across eviction and reentry: eviction cannot erase an unelapsed
+sampling deadline, including a deadline established by an initial observation.
+Live interval edits preserve already-established deadlines. Rotation above
+cache capacity may delay refreshes according to load; there is no fixed
+wall-clock latency guarantee or promise to observe every marker before every
+finite expiry, and an indivisibly unserviceable collector has no progress
+guarantee.
+
+Each recipient's projection is recomputed independently: a field is sent only
+when that recipient's session manifest includes the field with the same kind,
+the marker's target-type rule set and the recipient's server-derived mask include
+the field, and the recipient's actual vanilla permission level meets the field's
+required level (which a server permission override may replace). A child-denied exact
 reference is never annotated even when its root field is projected, and the
-parent value stays complete. A failed or unavailable
-optional source cannot break Basic or another adapter; the last demanded values
-are retained with a stale marker instead.
+parent value stays complete.
+
+An absent or evicted observation and a budget-deferred turn are not failed
+captures: they neither replace a section with empty fresh data nor manufacture
+staleness. An actual failed capture retains each known recipient's own last
+still-authorized projection as stale, even after cache eviction; recipient
+projections are never combined into a neutral source observation. A failed or
+unavailable optional source cannot break Basic or another adapter. A successful
+fresh capture replaces the whole section, and a legitimate empty demand clears
+it without pretending that a source was captured.
+
+Revocation immediately prunes each recipient's retained fields and selection
+annotations, including when fresh authorization is first observed during a
+metadata refresh before a reset. Cached replay and later loosening cannot
+restore those pruned fields or regenerate their annotations from the marker's
+selections; only a successful fresh capture under the new authorization can
+restore them. Failed captures and empty-demand clears do not authorize that
+restoration. Initial delivery, baseline replay and metadata refresh obey the
+same no-resurrection rule.
+
+Negotiation and policy resets schedule read-free baseline paging over the
+canonical active population, including markers absent from the heavy cache;
+total baseline discovery remains bounded across ready sessions.
+A newly ready member of a marker's frozen audience remains eligible; expiry and
+audience are rechecked at delivery. The baseline uses an authorized cached
+observation, that recipient's still-authorized prior projection, or explicitly
+empty stale Basic when neither exists. The atomic `CREATED` Basic initial must
+be delivered for the current view before optional sections or inventory data.
+A replayed initial must satisfy the same atomic acceptance contract as a new
+initial; pruning is not bypassed to make a cached receipt acceptable.
+Markers created after a baseline's population boundary retain their immediate
+ready-recipient publication path. Baselines announce the canonical store's
+recipient winners, never cache winners, and session revisions remain monotonic
+across eviction, reentry and reset.
+
+Metadata refresh is likewise read-free and does not advance sampling cadence;
+it updates only already-known recipients using their retained owner name. A
+first baseline may obtain an online owner's existing profile name without a
+world or source read. Baseline paging and metadata replay do not add sampling
+allowances or change marker identity, frozen audience or lifetime. Monitoring
+of actual resource-delayed work, including property previews, is owned by
+[shared sources](shared_sources.md#budget-delay-monitoring).
 
 Permission evaluation is replaceable and independent of field policy and
 projection. The default compares the recipient's actual level to the required
