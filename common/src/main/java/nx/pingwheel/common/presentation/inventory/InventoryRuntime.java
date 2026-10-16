@@ -28,6 +28,7 @@ import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SourceAccess;
 import nx.pingwheel.common.presentation.source.SourceKey;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 /** One server-lifetime owner of physical rounds, logical coverage and retained admission. */
 public final class InventoryRuntime implements AutoCloseable {
@@ -296,6 +297,11 @@ public final class InventoryRuntime implements AutoCloseable {
 	private void physicalProgress(Round round) {
 		if (round.physicalDelay != null) round.physicalDelay.progress(cycle(round.physicalModule));
 	}
+	private void warn(String operation, Consumer consumer, Round round, Throwable failure) {
+		InventoryCaptureDiagnostics.warn("runtime/" + operation, consumer.input, round == null ? null : round.key,
+			() -> "consumer=" + consumer.diagnosticId + " subject=" + consumer.subject
+				+ " round=" + (round == null ? "none" : round.sequence) + " tick=" + tick, failure);
+	}
 	private int providerReasons(long probes, long work) {
 		return (physical.remaining(InventorySourceAccess.PROBES) < probes ? Reason.PROBE_WORK.bit() : 0)
 			| (physical.remaining(InventorySourceAccess.PROVIDER_WORK) < work ? Reason.PROVIDER_WORK.bit() : 0);
@@ -348,7 +354,11 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (ticket.isEmpty()) return Optional.empty();
 		try (var grant = ticket.get()) {
 			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK)); return work.get();
-		} catch (RuntimeException | LinkageError failure) { return Optional.empty(); }
+		} catch (RuntimeException | LinkageError failure) {
+			if (!InventoryCaptureDiagnostics.expectedFailure(failure))
+				RateLimitedDiagnostics.warn("inventory/runtime/preflight", work.getClass().getName(), () -> "tick=" + tick, failure);
+			return Optional.empty();
+		}
 		}
 	}
 	public void advance(long now, InventorySettings settings) {
@@ -518,6 +528,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			if (round.physicalDelay != null) round.physicalDelay.cancel();
 			return InventorySourceAccess.Preparation.INCOMPLETE;
 		} catch (RuntimeException | LinkageError unavailable) {
+			warn("snapshot-prepare", consumer, round, unavailable);
 			if (round.physicalDelay != null) round.physicalDelay.cancel();
 			return InventorySourceAccess.Preparation.UNAVAILABLE;
 		}
@@ -582,7 +593,10 @@ public final class InventoryRuntime implements AutoCloseable {
 				if (!valid) retireInvalid(input);
 				return Optional.of(valid);
 			}
-		} catch (RuntimeException | LinkageError unavailable) { retireInvalid(input); return Optional.of(false); }
+		} catch (RuntimeException | LinkageError unavailable) {
+			InventoryCaptureDiagnostics.warn("runtime/input-probe", input, null, () -> "tick=" + tick, unavailable);
+			retireInvalid(input); return Optional.of(false);
+		}
 		}
 	}
 	/** Checks the actual observation being published, including the completed result retained during a new sweep. */
@@ -613,7 +627,7 @@ public final class InventoryRuntime implements AutoCloseable {
 						used++; // attempted validity calls remain charged, including exceptions and invalid retirement
 						boolean valid;
 						try { valid = !round.closed && round.handle.evidenceValid(); }
-						catch (RuntimeException | LinkageError unavailable) { valid = false; }
+						catch (RuntimeException | LinkageError unavailable) { warn("evidence-probe", consumer, round, unavailable); valid = false; }
 						if (!valid) { retire(round, unavailable(consumer.input.viewKey())); return Optional.of(false); }
 					}
 					if (consumer.probeDelay.outstanding()) consumer.probeDelay.progress(cycle(consumer));
@@ -748,7 +762,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private boolean bindingEvidenceValid(Consumer consumer) {
 		try { return consumer.bindingEvidence == null || consumer.bindingEvidence.evidenceValid(); }
-		catch (RuntimeException | LinkageError unavailable) { return false; }
+		catch (RuntimeException | LinkageError unavailable) { warn("binding-probe", consumer, consumer.round, unavailable); return false; }
 	}
 	/** Cache consumption checks its own original binding, not only the peer whose physical sweep was shared. */
 	private InventorySourceAccess.Preparation checkBindingEvidence(Consumer consumer) {
@@ -783,7 +797,7 @@ public final class InventoryRuntime implements AutoCloseable {
 					InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 				boolean valid;
 				try { valid = !handoff.closed && handoff.handle.evidenceValid(); }
-				catch (RuntimeException | LinkageError unavailable) { valid = false; }
+				catch (RuntimeException | LinkageError unavailable) { warn("handoff-probe", consumer, handoff, unavailable); valid = false; }
 				if (!valid) {
 					Observation invalid = unavailable(consumer.input.viewKey());
 					retire(handoff, invalid); consumer.pendingObservation = invalid;
@@ -1299,6 +1313,8 @@ public final class InventoryRuntime implements AutoCloseable {
 				round.handle.tightenDisplay(ceiling);
 			}
 		} catch (RuntimeException | LinkageError unavailable) {
+			InventoryCaptureDiagnostics.warn("runtime/source-projection", round.input, round.key,
+				() -> "round=" + round.sequence + " ceiling=" + ceiling + " tick=" + tick, unavailable);
 			unsupportedSourceProjection(round);
 		}
 		return 0;

@@ -55,6 +55,38 @@ class InventoryMinecraftSnapshotCaptureTest {
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
+	@Test void normalLockLootUnloadAndTopologyLossDoNotProduceWarnings() {
+		World world = new World(); Chest chest = world.addChest(FIRST, Blocks.CHEST.defaultBlockState(), Items.STONE, 1);
+		var input = input("minecraft:chest", FIRST); var admitted = view(world, input);
+		try (var capture = new InventoryMinecraftDiagnosticsTest.Capture(); var source = source(world, input, admitted, () -> view(world, input))) {
+			chest.lock = new LockCode("locked"); assertFalse(source.valid()); chest.lock = LockCode.NO_LOCK;
+			chest.setLootTable(ResourceKey.create(Registries.LOOT_TABLE, ResourceLocation.parse("minecraft:chests/simple_dungeon")));
+			assertFalse(source.valid()); chest.setLootTable(null);
+			world.loaded.clear(); assertFalse(source.valid()); world.loaded.add(FIRST);
+			world.blocks.put(FIRST, Blocks.DIRT.defaultBlockState()); assertFalse(source.valid());
+			assertTrue(capture.events.isEmpty()); assertEquals(0, chest.itemReads);
+		}
+	}
+
+	@Test void throwingFrozenAuthorityCallbackReportsItsCauseBeforeCaptureBecomesUnavailable() {
+		World world = new World(); boolean[] broken = {false};
+		Chest chest = new Chest(FIRST, Blocks.CHEST.defaultBlockState()) {
+			@Override public LockCode pingforit$inventoryLock() {
+				if (broken[0]) throw new IllegalStateException("lock accessor failed", new RuntimeException("lock accessor cause"));
+				return super.pingforit$inventoryLock();
+			}
+		};
+		chest.setItem(0, new ItemStack(Items.STONE)); world.put(FIRST, Blocks.CHEST.defaultBlockState(), chest);
+		var input = input("minecraft:chest", FIRST); var admitted = view(world, input);
+		try (var capture = new InventoryMinecraftDiagnosticsTest.Capture(); var source = source(world, input, admitted, () -> view(world, input))) {
+			var plan = source.snapshotPlan().orElseThrow(); chest.afterRead = () -> broken[0] = true;
+			assertThrows(InventorySourceUnavailableException.class, plan::capture);
+			assertEquals(1, chest.itemReads); assertEquals(1, plan.attemptedPhysicalReads());
+			assertEquals(1, capture.events.size()); assertTrue(capture.message().contains("lock accessor failed"));
+			assertTrue(capture.message().contains("lock accessor cause")); assertTrue(capture.message().contains("inventory-snapshot-authority"));
+		}
+	}
+
 	@Test void singleChestReadsEveryPhysicalSlotWithoutSavingOrCollectingComponents() {
 		World world = new World();
 		Chest first = world.addChest(FIRST, Blocks.CHEST.defaultBlockState(), Items.DIAMOND, 6);

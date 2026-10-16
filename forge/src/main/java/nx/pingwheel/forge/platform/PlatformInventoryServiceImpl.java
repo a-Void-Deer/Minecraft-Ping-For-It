@@ -22,6 +22,8 @@ import net.minecraft.world.Container;
 import net.minecraft.world.WorldlyContainer;
 
 import nx.pingwheel.common.platform.IPlatformInventoryService;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 /**
  * Forge item-handler provider for the platform inventory bridge.
@@ -77,6 +79,10 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			BlockPos position = pos.immutable();
 			return handler.map(found -> new HandlerAccess(found, () -> memberGate.test(position)));
 		} catch (RuntimeException | LinkageError failure) {
+			if (!(failure instanceof InventorySourceUnavailableException))
+				RateLimitedDiagnostics.warn("inventory-capability-find", "forge:item_handler",
+					() -> "position=" + pos + " face=" + side + " worldClass=" + world.getClass().getName()
+						+ " blockEntityClass=" + blockEntity.getClass().getName(), failure);
 			return Optional.empty();
 		}
 	}
@@ -101,7 +107,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			this.raw = Objects.requireNonNull(raw);
 			this.scratch = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.Scratch(this.raw);
 		}
-		private void requireMember() { if (!memberGate.getAsBoolean()) throw new IllegalStateException("inventory handler outside the read scope"); }
+		private void requireMember() { if (!memberGate.getAsBoolean()) throw new InventorySourceUnavailableException("inventory handler outside the read scope"); }
 		@Override public Access guardedBy(BooleanSupplier gate) { var access = new HandlerAccess(handler, () -> memberGate.getAsBoolean() && gate.getAsBoolean(), raw); access.residentScope = residentScope; return access; }
 		@Override public Access scopedResidents(ResidentScope scope) { var access = new HandlerAccess(handler, memberGate, raw); access.residentScope = Objects.requireNonNull(scope); return access; }
 		private Container wrapper() {
@@ -142,10 +148,10 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			Container container = wrapper(); if (container == null) return false;
 			if (residentScope == null) return false; // compatibility-only LIVE/EXTERNAL_TRUST
 			if (!residentScope.valid())
-				throw new IllegalStateException("inventory wrapper delegate outside admitted source");
+				throw new InventorySourceUnavailableException("inventory wrapper delegate outside admitted source");
 			nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.requireScope(container, residentScope::allows, scratch);
 			if (handler instanceof SidedInvWrapper && ResidentReads.field(handler, SidedInvWrapper.class, "side", Direction.class) != residentScope.face())
-				throw new IllegalStateException("inventory wrapper changed frozen face");
+				throw new InventorySourceUnavailableException("inventory wrapper changed frozen face");
 			boolean inheritedRead = handler instanceof InvWrapper
 				? ResidentReads.inherits(handler, InvWrapper.class, "getStackInSlot", int.class)
 				: ResidentReads.inherits(handler, SidedInvWrapper.class, "getStackInSlot", int.class);
@@ -161,14 +167,14 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 				// otherwise stays LIVE and uncertified.
 				if (handler instanceof InvWrapper && inheritedRead
 					&& !nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.identityMapping(container, residentScope.face()))
-					throw new IllegalStateException("inventory wrapper changed frozen local mapping");
+					throw new InventorySourceUnavailableException("inventory wrapper changed frozen local mapping");
 				return false;
 			}
 			boolean audited = residentScope.audited(container) && nativeWrapper;
 			if (!nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.mappingEquals(container, residentScope.face(), expected)
 				|| handler instanceof InvWrapper
 				&& !nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.identityMapping(container, residentScope.face()))
-				throw new IllegalStateException("inventory wrapper changed frozen local mapping");
+				throw new InventorySourceUnavailableException("inventory wrapper changed frozen local mapping");
 			return audited;
 		}
 		/**
@@ -198,20 +204,25 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		private void authorizeResolved(Container delegate) {
 			requireMember();
 			if (!residentScope.valid())
-				throw new IllegalStateException("inventory wrapper delegate outside admitted source");
+				throw new InventorySourceUnavailableException("inventory wrapper delegate outside admitted source");
 			nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.requireScope(delegate, residentScope::allows, scratch);
 			var expected = residentScope.slots(delegate);
 			if (expected != null) {
 				if (!nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.mappingEquals(delegate, residentScope.face(), expected))
-					throw new IllegalStateException("inventory wrapper changed frozen local mapping");
+					throw new InventorySourceUnavailableException("inventory wrapper changed frozen local mapping");
 				return;
 			}
 			if (!nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.identityMapping(delegate, residentScope.face()))
-				throw new IllegalStateException("inventory wrapper changed frozen local mapping");
+				throw new InventorySourceUnavailableException("inventory wrapper changed frozen local mapping");
 		}
 		@Override public boolean valid() {
-			try { requireMember(); return true; }
-			catch (RuntimeException | LinkageError unavailable) { return false; }
+			try { return memberGate.getAsBoolean(); }
+			catch (RuntimeException | LinkageError unavailable) {
+				if (!(unavailable instanceof InventorySourceUnavailableException))
+					RateLimitedDiagnostics.warn("inventory-handler-valid", handler.getClass().getName(),
+						() -> "handlerClass=" + handler.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
+				return false;
+			}
 		}
 
 		/** Scoped known wrapper whose concrete size getter is the inherited native forwarding method. */
@@ -233,18 +244,18 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			Container delegate = wrapper();
 			requireMember();
 			if (!residentScope.valid())
-				throw new IllegalStateException("inventory wrapper delegate outside admitted source");
+				throw new InventorySourceUnavailableException("inventory wrapper delegate outside admitted source");
 			nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.requireScope(delegate, residentScope::allows, scratch);
 			boolean inheritedRead = ResidentReads.inherits(handler, InvWrapper.class, "getStackInSlot", int.class);
 			var expected = residentScope.slots(delegate);
 			if (expected != null) {
 				if (!nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.mappingEquals(delegate, residentScope.face(), expected)
 					|| !nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.identityMapping(delegate, residentScope.face()))
-					throw new IllegalStateException("inventory wrapper changed frozen local mapping");
+					throw new InventorySourceUnavailableException("inventory wrapper changed frozen local mapping");
 				return delegate.getContainerSize();
 			}
 			if (inheritedRead && !nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.identityMapping(delegate, residentScope.face()))
-				throw new IllegalStateException("inventory wrapper changed frozen local mapping");
+				throw new InventorySourceUnavailableException("inventory wrapper changed frozen local mapping");
 			return delegate.getContainerSize();
 		}
 		@Override
@@ -308,7 +319,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			requireMember();
 			ItemStack stack = content(slot);
 			requireMember();
-			if (residentScope != null && !residentScope.valid()) throw new IllegalStateException("inventory source revoked during resident read");
+			if (residentScope != null && !residentScope.valid()) throw new InventorySourceUnavailableException("inventory source revoked during resident read");
 			return ResidentReads.stack(stack);
 		}
 

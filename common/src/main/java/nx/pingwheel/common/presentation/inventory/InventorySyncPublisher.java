@@ -26,6 +26,7 @@ import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 /** Actual bounded dedicated publication. Queued cuts remain immutable until fully transmitted. */
 public final class InventorySyncPublisher implements SyncPublisher, AutoCloseable {
@@ -185,7 +186,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 				if (handoff != null) {
 					boolean accepted;
 					try { accepted = handoff.accepted(control.state.context.recipient(), control.packet); }
-					catch (RuntimeException callbackFailure) { accepted = false; }
+					catch (RuntimeException callbackFailure) { warn("control-handoff", control.state, control.packet, callbackFailure); accepted = false; }
 					if (accepted) dataGates.remove(control.state.context.recipient());
 				}
 			}
@@ -659,8 +660,18 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			// Budget admission resolved even if the independent transport handoff fails.
 			if (state.monitored) stage.progress(cycle(state));
 			try { transport.send(state.context.recipient(), packet); return true; }
-			catch (RuntimeException failure) { return false; } // conservatively charged; same immutable part retries
+			catch (RuntimeException failure) {
+				warn("transport-send", state, packet, failure);
+				return false; // conservatively charged; same immutable part retries
+			}
 		}
+	}
+	private void warn(String operation, State state, InventoryS2CPacket packet, Throwable failure) {
+		RateLimitedDiagnostics.warn("inventory/publisher/" + operation, transport.getClass().getName() + "/" + packet.kind(),
+			() -> "kind=" + packet.kind() + " request=" + packet.requestId() + " recipient=" + state.context.recipient()
+				+ " marker=" + packet.markerId() + " epoch=" + packet.epoch() + " presentationEpoch=" + packet.presentationEpoch()
+				+ " view=" + packet.view() + " baseline=" + packet.baselineId() + " stateRevision=" + packet.statusRevision()
+				+ " watermark=" + packet.watermark() + " part=" + packet.partIndex() + "/" + packet.partCount(), failure);
 	}
 	@Override public void cancel(Context context) {
 		State state = states.get(key(context));

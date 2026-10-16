@@ -5,6 +5,7 @@ import java.util.BitSet;
 import java.util.Objects;
 
 import nx.pingwheel.common.config.InventoryLimits;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 /**
  * Server-thread-confined bounded physical observation cache for one
@@ -118,6 +119,9 @@ public final class InventoryScanBroker implements AutoCloseable {
 				state = InventoryScanner.State.INCOMPLETE;
 			}
 		} catch (RuntimeException | LinkageError failure) {
+			if (!InventoryCaptureDiagnostics.expectedFailure(failure))
+				RateLimitedDiagnostics.warn("inventory/broker-physical-step", source.getClass().getName(),
+					() -> "sourceClass=" + source.getClass().getName() + " scanned=" + scanned + " total=" + total + " maximumSlots=" + maximumSlots, failure);
 			state = InventoryScanner.State.UNAVAILABLE;
 			clearCache();
 		}

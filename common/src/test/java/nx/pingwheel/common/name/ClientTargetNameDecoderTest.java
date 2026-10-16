@@ -13,9 +13,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.util.SafeExceptionReport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,7 +64,7 @@ class ClientTargetNameDecoderTest {
 	}
 
 	@Test
-	void decodeFailureLogsOnlyMarkerIdAndExceptionClass() {
+	void decodeFailureLogsMarkerIdAndBoundedExceptionDetails() {
 		List<LogRecord> records = new ArrayList<>();
 		ClientTargetNameDecoder.setLogger((message, args) -> records.add(new LogRecord(message, args)));
 
@@ -76,19 +76,12 @@ class ClientTargetNameDecoderTest {
 		assertEquals(1, records.size());
 		LogRecord record = records.get(0);
 
-		// Safe fields only: the marker id and an exception class name. The
-		// payload JSON must never appear in the message or the arguments.
-		assertEquals("target name decode failed: markerId={} reason={}", record.message());
-		assertEquals(2, record.args().length);
-		assertEquals(42L, record.args()[0]);
-		assertTrue(String.valueOf(record.args()[1]).endsWith("Exception"), () -> String.valueOf(record.args()[1]));
-		assertFalse(record.message().contains("translate"), () -> record.message());
-		assertFalse(record.message().contains("pingforit.target.here"), () -> record.message());
-
-		for (Object arg : record.args()) {
-			assertFalse(String.valueOf(arg).contains("translate"), () -> String.valueOf(arg));
-			assertFalse(String.valueOf(arg).contains("pingforit.target.here"), () -> String.valueOf(arg));
-		}
+		assertTrue(record.message().contains("markerId=42"));
+		assertTrue(record.message().contains("Exception"));
+		assertTrue(record.message().contains("\n    at "));
+		assertTrue(record.message().contains("ClientTargetNameDecoder.decode"));
+		assertTrue(record.message().length() <= SafeExceptionReport.MAX_CHARACTERS);
+		assertEquals(0, record.args().length, "No second, unbounded throwable argument");
 	}
 
 	@Test

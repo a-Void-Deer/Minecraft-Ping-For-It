@@ -17,6 +17,7 @@ import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import org.junit.jupiter.api.Test;
+import org.apache.logging.log4j.Level;
 import static org.junit.jupiter.api.Assertions.*;
 
 class InventoryRuntimeTest {
@@ -163,6 +164,28 @@ class InventoryRuntimeTest {
 			var reads = new CostLedger.Counter("inventory/capture_reads", CostLedger.Unit.WORK);
 			assertEquals(captureFailure ? 1 : 0, ledger.used(reads));
 			assertEquals(captureFailure ? 1 : 0, source.captures); assertEquals(0, source.reads.get()); assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void independentPlanDiscoveryReportsOriginalCastAndConsumerRoundWithoutReadingOrLeaking() throws Exception {
+		var settings = InventorySettings.serverDefaults(); var owner = new UUID(41, 50);
+		var failure = new ClassCastException("runtime independent plan cannot cast native source");
+		var closes = new AtomicInteger();
+		var source = new DiscoverySource(input(owner)) {
+			@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan(InventoryValidationBudget.Allowance allowance) {
+				allowance.debit(discoveryStep); throw failure;
+			}
+			@Override public void close() { closes.incrementAndGet(); }
+		};
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture();
+			var runtime = new InventoryRuntime(i -> Optional.of(source), settings.pendingMemoryBytes())) {
+			runtime.advance(0, settings); var consumer = runtime.attach(source.input, new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			assertEquals(InventorySourceAccess.Preparation.UNAVAILABLE, runtime.prepare(consumer));
+			assertEquals(7, itemLedger(runtime).used(itemWorkCounter()), "throwing discovery's admitted prefix remains paid");
+			assertEquals(0, source.captures); assertEquals(0, source.reads.get()); assertEquals(0, runtime.memory().reserved());
+			logs.report("runtime/snapshot-prepare", Level.WARN, failure.getMessage(), "java.lang.ClassCastException", "at " + getClass().getName() + ".independentPlanDiscoveryReportsOriginalCast",
+				"consumer=1", "round=1", "subject=PreviewSubject[client=" + owner, "position=1,2,3", "source=SourceKey[providerId=test");
+			consumer.close(); assertEquals(1, closes.get());
+			assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 		}
 	}
 	@Test void detachedWorkRefusesBeforeAttemptAndPaysThrowingAttemptsWithoutRootMemoryOrProbes() throws Exception {

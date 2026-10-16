@@ -11,6 +11,7 @@ import net.neoforged.neoforge.items.IItemHandler;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotSchemas;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -141,7 +142,7 @@ class CreateVaultInventoryAccessTest {
 		java.util.function.Consumer<BlockPos> afterLoaded = ignored -> {};
 		@Override public String dimension() { return "minecraft:overworld"; }
 		@Override public Member loaded(BlockPos pos) {
-			probes++; loadedPositions.add(pos); Member member = members.get(pos); if (member == null) throw new IllegalStateException("unloaded"); afterLoaded.accept(pos); return member;
+			probes++; loadedPositions.add(pos); Member member = members.get(pos); if (member == null) throw new InventorySourceUnavailableException("unloaded"); afterLoaded.accept(pos); return member;
 		}
 		static World pair() { var world = new World(); var first = new Member() {
 			@Override public boolean isController() { world.controllerReads++; return super.isController(); }

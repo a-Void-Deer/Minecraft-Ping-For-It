@@ -171,7 +171,7 @@ public final class InventoryValidationBudget {
 	}
 	/** Compare callback-returned evidence before touching its expanded members. */
 	public static void requireLayout(InventorySnapshotLayout expected, InventorySnapshotLayout current) {
-		if (!java.util.Objects.equals(expected, current)) throw new IllegalStateException("inventory provider layout changed");
+		if (!java.util.Objects.equals(expected, current)) throw new InventorySourceUnavailableException("inventory provider layout changed");
 	}
 	public static Cost layoutlessDiscovery() { return bookkeeping().plus(fixed(null)).plus(layoutlessView().times(3)); }
 	public static Cost viewValidation(InventorySnapshotLayout layout, boolean vault, long frozenLocks) {

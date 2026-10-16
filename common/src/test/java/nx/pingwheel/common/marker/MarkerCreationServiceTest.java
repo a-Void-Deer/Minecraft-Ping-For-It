@@ -1,10 +1,20 @@
 package nx.pingwheel.common.marker;
 
 import org.junit.jupiter.api.Test;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.config.Property;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -25,6 +35,7 @@ import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.util.RateLimitedDiagnosticsTestScope;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -479,15 +490,33 @@ class MarkerCreationServiceTest {
 		var intent = PresentationPropertyIntent.of(PresentationPropertyRef.root("minecraft:basic", "minecraft:block.state"),
 			new PresentationValue.RecordValue(Map.of()), "request");
 		var transaction = transaction(provider);
-		assertRejected(service.createWithExternalTransaction(transaction, OWNER, candidate, "attention", 10L,
-			110L, List.of(RECIPIENT), List.of(intent),
-			(target, type, owner, recipients, intents) ->
-				MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_PING_TYPE)),
-			MarkerRejectReason.INVALID_PING_TYPE);
-		assertRejected(service.createWithExternalTransaction(transaction, OWNER, candidate, "attention", 10L,
-			110L, List.of(RECIPIENT), List.of(intent),
-			(target, type, owner, recipients, intents) -> { throw new IllegalStateException("source unavailable"); }),
-			MarkerRejectReason.INVALID_REQUEST);
+		var failure = new IllegalStateException("source unavailable payload={name:Alice}",
+			new IllegalArgumentException("cause registry=provider:machine"));
+		failure.setStackTrace(new StackTraceElement[] {
+			new StackTraceElement("provider.PropertySource", "read", "PropertySource.java", 37)
+		});
+		failure.addSuppressed(new IllegalStateException("close failed position=(1,2,3)"));
+		try (var diagnostics = new DiagnosticCapture()) {
+			assertRejected(service.createWithExternalTransaction(transaction, OWNER, candidate, "attention", 10L,
+				110L, List.of(RECIPIENT), List.of(intent),
+				(target, type, owner, recipients, intents) ->
+					MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_PING_TYPE)),
+				MarkerRejectReason.INVALID_PING_TYPE);
+			assertTrue(diagnostics.events.isEmpty(), "An ordinary admission rejection is not a warning");
+			assertRejected(service.createWithExternalTransaction(transaction, OWNER, candidate, "attention", 10L,
+				110L, List.of(RECIPIENT), List.of(intent),
+				(target, type, owner, recipients, intents) -> { throw failure; }),
+				MarkerRejectReason.INVALID_REQUEST);
+			assertEquals(1, diagnostics.events.size());
+			LogEvent event = diagnostics.events.getFirst();
+			assertEquals(Level.WARN, event.getLevel());
+			String report = event.getMessage().getFormattedMessage();
+			assertTrue(report.contains("source unavailable payload={name:Alice}"));
+			assertTrue(report.contains("cause registry=provider:machine"));
+			assertTrue(report.contains("close failed position=(1,2,3)"));
+			assertTrue(report.contains("provider.PropertySource.read (PropertySource.java:37)"));
+			assertTrue(report.contains(committed.providerLocator()), "Diagnose the committed read binding, not just its candidate");
+		}
 		assertEquals(2, provider.releaseCalls);
 		assertEquals(0, store.size());
 	}
@@ -667,6 +696,37 @@ class MarkerCreationServiceTest {
 	}
 
 	// --- fakes -------------------------------------------------------------------
+
+	private static final class DiagnosticCapture implements AutoCloseable {
+		private final Logger logger = (Logger) LogManager.getLogger("pingforit");
+		private final LoggerContext context = logger.getContext();
+		private final Configuration configuration = context.getConfiguration();
+		private final LoggerConfig previous = configuration.getLoggers().get(logger.getName());
+		private final List<LogEvent> events = new ArrayList<>();
+		private final RateLimitedDiagnosticsTestScope diagnostics;
+		private final AbstractAppender appender = new AbstractAppender(
+			"marker-admission-diagnostics", null, null, true, Property.EMPTY_ARRAY) {
+			@Override public void append(LogEvent event) { events.add(event.toImmutable()); }
+		};
+
+		private DiagnosticCapture() {
+			appender.start();
+			LoggerConfig capture = new LoggerConfig(logger.getName(), Level.WARN, false);
+			capture.addAppender(appender, Level.WARN, null);
+			configuration.removeLogger(logger.getName());
+			configuration.addLogger(logger.getName(), capture);
+			context.updateLoggers();
+			diagnostics = RateLimitedDiagnosticsTestScope.install();
+		}
+
+		@Override public void close() {
+			diagnostics.close();
+			configuration.removeLogger(logger.getName());
+			if (previous != null) configuration.addLogger(logger.getName(), previous);
+			context.updateLoggers();
+			appender.stop();
+		}
+	}
 
 	private static final class RecordingValidator implements AuthoritativeTargetValidator {
 

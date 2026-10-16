@@ -117,7 +117,7 @@ class InventoryAuthorityOrderTest {
 		try (var f = new Fixture()) { f.host.annotation = false; assertEquals(MarkerRejectReason.INVALID_PING_TYPE, f.reject()); assertEquals(0, f.host.store.size()); assertEquals(0, f.backend.runtime().memory().reserved()); }
 	}
 	@Test void publicationFailureAfterCommitKeepsCommittedCreateAndNeverRetriesOrRejects() {
-		try (var f = new Fixture()) {
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var f = new Fixture()) {
 			f.host.failPublication = true;
 			int before = f.reads.get();
 			f.backend.handle(InventoryBackendTest.A, f.selected, 1, f.settings);
@@ -133,6 +133,9 @@ class InventoryAuthorityOrderTest {
 			assertEquals(1, f.host.store.size(), "a replayed outcome never re-creates the marker");
 			assertEquals(events, f.host.events.size(), "a replayed outcome never re-enters admission or publication");
 			assertEquals(InventoryS2CPacket.Kind.SELECTED, f.lastOutcome(1).kind());
+			logs.report("publish-created", org.apache.logging.log4j.Level.ERROR, "publication failed after commit",
+				"committed marker=" + marker.id(), "request=" + f.selected.requestId(), "commit=" + f.selected.commitId(),
+				"owner=" + InventoryBackendTest.A, "at " + getClass().getName() + "$OrderedHost.publishCreated");
 		}
 	}
 	@Test void sidecarQueryFollowsTheCommittedTrackingLeaseAndItsRemoval() {

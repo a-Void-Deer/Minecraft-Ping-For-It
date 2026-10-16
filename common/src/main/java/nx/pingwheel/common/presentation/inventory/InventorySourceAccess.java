@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryCatalogAdmission;
@@ -225,22 +226,40 @@ public final class InventorySourceAccess implements SourceAccess {
 		if (admission.isEmpty()) return false;
 		int used = 0;
 		try (var ticket = admission.get()) {
-			try (var source = resolver.apply(input).orElse(null)) {
-				if (source == null || !source.valid()) return false;
-				if (source.stableCursor()) {
-					if (witness >= source.slots()) return false;
-					used = 1;
-					return catalog == null ? source.matchesSelection(witness, selection) : source.matchesSelection(witness, selection, catalog);
+			String sourceClass = "unresolved";
+			try {
+				Source source = resolver.apply(input).orElse(null);
+				Throwable primary = null;
+				try {
+					if (source != null) sourceClass = source.getClass().getName();
+					if (source == null || !source.valid()) return false;
+					if (source.stableCursor()) {
+						if (witness >= source.slots()) return false;
+						used = 1;
+						return catalog == null ? source.matchesSelection(witness, selection) : source.matchesSelection(witness, selection, catalog);
+					}
+					used = limit;
+					SelectionWitness observed = catalog == null ? source.observeSelection(limit, selection) : source.observeSelection(limit, selection, catalog);
+					if (observed.visited() > limit) return false;
+					used = observed.visited();
+					return observed.present();
+				} catch (RuntimeException | Error failure) {
+					primary = failure;
+					if (failure instanceof CursorlessReadFailure cursorless) used = Math.min(limit, cursorless.attemptedVisits());
+					throw failure;
+				} finally {
+					closeAttemptSource("selection-witness-close", source, primary, () -> "witness=" + witness + " limit=" + limit);
 				}
-				used = limit;
-				SelectionWitness observed = catalog == null ? source.observeSelection(limit, selection) : source.observeSelection(limit, selection, catalog);
-				if (observed.visited() > limit) return false;
-				used = observed.visited();
-				return observed.present();
 			} catch (CursorlessReadFailure failure) {
 				used = Math.min(limit, failure.attemptedVisits());
+				String failedClass = sourceClass;
+				InventoryCaptureDiagnostics.warn("selection-witness", input, null, () -> "sourceClass=" + failedClass + " witness=" + witness + " limit=" + limit, failure);
 				return false;
-			} catch (RuntimeException | LinkageError unavailable) { return false; }
+			} catch (RuntimeException | LinkageError unavailable) {
+				String failedClass = sourceClass;
+				InventoryCaptureDiagnostics.warn("selection-witness", input, null, () -> "sourceClass=" + failedClass + " witness=" + witness + " limit=" + limit, unavailable);
+				return false;
+			}
 			finally { ticket.commit(Map.of(PHYSICAL, (long) used, PROBES, 1L, PROVIDER_WORK, (used + 1L) * PROVIDER_CALL_WORK)); }
 		}
 	}
@@ -248,22 +267,62 @@ public final class InventorySourceAccess implements SourceAccess {
 		return item != null && item.count() > 0 && (selection.aggregate() ? item.key().itemId().equals(selection.itemId())
 			: !item.aggregateRequired() && item.key().equals(selection.exact()));
 	}
+	/** Close once while both failures are available, before expected outcomes are filtered. */
+	private void closeAttemptSource(String operation, Source source, Throwable primary, Supplier<String> detail) {
+		if (source == null) return;
+		try { source.close(); }
+		catch (RuntimeException | LinkageError cleanup) {
+			if (primary == null) throw cleanup;
+			// The owned cursorless wrapper disables suppression. Keep its original
+			// cause as the report carrier without replacing the business exception.
+			Throwable reason = primary instanceof CursorlessReadFailure ? primary.getCause() : primary;
+			if (cleanup != primary && cleanup != reason) reason.addSuppressed(cleanup);
+			if (InventoryCaptureDiagnostics.expectedFailure(primary))
+				InventoryCaptureDiagnostics.warn(operation, input, null,
+					() -> "sourceClass=" + source.getClass().getName() + " primaryClass=" + primary.getClass().getName()
+						+ " primaryReasonClass=" + reason.getClass().getName() + " primaryMessage=" + reason.getMessage() + " " + detail.get(), cleanup);
+		} catch (Error cleanup) {
+			if (primary instanceof Error && !(primary instanceof LinkageError)) {
+				if (cleanup != primary) primary.addSuppressed(cleanup);
+			} else {
+				// A fatal cleanup must never become suppressed under a recoverable
+				// failure which the caller will convert to false/unavailable.
+				if (primary != null && cleanup != primary) cleanup.addSuppressed(primary);
+				throw cleanup;
+			}
+		}
+	}
 	@Override public ResolveResult resolve(PresentationAdapter.DetachedTarget target, ReadScope scope, CostLedger ledger) {
 		if (!scope.viewKey().equals(input.viewKey()) || !matches(target)) return ResolveResult.Unresolved.UNSUPPORTED;
 		var ticket = ledger.tryReserve(Map.of(PROBES, 1L, PROVIDER_WORK, PROVIDER_CALL_WORK));
 		if (ticket.isEmpty()) return ResolveResult.Unresolved.DEFERRED;
+		String sourceClass = "unresolved";
 		try (var grant = ticket.get()) {
 			grant.commit(Map.of(PROBES, 1L, PROVIDER_WORK, PROVIDER_CALL_WORK));
-			if (prepared != null) { prepared.close(); prepared = null; }
+			if (prepared != null) {
+				Source previous = prepared; prepared = null;
+				sourceClass = previous.getClass().getName(); previous.close();
+			}
+			sourceClass = "unresolved";
 			prepared = resolver.apply(input).orElse(null);
 			if (prepared == null) return ResolveResult.Unresolved.UNAVAILABLE;
-			if (!prepared.key().readScope().equals(scope.viewKey())) { prepared.close(); prepared = null; return ResolveResult.Unresolved.UNAVAILABLE; }
+			sourceClass = prepared.getClass().getName();
+			if (!prepared.key().readScope().equals(scope.viewKey())) {
+				Source denied = prepared; prepared = null; denied.close();
+				return ResolveResult.Unresolved.UNAVAILABLE;
+			}
 			return new ResolveResult.Available(new Descriptor(prepared.key(), 1,
 				new Capabilities(!prepared.stableCursor(), prepared.stableCursor(), prepared.version().isPresent())));
 		} catch (RuntimeException | LinkageError unavailable) {
-			try { if (prepared != null) prepared.close(); } catch (RuntimeException | LinkageError cleanup) { unavailable.addSuppressed(cleanup); }
-			finally { prepared = null; }
+			Source failed = prepared; prepared = null;
+			closeAttemptSource("resolve-close", failed, unavailable, () -> "stage=resolve");
+			String failedClass = sourceClass;
+			InventoryCaptureDiagnostics.warn("resolve", input, null, () -> "sourceClass=" + failedClass, unavailable);
 			return ResolveResult.Unresolved.UNAVAILABLE;
+		} catch (Error fatal) {
+			Source failed = prepared; prepared = null;
+			closeAttemptSource("resolve-close", failed, fatal, () -> "stage=resolve");
+			throw fatal;
 		}
 	}
 	@Override public OpenResult open(Descriptor descriptor, ReadScope scope, CostLedger ledger) {
@@ -340,6 +399,7 @@ public final class InventorySourceAccess implements SourceAccess {
 			if (preparation != null) return preparation;
 			InventorySnapshot captured = null;
 			RetainedMemoryLedger.Ticket reserved = null;
+			Throwable preparationFailure = null;
 			try {
 				if (!source.valid(discovery)) return settle(Preparation.INVALID);
 				SnapshotPlan plan = source.snapshotPlan(discovery).orElse(null);
@@ -380,15 +440,18 @@ public final class InventorySourceAccess implements SourceAccess {
 				return Preparation.READY;
 			} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException
 				| nx.pingwheel.common.presentation.inventory.minecraft.InventoryObservationSnapshot.LimitException failure) {
+				preparationFailure = failure;
 				InventoryCaptureDiagnostics.boundExceeded(input, "capture-work-or-structure");
 				return settle(Preparation.INCOMPLETE);
 			} catch (RuntimeException | LinkageError failure) {
-				InventoryCaptureDiagnostics.captureFailed(input, failure);
+				preparationFailure = failure;
 				return settle(Preparation.UNAVAILABLE);
 			} finally {
 				// Fatal Errors propagate, but never strand a captured object or its
 				// provisional retained-memory reservation.
-				releaseUntransferred(captured, reserved);
+				releaseUntransferred(input, descriptor.key(), captured, reserved, preparationFailure);
+				if (preparationFailure != null)
+					InventoryCaptureDiagnostics.warn("capture-failed", input, descriptor.key(), () -> "stage=snapshot-prepare sourceClass=" + source.getClass().getName(), preparationFailure);
 			}
 		}
 
@@ -472,23 +535,23 @@ public final class InventorySourceAccess implements SourceAccess {
 					} catch (InventoryItemBudget.CaptureLimitException exhausted) {
 						InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace");
 						terminal = true;
-						releaseRetained();
+						releaseRetained(exhausted);
 						return snapshotCaptured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
 					} catch (RuntimeException | LinkageError unavailable) {
-						InventoryCaptureDiagnostics.snapshotStepFailed(input, unavailable);
 						terminal = true;
-						releaseRetained();
+						releaseRetained(unavailable);
+						InventoryCaptureDiagnostics.warn("snapshot-step-failed", input, descriptor.key(), () -> "cursor=" + cursor + " slots=" + snapshotSlots, unavailable);
 						return snapshotCaptured(null, CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
 					} finally { ticket.commit(Map.of(PHYSICAL, (long) used, PROBES, 1L, PROVIDER_WORK, (used + 1L) * PROVIDER_CALL_WORK)); }
 				}
 			} catch (RuntimeException | LinkageError unavailable) {
-				InventoryCaptureDiagnostics.snapshotStepFailed(input, unavailable);
 				terminal = true;
-				releaseRetained();
+				releaseRetained(unavailable);
+				InventoryCaptureDiagnostics.warn("snapshot-step-failed", input, descriptor.key(), () -> "cursor=" + cursor + " slots=" + snapshotSlots, unavailable);
 				return snapshotCaptured(null, CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
 			} catch (Error fatal) {
 				terminal = true;
-				try { releaseRetained(); }
+				try { releaseRetained(fatal); }
 				catch (Error cleanup) { if (cleanup != fatal) fatal.addSuppressed(cleanup); }
 				throw fatal;
 			}
@@ -525,7 +588,11 @@ public final class InventorySourceAccess implements SourceAccess {
 						expected = complete ? cursor : -1;
 						terminal = true;
 					} else {
-						if (expected < 0 || source.slots() != expected) throw new IllegalStateException("slot view changed");
+						if (expected < 0 || source.slots() != expected) {
+							// An ordinary topology change is unavailability, not a provider exception.
+							terminal = true;
+							return captured(null, CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
+						}
 						while (cursor < Math.min(expected, MAX_SLOTS) && used < allowance) {
 							used++; // An attempted throwing read still consumes its admission.
 							var item = catalog == null ? source.read(cursor) : source.read(cursor, catalog);
@@ -544,12 +611,14 @@ public final class InventorySourceAccess implements SourceAccess {
 						InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace");
 						return captured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
 					}
+					InventoryCaptureDiagnostics.warn("live-step", input, descriptor.key(), () -> "cursor=" + cursor + " expected=" + expected, failure);
 					return captured(null, CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
 				} catch (InventoryItemBudget.CaptureLimitException exhausted) {
 					InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace");
 					terminal = true;
 					return captured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
 				} catch (RuntimeException | LinkageError unavailable) {
+					InventoryCaptureDiagnostics.warn("live-step", input, descriptor.key(), () -> "cursor=" + cursor + " expected=" + expected, unavailable);
 					terminal = true;
 					return captured(null, CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
 				} finally { ticket.commit(Map.of(PHYSICAL, (long) used, PROBES, 1L, PROVIDER_WORK, (used + 1L) * PROVIDER_CALL_WORK)); }
@@ -564,13 +633,16 @@ public final class InventorySourceAccess implements SourceAccess {
 		}
 
 		private void releaseRetained() {
+			releaseRetained(null);
+		}
+		private void releaseRetained(Throwable primary) {
 			InventorySnapshot held = snapshot;
 			snapshot = null;
 			RetainedMemoryLedger.Ticket heldTicket = snapshotMemory;
 			snapshotMemory = null;
 			Error fatal = null;
-			try { closeRecoverable(held); } catch (Error failure) { fatal = failure; }
-			try { closeRecoverable(heldTicket); }
+			try { closeRecoverable(input, descriptor.key(), held, primary); } catch (Error failure) { fatal = failure; }
+			try { closeRecoverable(input, descriptor.key(), heldTicket, primary); }
 			catch (Error failure) {
 				if (fatal == null) fatal = failure;
 				else if (failure != fatal) fatal.addSuppressed(failure);
@@ -583,7 +655,9 @@ public final class InventorySourceAccess implements SourceAccess {
 				Error fatal = null;
 				try { releaseRetained(); } catch (Error failure) { fatal = failure; }
 				try { source.close(); }
-				catch (RuntimeException | LinkageError unavailable) { /* local provider cleanup must not strand other consumers */ }
+				catch (RuntimeException | LinkageError unavailable) {
+					if (fatal == null) InventoryCaptureDiagnostics.warn("source-close", input, descriptor.key(), () -> "sourceClass=" + source.getClass().getName(), unavailable);
+				}
 				catch (Error failure) {
 					if (fatal == null) fatal = failure;
 					else if (failure != fatal) fatal.addSuppressed(failure);
@@ -593,10 +667,10 @@ public final class InventorySourceAccess implements SourceAccess {
 		}
 	}
 
-	private static void releaseUntransferred(InventorySnapshot snapshot, RetainedMemoryLedger.Ticket ticket) {
+	private static void releaseUntransferred(InventorySourceInput input, SourceKey key, InventorySnapshot snapshot, RetainedMemoryLedger.Ticket ticket, Throwable primary) {
 		Error fatal = null;
-		try { closeRecoverable(snapshot); } catch (Error failure) { fatal = failure; }
-		try { closeRecoverable(ticket); }
+		try { closeRecoverable(input, key, snapshot, primary); } catch (Error failure) { fatal = failure; }
+		try { closeRecoverable(input, key, ticket, primary); }
 		catch (Error failure) {
 			if (fatal == null) fatal = failure;
 			else if (failure != fatal) fatal.addSuppressed(failure);
@@ -604,13 +678,27 @@ public final class InventorySourceAccess implements SourceAccess {
 		if (fatal != null) throw fatal;
 	}
 
-	private static void closeRecoverable(InventorySnapshot snapshot) throws Error {
+	private static void closeRecoverable(InventorySourceInput input, SourceKey key, InventorySnapshot snapshot, Throwable primary) throws Error {
 		if (snapshot == null) return;
-		try { snapshot.close(); } catch (RuntimeException | LinkageError ignored) { /* cleanup must not strand the retained ticket */ }
+		try { snapshot.close(); } catch (RuntimeException | LinkageError failure) {
+			if (primary != null && primary != failure) primary.addSuppressed(failure);
+			// Expected primary outcomes have no exception report of their own; a
+			// failing cleanup still needs its separate, explicitly associated report.
+			if (primary == null || InventoryCaptureDiagnostics.expectedFailure(primary))
+				InventoryCaptureDiagnostics.warn("snapshot-close", input, key,
+					() -> "snapshotClass=" + snapshot.getClass().getName()
+						+ (primary == null ? "" : " primaryClass=" + primary.getClass().getName() + " primaryMessage=" + primary.getMessage()), failure);
+		}
 	}
 
-	private static void closeRecoverable(RetainedMemoryLedger.Ticket ticket) throws Error {
+	private static void closeRecoverable(InventorySourceInput input, SourceKey key, RetainedMemoryLedger.Ticket ticket, Throwable primary) throws Error {
 		if (ticket == null) return;
-		try { ticket.close(); } catch (RuntimeException | LinkageError ignored) { /* ledger cleanup is best-effort but never fatal */ }
+		try { ticket.close(); } catch (RuntimeException | LinkageError failure) {
+			if (primary != null && primary != failure) primary.addSuppressed(failure);
+			if (primary == null || InventoryCaptureDiagnostics.expectedFailure(primary))
+				InventoryCaptureDiagnostics.warn("snapshot-memory-close", input, key,
+					() -> "stage=retained-ticket-close"
+						+ (primary == null ? "" : " primaryClass=" + primary.getClass().getName() + " primaryMessage=" + primary.getMessage()), failure);
+		}
 	}
 }

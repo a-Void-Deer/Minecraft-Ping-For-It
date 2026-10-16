@@ -5,12 +5,12 @@ import java.util.IdentityHashMap;
 import java.util.Set;
 
 /**
- * Pure, bounded exception diagnostics that never inspect throwable payloads.
+ * Pure, bounded exception diagnostics with unredacted throwable messages.
  *
- * <p>Only class names, relationships, and selected source-frame fields are
- * included. In particular, this class never calls {@code getMessage()},
+ * <p>Includes types, messages, source frames, causes and suppressed exceptions.
+ * Message control characters are escaped, not removed. This class never calls
  * {@code getLocalizedMessage()}, {@code toString()}, or a crash-report API.
- * Throwable accessors are treated as hostile and fail soft to a fixed marker.
+ * Throwable accessors are treated as hostile and fail soft to explicit markers.
  */
 public final class SafeExceptionReport {
 	/** Maximum relationship depth, counting the top node as depth zero. */
@@ -21,10 +21,16 @@ public final class SafeExceptionReport {
 	public static final int MAX_FRAMES_PER_NODE = 24;
 	/** Maximum source frames included in the complete report. */
 	public static final int MAX_TOTAL_FRAMES = 128;
+	/** Maximum distinct throwables inspected in the complete report. */
+	public static final int MAX_THROWABLE_NODES = 64;
 	/** Maximum characters in a throwable-only report. */
 	public static final int MAX_CHARACTERS = 12000;
 	/** Maximum characters used for one relationship node. */
 	public static final int MAX_NODE_CHARACTERS = 2400;
+	/** Separate message budget leaves room for the node's source frames. */
+	public static final int MAX_MESSAGE_CHARACTERS = 800;
+	/** Context cannot consume the exception's source-frame budget. */
+	public static final int MAX_CONTEXT_CHARACTERS = 1200;
 
 	private static final String TRUNCATED = "[truncated]";
 	private static final String NODE_TRUNCATED = "    [node truncated]\n";
@@ -38,12 +44,16 @@ public final class SafeExceptionReport {
 	private SafeExceptionReport() {}
 
 	/**
-	 * Formats {@code throwable} without reading its message or converting it to
-	 * text. The result is bounded, deterministic, and safe to pass as one log
-	 * message argument.
+	 * Formats {@code throwable}, including its original message, without invoking
+	 * throwable string conversion. The bounded result is one log message argument;
+	 * callers must not also attach the throwable for unbounded logger rendering.
 	 */
 	public static String format(Throwable throwable) {
-		BoundedText report = new BoundedText(MAX_CHARACTERS, TRUNCATED);
+		return format(throwable, MAX_CHARACTERS);
+	}
+
+	private static String format(Throwable throwable, int maximum) {
+		BoundedText report = new BoundedText(maximum, TRUNCATED);
 
 		if (throwable == null) {
 			report.append("[null throwable]");
@@ -57,16 +67,18 @@ public final class SafeExceptionReport {
 	}
 
 	/**
-	 * Formats a safe caller-provided context and a throwable as one complete
-	 * message. Callers must supply only constant text or safe scalar values;
-	 * this method never derives context from game, network, or throwable data.
+	 * Formats caller-provided detached scalar context and a throwable as one
+	 * bounded message. Ordinary text is not redacted; control characters in the
+	 * context are escaped, and report structure retains real line breaks.
 	 */
-	public static String formatWithContext(String constantContext, Throwable throwable) {
-		BoundedText message = new BoundedText(MAX_CHARACTERS, TRUNCATED);
-		message.append(constantContext == null ? "[null context]" : constantContext);
-		message.append(": ");
-		message.append(format(throwable));
-		return message.value();
+	public static String formatWithContext(String context, Throwable throwable) {
+		String boundedContext = boundedScalar(
+			context == null ? "[null context]" : context,
+			MAX_CONTEXT_CHARACTERS, "[context truncated]"
+		);
+		String separator = ":\n";
+		return boundedContext + separator
+			+ format(throwable, MAX_CHARACTERS - boundedContext.length() - separator.length());
 	}
 
 	private static void renderNode(
@@ -81,15 +93,24 @@ public final class SafeExceptionReport {
 			return;
 		}
 
-		if (!visited.add(throwable)) {
+		if (visited.contains(throwable)) {
 			appendRelationship(report, relationship, CYCLE, safeClassName(throwable));
 			return;
 		}
 
+		if (visited.size() >= MAX_THROWABLE_NODES) {
+			appendRelationship(report, relationship, "[node limit]", null);
+			return;
+		}
+
+		visited.add(throwable);
+
 		BoundedText node = new BoundedText(MAX_NODE_CHARACTERS, NODE_TRUNCATED);
 		node.append(relationship);
 		node.append(": ");
-		node.append(safeClassName(throwable));
+		node.appendEscaped(safeClassName(throwable));
+		node.append(": ");
+		node.append(boundedScalar(lookupMessage(throwable), MAX_MESSAGE_CHARACTERS, "[message truncated]"));
 		node.append("\n");
 		appendFrames(node, throwable, frameBudget);
 		report.append(node.value());
@@ -158,7 +179,7 @@ public final class SafeExceptionReport {
 
 		if (className != null) {
 			report.append(" to ");
-			report.append(className);
+			report.appendEscaped(className);
 		}
 
 		report.append("\n");
@@ -204,16 +225,16 @@ public final class SafeExceptionReport {
 			return;
 		}
 
-		node.append(safeFrameClassName(frame));
+		node.appendEscaped(safeFrameClassName(frame));
 		node.append(".");
-		node.append(safeFrameMethodName(frame));
+		node.appendEscaped(safeFrameMethodName(frame));
 
 		String fileName = safeFrameFileName(frame);
 		int lineNumber = safeFrameLineNumber(frame);
 
 		if (fileName != null) {
 			node.append(" (");
-			node.append(fileName);
+			node.appendEscaped(fileName);
 
 			if (lineNumber >= 0) {
 				node.append(":");
@@ -236,6 +257,21 @@ public final class SafeExceptionReport {
 		} catch (Throwable ignored) {
 			return UNAVAILABLE;
 		}
+	}
+
+	private static String lookupMessage(Throwable throwable) {
+		try {
+			String message = throwable.getMessage();
+			return message == null ? "[null message]" : message;
+		} catch (RuntimeException | LinkageError ignored) {
+			return "[message unavailable]";
+		}
+	}
+
+	private static String boundedScalar(String text, int maximum, String truncationMarker) {
+		BoundedText scalar = new BoundedText(maximum, truncationMarker);
+		scalar.appendEscaped(text);
+		return scalar.value();
 	}
 
 	private static String safeFrameClassName(StackTraceElement frame) {
@@ -350,24 +386,45 @@ public final class SafeExceptionReport {
 			int remaining = maximum - value.length();
 
 			if (text.length() <= remaining) {
-				appendSanitized(text, text.length());
+				value.append(text);
 				return;
 			}
 
 			int contentLimit = Math.max(0, remaining - truncationMarker.length());
-			appendSanitized(text, contentLimit);
+			value.append(text, 0, Math.min(text.length(), contentLimit));
+			// An earlier append may have filled the budget exactly. Make room for
+			// the marker even then, rather than silently losing later report data.
+			value.setLength(Math.min(value.length(), Math.max(0, maximum - truncationMarker.length())));
 
 			int markerLength = Math.min(truncationMarker.length(), maximum - value.length());
 			value.append(truncationMarker, 0, markerLength);
 			truncated = true;
 		}
 
-		private void appendSanitized(String text, int characterLimit) {
-			int count = Math.min(text.length(), Math.max(0, characterLimit));
+		private void appendEscaped(String text) {
+			if (text == null) {
+				append(NULL_VALUE);
+				return;
+			}
 
-			for (int index = 0; index < count; index++) {
+			for (int index = 0; index < text.length() && !truncated; index++) {
 				char character = text.charAt(index);
-				value.append(character < 0x20 || character == 0x7F ? '?' : character);
+				switch (character) {
+					case '\\' -> append("\\\\");
+					case '\n' -> append("\\n");
+					case '\r' -> append("\\r");
+					case '\t' -> append("\\t");
+					case '\b' -> append("\\b");
+					case '\f' -> append("\\f");
+					default -> {
+						if (Character.isISOControl(character)) {
+							String hex = Integer.toHexString(character);
+							append("\\u" + "0".repeat(4 - hex.length()) + hex);
+						} else {
+							append(Character.toString(character));
+						}
+					}
+				}
 			}
 		}
 

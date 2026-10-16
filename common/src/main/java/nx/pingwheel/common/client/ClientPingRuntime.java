@@ -114,6 +114,7 @@ import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
 import nx.pingwheel.common.util.InputUtils;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 import nx.pingwheel.common.math.RaycastPolicy;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -149,9 +150,9 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
 	 * {@code CommonClient}), so interaction and marker state can never leak across
 	 * connections.
  *
- * <p>Logging only ever carries safe fields: token sequences, request/marker
- * ids, ping type ids, target kinds, candidate counts, and reasons. UUIDs,
- * positions, names, and colors are never logged.
+ * <p>Routine interaction decisions use debug logging. Unexpected optional
+ * content failures retain bounded exception and capture detail in rate-limited
+ * WARN reports without changing the established unavailable/fallback outcomes.
  */
 public final class ClientPingRuntime {
 
@@ -768,7 +769,11 @@ public final class ClientPingRuntime {
 			baselineHeld && gestureSkipHold.eligible(frameTimeMillis));
 		if (selectorContent != null && machine.phase() != PingInteractionPhase.IDLE) {
 			try { selectorContent.tick(); }
-			catch (RuntimeException | LinkageError unavailable) { logger.debug("selector content update unavailable"); }
+			catch (RuntimeException | LinkageError unavailable) {
+				RateLimitedDiagnostics.warn("selector-content-update", NativeSelectorContent.class.getName(),
+					() -> "selector content update unavailable capture=" + activeInteraction.currentContext().orElse(null)
+						+ " phase=" + machine.phase() + " tick=" + localTick, unavailable);
+			}
 		}
 		if (machine.phase() == PingInteractionPhase.WHEEL_OPEN) {
 			baselineMenuOpened = true;
@@ -811,11 +816,12 @@ public final class ClientPingRuntime {
 	}
 
 	private void baselineAbort() {
+		CapturedPingContext abortedCapture = activeInteraction.currentContext().orElse(null);
 		machine.abort();
 		if (baselineToken != null) activeInteraction.invalidate(baselineToken);
 		baselineHeld = false;
 		baselineToken = null;
-		finishSelector(true);
+		finishSelector(true, abortedCapture);
 		interactionAccess.disposeMouse(abortingScreenTransition);
 	}
 
@@ -833,11 +839,16 @@ public final class ClientPingRuntime {
 			json -> {
 				if (Game == null || Game.level == null) return null;
 				try { return Component.Serializer.fromJson(json, Game.level.registryAccess()); }
-				catch (RuntimeException | LinkageError invalid) { return null; }
+				catch (RuntimeException | LinkageError invalid) {
+					RateLimitedDiagnostics.warn("selector-content-name-decode", NativeSelectorContent.class.getName(),
+						() -> "selector target name unavailable capture=" + capture + " nameJson=" + json, invalid);
+					return null;
+				}
 			});
 		try { selectorContent.begin(interactionAccess.lifecycle().level()); }
 		catch (RuntimeException | LinkageError unavailable) {
-			logger.debug("selector preview unavailable");
+			RateLimitedDiagnostics.warn("selector-content-init", NativeSelectorContent.class.getName(),
+				() -> "selector preview unavailable capture=" + capture + " tick=" + localTick, unavailable);
 		}
 	}
 
@@ -912,7 +923,12 @@ public final class ClientPingRuntime {
 		var opened = new SpatialSelectorSession<>(ordinary, Map.of(), selectorSettings, fence,
 			(target, bound) -> {
 				try { return content == null ? null : content.read(target, bound); }
-				catch (RuntimeException | LinkageError unavailable) { logger.debug("selector content projection unavailable"); return null; }
+				catch (RuntimeException | LinkageError unavailable) {
+					RateLimitedDiagnostics.warn("selector-content-read", NativeSelectorContent.class.getName(),
+						() -> "selector content projection unavailable target=" + target + " fence=" + bound
+							+ " capture=" + context, unavailable);
+					return null;
+				}
 			}, interactionAccess.listGeometry(selectorStyle));
 		selector = opened;
 		Object level = interactionAccess.lifecycle().level();
@@ -958,6 +974,10 @@ public final class ClientPingRuntime {
 	}
 
 	private void finishSelector(boolean hard) {
+		finishSelector(hard, activeInteraction.currentContext().orElse(null));
+	}
+
+	private void finishSelector(boolean hard, CapturedPingContext closingCapture) {
 		gestureSkipHold.reset();
 		if (preciseRefresh != null) preciseRefresh.end();
 		preciseRefresh = null;
@@ -972,7 +992,11 @@ public final class ClientPingRuntime {
 		selectorContexts.clear(); pendingRay = null; wheelSelection = WheelSelection.NONE;
 		if (hard) selectorPaint.reset();
 		try { if (old != null) old.close(); }
-		catch (RuntimeException | LinkageError unavailable) { logger.debug("selector preview close unavailable"); }
+		catch (RuntimeException | LinkageError unavailable) {
+			RateLimitedDiagnostics.warn("selector-content-close", NativeSelectorContent.class.getName(),
+				() -> "selector preview close unavailable capture=" + closingCapture + " hard=" + hard
+					+ " tick=" + localTick, unavailable);
+		}
 	}
 
 	public Optional<SpatialSelectorSession.Snapshot> selectorSnapshot() {

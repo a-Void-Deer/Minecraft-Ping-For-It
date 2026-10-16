@@ -16,6 +16,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.Container;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 /**
  * Loader bridge for item sources that expose a native, read-only inventory
@@ -269,7 +271,7 @@ public interface IPlatformInventoryService {
 		GuardedAccess(Access delegate, BooleanSupplier memberGate) {
 			this.delegate = Objects.requireNonNull(delegate); this.memberGate = Objects.requireNonNull(memberGate);
 		}
-		private void requireMember() { if (!memberGate.getAsBoolean()) throw new IllegalStateException("inventory access outside the read scope"); }
+		private void requireMember() { if (!memberGate.getAsBoolean()) throw new InventorySourceUnavailableException("inventory access outside the read scope"); }
 		private <T> T checked(java.util.function.Supplier<T> operation) {
 			requireMember(); T value = operation.get(); requireMember(); return value;
 		}
@@ -277,7 +279,12 @@ public interface IPlatformInventoryService {
 		@Override public Optional<InventorySnapshotLayout> snapshotLayout() { return checked(delegate::snapshotLayout); }
 		@Override public boolean valid() {
 			try { return checked(delegate::valid); }
-			catch (RuntimeException | LinkageError unavailable) { return false; }
+			catch (RuntimeException | LinkageError unavailable) {
+				if (!(unavailable instanceof InventorySourceUnavailableException))
+					RateLimitedDiagnostics.warn("inventory-guarded-access-valid", delegate.getClass().getName(),
+						() -> "delegateClass=" + delegate.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
+				return false;
+			}
 		}
 		@Override public int slots() { return checked(delegate::slots); }
 		@Override public boolean stableCursor() { return checked(delegate::stableCursor); }

@@ -1,28 +1,18 @@
 package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 public class PacketHandler {
 	PacketHandler() {}
-
-	// Dedicated logger for packet decode failures. This intentionally uses
-	// Log4j directly instead of Global.LOGGER: Global's static initializer
-	// resolves the platform context and must never run from packet decoding,
-	// and tests must be able to exercise readSafe without platform wiring.
-	private static final Logger LOGGER = LogManager.getLogger(PacketHandler.class);
 
 	public static <T> T readSafe(FriendlyByteBuf buf, Class<T> packetClass) {
 		try {
 			try {
 				return packetClass.getDeclaredConstructor(FriendlyByteBuf.class).newInstance(buf);
 			} catch (ReflectiveOperationException | RuntimeException e) {
-				// Only the packet class name and the exception class name are
-				// logged. Payload bytes, exception messages, and any other
-				// user-controlled data never reach the log.
-				LOGGER.debug("Failed to decode {} packet, using corrupt fallback ({}).",
-					packetClass.getSimpleName(), e.getClass().getSimpleName());
+				RateLimitedDiagnostics.debug("packet-decode", packetClass.getName(),
+					() -> "packetClass=" + packetClass.getName() + " fallback=corrupt", e);
 				return corruptFallback(packetClass);
 			}
 		} finally {

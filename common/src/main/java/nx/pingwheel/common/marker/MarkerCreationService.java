@@ -23,6 +23,7 @@ import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationSection;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 /**
  * Server-side orchestration for marker creation and removal.
@@ -69,9 +70,9 @@ import nx.pingwheel.common.presentation.PresentationSection;
  * {@link MarkerRejectReason} for the runtime adapter, and
  * {@link #expire(long)} passes through the store's batch expiry result.
  *
- * <p>Debug logging is emitted at this orchestration boundary only, using safe
- * fields (target kind, dimension id, ping type ids, marker ids). Custom names,
- * player names, colors, and registry lookups are never logged.
+ * <p>Routine decisions use the injected debug logger. Unexpected contract
+ * failures retain bounded exception and target detail in rate-limited WARN
+ * reports without changing the pipeline's rejection or rollback behavior.
  */
 public final class MarkerCreationService {
 	@FunctionalInterface
@@ -375,7 +376,13 @@ public final class MarkerCreationService {
 			if (admitted == null) throw new IllegalArgumentException("property admission returned null");
 		} catch (RuntimeException | LinkageError failure) {
 			if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
-			logger.debug("create rejected: property admission failed");
+			Target failedTarget = markerTarget;
+			String failedType = markerTargetType.id();
+			RateLimitedDiagnostics.warn(dedicated == null ? "marker-property-admission" : "marker-dedicated-admission",
+				failedTarget.getClass().getName(),
+				() -> "create rejected: admission failed owner=" + owner + " target=" + failedTarget
+					+ " targetType=" + failedType + " pingType=" + pingTypeId + " recipients=" + recipients
+					+ " intents=" + intents, failure);
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}
 		if (admitted.rejection() != null) {
@@ -399,7 +406,12 @@ public final class MarkerCreationService {
 				releaseMaterialized(level, materializedTarget, transaction);
 			}
 
-			logger.debugException("create rejected: store contract failure", e);
+			Target failedTarget = markerTarget;
+			String failedType = markerTargetType.id();
+			RateLimitedDiagnostics.warn("marker-create-store", failedTarget.getClass().getName(),
+				() -> "create rejected: store contract failure owner=" + owner + " target=" + failedTarget
+					+ " targetType=" + failedType + " pingType=" + pingTypeId + " recipients=" + recipients
+					+ " arrivalTick=" + arrivalTick + " expiresAtTick=" + expiresAtTick, e);
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}
 		logger.debug("create accepted: id={} targetType={} pingType={}",
@@ -475,7 +487,8 @@ public final class MarkerCreationService {
 
 			return result;
 		} catch (RuntimeException | LinkageError e) {
-			logger.debugException("create rejected: validator contract failure", e);
+			RateLimitedDiagnostics.warn("marker-create-validate", validator.getClass().getName(),
+				() -> "create rejected: validator contract failure owner=" + owner + " target=" + requestedTarget, e);
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}
 	}
@@ -503,7 +516,8 @@ public final class MarkerCreationService {
 
 			return Optional.of(resolved);
 		} catch (RuntimeException e) {
-			logger.debugException("create rejected: resolver contract failure", e);
+			RateLimitedDiagnostics.warn("marker-create-resolve", resolver.getClass().getName(),
+				() -> "create rejected: resolver contract failure target=" + target + " matchContext=" + context, e);
 			return Optional.empty();
 		}
 	}

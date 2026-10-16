@@ -117,7 +117,7 @@ public final class InventoryContainerReads {
 	private static void requireScope(Container value, Predicate<Container> admitted, Container[] active, int depth, int[] nodes) {
 		if (value == null || depth == active.length || ++nodes[0] > 32) throw new IllegalStateException("container wrapper bound");
 		for (int i = 0; i < depth; i++) if (active[i] == value) throw new IllegalStateException("container wrapper cycle");
-		if (!admitted.test(value)) throw new IllegalStateException("container delegate outside admitted source");
+		if (!admitted.test(value)) throw new InventorySourceUnavailableException("container delegate outside admitted source");
 		active[depth] = value;
 		if (value instanceof CompoundContainer) for (Field field : CompoundContainer.class.getDeclaredFields())
 			if (field.getType() == Container.class) {
@@ -160,7 +160,7 @@ public final class InventoryContainerReads {
 				|| !ResidentReads.inherits(value, RandomizableContainerBlockEntity.class, LOOT)
 				|| !ResidentReads.inherits(value, BlockEntity.class, LEVEL)
 				|| !ResidentReads.inherits(value, BlockEntity.class, POSITION)) return false;
-			if (((RandomizableContainer) value).getLootTable() != null) throw new IllegalStateException("pending container loot");
+			if (((RandomizableContainer) value).getLootTable() != null) throw new InventorySourceUnavailableException("pending container loot");
 		}
 		String items = itemsMethod();
 		if (items == null) return false;

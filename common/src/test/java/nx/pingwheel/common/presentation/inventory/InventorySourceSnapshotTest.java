@@ -13,14 +13,17 @@ import java.util.function.Supplier;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.PresentationAdapter;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SourceAccess;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import org.junit.jupiter.api.Test;
+import org.apache.logging.log4j.Level;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -45,9 +48,13 @@ class InventorySourceSnapshotTest {
 	}
 
 	private static InventorySourceAccess.InventoryHandle open(InventorySourceAccess.Source source, CostLedger ledger) {
-		var access = new InventorySourceAccess(INPUT, i -> Optional.of(source));
-		var scope = new SourceAccess.ReadScope(INPUT.viewKey(), Set.of("pingforit:inventory.items"));
-		var target = INPUT.ordinaryTarget().orElseThrow();
+		return open(INPUT, source, ledger);
+	}
+
+	private static InventorySourceAccess.InventoryHandle open(InventorySourceInput input, InventorySourceAccess.Source source, CostLedger ledger) {
+		var access = new InventorySourceAccess(input, i -> Optional.of(source));
+		var scope = new SourceAccess.ReadScope(input.viewKey(), Set.of("pingforit:inventory.items"));
+		var target = input.ordinaryTarget().orElseThrow();
 		var resolved = (SourceAccess.ResolveResult.Available) access.resolve(new PresentationAdapter.DetachedTarget(
 			target.dimensionId(), "block", target.blockRegistryId(), target.x(), target.y(), target.z(), ""), scope, ledger);
 		return (InventorySourceAccess.InventoryHandle) ((SourceAccess.OpenResult.Started) access.open(resolved.descriptor(), scope, ledger)).handle();
@@ -283,20 +290,395 @@ class InventorySourceSnapshotTest {
 	@Test
 	void failingCaptureReleasesTheReservationAndReportsTerminalUnavailable() {
 		var source = new TestSource();
-		source.plan = new TestPlan(4096, () -> { source.captures.incrementAndGet(); throw new IllegalStateException("capture"); });
+		var failure = new ClassCastException("test.NativeInventory cannot be cast to test.Container during capture");
+		failure.addSuppressed(new IllegalStateException("capture provider cleanup detail"));
+		source.plan = new TestPlan(4096, () -> { source.captures.incrementAndGet(); throw failure; });
 		var memory = new RetainedMemoryLedger(16000);
-		var handle = open(source, grant(0));
-		assertEquals(InventorySourceAccess.Preparation.UNAVAILABLE, handle.prepareSnapshot(memory));
-		assertEquals(0, memory.retained());
-		assertEquals(0, memory.reserved());
-		assertEquals(InventorySourceAccess.Preparation.UNAVAILABLE, handle.prepareSnapshot(memory), "a failed capture is not retried");
-		assertEquals(1, source.captures.get());
-		var result = step(handle, grant(0));
-		assertEquals(CaptureResult.Availability.UNAVAILABLE, result.availability());
-		assertEquals(CaptureResult.Completeness.INCOMPLETE, result.completeness());
-		assertTrue(result.payload().isEmpty(), "a failed capture is never an empty snapshot");
-		assertEquals(0, source.liveReads.get(), "a failed snapshot never falls back to a live read");
-		assertTrue(handle.step(grant(0)) instanceof SourceAccess.StepOutcome.Deferred, "a terminal result is delivered once");
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var handle = open(source, grant(0))) {
+			assertEquals(InventorySourceAccess.Preparation.UNAVAILABLE, handle.prepareSnapshot(memory));
+			assertEquals(0, memory.retained());
+			assertEquals(0, memory.reserved());
+			assertEquals(InventorySourceAccess.Preparation.UNAVAILABLE, handle.prepareSnapshot(memory), "a failed capture is not retried");
+			assertEquals(1, source.captures.get());
+			var result = step(handle, grant(0));
+			assertEquals(CaptureResult.Availability.UNAVAILABLE, result.availability());
+			assertEquals(CaptureResult.Completeness.INCOMPLETE, result.completeness());
+			assertTrue(result.payload().isEmpty(), "a failed capture is never an empty snapshot");
+			assertEquals(0, source.liveReads.get(), "a failed snapshot never falls back to a live read");
+			assertTrue(handle.step(grant(0)) instanceof SourceAccess.StepOutcome.Deferred, "a terminal result is delivered once");
+			logs.report("capture-failed", Level.WARN, "java.lang.ClassCastException", failure.getMessage(),
+				"capture provider cleanup detail", "at " + getClass().getName() + ".failingCaptureReleasesTheReservation", "stage=snapshot-prepare", "position=1,2,3",
+				"registry=minecraft:chest", "face=NORTH", "readOwner=" + INPUT.readOwner(), "source=SourceKey[providerId=test", "same-container");
+		}
+		assertEquals(1, source.closes.get());
+	}
+
+	@Test void failedSnapshotMetadataReportsPrimaryAndCleanupTogetherAfterReservationRelease() {
+		var source = new TestSource();
+		var failure = new ClassCastException("captured slots cannot be cast to test.SlotMetadata");
+		failure.initCause(new IllegalArgumentException("snapshot metadata cause"));
+		var cleanup = new IllegalStateException("snapshot metadata cleanup failed", new RuntimeException("metadata cleanup cause"));
+		var snapshot = new TestSnapshot(items(1), 512) {
+			@Override public int slots() { throw failure; }
+			@Override public void close() { super.close(); throw cleanup; }
+		};
+		source.plan = new TestPlan(1024, () -> { source.captures.incrementAndGet(); return Optional.of(snapshot); });
+		var memory = new RetainedMemoryLedger(2048);
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var handle = open(source, grant(0))) {
+			assertEquals(InventorySourceAccess.Preparation.UNAVAILABLE, handle.prepareSnapshot(memory));
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+			assertEquals(1, snapshot.closes.get()); assertEquals(1, source.captures.get());
+			assertEquals(InventorySourceAccess.Preparation.UNAVAILABLE, handle.prepareSnapshot(memory));
+			var result = step(handle, grant(0));
+			assertEquals(CaptureResult.Availability.UNAVAILABLE, result.availability());
+			assertEquals(CaptureResult.Completeness.INCOMPLETE, result.completeness()); assertTrue(result.payload().isEmpty());
+			assertEquals(0, source.liveReads.get());
+			assertEquals(1, failure.getSuppressed().length); assertSame(cleanup, failure.getSuppressed()[0]);
+			logs.report("capture-failed", Level.WARN, failure.getMessage(), "snapshot metadata cause", cleanup.getMessage(),
+				"metadata cleanup cause", "suppressed[0]", "stage=snapshot-prepare");
+			assertEquals(1, logs.events.size(), "cleanup is included in the original report, never a second warning");
+		}
+		assertEquals(1, snapshot.closes.get()); assertEquals(1, source.closes.get());
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+
+	@Test void repeatedPrimaryFromSnapshotCleanupDoesNotAttemptSelfSuppression() {
+		var source = new TestSource(); var failure = new ClassCastException("same metadata and cleanup failure");
+		var snapshot = new TestSnapshot(items(1), 512) {
+			@Override public int slots() { throw failure; }
+			@Override public void close() { super.close(); throw failure; }
+		};
+		source.plan = new TestPlan(1024, () -> Optional.of(snapshot)); var memory = new RetainedMemoryLedger(2048);
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var handle = open(source, grant(0))) {
+			assertEquals(InventorySourceAccess.Preparation.UNAVAILABLE, handle.prepareSnapshot(memory));
+			assertEquals(0, failure.getSuppressed().length); assertEquals(1, snapshot.closes.get());
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+			logs.report("capture-failed", Level.WARN, failure.getMessage()); assertEquals(1, logs.events.size());
+		}
+	}
+
+	@Test void expectedMetadataDenialStillReportsUnexpectedCleanupWithPrimaryAssociation() {
+		var source = new TestSource();
+		var denied = new nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException("snapshot authority revoked");
+		var cleanup = new IllegalStateException("cleanup after expected denial", new RuntimeException("expected denial cleanup cause"));
+		var snapshot = new TestSnapshot(items(1), 512) {
+			@Override public int slots() { throw denied; }
+			@Override public void close() { super.close(); throw cleanup; }
+		};
+		source.plan = new TestPlan(1024, () -> Optional.of(snapshot)); var memory = new RetainedMemoryLedger(2048);
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var handle = open(source, grant(0))) {
+			assertEquals(InventorySourceAccess.Preparation.UNAVAILABLE, handle.prepareSnapshot(memory));
+			assertEquals(1, snapshot.closes.get()); assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+			assertEquals(1, denied.getSuppressed().length); assertSame(cleanup, denied.getSuppressed()[0]);
+			logs.report("snapshot-close", Level.WARN, cleanup.getMessage(), "expected denial cleanup cause", "primaryClass=" + denied.getClass().getName(), "primaryMessage=" + denied.getMessage());
+			assertEquals(1, logs.events.size(), "expected denial itself stays silent; its unexpected cleanup cannot disappear");
+		}
+	}
+
+	@Test void throwingLiveReadKeepsAttemptChargeAndTerminalUnavailableWithOriginalDiagnostic() {
+		var failure = new ClassCastException("live slot value cannot be cast to test.Container");
+		var reads = new AtomicInteger(); var closes = new AtomicInteger();
+		var source = new InheritedNoOpSource() {
+			@Override public int slots() { return 2; }
+			@Override public InventoryDomainCodec.Item read(int slot) { reads.incrementAndGet(); throw failure; }
+			@Override public void close() { closes.incrementAndGet(); }
+		};
+		var memory = new RetainedMemoryLedger(4096);
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var handle = open(source, grant(0))) {
+			assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(memory));
+			var ledger = grant(2); var result = step(handle, ledger);
+			assertEquals(CaptureResult.Availability.UNAVAILABLE, result.availability());
+			assertEquals(CaptureResult.Completeness.INCOMPLETE, result.completeness()); assertTrue(result.payload().isEmpty());
+			assertEquals(1, ledger.used(InventorySourceAccess.PHYSICAL)); assertEquals(1, ledger.used(InventorySourceAccess.PROBES));
+			assertEquals(2 * InventorySourceAccess.PROVIDER_CALL_WORK, ledger.used(InventorySourceAccess.PROVIDER_WORK));
+			assertEquals(1, reads.get()); assertTrue(handle.step(grant(2)) instanceof SourceAccess.StepOutcome.Deferred);
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+			logs.report("live-step", Level.WARN, failure.getMessage(), "java.lang.ClassCastException", "at " + getClass().getName() + ".throwingLiveReadKeepsAttemptCharge",
+				"cursor=0", "expected=2", "position=1,2,3", "source=SourceKey[providerId=test", "readOwner=" + INPUT.readOwner());
+		}
+		assertEquals(1, closes.get());
+	}
+
+	@Test void failedResolutionReportsCleanupSuppressedUnderOriginalFailureAndKeepsProbeCharge() {
+		var failure = new ClassCastException("source metadata cast failed"); var closes = new AtomicInteger();
+		var source = new InheritedNoOpSource() {
+			@Override public boolean stableCursor() { throw failure; }
+			@Override public void close() { closes.incrementAndGet(); throw new IllegalStateException("resolution cleanup failed"); }
+		};
+		var access = new InventorySourceAccess(INPUT, i -> Optional.of(source));
+		var scope = new SourceAccess.ReadScope(INPUT.viewKey(), Set.of("pingforit:inventory.items"));
+		var ledger = grant(0);
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture()) {
+			assertEquals(SourceAccess.ResolveResult.Unresolved.UNAVAILABLE, access.resolve(new PresentationAdapter.DetachedTarget(
+				BLOCK.dimensionId(), "block", BLOCK.blockRegistryId(), BLOCK.x(), BLOCK.y(), BLOCK.z(), ""), scope, ledger));
+			assertEquals(1, closes.get()); assertEquals(1, ledger.used(InventorySourceAccess.PROBES));
+			assertEquals(InventorySourceAccess.PROVIDER_CALL_WORK, ledger.used(InventorySourceAccess.PROVIDER_WORK));
+			logs.report("resolve", Level.WARN, failure.getMessage(), "resolution cleanup failed", "suppressed[0]", "position=1,2,3");
+			assertEquals(1, logs.events.size(), "cleanup stays suppressed under the original failure, not a second report");
+		}
+	}
+
+	@Test void normalLiveTopologyLossKeepsUnavailableAndProbeChargeWithoutExceptionWarning() {
+		var size = new AtomicInteger(2);
+		var source = new InheritedNoOpSource() {
+			@Override public int slots() { return size.get(); }
+			@Override public InventoryDomainCodec.Item read(int slot) { return item(slot); }
+		};
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var handle = open(source, grant(0))) {
+			assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(new RetainedMemoryLedger(4096)));
+			assertEquals(CaptureResult.Completeness.CONTINUE, step(handle, grant(1)).completeness());
+			size.set(1); var ledger = grant(1); var result = step(handle, ledger);
+			assertEquals(CaptureResult.Availability.UNAVAILABLE, result.availability());
+			assertEquals(CaptureResult.Completeness.INCOMPLETE, result.completeness()); assertTrue(result.payload().isEmpty());
+			assertEquals(0, ledger.used(InventorySourceAccess.PHYSICAL)); assertEquals(1, ledger.used(InventorySourceAccess.PROBES));
+			assertTrue(logs.events.isEmpty(), "a changed slot view is ordinary unavailability, not a failing callback");
+		}
+	}
+
+	@Test void expectedDirectAndCursorlessReadDenialsKeepUnavailableWhileRealCallbackFailuresWarn() {
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "diagnostic:read-denial"), INPUT.readOwner(), INPUT.face());
+		for (boolean cursorless : List.of(false, true)) for (boolean expected : List.of(true, false)) {
+			RuntimeException reason = expected
+				? new nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException("inventory access outside the read scope")
+				: new IllegalStateException("inventory access outside the read scope", new RuntimeException("unexpected live callback cause"));
+			RuntimeException failure = cursorless ? new InventorySourceAccess.CursorlessReadFailure(1, reason) : reason;
+			var closes = new AtomicInteger();
+			var source = new InheritedNoOpSource() {
+				@Override public boolean stableCursor() { return !cursorless; }
+				@Override public int slots() { return 1; }
+				@Override public InventoryDomainCodec.Item read(int slot) { throw failure; }
+				@Override public InventorySourceAccess.Page enumerate(int limit) { throw failure; }
+				@Override public void close() { closes.incrementAndGet(); }
+			};
+			var memory = new RetainedMemoryLedger(4096);
+			try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var handle = open(input, source, grant(0))) {
+				assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(memory)); var ledger = grant(1);
+				var result = step(handle, ledger);
+				assertEquals(CaptureResult.Availability.UNAVAILABLE, result.availability());
+				assertEquals(CaptureResult.Completeness.INCOMPLETE, result.completeness()); assertTrue(result.payload().isEmpty());
+				assertEquals(1, ledger.used(InventorySourceAccess.PHYSICAL)); assertEquals(1, ledger.used(InventorySourceAccess.PROBES));
+				assertEquals(2 * InventorySourceAccess.PROVIDER_CALL_WORK, ledger.used(InventorySourceAccess.PROVIDER_WORK));
+				assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+				if (expected) assertTrue(logs.events.isEmpty());
+				else { logs.report("live-step", Level.WARN, reason.getMessage(), "unexpected live callback cause"); assertEquals(1, logs.events.size()); }
+				assertTrue(handle.step(grant(1)) instanceof SourceAccess.StepOutcome.Deferred);
+			}
+			assertEquals(1, closes.get());
+		}
+	}
+
+	@Test void throwingSelectionWitnessClosesSourceAndKeepsAttemptCostAndSuppressedCleanupReport() {
+		var failure = new ClassCastException("selection witness cannot cast resident item"); var closes = new AtomicInteger();
+		var source = new InheritedNoOpSource() {
+			@Override public int slots() { return 1; }
+			@Override public InventoryDomainCodec.Item read(int slot) { throw failure; }
+			@Override public void close() { closes.incrementAndGet(); throw new IllegalStateException("witness cleanup failed"); }
+		};
+		var selection = new InventorySelection(new InventoryScanner.Key("minecraft:stone", "k0"), "minecraft:stone", "stone", null, false, "danger");
+		var ledger = grant(1);
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture()) {
+			assertEquals(false, new InventorySourceAccess(INPUT, i -> Optional.of(source)).selectionPresent(selection, 0, 1, ledger));
+			assertEquals(1, closes.get()); assertEquals(1, ledger.used(InventorySourceAccess.PHYSICAL));
+			assertEquals(1, ledger.used(InventorySourceAccess.PROBES));
+			assertEquals(2 * InventorySourceAccess.PROVIDER_CALL_WORK, ledger.used(InventorySourceAccess.PROVIDER_WORK));
+			logs.report("selection-witness", Level.WARN, failure.getMessage(), "witness cleanup failed", "suppressed[0]", "witness=0", "limit=1");
+			assertEquals(1, logs.events.size());
+		}
+	}
+
+	private static InventorySourceInput cleanupInput(String name) {
+		return new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "diagnostic:p2-" + name), INPUT.readOwner(), INPUT.face());
+	}
+	private static InventorySelection cleanupSelection() {
+		return new InventorySelection(new InventoryScanner.Key("minecraft:stone", "k0"), "minecraft:stone", "stone", null, false, "danger");
+	}
+	private static SourceAccess.ResolveResult resolveAttempt(InventorySourceAccess access, InventorySourceInput input, CostLedger ledger) {
+		var target = input.ordinaryTarget().orElseThrow();
+		return access.resolve(new PresentationAdapter.DetachedTarget(target.dimensionId(), "block", target.blockRegistryId(),
+			target.x(), target.y(), target.z(), ""), new SourceAccess.ReadScope(input.viewKey(), Set.of("pingforit:inventory.items")), ledger);
+	}
+	private static void attemptCharges(CostLedger ledger, int grantedSlots, int visits) {
+		assertEquals(visits, ledger.used(InventorySourceAccess.PHYSICAL)); assertEquals(1, ledger.used(InventorySourceAccess.PROBES));
+		assertEquals((visits + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK, ledger.used(InventorySourceAccess.PROVIDER_WORK));
+		assertEquals(grantedSlots - visits, ledger.remaining(InventorySourceAccess.PHYSICAL), "unused admission is released");
+		assertEquals(7, ledger.remaining(InventorySourceAccess.PROBES));
+		assertEquals(InventorySourceAccess.MAX_PROVIDER_WORK_PER_TICK - (visits + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK,
+			ledger.remaining(InventorySourceAccess.PROVIDER_WORK));
+	}
+	private static void throwAttemptFailure(Throwable failure) {
+		if (failure instanceof RuntimeException runtime) throw runtime;
+		if (failure instanceof Error error) throw error;
+		if (failure != null) throw new AssertionError("unsupported fixture failure", failure);
+	}
+	private static final class AttemptSource extends InheritedNoOpSource {
+		final List<String> events = new ArrayList<>();
+		final boolean metadataFailure, cursorless;
+		final Throwable primary, cleanup;
+		Runnable beforeClose = () -> {};
+		AttemptSource(boolean metadataFailure, boolean cursorless, Throwable primary, Throwable cleanup) {
+			this.metadataFailure = metadataFailure; this.cursorless = cursorless; this.primary = primary; this.cleanup = cleanup;
+		}
+		@Override public boolean stableCursor() {
+			if (metadataFailure) { events.add("metadata"); throwAttemptFailure(primary); }
+			return !cursorless;
+		}
+		@Override public int slots() { return 3; }
+		@Override public InventoryDomainCodec.Item read(int slot) { events.add("read"); throwAttemptFailure(primary); return item(0); }
+		@Override public InventorySourceAccess.SelectionWitness observeSelection(int limit, InventorySelection selection) {
+			events.add("observe"); throwAttemptFailure(primary); return new InventorySourceAccess.SelectionWitness(true, 1);
+		}
+		@Override public void close() { events.add("close"); beforeClose.run(); throwAttemptFailure(cleanup); }
+	}
+
+	@Test void expectedWitnessPrimaryReportsGenuineCleanupForDirectAndSuppressionDisabledCursorless() {
+		for (boolean cursorless : List.of(false, true)) {
+			var input = cleanupInput("witness-expected-" + cursorless);
+			var reason = new InventorySourceUnavailableException("witness authority revoked");
+			RuntimeException primary = cursorless ? new InventorySourceAccess.CursorlessReadFailure(1, reason) : reason;
+			var cleanup = new IllegalStateException("genuine witness close failure", new RuntimeException("witness close cause"));
+			var source = new AttemptSource(false, cursorless, primary, cleanup); var ledger = grant(3);
+			source.beforeClose = () -> assertEquals(0, ledger.used(InventorySourceAccess.PHYSICAL), "source closes before ticket settlement");
+			try (var logs = new InventoryCaptureDiagnosticsTest.Capture()) {
+				assertEquals(false, new InventorySourceAccess(input, i -> Optional.of(source)).selectionPresent(cleanupSelection(), 0, 3, ledger));
+				assertEquals(List.of(cursorless ? "observe" : "read", "close"), source.events); attemptCharges(ledger, 3, 1);
+				logs.report("selection-witness-close", Level.WARN, cleanup.getMessage(), "witness close cause", "sourceClass=" + source.getClass().getName(),
+					"primaryClass=" + primary.getClass().getName(), "primaryReasonClass=" + reason.getClass().getName(), "primaryMessage=" + reason.getMessage(), "witness=0", "limit=3");
+				assertEquals(1, logs.events.size(), "expected primary stays silent without hiding cleanup");
+				assertEquals(1, reason.getSuppressed().length); assertSame(cleanup, reason.getSuppressed()[0]);
+				if (cursorless) assertEquals(0, primary.getSuppressed().length, "the owned wrapper remains suppression-disabled");
+			}
+		}
+	}
+
+	@Test void expectedResolutionPrimaryReportsGenuineCleanupAndClearsPreparedSource() {
+		for (boolean cursorless : List.of(false, true)) {
+			var input = cleanupInput("resolve-expected-" + cursorless);
+			var reason = new InventorySourceUnavailableException("resolution authority revoked");
+			RuntimeException primary = cursorless ? new InventorySourceAccess.CursorlessReadFailure(1, reason) : reason;
+			var cleanup = new IllegalStateException("genuine resolve close failure", new RuntimeException("resolve close cause"));
+			var source = new AttemptSource(true, false, primary, cleanup); var resolutions = new AtomicInteger();
+			var access = new InventorySourceAccess(input, i -> resolutions.getAndIncrement() == 0 ? Optional.of(source) : Optional.empty());
+			var ledger = grant(0);
+			try (var logs = new InventoryCaptureDiagnosticsTest.Capture()) {
+				assertEquals(SourceAccess.ResolveResult.Unresolved.UNAVAILABLE, resolveAttempt(access, input, ledger)); attemptCharges(ledger, 0, 0);
+				assertEquals(SourceAccess.ResolveResult.Unresolved.UNAVAILABLE, resolveAttempt(access, input, grant(0)));
+				assertEquals(List.of("metadata", "close"), source.events); assertEquals(2, resolutions.get());
+				logs.report("resolve-close", Level.WARN, cleanup.getMessage(), "resolve close cause", "sourceClass=" + source.getClass().getName(),
+					"primaryClass=" + primary.getClass().getName(), "primaryReasonClass=" + reason.getClass().getName(), "primaryMessage=" + reason.getMessage(), "stage=resolve");
+				assertEquals(1, logs.events.size()); assertSame(cleanup, reason.getSuppressed()[0]);
+				if (cursorless) assertEquals(0, primary.getSuppressed().length);
+			}
+		}
+	}
+
+	@Test void realPrimaryAndCursorlessCauseKeepOneReportWithCleanupAndOriginalCharges() {
+		for (boolean resolving : List.of(false, true)) for (boolean cursorless : List.of(false, true)) {
+			var input = cleanupInput("real-" + resolving + "-" + cursorless);
+			var reason = new IllegalStateException("real callback primary", new IllegalArgumentException("real callback cause"));
+			RuntimeException primary = cursorless ? new InventorySourceAccess.CursorlessReadFailure(1, reason) : reason;
+			var cleanup = new IllegalStateException("real callback cleanup", new RuntimeException("real cleanup cause"));
+			var source = new AttemptSource(resolving, cursorless, primary, cleanup); var ledger = grant(resolving ? 0 : 3);
+			var access = new InventorySourceAccess(input, i -> Optional.of(source));
+			try (var logs = new InventoryCaptureDiagnosticsTest.Capture()) {
+				if (resolving) assertEquals(SourceAccess.ResolveResult.Unresolved.UNAVAILABLE, resolveAttempt(access, input, ledger));
+				else assertEquals(false, access.selectionPresent(cleanupSelection(), 0, 3, ledger));
+				assertEquals(List.of(resolving ? "metadata" : cursorless ? "observe" : "read", "close"), source.events);
+				attemptCharges(ledger, resolving ? 0 : 3, resolving ? 0 : 1);
+				logs.report(resolving ? "resolve" : "selection-witness", Level.WARN, reason.getMessage(), "real callback cause", cleanup.getMessage(),
+					"real cleanup cause", "suppressed[0]", "sourceClass=" + source.getClass().getName());
+				assertEquals(1, logs.events.size(), "genuine primary and cleanup are not separate warnings");
+				assertEquals(1, reason.getSuppressed().length); assertSame(cleanup, reason.getSuppressed()[0]);
+				if (cursorless) assertEquals(0, primary.getSuppressed().length);
+			}
+		}
+	}
+
+	@Test void expectedAttemptWithoutCleanupFailureRemainsSilentAndPaid() {
+		for (boolean resolving : List.of(false, true)) for (boolean cursorless : List.of(false, true)) {
+			var reason = new InventorySourceUnavailableException("ordinary attempt denial");
+			RuntimeException primary = cursorless ? new InventorySourceAccess.CursorlessReadFailure(1, reason) : reason;
+			var source = new AttemptSource(resolving, cursorless, primary, null); var ledger = grant(resolving ? 0 : 3);
+			var input = cleanupInput("silent-" + resolving + "-" + cursorless); var access = new InventorySourceAccess(input, i -> Optional.of(source));
+			try (var logs = new InventoryCaptureDiagnosticsTest.Capture()) {
+				if (resolving) assertEquals(SourceAccess.ResolveResult.Unresolved.UNAVAILABLE, resolveAttempt(access, input, ledger));
+				else assertEquals(false, access.selectionPresent(cleanupSelection(), 0, 3, ledger));
+				assertTrue(logs.events.isEmpty()); attemptCharges(ledger, resolving ? 0 : 3, resolving ? 0 : 1);
+				assertEquals(1L, source.events.stream().filter("close"::equals).count());
+			}
+		}
+	}
+
+	@Test void attemptCleanupNeverSuppressesPrimaryOrCursorlessCauseUnderItself() {
+		for (boolean resolving : List.of(false, true)) for (int shape = 0; shape < 3; shape++) {
+			var reason = new IllegalStateException("same primary and close failure");
+			RuntimeException primary = shape == 0 ? reason : new InventorySourceAccess.CursorlessReadFailure(1, reason);
+			Throwable cleanup = shape == 2 ? primary : reason;
+			var source = new AttemptSource(resolving, shape != 0, primary, cleanup); var ledger = grant(resolving ? 0 : 3);
+			var input = cleanupInput("self-" + resolving + "-" + shape); var access = new InventorySourceAccess(input, i -> Optional.of(source));
+			try (var logs = new InventoryCaptureDiagnosticsTest.Capture()) {
+				if (resolving) assertEquals(SourceAccess.ResolveResult.Unresolved.UNAVAILABLE, resolveAttempt(access, input, ledger));
+				else assertEquals(false, access.selectionPresent(cleanupSelection(), 0, 3, ledger));
+				assertEquals(0, primary.getSuppressed().length); assertEquals(0, reason.getSuppressed().length);
+				assertEquals(1L, source.events.stream().filter("close"::equals).count()); attemptCharges(ledger, resolving ? 0 : 3, resolving ? 0 : 1);
+				logs.report(resolving ? "resolve" : "selection-witness", Level.WARN, reason.getMessage()); assertEquals(1, logs.events.size());
+			}
+		}
+	}
+
+	@Test void fatalAttemptCleanupPropagatesAfterOneCloseAndKeepsAttemptedPrefixPaid() {
+		for (boolean resolving : List.of(false, true)) for (boolean cursorless : List.of(false, true)) {
+			var reason = new InventorySourceUnavailableException("expected denial before fatal close");
+			RuntimeException primary = cursorless ? new InventorySourceAccess.CursorlessReadFailure(1, reason) : reason;
+			var fatal = new AssertionError("fatal attempt cleanup"); var source = new AttemptSource(resolving, cursorless, primary, fatal);
+			var ledger = grant(resolving ? 0 : 3); var input = cleanupInput("fatal-close-" + resolving + "-" + cursorless);
+			var access = new InventorySourceAccess(input, i -> Optional.of(source));
+			if (resolving) assertSame(fatal, assertThrows(AssertionError.class, () -> resolveAttempt(access, input, ledger)));
+			else assertSame(fatal, assertThrows(AssertionError.class, () -> access.selectionPresent(cleanupSelection(), 0, 3, ledger)));
+			assertEquals(1, fatal.getSuppressed().length); assertSame(primary, fatal.getSuppressed()[0]);
+			assertEquals(1L, source.events.stream().filter("close"::equals).count()); attemptCharges(ledger, resolving ? 0 : 3, resolving ? 0 : 1);
+		}
+	}
+
+	@Test void fatalAttemptPrimarySurvivesRecoverableFatalAndIdenticalCleanup() {
+		for (boolean resolving : List.of(false, true)) for (int shape = 0; shape < 3; shape++) {
+			var fatal = new AssertionError("fatal attempt primary");
+			Throwable cleanup = shape == 0 ? new IllegalStateException("recoverable cleanup under fatal") : shape == 1 ? new AssertionError("secondary fatal cleanup") : fatal;
+			var source = new AttemptSource(resolving, false, fatal, cleanup); var ledger = grant(resolving ? 0 : 3);
+			var input = cleanupInput("fatal-primary-" + resolving + "-" + shape); var access = new InventorySourceAccess(input, i -> Optional.of(source));
+			if (resolving) assertSame(fatal, assertThrows(AssertionError.class, () -> resolveAttempt(access, input, ledger)));
+			else assertSame(fatal, assertThrows(AssertionError.class, () -> access.selectionPresent(cleanupSelection(), 0, 3, ledger)));
+			assertEquals(shape == 2 ? 0 : 1, fatal.getSuppressed().length);
+			if (shape != 2) assertSame(cleanup, fatal.getSuppressed()[0]);
+			assertEquals(1L, source.events.stream().filter("close"::equals).count()); attemptCharges(ledger, resolving ? 0 : 3, resolving ? 0 : 1);
+		}
+	}
+
+	@Test void successfulWitnessWithThrowingCloseStillReturnsFalseAndClosesOnlyOnce() {
+		var cleanup = new IllegalStateException("close after positive witness"); var source = new AttemptSource(false, false, null, cleanup);
+		var ledger = grant(3); var input = cleanupInput("positive-close");
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture()) {
+			assertEquals(false, new InventorySourceAccess(input, i -> Optional.of(source)).selectionPresent(cleanupSelection(), 0, 3, ledger));
+			assertEquals(List.of("read", "close"), source.events); attemptCharges(ledger, 3, 1);
+			logs.report("selection-witness", Level.WARN, cleanup.getMessage(), "sourceClass=" + source.getClass().getName()); assertEquals(1, logs.events.size());
+		}
+	}
+
+	@Test void resolveReplacedOrWrongScopeSourceIsNotClosedAgainWhenCloseThrows() {
+		for (boolean replacing : List.of(false, true)) {
+			var input = cleanupInput("close-once-" + replacing); var closes = new AtomicInteger(); var resolutions = new AtomicInteger();
+			var cleanup = new IllegalStateException("resolution direct close failure");
+			var source = new InheritedNoOpSource() {
+				@Override public SourceKey key() { return new SourceKey("test", "inventory", "close-once", replacing ? input.viewKey() : "wrong-scope"); }
+				@Override public void close() { closes.incrementAndGet(); throw cleanup; }
+			};
+			var access = new InventorySourceAccess(input, i -> { resolutions.incrementAndGet(); return Optional.of(source); });
+			try (var logs = new InventoryCaptureDiagnosticsTest.Capture()) {
+				if (replacing) assertTrue(resolveAttempt(access, input, grant(0)) instanceof SourceAccess.ResolveResult.Available);
+				var ledger = grant(0); assertEquals(SourceAccess.ResolveResult.Unresolved.UNAVAILABLE, resolveAttempt(access, input, ledger));
+				assertEquals(1, closes.get()); assertEquals(1, resolutions.get()); attemptCharges(ledger, 0, 0);
+				logs.report("resolve", Level.WARN, cleanup.getMessage(), "sourceClass=" + source.getClass().getName()); assertEquals(1, logs.events.size());
+			}
+		}
 	}
 
 	@Test
@@ -421,25 +803,36 @@ class InventorySourceSnapshotTest {
 	@Test
 	void snapshotStepFailurePublishesNoPartialDataAndReleasesRetainedState() {
 		var source = new TestSource();
+		var failure = new ClassCastException("detached slot cannot be cast to test.CapturedItem");
+		failure.initCause(new IllegalArgumentException("detached slot decode cause"));
+		var cleanup = new IllegalStateException("snapshot read cleanup failed", new RuntimeException("read cleanup cause"));
 		var snapshot = new TestSnapshot(items(2), 2048) {
 			@Override public InventoryDomainCodec.Item read(int index) {
-				if (index == 1) throw new IllegalStateException("read");
+				if (index == 1) throw failure;
 				return super.read(index);
 			}
+			@Override public void close() { super.close(); throw cleanup; }
 		};
 		source.plan = new TestPlan(4096, () -> { source.captures.incrementAndGet(); return Optional.of(snapshot); });
 		var memory = new RetainedMemoryLedger(16000);
-		var handle = open(source, grant(0));
-		assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(memory));
-		var ledger = grant(2);
-		var result = step(handle, ledger);
-		assertEquals(CaptureResult.Availability.UNAVAILABLE, result.availability());
-		assertEquals(CaptureResult.Completeness.INCOMPLETE, result.completeness());
-		assertTrue(result.payload().isEmpty(), "a page that failed mid-read is never published");
-		assertEquals(2, ledger.used(InventorySourceAccess.PHYSICAL), "an attempted throwing snapshot read still charges");
-		assertEquals(1, snapshot.closes.get(), "a terminal snapshot read failure releases the retained snapshot");
-		assertEquals(0, memory.retained());
-		assertEquals(0, memory.reserved());
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var handle = open(source, grant(0))) {
+			assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(memory));
+			var ledger = grant(2);
+			var result = step(handle, ledger);
+			assertEquals(CaptureResult.Availability.UNAVAILABLE, result.availability());
+			assertEquals(CaptureResult.Completeness.INCOMPLETE, result.completeness());
+			assertTrue(result.payload().isEmpty(), "a page that failed mid-read is never published");
+			assertEquals(2, ledger.used(InventorySourceAccess.PHYSICAL), "an attempted throwing snapshot read still charges");
+			assertEquals(1, snapshot.closes.get(), "a terminal snapshot read failure releases the retained snapshot");
+			assertEquals(0, memory.retained());
+			assertEquals(0, memory.reserved());
+			assertEquals(1, failure.getSuppressed().length); assertSame(cleanup, failure.getSuppressed()[0]);
+			logs.report("snapshot-step-failed", Level.WARN, failure.getMessage(), "java.lang.ClassCastException",
+				"detached slot decode cause", cleanup.getMessage(), "read cleanup cause", "suppressed[0]",
+				"at " + getClass().getName() + ".snapshotStepFailurePublishesNoPartialData", "cursor=1", "slots=2", "same-container");
+			assertEquals(1, logs.events.size(), "the terminal page and cleanup share one report");
+		}
+		assertEquals(1, snapshot.closes.get()); assertEquals(1, source.closes.get());
 	}
 
 	@Test
@@ -501,6 +894,49 @@ class InventorySourceSnapshotTest {
 		assertEquals(1, retainedSnapshot.closes.get(), "fatal retained-cost errors close the detached snapshot");
 		assertEquals(0, retainedMemory.reserved());
 		assertEquals(0, retainedMemory.retained());
+	}
+
+	@Test
+	void fatalCleanupDuringPrepareAndStepStillPropagatesAfterReleasingMemory() {
+		for (boolean preparing : List.of(true, false)) {
+			var source = new TestSource(); var fatal = new AssertionError("fatal snapshot cleanup");
+			var failure = new ClassCastException("ordinary metadata or read failure before fatal cleanup");
+			var snapshot = new TestSnapshot(items(1), 512) {
+				@Override public int slots() { if (preparing) throw failure; return super.slots(); }
+				@Override public InventoryDomainCodec.Item read(int index) { throw failure; }
+				@Override public void close() { super.close(); throw fatal; }
+			};
+			source.plan = new TestPlan(1024, () -> Optional.of(snapshot)); var memory = new RetainedMemoryLedger(2048);
+			try (var handle = open(source, grant(0))) {
+				if (preparing) assertSame(fatal, assertThrows(AssertionError.class, () -> handle.prepareSnapshot(memory)));
+				else {
+					assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(memory));
+					var ledger = grant(1);
+					assertSame(fatal, assertThrows(AssertionError.class, () -> step(handle, ledger)));
+					assertEquals(1, ledger.used(InventorySourceAccess.PHYSICAL)); assertEquals(1, ledger.used(InventorySourceAccess.PROBES));
+				}
+				assertEquals(1, snapshot.closes.get()); assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+			}
+			assertEquals(1, snapshot.closes.get()); assertEquals(1, source.closes.get());
+		}
+	}
+
+	@Test void fatalSnapshotReadKeepsRecoverableCleanupSuppressedAndAttemptCharged() {
+		var source = new TestSource(); var fatal = new AssertionError("fatal detached read");
+		var cleanup = new IllegalStateException("cleanup after fatal read", new RuntimeException("fatal read cleanup cause"));
+		var snapshot = new TestSnapshot(items(1), 512) {
+			@Override public InventoryDomainCodec.Item read(int index) { throw fatal; }
+			@Override public void close() { super.close(); throw cleanup; }
+		};
+		source.plan = new TestPlan(1024, () -> Optional.of(snapshot)); var memory = new RetainedMemoryLedger(2048);
+		try (var handle = open(source, grant(0))) {
+			assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(memory)); var ledger = grant(1);
+			assertSame(fatal, assertThrows(AssertionError.class, () -> step(handle, ledger)));
+			assertEquals(1, fatal.getSuppressed().length); assertSame(cleanup, fatal.getSuppressed()[0]);
+			assertEquals(1, snapshot.closes.get()); assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+			assertEquals(1, ledger.used(InventorySourceAccess.PHYSICAL)); assertEquals(1, ledger.used(InventorySourceAccess.PROBES));
+		}
+		assertEquals(1, source.closes.get());
 	}
 
 	@Test

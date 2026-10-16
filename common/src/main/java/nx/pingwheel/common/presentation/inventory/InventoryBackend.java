@@ -477,10 +477,19 @@ public final class InventoryBackend implements AutoCloseable {
 						// commit is never reported as a retryable rejection.
 						prepared.commit(marker);
 						try { host.publishCreated(outcome); }
-						catch (RuntimeException | LinkageError publicationFailure) { /* committed; fail soft */ }
+						catch (RuntimeException | LinkageError publicationFailure) {
+							nx.pingwheel.common.util.RateLimitedDiagnostics.error("inventory/publish-created", host.getClass().getName(),
+								() -> "committed marker=" + outcome.marker().id() + " request=" + packet.requestId()
+									+ " commit=" + packet.commitId() + " owner=" + player + " epoch=" + session.epoch
+									+ " " + InventoryCaptureDiagnostics.context(preview.input), publicationFailure);
+						}
 						prepared.attachRecipients(marker);
 					}
-				} catch (RuntimeException | LinkageError failure) { rejection = MarkerRejectReason.INVALID_REQUEST; }
+				} catch (RuntimeException | LinkageError failure) {
+					InventoryCaptureDiagnostics.warn("select-create", preview.input, null,
+						() -> "request=" + packet.requestId() + " commit=" + packet.commitId() + " owner=" + player, failure);
+					rejection = MarkerRejectReason.INVALID_REQUEST;
+				}
 				finally { prepared.close(); }
 			}
 		}

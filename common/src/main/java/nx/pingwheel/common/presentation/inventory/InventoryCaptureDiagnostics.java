@@ -1,24 +1,27 @@
 package nx.pingwheel.common.presentation.inventory;
 
 import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.function.Supplier;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryObservationSnapshot;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.source.SourceKey;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 /**
- * Low-frequency inventory snapshot-capture diagnostics. One bounded line per
- * reason and interval carries the target, the frozen face and a fixed reason
- * token; raw NBT, item data and arbitrary exception text never reach the log.
- * The logger is resolved lazily so pure tests never trigger a platform
- * service lookup just by exercising a capture.
+ * Low-frequency inventory source diagnostics. Unexpected failures retain their
+ * original bounded exception report; ordinary bounds and memory scheduling keep
+ * their independent reason gate. Logging never resolves a source or initializes
+ * the platform services.
  */
 final class InventoryCaptureDiagnostics {
 
 	private enum Reason {
-		CAPTURE_FAILED("capture-failed"),
-		SNAPSHOT_STEP_FAILED("snapshot-step-failed"),
 		BOUND_EXCEEDED("bound-exceeded"),
 		MEMORY_DEFERRED("memory-deferred");
 
@@ -29,18 +32,55 @@ final class InventoryCaptureDiagnostics {
 		}
 	}
 
-	/** At most one line per reason per interval; capture failures never log per slot. */
+	/** At most one line per ordinary reason per interval; failures use the shared bounded gate. */
 	private static final long MIN_INTERVAL_NANOS = 10_000_000_000L;
 	private static final AtomicLongArray LAST_LOGGED = new AtomicLongArray(Reason.values().length);
 
 	private InventoryCaptureDiagnostics() {}
 
 	static void captureFailed(InventorySourceInput input, Throwable failure) {
-		log(Reason.CAPTURE_FAILED, input, failure == null ? "unknown" : failure.getClass().getSimpleName());
+		warn("capture-failed", input, null, () -> "stage=snapshot-prepare", failure);
 	}
 
 	static void snapshotStepFailed(InventorySourceInput input, Throwable failure) {
-		log(Reason.SNAPSHOT_STEP_FAILED, input, failure == null ? "unknown" : failure.getClass().getSimpleName());
+		warn("snapshot-step-failed", input, null, () -> "stage=snapshot-step", failure);
+	}
+
+	static void warn(String operation, InventorySourceInput input, SourceKey source, Supplier<String> detail, Throwable failure) {
+		if (expectedFailure(failure)) return;
+		RateLimitedDiagnostics.warn("inventory/" + operation, scope(input.target()),
+			() -> context(input) + (source == null ? "" : " source=" + source) + " " + detail.get()
+				+ (input.target() instanceof Target.ExternalBlockTarget external ? " locator=" + external.providerLocator() : ""), failure);
+	}
+
+	static boolean expectedFailure(Throwable failure) {
+		Throwable reason = failure instanceof InventorySourceAccess.CursorlessReadFailure ? failure.getCause() : failure;
+		return reason instanceof InventoryItemBudget.CaptureLimitException
+			|| reason instanceof InventoryObservationSnapshot.LimitException
+			|| reason instanceof InventorySourceUnavailableException;
+	}
+
+	static String scope(Target target) {
+		return target instanceof Target.ExternalBlockTarget external
+			? external.providerId() + "/" + external.expectedBlockRegistryId()
+			: target instanceof Target.BlockTarget block ? "block/" + block.blockRegistryId() : target.getClass().getName();
+	}
+
+	static String context(InventorySourceInput input) {
+		return "face=" + input.face() + " readOwner=" + input.readOwner() + " " + targetContext(input.target());
+	}
+
+	static String targetContext(Target target) {
+		if (target instanceof Target.ExternalBlockTarget external) {
+			// Detached external coordinates are placeholders, not a physical read position.
+			return "dimension=" + external.dimensionId() + " provider=" + external.providerId()
+				+ " stableId=" + external.stableTargetId() + " registry=" + external.expectedBlockRegistryId();
+		}
+		if (target instanceof Target.BlockTarget block) {
+			return "dimension=" + block.dimensionId() + " position=" + block.x() + "," + block.y() + "," + block.z()
+				+ " registry=" + block.blockRegistryId();
+		}
+		return "target=" + target;
 	}
 
 	static void boundExceeded(InventorySourceInput input, String detail) {
@@ -58,16 +98,9 @@ final class InventoryCaptureDiagnostics {
 		if (last != 0L && now - last < MIN_INTERVAL_NANOS) return;
 		if (!LAST_LOGGED.compareAndSet(index, last, now)) return;
 		try {
-			var target = input.target();
-			if (target instanceof Target.ExternalBlockTarget external) {
-				// External coordinates are placeholders; the provider identity is the diagnostic context.
-				logger().warn("inventory snapshot {} at {} provider={} registry={} face={} ({})", reason.token,
-					external.dimensionId(), external.providerId(), external.expectedBlockRegistryId(), input.face(), detail);
-			} else {
-				var block = (Target.BlockTarget) target;
-				logger().warn("inventory snapshot {} at {} {} {} face={} ({})", reason.token,
-					block.dimensionId(), block.x() + "," + block.y() + "," + block.z(), block.blockRegistryId(), input.face(), detail);
-			}
+			if (reason == Reason.MEMORY_DEFERRED) {
+				if (logger().isDebugEnabled()) logger().debug("inventory snapshot {} {} ({})", reason.token, context(input), detail);
+			} else if (logger().isWarnEnabled()) logger().warn("inventory snapshot {} {} ({})", reason.token, context(input), detail);
 		} catch (RuntimeException | LinkageError ignored) { /* diagnostics never affect capture */ }
 	}
 

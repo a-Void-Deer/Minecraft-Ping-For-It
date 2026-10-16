@@ -41,6 +41,7 @@ import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
 import nx.pingwheel.common.presentation.inventory.InventorySelection;
 import nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources;
 import nx.pingwheel.common.presentation.source.SourceKey;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 /** Ordinary and provider-confirmed blocks. Every view is sided, read-only, loaded and owner-authorized. */
 public final class InventoryMinecraftSources {
@@ -114,7 +115,7 @@ public final class InventoryMinecraftSources {
 			Objects.requireNonNull(face, "face");
 			Objects.requireNonNull(memberGate, "memberGate");
 		}
-		boolean contains(BlockPos pos) { return pos != null && InventoryMinecraftSources.contains(memberGate, pos); }
+		boolean contains(BlockPos pos) { return pos != null && InventoryMinecraftSources.contains(memberGate, pos, position, face); }
 	}
 
 	/**
@@ -130,7 +131,7 @@ public final class InventoryMinecraftSources {
 			Objects.requireNonNull(memberGate, "memberGate");
 			Objects.requireNonNull(providers, "providers");
 		}
-		boolean contains(BlockPos pos) { return pos != null && InventoryMinecraftSources.contains(memberGate, pos); }
+		boolean contains(BlockPos pos) { return pos != null && InventoryMinecraftSources.contains(memberGate, pos, descriptor, null); }
 	}
 
 	/** Fresh synchronous provider resolution for one external input; empty means the binding is unavailable. */
@@ -140,8 +141,16 @@ public final class InventoryMinecraftSources {
 	}
 
 	private static boolean contains(Predicate<BlockPos> gate, BlockPos pos) {
+		return contains(gate, pos, null, null);
+	}
+	private static boolean contains(Predicate<BlockPos> gate, BlockPos pos, Object binding, BlockFace face) {
 		try { return gate.test(pos); }
-		catch (RuntimeException | LinkageError unavailable) { return false; }
+		catch (RuntimeException | LinkageError unavailable) {
+			if (!(unavailable instanceof InventorySourceUnavailableException) && !(unavailable instanceof InventoryItemBudget.CaptureLimitException))
+				RateLimitedDiagnostics.warn("inventory-member-scope", gate.getClass().getName(),
+					() -> "position=" + pos + " binding=" + binding + " face=" + face + " gateClass=" + gate.getClass().getName(), unavailable);
+			return false;
+		}
 	}
 
 	/** The one validated effective display cap range; every catalogue and snapshot ceiling passes here. */
@@ -185,7 +194,10 @@ public final class InventoryMinecraftSources {
 			return Optional.of(new Source(input, view, server::isSameThread, () -> view(world, input,
 				new PhysicalRead(input.ordinaryTarget().orElseThrow(), input.face(), world::isLoaded), providers, view.snapshotLayout, true), codec, world, null,
 				displayBytes, catalog::tightenDisplay, catalog::reprojectionSummary));
-		} catch (RuntimeException | LinkageError unavailable) { return Optional.empty(); }
+		} catch (RuntimeException | LinkageError unavailable) {
+			InventorySnapshotDiagnostics.failure("inventory-source-resolve", input, null, () -> "displayBytes=" + displayBytes, unavailable);
+			return Optional.empty();
+		}
 	}
 
 	/** The server level is looked up per operation so no world handle is retained across ticks. */
@@ -233,7 +245,10 @@ public final class InventoryMinecraftSources {
 			if (first == null || !InventorySourceInput.sameBinding(input.target(), first.descriptor().target())) return Optional.empty();
 			View view = view(first.world(), input, new PhysicalRead(first.descriptor().blockTarget(), input.face(), first::contains), first.providers());
 			return Optional.of(new ExternalSource(input, first, bindings, onThread, codec, view, displayBytes, tightenDisplay, reprojectionSummary));
-		} catch (RuntimeException | LinkageError unavailable) { return Optional.empty(); }
+		} catch (RuntimeException | LinkageError unavailable) {
+			InventorySnapshotDiagnostics.failure("inventory-external-resolve", input, bindings, () -> "displayBytes=" + displayBytes, unavailable);
+			return Optional.empty();
+		}
 	}
 
 	static View view(SourceWorld world, InventorySourceInput input, ProviderAccessLookup providers) {
@@ -250,19 +265,19 @@ public final class InventoryMinecraftSources {
 		InventorySnapshotLayout expected, boolean enforceShape) {
 		var target = physical.position();
 		BlockPos pos = new BlockPos(target.x(), target.y(), target.z());
-		if (!physical.contains(pos) || !world.isLoaded(pos)) throw new IllegalStateException("unloaded inventory");
-		if (!physical.contains(pos)) throw new IllegalStateException("inventory root outside the read scope");
+		if (!physical.contains(pos) || !world.isLoaded(pos)) throw new InventorySourceUnavailableException("unloaded inventory");
+		if (!physical.contains(pos)) throw new InventorySourceUnavailableException("inventory root outside the read scope");
 		BlockState state = world.blockState(pos);
 		if (!BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(target.blockRegistryId()))
-			throw new IllegalStateException("original block unavailable");
-		if (!physical.contains(pos)) throw new IllegalStateException("inventory root outside the read scope");
+			throw new InventorySourceUnavailableException("original block unavailable");
+		if (!physical.contains(pos)) throw new InventorySourceUnavailableException("inventory root outside the read scope");
 		BlockEntity entity = world.blockEntity(pos);
 		if (enforceShape && !ordinaryLayout(expected) && entity instanceof Container)
-			throw new IllegalStateException("inventory provider kind changed");
+			throw new InventorySourceUnavailableException("inventory provider kind changed");
 		if (enforceShape && ordinaryLayout(expected) && !(entity instanceof Container))
-			throw new IllegalStateException("inventory container kind changed");
+			throw new InventorySourceUnavailableException("inventory container kind changed");
 		if (enforceShape && (expected == null || vault(expected)) && entity instanceof net.minecraft.world.level.block.entity.BaseContainerBlockEntity)
-			throw new IllegalStateException("inventory member lock kind changed");
+			throw new InventorySourceUnavailableException("inventory member lock kind changed");
 		check(entity, world.heldKey());
 		Direction face = Direction.valueOf(physical.face().name());
 		List<BlockEntity> entities = new ArrayList<>();
@@ -270,19 +285,19 @@ public final class InventoryMinecraftSources {
 		String identity = VanillaInventorySource.simpleBlockId(target.dimensionId(), pos, target.blockRegistryId());
 		if (state.getBlock() instanceof ChestBlock && state.getValue(ChestBlock.TYPE) != ChestType.SINGLE) {
 			BlockPos partner = pos.relative(ChestBlock.getConnectedDirection(state));
-			if (!physical.contains(partner) || !world.isLoaded(partner)) throw new IllegalStateException("unloaded chest partner");
-			if (!physical.contains(partner)) throw new IllegalStateException("chest partner outside the read scope");
+			if (!physical.contains(partner) || !world.isLoaded(partner)) throw new InventorySourceUnavailableException("unloaded chest partner");
+			if (!physical.contains(partner)) throw new InventorySourceUnavailableException("chest partner outside the read scope");
 			BlockState other = world.blockState(partner);
 			if (other.getBlock() != state.getBlock() || other.getValue(ChestBlock.TYPE) == ChestType.SINGLE
 				|| other.getValue(ChestBlock.TYPE) == state.getValue(ChestBlock.TYPE)
 				|| other.getValue(ChestBlock.FACING) != state.getValue(ChestBlock.FACING)
 				|| !partner.relative(ChestBlock.getConnectedDirection(other)).equals(pos))
-				throw new IllegalStateException("invalid chest pairing");
-			if (!physical.contains(partner)) throw new IllegalStateException("chest partner outside the read scope");
+				throw new InventorySourceUnavailableException("invalid chest pairing");
+			if (!physical.contains(partner)) throw new InventorySourceUnavailableException("chest partner outside the read scope");
 			BlockEntity otherEntity = world.blockEntity(partner);
 			check(otherEntity, world.heldKey());
 			if (!(entity instanceof ChestBlockEntity) || !(otherEntity instanceof ChestBlockEntity))
-				throw new IllegalStateException("invalid chest halves");
+				throw new InventorySourceUnavailableException("invalid chest halves");
 			boolean first = compare(pos, partner) < 0;
 			entities.add(first ? entity : otherEntity);
 			entities.add(first ? otherEntity : entity);
@@ -291,13 +306,13 @@ public final class InventoryMinecraftSources {
 		if (entity instanceof Container) {
 			List<InventorySnapshotLayout.Member> members = new ArrayList<>();
 			for (BlockEntity half : entities) {
-				if (!(half instanceof Container container)) throw new IllegalStateException("missing container half");
+				if (!(half instanceof Container container)) throw new InventorySourceUnavailableException("missing container half");
 				BlockPos memberPos = half.getBlockPos().immutable();
-				if (!physical.contains(memberPos)) throw new IllegalStateException("inventory member outside the read scope");
+				if (!physical.contains(memberPos)) throw new InventorySourceUnavailableException("inventory member outside the read scope");
 				int[] mapping = sidedSlots(container, face);
 				for (int slot : mapping) slots.add(new Slot(container, slot));
 				if (slots.size() > InventorySourceAccess.MAX_SLOTS) throw new IllegalStateException("container view exceeds finite bound");
-				if (!physical.contains(memberPos)) throw new IllegalStateException("inventory member outside the read scope");
+				if (!physical.contains(memberPos)) throw new InventorySourceUnavailableException("inventory member outside the read scope");
 				BlockState memberState = world.blockState(memberPos);
 				String memberBlockId = BuiltInRegistries.BLOCK.getKey(memberState.getBlock()).toString();
 				String memberEntityId = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(half.getType()).toString();
@@ -314,12 +329,12 @@ public final class InventoryMinecraftSources {
 			return new View(identity, List.copyOf(entities), List.copyOf(slots), null, layout, true);
 		}
 		// Only genuinely non-Container sources reach the native capability bridge.
-		if (!physical.contains(pos)) throw new IllegalStateException("inventory capability outside the read scope");
-		IPlatformInventoryService.Access access = providers.find(pos, face).orElseThrow();
+		if (!physical.contains(pos)) throw new InventorySourceUnavailableException("inventory capability outside the read scope");
+		IPlatformInventoryService.Access access = providers.find(pos, face).orElseThrow(() -> new InventorySourceUnavailableException("inventory capability absent"));
 		if (input.target() instanceof Target.ExternalBlockTarget) {
-			if (!physical.contains(pos)) throw new IllegalStateException("inventory capability outside the read scope after lookup");
+			if (!physical.contains(pos)) throw new InventorySourceUnavailableException("inventory capability outside the read scope after lookup");
 			access = access.guardedBy(() -> physical.contains(pos));
-			if (!access.valid()) throw new IllegalStateException("inventory capability unavailable");
+			if (!access.valid()) throw new InventorySourceUnavailableException("inventory capability unavailable");
 		}
 		String accessIdentity = access.alias().orElse(identity);
 		InventorySnapshotLayout layout = providerLayout(input, pos, access, physical::contains, false, expected, enforceShape);
@@ -353,7 +368,11 @@ public final class InventoryMinecraftSources {
 					return physical.contains(pos) && world.isLoaded(pos) && world.blockEntity(pos) == entity
 						&& InventoryReadSafety.readable(entity, world.heldKey());
 				} catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
-				catch (RuntimeException | LinkageError unavailable) { return false; }
+				catch (RuntimeException | LinkageError unavailable) {
+					InventorySnapshotDiagnostics.failure("inventory-resident-scope-valid", input, entity,
+						() -> "position=" + pos + " layout=" + (admittedLayout == null ? "live" : admittedLayout.layoutId()), unavailable);
+					return false;
+				}
 			}
 			@Override public boolean allows(Container container) {
 				if (!valid()) return false;
@@ -388,7 +407,7 @@ public final class InventoryMinecraftSources {
 				return null;
 			}
 		});
-		if (layout != null && visibleSlots(layout) != access.slots()) throw new IllegalStateException("provider layout changed scoped slot witness");
+		if (layout != null && visibleSlots(layout) != access.slots()) throw new InventorySourceUnavailableException("provider layout changed scoped slot witness");
 		return new View(accessIdentity, List.copyOf(entities), List.of(), access, layout, false);
 	}
 
@@ -415,7 +434,7 @@ public final class InventoryMinecraftSources {
 		try { layout = access.snapshotLayout().orElse(null); }
 		catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
 		catch (RuntimeException | LinkageError unsupported) {
-			InventorySnapshotDiagnostics.unsupported(input, "provider snapshot layout unavailable");
+			InventorySnapshotDiagnostics.failure("inventory-provider-snapshot-layout", input, access, () -> "position=" + pos, unsupported);
 			return null;
 		}
 		// The provider callback is the explicit trust boundary. Its immutable DTO
@@ -429,7 +448,7 @@ public final class InventoryMinecraftSources {
 			boolean registered = true;
 			for (int memberIndex = 0; memberIndex < layout.members().size(); memberIndex++) {
 				var member = layout.members().get(memberIndex);
-				if (!contains(memberGate, member.position())) throw new IllegalStateException("inventory layout member outside the read scope");
+				if (!contains(memberGate, member.position())) throw new InventorySourceUnavailableException("inventory layout member outside the read scope");
 				for (int segmentIndex = 0; segmentIndex < member.segments().size(); segmentIndex++)
 					registered &= InventorySnapshotSchemas.registered(member.segments().get(segmentIndex).schemaId());
 			}
@@ -438,7 +457,7 @@ public final class InventoryMinecraftSources {
 		if (enforceShape && !unsupportedLayout) InventoryValidationBudget.requireLayout(expected, layout);
 		if (layout == null) return null;
 		if (layout.members().stream().anyMatch(member -> !contains(memberGate, member.position())))
-			throw new IllegalStateException("inventory layout member outside the read scope");
+			throw new InventorySourceUnavailableException("inventory layout member outside the read scope");
 		if (!layout.members().stream().anyMatch(member -> member.position().equals(pos))
 			|| (!access.alias().isEmpty() && !layout.layoutId().equals(access.alias().orElseThrow()))
 			|| checkSlots && visibleSlots(layout) != access.slots())
@@ -455,6 +474,7 @@ public final class InventoryMinecraftSources {
 		int size = container.getContainerSize();
 		if (size < 0 || size > InventorySourceAccess.MAX_SLOTS) throw new IllegalStateException("container slot bound");
 		int[] source = container instanceof WorldlyContainer sided ? sided.getSlotsForFace(face) : null;
+		if (source == null && container instanceof WorldlyContainer) throw new InventorySourceUnavailableException("missing sided mapping");
 		if (source != null && source.length > InventorySourceAccess.MAX_SLOTS) throw new IllegalStateException("sided slot bound");
 		int[] mapping = source == null && !(container instanceof WorldlyContainer) ? java.util.stream.IntStream.range(0, size).toArray()
 			: java.util.Objects.requireNonNull(source, "missing sided mapping").clone();
@@ -466,7 +486,7 @@ public final class InventoryMinecraftSources {
 		return mapping;
 	}
 	private static void check(BlockEntity entity, ItemStack heldKey) {
-		if (!InventoryReadSafety.readable(entity, heldKey)) throw new IllegalStateException("source read denied");
+		if (!InventoryReadSafety.readable(entity, heldKey)) throw new InventorySourceUnavailableException("source read denied");
 	}
 	private static int visibleSlots(InventorySnapshotLayout layout) {
 		int result = 0;
@@ -572,7 +592,10 @@ public final class InventoryMinecraftSources {
 				liveAccess = current.access;
 				return true;
 			} catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
-			catch (RuntimeException | LinkageError unavailable) { return false; }
+			catch (RuntimeException | LinkageError unavailable) {
+				InventorySnapshotDiagnostics.failure("inventory-source-valid", input, original.access, () -> "source=" + original.identity, unavailable);
+				return false;
+			}
 		}
 		@Override public boolean valid(InventoryValidationBudget.Allowance allowance) {
 			var previous = validation; validation = Objects.requireNonNull(allowance);
@@ -596,7 +619,7 @@ public final class InventoryMinecraftSources {
 			discovery.debit(InventoryValidationBudget.fixed(layout));
 			validation = discovery;
 			try {
-				if (!valid()) throw new IllegalStateException("snapshot source invalid");
+				if (!valid()) throw new InventorySourceUnavailableException("snapshot source invalid");
 				discovery.debit(InventoryValidationBudget.supported(layout, provider, vault));
 				if (testSnapshotCapture == null && (world == null || !captureSupported(currentView(), world))) return Optional.empty();
 				long upperBound = InventoryObservationSnapshot.memoryUpperBound(layout, displayBytes, provider, vault, lockMembers);
@@ -625,7 +648,7 @@ public final class InventoryMinecraftSources {
 					allowance.debit(InventoryValidationBudget.fixed(layout));
 					validation = allowance;
 					try {
-						if (closed || !onThread.getAsBoolean() || !valid()) throw new IllegalStateException("capture source invalid");
+						if (closed || !onThread.getAsBoolean() || !valid()) throw new InventorySourceUnavailableException("capture source invalid");
 						if (testSnapshotCapture != null) return testSnapshotCapture.get();
 						if (world == null) return Optional.empty();
 						return captureObservations(input, new PhysicalRead(input.ordinaryTarget().orElseThrow(), input.face(), world::isLoaded),
@@ -657,7 +680,7 @@ public final class InventoryMinecraftSources {
 			return readOwned(slot, Objects.requireNonNull(admission));
 		}
 		private InventoryDomainCodec.Item readOwned(int slot, InventoryCatalogAdmission admission) {
-			if (!valid()) throw new IllegalStateException("inventory view changed");
+			if (!valid()) throw new InventorySourceUnavailableException("inventory view changed");
 			if (world == null) {
 				if (liveAccess != null) return decode(codec, liveAccess.read(slot), admission);
 				var value = readResident(original, null, slot);
@@ -665,7 +688,7 @@ public final class InventoryMinecraftSources {
 			}
 			var resident = readResident(original, liveAccess, slot);
 			var item = freezeItem(residentCatalog, world.registries(), displayBytes, resident, InventoryItemBudget.root(displayBytes), admission);
-			if (!valid()) throw new IllegalStateException("inventory authority revoked during read");
+			if (!valid()) throw new InventorySourceUnavailableException("inventory authority revoked during read");
 			return item;
 		}
 		@Override public InventorySourceAccess.Page enumerate(int limit) {
@@ -677,7 +700,7 @@ public final class InventoryMinecraftSources {
 		private InventorySourceAccess.Page enumerateOwned(int limit, InventoryCatalogAdmission admission) {
 			var progress = world == null ? null : new CursorlessProgress();
 			try {
-				if (!valid()) throw new IllegalStateException("inventory view changed");
+				if (!valid()) throw new InventorySourceUnavailableException("inventory view changed");
 				if (world == null) {
 					var observed = liveAccess.observe(limit);
 					List<InventoryDomainCodec.Item> values = new ArrayList<>();
@@ -718,7 +741,7 @@ public final class InventoryMinecraftSources {
 			}
 			var progress = new CursorlessProgress();
 			try {
-				if (!valid()) throw new IllegalStateException("inventory view changed");
+				if (!valid()) throw new InventorySourceUnavailableException("inventory view changed");
 				return witnessResident(liveAccess, limit, selection, residentCatalog, world.registries(), displayBytes, this::valid, admission, progress);
 			} catch (RuntimeException | LinkageError failure) {
 				if (admission != null) progress.failed(failure);
@@ -759,7 +782,7 @@ public final class InventoryMinecraftSources {
 		if (world == null || layout == null) return Optional.empty();
 		if (upperBound < InventoryObservationSnapshot.memoryUpperBound(layout, displayBytes, view.access != null, vault(layout), lockMembers))
 			throw new InventoryItemBudget.CaptureLimitException("inventory validation workspace was not admitted");
-		if (!world.onServerThread()) throw new IllegalStateException("snapshot owner or server thread unavailable");
+		if (!world.onServerThread()) throw new InventorySourceUnavailableException("snapshot owner or server thread unavailable");
 		var memberCost = InventoryValidationBudget.members(layout, lockMembers);
 		var supportedCost = InventoryValidationBudget.supported(layout, view.access != null, vault(layout));
 		var readCost = InventoryValidationBudget.read(layout, view.access != null, vault(layout));
@@ -774,32 +797,36 @@ public final class InventoryMinecraftSources {
 		for (int index = 0; index < layout.members().size(); index++) {
 			var member = layout.members().get(index);
 			BlockEntity entity = members.get(index);
-			if (!physical.contains(member.position())) throw new IllegalStateException("snapshot member outside the read scope");
+			if (!physical.contains(member.position())) throw new InventorySourceUnavailableException("snapshot member outside the read scope");
 			if (entity instanceof Container container && member.segments().size() == 1) {
 				var segment = member.segments().get(0);
 				if (container.getContainerSize() != segment.localSlots() || !InventoryContainerReads.mappingEquals(container, Direction.valueOf(input.face().name()), segment.visibleSlots()))
-					throw new IllegalStateException("snapshot container face mapping changed");
+					throw new InventorySourceUnavailableException("snapshot container face mapping changed");
 			}
 		}
-		if (!valid.getAsBoolean()) throw new IllegalStateException("snapshot source topology changed before contents");
+		if (!valid.getAsBoolean()) throw new InventorySourceUnavailableException("snapshot source topology changed before contents");
 
 		validation.debit(supportedCost);
 		InventoryContainerReads.Scratch scratch = new InventoryContainerReads.Scratch();
-		if (!captureSupported(view, world, scratch)) throw new IllegalStateException("resident capture graph changed");
-		BooleanSupplier authority = frozenAuthority(view, members, physical, world);
+		if (!captureSupported(view, world, scratch)) throw new InventorySourceUnavailableException("resident capture graph changed");
+		BooleanSupplier authority = frozenAuthority(input, view, members, physical, world);
 		InventoryObservationSnapshot captured = InventoryObservationSnapshot.capture(layout,
 			new BlockPos(physical.position().x(), physical.position().y(), physical.position().z()), world.registries(), displayBytes, upperBound,
 			index -> {
 				validation.debit(readCost);
-				if (!captureSupported(view, world, scratch)) throw new IllegalStateException("resident capture graph changed before read");
+				if (!captureSupported(view, world, scratch)) throw new InventorySourceUnavailableException("resident capture graph changed before read");
 				attemptedRead.run(); return readResident(view, view.access, index);
-			}, () -> { validation.debit(authorityCost); return authority.getAsBoolean(); }, validation);
+			}, () -> {
+				validation.debit(authorityCost);
+				if (!authority.getAsBoolean()) throw new InventorySourceUnavailableException("capture authority or topology revoked");
+				return true;
+			}, validation);
 		try {
 			validation.debit(memberCost);
 			List<BlockEntity> after = precheckMembers(layout, world, physical.memberGate());
-			if (!members.equals(after) || !valid.getAsBoolean()) throw new IllegalStateException("capture source topology changed during resident reads");
+			if (!members.equals(after) || !valid.getAsBoolean()) throw new InventorySourceUnavailableException("capture source topology changed during resident reads");
 			validation.debit(supportedCost);
-			if (!captureSupported(view, world, scratch)) throw new IllegalStateException("capture resident graph changed during resident reads");
+			if (!captureSupported(view, world, scratch)) throw new InventorySourceUnavailableException("capture resident graph changed during resident reads");
 			return Optional.of(captured);
 		} catch (RuntimeException | Error failure) { captured.close(); throw failure; }
 	}
@@ -832,7 +859,7 @@ public final class InventoryMinecraftSources {
 	 * cannot widen the admitted scope. Classification and provider metadata
 	 * callbacks are admitted by that same symbolic validation work term.
 	 */
-	private static BooleanSupplier frozenAuthority(View view, List<BlockEntity> members, PhysicalRead physical, SourceWorld world) {
+	private static BooleanSupplier frozenAuthority(InventorySourceInput input, View view, List<BlockEntity> members, PhysicalRead physical, SourceWorld world) {
 		InventorySnapshotLayout layout = view.snapshotLayout;
 		Direction face = Direction.valueOf(physical.face().name());
 		var blocks = new net.minecraft.world.level.block.Block[members.size()];
@@ -871,7 +898,11 @@ public final class InventoryMinecraftSources {
 						visibleIndex++;
 						return true;
 					}
-				} catch (RuntimeException | LinkageError unavailable) { return false; }
+				} catch (RuntimeException | LinkageError unavailable) {
+					InventorySnapshotDiagnostics.failure("inventory-snapshot-authority", input, view.access,
+						() -> "source=" + view.identity + " member=" + memberIndex + " segment=" + segmentIndex + " visibleSlot=" + visibleIndex, unavailable);
+					return false;
+				}
 			}
 			/** Every frozen member is still loaded, the same BlockEntity, block, readable and, for a chest half, still reciprocally paired. */
 			private boolean membersHeld() {
@@ -934,7 +965,7 @@ public final class InventoryMinecraftSources {
 			progress.attemptingVisit(); // Every delivered view, including blank/failing freezes.
 			try {
 				values.add(freezeItem(catalog, registries, displayBytes, resident, budget, admission));
-				if (!valid.getAsBoolean()) throw new IllegalStateException("enumeration authority revoked");
+				if (!valid.getAsBoolean()) throw new InventorySourceUnavailableException("enumeration authority revoked");
 				return true;
 			} catch (RuntimeException | LinkageError failure) {
 				if (admission != null) throw progress.visitorFailed(failure);
@@ -942,7 +973,8 @@ public final class InventoryMinecraftSources {
 			}
 		});
 		progress.returned(visited.visited());
-		if (visited.visited() != values.size() || !valid.getAsBoolean()) throw new IllegalStateException("invalid resident enumeration");
+		if (visited.visited() != values.size()) throw new IllegalStateException("invalid resident enumeration");
+		if (!valid.getAsBoolean()) throw new InventorySourceUnavailableException("invalid resident enumeration");
 		return new InventorySourceAccess.Page(values, visited.complete());
 	}
 	private static boolean witness(IPlatformInventoryService.ResidentEntry resident, InventorySelection selection,
@@ -971,7 +1003,7 @@ public final class InventoryMinecraftSources {
 			progress.attemptingVisit();
 			try {
 				progress.present = witness(resident, selection, catalog, registries, displayBytes, budget, admission);
-				if (!valid.getAsBoolean()) throw new IllegalStateException("selection authority revoked");
+				if (!valid.getAsBoolean()) throw new InventorySourceUnavailableException("selection authority revoked");
 				return !progress.present;
 			} catch (RuntimeException | LinkageError failure) {
 				if (admission != null) throw progress.visitorFailed(failure);
@@ -979,7 +1011,7 @@ public final class InventoryMinecraftSources {
 			}
 		});
 		progress.returned(visited.visited());
-		if (!valid.getAsBoolean()) throw new IllegalStateException("selection authority revoked");
+		if (!valid.getAsBoolean()) throw new InventorySourceUnavailableException("selection authority revoked");
 		return new InventorySourceAccess.SelectionWitness(progress.present, visited.visited());
 	}
 	private static boolean matches(InventoryDomainCodec.Item item, InventorySelection selection) {
@@ -991,15 +1023,15 @@ public final class InventoryMinecraftSources {
 		List<BlockEntity> members = new ArrayList<>(layout.members().size());
 		for (InventorySnapshotLayout.Member member : layout.members()) {
 			BlockPos position = member.position();
-			if (!contains(memberGate, position) || !world.isLoaded(position)) throw new IllegalStateException("snapshot member is not loaded");
-			if (!contains(memberGate, position)) throw new IllegalStateException("snapshot member outside the read scope");
+			if (!contains(memberGate, position) || !world.isLoaded(position)) throw new InventorySourceUnavailableException("snapshot member is not loaded");
+			if (!contains(memberGate, position)) throw new InventorySourceUnavailableException("snapshot member outside the read scope");
 			BlockState state = world.blockState(position);
 			if (!BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(member.blockId()))
-				throw new IllegalStateException("snapshot member block changed");
-			if (!contains(memberGate, position)) throw new IllegalStateException("snapshot member outside the read scope");
+				throw new InventorySourceUnavailableException("snapshot member block changed");
+			if (!contains(memberGate, position)) throw new InventorySourceUnavailableException("snapshot member outside the read scope");
 			BlockEntity entity = world.blockEntity(position);
 			if (entity == null || !BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).toString().equals(member.blockEntityId()))
-				throw new IllegalStateException("snapshot member block entity changed");
+				throw new InventorySourceUnavailableException("snapshot member block entity changed");
 			check(entity, world.heldKey());
 			members.add(entity);
 		}
@@ -1084,7 +1116,11 @@ public final class InventoryMinecraftSources {
 			if (closed || !onThread.getAsBoolean()) return false;
 			try { current(); return true; }
 			catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
-			catch (RuntimeException | LinkageError unavailable) { return false; }
+			catch (RuntimeException | LinkageError unavailable) {
+				InventorySnapshotDiagnostics.failure("inventory-external-valid", input, bindings,
+					() -> "source=" + identity + " descriptor=" + descriptor, unavailable);
+				return false;
+			}
 		}
 		@Override public boolean valid(InventoryValidationBudget.Allowance allowance) {
 			var previous = validation; validation = Objects.requireNonNull(allowance);
@@ -1168,7 +1204,7 @@ public final class InventoryMinecraftSources {
 				.allMatch(member -> live.binding().contains(member.position()));
 		}
 		private void requireMembers(Current live) {
-			if (!membersAllowed(live)) throw new IllegalStateException("inventory handoff outside the read scope");
+			if (!membersAllowed(live)) throw new InventorySourceUnavailableException("inventory handoff outside the read scope");
 		}
 		@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
 			InventorySnapshotLayout captured = layout;
@@ -1213,7 +1249,7 @@ public final class InventoryMinecraftSources {
 					allowance.debit(InventoryValidationBudget.fixed(captured));
 					validation = allowance;
 					try {
-						if (closed || !onThread.getAsBoolean()) throw new IllegalStateException("capture source invalid");
+						if (closed || !onThread.getAsBoolean()) throw new InventorySourceUnavailableException("capture source invalid");
 						Current current = current();
 						BlockReadSource live = current.binding().descriptor();
 						return captureObservations(input, new PhysicalRead(live.blockTarget(), input.face(), current.binding()::contains),
@@ -1235,14 +1271,14 @@ public final class InventoryMinecraftSources {
 		@Override public void close() { closed = true; }
 
 		private Current current() {
-			if (closed) throw new IllegalStateException("closed inventory source");
-			if (!onThread.getAsBoolean()) throw new IllegalStateException("inventory source is not on the server thread");
+			if (closed) throw new InventorySourceUnavailableException("closed inventory source");
+			if (!onThread.getAsBoolean()) throw new InventorySourceUnavailableException("inventory source is not on the server thread");
 			if (validationViewCost != null)
 				(validation == null ? new InventoryValidationBudget.Allowance(validationViewCost) : validation).debit(validationViewCost);
-			ExternalBinding binding = bindings.resolve().orElseThrow(() -> new IllegalStateException("provider read source unavailable"));
-			if (!sameDescriptor(binding.descriptor())) throw new IllegalStateException("provider read binding changed");
+			ExternalBinding binding = bindings.resolve().orElseThrow(() -> new InventorySourceUnavailableException("provider read source unavailable"));
+			if (!sameDescriptor(binding.descriptor())) throw new InventorySourceUnavailableException("provider read binding changed");
 			View view = view(binding.world(), input, new PhysicalRead(binding.descriptor().blockTarget(), input.face(), binding::contains), binding.providers(), layout, true);
-			if (!sameTopology(view)) throw new IllegalStateException("provider read topology changed");
+			if (!sameTopology(view)) throw new InventorySourceUnavailableException("provider read topology changed");
 			Current current = new Current(binding, view);
 			requireMembers(current);
 			return current;
@@ -1289,7 +1325,7 @@ public final class InventoryMinecraftSources {
 		@Override public boolean onServerThread() { return level.getServer().isSameThread(); }
 		@Override public ItemStack heldKey() {
 			ServerPlayer owner = ownerSupplier.get();
-			if (owner == null) throw new IllegalStateException("snapshot owner unavailable");
+			if (owner == null) throw new InventorySourceUnavailableException("snapshot owner unavailable");
 			return owner.getMainHandItem();
 		}
 		@Override public HolderLookup.Provider registries() { return level.registryAccess(); }

@@ -65,6 +65,7 @@ import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.RateLimiter;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -453,7 +454,10 @@ public class ServerCore {
 			config.validate();
 			saved = ServerConfig.HANDLER.saveSafely();
 		} catch (RuntimeException ex) {
-			LOGGER.debug(() -> "presentation policy save failed: %s".formatted(ex.getClass().getSimpleName()));
+			RateLimitedDiagnostics.warn("presentation-policy-save", "server-config",
+				() -> "presentation policy validation/save failed: path=%s requestId=%d operation=%s targetType=%s selector=%s whitelistOnly=%s player=%s"
+					.formatted(ServerConfig.HANDLER.getConfigPath(), packet.requestId(), packet.operation(),
+						packet.targetTypeId(), packet.selector(), packet.whitelistOnly(), player.getUUID()), ex);
 			saved = false;
 		}
 
@@ -737,7 +741,9 @@ public class ServerCore {
 			PresentationServer.created(server, created.marker(), created.authoritativeName(), owner.getGameProfile().getName());
 			sendPresentationWinnerChanges(server.getPlayerList(), created.winnerChanges(), null);
 		} catch (RuntimeException | LinkageError deliveryFailure) {
-			LOGGER.debug("inventory create publication failed after commit", deliveryFailure);
+			RateLimitedDiagnostics.error("inventory-create-publish", "server-marker",
+				() -> "inventory create publication failed after commit: marker=" + created.marker()
+					+ " winnerChanges=" + created.winnerChanges(), deliveryFailure);
 		}
 	}
 
@@ -890,7 +896,10 @@ public class ServerCore {
 			if (result instanceof ExternalBlockServerProvider.RefreshResult.Available available) {
 				try {
 					sameTargetKey = marker.targetKey().equals(nx.pingwheel.common.marker.TargetKey.from(available.target()));
-				} catch (RuntimeException ignored) {
+				} catch (RuntimeException invalidRefresh) {
+					RateLimitedDiagnostics.warn("external-marker-refresh-key", external.providerId(),
+						() -> "markerId=" + marker.id() + " committedTarget=" + external
+							+ " refreshedTarget=" + available.target(), invalidRefresh);
 					sameTargetKey = false;
 				}
 			}

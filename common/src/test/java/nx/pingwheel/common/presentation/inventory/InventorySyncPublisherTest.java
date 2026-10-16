@@ -8,6 +8,7 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.source.*;
 import org.junit.jupiter.api.Test;
+import org.apache.logging.log4j.Level;
 import static org.junit.jupiter.api.Assertions.*;
 
 class InventorySyncPublisherTest {
@@ -279,6 +280,34 @@ class InventorySyncPublisherTest {
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
+	@Test void throwingTransportRetainsOriginalReportAndChargesEachRetryWithoutChangingTheImmutablePacket() throws Exception {
+		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16000000);
+		var failure = new ClassCastException("transport payload cannot be cast to test.Connection");
+		class ThrowingTransport extends Transport {
+			final List<InventoryS2CPacket> attempts = new ArrayList<>(); boolean failing = true;
+			@Override public void send(UUID recipient, InventoryS2CPacket packet) {
+				attempts.add(packet); if (failing) throw failure; super.send(recipient, packet);
+			}
+		}
+		var transport = new ThrowingTransport();
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("preview/transport-diagnostic", 43);
+			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 41, null, "target", null)));
+			publish(publisher, context, capture(1, 1, 10));
+			publisher.drain(); publisher.drain();
+			assertEquals(2, transport.attempts.size()); assertSame(transport.attempts.getFirst(), transport.attempts.getLast());
+			assertTrue(transport.sent.isEmpty()); assertTrue(publisher.pending(context)); assertEquals(0, memory.reserved());
+			var charges = (Map<?, ?>) InventoryBackendTest.field(publisher, "clientBytes");
+			assertEquals(2L * bytes(transport.attempts.getFirst()), charges.get("preview/" + context.recipient()), "a throwing handoff stays charged");
+			logs.report("publisher/transport-send", Level.WARN, failure.getMessage(), "java.lang.ClassCastException",
+				"at " + getClass().getName() + ".throwingTransportRetainsOriginalReport", "kind=PREVIEW", "request=41",
+				"recipient=" + context.recipient(), "marker=null", "epoch=7", "baseline=43", "part=0/1");
+			assertEquals(1, logs.events.size(), "the repeated same failure is rate-limited without suppressing the retry");
+			transport.failing = false; publisher.advance(5, settings); publisher.drain();
+			assertTrue(transport.sent.stream().anyMatch(p -> !p.entries().isEmpty())); publisher.cancel(context);
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
 	@Test void largeAllowedFrameIsRefusedWhenTheIndependentFragmentBudgetIsTooSmall() {
 		var settings = InventorySettings.serverDefaults();
 		settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(0.25)));
@@ -440,7 +469,7 @@ class InventorySyncPublisherTest {
 	}
 	@Test void callbackAddedControlsWaitForNextDrainAndCallbackFailureDoesNotRetryAcceptedWork() {
 		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
-		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var publisher = new InventorySyncPublisher(memory, transport)) {
 			publisher.advance(0, settings); var recipient = context("control", 1).recipient(); publisher.gateData(recipient);
 			var offer = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
 			var policy = InventoryS2CPacket.policy(7, 100, 1, Set.of("block"));
@@ -453,6 +482,13 @@ class InventorySyncPublisherTest {
 			assertDoesNotThrow(publisher::drainControls);
 			assertEquals(List.of(offer, policy), transport.sent, "new callback work cannot extend the current drain");
 			assertEquals(2, callbacks[0]); assertTrue(publisher.dataGated(recipient));
+			var failures = logs.events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("operation=inventory/publisher/control-handoff ")).toList();
+			assertEquals(2, failures.size(), "OFFER and POLICY are independently scoped failures");
+			for (var event : failures) {
+				assertEquals(Level.WARN, event.getLevel()); var message = event.getMessage().getFormattedMessage();
+				assertTrue(message.contains("callback failed after transport accepted")); assertTrue(message.contains("recipient=" + recipient));
+				assertTrue(message.contains("at " + getClass().getName() + ".lambda$callbackAddedControls"));
+			}
 			publisher.setControlHandoff((player, packet) -> true); publisher.drainControls();
 			assertEquals(List.of(offer, policy, offer), transport.sent); assertFalse(publisher.dataGated(recipient));
 			publisher.drainControls(); assertEquals(3, transport.sent.size());

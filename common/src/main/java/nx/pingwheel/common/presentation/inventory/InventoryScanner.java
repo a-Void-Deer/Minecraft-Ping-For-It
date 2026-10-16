@@ -5,6 +5,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
+
 /** One server-thread-confined, bounded observation. A new sweep uses a new scanner. */
 public final class InventoryScanner implements AutoCloseable {
 
@@ -125,6 +127,9 @@ public final class InventoryScanner implements AutoCloseable {
 		} catch (ArithmeticException failure) {
 			state = State.INCOMPLETE;
 		} catch (RuntimeException | LinkageError failure) {
+			if (!InventoryCaptureDiagnostics.expectedFailure(failure))
+				RateLimitedDiagnostics.warn("inventory/scanner-step", source.getClass().getName(),
+					() -> "sourceClass=" + source.getClass().getName() + " cursor=" + cursor + " expected=" + expected + " previewAll=" + previewAll, failure);
 			state = State.UNAVAILABLE;
 			counts.clear();
 			totals.clear();

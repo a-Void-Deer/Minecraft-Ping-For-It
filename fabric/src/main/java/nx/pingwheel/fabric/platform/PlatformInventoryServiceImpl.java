@@ -27,6 +27,8 @@ import net.minecraft.world.item.Items;
 
 import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 /**
  * Fabric Transfer provider for the platform inventory bridge.
@@ -84,6 +86,10 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			}
 			return Optional.of(new EnumeratedAccess(storage, gate));
 		} catch (RuntimeException | LinkageError failure) {
+			if (!(failure instanceof InventorySourceUnavailableException))
+				RateLimitedDiagnostics.warn("inventory-capability-find", "fabric:transfer",
+					() -> "position=" + pos + " face=" + side + " worldClass=" + world.getClass().getName()
+						+ " blockEntityClass=" + (blockEntity == null ? "none" : blockEntity.getClass().getName()), failure);
 			return Optional.empty();
 		}
 	}
@@ -92,12 +98,15 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		try {
 			return OptionalLong.of(storage.getVersion());
 		} catch (RuntimeException | LinkageError failure) {
+			if (!(failure instanceof InventorySourceUnavailableException))
+				RateLimitedDiagnostics.warn("inventory-storage-version", storage.getClass().getName(),
+					() -> "storageClass=" + storage.getClass().getName(), failure);
 			return OptionalLong.empty();
 		}
 	}
 
 	private static void requireMember(BooleanSupplier memberGate) {
-		if (!memberGate.getAsBoolean()) throw new IllegalStateException("inventory storage outside the read scope");
+		if (!memberGate.getAsBoolean()) throw new InventorySourceUnavailableException("inventory storage outside the read scope");
 	}
 	private static boolean containsLocal(java.util.List<Integer> mapping, int local) {
 		for (int index = 0; index < mapping.size(); index++) if (mapping.get(index) == local) return true;
@@ -131,7 +140,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		if (view == null) throw new IllegalStateException("provider returned a null storage view");
 		if (view.getClass() == NativeSlots.SIDED_SLOT) {
 			if (scope != null && ResidentReads.field(view, NativeSlots.SIDED_SLOT, "direction", Direction.class) != scope.face())
-				throw new IllegalStateException("Fabric wrapper changed frozen face");
+				throw new InventorySourceUnavailableException("Fabric wrapper changed frozen face");
 			SingleStackStorage slot = raw.mappedSlot(view);
 			if (slot == null || slot.getClass() != NativeSlots.SLOT) throw new IllegalStateException("Fabric sided slot unavailable");
 			return slot;
@@ -189,7 +198,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			if (inventory == null || raw.localSlot(storage) < 0)
 				throw new IllegalStateException("Fabric mapped inventory slot unavailable");
 			if (scope != null) {
-				if (!scope.valid()) throw new IllegalStateException("Fabric inventory delegate outside admitted source scope");
+				if (!scope.valid()) throw new InventorySourceUnavailableException("Fabric inventory delegate outside admitted source scope");
 				nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.requireScope(inventory, scope::allows, scratch);
 				var mapping = scope.slots(inventory);
 				boolean held;
@@ -206,9 +215,9 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 					// must at least stay inside the selected face.
 					: nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.faceContains(
 						inventory, scope.face(), raw.localSlot(storage));
-				if (!held) throw new IllegalStateException("Fabric inventory slot outside frozen local mapping");
+				if (!held) throw new InventorySourceUnavailableException("Fabric inventory slot outside frozen local mapping");
 			} else if (inventory instanceof RandomizableContainer randomizable && randomizable.getLootTable() != null)
-				throw new IllegalStateException("Fabric inventory delegate has pending loot");
+				throw new InventorySourceUnavailableException("Fabric inventory delegate has pending loot");
 		}
 		boolean nativeBlank = ResidentReads.inherits(storage, SingleStackStorage.class, "isResourceBlank");
 		boolean nativeAmount = ResidentReads.inherits(storage, SingleStackStorage.class, "getAmount");
@@ -290,8 +299,13 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		@Override public Access guardedBy(BooleanSupplier gate) { var access = new SlottedAccess(storage, () -> memberGate.getAsBoolean() && gate.getAsBoolean(), raw); access.residentScope = residentScope; return access; }
 		@Override public Access scopedResidents(ResidentScope scope) { var access = new SlottedAccess(storage, memberGate, raw); access.residentScope = Objects.requireNonNull(scope); return access; }
 		@Override public boolean valid() {
-			try { requireMember(memberGate); return true; }
-			catch (RuntimeException | LinkageError unavailable) { return false; }
+			try { return memberGate.getAsBoolean(); }
+			catch (RuntimeException | LinkageError unavailable) {
+				if (!(unavailable instanceof InventorySourceUnavailableException))
+					RateLimitedDiagnostics.warn("inventory-storage-valid", storage.getClass().getName(),
+						() -> "storageClass=" + storage.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
+				return false;
+			}
 		}
 
 		@Override
@@ -327,7 +341,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			StorageView<ItemVariant> view = storage.getSlot(slot);
 			requireMember(memberGate);
 			ResidentEntry entry = residentEntry(view, memberGate, raw, residentScope, slot, true, scratch);
-			if (residentScope != null && !residentScope.valid()) throw new IllegalStateException("inventory source revoked during resident read");
+			if (residentScope != null && !residentScope.valid()) throw new InventorySourceUnavailableException("inventory source revoked during resident read");
 			return entry;
 		}
 
@@ -401,8 +415,13 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		@Override public Access guardedBy(BooleanSupplier gate) { var access = new EnumeratedAccess(storage, () -> memberGate.getAsBoolean() && gate.getAsBoolean(), raw); access.residentScope = residentScope; return access; }
 		@Override public Access scopedResidents(ResidentScope scope) { var access = new EnumeratedAccess(storage, memberGate, raw); access.residentScope = Objects.requireNonNull(scope); return access; }
 		@Override public boolean valid() {
-			try { requireMember(memberGate); return true; }
-			catch (RuntimeException | LinkageError unavailable) { return false; }
+			try { return memberGate.getAsBoolean(); }
+			catch (RuntimeException | LinkageError unavailable) {
+				if (!(unavailable instanceof InventorySourceUnavailableException))
+					RateLimitedDiagnostics.warn("inventory-storage-valid", storage.getClass().getName(),
+						() -> "storageClass=" + storage.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
+				return false;
+			}
 		}
 
 		@Override
@@ -440,7 +459,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 				if (!next) return new ResidentVisit(visited, true);
 				requireMember(memberGate); StorageView<ItemVariant> view = iterator.next(); requireMember(memberGate);
 				ResidentEntry entry = residentEntry(view, memberGate, raw, residentScope, visited, false, scratch);
-				if (residentScope != null && !residentScope.valid()) throw new IllegalStateException("inventory source revoked during resident read");
+				if (residentScope != null && !residentScope.valid()) throw new InventorySourceUnavailableException("inventory source revoked during resident read");
 				visited++;
 				boolean more = visitor.visit(entry);
 				requireMember(memberGate);
