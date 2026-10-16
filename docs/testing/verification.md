@@ -1840,8 +1840,8 @@ through an already acquired member or local handler. `CreateVaultSourceWrapperTe
 segmented Vault provider with the production common wrapper: a same-controller
 rotation invalidates before the cursor continues, and a fresh handle recovers
 the complete twelve-slot sum. `SableInventoryHandoffTest` covers the production
-preview-to-tracking handoff with recording transports: a preview candidate uses
-a request-scoped quota without a marker key or provider reference, a valid
+preview-to-tracking handoff with recording transports: a candidate preview is
+request-scoped without allocating a marker key or provider reference, a valid
 selection materializes once, binds the current physical root, witnesses the
 live item and stores committed tracking with a fresh count, a wrong sub-level,
 root, registry or inactive source rejects before the witness with a single

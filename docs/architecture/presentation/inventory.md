@@ -112,8 +112,9 @@ no player identity or client-selected item count travels on the request. The
 server assigns bounded opaque entry keys scoped to the request, not item IDs.
 Opening the request runs the existing authority gates plus nonallocating
 provider validation for an external candidate; it creates no TargetKey, marker
-identity, provider reference or tracking state, and its quota identity is the
-preview request rather than a candidate target key.
+identity, provider reference or tracking state. The request identity scopes
+preview state and publication within the inventory session; quota accounting is
+owned by [Budgets, queues and memory](#budgets-queues-and-memory).
 
 The preview-to-tracking handoff follows the existing create authority first:
 the server materializes an external candidate once, then binds the preview's

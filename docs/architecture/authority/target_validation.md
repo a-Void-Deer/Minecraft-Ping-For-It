@@ -10,9 +10,11 @@ how clients present rejection outcomes is owned by
 
 ## Create adjudication order
 
-The authoritative marker-creation ingress is the negotiated presentation
-session's `CREATE` intent, delivered through the network/session boundary owned
-by [network protocol](../network/protocol.md#registered-ingress-and-current-effects);
+The authoritative marker-creation ingress routes are the negotiated presentation
+session's `CREATE` intent and the dedicated inventory session's `SELECT` intent.
+Both enter the common authority adjudication below through the network/session
+boundary owned by
+[network protocol](../network/protocol.md#registered-ingress-and-current-effects);
 the superseded `MarkerCreate` route is registered but inert and creates nothing.
 The server repeats target classification from its own game state and does not
 trust client-supplied target validity or presentation/ownership data. The

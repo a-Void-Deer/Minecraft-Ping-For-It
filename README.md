@@ -71,17 +71,18 @@ action; the root's down (180°) Cancel Marker action explicitly requests
 cancellation of the nearest eligible marker you own.
 
 - `/pingforit` or `/pingforit help` shows command help.
-- `/pingforit config` opens the settings GUI. Its server section is available
-  to players with the required server permission and edits authoritative server
-  settings; the exact edit authority and required permission are owned by
+- `/pingforit config` opens the settings GUI. Its server section lets connected
+  players view authoritative server settings; editing requires server permission.
+  The exact edit authority and required permission are owned by
   [Server configuration authority](docs/architecture/authority/server-config.md).
 - `/pingforit channel` reads or changes the player's ping channel.
 
 ## Configuration
 
 The client and server settings are stored in configurable JSON files under
-`config/`. The settings GUI includes client controls and, when permitted, the
-server section. Client-side lists have no GUI list editor: the block-list action
+`config/`. The settings GUI includes client controls and, for connected players,
+a view of authoritative server settings; only editing requires permission.
+Client-side lists have no GUI list editor: the block-list action
 saves and closes the screen before opening the client file, while the server
 presentation policy selector provides its own GUI add and remove editing. Exact
 filenames, keys, list syntax, close/save behavior, external-edit reload timing,

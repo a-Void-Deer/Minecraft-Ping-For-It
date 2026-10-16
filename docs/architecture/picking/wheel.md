@@ -42,8 +42,11 @@ not a circle at half that radius — and one straight divider on every actual
 shared boundary between adjacent sectors, from that circle out to the outer
 radius of that menu's sector underlay. The dividers follow the real sector
 boundaries, including the root's unequal spans and the boundaries of any Back,
-disabled or reserved entry. The center guides are interaction chrome,
-independent of the wheel-underlay and target opacity preferences.
+disabled or reserved entry. An ancestor derives actual shared-boundary dividers
+only from the original sector geometry of its retained breadcrumb and Back
+choices; hidden choices contribute no divider, while the center circle remains.
+The center guides are interaction chrome, independent of the wheel-underlay and
+target opacity preferences.
 
 The root presents the fixed eight-sector layout:
 
@@ -437,9 +440,9 @@ item submenu and every ordinary row paints.
 A user Back from the list, by Back stroke or Back-hover, returns to the parent
 Content menu through the general user-return alignment
 ([submenu centering and view translation](#submenu-centering-and-view-translation)):
-the retained pattern, including the still-open list's placement, is rigidly
-translated so the returned Content origin lands on the pointer, and the list
-keeps its selected key, window, ordering, discovery state and side orientation.
+the logical pointer stays fixed while the remaining radial pattern is rigidly
+translated so the returned Content origin lands on the pointer. Leaving the
+inventory navigation path closes the list and clears its rows and selection.
 The old programmatic placement, the logical pointer on the circumference of
 the returned menu's center deadzone in the frozen direction of the
 inventory-display entry center, is retained only for a programmatic return
