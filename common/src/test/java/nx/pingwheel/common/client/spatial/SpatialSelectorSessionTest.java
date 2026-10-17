@@ -465,7 +465,7 @@ class SpatialSelectorSessionTest {
 		var root = current(rootSession);
 		assertEquals(ping("danger").outlineColor(),
 			root.choices().stream().filter(choice -> choice.id().equals("danger")).findFirst().orElseThrow().outlineColor());
-		assertNull(root.choices().stream().filter(choice -> choice.id().equals("cancel-marker")).findFirst().orElseThrow().outlineColor());
+		assertNotNull(root.choices().stream().filter(choice -> choice.id().equals("cancel-marker")).findFirst().orElseThrow().outlineColor());
 		assertNull(root.choices().stream().filter(choice -> choice.id().equals("reserved-ne")).findFirst().orElseThrow().outlineColor());
 
 		enter(rootSession, "intent", 10);
@@ -862,6 +862,69 @@ class SpatialSelectorSessionTest {
 		assertEquals(listMenu, current(session).menuId());
 		session.tick(1360);
 		assertTrue(current(session).menuId().endsWith(":content"), "physical re-entry and full dwell pop exactly one level");
+	}
+
+	@Test
+	void inventoryBordersFollowLiveDirectAnnotationAndLoseColorWhenAttentionIsNotAuthorized() {
+		var target = target("ordinary", "entity_block", true);
+		var request = ping("request");
+		for (boolean enabled : List.of(false, true)) {
+			var port = new Content();
+			port.next = new SpatialSelectorSession.ContentProjection<>(fence(target), 1, false, Status.UPDATING, List.of(),
+				new SpatialSelectorSession.InventoryPreview<>("inventory", Status.UNKNOWN,
+					List.of(new SpatialSelectorSession.InventoryRow<>("a", "Unknown count", null, "minecraft:stone", Status.INCOMPLETE, "opaque:a")),
+					List.of(request), request));
+			var session = enabled ? session(target, Map.of(), false, port) : sessionOff(target, false, port);
+			session.open(0); enter(session, "content", 10);
+			String id = current(session).choices().stream().filter(c -> c.id().endsWith(":inventory")).findFirst().orElseThrow().id();
+			enter(session, id, 150);
+			var row = session.snapshot().inventoryView().rows().getFirst();
+			assertTrue(row.quality().grey());
+			if (enabled) {
+				assertEquals(request.outlineColor(), row.outlineColor());
+				var intent = assertInstanceOf(SelectorIntent.SelectInventory.class, session.releaseIntent(300));
+				assertEquals("request", intent.itemType().id());
+				assertEquals("attention", intent.mainType().id(), "row color is independent of whole-marker default");
+			} else {
+				assertNull(row.outlineColor(), "OFF cannot invent Attention permission");
+				assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(300));
+			}
+		}
+	}
+
+	@Test
+	void inventoryBorderUpdatesWithAnnotationAuthorityWithoutChangingSelection() {
+		var session = openedList(false, new Content());
+		var target = target("ordinary", "entity_block", true);
+		var prior = session.snapshot().inventory();
+		var request = ping("request");
+		session.updateContent(new SpatialSelectorSession.ContentProjection<>(fence(target), 2, false, Status.UPDATING, List.of(),
+			new SpatialSelectorSession.InventoryPreview<String>("inventory", Status.UNKNOWN, List.of(), List.of(request), request)), 280);
+		assertEquals(prior.selectedKey(), session.snapshot().inventory().selectedKey());
+		assertTrue(session.snapshot().inventoryView().rows().stream().allMatch(row -> row.outlineColor().equals(request.outlineColor())));
+		session.updateContent(new SpatialSelectorSession.ContentProjection<>(fence(target), 3, false, Status.UPDATING, List.of(),
+			new SpatialSelectorSession.InventoryPreview<String>("inventory", Status.UNKNOWN, List.of(), List.of(), null)), 281);
+		assertTrue(session.snapshot().inventoryView().rows().stream().allMatch(row -> row.outlineColor() == null));
+		assertFalse(session.snapshot().inventoryView().selectedRowCommittable());
+	}
+
+	@Test
+	void localActionsHaveDistinctNonGreyRoleColorsAndNavigationKeepsNoActionColor() {
+		var session = session(target("ordinary", "block", true), Map.of(), false, new Content());
+		session.open(0);
+		var root = current(session);
+		var colors = new java.util.HashSet<Integer>();
+		colors.add(root.choices().stream().filter(c -> c.id().equals("cancel-marker")).findFirst().orElseThrow().outlineColor());
+		assertNull(root.choices().stream().filter(c -> c.id().equals("settings")).findFirst().orElseThrow().outlineColor());
+		enter(session, "settings", 10);
+		for (var choice : current(session).choices()) {
+			if (choice.back()) { assertNull(choice.outlineColor()); continue; }
+			assertNotNull(choice.outlineColor());
+			assertTrue(colors.add(choice.outlineColor()), "each local action has its own role color");
+			assertNotEquals((choice.outlineColor() >> 16) & 255, choice.outlineColor() & 255, "not grey");
+			assertTrue(choice.action().startsWith("settings:"), "no synthetic Ping Type action");
+		}
+		assertEquals(4, colors.size());
 	}
 
 	@Test
@@ -1338,6 +1401,8 @@ class SpatialSelectorSessionTest {
 		assertNull(view.retainedRowKey());
 		assertFalse(view.forwardAvailable(), "OFF has no item Forward entry or hint");
 		assertTrue(view.selectedRowCommittable(), "direct release is still eligible under OFF");
+		assertEquals(ping("attention").outlineColor(), view.rows().getFirst().outlineColor(),
+			"row border follows the item annotation, not the whole-marker Loot type");
 		var intent = assertInstanceOf(SelectorIntent.SelectInventory.class, session.releaseIntent(300));
 		assertEquals("opaque:a", intent.reference());
 		assertEquals("attention", intent.itemType().id());

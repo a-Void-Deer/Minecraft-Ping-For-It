@@ -103,12 +103,20 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 	 * renderer. {@code displayJson} is the immutable server-bounded encoded
 	 * display value; null keeps the native registry-name fallback.
 	 */
-	public record Row(String key, String label, Long count, String itemId, String displayJson, Status quality) {
+	public record Row(String key, String label, Long count, String itemId, String displayJson, Status quality,
+		Integer outlineColor) {
 
 		public Row {
 			Objects.requireNonNull(key, "key");
 			Objects.requireNonNull(label, "label");
 			Objects.requireNonNull(quality, "quality");
+			if (outlineColor != null && (outlineColor & 0xFF000000) != 0)
+				throw new IllegalArgumentException("outlineColor must be a 24-bit RGB value");
+		}
+
+		/** A null outline carries no direct-send capability; quality is independent of that capability. */
+		public Row(String key, String label, Long count, String itemId, String displayJson, Status quality) {
+			this(key, label, count, itemId, displayJson, quality, null);
 		}
 
 		/** Compatibility form without encoded display data. */

@@ -129,7 +129,7 @@ public final class SpatialController {
 
 	/**
 	 * One entry as resolved for rendering or hit-testing. {@code outlineColor} is
-	 * the nullable detached 24-bit Ping Type outline colour, never decoded from
+	 * the nullable detached 24-bit Ping Type or local-action colour, never decoded from
 	 * the opaque action.
 	 */
 	public record ChoiceView(

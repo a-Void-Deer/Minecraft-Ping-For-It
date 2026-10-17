@@ -464,7 +464,13 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		for (SelectorIntent.CaptureToggle toggle : SelectorIntent.CaptureToggle.values()) {
 			String id = "settings:" + toggle.name();
 			actions.put(id, new SelectorIntent.ToggleNextCapture<>(toggle));
-			toggles.add(SpatialMenu.Choice.leaf(id, "pingforit.spatial.toggle." + toggle.name().toLowerCase(java.util.Locale.ROOT), id));
+			int color = switch (toggle) {
+				case FLUIDS -> 0x4DD0E1;
+				case ENTITY_BLACKLIST -> 0xB388FF;
+				case TRANSPARENT_BLOCKS -> 0x80CBC4;
+			};
+			toggles.add(SpatialMenu.Choice.leaf(id, "pingforit.spatial.toggle." + toggle.name().toLowerCase(java.util.Locale.ROOT), id)
+				.withOutlineColor(color));
 		}
 		actions.put("cancel-marker", new SelectorIntent.CancelOwnMarker<>());
 		return SpatialMenu.of(sessionKey + ":root",
@@ -474,7 +480,8 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 					new SpatialMenu(contentMenu, content).withPreferredBearing(inventoryMenu, 90))).withSector(45, 35),
 			SpatialMenu.Choice.reserved("reserved-ne", "pingforit.spatial.reserved").withSector(90, 55),
 			SpatialMenu.Choice.reserved("reserved-se", "pingforit.spatial.reserved").withSector(135, 35),
-			SpatialMenu.Choice.leaf("cancel-marker", "pingforit.spatial.cancel", "cancel-marker").withSector(180, 55),
+			SpatialMenu.Choice.leaf("cancel-marker", "pingforit.spatial.cancel", "cancel-marker")
+				.withOutlineColor(0xFF8A65).withSector(180, 55),
 			SpatialMenu.Choice.branch("precise", "pingforit.spatial.precise", new SpatialMenu(sessionKey + ":precise", candidates)).withSector(225, 35),
 			SpatialMenu.Choice.branch("intent", "pingforit.spatial.intent", new SpatialMenu(sessionKey + ":intent", intents)).withSector(270, 55),
 			SpatialMenu.Choice.branch("settings", "pingforit.spatial.settings", new SpatialMenu(sessionKey + ":settings", toggles)).withSector(315, 35));
@@ -720,9 +727,12 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 
 	private List<SpatialInventoryView.Row> paintRows() {
 		List<SpatialInventoryView.Row> paintRows = new ArrayList<>();
+		PingType type = directItemType();
+		Integer outline = type != null && preview.allowedItemTypes().contains(type) ? type.outlineColor() : null;
 		for (InventoryListModel.Entry entry : list.snapshot().entries()) {
 			InventoryRow<R> row = rows.get(entry.key());
-			if (row != null) paintRows.add(new SpatialInventoryView.Row(row.key(), row.label(), row.count(), row.itemId(), row.displayJson(), row.quality()));
+			if (row != null) paintRows.add(new SpatialInventoryView.Row(row.key(), row.label(), row.count(), row.itemId(),
+				row.displayJson(), row.quality(), outline));
 		}
 		return paintRows;
 	}
@@ -745,9 +755,9 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	}
 
 	/**
-	 * Frozen direct-release annotation for a selected row: the whole-marker
-	 * default when content intent is ON, otherwise the authorized Attention
-	 * annotation. Missing authorization stays null instead of inventing one.
+	 * Direct-release annotation under the frozen content-intent preference:
+	 * the live preview's default item type when ON, otherwise authorized Attention.
+	 * Missing authorization stays null instead of inventing one.
 	 */
 	private PingType directItemType() {
 		if (preview == null || unavailable(preview.status())) return null;

@@ -20,6 +20,8 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 /**
  * Border-colour projection from the real selector facade: a choice carrying a
@@ -61,18 +63,27 @@ class SpatialOverlayRendererBorderTest {
 
 	@Test
 	void untypedAndLegacyChoicesKeepTheEstablishedFallbacks() {
-		var cancel = rootChoice("cancel-marker", 0);
-		assertNull(cancel.outlineColor());
+		var navigation = rootChoice("settings", 0);
+		assertNull(navigation.outlineColor());
 		assertEquals(SpatialOverlayRenderer.BORDER_SELECTED_FALLBACK,
-			SpatialOverlayRenderer.nodeBorderColor(cancel, true));
+			SpatialOverlayRenderer.nodeBorderColor(navigation, true));
 		assertEquals(SpatialOverlayRenderer.BORDER_COLOR,
-			SpatialOverlayRenderer.nodeBorderColor(cancel, false));
+			SpatialOverlayRenderer.nodeBorderColor(navigation, false));
 
 		var legacy = new SpatialController.ChoiceView("legacy", "label", "ping:danger", false, false, false,
 			false, true, 0.0, 55.0, null);
 		PingType danger = PingTypeCatalog.builtIn().findById("danger").orElseThrow();
 		assertEquals(0xFF000000 | danger.outlineColor(), SpatialOverlayRenderer.nodeBorderColor(legacy, true));
 		assertEquals(SpatialOverlayRenderer.BORDER_COLOR, SpatialOverlayRenderer.nodeBorderColor(legacy, false));
+	}
+
+	@Test
+	void cancellationUsesItsActionColorWithoutChangingOnFocusOrPretendingToBeAPing() {
+		var cancel = rootChoice("cancel-marker", 0);
+		assertNotNull(cancel.outlineColor());
+		assertEquals("cancel-marker", cancel.action());
+		assertEquals(SpatialOverlayRenderer.nodeBorderColor(cancel, false), SpatialOverlayRenderer.nodeBorderColor(cancel, true));
+		assertNotEquals(SpatialOverlayRenderer.BORDER_COLOR, SpatialOverlayRenderer.nodeBorderColor(cancel, false));
 	}
 
 	@Test

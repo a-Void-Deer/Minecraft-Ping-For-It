@@ -12,7 +12,7 @@ import java.util.Objects;
  * deliberately opaque here: a later Minecraft adapter maps it to ping types,
  * target selections, toggles, or cancellation without this model depending on
  * any game class. A choice may also carry a nullable detached {@code outlineColor}
- * (24-bit RGB) copied from the Ping Type it commits, so a renderer never has to
+ * (24-bit RGB) copied from its Ping Type or local action role, so a renderer never has to
  * decode the opaque action to recover it.
  *
  * <p>Root entries carry the fixed geometry supplied by the caller through
@@ -58,7 +58,7 @@ public record SpatialMenu(String id, List<Choice> choices, PreferredBearing pref
 	 * One selectable entry. {@code bearing}/{@code span} are only meaningful
 	 * for caller-fixed geometry (root entries); they are null for equal-sector
 	 * child menus and must be provided together. {@code outlineColor} is a
-	 * detached 24-bit Ping Type outline colour, never decoded from the opaque
+	 * detached 24-bit Ping Type or local-action outline colour, never decoded from the opaque
 	 * action.
 	 */
 	public record Choice(
@@ -133,7 +133,7 @@ public record SpatialMenu(String id, List<Choice> choices, PreferredBearing pref
 			return new Choice(id, label, action, children, back, disabled, reserved, bearing, span, outlineColor);
 		}
 
-		/** Returns a copy carrying a detached Ping Type outline colour (24-bit RGB). */
+		/** Returns a copy carrying a detached Ping Type or local-action outline colour (24-bit RGB). */
 		public Choice withOutlineColor(int outlineColor) {
 			return new Choice(id, label, action, children, back, disabled, reserved, bearing, span, outlineColor);
 		}
