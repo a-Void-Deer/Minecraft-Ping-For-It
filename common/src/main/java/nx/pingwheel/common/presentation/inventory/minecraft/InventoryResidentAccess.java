@@ -32,16 +32,15 @@ import nx.pingwheel.common.mixin.InventoryListTagAccessor;
 import nx.pingwheel.common.mixin.InventoryNonNullListAccessor;
 import nx.pingwheel.common.mixin.InventoryPatchedComponentsAccessor;
 import nx.pingwheel.common.mixin.InventoryProjectileItemsAccessor;
-import nx.pingwheel.common.mixin.InventoryReferenceMapCapacityAccessor;
 import nx.pingwheel.common.mixin.InventorySimpleComponentsAccessor;
 import nx.pingwheel.common.mixin.InventoryPotionEffectsAccessor;
 import nx.pingwheel.common.mixin.InventoryEnchantmentsAccessor;
-import nx.pingwheel.common.mixin.InventoryObjectIntMapCapacityAccessor;
 
 /**
  * Narrow raw field ports. Consumers must certify exact outer/backing shapes
- * before traversal. Tests inject field-equivalent access; production never uses
- * reflection, copying getters, combined component views or synthetic flattening.
+ * before traversal. Minecraft fields use accessors; three fixed external-library
+ * fields use cached reads independent of loader transformation. No copying
+ * getters, combined component views, field discovery or synthetic flattening.
  */
 public interface InventoryResidentAccess {
 	default int styleFlags(net.minecraft.network.chat.Style style) {
@@ -141,7 +140,7 @@ public interface InventoryResidentAccess {
 		return ((InventoryItemComponentsAccessor) (Object) item).pingforit$components();
 	}
 	default int referenceMapCapacity(Map<?, ?> map) {
-		return ((InventoryReferenceMapCapacityAccessor) map).pingforit$capacity();
+		return InventoryExternalFields.referenceMapCapacity(map);
 	}
 	default List<?> nonNullList(NonNullList<?> list) {
 		return ((InventoryNonNullListAccessor) list).pingforit$list();
@@ -175,10 +174,10 @@ public interface InventoryResidentAccess {
 		return ((InventoryEnchantmentsAccessor) (Object) value).pingforit$enchantments();
 	}
 	default int objectIntCapacity(it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<?> map) {
-		return ((InventoryObjectIntMapCapacityAccessor) map).pingforit$capacity();
+		return InventoryExternalFields.objectIntCapacity(map);
 	}
 	default com.google.common.collect.Multimap<String, com.mojang.authlib.properties.Property> profile(
 		com.mojang.authlib.properties.PropertyMap map) {
-		return ((nx.pingwheel.common.mixin.InventoryProfilePropertiesAccessor) map).pingforit$properties();
+		return InventoryExternalFields.profile(map);
 	}
 }

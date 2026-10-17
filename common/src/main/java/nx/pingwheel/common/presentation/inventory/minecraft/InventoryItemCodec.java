@@ -135,7 +135,7 @@ public final class InventoryItemCodec {
 		static final InventoryItemNativeAccess NATIVE = InventoryItemNativeAccess.load();
 	}
 
-	/** Field-equivalent headless injection; never a production reflection fallback. */
+	/** Field-equivalent Minecraft injection; external fields retain their production ports. */
 	static InventoryDetachedItem freeze(InventoryResidentItem input, HolderLookup.Provider registries,
 		int displayBytes, InventoryItemBudget budget, InventoryResidentAccess raw, InventoryItemNativeAccess nativeAccess) {
 		Objects.requireNonNull(input, "input"); Objects.requireNonNull(registries, "registries");

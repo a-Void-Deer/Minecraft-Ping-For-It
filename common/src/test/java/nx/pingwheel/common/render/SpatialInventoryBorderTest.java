@@ -45,23 +45,28 @@ class SpatialInventoryBorderTest {
 		return p.rows;
 	}
 
-	@Test void selectableRowsHaveCompleteAnnotationBordersEvenWithGreyQualityAndWithoutSelection() {
+	@Test void onlySelectedCommittableRowHasCompleteAnnotationBorderEvenWithGreyQuality() {
 		var rows = paint(view());
-		for (int i = 0; i < 2; i++) {
-			var row = rows.get(i);
-			assertTrue(row.grey(), "unknown quality affects text, not send capability");
-			assertEquals(view().rows().get(i).outlineColor(), row.outlineColor());
-			List<Fill> fills = new ArrayList<>();
-			SpatialOverlayRenderer.paintRowFills(row, STYLE, 1, 0,
-				(l, t, r, b, color) -> fills.add(new Fill(l, t, r, b, color)));
-			assertEquals(4, fills.size(), "a complete rectangle, not just a selected stripe");
-			int rgb = row.outlineColor();
-			assertTrue(fills.stream().allMatch(f -> f.color() == (0xFF000000 | rgb)));
-			int left = -99, right = 99;
-			assertEquals(left, fills.get(0).left()); assertEquals(right, fills.get(0).right());
-			assertEquals(left, fills.get(2).left()); assertEquals(right, fills.get(3).right());
-			assertEquals(fills.get(0).top(), -fills.get(1).bottom());
-		}
+		var row = rows.stream().filter(SpatialOverlayRenderer.RowPaint::selected).findFirst().orElseThrow();
+		assertTrue(row.grey(), "unknown quality affects text, not send capability");
+		assertEquals(row.row().outlineColor(), row.outlineColor());
+		List<Fill> fills = new ArrayList<>();
+		SpatialOverlayRenderer.paintRowFills(row, STYLE, 1, 0,
+			(l, t, r, b, color) -> fills.add(new Fill(l, t, r, b, color)));
+		assertEquals(4, fills.size(), "a complete rectangle, not just a selected stripe");
+		int rgb = row.outlineColor();
+		assertTrue(fills.stream().allMatch(f -> f.color() == (0xFF000000 | rgb)));
+		int left = -99, right = 99;
+		assertEquals(left, fills.get(0).left()); assertEquals(right, fills.get(0).right());
+		assertEquals(left, fills.get(2).left()); assertEquals(right, fills.get(3).right());
+		assertEquals(fills.get(0).top(), -fills.get(1).bottom());
+		var unselected = rows.stream().filter(value -> value.row().key().equals("b")).findFirst().orElseThrow();
+		assertNotNull(unselected.row().outlineColor(), "the DTO still carries annotation capability");
+		assertNull(unselected.outlineColor());
+		List<Fill> unselectedFills = new ArrayList<>();
+		SpatialOverlayRenderer.paintRowFills(unselected, STYLE, 1, 0,
+			(l, t, r, b, color) -> unselectedFills.add(new Fill(l, t, r, b, color)));
+		assertTrue(unselectedFills.isEmpty(), "an unselected row gains neither a colored border nor a fill");
 		assertNull(rows.get(2).outlineColor(), "the renderer never invents annotation authority");
 	}
 

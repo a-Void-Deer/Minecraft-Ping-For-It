@@ -275,6 +275,7 @@ final class InventoryComponentCertificate {
 			budget.allocate(9 + 4L * size, 0, 3L * size + 3, size + 3L);
 			var levels = new ArrayList<EnchantmentLevel>(size);
 			if (size != 0) {
+				budget.work(InventoryExternalFields.READ_WORK);
 				int capacity = raw.objectIntCapacity(map);
 				if (capacity < 1 || (capacity & (capacity - 1)) != 0) refuse();
 				bounds.nativeTraversal((long) capacity + size);
@@ -723,6 +724,7 @@ final class InventoryComponentCertificate {
 		}
 		Optional<?> idValue = profile.id(); if (idValue.isPresent()) exact(idValue.orElseThrow(), java.util.UUID.class);
 		exact(profile.properties(), com.mojang.authlib.properties.PropertyMap.class);
+		budget.work(InventoryExternalFields.READ_WORK);
 		var delegate = raw.profile(profile.properties()); exact(delegate, PROPERTY_DELEGATE);
 		int size = delegate.size(); cardinality(size); bounds.nativeTraversal(size);
 		budget.allocate(0, 0, 5, 3); // values view and linked iterators on this guard pass

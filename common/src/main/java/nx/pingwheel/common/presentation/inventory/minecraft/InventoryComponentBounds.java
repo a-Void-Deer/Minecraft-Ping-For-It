@@ -70,6 +70,7 @@ final class InventoryComponentBounds {
 		// Fixed runtime/class identity work is process initialization, not a
 		// first resident map's admission or permission to call unknown methods.
 		InventoryNativeTraversal.runtimeSupported();
+		InventoryExternalFields.initialize();
 	}
 
 	/** Reads at most bounded logical cells; no size/iterator method on an unknown implementation. */
@@ -127,6 +128,7 @@ final class InventoryComponentBounds {
 			int size = value.size();
 			cardinality(size);
 			if (size == 0) return 0;
+			budget.work(InventoryExternalFields.READ_WORK);
 			int capacity = raw.referenceMapCapacity(value);
 			if (capacity < 1 || (capacity & (capacity - 1)) != 0) refuse("native reference-map capacity");
 			mapTraversal(InventoryItemBudget.add(capacity, size));

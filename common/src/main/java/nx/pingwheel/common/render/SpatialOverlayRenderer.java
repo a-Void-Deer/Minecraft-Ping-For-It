@@ -893,6 +893,9 @@ public final class SpatialOverlayRenderer {
 			String activeMenu = origin == null ? null : radial.menus().getLast().menuId();
 			boolean hidePointer = listActive;
 			String retainedRowKey = inventory == null ? null : inventory.retainedRowKey();
+			String selectedRowKey = listActive && inventory.selectedIndex() >= 0
+				&& inventory.selectedIndex() < inventory.rows().size()
+				? inventory.rows().get(inventory.selectedIndex()).key() : null;
 			SpatialController.Point followerPoint = null;
 			for (var state : states.stream().sorted(Comparator.comparingInt(value -> paintRank(value, activeMenu))).toList()) {
 				// While an item submenu is active every other row, including its
@@ -903,6 +906,18 @@ public final class SpatialOverlayRenderer {
 				}
 				var displayed = new SpatialOverlayTransitions.State<>(state.key(), state.x() + viewX, state.y() + viewY,
 					state.scale(), state.alpha(), state.present(), state.data(), state.backgroundAlpha());
+				// A detached former selection still fades. Clear its cached border
+				// too, so closing the list cannot restore the canceled decoration.
+				if (listActive && state.data() instanceof RowPaint row && row.outlineColor() != null
+					&& (!state.present() || !state.key().owner().equals(inventory.listKey())
+						|| !row.row().key().equals(selectedRowKey) || !inventory.selectedRowCommittable()
+						|| inventory.backAffordance().focused())) {
+					var uncolored = new RowPaint(row.row(), row.width(), row.height(), row.selected(), row.grey(), null);
+					transitions.updatePaintData(state.key(), uncolored);
+					displayed = new SpatialOverlayTransitions.State<>(displayed.key(), displayed.x(), displayed.y(),
+						displayed.scale(), displayed.alpha(), displayed.present(), uncolored,
+						displayed.backgroundAlpha());
+				}
 				if (state.present() && state.data() instanceof GuidePaint) {
 					// A guide is the actual frozen interaction boundary, not a moving
 					// node. Fade it at its current menu origin without scaling its radius.
@@ -1486,7 +1501,7 @@ public final class SpatialOverlayRenderer {
 			add(targets, new VisualKey("row", owner, row.key()), x, rowY, 1.0, 1.0, rowCoverage, x, rowY + 6.0,
 				new RowPaint(row, layout.width(), rowHeight, selected,
 					view.status().grey() || row.quality().grey(),
-					listActive && !view.backAffordance().focused() && (!selected || view.selectedRowCommittable())
+					listActive && selected && view.selectedRowCommittable() && !view.backAffordance().focused()
 						? row.outlineColor() : null));
 		}
 		double footerY = y + layout.height() / 2.0 - footerHeight / 2.0;

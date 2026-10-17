@@ -22,7 +22,7 @@ import net.minecraft.world.item.component.BundleContents;
 import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.item.component.ItemContainerContents;
 
-/** Headless injection of the SAME fields as production accessors, never combined-map views. */
+/** Headless Minecraft fields; external-library reads inherit the production ports. */
 public class InventoryResidentAccessFields implements InventoryResidentAccess {
 	public InventoryResidentAccessFields() {}
 	@Override public int styleFlags(net.minecraft.network.chat.Style style) {
@@ -66,7 +66,6 @@ public class InventoryResidentAccessFields implements InventoryResidentAccess {
 	@Override public Map<DataComponentType<?>, Optional<?>> patch(DataComponentPatch patch) { return field(patch, "map"); }
 	@Override public Map<DataComponentType<?>, Object> simple(DataComponentMap map) { return field(map, "map"); }
 	@Override public DataComponentMap itemComponents(Item item) { return fieldAt(item, Item.class, "components"); }
-	@Override public int referenceMapCapacity(Map<?, ?> map) { return field(map, "n"); }
 	@Override public List<?> nonNullList(NonNullList<?> list) { return field(list, "list"); }
 	@Override public Map<String, Tag> compound(CompoundTag tag) { return field(tag, "tags"); }
 	@Override public List<Tag> list(ListTag tag) { return field(tag, "list"); }
@@ -78,9 +77,6 @@ public class InventoryResidentAccessFields implements InventoryResidentAccess {
 	@Override public List<MobEffectInstance> potion(net.minecraft.world.item.alchemy.PotionContents potion) { return field(potion, "customEffects"); }
 	@Override public it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<?> enchantments(
 		net.minecraft.world.item.enchantment.ItemEnchantments value) { return field(value, "enchantments"); }
-	@Override public int objectIntCapacity(it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<?> map) { return field(map, "n"); }
-	@Override public com.google.common.collect.Multimap<String, com.mojang.authlib.properties.Property> profile(
-		com.mojang.authlib.properties.PropertyMap map) { return field(map, "properties"); }
 
 	static <T> T field(Object owner, String name) { return fieldAt(owner, owner.getClass(), name); }
 	static <T> T fieldAny(Object owner, String... names) {

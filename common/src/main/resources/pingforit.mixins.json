@@ -17,7 +17,6 @@
 		"InventoryListTagAccessor",
 		"InventoryHiddenEffectAccessor",
 		"InventoryAdventurePredicatesAccessor",
-		"InventoryReferenceMapCapacityAccessor",
 		"InventoryPotionEffectsAccessor",
 		"InventoryEnchantmentsAccessor",
 		"InventoryHolderReferenceAccessor",
@@ -34,8 +33,6 @@
 		"InventoryBuilderEntryAccessor",
 		"InventoryBuilderLookupMixin",
 		"InventoryBuilderOwnerAccessor",
-		"InventoryObjectIntMapCapacityAccessor",
-		"InventoryProfilePropertiesAccessor",
 		"InventoryFoodEffectAccessor"
 	],
 	"client": [

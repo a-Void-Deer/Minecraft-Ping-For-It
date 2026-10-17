@@ -300,6 +300,13 @@ public final class SpatialOverlayTransitions<K, V> {
 		return nodes.isEmpty();
 	}
 
+	/** Replace retained paint data without changing a node's pose, timing or lifetime. */
+	void updatePaintData(K key, V data) {
+		Objects.requireNonNull(data, "data");
+		Node node = nodes.get(key);
+		if (node != null) node.data = data;
+	}
+
 	/** A shared GUI-center rebase, including detached paint, with no animation/input time or channel change. */
 	void translateGeometry(double deltaX, double deltaY) {
 		if (!Double.isFinite(deltaX) || !Double.isFinite(deltaY)) throw new IllegalArgumentException("invalid geometry translation");

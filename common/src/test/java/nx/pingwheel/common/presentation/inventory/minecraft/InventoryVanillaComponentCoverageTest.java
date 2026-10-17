@@ -45,10 +45,22 @@ class InventoryVanillaComponentCoverageTest {
 
 	@Test void ordinaryDefaultsToolsArmourAndAllSevenEffectBearingFoodsMatchStaticOracle() {
 		for (Item item : List.of(Items.STONE, Items.DIAMOND, Items.DIAMOND_SWORD, Items.DIAMOND_PICKAXE,
-			Items.IRON_AXE, Items.LEATHER_CHESTPLATE, Items.DIAMOND_HELMET, Items.CHICKEN,
+			Items.IRON_AXE, Items.LEATHER_CHESTPLATE, Items.DIAMOND_HELMET, Items.BOW,
+			Items.CROSSBOW, Items.SHIELD, Items.FISHING_ROD, Items.TRIDENT, Items.ELYTRA,
+			Items.FLINT_AND_STEEL, Items.SHEARS, Items.CHICKEN,
 			Items.POISONOUS_POTATO, Items.PUFFERFISH, Items.ROTTEN_FLESH, Items.SPIDER_EYE,
 			Items.GOLDEN_APPLE, Items.ENCHANTED_GOLDEN_APPLE, Items.MUSHROOM_STEW,
 			Items.POTION, Items.WRITABLE_BOOK, Items.WRITTEN_BOOK, Items.FIREWORK_ROCKET, Items.DEBUG_STICK)) exactOracle(new ItemStack(item));
+	}
+
+	@Test void nonemptyProfilePropertiesMatchNativePersistentIdentity() {
+		var properties = new com.mojang.authlib.properties.PropertyMap();
+		properties.put("textures", new com.mojang.authlib.properties.Property("textures", "first"));
+		properties.put("textures", new com.mojang.authlib.properties.Property("textures", "second", "signature"));
+		var stack = new ItemStack(Items.PLAYER_HEAD);
+		stack.set(DataComponents.PROFILE, new ResolvableProfile(Optional.of("Player"),
+			Optional.of(new java.util.UUID(1, 2)), properties));
+		exactOracle(stack);
 	}
 
 	@Test void completeTextEncodeFloorIncludesStoredScoreSelectorNbtAndShowEntity() {

@@ -139,9 +139,11 @@ class InventoryRegistryContextGuardTest {
 				.build(ResourceLocation.parse("test:finite")))).build(builtin);
 		Holder<Enchantment> holder = provider.lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(key);
 		var mutable = new ItemEnchantments.Mutable(ItemEnchantments.EMPTY); mutable.set(holder, 3);
-		for (boolean tooltip : new boolean[] {true, false}) {
-			var stack = new ItemStack(Items.STONE); stack.set(DataComponents.ENCHANTMENTS, mutable.toImmutable().withTooltip(tooltip));
-			oracle(stack, provider);
+		for (var type : List.of(DataComponents.ENCHANTMENTS, DataComponents.STORED_ENCHANTMENTS)) {
+			for (boolean tooltip : new boolean[] {true, false}) {
+				var stack = new ItemStack(Items.STONE); stack.set(type, mutable.toImmutable().withTooltip(tooltip));
+				oracle(stack, provider);
+			}
 		}
 		var empty = new ItemStack(Items.STONE); empty.set(DataComponents.STORED_ENCHANTMENTS, ItemEnchantments.EMPTY.withTooltip(false)); oracle(empty, builtin);
 	}

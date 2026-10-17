@@ -172,6 +172,9 @@ final class InventoryNativeCost {
 		}
 	}
 	private void profile(ResolvableProfile profile) {
+		// This arithmetic walk performs its own field read, separate from the
+		// earlier resident-shape certificate and the later native codec call.
+		budget.work(InventoryExternalFields.READ_WORK);
 		var properties = raw.profile(profile.properties()); int n = properties.size();
 		c.either(); c.record(3, (profile.name().isPresent() ? 1 : 0) + (profile.id().isPresent() ? 1 : 0) + (n == 0 ? 0 : 1));
 		c.optionalFields(2); c.defaults(1, n == 0 ? 0 : 1); c.v(0, 0, 14, 2); c.w(36);

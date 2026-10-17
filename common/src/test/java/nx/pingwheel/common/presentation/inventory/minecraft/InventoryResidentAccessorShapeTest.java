@@ -40,7 +40,6 @@ import nx.pingwheel.common.mixin.InventoryListTagAccessor;
 import nx.pingwheel.common.mixin.InventoryNonNullListAccessor;
 import nx.pingwheel.common.mixin.InventoryPatchedComponentsAccessor;
 import nx.pingwheel.common.mixin.InventoryProjectileItemsAccessor;
-import nx.pingwheel.common.mixin.InventoryReferenceMapCapacityAccessor;
 import nx.pingwheel.common.mixin.InventorySimpleComponentsAccessor;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -67,8 +66,6 @@ class InventoryResidentAccessorShapeTest {
 		shape(InventoryListTagAccessor.class, "pingforit$list", ListTag.class, "list");
 		shape(InventoryHiddenEffectAccessor.class, "pingforit$hiddenEffect", MobEffectInstance.class, "hiddenEffect");
 		shape(InventoryAdventurePredicatesAccessor.class, "pingforit$predicates", AdventureModePredicate.class, "predicates");
-		shape(InventoryReferenceMapCapacityAccessor.class, "pingforit$capacity",
-			it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap.class, "n");
 		shape(nx.pingwheel.common.mixin.InventoryHolderReferenceAccessor.class, "pingforit$owner", net.minecraft.core.Holder.Reference.class, "owner");
 		shape(nx.pingwheel.common.mixin.InventoryHolderReferenceAccessor.class, "pingforit$key", net.minecraft.core.Holder.Reference.class, "key");
 		shape(nx.pingwheel.common.mixin.InventoryHolderReferenceAccessor.class, "pingforit$value", net.minecraft.core.Holder.Reference.class, "value");
@@ -120,7 +117,7 @@ class InventoryResidentAccessorShapeTest {
 				InventoryComponentPatchAccessor.class, InventoryItemComponentsAccessor.class, InventoryContainerItemsAccessor.class,
 				InventoryProjectileItemsAccessor.class, InventoryBundleItemsAccessor.class, InventoryNonNullListAccessor.class,
 				InventoryCompoundTagAccessor.class, InventoryListTagAccessor.class, InventoryHiddenEffectAccessor.class,
-				InventoryAdventurePredicatesAccessor.class, InventoryReferenceMapCapacityAccessor.class,
+				InventoryAdventurePredicatesAccessor.class,
 				nx.pingwheel.common.mixin.InventoryHolderReferenceAccessor.class, nx.pingwheel.common.mixin.InventoryNamedHolderSetAccessor.class,
 				nx.pingwheel.common.mixin.InventoryDirectHolderSetAccessor.class, nx.pingwheel.common.mixin.InventoryRegistryAccessAccessor.class,
 				nx.pingwheel.common.mixin.InventoryMappedRegistryAccessor.class, nx.pingwheel.common.mixin.InventoryRegistryRootMixin.class,

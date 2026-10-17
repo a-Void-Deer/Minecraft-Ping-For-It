@@ -34,9 +34,12 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real session, native normalization, frame projection and recorded production paint; no GLFW or GPU. */
 class SpatialInventoryNavigationIntegrationTest {
 
+	private record RowFrame(String key, Integer outlineColor, boolean present, double alpha) {}
+
 	private static final class Painter implements SpatialOverlayRenderer.FramePainter {
 		private static final StringSplitter FONT = new StringSplitter((point, style) -> 6.0f);
 		final List<String> selectedRows = new ArrayList<>();
+		final List<RowFrame> rows = new ArrayList<>();
 		final List<String> paintedNodes = new ArrayList<>();
 		final List<SpatialOverlayRenderer.NodePaint> nodes = new ArrayList<>();
 		final List<SpatialOverlayRenderer.SectorPaint> sectors = new ArrayList<>();
@@ -46,8 +49,10 @@ class SpatialInventoryNavigationIntegrationTest {
 		public StringSplitter splitter() { return FONT; }
 		public boolean paint(SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> state,
 			SpatialOverlayRenderer.NodeLayout layout, SpatialOverlayRenderer.Style style) {
-			if (state.present() && state.data() instanceof SpatialOverlayRenderer.RowPaint row && row.selected())
-				selectedRows.add(row.row().key());
+			if (state.data() instanceof SpatialOverlayRenderer.RowPaint row) {
+				rows.add(new RowFrame(row.row().key(), row.outlineColor(), state.present(), state.alpha()));
+				if (state.present() && row.selected()) selectedRows.add(row.row().key());
+			}
 			if (state.present() && state.data() instanceof SpatialOverlayRenderer.NodePaint node) {
 				paintedNodes.add(node.choice().id());
 				nodes.add(node);
@@ -58,7 +63,8 @@ class SpatialInventoryNavigationIntegrationTest {
 			return true;
 		}
 		public void connector(SpatialOverlayRenderer.GuideLine line, double alpha) {}
-		void clear() { selectedRows.clear(); paintedNodes.clear(); nodes.clear(); sectors.clear(); pointerHidden = false; }
+		RowFrame row(String key) { return rows.stream().filter(row -> row.key().equals(key)).findFirst().orElseThrow(); }
+		void clear() { selectedRows.clear(); rows.clear(); paintedNodes.clear(); nodes.clear(); sectors.clear(); pointerHidden = false; }
 	}
 
 	private static final class Fixture {
@@ -314,6 +320,86 @@ class SpatialInventoryNavigationIntegrationTest {
 		}
 		var intent = assertInstanceOf(SelectorIntent.SelectInventory.class, f.session.releaseIntent(f.now + 1));
 		assertEquals("opaque:k15", intent.reference());
+	}
+
+	@Test
+	void nativeSelectionChangeMovesTheAnnotationBorderToTheCurrentKeyWithinTheWindow() {
+		var f = new Fixture(320, 240, "1", false, 0);
+		f.openList(false);
+		var before = f.snapshot().inventory();
+		String oldKey = before.selectedKey();
+		Integer color = f.painter.row(oldKey).outlineColor();
+		assertNotNull(color, "the initial direct release has an annotation border");
+
+		f.move(0, f.geometry.rowHeight() / 0.5, f.now + 1);
+		var after = f.snapshot().inventory();
+		String selectedKey = after.selectedKey();
+		assertNotEquals(oldKey, selectedKey);
+		assertEquals(before.windowFirst(), after.windowFirst(), "both rows stay in the same window");
+		f.frame(f.now + 1);
+		assertTrue(f.painter.row(oldKey).present(), "the old row still paints");
+		assertNull(f.painter.row(oldKey).outlineColor());
+		assertEquals(color, f.painter.row(selectedKey).outlineColor());
+		assertEquals(List.of(selectedKey), f.painter.rows.stream().filter(row -> row.outlineColor() != null)
+			.map(RowFrame::key).toList(), "only the model's selected key advertises direct release");
+
+		f.move(f.backSign() * 50, 0, f.now + 1);
+		assertTrue(f.snapshot().inventoryView().backAffordance().focused());
+		f.frame(f.now + 1);
+		assertTrue(f.painter.rows.stream().allMatch(row -> row.outlineColor() == null), "Back focus removes direct-send borders");
+	}
+
+	@Test
+	void nativeWindowJumpKeepsTheOldSelectedRowFadingWithoutItsAnnotationBorder() {
+		var f = new Fixture(320, 240, "1", false, 0);
+		f.openList(false);
+		String oldKey = f.snapshot().inventory().selectedKey();
+		Integer color = f.painter.row(oldKey).outlineColor();
+		assertNotNull(color);
+		f.scroll(15);
+		String selectedKey = f.snapshot().inventory().selectedKey();
+		assertNotEquals(oldKey, selectedKey);
+		assertTrue(f.snapshot().inventory().windowFirst() > 0);
+		f.frame(f.now + 1);
+		f.frame(f.now + 16);
+		var detached = f.painter.row(oldKey);
+		assertFalse(detached.present(), "the former selection remains as an exit node");
+		assertTrue(detached.alpha() > 0 && detached.alpha() < 1, "the ordinary fade remains in progress");
+		assertNull(detached.outlineColor(), "a row outside the visible window cannot advertise direct release");
+		assertEquals(color, f.painter.row(selectedKey).outlineColor());
+		assertEquals(List.of(selectedKey), f.painter.rows.stream().filter(row -> row.outlineColor() != null)
+			.map(RowFrame::key).toList());
+
+		assertInstanceOf(SelectorIntent.SelectInventory.class, f.session.releaseIntent(f.now + 1));
+		f.frame(f.now + 1);
+		f.frame(f.now + 16);
+		var closing = f.painter.row(selectedKey);
+		assertFalse(closing.present());
+		assertTrue(closing.alpha() > 0 && closing.alpha() < 1);
+		assertEquals(color, closing.outlineColor(), "ordinary close retains the departing border through its exit fade");
+		var oldClosing = f.painter.row(oldKey);
+		assertFalse(oldClosing.present(), "closing does not remove the former selection's detached node");
+		assertTrue(oldClosing.alpha() > 0 && oldClosing.alpha() < detached.alpha(), "its original exit fade continues");
+		assertNull(oldClosing.outlineColor(), "closing cannot restore a canceled annotation border from cached paint");
+	}
+
+	@Test
+	void nativeReselectionRestoresTheAnnotationBorderOnTheRetargetedRow() {
+		var f = new Fixture(320, 240, "1", false, 0);
+		f.openList(false);
+		String key = f.snapshot().inventory().selectedKey();
+		Integer color = f.painter.row(key).outlineColor();
+		assertNotNull(color);
+		f.scroll(15);
+		f.frame(f.now + 1); f.frame(f.now + 16);
+		assertFalse(f.painter.row(key).present());
+		assertNull(f.painter.row(key).outlineColor());
+		f.scroll(-15);
+		assertEquals(key, f.snapshot().inventory().selectedKey());
+		f.frame(f.now + 1); f.frame(f.now + 16);
+		assertTrue(f.painter.row(key).present());
+		assertEquals(color, f.painter.row(key).outlineColor(), "retargeting replaces the canceled paint with current authorization");
+		assertEquals(List.of(key), f.painter.rows.stream().filter(row -> row.outlineColor() != null).map(RowFrame::key).toList());
 	}
 
 	@Test
@@ -591,6 +677,8 @@ class SpatialInventoryNavigationIntegrationTest {
 		assertTrue(f.menu().menuId().contains(":item:"), "a forward stroke opens the item submenu");
 		f.frame(f.now + 1);
 		assertEquals(List.of("k0"), f.painter.selectedRows, "the inventory list stays painted under the item submenu");
+		assertTrue(f.painter.rows.stream().allMatch(row -> row.outlineColor() == null),
+			"the retained item row does not advertise a direct list release");
 		assertTrue(f.painter.paintedNodes.contains(inventoryId), "the content ancestor keeps its inventory breadcrumb");
 		assertTrue(f.painter.paintedNodes.stream().noneMatch(id -> id.contains(":property:")));
 		assertEquals(3, f.snapshot().radial().menus().get(1).choices().stream()
