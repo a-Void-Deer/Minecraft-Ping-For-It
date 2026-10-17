@@ -52,8 +52,9 @@ The client scope has seven categories:
   Trail, Trail Length, Trail Opacity, and Reduce Selector Motion. Trail Length
   controls retained trail points; Trail Opacity controls only the trail's
   visibility strength, independently of wheel and target opacity.
-- **Input Interaction**: Wheel Hold Time, Long-Press
-  Compatibility Mode, Compatibility Time Slice, and Cancel Cone Half-Angle,
+- **Input Interaction**: Wheel Hold Time, Gesture Skips Long Press, Minimum
+  Gesture Hold, Long-Press Compatibility Mode, Compatibility Time Slice, and
+  Cancel Cone Half-Angle,
   followed by a Spatial selector gestures subgroup with Center Deadzone, Entry
   Stroke Length, Entry Dwell, Inventory Vertical Mouse Sensitivity, Require
   Sustained Hover to Return, Back-Hover Dwell, and Content Intent Selection.
@@ -96,6 +97,18 @@ catalogue. The retired wheel radius and wheel timeout keys are also absent from
 the screen and have no persisted meaning
 ([client configuration](../config/client.md#obsolete-keys)). There is no
 user-facing reload control.
+
+## Input interaction controls
+
+The gesture controls' tooltips state that edits apply to the next hold. While
+compatibility mode is enabled, the gesture toggle displays OFF and both gesture
+controls are disabled; changing compatibility refreshes their displayed value and
+availability on the same page. Leaving compatibility mode makes them editable
+again without turning the toggle back on. The persisted preference-clearing
+relationship is owned by
+[client configuration](../config/client.md#spatial-selector-interaction), and
+gesture timing is owned by
+[long-press timing](../architecture/input/long-press.md#optional-physical-hold-gesture).
 
 ## Server performance category
 

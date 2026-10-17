@@ -23,6 +23,15 @@ supplementary code points and never turns a truncated surrogate into a
 replacement byte, and the presentation text bound admits the maximum whole
 emoji prefix without dropping literal punctuation or adding base text.
 
+`ClientTargetNameDecoderTest` covers valid component decoding, malformed JSON
+falling back to the unknown translatable name, and valid input emitting no
+diagnostic. Its injected synchronous logger receives one bounded report with
+the marker ID, exception details and decode source frame, without an additional
+throwable argument. This callback fixture does not exercise production logger
+admission or the no-op formatting bypass, and does not infer custom callbacks'
+internal DEBUG enablement. Shared production-helper evidence is inventoried in
+[shared exception diagnostics](integrations.md#shared-exception-diagnostics).
+
 ## Selector overlay layout and frame rendering
 
 `SpatialOverlayRendererTimingTest` covers renderer timing models.
@@ -176,7 +185,31 @@ production-frame recording-painter and CPU-model seams, not `GuiGraphics`, GPU,
 GLFW-window, or multiplayer evidence.
 `SpatialOverlayRendererBorderTest` projects the real facade's typed border
 color in both focus states, keeps the untyped and legacy `ping:` action
-fallbacks, and retains the detached color through the exit transition.
+fallbacks, verifies the cancellation action's focus-independent color, and
+retains the detached color through the exit transition.
+`SpatialInventoryBorderTest` drives the production list planner and row-fill
+seam: selected and unselected authorized rows carry complete annotation-colored
+rectangles, grey data quality does not remove them, and Back focus, a retained
+item row and a noncommittable selected row suppress direct-send decoration.
+`SpatialSelectorSessionTest` checks distinct non-grey local-action colors
+without inventing Ping actions, item annotation colors independently of the
+whole-marker default, missing Attention authorization under content-intent OFF,
+and live annotation-policy changes without changing selection.
+
+`SpatialLabelAvoidanceTest` covers bounded vertical placement, stable shallow
+collision resolution, fixed focus, resistance to small pointer jitter,
+sector-preserving unsolvable crowds and reset. `SpatialOverlayReadabilityTest`
+uses the production frame path with explicit font metrics: an English shallow
+overlap separates while text dimensions and controller state remain unchanged;
+the current focused node paints last among text-bearing nodes and detached old
+focus does not retain that priority; movement follows the finite transition and
+reset discards placement memory; connector segment subtraction leaves title
+rectangles uncovered; and all bundled locales keep full single-line text,
+horizontal anchors, bounded vertical offsets and sector membership across
+viewport sizes. The existing follower, Precise, breadcrumb and inventory
+clearance suites retain their own geometry coverage. These are CPU layout,
+recording-painter and fill-seam checks, not evidence of native GUI batching,
+resource-pack font readability or visual comfort during live input.
 `SpatialViewOffsetTest` and
 `SpatialViewOffsetProjectionTest` cover the selector's single rigid view
 translation: exact endpoints, continuous re-aiming, an unchanged origin never

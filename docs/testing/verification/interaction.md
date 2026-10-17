@@ -75,6 +75,53 @@ reaching cancellation and then being rejected by the server without a local
 fallback. Frozen press-ray behavior and the pending-capture/wheel interaction
 boundary otherwise have focused test coverage.
 
+### Gesture shortcut opening
+
+`GestureSkipHoldTest` covers the passive pre-open input model: the minimum wait
+is inclusive, the center-deadzone boundary is exclusive, GUI-scaled net
+displacement rather than historical travel qualifies, and an elapsed-time
+check needs no new callback. Ordered sample history is consumed once and reset
+discards it; foreign-window and non-finite samples and scale or ownership
+handoffs cannot invent displacement.
+
+The gesture cases in `ClientPingRuntimeInteractionTest` cover early crossing
+followed by a held frame at the minimum wait without another move, crossing
+after the wait, the frozen deadzone and wait despite live edits, an independent
+ordinary long press without movement, and return-to-center or short-flick
+release retaining the default-create path. They also cover disabled and
+compatibility modes, including virtual-held compatibility; pending capture,
+invalid viewport and physical release gating actual opening; release observed
+on a frame; and reset, screen, focus, level and dimension aborts fencing an old
+capture and trajectory from a new hold. Press-time ray and target remain frozen
+through the gesture opening. The ordered pre-open path pays the selector's
+stroke and turn entry once and retains dwell timing and trail history; native
+ownership begins only at opening, and reset/handoff priming adds no jump or
+duplicate travel. Enabling compatibility during a pending gesture discards that
+path while leaving the ordinary hold available.
+
+The alternative-eligibility cases in `PingInteractionStateMachineTest` cover
+capture readiness, held present, current-token ownership, release taking
+precedence over late completion, and abort not granting eligibility to a later
+ordinary hold. Configuration persistence and control-resource coverage are
+inventoried in
+[configuration verification](configuration-ui.md#inventory-and-spatial-selector-configuration).
+These are headless input-model, runtime-port and state-machine checks, not live
+camera, rebound-key delivery, GLFW ownership or loader gameplay evidence; the
+[manual gesture scenarios](manual-integration.md#pending-manual-and-integration-matrix)
+remain pending.
+
+Resource-bound cases in `GestureSkipHoldTest` and
+`ClientPingRuntimeInteractionTest` cover the exact last retained sample and
+first excess sample, ordered single-use handoff with an immutable transferred
+history, whole-history discard without a retained prefix or later tail, and
+recovery on a new hold.
+The runtime cases exercise preserving the original token, capture, frozen
+target and press timer without an early send or notice; ordinary opening at
+the center with fresh owned input; and one default create on release with both
+ready and pending capture, followed by a later press using the still-enabled
+shortcut. These remain helper and runtime-port checks rather than real native
+input, camera or gameplay verification.
+
 ## Precise live candidate capture
 
 The [live-capture owner](../../architecture/picking/capture.md#precise-live-candidate-capture)
@@ -364,6 +411,19 @@ bound caps the published trail.
 It is a standalone model seam: no native screen, renderer, input callback,
 configuration, or world-candidate source is exercised.
 
+`SpatialPreferredBearingTest` covers preferred non-Back placement over zero
+through twelve siblings and multiple parent bearings: the slots keep their
+original starts and equal spans, tile the full circle without rotating, and
+retain the true parent-facing Back and the relative order of other non-Back
+choices. A four-slot boundary case follows the start-inclusive hit convention
+rather than forcing the preferred center due right. An explicit Back stays in
+its own slot even when the preferred choice moves across it, a desired bearing
+inside Back selects the nearest non-Back slot, and a disabled choice still
+receives placement. A missing or Back choice preference is inert, root
+caller-fixed geometry remains authoritative, and the parent-directed reverse
+stroke still returns one level. These are headless controller checks, not a
+live input or rendering run.
+
 `SpatialSelectorSessionTest` covers the production headless selector facade:
 the frozen root menu and its allowed typed intents (with a whole-marker choice
 disallowed for the entity-block fixture rather than by a universal disable),
@@ -395,6 +455,13 @@ and keeps the parent identity; a declared group with no visible member choice
 is omitted instead of becoming a dead selectable root; a nested group path
 renders its subgroups under the declared parent and releases the nested member;
 and a property group path whose declared ancestor chain is missing is rejected.
+Its Content-direction cases enter the real root through upper-right bearings
+and then move exactly right across varying property/group counts: inventory is
+focused without rotating Back, other property and group entries keep relative
+order, an enabled inventory opens with the resolved breadcrumb and a disabled
+one retains its focusable slot without opening or committing. With no inventory,
+declared order and equal-sector geometry stay unchanged; nested groups and
+property Ping Type menus keep their own ordering.
 The session keeps the list's logical pointer fixed on both axes: physical list
 samples never move it (only viewport confinement may still correct it),
 vertical glide and bounded horizontal side progress accumulate independently
@@ -444,10 +511,11 @@ fixed list pointer, trail, selection and hover progress untouched. Through
 the selector session, owned GUI-scaled native vertical movement continues list
 glide at confined edges and the first real reversed movement applies immediately
 after a scale handoff, while unowned samples and handoff priming add no travel.
-Fractional native samples — one window pixel being half a GUI pixel —
-accumulate through the real input adapter into exactly one return to the root,
-with the pointer stopping at the net return distance and further reverse
-samples leaving the root active.
+Fractional native samples — one window pixel being half a GUI pixel on each
+axis — accumulate through the real input adapter into exactly one return to
+the root: the first diagonal sample crossing the net return threshold returns,
+while earlier samples stay in the child and further reverse samples leave the
+root active.
 These are headless model and input-normalization seams: no native screen,
 renderer, input callback, world-candidate source, or in-game integration is
 exercised.
@@ -657,7 +725,12 @@ breadcrumb rule through the real path:
 the root and Content ancestors keep only their entry breadcrumbs and the
 Content Back navigation while the hidden root and property options are not
 planned, the logical navigation choices remain complete, and the inventory list
-panel stays painted under the item submenu. The fixture does not instantiate
+panel stays painted under the item submenu. Its native upper-right-then-right
+case enters Content by a qualified turn at the actual corner and continues the
+same rightward stroke plus dwell into inventory. Controller focus, sector
+paint and the active follower receive the same equal-sector geometry; Back
+still faces the real root, and the entered inventory breadcrumb retains that
+geometry rather than a forced due-right center. The fixture does not instantiate
 the complete `ClientPingRuntime`, a GLFW window, `GuiGraphics`, or GPU submission;
 native-window/gameplay confirmation of inventory-axis reachability after the
 item-Back resize handoff remains pending.

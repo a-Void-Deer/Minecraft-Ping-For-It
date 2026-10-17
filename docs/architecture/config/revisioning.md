@@ -115,10 +115,11 @@ present; the removal takes effect when that configuration is next serialized.
 
 ## Same-version shape normalization
 
-Object-shape normalization is separate from ordered version migration and also
+Load-time normalization is separate from ordered version migration and also
 runs for a same-version or older load, composed after the ordered steps and
-before typed deserialization. It reconciles only the persisted presentation
-shape and fails closed on a malformed shape:
+before typed deserialization. It reconciles the persisted presentation shape
+and the explicitly conflicting client preference pair described below, failing
+closed on a malformed presentation shape:
 
 - A server document whose `presentation.targetTypes` map is present keeps that
   map and drops the obsolete flat `presentation.white`, `presentation.black`,
@@ -133,11 +134,14 @@ shape and fails closed on a malformed shape:
   normalization; an existing new-shape map wins over the obsolete flat members.
 - A client document drops the obsolete `presentationReceive` and
   `presentationDisplay` keys.
+- The explicit client gesture/compatibility preference conflict follows the
+  normalization rule owned by
+  [client configuration](../../config/client.md#spatial-selector-interaction).
 
-A document with none of the obsolete or malformed shape is not rewritten for
-normalization alone. Future-version protection and the changed-source
-pending-migration guard are unchanged; normalization shares the same guarded
-writeback.
+A document with neither an obsolete or malformed shape nor that explicit
+preference conflict is not rewritten for normalization alone. Future-version
+protection and the changed-source pending-migration guard are unchanged;
+normalization shares the same guarded writeback.
 
 ## Invalid-file recovery differs by config type
 

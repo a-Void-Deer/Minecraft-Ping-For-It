@@ -25,6 +25,21 @@ The current suite covers:
 - source ordering and one evaluation of each consulted resolver in
   `DefaultTargetResolverTest`.
 
+`MarkerCreationServiceTest` captures actual Log4j events for admission after
+external materialization: an ordinary admission-type rejection emits no WARN,
+while a throwing admission callback emits one WARN with the original message,
+cause, suppressed detail, source frame and committed external locator.
+Both paths reject, release the materialized reference and leave the marker store
+untouched. This is a headless service/callback seam, not a live provider,
+deployed logging configuration or end-to-end server/client validation.
+
+`PacketHandlerTest` covers full buffer consumption after valid or corrupt
+decoding and a failed fallback constructor preserving its reflection failure
+cause while still draining the buffer. It does not assert the actual DEBUG
+events from `readSafe`; public diagnostic-helper evidence is inventoried in
+[shared exception diagnostics](integrations.md#shared-exception-diagnostics),
+not an end-to-end packet decode or transport logging test.
+
 Marker-store, packet, and update tests provide recipient-scoped state and
 channel-mode transport seams, but do not establish the complete `ServerCore`
 ordering and channel/admission matrix in a live client/server path. Loader
@@ -72,6 +87,9 @@ client coverage does not close the server and end-to-end policy
 
 - the complete `ServerCore` operation ordering and channel/admission matrix in
   an end-to-end server path;
+- independent call-site diagnostic fixtures for the `ServerCore` and
+  `ClientPingRuntime` exception-log catch paths; the admission logging evidence
+  above does not establish those branches;
 - same-ID marker creation after local record deletion in the full client
   runtime: production final deletion evicts retained presentation values under
   a session tombstone, so the late create is dropped, while the isolated

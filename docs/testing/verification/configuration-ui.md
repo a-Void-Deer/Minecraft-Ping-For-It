@@ -123,6 +123,23 @@ model and persistence seams only: no server-administration path, remote change
 route, settings-widget interaction, scheduler consumption or full client
 selector runtime is exercised.
 
+`GestureSkipHoldConfigTest` covers fresh, missing and null shortcut preferences
+defaulting to opt-in disabled, minimum-wait clamping through setters,
+validation and snapshot construction, frozen preference/wait values, and older
+snapshot constructor forms leaving the shortcut disabled. It exercises
+compatibility clearing an enabled preference without later restoring it,
+preventing re-enablement while compatibility is active, and retaining the
+configured wait. Filesystem-backed cases cover explicit round-trip values,
+missing members and an untouched save leaving same-version bytes unchanged,
+explicit conflicting booleans being persistently reconciled through guarded
+same-version normalization while unknown nested data survives, and persistence
+across reload. A failed normalization remains pending; a later external
+future-version edit is not overwritten by save or reset, and future-version
+and invalid-file protections still decline gesture-related edits. These are
+model and handler seams, not live settings-widget interaction. The runtime
+eligibility and trajectory evidence is inventoried in
+[interaction verification](interaction.md#gesture-shortcut-opening).
+
 ## Server-settings snapshots and updates
 
 `ServerSettingsModelTest` covers request correlation, stale responses, denial,
@@ -225,8 +242,9 @@ screen evidence:
 - `SettingsCategoryCatalogTest` covers exactly-once placement of every existing
   control in the approved category order and immutable per-category lists,
   including the trail controls in Wheel Appearance, the content-intent control
-  in the client Input Interaction spatial group, the client scope without a
-  presentation category, the client
+  in the client Input Interaction spatial group, the gesture shortcut and
+  minimum-wait controls immediately after Wheel Hold Time, the client scope
+  without a presentation category, the client
   Performance category exposing exactly the precise capture period control, the
   server Presentation category, and the server Performance category exposing
   the monitoring control first and every inventory leaf exactly once and only in
@@ -287,7 +305,8 @@ screen evidence:
   external-list tooltips, the independent wheel and target opacity labels, the
   retired wheel timeout key's removal, and the complete spatial-selector
   preference key set with its wheel-options group heading, including the
-  precise capture period, trail controls and tooltips, the content-intent label
+  precise capture period, trail controls and tooltips, the gesture-shortcut
+  toggle and minimum-wait labels and tooltips, the content-intent label
   and tooltip, and numeric/boolean
   placeholder rules; point and percent unit placeholders are also checked for
   every bundled locale. It checks required key presence per locale rather than a
@@ -317,7 +336,11 @@ screen evidence:
   set stays aligned across locales; it
   does not render or assemble screen labels;
 - `SpatialSelectorSettingsLocalizationTest` covers the eight bundled locale
-  files for the content-intent setting and the root marker-removal label: the
+  files for the gesture shortcut, minimum wait, content-intent setting and root
+  marker-removal label: gesture labels and tooltips are nonblank, the minimum
+  wait label has exactly one value placeholder, both gesture tooltips state
+  next-hold application, and the confirmed Chinese gesture-toggle label is
+  pinned; for content intent and marker removal, the
   label and tooltip exist non-blank without placeholders and differ, every
   locale's tooltip states next-hold application, only the expected two
   content-intent keys exist with no stale variants, and the stable root cancel
@@ -339,6 +362,10 @@ seams rather than native widget containers, mouse dispatch, or live focus lists.
 
 ## Known automated gaps
 
+- the gesture controls' assembled OFF/disabled presentation and live refresh
+  when compatibility is toggled are not exercised by a constructed settings
+  screen; model clearing, catalog placement and resource presence do not prove
+  native widget state;
 - inventory administration and spatial-selector configuration have model,
   persistence, strict wire, draft, catalog and focus-helper seams; live
   administration, native widget input/focus, permission changes, persistence,

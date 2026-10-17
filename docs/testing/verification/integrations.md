@@ -4,6 +4,43 @@ Use the [verification index](README.md) for the global evidence rules and the
 [pending manual and integration matrix](manual-integration.md#pending-manual-and-integration-matrix)
 for scenarios that remain pending.
 
+## Shared exception diagnostics
+
+`SafeExceptionReportTest` covers original messages, exception types, source
+frames, causes and suppressed relationships without redaction; recognizable
+control-character escapes with readable structural line breaks; separate
+context and message bounds that preserve the top source frame; and explicit
+truncation, depth, node, frame and cycle markers. Hostile-accessor cases cover
+message, stack and cause fallbacks without localized-message or throwable
+string conversion, while fatal message-accessor failures propagate unchanged.
+Its logger seam receives one complete formatted string without a second
+throwable argument.
+
+`RateLimitedDiagnosticsTest` covers WARN/ERROR reports through a recording sink:
+disabled-level laziness, duplicate suppression despite message/request churn,
+independent stage, scope, exception-type and source-location admissions, exact
+window recovery and clock wraparound, bounded capacity without active-entry
+eviction, counted low-frequency overflow summaries, bounded long fields and
+distinct long scopes, and concurrent duplicate admission. Recoverable context
+failures retain the original exception, recoverable sink failures remain
+fail-soft, and a fatal context failure propagates.
+
+`GlobalExceptionLoggingTest` uses a real Log4j test appender to cover disabled
+DEBUG/WARN/ERROR helpers not reading throwable accessors and the disabled public
+DEBUG route evaluating neither context nor throwable accessors. The enabled
+helpers and public rate-limited DEBUG/WARN/ERROR routes emit their intended
+levels, retaining
+context, original messages, causes, suppressed details and source frames in one
+bounded report without an attached throwable for additional logger rendering.
+The common real-appender fixtures install isolated limiter instances with a
+Log4j-backed test sink and restore the previous instances after capture; public
+static routes and bounded formatting remain exercised. This isolation is not
+evidence of continuous production operation or high-cardinality soak behavior.
+These are helper and test-configured logging seams, not deployed appender,
+layout, asynchronous logging, live provider, loader/Mixin or game-session
+evidence. They do not establish that every integration call site emits the
+required diagnostic details.
+
 ## Create presentation adapters
 
 NeoForge Create adapter seams cover the optional summary route:

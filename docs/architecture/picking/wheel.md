@@ -19,10 +19,36 @@ owned by
 One held interaction consumes one immutable, validated
 [spatial-selector settings](../../config/client.md#spatial-selector-interaction)
 snapshot; editing the live configuration cannot change a gesture already in
-progress. The retired persisted wheel radius and wheel timeout keys never
-configure this interaction; their removal and migration are owned by
+progress by mutating that snapshot. The pre-open shortcut disqualifications
+below still apply. The retired persisted wheel radius and wheel timeout keys
+never configure this interaction; their removal and migration are owned by
 [revisioning](../config/revisioning.md#ordered-migration-and-writeback) and
 [client configuration](../../config/client.md#obsolete-keys).
+
+### Pre-open trajectory and resource fallback
+
+While the optional
+[physical-hold gesture](../input/long-press.md#optional-physical-hold-gesture)
+remains active, actual opening carries the complete admitted pre-open movement
+into the selector once, in its original order and with its original sample
+times. The stroke, dwell, turn corners and trail therefore continue from the
+press rather than starting from only the final pointer position. This handoff
+does not backdate actual opening or native input ownership. Release, abort, or
+an observed activation of compatibility mode discards the pending shortcut
+movement instead of replaying it into another hold.
+
+Pre-open trajectory storage and handoff work are bounded. Exceeding that
+resource bound disables only this hold's gesture shortcut and discards its
+entire trajectory; neither a retained prefix nor a later tail may be replayed,
+and later movement cannot revive the shortcut within that hold. The current
+interaction token, original press time, frozen target, capture and held state
+remain intact. Nothing is sent early, and no additional notice is shown.
+Ordinary long press continues from the original press time under
+[capture's actual-open gates](capture.md#baseline-release-and-actual-wheel-opening);
+if it opens, its selector starts at the center and accepts only subsequent
+owned input. A release before an actual open keeps the ordinary default-create
+path, including waiting for pending capture. The next physical press can use
+the shortcut again, without changing its persisted preference.
 
 ## Native selector presentation
 
@@ -53,8 +79,8 @@ The root presents the fixed eight-sector layout:
 | Bearing | Span | Root entry |
 | ---: | ---: | --- |
 | 0 | 55 | Danger — enabled only when the resolved Target Type allows `danger`; otherwise disabled |
-| 45 | 35 | Reserved placeholder, disabled |
-| 90 | 55 | Content |
+| 45 | 35 | Content |
+| 90 | 55 | Reserved placeholder, disabled |
 | 135 | 35 | Reserved placeholder, disabled |
 | 180 | 55 | Unping |
 | 225 | 35 | Precise |
@@ -67,8 +93,37 @@ sector is enabled only when the resolved Target Type's ordered Ping Types
 include `danger`: a release on it creates the frozen ordinary captured target
 with `danger`. When that Target Type does not allow `danger`, the sector is
 presented disabled and never commits. The center deadzone has no focus. A
-choice that carries a Ping Type uses that Ping Type's outline color for its
-border; the [fixed catalog](../identity/catalogs.md) owns the colors.
+choice that can submit a Ping uses the actual submitted Ping Type's outline
+color for a complete solid border, including a branch with a default submission
+and a selectable inventory row. Property and item annotations use their own
+annotation type rather than the whole-marker type; the
+[fixed catalog](../identity/catalogs.md) owns those colors. Pure navigation and
+Back keep neutral borders, and disabled or reserved choices keep dashed borders.
+Unping and the three target-selection toggles use distinct, fixed local-action
+border colors: coral orange for Unping, cyan for fluids, violet for the entity
+blacklist, and mint green for transparent blocks. These are local action roles,
+not additional Ping Types, and their colors remain the same when focused or
+when a toggle changes state.
+
+Ordinary titles remain single-line at their configured text size. The active
+menu's unfocused title frames may move vertically within a bounded neighborhood
+to reduce overlap, with their centers staying in their original sectors. This
+moves the complete frame and its text together, without changing its width,
+height, horizontal anchor, sector, hit test, dwell, turn or release result.
+Placement retains a stable solution through small input changes and follows
+the existing finite transitions and reduced-motion preference. A changed text
+measurement or viewport is a visual relayout, never gesture input. Ancestor
+breadcrumbs, Precise title/name layouts, inventory rows and the inventory item
+menu's Back frame retain their own positioning rules.
+
+The focused frame keeps its established pointer-following geometry and is
+painted above other titles, inventory content, ancestors and detached exit
+frames as one group of background, border, text and attached feedback. Former
+focus in an exit tail has no active-focus priority. Menu links lie below text,
+and the follower connector leaves painted title frames uncovered. The final
+pointer feedback still follows successful node painting. Limited space or
+exceptionally dense content may retain overlap: bounded, stable placement and
+readable focus take precedence over wrapping, shrinking or unbounded spreading.
 
 Position, opacity and scale are smoothly interpolated for an unchanged entry,
 for appearance and disappearance, and across a radial/list mode switch. A
@@ -289,7 +344,8 @@ actual entry count, including its Back entry. An explicit Back entry stays
 centered on the bearing from the child origin back to its parent origin, and an
 automatically appended Back takes that same parent-centered position and
 carries the localized Back label rather than an unlabeled frame; siblings keep
-their declared order and tile with equal spans.
+their declared order and tile with equal spans, subject only to the top-level
+[Content inventory placement](#content).
 
 ### Intent
 
@@ -350,6 +406,20 @@ session value store are owned by
 [presentation snapshot](../presentation/presentation_snapshot.md); the
 inventory list's data, status, count and ordering rules are owned by
 [inventory preview and tracking](../presentation/inventory.md).
+
+Within the equal-sector, parent-centered Back geometry, the top-level Content
+menu places its inventory choice as close to due right as the non-Back slots
+permit. When a non-Back slot contains the 90-degree bearing, that is the
+inventory slot. It does not force that slot's center to 90 degrees or rotate
+Back away from the real parent direction. At an equal-distance shared boundary,
+the existing start-inclusive/end-exclusive hit rule determines the inventory slot so a
+due-right stroke focuses inventory rather than its neighbor. Other properties
+and navigation groups keep their relative order; without an inventory choice
+there is no reordering, a disabled inventory choice retains its slot, and
+nested groups are unaffected.
+The root's upper-right Content entry followed by a rightward gesture can
+therefore reach inventory when the ordinary branch-entry gates admit it; this
+placement bypasses no stroke, dwell or turn requirement.
 
 Whether the content hierarchy offers its additional property and item Ping
 Type menus is frozen per hold from the client's content-intent preference
@@ -428,6 +498,13 @@ non-background alpha are retained, and no previously unfilled unselected row
 gains a fill. While an item's radial submenu is open, the list beneath it is
 not the active surface and is presented unfocused.
 
+On the active list, every authorized directly selectable row carries its
+annotation-colored solid border, including unselected rows. Data-quality text
+may remain grey without losing that border. Back-side focus, an active item
+submenu, or loss of direct annotation authorization removes the direct-send
+decoration; a retained row behind its item menu does not claim to be the current
+release target. Border painting changes neither row fills nor selection gates.
+
 While an item's submenu is active, the list paints only the entered row,
 identified by the item key frozen when that submenu opened rather than by the
 current selected index; the complete row model, selection, visible window,
@@ -502,14 +579,23 @@ meanings and their next-capture application are owned by
 [selection policy](selection_policy.md#selector-settings-branch).
 
 Each toggle entry shows its localized name followed by a localized ON/OFF
-state — green for ON, red for OFF — and only the state word is colored; the
-name, the separator, and the entry's border styling stay unchanged. The
+state — green for ON, red for OFF — and only the state word changes color with
+the setting. The name and separator keep their text styling; the entry retains
+its fixed local-action border under [native selector presentation](#native-selector-presentation). The
 displayed state samples the live setting on every draw rather than the hold's
 frozen raycast policy, so a setting changed while the interaction is still
 held is reflected on the next draw without reopening the wheel, while the
 captured target and the hold's frozen policy remain unaffected.
 
 ## Mouse ownership
+
+Before actual opening, observing movement for the optional gesture shortcut is
+passive: camera look and the existing mouse ownership continue normally. Only
+actual opening starts the selector's ownership below. The ordered movement
+handoff under
+[pre-open trajectory and resource fallback](#pre-open-trajectory-and-resource-fallback)
+does not consume the same physical sample twice, and the native-mode transition
+is primed without adding a jump to the continued gesture.
 
 The selector releases the vanilla mouse grab only while it is actually open
 and no client screen is open. It re-grabs the mouse only when that grab was

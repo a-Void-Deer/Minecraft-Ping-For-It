@@ -70,12 +70,14 @@ here.
 
 `spatialSelector` holds client-local spatial-selector gesture and appearance
 preferences. An absent or `null` object is initialized by the config model, and
-a missing member keeps its model-initialized value while explicit members are
-retained.
+a missing member keeps its model-initialized value. Explicit members follow
+validation and the preference relationships below.
 
 | Key | JSON form | Local meaning |
 | --- | --- | --- |
 | `spatialSelector` | object | Container for the preferences below; never sent to the server and cannot alter server policy. |
+| `spatialSelector.gestureSkipHoldEnabled` | boolean | Opt-in gesture shortcut, disabled by default, allowing a physical Ping-key hold and displacement to qualify for early selector opening. [Long-press timing](../architecture/input/long-press.md#optional-physical-hold-gesture) owns eligibility; compatibility mode takes priority under the preference relationship below. |
+| `spatialSelector.gestureSkipHoldMillis` | number, milliseconds | Minimum continuous physical hold before the optional gesture shortcut may qualify, independent of the ordinary long-press threshold. |
 | `spatialSelector.deadzone` | number, GUI pixels | Center deadzone; a release inside it abandons the gesture. |
 | `spatialSelector.stroke` | number, GUI pixels | Minimum pointer stroke before a dwell can enter a focused submenu. |
 | `spatialSelector.dwellMillis` | number, milliseconds | Dwell threshold before a focused branch entry is entered. |
@@ -92,7 +94,26 @@ retained.
 | `spatialSelector.contentIntentEnabled` | boolean | Whether the Content hierarchy offers its additional property and inventory-item Ping Type selection menus; while disabled, an otherwise selectable property or a directly released inventory item requests the Attention annotation instead, without changing the whole-marker Ping Type. Frozen into the held gesture's snapshot like the other selector preferences. |
 
 The config model supplies an immutable validated snapshot for one held gesture,
-so editing the live configuration cannot change a gesture already in progress.
+so ordinary preference edits apply to the next hold rather than mutating that
+snapshot. Compatibility's disabling relationship below still applies.
+The gesture-shortcut choice and minimum wait belong to that snapshot. Enabling
+long-press compatibility takes priority: it forces the gesture shortcut off,
+clears any previously enabled preference for persistence, and prevents it from
+being enabled while compatibility is active. Disabling compatibility does not
+restore that choice; the player must explicitly enable it again. Observing
+compatibility enabled can also end a pending shortcut under
+[wheel's input-handoff contract](../architecture/picking/wheel.md#opening-and-selection).
+
+A loaded client document with both `longPressCompatibilityMode` and
+`spatialSelector.gestureSkipHoldEnabled` explicitly `true` is normalized by
+clearing the latter and scheduling the existing guarded writeback even at the
+same version. Missing shortcut members alone do not trigger a load rewrite. The shared normalization,
+changed-source guard, future-version protection and invalid-file recovery
+remain owned by
+[configuration revisioning](../architecture/config/revisioning.md#same-version-shape-normalization),
+and the controls' disabled presentation is owned by the
+[configuration UI](../UI/settings-screen.md#input-interaction-controls).
+
 Trail visibility, length, and opacity are frozen in that snapshot; explicit
 persisted values are retained, and missing or `null` members use the model's
 initialized values without a migration that rewrites or rescales them.

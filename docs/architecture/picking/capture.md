@@ -90,22 +90,27 @@ coarse bounds.
 
 ## Baseline release and actual wheel opening
 
-At the baseline press, freeze the effective long-press threshold. Its timing
-relationship is owned by [long-press timing](../input/long-press.md).
+At the baseline press, freeze the effective long-press threshold and the held
+interaction's spatial-selector settings snapshot. Ordinary and optional gesture
+eligibility are owned by [long-press timing](../input/long-press.md).
 Release and wheel-open outcomes are:
 
 | Interaction state at the release/present boundary | Outcome |
 | --- | --- |
-| Released before the frozen threshold, with capture ready | Create the captured target using that Target Type's default Ping Type. |
-| Released before the frozen threshold, with capture pending | Wait for capture, then create its default Ping Type. |
-| Threshold elapsed but no wheel actually opened | Use the same default-create path, including pending-capture waiting. |
+| Released before the frozen threshold without an actual wheel open, with capture ready | Create the captured target using that Target Type's default Ping Type. |
+| Released before the frozen threshold without an actual wheel open, with capture pending | Wait for capture, then create its default Ping Type. |
+| Ordinary or gesture eligibility reached but no wheel actually opened | Use the same default-create path, including pending-capture waiting. |
 | Wheel actually opened | Delegate release to [wheel](wheel.md#radial-release-result). |
 
-Holding beyond the threshold opens a wheel only after capture is ready and a
-render/present frame occurs while the key remains held. Elapsed time alone does
-not fabricate an opened wheel. [Wheel](wheel.md) owns the actual-open snapshot
-and the resulting selection and cancellation behavior. No release outcome
-samples the release-time camera or casts a release-time ray.
+Either eligibility path opens a wheel only after capture is ready, the viewport
+is valid, and a render/present frame occurs while the current interaction token
+is still owned and the key remains held. Neither elapsed time nor pointer
+movement fabricates an opened wheel, and a capture completion after
+release or abort cannot open one retroactively. [Wheel](wheel.md) owns the
+actual-open selection, pre-open input handoff, and subsequent cancellation
+behavior. Both opening paths retain the ordinary press-frozen ray, target and
+Target Type. No release outcome samples the release-time camera or casts a
+release-time ray.
 
 ## Interaction lifecycle aborts
 

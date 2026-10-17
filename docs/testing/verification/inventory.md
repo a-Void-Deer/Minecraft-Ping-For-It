@@ -502,6 +502,70 @@ full production configuration or Fabric API coexistence, FML lifecycle, shipped
 intermediary/SRG namespaces, arbitrary provider internals, or an installed Create
 runtime.
 
+### Failure diagnostic seams
+
+`InventoryCaptureDiagnosticsTest` checks a real Log4j test appender for the
+original external-capture cast message and source frame, provider identity,
+locator, frozen face and read owner without inventing physical coordinates.
+Expected budget or access denials, directly or as cursorless causes, neither
+emit a warning nor evaluate diagnostic context; an unexpected provider failure
+with the same message still warns. `InventorySourceSnapshotTest` checks capture,
+live-read and snapshot-read cast failures retaining original messages, frames
+and source/target context with unavailable outcomes and no empty or partial
+payloads. Failed capture never falls back to live reads and attempted reads
+stay charged. Metadata/read failure followed by snapshot-close failure keeps
+both exceptions and their causes in one report, closes once and releases all
+retained/reserved state. Additional cases prevent self-suppression, report
+unexpected cleanup associated with an otherwise silent expected denial, and
+propagate fatal cleanup/read failures with attempted reads still charged and
+recoverable cleanup attached to a fatal read. Resolve and live-witness cases
+distinguish a real primary's combined report from a separately associated
+unexpected cleanup after expected denial, including cursorless causes; denial
+without cleanup stays silent and paid. Self/fatal combinations preserve failure
+identity and one close, a positive witness with failing close returns false,
+and failed replacement or wrong-scope resolution clears the prepared source
+without double-close. Ordinary topology loss and expected direct/cursorless
+read denial stay unavailable without an exception warning.
+`InventoryRuntimeTest` separately checks failed plan discovery with consumer,
+round and source context, the attempted prefix still paid, no capture/read and
+no retained or reserved leak.
+
+`InventoryMinecraftDiagnosticsTest` checks layout callback messages, causes,
+suppressed details, frames and read context, cross-position warning suppression
+without extra content reads, and a failed layout callback retaining its live
+route. Missing/unregistered schemas, absent optional bindings, ordinary lease
+loss and membership denial stay silent; throwing resolver, current-binding,
+membership and validity callbacks report their causes without changing denial
+or fallback. Default guarded-access cases distinguish ordinary false/denial
+from throwing gates/delegates, rate-control repeated gate warnings and propagate
+a fatal gate error. `InventoryMinecraftSnapshotCaptureTest` checks lock, pending
+loot, unload and topology loss without WARN or item reads, and a throwing frozen
+authority callback diagnosed before capture becomes unavailable with its
+attempted read counted. `InventoryContainerReadsTest` checks expected denial for
+foreign delegates and pending loot without unpacking that loot table.
+
+Each loader's `PlatformInventoryDiagnosticsTest` checks silent membership denial
+versus a throwing gate's WARN and original cause. Fabric and Forge additionally
+cover absent capabilities and throwing lookups at different positions with one
+warning and no extra lookup, while Fabric checks the throwing-version fallback.
+NeoForge's `CreateVaultInventoryDiagnosticsTest` checks silent revocation,
+unloaded members and topology changes against the recording member fixture,
+and throwing lookup, validation or snapshot metadata preserving unavailable or
+absent results with cause-bearing warnings. These do not install Create or
+launch any loader or Mixin runtime.
+
+`InventorySyncPublisherTest` checks transport failure reports while retries keep
+the same immutable packet and charge each handoff; repeated failure suppresses
+the warning, not the retry, and later transport recovery progresses. Its
+control-callback cases retain the data gate after accepted-transport callback
+failure, report OFFER and POLICY independently, and defer callback-added work.
+`InventoryAuthorityOrderTest` checks an ERROR with committed-marker and request
+context after initial publication fails, while retaining the selected outcome
+and tracking sidecar without re-entering admission or re-creating a marker.
+These are headless production-call-site and test-appender seams; shared helper
+coverage and logging-deployment limitations are owned by
+[shared exception diagnostics](integrations.md#shared-exception-diagnostics).
+
 ### Tracking projection
 
 `InventoryTrackingRendererTest`
@@ -538,6 +602,12 @@ remain pending.
   optional-provider wiring and live transport still require their own
   evidence, and no manual world, GPU, transport or multiplayer validation is
   recorded by those seams;
+- inventory call-site logging coverage is limited to the
+  [diagnostic seams above](#failure-diagnostic-seams). Other runtime
+  probe/projection branches, capture-handle source-close and standalone
+  snapshot/ticket-close diagnostics, scanner/broker and legacy preview-server branches lack
+  direct log-event assertions. Test appenders do not establish production
+  file-appender delivery or low-frequency behavior in a prolonged live soak;
 - default-cap capture, live selection and fresh tracking have headless native
   seam evidence. Independent review establishes the composed root/native/Catalog/
   caller allocation and work bounds within the versioned static source-event
@@ -579,7 +649,7 @@ remain pending.
   ordinary single- or double-chest contents change, a multi-period
   low-consumption quota completing stably, a real mod-provided bounded
   multi-member extractor or installed multi-member Create Vault, live-world safety
-  invalidation and recovery, low-frequency source-failure diagnostics, and real
+  invalidation and recovery, live-source failure diagnostics, and real
   world, multiplayer, tick-order and GPU execution remain manual/integration
   scenarios;
 - headless provider-confirmed external inventory coverage is inventoried above,
