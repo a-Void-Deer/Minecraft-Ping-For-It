@@ -25,7 +25,7 @@ class SettingsCategoryCatalogTest {
 			Setting.PLAYER_INFO_MODE,
 			Setting.TEAM_COLOR_MODE), SettingsCategoryCatalog.settings(Category.MARKER_DISPLAY));
 		assertEquals(List.of(
-			Setting.PASS_THROUGH_TRANSPARENT_BLOCKS,
+			Setting.MARK_TRANSPARENT_BLOCKS,
 			Setting.MARK_BLACKLISTED_TARGETS,
 			Setting.MARK_FLUIDS), SettingsCategoryCatalog.settings(Category.TARGET_SELECTION));
 		assertEquals(List.of(

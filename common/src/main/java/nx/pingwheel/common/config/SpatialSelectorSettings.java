@@ -51,7 +51,7 @@ public final class SpatialSelectorSettings {
 
 	public static final BigDecimal MIN_TARGET_GLIDE = new BigDecimal("0.25");
 	public static final BigDecimal MAX_TARGET_GLIDE = new BigDecimal("20");
-	public static final BigDecimal DEFAULT_TARGET_GLIDE = new BigDecimal("1.75");
+	public static final BigDecimal DEFAULT_TARGET_GLIDE = new BigDecimal("2.5");
 	public static final BigDecimal TARGET_GLIDE_STEP = new BigDecimal("0.25");
 
 	/** Confirmed Back-hover dwell range, step and disabled-by-default policy. */

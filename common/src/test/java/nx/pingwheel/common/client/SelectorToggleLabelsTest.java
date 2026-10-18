@@ -53,6 +53,20 @@ class SelectorToggleLabelsTest {
 	}
 
 	@Test
+	void transparentMarkingReadsOutlineModeWithoutChangingTheStableMenuKey() {
+		var transparent = choice(SelectorIntent.CaptureToggle.TRANSPARENT_BLOCKS);
+		var outline = new SelectorToggleLabels(() -> new RaycastPolicy(
+			RaycastPolicy.BlockMode.OUTLINE, RaycastPolicy.FluidMode.NONE, false));
+		Component on = outline.label(transparent);
+		assertEquals("pingforit.spatial.toggle.transparent_blocks",
+			assertInstanceOf(TranslatableContents.class, on.getContents()).getKey());
+		assertEquals(ON_KEY, stateKey(on));
+		var visual = new SelectorToggleLabels(() -> new RaycastPolicy(
+			RaycastPolicy.BlockMode.VISUAL, RaycastPolicy.FluidMode.ANY, true));
+		assertEquals(OFF_KEY, stateKey(visual.label(transparent)));
+	}
+
+	@Test
 	void onlyTheStateWordIsColoredAndTheNameAndSeparatorStayPlain() {
 		SelectorToggleLabels labels = new SelectorToggleLabels(() -> RaycastPolicy.from(false, false, true));
 		Component on = labels.label(choice(SelectorIntent.CaptureToggle.FLUIDS));

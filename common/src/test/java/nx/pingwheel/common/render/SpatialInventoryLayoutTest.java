@@ -27,6 +27,132 @@ class SpatialInventoryLayoutTest {
 	}
 
 	@Test
+	void nativeMetricsKeepNaturalContentAndLimitOnlyTheAvailableWindow() {
+		var metrics = SpatialInventoryLayout.measure(640, 360, 9, 1);
+		assertTrue(metrics.width() < 128, "an empty content measure does not fill the available width");
+		assertEquals(7, metrics.visibleRows(), "seven complete readable rows fit between the header and footer");
+		for (int size : new int[] {0, 2, 30}) {
+			var view = new SpatialInventoryView("list", true, rows(size), size == 0 ? -1 : 0, 0, 30,
+				true, Status.READY, 0, 0);
+			var layout = metrics.layout(view, 320, 180);
+			assertEquals(Math.min(size, 7), layout.count());
+			assertEquals(26 + 15 + Math.min(size, 7) * 22, layout.height());
+			assertTrue(layout.height() <= 216, "content height stays within its GUI budget");
+		}
+		assertEquals(metrics.width(), SpatialInventoryLayout.measure(1600, 1000, 9, 1).width(),
+			"a large screen does not grow an empty natural box");
+	}
+
+	private static SpatialInventoryView content(String name) {
+		var row = new Row("name", "unused-fallback", 1L, null, null, Status.READY, null,
+			new SpatialInventoryView.RowDisplay(net.minecraft.network.chat.Component.literal(name)));
+		return new SpatialInventoryView("list", true, List.of(row), 0, 0, 5, true, Status.READY, 0, 0)
+			.withNavigation(null, false, true);
+	}
+
+	@Test
+	void actualDetachedContentDrivesWidthBeforeTheViewportCapAndDoesNotTrackTheSelectedWindow() {
+		java.util.function.ToIntFunction<net.minecraft.network.chat.FormattedText> widths = text -> text.getString().length() * 6;
+		var empty = new SpatialInventoryView("empty", true, List.of(), -1, 0, 5, true, Status.READY, 0, 0)
+			.withNavigation(null, false, false);
+		var shortView = content("Short item");
+		var middleView = content("A moderately long detached item name");
+		var longView = content("A long detached display name that can use more than the historical fixed panel width");
+		double emptyWidth = SpatialInventoryLayout.measure(empty, 1600, 1000, 9, 1, widths).width();
+		double shortWidth = SpatialInventoryLayout.measure(shortView, 1600, 1000, 9, 1, widths).width();
+		double middleWidth = SpatialInventoryLayout.measure(middleView, 1600, 1000, 9, 1, widths).width();
+		double longWidth = SpatialInventoryLayout.measure(longView, 1600, 1000, 9, 1, widths).width();
+		assertTrue(emptyWidth < shortWidth && shortWidth < middleWidth && middleWidth < longWidth);
+		assertTrue(middleWidth > 200 && middleWidth < 320, "room above the old width is used naturally, not filled to a new fixed maximum");
+		assertTrue(longWidth > 200 && longWidth <= 320, "long content uses the room beyond the old fixed width");
+		assertEquals(320, longWidth, "only the real viewport maximum clips this long name");
+		Row longRow = longView.rows().getFirst();
+		var distinctLongRow = new Row("long", longRow.label(), longRow.count(), longRow.itemId(), longRow.displayJson(),
+			longRow.quality(), longRow.outlineColor(), longRow.display());
+		var allRows = new SpatialInventoryView("list", true, List.of(shortView.rows().getFirst(), distinctLongRow),
+			0, 0, 1, true, Status.READY, 0, 0).withNavigation(null, false, true);
+		var nextWindow = new SpatialInventoryView("list", true, allRows.rows(), 1, 1, 1, true, Status.READY, 0, 0)
+			.withNavigation(null, false, true);
+		assertEquals(SpatialInventoryLayout.measure(allRows, 1600, 1000, 9, 1, widths),
+			SpatialInventoryLayout.measure(nextWindow, 1600, 1000, 9, 1, widths), "bounded full-row measurement cannot jitter with scrolling");
+		assertEquals(SpatialInventoryLayout.measure(80, 60, 9, 1).width(),
+			SpatialInventoryLayout.measure(longView, 80, 60, 9, 1, widths).width(), "an impossible tiny cap keeps the readable floor");
+	}
+
+	@Test
+	void countHeaderAndFooterChromeContributeTheirUnscaledNaturalWidths() {
+		java.util.function.ToIntFunction<net.minecraft.network.chat.FormattedText> widths = text -> {
+			if (text.getString().equals("pingforit.spatial.inventory.forward")) return 40;
+			if (text.getString().equals(Status.UPDATING.translationKey())) return 110;
+			return text.getString().length() * 6;
+		};
+		var shortView = content("Short item");
+		double shortWidth = SpatialInventoryLayout.measure(shortView, 1600, 1000, 9, 1, widths).width();
+		var footer = shortView.withNavigation(null, true, true);
+		var retained = shortView.withNavigation("name", false, false);
+		assertTrue(SpatialInventoryLayout.measure(footer, 1600, 1000, 9, 1, widths).width() > shortWidth);
+		assertEquals(SpatialInventoryLayout.measure(footer, 1600, 1000, 9, 1, widths).width(),
+			SpatialInventoryLayout.measure(retained, 1600, 1000, 9, 1, widths).width(), "item retention reserves the same Forward chrome");
+		var status = new SpatialInventoryView("list", true, shortView.rows(), 0, 0, 1, true, Status.UPDATING, 0, 0)
+			.withNavigation(null, false, true);
+		assertTrue(SpatialInventoryLayout.measure(status, 1600, 1000, 9, 1, widths).width() > shortWidth);
+		Row row = shortView.rows().getFirst();
+		var quantity = new Row(row.key(), row.label(), Long.MAX_VALUE, row.itemId(), row.displayJson(), row.quality(), null, row.display());
+		var quantityView = new SpatialInventoryView("list", true, List.of(quantity), 0, 0, 1, true, Status.READY, 0, 0)
+			.withNavigation(null, false, true);
+		double quantityWidth = SpatialInventoryLayout.measure(quantityView, 1600, 1000, 9, 1, widths).width();
+		assertTrue(quantityWidth > shortWidth);
+		assertTrue(quantityWidth >= widths.applyAsInt(SpatialInventoryLayout.quantity(Long.MAX_VALUE)) * 2,
+			"natural width can show the whole full-sized quantity in its half-row slot");
+	}
+
+	@Test
+	void positionHeaderReservesTheWidestActualLabelBeforeAnySelectionScrollsToIt() {
+		java.util.function.ToIntFunction<net.minecraft.network.chat.FormattedText> widths = text -> {
+			String value = text.getString();
+			if (value.contains(" / ")) return value.startsWith("1 / ") ? 120 : 30;
+			return value.length() * 6;
+		};
+		var view = new SpatialInventoryView("header", true, rows(12), 11, 11, 1, true, Status.READY, 0, 0)
+			.withNavigation(null, false, true);
+		var metrics = SpatialInventoryLayout.measure(view, 1600, 1000, 9, 1, widths);
+		assertTrue(metrics.width() - 8 >= widths.applyAsInt(net.minecraft.network.chat.Component.literal("1 / 12")),
+			"proportional digit widths cannot make the first position wider than the reserved header");
+		assertEquals(metrics, SpatialInventoryLayout.measure(view.withWindow(0, 1), 1600, 1000, 9, 1, widths),
+			"header demand does not follow the current viewport window");
+	}
+
+	@Test
+	void tinyGuiKeepsReadableIconTextAndOneWholeRowInsteadOfShrinkingThePattern() {
+		var normal = SpatialInventoryLayout.measure(640, 360, 9, 1);
+		var tiny = SpatialInventoryLayout.measure(80, 60, 9, 1);
+		var view = new SpatialInventoryView("list", true, rows(30), 15, 0, 30, false, Status.READY, 7, -3);
+		var layout = tiny.layout(view, 40, 30);
+		assertEquals(1, tiny.visibleRows());
+		assertEquals(normal.rowHeight(), layout.rowHeight());
+		assertEquals(normal.headerHeight(), layout.headerHeight());
+		assertEquals(normal.footerHeight(), layout.footerHeight());
+		assertEquals(50, layout.width(), "icon plus existing row insets/gap and two readable line-height glyph cells");
+		assertEquals(63, layout.height(), "one complete row and natural chrome take precedence over an impossible cap");
+		assertEquals(15, layout.first());
+		assertTrue(Double.isFinite(layout.rowCenterY(15)));
+		assertEquals(47, layout.centerX(), "no panel-only viewport clamp changes the rigid pattern");
+	}
+
+	@Test
+	void retainedAnchorSurvivesCapacityAndFontRelayout() {
+		var view = new SpatialInventoryView("list", true, rows(30), 15, 7, 17, true, Status.READY, 19, -10)
+			.withSelectedRowCenterY(27).withNavigation("r15", false, false);
+		for (var metrics : List.of(SpatialInventoryLayout.measure(1000, 700, 9, 1),
+			SpatialInventoryLayout.measure(320, 240, 9, 1), SpatialInventoryLayout.measure(320, 240, 14, 1.25))) {
+			var layout = metrics.layout(view, 160, 120);
+			assertEquals(147, layout.rowCenterY(15), "the frozen row anchor, not its old row slot, owns the item origin");
+			assertEquals(179, layout.centerX());
+			assertTrue(layout.count() <= metrics.visibleRows(), "the anchor never bypasses the measured capacity");
+		}
+	}
+
+	@Test
 	void layoutUsesCallerWindowAndViewportAndReturnsAbsoluteGuiRowY() {
 		var view = new SpatialInventoryView("list", true, rows(12), 6, 4, 5, true, Status.READY, 30.0, -10.0);
 		var layout = SpatialInventoryLayout.of(view, 320.0, 180.0, 200.0, 20.0, 10.0, 10.0);

@@ -32,13 +32,13 @@ public class Raycast {
 		Vec3 rayStartVec,
 		Vec3 direction,
 		double maxDistance,
-		boolean passThroughTransparentBlocks
+		boolean markTransparentBlocks
 	) {
 		return traceDirectionalDetailed(
 			rayStartVec,
 			direction,
 			maxDistance,
-			RaycastPolicy.from(passThroughTransparentBlocks, false, false))
+			RaycastPolicy.from(markTransparentBlocks, false, false))
 			.map(RaycastSelection::hitResult)
 			.orElse(null);
 	}

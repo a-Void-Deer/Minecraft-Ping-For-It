@@ -571,7 +571,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			case DIRECTION_INDICATOR_VISIBLE -> this.addOption(setting, this.getDirectionIndicatorVisibleOption(), false);
 			case PLAYER_INFO_MODE -> this.addOption(setting, this.getPlayerInfoModeOption(), false);
 			case TEAM_COLOR_MODE -> this.addOption(setting, this.getTeamColorModeOption(), false);
-			case PASS_THROUGH_TRANSPARENT_BLOCKS -> this.addOption(setting, this.getPassThroughTransparentBlocksOption(), true);
+			case MARK_TRANSPARENT_BLOCKS -> this.addOption(setting, this.getMarkTransparentBlocksOption(), true);
 			case MARK_BLACKLISTED_TARGETS -> this.addOption(setting, this.getMarkBlacklistedTargetsOption(), true);
 			case MARK_FLUIDS -> this.addOption(setting, this.getMarkFluidsOption(), false);
 			case SPATIAL_ROOT_DISTANCE -> this.addOption(setting, this.getSpatialRootDistanceOption(), false);
@@ -2212,9 +2212,9 @@ public class SettingsScreen extends OptionsSubScreen {
 			config::isItemIconVisible, config::setItemIconVisible);
 	}
 
-	private OptionInstance<Boolean> getPassThroughTransparentBlocksOption() {
-		return OptionUtils.ofBool(LanguageUtils.settings("pass_through_transparent_blocks").getKey(),
-			config::isPassThroughTransparentBlocks, config::setPassThroughTransparentBlocks);
+	private OptionInstance<Boolean> getMarkTransparentBlocksOption() {
+		return OptionUtils.ofBool(LanguageUtils.settings("mark_transparent_blocks").getKey(),
+			config::isMarkTransparentBlocks, config::setMarkTransparentBlocks);
 	}
 
 	private OptionInstance<Boolean> getMarkBlacklistedTargetsOption() {

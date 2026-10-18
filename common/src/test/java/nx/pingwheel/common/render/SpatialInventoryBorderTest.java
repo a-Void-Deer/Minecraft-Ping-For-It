@@ -56,7 +56,7 @@ class SpatialInventoryBorderTest {
 		assertEquals(4, fills.size(), "a complete rectangle, not just a selected stripe");
 		int rgb = row.outlineColor();
 		assertTrue(fills.stream().allMatch(f -> f.color() == (0xFF000000 | rgb)));
-		int left = -99, right = 99;
+		int left = (int) Math.round(-row.width() / 2) + 1, right = (int) Math.round(row.width() / 2) - 1;
 		assertEquals(left, fills.get(0).left()); assertEquals(right, fills.get(0).right());
 		assertEquals(left, fills.get(2).left()); assertEquals(right, fills.get(3).right());
 		assertEquals(fills.get(0).top(), -fills.get(1).bottom());
@@ -75,5 +75,28 @@ class SpatialInventoryBorderTest {
 		var retained = paint(view().withNavigation("a", false, false));
 		assertEquals(1, retained.size()); assertNull(retained.getFirst().outlineColor());
 		assertNull(paint(view().withNavigation(null, true, false)).getFirst().outlineColor());
+	}
+
+	@Test void clippedFullSizeQuantityNeverChangesTheSelectedOnlyAnnotationBorder() {
+		var original = view();
+		var rows = new ArrayList<>(original.rows());
+		var selected = rows.getFirst();
+		rows.set(0, new SpatialInventoryView.Row(selected.key(), selected.label(), Long.MAX_VALUE, selected.itemId(),
+			selected.displayJson(), selected.quality(), selected.outlineColor()));
+		var longCount = new SpatialInventoryView("list", true, rows, 0, 0, 3, true, SpatialInventoryView.Status.UNKNOWN, 0, 0)
+			.withNavigation(null, true, true);
+		var painted = paint(longCount);
+		assertEquals(List.of("a"), painted.stream().filter(row -> row.outlineColor() != null).map(row -> row.row().key()).toList());
+		var row = painted.getFirst();
+		var font = new StringSplitter((point, style) -> 6f);
+		var quantity = SpatialOverlayRenderer.inventoryText(SpatialInventoryLayout.quantity(row.row().count()),
+			18, STYLE.inventoryTextScale(), text -> (int) font.stringWidth(text), font);
+		assertEquals(STYLE.inventoryTextScale(), quantity.scale());
+		assertTrue(font.stringWidth(quantity.text()) * quantity.scale() <= 18);
+		List<Fill> fills = new ArrayList<>();
+		SpatialOverlayRenderer.paintRowFills(row, STYLE, 1, 0,
+			(l, t, r, b, color) -> fills.add(new Fill(l, t, r, b, color)));
+		assertEquals(4, fills.size());
+		assertTrue(fills.stream().allMatch(fill -> fill.color() == (0xFF000000 | selected.outlineColor())));
 	}
 }

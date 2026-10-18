@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
 import nx.pingwheel.common.config.SpatialSelectorSettings;
 import nx.pingwheel.common.domain.BlockFace;
@@ -189,6 +190,10 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			return new ListGeometry(visibleRows, layout.width(), layout.headerHeight(), layout.rowHeight(),
 				layout.footerHeight(), childClearance);
 		}
+		public static ListGeometry fromMetrics(SpatialInventoryLayout.Metrics metrics, double childClearance) {
+			return new ListGeometry(metrics.visibleRows(), metrics.width(), metrics.headerHeight(), metrics.rowHeight(),
+				metrics.footerHeight(), childClearance);
+		}
 	}
 
 	/** Frozen radial/list frame; session/list keys fence transition identities across opens. */
@@ -216,7 +221,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private final SpatialSelectorSettings.Snapshot settings;
 	private final ContentFence fence;
 	private final ContentPort<R> contentPort;
-	private final ListGeometry geometry;
+	private ListGeometry geometry;
 	private final InventoryListModel list;
 	private final InventoryGesture gesture;
 	private final SpatialController radial;
@@ -225,6 +230,10 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private final String inventoryMenu;
 	private final Map<String, SelectorIntent<R>> actions = new HashMap<>();
 	private final Map<String, InventoryRow<R>> rows = new LinkedHashMap<>();
+	private final Map<String, PreparedDisplay> displays = new HashMap<>();
+	private Function<SpatialInventoryView.Row, SpatialInventoryView.RowDisplay> displayProjection;
+	private Function<SpatialInventoryView, ListGeometry> geometryMeasurement;
+	private record PreparedDisplay(String itemId, String label, String json, SpatialInventoryView.RowDisplay display) {}
 	private ContentProjection<R> projection;
 	private InventoryPreview<R> preview;
 	private boolean opened;
@@ -331,6 +340,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		boolean unavailable = unavailable(update.status());
 		if (update.reset() || unavailable || update.inventory() == null || unavailable(update.inventory().status())) {
 			rows.clear();
+			displays.clear();
 			list.close();
 			if (itemKey != null && itemMenu().equals(activeMenuId())) radial.backProgrammatically(nowMillis);
 		}
@@ -436,6 +446,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 
 	private void finish() {
 		active = false; list.close(); rows.clear(); actions.clear(); projection = null; preview = null;
+		displays.clear(); geometryMeasurement = null; displayProjection = null;
 		itemKey = null; itemAnchorY = Double.NaN; listWasActive = false;
 		precise = Map.of(); preciseFrame = null; issuedPreciseFrame = null; presentedPreciseFrame = null; liveToken = null; liveLevel = null;
 	}
@@ -619,12 +630,47 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			throw new IllegalArgumentException("item clearance must be positive and finite");
 		if (clearance == itemClearance) return;
 		itemClearance = clearance;
+		repositionItem(nowMillis);
+	}
+
+	/**
+	 * Installs this frame's bounded presentation ports before input. Display
+	 * projection is reused until an item's transmitted identity changes; geometry
+	 * is refreshed again after discovery/navigation so the first input on a new
+	 * surface and the ensuing paint cannot consume different content widths.
+	 */
+	public void prepareInventoryGeometry(Function<SpatialInventoryView, ListGeometry> measurement,
+		Function<SpatialInventoryView.Row, SpatialInventoryView.RowDisplay> displayProjection, long nowMillis) {
+		this.geometryMeasurement = Objects.requireNonNull(measurement);
+		this.displayProjection = Objects.requireNonNull(displayProjection);
+		refreshInventoryGeometry(nowMillis);
+	}
+
+	private void refreshInventoryGeometry(long nowMillis) {
+		if (geometryMeasurement != null) updateListGeometry(geometryMeasurement.apply(inventoryView()), nowMillis);
+	}
+
+	/** Refresh all shared metrics atomically before input; never reopen the list or rebase its gesture. */
+	public void updateListGeometry(ListGeometry next, long nowMillis) {
+		Objects.requireNonNull(next, "geometry");
+		if (next.equals(geometry) && next.childClearance() == itemClearance) return;
+		geometry = next;
+		list.setVisibleRows(next.visibleRows());
+		gesture.updateRowHeight(next.rowHeight());
+		itemClearance = next.childClearance();
+		repositionItem(nowMillis);
+	}
+
+	private void repositionItem(long nowMillis) {
 		if (!isItemActive()) return;
 		InventoryListModel.Snapshot state = list.snapshot();
 		double sign = state.direction().forward() == InventoryListModel.Side.RIGHT ? 1.0 : -1.0;
 		double axisX = state.axisX();
-		radial.repositionExternal(new SpatialController.Point(axisX + sign * (geometry.width() / 2.0 + clearance), itemAnchorY),
-			new SpatialController.Point(axisX, itemAnchorY), nowMillis);
+		var origin = new SpatialController.Point(axisX + sign * (geometry.width() / 2.0 + itemClearance), itemAnchorY);
+		var anchor = new SpatialController.Point(axisX, itemAnchorY);
+		var menu = activeMenu();
+		if (origin.equals(menu.origin()) && anchor.equals(menu.parentOrigin())) return;
+		radial.repositionExternal(origin, anchor, nowMillis);
 	}
 
 	/**
@@ -688,6 +734,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			listWasActive = true;
 			alignListPointer();
 		} else listWasActive = false;
+		refreshInventoryGeometry(nowMillis);
 	}
 
 	/**
@@ -731,8 +778,16 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		Integer outline = type != null && preview.allowedItemTypes().contains(type) ? type.outlineColor() : null;
 		for (InventoryListModel.Entry entry : list.snapshot().entries()) {
 			InventoryRow<R> row = rows.get(entry.key());
-			if (row != null) paintRows.add(new SpatialInventoryView.Row(row.key(), row.label(), row.count(), row.itemId(),
-				row.displayJson(), row.quality(), outline));
+			if (row == null) continue;
+			var paint = new SpatialInventoryView.Row(row.key(), row.label(), row.count(), row.itemId(), row.displayJson(), row.quality(), outline);
+			PreparedDisplay prepared = displays.get(row.key());
+			if (displayProjection != null && (prepared == null || !Objects.equals(prepared.itemId(), row.itemId())
+				|| !prepared.label().equals(row.label()) || !Objects.equals(prepared.json(), row.displayJson()))) {
+				prepared = new PreparedDisplay(row.itemId(), row.label(), row.displayJson(), displayProjection.apply(paint));
+				displays.put(row.key(), prepared);
+			}
+			paintRows.add(new SpatialInventoryView.Row(row.key(), row.label(), row.count(), row.itemId(), row.displayJson(),
+				row.quality(), outline, prepared == null ? null : prepared.display()));
 		}
 		return paintRows;
 	}

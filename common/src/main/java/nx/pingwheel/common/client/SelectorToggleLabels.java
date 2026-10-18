@@ -63,7 +63,7 @@ public final class SelectorToggleLabels {
 		return switch (toggle) {
 			case FLUIDS -> policy.fluidMode() == RaycastPolicy.FluidMode.ANY;
 			case ENTITY_BLACKLIST -> policy.includeIgnoredEntities();
-			case TRANSPARENT_BLOCKS -> policy.blockMode() == RaycastPolicy.BlockMode.VISUAL;
+			case TRANSPARENT_BLOCKS -> policy.blockMode() == RaycastPolicy.BlockMode.OUTLINE;
 		};
 	}
 }

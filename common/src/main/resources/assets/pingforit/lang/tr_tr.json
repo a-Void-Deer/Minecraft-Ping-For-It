@@ -1,7 +1,7 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Konumu Pingle",
-	"key.pingforit.toggle_pass_through_transparent_blocks": "Şeffaf Blokları Aş",
+	"key.pingforit.toggle_mark_transparent_blocks": "Şeffaf Blokları İşaretlemeyi Aç/Kapat",
 	"key.pingforit.toggle_mark_blacklisted_targets": "Kara Listedeki Hedefleri İşaretle",
 	"key.pingforit.toggle_mark_fluids": "Sıvıları İşaretle",
 	"key.pingforit.open_settings": "Ayarları Aç",
@@ -21,7 +21,7 @@
 	"settings.pingforit.ping_distance": "Ping Mesafesi: %s",
 	"settings.pingforit.item_icon_visible": "Eşya Simgeleri",
 	"settings.pingforit.direction_indicator_visible": "Yön Göstergesi",
-	"settings.pingforit.pass_through_transparent_blocks": "Şeffaf Blokları Aş",
+	"settings.pingforit.mark_transparent_blocks": "Şeffaf Blokları İşaretle",
 	"settings.pingforit.mark_blacklisted_targets": "Kara Listedeki Hedefleri İşaretle",
 	"settings.pingforit.mark_fluids": "Sıvıları İşaretle",
 	"settings.pingforit.ping_size": "Ping Boyutu: %s",
@@ -114,7 +114,7 @@
   ,"settings.pingforit.marker_display_duration.tooltip": "İşaretçilerin yerel olarak ne kadar süre görünür kalacağını belirler. Sunucuyu takip et, her işaretçinin dondurulmuş sunucu süresini kullanır."
   ,"value.pingforit.follow_server": "Sunucuyu takip et"
   ,"unit.pingforit.seconds": "%ss"
-  ,"notice.pingforit.pass_through_transparent_blocks": "Şeffaf bloklardan işaretle: "
+  ,"notice.pingforit.mark_transparent_blocks": "Şeffaf blokları işaretle: "
   ,"notice.pingforit.mark_blacklisted_targets": "Kara listedeki hedefleri işaretle: "
   ,"notice.pingforit.mark_fluids": "Sıvıları işaretle: "
   ,"notice.pingforit.on": "Açık"
@@ -325,7 +325,7 @@
   ,"pingforit.spatial.settings": "Seçim"
   ,"pingforit.spatial.toggle.fluids": "Sıvılar"
   ,"pingforit.spatial.toggle.entity_blacklist": "Kara liste"
-  ,"pingforit.spatial.toggle.transparent_blocks": "Şeffaf Bloklar"
+  ,"pingforit.spatial.toggle.transparent_blocks": "Şeffaf Blokları İşaretle"
   ,"pingforit.spatial.target_type.dropped_item": "Düşen Eşya"
   ,"pingforit.spatial.target_type.entity": "Varlık"
   ,"pingforit.spatial.target_type.entity_block": "Blok Varlığı"

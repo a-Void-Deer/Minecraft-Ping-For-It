@@ -40,7 +40,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class SableSupplementalRaycasterTest {
 	private static final String DIMENSION = "minecraft:overworld";
 	private static final Vec3 START = new Vec3(0, .5, .5), END = new Vec3(20, .5, .5);
-	private static final RaycastPolicy POLICY = RaycastPolicy.from(false, false, false);
+	private static final RaycastPolicy POLICY = new RaycastPolicy(
+		RaycastPolicy.BlockMode.OUTLINE, RaycastPolicy.FluidMode.NONE, false);
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
 	@Test
@@ -170,7 +171,7 @@ class SableSupplementalRaycasterTest {
 		CandidateCollector outline = new CandidateCollector(), visual = new CandidateCollector();
 		Vec3 start = new Vec3(0, .25, .5), end = new Vec3(20, .25, .5);
 		assertTrue(scan(List.of(plot), start, end, POLICY, limits(), outline));
-		assertTrue(scan(List.of(plot), start, end, RaycastPolicy.from(true, false, false), limits(), visual));
+		assertTrue(scan(List.of(plot), start, end, RaycastPolicy.from(false, false, false), limits(), visual));
 		assertFalse(outline.evidence().isEmpty());
 		assertTrue(visual.evidence().isEmpty());
 		world.blocks.put(new BlockPos(100, 0, 100), Blocks.WATER.defaultBlockState());

@@ -38,6 +38,7 @@ import static nx.pingwheel.common.Global.MOD_ID;
 public class ConfigHandler <T extends IConfig> {
 
 	private final Gson gson;
+	private final Gson documentGson;
 	private final Class<T> configType;
 	private final Path configPath;
 	private final boolean recoverInvalidConfig;
@@ -94,6 +95,9 @@ public class ConfigHandler <T extends IConfig> {
 			// presence-aware parsing before InventorySettings validation.
 			.registerTypeAdapter(IntLimit.class, new IntLimitDeserializer())
 			.create();
+		// Model nulls remain omitted above; explicit nulls already present in the
+		// merged raw document must survive its final tree-only serialization.
+		this.documentGson = gson.newBuilder().serializeNulls().create();
 		this.configType = Objects.requireNonNull(configType, "configType");
 		this.configPath = Objects.requireNonNull(configPath, "configPath");
 		this.backupWriter = Objects.requireNonNull(backupWriter, "backupWriter");
@@ -310,6 +314,13 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	private T deserializeConfig(JsonElement root) {
+		if (usesLegacyTransparentBlockToggle()) {
+			// A handler running below the boundary still reads the old schema. Keep
+			// a future-named raw member in the preservation base, not in the model.
+			JsonObject modelRoot = root.getAsJsonObject().deepCopy();
+			modelRoot.addProperty("markTransparentBlocks", !legacyTransparentBlockToggle(modelRoot));
+			root = modelRoot;
+		}
 		T loaded = gson.fromJson(root, configType);
 		if (loaded == null) {
 			throw new IllegalStateException("config JSON is empty");
@@ -329,6 +340,9 @@ public class ConfigHandler <T extends IConfig> {
 
 		if (configType == ClientConfig.class) {
 			removeKeys(serialized.getAsJsonObject(), REMOVED_CLIENT_PRESENTATION_KEYS);
+		}
+		if (usesLegacyTransparentBlockToggle()) {
+			projectLegacyTransparentBlockToggle(serialized.getAsJsonObject(), rootToPreserve);
 		}
 
 		if (rootToPreserve != null) {
@@ -363,10 +377,41 @@ public class ConfigHandler <T extends IConfig> {
 			&& modVersion.compareTo(ConfigVersionUpdater.WHEEL_TIMEOUT_REMOVED_VERSION) >= 0) {
 			ConfigVersionUpdater.removeLegacyWheelTimeout(serialized.getAsJsonObject());
 		}
+		if (configType == ClientConfig.class
+			&& modVersion.compareTo(ConfigVersionUpdater.MARK_TRANSPARENT_BLOCKS_INTRODUCED_VERSION) >= 0) {
+			ConfigVersionUpdater.removeLegacyTransparentBlockToggle(serialized.getAsJsonObject());
+		}
 
 		JsonElement marker = new com.google.gson.JsonPrimitive(modVersion.originalVersion());
 		serialized.getAsJsonObject().add(ConfigVersionUpdater.VERSION_KEY, marker);
-		return gson.toJson(serialized);
+		return documentGson.toJson(serialized);
+	}
+
+	private boolean usesLegacyTransparentBlockToggle() {
+		return configType == ClientConfig.class
+			&& modVersion.compareTo(ConfigVersionUpdater.MARK_TRANSPARENT_BLOCKS_INTRODUCED_VERSION) < 0;
+	}
+
+	private boolean legacyTransparentBlockToggle(JsonObject root) {
+		// Use the existing Gson boolean adapter, including its invalid-type errors.
+		return Boolean.TRUE.equals(gson.fromJson(root.get("passThroughTransparentBlocks"), Boolean.class));
+	}
+
+	private void projectLegacyTransparentBlockToggle(JsonObject serialized, JsonElement rootToPreserve) {
+		boolean passThrough = !((ClientConfig) config).isMarkTransparentBlocks();
+		serialized.remove("markTransparentBlocks");
+		if (rootToPreserve != null && rootToPreserve.isJsonObject()) {
+			JsonObject preserved = rootToPreserve.getAsJsonObject();
+			if (preserved.has("passThroughTransparentBlocks")
+				&& legacyTransparentBlockToggle(preserved) == passThrough) {
+				// Let the guarded merge retain an unchanged legacy raw value. Omitting
+				// the future key above likewise leaves any pre-existing unknown one alone.
+				return;
+			}
+		}
+		// Fresh files, ordinary saves and pending edits must persist the model's
+		// actual selection effect without prematurely introducing the future key.
+		serialized.addProperty("passThroughTransparentBlocks", passThrough);
 	}
 
 	private VersionedConfig readVersionedConfig(String serialized, byte[] sourceBytes) {

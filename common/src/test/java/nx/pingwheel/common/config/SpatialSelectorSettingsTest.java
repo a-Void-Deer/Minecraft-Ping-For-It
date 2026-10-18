@@ -19,9 +19,10 @@ class SpatialSelectorSettingsTest {
 	@Test
 	void initializedMissingNullAndExplicitGlideValuesDriveTheirOwnRelativeThresholds() {
 		for (var probe : List.of(
-			new GlideProbe("{}", 40.0 / 1.75),
-			new GlideProbe("{\"targetGlide\":null}", 40.0 / 1.75),
+			new GlideProbe("{}", 16.0),
+			new GlideProbe("{\"targetGlide\":null}", 16.0),
 			new GlideProbe("{\"targetGlide\":1}", 40.0),
+			new GlideProbe("{\"targetGlide\":1.75}", 40.0 / 1.75),
 			new GlideProbe("{\"targetGlide\":2}", 20.0),
 			new GlideProbe("{\"targetGlide\":0.25}", 160.0),
 			new GlideProbe("{\"targetGlide\":9}", 40.0 / 9.0))) {
@@ -32,7 +33,7 @@ class SpatialSelectorSettingsTest {
 			assertGlideThreshold(beforeValidation, probe.threshold());
 			assertGlideThreshold(new Gson().fromJson(new Gson().toJson(settings), SpatialSelectorSettings.class).snapshot(), probe.threshold());
 		}
-		assertGlideThreshold(new SpatialSelectorSettings().snapshot(), 40.0 / 1.75);
+		assertGlideThreshold(new SpatialSelectorSettings().snapshot(), 16.0);
 	}
 
 	@Test
@@ -43,7 +44,7 @@ class SpatialSelectorSettingsTest {
 		assertGlideThreshold(savedQuarter, 160);
 		assertGlideThreshold(settings.snapshot(), 20);
 		settings.setTargetGlide(null);
-		assertGlideThreshold(settings.snapshot(), 40.0 / 1.75);
+		assertGlideThreshold(settings.snapshot(), 16.0);
 		assertGlideThreshold(savedQuarter, 160);
 	}
 
@@ -74,9 +75,9 @@ class SpatialSelectorSettingsTest {
 		assertEquals(0, new BigDecimal("1.3")
 			.compareTo(SpatialSelectorSettings.clampTargetGlide(new BigDecimal("1.3"))),
 			"a valid off-grid factor stays literal instead of snapping to the step grid");
-		assertEquals(0, new BigDecimal("1.75")
+		assertEquals(0, new BigDecimal("2.5")
 			.compareTo(SpatialSelectorSettings.clampTargetGlide(null)));
-		assertEquals(0, new BigDecimal("1.75")
+		assertEquals(0, new BigDecimal("2.5")
 			.compareTo(new SpatialSelectorSettings().getTargetGlide()));
 	}
 

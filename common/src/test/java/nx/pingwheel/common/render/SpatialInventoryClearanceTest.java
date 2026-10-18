@@ -243,6 +243,11 @@ class SpatialInventoryClearanceTest {
 			null, style, now, viewport, width, height, painter);
 	}
 
+	private static double panelHalfWidth(SpatialInventoryView inventory, Painter painter, SpatialOverlayRenderer.Style style,
+		int width, int height) {
+		return SpatialOverlayRenderer.inventoryLayout(inventory, width, height, painter.lineHeight(), style, painter::width).width() / 2.0;
+	}
+
 	@ParameterizedTest
 	@CsvSource({"1,24,9,0.5", "-1,24,9,0.5", "1,240,9,1.0", "-1,240,9,1.0",
 		"1,24,60,1.0", "-1,24,60,1.0"})
@@ -262,18 +267,20 @@ class SpatialInventoryClearanceTest {
 			.withSelectedRowCenterY(rowY).withNavigation("retained", true, true);
 		double oldClearance = SpatialOverlayRenderer.itemMenuClearance(320, 240, lineHeight, rawBackWidth, style);
 		double newClearance = SpatialOverlayRenderer.itemMenuClearance(1000, 700, lineHeight, rawBackWidth, style);
-		var controller = controller(axisX + sign * (100 + oldClearance), rowY, axisX, sign, false);
+		double oldHalf = panelHalfWidth(inventory, painter, style, 320, 240);
+		double newHalf = panelHalfWidth(inventory, painter, style, 1000, 700);
+		var controller = controller(axisX + sign * (oldHalf + oldClearance), rowY, axisX, sign, false);
 		frame(session, controller, inventory, painter, label, style, 320, 240, 0);
 		frame(session, controller, inventory, painter, label, style, 320, 240, DURATION);
 		assertPaintedClearance(painter, "old settled");
 		assertTrue(((SpatialOverlayRenderer.NodePaint) painter.node(true).state().data()).selected(), "exercise the largest selected Back frame");
 
 		long resized = DURATION + 1;
-		controller.repositionExternal(p(axisX + sign * (100 + newClearance), rowY), p(axisX, rowY), resized / 1_000_000L);
+		controller.repositionExternal(p(axisX + sign * (newHalf + newClearance), rowY), p(axisX, rowY), resized / 1_000_000L);
 		frame(session, controller, inventory, painter, label, style, 1000, 700, resized);
 		assertPaintedClearance(painter, "first enlarged frame");
 		double firstPanelX = painter.panel().state().x(), firstGuideX = painter.itemGuide().state().x();
-		assertEquals(100 + newClearance, sign * (firstGuideX - firstPanelX), 1.0e-9,
+		assertEquals(newHalf + newClearance, sign * (firstGuideX - firstPanelX), 1.0e-9,
 			"the first frame cannot retain the old panel-to-menu clearance beside a new radius payload");
 		frame(session, controller, inventory, painter, label, style, 1000, 700, resized + DURATION / 2);
 		assertPaintedClearance(painter, "mid enlarged frame");
@@ -285,7 +292,7 @@ class SpatialInventoryClearanceTest {
 		assertEquals(350, painter.itemGuide().state().y(), 1.0e-9);
 
 		long shrunk = resized + DURATION + 1;
-		controller.repositionExternal(p(axisX + sign * (100 + oldClearance), rowY), p(axisX, rowY), shrunk / 1_000_000L);
+		controller.repositionExternal(p(axisX + sign * (oldHalf + oldClearance), rowY), p(axisX, rowY), shrunk / 1_000_000L);
 		for (long elapsed : new long[] {0, DURATION / 2, DURATION}) {
 			frame(session, controller, inventory, painter, label, style, 320, 240, shrunk + elapsed);
 			assertPaintedClearance(painter, "shrunk frame at " + elapsed);
@@ -305,11 +312,17 @@ class SpatialInventoryClearanceTest {
 			new SpatialInventoryView.Row("retained", "Retained", 2L, null, SpatialInventoryView.Status.READY)),
 			0, 0, 1, sign > 0, SpatialInventoryView.Status.READY, 0, 0)
 			.withSelectedRowCenterY(0).withNavigation("retained", true, true);
-		var controller = controller(sign * (100 + oldClearance), 0, 0, sign, true);
+		double oldHalf = panelHalfWidth(inventory, painter, style, 320, 240);
+		double newHalf = panelHalfWidth(inventory, painter, style, 1000, 700);
+		var controller = controller(sign * (oldHalf + oldClearance), 0, 0, sign, true);
 		frame(session, controller, inventory, painter, label, style, 320, 240, 0);
 		frame(session, controller, inventory, painter, label, style, 320, 240, DURATION);
+		// The content width also changes on resize. Keep this fixture's pointer
+		// beyond both child origins so the same leaf remains a follower; a pointer
+		// between the two origins legitimately changes to Back instead.
+		controller.rebase(sign * (newHalf + newClearance + 30), 0, DURATION / 1_000_000L);
 		long resized = DURATION + 1;
-		controller.repositionExternal(p(sign * (100 + newClearance), 0), p(0, 0), resized / 1_000_000L);
+		controller.repositionExternal(p(sign * (newHalf + newClearance), 0), p(0, 0), resized / 1_000_000L);
 		for (long elapsed : new long[] {0, DURATION / 2, DURATION}) {
 			frame(session, controller, inventory, painter, label, style, 1000, 700, resized + elapsed);
 			assertPaintedClearance(painter, "follower resize at " + elapsed);
@@ -347,12 +360,13 @@ class SpatialInventoryClearanceTest {
 		double oldClearance = SpatialOverlayRenderer.itemMenuClearance(400, 300, 9, painter.width(shortLabel), style);
 		double newClearance = SpatialOverlayRenderer.itemMenuClearance(400, 300, 9, painter.width(longLabel), style);
 		assertTrue(newClearance > oldClearance, "the newly measured frame requires an actual metric-only relayout");
-		var controller = controller(sign * (100 + oldClearance), 0, 0, sign, false);
+		double half = panelHalfWidth(inventory, painter, style, 400, 300);
+		var controller = controller(sign * (half + oldClearance), 0, 0, sign, false);
 		frame(session, controller, inventory, painter, shortLabel, style, 400, 300, 0);
 		frame(session, controller, inventory, painter, shortLabel, style, 400, 300, DURATION);
 		assertPaintedClearance(painter, "old measured label");
 		long changed = DURATION + 1;
-		controller.repositionExternal(p(sign * (100 + newClearance), 0), p(0, 0), changed / 1_000_000L);
+		controller.repositionExternal(p(sign * (half + newClearance), 0), p(0, 0), changed / 1_000_000L);
 		for (long elapsed : new long[] {0, DURATION / 2, DURATION}) {
 			frame(session, controller, inventory, painter, longLabel, style, 400, 300, changed + elapsed);
 			assertPaintedClearance(painter, "same-viewport label relayout at " + elapsed);
@@ -367,7 +381,7 @@ class SpatialInventoryClearanceTest {
 		var session = new SpatialOverlayRenderer.Session();
 		var label = Component.literal("Back");
 		var retained = new SpatialInventoryView.Row("retained", "Retained", 2L, null, SpatialInventoryView.Status.READY);
-		var oldInventory = new SpatialInventoryView("list", true, List.of(retained,
+		var oldInventory = new SpatialInventoryView("prior-list", true, List.of(retained,
 			new SpatialInventoryView.Row("other", "Other", 1L, null, SpatialInventoryView.Status.READY)),
 			0, 0, 3, sign > 0, SpatialInventoryView.Status.READY, 0, 0)
 			.withSelectedRowCenterY(0).withNavigation("retained", true, true);
@@ -376,15 +390,20 @@ class SpatialInventoryClearanceTest {
 			.withSelectedRowCenterY(0).withNavigation("retained", true, true);
 		double oldClearance = SpatialOverlayRenderer.itemMenuClearance(320, 240, 9, 24, style);
 		double newClearance = SpatialOverlayRenderer.itemMenuClearance(1000, 700, 9, 24, style);
-		var controller = controller(sign * (100 + oldClearance), 0, 0, sign, false);
+		double oldHalf = panelHalfWidth(oldInventory, painter, style, 320, 240);
+		double newHalf = panelHalfWidth(newInventory, painter, style, 1000, 700);
+		var controller = controller(sign * (oldHalf + oldClearance), 0, 0, sign, false);
 		frame(session, controller, oldInventory, painter, label, style, 320, 240, 0);
 		frame(session, controller, oldInventory, painter, label, style, 320, 240, DURATION);
-		// A stream/window topology change leaves a bounded panel exit before resize.
+		// A prior list owner keeps its ordinary bounded panel exit before resize;
+		// row-count changes within one owner resize its existing surface instead.
 		frame(session, controller, newInventory, painter, label, style, 320, 240, DURATION + 1);
 		long resized = DURATION + 2;
-		controller.repositionExternal(p(sign * (100 + newClearance), 0), p(0, 0), resized / 1_000_000L);
+		controller.repositionExternal(p(sign * (newHalf + newClearance), 0), p(0, 0), resized / 1_000_000L);
 		for (long elapsed : new long[] {0, DURATION / 2, DURATION}) {
 			frame(session, controller, newInventory, painter, label, style, 1000, 700, resized + elapsed);
+			if (elapsed == 0) assertTrue(painter.draws.stream().anyMatch(draw -> !draw.state().present()
+				&& draw.state().data() instanceof SpatialOverlayRenderer.PanelPaint), "a different list owner still paints its normal exit tail");
 			assertPaintedClearance(painter, "detached-panel resize at " + elapsed);
 		}
 	}

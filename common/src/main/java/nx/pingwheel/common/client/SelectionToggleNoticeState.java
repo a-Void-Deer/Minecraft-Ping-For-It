@@ -80,7 +80,7 @@ public final class SelectionToggleNoticeState {
 	}
 
 	public enum Kind {
-		PASS_THROUGH_TRANSPARENT_BLOCKS(LanguageUtils.keyOf("notice", "pass_through_transparent_blocks")),
+		MARK_TRANSPARENT_BLOCKS(LanguageUtils.keyOf("notice", "mark_transparent_blocks")),
 		MARK_BLACKLISTED_TARGETS(LanguageUtils.keyOf("notice", "mark_blacklisted_targets")),
 		MARK_FLUIDS(LanguageUtils.keyOf("notice", "mark_fluids"));
 

@@ -4,6 +4,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+
 /**
  * Immutable, domain-neutral inventory paint input. Rows retain caller order,
  * selection and window; status never infers completion from counts or emptiness.
@@ -67,6 +70,13 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 			retainedRowKey, forwardAvailable, selectedRowCommittable);
 	}
 
+	/** A non-input capacity/window relayout; every identity, permission and row anchor is retained. */
+	public SpatialInventoryView withWindow(int first, int capacity) {
+		return new SpatialInventoryView(listKey, open, rows, selectedIndex, first, capacity,
+			backLeft, status, axisX, glideBaseY, selectedRowCenterY, backAffordance,
+			retainedRowKey, forwardAvailable, selectedRowCommittable);
+	}
+
 	/** Caller supplies timer output; rendering owns no hover timer or navigation. */
 	public SpatialInventoryView withBackAffordance(boolean focused, double progress) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows,
@@ -104,7 +114,12 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 	 * display value; null keeps the native registry-name fallback.
 	 */
 	public record Row(String key, String label, Long count, String itemId, String displayJson, Status quality,
-		Integer outlineColor) {
+		Integer outlineColor, RowDisplay display) {
+
+		public Row(String key, String label, Long count, String itemId, String displayJson, Status quality,
+			Integer outlineColor) {
+			this(key, label, count, itemId, displayJson, quality, outlineColor, null);
+		}
 
 		public Row {
 			Objects.requireNonNull(key, "key");
@@ -123,6 +138,26 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 		public Row(String key, String label, Long count, String itemId, Status quality) {
 			this(key, label, count, itemId, null, quality);
 		}
+	}
+
+	/**
+	 * One detached name/icon projection shared by measurement and paint. Native
+	 * icon rendering receives a copy, so mutation of a painted player-head stack
+	 * cannot change the retained transmission or its measured display name.
+	 */
+	public static final class RowDisplay {
+		private final Component name;
+		private final ItemStack icon;
+
+		public RowDisplay(Component name, ItemStack icon) {
+			this.name = Objects.requireNonNull(name).copy();
+			this.icon = Objects.requireNonNull(icon).copy();
+		}
+		/** Text-only detached observation; no item construction is needed to measure it. */
+		public RowDisplay(Component name) { this.name = Objects.requireNonNull(name).copy(); this.icon = null; }
+		public Component name() { return name.copy(); }
+		public boolean hasIcon() { return icon != null && !icon.isEmpty(); }
+		public ItemStack icon() { return icon == null ? ItemStack.EMPTY : icon.copy(); }
 	}
 
 	/** Separate view status and row quality use the same presentation vocabulary. */

@@ -1,7 +1,7 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Lokalizacja pingu",
-	"key.pingforit.toggle_pass_through_transparent_blocks": "Przechodzenie przezroczystych bloków",
+	"key.pingforit.toggle_mark_transparent_blocks": "Przełącz oznaczanie przezroczystych bloków",
 	"key.pingforit.toggle_mark_blacklisted_targets": "Oznaczanie celów z czarnej listy",
 	"key.pingforit.toggle_mark_fluids": "Oznaczanie płynów",
 	"key.pingforit.open_settings": "Otwórz ustawienia",
@@ -21,7 +21,7 @@
 	"settings.pingforit.ping_distance": "Zasięg pingu: %s",
 	"settings.pingforit.item_icon_visible": "Ikony itemów",
 	"settings.pingforit.direction_indicator_visible": "Wskaźnik kierunku",
-	"settings.pingforit.pass_through_transparent_blocks": "Przechodzenie przezroczystych bloków",
+	"settings.pingforit.mark_transparent_blocks": "Oznaczaj przezroczyste bloki",
 	"settings.pingforit.mark_blacklisted_targets": "Oznaczanie celów z czarnej listy",
 	"settings.pingforit.mark_fluids": "Oznaczanie płynów",
 	"settings.pingforit.ping_size": "Rozmiar pingu: %s",
@@ -114,7 +114,7 @@
   ,"settings.pingforit.marker_display_duration.tooltip": "Jak długo znaczniki są widoczne lokalnie. Opcja śledzenia serwera używa zamrożonego czasu każdego znacznika."
   ,"value.pingforit.follow_server": "Śledź serwer"
   ,"unit.pingforit.seconds": "%ss"
-  ,"notice.pingforit.pass_through_transparent_blocks": "Oznaczanie przezroczystych bloków: "
+  ,"notice.pingforit.mark_transparent_blocks": "Oznaczanie przezroczystych bloków: "
   ,"notice.pingforit.mark_blacklisted_targets": "Oznaczanie celów z czarnej listy: "
   ,"notice.pingforit.mark_fluids": "Oznaczanie cieczy: "
   ,"notice.pingforit.on": "Włączone"
@@ -325,7 +325,7 @@
   ,"pingforit.spatial.settings": "Wybór"
   ,"pingforit.spatial.toggle.fluids": "Płyny"
   ,"pingforit.spatial.toggle.entity_blacklist": "Czarna lista"
-  ,"pingforit.spatial.toggle.transparent_blocks": "Przezroczyste bloki"
+  ,"pingforit.spatial.toggle.transparent_blocks": "Oznaczaj przezroczyste bloki"
   ,"pingforit.spatial.target_type.dropped_item": "Przedmiot"
   ,"pingforit.spatial.target_type.entity": "Byt"
   ,"pingforit.spatial.target_type.entity_block": "Blok z bytem"

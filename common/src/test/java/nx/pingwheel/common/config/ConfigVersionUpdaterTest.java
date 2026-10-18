@@ -134,6 +134,17 @@ class ConfigVersionUpdaterTest {
 				unordered));
 	}
 
+	@Test
+	void twoStepsAtTheSameTargetAreRejectedEvenForDifferentConfigTypes() {
+		var first = step("0.5.0-pfi-beta1", "client");
+		var second = new ConfigVersionUpdater.MigrationStep(
+			version("0.5.0-pfi-beta1"), ServerConfig.class,
+			root -> { throw new AssertionError("invalid plan must not execute"); }, "server");
+		assertThrows(IllegalStateException.class, () -> ConfigVersionUpdater.update(
+			json("{\"pingforit-version\":\"0.1.0-pfi-beta1\"}"), ClientConfig.class,
+			VERSION_0_1, version("0.5.0-pfi-beta1"), List.of(first, second)));
+	}
+
 	private static ConfigVersionUpdater.MigrationStep step(String target, String suffix) {
 		return new ConfigVersionUpdater.MigrationStep(
 			version(target),

@@ -1,7 +1,7 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "标记坐标",
-	"key.pingforit.toggle_pass_through_transparent_blocks": "切换穿透透明方块",
+	"key.pingforit.toggle_mark_transparent_blocks": "切换标记透明方块",
 	"key.pingforit.toggle_mark_blacklisted_targets": "切换标记黑名单目标",
 	"key.pingforit.toggle_mark_fluids": "切换标记流体",
 	"key.pingforit.open_settings": "打开设置",
@@ -21,7 +21,7 @@
 	"settings.pingforit.ping_distance": "标记距离: %s",
 	"settings.pingforit.item_icon_visible": "物品图标",
 	"settings.pingforit.direction_indicator_visible": "方向指示器",
-	"settings.pingforit.pass_through_transparent_blocks": "穿透透明方块",
+	"settings.pingforit.mark_transparent_blocks": "标记透明方块",
 	"settings.pingforit.mark_blacklisted_targets": "标记黑名单目标",
 	"settings.pingforit.mark_fluids": "标记流体",
 	"settings.pingforit.ping_size": "标记点尺寸: %s",
@@ -122,7 +122,7 @@
   ,"settings.pingforit.marker_display_duration.tooltip": "标记在本地显示的时长。“跟随服务器”使用每个标记冻结的服务器时长。"
   ,"value.pingforit.follow_server": "跟随服务器"
   ,"unit.pingforit.seconds": "%ss"
-  ,"notice.pingforit.pass_through_transparent_blocks": "标记穿过透明方块: "
+  ,"notice.pingforit.mark_transparent_blocks": "标记透明方块: "
   ,"notice.pingforit.mark_blacklisted_targets": "标记黑名单目标: "
   ,"notice.pingforit.mark_fluids": "标记液体: "
   ,"notice.pingforit.on": "开"
@@ -333,7 +333,7 @@
   ,"pingforit.spatial.settings": "选择"
   ,"pingforit.spatial.toggle.fluids": "流体"
   ,"pingforit.spatial.toggle.entity_blacklist": "黑名单"
-  ,"pingforit.spatial.toggle.transparent_blocks": "透明方块"
+  ,"pingforit.spatial.toggle.transparent_blocks": "标记透明方块"
   ,"pingforit.spatial.target_type.dropped_item": "掉落物"
   ,"pingforit.spatial.target_type.entity": "实体"
   ,"pingforit.spatial.target_type.entity_block": "方块实体"

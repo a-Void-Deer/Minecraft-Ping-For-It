@@ -34,16 +34,30 @@ class SpatialOverlayRendererBackgroundTest {
 	private record Draw(SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> state,
 		SpatialOverlayRenderer.NodeLayout layout) {}
 	private record Fill(String row, int left, int top, int right, int bottom, int color) {}
+	private record Gradient(SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> state,
+		double radius, double start, double span, int rgb, double coverage, double opacity, int centerAlpha) {}
 
 	private static final class Painter implements SpatialOverlayRenderer.FramePainter {
 		final List<Draw> draws = new ArrayList<>();
 		final List<Fill> fills = new ArrayList<>();
+		final List<Gradient> gradients = new ArrayList<>();
+		final List<String> phases = new ArrayList<>();
 		public int lineHeight() { return 9; }
 		public int width(FormattedText text) { return (int) Math.ceil(FONT.stringWidth(text)); }
 		public StringSplitter splitter() { return FONT; }
+		public void flush() { phases.add("flush"); }
 		public boolean paint(SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> state,
 			SpatialOverlayRenderer.NodeLayout layout, SpatialOverlayRenderer.Style style) {
 			draws.add(new Draw(state, layout));
+			phases.add(SpatialOverlayRenderer.isRadialUnderlay(state.data()) ? "underlay" : "foreground");
+			// The same primitive draw seam used by native submission routes into
+			// the real gradient emitter here, without constructing GuiGraphics.
+			SpatialOverlayRenderer.paintRadialUnderlay(state, style, (radius, start, span, rgb, coverage, opacity) -> {
+				int[] center = {-1};
+				RadialGradient.emit(radius, start, span, rgb, coverage, opacity,
+					(x, y, color) -> { if (center[0] < 0) center[0] = color >>> 24; });
+				gradients.add(new Gradient(state, radius, start, span, rgb, coverage, opacity, center[0]));
+			});
 			if (state.data() instanceof SpatialOverlayRenderer.RowPaint row) {
 				// This invokes the same decoration routine used by paintRow, not a
 				// test-side interpretation of the transition coverage channel.
@@ -54,7 +68,14 @@ class SpatialOverlayRendererBackgroundTest {
 			return true;
 		}
 		public void connector(SpatialOverlayRenderer.GuideLine line, double alpha) {}
-		void clear() { draws.clear(); fills.clear(); }
+		void clear() { draws.clear(); fills.clear(); gradients.clear(); phases.clear(); }
+		Gradient gradient(String owner, String entry) {
+			return gradients.stream().filter(value -> value.state().key().owner().equals(owner)
+				&& value.state().key().entry().equals(entry)).findFirst().orElseThrow();
+		}
+		List<Draw> foreground() {
+			return draws.stream().filter(draw -> !SpatialOverlayRenderer.isRadialUnderlay(draw.state().data())).toList();
+		}
 		List<Fill> overlays(String key) {
 			return fills.stream().filter(fill -> fill.row().equals(key) && fill.right() - fill.left() > 1).toList();
 		}
@@ -279,6 +300,149 @@ class SpatialOverlayRendererBackgroundTest {
 		assertFalse(painter.hasPresentData(SpatialOverlayRenderer.NodePaint.class));
 		assertFalse(painter.hasPresentData(SpatialOverlayRenderer.SectorPaint.class));
 		assertTrue(session.paintedChoiceIds().isEmpty());
+	}
+
+	private static void assertUnderlayBatch(Painter painter) {
+		assertFalse(painter.gradients.isEmpty());
+		assertEquals(2, painter.phases.stream().filter("flush"::equals).count(),
+			"one boundary before the entire batch and one before foreground, never one per sector or band");
+		assertEquals("flush", painter.phases.getFirst(), "pre-existing GUI work finishes first");
+		int end = painter.phases.lastIndexOf("flush");
+		assertEquals(painter.gradients.size(), end - 1);
+		assertTrue(painter.phases.subList(1, end).stream().allMatch("underlay"::equals));
+		assertTrue(painter.phases.subList(end + 1, painter.phases.size()).stream().allMatch("foreground"::equals),
+			"guides, trail, panels, titles, text and icons begin only after the underlay batch finishes");
+	}
+
+	@Test
+	void rootSubmenuAncestorBackAndDetachedExitUseTheProductionGradientRoute() {
+		var painter = new Painter();
+		var session = new SpatialOverlayRenderer.Session();
+		var style = new SpatialOverlayRenderer.Style(50, 70, 1, 1, 88, 1, false, true);
+		var rootChoice = new SpatialController.ChoiceView("danger", "Danger", "action:danger",
+			false, false, false, false, true, 332.5, 55, null);
+		var contentChoice = new SpatialController.ChoiceView("content", "Content", null,
+			false, false, false, true, true, 27.5, 180, null);
+		var rootBack = new SpatialController.ChoiceView("root:back", "Back", null,
+			true, false, false, false, true, 207.5, 125, null);
+		var root = menu("root", p(0, 0), null, List.of(rootChoice, contentChoice, rootBack));
+		frame(session, snapshot(List.of(root), p(0, 0)), painter, style, 0, null);
+		var gradient = painter.gradient("root", "danger");
+		assertEquals(332.5, gradient.start());
+		assertEquals(55, gradient.span());
+		assertEquals(((SpatialOverlayRenderer.SectorPaint) gradient.state().data()).radius(), gradient.radius());
+		assertEquals(0.30, gradient.coverage(), 1.0e-12, "the original unquantized coverage reaches the draw seam");
+		assertEquals(50, gradient.opacity());
+		assertEquals(38, gradient.centerAlpha(), "opacity multiplies once; pre-rounded coverage would produce 39");
+		assertEquals(SpatialOverlayRenderer.SECTOR_BACKGROUND, gradient.rgb(), "the base color is not repacked first");
+		assertUnderlayBatch(painter);
+		var foreground = painter.foreground();
+		frame(session, snapshot(List.of(root), p(0, 0)), painter,
+			new SpatialOverlayRenderer.Style(100, 70, 1, 1, 88, 1, false, true), 1, null);
+		assertEquals(foreground, painter.foreground(), "wheel opacity changes no frame, foreground or chrome state");
+
+		var childChoice = new SpatialController.ChoiceView("child:leaf", "Leaf", "action:leaf",
+			false, false, false, false, true, 37, 180, null);
+		var childBack = new SpatialController.ChoiceView("child:back", "Back", null,
+			true, false, false, false, true, 217, 180, null);
+		var child = new SpatialController.MenuView("child", p(70, 30), p(0, 0), null,
+			List.of(childChoice, childBack), "content");
+		var nested = snapshot(List.of(root, child), p(0, 0));
+		frame(session, nested, painter, style, 2, null);
+		assertEquals(3, painter.gradients.size(), "only ancestor Back and the active submenu's two sectors remain");
+		assertEquals(0.105, painter.gradient("root", "root:back").coverage(), 1.0e-12);
+		assertEquals(37, painter.gradient("child", "child:leaf").start());
+		assertEquals(180, painter.gradient("child", "child:leaf").span());
+		assertUnderlayBatch(painter);
+
+		var animated = new SpatialOverlayRenderer.Style(50, 70, 1, 1, 88, 1, false, false);
+		session = new SpatialOverlayRenderer.Session();
+		frame(session, nested, painter, animated, 0, null);
+		frame(session, nested, painter, animated, DURATION, null);
+		frame(session, null, painter, animated, DURATION + 1, null);
+		assertEquals(3, painter.gradients.size());
+		assertTrue(painter.gradients.stream().noneMatch(value -> value.state().present()));
+		frame(session, null, painter, animated, DURATION + 1 + DURATION / 2, null);
+		assertEquals(0.15, painter.gradient("child", "child:leaf").coverage(), 1.0e-12);
+		assertEquals(19, painter.gradient("child", "child:leaf").centerAlpha());
+		assertUnderlayBatch(painter);
+	}
+
+	@Test
+	void inventoryBackHalvesAndItemRadialShareTheBatchWithoutFadingRectangularSurfaces() {
+		for (boolean backLeft : new boolean[] {true, false}) {
+			var painter = new Painter();
+			var session = new SpatialOverlayRenderer.Session();
+			var style = new SpatialOverlayRenderer.Style(50, 70, 1, 1, 88, 1, false, true);
+			var view = new SpatialInventoryView("list", true, rows(1), 0, 0, 1, backLeft, Status.READY, 0, 0);
+			frame(session, listSnapshot(p(90, 0)), painter, style, 0, view);
+			assertEquals(1, painter.gradients.size(), "panel, header, row and Back title never take the radial route");
+			var gradient = painter.gradients.getFirst();
+			assertTrue(gradient.state().data() instanceof SpatialOverlayRenderer.InventoryBackSectorPaint);
+			assertEquals(backLeft ? 180 : 0, gradient.start());
+			assertEquals(180, gradient.span());
+			assertEquals(0.30, gradient.coverage(), 1.0e-12);
+			assertEquals(50, gradient.opacity());
+			assertEquals(38, gradient.centerAlpha());
+			assertUnderlayBatch(painter);
+			var foreground = painter.foreground();
+			frame(session, listSnapshot(p(90, 0)), painter,
+				new SpatialOverlayRenderer.Style(100, 70, 1, 1, 88, 1, false, true), 1, view);
+			assertEquals(foreground, painter.foreground(), "Back frame, panel, row/icon and progress keep their own appearance");
+
+			frame(session, itemSnapshot(), painter, style, 2, view.withNavigation("r0", true, true));
+			assertEquals(2, painter.gradients.size(), "the item's radial entry and retained inventory Back share one phase");
+			assertEquals(54, painter.gradient("item", "item:leaf").centerAlpha());
+			assertUnderlayBatch(painter);
+
+			frame(session, listSnapshot(p(90, 0)), painter,
+				new SpatialOverlayRenderer.Style(50, 0, 1, 1, 88, 1, false, true), 3, view);
+			assertEquals(1, painter.gradients.size());
+			assertEquals(38, painter.gradients.getFirst().centerAlpha(), "target opacity never scales a radial underlay");
+			assertFalse(painter.hasPresentData(SpatialOverlayRenderer.InventoryBackPaint.class));
+			assertFalse(painter.hasPresentData(SpatialOverlayRenderer.PanelPaint.class));
+
+			frame(session, listSnapshot(p(90, 0)), painter,
+				new SpatialOverlayRenderer.Style(0, 70, 1, 1, 88, 1, false, true), 4, view);
+			assertTrue(painter.gradients.isEmpty());
+			assertFalse(painter.phases.contains("flush"), "an invisible underlay creates no extra batch or flush");
+			assertTrue(painter.hasPresentData(SpatialOverlayRenderer.InventoryBackPaint.class));
+			assertTrue(painter.hasPresentData(SpatialOverlayRenderer.PanelPaint.class));
+
+			var animated = new SpatialOverlayRenderer.Style(50, 70, 1, 1, 88, 1, false, false);
+			session = new SpatialOverlayRenderer.Session();
+			frame(session, listSnapshot(p(90, 0)), painter, animated, 0, view);
+			frame(session, listSnapshot(p(90, 0)), painter, animated, DURATION, view);
+			frame(session, null, painter, animated, DURATION + 1, null);
+			frame(session, null, painter, animated, DURATION + 1 + DURATION / 2, null);
+			assertEquals(1, painter.gradients.size(), "the detached Back half keeps the same gradient route");
+			assertFalse(painter.gradients.getFirst().state().present());
+			assertEquals(backLeft ? 180 : 0, painter.gradients.getFirst().start());
+			assertEquals(0.15, painter.gradients.getFirst().coverage(), 1.0e-12);
+			assertEquals(19, painter.gradients.getFirst().centerAlpha());
+			assertUnderlayBatch(painter);
+		}
+	}
+
+	@Test
+	void underlayAdmissionUsesItsBackgroundPeakNotTheUnrelatedForegroundChannel() {
+		var style = new SpatialOverlayRenderer.Style(50, 100, 1, 1, true, true);
+		var painter = new Painter();
+		for (SpatialOverlayRenderer.Paint data : List.of(new SpatialOverlayRenderer.SectorPaint(leaf("leaf"), 60),
+			new SpatialOverlayRenderer.InventoryBackSectorPaint(60, 180, null))) {
+			assertTrue(SpatialOverlayRenderer.renders(data, 1, style), "the historical single-channel form remains supported");
+			for (double coverage : new double[] {0, 0.001}) {
+				assertFalse(SpatialOverlayRenderer.renders(data, 1, coverage, style));
+				painter.paint(new SpatialOverlayTransitions.State<>(new SpatialOverlayRenderer.VisualKey("probe", "", ""),
+					0, 0, 1, 1, true, data, coverage), null, style);
+			}
+			assertTrue(painter.gradients.isEmpty(), "even direct draw admission cannot queue quantized-zero geometry");
+			assertTrue(SpatialOverlayRenderer.renders(data, 0, 0.30, style));
+			painter.paint(new SpatialOverlayTransitions.State<>(new SpatialOverlayRenderer.VisualKey("probe", "", ""),
+				0, 0, 1, 0, true, data, 0.30), null, style);
+			assertEquals(38, painter.gradients.getFirst().centerAlpha(), "background-only paint retains the original coverage");
+			painter.clear();
+		}
 	}
 
 	@Test

@@ -107,7 +107,7 @@ class ClientConfigLocalizationTest {
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_mode.tooltip");
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_slice_millis");
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_slice_millis.tooltip");
-		assertContainsKey(enUs, "settings.pingforit.pass_through_transparent_blocks");
+		assertContainsKey(enUs, "settings.pingforit.mark_transparent_blocks");
 		assertContainsKey(enUs, "settings.pingforit.mark_blacklisted_targets");
 		assertContainsKey(enUs, "settings.pingforit.mark_fluids");
 		assertContainsKey(enUs, "settings.pingforit.reset_all");
@@ -134,13 +134,13 @@ class ClientConfigLocalizationTest {
 
 			var json = JsonParser.parseString(contents).getAsJsonObject();
 			for (String key : java.util.List.of(
-				"key.pingforit.toggle_pass_through_transparent_blocks",
+				"key.pingforit.toggle_mark_transparent_blocks",
 				"key.pingforit.toggle_mark_blacklisted_targets",
 				"key.pingforit.toggle_mark_fluids")) {
 				nonBlankTranslation(json, locale, key);
 			}
 			for (String key : java.util.List.of(
-				"settings.pingforit.pass_through_transparent_blocks",
+				"settings.pingforit.mark_transparent_blocks",
 				"settings.pingforit.mark_blacklisted_targets",
 				"settings.pingforit.mark_fluids",
 				"settings.pingforit.wheel_opacity",
@@ -176,6 +176,24 @@ class ClientConfigLocalizationTest {
 			assertFalse(json.has("settings.pingforit.wheel_timeout_millis.tooltip"),
 				() -> "retired wheel timeout tooltip must be absent: " + locale);
 			nonBlankTranslation(json, locale, "pingforit.spatial.back");
+		}
+	}
+
+	@Test
+	void transparentMarkingKeysReplacePassThroughKeysAndKeepTheSpatialIdentityInEveryLocale() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			for (String key : List.of("key.pingforit.toggle_mark_transparent_blocks",
+				"settings.pingforit.mark_transparent_blocks", "notice.pingforit.mark_transparent_blocks",
+				"pingforit.spatial.toggle.transparent_blocks")) {
+				String label = nonBlankTranslation(json, locale, key);
+				assertFalse(label.contains("%"), locale + ":" + key + " is a literal label");
+			}
+			for (String key : List.of("key.pingforit.toggle_pass_through_transparent_blocks",
+				"settings.pingforit.pass_through_transparent_blocks", "notice.pingforit.pass_through_transparent_blocks",
+				"settings.pingforit.mark_transparent_blocks.tooltip")) {
+				assertFalse(json.has(key), locale + ":" + key);
+			}
 		}
 	}
 

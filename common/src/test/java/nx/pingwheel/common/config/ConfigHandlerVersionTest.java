@@ -193,6 +193,7 @@ class ConfigHandlerVersionTest {
         assertEquals(23, persisted.get("pingVolume").getAsInt());
         assertEquals(512, persisted.get("pingDistance").getAsInt());
         assertFalse(persisted.get("itemIconVisible").getAsBoolean());
+        assertFalse(persisted.has("markTransparentBlocks"));
         assertFalse(persisted.get("passThroughTransparentBlocks").getAsBoolean());
         assertFalse(persisted.get("markBlacklistedTargets").getAsBoolean());
         assertFalse(persisted.get("markFluids").getAsBoolean());

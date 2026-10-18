@@ -43,6 +43,25 @@ class InventoryListModelTest {
 	}
 
 	@Test
+	void capacityRelayoutKeepsKeyDiscoveryOrderingAndFractionalWheelInput() {
+		var model = opened(3, entry("a", 10), entry("b", 9), entry("c", 8), entry("d", 7), entry("e", 6));
+		model.select("c");
+		model.wheel(0.75f);
+		var before = model.snapshot();
+		model.setVisibleRows(1);
+		assertEquals(before.entries(), model.snapshot().entries());
+		assertEquals("c", model.selectedKey());
+		assertEquals(2, model.windowFirst(), "the selected key remains visible at the new capacity");
+		model.setVisibleRows(5);
+		assertEquals(0, model.windowFirst());
+		assertEquals(1, model.wheel(0.25f), "resize retains the ordinary-wheel fraction");
+		assertEquals("d", model.selectedKey());
+		model.applyBatch(List.of(entry("new", 999)));
+		assertEquals(List.of("a", "b", "c", "d", "e", "new"), keys(model), "resize never unfreezes discovery ordering");
+		assertThrows(IllegalArgumentException.class, () -> model.setVisibleRows(0));
+	}
+
+	@Test
 	void openSortsByQuantityWithStableFirstSeenTies() {
 		InventoryListModel model = opened(3, entry("a", 10), entry("b", 20), entry("c", 20), entry("d", 5));
 

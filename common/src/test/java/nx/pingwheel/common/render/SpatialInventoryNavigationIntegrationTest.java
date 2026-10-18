@@ -7,12 +7,15 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.IntStream;
 
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.StringSplitter;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FormattedText;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.joml.Vector4f;
 
 import nx.pingwheel.common.client.spatial.InventoryListModel;
 import nx.pingwheel.common.client.spatial.NativeSelectorInput;
@@ -35,6 +38,13 @@ import static org.junit.jupiter.api.Assertions.*;
 class SpatialInventoryNavigationIntegrationTest {
 
 	private record RowFrame(String key, Integer outlineColor, boolean present, double alpha) {}
+	private record Draw(SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> state,
+		SpatialOverlayRenderer.NodeLayout layout) {}
+	private record Bounds(double left, double top, double right, double bottom) {
+		boolean disjoint(Bounds other) {
+			return right <= other.left || other.right <= left || bottom <= other.top || other.bottom <= top;
+		}
+	}
 
 	private static final class Painter implements SpatialOverlayRenderer.FramePainter {
 		private static final StringSplitter FONT = new StringSplitter((point, style) -> 6.0f);
@@ -43,12 +53,23 @@ class SpatialInventoryNavigationIntegrationTest {
 		final List<String> paintedNodes = new ArrayList<>();
 		final List<SpatialOverlayRenderer.NodePaint> nodes = new ArrayList<>();
 		final List<SpatialOverlayRenderer.SectorPaint> sectors = new ArrayList<>();
+		final List<Draw> draws = new ArrayList<>();
+		boolean localizedInventoryLabels;
 		boolean pointerHidden;
 		public int lineHeight() { return 9; }
-		public int width(FormattedText text) { return (int) Math.ceil(FONT.stringWidth(text)); }
+		public int width(FormattedText text) {
+			if (localizedInventoryLabels && text instanceof Component component
+				&& component.getContents() instanceof TranslatableContents translation
+				&& translation.getKey().equals("pingforit.spatial.inventory.forward")) text = Component.literal("Forward");
+			return (int) Math.ceil(FONT.stringWidth(text));
+		}
+		Component label(SpatialController.ChoiceView choice) {
+			return Component.literal(localizedInventoryLabels && choice.back() ? "Back" : choice.label());
+		}
 		public StringSplitter splitter() { return FONT; }
 		public boolean paint(SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> state,
 			SpatialOverlayRenderer.NodeLayout layout, SpatialOverlayRenderer.Style style) {
+			draws.add(new Draw(state, layout));
 			if (state.data() instanceof SpatialOverlayRenderer.RowPaint row) {
 				rows.add(new RowFrame(row.row().key(), row.outlineColor(), state.present(), state.alpha()));
 				if (state.present() && row.selected()) selectedRows.add(row.row().key());
@@ -64,7 +85,7 @@ class SpatialInventoryNavigationIntegrationTest {
 		}
 		public void connector(SpatialOverlayRenderer.GuideLine line, double alpha) {}
 		RowFrame row(String key) { return rows.stream().filter(row -> row.key().equals(key)).findFirst().orElseThrow(); }
-		void clear() { selectedRows.clear(); rows.clear(); paintedNodes.clear(); nodes.clear(); sectors.clear(); pointerHidden = false; }
+		void clear() { selectedRows.clear(); rows.clear(); paintedNodes.clear(); nodes.clear(); sectors.clear(); draws.clear(); pointerHidden = false; }
 	}
 
 	private static final class Fixture {
@@ -76,13 +97,14 @@ class SpatialInventoryNavigationIntegrationTest {
 		final Painter painter = new Painter();
 		final SpatialSelectorSettings.Snapshot settings;
 		final SpatialOverlayRenderer.Style style;
-		final SpatialSelectorSession.ListGeometry geometry;
+		SpatialSelectorSession.ListGeometry geometry;
 		final SpatialSelectorSession<String> session;
 		final NativeSelectorInput input;
 		final List<SpatialSelectorSession.Property> properties;
 		NativeSelectorInput.Frame nativeFrame;
 		SpatialSelectorSession.ContentProjection<String> pending;
 		long now, revision = 1;
+		int displayProjections;
 		double rawX = 1000, rawY = 700;
 
 		Fixture(int width, int height, String glide, boolean reduced, int propertyCount) {
@@ -106,10 +128,7 @@ class SpatialInventoryNavigationIntegrationTest {
 			style = new SpatialOverlayRenderer.Style(100, 100, 1, 1, settings.rootDistance(),
 				settings.submenuRadiusScale().doubleValue(), settings.showTrail(), settings.reduceMotion());
 			nativeFrame = nativeFrame(width, height);
-			var empty = new SpatialInventoryView("geometry", false, List.of(), -1, 0, 1, true, Status.UNKNOWN, 0, 0);
-			var layout = SpatialOverlayRenderer.inventoryLayout(empty, 0, 0, painter.lineHeight(), style);
-			int visible = Math.max(1, (int) ((height - layout.headerHeight() - layout.footerHeight()) / layout.rowHeight()));
-			geometry = SpatialSelectorSession.ListGeometry.fromLayout(visible, layout, settings.deadzone());
+			geometry = measureGeometry(null);
 			properties = IntStream.range(0, propertyCount).mapToObj(index -> new SpatialSelectorSession.Property("p" + index, "p" + index,
 				PresentationPropertyRef.root("pingforit:basic", "pingforit:p" + index), new PresentationValue.NumberValue(index),
 				List.of(PingTypeCatalog.builtIn().findById("attention").orElseThrow()),
@@ -142,6 +161,7 @@ class SpatialInventoryNavigationIntegrationTest {
 		SpatialController.MenuView menu() { return snapshot().radial().menus().getLast(); }
 		void frame(long time) {
 			now = time;
+			prepareGeometry();
 			long nanos = time * 1_000_000L;
 			session.constrainPointer(paint.prepareViewport(session.snapshot().radial(), nativeFrame.guiWidth(), nativeFrame.guiHeight(), style, nanos), now);
 			session.tick(now);
@@ -149,12 +169,13 @@ class SpatialInventoryNavigationIntegrationTest {
 			inputSynchronize();
 			painter.clear();
 			var state = session.snapshot();
-			paint.drawFrame(state.radial(), state.inventoryView(), choice -> Component.literal(choice.label()), null, style, nanos,
+			paint.drawFrame(state.radial(), state.inventoryView(), painter::label, null, style, nanos,
 				state.viewport(), nativeFrame.guiWidth(), nativeFrame.guiHeight(), painter);
 		}
 		void inputSynchronize() { if (input != null) input.synchronize(nativeFrame); }
 		void move(double dx, double dy, long time) {
 			now = time;
+			prepareGeometry();
 			session.constrainPointer(paint.lastViewport(nativeFrame.guiWidth(), nativeFrame.guiHeight()), now);
 			rawX += dx * nativeFrame.windowWidth() / nativeFrame.guiWidth();
 			rawY += dy * nativeFrame.windowHeight() / nativeFrame.guiHeight();
@@ -233,8 +254,19 @@ class SpatialInventoryNavigationIntegrationTest {
 			assertEquals(List.of("k0"), painter.selectedRows);
 		}
 		void scroll(double rows) {
+			prepareGeometry();
 			assertTrue(input.onScroll(7, 0, -rows, nativeFrame, now + 1));
 			now++;
+		}
+		SpatialSelectorSession.ListGeometry measureGeometry(SpatialInventoryView view) {
+			return SpatialSelectorSession.ListGeometry.fromMetrics(SpatialInventoryLayout.measure(
+				view, nativeFrame.guiWidth(), nativeFrame.guiHeight(), painter.lineHeight(), style.inventoryTextScale(), painter::width),
+				SpatialOverlayRenderer.itemMenuClearance(nativeFrame.guiWidth(), nativeFrame.guiHeight(), painter.lineHeight(),
+					painter.width(Component.literal("Back")), style));
+		}
+		void prepareGeometry() {
+			session.prepareInventoryGeometry(view -> geometry = measureGeometry(view),
+				row -> { displayProjections++; return new SpatialInventoryView.RowDisplay(Component.literal(row.label())); }, now);
 		}
 		void resize(int width, int height) {
 			nativeFrame = nativeFrame(width, height);
@@ -251,6 +283,43 @@ class SpatialInventoryNavigationIntegrationTest {
 			frame(now + 1); // a newly visible row begins its appearance at zero alpha
 			frame(now + 16);
 			assertEquals(List.of("k" + expected), painter.selectedRows, "painted selected key agrees with the model");
+		}
+	}
+
+	/** Observe rounded paint rectangles through the same float pose used by native submission. */
+	private static Bounds transformedBounds(Draw draw, int left, int top, int right, int bottom) {
+		var pose = new PoseStack();
+		pose.translate(draw.state().x(), draw.state().y(), 0);
+		pose.scale((float) draw.state().scale(), (float) draw.state().scale(), 1);
+		var near = new Vector4f(left, top, 0, 1).mul(pose.last().pose());
+		var far = new Vector4f(right, bottom, 0, 1).mul(pose.last().pose());
+		return new Bounds(near.x(), near.y(), far.x(), far.y());
+	}
+
+	private static void assertItemClearOfEveryPaintedPanel(Fixture fixture, String itemMenu, String phase) {
+		var panels = fixture.painter.draws.stream().filter(draw -> draw.state().data() instanceof SpatialOverlayRenderer.PanelPaint)
+			.map(draw -> {
+				var panel = (SpatialOverlayRenderer.PanelPaint) draw.state().data();
+				return transformedBounds(draw, (int) Math.round(-panel.width() / 2), (int) Math.round(-panel.height() / 2),
+					(int) Math.round(panel.width() / 2), (int) Math.round(panel.height() / 2));
+			}).toList();
+		assertFalse(panels.isEmpty(), phase + ": the panel must actually paint, not be hidden to avoid overlap");
+		var back = fixture.painter.draws.stream().filter(draw -> draw.state().present() && draw.state().key().owner().equals(itemMenu)
+			&& draw.state().data() instanceof SpatialOverlayRenderer.NodePaint node && node.choice().back()).findFirst().orElseThrow();
+		var frame = back.layout();
+		Bounds backBounds = transformedBounds(back, frame.left(), frame.top(), frame.right(), frame.bottom());
+		for (Bounds panel : panels) assertTrue(panel.disjoint(backBounds),
+			phase + ": the complete child Back frame clears every present or detached panel");
+		var sectors = fixture.painter.draws.stream().filter(draw -> draw.state().present() && draw.state().key().owner().equals(itemMenu)
+			&& draw.state().data() instanceof SpatialOverlayRenderer.SectorPaint).toList();
+		assertFalse(sectors.isEmpty(), phase + ": actual child sectors are recorded");
+		for (Draw draw : sectors) {
+			// A conservative bound on the emitted sector, including rounded edge
+			// pixels, reads paint output rather than mirroring clearance tuning.
+			int extent = (int) Math.ceil(((SpatialOverlayRenderer.SectorPaint) draw.state().data()).radius()) + 1;
+			Bounds sectorBounds = transformedBounds(draw, -extent, -extent, extent, extent);
+			for (Bounds panel : panels) assertTrue(panel.disjoint(sectorBounds),
+				phase + ": every child sector clears every present or detached panel");
 		}
 	}
 
@@ -488,7 +557,12 @@ class SpatialInventoryNavigationIntegrationTest {
 		f.settle(); f.assertSelected(15);
 		var beforeResize = f.snapshot();
 		f.resize(320, 240); f.settle();
-		assertEquals(beforeResize.inventory(), f.snapshot().inventory(), "axis-only correction preserves row selection, window and list layout");
+		assertEquals(beforeResize.inventory().entries(), f.snapshot().inventory().entries());
+		assertEquals(beforeResize.inventory().selectedKey(), f.snapshot().inventory().selectedKey());
+		assertEquals(beforeResize.inventory().direction(), f.snapshot().inventory().direction());
+		var resized = f.snapshot().inventoryView();
+		assertTrue(resized.selectedIndex() >= resized.windowFirst()
+			&& resized.selectedIndex() < resized.windowFirst() + resized.visibleRows(), "rewindowing keeps the key visible");
 		assertEquals(beforeResize.radial().trail(), f.snapshot().radial().trail(), "correction adds no gesture trail");
 		assertEquals(0, f.snapshot().radial().hoverProgress(), "projection does not advance Back");
 		assertTrue(f.menu().menuId().endsWith(":inventory"));
@@ -644,6 +718,147 @@ class SpatialInventoryNavigationIntegrationTest {
 		assertEquals(before.pointer(), after.pointer(), "a pure metric update moves no pointer");
 		assertEquals(before.trail(), after.trail(), "a pure metric update adds no trail");
 		assertEquals(0.0, after.hoverProgress());
+	}
+
+	@Test
+	void boundedDetachedDisplayProjectionIsReusedAcrossScrollAndRemeasureButInvalidatedForChangedText() {
+		var f = new Fixture(1600, 1000, "1", true, 0, 18, false, false);
+		f.openList(false);
+		int projected = f.displayProjections;
+		assertEquals(f.snapshot().inventoryView().rows().size(), projected, "one projection per bounded discovered row");
+		double beforeWidth = f.geometry.width();
+		f.scroll(15); f.prepareGeometry(); f.frame(f.now + 1);
+		assertEquals(projected, f.displayProjections, "scrolling and repeated font measurement never call item display providers");
+		var before = f.snapshot();
+		var changed = new SpatialSelectorSession.InventoryRow<String>("k0",
+			"A changed detached display name that has enough characters to fill the available GUI width", 100L,
+			"minecraft:stone", Status.READY, "opaque:k0");
+		f.pending = f.projection(List.of(changed)); f.frame(f.now + 1);
+		assertEquals(projected + 1, f.displayProjections, "only the changed display identity is detached again");
+		assertTrue(f.geometry.width() > beforeWidth);
+		assertTrue(f.geometry.width() <= 320);
+		assertEquals(before.inventory().selectedKey(), f.snapshot().inventory().selectedKey());
+		assertEquals(before.radial().pointer(), f.snapshot().radial().pointer());
+		assertEquals(before.radial().trail(), f.snapshot().radial().trail());
+		assertTrue(f.menu().menuId().endsWith(":inventory"), "content remeasurement is never navigation input");
+	}
+
+	@Test
+	void guiScaleHandoffAtAnUnchangedNativeWindowPreparesCapacityWithoutSyntheticInput() {
+		var f = new Fixture(1000, 700, "1", true, 0);
+		f.openList(false); f.scroll(15); f.settle();
+		var before = f.snapshot();
+		var oldNative = f.nativeFrame;
+		f.nativeFrame = new NativeSelectorInput.Frame(7, oldNative.windowWidth(), oldNative.windowHeight(),
+			500, 350, true, false, true);
+		f.input.synchronize(f.nativeFrame); f.input.prime(f.rawX, f.rawY, f.nativeFrame);
+		f.frame(f.now + 1);
+		var after = f.snapshot();
+		assertEquals(before.inventory().entries(), after.inventory().entries());
+		assertEquals(before.inventory().selectedKey(), after.inventory().selectedKey());
+		assertEquals(before.radial().trail(), after.radial().trail());
+		assertTrue(f.menu().menuId().endsWith(":inventory"));
+		assertTrue(f.geometry.width() <= 100, "the content width respects the scaled viewport budget");
+		assertTrue(after.inventoryView().visibleRows() < before.inventoryView().visibleRows());
+		f.move(0, f.geometry.rowHeight() / 0.5, f.now + 1);
+		assertEquals("k16", f.snapshot().inventory().selectedKey(), "the first real scaled sample moves exactly one row");
+	}
+
+	@Test
+	void activeListGeometryRefreshPreservesTheRunningBackTimerAndFractionalWheelInput() {
+		var f = new Fixture(1000, 700, "1", true, 0, 18, true);
+		f.openList(false);
+		f.scroll(0.75);
+		f.resize(640, 360);
+		f.scroll(0.25);
+		assertEquals("k1", f.snapshot().inventory().selectedKey(), "resize does not drop the ordinary-wheel remainder");
+		f.move(f.backSign() * 30, 0, f.now + 1);
+		long started = f.now;
+		f.frame(started + f.settings.hoverMillis() / 2);
+		var before = f.snapshot();
+		assertEquals(0.5, before.radial().hoverProgress(), 0.01);
+		var next = SpatialSelectorSession.ListGeometry.fromMetrics(SpatialInventoryLayout.measure(640, 360, 12, 1),
+			f.geometry.childClearance());
+		f.session.updateListGeometry(next, f.now);
+		var after = f.session.snapshot();
+		assertEquals(before.radial(), after.radial(), "font/capacity changes add neither input nor Back timer progress");
+		assertEquals(before.inventory().selectedKey(), after.inventory().selectedKey());
+		assertEquals(before.inventory().entries(), after.inventory().entries());
+		assertTrue(after.inventoryView().backAffordance().focused());
+		assertTrue(after.inventoryView().visibleRows() < before.inventoryView().visibleRows());
+		f.session.tick(started + f.settings.hoverMillis());
+		assertTrue(f.session.snapshot().radial().menus().getLast().menuId().endsWith(":content"),
+			"relayout does not restart or fire the established running list Back timer");
+	}
+
+	@ParameterizedTest
+	@CsvSource({"false", "true"})
+	void quantityShrinkAndDiscoveryKeepEveryPaintedPanelClearOfTheActiveItemInBothDirections(boolean leftEntry) {
+		var f = new Fixture(1600, 1000, "1", false, 0);
+		f.painter.localizedInventoryLabels = true;
+		var initial = f.projection(List.of(f.row("k0", Long.MAX_VALUE)));
+		f.pending = new SpatialSelectorSession.ContentProjection<>(initial.fence(), initial.revision(), true,
+			initial.status(), initial.properties(), initial.inventory());
+		f.frame(f.now + 1);
+		f.openList(false, leftEntry);
+		f.move((leftEntry ? -1 : 1) * 80, 0, f.now + 1);
+		f.settle();
+		var before = f.snapshot();
+		String item = f.menu().menuId();
+		assertTrue(item.contains(":item:"));
+		assertEquals("k0", before.inventoryView().retainedRowKey());
+		double wide = f.geometry.width();
+		assertItemClearOfEveryPaintedPanel(f, item, "old settled");
+
+		// A legal sparse update shrinks the quantity and discovers a second row
+		// in the same tick, changing both natural width and panel row count.
+		f.pending = f.projection(List.of(f.row("k0", 1), f.row("k1", 1)));
+		long changed = f.now + 1;
+		for (long elapsed : new long[] {0, 80, 160}) {
+			f.frame(changed + elapsed);
+			var after = f.snapshot();
+			assertEquals(item, f.menu().menuId());
+			assertEquals(before.inventory().selectedKey(), after.inventory().selectedKey());
+			assertEquals(before.inventoryView().retainedRowKey(), after.inventoryView().retainedRowKey());
+			assertEquals(before.inventoryView().selectedRowCenterY(), after.inventoryView().selectedRowCenterY());
+			assertEquals(before.radial().pointer(), after.radial().pointer(), "content relayout never drags the fixed pointer");
+			assertEquals(before.radial().trail(), after.radial().trail(), "content relayout is not physical input");
+			assertEquals(2, after.inventory().entries().size());
+			assertTrue(f.geometry.width() < wide, "the shared content width genuinely shrinks instead of retaining old clearance width");
+			assertItemClearOfEveryPaintedPanel(f, item, "content shrink at " + elapsed);
+		}
+		var finalPanel = f.painter.draws.stream().filter(draw -> draw.state().present()
+			&& draw.state().data() instanceof SpatialOverlayRenderer.PanelPaint).findFirst().orElseThrow();
+		assertEquals(f.geometry.width(), ((SpatialOverlayRenderer.PanelPaint) finalPanel.state().data()).width(),
+			"the settled painted surface uses the new shared width, not a permanently cached long quantity");
+	}
+
+	@ParameterizedTest
+	@CsvSource({"false, false", "false, true", "true, false", "true, true"})
+	void resizingAnActiveItemRetainsItsFrozenRowAndUsesTheNewPanelEdgeInBothDirections(boolean leftEntry, boolean reduced) {
+		var f = new Fixture(1000, 700, "1", reduced, 0);
+		f.openList(false, leftEntry); f.scroll(15); f.settle();
+		double forward = leftEntry ? -1 : 1;
+		f.move(forward * 80, 0, f.now + 1); f.settle();
+		var before = f.snapshot();
+		String item = f.menu().menuId();
+		double anchor = before.inventoryView().selectedRowCenterY();
+		f.resize(320, 240);
+		var after = f.snapshot();
+		assertEquals(item, f.menu().menuId(), "resize never navigates or changes the entered item");
+		assertEquals(before.inventory().selectedKey(), after.inventory().selectedKey());
+		assertEquals(before.inventory().entries(), after.inventory().entries());
+		assertEquals("k15", after.inventoryView().retainedRowKey());
+		assertEquals(anchor, after.inventoryView().selectedRowCenterY());
+		assertEquals(before.radial().trail(), after.radial().trail());
+		var layout = SpatialOverlayRenderer.inventoryLayout(after.inventoryView(), 320, 240, f.painter.lineHeight(), f.style, f.painter::width);
+		assertEquals(anchor, layout.rowCenterY(after.inventory().selectedIndex()) - 120, 1e-9);
+		assertEquals(layout.width() / 2 + f.geometry.childClearance(),
+			forward * (f.menu().origin().x() - after.inventory().axisX()), 1e-9,
+			"the child and painter consume the same newly measured content edge");
+		assertEquals(List.of("k15"), f.painter.selectedRows, "only the frozen entered row paints");
+		f.settle();
+		assertEquals(item, f.menu().menuId());
 	}
 
 	@Test

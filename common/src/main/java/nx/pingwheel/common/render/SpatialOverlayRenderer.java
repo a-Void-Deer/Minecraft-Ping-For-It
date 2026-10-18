@@ -118,9 +118,7 @@ public final class SpatialOverlayRenderer {
 	static final double SHARED_BOUNDARY_TOLERANCE_DEGREES = 1.0e-6;
 
 	static final int BORDER_THICKNESS = 1;
-	static final int ROW_HEIGHT = 12;
-	static final int LIST_WIDTH = 200;
-	static final int ITEM_ICON_SIZE = 16;
+	static final int ITEM_ICON_SIZE = SpatialInventoryLayout.ITEM_ICON_SIZE;
 	static final double BOX_HEIGHT = 14.0;
 	static final double MIN_BOX_WIDTH = 14.0;
 	static final double ORBIT_MIN = 32.0;
@@ -188,9 +186,6 @@ public final class SpatialOverlayRenderer {
 	private static final double APPEARANCE_SCALE = 0.92;
 	private static final double TWO_PI = Math.PI * 2.0;
 	private static final Session SHARED = new Session();
-
-	/** Main-thread scratch row; backdrop painting must not allocate per frame. */
-	private static final double[] SECTOR_ROW_BOUNDS = new double[2];
 
 	/**
 	 * Caller-resolved visual preferences; no configuration access occurs here.
@@ -304,7 +299,7 @@ public final class SpatialOverlayRenderer {
 
 	record VisualKey(String kind, String owner, String entry) {}
 	sealed interface Paint permits NodePaint, PanelPaint, RowPaint, HeaderPaint, FooterPaint, ChromePaint,
-		SectorPaint, GuidePaint, TrailPaint, LinkPaint {}
+		SectorPaint, InventoryBackPaint, InventoryBackSectorPaint, GuidePaint, TrailPaint, LinkPaint {}
 	/** Immutable prior-frame visual history, painted once below every text-bearing surface. */
 	record TrailPaint(List<SpatialController.Point> points) implements Paint {
 		TrailPaint { points = List.copyOf(points); }
@@ -339,22 +334,43 @@ public final class SpatialOverlayRenderer {
 			return targetDetail != null && !SpatialTargetDetailText.limit(targetDetail).getString().isBlank();
 		}
 	}
-	record PanelPaint(double width, double height, double headerHeight) implements Paint {}
+	/** Logical source retained with exit paint so a resize can remeasure, not scale, its content box. */
+	record InventoryGeometry(SpatialInventoryView view, SpatialInventoryLayout layout) {}
+	record PanelPaint(double width, double height, double headerHeight, InventoryGeometry geometry) implements Paint {
+		PanelPaint(double width, double height, double headerHeight) { this(width, height, headerHeight, null); }
+	}
 	record RowPaint(SpatialInventoryView.Row row, double width, double height, boolean selected,
-		boolean grey, Integer outlineColor) implements Paint {
+		boolean grey, Integer outlineColor, InventoryGeometry geometry) implements Paint {
+		RowPaint(SpatialInventoryView.Row row, double width, double height, boolean selected, boolean grey, Integer outlineColor) {
+			this(row, width, height, selected, grey, outlineColor, null);
+		}
 		RowPaint(SpatialInventoryView.Row row, double width, double height, boolean selected, boolean grey) {
 			this(row, width, height, selected, grey, null);
 		}
 	}
-	record HeaderPaint(double width, double height, String position, SpatialInventoryView.Status status)
-		implements Paint {}
+	record HeaderPaint(double width, double height, String position, SpatialInventoryView.Status status,
+		InventoryGeometry geometry) implements Paint {
+		HeaderPaint(double width, double height, String position, SpatialInventoryView.Status status) {
+			this(width, height, position, status, null);
+		}
+	}
 	record FooterPaint(double width, double height, boolean backLeft,
-		SpatialInventoryView.BackAffordance back, boolean forwardAvailable) implements Paint {
+		SpatialInventoryView.BackAffordance back, boolean forwardAvailable, InventoryGeometry geometry) implements Paint {
+		FooterPaint(double width, double height, boolean backLeft, SpatialInventoryView.BackAffordance back, boolean forwardAvailable) {
+			this(width, height, backLeft, back, forwardAvailable, null);
+		}
 
 		/** Historical form: independent paint callers always showed the Forward hint. */
 		FooterPaint(double width, double height, boolean backLeft, SpatialInventoryView.BackAffordance back) {
 			this(width, height, backLeft, back, true);
 		}
+	}
+	/** Navigation paint, never a fabricated radial choice, follower, or release candidate. */
+	record InventoryBackPaint(Component label, double width, double height, SpatialInventoryView.BackAffordance back,
+		InventoryGeometry geometry) implements Paint {}
+	/** Outward-facing 180-degree underlay with its own wheel-opacity/background transition. */
+	record InventoryBackSectorPaint(double radius, double startDegrees, InventoryGeometry geometry) implements Paint {
+		double spanDegrees() { return 180.0; }
 	}
 	record ChromePaint(SpatialController.Snapshot snapshot, boolean pointerHidden) implements Paint {
 		ChromePaint(SpatialController.Snapshot snapshot) { this(snapshot, false); }
@@ -713,9 +729,11 @@ public final class SpatialOverlayRenderer {
 		/** One prior geometry sample, not a second animation/history or an input baseline. */
 		private FrameGeometry frameGeometry;
 
-		private record FrameGeometry(double width, double height, String itemMenu, SpatialController.Point itemOrigin) {
+		private record FrameGeometry(double width, double height, String itemMenu, SpatialController.Point itemOrigin,
+			SpatialInventoryLayout.Metrics inventoryMetrics) {
 			boolean relayoutFrom(FrameGeometry previous) {
 				return previous != null && (width != previous.width || height != previous.height
+					|| !inventoryMetrics.equals(previous.inventoryMetrics)
 					|| itemMenu != null && itemMenu.equals(previous.itemMenu) && !itemOrigin.equals(previous.itemOrigin));
 			}
 		}
@@ -785,6 +803,7 @@ public final class SpatialOverlayRenderer {
 					public int lineHeight() { return font.lineHeight; }
 					public int width(FormattedText text) { return font.width(text); }
 					public StringSplitter splitter() { return font.getSplitter(); }
+					public void flush() { graphics.flush(); }
 					public boolean paint(SpatialOverlayTransitions.State<VisualKey, Paint> state,
 						NodeLayout layout, Style preference) {
 						boolean focused = state.present() && state.data() instanceof NodePaint node && node.selected();
@@ -834,7 +853,8 @@ public final class SpatialOverlayRenderer {
 			SpatialController.Point origin = activeOrigin(radial);
 			var geometry = new FrameGeometry(guiWidth, guiHeight,
 				origin != null && inventory != null && inventory.open() && inventory.retainedRowKey() != null
-					? radial.menus().getLast().menuId() : null, origin);
+					? radial.menus().getLast().menuId() : null, origin,
+				SpatialInventoryLayout.measure(inventory, guiWidth, guiHeight, painter.lineHeight(), style.inventoryTextScale(), painter::width));
 			boolean relayout = geometry.relayoutFrom(frameGeometry);
 			if (frameGeometry != null && (guiWidth != frameGeometry.width() || guiHeight != frameGeometry.height())
 				&& (origin != null || inventory != null && inventory.open())) {
@@ -853,7 +873,7 @@ public final class SpatialOverlayRenderer {
 					centerX, centerY, orbitFor(Math.min(guiWidth, guiHeight)), style.rootDistance(), style.submenuRadiusScale());
 			}
 			if (inventory != null && inventory.open()) {
-				addInventory(targets, inventory, painter.lineHeight(), style, guiWidth, guiHeight, listActive);
+				addInventory(targets, inventory, painter, style, guiWidth, guiHeight, listActive);
 			}
 			avoidLabels(targets, radial, inventory, centerX, centerY, style, painter);
 			VisualKey desiredOwner = targets.stream().filter(target -> target.data() instanceof NodePaint node && node.follower() != null)
@@ -897,7 +917,11 @@ public final class SpatialOverlayRenderer {
 				&& inventory.selectedIndex() < inventory.rows().size()
 				? inventory.rows().get(inventory.selectedIndex()).key() : null;
 			SpatialController.Point followerPoint = null;
+			Map<InventoryGeometry, SpatialInventoryLayout> inventoryLayouts = new java.util.IdentityHashMap<>();
+			boolean underlayBatch = false;
 			for (var state : states.stream().sorted(Comparator.comparingInt(value -> paintRank(value, activeMenu))).toList()) {
+				state = remeasureInventory(state, guiWidth, guiHeight, painter, style, inventoryLayouts);
+				if (state == null) continue;
 				// While an item submenu is active every other row, including its
 				// detached exit tail, is suppressed: only the entered item row paints.
 				if (retainedRowKey != null && state.data() instanceof RowPaint row
@@ -912,7 +936,7 @@ public final class SpatialOverlayRenderer {
 					&& (!state.present() || !state.key().owner().equals(inventory.listKey())
 						|| !row.row().key().equals(selectedRowKey) || !inventory.selectedRowCommittable()
 						|| inventory.backAffordance().focused())) {
-					var uncolored = new RowPaint(row.row(), row.width(), row.height(), row.selected(), row.grey(), null);
+					var uncolored = new RowPaint(row.row(), row.width(), row.height(), row.selected(), row.grey(), null, row.geometry());
 					transitions.updatePaintData(state.key(), uncolored);
 					displayed = new SpatialOverlayTransitions.State<>(displayed.key(), displayed.x(), displayed.y(),
 						displayed.scale(), displayed.alpha(), displayed.present(), uncolored,
@@ -921,7 +945,8 @@ public final class SpatialOverlayRenderer {
 				if (state.present() && state.data() instanceof GuidePaint) {
 					// A guide is the actual frozen interaction boundary, not a moving
 					// node. Fade it at its current menu origin without scaling its radius.
-					var menu = radial.menus().stream().filter(value -> value.menuId().equals(state.key().owner())).findFirst().orElseThrow();
+					String guideOwner = state.key().owner();
+					var menu = radial.menus().stream().filter(value -> value.menuId().equals(guideOwner)).findFirst().orElseThrow();
 					displayed = new SpatialOverlayTransitions.State<>(state.key(), centerX + menu.origin().x() + viewX,
 						centerY + menu.origin().y() + viewY, 1.0, state.alpha(), true, state.data(), state.backgroundAlpha());
 				}
@@ -942,6 +967,13 @@ public final class SpatialOverlayRenderer {
 				if (state.present() && state.data() instanceof RowPaint row && row.selected())
 					selected = new RowLayout(displayed.y(), row.width() * state.scale());
 				if (!renders(state.data(), state.alpha(), state.backgroundAlpha(), style)) continue;
+				boolean underlay = isRadialUnderlay(state.data());
+				if (underlay != underlayBatch) {
+					// Earlier GUI queues finish before direct-buffer underlays; the whole
+					// underlay batch finishes before any vanilla fill, text or icon can flush.
+					painter.flush();
+					underlayBatch = underlay;
+				}
 				NodeLayout layout = state.data() instanceof NodePaint node
 					? nodeLayout(node, painter::width, painter.lineHeight(), style, painter.splitter()) : null;
 				if (!painter.paint(displayed, layout, style)) continue;
@@ -964,6 +996,7 @@ public final class SpatialOverlayRenderer {
 					}
 				}
 			}
+			if (underlayBatch) painter.flush();
 			paintedChoiceIds = Set.copyOf(painted);
 			trail.commit(radial, desiredOwner, followerPoint, nowNanos, style.reduceMotion());
 			return selected;
@@ -1019,6 +1052,8 @@ public final class SpatialOverlayRenderer {
 		int lineHeight();
 		int width(FormattedText text);
 		StringSplitter splitter();
+		/** Phase boundary only: never one flush per sector, band or quad. */
+		default void flush() {}
 		boolean paint(SpatialOverlayTransitions.State<VisualKey, Paint> state, NodeLayout layout, Style style);
 		void connector(GuideLine line, double alpha);
 	}
@@ -1317,9 +1352,10 @@ public final class SpatialOverlayRenderer {
 	 * trail have no background layer.
 	 */
 	static double backgroundLayerAlpha(Object data, double stateBackgroundAlpha, Style style) {
-		if (data instanceof SectorPaint) return stateBackgroundAlpha * style.opacityPercent() / 100.0;
+		if (data instanceof SectorPaint || data instanceof InventoryBackSectorPaint)
+			return stateBackgroundAlpha * style.opacityPercent() / 100.0;
 		if (data instanceof NodePaint || data instanceof PanelPaint
-			|| data instanceof HeaderPaint || data instanceof RowPaint) {
+			|| data instanceof HeaderPaint || data instanceof RowPaint || data instanceof InventoryBackPaint) {
 			return stateBackgroundAlpha * style.targetOpacityPercent() / 100.0;
 		}
 		return 0.0;
@@ -1342,7 +1378,7 @@ public final class SpatialOverlayRenderer {
 		 * fade. Trail opacity is a separate multiplier applied exactly once.
 	 */
 	static double layerAlpha(Object data, double stateAlpha, Style style) {
-		if (data instanceof SectorPaint) return backdropAlpha(stateAlpha, style);
+		if (data instanceof SectorPaint || data instanceof InventoryBackSectorPaint) return backdropAlpha(stateAlpha, style);
 		if (data instanceof TrailPaint) return style.showTrail() ? stateAlpha * style.trailOpacityPercent() / 100.0 : 0.0;
 		if (data instanceof GuidePaint || data instanceof ChromePaint || data instanceof LinkPaint) return stateAlpha;
 		return targetAlpha(stateAlpha, style);
@@ -1357,7 +1393,7 @@ public final class SpatialOverlayRenderer {
 	 * its own guard, including the font-color transparency protection.
 	 */
 	static boolean renders(Object data, double stateAlpha, Style style) {
-		return renders(data, stateAlpha, 0.0, style);
+		return renders(data, stateAlpha, isRadialUnderlay(data) ? stateAlpha : 0.0, style);
 	}
 
 	/**
@@ -1367,6 +1403,7 @@ public final class SpatialOverlayRenderer {
 	 * layer whose data has no background contributes no second gate.
 	 */
 	static boolean renders(Object data, double stateAlpha, double stateBackgroundAlpha, Style style) {
+		if (isRadialUnderlay(data)) return backgroundChannel(stateBackgroundAlpha, style.opacityPercent()) != 0;
 		return layerAlpha(data, stateAlpha, style) > 0.0
 			|| backgroundLayerAlpha(data, stateBackgroundAlpha, style) > 0.0;
 	}
@@ -1452,7 +1489,7 @@ public final class SpatialOverlayRenderer {
 
 	/** Historical trail lies above underlays/guides but below ALL text-bearing paints. */
 	static int paintRank(Object data) {
-		if (data instanceof SectorPaint) return 0;
+		if (data instanceof SectorPaint || data instanceof InventoryBackSectorPaint) return 0;
 		if (data instanceof GuidePaint || data instanceof LinkPaint) return 1;
 		if (data instanceof TrailPaint) return 2;
 		if (data instanceof PanelPaint) return 3;
@@ -1467,8 +1504,11 @@ public final class SpatialOverlayRenderer {
 	}
 
 	private static void addInventory(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
-		SpatialInventoryView view, int lineHeight, Style style, double guiWidth, double guiHeight, boolean listActive) {
-		SpatialInventoryLayout layout = inventoryLayout(view, guiWidth, guiHeight, lineHeight, style);
+		SpatialInventoryView view, FramePainter painter, Style style, double guiWidth, double guiHeight, boolean listActive) {
+		var metrics = SpatialInventoryLayout.measure(view, guiWidth, guiHeight, painter.lineHeight(), style.inventoryTextScale(), painter::width);
+		view = metrics.window(view);
+		SpatialInventoryLayout layout = metrics.layout(view, guiWidth / 2.0, guiHeight / 2.0);
+		var source = new InventoryGeometry(view, metrics.layout(view, 0, 0));
 		double rowHeight = layout.rowHeight();
 		double headerHeight = layout.headerHeight();
 		double footerHeight = layout.footerHeight();
@@ -1479,13 +1519,15 @@ public final class SpatialOverlayRenderer {
 		// submenu the list drops to the resting inventory coverage.
 		double surfaceCoverage = backgroundCoverage(BOX_BACKGROUND_PERCENT,
 			listActive ? INVENTORY_ACTIVE_GAIN : INVENTORY_IDLE_GAIN, 1.0);
-		add(targets, new VisualKey("panel", owner, Integer.toString(layout.count())), x, y, 1.0, 1.0, surfaceCoverage,
-			x, y + 8.0, new PanelPaint(layout.width(), layout.height(), layout.headerHeight()));
+		// Row/window changes resize the same surface, not a second fading panel
+		// whose stale content width could overlap an already-relayouted item child.
+		add(targets, new VisualKey("panel", owner, ""), x, y, 1.0, 1.0, surfaceCoverage,
+			x, y + 8.0, new PanelPaint(layout.width(), layout.height(), layout.headerHeight(), source));
 		String position = view.selectedIndex() >= 0 && view.selectedIndex() < view.rows().size()
 			? (view.selectedIndex() + 1) + " / " + view.rows().size() : "";
 		double headerY = y - layout.height() / 2.0 + headerHeight / 2.0;
 		add(targets, new VisualKey("header", owner, view.status().name()), x, headerY, 1.0, 1.0, surfaceCoverage,
-			x, headerY + 4.0, new HeaderPaint(layout.width(), headerHeight, position, view.status()));
+			x, headerY + 4.0, new HeaderPaint(layout.width(), headerHeight, position, view.status(), source));
 		// The complete window, header and footer keep their full layout; while an
 		// item submenu is active only the entered row is planned at all.
 		String retainedRowKey = view.retainedRowKey();
@@ -1502,12 +1544,86 @@ public final class SpatialOverlayRenderer {
 				new RowPaint(row, layout.width(), rowHeight, selected,
 					view.status().grey() || row.quality().grey(),
 					listActive && selected && view.selectedRowCommittable() && !view.backAffordance().focused()
-						? row.outlineColor() : null));
+						? row.outlineColor() : null, source));
 		}
 		double footerY = y + layout.height() / 2.0 - footerHeight / 2.0;
 		add(targets, new VisualKey("footer", owner, ""), x, footerY, 1.0, 1.0, 0.0, x, footerY + 4.0,
 			new FooterPaint(layout.width(), footerHeight, view.backLeft(), view.backAffordance(),
-				view.forwardAvailable()));
+				view.forwardAvailable(), source));
+		var back = inventoryBackLayout(layout, painter, style, view.backLeft());
+		boolean focused = listActive && view.backAffordance().focused();
+		var affordance = focused ? view.backAffordance() : SpatialInventoryView.BackAffordance.NONE;
+		add(targets, new VisualKey("inventory-back-sector", owner, ""), back.originX(), y, 1.0, 1.0,
+			backgroundCoverage(SECTOR_BACKGROUND_PERCENT, focused ? SECTOR_FOCUSED_GAIN : 1.0, 1.0),
+			back.originX(), y, new InventoryBackSectorPaint(back.radius(), view.backLeft() ? 180.0 : 0.0, source));
+		add(targets, new VisualKey("inventory-back", owner, ""), back.frameX(), y, 1.0, 1.0,
+			backgroundCoverage(BOX_BACKGROUND_PERCENT, 1.0, 1.0), back.frameX(), y,
+			new InventoryBackPaint(Component.translatable("pingforit.spatial.inventory.back"), back.width(), back.height(), affordance, source));
+	}
+
+	/** Back's half-disc starts just outside the panel; its measured frame stays within that outward half. */
+	record InventoryBackLayout(double originX, double frameX, double radius, double width, double height) {}
+	static InventoryBackLayout inventoryBackLayout(SpatialInventoryLayout panel, FramePainter painter, Style style, boolean backLeft) {
+		var frame = nodeLayout(painter.width(Component.translatable("pingforit.spatial.inventory.back")),
+			painter.lineHeight(), style.optionTextScale());
+		double sign = backLeft ? -1.0 : 1.0;
+		double origin = panel.centerX() + sign * (panel.width() / 2.0 + NODE_TEXT_INSET);
+		double distance = frame.width() / 2.0 + NODE_TEXT_INSET;
+		double radius = Math.max(ORBIT_MIN, Math.hypot(distance + frame.width() / 2.0, frame.height() / 2.0) + NODE_TEXT_INSET);
+		return new InventoryBackLayout(origin, origin + sign * distance, radius, frame.width(), frame.height());
+	}
+
+	/** Re-measure detached content under the same viewport, retaining its finite fade and rigid projection. */
+	private static SpatialOverlayTransitions.State<VisualKey, Paint> remeasureInventory(
+		SpatialOverlayTransitions.State<VisualKey, Paint> state, double width, double height, FramePainter painter, Style style,
+		Map<InventoryGeometry, SpatialInventoryLayout> layouts) {
+		if (state.present()) return state; // current targets already share the freshly measured metrics
+		InventoryGeometry source = switch (state.data()) {
+			case PanelPaint value -> value.geometry();
+			case RowPaint value -> value.geometry();
+			case HeaderPaint value -> value.geometry();
+			case FooterPaint value -> value.geometry();
+			case InventoryBackPaint value -> value.geometry();
+			case InventoryBackSectorPaint value -> value.geometry();
+			default -> null;
+		};
+		if (source == null) return state;
+		var next = layouts.computeIfAbsent(source, value -> SpatialInventoryLayout.measure(value.view(), width, height,
+			painter.lineHeight(), style.inventoryTextScale(), painter::width).layout(value.view(), 0, 0));
+		var previous = source.layout();
+		if (next.equals(previous) && !(state.data() instanceof InventoryBackPaint)
+			&& !(state.data() instanceof InventoryBackSectorPaint)) return state;
+		double dx = next.centerX() - previous.centerX();
+		double dy = next.centerY() - previous.centerY();
+		Paint paint = state.data();
+		if (paint instanceof PanelPaint) {
+			paint = new PanelPaint(next.width(), next.height(), next.headerHeight(), source);
+		} else if (paint instanceof HeaderPaint value) {
+			dy += (-next.height() + next.headerHeight() + previous.height() - previous.headerHeight()) / 2.0;
+			paint = new HeaderPaint(next.width(), next.headerHeight(), value.position(), value.status(), source);
+		} else if (paint instanceof FooterPaint value) {
+			dy += (next.height() - next.footerHeight() - previous.height() + previous.footerHeight()) / 2.0;
+			paint = new FooterPaint(next.width(), next.footerHeight(), value.backLeft(), value.back(), value.forwardAvailable(), source);
+		} else if (paint instanceof RowPaint value) {
+			int index = -1;
+			for (int i = 0; i < source.view().rows().size(); i++)
+				if (source.view().rows().get(i).key().equals(value.row().key())) { index = i; break; }
+			if (index < next.first() || index >= next.first() + next.count()) return null;
+			dy = next.rowCenterY(index) - previous.rowCenterY(index);
+			paint = new RowPaint(value.row(), next.width(), next.rowHeight(), value.selected(), value.grey(), value.outlineColor(), source);
+		} else {
+			var oldBack = inventoryBackLayout(previous, painter, style, source.view().backLeft());
+			var nextBack = inventoryBackLayout(next, painter, style, source.view().backLeft());
+			if (paint instanceof InventoryBackPaint value) {
+				dx = nextBack.frameX() - oldBack.frameX();
+				paint = new InventoryBackPaint(value.label(), nextBack.width(), nextBack.height(), value.back(), source);
+			} else if (paint instanceof InventoryBackSectorPaint value) {
+				dx = nextBack.originX() - oldBack.originX();
+				paint = new InventoryBackSectorPaint(nextBack.radius(), value.startDegrees(), source);
+			}
+		}
+		return new SpatialOverlayTransitions.State<>(state.key(), state.x() + dx, state.y() + dy,
+			state.scale(), state.alpha(), state.present(), paint, state.backgroundAlpha());
 	}
 
 	/**
@@ -1531,13 +1647,16 @@ public final class SpatialOverlayRenderer {
 	 */
 	public static SpatialInventoryLayout inventoryLayout(SpatialInventoryView view, double guiWidth, double guiHeight,
 		int fontLineHeight, Style style) {
-		if (fontLineHeight <= 0) {
-			throw new IllegalArgumentException("fontLineHeight must be positive");
-		}
-		double textHeight = fontLineHeight * style.inventoryTextScale();
-		double rowHeight = Math.max(ROW_HEIGHT, Math.max(ITEM_ICON_SIZE + 2.0, textHeight * 2.0 + 4.0));
-		return SpatialInventoryLayout.of(view, guiWidth / 2.0, guiHeight / 2.0,
-			LIST_WIDTH, textHeight * 2.0 + 8.0, rowHeight, textHeight + 6.0);
+		Font font = font();
+		ToIntFunction<FormattedText> widths = font == null ? text -> 0 : font::width;
+		return inventoryLayout(view, guiWidth, guiHeight, fontLineHeight, style, widths);
+	}
+
+	/** Explicit font-width port for independent/headless callers; native measurement uses the same function. */
+	public static SpatialInventoryLayout inventoryLayout(SpatialInventoryView view, double guiWidth, double guiHeight,
+		int fontLineHeight, Style style, ToIntFunction<FormattedText> widths) {
+		return SpatialInventoryLayout.measure(view, guiWidth, guiHeight, fontLineHeight, style.inventoryTextScale(), widths)
+			.layout(view, guiWidth / 2.0, guiHeight / 2.0);
 	}
 
 	/**
@@ -1593,8 +1712,8 @@ public final class SpatialOverlayRenderer {
 			drawNode(graphics, font, node, state, alpha, layout, style);
 			return;
 		}
-		if (state.data() instanceof SectorPaint sector) {
-			drawSector(graphics, sector, state, style);
+		if (isRadialUnderlay(state.data())) {
+			drawRadialUnderlay(graphics, state, style);
 			return;
 		}
 		if (state.data() instanceof GuidePaint guide) {
@@ -1634,48 +1753,33 @@ public final class SpatialOverlayRenderer {
 			} else if (state.data() instanceof HeaderPaint header) {
 				double left = -header.width() / 2.0 + 4.0;
 				double top = -header.height() / 2.0 + 3.0;
-				drawText(graphics, font, Component.literal(header.position()), left, top,
+				drawInventoryText(graphics, font, Component.literal(header.position()), left, top, header.width() - 8.0,
 					style.inventoryTextScale(), TEXT_DIMMED_COLOR, alpha);
 				String key = header.status().translationKey();
 				if (key != null) {
-					drawFittedText(graphics, font, Component.translatable(key), left,
+					drawInventoryText(graphics, font, Component.translatable(key), left,
 						top + font.lineHeight * style.inventoryTextScale() + 2.0, header.width() - 8.0,
 						style.inventoryTextScale(), TEXT_DIMMED_COLOR, alpha);
 				}
 			} else if (state.data() instanceof FooterPaint footer) {
-				Component back = Component.translatable("pingforit.spatial.inventory.back");
 				Component forward = Component.translatable("pingforit.spatial.inventory.forward");
-				Component left = footer.backLeft() ? back : forward;
-				Component right = footer.backLeft() ? forward : back;
 				double available = footer.width() / 2.0 - 8.0;
-				int squareSize = Math.max(6, (int) Math.round(footer.height() - 4.0));
-				double backAvailable = Math.max(0.0, available - squareSize - 4.0);
 				double y = -footer.height() / 2.0 + 2.0;
-				int backColor = footer.back().focused() && state.present() ? TEXT_COLOR : TEXT_DIMMED_COLOR;
-				double leftWidth = footer.backLeft() ? backAvailable : available;
-				double leftX = -footer.width() / 2.0 + 4.0 + (footer.backLeft() ? squareSize + 4.0 : 0.0);
-				// The Forward hint exists only while the item entry is available; the
-				// Back hint keeps its label and its focused progress square.
-				if (footer.backLeft() || footer.forwardAvailable()) {
-					drawFittedText(graphics, font, left, leftX, y, leftWidth, style.inventoryTextScale(),
-						footer.backLeft() ? backColor : TEXT_DIMMED_COLOR, alpha);
+				if (footer.forwardAvailable()) {
+					double textWidth = Math.min(available, font.width(forward) * style.inventoryTextScale());
+					double x = footer.backLeft() ? footer.width() / 2.0 - 4.0 - textWidth : -footer.width() / 2.0 + 4.0;
+					drawInventoryText(graphics, font, forward, x, y, available, style.inventoryTextScale(), TEXT_DIMMED_COLOR, alpha);
 				}
-				double rightAvailable = footer.backLeft() ? available : backAvailable;
-				double rightWidth = Math.min(rightAvailable, font.width(right) * style.inventoryTextScale());
-				double rightEdge = footer.width() / 2.0 - 4.0 - (footer.backLeft() ? 0.0 : squareSize + 4.0);
-				if (!footer.backLeft() || footer.forwardAvailable()) {
-					drawFittedText(graphics, font, right, rightEdge - rightWidth, y, rightAvailable,
-						style.inventoryTextScale(), footer.backLeft() ? TEXT_DIMMED_COLOR : backColor, alpha);
-				}
-				if (footer.back().focused() && state.present()) {
-					int squareX = (int) Math.round(footer.backLeft() ? -footer.width() / 2.0 + 4.0
-						: footer.width() / 2.0 - 4.0 - squareSize);
-					int squareY = (int) Math.round(y);
-					strokeRect(graphics, squareX, squareY, squareX + squareSize, squareY + squareSize,
-						withAlpha(BORDER_COLOR, alpha));
-					drawSquareProgress(graphics, squareX, squareY, squareSize, footer.back().progress(),
-						withAlpha(PROGRESS_COLOR, alpha));
-				}
+			} else if (state.data() instanceof InventoryBackPaint back) {
+				int left = (int) Math.round(-back.width() / 2.0), right = (int) Math.round(back.width() / 2.0);
+				int top = (int) Math.round(-back.height() / 2.0), bottom = (int) Math.round(back.height() / 2.0);
+				graphics.fill(left, top, right, bottom,
+					withBackgroundAlpha(NODE_BACKGROUND, state.backgroundAlpha(), style.targetOpacityPercent()));
+				strokeRect(graphics, left, top, right, bottom, withAlpha(BORDER_COLOR, alpha));
+				drawText(graphics, font, back.label(), left + NODE_TEXT_INSET, -font.lineHeight * style.optionTextScale() / 2.0,
+					style.optionTextScale(), back.back().focused() ? TEXT_COLOR : TEXT_DIMMED_COLOR, alpha);
+				if (state.present() && back.back().focused()) drawProgressSegments(graphics,
+					backProgressSegments(left, top, right, bottom, back.back().progress()), withAlpha(PROGRESS_COLOR, alpha));
 			}
 		} finally {
 			pose.popPose();
@@ -1698,16 +1802,17 @@ public final class SpatialOverlayRenderer {
 			SpatialItemIconRenderer.draw(graphics, stack, (int) textLeft, -ITEM_ICON_SIZE / 2, tint, (float) alpha);
 			textLeft += ITEM_ICON_SIZE + 3.0;
 		}
-		Component quantity = row.count() == null ? Component.empty() : Component.literal("x" + row.count());
-		double quantityWidth = font.width(quantity) * textScale;
+		Component quantity = SpatialInventoryLayout.quantity(row.count());
+		double quantityWidth = Math.min(font.width(quantity) * textScale,
+			Math.max(0.0, (right - 4.0 - textLeft) / 2.0));
 		double textTop = top + 2.0;
 		int textColor = paint.grey() ? TEXT_DISABLED_COLOR : paint.selected() ? TEXT_COLOR : TEXT_DIMMED_COLOR;
-		drawClippedText(graphics, font, display.name(), textLeft, textTop,
+		drawInventoryText(graphics, font, display.name(), textLeft, textTop,
 			Math.max(0.0, right - 8.0 - quantityWidth - textLeft), textScale, textColor, alpha);
-		drawText(graphics, font, quantity, right - 4.0 - quantityWidth, textTop, textScale, textColor, alpha);
+		drawInventoryText(graphics, font, quantity, right - 4.0 - quantityWidth, textTop, quantityWidth, textScale, textColor, alpha);
 		String qualityKey = row.quality().translationKey();
 		if (qualityKey != null) {
-			drawFittedText(graphics, font, Component.translatable(qualityKey), textLeft,
+			drawInventoryText(graphics, font, Component.translatable(qualityKey), textLeft,
 				textTop + font.lineHeight * textScale + 1.0, right - 4.0 - textLeft,
 				textScale, TEXT_DISABLED_COLOR, alpha);
 		}
@@ -1741,18 +1846,34 @@ public final class SpatialOverlayRenderer {
 		}
 	}
 
-	private static void drawClippedText(GuiGraphics graphics, Font font, Component label, double x, double y,
-		double width, double scale, int color, double alpha) {
-		String clipped = font.plainSubstrByWidth(label.getString(), Math.max(0, (int) Math.floor(width / scale)));
-		drawText(graphics, font, Component.literal(clipped), x, y, scale, color, alpha);
+	/** Fixed configured text scale; clipping is a content operation, never a font-size adjustment. */
+	record InventoryText(FormattedText text, double scale, double width) {}
+	static InventoryText inventoryText(Component label, double width, double scale,
+		ToIntFunction<FormattedText> widths, StringSplitter splitter) {
+		int budget = Math.max(0, (int) Math.floor(width / scale));
+		FormattedText text = label;
+		if (widths.applyAsInt(label) > budget) {
+			Component ellipsis = Component.literal("…");
+			int suffix = widths.applyAsInt(ellipsis);
+			text = suffix > budget ? FormattedText.EMPTY : FormattedText.composite(
+				splitter.headByWidth(label, budget - suffix, net.minecraft.network.chat.Style.EMPTY), ellipsis);
+		}
+		return new InventoryText(text, scale, Math.max(0.0, width));
 	}
 
-	/** Status semantics must remain readable, even with a larger font override. */
-	private static void drawFittedText(GuiGraphics graphics, Font font, Component label, double x, double y,
+	private static void drawInventoryText(GuiGraphics graphics, Font font, Component label, double x, double y,
 		double width, double scale, int color, double alpha) {
-		int labelWidth = font.width(label);
-		if (width > 0.0 && labelWidth > 0) {
-			drawText(graphics, font, label, x, y, Math.min(scale, width / labelWidth), color, alpha);
+		if (width <= 0.0) return;
+		InventoryText text = inventoryText(label, width, scale, font::width, font.getSplitter());
+		var transform = graphics.pose().last().pose();
+		var near = transform.transformPosition((float) x, (float) y, 0.0f, new org.joml.Vector3f());
+		var far = transform.transformPosition((float) (x + width), (float) (y + font.lineHeight * scale), 0.0f, new org.joml.Vector3f());
+		graphics.enableScissor((int) Math.ceil(near.x()), (int) Math.floor(near.y()),
+			Math.max((int) Math.ceil(near.x()), (int) Math.floor(far.x())), (int) Math.ceil(far.y()));
+		try {
+			drawText(graphics, font, Language.getInstance().getVisualOrder(text.text()), x, y, text.scale(), color, alpha);
+		} finally {
+			graphics.disableScissor();
 		}
 	}
 
@@ -1895,18 +2016,38 @@ public final class SpatialOverlayRenderer {
 		}
 	}
 
-	private static void drawSector(GuiGraphics graphics, SectorPaint sector,
-		SpatialOverlayTransitions.State<VisualKey, Paint> state, Style style) {
-		int color = withBackgroundAlpha(SECTOR_BACKGROUND, state.backgroundAlpha(), style.opacityPercent());
-		if ((color >>> 24) == 0) {
-			return;
+	static boolean isRadialUnderlay(Object data) {
+		return data instanceof SectorPaint || data instanceof InventoryBackSectorPaint;
+	}
+
+	/** Primitive draw port shared by native submission and recording production-frame tests. */
+	@FunctionalInterface
+	interface RadialUnderlayPainter {
+		void draw(double radius, double startDegrees, double spanDegrees, int rgb, double coverage, double opacityPercent);
+	}
+
+	/** Only circular underlays take this route; rectangular backgrounds and foreground never do. */
+	static void paintRadialUnderlay(SpatialOverlayTransitions.State<VisualKey, Paint> state, Style style,
+		RadialUnderlayPainter painter) {
+		if (!isRadialUnderlay(state.data()) || backgroundChannel(state.backgroundAlpha(), style.opacityPercent()) == 0) return;
+		if (state.data() instanceof SectorPaint sector) {
+			painter.draw(sector.radius(), sector.choice().startDegrees(), sector.choice().spanDegrees(),
+				SECTOR_BACKGROUND, state.backgroundAlpha(), style.opacityPercent());
+		} else if (state.data() instanceof InventoryBackSectorPaint sector) {
+			painter.draw(sector.radius(), sector.startDegrees(), sector.spanDegrees(),
+				SECTOR_BACKGROUND, state.backgroundAlpha(), style.opacityPercent());
 		}
+	}
+
+	private static void drawRadialUnderlay(GuiGraphics graphics,
+		SpatialOverlayTransitions.State<VisualKey, Paint> state, Style style) {
 		var pose = graphics.pose();
 		pose.pushPose();
 		try {
 			pose.translate(state.x(), state.y(), 0.0);
 			pose.scale((float) state.scale(), (float) state.scale(), 1.0f);
-			fillSector(graphics, sector.radius(), sector.choice().startDegrees(), sector.choice().spanDegrees(), color);
+			paintRadialUnderlay(state, style, (radius, start, span, rgb, coverage, opacity) ->
+				RadialGradient.draw(graphics, radius, start, span, rgb, coverage, opacity));
 		} finally {
 			pose.popPose();
 		}
@@ -1940,34 +2081,12 @@ public final class SpatialOverlayRenderer {
 	}
 
 	/**
-	 * Fills a sector as one bounded quad per scanline. Rows are derived from the
-	 * transition state's origin, so no per-frame allocation occurs here.
-	 */
-	private static void fillSector(GuiGraphics graphics, double radius, double startDegrees,
-		double spanDegrees, int color) {
-		int firstRow = (int) Math.ceil(-radius);
-		int lastRow = (int) Math.floor(radius);
-		for (int dy = firstRow; dy <= lastRow; dy++) {
-			sectorRow(dy, radius, startDegrees, spanDegrees, SECTOR_ROW_BOUNDS);
-			if (SECTOR_ROW_BOUNDS[0] > SECTOR_ROW_BOUNDS[1]) {
-				continue;
-			}
-			int left = (int) Math.round(SECTOR_ROW_BOUNDS[0]);
-			int right = (int) Math.round(SECTOR_ROW_BOUNDS[1]);
-			if (right <= left) {
-				right = left + 1;
-			}
-			graphics.fill(left, dy, right, dy + 1, color);
-		}
-	}
-
-	/**
 	 * Pure scanline probe for one backdrop row, in coordinates relative to the
 	 * sector origin: {@code bounds[0]} is the leftmost and {@code bounds[1]} the
 	 * rightmost covered x, and {@code bounds[0] > bounds[1]} means the row is
 	 * empty. Exact for the supported spans the controller emits: a convex sector
-	 * of at most a half turn, or a full disc. Only callers asking for the returned
-	 * array allocate; painting reuses a main-thread scratch row.
+	 * of at most a half turn, or a full disc. Retained for CPU geometry callers;
+	 * native underlay painting uses the radial vertex mesh instead.
 	 */
 	static double[] sectorRowBounds(double dy, double radius, double startDegrees, double spanDegrees) {
 		double[] bounds = new double[2];
@@ -2104,19 +2223,6 @@ public final class SpatialOverlayRenderer {
 		guiGraphics.fill(x - 1, y - 1, x + 2, y + 2, color);
 	}
 
-	private static void drawSquareProgress(
-		GuiGraphics guiGraphics,
-		int x,
-		int y,
-		int size,
-		double progress,
-		int color
-	) {
-		for (SpatialSquareProgress.Segment segment : SpatialSquareProgress.segments(x, y, size, progress)) {
-			line(guiGraphics, segment.x1(), segment.y1(), segment.x2(), segment.y2(), color, BORDER_THICKNESS);
-		}
-	}
-
 	/**
 	 * Draws a straight line as one-pixel-step axis-aligned quads. The step never
 	 * exceeds one pixel along the dominant axis, so the line stays continuous
@@ -2210,6 +2316,7 @@ public final class SpatialOverlayRenderer {
 	 * registry translation key.
 	 */
 	static ClientItemDisplay.Display rowDisplay(SpatialInventoryView.Row row) {
+		if (row.display() != null) return new ClientItemDisplay.Display(row.display().icon(), row.display().name());
 		return ClientItemDisplay.resolve(row.itemId(), row.label(), row.displayJson());
 	}
 

@@ -91,7 +91,7 @@ public final class InventoryListModel {
 		}
 	}
 
-	private final int visibleRows;
+	private int visibleRows;
 	private final List<Row> rows = new ArrayList<>();
 	private final Map<String, Row> byKey = new HashMap<>();
 
@@ -116,6 +116,12 @@ public final class InventoryListModel {
 
 	public int visibleRows() {
 		return visibleRows;
+	}
+
+	/** Non-input rewindowing: keeps the key, discovery freeze, ordering and wheel fraction. */
+	public void setVisibleRows(int visibleRows) {
+		if (visibleRows <= 0) throw new IllegalArgumentException("visibleRows must be positive");
+		this.visibleRows = visibleRows;
 	}
 
 	public boolean isOpen() {

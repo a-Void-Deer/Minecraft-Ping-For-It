@@ -1,7 +1,7 @@
 {
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Localisation du Ping",
-	"key.pingforit.toggle_pass_through_transparent_blocks": "Traverser les blocs transparents",
+	"key.pingforit.toggle_mark_transparent_blocks": "Basculer le marquage des blocs transparents",
 	"key.pingforit.toggle_mark_blacklisted_targets": "Marquer les cibles de la liste noire",
 	"key.pingforit.toggle_mark_fluids": "Marquer les fluides",
 	"key.pingforit.open_settings": "Ouvrir les Paramètres",
@@ -21,7 +21,7 @@
 	"settings.pingforit.ping_distance": "Distance du Ping : %s",
 	"settings.pingforit.item_icon_visible": "Icônes d'Objets",
 	"settings.pingforit.direction_indicator_visible": "Indicateur de Direction",
-	"settings.pingforit.pass_through_transparent_blocks": "Traverser les blocs transparents",
+	"settings.pingforit.mark_transparent_blocks": "Marquer les blocs transparents",
 	"settings.pingforit.mark_blacklisted_targets": "Marquer les cibles de la liste noire",
 	"settings.pingforit.mark_fluids": "Marquer les fluides",
 	"settings.pingforit.ping_size": "Taille du Ping : %s",
@@ -119,7 +119,7 @@
   ,"settings.pingforit.marker_display_duration.tooltip": "Durée d'affichage local des marqueurs. Suivre le serveur utilise la durée serveur figée de chaque marqueur."
   ,"value.pingforit.follow_server": "Suivre le serveur"
   ,"unit.pingforit.seconds": "%ss"
-  ,"notice.pingforit.pass_through_transparent_blocks": "Marquer à travers les blocs transparents : "
+  ,"notice.pingforit.mark_transparent_blocks": "Marquer les blocs transparents : "
   ,"notice.pingforit.mark_blacklisted_targets": "Marquer les cibles sur liste noire : "
   ,"notice.pingforit.mark_fluids": "Marquer les liquides : "
   ,"notice.pingforit.on": "Activé"
@@ -330,7 +330,7 @@
   ,"pingforit.spatial.settings": "Sélection"
   ,"pingforit.spatial.toggle.fluids": "Fluides"
   ,"pingforit.spatial.toggle.entity_blacklist": "Liste noire"
-  ,"pingforit.spatial.toggle.transparent_blocks": "Blocs transparents"
+  ,"pingforit.spatial.toggle.transparent_blocks": "Marquer les blocs transparents"
   ,"pingforit.spatial.target_type.dropped_item": "Objet au sol"
   ,"pingforit.spatial.target_type.entity": "Entité"
   ,"pingforit.spatial.target_type.entity_block": "Bloc-entité"

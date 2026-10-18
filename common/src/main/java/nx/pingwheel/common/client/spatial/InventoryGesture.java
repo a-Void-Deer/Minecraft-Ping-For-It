@@ -54,7 +54,7 @@ public final class InventoryGesture {
 	private final InventoryListModel list;
 	private final double glideSensitivity;
 	private final boolean backHoverEnabled;
-	private final double pixelsPerRow;
+	private double pixelsPerRow;
 
 	private double axisX;
 	private double pointerX;
@@ -85,6 +85,15 @@ public final class InventoryGesture {
 
 		this.glideSensitivity = glideSensitivity;
 		this.backHoverEnabled = backHoverEnabled;
+		this.pixelsPerRow = pixelsPerRow;
+	}
+
+	/** Relayout is not input: retain the sub-row fraction, wheel lock and side intent. */
+	public void updateRowHeight(double pixelsPerRow) {
+		if (!Double.isFinite(pixelsPerRow) || pixelsPerRow <= 0)
+			throw new IllegalArgumentException("row height must be positive and finite");
+		if (pixelsPerRow == this.pixelsPerRow) return;
+		glideRemainder = glideRemainder / this.pixelsPerRow * pixelsPerRow;
 		this.pixelsPerRow = pixelsPerRow;
 	}
 

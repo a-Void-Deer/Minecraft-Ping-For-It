@@ -15,20 +15,20 @@ public class InputUtils {
 
 	private static final String SETTINGS_CATEGORY = LanguageUtils.keyOf("key.category", "name");
 	public static final KeyMapping KEY_BINDING_PING = new KeyMapping(LanguageUtils.keyOf("key", "ping_location"), InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_5, SETTINGS_CATEGORY);
-	public static final KeyMapping KEY_BINDING_TOGGLE_PASS_THROUGH_TRANSPARENT_BLOCKS = new KeyMapping(
-		LanguageUtils.keyOf("key", "toggle_pass_through_transparent_blocks"),
+	public static final KeyMapping KEY_BINDING_TOGGLE_MARK_TRANSPARENT_BLOCKS = new KeyMapping(
+		LanguageUtils.keyOf("key", "toggle_mark_transparent_blocks"),
 		InputConstants.Type.KEYSYM,
-		GLFW.GLFW_KEY_LEFT_SHIFT,
+		InputConstants.UNKNOWN.getValue(),
 		SETTINGS_CATEGORY);
 	public static final KeyMapping KEY_BINDING_TOGGLE_MARK_BLACKLISTED_TARGETS = new KeyMapping(
 		LanguageUtils.keyOf("key", "toggle_mark_blacklisted_targets"),
 		InputConstants.Type.KEYSYM,
-		GLFW.GLFW_KEY_LEFT_CONTROL,
+		InputConstants.UNKNOWN.getValue(),
 		SETTINGS_CATEGORY);
 	public static final KeyMapping KEY_BINDING_TOGGLE_MARK_FLUIDS = new KeyMapping(
 		LanguageUtils.keyOf("key", "toggle_mark_fluids"),
 		InputConstants.Type.KEYSYM,
-		GLFW.GLFW_KEY_LEFT_ALT,
+		InputConstants.UNKNOWN.getValue(),
 		SETTINGS_CATEGORY);
 	public static final KeyMapping KEY_BINDING_SETTINGS = new KeyMapping(LanguageUtils.keyOf("key", "open_settings"), InputConstants.Type.KEYSYM, -1, SETTINGS_CATEGORY);
 
@@ -93,10 +93,10 @@ public class InputUtils {
 		}
 
 		final ClaimedKey key = ClaimedKey.from(rawKey);
-		boolean passThroughBinding = matches(KEY_BINDING_TOGGLE_PASS_THROUGH_TRANSPARENT_BLOCKS, rawKey);
+		boolean transparentBinding = matches(KEY_BINDING_TOGGLE_MARK_TRANSPARENT_BLOCKS, rawKey);
 		boolean blacklistedBinding = matches(KEY_BINDING_TOGGLE_MARK_BLACKLISTED_TARGETS, rawKey);
 		boolean fluidsBinding = matches(KEY_BINDING_TOGGLE_MARK_FLUIDS, rawKey);
-		if (!(passThroughBinding || blacklistedBinding || fluidsBinding)) {
+		if (!(transparentBinding || blacklistedBinding || fluidsBinding)) {
 			return;
 		}
 
@@ -112,8 +112,8 @@ public class InputUtils {
 			return;
 		}
 
-		if (passThroughBinding) {
-			togglePassThroughTransparentBlocks(eventTimeMillis);
+		if (transparentBinding) {
+			toggleMarkTransparentBlocks(eventTimeMillis);
 		}
 		if (blacklistedBinding) {
 			toggleMarkBlacklistedTargets(eventTimeMillis);
@@ -131,13 +131,13 @@ public class InputUtils {
 		};
 	}
 
-	private static void togglePassThroughTransparentBlocks(long eventTimeMillis) {
+	private static void toggleMarkTransparentBlocks(long eventTimeMillis) {
 		final ClientConfig config = ClientConfig.HANDLER.getConfig();
-		config.setPassThroughTransparentBlocks(!config.isPassThroughTransparentBlocks());
+		config.setMarkTransparentBlocks(!config.isMarkTransparentBlocks());
 		ClientConfig.HANDLER.saveSafely();
 		SelectionToggleNoticeState.INSTANCE.show(
-			SelectionToggleNoticeState.Kind.PASS_THROUGH_TRANSPARENT_BLOCKS,
-			config.isPassThroughTransparentBlocks(),
+			SelectionToggleNoticeState.Kind.MARK_TRANSPARENT_BLOCKS,
+			config.isMarkTransparentBlocks(),
 			eventTimeMillis);
 	}
 
@@ -147,7 +147,7 @@ public class InputUtils {
 		switch (java.util.Objects.requireNonNull(toggle)) {
 			case FLUIDS -> toggleMarkFluids(eventTimeMillis);
 			case ENTITY_BLACKLIST -> toggleMarkBlacklistedTargets(eventTimeMillis);
-			case TRANSPARENT_BLOCKS -> togglePassThroughTransparentBlocks(eventTimeMillis);
+			case TRANSPARENT_BLOCKS -> toggleMarkTransparentBlocks(eventTimeMillis);
 		}
 	}
 

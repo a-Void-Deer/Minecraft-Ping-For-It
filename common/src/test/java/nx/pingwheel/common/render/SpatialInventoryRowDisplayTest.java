@@ -56,6 +56,38 @@ class SpatialInventoryRowDisplayTest {
 	}
 
 	@Test
+	void detachedRowMetadataMeasuresTheSameNameAndIconThatPaintingConsumesWithoutResolvingAgain() {
+		ItemStack named = new ItemStack(Items.GUNPOWDER);
+		named.set(DataComponents.CUSTOM_NAME, Component.literal("A sufficiently long transmitted custom name"));
+		var resolved = SpatialOverlayRenderer.rowDisplay(row("minecraft:gunpowder", "item.minecraft.gunpowder", json(named)), RegistryAccess.EMPTY);
+		var detached = new SpatialInventoryView.RowDisplay(resolved.name(), resolved.stack());
+		var supplied = new SpatialInventoryView.Row("row", "intentionally.short.fallback", Long.MAX_VALUE,
+			"minecraft:gunpowder", "not re-decoded", SpatialInventoryView.Status.READY, null, detached);
+		var painted = SpatialOverlayRenderer.rowDisplay(supplied);
+		assertEquals(resolved.name().getString(), painted.name().getString());
+		assertTrue(detached.hasIcon());
+		assertFalse(painted.stack().isEmpty());
+		painted.stack().setCount(20);
+		assertEquals(1, SpatialOverlayRenderer.rowDisplay(supplied).stack().getCount(), "native paint owns its icon copy");
+		var view = new SpatialInventoryView("list", true, List.of(supplied), 0, 0, 1, true,
+			SpatialInventoryView.Status.READY, 0, 0).withNavigation(null, false, true);
+		var widths = (java.util.function.ToIntFunction<net.minecraft.network.chat.FormattedText>) text -> text.getString().length() * 6;
+		var measured = SpatialInventoryLayout.measure(view, 1600, 1000, 9, 1, widths);
+		assertTrue(measured.width() > 200 && measured.width() <= 320,
+			"the transmitted display and full-sized long quantity, not the short fallback key, drive natural width");
+		var shortIcon = new SpatialInventoryView.Row("icon", "fallback", 1L, null, null, SpatialInventoryView.Status.READY, null,
+			new SpatialInventoryView.RowDisplay(Component.literal("Short name"), new ItemStack(Items.STONE)));
+		var shortBare = new SpatialInventoryView.Row("bare", "fallback", 1L, null, null, SpatialInventoryView.Status.READY, null,
+			new SpatialInventoryView.RowDisplay(Component.literal("Short name")));
+		var iconView = new SpatialInventoryView("icon", true, List.of(shortIcon), 0, 0, 1, true, SpatialInventoryView.Status.READY, 0, 0)
+			.withNavigation(null, false, true);
+		var bareView = new SpatialInventoryView("bare", true, List.of(shortBare), 0, 0, 1, true, SpatialInventoryView.Status.READY, 0, 0)
+			.withNavigation(null, false, true);
+		assertEquals(16 + 3, SpatialInventoryLayout.measure(iconView, 1600, 1000, 9, 1, widths).width()
+			- SpatialInventoryLayout.measure(bareView, 1600, 1000, 9, 1, widths).width(), "the detached icon contributes its actual row slot");
+	}
+
+	@Test
 	void rowSeamCarriesTransmittedComponentsIntoTheCountOneIconStack() {
 		ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
 		sword.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);

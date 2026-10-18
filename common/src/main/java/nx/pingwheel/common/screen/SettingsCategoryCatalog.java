@@ -27,7 +27,7 @@ public final class SettingsCategoryCatalog {
 		DIRECTION_INDICATOR_VISIBLE("direction_indicator_visible"),
 		PLAYER_INFO_MODE("player_info_mode"),
 		TEAM_COLOR_MODE("team_color_mode"),
-		PASS_THROUGH_TRANSPARENT_BLOCKS("pass_through_transparent_blocks"),
+		MARK_TRANSPARENT_BLOCKS("mark_transparent_blocks"),
 		MARK_BLACKLISTED_TARGETS("mark_blacklisted_targets"),
 		MARK_FLUIDS("mark_fluids"),
 		SPATIAL_ROOT_DISTANCE("spatial_selector.root_distance"),
@@ -147,7 +147,7 @@ public final class SettingsCategoryCatalog {
 			Setting.PLAYER_INFO_MODE,
 			Setting.TEAM_COLOR_MODE));
 		settings.put(Category.TARGET_SELECTION, List.of(
-			Setting.PASS_THROUGH_TRANSPARENT_BLOCKS,
+			Setting.MARK_TRANSPARENT_BLOCKS,
 			Setting.MARK_BLACKLISTED_TARGETS,
 			Setting.MARK_FLUIDS));
 		settings.put(Category.WHEEL_APPEARANCE, List.of(

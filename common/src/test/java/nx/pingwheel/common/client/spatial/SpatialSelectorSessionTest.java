@@ -1469,6 +1469,25 @@ class SpatialSelectorSessionTest {
 	}
 
 	@Test
+	void capacityRelayoutCannotRearmTheSharedHeldBackBlockAfterAnItemReturn() {
+		var session = openedList(true, new Content());
+		session.moveGui(200, 0, 290);
+		var back = current(session).choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow();
+		focus(session, back.id(), 300); session.tick(550);
+		String listMenu = current(session).menuId();
+		assertTrue(listMenu.endsWith(":inventory"));
+		var before = session.snapshot();
+		session.updateListGeometry(new SpatialSelectorSession.ListGeometry(1, 64, 26, 22, 15, 70), 560);
+		assertEquals(before.radial(), session.snapshot().radial(), "capacity-only relayout is not physical leave input");
+		double backSign = session.snapshot().inventory().direction().back() == InventoryListModel.Side.LEFT ? -1 : 1;
+		session.moveGui(backSign * 30, 0, 570); session.tick(1000);
+		assertEquals(listMenu, current(session).menuId(), "entering Back while the shared block is held cannot cascade");
+		session.moveGui(-backSign * 30, 0, 1010);
+		session.moveGui(backSign * 30, 0, 1020); session.tick(1270);
+		assertTrue(current(session).menuId().endsWith(":content"), "a deliberate physical leave/reentry still permits one return");
+	}
+
+	@Test
 	void itemClearanceUpdateRepositionsTheActiveItemAndIsInertBeforeEntry() {
 		var session = openedList(false, new Content());
 		session.updateItemClearance(120, 290); // before entry: caches only

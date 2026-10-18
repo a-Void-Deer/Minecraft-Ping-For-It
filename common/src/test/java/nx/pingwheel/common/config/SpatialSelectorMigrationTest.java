@@ -28,12 +28,13 @@ class SpatialSelectorMigrationTest {
 		Path freshPath = directory.resolve("fresh.json");
 		var fresh = new ConfigHandler<>(ClientConfig.class, freshPath, TIMEOUT_TARGET);
 		fresh.load();
-		assertEquals(0, new java.math.BigDecimal("1.75").compareTo(read(freshPath).getAsJsonObject("spatialSelector")
+		assertEquals(0, new java.math.BigDecimal("2.5").compareTo(read(freshPath).getAsJsonObject("spatialSelector")
 			.get("targetGlide").getAsBigDecimal()));
-		assertLoadedGlideThreshold(fresh.getConfig(), 40.0 / 1.75);
+		assertLoadedGlideThreshold(fresh.getConfig(), 16);
 		for (String selector : List.of("", ",\"spatialSelector\":null", ",\"spatialSelector\":{}",
 			",\"spatialSelector\":{\"targetGlide\":null}", ",\"spatialSelector\":{\"targetGlide\":0.25}",
-			",\"spatialSelector\":{\"targetGlide\":2}", ",\"spatialSelector\":{\"targetGlide\":9}")) {
+			",\"spatialSelector\":{\"targetGlide\":1.75}", ",\"spatialSelector\":{\"targetGlide\":2}",
+			",\"spatialSelector\":{\"targetGlide\":9}")) {
 			Path path = directory.resolve("current.json");
 			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET + "\",\"pingVolume\":37" + selector + "}\n")
 				.getBytes(StandardCharsets.UTF_8);
@@ -41,9 +42,10 @@ class SpatialSelectorMigrationTest {
 			var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
 			handler.load();
 			double threshold = selector.contains(":0.25") ? 160
+				: selector.contains(":1.75}") ? 40.0 / 1.75
 				: selector.contains(":2}") ? 20
 				: selector.contains(":9}") ? 40.0 / 9.0
-				: 40.0 / 1.75;
+				: 16;
 			assertLoadedGlideThreshold(handler.getConfig(), threshold);
 			assertEquals(37, handler.getConfig().getPingVolume());
 			assertArrayEquals(original, Files.readAllBytes(path), "default normalization is not a load rewrite");
@@ -54,6 +56,12 @@ class SpatialSelectorMigrationTest {
 			if (threshold == 160) assertEquals(0, new java.math.BigDecimal("0.25").compareTo(
 				read(path).getAsJsonObject("spatialSelector").get("targetGlide").getAsBigDecimal()));
 		}
+		fresh.getConfig().getSpatialSelector().setTargetGlide(new java.math.BigDecimal("0.25"));
+		fresh.resetToDefaults();
+		assertLoadedGlideThreshold(fresh.getConfig(), 16);
+		var resetReloaded = new ConfigHandler<>(ClientConfig.class, freshPath, TIMEOUT_TARGET);
+		resetReloaded.load();
+		assertLoadedGlideThreshold(resetReloaded.getConfig(), 16);
 		assertNoBackup(directory);
 	}
 

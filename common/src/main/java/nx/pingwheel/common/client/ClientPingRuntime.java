@@ -88,7 +88,6 @@ import nx.pingwheel.common.presentation.preview.client.PreviewLocalReaders;
 import nx.pingwheel.common.presentation.InventoryItemPingTypes;
 import nx.pingwheel.common.presentation.PresentationPropertyPingTypes;
 import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
-import nx.pingwheel.common.render.SpatialInventoryView;
 import nx.pingwheel.common.render.SpatialOverlayRenderer;
 import nx.pingwheel.common.interaction.wheel.WheelSelection;
 import nx.pingwheel.common.client.LongPressCompatibilityController;
@@ -279,6 +278,15 @@ public final class ClientPingRuntime {
 		Optional<NativeSelectorInput.Frame> inputFrame();
 		default Optional<GestureSkipHold.Position> mousePosition() { return Optional.empty(); }
 		SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style);
+		default SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame) {
+			var geometry = listGeometry(style);
+			return new SpatialSelectorSession.ListGeometry(geometry.visibleRows(), geometry.width(), geometry.headerHeight(),
+				geometry.rowHeight(), geometry.footerHeight(), itemMenuClearance(style, frame));
+		}
+		default SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame,
+			nx.pingwheel.common.render.SpatialInventoryView view) { return listGeometry(style, frame); }
+		default nx.pingwheel.common.render.SpatialInventoryView.RowDisplay inventoryDisplay(
+			nx.pingwheel.common.render.SpatialInventoryView.Row row) { return null; }
 		/**
 		 * Distance from the inventory panel's forward edge to the item-menu
 		 * centre. The headless compatibility fallback uses the port's explicit
@@ -699,7 +707,7 @@ public final class ClientPingRuntime {
 	 * live by the selector toggle labels.
 	 */
 	private static RaycastPolicy raycastPolicy(ClientConfig config) {
-		return RaycastPolicy.from(config.isPassThroughTransparentBlocks(), config.isMarkBlacklistedTargets(), config.isMarkFluids());
+		return RaycastPolicy.from(config.isMarkTransparentBlocks(), config.isMarkBlacklistedTargets(), config.isMarkFluids());
 	}
 
 	private LongPressCompatibilityController.BaselineOutcome baselineRelease() {
@@ -780,7 +788,7 @@ public final class ClientPingRuntime {
 			if (selector == null) openSelector(frameTimeMillis);
 			if (selector != null && presentable) {
 				var frame = inputFrame.orElseThrow();
-				prepareItemClearance(frame, frameTimeMillis);
+				prepareInventoryGeometry(frame, frameTimeMillis);
 				// The interaction frame owns projection publication. Paint consumes it unchanged.
 				long nowNanos = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(frameTimeMillis);
 				selector.constrainPointer(selectorPaint.prepareViewport(selector.snapshot().radial(), frame.guiWidth(), frame.guiHeight(),
@@ -1005,21 +1013,24 @@ public final class ClientPingRuntime {
 	}
 	private void constrainSelector(NativeSelectorInput.Frame frame, long nowMillis) {
 		if (selector == null) return;
-		prepareItemClearance(frame, nowMillis);
+		prepareInventoryGeometry(frame, nowMillis);
 		selector.constrainPointer(selectorPaint.lastViewport(frame.guiWidth(), frame.guiHeight()), nowMillis);
 	}
 	/**
 	 * Interaction geometry is measured before viewport confinement and before
-	 * move/scroll/release/tick paths; draw remains only a consumer.
+	 * move/scroll/release/tick paths. Paint-only frames use the same preparation
+	 * without advancing interaction time.
 	 */
-	private void prepareItemClearance(NativeSelectorInput.Frame frame, long nowMillis) {
+	private void prepareInventoryGeometry(NativeSelectorInput.Frame frame, long nowMillis) {
 		if (selector == null || selectorStyle == null) return;
-		selector.updateItemClearance(interactionAccess.itemMenuClearance(selectorStyle, frame), nowMillis);
+		selector.prepareInventoryGeometry(view -> interactionAccess.listGeometry(selectorStyle, frame, view),
+			interactionAccess::inventoryDisplay, nowMillis);
 	}
 	public void drawSelector(GuiGraphics graphics) {
 		var inputFrame = interactionAccess.inputFrame();
 		if (inputFrame.isEmpty()) return;
 		if (selectorStyle == null || (selector == null && !selectorPaint.isAnimating())) return;
+		constrainSelector(inputFrame.get(), timeSource.nowMillis());
 		var opened = selector;
 		var snapshot = opened == null ? null : opened.snapshot();
 		Function<SpatialController.ChoiceView, Component> details = snapshot == null ? null
@@ -1216,12 +1227,29 @@ public final class ClientPingRuntime {
 			return Game == null ? Optional.empty() : Optional.of(new GestureSkipHold.Position(Game.mouseHandler.xpos(), Game.mouseHandler.ypos()));
 		}
 		public SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style) {
-			var view = new SpatialInventoryView("layout", false, List.of(), -1, 0, 1, true, SpatialInventoryView.Status.UNKNOWN, 0, 0);
-			var layout = SpatialOverlayRenderer.inventoryLayout(view, 0, 0, Game.font.lineHeight, style);
-			int rows = Math.max(1, (int) ((Game.getWindow().getGuiScaledHeight() - layout.headerHeight() - layout.footerHeight())
-				/ layout.rowHeight()));
-			double clearance = measuredItemMenuClearance(style, Game.getWindow().getGuiScaledWidth(), Game.getWindow().getGuiScaledHeight());
-			return SpatialSelectorSession.ListGeometry.fromLayout(rows, layout, clearance);
+			return measuredListGeometry(style, Game.getWindow().getGuiScaledWidth(), Game.getWindow().getGuiScaledHeight());
+		}
+		public SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame) {
+			return measuredListGeometry(style, frame.guiWidth(), frame.guiHeight());
+		}
+		public SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame,
+			nx.pingwheel.common.render.SpatialInventoryView view) {
+			return SpatialSelectorSession.ListGeometry.fromMetrics(nx.pingwheel.common.render.SpatialInventoryLayout.measure(
+				view, frame.guiWidth(), frame.guiHeight(), Game.font.lineHeight, style.inventoryTextScale(), Game.font::width),
+				measuredItemMenuClearance(style, frame.guiWidth(), frame.guiHeight()));
+		}
+		public nx.pingwheel.common.render.SpatialInventoryView.RowDisplay inventoryDisplay(
+			nx.pingwheel.common.render.SpatialInventoryView.Row row) {
+			try {
+				var display = nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.resolve(row.itemId(), row.label(), row.displayJson());
+				return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(display.name(), display.stack());
+			} catch (RuntimeException | LinkageError unavailable) {
+				return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(Component.translatable(row.label()));
+			}
+		}
+		private SpatialSelectorSession.ListGeometry measuredListGeometry(SpatialOverlayRenderer.Style style, int width, int height) {
+			return SpatialSelectorSession.ListGeometry.fromMetrics(nx.pingwheel.common.render.SpatialInventoryLayout.measure(
+				width, height, Game.font.lineHeight, style.inventoryTextScale()), measuredItemMenuClearance(style, width, height));
 		}
 		public double itemMenuClearance(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame) {
 			return measuredItemMenuClearance(style, frame.guiWidth(), frame.guiHeight());

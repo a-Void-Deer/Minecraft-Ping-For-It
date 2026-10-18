@@ -38,6 +38,30 @@ class InventoryGestureTest {
 	}
 
 	@Test
+	void rowMetricRelayoutKeepsGlideFractionSideProgressAndWheelLock() {
+		var model = listWithRows(40);
+		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
+		gesture.begin(0, 0, leftBack());
+		gesture.move(0, 20); // half a row under the old metric
+		gesture.move(10, 0);
+		gesture.updateRowHeight(40);
+		assertEquals(10, gesture.horizontalTravel());
+		assertEquals(0, model.selectedIndex());
+		gesture.move(0, 40); // remaining half under the new metric
+		assertEquals(1, model.selectedIndex());
+		gesture.wheelRows(0.75);
+		gesture.updateRowHeight(30);
+		assertEquals(1, gesture.wheelRows(0.25), "fractional wheel input survives independently");
+		gesture.move(0, 10); // partial signed wheel unlock
+		gesture.updateRowHeight(40);
+		gesture.move(0, 3);
+		assertEquals(2, model.selectedIndex(), "relayout did not clear the wheel lock");
+		gesture.move(0, 1); // unlock at 14; this sample alone contributes half a pixel
+		gesture.move(0, 79);
+		assertEquals(3, model.selectedIndex(), "relayout preserved partial unlock travel");
+	}
+
+	@Test
 	void physicalSamplesKeepBothLogicalPointerAxesWhileLongVerticalTravelGlides() {
 		var model = listWithRows(40);
 		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
