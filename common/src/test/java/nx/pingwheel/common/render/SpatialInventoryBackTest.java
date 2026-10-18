@@ -128,7 +128,7 @@ class SpatialInventoryBackTest {
 				.findFirst().orElseThrow();
 			var paint = (SpatialOverlayRenderer.PanelPaint) panel.data();
 			assertFalse(panel.present());
-			assertEquals(64, paint.width());
+			assertEquals(96, paint.width());
 			assertEquals(129, paint.height(), "four whole rows fit the resized content budget");
 			assertEquals(22, painter.states.stream().filter(state -> state.data() instanceof SpatialOverlayRenderer.RowPaint)
 				.map(state -> ((SpatialOverlayRenderer.RowPaint) state.data()).height()).findFirst().orElseThrow());

@@ -9,7 +9,7 @@ import net.minecraft.network.chat.FormattedText;
 public record SpatialInventoryLayout(int first, int count, double centerX, double centerY,
 	double width, double height, double headerHeight, double rowHeight, double footerHeight) {
 
-	private static final double MAX_WIDTH_FRACTION = 0.2;
+	private static final double MAX_WIDTH_FRACTION = 0.3;
 	private static final double MAX_HEIGHT_FRACTION = 0.6;
 	public static final int ITEM_ICON_SIZE = 16;
 

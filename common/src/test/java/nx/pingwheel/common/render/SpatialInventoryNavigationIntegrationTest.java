@@ -736,7 +736,7 @@ class SpatialInventoryNavigationIntegrationTest {
 		f.pending = f.projection(List.of(changed)); f.frame(f.now + 1);
 		assertEquals(projected + 1, f.displayProjections, "only the changed display identity is detached again");
 		assertTrue(f.geometry.width() > beforeWidth);
-		assertTrue(f.geometry.width() <= 320);
+		assertTrue(f.geometry.width() <= 480);
 		assertEquals(before.inventory().selectedKey(), f.snapshot().inventory().selectedKey());
 		assertEquals(before.radial().pointer(), f.snapshot().radial().pointer());
 		assertEquals(before.radial().trail(), f.snapshot().radial().trail());
@@ -758,7 +758,7 @@ class SpatialInventoryNavigationIntegrationTest {
 		assertEquals(before.inventory().selectedKey(), after.inventory().selectedKey());
 		assertEquals(before.radial().trail(), after.radial().trail());
 		assertTrue(f.menu().menuId().endsWith(":inventory"));
-		assertTrue(f.geometry.width() <= 100, "the content width respects the scaled viewport budget");
+		assertTrue(f.geometry.width() <= 150, "the content width respects the scaled viewport budget");
 		assertTrue(after.inventoryView().visibleRows() < before.inventoryView().visibleRows());
 		f.move(0, f.geometry.rowHeight() / 0.5, f.now + 1);
 		assertEquals("k16", f.snapshot().inventory().selectedKey(), "the first real scaled sample moves exactly one row");

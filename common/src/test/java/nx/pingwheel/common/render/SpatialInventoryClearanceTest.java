@@ -306,23 +306,27 @@ class SpatialInventoryClearanceTest {
 		var label = Component.literal("Back");
 		var painter = new Painter(9);
 		var session = new SpatialOverlayRenderer.Session();
-		double oldClearance = SpatialOverlayRenderer.itemMenuClearance(320, 240, 9, 24, style);
+		double oldClearance = SpatialOverlayRenderer.itemMenuClearance(400, 240, 9, 24, style);
 		double newClearance = SpatialOverlayRenderer.itemMenuClearance(1000, 700, 9, 24, style);
 		var inventory = new SpatialInventoryView("list", true, List.of(
 			new SpatialInventoryView.Row("retained", "Retained", 2L, null, SpatialInventoryView.Status.READY)),
 			0, 0, 1, sign > 0, SpatialInventoryView.Status.READY, 0, 0)
 			.withSelectedRowCenterY(0).withNavigation("retained", true, true);
-		double oldHalf = panelHalfWidth(inventory, painter, style, 320, 240);
+		double oldHalf = panelHalfWidth(inventory, painter, style, 400, 240);
 		double newHalf = panelHalfWidth(inventory, painter, style, 1000, 700);
 		var controller = controller(sign * (oldHalf + oldClearance), 0, 0, sign, true);
-		frame(session, controller, inventory, painter, label, style, 320, 240, 0);
-		frame(session, controller, inventory, painter, label, style, 320, 240, DURATION);
+		frame(session, controller, inventory, painter, label, style, 400, 240, 0);
+		frame(session, controller, inventory, painter, label, style, 400, 240, DURATION);
 		// The content width also changes on resize. Keep this fixture's pointer
 		// beyond both child origins so the same leaf remains a follower; a pointer
-		// between the two origins legitimately changes to Back instead.
+		// between the two origins legitimately changes to Back instead. The old
+		// viewport must also admit that pointer: a narrower one confines the
+		// pre-resize rebase, leaving the pointer inside the new child deadzone.
 		controller.rebase(sign * (newHalf + newClearance + 30), 0, DURATION / 1_000_000L);
 		long resized = DURATION + 1;
 		controller.repositionExternal(p(sign * (newHalf + newClearance), 0), p(0, 0), resized / 1_000_000L);
+		assertEquals("item:leaf", controller.snapshot().menus().getLast().focusId(),
+			"the rebased pointer stays beyond the new item origin instead of entering its deadzone");
 		for (long elapsed : new long[] {0, DURATION / 2, DURATION}) {
 			frame(session, controller, inventory, painter, label, style, 1000, 700, resized + elapsed);
 			assertPaintedClearance(painter, "follower resize at " + elapsed);

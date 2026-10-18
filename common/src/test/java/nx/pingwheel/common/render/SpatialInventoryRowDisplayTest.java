@@ -73,7 +73,7 @@ class SpatialInventoryRowDisplayTest {
 			SpatialInventoryView.Status.READY, 0, 0).withNavigation(null, false, true);
 		var widths = (java.util.function.ToIntFunction<net.minecraft.network.chat.FormattedText>) text -> text.getString().length() * 6;
 		var measured = SpatialInventoryLayout.measure(view, 1600, 1000, 9, 1, widths);
-		assertTrue(measured.width() > 200 && measured.width() <= 320,
+		assertTrue(measured.width() > 200 && measured.width() <= 480,
 			"the transmitted display and full-sized long quantity, not the short fallback key, drive natural width");
 		var shortIcon = new SpatialInventoryView.Row("icon", "fallback", 1L, null, null, SpatialInventoryView.Status.READY, null,
 			new SpatialInventoryView.RowDisplay(Component.literal("Short name"), new ItemStack(Items.STONE)));

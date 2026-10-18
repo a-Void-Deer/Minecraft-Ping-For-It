@@ -29,7 +29,7 @@ class SpatialInventoryLayoutTest {
 	@Test
 	void nativeMetricsKeepNaturalContentAndLimitOnlyTheAvailableWindow() {
 		var metrics = SpatialInventoryLayout.measure(640, 360, 9, 1);
-		assertTrue(metrics.width() < 128, "an empty content measure does not fill the available width");
+		assertTrue(metrics.width() < 192, "an empty content measure does not fill the available width");
 		assertEquals(7, metrics.visibleRows(), "seven complete readable rows fit between the header and footer");
 		for (int size : new int[] {0, 2, 30}) {
 			var view = new SpatialInventoryView("list", true, rows(size), size == 0 ? -1 : 0, 0, 30,
@@ -63,9 +63,9 @@ class SpatialInventoryLayoutTest {
 		double middleWidth = SpatialInventoryLayout.measure(middleView, 1600, 1000, 9, 1, widths).width();
 		double longWidth = SpatialInventoryLayout.measure(longView, 1600, 1000, 9, 1, widths).width();
 		assertTrue(emptyWidth < shortWidth && shortWidth < middleWidth && middleWidth < longWidth);
-		assertTrue(middleWidth > 200 && middleWidth < 320, "room above the old width is used naturally, not filled to a new fixed maximum");
-		assertTrue(longWidth > 200 && longWidth <= 320, "long content uses the room beyond the old fixed width");
-		assertEquals(320, longWidth, "only the real viewport maximum clips this long name");
+		assertTrue(middleWidth > 200 && middleWidth < 480, "room above the old width is used naturally, not filled to a new fixed maximum");
+		assertTrue(longWidth > 200 && longWidth <= 480, "long content uses the room beyond the old fixed width");
+		assertEquals(480, longWidth, "only the real viewport maximum clips this long name");
 		Row longRow = longView.rows().getFirst();
 		var distinctLongRow = new Row("long", longRow.label(), longRow.count(), longRow.itemId(), longRow.displayJson(),
 			longRow.quality(), longRow.outlineColor(), longRow.display());
