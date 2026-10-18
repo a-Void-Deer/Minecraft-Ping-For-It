@@ -498,9 +498,10 @@ non-background alpha are retained, and no previously unfilled unselected row
 gains a fill. While an item's radial submenu is open, the list beneath it is
 not the active surface and is presented unfocused.
 
-On the active list, every authorized directly selectable row carries its
-annotation-colored solid border, including unselected rows. Data-quality text
-may remain grey without losing that border. Back-side focus, an active item
+On the active list, only the currently selected row that a direct release can
+commit carries its annotation-colored solid border. Data-quality text may remain
+grey without losing that border. Unselected rows and rows that leave the visible
+window do not retain that annotation border. Back-side focus, an active item
 submenu, or loss of direct annotation authorization removes the direct-send
 decoration; a retained row behind its item menu does not claim to be the current
 release target. Border painting changes neither row fills nor selection gates.

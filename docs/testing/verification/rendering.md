@@ -188,9 +188,19 @@ color in both focus states, keeps the untyped and legacy `ping:` action
 fallbacks, verifies the cancellation action's focus-independent color, and
 retains the detached color through the exit transition.
 `SpatialInventoryBorderTest` drives the production list planner and row-fill
-seam: selected and unselected authorized rows carry complete annotation-colored
-rectangles, grey data quality does not remove them, and Back focus, a retained
-item row and a noncommittable selected row suppress direct-send decoration.
+seam: only the selected committable row carries a complete annotation-colored
+rectangle, including with grey data quality. An unselected row retains its
+annotation capability in the row data but paints neither that border nor an
+added fill. Back focus, a retained item row and a noncommittable selected row
+suppress direct-send decoration. `SpatialInventoryNavigationIntegrationTest`
+drives native-normalized input through the real session and recorded production
+frame: selection changes within one visible window move the border to the
+current item key, and a scroll-window jump leaves the old selected row fading
+without an outline. Ordinary close retains the current row's border through its
+exit fade while the old row continues its original fade without regaining an
+outline. Reselecting a departing row restores its authorized border on that
+current key alone. These are headless input and recording-painter seams, not
+live window or GPU evidence.
 `SpatialSelectorSessionTest` checks distinct non-grey local-action colors
 without inventing Ping actions, item annotation colors independently of the
 whole-marker default, missing Attention authorization under content-intent OFF,

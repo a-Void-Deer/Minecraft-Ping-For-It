@@ -364,7 +364,12 @@ and safe exact versus unsafe-identity aggregate selection. Additional component
 fidelity and ordinary-item tests compare admitted persistent encodings against
 independent native-codec oracles, including prototype defaults, explicit
 removals, supported tools, equipment and food, nested items and potion-copy
-semantics. Registry-context and holder guards test unknown providers stopping
+semantics. `InventoryVanillaComponentCoverageTest` includes eight durable-item
+defaults and a nonempty PROFILE with signed and unsigned properties in its
+native persistent-identity comparisons. `InventoryRegistryContextGuardTest`
+compares both nonempty enchantment component forms, including stored
+enchantments, with tooltip visibility enabled and disabled against the native
+codec. Registry-context and holder guards test unknown providers stopping
 before callbacks, owner compatibility, unbound holders and admitted native
 lookup shapes. Canonical-writer tests use an independent byte oracle for tag
 kinds, key order, UTF and floating-point cases; adventure/SNBT cases compare
@@ -489,7 +494,18 @@ getters without using old copy/conversion routes. Unknown overrides, foreign
 delegates and final revocation have negative controls; Vault locals have
 save/serialization traps and an all-member final gate. Saved-delegate/stateful
 metadata authority and overlong-lookup refusal have headless loader coverage.
-Exact-field and access-shape tests do not themselves apply Mixins. Separate
+`InventoryExternalFieldsTest` directly exercises the production cached-field
+ports for both fastutil map capacities and PROFILE properties on ordinary,
+untransformed external-library objects, without ServiceLoader substitution.
+Equal-size maps with different resident capacities keep their actual capacities;
+PROFILE reads retain the original backing and property objects; unsupported map
+owners and subclasses reject before overridden methods run. Sparse map and
+enchantment cases check budget refusal before an entry view or iterator is
+created, with positive controls for the entry-view cache. The headless
+`InventoryResidentAccessFields` fixture inherits these three production ports
+and substitutes only Minecraft field reads. `InventoryResidentAccessorShapeTest`
+checks the remaining Minecraft accessor descriptors and loader registrations;
+it does not cover external-library ports or apply Mixins. Separate
 isolated named-host probes exercise the selected registry, holder, builder and
 enchantment raw ports on captured compiled Common, Fabric and NeoForge inputs;
 Forge's registry/builder reads pass, but native enchantment initialization stops
@@ -501,6 +517,16 @@ and high inputs and retained named colors. These probes do not establish
 full production configuration or Fabric API coexistence, FML lifecycle, shipped
 intermediary/SRG namespaces, arbitrary provider internals, or an installed Create
 runtime.
+
+An isolated named-module probe using the installed NeoForge dependency set and
+SecureJarHandler exercises the production cached-field helper from an automatic
+GAME caller module. Both direct access to fastutil and authlib in MC-BOOTSTRAP
+and access through a modeled GAME → SERVICE → MC-BOOTSTRAP ancestor chain pass
+the field and helper checks without target-package opens or added read edges.
+This establishes named-layer library access, not a complete inventory preview:
+it does not launch the FML lifecycle, real PLUGIN/SERVICE wiring, Minecraft,
+Mixin-transformed PropertyMap or game-thread execution. Fabric and Forge have
+no corresponding module-runtime probe evidence.
 
 ### Failure diagnostic seams
 
@@ -526,6 +552,9 @@ identity and one close, a positive witness with failing close returns false,
 and failed replacement or wrong-scope resolution clears the prepared source
 without double-close. Ordinary topology loss and expected direct/cursorless
 read denial stay unavailable without an exception warning.
+These diagnostic fixtures do not inject an external cached-field resolution or
+access failure; the direct external-port tests above do not establish that
+failure's log delivery.
 `InventoryRuntimeTest` separately checks failed plan discovery with consumer,
 round and source context, the attempted prefix still paid, no capture/read and
 no retained or reserved leak.
