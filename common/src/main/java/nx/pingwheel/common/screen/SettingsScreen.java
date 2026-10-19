@@ -576,6 +576,8 @@ public class SettingsScreen extends OptionsSubScreen {
 			case MARK_FLUIDS -> this.addOption(setting, this.getMarkFluidsOption(), false);
 			case SPATIAL_ROOT_DISTANCE -> this.addOption(setting, this.getSpatialRootDistanceOption(), false);
 			case SPATIAL_SUBMENU_RADIUS_SCALE -> this.addOption(setting, this.getSpatialSubmenuRadiusScaleOption(), false);
+			case SPATIAL_INVENTORY_MAX_WIDTH_FRACTION -> this.addOption(setting, this.getSpatialInventoryMaxWidthFractionOption(), false);
+			case SPATIAL_INVENTORY_MAX_HEIGHT_FRACTION -> this.addOption(setting, this.getSpatialInventoryMaxHeightFractionOption(), false);
 			case WHEEL_OPACITY -> this.addOption(setting, this.getWheelOpacityOption(), false);
 			case WHEEL_TARGET_OPACITY -> this.addOption(setting, this.getWheelTargetOpacityOption(), false);
 			case WHEEL_TARGET_FONT_SIZE -> this.addOption(setting, this.getWheelTargetFontSizeOption(), false);
@@ -2322,6 +2324,24 @@ public class SettingsScreen extends OptionsSubScreen {
 		return OptionUtils.ofDecimal(text.getKey(), MIN_SUBMENU_RADIUS_SCALE, MAX_SUBMENU_RADIUS_SCALE, SUBMENU_RADIUS_SCALE_STEP,
 			value -> text.get(Component.literal(value.stripTrailingZeros().toPlainString() + "×")),
 			() -> text.path("tooltip").get(), selector::getSubmenuRadiusScale, selector::setSubmenuRadiusScale);
+	}
+
+	private OptionInstance<BigDecimal> getSpatialInventoryMaxWidthFractionOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("inventory_max_width_fraction");
+		return OptionUtils.ofDecimal(text.getKey(), MIN_INVENTORY_MAX_WIDTH_FRACTION, MAX_INVENTORY_MAX_WIDTH_FRACTION,
+			INVENTORY_MAX_WIDTH_FRACTION_STEP,
+			value -> text.get(Component.literal(value.stripTrailingZeros().toPlainString() + "×")),
+			() -> text.path("tooltip").get(), selector::getInventoryMaxWidthFraction, selector::setInventoryMaxWidthFraction);
+	}
+
+	private OptionInstance<BigDecimal> getSpatialInventoryMaxHeightFractionOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("inventory_max_height_fraction");
+		return OptionUtils.ofDecimal(text.getKey(), MIN_INVENTORY_MAX_HEIGHT_FRACTION, MAX_INVENTORY_MAX_HEIGHT_FRACTION,
+			INVENTORY_MAX_HEIGHT_FRACTION_STEP,
+			value -> text.get(Component.literal(value.stripTrailingZeros().toPlainString() + "×")),
+			() -> text.path("tooltip").get(), selector::getInventoryMaxHeightFraction, selector::setInventoryMaxHeightFraction);
 	}
 
 	private OptionInstance<Boolean> getGestureSkipHoldEnabledOption() {

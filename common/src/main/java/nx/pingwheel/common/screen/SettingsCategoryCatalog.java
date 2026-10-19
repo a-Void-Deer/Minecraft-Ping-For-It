@@ -32,6 +32,8 @@ public final class SettingsCategoryCatalog {
 		MARK_FLUIDS("mark_fluids"),
 		SPATIAL_ROOT_DISTANCE("spatial_selector.root_distance"),
 		SPATIAL_SUBMENU_RADIUS_SCALE("spatial_selector.submenu_radius_scale"),
+		SPATIAL_INVENTORY_MAX_WIDTH_FRACTION("spatial_selector.inventory_max_width_fraction"),
+		SPATIAL_INVENTORY_MAX_HEIGHT_FRACTION("spatial_selector.inventory_max_height_fraction"),
 		WHEEL_OPACITY("wheel_opacity"),
 		WHEEL_TARGET_OPACITY("wheel_target_opacity"),
 		WHEEL_TARGET_FONT_SIZE("wheel_target_font_size"),
@@ -152,6 +154,8 @@ public final class SettingsCategoryCatalog {
 		settings.put(Category.WHEEL_APPEARANCE, List.of(
 			Setting.SPATIAL_ROOT_DISTANCE,
 			Setting.SPATIAL_SUBMENU_RADIUS_SCALE,
+			Setting.SPATIAL_INVENTORY_MAX_WIDTH_FRACTION,
+			Setting.SPATIAL_INVENTORY_MAX_HEIGHT_FRACTION,
 			Setting.WHEEL_OPACITY,
 			Setting.WHEEL_TARGET_OPACITY,
 			Setting.WHEEL_TARGET_FONT_SIZE,

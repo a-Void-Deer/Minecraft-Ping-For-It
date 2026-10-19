@@ -12,6 +12,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.client.spatial.SpatialController;
+import nx.pingwheel.common.config.SpatialSelectorSettings;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -117,7 +118,8 @@ class SpatialInventoryBackTest {
 	void resizedDetachedContentUsesTheCurrentContentBudgetWithoutScalingOrAnOldCapacityEscape() {
 		var painter = new Painter();
 		var session = new SpatialOverlayRenderer.Session();
-		var animated = new SpatialOverlayRenderer.Style(100, 100, 1, 1, false, false);
+		var animated = new SpatialOverlayRenderer.Style(100, 100, 1, 1, 0, 1, false, false,
+			SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, 0.30, 0.60);
 		frame(session, painter, view(true), animated, 1000, 700, 0);
 		frame(session, painter, view(true), animated, 1000, 700, DURATION);
 		frame(session, painter, null, animated, 1000, 700, DURATION + 1);

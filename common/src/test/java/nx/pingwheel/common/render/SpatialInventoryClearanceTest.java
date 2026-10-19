@@ -380,11 +380,11 @@ class SpatialInventoryClearanceTest {
 	@ParameterizedTest
 	@CsvSource({"1", "-1"})
 	void resizeRebasesADetachedPriorPanelWithTheSamePatternInsteadOfLeavingItsOldGuiCenter(double sign) {
-		var style = new SpatialOverlayRenderer.Style(100, 100, 0.5, 1, 88, 1.5, true, false);
+		var style = new SpatialOverlayRenderer.Style(100, 100, 0.5, 1, 88, 1.5, true, false, 19, 100, 0.65, 0.85);
 		var painter = new Painter(9);
 		var session = new SpatialOverlayRenderer.Session();
 		var label = Component.literal("Back");
-		var retained = new SpatialInventoryView.Row("retained", "Retained", 2L, null, SpatialInventoryView.Status.READY);
+		var retained = new SpatialInventoryView.Row("retained", "R".repeat(300), 2L, null, SpatialInventoryView.Status.READY);
 		var oldInventory = new SpatialInventoryView("prior-list", true, List.of(retained,
 			new SpatialInventoryView.Row("other", "Other", 1L, null, SpatialInventoryView.Status.READY)),
 			0, 0, 3, sign > 0, SpatialInventoryView.Status.READY, 0, 0)
@@ -406,8 +406,12 @@ class SpatialInventoryClearanceTest {
 		controller.repositionExternal(p(sign * (newHalf + newClearance), 0), p(0, 0), resized / 1_000_000L);
 		for (long elapsed : new long[] {0, DURATION / 2, DURATION}) {
 			frame(session, controller, newInventory, painter, label, style, 1000, 700, resized + elapsed);
-			if (elapsed == 0) assertTrue(painter.draws.stream().anyMatch(draw -> !draw.state().present()
-				&& draw.state().data() instanceof SpatialOverlayRenderer.PanelPaint), "a different list owner still paints its normal exit tail");
+			if (elapsed == 0) {
+				var detached = painter.draws.stream().filter(draw -> !draw.state().present()
+					&& draw.state().data() instanceof SpatialOverlayRenderer.PanelPaint).findFirst().orElseThrow();
+				assertEquals(650, ((SpatialOverlayRenderer.PanelPaint) detached.state().data()).width(),
+					"the real exit tail is remeasured with the frozen custom width rather than the default cap");
+			}
 			assertPaintedClearance(painter, "detached-panel resize at " + elapsed);
 		}
 	}

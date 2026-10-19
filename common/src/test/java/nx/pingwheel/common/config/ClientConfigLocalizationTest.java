@@ -281,6 +281,8 @@ class ClientConfigLocalizationTest {
 			"settings.pingforit.spatial_selector.dwell_millis",
 			"settings.pingforit.spatial_selector.root_distance",
 			"settings.pingforit.spatial_selector.submenu_radius_scale",
+			"settings.pingforit.spatial_selector.inventory_max_width_fraction",
+			"settings.pingforit.spatial_selector.inventory_max_height_fraction",
 			"settings.pingforit.spatial_selector.hover_millis",
 			"settings.pingforit.spatial_selector.trail_length",
 			"settings.pingforit.spatial_selector.trail_opacity",
@@ -315,7 +317,8 @@ class ClientConfigLocalizationTest {
 			for (String key : booleanLabels) {
 				assertFalse(nonBlankTranslation(json, locale, key).contains("%"), locale + ":" + key);
 			}
-			for (String key : List.of("trail_length", "trail_opacity", "show_trail")) {
+			for (String key : List.of("trail_length", "trail_opacity", "show_trail",
+				"inventory_max_width_fraction", "inventory_max_height_fraction")) {
 				assertFalse(nonBlankTranslation(json, locale,
 					"settings.pingforit.spatial_selector." + key + ".tooltip").contains("%"), locale + ":" + key);
 			}

@@ -49,6 +49,16 @@ public final class SpatialSelectorSettings {
 	public static final BigDecimal DEFAULT_SUBMENU_RADIUS_SCALE = new BigDecimal("1.5");
 	public static final BigDecimal SUBMENU_RADIUS_SCALE_STEP = new BigDecimal("0.1");
 
+	/** Maximum inventory content-panel dimensions relative to the GUI viewport. */
+	public static final BigDecimal MIN_INVENTORY_MAX_WIDTH_FRACTION = new BigDecimal("0.2");
+	public static final BigDecimal MAX_INVENTORY_MAX_WIDTH_FRACTION = new BigDecimal("0.8");
+	public static final BigDecimal DEFAULT_INVENTORY_MAX_WIDTH_FRACTION = new BigDecimal("0.3");
+	public static final BigDecimal INVENTORY_MAX_WIDTH_FRACTION_STEP = new BigDecimal("0.05");
+	public static final BigDecimal MIN_INVENTORY_MAX_HEIGHT_FRACTION = new BigDecimal("0.3");
+	public static final BigDecimal MAX_INVENTORY_MAX_HEIGHT_FRACTION = new BigDecimal("0.95");
+	public static final BigDecimal DEFAULT_INVENTORY_MAX_HEIGHT_FRACTION = new BigDecimal("0.7");
+	public static final BigDecimal INVENTORY_MAX_HEIGHT_FRACTION_STEP = new BigDecimal("0.05");
+
 	/** Confirmed Back-hover dwell range, step and disabled-by-default policy. */
 	public static final int MIN_HOVER_MILLIS = 100;
 	public static final int MAX_HOVER_MILLIS = 2000;
@@ -87,6 +97,8 @@ public final class SpatialSelectorSettings {
 	private int dwellMillis = DEFAULT_DWELL_MILLIS;
 	private int rootDistance = DEFAULT_ROOT_DISTANCE;
 	private BigDecimal submenuRadiusScale = DEFAULT_SUBMENU_RADIUS_SCALE;
+	private BigDecimal inventoryMaxWidthFraction = DEFAULT_INVENTORY_MAX_WIDTH_FRACTION;
+	private BigDecimal inventoryMaxHeightFraction = DEFAULT_INVENTORY_MAX_HEIGHT_FRACTION;
 	private boolean hoverEnabled = DEFAULT_HOVER_ENABLED;
 	private int hoverMillis = DEFAULT_HOVER_MILLIS;
 	private boolean showTrail = true;
@@ -105,6 +117,8 @@ public final class SpatialSelectorSettings {
 		dwellMillis = clampDwellMillis(dwellMillis);
 		rootDistance = clampRootDistance(rootDistance);
 		submenuRadiusScale = clampSubmenuRadiusScale(submenuRadiusScale);
+		inventoryMaxWidthFraction = clampInventoryMaxWidthFraction(inventoryMaxWidthFraction);
+		inventoryMaxHeightFraction = clampInventoryMaxHeightFraction(inventoryMaxHeightFraction);
 		hoverMillis = clampHoverMillis(hoverMillis);
 		preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks);
 		trailLength = clampTrailLength(trailLength);
@@ -117,6 +131,8 @@ public final class SpatialSelectorSettings {
 	public void setDwellMillis(int value) { dwellMillis = clampDwellMillis(value); }
 	public void setRootDistance(int value) { rootDistance = clampRootDistance(value); }
 	public void setSubmenuRadiusScale(BigDecimal value) { submenuRadiusScale = clampSubmenuRadiusScale(value); }
+	public void setInventoryMaxWidthFraction(BigDecimal value) { inventoryMaxWidthFraction = clampInventoryMaxWidthFraction(value); }
+	public void setInventoryMaxHeightFraction(BigDecimal value) { inventoryMaxHeightFraction = clampInventoryMaxHeightFraction(value); }
 	public void setHoverMillis(int value) { hoverMillis = clampHoverMillis(value); }
 	public void setPreciseCapturePeriodTicks(int value) { preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(value); }
 	public void setTrailLength(int value) { trailLength = clampTrailLength(value); }
@@ -156,6 +172,22 @@ public final class SpatialSelectorSettings {
 		return Math.clamp(value, MIN_HOVER_MILLIS, MAX_HOVER_MILLIS);
 	}
 
+	public static BigDecimal clampInventoryMaxWidthFraction(BigDecimal value) {
+		if (value == null) return DEFAULT_INVENTORY_MAX_WIDTH_FRACTION;
+		if (value.compareTo(MIN_INVENTORY_MAX_WIDTH_FRACTION) < 0) return MIN_INVENTORY_MAX_WIDTH_FRACTION;
+		if (value.compareTo(MAX_INVENTORY_MAX_WIDTH_FRACTION) > 0) return MAX_INVENTORY_MAX_WIDTH_FRACTION;
+
+		return value.stripTrailingZeros();
+	}
+
+	public static BigDecimal clampInventoryMaxHeightFraction(BigDecimal value) {
+		if (value == null) return DEFAULT_INVENTORY_MAX_HEIGHT_FRACTION;
+		if (value.compareTo(MIN_INVENTORY_MAX_HEIGHT_FRACTION) < 0) return MIN_INVENTORY_MAX_HEIGHT_FRACTION;
+		if (value.compareTo(MAX_INVENTORY_MAX_HEIGHT_FRACTION) > 0) return MAX_INVENTORY_MAX_HEIGHT_FRACTION;
+
+		return value.stripTrailingZeros();
+	}
+
 	public static int clampPreciseCapturePeriodTicks(int value) {
 		return Math.clamp(value, MIN_PRECISE_CAPTURE_PERIOD_TICKS, MAX_PRECISE_CAPTURE_PERIOD_TICKS);
 	}
@@ -176,14 +208,29 @@ public final class SpatialSelectorSettings {
 			showTrail, reduceMotion, clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks),
 			clampSubmenuRadiusScale(submenuRadiusScale),
 			clampTrailLength(trailLength), clampTrailOpacity(trailOpacity),
-			contentIntentEnabled, gestureSkipHoldEnabled, clampGestureSkipHoldMillis(gestureSkipHoldMillis));
+			contentIntentEnabled, gestureSkipHoldEnabled, clampGestureSkipHoldMillis(gestureSkipHoldMillis),
+			clampInventoryMaxWidthFraction(inventoryMaxWidthFraction),
+			clampInventoryMaxHeightFraction(inventoryMaxHeightFraction));
 	}
 
 	public record Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
 		boolean hoverEnabled, int hoverMillis,
 		boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
 		BigDecimal submenuRadiusScale, int trailLength, int trailOpacity,
-		boolean contentIntentEnabled, boolean gestureSkipHoldEnabled, int gestureSkipHoldMillis) {
+		boolean contentIntentEnabled, boolean gestureSkipHoldEnabled, int gestureSkipHoldMillis,
+		BigDecimal inventoryMaxWidthFraction, BigDecimal inventoryMaxHeightFraction) {
+
+		/** Previous snapshot forms retain the initialized inventory panel limits. */
+		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
+			boolean hoverEnabled, int hoverMillis,
+			boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
+			BigDecimal submenuRadiusScale, int trailLength, int trailOpacity,
+			boolean contentIntentEnabled, boolean gestureSkipHoldEnabled, int gestureSkipHoldMillis) {
+			this(deadzone, stroke, dwellMillis, rootDistance, hoverEnabled,
+				hoverMillis, showTrail, reduceMotion, preciseCapturePeriodTicks, submenuRadiusScale,
+				trailLength, trailOpacity, contentIntentEnabled, gestureSkipHoldEnabled, gestureSkipHoldMillis,
+				DEFAULT_INVENTORY_MAX_WIDTH_FRACTION, DEFAULT_INVENTORY_MAX_HEIGHT_FRACTION);
+		}
 
 		/** Previous snapshot forms keep the opt-in gesture shortcut disabled. */
 		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,

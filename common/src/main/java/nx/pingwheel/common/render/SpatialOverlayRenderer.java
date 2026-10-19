@@ -197,11 +197,22 @@ public final class SpatialOverlayRenderer {
 	 * (radial nodes, inventory panel, rows, header and footer) and its label.
 	 * {@code submenuRadiusScale} multiplies the viewport-derived non-root orbit
 	 * only; the root menu keeps its caller distance and the inventory list keeps
-	 * its own width and height.
+	 * its own content-driven size, capped by the held inventory proportions of
+	 * the current GUI viewport without shrinking its readable text/icon minimum.
 	 */
 	public record Style(int opacityPercent, int targetOpacityPercent, double optionTextScale, double inventoryTextScale,
 		double rootDistance, double submenuRadiusScale, boolean showTrail, boolean reduceMotion,
-		int trailLength, int trailOpacityPercent) {
+		int trailLength, int trailOpacityPercent, double inventoryMaxWidthFraction, double inventoryMaxHeightFraction) {
+
+		/** Compatibility form; native holds supply their frozen inventory proportions explicitly. */
+		public Style(int opacityPercent, int targetOpacityPercent, double optionTextScale, double inventoryTextScale,
+			double rootDistance, double submenuRadiusScale, boolean showTrail, boolean reduceMotion,
+			int trailLength, int trailOpacityPercent) {
+			this(opacityPercent, targetOpacityPercent, optionTextScale, inventoryTextScale, rootDistance, submenuRadiusScale,
+				showTrail, reduceMotion, trailLength, trailOpacityPercent,
+				nx.pingwheel.common.config.SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_WIDTH_FRACTION.doubleValue(),
+				nx.pingwheel.common.config.SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_HEIGHT_FRACTION.doubleValue());
+		}
 
 		/** Compatibility form; native holds supply their frozen trail preferences explicitly. */
 		public Style(int opacityPercent, int targetOpacityPercent, double optionTextScale, double inventoryTextScale,
@@ -248,7 +259,9 @@ public final class SpatialOverlayRenderer {
 			if (!Double.isFinite(optionTextScale) || optionTextScale <= 0.0
 				|| !Double.isFinite(inventoryTextScale) || inventoryTextScale <= 0.0
 				|| !Double.isFinite(rootDistance) || rootDistance < 0.0
-				|| !Double.isFinite(submenuRadiusScale) || submenuRadiusScale <= 0.0) {
+				|| !Double.isFinite(submenuRadiusScale) || submenuRadiusScale <= 0.0
+				|| !Double.isFinite(inventoryMaxWidthFraction) || inventoryMaxWidthFraction <= 0.0
+				|| !Double.isFinite(inventoryMaxHeightFraction) || inventoryMaxHeightFraction <= 0.0) {
 				throw new IllegalArgumentException(
 					"visual scales must be finite and positive, and root distance finite and non-negative");
 			}
@@ -294,6 +307,17 @@ public final class SpatialOverlayRenderer {
 			return new Style(opacityPercent, targetOpacityPercent,
 				WheelLabelLayout.BASE_TEXT_SCALE * optionFontPercent / 100.0,
 				targetFontPercent / 100.0, rootDistance, submenuRadiusScale, showTrail, reduceMotion, trailLength, trailOpacityPercent);
+		}
+
+		/** Native full form: every value is resolved once by the press-time caller. */
+		public static Style fromLegacyFontSizes(int opacityPercent, int targetOpacityPercent, int optionFontPercent,
+			int targetFontPercent, double rootDistance, double submenuRadiusScale,
+			boolean showTrail, boolean reduceMotion, int trailLength, int trailOpacityPercent,
+			double inventoryMaxWidthFraction, double inventoryMaxHeightFraction) {
+			return new Style(opacityPercent, targetOpacityPercent,
+				WheelLabelLayout.BASE_TEXT_SCALE * optionFontPercent / 100.0,
+				targetFontPercent / 100.0, rootDistance, submenuRadiusScale, showTrail, reduceMotion, trailLength, trailOpacityPercent,
+				inventoryMaxWidthFraction, inventoryMaxHeightFraction);
 		}
 	}
 
@@ -854,7 +878,8 @@ public final class SpatialOverlayRenderer {
 			var geometry = new FrameGeometry(guiWidth, guiHeight,
 				origin != null && inventory != null && inventory.open() && inventory.retainedRowKey() != null
 					? radial.menus().getLast().menuId() : null, origin,
-				SpatialInventoryLayout.measure(inventory, guiWidth, guiHeight, painter.lineHeight(), style.inventoryTextScale(), painter::width));
+				SpatialInventoryLayout.measure(inventory, guiWidth, guiHeight, painter.lineHeight(), style.inventoryTextScale(),
+					style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), painter::width));
 			boolean relayout = geometry.relayoutFrom(frameGeometry);
 			if (frameGeometry != null && (guiWidth != frameGeometry.width() || guiHeight != frameGeometry.height())
 				&& (origin != null || inventory != null && inventory.open())) {
@@ -1505,7 +1530,8 @@ public final class SpatialOverlayRenderer {
 
 	private static void addInventory(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
 		SpatialInventoryView view, FramePainter painter, Style style, double guiWidth, double guiHeight, boolean listActive) {
-		var metrics = SpatialInventoryLayout.measure(view, guiWidth, guiHeight, painter.lineHeight(), style.inventoryTextScale(), painter::width);
+		var metrics = SpatialInventoryLayout.measure(view, guiWidth, guiHeight, painter.lineHeight(), style.inventoryTextScale(),
+			style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), painter::width);
 		view = metrics.window(view);
 		SpatialInventoryLayout layout = metrics.layout(view, guiWidth / 2.0, guiHeight / 2.0);
 		var source = new InventoryGeometry(view, metrics.layout(view, 0, 0));
@@ -1589,7 +1615,8 @@ public final class SpatialOverlayRenderer {
 		};
 		if (source == null) return state;
 		var next = layouts.computeIfAbsent(source, value -> SpatialInventoryLayout.measure(value.view(), width, height,
-			painter.lineHeight(), style.inventoryTextScale(), painter::width).layout(value.view(), 0, 0));
+			painter.lineHeight(), style.inventoryTextScale(), style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(),
+			painter::width).layout(value.view(), 0, 0));
 		var previous = source.layout();
 		if (next.equals(previous) && !(state.data() instanceof InventoryBackPaint)
 			&& !(state.data() instanceof InventoryBackSectorPaint)) return state;
@@ -1655,7 +1682,8 @@ public final class SpatialOverlayRenderer {
 	/** Explicit font-width port for independent/headless callers; native measurement uses the same function. */
 	public static SpatialInventoryLayout inventoryLayout(SpatialInventoryView view, double guiWidth, double guiHeight,
 		int fontLineHeight, Style style, ToIntFunction<FormattedText> widths) {
-		return SpatialInventoryLayout.measure(view, guiWidth, guiHeight, fontLineHeight, style.inventoryTextScale(), widths)
+		return SpatialInventoryLayout.measure(view, guiWidth, guiHeight, fontLineHeight, style.inventoryTextScale(),
+			style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), widths)
 			.layout(view, guiWidth / 2.0, guiHeight / 2.0);
 	}
 

@@ -7,10 +7,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -18,6 +20,12 @@ import static org.junit.jupiter.api.Assertions.*;
 class SpatialSelectorMigrationTest {
 	private static final String TIMEOUT_TARGET = "0.5.0-pfi-beta1";
 	private static final String LEGACY = "0.4.2-pfi-beta1";
+
+	/** Contract-owned inventory-panel fraction bounds used as explicit boundary probes. */
+	private static final BigDecimal WIDTH_FRACTION_MIN = new BigDecimal("0.20");
+	private static final BigDecimal WIDTH_FRACTION_MAX = new BigDecimal("0.80");
+	private static final BigDecimal HEIGHT_FRACTION_MIN = new BigDecimal("0.30");
+	private static final BigDecimal HEIGHT_FRACTION_MAX = new BigDecimal("0.95");
 
 	@Test
 	void removedGlideIsUnknownDataWithoutASameVersionLoadRewrite(
@@ -328,12 +336,23 @@ class SpatialSelectorMigrationTest {
 	@Test
 	void futureVersionGuardKeepsAllBytesAndRefusesSaveAndReset(@TempDir Path directory) throws IOException {
 		Path path = directory.resolve("client.json");
-		byte[] original = legacyRoot("0.5.0-pfi-beta2").toString().getBytes(StandardCharsets.UTF_8);
+		JsonObject futureRoot = legacyRoot("0.5.0-pfi-beta2");
+		futureRoot.add("spatialSelector", JsonParser.parseString(
+			"{\"inventoryMaxWidthFraction\":null,\"inventoryMaxHeightFraction\":1.5,"
+				+ "\"unknownPreference\":true}").getAsJsonObject());
+		byte[] original = futureRoot.toString().getBytes(StandardCharsets.UTF_8);
 		Files.write(path, original);
 		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
 		handler.load();
-		assertEquals(new SpatialSelectorSettings(), handler.getConfig().getSpatialSelector());
+		SpatialSelectorSettings fallback = handler.getConfig().getSpatialSelector();
+		SpatialSelectorSettings expectedDefaults = new ClientConfig().getSpatialSelector();
+		assertEquals(expectedDefaults, fallback, "future-version fallback uses normal model initialization");
+		assertDecimalEquals(expectedDefaults.getInventoryMaxWidthFraction(),
+			fallback.snapshot().inventoryMaxWidthFraction());
+		assertDecimalEquals(expectedDefaults.getInventoryMaxHeightFraction(),
+			fallback.snapshot().inventoryMaxHeightFraction());
 		handler.getConfig().getSpatialSelector().setHoverEnabled(true);
+		handler.getConfig().getSpatialSelector().setInventoryMaxWidthFraction(new BigDecimal("0.45"));
 		assertFalse(handler.saveSafely());
 		handler.resetToDefaults();
 		assertEquals(new SpatialSelectorSettings(), handler.getConfig().getSpatialSelector());
@@ -407,6 +426,219 @@ class SpatialSelectorMigrationTest {
 			"reset persists the disabled content-intent default");
 	}
 
+	@Test
+	void sameVersionSelectorWithoutInventoryFractionsUsesModelDefaultsWithoutRewrite(
+		@TempDir Path directory) throws IOException {
+		SpatialSelectorSettings expected = new ClientConfig().getSpatialSelector();
+		for (String selectorJson : List.of("", ",\"spatialSelector\":{}")) {
+			Path path = directory.resolve("missing.json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37" + selectorJson + "}\n").getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+
+			SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
+			assertEquals(expected, selector);
+			assertDecimalEquals(expected.getInventoryMaxWidthFraction(),
+				selector.snapshot().inventoryMaxWidthFraction());
+			assertDecimalEquals(expected.getInventoryMaxHeightFraction(),
+				selector.snapshot().inventoryMaxHeightFraction());
+			assertEquals(37, handler.getConfig().getPingVolume());
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"missing additive selector members are not a load rewrite");
+			assertTrue(handler.saveSafely());
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"an untouched same-version save is a no-op");
+
+			ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			reloaded.load();
+			assertEquals(expected, reloaded.getConfig().getSpatialSelector());
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void explicitInventoryFractionsRoundTripWithoutQuantizationThroughARealSave(
+		@TempDir Path directory) throws IOException {
+		List<BigDecimal[]> values = List.of(
+			new BigDecimal[] {new BigDecimal("0.45"), new BigDecimal("0.85")},
+			new BigDecimal[] {new BigDecimal("0.333"), new BigDecimal("0.777")});
+		int index = 0;
+		for (BigDecimal[] pair : values) {
+			Path path = directory.resolve("explicit-" + index++ + ".json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37,\"spatialSelector\":{"
+				+ "\"inventoryMaxWidthFraction\":" + pair[0]
+				+ ",\"inventoryMaxHeightFraction\":" + pair[1] + "}}\n")
+				.getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+
+			SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
+			assertDecimalEquals(pair[0], selector.getInventoryMaxWidthFraction());
+			assertDecimalEquals(pair[1], selector.getInventoryMaxHeightFraction());
+			assertDecimalEquals(pair[0], selector.snapshot().inventoryMaxWidthFraction());
+			assertDecimalEquals(pair[1], selector.snapshot().inventoryMaxHeightFraction());
+			assertTrue(WIDTH_FRACTION_MIN.compareTo(pair[0]) <= 0
+				&& pair[0].compareTo(WIDTH_FRACTION_MAX) <= 0, "the width test point is inside its legal interval");
+			assertTrue(HEIGHT_FRACTION_MIN.compareTo(pair[1]) <= 0
+				&& pair[1].compareTo(HEIGHT_FRACTION_MAX) <= 0, "the height test point is inside its legal interval");
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"explicit in-range values are loaded without a rewrite");
+
+			handler.getConfig().setPingVolume(38);
+			assertTrue(handler.saveSafely());
+			JsonObject persisted = read(path).getAsJsonObject("spatialSelector");
+			assertDecimalEquals(pair[0], persisted.get("inventoryMaxWidthFraction").getAsBigDecimal());
+			assertDecimalEquals(pair[1], persisted.get("inventoryMaxHeightFraction").getAsBigDecimal());
+
+			ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			reloaded.load();
+			assertEquals(38, reloaded.getConfig().getPingVolume());
+			assertDecimalEquals(pair[0],
+				reloaded.getConfig().getSpatialSelector().getInventoryMaxWidthFraction());
+			assertDecimalEquals(pair[1],
+				reloaded.getConfig().getSpatialSelector().getInventoryMaxHeightFraction());
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void nullAndOutOfRangeInventoryFractionsLegalizeThroughTheHandler(
+		@TempDir Path directory) throws IOException {
+		SpatialSelectorSettings modelDefaults = new ClientConfig().getSpatialSelector();
+		List<FractionExpectation> cases = List.of(
+			new FractionExpectation(
+				"{\"inventoryMaxWidthFraction\":null,\"inventoryMaxHeightFraction\":null}",
+				modelDefaults.getInventoryMaxWidthFraction(), modelDefaults.getInventoryMaxHeightFraction(), true),
+			new FractionExpectation(
+				"{\"inventoryMaxWidthFraction\":0.10,\"inventoryMaxHeightFraction\":1.20}",
+				WIDTH_FRACTION_MIN, HEIGHT_FRACTION_MAX, false));
+		int index = 0;
+		for (FractionExpectation expected : cases) {
+			Path path = directory.resolve("normalized-" + index++ + ".json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37,\"spatialSelector\":" + expected.selectorJson() + "}\n")
+				.getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+
+			SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
+			if (expected.modelDefaults()) assertEquals(modelDefaults, selector);
+			assertDecimalEquals(expected.width(), selector.getInventoryMaxWidthFraction());
+			assertDecimalEquals(expected.height(), selector.getInventoryMaxHeightFraction());
+			assertDecimalEquals(expected.width(), selector.snapshot().inventoryMaxWidthFraction());
+			assertDecimalEquals(expected.height(), selector.snapshot().inventoryMaxHeightFraction());
+			assertEquals(37, handler.getConfig().getPingVolume());
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"legalization is in-memory and does not rewrite a same-version source");
+
+			handler.getConfig().setPingVolume(38);
+			assertTrue(handler.saveSafely());
+			JsonObject persisted = read(path).getAsJsonObject("spatialSelector");
+			assertDecimalEquals(selector.getInventoryMaxWidthFraction(),
+				persisted.get("inventoryMaxWidthFraction").getAsBigDecimal());
+			assertDecimalEquals(selector.getInventoryMaxHeightFraction(),
+				persisted.get("inventoryMaxHeightFraction").getAsBigDecimal());
+
+			ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			reloaded.load();
+			assertEquals(selector, reloaded.getConfig().getSpatialSelector());
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void olderVersionMissingInventoryFractionsGainDefaultsOnTheExistingMigrationWrite(
+		@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("legacy-missing.json");
+		JsonObject source = legacyRoot(LEGACY);
+		JsonObject rawSelector = JsonParser.parseString(
+			"{\"hoverEnabled\":true,\"unknownPreference\":{\"enabled\":true}}").getAsJsonObject();
+		source.add("spatialSelector", rawSelector);
+		Files.writeString(path, source.toString(), StandardCharsets.UTF_8);
+
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		handler.load();
+
+		SpatialSelectorSettings expected = new ClientConfig().getSpatialSelector();
+		expected.setHoverEnabled(true);
+		SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
+		assertEquals(expected, selector);
+		assertDecimalEquals(expected.getInventoryMaxWidthFraction(),
+			selector.snapshot().inventoryMaxWidthFraction());
+		assertDecimalEquals(expected.getInventoryMaxHeightFraction(),
+			selector.snapshot().inventoryMaxHeightFraction());
+
+		JsonObject persisted = read(path);
+		JsonObject persistedSelector = persisted.getAsJsonObject("spatialSelector");
+		assertDecimalEquals(selector.getInventoryMaxWidthFraction(),
+			persistedSelector.get("inventoryMaxWidthFraction").getAsBigDecimal());
+		assertDecimalEquals(selector.getInventoryMaxHeightFraction(),
+			persistedSelector.get("inventoryMaxHeightFraction").getAsBigDecimal());
+		assertEquals(rawSelector.get("unknownPreference"), persistedSelector.get("unknownPreference"));
+		assertEquals(source.get("unknown"), persisted.get("unknown"));
+		assertEquals(TIMEOUT_TARGET, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
+		assertNoRetiredWheelKeys(persisted);
+
+		ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		reloaded.load();
+		assertEquals(expected, reloaded.getConfig().getSpatialSelector());
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void explicitInventoryFractionsAndUnknownNestedDataSurviveARealSaveThroughThePendingMigration(
+		@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("legacy-explicit.json");
+		JsonObject source = legacyRoot(LEGACY);
+		JsonObject rawSelector = JsonParser.parseString("""
+			{"inventoryMaxWidthFraction":0.45,"inventoryMaxHeightFraction":0.85,
+			 "unknownPreference":{"enabled":true}}
+			""").getAsJsonObject();
+		source.add("spatialSelector", rawSelector);
+		byte[] original = source.toString().getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+
+		AtomicBoolean failWrite = new AtomicBoolean(true);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path,
+			(sourcePath, backup, bytes) -> fail("valid migration must not enter broken-file recovery"),
+			TIMEOUT_TARGET,
+			(destination, serialized) -> {
+				if (failWrite.get()) throw new IOException("injected migration write failure");
+				Files.writeString(destination, serialized, StandardCharsets.UTF_8);
+			});
+		handler.load();
+		assertArrayEquals(original, Files.readAllBytes(path));
+		SpatialSelectorSettings loaded = handler.getConfig().getSpatialSelector();
+		assertDecimalEquals(new BigDecimal("0.45"), loaded.getInventoryMaxWidthFraction());
+		assertDecimalEquals(new BigDecimal("0.85"), loaded.getInventoryMaxHeightFraction());
+
+		handler.getConfig().setPingVolume(38);
+		failWrite.set(false);
+		assertTrue(handler.saveSafely());
+
+		JsonObject persisted = read(path);
+		assertEquals(38, persisted.get("pingVolume").getAsInt());
+		JsonObject persistedSelector = persisted.getAsJsonObject("spatialSelector");
+		assertDecimalEquals(loaded.getInventoryMaxWidthFraction(),
+			persistedSelector.get("inventoryMaxWidthFraction").getAsBigDecimal());
+		assertDecimalEquals(loaded.getInventoryMaxHeightFraction(),
+			persistedSelector.get("inventoryMaxHeightFraction").getAsBigDecimal());
+		assertEquals(rawSelector.get("unknownPreference"), persistedSelector.get("unknownPreference"));
+		assertEquals(source.get("unknown"), persisted.get("unknown"));
+		assertEquals(TIMEOUT_TARGET, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
+
+		ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		reloaded.load();
+		assertEquals(38, reloaded.getConfig().getPingVolume());
+		assertEquals(loaded, reloaded.getConfig().getSpatialSelector());
+		assertNoBackup(directory);
+	}
+
 	private static JsonObject legacyRoot(String version) {
 		JsonObject root = JsonParser.parseString("""
 			{"wheelInnerRadius":63,"wheelOuterRadius":231,"wheelOpacity":35,
@@ -424,6 +656,14 @@ class SpatialSelectorMigrationTest {
 	private static JsonObject read(Path path) throws IOException {
 		return JsonParser.parseString(Files.readString(path, StandardCharsets.UTF_8)).getAsJsonObject();
 	}
+
+	private static void assertDecimalEquals(BigDecimal expected, BigDecimal actual) {
+		assertNotNull(actual);
+		assertEquals(0, expected.compareTo(actual), "expected " + expected + " but was " + actual);
+	}
+
+	private record FractionExpectation(
+		String selectorJson, BigDecimal width, BigDecimal height, boolean modelDefaults) {}
 
 	private static void assertNoRadii(JsonObject root) {
 		assertFalse(root.has("wheelInnerRadius"));

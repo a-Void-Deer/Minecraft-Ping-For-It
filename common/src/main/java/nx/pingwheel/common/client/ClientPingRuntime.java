@@ -684,7 +684,8 @@ public final class ClientPingRuntime {
 		selectorNativeDistance = Math.min(config.getRaycastDistance(), selectorPingDistance);
 		selectorStyle = SpatialOverlayRenderer.Style.fromLegacyFontSizes(config.getWheelOpacity(), config.getWheelTargetOpacity(), config.getWheelFontSize(),
 			config.getWheelTargetFontSize(), selectorSettings.rootDistance(), selectorSettings.submenuRadiusScale().doubleValue(),
-			selectorSettings.showTrail(), selectorSettings.reduceMotion(), selectorSettings.trailLength(), selectorSettings.trailOpacity());
+			selectorSettings.showTrail(), selectorSettings.reduceMotion(), selectorSettings.trailLength(), selectorSettings.trailOpacity(),
+			selectorSettings.inventoryMaxWidthFraction().doubleValue(), selectorSettings.inventoryMaxHeightFraction().doubleValue());
 		pendingRay = null;
 		if (pressRay == null) machine.abort();
 		else {
@@ -1235,7 +1236,8 @@ public final class ClientPingRuntime {
 		public SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame,
 			nx.pingwheel.common.render.SpatialInventoryView view) {
 			return SpatialSelectorSession.ListGeometry.fromMetrics(nx.pingwheel.common.render.SpatialInventoryLayout.measure(
-				view, frame.guiWidth(), frame.guiHeight(), Game.font.lineHeight, style.inventoryTextScale(), Game.font::width),
+				view, frame.guiWidth(), frame.guiHeight(), Game.font.lineHeight, style.inventoryTextScale(),
+				style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), Game.font::width),
 				measuredItemMenuClearance(style, frame.guiWidth(), frame.guiHeight()));
 		}
 		public nx.pingwheel.common.render.SpatialInventoryView.RowDisplay inventoryDisplay(
@@ -1249,7 +1251,8 @@ public final class ClientPingRuntime {
 		}
 		private SpatialSelectorSession.ListGeometry measuredListGeometry(SpatialOverlayRenderer.Style style, int width, int height) {
 			return SpatialSelectorSession.ListGeometry.fromMetrics(nx.pingwheel.common.render.SpatialInventoryLayout.measure(
-				width, height, Game.font.lineHeight, style.inventoryTextScale()), measuredItemMenuClearance(style, width, height));
+				width, height, Game.font.lineHeight, style.inventoryTextScale(), style.inventoryMaxWidthFraction(),
+				style.inventoryMaxHeightFraction()), measuredItemMenuClearance(style, width, height));
 		}
 		public double itemMenuClearance(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame) {
 			return measuredItemMenuClearance(style, frame.guiWidth(), frame.guiHeight());

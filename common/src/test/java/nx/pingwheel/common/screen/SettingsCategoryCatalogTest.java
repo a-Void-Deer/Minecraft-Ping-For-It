@@ -31,6 +31,8 @@ class SettingsCategoryCatalogTest {
 		assertEquals(List.of(
 			Setting.SPATIAL_ROOT_DISTANCE,
 			Setting.SPATIAL_SUBMENU_RADIUS_SCALE,
+			Setting.SPATIAL_INVENTORY_MAX_WIDTH_FRACTION,
+			Setting.SPATIAL_INVENTORY_MAX_HEIGHT_FRACTION,
 			Setting.WHEEL_OPACITY,
 			Setting.WHEEL_TARGET_OPACITY,
 			Setting.WHEEL_TARGET_FONT_SIZE,

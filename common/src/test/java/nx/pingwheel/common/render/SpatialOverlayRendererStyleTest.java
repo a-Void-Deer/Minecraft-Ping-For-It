@@ -3,9 +3,12 @@ package nx.pingwheel.common.render;
 import net.minecraft.network.chat.Component;
 import nx.pingwheel.common.client.spatial.SpatialController;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SpatialOverlayRendererStyleTest {
@@ -18,6 +21,32 @@ class SpatialOverlayRendererStyleTest {
 		assertEquals(1.4, style.inventoryTextScale());
 		assertFalse(style.showTrail());
 		assertTrue(style.reduceMotion());
+	}
+
+	@Test
+	void compatibilityFormsUseModelDefaultsAndExplicitFullFormsRetainInventoryProportions() {
+		var legacy = new SpatialOverlayRenderer.Style(37, 37, 0.62, 1.4, 88, 1, false, true, 19, 31);
+		assertEquals(nx.pingwheel.common.config.SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_WIDTH_FRACTION.doubleValue(),
+			legacy.inventoryMaxWidthFraction());
+		assertEquals(nx.pingwheel.common.config.SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_HEIGHT_FRACTION.doubleValue(),
+			legacy.inventoryMaxHeightFraction());
+		var explicit = SpatialOverlayRenderer.Style.fromLegacyFontSizes(37, 53, 80, 140, 88, 2.5, false, true,
+			19, 31, 0.375, 0.825);
+		assertEquals(0.375, explicit.inventoryMaxWidthFraction(), "pure paint style does not snap independent caller values to config steps");
+		assertEquals(0.825, explicit.inventoryMaxHeightFraction());
+		assertEquals(2.5, explicit.submenuRadiusScale());
+		assertEquals(legacy.inventoryTextScale(), explicit.inventoryTextScale());
+		assertEquals(19, explicit.trailLength());
+		assertEquals(31, explicit.trailOpacityPercent());
+	}
+
+	@ParameterizedTest
+	@ValueSource(doubles = {0.0, -0.1, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY})
+	void invalidInventoryProportionsCannotEnterTheFrozenStyle(double invalid) {
+		assertThrows(IllegalArgumentException.class,
+			() -> new SpatialOverlayRenderer.Style(100, 100, 1, 1, 88, 1, true, false, 19, 31, invalid, 0.70));
+		assertThrows(IllegalArgumentException.class,
+			() -> new SpatialOverlayRenderer.Style(100, 100, 1, 1, 88, 1, true, false, 19, 31, 0.30, invalid));
 	}
 
 	@Test

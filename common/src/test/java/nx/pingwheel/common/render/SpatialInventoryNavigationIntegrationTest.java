@@ -1,5 +1,6 @@
 package nx.pingwheel.common.render;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -94,6 +95,7 @@ class SpatialInventoryNavigationIntegrationTest {
 		final SpatialSelectorSession.ContentFence fence = new SpatialSelectorSession.ContentFence(31, 42, 53, "ordinary");
 		final SpatialOverlayRenderer.Session paint = new SpatialOverlayRenderer.Session();
 		final Painter painter = new Painter();
+		final SpatialSelectorSettings preferences = new SpatialSelectorSettings();
 		final SpatialSelectorSettings.Snapshot settings;
 		final SpatialOverlayRenderer.Style style;
 		SpatialSelectorSession.ListGeometry geometry;
@@ -117,14 +119,24 @@ class SpatialInventoryNavigationIntegrationTest {
 		/** {@code contentIntent} selects the frozen property/item intent behavior explicitly. */
 		Fixture(int width, int height, boolean reduced, int propertyCount, int deadzone, boolean hover,
 			boolean contentIntent) {
-			var preferences = new SpatialSelectorSettings();
+			this(width, height, reduced, propertyCount, deadzone, hover, contentIntent,
+				SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_WIDTH_FRACTION.doubleValue(),
+				SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_HEIGHT_FRACTION.doubleValue());
+		}
+
+		Fixture(int width, int height, boolean reduced, int propertyCount, int deadzone, boolean hover,
+			boolean contentIntent, double maxWidthFraction, double maxHeightFraction) {
 			preferences.setReduceMotion(reduced);
 			preferences.setDeadzone(deadzone);
 			preferences.setHoverEnabled(hover);
 			preferences.setContentIntentEnabled(contentIntent);
+			preferences.setInventoryMaxWidthFraction(BigDecimal.valueOf(maxWidthFraction));
+			preferences.setInventoryMaxHeightFraction(BigDecimal.valueOf(maxHeightFraction));
 			settings = preferences.snapshot();
 			style = new SpatialOverlayRenderer.Style(100, 100, 1, 1, settings.rootDistance(),
-				settings.submenuRadiusScale().doubleValue(), settings.showTrail(), settings.reduceMotion());
+				settings.submenuRadiusScale().doubleValue(), settings.showTrail(), settings.reduceMotion(),
+				settings.trailLength(), settings.trailOpacity(), settings.inventoryMaxWidthFraction().doubleValue(),
+				settings.inventoryMaxHeightFraction().doubleValue());
 			nativeFrame = nativeFrame(width, height);
 			geometry = measureGeometry(null);
 			properties = IntStream.range(0, propertyCount).mapToObj(index -> new SpatialSelectorSession.Property("p" + index, "p" + index,
@@ -272,7 +284,8 @@ class SpatialInventoryNavigationIntegrationTest {
 		}
 		SpatialSelectorSession.ListGeometry measureGeometry(SpatialInventoryView view) {
 			return SpatialSelectorSession.ListGeometry.fromMetrics(SpatialInventoryLayout.measure(
-				view, nativeFrame.guiWidth(), nativeFrame.guiHeight(), painter.lineHeight(), style.inventoryTextScale(), painter::width),
+				view, nativeFrame.guiWidth(), nativeFrame.guiHeight(), painter.lineHeight(), style.inventoryTextScale(),
+				style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), painter::width),
 				SpatialOverlayRenderer.itemMenuClearance(nativeFrame.guiWidth(), nativeFrame.guiHeight(), painter.lineHeight(),
 					painter.width(Component.literal("Back")), style));
 		}
@@ -296,6 +309,108 @@ class SpatialInventoryNavigationIntegrationTest {
 			frame(now + 16);
 			assertEquals(List.of("k" + expected), painter.selectedRows, "painted selected key agrees with the model");
 		}
+	}
+
+	private static void publishLongNames(Fixture fixture) {
+		fixture.pending = fixture.projection(IntStream.range(0, 30).mapToObj(index ->
+			new SpatialSelectorSession.InventoryRow<String>("k" + index, "Long detached item name ".repeat(10), 100L - index,
+				"minecraft:stone", Status.READY, "opaque:k" + index)).toList());
+		fixture.frame(fixture.now + 1);
+	}
+
+	private static void assertSharedInventoryPanel(Fixture fixture) {
+		var view = fixture.snapshot().inventoryView();
+		var layout = SpatialOverlayRenderer.inventoryLayout(view, fixture.nativeFrame.guiWidth(), fixture.nativeFrame.guiHeight(),
+			fixture.painter.lineHeight(), fixture.style, fixture.painter::width);
+		var panel = fixture.painter.draws.stream().filter(draw -> draw.state().present()
+			&& draw.state().data() instanceof SpatialOverlayRenderer.PanelPaint).findFirst().orElseThrow();
+		var paint = (SpatialOverlayRenderer.PanelPaint) panel.state().data();
+		assertEquals(fixture.geometry.width(), layout.width(), "native side boundaries and renderer layout share the held width");
+		assertEquals(layout.width(), paint.width(), "production panel paint uses the same measured edge");
+		assertEquals(layout.height(), paint.height(), "panel chrome and complete row capacity share the held height");
+		assertEquals(fixture.geometry.visibleRows(), view.visibleRows(), "the input model receives the measured row capacity");
+		var back = fixture.painter.draws.stream().filter(draw -> draw.state().present()
+			&& draw.state().data() instanceof SpatialOverlayRenderer.InventoryBackPaint).findFirst().orElseThrow();
+		var backPaint = (SpatialOverlayRenderer.InventoryBackPaint) back.state().data();
+		double sign = fixture.backSign();
+		assertTrue(sign * (back.state().x() - panel.state().x()) - backPaint.width() * back.state().scale() / 2
+			>= paint.width() * panel.state().scale() / 2, "the complete Back frame lies outside the capped content panel");
+	}
+
+	@ParameterizedTest
+	@CsvSource({"0.20, 0.30, false", "0.80, 0.30, true", "0.20, 0.95, true", "0.80, 0.95, false"})
+	void customInventoryMaximaDrivePaintCapacitySideBoundariesAndRowAnchoredItems(
+		double maxWidth, double maxHeight, boolean leftEntry) {
+		var f = new Fixture(1000, 700, true, 0, 18, false, true, maxWidth, maxHeight);
+		f.painter.localizedInventoryLabels = true;
+		publishLongNames(f);
+		f.openList(false, leftEntry);
+		assertEquals(Math.floor(1000 * maxWidth), f.geometry.width(), "long content reaches the independently configured width cap");
+		assertEquals((int) Math.floor((700 * maxHeight - 41) / 22), f.geometry.visibleRows());
+		assertSharedInventoryPanel(f);
+
+		double sign = f.backSign(), axis = f.snapshot().inventory().axisX();
+		f.moveTo(axis + sign * (f.geometry.width() / 2 - 1), f.snapshot().radial().pointer().y(), f.now + 1);
+		assertFalse(f.snapshot().inventoryView().backAffordance().focused(), "motion inside the chosen panel width is not side intent");
+		f.move(sign * (0.5 + f.settings.deadzone()), 0, f.now + 1);
+		assertFalse(f.snapshot().inventoryView().backAffordance().focused(), "travel just below the deadzone is measured from the actual content edge");
+		f.move(sign, 0, f.now + 1);
+		assertTrue(f.snapshot().inventoryView().backAffordance().focused());
+		f.moveTo(axis, f.snapshot().radial().pointer().y(), f.now + 1);
+		assertFalse(f.snapshot().inventoryView().backAffordance().focused());
+
+		f.scroll(15); f.settle();
+		var before = f.snapshot();
+		var layout = SpatialOverlayRenderer.inventoryLayout(before.inventoryView(), 1000, 700, f.painter.lineHeight(), f.style, f.painter::width);
+		f.side(-sign, f.settings.stroke() - 1);
+		assertTrue(f.menu().menuId().endsWith(":inventory"), "the same edge-based stroke is required for Forward");
+		f.move(-sign * 2, 0, f.now + 1); f.settle();
+		assertTrue(f.menu().menuId().contains(":item:"));
+		assertEquals("k15", f.snapshot().inventoryView().retainedRowKey());
+		assertEquals(layout.rowCenterY(15) - 350, f.menu().origin().y(), 1e-9, "item Y is the measured selected-row anchor");
+		assertEquals(f.geometry.width() / 2 + f.geometry.childClearance(),
+			-sign * (f.menu().origin().x() - before.inventory().axisX()), 1e-9);
+		assertSharedInventoryPanel(f);
+		assertItemClearOfEveryPaintedPanel(f, f.menu().menuId(), "custom held dimensions");
+	}
+
+	@Test
+	void livePreferenceEditsDoNotChangeHeldStyleAndResizeUsesItsOriginalFractions() {
+		var f = new Fixture(1000, 700, true, 0, 18, false, true, 0.65, 0.85);
+		publishLongNames(f); f.openList(false); f.scroll(15); f.settle();
+		f.preferences.setInventoryMaxWidthFraction(new BigDecimal("0.20"));
+		f.preferences.setInventoryMaxHeightFraction(new BigDecimal("0.30"));
+		f.frame(f.now + 1);
+		assertEquals(650, f.geometry.width());
+		assertEquals(25, f.geometry.visibleRows());
+		assertSharedInventoryPanel(f);
+		var before = f.snapshot();
+		f.resize(500, 350); f.settle();
+		assertEquals(325, f.geometry.width(), "the new GUI viewport is measured with the held 0.65 proportion");
+		assertEquals(11, f.geometry.visibleRows(), "the held 0.85 height is retained rather than live config or an old pixel height");
+		assertEquals(before.inventory().entries(), f.snapshot().inventory().entries());
+		assertEquals(before.inventory().selectedKey(), f.snapshot().inventory().selectedKey());
+		assertEquals(before.inventory().direction(), f.snapshot().inventory().direction());
+		assertSharedInventoryPanel(f);
+		assertTrue(f.menu().menuId().endsWith(":inventory"), "resize is not navigation");
+		assertEquals(0, f.snapshot().radial().hoverProgress());
+	}
+
+	@Test
+	void aClosingListRemeasuresItsRealDetachedPanelAndRowsWithTheHeldProportionsAfterResize() {
+		var f = new Fixture(1000, 700, false, 0, 18, false, true, 0.65, 0.85);
+		publishLongNames(f); f.openList(false); f.scroll(15); f.settle();
+		assertInstanceOf(SelectorIntent.SelectInventory.class, f.session.releaseIntent(f.now + 1));
+		f.frame(f.now + 1); // begin the ordinary bounded exit before changing GUI dimensions
+		f.resize(320, 240);
+		var detached = f.painter.draws.stream().filter(draw -> !draw.state().present()
+			&& draw.state().data() instanceof SpatialOverlayRenderer.PanelPaint).findFirst().orElseThrow();
+		var panel = (SpatialOverlayRenderer.PanelPaint) detached.state().data();
+		assertEquals(208, panel.width(), "the exit tail uses the held 0.65, not the default width or old pixel width");
+		assertEquals(195, panel.height(), "the held 0.85 fits seven complete rows and natural chrome at the new GUI height");
+		assertEquals(7, f.painter.rows.size(), "detached rows outside the newly measured capacity are not painted");
+		assertTrue(f.painter.rows.stream().noneMatch(RowFrame::present));
+		assertTrue(detached.state().alpha() > 0 && detached.state().alpha() < 1, "the existing finite exit still paints");
 	}
 
 	/** Observe rounded paint rectangles through the same float pose used by native submission. */
@@ -729,7 +844,7 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void boundedDetachedDisplayProjectionIsReusedAcrossScrollAndRemeasureButInvalidatedForChangedText() {
-		var f = new Fixture(1600, 1000, true, 0, 18, false, false);
+		var f = new Fixture(1600, 1000, true, 0, 18, false, false, 0.30, 0.60);
 		f.openList(false);
 		int projected = f.displayProjections;
 		assertEquals(f.snapshot().inventoryView().rows().size(), projected, "one projection per bounded discovered row");
@@ -752,7 +867,7 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void guiScaleHandoffAtAnUnchangedNativeWindowPreparesCapacityWithoutSyntheticInput() {
-		var f = new Fixture(1000, 700, true, 0);
+		var f = new Fixture(1000, 700, true, 0, 18, false, true, 0.30, 0.60);
 		f.openList(false); f.scroll(15); f.settle();
 		var before = f.snapshot();
 		var oldNative = f.nativeFrame;
@@ -844,7 +959,9 @@ class SpatialInventoryNavigationIntegrationTest {
 	@ParameterizedTest
 	@CsvSource({"false, false", "false, true", "true, false", "true, true"})
 	void resizingAnActiveItemRetainsItsFrozenRowAndUsesTheNewPanelEdgeInBothDirections(boolean leftEntry, boolean reduced) {
-		var f = new Fixture(1000, 700, reduced, 0);
+		var f = new Fixture(1000, 700, reduced, 0, 18, false, true, 0.65, 0.85);
+		f.painter.localizedInventoryLabels = true;
+		publishLongNames(f);
 		f.openList(false, leftEntry); f.scroll(15); f.settle();
 		double forward = leftEntry ? -1 : 1;
 		f.side(forward, f.settings.stroke() + 1); f.settle();
@@ -860,6 +977,8 @@ class SpatialInventoryNavigationIntegrationTest {
 		assertEquals(anchor, after.inventoryView().selectedRowCenterY());
 		assertEquals(before.radial().trail(), after.radial().trail());
 		var layout = SpatialOverlayRenderer.inventoryLayout(after.inventoryView(), 320, 240, f.painter.lineHeight(), f.style, f.painter::width);
+		assertEquals(208, layout.width(), "resized paint and item placement use the custom held width");
+		assertEquals(7, after.inventoryView().visibleRows(), "resized list capacity uses the custom held height");
 		assertEquals(anchor, layout.rowCenterY(after.inventory().selectedIndex()) - 120, 1e-9);
 		assertEquals(layout.width() / 2 + f.geometry.childClearance(),
 			forward * (f.menu().origin().x() - after.inventory().axisX()), 1e-9,
@@ -867,6 +986,8 @@ class SpatialInventoryNavigationIntegrationTest {
 		assertEquals(List.of("k15"), f.painter.selectedRows, "only the frozen entered row paints");
 		f.settle();
 		assertEquals(item, f.menu().menuId());
+		assertSharedInventoryPanel(f);
+		assertItemClearOfEveryPaintedPanel(f, item, "resized custom dimensions");
 	}
 
 	@Test

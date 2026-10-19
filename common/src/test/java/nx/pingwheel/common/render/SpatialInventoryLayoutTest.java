@@ -1,5 +1,6 @@
 package nx.pingwheel.common.render;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -8,6 +9,9 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import nx.pingwheel.common.client.spatial.InventoryListModel;
 import nx.pingwheel.common.render.SpatialInventoryView.Row;
@@ -28,7 +32,7 @@ class SpatialInventoryLayoutTest {
 
 	@Test
 	void nativeMetricsKeepNaturalContentAndLimitOnlyTheAvailableWindow() {
-		var metrics = SpatialInventoryLayout.measure(640, 360, 9, 1);
+		var metrics = SpatialInventoryLayout.measure(640, 360, 9, 1, 0.30, 0.60);
 		assertTrue(metrics.width() < 192, "an empty content measure does not fill the available width");
 		assertEquals(7, metrics.visibleRows(), "seven complete readable rows fit between the header and footer");
 		for (int size : new int[] {0, 2, 30}) {
@@ -39,8 +43,115 @@ class SpatialInventoryLayoutTest {
 			assertEquals(26 + 15 + Math.min(size, 7) * 22, layout.height());
 			assertTrue(layout.height() <= 216, "content height stays within its GUI budget");
 		}
-		assertEquals(metrics.width(), SpatialInventoryLayout.measure(1600, 1000, 9, 1).width(),
+		assertEquals(metrics.width(), SpatialInventoryLayout.measure(1600, 1000, 9, 1, 0.30, 0.60).width(),
 			"a large screen does not grow an empty natural box");
+	}
+
+	@Test
+	void compatibilityMeasurementsDelegateToTheInitializedModelFractions() {
+		double width = nx.pingwheel.common.config.SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_WIDTH_FRACTION.doubleValue();
+		double height = nx.pingwheel.common.config.SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_HEIGHT_FRACTION.doubleValue();
+		var view = content("A".repeat(300));
+		java.util.function.ToIntFunction<net.minecraft.network.chat.FormattedText> widths = text -> text.getString().length() * 6;
+		assertEquals(SpatialInventoryLayout.measure(640, 360, 9, 1, width, height),
+			SpatialInventoryLayout.measure(640, 360, 9, 1));
+		assertEquals(SpatialInventoryLayout.measure(view, 640, 360, 9, 1, width, height, widths),
+			SpatialInventoryLayout.measure(view, 640, 360, 9, 1, widths));
+	}
+
+	@ParameterizedTest
+	@CsvSource({"0.20, 200", "0.375, 375", "0.80, 800"})
+	void widthFractionCapsOnlyWidthAndDoesNotQuantizeIndependentCallerValues(double fraction, int width) {
+		var view = content("A".repeat(300));
+		java.util.function.ToIntFunction<net.minecraft.network.chat.FormattedText> widths = text -> text.getString().length() * 6;
+		var baseline = SpatialInventoryLayout.measure(view, 1000, 700, 9, 1, 0.30, 0.60, widths);
+		var metrics = SpatialInventoryLayout.measure(view, 1000, 700, 9, 1, fraction, 0.60, widths);
+		assertEquals(width, metrics.width(), "long content reaches only the chosen width maximum");
+		assertEquals(baseline.visibleRows(), metrics.visibleRows(), "width does not change row capacity");
+		assertEquals(baseline.rowHeight(), metrics.rowHeight(), "text and icon size never shrink");
+	}
+
+	@ParameterizedTest
+	@CsvSource({"0.30, 210", "0.425, 297.5", "0.70, 490", "0.95, 665"})
+	void heightFractionCapsWholeRowCapacityWithoutGrowingShortContentOrChangingWidth(double fraction, BigDecimal budget) {
+		var view = new SpatialInventoryView("list", true, rows(100), 0, 0, 100, true, Status.READY, 0, 0);
+		var metrics = SpatialInventoryLayout.measure(1000, 700, 9, 1, 0.30, fraction);
+		assertEquals(26, metrics.headerHeight());
+		assertEquals(15, metrics.footerHeight());
+		assertEquals(22, metrics.rowHeight());
+		assertEquals(SpatialInventoryLayout.measure(1000, 700, 9, 1, 0.30, 0.60).width(), metrics.width());
+		double panelHeight = metrics.layout(view, 500, 350).height();
+		assertEquals(41 + metrics.visibleRows() * 22, panelHeight);
+		assertTrue(BigDecimal.valueOf(panelHeight).compareTo(budget) <= 0, "every complete row fits the exact budget");
+		assertTrue(BigDecimal.valueOf(panelHeight + 22).compareTo(budget) > 0, "one more row must exceed the budget");
+		var shortView = new SpatialInventoryView("short", true, rows(2), 0, 0, 100, true, Status.READY, 0, 0);
+		assertEquals(85, metrics.layout(shortView, 500, 350).height(), "a maximum is not a forced panel height");
+		assertEquals(41, metrics.layout(new SpatialInventoryView("empty", true, List.of(), -1, 0, 100,
+			true, Status.READY, 0, 0), 500, 350).height(), "empty content keeps only its natural chrome");
+	}
+
+	@ParameterizedTest
+	@CsvSource({"680, 1.1, 28, 16, 24, 476, 18", "1410, 1, 26, 15, 22, 987, 43"})
+	void exactDecimalHeightBudgetsRetainTheLastWholeRow(int viewportHeight, double textScale,
+		int header, int footer, int row, int budget, int capacity) {
+		var view = new SpatialInventoryView("list", true, rows(100), 0, 0, 100, true, Status.READY, 0, 0);
+		var metrics = SpatialInventoryLayout.measure(1000, viewportHeight, 9, textScale, 0.30, 0.70);
+		assertEquals(header, metrics.headerHeight());
+		assertEquals(footer, metrics.footerHeight());
+		assertEquals(row, metrics.rowHeight());
+		assertEquals(budget, header + footer + capacity * row, "independent exact whole-row geometry");
+		assertEquals(capacity, metrics.visibleRows());
+		assertEquals(budget, metrics.layout(view, 500, viewportHeight / 2.0).height());
+		assertTrue(header + footer + (capacity + 1) * row > budget, "an additional whole row cannot fit");
+		assertEquals(metrics, SpatialInventoryLayout.measure(view, 1000, viewportHeight, 9, textScale,
+			0.30, 0.70, text -> 0), "content-aware and compatibility geometry share the exact budget");
+
+		assertEquals(capacity - 1, SpatialInventoryLayout.measure(1000, viewportHeight, 9, textScale,
+			0.30, Math.nextDown(0.70)).visibleRows(), "even the nearest smaller fraction cannot borrow the boundary row");
+		assertEquals(capacity - 1, SpatialInventoryLayout.measure(1000, Math.nextDown((double) viewportHeight), 9,
+			textScale, 0.30, 0.70).visibleRows(), "even the nearest smaller viewport cannot borrow the boundary row");
+		assertEquals(capacity, SpatialInventoryLayout.measure(1000, viewportHeight, 9, textScale,
+			0.30, Math.nextUp(0.70)).visibleRows(), "a slightly larger budget still cannot fit another row");
+		assertEquals(capacity, SpatialInventoryLayout.measure(1000, Math.nextUp((double) viewportHeight), 9,
+			textScale, 0.30, 0.70).visibleRows());
+	}
+
+	@Test
+	void exactDecimalWidthBudgetKeepsItsWholeBoundaryPixelWithoutExpandingSmallerCaps() {
+		var view = content("A".repeat(300));
+		java.util.function.ToIntFunction<net.minecraft.network.chat.FormattedText> widths = text -> text.getString().length() * 6;
+		assertEquals(245, SpatialInventoryLayout.measure(view, 700, 700, 9, 1, 0.35, 0.70, widths).width(),
+			"seven hundred GUI pixels at thirty-five percent allow exactly 245 pixels");
+		assertEquals(244, SpatialInventoryLayout.measure(view, 700, 700, 9, 1, Math.nextDown(0.35), 0.70, widths).width());
+		assertEquals(244, SpatialInventoryLayout.measure(view, Math.nextDown(700.0), 700, 9, 1, 0.35, 0.70, widths).width());
+		assertEquals(245, SpatialInventoryLayout.measure(view, 700, 700, 9, 1, Math.nextUp(0.35), 0.70, widths).width());
+		assertEquals(245, SpatialInventoryLayout.measure(view, Math.nextUp(700.0), 700, 9, 1, 0.35, 0.70, widths).width());
+	}
+
+	@Test
+	void dimensionsAreRemeasuredAgainstTheCurrentGuiViewportUsingTheSameFractions() {
+		var view = content("A".repeat(300));
+		java.util.function.ToIntFunction<net.minecraft.network.chat.FormattedText> widths = text -> text.getString().length() * 6;
+		var original = SpatialInventoryLayout.measure(view, 1000, 700, 9, 1, 0.65, 0.85, widths);
+		var resized = SpatialInventoryLayout.measure(view, 500, 350, 9, 1, 0.65, 0.85, widths);
+		assertEquals(650, original.width());
+		assertEquals(325, resized.width());
+		assertEquals(25, original.visibleRows());
+		assertEquals(11, resized.visibleRows());
+		assertEquals(original.rowHeight(), resized.rowHeight());
+		assertEquals(original.headerHeight(), resized.headerHeight());
+		assertEquals(original.footerHeight(), resized.footerHeight());
+	}
+
+	@ParameterizedTest
+	@ValueSource(doubles = {0.0, -0.1, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY})
+	void invalidProportionsAreRejectedByBothMeasurementForms(double invalid) {
+		var view = content("Short");
+		java.util.function.ToIntFunction<net.minecraft.network.chat.FormattedText> widths = text -> 6;
+		assertThrows(IllegalArgumentException.class, () -> SpatialInventoryLayout.measure(640, 360, 9, 1, invalid, 0.70));
+		assertThrows(IllegalArgumentException.class, () -> SpatialInventoryLayout.measure(640, 360, 9, 1, 0.30, invalid));
+		assertThrows(IllegalArgumentException.class, () -> SpatialInventoryLayout.measure(view, 640, 360, 9, 1, invalid, 0.70, widths));
+		assertThrows(IllegalArgumentException.class, () -> SpatialInventoryLayout.measure(view, 640, 360, 9, 1, 0.30, invalid, widths));
 	}
 
 	private static SpatialInventoryView content(String name) {
@@ -58,10 +169,10 @@ class SpatialInventoryLayoutTest {
 		var shortView = content("Short item");
 		var middleView = content("A moderately long detached item name");
 		var longView = content("A long detached display name that can use more than the historical fixed panel width");
-		double emptyWidth = SpatialInventoryLayout.measure(empty, 1600, 1000, 9, 1, widths).width();
-		double shortWidth = SpatialInventoryLayout.measure(shortView, 1600, 1000, 9, 1, widths).width();
-		double middleWidth = SpatialInventoryLayout.measure(middleView, 1600, 1000, 9, 1, widths).width();
-		double longWidth = SpatialInventoryLayout.measure(longView, 1600, 1000, 9, 1, widths).width();
+		double emptyWidth = SpatialInventoryLayout.measure(empty, 1600, 1000, 9, 1, 0.30, 0.60, widths).width();
+		double shortWidth = SpatialInventoryLayout.measure(shortView, 1600, 1000, 9, 1, 0.30, 0.60, widths).width();
+		double middleWidth = SpatialInventoryLayout.measure(middleView, 1600, 1000, 9, 1, 0.30, 0.60, widths).width();
+		double longWidth = SpatialInventoryLayout.measure(longView, 1600, 1000, 9, 1, 0.30, 0.60, widths).width();
 		assertTrue(emptyWidth < shortWidth && shortWidth < middleWidth && middleWidth < longWidth);
 		assertTrue(middleWidth > 200 && middleWidth < 480, "room above the old width is used naturally, not filled to a new fixed maximum");
 		assertTrue(longWidth > 200 && longWidth <= 480, "long content uses the room beyond the old fixed width");
@@ -73,10 +184,10 @@ class SpatialInventoryLayoutTest {
 			0, 0, 1, true, Status.READY, 0, 0).withNavigation(null, false, true);
 		var nextWindow = new SpatialInventoryView("list", true, allRows.rows(), 1, 1, 1, true, Status.READY, 0, 0)
 			.withNavigation(null, false, true);
-		assertEquals(SpatialInventoryLayout.measure(allRows, 1600, 1000, 9, 1, widths),
-			SpatialInventoryLayout.measure(nextWindow, 1600, 1000, 9, 1, widths), "bounded full-row measurement cannot jitter with scrolling");
-		assertEquals(SpatialInventoryLayout.measure(80, 60, 9, 1).width(),
-			SpatialInventoryLayout.measure(longView, 80, 60, 9, 1, widths).width(), "an impossible tiny cap keeps the readable floor");
+		assertEquals(SpatialInventoryLayout.measure(allRows, 1600, 1000, 9, 1, 0.30, 0.60, widths),
+			SpatialInventoryLayout.measure(nextWindow, 1600, 1000, 9, 1, 0.30, 0.60, widths), "bounded full-row measurement cannot jitter with scrolling");
+		assertEquals(SpatialInventoryLayout.measure(80, 60, 9, 1, 0.30, 0.60).width(),
+			SpatialInventoryLayout.measure(longView, 80, 60, 9, 1, 0.30, 0.60, widths).width(), "an impossible tiny cap keeps the readable floor");
 	}
 
 	@Test
@@ -124,8 +235,8 @@ class SpatialInventoryLayoutTest {
 
 	@Test
 	void tinyGuiKeepsReadableIconTextAndOneWholeRowInsteadOfShrinkingThePattern() {
-		var normal = SpatialInventoryLayout.measure(640, 360, 9, 1);
-		var tiny = SpatialInventoryLayout.measure(80, 60, 9, 1);
+		var normal = SpatialInventoryLayout.measure(640, 360, 9, 1, 0.20, 0.30);
+		var tiny = SpatialInventoryLayout.measure(80, 60, 9, 1, 0.20, 0.30);
 		var view = new SpatialInventoryView("list", true, rows(30), 15, 0, 30, false, Status.READY, 7, -3);
 		var layout = tiny.layout(view, 40, 30);
 		assertEquals(1, tiny.visibleRows());

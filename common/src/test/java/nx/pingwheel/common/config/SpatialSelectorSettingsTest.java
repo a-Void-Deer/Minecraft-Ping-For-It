@@ -9,6 +9,7 @@ import java.util.function.IntUnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SpatialSelectorSettingsTest {
@@ -413,6 +414,113 @@ class SpatialSelectorSettingsTest {
 		first.getSpatialSelector().setRootDistance(90);
 		first.getSpatialSelector().setHoverEnabled(true);
 		assertEquals(untouched, second.getSpatialSelector().snapshot());
+	}
+
+	@Test
+	void inventoryPanelLimitsDefaultIndependentlyForMissingAndNullMembers() {
+		SpatialSelectorSettings.Snapshot defaults = new SpatialSelectorSettings().snapshot();
+		SpatialSelectorSettings missing = new Gson().fromJson("{}", SpatialSelectorSettings.class);
+		assertEquals(defaults, missing.snapshot());
+
+		SpatialSelectorSettings nullWidth = new Gson().fromJson(
+			"{\"inventoryMaxWidthFraction\":null,\"inventoryMaxHeightFraction\":0.825}", SpatialSelectorSettings.class);
+		assertNull(nullWidth.getInventoryMaxWidthFraction());
+		assertEquals(defaults.inventoryMaxWidthFraction(), nullWidth.snapshot().inventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.825"), nullWidth.snapshot().inventoryMaxHeightFraction());
+		assertNull(nullWidth.getInventoryMaxWidthFraction(), "taking a safe snapshot does not mutate loaded values");
+		nullWidth.validate();
+		assertEquals(defaults.inventoryMaxWidthFraction(), nullWidth.getInventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.825"), nullWidth.getInventoryMaxHeightFraction());
+
+		SpatialSelectorSettings nullHeight = new Gson().fromJson(
+			"{\"inventoryMaxWidthFraction\":0.475,\"inventoryMaxHeightFraction\":null}", SpatialSelectorSettings.class);
+		assertNull(nullHeight.getInventoryMaxHeightFraction());
+		assertEquals(new BigDecimal("0.475"), nullHeight.snapshot().inventoryMaxWidthFraction());
+		assertEquals(defaults.inventoryMaxHeightFraction(), nullHeight.snapshot().inventoryMaxHeightFraction());
+		nullHeight.validate();
+		assertEquals(new BigDecimal("0.475"), nullHeight.getInventoryMaxWidthFraction());
+		assertEquals(defaults.inventoryMaxHeightFraction(), nullHeight.getInventoryMaxHeightFraction());
+	}
+
+	@Test
+	void inventoryPanelLimitsClampRawJsonAndSettersIndependentlyWithoutQuantizing() {
+		SpatialSelectorSettings settings = new Gson().fromJson("""
+			{"inventoryMaxWidthFraction":-1,"inventoryMaxHeightFraction":2,"rootDistance":90}
+			""", SpatialSelectorSettings.class);
+		SpatialSelectorSettings.Snapshot frozen = settings.snapshot();
+		assertEquals(new BigDecimal("0.2"), frozen.inventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.95"), frozen.inventoryMaxHeightFraction());
+		settings.validate();
+		assertEquals(frozen, settings.snapshot());
+		assertEquals(new BigDecimal("0.2"), settings.getInventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.95"), settings.getInventoryMaxHeightFraction());
+
+		settings.setInventoryMaxWidthFraction(new BigDecimal("0.47300"));
+		settings.setInventoryMaxHeightFraction(new BigDecimal("-1"));
+		assertEquals(new BigDecimal("0.473"), settings.getInventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.3"), settings.getInventoryMaxHeightFraction());
+		settings.setInventoryMaxHeightFraction(new BigDecimal("0.8123400"));
+		settings.setInventoryMaxWidthFraction(new BigDecimal("2"));
+		assertEquals(new BigDecimal("0.8"), settings.getInventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.81234"), settings.getInventoryMaxHeightFraction());
+		assertEquals(90, settings.getRootDistance());
+
+		settings.setInventoryMaxWidthFraction(null);
+		assertEquals(SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_WIDTH_FRACTION, settings.getInventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.81234"), settings.getInventoryMaxHeightFraction());
+		settings.setInventoryMaxWidthFraction(new BigDecimal("0.473"));
+		settings.setInventoryMaxHeightFraction(null);
+		assertEquals(new BigDecimal("0.473"), settings.getInventoryMaxWidthFraction());
+		assertEquals(SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_HEIGHT_FRACTION, settings.getInventoryMaxHeightFraction());
+	}
+
+	@Test
+	void customInventoryPanelLimitsStayExactThroughValidationAndFreezeIntoTheSnapshot() {
+		SpatialSelectorSettings settings = new Gson().fromJson("""
+			{"inventoryMaxWidthFraction":0.47300,"inventoryMaxHeightFraction":0.8123400}
+			""", SpatialSelectorSettings.class);
+		SpatialSelectorSettings.Snapshot frozen = settings.snapshot();
+		assertEquals(new BigDecimal("0.473"), frozen.inventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.81234"), frozen.inventoryMaxHeightFraction());
+		settings.validate();
+		assertEquals(frozen, settings.snapshot());
+		assertEquals(new BigDecimal("0.473"), settings.getInventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.81234"), settings.getInventoryMaxHeightFraction());
+
+		settings.setInventoryMaxWidthFraction(new BigDecimal("0.6"));
+		settings.setInventoryMaxHeightFraction(new BigDecimal("0.5"));
+		assertEquals(new BigDecimal("0.473"), frozen.inventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.81234"), frozen.inventoryMaxHeightFraction());
+		assertEquals(new BigDecimal("0.6"), settings.snapshot().inventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.5"), settings.snapshot().inventoryMaxHeightFraction());
+	}
+
+	@Test
+	void everyPreviousSnapshotConstructorUsesDefaultPanelLimitsWhileCanonicalCarriesCustomValues() {
+		SpatialSelectorSettings.Snapshot defaults = new SpatialSelectorSettings().snapshot();
+		for (SpatialSelectorSettings.Snapshot previous : List.of(
+			new SpatialSelectorSettings.Snapshot(18, 50, 180, 55, false, 500, true, false),
+			new SpatialSelectorSettings.Snapshot(18, 50, 180, 55, false, 500, true, false, 25),
+			new SpatialSelectorSettings.Snapshot(18, 50, 180, 55, false, 500, true, false, 25,
+				new BigDecimal("2")),
+			new SpatialSelectorSettings.Snapshot(18, 50, 180, 55, false, 500, true, false, 25,
+				new BigDecimal("2"), 64, 25),
+			new SpatialSelectorSettings.Snapshot(18, 50, 180, 55, false, 500, true, false, 25,
+				new BigDecimal("2"), 64, 25, true),
+			new SpatialSelectorSettings.Snapshot(18, 50, 180, 55, false, 500, true, false, 25,
+				new BigDecimal("2"), 64, 25, true, true, 100))) {
+			assertEquals(defaults.inventoryMaxWidthFraction(), previous.inventoryMaxWidthFraction());
+			assertEquals(defaults.inventoryMaxHeightFraction(), previous.inventoryMaxHeightFraction());
+		}
+
+		SpatialSelectorSettings.Snapshot canonical = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			false, 500, true, false, 25, new BigDecimal("2"), 64, 25, true, true, 100,
+			new BigDecimal("0.475"), new BigDecimal("0.825"));
+		assertEquals(new BigDecimal("0.475"), canonical.inventoryMaxWidthFraction());
+		assertEquals(new BigDecimal("0.825"), canonical.inventoryMaxHeightFraction());
+		assertTrue(canonical.contentIntentEnabled());
+		assertTrue(canonical.gestureSkipHoldEnabled());
+		assertEquals(100, canonical.gestureSkipHoldMillis());
 	}
 
 	private static SpatialSelectorSettings explicitSettings() {

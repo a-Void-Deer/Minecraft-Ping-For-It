@@ -1,5 +1,6 @@
 package nx.pingwheel.common.client;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -784,6 +785,35 @@ class ClientPingRuntimeInteractionTest {
 			assertEquals(0, f.access.selectorStyle.trailOpacityPercent()); assertFalse(f.access.selectorStyle.showTrail());
 			f.runtime.abort();
 		} finally { settings.setTrailLength(oldLength); settings.setTrailOpacity(oldOpacity); settings.setShowTrail(oldShown); }
+	}
+	@Test void pressFreezesInventoryProportionsIntoTheActualNativePaintAndGeometryStyleUntilNextHold() {
+		var settings = ClientConfig.HANDLER.getConfig().getSpatialSelector();
+		var oldWidth = settings.getInventoryMaxWidthFraction();
+		var oldHeight = settings.getInventoryMaxHeightFraction();
+		try {
+			settings.setInventoryMaxWidthFraction(new BigDecimal("0.65"));
+			settings.setInventoryMaxHeightFraction(new BigDecimal("0.85"));
+			Fixture f = new Fixture(); f.press(0);
+			settings.setInventoryMaxWidthFraction(new BigDecimal("0.20"));
+			settings.setInventoryMaxHeightFraction(new BigDecimal("0.30"));
+			f.frame(250, true);
+			var held = f.access.selectorStyle;
+			assertEquals(new BigDecimal("0.65"), f.snapshot().settings().inventoryMaxWidthFraction());
+			assertEquals(new BigDecimal("0.85"), f.snapshot().settings().inventoryMaxHeightFraction());
+			assertEquals(0.65, held.inventoryMaxWidthFraction(), "the production press path explicitly injects snapshot width into Style");
+			assertEquals(0.85, held.inventoryMaxHeightFraction(), "the native geometry port receives the same frozen height as painting");
+			f.access.frame = new NativeSelectorInput.Frame(1, 2000, 1400, 500, 350, true, false);
+			f.frame(260, true);
+			assertSame(held, f.access.selectorStyle, "resize cannot rebuild Style from the live preferences");
+			f.runtime.abort(); f.press(300); f.frame(550, true);
+			assertEquals(0.20, f.access.selectorStyle.inventoryMaxWidthFraction());
+			assertEquals(0.30, f.access.selectorStyle.inventoryMaxHeightFraction());
+			assertNotSame(held, f.access.selectorStyle, "the next physical hold adopts both edits");
+			f.runtime.abort();
+		} finally {
+			settings.setInventoryMaxWidthFraction(oldWidth);
+			settings.setInventoryMaxHeightFraction(oldHeight);
+		}
 	}
 	@ParameterizedTest @ValueSource(booleans = {false, true})
 	void reentrantAbortInValidatorBlocksEveryReleasePacket(boolean menu) {

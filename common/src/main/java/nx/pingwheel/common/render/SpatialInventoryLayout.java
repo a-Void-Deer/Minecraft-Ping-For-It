@@ -1,16 +1,17 @@
 package nx.pingwheel.common.render;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.function.ToIntFunction;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FormattedText;
+import nx.pingwheel.common.config.SpatialSelectorSettings;
 
 /** Pure GUI-space geometry. No independently chosen viewport or row ordering. */
 public record SpatialInventoryLayout(int first, int count, double centerX, double centerY,
 	double width, double height, double headerHeight, double rowHeight, double footerHeight) {
 
-	private static final double MAX_WIDTH_FRACTION = 0.3;
-	private static final double MAX_HEIGHT_FRACTION = 0.6;
 	public static final int ITEM_ICON_SIZE = 16;
 
 	/** Shared unanimated metrics for input, row capacity and paint, in scaled GUI pixels. */
@@ -40,7 +41,15 @@ public record SpatialInventoryLayout(int first, int count, double centerX, doubl
 	 * Zero viewport dimensions retain the dimensionless compatibility measure.
 	 */
 	public static Metrics measure(double guiWidth, double guiHeight, int fontLineHeight, double textScale) {
-		return measure(guiWidth, guiHeight, fontLineHeight, textScale, 0.0);
+		return measure(guiWidth, guiHeight, fontLineHeight, textScale,
+			SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_WIDTH_FRACTION.doubleValue(),
+			SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_HEIGHT_FRACTION.doubleValue());
+	}
+
+	/** Explicit held proportions; the current viewport is measured again after a resize. */
+	public static Metrics measure(double guiWidth, double guiHeight, int fontLineHeight, double textScale,
+		double maxWidthFraction, double maxHeightFraction) {
+		return measure(guiWidth, guiHeight, fontLineHeight, textScale, maxWidthFraction, maxHeightFraction, 0.0);
 	}
 
 	/**
@@ -52,6 +61,14 @@ public record SpatialInventoryLayout(int first, int count, double centerX, doubl
 	 */
 	public static Metrics measure(SpatialInventoryView view, double guiWidth, double guiHeight,
 		int fontLineHeight, double textScale, ToIntFunction<FormattedText> widths) {
+		return measure(view, guiWidth, guiHeight, fontLineHeight, textScale,
+			SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_WIDTH_FRACTION.doubleValue(),
+			SpatialSelectorSettings.DEFAULT_INVENTORY_MAX_HEIGHT_FRACTION.doubleValue(), widths);
+	}
+
+	public static Metrics measure(SpatialInventoryView view, double guiWidth, double guiHeight,
+		int fontLineHeight, double textScale, double maxWidthFraction, double maxHeightFraction,
+		ToIntFunction<FormattedText> widths) {
 		double naturalWidth = 0.0;
 		if (view != null) {
 			int total = view.rows().size();
@@ -76,16 +93,19 @@ public record SpatialInventoryLayout(int first, int count, double centerX, doubl
 				naturalWidth = Math.max(naturalWidth, 9.0 + icon + content);
 			}
 		}
-		return measure(guiWidth, guiHeight, fontLineHeight, textScale, naturalWidth);
+		return measure(guiWidth, guiHeight, fontLineHeight, textScale, maxWidthFraction, maxHeightFraction, naturalWidth);
 	}
 
 	public static Component quantity(Long count) {
 		return count == null ? Component.empty() : Component.literal("x" + count);
 	}
 
-	private static Metrics measure(double guiWidth, double guiHeight, int fontLineHeight, double textScale, double contentWidth) {
+	private static Metrics measure(double guiWidth, double guiHeight, int fontLineHeight, double textScale,
+		double maxWidthFraction, double maxHeightFraction, double contentWidth) {
 		if (!Double.isFinite(guiWidth) || guiWidth < 0 || !Double.isFinite(guiHeight) || guiHeight < 0
-			|| fontLineHeight <= 0 || !Double.isFinite(textScale) || textScale <= 0)
+			|| fontLineHeight <= 0 || !Double.isFinite(textScale) || textScale <= 0
+			|| !Double.isFinite(maxWidthFraction) || maxWidthFraction <= 0
+			|| !Double.isFinite(maxHeightFraction) || maxHeightFraction <= 0)
 			throw new IllegalArgumentException("invalid inventory metrics");
 		double textHeight = fontLineHeight * textScale;
 		// Whole-pixel chrome prevents a final rounded border from exceeding a
@@ -96,10 +116,18 @@ public record SpatialInventoryLayout(int first, int count, double centerX, doubl
 		double readableWidth = Math.ceil(5.0 + ITEM_ICON_SIZE + 3.0 + 8.0 + textHeight * 2.0);
 		double naturalWidth = Math.max(Math.ceil(contentWidth), readableWidth);
 		double width = guiWidth == 0 ? naturalWidth
-			: Math.max(readableWidth, Math.min(naturalWidth, Math.floor(guiWidth * MAX_WIDTH_FRACTION)));
+			: Math.max(readableWidth, Math.min(naturalWidth, wholePixelBudget(guiWidth, maxWidthFraction)));
 		int capacity = guiHeight == 0 ? Integer.MAX_VALUE : Math.max(1,
-			(int) Math.floor((guiHeight * MAX_HEIGHT_FRACTION - headerHeight - footerHeight) / rowHeight));
+			(int) Math.floor((wholePixelBudget(guiHeight, maxHeightFraction) - headerHeight - footerHeight) / rowHeight));
 		return new Metrics(capacity, width, headerHeight, rowHeight, footerHeight);
+	}
+
+	private static double wholePixelBudget(double viewport, double fraction) {
+		// Restore the decimal inputs before multiplying: binary 680 * 0.7 falls
+		// below 476. Chrome and rows use whole pixels, so flooring the exact cap
+		// loses no fitting geometry and never borrows pixels from a smaller cap.
+		return BigDecimal.valueOf(viewport).multiply(BigDecimal.valueOf(fraction))
+			.setScale(0, RoundingMode.FLOOR).doubleValue();
 	}
 
 	public static SpatialInventoryLayout of(SpatialInventoryView view, double guiCenterX, double guiCenterY,
