@@ -49,11 +49,6 @@ public final class SpatialSelectorSettings {
 	public static final BigDecimal DEFAULT_SUBMENU_RADIUS_SCALE = new BigDecimal("1.5");
 	public static final BigDecimal SUBMENU_RADIUS_SCALE_STEP = new BigDecimal("0.1");
 
-	public static final BigDecimal MIN_TARGET_GLIDE = new BigDecimal("0.25");
-	public static final BigDecimal MAX_TARGET_GLIDE = new BigDecimal("20");
-	public static final BigDecimal DEFAULT_TARGET_GLIDE = new BigDecimal("2.5");
-	public static final BigDecimal TARGET_GLIDE_STEP = new BigDecimal("0.25");
-
 	/** Confirmed Back-hover dwell range, step and disabled-by-default policy. */
 	public static final int MIN_HOVER_MILLIS = 100;
 	public static final int MAX_HOVER_MILLIS = 2000;
@@ -92,7 +87,6 @@ public final class SpatialSelectorSettings {
 	private int dwellMillis = DEFAULT_DWELL_MILLIS;
 	private int rootDistance = DEFAULT_ROOT_DISTANCE;
 	private BigDecimal submenuRadiusScale = DEFAULT_SUBMENU_RADIUS_SCALE;
-	private BigDecimal targetGlide = DEFAULT_TARGET_GLIDE;
 	private boolean hoverEnabled = DEFAULT_HOVER_ENABLED;
 	private int hoverMillis = DEFAULT_HOVER_MILLIS;
 	private boolean showTrail = true;
@@ -111,7 +105,6 @@ public final class SpatialSelectorSettings {
 		dwellMillis = clampDwellMillis(dwellMillis);
 		rootDistance = clampRootDistance(rootDistance);
 		submenuRadiusScale = clampSubmenuRadiusScale(submenuRadiusScale);
-		targetGlide = clampTargetGlide(targetGlide);
 		hoverMillis = clampHoverMillis(hoverMillis);
 		preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks);
 		trailLength = clampTrailLength(trailLength);
@@ -124,7 +117,6 @@ public final class SpatialSelectorSettings {
 	public void setDwellMillis(int value) { dwellMillis = clampDwellMillis(value); }
 	public void setRootDistance(int value) { rootDistance = clampRootDistance(value); }
 	public void setSubmenuRadiusScale(BigDecimal value) { submenuRadiusScale = clampSubmenuRadiusScale(value); }
-	public void setTargetGlide(BigDecimal value) { targetGlide = clampTargetGlide(value); }
 	public void setHoverMillis(int value) { hoverMillis = clampHoverMillis(value); }
 	public void setPreciseCapturePeriodTicks(int value) { preciseCapturePeriodTicks = clampPreciseCapturePeriodTicks(value); }
 	public void setTrailLength(int value) { trailLength = clampTrailLength(value); }
@@ -160,15 +152,6 @@ public final class SpatialSelectorSettings {
 		return stripped.scale() < 0 ? stripped.setScale(0) : stripped;
 	}
 
-	public static BigDecimal clampTargetGlide(BigDecimal value) {
-		if (value == null) return DEFAULT_TARGET_GLIDE;
-		if (value.compareTo(MIN_TARGET_GLIDE) < 0) return MIN_TARGET_GLIDE;
-		if (value.compareTo(MAX_TARGET_GLIDE) > 0) return MAX_TARGET_GLIDE;
-
-		BigDecimal stripped = value.stripTrailingZeros();
-		return stripped.scale() < 0 ? stripped.setScale(0) : stripped;
-	}
-
 	public static int clampHoverMillis(int value) {
 		return Math.clamp(value, MIN_HOVER_MILLIS, MAX_HOVER_MILLIS);
 	}
@@ -189,7 +172,7 @@ public final class SpatialSelectorSettings {
 	public Snapshot snapshot() {
 		return new Snapshot(clampDeadzone(deadzone), clampStroke(stroke),
 			clampDwellMillis(dwellMillis), clampRootDistance(rootDistance),
-			clampTargetGlide(targetGlide), hoverEnabled, clampHoverMillis(hoverMillis),
+			hoverEnabled, clampHoverMillis(hoverMillis),
 			showTrail, reduceMotion, clampPreciseCapturePeriodTicks(preciseCapturePeriodTicks),
 			clampSubmenuRadiusScale(submenuRadiusScale),
 			clampTrailLength(trailLength), clampTrailOpacity(trailOpacity),
@@ -197,17 +180,17 @@ public final class SpatialSelectorSettings {
 	}
 
 	public record Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
-		BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+		boolean hoverEnabled, int hoverMillis,
 		boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
 		BigDecimal submenuRadiusScale, int trailLength, int trailOpacity,
 		boolean contentIntentEnabled, boolean gestureSkipHoldEnabled, int gestureSkipHoldMillis) {
 
 		/** Previous snapshot forms keep the opt-in gesture shortcut disabled. */
 		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
-			BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+			boolean hoverEnabled, int hoverMillis,
 			boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
 			BigDecimal submenuRadiusScale, int trailLength, int trailOpacity, boolean contentIntentEnabled) {
-			this(deadzone, stroke, dwellMillis, rootDistance, targetGlide, hoverEnabled,
+			this(deadzone, stroke, dwellMillis, rootDistance, hoverEnabled,
 				hoverMillis, showTrail, reduceMotion, preciseCapturePeriodTicks, submenuRadiusScale,
 				trailLength, trailOpacity, contentIntentEnabled, false, DEFAULT_GESTURE_SKIP_HOLD_MILLIS);
 		}
@@ -217,10 +200,10 @@ public final class SpatialSelectorSettings {
 		 * toggle; the confirmed default keeps the direct Attention annotation.
 		 */
 		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
-			BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+			boolean hoverEnabled, int hoverMillis,
 			boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
 			BigDecimal submenuRadiusScale, int trailLength, int trailOpacity) {
-			this(deadzone, stroke, dwellMillis, rootDistance, targetGlide, hoverEnabled,
+			this(deadzone, stroke, dwellMillis, rootDistance, hoverEnabled,
 				hoverMillis, showTrail, reduceMotion, preciseCapturePeriodTicks,
 				submenuRadiusScale, trailLength, trailOpacity, DEFAULT_CONTENT_INTENT_ENABLED);
 		}
@@ -231,10 +214,10 @@ public final class SpatialSelectorSettings {
 		 * changing the caller's trail visibility choice.
 		 */
 		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
-			BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+			boolean hoverEnabled, int hoverMillis,
 			boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
 			BigDecimal submenuRadiusScale) {
-			this(deadzone, stroke, dwellMillis, rootDistance, targetGlide, hoverEnabled,
+			this(deadzone, stroke, dwellMillis, rootDistance, hoverEnabled,
 				hoverMillis, showTrail, reduceMotion, preciseCapturePeriodTicks,
 				submenuRadiusScale, DEFAULT_TRAIL_LENGTH, DEFAULT_TRAIL_OPACITY);
 		}
@@ -244,9 +227,9 @@ public final class SpatialSelectorSettings {
 		 * scale; the confirmed default is the baseline 1.5 multiplier.
 		 */
 		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
-			BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+			boolean hoverEnabled, int hoverMillis,
 			boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks) {
-			this(deadzone, stroke, dwellMillis, rootDistance, targetGlide, hoverEnabled,
+			this(deadzone, stroke, dwellMillis, rootDistance, hoverEnabled,
 				hoverMillis, showTrail, reduceMotion, preciseCapturePeriodTicks, DEFAULT_SUBMENU_RADIUS_SCALE);
 		}
 
@@ -255,9 +238,9 @@ public final class SpatialSelectorSettings {
 		 * period; the confirmed default captures every tick.
 		 */
 		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
-			BigDecimal targetGlide, boolean hoverEnabled, int hoverMillis,
+			boolean hoverEnabled, int hoverMillis,
 			boolean showTrail, boolean reduceMotion) {
-			this(deadzone, stroke, dwellMillis, rootDistance, targetGlide, hoverEnabled,
+			this(deadzone, stroke, dwellMillis, rootDistance, hoverEnabled,
 				hoverMillis, showTrail, reduceMotion, DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS);
 		}
 	}

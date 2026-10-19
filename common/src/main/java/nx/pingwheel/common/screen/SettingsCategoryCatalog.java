@@ -49,7 +49,6 @@ public final class SettingsCategoryCatalog {
 		SPATIAL_DEADZONE("spatial_selector.deadzone"),
 		SPATIAL_STROKE("spatial_selector.stroke"),
 		SPATIAL_DWELL_MILLIS("spatial_selector.dwell_millis"),
-		SPATIAL_TARGET_GLIDE("spatial_selector.target_glide"),
 		SPATIAL_HOVER_ENABLED("spatial_selector.hover_enabled"),
 		SPATIAL_HOVER_MILLIS("spatial_selector.hover_millis"),
 		SPATIAL_CONTENT_INTENT_ENABLED("spatial_selector.content_intent_enabled"),
@@ -171,7 +170,6 @@ public final class SettingsCategoryCatalog {
 			Setting.SPATIAL_DEADZONE,
 			Setting.SPATIAL_STROKE,
 			Setting.SPATIAL_DWELL_MILLIS,
-			Setting.SPATIAL_TARGET_GLIDE,
 			Setting.SPATIAL_HOVER_ENABLED,
 			Setting.SPATIAL_HOVER_MILLIS,
 			Setting.SPATIAL_CONTENT_INTENT_ENABLED));

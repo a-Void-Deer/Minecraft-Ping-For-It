@@ -3,280 +3,138 @@ package nx.pingwheel.common.client.spatial;
 import java.util.Objects;
 
 /**
- * Pure horizontal/vertical gesture adapter for the streamed inventory list.
- *
- * <p>The physical list input never moves the logical pointer: both pointer axes
- * stay fixed while the list is active. This adapter owns a bounded signed
- * horizontal progress accumulator instead, the frozen row-height threshold, the
- * glide and wheel fractions, the wheel-lock state and the Back/Forward side
- * pair supplied by {@link InventoryListModel#directionFor(double)}. Each
- * admitted GUI sample classifies its horizontal delta against an inclusive
- * {@code 25} degree cone around the vertical axis; inside the cone the sample's
- * dx is ignored while its dy and all previously accumulated progress survive.
- * Outside the cone the dx accumulates, saturating at the existing side-exit
- * distance and discarding overshoot so an immediate reversal acts at once.
- * {@link #move(double, double)} emits a navigation {@link Action} when a side
- * gate is crossed and otherwise feeds vertical glide rows into
- * {@link InventoryListModel#glide(int)}; {@link #wheelPixels(double)} and
- * {@link #wheelRows(float)} convert scroll input (100 pixels per row) and feed
- * whole rows. Selection is only ever changed through the list model, and
- * nothing here paints or reads Minecraft state.
- *
- * <p>Rules mirrored from the latest prototype: a Back hover focus suppresses
- * glide and wheel entirely; with hover disabled a Back-side stroke past the
- * exit gate emits {@link Action#BACK}; a Forward-side stroke past the exit gate
- * emits {@link Action#FORWARD} (the caller then enters the selected row's
- * submenu); horizontal progress beyond the hint gate without a navigation
- * suppresses glide; after a wheel step, glide stays locked until vertical
- * movement passes its unlock threshold; relative vertical glide advances at
- * the frozen row-height threshold, discarding opposing sub-row travel on
- * reversal. Only a sample that actually changes the horizontal accumulator may
- * trigger navigation or count as physical movement for a caller's held-Back
- * release; vertical-only, cone-filtered and already-saturated samples cannot.
+ * List-only gesture state. The controller remains the sole pointer owner: this
+ * adapter retains only bounded exterior-side progress and the independent wheel
+ * fraction/lock. All geometry is unanimated controller-space geometry.
  */
 public final class InventoryGesture {
 
-	/** What the caller should do after a movement sample. */
-	public enum Action {
-		NONE,
-		BACK,
-		FORWARD
-	}
+	public enum Action { NONE, BACK, FORWARD }
 
-	private static final double SIDE_HINT = 19.0;
-	private static final double SIDE_EXIT = 76.0;
 	private static final double WHEEL_UNLOCK = 14.0;
-	private static final double INTRINSIC_GLIDE = 0.5;
-	private static final double PIXELS_PER_ROW = 9.0;
-	private static final double WHEEL_PIXELS_PER_ROW = 100.0;
 	private static final double CONE_TANGENT = Math.tan(Math.toRadians(25.0));
-
 	private final InventoryListModel list;
-	private final double glideSensitivity;
+	private final double deadzone;
+	private final double stroke;
 	private final boolean backHoverEnabled;
-	private double pixelsPerRow;
-
-	private double axisX;
-	private double pointerX;
-	private double pointerY;
+	private double backSign;
 	private double horizontalProgress;
-	private double glideRemainder;
 	private double wheelRemainder;
 	private double wheelUnlockTravel;
 	private boolean wheelLocked;
-	private boolean backHoverFocused;
-	private InventoryListModel.Direction direction =
-		new InventoryListModel.Direction(InventoryListModel.Side.LEFT, InventoryListModel.Side.RIGHT);
-	private double backSign = -1.0;
-	private double forwardSign = 1.0;
 
-	public InventoryGesture(InventoryListModel list, double glideSensitivity, boolean backHoverEnabled) {
-		this(list, glideSensitivity, backHoverEnabled, PIXELS_PER_ROW);
-	}
-
-	/** The native facade supplies its immutable layout's travel-per-row metric. */
-	public InventoryGesture(InventoryListModel list, double glideSensitivity, boolean backHoverEnabled, double pixelsPerRow) {
+	public InventoryGesture(InventoryListModel list, double deadzone, double stroke, boolean backHoverEnabled) {
 		this.list = Objects.requireNonNull(list, "list");
-
-		if (!Double.isFinite(glideSensitivity) || !(glideSensitivity > 0.0)
-			|| !Double.isFinite(pixelsPerRow) || !(pixelsPerRow > 0.0)) {
-			throw new IllegalArgumentException("glideSensitivity must be positive");
-		}
-
-		this.glideSensitivity = glideSensitivity;
+		if (!Double.isFinite(deadzone) || deadzone < 0 || !Double.isFinite(stroke) || stroke <= deadzone)
+			throw new IllegalArgumentException("invalid side thresholds");
+		this.deadzone = deadzone;
+		this.stroke = stroke;
 		this.backHoverEnabled = backHoverEnabled;
-		this.pixelsPerRow = pixelsPerRow;
 	}
 
-	/** Relayout is not input: retain the sub-row fraction, wheel lock and side intent. */
-	public void updateRowHeight(double pixelsPerRow) {
-		if (!Double.isFinite(pixelsPerRow) || pixelsPerRow <= 0)
-			throw new IllegalArgumentException("row height must be positive and finite");
-		if (pixelsPerRow == this.pixelsPerRow) return;
-		glideRemainder = glideRemainder / this.pixelsPerRow * pixelsPerRow;
-		this.pixelsPerRow = pixelsPerRow;
+	public void begin(InventoryListModel.Direction direction) {
+		backSign = Objects.requireNonNull(direction).back() == InventoryListModel.Side.LEFT ? -1 : 1;
+		rebase();
 	}
 
-	/** Enters the list with its frozen axis, initial pointer and side pair. */
-	public void begin(double axisX, double pointerY, InventoryListModel.Direction direction) {
-		this.direction = Objects.requireNonNull(direction, "direction");
-		this.backSign = direction.back() == InventoryListModel.Side.LEFT ? -1.0 : 1.0;
-		this.forwardSign = -this.backSign;
-		rebase(axisX, pointerY);
+	/** A surface handoff is not physical movement and never releases held Back. */
+	public void rebase() {
+		horizontalProgress = 0;
+		wheelRemainder = 0;
+		wheelUnlockTravel = 0;
+		wheelLocked = false;
+	}
+
+	/** Ignore only this sample's near-vertical dx, not previously earned side progress. */
+	public double horizontalDelta(double dx, double dy) {
+		if (!Double.isFinite(dx) || !Double.isFinite(dy)) return 0;
+		return dy != 0 && Math.abs(dx) <= Math.abs(dy) * CONE_TANGENT ? 0 : dx;
 	}
 
 	/**
-	 * Re-bases after an item return: the axis, legacy pointer copy, fractions
-	 * and horizontal progress reset while the model keeps its selected key and
-	 * window.
+	 * Count only physical travel outside the panel. At an unreachable panel edge,
+	 * the corresponding viewport edge is the qualification boundary instead. Raw
+	 * outward travel beyond confinement can continue a stroke, but never creates
+	 * another pointer or banks overshoot. Alignment never calls this method.
 	 */
-	public void rebase(double x, double y) {
-		axisX = x;
-		pointerX = x;
-		pointerY = y;
-		horizontalProgress = 0.0;
-		glideRemainder = 0.0;
-		wheelRemainder = 0.0;
-		wheelUnlockTravel = 0.0;
-		wheelLocked = false;
-		backHoverFocused = false;
-	}
-
-	/** Applies one physical delta; returns the navigation the caller must run. */
-	public Action move(double deltaX, double deltaY) {
-		return move(deltaX, deltaY, deltaY);
-	}
-
-	/** Confined pointer travel and independent authorized vertical selection travel. */
-	public Action move(double deltaX, double deltaY, double selectionDeltaY) {
-		if (!Double.isFinite(deltaX) || !Double.isFinite(deltaY) || !Double.isFinite(selectionDeltaY)) return Action.NONE;
-
-		double contribution = deltaX;
-		if (deltaY != 0.0 && Math.abs(deltaX) <= Math.abs(deltaY) * CONE_TANGENT) contribution = 0.0;
-		double previousProgress = horizontalProgress;
-		horizontalProgress = Math.clamp(horizontalProgress + contribution, -SIDE_EXIT, SIDE_EXIT);
-		boolean effectiveHorizontal = horizontalProgress != previousProgress;
-
-		if (backHoverEnabled) backHoverFocused = horizontalProgress * backSign >= SIDE_HINT;
-
-		if (backHoverFocused) {
-			glideRemainder = 0.0;
-			wheelUnlockTravel = 0.0;
-			return Action.NONE;
+	public Action moveHorizontal(double dx, double beforeX, double afterX, double panelLeft, double panelRight,
+		SpatialController.Viewport viewport) {
+		if (!Double.isFinite(dx) || dx == 0) return Action.NONE;
+		double left = panelLeft, right = panelRight;
+		if (viewport != null) {
+			double screenLeft = -viewport.centerX() - viewport.viewX();
+			double screenRight = viewport.width() - 1.0 - viewport.centerX() - viewport.viewX();
+			left = Math.clamp(left, screenLeft, screenRight);
+			right = Math.clamp(right, screenLeft, screenRight);
 		}
-
-		if (effectiveHorizontal && !backHoverEnabled && horizontalProgress * backSign >= SIDE_EXIT) {
-			return Action.BACK;
-		}
-
-		if (effectiveHorizontal && horizontalProgress * forwardSign >= SIDE_EXIT) {
-			return Action.FORWARD;
-		}
-
-		if (Math.abs(horizontalProgress) > SIDE_HINT) {
-			return Action.NONE;
-		}
-
-		if (wheelLocked) {
-			// This is signed, unscaled travel, not the direction-cleared glide fraction.
-			wheelUnlockTravel += selectionDeltaY;
-
-			if (Math.abs(wheelUnlockTravel) < WHEEL_UNLOCK) {
-				return Action.NONE;
+		double previous = horizontalProgress;
+		if (dx > 0) {
+			if (afterX < left) horizontalProgress = Math.min(0, horizontalProgress + dx);
+			else {
+				double exterior = Math.max(0, dx - Math.max(0, right - beforeX));
+				horizontalProgress = exterior > 0 ? Math.min(stroke, Math.max(0, horizontalProgress) + exterior) : 0;
 			}
-
-			wheelLocked = false;
-			wheelUnlockTravel = 0.0;
-			glideRemainder = 0.0;
+		} else {
+			if (afterX > right) horizontalProgress = Math.max(0, horizontalProgress + dx);
+			else {
+				double exterior = Math.max(0, -dx - Math.max(0, beforeX - left));
+				horizontalProgress = exterior > 0 ? -Math.min(stroke, Math.max(0, -horizontalProgress) + exterior) : 0;
+			}
 		}
-
-		if ((selectionDeltaY > 0.0 && glideRemainder < 0.0) || (selectionDeltaY < 0.0 && glideRemainder > 0.0)) {
-			glideRemainder = 0.0;
-		}
-		double travel = glideRemainder + selectionDeltaY * (glideSensitivity * INTRINSIC_GLIDE);
-		// Casting saturates attempted rows; modulo consumes all whole travel even
-		// at an endpoint, without banking overshoot or overflowing an int count.
-		int steps = (int) (travel / pixelsPerRow);
-		glideRemainder = Double.isFinite(travel) ? travel % pixelsPerRow : 0.0;
-
-		if (steps != 0) {
-			list.glide(steps);
-		}
-
+		if (horizontalProgress == previous) return Action.NONE;
+		if (horizontalProgress * backSign >= stroke) return backHoverEnabled ? Action.NONE : Action.BACK;
+		if (horizontalProgress * -backSign >= stroke) return Action.FORWARD;
 		return Action.NONE;
 	}
 
-	/** Native movement computes current-sample Back focus from the accumulator. */
-	public Action moveGui(double deltaX, double deltaY) {
-		return moveGui(deltaX, deltaY, deltaY);
-	}
-
-	/** Current-sample Back focus follows only effective filtered horizontal progress. */
-	public Action moveGui(double deltaX, double deltaY, double selectionDeltaY) {
-		return move(deltaX, deltaY, selectionDeltaY);
-	}
-
-	/** Platform-converted row deltas (already divided by its own scroll unit). */
-	public int wheelRows(float rows) {
-		return wheelRows((double) rows);
-	}
-
-	/** Double-precision native callback path; normalization remains external. */
-	public int wheelRows(double rows) {
-		return wheelPixels(rows * WHEEL_PIXELS_PER_ROW);
-	}
-
-	/** Raw wheel deltas: 100 pixels equals one row. Suppressed on Back hover. */
-	public int wheelPixels(double pixels) {
-		if (backHoverFocused) {
+	/** Signed-net raw GUI travel unlocks Y; only the excess over the lock is admitted. */
+	public double verticalDelta(double dy) {
+		if (!Double.isFinite(dy)) return 0;
+		if (sideIntent()) {
+			if (isBackHoverFocused()) wheelUnlockTravel = 0;
 			return 0;
 		}
-		if (pixels != 0.0) list.markScrolled();
-
-		wheelRemainder += pixels;
-		int rows = (int) (wheelRemainder / WHEEL_PIXELS_PER_ROW);
-
-		if (rows == 0) {
+		if (!wheelLocked) return dy;
+		double net = wheelUnlockTravel + dy;
+		if (Math.abs(net) < WHEEL_UNLOCK) {
+			wheelUnlockTravel = net;
 			return 0;
 		}
+		wheelLocked = false;
+		wheelUnlockTravel = 0;
+		return net - Math.copySign(WHEEL_UNLOCK, net);
+	}
 
-		wheelRemainder -= rows * WHEEL_PIXELS_PER_ROW;
+	/** Physical Y selection never snaps the pointer back to its row representative. */
+	public void selectAt(double pointerY, SpatialController.Viewport viewport) {
+		if (viewport == null || list.size() == 0 || viewport.height() <= 1) return;
+		double screenY = pointerY + viewport.centerY() + viewport.viewY();
+		double fraction = Math.clamp(screenY / (viewport.height() - 1.0), 0, 1);
+		list.select((int) Math.round(fraction * (list.size() - 1.0)));
+	}
+
+	/** System alignment: first/last representatives are the inclusive screen endpoints. */
+	public double selectedY(SpatialController.Viewport viewport) {
+		double fraction = list.size() <= 1 ? 0 : Math.max(0, list.selectedIndex()) / (list.size() - 1.0);
+		return fraction * (viewport.height() - 1.0) - viewport.centerY() - viewport.viewY();
+	}
+
+	/** Whole row steps synchronize Y at the caller; signed fractional wheel input survives. */
+	public boolean wheelRows(double rows) {
+		if (!Double.isFinite(rows) || isBackHoverFocused()) return false;
+		if (rows != 0) list.markScrolled();
+		double travel = wheelRemainder + rows;
+		int steps = (int) travel;
+		wheelRemainder = Double.isFinite(travel) ? travel % 1.0 : 0;
+		if (steps == 0) return false;
 		wheelLocked = true;
-		wheelUnlockTravel = 0.0;
-		glideRemainder = 0.0;
-		return list.glide(rows);
+		wheelUnlockTravel = 0;
+		list.glide(steps);
+		return true;
 	}
 
-	/** Set by the controller from its own Back-focus gate. */
-	public void setBackHoverFocused(boolean focused) {
-		this.backHoverFocused = focused;
-	}
-
-	public boolean isBackHoverFocused() {
-		return backHoverFocused;
-	}
-
-	/** Same gate used by movement and release; derived from the accumulator. */
-	public boolean isBackSideFocused() {
-		return horizontalProgress * backSign >= SIDE_HINT;
-	}
-
-	/**
-	 * Signed accumulated horizontal progress, bounded to the side-exit
-	 * distance. The session compares it before and after a sample to decide
-	 * whether that sample was effective physical list movement.
-	 */
-	public double horizontalTravel() {
-		return horizontalProgress;
-	}
-
-	/**
-	 * Imports the controller's logical pointer for the legacy read model only.
-	 * It never re-imports pointer drift into navigation, progress or focus.
-	 */
-	public void alignPointer(double x, double y) {
-		pointerX = x;
-		pointerY = y;
-	}
-
-	/** Projection-only axis correction; keeps progress, fractions and wheel lock untouched. */
-	void constrainAxis(SpatialController.Viewport viewport) {
-		axisX = viewport.confine(new SpatialController.Point(axisX, pointerY)).x();
-	}
-
-	public double axisX() {
-		return axisX;
-	}
-
-	public double pointerX() {
-		return pointerX;
-	}
-
-	public double pointerY() {
-		return pointerY;
-	}
-
-	public InventoryListModel.Direction direction() {
-		return direction;
-	}
+	public boolean sideIntent() { return Math.abs(horizontalProgress) > deadzone; }
+	public boolean isBackSideFocused() { return horizontalProgress * backSign > deadzone; }
+	public boolean isBackHoverFocused() { return backHoverEnabled && isBackSideFocused(); }
+	public double horizontalTravel() { return horizontalProgress; }
 }

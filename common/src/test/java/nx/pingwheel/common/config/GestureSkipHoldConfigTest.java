@@ -42,10 +42,10 @@ class GestureSkipHoldConfigTest {
 	}
 
 	@Test void previousSnapshotConstructorsKeepTheShortcutDisabled() {
-		var prior = new SpatialSelectorSettings.Snapshot(24, 50, 180, 55, java.math.BigDecimal.ONE,
+		var prior = new SpatialSelectorSettings.Snapshot(24, 50, 180, 55,
 			false, 500, true, false, 1, new java.math.BigDecimal("1.5"), 130, 50, true);
 		assertTrue(prior.contentIntentEnabled()); assertFalse(prior.gestureSkipHoldEnabled()); assertEquals(75, prior.gestureSkipHoldMillis());
-		var older = new SpatialSelectorSettings.Snapshot(24, 50, 180, 55, java.math.BigDecimal.ONE, false, 500, true, false);
+		var older = new SpatialSelectorSettings.Snapshot(24, 50, 180, 55, false, 500, true, false);
 		assertFalse(older.gestureSkipHoldEnabled()); assertEquals(75, older.gestureSkipHoldMillis());
 	}
 

@@ -145,19 +145,26 @@ class SpatialOverlayRendererTrailTest {
 		frame(s, c, painter, style(true, 16, 50), 1, VIEW, null);
 		assertTrue(painter.paints.stream().anyMatch(state -> state.data() instanceof SpatialOverlayRenderer.TrailPaint),
 			"precondition: a prior tail paints while no list surface is active");
-		c.moveExternalPointer(3, 8, 3);
+		c.moveExternalPointerWithoutTrail(3, 8, 3);
 		frame(s, c, painter, style(true, 16, 50), 2, VIEW, list);
-		assertEquals(List.of(p(0, 0), p(4, 7), p(7, 15)), s.trailPoints()); assertTrue(painter.hidden());
+		assertEquals(List.of(p(0, 0), p(4, 7)), s.trailPoints()); assertFalse(painter.hidden());
+		assertEquals(p(7, 15), c.snapshot().pointer(), "the shared crosshair follows list input without recording history");
+		assertEquals(p(7, 15), ((SpatialOverlayRenderer.ChromePaint) painter.paints.stream()
+			.filter(state -> state.data() instanceof SpatialOverlayRenderer.ChromePaint).findFirst().orElseThrow().data()).snapshot().pointer());
 		assertTrue(painter.paints.stream().noneMatch(state -> state.data() instanceof SpatialOverlayRenderer.TrailPaint),
 			"the active list hides its own trail and any prior tail");
 		assertTrue(painter.paints.stream().anyMatch(state -> state.data() instanceof SpatialOverlayRenderer.PanelPaint),
 			"the list chrome still paints");
-		c.enterExternal(SpatialMenu.of("item", SpatialMenu.Choice.leaf("item", "item", "item")), 30, 20, 4);
-		painter.clear();
+		c.alignExternalPointer(7, -40, 4);
 		frame(s, c, painter, style(true, 16, 50), 3, VIEW, list);
+		assertTrue(s.trailPoints().isEmpty(), "list alignment fences the prior tail without recording its new seed");
+		assertFalse(painter.hidden());
+		c.enterExternal(SpatialMenu.of("item", SpatialMenu.Choice.leaf("item", "item", "item")), 30, 20, 5);
+		painter.clear();
+		frame(s, c, painter, style(true, 16, 50), 4, VIEW, list);
 		assertEquals(List.of(p(30, 20)), s.trailPoints(), "list to item rebase is not a joining stroke");
 		assertFalse(painter.hidden(), "the item radial keeps the ordinary crosshair rule");
-		frame(s, c, painter, style(true, 16, 50), 4, VIEW, list);
+		frame(s, c, painter, style(true, 16, 50), 5, VIEW, list);
 		assertEquals(List.of(p(30, 20)), painter.trail().points(), "the next frame paints the new epoch's committed seed");
 		int trail = java.util.stream.IntStream.range(0, painter.paints.size()).filter(i -> painter.paints.get(i).data() instanceof SpatialOverlayRenderer.TrailPaint).findFirst().orElseThrow();
 		for (int i = 0; i < painter.paints.size(); i++) {

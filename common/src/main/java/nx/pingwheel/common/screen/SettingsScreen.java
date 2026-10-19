@@ -593,7 +593,6 @@ public class SettingsScreen extends OptionsSubScreen {
 			case SPATIAL_DEADZONE -> this.addOption(setting, this.getSpatialDeadzoneOption(), false);
 			case SPATIAL_STROKE -> this.addOption(setting, this.getSpatialStrokeOption(), false);
 			case SPATIAL_DWELL_MILLIS -> this.addOption(setting, this.getSpatialDwellOption(), false);
-			case SPATIAL_TARGET_GLIDE -> this.addOption(setting, this.getSpatialTargetGlideOption(), true);
 			case SPATIAL_HOVER_ENABLED -> this.addOption(setting, this.getSpatialHoverEnabledOption(), true);
 			case SPATIAL_HOVER_MILLIS -> this.addOption(setting, this.getSpatialHoverMillisOption(), false);
 			case SPATIAL_CONTENT_INTENT_ENABLED -> this.addOption(setting, this.getSpatialContentIntentEnabledOption(), false);
@@ -2365,14 +2364,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		return OptionUtils.ofInt(text.getKey(), MIN_DWELL_MILLIS, MAX_DWELL_MILLIS, DWELL_MILLIS_STEP,
 			value -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
 			() -> text.path("tooltip").get(), selector::getDwellMillis, selector::setDwellMillis);
-	}
-
-	private OptionInstance<java.math.BigDecimal> getSpatialTargetGlideOption() {
-		SpatialSelectorSettings selector = config.getSpatialSelector();
-		final var text = LanguageUtils.settings("spatial_selector").path("target_glide");
-		return OptionUtils.ofDecimal(text.getKey(), MIN_TARGET_GLIDE, MAX_TARGET_GLIDE, TARGET_GLIDE_STEP,
-			value -> text.get(Component.literal(value.stripTrailingZeros().toPlainString() + "×")),
-			() -> text.path("tooltip").get(), selector::getTargetGlide, selector::setTargetGlide);
 	}
 
 	private OptionInstance<Boolean> getSpatialHoverEnabledOption() {

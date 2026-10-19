@@ -1,6 +1,5 @@
 package nx.pingwheel.common.client.spatial;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -79,7 +78,7 @@ class NativeSelectorInputTest {
 	}
 
 	@Test
-	void ownedGuiScaledNativePositionsContinueListGlideAtEdgesWithoutHandoffTravel() {
+	void ownedGuiScaledNativePositionsMoveListPointerAcrossAbsoluteEndpointsWithoutHandoffTravel() {
 		var target = new SpatialSelectorSession.CapturedTarget("ordinary", new ResolvedTarget(
 			new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"),
 			TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow()), Optional.of(BlockFace.NORTH), Optional.empty());
@@ -91,7 +90,6 @@ class NativeSelectorInputTest {
 				new SpatialSelectorSession.InventoryRow<>("c", "c", 1L, "minecraft:stone", Status.READY, "opaque:c")),
 			List.of(attention), attention);
 		var preferences = new SpatialSelectorSettings();
-		preferences.setTargetGlide(new BigDecimal("1")); // the explicit calibration factor this native boundary checks
 		var session = new SpatialSelectorSession<>(target, Map.of(), preferences.snapshot(), fence,
 			(ignored, requestedFence) -> new SpatialSelectorSession.ContentProjection<>(fence, 1, false, Status.READY, List.of(), preview),
 			new SpatialSelectorSession.ListGeometry(3, 180, 17, 20, 19, 85));
@@ -99,19 +97,19 @@ class NativeSelectorInputTest {
 		session.moveGui(100, 0, 182); session.tick(362);
 		assertTrue(session.snapshot().inventory().open());
 		double axis = session.snapshot().radial().pointer().x();
-		session.constrainPointer(new SpatialController.Viewport(1, 1, -axis - 0.5, -0.5), 363);
+		session.constrainPointer(new SpatialController.Viewport(600, 81, -axis, -0.5), 363);
 		var pointer = session.snapshot().radial().pointer(); var trail = session.snapshot().radial().trail();
 		var owned = frame(1200, 600, true, false);
 		var input = new NativeSelectorInput(session); input.open();
 		input.onMove(7, 100, 100, owned, 364); // prime, not input
 		input.onMove(8, 100, 10000, owned, 365); // foreign window, not a new baseline
-		input.onMove(7, 100, 178, owned, 366); // 78 window px = 39 GUI px
+		input.onMove(7, 100, 138, owned, 366); // 38 window px = 19 GUI px, below the absolute first-row boundary
 		assertEquals("a", session.snapshot().inventory().selectedKey());
-		input.onMove(7, 100, 180, owned, 367);
+		input.onMove(7, 100, 140, owned, 367);
 		assertEquals("b", session.snapshot().inventory().selectedKey());
 		var rescaled = new NativeSelectorInput.Frame(7, 1200, 800, 300, 200, true, false);
 		input.onMove(7, -4000, -4000, rescaled, 368);
-		assertEquals("b", session.snapshot().inventory().selectedKey(), "scale handoff cannot synthesize reverse glide");
+		assertEquals("b", session.snapshot().inventory().selectedKey(), "scale handoff cannot synthesize reverse travel");
 		input.onMove(7, -4000, -3840, rescaled, 369); // 160 window px = 40 GUI px
 		assertEquals("c", session.snapshot().inventory().selectedKey());
 		var unowned = new NativeSelectorInput.Frame(7, 1200, 800, 300, 200, true, false, false);
@@ -119,11 +117,12 @@ class NativeSelectorInputTest {
 		input.onMove(7, 2000, 2000, rescaled, 371);
 		assertEquals("c", session.snapshot().inventory().selectedKey());
 		input.onMove(7, 2000, 1840, rescaled, 372);
-		assertEquals("b", session.snapshot().inventory().selectedKey(), "native reversal is relative even at a fixed drawn pointer");
+		assertEquals("b", session.snapshot().inventory().selectedKey(), "native reversal moves immediately from the endpoint");
 		input.synchronize(new NativeSelectorInput.Frame(7, 1200, 800, 300, 200, false, false));
 		input.onMove(7, -1000, -1000, rescaled, 373);
 		assertEquals("b", session.snapshot().inventory().selectedKey(), "focus handoff primes without travel");
-		assertEquals(pointer, session.snapshot().radial().pointer());
+		assertEquals(pointer.x(), session.snapshot().radial().pointer().x());
+		assertEquals(pointer.y() + 20, session.snapshot().radial().pointer().y());
 		assertEquals(trail, session.snapshot().radial().trail());
 		var intent = assertInstanceOf(SelectorIntent.SelectInventory.class, session.releaseIntent(374));
 		assertEquals("opaque:b", intent.reference());
@@ -172,7 +171,7 @@ class NativeSelectorInputTest {
 	}
 
 	@Test
-	void endlessAlternatingGuiCallbacksCannotDriftTheFixedListPointerOrSelection() {
+	void endlessAlternatingGuiCallbacksMoveAndReturnTheSharedListPointerWithoutTrailOrSelectionDrift() {
 		var target = new SpatialSelectorSession.CapturedTarget("ordinary", new ResolvedTarget(
 			new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"),
 			TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow()), Optional.of(BlockFace.NORTH), Optional.empty());
@@ -183,7 +182,6 @@ class NativeSelectorInputTest {
 				new SpatialSelectorSession.InventoryRow<>("b", "b", 2L, "minecraft:stone", Status.READY, "opaque:b")),
 			List.of(attention), attention);
 		var preferences = new SpatialSelectorSettings();
-		preferences.setTargetGlide(new BigDecimal("1"));
 		var session = new SpatialSelectorSession<>(target, Map.of(), preferences.snapshot(), fence,
 			(ignored, requestedFence) -> new SpatialSelectorSession.ContentProjection<>(fence, 1, false, Status.READY, List.of(), preview),
 			new SpatialSelectorSession.ListGeometry(3, 180, 17, 20, 19, 85));
@@ -197,9 +195,10 @@ class NativeSelectorInputTest {
 		input.open(); input.prime(600, 400, owned);
 		for (int sample = 0; sample < 2000; sample++) {
 			input.onMove(7, 600 + (sample % 2 == 0 ? 2 : 0), 400, owned, 400L + sample);
+			assertEquals(before.pointer().x() + (sample % 2 == 0 ? 1 : 0), session.snapshot().radial().pointer().x());
 		}
 
-		assertEquals(before.pointer(), session.snapshot().radial().pointer(), "endless callbacks never move the fixed pointer");
+		assertEquals(before.pointer(), session.snapshot().radial().pointer(), "balanced callbacks return to the starting pointer");
 		assertEquals(before.trail(), session.snapshot().radial().trail(), "list input appends no trail");
 		assertEquals("a", session.snapshot().inventory().selectedKey());
 		assertEquals(0.0, session.snapshot().radial().hoverProgress());

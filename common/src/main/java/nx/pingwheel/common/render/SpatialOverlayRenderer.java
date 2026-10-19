@@ -840,8 +840,8 @@ public final class SpatialOverlayRenderer {
 			Function<SpatialController.ChoiceView, Component> details, Style style, long nowNanos,
 			SpatialController.Viewport viewport, double width, double height, FramePainter painter) {
 			paintedChoiceIds = Set.of();
-			// The active empty list surface hides the crosshair and every trail
-			// paint; an item radial keeps the ordinary pointer/trail rules.
+			// The active list keeps its moving crosshair but hides every trail
+			// paint; an item radial keeps the ordinary follower/trail rules.
 			boolean listActive = activeInventoryList(radial, inventory);
 			List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets = new ArrayList<>();
 			trail.prepare(radial, style.trailLength(), nowNanos, style.reduceMotion());
@@ -911,7 +911,7 @@ public final class SpatialOverlayRenderer {
 			RowLayout selected = RowLayout.NONE;
 			Set<String> painted = new HashSet<>();
 			String activeMenu = origin == null ? null : radial.menus().getLast().menuId();
-			boolean hidePointer = listActive;
+			boolean hidePointer = false;
 			String retainedRowKey = inventory == null ? null : inventory.retainedRowKey();
 			String selectedRowKey = listActive && inventory.selectedIndex() >= 0
 				&& inventory.selectedIndex() < inventory.rows().size()
@@ -998,7 +998,7 @@ public final class SpatialOverlayRenderer {
 			}
 			if (underlayBatch) painter.flush();
 			paintedChoiceIds = Set.copyOf(painted);
-			trail.commit(radial, desiredOwner, followerPoint, nowNanos, style.reduceMotion());
+			if (!listActive) trail.commit(radial, desiredOwner, followerPoint, nowNanos, style.reduceMotion());
 			return selected;
 		}
 

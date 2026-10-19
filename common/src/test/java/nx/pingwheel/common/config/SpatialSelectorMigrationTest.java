@@ -12,9 +12,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import nx.pingwheel.common.client.spatial.InventoryGesture;
-import nx.pingwheel.common.client.spatial.InventoryListModel;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Retired wheel-key removal is a release-boundary migration, not same-version normalization. */
@@ -23,78 +20,32 @@ class SpatialSelectorMigrationTest {
 	private static final String LEGACY = "0.4.2-pfi-beta1";
 
 	@Test
-	void freshFilePersistsTheDefaultGlideAndCurrentMissingNullAndExplicitValuesNeverRewriteOnLoad(
+	void removedGlideIsUnknownDataWithoutASameVersionLoadRewrite(
 		@TempDir Path directory) throws IOException {
 		Path freshPath = directory.resolve("fresh.json");
 		var fresh = new ConfigHandler<>(ClientConfig.class, freshPath, TIMEOUT_TARGET);
 		fresh.load();
-		assertEquals(0, new java.math.BigDecimal("2.5").compareTo(read(freshPath).getAsJsonObject("spatialSelector")
-			.get("targetGlide").getAsBigDecimal()));
-		assertLoadedGlideThreshold(fresh.getConfig(), 16);
-		for (String selector : List.of("", ",\"spatialSelector\":null", ",\"spatialSelector\":{}",
-			",\"spatialSelector\":{\"targetGlide\":null}", ",\"spatialSelector\":{\"targetGlide\":0.25}",
-			",\"spatialSelector\":{\"targetGlide\":1.75}", ",\"spatialSelector\":{\"targetGlide\":2}",
-			",\"spatialSelector\":{\"targetGlide\":9}")) {
+		assertFalse(read(freshPath).getAsJsonObject("spatialSelector").has("targetGlide"));
+		var expected = fresh.getConfig().getSpatialSelector().snapshot();
+		for (String value : List.of("null", "0.25", "20", "{\"unused\":true}")) {
 			Path path = directory.resolve("current.json");
-			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET + "\",\"pingVolume\":37" + selector + "}\n")
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37,\"spatialSelector\":{\"targetGlide\":" + value + "}}\n")
 				.getBytes(StandardCharsets.UTF_8);
 			Files.write(path, original);
 			var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
 			handler.load();
-			double threshold = selector.contains(":0.25") ? 160
-				: selector.contains(":1.75}") ? 40.0 / 1.75
-				: selector.contains(":2}") ? 20
-				: selector.contains(":9}") ? 40.0 / 9.0
-				: 16;
-			assertLoadedGlideThreshold(handler.getConfig(), threshold);
+			assertEquals(expected, handler.getConfig().getSpatialSelector().snapshot(),
+				"the removed member cannot change any live selector preference");
 			assertEquals(37, handler.getConfig().getPingVolume());
-			assertArrayEquals(original, Files.readAllBytes(path), "default normalization is not a load rewrite");
+			assertArrayEquals(original, Files.readAllBytes(path), "unknown nested data does not schedule a rewrite");
 			assertTrue(handler.saveSafely());
+			assertArrayEquals(original, Files.readAllBytes(path), "an untouched same-version save is a no-op");
 			var reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
 			reloaded.load();
-			assertLoadedGlideThreshold(reloaded.getConfig(), threshold);
-			if (threshold == 160) assertEquals(0, new java.math.BigDecimal("0.25").compareTo(
-				read(path).getAsJsonObject("spatialSelector").get("targetGlide").getAsBigDecimal()));
+			assertEquals(expected, reloaded.getConfig().getSpatialSelector().snapshot());
 		}
-		fresh.getConfig().getSpatialSelector().setTargetGlide(new java.math.BigDecimal("0.25"));
-		fresh.resetToDefaults();
-		assertLoadedGlideThreshold(fresh.getConfig(), 16);
-		var resetReloaded = new ConfigHandler<>(ClientConfig.class, freshPath, TIMEOUT_TARGET);
-		resetReloaded.load();
-		assertLoadedGlideThreshold(resetReloaded.getConfig(), 16);
 		assertNoBackup(directory);
-	}
-
-	@Test
-	void existingVersionMigrationNeverRescalesExplicitQuarterGlide(@TempDir Path directory) throws IOException {
-		var source = legacyRoot(LEGACY);
-		source.add("spatialSelector", JsonParser.parseString("{\"targetGlide\":0.25,\"trailLength\":64,\"trailOpacity\":0}"));
-		var migrated = update(source, ClientConfig.class, LEGACY, TIMEOUT_TARGET);
-		assertEquals(source.get("spatialSelector"), migrated.get("spatialSelector"));
-		Path path = directory.resolve("legacy.json");
-		Files.writeString(path, source.toString(), StandardCharsets.UTF_8);
-		var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
-		handler.load();
-		assertLoadedGlideThreshold(handler.getConfig(), 160);
-		assertEquals(64, handler.getConfig().getSpatialSelector().getTrailLength());
-		assertEquals(0, handler.getConfig().getSpatialSelector().getTrailOpacity());
-		assertEquals(64, read(path).getAsJsonObject("spatialSelector").get("trailLength").getAsInt());
-		assertEquals(0, read(path).getAsJsonObject("spatialSelector").get("trailOpacity").getAsInt());
-		assertEquals(0, new java.math.BigDecimal("0.25").compareTo(read(path).getAsJsonObject("spatialSelector")
-			.get("targetGlide").getAsBigDecimal()));
-		assertNoRetiredWheelKeys(read(path));
-		assertNoBackup(directory);
-	}
-
-	private static void assertLoadedGlideThreshold(ClientConfig config, double threshold) {
-		var list = new InventoryListModel(3);
-		list.open(List.of(new InventoryListModel.Entry("a", "a", 3, null),
-			new InventoryListModel.Entry("b", "b", 2, null)), 0, 0, 180);
-		var frozen = config.getSpatialSelector().snapshot();
-		var gesture = new InventoryGesture(list, frozen.targetGlide().doubleValue(), frozen.hoverEnabled(), 20);
-		gesture.begin(0, 0, list.direction());
-		gesture.move(0, threshold - 1); assertEquals("a", list.selectedKey());
-		gesture.move(0, 1); assertEquals("b", list.selectedKey());
 	}
 
 	@Test
@@ -211,6 +162,8 @@ class SpatialSelectorMigrationTest {
 		assertEquals(expected, handler.getConfig().getSpatialSelector());
 		JsonObject persisted = read(path).getAsJsonObject("spatialSelector");
 		assertEquals(selector.get("unknownPreference"), persisted.get("unknownPreference"));
+		assertEquals(selector.get("targetGlide"), persisted.get("targetGlide"),
+			"the removed preference follows the existing guarded nested-unknown preservation rule");
 		for (var entry : new Gson().toJsonTree(expected).getAsJsonObject().entrySet()) {
 			assertEquals(entry.getValue(), persisted.get(entry.getKey()), entry.getKey());
 		}
@@ -260,7 +213,7 @@ class SpatialSelectorMigrationTest {
 	@Test
 	void sameVersionAbsentAndPartialSelectorGainModelDefaultsWithoutALoadRewrite(
 		@TempDir Path directory) throws IOException {
-		for (String selectorJson : List.of("", ",\"spatialSelector\":{\"targetGlide\":1.5,\"hoverEnabled\":true}")) {
+		for (String selectorJson : List.of("", ",\"spatialSelector\":{\"hoverEnabled\":true}")) {
 			Path path = directory.resolve("client.json");
 			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET + "\",\"pingVolume\":37"
 				+ selectorJson + "}\n").getBytes(StandardCharsets.UTF_8);
@@ -340,7 +293,7 @@ class SpatialSelectorMigrationTest {
 		Path path = directory.resolve("client.json");
 		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
 		SpatialSelectorSettings preferences = new Gson().fromJson("""
-			{"deadzone":28,"stroke":70,"dwellMillis":230,"rootDistance":90,"targetGlide":1.75,
+			{"deadzone":28,"stroke":70,"dwellMillis":230,"rootDistance":90,
 			 "hoverEnabled":true,"hoverMillis":750,"showTrail":false,"reduceMotion":true,
 			 "preciseCapturePeriodTicks":25,"trailLength":64,"trailOpacity":73}
 			""", SpatialSelectorSettings.class);

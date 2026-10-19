@@ -7,79 +7,11 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.function.IntUnaryOperator;
 
-import nx.pingwheel.common.client.spatial.InventoryGesture;
-import nx.pingwheel.common.client.spatial.InventoryListModel;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SpatialSelectorSettingsTest {
-
-	@Test
-	void initializedMissingNullAndExplicitGlideValuesDriveTheirOwnRelativeThresholds() {
-		for (var probe : List.of(
-			new GlideProbe("{}", 16.0),
-			new GlideProbe("{\"targetGlide\":null}", 16.0),
-			new GlideProbe("{\"targetGlide\":1}", 40.0),
-			new GlideProbe("{\"targetGlide\":1.75}", 40.0 / 1.75),
-			new GlideProbe("{\"targetGlide\":2}", 20.0),
-			new GlideProbe("{\"targetGlide\":0.25}", 160.0),
-			new GlideProbe("{\"targetGlide\":9}", 40.0 / 9.0))) {
-			SpatialSelectorSettings settings = new Gson().fromJson(probe.json(), SpatialSelectorSettings.class);
-			var beforeValidation = settings.snapshot();
-			settings.validate();
-			assertEquals(beforeValidation, settings.snapshot());
-			assertGlideThreshold(beforeValidation, probe.threshold());
-			assertGlideThreshold(new Gson().fromJson(new Gson().toJson(settings), SpatialSelectorSettings.class).snapshot(), probe.threshold());
-		}
-		assertGlideThreshold(new SpatialSelectorSettings().snapshot(), 16.0);
-	}
-
-	@Test
-	void frozenGlideBehaviorDoesNotFollowLiveChangesOrResetToTheDefault() {
-		var settings = new Gson().fromJson("{\"targetGlide\":0.25}", SpatialSelectorSettings.class);
-		var savedQuarter = settings.snapshot();
-		settings.setTargetGlide(new BigDecimal("2"));
-		assertGlideThreshold(savedQuarter, 160);
-		assertGlideThreshold(settings.snapshot(), 20);
-		settings.setTargetGlide(null);
-		assertGlideThreshold(settings.snapshot(), 16.0);
-		assertGlideThreshold(savedQuarter, 160);
-	}
-
-	private static void assertGlideThreshold(SpatialSelectorSettings.Snapshot settings, double threshold) {
-		var list = new InventoryListModel(3);
-		list.open(List.of(new InventoryListModel.Entry("a", "a", 3, null),
-			new InventoryListModel.Entry("b", "b", 2, null)), 0, 0, 180);
-		var gesture = new InventoryGesture(list, settings.targetGlide().doubleValue(), settings.hoverEnabled(), 20);
-		gesture.begin(0, 0, list.direction());
-		gesture.move(0, threshold - 1);
-		assertEquals("a", list.selectedKey());
-		gesture.move(0, 1);
-		assertEquals("b", list.selectedKey());
-	}
-
-	@Test
-	void targetGlideClampsToTheConfirmedRangeAndKeepsValidExplicitFactorsLiteral() {
-		assertEquals(0, new BigDecimal("0.25")
-			.compareTo(SpatialSelectorSettings.clampTargetGlide(new BigDecimal("0.1"))));
-		assertEquals(0, new BigDecimal("20")
-			.compareTo(SpatialSelectorSettings.clampTargetGlide(new BigDecimal("21"))));
-		assertEquals(0, new BigDecimal("20")
-			.compareTo(SpatialSelectorSettings.clampTargetGlide(new BigDecimal("20"))));
-		assertEquals(0, new BigDecimal("1.5")
-			.compareTo(SpatialSelectorSettings.clampTargetGlide(new BigDecimal("1.5"))));
-		assertEquals(0, new BigDecimal("9")
-			.compareTo(SpatialSelectorSettings.clampTargetGlide(new BigDecimal("9"))));
-		assertEquals(0, new BigDecimal("1.3")
-			.compareTo(SpatialSelectorSettings.clampTargetGlide(new BigDecimal("1.3"))),
-			"a valid off-grid factor stays literal instead of snapping to the step grid");
-		assertEquals(0, new BigDecimal("2.5")
-			.compareTo(SpatialSelectorSettings.clampTargetGlide(null)));
-		assertEquals(0, new BigDecimal("2.5")
-			.compareTo(new SpatialSelectorSettings().getTargetGlide()));
-	}
 
 	@Test
 	void hoverMillisClampsToTheConfirmedDwellRange() {
@@ -91,14 +23,13 @@ class SpatialSelectorSettingsTest {
 	@Test
 	void nullAndOutOfRangeNestedValuesValidateWithoutThrowing() {
 		SpatialSelectorSettings settings = new SpatialSelectorSettings();
-		settings.setTargetGlide(null);
+		settings.setSubmenuRadiusScale(null);
 		settings.setHoverMillis(Integer.MIN_VALUE);
 		settings.setHoverEnabled(true);
 
 		settings.validate();
 
-		assertTrue(settings.getTargetGlide().compareTo(SpatialSelectorSettings.MIN_TARGET_GLIDE) >= 0);
-		assertTrue(settings.getTargetGlide().compareTo(SpatialSelectorSettings.MAX_TARGET_GLIDE) <= 0);
+		assertEquals(SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE, settings.getSubmenuRadiusScale());
 		assertEquals(SpatialSelectorSettings.MIN_HOVER_MILLIS, settings.getHoverMillis());
 		assertTrue(settings.isHoverEnabled());
 	}
@@ -144,24 +75,24 @@ class SpatialSelectorSettingsTest {
 
 	@Test
 	void previousSnapshotConstructorFormsDefaultTheContentIntentChoice() {
+		SpatialSelectorSettings.Snapshot eight = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			false, 500, true, false);
+		assertFalse(eight.contentIntentEnabled());
+
 		SpatialSelectorSettings.Snapshot nine = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
-			new BigDecimal("0.25"), false, 500, true, false);
+			false, 500, true, false, 25);
 		assertFalse(nine.contentIntentEnabled());
 
 		SpatialSelectorSettings.Snapshot ten = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
-			new BigDecimal("0.25"), false, 500, true, false, 25);
+			false, 500, true, false, 25, new BigDecimal("2.0"));
 		assertFalse(ten.contentIntentEnabled());
 
-		SpatialSelectorSettings.Snapshot eleven = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
-			new BigDecimal("0.25"), false, 500, true, false, 25, new BigDecimal("2.0"));
-		assertFalse(eleven.contentIntentEnabled());
-
-		SpatialSelectorSettings.Snapshot thirteen = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
-			new BigDecimal("0.25"), false, 500, true, false, 25, new BigDecimal("2.0"), 64, 0);
-		assertFalse(thirteen.contentIntentEnabled());
+		SpatialSelectorSettings.Snapshot twelve = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			false, 500, true, false, 25, new BigDecimal("2.0"), 64, 0);
+		assertFalse(twelve.contentIntentEnabled());
 
 		SpatialSelectorSettings.Snapshot canonical = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
-			new BigDecimal("0.25"), false, 500, true, false, 25, new BigDecimal("2.0"), 64, 0, true);
+			false, 500, true, false, 25, new BigDecimal("2.0"), 64, 0, true);
 		assertTrue(canonical.contentIntentEnabled());
 	}
 
@@ -253,7 +184,7 @@ class SpatialSelectorSettingsTest {
 	void rawJsonValidationAndSnapshotClampAllValuesWithoutResettingBooleanChoices() {
 		SpatialSelectorSettings settings = new Gson().fromJson("""
 			{"deadzone":-1,"stroke":2147483647,"dwellMillis":-1,"rootDistance":2147483647,
-			 "targetGlide":null,"hoverEnabled":true,"hoverMillis":-1,"showTrail":false,"reduceMotion":true,
+			 "hoverEnabled":true,"hoverMillis":-1,"showTrail":false,"reduceMotion":true,
 			 "trailLength":-1,"trailOpacity":2147483647}
 			""", SpatialSelectorSettings.class);
 		SpatialSelectorSettings.Snapshot frozen = settings.snapshot();
@@ -332,7 +263,6 @@ class SpatialSelectorSettingsTest {
 		assertEquals(SpatialSelectorSettings.MAX_TRAIL_OPACITY, settings.getTrailOpacity());
 		assertEquals(64, settings.getTrailLength());
 		assertEquals(90, settings.getRootDistance());
-		assertEquals(new BigDecimal("1.5"), settings.getTargetGlide());
 		assertTrue(settings.isShowTrail());
 		assertFalse(settings.isReduceMotion());
 	}
@@ -345,7 +275,6 @@ class SpatialSelectorSettingsTest {
 		settings.setStroke(80);
 		settings.setDwellMillis(250);
 		settings.setRootDistance(100);
-		settings.setTargetGlide(new BigDecimal("2"));
 		settings.setHoverEnabled(false);
 		settings.setHoverMillis(1000);
 		settings.setShowTrail(false);
@@ -355,7 +284,7 @@ class SpatialSelectorSettingsTest {
 		settings.setTrailOpacity(100);
 
 		assertEquals(new SpatialSelectorSettings.Snapshot(28, 70, 200, 90,
-			new BigDecimal("1.5"), true, 750, true, false,
+			true, 750, true, false,
 			SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS,
 			SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE, 64, 25), frozen);
 	}
@@ -367,7 +296,6 @@ class SpatialSelectorSettingsTest {
 		assertEquals(28, settings.getDeadzone());
 		assertEquals(70, settings.getStroke());
 		assertEquals(200, settings.getDwellMillis());
-		assertEquals(new BigDecimal("1.5"), settings.getTargetGlide());
 		assertEquals(750, settings.getHoverMillis());
 		assertTrue(settings.isHoverEnabled());
 
@@ -375,7 +303,6 @@ class SpatialSelectorSettingsTest {
 		settings.setDeadzone(Integer.MAX_VALUE);
 		settings.setStroke(Integer.MIN_VALUE);
 		settings.setDwellMillis(Integer.MAX_VALUE);
-		settings.setTargetGlide(BigDecimal.TEN);
 		settings.setHoverMillis(Integer.MAX_VALUE);
 		settings.setHoverEnabled(false);
 		settings.validate();
@@ -450,30 +377,30 @@ class SpatialSelectorSettingsTest {
 
 	@Test
 	void previousSnapshotConstructorFormsDefaultTheSubmenuRadiusScaleAndTrailPreferences() {
-		SpatialSelectorSettings.Snapshot nine = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
-			new BigDecimal("0.25"), false, 500, true, false);
-		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE.compareTo(nine.submenuRadiusScale()));
+		SpatialSelectorSettings.Snapshot eight = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			false, 500, true, false);
+		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE.compareTo(eight.submenuRadiusScale()));
 		assertEquals(SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS,
-			nine.preciseCapturePeriodTicks());
+			eight.preciseCapturePeriodTicks());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, eight.trailLength());
+		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, eight.trailOpacity());
+
+		SpatialSelectorSettings.Snapshot nine = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			false, 500, true, false, 25);
+		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE.compareTo(nine.submenuRadiusScale()));
+		assertEquals(25, nine.preciseCapturePeriodTicks());
 		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, nine.trailLength());
 		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, nine.trailOpacity());
 
 		SpatialSelectorSettings.Snapshot ten = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
-			new BigDecimal("0.25"), false, 500, true, false, 25);
-		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE.compareTo(ten.submenuRadiusScale()));
+			false, 500, true, false, 25, new BigDecimal("2.0"));
 		assertEquals(25, ten.preciseCapturePeriodTicks());
+		assertEquals(0, new BigDecimal("2.0").compareTo(ten.submenuRadiusScale()));
 		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, ten.trailLength());
 		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, ten.trailOpacity());
 
-		SpatialSelectorSettings.Snapshot eleven = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
-			new BigDecimal("0.25"), false, 500, true, false, 25, new BigDecimal("2.0"));
-		assertEquals(25, eleven.preciseCapturePeriodTicks());
-		assertEquals(0, new BigDecimal("2.0").compareTo(eleven.submenuRadiusScale()));
-		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, eleven.trailLength());
-		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, eleven.trailOpacity());
-
 		SpatialSelectorSettings.Snapshot canonical = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
-			new BigDecimal("0.25"), false, 500, true, false, 25, new BigDecimal("2.0"), 64, 0);
+			false, 500, true, false, 25, new BigDecimal("2.0"), 64, 0);
 		assertEquals(64, canonical.trailLength());
 		assertEquals(0, canonical.trailOpacity());
 	}
@@ -490,13 +417,11 @@ class SpatialSelectorSettingsTest {
 
 	private static SpatialSelectorSettings explicitSettings() {
 		return new Gson().fromJson("""
-			{"deadzone":28,"stroke":70,"dwellMillis":200,"rootDistance":90,"targetGlide":1.5,
+			{"deadzone":28,"stroke":70,"dwellMillis":200,"rootDistance":90,
 			 "hoverEnabled":true,"hoverMillis":750,"showTrail":true,"reduceMotion":false,
 			 "trailLength":64,"trailOpacity":25}
 			""", SpatialSelectorSettings.class);
 	}
 
 	private record IntBound(int min, int max, IntUnaryOperator clamp) {}
-
-	private record GlideProbe(String json, double threshold) {}
 }

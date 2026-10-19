@@ -1,6 +1,5 @@
 package nx.pingwheel.common.render;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -107,19 +106,18 @@ class SpatialInventoryNavigationIntegrationTest {
 		int displayProjections;
 		double rawX = 1000, rawY = 700;
 
-		Fixture(int width, int height, String glide, boolean reduced, int propertyCount) {
-			this(width, height, glide, reduced, propertyCount, SpatialSelectorSettings.DEFAULT_DEADZONE, false);
+		Fixture(int width, int height, boolean reduced, int propertyCount) {
+			this(width, height, reduced, propertyCount, SpatialSelectorSettings.DEFAULT_DEADZONE, false);
 		}
 
-		Fixture(int width, int height, String glide, boolean reduced, int propertyCount, int deadzone, boolean hover) {
-			this(width, height, glide, reduced, propertyCount, deadzone, hover, true);
+		Fixture(int width, int height, boolean reduced, int propertyCount, int deadzone, boolean hover) {
+			this(width, height, reduced, propertyCount, deadzone, hover, true);
 		}
 
 		/** {@code contentIntent} selects the frozen property/item intent behavior explicitly. */
-		Fixture(int width, int height, String glide, boolean reduced, int propertyCount, int deadzone, boolean hover,
+		Fixture(int width, int height, boolean reduced, int propertyCount, int deadzone, boolean hover,
 			boolean contentIntent) {
 			var preferences = new SpatialSelectorSettings();
-			preferences.setTargetGlide(new BigDecimal(glide));
 			preferences.setReduceMotion(reduced);
 			preferences.setDeadzone(deadzone);
 			preferences.setHoverEnabled(hover);
@@ -202,13 +200,27 @@ class SpatialInventoryNavigationIntegrationTest {
 		double backSign() {
 			return snapshot().inventory().direction().back() == InventoryListModel.Side.LEFT ? -1.0 : 1.0;
 		}
+		double optionStep() { return (nativeFrame.guiHeight() - 1.0) / (snapshot().inventory().entries().size() - 1.0); }
+		/** Exercise only real native Y input after callers have explicitly paid any wheel lock. */
+		void moveToOption(int index) {
+			var state = snapshot();
+			double screenY = state.radial().pointer().y() + state.viewport().centerY() + state.viewport().viewY();
+			move(0, index * optionStep() - screenY, now + 1);
+		}
+		/** Reach the actual logical panel edge, then pay the requested exterior distance. */
+		void side(double sign, double exterior) {
+			var state = snapshot();
+			double boundary = state.inventory().axisX() + sign * geometry.width() / 2;
+			double distance = Math.max(0, sign * (boundary - state.radial().pointer().x()));
+			move(sign * (distance + exterior), 0, now + 1);
+		}
 		void leaveListBySideBack() {
 			if (settings.hoverEnabled()) {
-				move(backSign() * 50, 0, now + 1);
+				side(backSign(), settings.deadzone() + 1);
 				assertTrue(snapshot().inventoryView().backAffordance().focused(), "Back hover precedes the return");
 				frame(now + settings.hoverMillis() + 1);
 			} else {
-				move(backSign() * 90, 0, now + 1);
+				side(backSign(), settings.stroke() + 1);
 			}
 		}
 		void settle() { frame(now + 1); frame(now + 160); }
@@ -250,7 +262,7 @@ class SpatialInventoryNavigationIntegrationTest {
 			settle();
 			assertTrue(snapshot().inventory().open());
 			assertTrue(menu().choices().isEmpty(), "inventory external surface is active");
-			assertTrue(painter.pointerHidden, "the real frame path hides the list pointer");
+			assertFalse(painter.pointerHidden, "the real frame path paints the moving list crosshair");
 			assertEquals(List.of("k0"), painter.selectedRows);
 		}
 		void scroll(double rows) {
@@ -325,7 +337,7 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void nativeUpperRightThenExactlyRightUsesTheSameEqualInventorySectorForHitFollowerAndPaint() {
-		var f = new Fixture(1000, 700, "1", true, 2, 18, false);
+		var f = new Fixture(1000, 700, true, 2, 18, false);
 		f.move(140, -140, 10);
 		assertEquals("content", f.snapshot().radial().focusId());
 		f.move(120, 0, 50); // qualified upper-right -> right turn, without a Content dwell
@@ -365,10 +377,9 @@ class SpatialInventoryNavigationIntegrationTest {
 	}
 
 	@ParameterizedTest
-	@CsvSource({"1, false, false", "0.25, false, false", "1, true, false", "0.25, true, false",
-		"1, false, true", "0.25, false, true", "1, true, true", "0.25, true, true"})
-	void nativeVerticalTravelSelectsAndPaintsBothDirectionsFromTheMiddleAtGuiEdges(String glide, boolean reduced, boolean leftEntry) {
-		var f = new Fixture(320, 240, glide, reduced, 0);
+	@CsvSource({"false, false", "true, false", "false, true", "true, true"})
+	void nativeVerticalTravelSelectsAndPaintsAbsoluteOptionsAtGuiEdges(boolean reduced, boolean leftEntry) {
+		var f = new Fixture(320, 240, reduced, 0);
 		f.openList(true, leftEntry);
 		assertEquals(leftEntry ? InventoryListModel.Side.LEFT : InventoryListModel.Side.RIGHT, f.snapshot().inventory().direction().forward());
 		f.move(0, -1000, f.now + 1);
@@ -377,14 +388,14 @@ class SpatialInventoryNavigationIntegrationTest {
 		f.pending = f.projection(List.of(f.row("k0", 0), f.row("new", 1000)));
 		f.frame(f.now + 16);
 		f.assertSelected(15);
-		double threshold = f.geometry.rowHeight() / (0.5 * Double.parseDouble(glide));
+		f.move(0, 14, f.now + 1); // unlock without moving Y
 		for (int step = 1; step <= 3; step++) {
-			f.move(0, threshold, f.now + 1);
+			f.moveToOption(15 + step);
 			f.assertSelected(15 + step);
 		}
 		assertTrue(f.snapshot().inventory().windowFirst() > 0, "the row window follows selection");
 		for (int step = 1; step <= 3; step++) {
-			f.move(0, -threshold, f.now + 1);
+			f.moveToOption(18 - step);
 			f.assertSelected(18 - step);
 		}
 		var intent = assertInstanceOf(SelectorIntent.SelectInventory.class, f.session.releaseIntent(f.now + 1));
@@ -393,14 +404,14 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void nativeSelectionChangeMovesTheAnnotationBorderToTheCurrentKeyWithinTheWindow() {
-		var f = new Fixture(320, 240, "1", false, 0);
+		var f = new Fixture(320, 240, false, 0);
 		f.openList(false);
 		var before = f.snapshot().inventory();
 		String oldKey = before.selectedKey();
 		Integer color = f.painter.row(oldKey).outlineColor();
 		assertNotNull(color, "the initial direct release has an annotation border");
 
-		f.move(0, f.geometry.rowHeight() / 0.5, f.now + 1);
+		f.moveToOption(1);
 		var after = f.snapshot().inventory();
 		String selectedKey = after.selectedKey();
 		assertNotEquals(oldKey, selectedKey);
@@ -412,7 +423,7 @@ class SpatialInventoryNavigationIntegrationTest {
 		assertEquals(List.of(selectedKey), f.painter.rows.stream().filter(row -> row.outlineColor() != null)
 			.map(RowFrame::key).toList(), "only the model's selected key advertises direct release");
 
-		f.move(f.backSign() * 50, 0, f.now + 1);
+		f.side(f.backSign(), f.settings.deadzone() + 1);
 		assertTrue(f.snapshot().inventoryView().backAffordance().focused());
 		f.frame(f.now + 1);
 		assertTrue(f.painter.rows.stream().allMatch(row -> row.outlineColor() == null), "Back focus removes direct-send borders");
@@ -420,7 +431,7 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void nativeWindowJumpKeepsTheOldSelectedRowFadingWithoutItsAnnotationBorder() {
-		var f = new Fixture(320, 240, "1", false, 0);
+		var f = new Fixture(320, 240, false, 0);
 		f.openList(false);
 		String oldKey = f.snapshot().inventory().selectedKey();
 		Integer color = f.painter.row(oldKey).outlineColor();
@@ -454,7 +465,7 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void nativeReselectionRestoresTheAnnotationBorderOnTheRetargetedRow() {
-		var f = new Fixture(320, 240, "1", false, 0);
+		var f = new Fixture(320, 240, false, 0);
 		f.openList(false);
 		String key = f.snapshot().inventory().selectedKey();
 		Integer color = f.painter.row(key).outlineColor();
@@ -472,23 +483,23 @@ class SpatialInventoryNavigationIntegrationTest {
 	}
 
 	@Test
-	void hiddenPointerOutsideHintCorridorSuppressesEvenLargeVerticalTravelUntilPhysicalRecentering() {
-		var f = new Fixture(320, 240, "1", false, 0);
+	void visiblePointerOutsidePanelDeadzoneSuppressesYUntilPhysicalReentry() {
+		var f = new Fixture(320, 240, false, 0);
 		f.openList(false); f.scroll(15); f.assertSelected(15);
-		f.move(20, 0, f.now + 1); f.frame(f.now + 16);
-		assertTrue(f.painter.pointerHidden);
+		f.side(-f.backSign(), f.settings.deadzone() + 1); f.frame(f.now + 16);
+		assertFalse(f.painter.pointerHidden);
 		f.move(0, 1000, f.now + 1); f.assertSelected(15);
 		f.move(0, -1000, f.now + 1); f.assertSelected(15);
-		f.move(-20, 0, f.now + 1);
+		double axis = f.snapshot().inventory().axisX();
+		f.move(axis - f.snapshot().radial().pointer().x(), 0, f.now + 1);
 		f.move(0, 1000, f.now + 1);
-		assertTrue(f.snapshot().inventory().selectedIndex() > 15, "reentering the corridor restores glide without changing sensitivity");
+		f.assertSelected(29);
 	}
 
 	@ParameterizedTest
-	@CsvSource({"1, false, -1", "0.25, false, -1", "1, true, -1", "0.25, true, -1",
-		"1, false, 1", "0.25, false, 1", "1, true, 1", "0.25, true, 1"})
-	void enteringListAtEitherReachableRightGuiCornerPreservesGlideThroughoutCenteringPan(String glide, boolean reduced, int ySign) {
-		var f = new Fixture(320, 240, glide, reduced, 0);
+	@CsvSource({"false, -1", "true, -1", "false, 1", "true, 1"})
+	void enteringListAtEitherReachableRightGuiCornerAlignsOptionsThroughoutCenteringPan(boolean reduced, int ySign) {
+		var f = new Fixture(320, 240, reduced, 0);
 		f.enter("content", 320); f.settle();
 		String list = f.menu().choices().stream().filter(value -> value.id().endsWith(":inventory")).findFirst().orElseThrow().id();
 		f.enterAt(list, 320, ySign * 119);
@@ -496,55 +507,52 @@ class SpatialInventoryNavigationIntegrationTest {
 		assertTrue(state.inventory().open());
 		assertEquals(state.inventory().axisX(), state.radial().pointer().x(), 1e-9, "entry rebase agrees with its frozen list axis");
 		f.scroll(15);
-		double threshold = f.geometry.rowHeight() / (0.5 * Double.parseDouble(glide));
+		f.move(0, 14, f.now + 1);
 		for (int step = 1; step <= 4; step++) {
-			f.move(0, threshold, f.now + 1);
+			f.moveToOption(15 + step);
 			f.assertSelected(15 + step);
 		}
 		f.settle();
-		f.move(0, -threshold * 4, f.now + 1); f.assertSelected(15);
+		f.moveToOption(15); f.assertSelected(15);
 	}
 
 	@ParameterizedTest
-	@CsvSource({"1, false", "0.25, false", "1, true", "0.25, true"})
-	void ordinaryItemBackReturnPreservesKeyWindowAndVerticalGlideBeforeAnyResize(String glide, boolean reduced) {
-		var f = new Fixture(320, 240, glide, reduced, 0);
+	@CsvSource({"false", "true"})
+	void ordinaryItemBackReturnPreservesKeyWindowAndAbsoluteSelectionBeforeAnyResize(boolean reduced) {
+		var f = new Fixture(320, 240, reduced, 0);
 		f.openList(false); f.scroll(15); f.assertSelected(15);
 		int window = f.snapshot().inventory().windowFirst();
-		f.move(80, 0, f.now + 1); f.settle();
+		f.side(-f.backSign(), f.settings.stroke() + 1); f.settle();
 		var item = f.menu();
 		var back = item.choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow();
 		f.enterAtBack(back.id(), -100);
 		assertEquals(window, f.snapshot().inventory().windowFirst());
 		f.settle(); f.assertSelected(15);
-		double threshold = f.geometry.rowHeight() / (0.5 * Double.parseDouble(glide));
-		f.move(0, threshold * 3, f.now + 1); f.assertSelected(18);
-		f.move(0, -threshold * 3, f.now + 1); f.assertSelected(15);
+		f.moveToOption(18); f.assertSelected(18);
+		f.moveToOption(15); f.assertSelected(15);
 	}
 
 	@ParameterizedTest
-	@CsvSource({"1, false", "0.25, false", "1, true", "0.25, true"})
-	void centeredListResizeAndScaleHandoffPreserveRelativeRowsWithoutProjectionTravel(String glide, boolean reduced) {
-		var f = new Fixture(1000, 700, glide, reduced, 0);
+	@CsvSource({"false", "true"})
+	void centeredListResizeAndScaleHandoffPreserveKeyWithoutProjectionTravel(boolean reduced) {
+		var f = new Fixture(1000, 700, reduced, 0);
 		f.openList(false); f.scroll(15); f.assertSelected(15);
-		var trail = f.snapshot().radial().trail();
 		f.resize(320, 240); f.settle();
-		assertEquals(trail, f.snapshot().radial().trail(), "resize and native scale priming are not gesture travel");
+		assertEquals(List.of(f.snapshot().radial().pointer()), f.snapshot().radial().trail(), "resize alignment begins a fresh epoch");
 		f.assertSelected(15);
-		double threshold = f.geometry.rowHeight() / (0.5 * Double.parseDouble(glide));
-		f.move(0, threshold * 3, f.now + 1); f.assertSelected(18);
-		f.move(0, -threshold * 6, f.now + 1); f.assertSelected(12);
+		f.move(0, 14, f.now + 1);
+		f.moveToOption(18); f.assertSelected(18);
+		f.moveToOption(12); f.assertSelected(12);
 	}
 
 	@ParameterizedTest
-	@CsvSource({"1, false, false", "0.25, false, false", "1, true, false", "0.25, true, false",
-		"1, false, true", "0.25, false, true", "1, true, true", "0.25, true, true"})
-	void itemReturnThenResizeCannotLeaveTheVerticalGestureAxisPermanentlyOutsideTheViewport(String glide, boolean reduced, boolean leftEntry) {
-		var f = new Fixture(1000, 700, glide, reduced, 0);
+	@CsvSource({"false, false", "true, false", "false, true", "true, true"})
+	void itemReturnThenResizePreservesAbsoluteSelectionAcrossBothDirections(boolean reduced, boolean leftEntry) {
+		var f = new Fixture(1000, 700, reduced, 0);
 		f.openList(false, leftEntry); f.scroll(15); f.assertSelected(15);
 		assertEquals(leftEntry ? InventoryListModel.Side.LEFT : InventoryListModel.Side.RIGHT, f.snapshot().inventory().direction().forward());
 		double forward = f.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
-		f.move(forward * 80, 0, f.now + 1);
+		f.side(forward, f.settings.stroke() + 1);
 		assertTrue(f.menu().menuId().contains(":item:"));
 		f.settle();
 		var item = f.menu();
@@ -563,16 +571,15 @@ class SpatialInventoryNavigationIntegrationTest {
 		var resized = f.snapshot().inventoryView();
 		assertTrue(resized.selectedIndex() >= resized.windowFirst()
 			&& resized.selectedIndex() < resized.windowFirst() + resized.visibleRows(), "rewindowing keeps the key visible");
-		assertEquals(beforeResize.radial().trail(), f.snapshot().radial().trail(), "correction adds no gesture trail");
+		assertEquals(List.of(f.snapshot().radial().pointer()), f.snapshot().radial().trail(), "correction starts a fresh seed without a joining stroke");
 		assertEquals(0, f.snapshot().radial().hoverProgress(), "projection does not advance Back");
 		assertTrue(f.menu().menuId().endsWith(":inventory"));
-		double threshold = f.geometry.rowHeight() / (0.5 * Double.parseDouble(glide));
-		f.move(0, threshold * 3, f.now + 1);
+		f.moveToOption(18);
 		f.frame(f.now + 1); f.frame(f.now + 16);
 		int downIndex = f.snapshot().inventory().selectedIndex();
 		List<String> downPaint = List.copyOf(f.painter.selectedRows);
 		String downMenu = f.menu().menuId();
-		f.move(0, -threshold * 6, f.now + 1);
+		f.moveToOption(12);
 		f.frame(f.now + 1); f.frame(f.now + 16);
 		int upIndex = f.snapshot().inventory().selectedIndex();
 		List<String> upPaint = List.copyOf(f.painter.selectedRows);
@@ -580,7 +587,7 @@ class SpatialInventoryNavigationIntegrationTest {
 		assertAll(
 			() -> assertTrue(downMenu.endsWith(":inventory"), "vertical-only movement must not enter an item because resize made the axis unreachable"),
 			() -> assertTrue(upMenu.endsWith(":inventory"), "vertical-only reversal remains list input"),
-			() -> assertEquals(18, downIndex, "three admitted native row thresholds must advance down"),
+			() -> assertEquals(18, downIndex, "absolute screen Y selects the full-list option"),
 			() -> assertEquals(List.of("k18"), downPaint, "paint must follow the down selection"),
 			() -> assertEquals(12, upIndex, "reverse travel must select above the middle without overshoot debt"),
 			() -> assertEquals(List.of("k12"), upPaint));
@@ -596,10 +603,10 @@ class SpatialInventoryNavigationIntegrationTest {
 		"true, false, 7, 30, 200, 160"})
 	void listUserReturnKeepsThePointerAtTheTriggerAndMovesTheParentCentreThere(
 		boolean hover, boolean reduced, int properties, int deadzone, int width, int height) {
-		var f = new Fixture(width, height, "1", reduced, properties, deadzone, hover);
+		var f = new Fixture(width, height, reduced, properties, deadzone, hover);
 		f.openList(true);
-		var trigger = f.snapshot().radial().pointer();
 		f.leaveListBySideBack();
+		var trigger = f.snapshot().radial().pointer();
 		f.settle();
 		var returned = f.snapshot().radial();
 		assertTrue(f.menu().menuId().endsWith(":content"), "exactly one level returns to Content");
@@ -620,12 +627,12 @@ class SpatialInventoryNavigationIntegrationTest {
 	@ParameterizedTest
 	@CsvSource({"false, false", "true, false", "false, true", "true, true"})
 	void listUserReturnNeverResolvesThroughTheOldCircumferencePlacement(boolean hover, boolean reduced) {
-		var f = new Fixture(1000, 700, "1", reduced, 0, SpatialSelectorSettings.DEFAULT_DEADZONE, hover);
+		var f = new Fixture(1000, 700, reduced, 0, SpatialSelectorSettings.DEFAULT_DEADZONE, hover);
 		f.openList(true);
 		f.resize(320, 240);
 		f.settle();
-		var trigger = f.snapshot().radial().pointer();
 		f.leaveListBySideBack();
+		var trigger = f.snapshot().radial().pointer();
 		assertTrue(f.menu().menuId().endsWith(":content"));
 		assertFalse(f.snapshot().inventory().open());
 		var returned = f.snapshot().radial();
@@ -643,12 +650,12 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void freshPhysicalMovementAfterAListUserReturnContinuesFromTheReturnedCentre() {
-		var f = new Fixture(1000, 700, "1", false, 0, SpatialSelectorSettings.DEFAULT_DEADZONE, false);
+		var f = new Fixture(1000, 700, false, 0, SpatialSelectorSettings.DEFAULT_DEADZONE, false);
 		f.openList(true);
 		f.resize(320, 240);
 		f.settle();
-		var trigger = f.snapshot().radial().pointer();
 		f.leaveListBySideBack();
+		var trigger = f.snapshot().radial().pointer();
 		assertTrue(f.menu().menuId().endsWith(":content"));
 		assertEquals(trigger, f.snapshot().radial().pointer());
 		f.move(10, 0, f.now + 1);
@@ -660,7 +667,7 @@ class SpatialInventoryNavigationIntegrationTest {
 	@ParameterizedTest
 	@CsvSource({"false, 0", "true, 7"})
 	void returnedCentreReopensTheListOnlyAfterAFullDeliberateStrokeAndDwell(boolean hover, int properties) {
-		var f = new Fixture(320, 240, "1", false, properties, 18, hover);
+		var f = new Fixture(320, 240, false, properties, 18, hover);
 		f.openList(true);
 		f.leaveListBySideBack();
 		f.settle();
@@ -683,14 +690,14 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void offContentIntentKeepsOrdinaryRowsAndNoForwardOrRetainedKey() {
-		var f = new Fixture(320, 240, "1", false, 0, SpatialSelectorSettings.DEFAULT_DEADZONE, false, false);
+		var f = new Fixture(320, 240, false, 0, SpatialSelectorSettings.DEFAULT_DEADZONE, false, false);
 		f.openList(false);
 		var view = f.snapshot().inventoryView();
 		assertNull(view.retainedRowKey());
 		assertFalse(view.forwardAvailable(), "OFF has no item Forward entry or hint");
 		assertTrue(view.selectedRowCommittable(), "direct release is still eligible under OFF");
 		double forward = f.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
-		f.move(forward * 100, 0, f.now + 1);
+		f.side(forward, f.settings.stroke() + 1);
 		assertTrue(f.menu().menuId().endsWith(":inventory"), "the frozen OFF toggle keeps Forward inert");
 		var intent = assertInstanceOf(SelectorIntent.SelectInventory.class, f.session.releaseIntent(f.now + 1));
 		assertEquals("opaque:k0", intent.reference());
@@ -699,10 +706,10 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void itemClearanceUpdatesRepositionTheActiveItemMenuWithoutPointerOrTrailTravel() {
-		var f = new Fixture(320, 240, "1", false, 3, SpatialSelectorSettings.DEFAULT_DEADZONE, false);
+		var f = new Fixture(320, 240, false, 3, SpatialSelectorSettings.DEFAULT_DEADZONE, false);
 		f.openList(false);
 		double forward = f.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
-		f.move(forward * 80, 0, f.now + 1);
+		f.side(forward, f.settings.stroke() + 1);
 		var item = f.menu();
 		assertTrue(item.menuId().contains(":item:"));
 		double axis = f.snapshot().inventory().axisX();
@@ -722,7 +729,7 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void boundedDetachedDisplayProjectionIsReusedAcrossScrollAndRemeasureButInvalidatedForChangedText() {
-		var f = new Fixture(1600, 1000, "1", true, 0, 18, false, false);
+		var f = new Fixture(1600, 1000, true, 0, 18, false, false);
 		f.openList(false);
 		int projected = f.displayProjections;
 		assertEquals(f.snapshot().inventoryView().rows().size(), projected, "one projection per bounded discovered row");
@@ -745,7 +752,7 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void guiScaleHandoffAtAnUnchangedNativeWindowPreparesCapacityWithoutSyntheticInput() {
-		var f = new Fixture(1000, 700, "1", true, 0);
+		var f = new Fixture(1000, 700, true, 0);
 		f.openList(false); f.scroll(15); f.settle();
 		var before = f.snapshot();
 		var oldNative = f.nativeFrame;
@@ -756,23 +763,24 @@ class SpatialInventoryNavigationIntegrationTest {
 		var after = f.snapshot();
 		assertEquals(before.inventory().entries(), after.inventory().entries());
 		assertEquals(before.inventory().selectedKey(), after.inventory().selectedKey());
-		assertEquals(before.radial().trail(), after.radial().trail());
+		assertEquals(List.of(after.radial().pointer()), after.radial().trail(), "scale alignment resets the trail epoch");
 		assertTrue(f.menu().menuId().endsWith(":inventory"));
 		assertTrue(f.geometry.width() <= 150, "the content width respects the scaled viewport budget");
 		assertTrue(after.inventoryView().visibleRows() < before.inventoryView().visibleRows());
-		f.move(0, f.geometry.rowHeight() / 0.5, f.now + 1);
+		f.move(0, 14, f.now + 1);
+		f.moveToOption(16);
 		assertEquals("k16", f.snapshot().inventory().selectedKey(), "the first real scaled sample moves exactly one row");
 	}
 
 	@Test
 	void activeListGeometryRefreshPreservesTheRunningBackTimerAndFractionalWheelInput() {
-		var f = new Fixture(1000, 700, "1", true, 0, 18, true);
+		var f = new Fixture(1000, 700, true, 0, 18, true);
 		f.openList(false);
 		f.scroll(0.75);
 		f.resize(640, 360);
 		f.scroll(0.25);
 		assertEquals("k1", f.snapshot().inventory().selectedKey(), "resize does not drop the ordinary-wheel remainder");
-		f.move(f.backSign() * 30, 0, f.now + 1);
+		f.side(f.backSign(), f.settings.deadzone() + 1);
 		long started = f.now;
 		f.frame(started + f.settings.hoverMillis() / 2);
 		var before = f.snapshot();
@@ -794,14 +802,14 @@ class SpatialInventoryNavigationIntegrationTest {
 	@ParameterizedTest
 	@CsvSource({"false", "true"})
 	void quantityShrinkAndDiscoveryKeepEveryPaintedPanelClearOfTheActiveItemInBothDirections(boolean leftEntry) {
-		var f = new Fixture(1600, 1000, "1", false, 0);
+		var f = new Fixture(1600, 1000, false, 0);
 		f.painter.localizedInventoryLabels = true;
 		var initial = f.projection(List.of(f.row("k0", Long.MAX_VALUE)));
 		f.pending = new SpatialSelectorSession.ContentProjection<>(initial.fence(), initial.revision(), true,
 			initial.status(), initial.properties(), initial.inventory());
 		f.frame(f.now + 1);
 		f.openList(false, leftEntry);
-		f.move((leftEntry ? -1 : 1) * 80, 0, f.now + 1);
+		f.side(leftEntry ? -1 : 1, f.settings.stroke() + 1);
 		f.settle();
 		var before = f.snapshot();
 		String item = f.menu().menuId();
@@ -821,7 +829,7 @@ class SpatialInventoryNavigationIntegrationTest {
 			assertEquals(before.inventory().selectedKey(), after.inventory().selectedKey());
 			assertEquals(before.inventoryView().retainedRowKey(), after.inventoryView().retainedRowKey());
 			assertEquals(before.inventoryView().selectedRowCenterY(), after.inventoryView().selectedRowCenterY());
-			assertEquals(before.radial().pointer(), after.radial().pointer(), "content relayout never drags the fixed pointer");
+			assertEquals(before.radial().pointer(), after.radial().pointer(), "item content relayout moves no pointer");
 			assertEquals(before.radial().trail(), after.radial().trail(), "content relayout is not physical input");
 			assertEquals(2, after.inventory().entries().size());
 			assertTrue(f.geometry.width() < wide, "the shared content width genuinely shrinks instead of retaining old clearance width");
@@ -836,10 +844,10 @@ class SpatialInventoryNavigationIntegrationTest {
 	@ParameterizedTest
 	@CsvSource({"false, false", "false, true", "true, false", "true, true"})
 	void resizingAnActiveItemRetainsItsFrozenRowAndUsesTheNewPanelEdgeInBothDirections(boolean leftEntry, boolean reduced) {
-		var f = new Fixture(1000, 700, "1", reduced, 0);
+		var f = new Fixture(1000, 700, reduced, 0);
 		f.openList(false, leftEntry); f.scroll(15); f.settle();
 		double forward = leftEntry ? -1 : 1;
-		f.move(forward * 80, 0, f.now + 1); f.settle();
+		f.side(forward, f.settings.stroke() + 1); f.settle();
 		var before = f.snapshot();
 		String item = f.menu().menuId();
 		double anchor = before.inventoryView().selectedRowCenterY();
@@ -863,7 +871,7 @@ class SpatialInventoryNavigationIntegrationTest {
 
 	@Test
 	void contentAndRootAncestorsKeepTheirBreadcrumbsWhileTheItemSubmenuKeepsTheListPanel() {
-		var f = new Fixture(320, 240, "1", true, 3, 18, false);
+		var f = new Fixture(320, 240, true, 3, 18, false);
 		f.openList(false);
 		f.frame(f.now + 1);
 
@@ -887,7 +895,7 @@ class SpatialInventoryNavigationIntegrationTest {
 			"the logical content choices are never removed");
 
 		double forward = f.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
-		f.move(forward * 80, 0, f.now + 1);
+		f.side(forward, f.settings.stroke() + 1);
 		f.settle();
 		assertTrue(f.menu().menuId().contains(":item:"), "a forward stroke opens the item submenu");
 		f.frame(f.now + 1);

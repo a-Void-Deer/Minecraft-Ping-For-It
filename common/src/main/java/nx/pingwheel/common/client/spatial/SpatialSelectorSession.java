@@ -248,6 +248,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private double returnTranslationX;
 	private double returnTranslationY;
 	private SpatialController.Viewport viewport;
+	private boolean listAlignmentPending;
 
 	/** Precise allocations are copied as-is in catalog order; acquisition/nonreuse is external. */
 	public SpatialSelectorSession(CapturedTarget ordinary, Map<String, CapturedTarget> precise,
@@ -269,7 +270,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		inventoryMenu = contentMenu + ":inventory";
 		list = new InventoryListModel(geometry.visibleRows());
 		itemClearance = geometry.childClearance();
-		gesture = new InventoryGesture(list, settings.targetGlide().doubleValue(), settings.hoverEnabled(), geometry.rowHeight());
+		gesture = new InventoryGesture(list, settings.deadzone(), settings.stroke(), settings.hoverEnabled());
 		radial = new SpatialController(buildRoot(), new SpatialController.Tuning(settings.deadzone(), settings.stroke(),
 			settings.dwellMillis(), settings.hoverEnabled(), settings.hoverMillis(), settings.trailLength()));
 	}
@@ -284,17 +285,28 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 
 	/** Publish the frame's exact projection, or updated dimensions with its last published offset. */
 	public void constrainPointer(SpatialController.Viewport viewport, long nowMillis) {
+		var previous = this.viewport;
+		var pointer = radial.snapshot().pointer();
 		this.viewport = Objects.requireNonNull(viewport);
 		radial.constrainPointer(viewport, nowMillis);
-		alignListPointer();
+		if (previous == null || previous.height() != viewport.height()) listAlignmentPending = true;
+		else if (isListActive() && !listAlignmentPending && previous.viewY() != viewport.viewY()) {
+			// A projection translation changes coordinates, not the actual screen Y
+			// or the physical displacement already earned inside the selected bin.
+			radial.alignExternalPointer(radial.snapshot().pointer().x(),
+				pointer.y() + previous.viewY() - viewport.viewY(), nowMillis);
+		}
+		alignListPointer(nowMillis);
 	}
 
-	private void alignListPointer() {
+	private void alignListPointer(long nowMillis) {
 		if (!isListActive()) return;
-		var pointer = radial.snapshot().pointer();
-		if (viewport != null) gesture.constrainAxis(viewport);
-		gesture.alignPointer(pointer.x(), pointer.y());
-		boolean backFocused = settings.hoverEnabled() && gesture.isBackSideFocused();
+		if (listAlignmentPending && viewport != null) {
+			var pointer = radial.snapshot().pointer();
+			radial.alignExternalPointer(pointer.x(), gesture.selectedY(viewport), nowMillis);
+			listAlignmentPending = false;
+		}
+		boolean backFocused = gesture.isBackHoverFocused();
 		list.setBackHoverFocused(backFocused);
 		radial.alignExternalBack(backFocused);
 	}
@@ -303,14 +315,22 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	public void moveGui(double deltaX, double deltaY, long nowMillis) {
 		if (!active || !Double.isFinite(deltaX) || !Double.isFinite(deltaY)) return;
 		if (isListActive()) {
-			// List input never moves the logical pointer; the gesture owns a
-			// bounded horizontal accumulator and independent vertical glide.
-			double before = gesture.horizontalTravel();
-			InventoryGesture.Action navigation = gesture.moveGui(deltaX, deltaY);
-			boolean effectiveHorizontal = gesture.horizontalTravel() != before;
-			boolean backFocused = settings.hoverEnabled() && gesture.isBackSideFocused();
+			alignListPointer(nowMillis);
+			var before = radial.snapshot().pointer();
+			double dx = gesture.horizontalDelta(deltaX, deltaY);
+			var effective = radial.moveExternalPointerWithoutTrail(dx, 0, nowMillis);
+			var after = radial.snapshot().pointer();
+			var panel = listLayout();
+			InventoryGesture.Action navigation = gesture.moveHorizontal(dx, before.x(), after.x(),
+				panel.centerX() - panel.width() / 2, panel.centerX() + panel.width() / 2, viewport);
+			double dy = viewport == null ? 0 : gesture.verticalDelta(deltaY);
+			var vertical = radial.moveExternalPointerWithoutTrail(0, dy, nowMillis);
+			if (vertical.y() != 0) gesture.selectAt(radial.snapshot().pointer().y(), viewport);
+			boolean backFocused = gesture.isBackHoverFocused();
 			list.setBackHoverFocused(backFocused);
-			if (!radial.updateExternalBack(backFocused, nowMillis, effectiveHorizontal)) {
+			// Raw screen-edge extrapolation is navigation progress, not a physical
+			// leave of Back. Only actual filtered X movement can release its latch.
+			if (!radial.updateExternalBack(backFocused, nowMillis, effective.x() != 0)) {
 				if (navigation == InventoryGesture.Action.BACK) radial.back(nowMillis);
 				else if (navigation == InventoryGesture.Action.FORWARD) enterItem(nowMillis);
 			}
@@ -321,13 +341,16 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	@Override
 	public void scrollRows(double rowDelta, long nowMillis) {
 		if (!active || !isListActive() || !Double.isFinite(rowDelta)) return;
-		gesture.wheelRows(rowDelta);
+		if (gesture.wheelRows(rowDelta)) {
+			listAlignmentPending = true;
+			alignListPointer(nowMillis);
+		}
 	}
 
 	public void tick(long nowMillis) {
 		if (!active) return;
 		pollContent(nowMillis);
-		if (isListActive()) radial.updateExternalBack(settings.hoverEnabled() && gesture.isBackSideFocused(), nowMillis);
+		if (isListActive()) radial.updateExternalBack(gesture.isBackHoverFocused(), nowMillis);
 		else radial.tick(nowMillis);
 		synchronizeNavigation(nowMillis);
 	}
@@ -336,6 +359,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	public boolean updateContent(ContentProjection<R> update, long nowMillis) {
 		if (!active || update == null || !fence.equals(update.fence())
 			|| (revisionSeen && update.revision() <= revision)) return false;
+		int previousSize = list.size(), previousIndex = list.selectedIndex();
 		revisionSeen = true; revision = update.revision();
 		boolean unavailable = unavailable(update.status());
 		if (update.reset() || unavailable || update.inventory() == null || unavailable(update.inventory().status())) {
@@ -356,6 +380,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			if (!rows.containsKey(itemKey) || preview == null || preview.allowedItemTypes().isEmpty()) radial.backProgrammatically(nowMillis);
 			else radial.replaceExternalMenu(buildItemMenu(itemKey), nowMillis);
 		}
+		if (previousSize != list.size() || previousIndex != list.selectedIndex()) listAlignmentPending = true;
 		synchronizeNavigation(nowMillis);
 		return true;
 	}
@@ -656,7 +681,6 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		if (next.equals(geometry) && next.childClearance() == itemClearance) return;
 		geometry = next;
 		list.setVisibleRows(next.visibleRows());
-		gesture.updateRowHeight(next.rowHeight());
 		itemClearance = next.childClearance();
 		repositionItem(nowMillis);
 	}
@@ -713,26 +737,28 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 				list.open(listEntries(new ArrayList<>(rows.values())), menu.origin().x(), menu.origin().y(),
 					bearing(menu.origin(), menu.parentOrigin()));
 				list.setStatus(preview.status() == Status.READY ? InventoryListModel.Status.COMPLETE : InventoryListModel.Status.UPDATING);
-				gesture.begin(menu.origin().x(), menu.origin().y(), list.direction());
+				gesture.begin(list.direction());
 				radial.useExternalSurface();
 				radial.rebase(menu.origin().x(), menu.origin().y(), nowMillis);
+				listAlignmentPending = true;
 			} else if (userReturn) {
 				// Item-to-list return: the model was translated by the applied
 				// rigid vector; rebase the gesture without reopening the model.
-				SpatialController.Point pointer = radial.snapshot().pointer();
-				gesture.rebase(pointer.x(), pointer.y());
+				gesture.rebase();
 				list.setBackHoverFocused(false);
 				radial.alignExternalBack(false);
+				listAlignmentPending = true;
 			} else if (!listWasActive) {
 				SpatialController.Point pointer = radial.snapshot().pointer();
-				gesture.rebase(pointer.x(), pointer.y());
+				gesture.rebase();
 				list.setBackHoverFocused(false);
 				radial.rebase(pointer.x(), pointer.y(), nowMillis);
+				listAlignmentPending = true;
 			}
 			itemKey = null;
 			itemAnchorY = Double.NaN;
 			listWasActive = true;
-			alignListPointer();
+			alignListPointer(nowMillis);
 		} else listWasActive = false;
 		refreshInventoryGeometry(nowMillis);
 	}

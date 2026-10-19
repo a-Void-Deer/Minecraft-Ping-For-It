@@ -1,6 +1,5 @@
 package nx.pingwheel.common.render;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -115,7 +114,7 @@ class SpatialOverlayRendererFollowerTest {
 		assertTrue(painter.chrome().pointerHidden(), "capability qualifies before dwell completion");
 	}
 
-	@Test void activeInventoryListHidesCrosshairUntilRadialMenuRestoresGlobalFeedback() {
+	@Test void activeInventoryListKeepsCrosshairVisibleWhileItemMenuUsesGlobalFeedback() {
 		var painter = new Painter(); var session = new SpatialOverlayRenderer.Session();
 		var list = new SpatialInventoryView("list", true, List.of(new SpatialInventoryView.Row("row", "Inventory Item", 1L,
 			null, SpatialInventoryView.Status.READY)), 0, 0, 3, true, SpatialInventoryView.Status.READY, 90, 0);
@@ -124,8 +123,8 @@ class SpatialOverlayRendererFollowerTest {
 			menu("list-menu", point(90, 0), null, List.of()));
 		var listFrame = snapshot(ancestors, point(90, 40));
 		session.drawFrame(listFrame, list, c -> Component.literal(c.label()), null, noFrames, 0, VIEW, 400, 300, painter);
-		assertTrue(painter.chrome().pointerHidden(), "active list hides the crosshair even with both frame opacity preferences at zero");
-		assertEquals(listFrame.trail(), painter.chrome().snapshot().trail(), "list hiding preserves trail data");
+		assertFalse(painter.chrome().pointerHidden(), "active list keeps the virtual crosshair visible even with both frame opacity preferences at zero");
+		assertEquals(listFrame.trail(), painter.chrome().snapshot().trail(), "list presentation preserves trail data");
 
 		var itemChoices = List.of(choice("back", null, true, true, false, false), leaf("item-option"));
 		var itemBack = snapshot(List.of(ancestors.getFirst(), ancestors.getLast(),
@@ -144,7 +143,7 @@ class SpatialOverlayRendererFollowerTest {
 
 		painter.clear();
 		session.drawFrame(listFrame, list, c -> Component.literal(c.label()), null, noFrames, 3, VIEW, 400, 300, painter);
-		assertTrue(painter.chrome().pointerHidden(), "returning to the active list restores its crosshair hide");
+		assertFalse(painter.chrome().pointerHidden(), "returning to the active list restores its visible crosshair");
 
 		var parentCenter = snapshot(leaf("parent-option"), point(0, 0));
 		var closedList = new SpatialInventoryView("list", false, list.rows(), 0, 0, 3, true,
@@ -308,7 +307,7 @@ class SpatialOverlayRendererFollowerTest {
 		for (boolean firstPaint : List.of(false, true)) {
 			var token = new ActiveInteraction().begin(); var level = new Object();
 			var ordinary = captured("ordinary", 1);
-			var settings = new SpatialSelectorSettings.Snapshot(12, 20, 120, 88, new BigDecimal("0.5"), false, 250, true, false);
+			var settings = new SpatialSelectorSettings.Snapshot(12, 20, 120, 88, false, 250, true, false);
 			var selector = new SpatialSelectorSession<String>(ordinary, Map.of(), settings,
 				new SpatialSelectorSession.ContentFence(token.sequence(), 42, 53, "ordinary"), (target, fence) -> null,
 				new SpatialSelectorSession.ListGeometry(3, 180, 17, 23, 19, 85));
@@ -396,7 +395,7 @@ class SpatialOverlayRendererFollowerTest {
 	@Test void offscreenPreciseIntermediateFrameCannotReplacePreviouslyPaintedEntityOnRelease() {
 		for (boolean firstPaint : List.of(false, true)) {
 			var token = new ActiveInteraction().begin(); var level = new Object();
-			var settings = new SpatialSelectorSettings.Snapshot(12, 20, 120, 88, new BigDecimal("0.5"), false, 250, true, false);
+			var settings = new SpatialSelectorSettings.Snapshot(12, 20, 120, 88, false, 250, true, false);
 			var selector = new SpatialSelectorSession<String>(captured("ordinary", 1), Map.of(), settings,
 				new SpatialSelectorSession.ContentFence(token.sequence(), 42, 53, "ordinary"), (target, fence) -> null,
 				new SpatialSelectorSession.ListGeometry(3, 180, 17, 23, 19, 85));

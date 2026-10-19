@@ -3,7 +3,6 @@ package nx.pingwheel.common.render;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -121,7 +120,7 @@ class SpatialSelectorLocalizationTest {
 		var captured = new SpatialSelectorSession.CapturedTarget("ordinary",
 			new ResolvedTarget(target, classification), Optional.empty(), Optional.of(new WorldVector(1, 2, 3)));
 		var settings = new SpatialSelectorSettings.Snapshot(30, 90, 120, 140,
-			new BigDecimal("0.5"), false, 250, true, false);
+			false, 250, true, false);
 		var fence = new SpatialSelectorSession.ContentFence(31, 42, 53, "ordinary");
 		return new SpatialSelectorSession<String>(captured, Map.of(), settings, fence,
 			(value, contentFence) -> null, GEOMETRY);

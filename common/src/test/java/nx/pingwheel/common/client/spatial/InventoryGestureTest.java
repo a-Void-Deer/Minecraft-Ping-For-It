@@ -1,488 +1,393 @@
 package nx.pingwheel.common.client.spatial;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Deterministic tests for {@link InventoryGesture}. Cases drive explicit raw
- * GUI samples and assert emitted navigation actions, glide row movement,
- * accumulator saturation/reversal and frozen-axis behavior. No renderer,
- * timestamps, or Minecraft state is involved.
- */
+/** Independent GUI endpoints, panel boundaries and raw-sample oracles; no native cursor or renderer. */
 class InventoryGestureTest {
+	private static final double EPS = 1e-9;
+	// Default fixture viewport 401x101, view offset (-30, 17): controller-space pixel centres.
+	private static final double SCREEN_LEFT = -170.5;
+	private static final double SCREEN_RIGHT = 229.5;
+	private static final class Fixture {
+		final InventoryListModel list = new InventoryListModel(5);
+		final InventoryGesture gesture;
+		final SpatialController controller;
+		SpatialController.Viewport viewport = new SpatialController.Viewport(401, 101, -30, 17);
+		double left = -50, right = 50;
+		Fixture(int count, boolean hover, boolean mirrored) {
+			this(count, hover, mirrored, 24, 50);
+		}
+		Fixture(int count, boolean hover, boolean mirrored, int deadzone, int stroke) {
+			list.open(IntStream.range(0, count).mapToObj(i -> new InventoryListModel.Entry("k" + i, "Item", count - i, "ready")).toList(),
+				0, 0, mirrored ? 90 : 180);
+			gesture = new InventoryGesture(list, deadzone, stroke, hover);
+			gesture.begin(list.direction());
+			controller = new SpatialController(SpatialMenu.of("root"),
+				new SpatialController.Tuning(deadzone, stroke, 100, false, 250));
+			controller.start(0);
+			controller.enterExternal(SpatialMenu.of("list"), 0, 0, 0);
+			controller.useExternalSurface();
+			controller.constrainPointer(viewport, 0);
+			sync();
+		}
+		void sync() { controller.alignExternalPointer(controller.snapshot().pointer().x(), gesture.selectedY(viewport), 0); }
+		SpatialController.Point pointer() { return controller.snapshot().pointer(); }
+		InventoryGesture.Action move(double dx, double dy) {
+			dx = gesture.horizontalDelta(dx, dy);
+			double before = pointer().x();
+			controller.moveExternalPointerWithoutTrail(dx, 0, 1);
+			var action = gesture.moveHorizontal(dx, before, pointer().x(), left, right, viewport);
+			double admitted = gesture.verticalDelta(dy);
+			var effective = controller.moveExternalPointerWithoutTrail(0, admitted, 1);
+			if (effective.y() != 0) gesture.selectAt(pointer().y(), viewport);
+			return action;
+		}
+		boolean wheel(double rows) {
+			if (!gesture.wheelRows(rows)) return false;
+			sync();
+			return true;
+		}
+		void moveToScreenY(double targetScreenY) { move(0, targetScreenY - screenY()); }
+		double screenY() { return pointer().y() + viewport.centerY() + viewport.viewY(); }
+	}
 
-	private static final double DELTA = 1.0e-9;
-	private static final double CONE_TANGENT = Math.tan(Math.toRadians(25.0));
-
-	private static InventoryListModel listWithRows(int rows) {
-		List<InventoryListModel.Entry> entries = new ArrayList<>();
-
-		for (int i = 0; i < rows; i++) {
-			entries.add(new InventoryListModel.Entry("k" + i, "label", rows - i, "common"));
+	@Test void absoluteMappingUsesFullListAndInclusiveGuiEndpointsMonotonically() {
+		for (int count : new int[] {2, 7, 101, 300}) {
+			var f = new Fixture(count, false, false);
+			assertEquals(0, f.list.selectedIndex()); assertEquals(0, f.screenY(), EPS);
+			int prior = 0;
+			for (int y = 1; y <= 100; y++) {
+				f.move(0, 1);
+				assertTrue(f.list.selectedIndex() >= prior);
+				if (count == 101) assertEquals(y, f.list.selectedIndex(), "one row per screen pixel");
+				assertEquals(y, f.screenY(), EPS, "selection does not quantize the pointer");
+				prior = f.list.selectedIndex();
+			}
+			assertEquals(count - 1, prior);
+			f.move(0, Double.MAX_VALUE); f.move(0, -1);
+			assertEquals(99, f.screenY(), EPS, "endpoint overshoot is discarded");
 		}
 
-		InventoryListModel model = new InventoryListModel(5);
-		model.open(entries, 0.0, 0.0, 90.0);
-		return model;
-	}
+		var two = new Fixture(2, false, false);
+		two.moveToScreenY(49); assertEquals(0, two.list.selectedIndex());
+		two.moveToScreenY(50); assertEquals(1, two.list.selectedIndex());
+		two.moveToScreenY(100); assertEquals(1, two.list.selectedIndex());
 
-	/** Back left / forward right, the vertical-parent fallback. */
-	private static InventoryListModel.Direction leftBack() {
-		return InventoryListModel.directionFor(180.0);
-	}
-
-	@Test
-	void rowMetricRelayoutKeepsGlideFractionSideProgressAndWheelLock() {
-		var model = listWithRows(40);
-		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(0, 0, leftBack());
-		gesture.move(0, 20); // half a row under the old metric
-		gesture.move(10, 0);
-		gesture.updateRowHeight(40);
-		assertEquals(10, gesture.horizontalTravel());
-		assertEquals(0, model.selectedIndex());
-		gesture.move(0, 40); // remaining half under the new metric
-		assertEquals(1, model.selectedIndex());
-		gesture.wheelRows(0.75);
-		gesture.updateRowHeight(30);
-		assertEquals(1, gesture.wheelRows(0.25), "fractional wheel input survives independently");
-		gesture.move(0, 10); // partial signed wheel unlock
-		gesture.updateRowHeight(40);
-		gesture.move(0, 3);
-		assertEquals(2, model.selectedIndex(), "relayout did not clear the wheel lock");
-		gesture.move(0, 1); // unlock at 14; this sample alone contributes half a pixel
-		gesture.move(0, 79);
-		assertEquals(3, model.selectedIndex(), "relayout preserved partial unlock travel");
-	}
-
-	@Test
-	void physicalSamplesKeepBothLogicalPointerAxesWhileLongVerticalTravelGlides() {
-		var model = listWithRows(40);
-		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(120.0, -40.0, leftBack());
-
-		for (int i = 0; i < 20; i++) {
-			assertEquals(InventoryGesture.Action.NONE, gesture.moveGui(0.0, 39.0));
-		}
-
-		assertEquals(120.0, gesture.pointerX(), DELTA, "physical list input never moves the logical pointer x");
-		assertEquals(-40.0, gesture.pointerY(), DELTA, "physical list input never moves the logical pointer y");
-		assertEquals(120.0, gesture.axisX(), DELTA);
-		assertEquals(0.0, gesture.horizontalTravel(), DELTA);
-		assertEquals(19, model.selectedIndex(), "780px of vertical travel glides at the frozen 20px row threshold");
-
-		assertEquals(InventoryGesture.Action.FORWARD, gesture.moveGui(200.0, 0.0));
-		assertEquals(120.0, gesture.pointerX(), DELTA, "the horizontal gate accumulates without pointer travel");
-		assertEquals(-40.0, gesture.pointerY(), DELTA);
-	}
-
-	@Test
-	void inclusiveConeIgnoresInsideOrExactDxInBothDirectionsAndPreservesPriorProgress() {
-		for (double sign : new double[] {-1, 1}) {
-			var model = listWithRows(40);
-			var gesture = new InventoryGesture(model, 1.0, false, 20.0);
-			gesture.begin(0.0, 0.0, leftBack());
-			assertEquals(InventoryGesture.Action.NONE, gesture.move(sign * 10.0, 0.0));
-			assertEquals(sign * 10.0, gesture.horizontalTravel(), DELTA);
-
-			double exact = 100.0 * CONE_TANGENT;
-			assertEquals(InventoryGesture.Action.NONE, gesture.move(sign * (exact - 0.001), 100.0));
-			assertEquals(sign * 10.0, gesture.horizontalTravel(), DELTA, "inside-cone dx is ignored and prior progress survives");
-			assertEquals(InventoryGesture.Action.NONE, gesture.move(sign * exact, 100.0));
-			assertEquals(sign * 10.0, gesture.horizontalTravel(), DELTA, "the inclusive bound still ignores dx");
-			assertEquals(InventoryGesture.Action.NONE, gesture.move(sign * (exact + 1.0), 100.0));
-			assertEquals(sign * (10.0 + exact + 1.0), gesture.horizontalTravel(), DELTA, "outside-cone dx accumulates");
+		// Literal nearest-row boundaries for N=7 across the inclusive 0..100 pixel centres.
+		var seven = new Fixture(7, false, false);
+		int[][] literalBoundaries = {
+			{0, 0}, {8, 0}, {9, 1}, {24, 1}, {25, 2}, {41, 2}, {42, 3},
+			{58, 3}, {59, 4}, {74, 4}, {75, 5}, {91, 5}, {92, 6}, {100, 6}
+		};
+		for (int[] boundary : literalBoundaries) {
+			seven.moveToScreenY(boundary[0]);
+			assertEquals(boundary[1], seven.list.selectedIndex(),
+				"literal N=7 boundary at screen y=" + boundary[0]);
+			assertEquals(boundary[0], seven.screenY(), EPS, "pointer remains at the literal screen coordinate");
 		}
 	}
 
-	@Test
-	void verticalOnlyTravelCannotNavigateOrCrossEitherSideGate() {
-		var model = listWithRows(40);
-		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(0.0, 0.0, leftBack());
-
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(0.0, 1000.0));
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(0.0, -2000.0));
-		assertEquals(0.0, gesture.horizontalTravel(), DELTA, "vertical-only samples never accumulate side travel");
-		assertFalse(gesture.isBackSideFocused());
+	@Test void splitSmallSamplesPreserveSubrowPointerTravelAndMatchBatch() {
+		var split = new Fixture(7, false, false); var batch = new Fixture(7, false, false);
+		for (int i = 0; i < 180; i++) split.move(0, 0.25);
+		batch.move(0, 45);
+		assertEquals(batch.pointer(), split.pointer());
+		assertEquals(batch.list.selectedKey(), split.list.selectedKey());
+		assertEquals(45, split.screenY(), EPS);
 	}
 
-	@Test
-	void saturatedExitDiscardsOvershootAndAllowsImmediateReversalWithoutDebt() {
-		var model = listWithRows(40);
-		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(0.0, 0.0, leftBack());
-
-		assertEquals(InventoryGesture.Action.FORWARD, gesture.move(1000.0, 0.0));
-		assertEquals(76.0, gesture.horizontalTravel(), DELTA, "the exit threshold bounds the accumulator");
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(10.0, 0.0), "an outward saturated sample is not effective");
-		assertEquals(76.0, gesture.horizontalTravel(), DELTA);
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(-1.0, 0.0), "reversal acts at once from the saturated bound");
-		assertEquals(75.0, gesture.horizontalTravel(), DELTA);
-		assertEquals(InventoryGesture.Action.BACK, gesture.move(-151.0, 0.0));
-		assertEquals(-76.0, gesture.horizontalTravel(), DELTA);
+	@Test void emptySingleAndSinglePixelViewportNeverDivideByZeroOrInventSelection() {
+		var empty = new Fixture(0, false, false); empty.move(0, 80);
+		assertNull(empty.list.selectedKey());
+		var single = new Fixture(1, false, false); single.move(0, Double.MAX_VALUE);
+		assertEquals("k0", single.list.selectedKey()); assertEquals(100, single.screenY(), EPS);
+		single.viewport = new SpatialController.Viewport(1, 1, 9, -3);
+		single.controller.constrainPointer(single.viewport, 2); single.sync();
+		single.move(0, Double.MAX_VALUE); single.move(0, -Double.MAX_VALUE);
+		assertEquals("k0", single.list.selectedKey());
+		assertEquals(single.pointer(), single.viewport.confine(single.pointer()));
 	}
 
-	@Test
-	void independentBoundedSaturationsReachBothGatesWithoutCrossingTheOther() {
-		for (double sign : new double[] {-1, 1}) {
-			var model = listWithRows(40);
-			var gesture = new InventoryGesture(model, 1.0, false, 20.0);
-			gesture.begin(0.0, 0.0, leftBack());
-
-			InventoryGesture.Action saturated = sign > 0 ? InventoryGesture.Action.FORWARD : InventoryGesture.Action.BACK;
-			InventoryGesture.Action opposite = sign > 0 ? InventoryGesture.Action.BACK : InventoryGesture.Action.FORWARD;
-			assertEquals(saturated, gesture.move(sign * 1000.0, 0.0));
-			assertEquals(sign * 76.0, gesture.horizontalTravel(), DELTA);
-			assertEquals(InventoryGesture.Action.NONE, gesture.move(-sign * 1.0, 0.0));
-			assertEquals(sign * 75.0, gesture.horizontalTravel(), DELTA, "the opposite gate is not reachable in one reversal pixel");
-			assertEquals(opposite, gesture.move(-sign * 151.0, 0.0));
-			assertEquals(-sign * 76.0, gesture.horizontalTravel(), DELTA);
-		}
+	@Test void wheelSynchronizesRepresentativeRetainsSignedFractionsAndOnlyAdmitsUnlockExcess() {
+		var f = new Fixture(11, false, false);
+		f.wheel(0.75); f.wheel(-0.25); f.wheel(0.5);
+		assertEquals(1, f.list.selectedIndex()); assertEquals(10, f.screenY(), EPS);
+		f.move(5, 10); f.move(0, -4); // signed net +6; X remains live
+		assertEquals(5, f.pointer().x(), EPS); assertEquals(10, f.screenY(), EPS);
+		f.move(0, 12); // net +18: only four pixels move
+		assertEquals(14, f.screenY(), EPS);
+		f.move(0, -1); assertEquals(13, f.screenY(), EPS);
+		f.wheel(1); f.move(0, -14); // exact unlock admits zero, but releases the lock
+		assertEquals(20, f.screenY(), EPS);
+		f.move(0, 1); assertEquals(21, f.screenY(), EPS);
 	}
 
-	@Test
-	void glideBlockingOutsideTheHintCorridorUsesTheAccumulatorNotThePointer() {
-		var model = listWithRows(40);
-		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(0.0, 0.0, leftBack());
-
-		gesture.alignPointer(5000.0, 5000.0);
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(0.0, 1000.0));
-		assertTrue(model.selectedIndex() > 0, "an imported pointer never creates the hint corridor");
-
-		gesture.move(20.0, 0.0);
-		int corridorBlocked = model.selectedIndex();
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(0.0, 1000.0));
-		assertEquals(corridorBlocked, model.selectedIndex(), "accumulated progress beyond the hint gate blocks glide");
-
-		gesture.alignPointer(-5000.0, -5000.0);
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(-1.0, 0.0));
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(0.0, 1000.0));
-		assertTrue(model.selectedIndex() > corridorBlocked, "only the accumulator returning inside the corridor restores glide");
+	@Test void batchedAndSplitWheelUnlockSamplesPayTheSameFourteenPixelToll() {
+		var split = new Fixture(11, false, false); var batch = new Fixture(11, false, false);
+		split.wheel(5); batch.wheel(5);
+		for (double dy : new double[] {10, -5, 4, 16}) split.move(0, dy);
+		batch.move(0, 25);
+		assertEquals(batch.pointer(), split.pointer()); assertEquals(61, split.screenY(), EPS);
 	}
 
-	@Test
-	void backHoverSuppressionComesFromTheAccumulatorAndReleasesOnReversal() {
-		var model = listWithRows(40);
-		var gesture = new InventoryGesture(model, 1.0, true, 20.0);
-		gesture.begin(0.0, 0.0, leftBack());
+	@Test void sideIntentCannotPayWheelUnlockTravelAndOnlyExcessMovesY() {
+		var f = new Fixture(11, false, false);
+		assertTrue(f.wheel(1));
+		assertEquals(1, f.list.selectedIndex()); assertEquals(10, f.screenY(), EPS);
 
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(-50.0, 0.0));
-		assertTrue(gesture.isBackSideFocused());
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(0.0, 1000.0));
-		assertEquals(0, model.selectedIndex(), "Back hover suppresses glide");
-		assertEquals(0, gesture.wheelRows(3), "Back hover suppresses wheel");
-		assertEquals(0, model.selectedIndex());
+		f.move(0, 10); // ten of the fourteen unlock pixels
+		assertEquals(10, f.screenY(), EPS);
+		f.move(75, 0); // forward side, 25 px beyond the panel edge
+		assertTrue(f.gesture.sideIntent());
+		assertEquals(InventoryGesture.Action.NONE, f.move(0, 10));
+		assertEquals(10, f.screenY(), EPS, "side-suppressed Y cannot pay unlock travel");
 
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(60.0, 0.0));
-		assertFalse(gesture.isBackSideFocused(), "reversal below the hint gate releases Back focus");
-		assertEquals(3, gesture.wheelRows(3));
-		assertEquals(3, model.selectedIndex());
+		f.move(-75, 0);
+		assertFalse(f.gesture.sideIntent());
+		f.move(0, 3); // 13 total; still locked because the side sample did not pay
+		assertEquals(10, f.screenY(), EPS, "the full remaining toll is still required");
+		f.move(0, 1); // exact threshold admits zero
+		assertEquals(10, f.screenY(), EPS);
+		f.move(0, 5); // only post-threshold travel moves Y
+		assertEquals(15, f.screenY(), EPS);
 	}
 
-	@Test
-	void wheelUnlockClearsPartialUnlockTravelWhenBackFocusResetsIt() {
-		var model = listWithRows(40);
-		var gesture = new InventoryGesture(model, 1.0, true, 20.0);
-		gesture.begin(0.0, 0.0, leftBack());
-		gesture.wheelRows(2);
-		gesture.move(-50.0, 0.0); // genuine Back focus resets the partial unlock without unlocking
-		gesture.move(-30.0, 500.0);
-		assertEquals(2, model.selectedIndex());
-		gesture.move(50.0, 0.0); // leave Back: the former 10px of unlock travel was discarded
-		gesture.move(0.0, 13.0);
-		gesture.move(0.0, 1.0); // only this sample unlocks, not the former travel
-		gesture.move(0.0, 38.0);
-		assertEquals(2, model.selectedIndex());
-		gesture.move(0.0, 1.0);
-		assertEquals(3, model.selectedIndex());
-	}
-
-	@Test
-	void forwardGateEmitsForwardAndHoverDisablesDistanceBack() {
-		InventoryListModel model = listWithRows(40);
-		InventoryGesture gesture = new InventoryGesture(model, 0.25, false);
-		gesture.begin(0.0, 0.0, leftBack());
-
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(30.0, 0.0), "hint region must not glide");
-		assertEquals(InventoryGesture.Action.FORWARD, gesture.move(60.0, 0.0));
-		assertEquals(0, model.selectedIndex(), "a side gate never changes rows by itself");
-
-		gesture.begin(0.0, 0.0, leftBack());
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(-30.0, 0.0));
-		assertEquals(InventoryGesture.Action.BACK, gesture.move(-60.0, 0.0));
-	}
-
-	@Test
-	void hoverEnabledSuppressesDistanceBackButKeepsForward() {
-		InventoryListModel model = listWithRows(40);
-		InventoryGesture gesture = new InventoryGesture(model, 0.25, true);
-
-		gesture.begin(0.0, 0.0, leftBack());
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(-90.0, 0.0), "hover owns Back instead of distance");
-
-		gesture.begin(0.0, 0.0, leftBack());
-		assertEquals(InventoryGesture.Action.FORWARD, gesture.move(90.0, 0.0));
-	}
-
-	@Test
-	void relativeGlideUsesFrozenRowHeightAndWheelLocksUntilUnscaledThreshold() {
-		InventoryListModel model = listWithRows(40);
-		InventoryGesture gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(0.0, 0.0, leftBack());
-
-		gesture.move(0.0, 39.0);
-		assertEquals(0, model.selectedIndex());
-		gesture.move(0.0, 1.0);
-		assertEquals(1, model.selectedIndex(), "40 native GUI pixels supply the frozen 20px row threshold at 1x");
-
-		assertEquals(2, gesture.wheelRows(2));
-		assertEquals(3, model.selectedIndex());
-
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(0.0, 10.0));
-		assertEquals(3, model.selectedIndex(), "wheel lock ignores sub-threshold movement");
-
-		assertEquals(InventoryGesture.Action.NONE, gesture.move(0.0, 4.0));
-		assertEquals(3, model.selectedIndex(), "the unlock sample seeds the new glide fraction");
-
-		gesture.move(0.0, 36.0);
-		assertEquals(4, model.selectedIndex());
-	}
-
-	@Test
-	void nearVerticalTravelGlidesWhileOffAxisTravelSuppressesGlide() {
-		InventoryListModel model = listWithRows(40);
-		InventoryGesture gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(0.0, 0.0, leftBack());
-
-		gesture.move(25.0, 100.0); // inside the inclusive cone: dx ignored, dy glides
-		assertEquals(2, model.selectedIndex());
-
-		gesture.begin(0.0, 0.0, leftBack());
-		gesture.move(25.0, 50.0); // outside the cone: progress beyond the hint gate suppresses glide
-		assertEquals(2, model.selectedIndex(), "gesture rebase preserves selection and off-axis travel adds no rows");
-		assertEquals(25.0, gesture.horizontalTravel(), DELTA);
-	}
-
-	@Test
-	void wheelPixelsConvertAtHundredPixelsPerRow() {
-		InventoryListModel model = listWithRows(40);
-		InventoryGesture gesture = new InventoryGesture(model, 0.25, false);
-		gesture.begin(0.0, 0.0, leftBack());
-
-		assertEquals(2, gesture.wheelPixels(250.0));
-		assertEquals(2, model.selectedIndex());
-
-		assertEquals(1, gesture.wheelPixels(60.0));
-		assertEquals(3, model.selectedIndex());
-
-		gesture.setBackHoverFocused(true);
-		assertEquals(0, gesture.wheelPixels(500.0));
-		assertEquals(3, model.selectedIndex());
-	}
-
-	@Test
-	void rebaseResetsAxisFractionsAndProgressButKeepsSelection() {
-		InventoryListModel model = listWithRows(40);
-		model.select(20);
-		InventoryGesture gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(0.0, 0.0, leftBack());
-		gesture.move(0.0, 79.0);
-		assertEquals(21, model.selectedIndex());
-		assertEquals("k21", model.selectedKey());
-		int window = model.windowFirst();
-
-		gesture.move(50.0, 0.0);
-		assertEquals(50.0, gesture.horizontalTravel(), DELTA);
-		gesture.rebase(100.0, 200.0);
-
-		assertEquals(100.0, gesture.axisX(), DELTA);
-		assertEquals(100.0, gesture.pointerX(), DELTA);
-		assertEquals(200.0, gesture.pointerY(), DELTA);
-		assertEquals(0.0, gesture.horizontalTravel(), DELTA, "rebase resets the horizontal accumulator");
-		assertFalse(gesture.isBackSideFocused());
-		assertEquals(21, model.selectedIndex(), "the model keeps its selection through a rebase");
-		assertEquals("k21", model.selectedKey());
-		assertEquals(window, model.windowFirst());
-		gesture.move(0.0, 1.0);
-		assertEquals(21, model.selectedIndex(), "rebase discards the former almost-whole row");
-
-		assertEquals(1, gesture.wheelRows(1));
-		assertEquals(22, model.selectedIndex());
-	}
-
-	@Test
-	void reversalClearsOpposingSubrowTravelButZeroDoesNot() {
-		var model = listWithRows(40);
-		model.select(20);
-		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(0, 500, leftBack());
-		gesture.move(0, 36);
-		gesture.move(0, -4);
-		assertEquals(20, model.selectedIndex());
-		gesture.move(0, -36);
-		assertEquals(19, model.selectedIndex(), "opposing 18px is cleared before the new direction accumulates");
-		gesture.move(0, -36);
-		gesture.move(0, 0);
-		gesture.move(0, -4);
-		assertEquals(18, model.selectedIndex(), "zero samples do not clear a same-direction remainder");
-		gesture.move(0, -36);
-		gesture.move(0, 4);
-		gesture.move(0, 36);
-		assertEquals(19, model.selectedIndex(), "both reversal directions discard the opposing fraction");
-	}
-
-	@Test
-	void multiplierScalesRelativeTravelWithoutChangingTheNativeRowHeight() {
-		for (double multiplier : new double[] {2.0, 0.25}) {
-			var model = listWithRows(40);
-			var gesture = new InventoryGesture(model, multiplier, false, 20.0);
-			gesture.begin(0, -500, leftBack());
-			double threshold = multiplier == 2.0 ? 20.0 : 160.0;
-			gesture.move(0, threshold - 1);
-			assertEquals(0, model.selectedIndex());
-			gesture.move(0, 1);
-			assertEquals(1, model.selectedIndex());
-		}
-	}
-
-	@Test
-	void constantDirectionIsIndependentOfBatchingStartingYAndAlignedPointerY() {
-		for (double sign : new double[] {-1, 1}) {
-			for (double startY : new double[] {-900, 0, 900}) {
-				var split = listWithRows(40); var batch = listWithRows(40);
-				split.select(20); batch.select(20);
-				var splitGesture = new InventoryGesture(split, 1.0, false, 20.0);
-				var batchGesture = new InventoryGesture(batch, 1.0, false, 20.0);
-				splitGesture.begin(0, startY, leftBack()); batchGesture.begin(0, startY, leftBack());
-				for (double delta : new double[] {20, 31, 29, 77, 84}) {
-					splitGesture.alignPointer(0, startY * 2);
-					splitGesture.move(0, sign * delta);
-				}
-				batchGesture.move(0, sign * 241);
-				assertEquals(20 + (int) sign * 6, batch.selectedIndex());
-				assertEquals(batch.selectedIndex(), split.selectedIndex());
-				splitGesture.move(0, sign * 39); batchGesture.move(0, sign * 39);
-				assertEquals(20 + (int) sign * 7, split.selectedIndex());
-				assertEquals(batch.selectedIndex(), split.selectedIndex(), "equal whole rows also retain equal sub-row travel");
+	@Test void panelInteriorAndExactDeadzoneHaveNoIntentAndStrokeIsNotAddedToDeadzone() {
+		for (boolean mirrored : List.of(false, true)) {
+			for (double side : new double[] {-1, 1}) {
+				var f = new Fixture(11, false, mirrored);
+				assertEquals(InventoryGesture.Action.NONE, f.move(side * 50, 0));
+				assertEquals(0, f.gesture.horizontalTravel());
+				f.move(side * 24, 0); assertFalse(f.gesture.sideIntent());
+				f.move(0, 10); assertEquals(10, f.screenY(), EPS);
+				f.move(side * 0.5, 0); assertTrue(f.gesture.sideIntent());
+				f.move(0, 50); assertEquals(10, f.screenY(), EPS, "side hint freezes Y");
+				assertEquals(InventoryGesture.Action.NONE, f.move(side * 25, 0));
+				var expected = (side > 0) == mirrored ? InventoryGesture.Action.BACK : InventoryGesture.Action.FORWARD;
+				assertEquals(expected, f.move(side * 0.5, 0), "stroke is measured from the panel, not the deadzone edge");
 			}
 		}
 	}
 
-	@Test
-	void attemptedRowsAtEndpointsNeverBankOvershootEvenForHugeFiniteTravel() {
-		for (double travel : new double[] {80000, Double.MAX_VALUE}) {
-			var model = listWithRows(40); model.select(20);
-			var gesture = new InventoryGesture(model, 3.0, false, 20.0);
-			gesture.begin(0, 0, leftBack());
-			gesture.move(0, 0, travel);
-			assertEquals(39, model.selectedIndex());
-			gesture.move(0, 0, -80);
-			assertEquals(33, model.selectedIndex(), "the first reverse row travel is never paid against overshoot");
-			gesture.move(0, 0, -travel);
-			assertEquals(0, model.selectedIndex());
-			gesture.move(0, 0, 80);
-			assertEquals(6, model.selectedIndex());
-			assertEquals(0, gesture.pointerY());
+	@Test void nonDefaultDeadzoneAndStrokeKeepExactPanelBoundaries() {
+		for (boolean mirrored : List.of(false, true)) {
+			for (double side : new double[] {-1, 1}) {
+				var f = new Fixture(11, false, mirrored, 16, 64);
+				assertEquals(InventoryGesture.Action.NONE, f.move(side * 50, 0));
+				assertEquals(0, f.gesture.horizontalTravel(), EPS);
+				f.move(side * 16, 0);
+				assertFalse(f.gesture.sideIntent(), "16 px is exactly the deadzone");
+				f.move(side * 0.5, 0);
+				assertTrue(f.gesture.sideIntent(), "16.5 px is beyond the deadzone");
+				assertEquals(InventoryGesture.Action.NONE, f.move(side * 47, 0)); // 63.5 total
+				var expected = (side > 0) == mirrored ? InventoryGesture.Action.BACK : InventoryGesture.Action.FORWARD;
+				assertEquals(expected, f.move(side * 0.5, 0),
+					"the 64 px stroke is measured from the panel edge, not added to the deadzone");
+			}
 		}
 	}
 
-	@Test
-	void independentSelectionTravelCannotTriggerNavigationRegardlessOfPointer() {
-		var model = listWithRows(40);
-		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(0, 0, leftBack());
-		for (double x : new double[] {-100, 100}) {
-			int before = model.selectedIndex();
-			gesture.alignPointer(x, 0);
-			assertEquals(InventoryGesture.Action.NONE, gesture.moveGui(0, 0, 800));
-			assertEquals(0.0, gesture.horizontalTravel(), DELTA, "an imported pointer never becomes side travel");
-			assertTrue(model.selectedIndex() > before, "vertical selection travel glides without any side navigation");
+	@Test void crossingSampleCountsOnlyExteriorAndReentryClearsProgress() {
+		var f = new Fixture(11, false, false);
+		f.move(60, 0); assertEquals(10, f.gesture.horizontalTravel(), EPS);
+		f.move(-11, 0); assertEquals(0, f.gesture.horizontalTravel(), EPS);
+		f.move(-100, 0); assertEquals(-1, f.gesture.horizontalTravel(), EPS);
+		f.move(1, 0); assertEquals(0, f.gesture.horizontalTravel(), EPS);
+	}
+
+	@Test void coneFiltersCurrentDxWithoutDeletingHistoryIncludingExactBoundary() {
+		for (double sign : new double[] {-1, 1}) {
+			var f = new Fixture(11, true, false);
+			f.move(sign * 60, 0);
+			double exact = 10 * Math.tan(Math.toRadians(25));
+			f.move(sign * exact, 10);
+			assertEquals(sign * 10, f.gesture.horizontalTravel(), EPS);
+			assertEquals(sign * 60, f.pointer().x(), EPS);
+			f.move(sign * (exact + 0.01), 10);
+			assertEquals(sign * (10 + exact + 0.01), f.gesture.horizontalTravel(), EPS);
 		}
 	}
 
-	@Test
-	void projectionAxisCorrectionPreservesProgressUnlockAndSubrowFraction() {
-		var model = listWithRows(40); model.select(20);
-		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(100.0, 0.0, leftBack());
-		gesture.wheelRows(1);      // wheel locked, selection 21
-		gesture.move(0.0, 10.0);   // partial signed unlock travel
-		gesture.move(30.0, 0.0);   // retain side progress after the admitted unlock sample
-
-		gesture.constrainAxis(new SpatialController.Viewport(100, 100, 0, 0));
-		assertEquals(49.0, gesture.axisX(), DELTA);
-		assertEquals(100.0, gesture.pointerX(), DELTA, "projection never moves the pointer copy");
-		assertEquals(30.0, gesture.horizontalTravel(), DELTA, "projection never resets horizontal progress");
-
-		gesture.move(-30.0, 0.0);  // progress returns inside the corridor; the 10px unlock travel survives
-		gesture.move(0.0, 4.0);    // 14 unlocks; this sample seeds only its own 2px glide
-		gesture.move(0.0, 38.0);   // 2 + 19 = 21px crosses one frozen row
-		assertEquals(22, model.selectedIndex());
+	@Test void crossedPanelCanContinueAtClampAndSaturatesWithoutOvershootDebt() {
+		for (double sign : new double[] {-1, 1}) {
+			var f = new Fixture(11, true, false);
+			f.left = -150; f.right = 200; // only 29.5px reachable beyond right panel edge
+			f.move(sign * Double.MAX_VALUE, 0);
+			assertEquals(sign * 50, f.gesture.horizontalTravel(), EPS);
+			var held = f.pointer(); f.move(sign * Double.MAX_VALUE, 0);
+			assertEquals(held, f.pointer()); assertEquals(sign * 50, f.gesture.horizontalTravel(), EPS);
+			f.move(-sign, 0);
+			assertEquals(sign * 49, f.gesture.horizontalTravel(), EPS, "one reverse pixel acts immediately");
+		}
 	}
 
-	@Test
-	void wheelUnlockUsesSignedUnscaledTravelWithoutDirectionClearing() {
-		var model = listWithRows(40);
-		var gesture = new InventoryGesture(model, 2.0, false, 20.0);
-		gesture.begin(0, 0, leftBack()); gesture.wheelRows(2);
-		gesture.move(0, 0, 10);
-		gesture.move(0, 0, -10);
-		gesture.move(0, 0, -10);
-		gesture.move(0, 0, -4); // signed net -14 unlocks; only this sample glides
-		assertEquals(2, model.selectedIndex());
-		gesture.move(0, 0, -15);
-		assertEquals(2, model.selectedIndex());
-		gesture.move(0, 0, -1);
-		assertEquals(1, model.selectedIndex());
+	@Test void panelAtOrBeyondScreenEdgeCanQualifyFromRawOutwardTravelInBothDirections() {
+		for (double sign : new double[] {-1, 1}) {
+			var f = new Fixture(11, false, false);
+			f.left = -1000; f.right = 1000;
+			double edge = sign < 0 ? -170.5 : 229.5;
+			f.move(edge, 0); assertEquals(0, f.gesture.horizontalTravel());
+			f.move(sign * 24, 0); assertFalse(f.gesture.sideIntent());
+			f.move(sign, 0); assertTrue(f.gesture.sideIntent());
+			assertEquals(sign < 0 ? InventoryGesture.Action.BACK : InventoryGesture.Action.FORWARD, f.move(sign * 25, 0));
+			f.move(-sign, 0);
+			assertEquals(0, f.gesture.horizontalTravel(), "actual screen-edge reentry clears fallback progress");
+		}
 	}
 
-	@Test
-	void ordinaryWheelRetainsItsSignedFractionAcrossReversalAndGlideSamples() {
-		var model = listWithRows(40); model.select(20);
-		var gesture = new InventoryGesture(model, 1.0, false, 20.0);
-		gesture.begin(0, 0, leftBack());
-		assertEquals(0, gesture.wheelPixels(76));
-		assertEquals(0, gesture.wheelPixels(-4));
-		gesture.move(0, 39); // independent almost-row glide fraction
-		assertEquals(0, gesture.wheelPixels(27));
-		assertEquals(1, gesture.wheelPixels(1));
-		assertEquals(21, model.selectedIndex(), "wheel cancels signed travel normally instead of using glide reversal rules");
+	@Test void panelEdgeExactlyOnScreenEdgeUsesFallbackOnBothSidesAndMirrors() {
+		for (boolean mirrored : List.of(false, true)) {
+			for (double side : new double[] {-1, 1}) {
+				var f = new Fixture(11, false, mirrored);
+				double edge = side < 0 ? SCREEN_LEFT : SCREEN_RIGHT;
+				if (side < 0) f.left = SCREEN_LEFT; else f.right = SCREEN_RIGHT;
+				f.move(edge, 0);
+				assertEquals(edge, f.pointer().x(), EPS);
+				assertEquals(0, f.gesture.horizontalTravel(), EPS);
+				f.move(side * 24, 0);
+				assertFalse(f.gesture.sideIntent());
+				f.move(side, 0);
+				assertTrue(f.gesture.sideIntent());
+				var expected = (side > 0) == mirrored ? InventoryGesture.Action.BACK : InventoryGesture.Action.FORWARD;
+				assertEquals(expected, f.move(side * 25, 0),
+					"an edge exactly on the screen edge can start fallback from that edge");
+			}
+		}
 	}
 
-	@Test
-	void nonfiniteMovementIsInertIncludingIndependentSelectionTravel() {
-		var model = listWithRows(40);
-		var gesture = new InventoryGesture(model, 1.0, true, 20.0);
-		gesture.begin(0, 0, leftBack()); gesture.moveGui(0, 39);
+	@Test void asymmetricPanelKeepsRealCrossingInsideAndFallbackBeyondTheScreen() {
+		var inside = new Fixture(11, false, false);
+		inside.left = -1000; // beyond the left screen edge
+		inside.right = 200;  // reachable inside the screen
+		inside.move(200, 0);
+		assertEquals(0, inside.gesture.horizontalTravel(), EPS);
+		inside.move(24, 0); assertFalse(inside.gesture.sideIntent());
+		inside.move(1, 0); assertTrue(inside.gesture.sideIntent());
+		assertEquals(InventoryGesture.Action.FORWARD, inside.move(25, 0),
+			"the inside edge counts only the exterior crossing");
+
+		var beyond = new Fixture(11, false, false);
+		beyond.left = -1000; // beyond the left screen edge
+		beyond.right = 200;  // reachable inside the screen
+		beyond.move(SCREEN_LEFT, 0);
+		assertEquals(SCREEN_LEFT, beyond.pointer().x(), EPS);
+		assertEquals(0, beyond.gesture.horizontalTravel(), EPS);
+		beyond.move(-24, 0); assertFalse(beyond.gesture.sideIntent());
+		beyond.move(-1, 0); assertTrue(beyond.gesture.sideIntent());
+		assertEquals(InventoryGesture.Action.BACK, beyond.move(-25, 0),
+			"the offscreen edge uses its screen-edge fallback");
+	}
+
+	@Test void whollyOffscreenPanelAndSinglePixelWidthUseOrderedScreenBoundariesWithoutSyntheticProgress() {
+		for (double sign : new double[] {-1, 1}) {
+			var f = new Fixture(3, false, false);
+			f.left = sign < 0 ? -2000 : 1000;
+			f.right = sign < 0 ? -1000 : 2000;
+			double edge = sign < 0 ? -170.5 : 229.5;
+			f.move(edge, 0);
+			assertEquals(0, f.gesture.horizontalTravel());
+			f.move(sign * 25, 0);
+			assertEquals(sign * 25, f.gesture.horizontalTravel());
+			f.move(-sign, 0);
+			assertFalse(f.gesture.sideIntent(), "one physical reverse sample clears the fallback without debt");
+			f.gesture.rebase();
+			f.viewport = new SpatialController.Viewport(1, 101, -0.5, 17);
+			f.controller.constrainPointer(f.viewport, 2); f.sync();
+			var pointer = f.pointer();
+			f.move(sign * 25, 0);
+			assertEquals(pointer, f.pointer());
+			assertEquals(sign * 25, f.gesture.horizontalTravel(), "a collapsed viewport still qualifies only fresh raw input");
+		}
+	}
+
+	@Test void hoverOwnsBackInsteadOfStrokeAndSuppressesWheelUntilPhysicalReentry() {
+		var f = new Fixture(11, true, false);
+		assertEquals(InventoryGesture.Action.NONE, f.move(-1000, 0));
+		assertTrue(f.gesture.isBackHoverFocused()); f.wheel(3);
+		assertEquals(0, f.list.selectedIndex());
+		f.move(1000, 0); // Forward still emits normally in hover mode
+		assertFalse(f.gesture.isBackHoverFocused()); f.wheel(1);
+		assertEquals(1, f.list.selectedIndex());
+	}
+
+	@Test void nonHoverBackSideStillAllowsWheelSelectionButHoverBackSuppressesIt() {
+		var nonHover = new Fixture(11, false, false);
+		nonHover.move(-75, 0);
+		assertTrue(nonHover.gesture.isBackSideFocused());
+		assertFalse(nonHover.gesture.isBackHoverFocused());
+		assertTrue(nonHover.wheel(1));
+		assertEquals(1, nonHover.list.selectedIndex());
+		assertEquals(10, nonHover.screenY(), EPS, "whole-row wheel synchronizes the pointer to the row representative");
+
+		var hover = new Fixture(11, true, false);
+		hover.move(-75, 0);
+		assertTrue(hover.gesture.isBackHoverFocused());
+		assertFalse(hover.wheel(1));
+		assertEquals(0, hover.list.selectedIndex());
+		assertEquals(0, hover.screenY(), EPS);
+	}
+
+	@Test void hoverModeForwardStillReturnsForwardAction() {
+		var f = new Fixture(11, true, false);
+		assertEquals(InventoryGesture.Action.NONE, f.move(-75, 0));
+		assertTrue(f.gesture.isBackHoverFocused());
+		assertEquals(InventoryGesture.Action.FORWARD, f.move(300, 0),
+			"Back-hover suppresses wheel and distance Back, not the Forward action");
+		assertFalse(f.gesture.isBackHoverFocused());
+	}
+
+	@Test void hoverBackFocusClearsPartialWheelUnlockTravel() {
+		var f = new Fixture(11, true, false);
+		assertTrue(f.wheel(2));
+		assertEquals(2, f.list.selectedIndex()); assertEquals(20, f.screenY(), EPS);
+		f.move(0, 10);
+		assertEquals(20, f.screenY(), EPS);
+		f.move(-75, 0);
+		assertTrue(f.gesture.isBackHoverFocused());
+		f.move(75, 0);
+		assertFalse(f.gesture.isBackHoverFocused());
+		f.move(0, 13);
+		assertEquals(20, f.screenY(), EPS, "Back-hover reset the earlier partial unlock travel");
+		f.move(0, 1);
+		assertEquals(20, f.screenY(), EPS, "the exact threshold admits no excess");
+		f.move(0, 5);
+		assertEquals(25, f.screenY(), EPS);
+	}
+
+	@Test void alignmentCannotSelectFreezeDiscoveryUnlockWheelOrChangeSideProgress() {
+		var f = new Fixture(11, false, false);
+		f.wheel(2); f.move(0, 10); f.move(60, 0);
+		f.viewport = new SpatialController.Viewport(500, 300, 8, -7);
+		f.controller.constrainPointer(f.viewport, 50); f.sync();
+		assertEquals("k2", f.list.selectedKey()); assertEquals(10, f.gesture.horizontalTravel());
+		double y = f.pointer().y(); f.move(0, 8);
+		assertEquals(y + 4, f.pointer().y(), EPS, "alignment did not pay or reset the signed unlock toll");
+		var pristine = new Fixture(2, false, false);
+		assertEquals(List.of("k0", "k1"),
+			pristine.list.snapshot().entries().stream().map(InventoryListModel.Entry::key).toList(),
+			"precondition: two discovered keys");
+		pristine.sync();
+		assertEquals(List.of("k0", "k1"),
+			pristine.list.snapshot().entries().stream().map(InventoryListModel.Entry::key).toList(),
+			"system alignment is not a user scroll");
+		assertTrue(pristine.list.applyBatch(List.of(
+			new InventoryListModel.Entry("new", "New", 999, "ready"))));
+		assertEquals(List.of("new", "k0", "k1"),
+			pristine.list.snapshot().entries().stream().map(InventoryListModel.Entry::key).toList(),
+			"alignment did not mark the list as scrolled; the later high-count batch still sorts first");
+	}
+
+	@Test void nonfiniteInputNeverPoisonsPointerSelectionOrFractions() {
+		var f = new Fixture(11, false, false); f.wheel(0.75);
 		for (double bad : new double[] {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY}) {
-			assertEquals(InventoryGesture.Action.NONE, gesture.moveGui(bad, 0, 1));
-			assertEquals(InventoryGesture.Action.NONE, gesture.moveGui(0, bad, 1));
-			assertEquals(InventoryGesture.Action.NONE, gesture.moveGui(0, 1, bad));
-			assertEquals(0.0, gesture.pointerX()); assertEquals(0.0, gesture.pointerY());
-			assertEquals(0, model.selectedIndex());
+			assertEquals(0, f.gesture.horizontalDelta(bad, 1));
+			assertEquals(0, f.gesture.verticalDelta(bad)); assertFalse(f.gesture.wheelRows(bad));
 		}
-		gesture.moveGui(0, 1);
-		assertEquals(1, model.selectedIndex(), "invalid samples do not poison the accumulated fraction");
-	}
-
-	@Test
-	void directionPairDrivesWhichSideIsBack() {
-		InventoryListModel model = listWithRows(40);
-		InventoryGesture gesture = new InventoryGesture(model, 0.25, false);
-		InventoryListModel.Direction rightBack = InventoryListModel.directionFor(90.0);
-
-		gesture.begin(0.0, 0.0, rightBack);
-		assertEquals(InventoryGesture.Action.BACK, gesture.move(90.0, 0.0));
-
-		gesture.begin(0.0, 0.0, rightBack);
-		assertEquals(InventoryGesture.Action.FORWARD, gesture.move(-90.0, 0.0));
+		f.wheel(0.25); assertEquals(1, f.list.selectedIndex());
 	}
 }

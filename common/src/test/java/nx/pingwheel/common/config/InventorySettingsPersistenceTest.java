@@ -507,7 +507,6 @@ class InventorySettingsPersistenceTest {
 		SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
 		assertNotNull(selector);
 		assertFalse(selector.isHoverEnabled());
-		assertTrue(selector.getTargetGlide().compareTo(SpatialSelectorSettings.MIN_TARGET_GLIDE) >= 0);
 		assertEquals(0, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE
 			.compareTo(selector.getSubmenuRadiusScale()));
 		assertEquals(SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, selector.getTrailLength());
@@ -520,7 +519,7 @@ class InventorySettingsPersistenceTest {
 		Path configPath = tempDir.resolve("client.json");
 		Files.writeString(configPath,
 			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"pingVolume\":37,\"spatialSelector\":{"
-				+ "\"targetGlide\":21,\"submenuRadiusScale\":9,\"hoverEnabled\":true,\"hoverMillis\":10}}\n",
+				+ "\"submenuRadiusScale\":9,\"hoverEnabled\":true,\"hoverMillis\":10}}\n",
 			StandardCharsets.UTF_8);
 
 		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
@@ -528,7 +527,6 @@ class InventorySettingsPersistenceTest {
 
 		assertEquals(37, handler.getConfig().getPingVolume());
 		SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
-		assertEquals(0, new BigDecimal("20").compareTo(selector.getTargetGlide()));
 		assertEquals(0, SpatialSelectorSettings.MAX_SUBMENU_RADIUS_SCALE
 			.compareTo(selector.getSubmenuRadiusScale()));
 		assertEquals(SpatialSelectorSettings.MIN_HOVER_MILLIS, selector.getHoverMillis());
@@ -544,7 +542,7 @@ class InventorySettingsPersistenceTest {
 
 		JsonObject selector = readRoot(configPath).getAsJsonObject("spatialSelector");
 		assertNotNull(selector);
-		assertTrue(selector.has("targetGlide"));
+		assertFalse(selector.has("targetGlide"), "fresh serialization does not create the removed preference");
 		assertTrue(selector.has("hoverEnabled"));
 		assertTrue(selector.has("hoverMillis"));
 		assertTrue(selector.has("preciseCapturePeriodTicks"));

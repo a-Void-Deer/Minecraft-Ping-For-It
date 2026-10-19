@@ -532,12 +532,27 @@ public final class SpatialController {
 
 	/** GUI deltas on an external surface do not run radial dwell, turn or retrace. */
 	public Point moveExternalPointer(double deltaX, double deltaY, long nowMillis) {
+		return moveExternalPointer(deltaX, deltaY, nowMillis, true);
+	}
+
+	/** Active lists move the shared pointer but retain no invisible physical trail samples. */
+	public Point moveExternalPointerWithoutTrail(double deltaX, double deltaY, long nowMillis) {
+		return moveExternalPointer(deltaX, deltaY, nowMillis, false);
+	}
+
+	private Point moveExternalPointer(double deltaX, double deltaY, long nowMillis, boolean recordTrail) {
 		if (!active || !activeMenu().surface || !Double.isFinite(deltaX) || !Double.isFinite(deltaY)) return new Point(0.0, 0.0);
 		Point effective = movePointer(deltaX, deltaY);
 		if (effective.x() == 0.0 && effective.y() == 0.0) return effective;
-		appendTrail();
+		if (recordTrail) appendTrail();
 		activeMenu().lastMovement = nowMillis;
 		return effective;
+	}
+
+	/** Non-input list placement starts a new epoch without hover, travel or held-Back release. */
+	public void alignExternalPointer(double x, double y, long nowMillis) {
+		if (!active || !activeMenu().surface || !Double.isFinite(x) || !Double.isFinite(y)) return;
+		rebaseInternal(new Point(x, y), nowMillis);
 	}
 
 	/** Alignment-only list focus refresh; the ordinary tick/move owns hover advancement. */

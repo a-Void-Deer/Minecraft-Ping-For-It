@@ -458,7 +458,7 @@ class NativeSelectorContentTest {
 			InventoryS2CPacket.Status.READY, 0, List.of(new InventoryS2CPacket.Entry("exact", "minecraft:gunpowder",
 				"item.minecraft.gunpowder", encoded, 1, 1, false, null))).stamp(100, 1));
 		var session = new SpatialSelectorSession<>(previewTarget(capture), Map.of(),
-			new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), false, 250, true, false),
+			new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, false, 250, true, false),
 			previewFence(content), (target, contentFence) -> content.read(target, contentFence), SELECTOR_GEOMETRY);
 		session.open(0L);
 		enter(session, "content", 10L);
@@ -499,7 +499,7 @@ class NativeSelectorContentTest {
 
 	/** Explicit content-intent ON for property-branch fixtures; never a compatibility default. */
 	private static SpatialSelectorSettings.Snapshot intentSettings() {
-		return new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), false, 250, true, false,
+		return new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, false, 250, true, false,
 			SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS, SpatialSelectorSettings.DEFAULT_SUBMENU_RADIUS_SCALE,
 			SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH, SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY, true);
 	}

@@ -1,6 +1,5 @@
 package nx.pingwheel.common.render;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -42,7 +41,7 @@ class SpatialOverlayRendererBorderTest {
 		var target = new SpatialSelectorSession.CapturedTarget("ordinary", new ResolvedTarget(value, classification),
 			Optional.empty(), Optional.empty());
 		var fence = new SpatialSelectorSession.ContentFence(31, 42, 53, target.candidateId());
-		var settings = new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"),
+		var settings = new SpatialSelectorSettings.Snapshot(30, 90, 120, 140,
 			false, 250, true, false);
 		var session = new SpatialSelectorSession<String>(target, Map.of(), settings, fence,
 			(captured, contentFence) -> null, GEOMETRY);

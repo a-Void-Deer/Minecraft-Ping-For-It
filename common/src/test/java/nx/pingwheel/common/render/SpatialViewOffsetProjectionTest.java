@@ -357,7 +357,7 @@ class SpatialViewOffsetProjectionTest {
 	}
 
 	private static SpatialSelectorSettings.Snapshot settings() {
-		return new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, new BigDecimal("0.5"), false, 250, true, false,
+		return new SpatialSelectorSettings.Snapshot(30, 90, 120, 140, false, 250, true, false,
 			1, new BigDecimal("1.5"), 130, 50, true);
 	}
 
