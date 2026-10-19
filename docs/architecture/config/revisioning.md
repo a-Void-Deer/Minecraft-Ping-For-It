@@ -83,14 +83,21 @@ The server step at `0.3.0-pfi-beta1`:
 - remove `pingDuration` in either case.
 
 The client step at `0.5.0-pfi-beta1` retires the persisted wheel radius and
-timeout keys:
+timeout keys and translates the transparent-block selection toggle:
 
 - remove `wheelInnerRadius` and `wheelOuterRadius`;
 - remove `wheelTimeoutMillis`;
-- these are the only keys changed by the step: never derive spatial-selector
-  values from retired radii, derive a replacement lifetime from the retired
-  timeout, or inject defaults in the raw step; the config model initializes
-  missing selector members;
+- when `markTransparentBlocks` is absent, invert the decoded legacy
+  `passThroughTransparentBlocks` value so the block-shape selection effect is
+  preserved; an absent or `null` legacy value retains its old disabled meaning
+  and translates to `markTransparentBlocks: true`;
+- an existing `markTransparentBlocks` entry wins over the legacy entry; remove
+  `passThroughTransparentBlocks` in either case. When translation is needed, an
+  invalid legacy representation is left invalid for typed deserialization and
+  recovery rather than silently accepted as a boolean;
+- never derive spatial-selector values from retired radii, derive a replacement
+  lifetime from the retired timeout, or inject selector defaults in the raw
+  step; the config model initializes missing selector members;
 - retain unrelated entries, the persisted wheel appearance keys, and unknown
   data.
 
@@ -108,10 +115,11 @@ stays pending for a later save attempt; it is not converted into invalid-file
 recovery.
 
 Client serialization at or after `0.5.0-pfi-beta1` also removes the retired
-wheel radius and timeout keys from the document it writes, including the
-preservation base of a guarded writeback, so a later save cannot resurrect
-them. A same-version load is not rewritten merely because retired keys are
-present; the removal takes effect when that configuration is next serialized.
+wheel radius and timeout keys and `passThroughTransparentBlocks` from the
+document it writes, including the preservation base of a guarded writeback, so
+a later save cannot resurrect them. A same-version load is not rewritten merely
+because retired keys are present; the removal takes effect when that
+configuration is next serialized.
 
 ## Same-version shape normalization
 

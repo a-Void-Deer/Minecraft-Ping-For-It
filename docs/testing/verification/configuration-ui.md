@@ -14,6 +14,25 @@ The current suite covers:
 - config-version marker, precedence, migration, client/server recovery, and
   future-version preservation seams.
 
+`TransparentBlockSelectionMigrationTest` contains filesystem-backed fixtures
+for the transparent-toggle transformation at the existing client beta1
+boundary: legacy decoded values retain their actual raycast effect, a present
+new key takes precedence, malformed authoritative values follow parser recovery
+and backup protection, and unrelated root and nested data survive. A guarded
+writeback fixture retains explicit unknown nulls at the root, inside objects
+and arrays, and under spatial-selector preferences through failure, retry and
+reload, without materializing an omitted nullable model field. Its
+pre-boundary handler cases check legacy-schema projection for fresh files,
+ordinary saves, resets and guarded writeback, preservation of an already-present
+unknown future key, and a later upgrade retaining the selected effect.
+Same-version fixtures keep the obsolete-key load and untouched save as no-ops
+while a real serialization removes the retired key; failed writes retain the
+usable policy, and retry observes changed-source and future-version guards.
+These are source-reviewed model and persistence fixtures, not a recorded test
+run, native key-binding load or gameplay evidence. The transformation and
+recovery contracts remain owned by
+[configuration revisioning](../../architecture/config/revisioning.md#ordered-migration-and-writeback).
+
 ## Inventory and spatial-selector configuration
 
 `InventorySettingsTest` covers the authoritative inventory budget model:
@@ -32,21 +51,7 @@ send-byte multipliers; `InventorySizeScaleTest` covers the ordered legal
 positions and their exact byte and quanta conversion, half-up normalization,
 pair legality, frame-priority reconcile and ordered position stepping.
 `SpatialSelectorSettingsTest` covers the spatial-selector settings snapshot and
-bounds: a missing, null or fresh-file target-glide setting initializes the
-implementation's non-neutral configured default, while the neutral multiplier
-remains an explicit case that preserves the intrinsic list-glide baseline.
-Explicit factors, including a valid off-grid value, stay literal rather than
-snapping to the step grid, out-of-range factors clamp to the confirmed range,
-and each factor drives its own relative row threshold through validation,
-round-trip and a frozen gesture snapshot; a live preference edit does not
-change the already-frozen gesture, and a later null reset returns to the
-configured default rather than the neutral factor. The updated glide
-calibration exercises the neutral factor against the updated intrinsic baseline
-and explicit faster and slower factors against their relative row thresholds.
-This records the calibration coverage, not a numeric tuning catalogue. An
-explicit saved factor remains literal in the tested version upgrade rather than
-being mass-rescaled.
-Hover, deadzone, stroke, dwell, root-distance, and submenu-radius-scale
+bounds. Hover, deadzone, stroke, dwell, root-distance, and submenu-radius-scale
 clamping saturate on both sides, a missing, explicit-null or fresh-file center
 deadzone initializes the current confirmed default while every valid saved
 deadzone value, including the previous default and both bounds, is retained
@@ -68,17 +73,19 @@ frozen snapshot clamp every value without resetting boolean choices, a frozen
 session snapshot never follows later config edits, root distance and gesture
 preferences stay independent in both mutation directions, and fresh defaults do
 not alias another client's mutable preferences. `SpatialSelectorMigrationTest`
-also covers missing, null and explicit target-glide settings retaining their
-model semantics without a same-version load rewrite: a fresh file persists the
-configured non-neutral default, a same-version load and save keep an explicit
-factor unchanged, and a version-boundary migration preserves an explicit
-multiplier without rescaling. Same-version deadzone defaults follow the same
-no-rewrite rule: a fresh file persists the current default, missing, null and
-explicit saved deadzone values are retained without rescaling, an untouched
+contains filesystem-backed cases for the obsolete preference catalogued by
+[client configuration](../../config/client.md#obsolete-keys): fresh output omits
+it, existing null, numeric and object-shaped values do not affect the live
+snapshot, a same-version load and untouched save preserve the source bytes,
+and reload keeps the same effective preferences without creating a backup.
+Its partial-selector upgrade case checks retained unknown nested data,
+including that obsolete member, separately from the modeled preferences.
+Same-version deadzone defaults follow the no-rewrite rule: a fresh file
+persists the current default, missing, null and explicit saved deadzone values
+are retained without rescaling, an untouched
 same-version save leaves the bytes unchanged, and a reload keeps the value. It
-covers the release-boundary migrations that remove only obsolete wheel keys
-without
-injecting defaults: the exact boundaries and pre-target versions retire the old
+covers the release-boundary retirement of obsolete wheel keys without injecting
+selector defaults: the exact boundaries and pre-target versions retire the old
 wheel radius keys and the retired wheel timeout key while unknown root data and
 appearance values survive, a running version below a boundary keeps its key,
 at-or-after-introduction and server configs are not consumed, a target-version
@@ -243,7 +250,8 @@ screen evidence:
   control in the approved category order and immutable per-category lists,
   including the trail controls in Wheel Appearance, the content-intent control
   in the client Input Interaction spatial group, the gesture shortcut and
-  minimum-wait controls immediately after Wheel Hold Time, the client scope
+  minimum-wait controls immediately after Wheel Hold Time, the input group
+  without a separate inventory mouse-sensitivity control, the client scope
   without a presentation category, the client
   Performance category exposing exactly the precise capture period control, the
   server Presentation category, and the server Performance category exposing
@@ -308,8 +316,10 @@ screen evidence:
   precise capture period, trail controls and tooltips, the gesture-shortcut
   toggle and minimum-wait labels and tooltips, the content-intent label
   and tooltip, and numeric/boolean
-  placeholder rules; point and percent unit placeholders are also checked for
-  every bundled locale. It checks required key presence per locale rather than a
+  placeholder rules; its exact preference key-set assertion also excludes the
+  obsolete inventory sensitivity label and tooltip. Point and percent unit
+  placeholders are also checked for every bundled locale. It checks required
+  key presence per locale rather than a
   full-translation guarantee, and does not
   render or assemble screen labels;
 - `InventorySettingsLocalizationTest` covers the eight bundled locale files,

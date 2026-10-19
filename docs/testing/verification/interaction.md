@@ -267,8 +267,10 @@ state-seam evidence, rather than live input-callback evidence:
   including suppression of repeated presses before the next release;
 - GUI/screen eligibility is exercised at the input-state seam, not through a
   live GUI callback;
-- `ClientConfigTargetSelectionTest` checks the disabled defaults for the three
-  target-selection toggles and their JSON round trip; and
+- `ClientConfigTargetSelectionTest` checks the model-initialized target-selection
+  choices and resulting block mode, their JSON round trip, and missing or null
+  transparent-block choices; related handler/migration evidence is inventoried in
+  [configuration verification](configuration-ui.md#configuration-recovery-and-selection-grammar); and
 - `EntitySelectionBlacklistTest` covers registration aggregation, idempotent
   removal, and the optional Create registration boundary, while
   `EntitySelectionBlacklistDefaultRuleTest` checks the default
@@ -278,7 +280,8 @@ The entity-selection blacklist evidence is distinct from block whitelist,
 block-shape, and display-blacklist behavior. It must also not be treated as
 raycast-filter coverage: spectator exclusion is implemented by `Raycast`, not
 by `EntitySelectionBlacklist`. The unit seams do not establish live GUI/screen
-callbacks or loader-specific physical key-repeat behavior.
+callbacks, vanilla saved-binding restoration or loader-specific physical
+key-repeat behavior.
 
 ## Exact entity-local picking and Create raycast seams
 
@@ -462,22 +465,11 @@ order, an enabled inventory opens with the resolved breadcrumb and a disabled
 one retains its focusable slot without opening or committing. With no inventory,
 declared order and equal-sector geometry stay unchanged; nested groups and
 property Ping Type menus keep their own ordering.
-The session keeps the list's logical pointer fixed on both axes: physical list
-samples never move it (only viewport confinement may still correct it),
-vertical glide and bounded horizontal side progress accumulate independently
-from the same admitted samples, the per-sample vertical-intent cone ignores
-only that sample's horizontal component while keeping its vertical component
-and prior horizontal progress, and only effective filtered horizontal progress
-can cross a side gate or physically release held Back. Pointer alignment from a
-pan or resize still does not glide, select, add a trail point, advance hover,
-trigger automatic side navigation, or release stale item focus; the corrected
-pointer is the next gesture baseline without correction travel. The frozen
-session settings deadzone reaches the controller read model
+Its list-specific pointer, viewport and held-Back cases are inventoried under
+[inventory-list gestures and navigation](#inventory-list-gestures-and-navigation).
+The frozen session settings deadzone reaches the controller read model
 unchanged from the value consumed by the renderer, including a non-default
-radius. The shared item-to-list Back latch
-honors the accumulator distinction: alignment after item return cannot
-cascade, but effective physical leave and re-entry permits a later one-level
-return. A user list Back is covered for both Back styles and both entry sides:
+radius. A user list Back is covered for both Back styles and both entry sides:
 exactly one level returns to Content with the pointer staying at the trigger
 and the returned Content centre rigidly translated there, no immediate focus
 and a single trail seed; stationary frames cannot reopen the list or navigate,
@@ -504,13 +496,15 @@ an empty list is never committable under OFF.
 accepted successive virtual window positions become GUI travel; opening,
 resize, focus loss, and reopen reprime without phantom travel; settled-coordinate
 priming preserves the next real movement; actual native ownership gates movement
-and every scroll callback independently of the vanilla grab flag; and scroll
-normalization occurs once only while owned without moving the pointer, and
-endless alternating owned GUI callbacks around the settled baseline leave the
-fixed list pointer, trail, selection and hover progress untouched. Through
-the selector session, owned GUI-scaled native vertical movement continues list
-glide at confined edges and the first real reversed movement applies immediately
-after a scale handoff, while unowned samples and handoff priming add no travel.
+and every scroll callback independently of the vanilla grab flag. Its recording
+sink checks scroll normalization without emitting a movement callback; the
+session's resulting wheel synchronization is inventoried separately below.
+Balanced alternating owned horizontal callbacks move and return the shared
+list pointer without trail, selection or hover drift. Through the selector
+session, owned GUI-scaled vertical input changes absolute selection and a
+release carries the selected opaque reference; reversal applies immediately
+after an endpoint and scale handoff, while unowned samples and handoff priming
+add no travel.
 Fractional native samples — one window pixel being half a GUI pixel on each
 axis — accumulate through the real input adapter into exactly one return to
 the root: the first diagonal sample crossing the net return threshold returns,
@@ -574,9 +568,10 @@ evidence.
 `SelectorToggleLabelsTest` covers the client-side settings-toggle label
 resolver headlessly: each of the three target-selection toggles reads only its
 own live concern (`markFluids`, `markBlacklistedTargets`,
-`passThroughTransparentBlocks`), every resolution re-samples the supplied live
-policy, the toggle name and separator stay plain while only the ON/OFF state
-word carries the status color (green for ON, red for OFF), and a non-toggle or
+`markTransparentBlocks`), transparent marking reads OUTLINE as ON and VISUAL as
+OFF without changing the menu-label identity, every resolution re-samples the
+supplied live policy, the toggle name and separator stay plain while only the
+ON/OFF state word carries the status color (green for ON, red for OFF), and a non-toggle or
 unknown choice returns no label so the caller keeps its own resolver. It is a
 label-resolution helper seam: it does not exercise the real selector draw,
 renderer wiring, or GPU submission.
@@ -669,46 +664,82 @@ submission, or multiplayer verification.
 
 ## Inventory list gestures and navigation
 
-`InventoryGestureTest` covers the fixed-pointer list accumulator: physical
-samples never move either logical pointer axis while vertical glide uses the
-frozen row threshold with split and batched movement independent of starting
-or aligned pointer Y, rebase resets the glide fraction while preserving
-selection and window, reversals in both directions discard opposing sub-row
-glide travel, the inclusive vertical-intent cone ignores a sample's
-inside-or-exact horizontal component in both directions while preserving prior
-accumulated progress, out-of-cone dx accumulates, vertical-only samples never
-navigate or cross either side gate, the side-exit bound discards overshoot and
-allows immediate reversal without debt or reaching the opposite gate in one
-pixel, glide suppression outside the hint corridor derives from the accumulated
-progress rather than an imported pointer, Back-hover suppression and
-wheel re-enable react to effective accumulated progress, and wheel unlock
-uses its separate signed, unscaled travel with only the unlocking sample
-beginning glide; ordinary scroll keeps its independent signed fraction across
-reversal and glide. The updated calibration tests an explicit neutral factor
-against the intrinsic baseline and explicit faster and slower factors against
-their relative row thresholds, independent of the configured non-neutral
-default; this records calibration coverage, not a numeric
-tuning catalogue. The model also covers huge finite endpoint travel with immediate
-reverse movement and no overshoot debt, and non-finite movement as inert.
+The behavior contract is owned by
+[wheel interaction](../../architecture/picking/wheel.md#inventory-list); the
+following inventory records source-reviewed test responsibilities, not an
+execution result.
+
+`InventoryGestureTest` composes the gesture helper with a real headless
+controller, without constructing the selector session. Literal boundary tables
+and screen-coordinate expectations check full-list selection at viewport
+endpoints and intermediate positions across several list sizes, monotonic
+movement, unquantized pointer Y, split fractional samples
+matching a batched move, immediate endpoint reversal without overshoot debt,
+and empty, single-row and single-pixel viewport safety. Wheel cases check
+signed fractional accumulation, representative-Y synchronization, X movement
+during the Y lock, opposing unlock travel, exact-threshold and crossing samples,
+split/batched unlock equivalence, side-suppressed input paying no unlock travel,
+and Back-hover focus clearing partial unlock travel. Panel cases check interior
+and exact deadzone admission, exterior-only crossing travel, re-entry clearing progress,
+and stroke measurement independent of the deadzone, with mirrored Back/Forward
+directions and a non-default threshold pair. Cone-boundary cases preserve prior
+progress while filtering only the current horizontal sample. Separate edge cases exercise a crossed panel
+continuing at confinement, exact panel/screen-edge coincidence on both mirrored
+sides, an asymmetric panel with a reachable edge and an offscreen edge,
+oversized and wholly offscreen panels, a collapsed horizontal viewport,
+saturation and immediate reversal. Hover owns Back instead of distance entry
+while still allowing the Forward action. Separate wheel cases distinguish
+Back-hover suppression from nonhover Back-side selection and representative-Y
+synchronization. Alignment cases preserve side progress and partial wheel
+unlock without selecting or freezing discovery order; non-finite input leaves
+the usable wheel fraction intact.
+
+`SpatialSelectorSessionTest` adds the production facade: initial screen-top
+placement, unsnapped small physical samples, endpoint reversal without trail
+growth, unchanged viewport publication leaving pointer and trail epoch alone,
+and discovery retaining the selected key while distinguishing physical scroll
+freeze from system synchronization. Viewport corrections retain selection and
+partial wheel unlock without side navigation. Its horizontal-projection
+animation case preserves pointer, selection and trail epoch through successive
+X offsets and a width-only change; its vertical-projection case preserves
+screen Y and selection through alternating Y offsets. Both interleave supplied
+mouse deltas to check continuous selection rather than repeated row snapping.
+The held non-default boundary case exercises both mirrored Back/Forward sides
+through the production session: the panel edge, exact deadzone, first exterior
+intent, Y suppression and exact stroke navigation keep the frozen snapshot
+despite later live preference edits. A separate mirrored release case checks
+that nonhover Back-side wheel input updates selection and pointer Y while
+Back-hover suppresses it, and either Back focus still releases with no action.
+Layout-only row-height and capacity changes do not recalibrate mouse selection.
+Mapping waits for a real
+viewport, and a collapsed vertical viewport retains legal selection. Side
+suppression does not turn vertical raw input into navigation or hover travel.
+After an item Back, raw-only edge extrapolation, projection changes and
+capacity relayout cannot release the shared held-Back block; an effective
+physical leave and re-entry still permits one return. These are headless
+helper/controller and session seams, not GLFW callback delivery.
+
 `InventoryListModelTest` covers sorted initial rows and stable ordering, selection
 and row-window clamping, and huge attempted row steps saturating without integer
 overflow and reversing immediately. A frozen-panel translation moves only the
-panel axis and glide baseline while preserving entries, selection, window,
+panel axis and row origin while preserving entries, selection, window,
 direction, status, discovery order, the scroll freeze and the fractional wheel
-remainder, and non-finite deltas are inert. These are model tests; the session and native
-input coverage in the [headless spatial radial menu](#headless-spatial-radial-menu)
-exercises authorized glide against a confined pointer.
+remainder, and non-finite deltas are inert. Capacity relayout keeps the selected
+key visible without changing discovery order or the fractional wheel remainder.
+These are row-model checks; they do not independently establish pointer
+mapping, side gestures or input ownership.
+
 `SpatialInventoryNavigationIntegrationTest` drives the headless native-input
 adapter and a real selector session through production inventory layout,
 viewport preparation/retargeting and frame rendering with a recording painter.
 It covers list entry from reachable viewport corners, centering pan and scale
-handoff, vertical glide and reversal at confined edges in both directions,
+handoff, absolute selection and reversal at viewport edges in both directions,
 normal and reduced motion, both forward-side orientations, selection painting
 after a streamed view update, and item-Back return followed by resize while
-preserving the selected key and row window and keeping vertical-only input on
-the list. Session and gesture seams also verify that viewport correction
-preserves partial glide, signed wheel-unlock and ordinary-wheel fractions, wheel
-lock, selection, trail and the held-Back latch. The same fixture also covers
+preserving the selected key, keeping it visible at the measured capacity and
+keeping vertical-only input on the list. Its active-list frame asserts that
+the moving crosshair is visible; a visible pointer outside the panel intent
+boundary suppresses Y until physical re-entry. The same fixture also covers
 the user list Back through the real native-input and
 session path with viewport preparation and retargeting: both Back styles,
 normal and reduced motion, an oblique inventory-slot entry, other GUI scales
@@ -718,8 +749,8 @@ cannot reopen the list, a deadzone release that abandons, and a full
 deliberate stroke plus dwell required to reopen the list; a resize never
 resolves through the old circumference placement and fresh real input
 continues from the returned centre. It also covers OFF content intent through
-the real path (ordinary rows, no Forward entry or retained key, a direct
-release carrying Attention) and an item-clearance update that repositions the
+the real path (ordinary rows, no Forward entry or retained key, and an inert
+Forward stroke followed immediately by release carrying Attention) and an item-clearance update that repositions the
 active item menu without pointer or trail travel. It also covers the ancestor
 breadcrumb rule through the real path:
 the root and Content ancestors keep only their entry breadcrumbs and the
@@ -730,10 +761,27 @@ case enters Content by a qualified turn at the actual corner and continues the
 same rightward stroke plus dwell into inventory. Controller focus, sector
 paint and the active follower receive the same equal-sector geometry; Back
 still faces the real root, and the entered inventory breadcrumb retains that
-geometry rather than a forced due-right center. The fixture does not instantiate
+geometry rather than a forced due-right center. Its content-measurement cases
+reuse one detached display projection per bounded discovered row across scroll
+and remeasurement; a changed label reprojects that row and changes width without
+moving the pointer or trail or navigating. A GUI-scale handoff at an unchanged
+native window updates capacity without synthetic input and admits the next real
+scaled row movement. Font/capacity refresh preserves fractional wheel input and
+an already-running list Back timer; an active item's resize retains its frozen
+row key and anchor while session and painter consume the same newly measured
+panel edge in both orientations. A quantity reduction combined with new-row
+discovery during an active item menu preserves the selected and retained item
+keys, frozen row anchor, pointer and trail through the content relayout in both
+orientations. `SpatialSelectorSessionTest` separately checks
+that capacity-only relayout cannot re-arm the shared held-Back block after an
+item return, while a deliberate physical leave and re-entry still permits one
+return. Panel/text/Back paint coverage, including current-selection borders, is
+inventoried in
+[rendering verification](rendering.md#selector-overlay-layout-and-frame-rendering).
+The fixture does not instantiate
 the complete `ClientPingRuntime`, a GLFW window, `GuiGraphics`, or GPU submission;
-native-window/gameplay confirmation of inventory-axis reachability after the
-item-Back resize handoff remains pending.
+native-window/gameplay confirmation of inventory selection reachability after
+the item-Back resize handoff remains pending.
 
 ## Known automated gaps
 

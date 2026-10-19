@@ -52,7 +52,7 @@ zero and drops every underlay or text-bearing frame, and the Back progress path
 tracing the frame's actually painted pixel extents and never leaving them;
 half-scale child-orbit bounds, the non-root submenu-radius multiplier with the
 root distance and legacy forms unchanged, and selected offsets; the square
-progress walk's last-painted extents and the inventory footer's immutable
+progress walk's last-painted extents and the inventory view's immutable
 back-affordance state; and sector scanline geometry, adjacent-sector tiling,
 shared disabled/reserved alpha, and paint ordering;
 `SpatialOverlayRendererGuideTest` covers the radial center guides headlessly:
@@ -87,8 +87,8 @@ displayed coverage and a separate alpha edit never restarts it, exit fades to
 zero while detached data keeps its deadline and reappearance resumes from the
 displayed coverage, reduced motion snaps and drops the exit tail, rewind cannot
 rewind the displayed coverage, resting coverage uses the fractional base
-coverages, eligible focus applies the confirmed sector and box gains to the
-focused entry and its siblings, Back, disabled, reserved and deadzone focus
+coverages, eligible radial focus applies the confirmed sector and box gains to
+the focused entry and its siblings, radial Back, disabled, reserved and deadzone focus
 keep every resting gain, ancestor levels apply structural dimming and omit the
 ancestor breadcrumb sector without repeating the foreground unselected factor,
 the final byte rounds exactly once, each opacity knob reaches only its own
@@ -102,6 +102,48 @@ before the return restores the window, a selection change draws the old
 overlay's fade and the new overlay's growth without ever filling a
 never-selected row, and the row-overlay draw honors reduced motion, opacity
 zero and quantized zero.
+
+`RadialGradientTest` records the production vertex emitter with independent
+geometry and alpha expectations: center coverage and unchanged RGB, an outward
+fade with soft shoulders and a transparent rim, fractional coverage and opacity
+until final-byte rounding, clockwise sector and Back-half orientation, exact
+shared edges for unequal and wrapped sectors, full-disc winding and
+non-overlapping topology, bounded radius-independent work, and inert invalid or
+quantized-zero inputs. The radial-route cases in
+`SpatialOverlayRendererBackgroundTest` connect production frame planning to
+that emitter through recording ports: root, submenu, ancestor Back, inventory
+Back halves, item menus and detached exit paint use the same underlay route;
+rectangular surfaces and foreground stay separate; wheel and target opacity
+retain their independent scopes; background-peak admission is independent of
+foreground alpha; and one underlay batch is bracketed before later layers.
+These are source-reviewed emitter and recording-painter fixtures, not a
+recorded test run, native GUI batching or GPU submission evidence.
+
+`SpatialInventoryLayoutTest` covers content-driven panel measurement before the
+viewport cap: detached row names, icon slots, full-sized quantities, status,
+position headers and Forward chrome contribute their natural width, with all
+bounded discovered rows measured independently of selection and the visible
+window. Empty or short content does not fill the maximum. Header, footer and
+whole-row capacity share the current GUI budget; a tiny GUI retains readable
+metrics and a whole row rather than shrinking the pattern, and a retained
+item-row anchor survives capacity and font relayout. The detached-display case
+in `SpatialInventoryRowDisplayTest` checks that measurement and painting consume
+the same transmitted name and owned icon rather than a short fallback label.
+`SpatialInventoryTextTest` covers the production clipping plan for long
+quantities, header/status text, Forward and tiny slots: configured scale stays
+fixed, fitting text stays whole, and an ellipsis must itself fit the available
+slot. These are layout, display-projection and clipping-plan seams, not native
+text or scissor submission evidence.
+
+The mirrored-side cases in `SpatialInventoryBackTest` record a complete Back
+title frame outside the panel's actual parent-facing edge at its vertical
+midpoint, its outward semicircle, and progress along the measured rectangular
+frame's painted extents. Focus enhances only the underlay coverage, without
+changing the title's geometry, scale or own background channel; wheel opacity
+reaches the underlay independently, and navigation paint acknowledges no
+fabricated choice. These are production-frame recording and perimeter-helper
+checks, not native window or graphics submission evidence.
+
 `SpatialOverlayRendererAncestorBreadcrumbTest` drives the production radial
 planning and frame seams through recording paint and font-metrics ports: each
 ancestor of the active path plans only its entry breadcrumb and Back
@@ -130,17 +172,33 @@ settled paint keeps the sector and measured Back frame disjoint through
 enlarge and shrink with the first frame committing the new panel-to-menu
 clearance, the follower ray, guide, connector and actual title acknowledgement
 stay on one geometry, a longer Back label at the same viewport relayouts the
-whole pattern before the new frame paints, a resize rebases a detached prior
-panel with the same pattern instead of leaving its old GUI center, and invalid
-inputs are rejected.
-`SpatialOverlayRendererFollowerTest` additionally drives list and item-submenu
-frames through the production renderer: an active inventory list hides the
-crosshair even when frame opacity is zero, an item submenu at Back/deadzone uses
-the radial pointer rule rather than inheriting list hiding, an eligible visible
-item follower can hide it, and returning to the list or leaving for the parent
-restores the applicable behavior. The list trail remains independent; inactive
-exit paint does not retain list-specific hiding. These checks use recording
-paint/metrics ports, not `GuiGraphics` or GPU submission.
+whole pattern before the new frame paints, and a resize rebases a different
+prior list's detached panel with the same pattern instead of leaving its old
+GUI center, with an explicit assertion that the ordinary exit still paints;
+invalid inputs are rejected. The content-shrink cases in
+`SpatialInventoryNavigationIntegrationTest` exercise a quantity reduction and
+new-row discovery together while an item menu is active, in both mirrored
+orientations with normal motion. First, intermediate and settled frames check
+every actually painted present or detached panel against the full child-sector
+bounds and complete Back title frame, require nonempty panel and sector paints,
+and confirm that the settled surface uses the smaller shared content width.
+These are recording-painter geometry checks, not native rendering evidence.
+`SpatialInventoryNavigationIntegrationTest` checks the production active-list
+chrome through its recording painter: list entry exposes the moving virtual
+crosshair, including while side intent suppresses vertical selection. Its
+selection and item-return coverage is inventoried in
+[interaction verification](interaction.md#inventory-list-gestures-and-navigation).
+`SpatialOverlayRendererFollowerTest` additionally checks active-list crosshair
+visibility with both frame opacity preferences at zero, including a return from
+an eligible item follower. The same case keeps the item Back/deadzone pointer
+visible, allows an eligible visible item follower to hide it, restores the
+parent radial deadzone feedback on leaving the list, and checks an inactive
+exit after that parent frame without connectors or choice acknowledgement.
+These are discrete snapshot/frame checks; they do not establish the complete
+animated handoff or a direct active-list detached exit. The
+[wheel owner](../../architecture/picking/wheel.md#inventory-list)
+defines the list/radial presentation handoff; recording paint does not establish
+native cursor visibility, `GuiGraphics` or GPU submission.
 `SpatialVisualTrailTest` covers the production shared-history model headlessly:
 one bounded history serves both the logical pointer and the certified
 follower; native raw pointer batches are consumed once and follower-era samples
@@ -162,9 +220,11 @@ painted centre; only a successful paint of the actual animated pose with
 a visible title frame admits a follower sample, while a failed paint, a
 disabled or Back focus, an omitted active node, or an actual offscreen pose
 cannot certify a predicted owner or borrow a detached duplicate; an inventory
-list hides every trail paint including a prior tail and its rows never own it,
-a list-to-item rebase is not a joining stroke, and the item radial keeps the
-shared history below text under the ordinary crosshair rule; a fractional
+list hides every trail paint including a prior tail and its rows never own it;
+moving the shared list pointer records no trail samples, and system alignment
+fences the prior tail without recording its seed. A list-to-item rebase is not
+a joining stroke, and the item radial keeps the shared history below text
+under the ordinary crosshair rule; a fractional
 projection change or
 rigid pan appends nothing, and trail visibility and its independent opacity
 reach only the trail; an ordinary release fades with the exact departing
@@ -330,6 +390,11 @@ or from arbitrary in-game camera angles.
 
 ## Known automated gaps
 
+- continuous list/item crosshair handoff and direct active-list detached exit
+  still need dedicated recording-frame coverage
+  aligned with the [list presentation contract](../../architecture/picking/wheel.md#inventory-list);
+  discrete active-list, zero-opacity return, item/radial and post-parent exit
+  assertions do not cover those transition paths;
 - repeated-ping HUD compositing for one target: existing tests cover winner
   selection and independent visual lifetimes, but no test checks whether several
   display-active same-target records change the displayed HUD alpha; the

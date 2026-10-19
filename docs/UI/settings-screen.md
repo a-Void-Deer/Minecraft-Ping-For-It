@@ -45,7 +45,7 @@ The client scope has seven categories:
 
 - **Marker Display**: Ping Distance, Marker Display Duration, Ping Size, Item
   Icons, Direction Indicator, Player Info, and Team Color.
-- **Target Selection**: Pass Through Transparent Blocks, Mark Blacklisted
+- **Target Selection**: Mark Transparent Blocks, Mark Blacklisted
   Targets, and Mark Fluids.
 - **Wheel Appearance**: Root Menu Distance, Submenu Size, Wheel Opacity, Wheel
   Target Opacity, Wheel Target Font Size, Wheel Option Font Size, Show Gesture
@@ -56,8 +56,8 @@ The client scope has seven categories:
   Gesture Hold, Long-Press Compatibility Mode, Compatibility Time Slice, and
   Cancel Cone Half-Angle,
   followed by a Spatial selector gestures subgroup with Center Deadzone, Entry
-  Stroke Length, Entry Dwell, Inventory Vertical Mouse Sensitivity, Require
-  Sustained Hover to Return, Back-Hover Dwell, and Content Intent Selection.
+  Stroke Length, Entry Dwell, Require Sustained Hover to Return, Back-Hover
+  Dwell, and Content Intent Selection.
   The Content Intent Selection toggle enables the additional property and
   inventory-item Ping Type selection menus in the Content hierarchy; its
   tooltip states that a change applies to the next hold.
@@ -99,6 +99,11 @@ the screen and have no persisted meaning
 user-facing reload control.
 
 ## Input interaction controls
+
+Center Deadzone and Entry Stroke Length are shared controls for radial and
+inventory-side gestures; there is no separate inventory vertical
+mouse-sensitivity control. Their value semantics and persisted form are owned
+by [client configuration](../config/client.md#spatial-selector-interaction).
 
 The gesture controls' tooltips state that edits apply to the next hold. While
 compatibility mode is enabled, the gesture toggle displays OFF and both gesture

@@ -59,9 +59,9 @@ here.
 
 | Key | JSON form | Local meaning |
 | --- | --- | --- |
-| `passThroughTransparentBlocks` | boolean | Persistent block-shape selection policy; see [selection policy](../architecture/picking/selection_policy.md). |
-| `markBlacklistedTargets` | boolean | Persistent entity-selection-blacklist policy; see [selection policy](../architecture/picking/selection_policy.md). |
-| `markFluids` | boolean | Persistent fluid-selection policy; see [selection policy](../architecture/picking/selection_policy.md). |
+| `markTransparentBlocks` | boolean | Persistent block-shape selection policy, initialized enabled; see [selection policy](../architecture/picking/selection_policy.md). Version-boundary preservation of the previous toggle's actual selection effect is owned by [configuration revisioning](../architecture/config/revisioning.md#ordered-migration-and-writeback). |
+| `markBlacklistedTargets` | boolean | Persistent entity-selection-blacklist policy, initialized disabled; see [selection policy](../architecture/picking/selection_policy.md). |
+| `markFluids` | boolean | Persistent fluid-selection policy, initialized disabled; see [selection policy](../architecture/picking/selection_policy.md). |
 | `playerInfoMode` | `HOLD`, `DISABLED`, `ALWAYS`, or `COMPACT` | Player-author presentation: `HOLD` shows verbose information while the player-list key is held; `ALWAYS` keeps it verbose; `COMPACT` puts the author in the distance label; `DISABLED` omits it. |
 | `teamColorMode` | `FULL`, `DISABLED`, `PING_ONLY`, or `LABELS_ONLY` | Whether team coloring applies to both ping and labels, neither, only the ping, or only labels. |
 | `entityBlockRenderMode` | `ALL`, `COMPATIBLE`, or `VOXEL_SHAPE_ONLY` | Local entity-block geometry route. [Geometry sources](../architecture/geometry/geometry_sources.md) owns route and outcome semantics. When decoding persisted input, an explicit `null` or unknown value normalizes to `COMPATIBLE`; a missing field is initialized by the config model. |
@@ -78,12 +78,11 @@ validation and the preference relationships below.
 | `spatialSelector` | object | Container for the preferences below; never sent to the server and cannot alter server policy. |
 | `spatialSelector.gestureSkipHoldEnabled` | boolean | Opt-in gesture shortcut, disabled by default, allowing a physical Ping-key hold and displacement to qualify for early selector opening. [Long-press timing](../architecture/input/long-press.md#optional-physical-hold-gesture) owns eligibility; compatibility mode takes priority under the preference relationship below. |
 | `spatialSelector.gestureSkipHoldMillis` | number, milliseconds | Minimum continuous physical hold before the optional gesture shortcut may qualify, independent of the ordinary long-press threshold. |
-| `spatialSelector.deadzone` | number, GUI pixels | Center deadzone; a release inside it abandons the gesture. |
-| `spatialSelector.stroke` | number, GUI pixels | Minimum pointer stroke before a dwell can enter a focused submenu. |
+| `spatialSelector.deadzone` | number, GUI pixels | Radial center deadzone and inventory-side intent threshold; [wheel](../architecture/picking/wheel.md#inventory-list) owns how the same held value applies at a list panel edge. |
+| `spatialSelector.stroke` | number, GUI pixels | Radial submenu-entry stroke and inventory-side navigation distance; [wheel](../architecture/picking/wheel.md#inventory-list) owns the panel-edge measurement and navigation gates. |
 | `spatialSelector.dwellMillis` | number, milliseconds | Dwell threshold before a focused branch entry is entered. |
 | `spatialSelector.rootDistance` | number, GUI pixels | Visual root-menu distance from the center; it does not change the deadzone or entry stroke. |
 | `spatialSelector.submenuRadiusScale` | number, multiplier | Client-local visual multiplier of the viewport-derived non-root radial radius, applied to every radial submenu including an inventory item's radial menu; the root menu's distance and every gesture threshold stay independent, and it freezes into the held gesture's snapshot like the other selector preferences. |
-| `spatialSelector.targetGlide` | number, multiplier | Multiplier over the inventory list's intrinsic vertical glide baseline; it does not affect ordinary-wheel input. The list's delta, threshold, reversal, and navigation behavior is owned by [wheel](../architecture/picking/wheel.md#inventory-list). |
 | `spatialSelector.hoverEnabled` | boolean | Whether sustained Back hover returns one level; opt-in and inert until enabled. |
 | `spatialSelector.hoverMillis` | number, milliseconds | Dwell threshold before Back-hover returns one level. |
 | `spatialSelector.showTrail` | boolean | Whether the shared pointer/active-option trail is drawn; false hides both pointer and option trail without changing gesture selection. |
@@ -121,15 +120,8 @@ Gesture behavior is owned by
 [wheel](../architecture/picking/wheel.md#headless-spatial-menu-model), which
 also owns the
 [Back-hover return state](../architecture/picking/wheel.md#back-hover-return-state)
-and the model's native-integration boundary. The config model's initialized
-target-glide default is an implementation-chosen non-neutral factor rather than
-the neutral multiplier; the neutral multiplier preserves the intrinsic glide
-baseline exactly rather than disabling glide. A missing or explicit `null`
-member uses the initialized default; an explicit factor is retained rather than
-rescaled, while an out-of-range factor normalizes under the same numeric-bound
-handling as the other selector preferences; no schema migration rewrites an
-explicit value. Numeric ranges, steps, and defaults remain implementation
-values.
+and the model's native-integration boundary. Numeric ranges, steps, and defaults
+remain implementation values.
 
 ### Block display lists
 
@@ -143,6 +135,14 @@ by `markBlacklistedTargets`; see
 [the blacklist boundary](../architecture/picking/selection_policy.md#raycast-use-and-blacklist-boundary).
 
 ### Obsolete keys
+
+`spatialSelector.targetGlide` is not a modeled preference and has no input,
+gesture, or settings-screen effect. It has no dedicated version boundary or
+migration. Existing unknown-key preservation may leave it in a raw document
+under [configuration revisioning](../architecture/config/revisioning.md), but a
+retained value is never read or applied. Inventory mouse selection is owned by
+[wheel](../architecture/picking/wheel.md#inventory-list), not by a sensitivity
+multiplier.
 
 `presentationReceive` and `presentationDisplay` are obsolete keys with no
 persisted meaning. The handler removes them from a loaded or serialized
