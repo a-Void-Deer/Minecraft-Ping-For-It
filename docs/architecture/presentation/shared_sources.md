@@ -212,12 +212,17 @@ These guarantees cover the pipeline's owned processing and explicitly audited
 call graphs, not pre-existing resident world storage, unrelated game work, total
 JVM heap, GC or wall-clock time. Memory charges are a conservative cost model,
 not a measurement of total JVM allocation. The mechanism cannot preempt an
-arbitrary third-party call. Where the domain explicitly retains an
-external-trusted route, admission bounds invocation count while that call's
-internals remain outside certified work and allocation; returned-data processing
-still obeys the guard. External trust alone is not atomicity evidence. Work
-outside that explicit trust boundary must be safely bounded or report
-unavailable.
+arbitrary third-party call. A domain may explicitly define an external-trusted
+provider or third-party codec route and name the lookup, callback and external
+cache behavior included in its trust boundary. Admission bounds invocation count;
+the named internals, including their retention, remain outside certified work,
+allocation and memory accounting. Owned wrappers and returned-data processing
+still obey pre-admission, the guard and the separate ledgers. External trust
+neither widens capture payload retention nor establishes atomicity evidence.
+Work outside that explicit trust boundary must be safely bounded or report
+unavailable. The inventory-specific classification and native persistent-codec
+route are owned by
+[inventory](inventory.md#component-classification-and-encoding-trust).
 
 Units are owned by code. Inventory's charged unit is the slot: consuming a
 captured snapshot's parse statistics spends the shared scan allowance and the

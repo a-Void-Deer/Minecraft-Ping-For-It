@@ -32,6 +32,10 @@ Do not turn normative documentation into a changelog. Never add statements such 
 “X is now…”, “X is no longer…”, or “X currently uses…” merely because this task fixed
 that implementation. Update docs only when the enduring contract itself changed.
 
+Development history should NOT be written into long-term contract. Documentation should
+be timeless: if a future version keeps the same implementation, then the document should
+not need to be changed in the update.
+
 ### Numerical and tuning detail
 
 Keep implementation numeric defaults, bounds, UI steps, and clamp formulas in

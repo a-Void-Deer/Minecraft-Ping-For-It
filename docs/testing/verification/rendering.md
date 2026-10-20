@@ -126,8 +126,23 @@ bounded discovered rows measured independently of selection and the visible
 window. Empty or short content does not fill the maximum. Header, footer and
 whole-row capacity share the current GUI budget; a tiny GUI retains readable
 metrics and a whole row rather than shrinking the pattern, and a retained
-item-row anchor survives capacity and font relayout. The detached-display case
-in `SpatialInventoryRowDisplayTest` checks that measurement and painting consume
+item-row anchor survives capacity and font relayout. Explicit-fraction fixtures
+check independent width and whole-row capacity caps, finite off-grid caller
+values without quantization, unchanged text metrics, viewport remeasurement
+with the same fractions, rejection of non-positive or non-finite fractions in
+both measurement forms, and compatibility overloads delegating to model
+initialization. Exact-decimal budget fixtures use independent literal geometry
+to check the whole-pixel width boundary and the last fitting complete row;
+adjacent smaller and larger fraction or viewport inputs neither borrow boundary
+geometry nor admit an extra pixel or row. Maximum-capacity assertions require
+the measured panel to fit the independent budget while one more whole row
+exceeds it. `SpatialOverlayRendererStyleTest` checks model-default delegation
+for a previous style form, custom fractions through the explicit legacy-font
+factory without changing supplied font, submenu or trail values, and rejection
+of non-positive or non-finite fractions in either dimension. These are
+source-reviewed layout and style fixtures, not recorded test runs.
+The detached-display case in `SpatialInventoryRowDisplayTest` checks that
+measurement and painting consume
 the same transmitted name and owned icon rather than a short fallback label.
 `SpatialInventoryTextTest` covers the production clipping plan for long
 quantities, header/status text, Forward and tiny slots: configured scale stays
@@ -174,7 +189,9 @@ clearance, the follower ray, guide, connector and actual title acknowledgement
 stay on one geometry, a longer Back label at the same viewport relayouts the
 whole pattern before the new frame paints, and a resize rebases a different
 prior list's detached panel with the same pattern instead of leaving its old
-GUI center, with an explicit assertion that the ordinary exit still paints;
+GUI center. That mirrored-side fixture uses custom frozen fractions and a long
+row, asserts the detached panel's newly measured width rather than a default
+cap at the first frame, and checks first, intermediate and settled clearance;
 invalid inputs are rejected. The content-shrink cases in
 `SpatialInventoryNavigationIntegrationTest` exercise a quantity reduction and
 new-row discovery together while an item menu is active, in both mirrored
@@ -186,7 +203,13 @@ These are recording-painter geometry checks, not native rendering evidence.
 `SpatialInventoryNavigationIntegrationTest` checks the production active-list
 chrome through its recording painter: list entry exposes the moving virtual
 crosshair, including while side intent suppresses vertical selection. Its
-selection and item-return coverage is inventoried in
+custom-fraction cases compare the session's logical metrics with recorded panel
+width, height and whole-row capacity, and keep the complete exterior Back frame
+outside that panel. A direct list release followed by resize records the actual
+detached panel at its newly measured dimensions, only the rows within the new
+capacity, and a still-visible finite exit. These are source-reviewed
+recording-painter fixtures, not recorded test runs, native GUI-scale callbacks,
+GLFW or GPU evidence. Its selection and item-return coverage is inventoried in
 [interaction verification](interaction.md#inventory-list-gestures-and-navigation).
 `SpatialOverlayRendererFollowerTest` additionally checks active-list crosshair
 visibility with both frame opacity preferences at zero, including a return from
@@ -195,7 +218,9 @@ visible, allows an eligible visible item follower to hide it, restores the
 parent radial deadzone feedback on leaving the list, and checks an inactive
 exit after that parent frame without connectors or choice acknowledgement.
 These are discrete snapshot/frame checks; they do not establish the complete
-animated handoff or a direct active-list detached exit. The
+animated crosshair handoff or crosshair/trail behavior during a direct
+active-list detached exit. The panel and row remeasurement fixture above does
+not establish those feedback paths. The
 [wheel owner](../../architecture/picking/wheel.md#inventory-list)
 defines the list/radial presentation handoff; recording paint does not establish
 native cursor visibility, `GuiGraphics` or GPU submission.
@@ -390,11 +415,12 @@ or from arbitrary in-game camera angles.
 
 ## Known automated gaps
 
-- continuous list/item crosshair handoff and direct active-list detached exit
-  still need dedicated recording-frame coverage
+- continuous list/item crosshair handoff and crosshair/trail feedback during a
+  direct active-list detached exit still need dedicated recording-frame coverage
   aligned with the [list presentation contract](../../architecture/picking/wheel.md#inventory-list);
   discrete active-list, zero-opacity return, item/radial and post-parent exit
-  assertions do not cover those transition paths;
+  assertions do not cover those feedback paths; the direct-exit panel and row
+  remeasurement fixture does not inspect that feedback;
 - repeated-ping HUD compositing for one target: existing tests cover winner
   selection and independent visual lifetimes, but no test checks whether several
   display-active same-target records change the displayed HUD alpha; the

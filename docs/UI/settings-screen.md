@@ -47,10 +47,11 @@ The client scope has seven categories:
   Icons, Direction Indicator, Player Info, and Team Color.
 - **Target Selection**: Mark Transparent Blocks, Mark Blacklisted
   Targets, and Mark Fluids.
-- **Wheel Appearance**: Root Menu Distance, Submenu Size, Wheel Opacity, Wheel
-  Target Opacity, Wheel Target Font Size, Wheel Option Font Size, Show Gesture
-  Trail, Trail Length, Trail Opacity, and Reduce Selector Motion. Trail Length
-  controls retained trail points; Trail Opacity controls only the trail's
+- **Wheel Appearance**: Root Menu Distance, Submenu Size, Inventory Max Width,
+  Inventory Max Height, Wheel Opacity, Wheel Target Opacity, Wheel Target Font
+  Size, Wheel Option Font Size, Show Gesture Trail, Trail Length, Trail Opacity,
+  and Reduce Selector Motion. Trail Length controls retained trail points;
+  Trail Opacity controls only the trail's
   visibility strength, independently of wheel and target opacity.
 - **Input Interaction**: Wheel Hold Time, Gesture Skips Long Press, Minimum
   Gesture Hold, Long-Press Compatibility Mode, Compatibility Time Slice, and

@@ -83,6 +83,8 @@ validation and the preference relationships below.
 | `spatialSelector.dwellMillis` | number, milliseconds | Dwell threshold before a focused branch entry is entered. |
 | `spatialSelector.rootDistance` | number, GUI pixels | Visual root-menu distance from the center; it does not change the deadzone or entry stroke. |
 | `spatialSelector.submenuRadiusScale` | number, multiplier | Client-local visual multiplier of the viewport-derived non-root radial radius, applied to every radial submenu including an inventory item's radial menu; the root menu's distance and every gesture threshold stay independent, and it freezes into the held gesture's snapshot like the other selector preferences. |
+| `spatialSelector.inventoryMaxWidthFraction` | number, viewport-width fraction | Maximum inventory content-panel width as a fraction of the current GUI-scaled viewport width, not a fixed panel width. |
+| `spatialSelector.inventoryMaxHeightFraction` | number, viewport-height fraction | Maximum inventory content-panel height as a fraction of the current GUI-scaled viewport height, not a fixed panel height. |
 | `spatialSelector.hoverEnabled` | boolean | Whether sustained Back hover returns one level; opt-in and inert until enabled. |
 | `spatialSelector.hoverMillis` | number, milliseconds | Dwell threshold before Back-hover returns one level. |
 | `spatialSelector.showTrail` | boolean | Whether the shared pointer/active-option trail is drawn; false hides both pointer and option trail without changing gesture selection. |
@@ -91,6 +93,17 @@ validation and the preference relationships below.
 | `spatialSelector.reduceMotion` | boolean | Reduces selector animation without changing gesture timing or selection. |
 | `spatialSelector.preciseCapturePeriodTicks` | positive integer, ticks | Live candidate capture period for the Precise branch while it is active. A change applies to the next hold, not to the running one. |
 | `spatialSelector.contentIntentEnabled` | boolean | Whether the Content hierarchy offers its additional property and inventory-item Ping Type selection menus; while disabled, an otherwise selectable property or a directly released inventory item requests the Attention annotation instead, without changing the whole-marker Ping Type. Frozen into the held gesture's snapshot like the other selector preferences. |
+
+The [inventory-list sizing contract](../architecture/picking/wheel.md#inventory-list)
+owns which surfaces these fractions size and how content demand and readable
+minima compose with the caps. Validation uses exact decimal values: missing or
+`null` members use their model-initialized values, out-of-range values clamp to
+the supported interval.
+
+Missing inventory-fraction members alone do not schedule a same-version load
+rewrite. Unknown nested-member preservation, guarded writeback, and
+future-version protection remain owned by
+[configuration revisioning](../architecture/config/revisioning.md).
 
 The config model supplies an immutable validated snapshot for one held gesture,
 so ordinary preference edits apply to the next hold rather than mutating that

@@ -8,7 +8,9 @@ source access, capture results, cost accounting, and sync publication — is
 owned by [shared sources](shared_sources.md). The reason a tracked inventory
 keeps the live Ping and original target identity instead of a source-instance
 generation is recorded in
-[D0008](../../decisions/D0008-inventory-source-recovery.md).
+[D0008](../../decisions/D0008-inventory-source-recovery.md). The compatibility
+trade-off for native persistent component codecs is explained by
+[D0010](../../decisions/D0010-persistent-component-codec-trust.md).
 
 This is the adopted contract for the confirmed inventory design. Coverage scope
 and pending runtime evidence for the ordinary-block and provider-confirmed
@@ -296,13 +298,53 @@ conclusion.
 
 Variant identity is the item ID plus its canonical persistent component bytes.
 The identity encoding covers the effective persistent component map after
-applying prototype defaults and explicit removals, under the native
-persistent-codec semantics. Exactness means that persistent encoding, including
-its native copy or projection semantics, not preservation of every raw resident
-field or hidden runtime chain. Transient component state is not part of variant
-identity. The same item ID with different persistent enchantments, damage or
-custom name is an independent entry and consumes its own quota when its
-identity is safe to encode.
+applying prototype defaults, patch additions and overrides, and explicit
+removals, under the native persistent-codec semantics. Exactness means that
+persistent encoding, including its native copy or projection semantics, not
+preservation of every raw resident field or hidden runtime chain. The same item
+ID with different persistent enchantments, damage or custom name is an
+independent entry and consumes its own quota when its identity is safe to encode.
+
+### Component classification and encoding trust
+
+A registered component type with a native persistent codec contributes its
+complete native persistent encoding even when Ping does not recognize the type
+or its value shape. The native codec, not a Ping-owned type catalogue or registry
+namespace, defines its persistent semantics. A native codec of `null` marks
+transient state, which is excluded from variant identity. An unregistered type
+without a reliable component registry ID is refused before its codec is called;
+neither inventing an ID nor dropping the component can produce an exact identity.
+
+The audited native fast path retains its bounded, certified processing and
+refusal rules. Registered persistent types outside that fast path use their
+native persistent codecs through an explicit external-trusted compatibility
+route, rather than requiring a component-specific integration. An unfamiliar
+registered type alone is not a reason to choose All variants. The generic route
+uses the same actual provider's native registry context, including custom
+registries needed by the codec, and resolves lookups on demand. It neither
+enumerates an arbitrary registry graph nor substitutes built-in registry context
+for the supplied provider.
+
+Generic codec execution, its required provider lookups, getter and
+`hashCode`/`equals` callbacks reached by this route, and native `EncoderCache`
+internals are explicitly external-trusted. This includes retention by that
+native cache of component values, Ops contexts and their reachable references.
+It is not a certificate of those internals' work, allocation or retained memory,
+nor a promise to preempt their elapsed time or allocation. A small returned
+encoding does not show that producing it was internally cheap. External cache
+retention does not authorize Ping-owned snapshots, queues or catalogues to retain
+resident values or provider objects.
+
+Admission still bounds invocation count before codec and required lookup calls.
+Ping-owned wrapper work and workspace, guarded copying of returned trees,
+canonicalization, hashing, retention, queues and wire publication remain subject
+to their existing pre-admission and finite structural and memory guards under
+[shared accounting](shared_sources.md#cost-accounting). Returned data must pass
+the guard and be copied into bounded owned form before it can supply an exact
+identity. External trust adds no configuration switch, removes no global guard,
+and does not turn a partial or failed encoding into a successful one.
+
+### Display projection
 
 Preview and marked-item tracking carry one bounded serialized persistent
 display value per variant beside the item's registry-id label. The label is the
@@ -321,6 +363,14 @@ for bounded display; the same omission applies to any shulker item nested
 inside them. This item-display rule does not hide the readable inventory of a
 placed shulker box.
 
+A registered persistent component unknown to Ping remains fully represented in
+identity. Its display value is retained only when bounded deep isolation and the
+display safety rules can be established. Otherwise only that display value is
+omitted, with an explicit component removal so client prototype defaults cannot
+restore it. This does not promise preservation of every unknown icon field. If
+the required suppression cannot fit safely, the display is unavailable rather
+than an unsuppressed bare stack; exact identity remains intact.
+
 After those omissions, an oversized display degrades through the existing
 anti-abuse ladder — the remaining component display, then removal of the custom
 name and item name, then the bare stack — and never exceeds the per-item
@@ -329,15 +379,27 @@ exact keys, identity mode or counts. A naturally componentless item likewise
 needs no fallback. A restored icon is assembled only from the transmitted
 display projection: omitted values must not reappear through prototype defaults,
 the identity digest or a local world-inventory read. Omitted, transient or
-unknown component and model data is not reconstructed.
+otherwise untransmitted component and model data is not reconstructed.
 
-Only an unsafe or oversized complete persistent identity requires the grey
-"All variants" aggregate; a display cap or display-only reprojection never
-does. A modded registry ID alone does not require fallback. Unsafe or oversized
-nested persistent data affects the outer entry's identity and therefore its
-item-ID group. The aggregate still requires a trustworthy item ID and
-authoritative amount: a failed source read is unavailable, not an empty entry or
-an invented aggregate. The existing `COMPONENT_TOO_LONG` status
+If client decoding, prototype defaults or a working-stack hook introduces an
+unsafe opaque component value that cannot be reliably isolated, presentation
+falls back to an empty icon and the registry-id label. It never turns a
+display-only failure into an aggregate, changes the exact selection identity,
+or discards authoritative counts.
+
+### Identity refusal and aggregate folding
+
+An unsafe or oversized complete persistent identity requires the grey "All
+variants" aggregate; a display cap or display-only reprojection never does.
+Real component encode errors or partial results, missing reliable registration,
+and unsafe or oversized returned identity trees retain the identity-refusal
+behavior. Dropping an unknown persistent component and labelling the remainder
+exact is forbidden. A modded registry ID or unfamiliar registered persistent
+type alone does not require fallback. Unsafe or oversized nested persistent data
+affects the outer entry's identity and therefore its item-ID group. The aggregate
+still requires a trustworthy item ID and authoritative amount: a failed source
+read is unavailable, not an empty entry or an invented aggregate. The existing
+`COMPONENT_TOO_LONG` status
 identifier denotes this aggregate identity mode. Its bare-item display represents
 the group rather than any particular variant.
 
@@ -462,8 +524,11 @@ capture, copy and freeze are bounded instead by fixed work, the structure guard,
 and the finite shared memory; capture is never a free or unbounded operation.
 Owned item processing and audited calls obey the pre-copy, encoding and hashing
 admission boundary owned by
-[shared accounting](shared_sources.md#cost-accounting). The live compatibility
-trust boundary is owned by [provider safety](#provider-layer-and-safety). An
+[shared accounting](shared_sources.md#cost-accounting). The explicit generic
+persistent-codec trust route is owned by
+[component classification and encoding trust](#component-classification-and-encoding-trust),
+and the live provider compatibility trust boundary by
+[provider safety](#provider-layer-and-safety). An
 unlimited mode is an explicit mode that removes only the configurable slot cap:
 the finite internal work and memory guard and both logical quotas survive, and
 unlimited is never implemented as a sentinel, integer overflow, unbounded array,

@@ -480,11 +480,18 @@ returns one level.
 
 The content branch's inventory preview opens a rectangular list surface. Its
 content panel, including the header and footer, grows with the presented
-content up to viewport-relative width and height maxima measured against the
-current GUI-scaled viewport; these are maxima, not forced dimensions. Inventory
-text keeps its configured size rather than shrinking to fit the panel. The
-minimum readable panel takes precedence on a small GUI and may exceed those
+content up to viewport-relative width and height maxima from the held
+[preferences](../../config/client.md#spatial-selector-interaction), measured
+against the current GUI-scaled viewport; these are maxima, not forced dimensions.
+Inventory text keeps its configured size rather than shrinking to fit the panel.
+The minimum readable panel takes precedence on a small GUI and may exceed those
 proportions. The exterior Back affordance is not part of the content-panel size.
+
+A resize within the same hold recomputes the panel against the new viewport
+using those same frozen fractions. Input geometry and painting share the
+resulting logical panel metrics, so the configured caps also govern row
+capacity, panel-edge side intent and item-menu placement; they do not change
+the held deadzone or stroke distances.
 
 Navigation is parent-relative: the selected row's Y is the child origin for
 that row's item menu, so an item submenu is anchored to its row rather than the

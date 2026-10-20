@@ -618,6 +618,12 @@ retained-history bound and the paint style's trail visibility, length, and
 opacity all come from the press-time snapshot, a live edit during the hold
 changes neither the retained history nor the painted style, and the next hold
 adopts the edited values with the painter and controller sharing one bound.
+The inventory-fraction case drives the production press path: edits between
+press and opening leave the selector snapshot and the style delivered to the
+geometry port at their press-time fractions, resize preserves that same style
+instance, and the next hold receives a new style with the edited fractions.
+This is a source-reviewed runtime-port fixture, not a recorded test run or an
+inventory paint assertion.
 `ClientPingDispatchReceiptTest` covers actual-send receipt, transport-failure
 rollback without queueing or refund, empty-tracker restoration and preservation
 of a newer reentrant route receipt.
@@ -772,11 +778,22 @@ row key and anchor while session and painter consume the same newly measured
 panel edge in both orientations. A quantity reduction combined with new-row
 discovery during an active item menu preserves the selected and retained item
 keys, frozen row anchor, pointer and trail through the content relayout in both
-orientations. `SpatialSelectorSessionTest` separately checks
-that capacity-only relayout cannot re-arm the shared held-Back block after an
+orientations. Its custom-fraction cases derive the held style from real settings
+and prepare production layout through that style: input inside the measured
+panel has no side intent, crossing the edge pays the frozen deadzone, re-entry
+clears Back focus, and Forward requires the edge-based stroke before opening
+the selected item's menu. The item origin uses the measured selected-row Y and
+panel edge plus child clearance. Live preference edits leave held dimensions
+unchanged; resize remeasures with those same fractions while retaining entries,
+selection and direction without navigation or hover progress. The active-item
+resize case uses custom fractions in both orientations and preserves its frozen
+row key, anchor and trail. These are source-reviewed session/input/layout
+fixtures, not recorded test runs or native-window delivery.
+`SpatialSelectorSessionTest` separately checks that capacity-only relayout
+cannot re-arm the shared held-Back block after an
 item return, while a deliberate physical leave and re-entry still permits one
-return. Panel/text/Back paint coverage, including current-selection borders, is
-inventoried in
+return. Panel/text/Back paint coverage, including current-selection borders and
+detached-exit remeasurement, is inventoried in
 [rendering verification](rendering.md#selector-overlay-layout-and-frame-rendering).
 The fixture does not instantiate
 the complete `ClientPingRuntime`, a GLFW window, `GuiGraphics`, or GPU submission;

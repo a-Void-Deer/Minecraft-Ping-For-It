@@ -130,6 +130,28 @@ model and persistence seams only: no server-administration path, remote change
 route, settings-widget interaction, scheduler consumption or full client
 selector runtime is exercised.
 
+The inventory-panel fraction fixtures in `SpatialSelectorSettingsTest` check
+missing and individually null members against model initialization without
+changing the other dimension, a safe snapshot leaving a raw null member
+unmodified, independent clamping through validation and setters, normalized
+decimal representations retaining in-range off-grid precision, and unrelated
+preferences remaining intact. A held snapshot keeps its fractions after live
+edits; every previous constructor form initializes the fractions, while the
+canonical form carries custom fractions alongside the supplied choices.
+`SpatialSelectorMigrationTest` contains filesystem-backed cases for the same
+preferences: absent or empty selectors keep same-version load and untouched-save
+bytes unchanged; explicit grid and off-grid values survive a real save and
+reload; null and out-of-range values legalize in memory without a load rewrite
+and serialize on a real save. An older source gains missing defaults through
+the existing migration while unknown root and nested data survive. An injected
+pending-migration write failure leaves the source bytes and usable explicit
+values intact, and retry plus reload preserve those values and unknown data.
+The future-version fixture uses model defaults in memory and refuses save and
+reset writes without changing protected bytes. These are source-reviewed model
+and persistence fixtures, not recorded test runs, live settings controls or
+selector-layout evidence. The preference contract remains owned by
+[client configuration](../../config/client.md#spatial-selector-interaction).
+
 `GestureSkipHoldConfigTest` covers fresh, missing and null shortcut preferences
 defaulting to opt-in disabled, minimum-wait clamping through setters,
 validation and snapshot construction, frozen preference/wait values, and older
@@ -248,7 +270,8 @@ screen evidence:
   retains a viewable snapshot while forcing the scope overview without one;
 - `SettingsCategoryCatalogTest` covers exactly-once placement of every existing
   control in the approved category order and immutable per-category lists,
-  including the trail controls in Wheel Appearance, the content-intent control
+  including the inventory width and height caps immediately after Submenu Size
+  and the trail controls in Wheel Appearance, the content-intent control
   in the client Input Interaction spatial group, the gesture shortcut and
   minimum-wait controls immediately after Wheel Hold Time, the input group
   without a separate inventory mouse-sensitivity control, the client scope
@@ -305,7 +328,12 @@ screen evidence:
 - `OptionUtilsDecimalTest` covers the decimal option codec's confirmed range
   and grid: every confirmed grid step round-trips exactly through encode and
   parse without floating-point drift, and zero or an out-of-range value is
-  rejected;
+  rejected. Its inventory-fraction fixtures construct the production decimal
+  options and exercise their actual slider value-set mapping at both endpoints
+  and every adjustment stop, with codec round trips and out-of-range rejection;
+  supplied off-grid values retain their codec precision without changing the
+  model. These are source-reviewed headless option and codec fixtures, not
+  recorded test runs, mouse dragging or keyboard adjustment of a live slider;
 - `ClientConfigLocalizationTest` covers the eight bundled locale files and the
   settings, category-navigation, server-status, entity-block-mode, and
   target-gone resource keys, their required format placeholders, the category
@@ -314,11 +342,11 @@ screen evidence:
   retired wheel timeout key's removal, and the complete spatial-selector
   preference key set with its wheel-options group heading, including the
   precise capture period, trail controls and tooltips, the gesture-shortcut
-  toggle and minimum-wait labels and tooltips, the content-intent label
-  and tooltip, and numeric/boolean
-  placeholder rules; its exact preference key-set assertion also excludes the
-  obsolete inventory sensitivity label and tooltip. Point and percent unit
-  placeholders are also checked for every bundled locale. It checks required
+  toggle and minimum-wait labels and tooltips, the inventory width and height
+  cap labels and format-free tooltips, the content-intent label and tooltip,
+  and numeric/boolean placeholder rules; its exact preference key-set assertion
+  also excludes the obsolete inventory sensitivity label and tooltip. Point and
+  percent unit placeholders are also checked for every bundled locale. It checks required
   key presence per locale rather than a
   full-translation guarantee, and does not
   render or assemble screen labels;
@@ -372,6 +400,11 @@ seams rather than native widget containers, mouse dispatch, or live focus lists.
 
 ## Known automated gaps
 
+- the client inventory-cap sliders' live input, assembled localized labels and
+  tooltips, and screen-close persistence are not established by their option
+  mapping, codec, catalog, resource or filesystem-handler fixtures; pending
+  native screen and panel checks remain in the
+  [manual matrix](manual-integration.md#pending-manual-and-integration-matrix);
 - the gesture controls' assembled OFF/disabled presentation and live refresh
   when compatibility is toggled are not exercised by a constructed settings
   screen; model clearing, catalog placement and resource presence do not prove
