@@ -6,7 +6,10 @@ import com.mojang.serialization.JsonOps;
 import io.netty.buffer.Unpooled;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.component.DataComponentPatch;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.component.TypedDataComponent;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.Bootstrap;
@@ -19,6 +22,10 @@ import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryDetachedItem;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -30,6 +37,7 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,10 +47,13 @@ class InventoryS2CPacketTest {
 	/** Smallest legal frame-scale budget for a 128 KiB display: display + metadata reserve on the frame grid. */
 	private static final int MAX_FRAME_FOR_MAX_DISPLAY = 136 * 1024;
 
+	private static RegistryAccess registries;
+
 	@BeforeAll
 	static void bootstrap() {
 		SharedConstants.tryDetectVersion();
 		Bootstrap.bootStrap();
+		registries = RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY);
 	}
 
 	private static FriendlyByteBuf buffer() {
@@ -912,6 +923,131 @@ class InventoryS2CPacketTest {
 			assertEquals(0x12345678, destination.getInt(0));
 		} finally { destination.release(); }
 	}
+
+	@Test
+	void sparseDisplaySavesActualWireBytesAgainstTheFullEffectivePatchBaseline() {
+		int displayBytes = InventoryLimits.DISPLAY_BASE_BYTES;
+		int frameBytes = InventoryLimits.FRAME_BASE_BYTES;
+
+		assertSparseDisplaySavesWire("stone", new ItemStack(Items.STONE), displayBytes, frameBytes);
+		assertSparseDisplaySavesWire("pickaxe", new ItemStack(Items.IRON_PICKAXE), displayBytes, frameBytes);
+		ItemStack damagedPickaxe = new ItemStack(Items.IRON_PICKAXE);
+		damagedPickaxe.set(DataComponents.DAMAGE, 5);
+		assertSparseDisplaySavesWire("damaged pickaxe", damagedPickaxe, displayBytes, frameBytes);
+	}
+
+	private static void assertSparseDisplaySavesWire(String fixture, ItemStack stack, int displayBytes, int frameBytes) {
+		String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+		DataComponentPatch fullPatch = fullEffectivePatch(stack);
+		assertNativeFullItemOracle(fixture, stack, fullPatch);
+
+		InventoryDetachedItem sparse = freezeStack(stack, displayBytes);
+		InventoryDetachedItem legacy = freezePatch(stack.getItem(), fullPatch, displayBytes);
+		assertEquals(itemId, sparse.display().itemId(), fixture + ": the sparse payload keeps the registry item id");
+		assertEquals(itemId, legacy.display().itemId(), fixture + ": the legacy payload keeps the registry item id");
+		assertFalse(sparse.display().aggregateRequired(), fixture + ": the fixture has exact identity");
+		assertFalse(legacy.display().aggregateRequired(), fixture + ": the baseline keeps exact identity");
+		assertNotNull(sparse.display().displayJson(), fixture + ": sparse display is available");
+		assertNotNull(legacy.display().displayJson(), fixture + ": legacy display is available");
+		assertEquals(sparse.display().label(), legacy.display().label(), fixture + ": the label is unchanged");
+
+		InventoryItemCodec.Catalog catalog = new InventoryItemCodec.Catalog(registries, displayBytes);
+		var sparseKey = catalog.intern(sparse).key();
+		var legacyKey = catalog.intern(legacy).key();
+		assertFalse(sparseKey.componentsKey().isEmpty(), fixture + ": fixture identity is exact");
+		assertEquals(sparseKey, legacyKey, fixture + ": display payload never changes the server variant identity");
+
+		InventoryS2CPacket.Entry sparseEntry = wireEntry(sparseKey.componentsKey(), sparse.display(),
+			sparse.display().displayJson());
+		InventoryS2CPacket.Entry legacyEntry = wireEntry(legacyKey.componentsKey(), legacy.display(),
+			legacy.display().displayJson());
+		assertSameWireIdentity(sparseEntry, legacyEntry);
+
+		WireResult sparseWire = writeAndRead(sparseEntry, displayBytes, frameBytes);
+		WireResult legacyWire = writeAndRead(legacyEntry, displayBytes, frameBytes);
+		assertSameWireIdentity(sparseWire.packet().entries().getFirst(), legacyWire.packet().entries().getFirst());
+		assertEquals(sparseEntry, sparseWire.packet().entries().getFirst());
+		assertEquals(legacyEntry, legacyWire.packet().entries().getFirst());
+		assertTrue(sparseWire.bytes() < legacyWire.bytes(),
+			() -> fixture + ": sparse display must use fewer actual wire bytes (sparse=" + sparseWire.bytes()
+				+ ", legacy=" + legacyWire.bytes() + ")");
+	}
+
+	private static InventoryDetachedItem freezeStack(ItemStack stack, int displayBytes) {
+		return InventoryItemCodec.freeze(new InventoryResidentItem.Stack(stack), registries, displayBytes,
+			InventoryItemBudget.root(displayBytes));
+	}
+
+	private static InventoryDetachedItem freezePatch(Item item, DataComponentPatch patch, int displayBytes) {
+		return InventoryItemCodec.freeze(new InventoryResidentItem.Patch(item, patch), registries, displayBytes,
+			InventoryItemBudget.root(displayBytes));
+	}
+
+	private static DataComponentPatch fullEffectivePatch(ItemStack stack) {
+		DataComponentPatch.Builder patch = DataComponentPatch.builder();
+		for (TypedDataComponent<?> component : stack.getComponents()) {
+			if (!component.type().isTransient()) addComponent(patch, component);
+		}
+		return patch.build();
+	}
+
+	private static <T> void addComponent(DataComponentPatch.Builder patch, TypedDataComponent<T> component) {
+		patch.set(component.type(), component.value());
+	}
+
+	private static void assertNativeFullItemOracle(String fixture, ItemStack original, DataComponentPatch fullPatch) {
+		ItemStack full = new ItemStack(original.getItemHolder(), 1, fullPatch);
+		assertEquals(original.getComponents(), full.getComponents(),
+			fixture + ": the explicit full patch is the effective component map");
+		var context = registries.createSerializationContext(JsonOps.INSTANCE);
+		JsonElement json = ItemStack.SINGLE_ITEM_CODEC.encodeStart(context, full).result().orElseThrow();
+		ItemStack decoded = ItemStack.SINGLE_ITEM_CODEC.parse(context, json).result().orElseThrow();
+		assertEquals(1, decoded.getCount(), fixture + ": the native full-map payload is count one");
+		assertEquals(original.getItem(), decoded.getItem(), fixture + ": the native full-map payload keeps its item id");
+		assertEquals(original.getComponents(), decoded.getComponents(),
+			fixture + ": the native full-map JSON round-trips every effective component");
+	}
+
+	private static InventoryS2CPacket.Entry wireEntry(String key, InventoryItemCodec.Display display, String displayJson) {
+		return new InventoryS2CPacket.Entry(key, display.itemId(), display.label(), displayJson,
+			BIG, BIG + 1, false, InventoryS2CPacket.Status.READY, BIG + 2, false, null);
+	}
+
+	private static void assertSameWireIdentity(InventoryS2CPacket.Entry expected, InventoryS2CPacket.Entry actual) {
+		assertEquals(expected.key(), actual.key());
+		assertEquals(expected.itemId(), actual.itemId());
+		assertEquals(expected.label(), actual.label());
+		assertEquals(expected.count(), actual.count());
+		assertEquals(expected.itemRevision(), actual.itemRevision());
+		assertEquals(expected.fallback(), actual.fallback());
+		assertEquals(expected.quality(), actual.quality());
+		assertEquals(expected.groupRevision(), actual.groupRevision());
+		assertEquals(expected.replaceGroup(), actual.replaceGroup());
+		assertEquals(expected.itemPingType(), actual.itemPingType());
+	}
+
+	private static WireResult writeAndRead(InventoryS2CPacket.Entry entry, int displayBytes, int frameBytes) {
+		InventoryS2CPacket packet = InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, BIG, BIG + 3,
+			new MarkerId(BIG + 4), BIG + 5, BIG + 6, BIG + 7, 0, 1, true,
+			InventoryS2CPacket.Status.READY, BIG + 8, List.of(entry));
+		FriendlyByteBuf buf = buffer();
+		try {
+			int encodedSize = packet.encodedSize(displayBytes, frameBytes);
+			packet.write(buf, displayBytes, frameBytes);
+			assertEquals(encodedSize, buf.writerIndex(), "the production writer emits exactly its measured frame size");
+			int bytes = buf.writerIndex();
+			InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
+			assertFalse(decoded.isCorrupt());
+			assertEquals(0, buf.readableBytes(), "the reader consumes the complete frame");
+			assertEquals(packet, decoded);
+			assertEquals(List.of(entry), decoded.entries());
+			return new WireResult(bytes, decoded);
+		} finally {
+			buf.release();
+		}
+	}
+
+	private record WireResult(int bytes, InventoryS2CPacket packet) {}
 
 	/**
 	 * Real registry-backed single-item JSON sized exactly in UTF-8 bytes. The

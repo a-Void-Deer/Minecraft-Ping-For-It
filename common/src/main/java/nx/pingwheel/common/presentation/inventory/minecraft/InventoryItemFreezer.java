@@ -121,7 +121,9 @@ final class InventoryItemFreezer {
 			}
 			int defaultSize = bounds.mapPass(defaults); int patchSize = bounds.mapPass(patch);
 			// Four ArrayList shells/backings, Plan, <=n Entry and <=n Value
-			// descriptors (Value has8 reference fields and two int fields).
+			// descriptors (Entry's two references and origin flag, and Value's
+			// eight reference fields and two int fields, stay inside this fixed
+			// object/reference model).
 			long n = defaultSize + patchSize;
 			budget.allocate(36 + 8 * n, 0, 9L + 11L * defaultSize + 14L * patchSize, 9 + 2 * n);
 			// Exact capacities effective[d+p], additions[p], removals[p],
@@ -151,7 +153,7 @@ final class InventoryItemFreezer {
 				Codec<?> externalCodec = externalCodec(type);
 				budget.work(256);
 				if (!InventoryComponentCertificate.nativeType(type) && externalCodec == null) continue;
-				effective.add(new Entry(typeId, value(type, entry.getValue(), depth + 1, externalCodec)));
+				effective.add(new Entry(typeId, value(type, entry.getValue(), depth + 1, externalCodec), true));
 			}
 			for (int index = 0; index < patchEntries.size(); index++) { var entry = patchEntries.get(index);
 				budget.work(32);
@@ -162,7 +164,7 @@ final class InventoryItemFreezer {
 				if (!InventoryComponentCertificate.nativeType(type) && externalCodec == null) continue;
 				Optional<?> optional = entry.getValue(); if (optional == null) InventoryComponentCertificate.refuse();
 				if (optional.isEmpty()) removals.add(typeId);
-				else { var admitted = new Entry(typeId, value(type, optional.orElseThrow(), depth + 1, externalCodec)); effective.add(admitted); additions.add(admitted); }
+				else { var admitted = new Entry(typeId, value(type, optional.orElseThrow(), depth + 1, externalCodec), false); effective.add(admitted); additions.add(admitted); }
 			}
 			return new Plan(itemId, count, effective, additions, removals, certificates);
 		} finally { bounds.leave(); }
@@ -268,7 +270,7 @@ final class InventoryItemFreezer {
 		return InventoryItemBudget.add(canonical, 512L + 2L * (id.length() + label.length() + (json == null ? 0 : json.length())));
 	}
 
-	private record Entry(String id, Value value) {}
+	private record Entry(String id, Value value, boolean fromPrototype) {}
 	private record Slot(int slot, Plan item) {}
 	private record FoodEffect(MobEffectInstance resident, float probability) {}
 
@@ -288,17 +290,22 @@ final class InventoryItemFreezer {
 			List<Entry> selected = display ? effective : additions;
 			if (display) for (int index = 0; index < selected.size(); index++) { Entry entry = selected.get(index);
 				certificate.planVisit();
-				if (entry.value.external()) certificate.admitRemovalName(entry.id, true);
+				// Unknown display values, and defaults that need a sanitized nested
+				// projection, are sent explicitly; an untouched known default is
+				// inherited from the client prototype instead. Provenance is already
+				// the native patch's normalization, so no value comparison runs here.
+				if (displayEmitted(entry) && entry.value.external()) certificate.admitRemovalName(entry.id, true);
 			}
 			// reset by admitRemovalNames: restart the allocation-free key schedule
 			certificate.beginMap(display);
 			for (int index = 0; index < selected.size(); index++) { Entry entry = selected.get(index);
-				if (display && (entry.id.equals("minecraft:lore") || (entry.id.equals("minecraft:container") && InventoryDisplayWriter.shulker(id)))) continue;
+				if (display) { certificate.planVisit(); if (!displayEmitted(entry)) continue; }
+				if (display && InventoryDisplayWriter.forcedSuppression(entry.id, id)) continue;
 				certificate.mapKey(display && entry.value.external() ? "!" + entry.id : entry.id);
 			}
 			for (int index = 0; index < removals.size(); index++) { String removed = removals.get(index);
-				if (!display || (!removed.equals("minecraft:lore")
-					&& !(removed.equals("minecraft:container") && InventoryDisplayWriter.shulker(id)))) certificate.mapKey("!" + removed);
+				if (display) certificate.planVisit();
+				if (!display || !InventoryDisplayWriter.forcedSuppression(removed, id)) certificate.mapKey("!" + removed);
 			}
 			if (display) { certificate.mapKey("!minecraft:lore"); if (InventoryDisplayWriter.shulker(id)) certificate.mapKey("!minecraft:container"); }
 			certificate.endMap();
@@ -306,23 +313,27 @@ final class InventoryItemFreezer {
 			certificate.admitScalars(countIncluded ? 1 : 0, 0, 0, 1, display);
 			int suppressed = 0;
 			if (display) for (int index = 0; index < selected.size(); index++) {
-				certificate.planVisit(); if (selected.get(index).value.external()) suppressed++;
+				Entry entry = selected.get(index); certificate.planVisit();
+				if (!displayEmitted(entry) || InventoryDisplayWriter.forcedSuppression(entry.id, id)) continue;
+				if (entry.value.external()) suppressed++;
 			}
 			certificate.admitEmptyMaps(removals.size() + suppressed + (display ? 2 : 0), display);
 			var fields = new ArrayList<Pair<T, T>>(); fields.add(Pair.of(ops.createString("id"), ops.createString(id)));
 			if (countIncluded) fields.add(Pair.of(ops.createString("count"), ops.createInt(count)));
 			var patch = new ArrayList<Pair<T, T>>();
-			// Display sends admitted effective values so omitted prototype values
-			// cannot reconstruct unredacted nested Lore/shulker contents. Identity
-			// saved items below still use the exact resident patch grammar.
+			// Display sends only positive display entries plus explicit removals;
+			// untouched prototype defaults stay omitted so the client inherits its
+			// local prototype. Nested item contents are still emitted recursively
+			// whenever their sanitized form must replace an unsafe inherited default.
 			for (int index = 0; index < selected.size(); index++) { Entry entry = selected.get(index);
-				if (display && (entry.id.equals("minecraft:lore") || (entry.id.equals("minecraft:container") && InventoryDisplayWriter.shulker(id)))) continue;
+				if (display) { certificate.planVisit(); if (!displayEmitted(entry)) continue; }
+				if (display && InventoryDisplayWriter.forcedSuppression(entry.id, id)) continue;
 				if (display && entry.value.external()) patch.add(Pair.of(ops.createString("!" + entry.id), ops.emptyMap()));
 				else patch.add(Pair.of(ops.createString(entry.id), entry.value.encode(ops, display)));
 			}
 			for (int index = 0; index < removals.size(); index++) { String removed = removals.get(index);
-				if (!display || (!removed.equals("minecraft:lore")
-					&& !(removed.equals("minecraft:container") && InventoryDisplayWriter.shulker(id))))
+				if (display) certificate.planVisit();
+				if (!display || !InventoryDisplayWriter.forcedSuppression(removed, id))
 					patch.add(Pair.of(ops.createString("!" + removed), ops.emptyMap()));
 			}
 			if (display) {
@@ -332,12 +343,25 @@ final class InventoryItemFreezer {
 			if (!patch.isEmpty()) fields.add(Pair.of(ops.createString("components"), ops.createMap(patch.stream())));
 			return ops.createMap(fields.stream());
 		}
+
+		private static boolean displayEmitted(Entry entry) {
+			return entry.value.external() || !entry.fromPrototype || entry.value.displayOverrideRequired();
+		}
 	}
 
 	private record Value(DataComponentType<?> type, Object resident, Codec<?> codec,
 		List<Slot> nested, Plan conversion, List<FoodEffect> effects, InventoryComponentCertificate certificate,
 		int firstEffect, int afterEffect, InventoryComponentCertificate.NativePasses passes) {
 		boolean external() { return resident instanceof InventoryExternalComponent; }
+		/**
+		 * A prototype default may be inherited only when no nested display data
+		 * needs the writer's recursive Lore/shulker/unknown suppression. An unknown
+		 * value and a non-empty contained-item graph are therefore explicit
+		 * overrides; an empty graph or conversion-free food remains inheritable.
+		 */
+		boolean displayOverrideRequired() {
+			return external() || (nested != null && !nested.isEmpty()) || conversion != null;
+		}
 		@SuppressWarnings("unchecked")
 		<T> T encode(DynamicOps<T> ops, boolean display) {
 			if (resident instanceof InventoryExternalComponent external) {

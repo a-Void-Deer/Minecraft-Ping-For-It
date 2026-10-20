@@ -6,8 +6,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mojang.datafixers.util.Pair;
@@ -44,9 +46,16 @@ import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.BundleContents;
+import net.minecraft.world.item.component.ChargedProjectiles;
+import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.item.component.ItemLore;
+import net.minecraft.world.item.component.ResolvableProfile;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -475,6 +484,157 @@ class InventoryGenericComponentCompatibilityTest {
 		assertTrue(frozen.display().aggregateRequired());
 	}
 
+	@Test void defaultUnknownComponentKeepsExactIdentityButIsDisplaySuppressed() {
+		var prototype = DataComponentMap.builder().addAll(Items.STONE.components())
+			.set(cachedInt, 810004).build();
+		var raw = prototypeRaw(prototype);
+
+		CACHED_INT_CALLS.set(0);
+		var frozen = freezePatch(DataComponentPatch.EMPTY, raw);
+		assertTrue(CACHED_INT_CALLS.get() > 0, "complete native identity encodes the registered default");
+		assertExact(frozen, prototype);
+
+		var components = displayComponents(frozen.display());
+		assertTrue(components.has("!pingforit_test:cached_int"), "a default unknown component stays explicitly suppressed");
+		assertFalse(components.has("pingforit_test:cached_int"));
+		assertFalse(frozen.display().displayJson().contains("810004"));
+	}
+
+	@Test void defaultMutableTextNbtAndProfileStaySparse() {
+		var properties = new com.mojang.authlib.properties.PropertyMap();
+		properties.put("textures", new com.mojang.authlib.properties.Property("textures", "default-profile"));
+		var prototype = DataComponentMap.builder().addAll(Items.STONE.components())
+			.set(DataComponents.CUSTOM_NAME, Component.literal("default name"))
+			.set(DataComponents.CUSTOM_DATA, CustomData.of(new CompoundTag()))
+			.set(DataComponents.PROFILE, new ResolvableProfile(Optional.of("Default"),
+				Optional.of(new java.util.UUID(1, 2)), properties))
+			.build();
+
+		var frozen = freezePatch(DataComponentPatch.EMPTY, prototypeRaw(prototype));
+		assertExact(frozen, prototype);
+		var components = displayComponents(frozen.display());
+		for (String key : List.of("minecraft:custom_name", "minecraft:custom_data", "minecraft:profile")) {
+			assertFalse(components.has(key), () -> "unmodified mutable default must inherit locally: " + key);
+			assertFalse(components.has("!" + key), () -> "an inherited default is not a deletion: " + key);
+		}
+		assertFalse(components.has("minecraft:lore"));
+		assertTrue(components.has("!minecraft:lore"));
+	}
+
+	@Test void defaultNestedItemStateCarriesSanitizedSparseOverrides() {
+		var shulkerPrototype = DataComponentMap.builder().addAll(Items.BLUE_SHULKER_BOX.components())
+			.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(List.of(new ItemStack(Items.DIAMOND, 4))))
+			.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("default secret"))))
+			.build();
+		var overrides = new java.util.HashMap<Item, DataComponentMap>();
+		overrides.put(Items.BLUE_SHULKER_BOX, shulkerPrototype);
+		overrides.put(Items.DIAMOND_SWORD,
+			DataComponentMap.builder().addAll(Items.DIAMOND_SWORD.components()).build());
+		overrides.put(Items.DIAMOND,
+			DataComponentMap.builder().addAll(Items.DIAMOND.components()).set(cachedInt, 424242).build());
+
+		var shulker = new ItemStack(Items.BLUE_SHULKER_BOX);
+		var sword = new ItemStack(Items.DIAMOND_SWORD);
+		var unknown = new ItemStack(Items.DIAMOND);
+		var nested = List.of(shulker, sword, unknown);
+
+		assertSanitizedNested(Items.CHEST, DataComponents.CONTAINER,
+			ItemContainerContents.fromItems(nested), overrides);
+		assertSanitizedNested(Items.BUNDLE, DataComponents.BUNDLE_CONTENTS,
+			new BundleContents(nested), overrides);
+		assertSanitizedNested(Items.CROSSBOW, DataComponents.CHARGED_PROJECTILES,
+			ChargedProjectiles.of(nested), overrides);
+		assertSanitizedNested(Items.APPLE, DataComponents.FOOD,
+			new FoodProperties(4, 0.3F, false, 1.6F, Optional.of(shulker), List.of()), overrides);
+	}
+
+	@Test void emptyDefaultCollectionsAndFoodWithoutConversionStayInherited() {
+		var emptyContainerPrototype = DataComponentMap.builder().addAll(Items.CHEST.components())
+			.set(DataComponents.CONTAINER, ItemContainerContents.EMPTY).build();
+		var chest = freezePatch(Items.CHEST, DataComponentPatch.EMPTY, prototypeRaw(emptyContainerPrototype));
+		var chestComponents = displayComponents(chest.display());
+		assertFalse(chestComponents.has("minecraft:container"));
+		assertFalse(chestComponents.has("!minecraft:container"));
+
+		var emptyBundlePrototype = DataComponentMap.builder().addAll(Items.BUNDLE.components())
+			.set(DataComponents.BUNDLE_CONTENTS, BundleContents.EMPTY).build();
+		var bundle = freezePatch(Items.BUNDLE, DataComponentPatch.EMPTY, prototypeRaw(emptyBundlePrototype));
+		var bundleComponents = displayComponents(bundle.display());
+		assertFalse(bundleComponents.has("minecraft:bundle_contents"));
+		assertFalse(bundleComponents.has("!minecraft:bundle_contents"));
+
+		var plainFood = new FoodProperties(4, 0.3F, false, 1.6F, Optional.empty(), List.of());
+		var applePrototype = DataComponentMap.builder().addAll(Items.APPLE.components())
+			.set(DataComponents.FOOD, plainFood).build();
+		var apple = freezePatch(Items.APPLE, DataComponentPatch.EMPTY, prototypeRaw(applePrototype));
+		var appleComponents = displayComponents(apple.display());
+		assertFalse(appleComponents.has("minecraft:food"));
+		assertFalse(appleComponents.has("!minecraft:food"));
+	}
+
+	private static <T> void assertSanitizedNested(Item outerItem, DataComponentType<T> type, T value,
+		Map<Item, DataComponentMap> nestedOverrides) {
+		var outerPrototype = DataComponentMap.builder().addAll(outerItem.components()).set(type, value).build();
+		var overrides = new java.util.HashMap<>(nestedOverrides);
+		overrides.put(outerItem, outerPrototype);
+		var frozen = freezePatch(outerItem, DataComponentPatch.EMPTY, prototypeOverrides(overrides));
+
+		var components = displayComponents(frozen.display());
+		var key = BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type).toString();
+		assertTrue(components.has(key), () -> "a default requiring sanitization carries an override: " + key);
+		assertFalse(frozen.display().displayJson().contains("default secret"));
+
+		var display = JsonParser.parseString(frozen.display().displayJson()).getAsJsonObject();
+		var shulkerItem = findItem(display, "minecraft:blue_shulker_box");
+		assertTrue(shulkerItem.isPresent(), "the sanitized override must retain its nested shulker item");
+		var shulkerChild = itemComponents(shulkerItem.orElseThrow(() -> new AssertionError("nested shulker item")));
+		assertTrue(shulkerChild.has("!minecraft:container"));
+		assertTrue(shulkerChild.has("!minecraft:lore"));
+		assertFalse(hasPositiveComponent(shulkerChild), "a sanitized nested shulker override stays sparse");
+
+		if (type != DataComponents.FOOD) {
+			var swordItem = findItem(display, "minecraft:diamond_sword");
+			assertTrue(swordItem.isPresent(), "the sanitized override must retain its nested sword item");
+			assertFalse(hasPositiveComponent(itemComponents(swordItem.orElseThrow(
+				() -> new AssertionError("nested sword item")))), "a nested unmodified item stays sparse");
+
+			var unknownItem = findItem(display, "minecraft:diamond");
+			assertTrue(unknownItem.isPresent(), "the sanitized override must retain its nested unknown item");
+			var unknownChild = itemComponents(unknownItem.orElseThrow(() -> new AssertionError("nested unknown item")));
+			assertTrue(unknownChild.has("!pingforit_test:cached_int"));
+			assertFalse(unknownChild.has("pingforit_test:cached_int"));
+		}
+	}
+
+	private static Optional<JsonObject> findItem(JsonElement element, String itemId) {
+		if (element.isJsonObject()) {
+			JsonObject object = element.getAsJsonObject();
+			JsonElement id = object.get("id");
+			if (id != null && id.isJsonPrimitive() && id.getAsJsonPrimitive().isString()
+				&& itemId.equals(id.getAsString())) return Optional.of(object);
+			for (var entry : object.entrySet()) {
+				Optional<JsonObject> found = findItem(entry.getValue(), itemId);
+				if (found.isPresent()) return found;
+			}
+		} else if (element.isJsonArray()) {
+			for (JsonElement child : element.getAsJsonArray()) {
+				Optional<JsonObject> found = findItem(child, itemId);
+				if (found.isPresent()) return found;
+			}
+		}
+		return Optional.empty();
+	}
+
+	private static JsonObject itemComponents(JsonObject item) {
+		JsonElement components = item.get("components");
+		return components != null && components.isJsonObject() ? components.getAsJsonObject() : new JsonObject();
+	}
+
+	private static boolean hasPositiveComponent(JsonObject components) {
+		for (String key : components.keySet()) if (!key.startsWith("!")) return true;
+		return false;
+	}
+
 	private static InventoryDetachedItem freeze(ItemStack stack) {
 		return freeze(new InventoryResidentItem.Stack(stack), registries, DISPLAY);
 	}
@@ -501,9 +661,31 @@ class InventoryGenericComponentCompatibilityTest {
 			InventoryItemBudget.root(DISPLAY), raw);
 	}
 
+	private static InventoryDetachedItem freezePatch(Item item, DataComponentPatch patch, InventoryResidentAccess raw) {
+		return freeze(new InventoryResidentItem.Patch(item, patch), registries, DISPLAY,
+			InventoryItemBudget.root(DISPLAY), raw);
+	}
+
 	private static InventoryResidentAccess prototypeRaw(DataComponentMap prototype) {
 		return new InventoryResidentAccessFields() {
 			@Override public DataComponentMap itemComponents(Item item) { return prototype; }
+		};
+	}
+
+	/** Item prototypes are server defaults for Patch inputs and resident defaults for nested stacks. */
+	private static InventoryResidentAccess prototypeOverrides(Map<Item, DataComponentMap> overrides) {
+		var actual = new InventoryResidentAccessFields();
+		return new InventoryResidentAccessFields() {
+			@Override public DataComponentMap itemComponents(Item item) {
+				return overrides.getOrDefault(item, actual.itemComponents(item));
+			}
+			@Override public DataComponentMap prototype(PatchedDataComponentMap map) {
+				DataComponentMap original = actual.prototype(map);
+				for (var entry : overrides.entrySet()) {
+					if (entry.getKey().components() == original) return entry.getValue();
+				}
+				return original;
+			}
 		};
 	}
 

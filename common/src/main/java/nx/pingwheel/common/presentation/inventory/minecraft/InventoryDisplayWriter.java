@@ -44,6 +44,10 @@ public final class InventoryDisplayWriter {
 		return id != null && id.getNamespace().equals("minecraft") && known(id.getPath());
 	}
 	static boolean shulker(String id) { return SHULKERS.contains(id); }
+	/** The single classification owner for the display redline shared with the freezer. */
+	static boolean lore(String key) { return LORE.equals(key); }
+	static boolean container(String key, String itemId) { return CONTAINER.equals(key) && shulker(itemId); }
+	static boolean forcedSuppression(String key, String itemId) { return lore(key) || container(key, itemId); }
 
 	static long utf8(String value) {
 		long bytes = 0;

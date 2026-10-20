@@ -1,23 +1,46 @@
 package nx.pingwheel.common.presentation.inventory.minecraft;
 
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.mojang.serialization.JsonOps;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.HolderSet;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.RegistrySetBuilder;
+import net.minecraft.core.component.DataComponentMap;
+import net.minecraft.core.component.DataComponentPatch;
+import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.component.PatchedDataComponentMap;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.config.InventorySizeScale;
+import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -29,11 +52,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InventoryItemDisplayProjectionTest {
 
 	private static final String LONG_NAME = "n".repeat(20000);
+	private static RegistryAccess registries;
 
 	@BeforeAll
 	static void bootStrap() {
 		SharedConstants.tryDetectVersion();
 		Bootstrap.bootStrap();
+		registries = RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY);
 	}
 
 	private static ItemStack namedWithCustomData() {
@@ -231,6 +256,196 @@ class InventoryItemDisplayProjectionTest {
 		assertThrows(InventoryItemCodec.IdentityUnavailableException.class,
 			() -> InventoryItemCodec.canonicalTag(net.minecraft.nbt.StringTag.valueOf(
 				"x".repeat(InventoryItemCodec.MAX_CANONICAL_BYTES + 1))));
+	}
+
+	@Test
+	void plainDefaultsTravelAsSparseNativePatchesWithoutChangingCompleteIdentity() {
+		for (Item item : List.of(Items.STONE, Items.DIAMOND_SWORD, Items.IRON_PICKAXE)) {
+			ItemStack source = new ItemStack(item);
+			InventoryDetachedItem frozen = freeze(source);
+
+			assertEquals(InventoryIdentityMode.EXACT, frozen.identityMode());
+			assertEquals(BuiltInRegistries.ITEM.getKey(item).toString(), frozen.display().itemId());
+			assertFalse(frozen.display().aggregateRequired());
+
+			JsonObject display = object(frozen.display().displayJson());
+			JsonObject components = components(display);
+			assertFalse(hasPositiveComponent(components),
+				() -> "an unmodified default must inherit locally instead of being repeated for " + item);
+			assertTrue(components.has("!minecraft:lore"));
+			assertFalse(components.has("minecraft:lore"), "display never exposes the filtered Lore value");
+
+			// Read the vanilla item JSON independently, then show that the sparse patch is a
+			// legal native value resolving to the same effective components under these defaults.
+			JsonObject nativeItem = nativeJson(source).getAsJsonObject();
+			JsonObject nativePatch = nativeItem.has("components")
+				? nativeItem.getAsJsonObject("components") : new JsonObject();
+			assertFalse(hasPositiveComponent(nativePatch), "the fixture itself carries no explicit patch");
+			ItemStack decoded = ItemStack.SINGLE_ITEM_CODEC
+				.parse(registries.createSerializationContext(JsonOps.INSTANCE), display)
+				.result().orElseThrow();
+			assertEquals(item, decoded.getItem());
+			assertEquals(1, decoded.getCount());
+			assertSameEffectiveComponentsExceptLore(source, decoded);
+
+			// The complete server-effective persistent map still supplies exact identity.
+			assertArrayEquals(InventoryItemCodec.canonicalTag(nativePersistentMap(source)),
+				frozen.canonicalForCatalog());
+		}
+	}
+
+	@Test
+	void explicitPatchValuesRemainAndNormalizedDefaultsStayOmitted() {
+		var key = ResourceKey.create(Registries.ENCHANTMENT,
+			ResourceLocation.fromNamespaceAndPath("pingforit_test", "finite"));
+		HolderLookup.Provider provider = new RegistrySetBuilder().add(Registries.ENCHANTMENT,
+			context -> context.register(key, Enchantment.enchantment(Enchantment.definition(
+				HolderSet.direct(), 1, 1, Enchantment.constantCost(1), Enchantment.constantCost(1), 1))
+				.build(ResourceLocation.fromNamespaceAndPath("pingforit_test", "finite")))).build(registries);
+
+		ItemStack source = new ItemStack(Items.DIAMOND_SWORD);
+		source.set(DataComponents.DAMAGE, 5);
+		source.set(DataComponents.CUSTOM_NAME, Component.literal("explicit display name"));
+		var enchantments = new ItemEnchantments.Mutable(ItemEnchantments.EMPTY);
+		enchantments.set(provider.lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(key), 2);
+		source.set(DataComponents.ENCHANTMENTS, enchantments.toImmutable());
+
+		var frozen = freeze(source, provider);
+		assertArrayEquals(InventoryItemCodec.canonicalTag(nativePersistentMap(source, provider)),
+			frozen.canonicalForCatalog());
+		JsonObject display = components(object(frozen.display().displayJson()));
+		JsonObject nativePatch = nativeJson(source, provider).getAsJsonObject().getAsJsonObject("components");
+		assertNotNull(nativePatch);
+		for (var entry : nativePatch.entrySet()) {
+			if (entry.getKey().startsWith("!")) continue;
+			assertEquals(entry.getValue(), display.get(entry.getKey()), entry.getKey());
+		}
+		assertEquals(5, display.get("minecraft:damage").getAsInt());
+		assertFalse(display.has("minecraft:max_damage"), "an unmodified sword default is still omitted");
+		assertFalse(display.has("!minecraft:max_damage"));
+		assertTrue(display.has("!minecraft:lore"));
+
+		DataComponentPatch removals = DataComponentPatch.builder()
+			.remove(DataComponents.MAX_DAMAGE).remove(DataComponents.LORE).build();
+		JsonObject removed = components(object(freezePatch(Items.DIAMOND_SWORD, removals).display().displayJson()));
+		assertEquals(new JsonObject(), removed.get("!minecraft:max_damage"));
+		assertEquals(new JsonObject(), removed.get("!minecraft:lore"));
+
+		int maxDamage = Items.DIAMOND_SWORD.components().getOrDefault(DataComponents.MAX_DAMAGE, 0);
+		assertTrue(maxDamage > 0);
+		ItemStack normalized = new ItemStack(Items.DIAMOND_SWORD);
+		normalized.set(DataComponents.MAX_DAMAGE, maxDamage);
+		assertEquals(0, ((PatchedDataComponentMap) normalized.getComponents()).asPatch().size(),
+			"the native setter normalizes an equal default away");
+		JsonObject normalizedDisplay = components(object(freeze(normalized).display().displayJson()));
+		assertFalse(normalizedDisplay.has("minecraft:max_damage"));
+		assertFalse(normalizedDisplay.has("!minecraft:max_damage"));
+
+		DataComponentPatch explicitEqual = DataComponentPatch.builder()
+			.set(DataComponents.MAX_DAMAGE, maxDamage).build();
+		JsonObject explicitDisplay = components(
+			object(freezePatch(Items.DIAMOND_SWORD, explicitEqual).display().displayJson()));
+		assertEquals(maxDamage, explicitDisplay.get("minecraft:max_damage").getAsInt(),
+			"a source-known explicit patch value is sent when the native patch still carries it");
+	}
+
+	@Test
+	void displayPatchInheritsTheClientLocalPrototypeInsteadOfTheServerDefault() throws ReflectiveOperationException {
+		Field field = Item.class.getDeclaredField("components");
+		field.setAccessible(true);
+		var original = Items.STONE.components();
+		ClientItemDisplay.reset();
+		try {
+			var server = DataComponentMap.builder().addAll(original)
+				.set(DataComponents.DAMAGE, 3).build();
+			field.set(Items.STONE, server);
+
+			String json = freeze(new ItemStack(Items.STONE)).display().displayJson();
+			assertFalse(components(object(json)).has("minecraft:damage"),
+				"the server default is inherited, not transmitted");
+			ItemStack serverDecoded = ItemStack.SINGLE_ITEM_CODEC
+				.parse(registries.createSerializationContext(JsonOps.INSTANCE), JsonParser.parseString(json))
+				.result().orElseThrow();
+			assertEquals(3, serverDecoded.get(DataComponents.DAMAGE),
+				"with the server registry the sparse patch inherits the server default");
+
+			var client = DataComponentMap.builder().addAll(original)
+				.set(DataComponents.DAMAGE, 7).build();
+			field.set(Items.STONE, client);
+			ClientItemDisplay.reset();
+			var resolved = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone",
+				"block.minecraft.stone", json);
+			assertEquals(7, resolved.stack().get(DataComponents.DAMAGE),
+				"the same patch inherits the client's local prototype default");
+		} finally {
+			field.set(Items.STONE, original);
+			ClientItemDisplay.reset();
+		}
+	}
+
+	private static InventoryDetachedItem freeze(ItemStack stack) {
+		return freeze(stack, registries);
+	}
+
+	private static InventoryDetachedItem freeze(ItemStack stack, HolderLookup.Provider provider) {
+		return InventoryItemCodec.freeze(new InventoryResidentItem.Stack(stack), provider,
+			InventoryItemCodec.MAX_DISPLAY_BYTES, InventoryItemBudget.root(InventoryItemCodec.MAX_DISPLAY_BYTES),
+			new InventoryResidentAccessFields(), new InventoryTestNativeAccess());
+	}
+
+	private static InventoryDetachedItem freezePatch(Item item, DataComponentPatch patch) {
+		return InventoryItemCodec.freeze(new InventoryResidentItem.Patch(item, patch), registries,
+			InventoryItemCodec.MAX_DISPLAY_BYTES, InventoryItemBudget.root(InventoryItemCodec.MAX_DISPLAY_BYTES),
+			new InventoryResidentAccessFields(), new InventoryTestNativeAccess());
+	}
+
+	private static JsonElement nativeJson(ItemStack stack) {
+		return nativeJson(stack, registries);
+	}
+
+	private static JsonElement nativeJson(ItemStack stack, HolderLookup.Provider provider) {
+		return ItemStack.CODEC.encodeStart(provider.createSerializationContext(JsonOps.INSTANCE), stack)
+			.result().orElseThrow();
+	}
+
+	private static Tag nativePersistentMap(ItemStack stack) {
+		return nativePersistentMap(stack, registries);
+	}
+
+	private static Tag nativePersistentMap(ItemStack stack, HolderLookup.Provider provider) {
+		return DataComponentMap.makeCodec(DataComponentType.PERSISTENT_CODEC)
+			.encodeStart(provider.createSerializationContext(NbtOps.INSTANCE),
+				stack.getComponents().filter(type -> !type.isTransient()))
+			.result().orElseThrow();
+	}
+
+	private static JsonObject object(String json) {
+		return JsonParser.parseString(json).getAsJsonObject();
+	}
+
+	private static JsonObject components(JsonObject item) {
+		JsonElement value = item.get("components");
+		return value != null && value.isJsonObject() ? value.getAsJsonObject() : new JsonObject();
+	}
+
+	private static boolean hasPositiveComponent(JsonObject components) {
+		for (String key : components.keySet()) if (!key.startsWith("!")) return true;
+		return false;
+	}
+
+	private static void assertSameEffectiveComponentsExceptLore(ItemStack expected, ItemStack actual) {
+		assertEquals(expected.getItem(), actual.getItem());
+		int expectedLore = expected.getComponents().has(DataComponents.LORE) ? 1 : 0;
+		assertEquals(expected.getComponents().size() - expectedLore, actual.getComponents().size(),
+			"display effective components match the source except for the mandatory Lore strip");
+		for (DataComponentType<?> type : expected.getComponents().keySet()) {
+			if (type == DataComponents.LORE) continue;
+			assertTrue(actual.getComponents().has(type), () -> "missing effective component: " + type);
+			assertEquals(expected.getComponents().get(type), actual.getComponents().get(type),
+				() -> "effective component differs: " + type);
+		}
+		assertFalse(actual.getComponents().has(DataComponents.LORE),
+			"the display never reconstructs the server's unmodified Lore default");
 	}
 
 	/** The same authoritative minimum the codec enforces: the display scale's smallest legal cap. */

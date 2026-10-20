@@ -257,6 +257,76 @@ class InventoryDisplayWriterTest {
 		assertFalse(projected.has("minecraft:container"));
 	}
 
+	@Test
+	void sparseLadderKeepsTombstonesAndOmitsUncarriedDefaultsAcrossConsecutiveTightening() {
+		JsonObject input = item();
+		JsonObject components = input.getAsJsonObject("components");
+		components.addProperty("minecraft:custom_name", "n".repeat(1500));
+		components.addProperty("minecraft:custom_data", "d".repeat(1500));
+		components.addProperty("minecraft:damage", 7);
+		components.add("!minecraft:max_damage", new JsonObject());
+
+		String retained = InventoryDisplayWriter.project(input, ID, 4096);
+		JsonObject full = componentObject(retained);
+		assertEquals(7, full.get("minecraft:damage").getAsInt());
+		assertTrue(full.has("minecraft:custom_name"));
+		assertTrue(full.has("!minecraft:max_damage"));
+
+		String middle = InventoryDisplayWriter.reproject(retained, ID, 2048);
+		JsonObject middleComponents = componentObject(middle);
+		assertTrue(middleComponents.has("minecraft:custom_data"));
+		assertTrue(middleComponents.has("!minecraft:custom_name"));
+		assertTrue(middleComponents.has("!minecraft:max_damage"));
+
+		String tight = InventoryDisplayWriter.reproject(middle, ID, 1024);
+		JsonObject tightComponents = componentObject(tight);
+		for (String removal : new String[] { "custom_name", "custom_data", "damage", "max_damage", "lore" }) {
+			assertTrue(tightComponents.has("!minecraft:" + removal), removal);
+		}
+		assertFalse(tightComponents.has("minecraft:custom_data"));
+		assertFalse(tightComponents.has("minecraft:damage"));
+		assertFalse(tightComponents.has("!minecraft:max_stack_size"),
+			"an omitted ordinary default never gains an invented tombstone");
+		assertTrue(wire(tight) <= wire(retained), "tightening never grows retained output");
+
+		assertEquals(tight, InventoryDisplayWriter.reproject(tight, ID, 1024),
+			"repeated tightening is stable");
+		assertEquals(tight, InventoryDisplayWriter.reproject(tight, ID, 4096),
+			"raising the ceiling never expands retained output");
+	}
+
+	@Test
+	void tightCapBoundaryIsDerivedFromTheActualEncodedPayload() {
+		String value = "x".repeat(1500);
+		JsonObject input = item();
+		input.getAsJsonObject("components").addProperty("minecraft:custom_data", value);
+		String expected = "{\"id\":\"minecraft:stone\",\"components\":{\"minecraft:custom_data\":\""
+			+ value + "\",\"!minecraft:lore\":{}}}";
+		int cap = wire(expected);
+		assertTrue(cap > 1024 && cap <= InventoryLimits.MAX_DISPLAY_BYTES);
+
+		JsonObject atCap = componentObject(InventoryDisplayWriter.project(input, ID, cap));
+		assertEquals(value, atCap.get("minecraft:custom_data").getAsString());
+
+		JsonObject below = componentObject(InventoryDisplayWriter.project(input, ID, cap - 1));
+		assertFalse(below.has("minecraft:custom_data"));
+		assertTrue(below.has("!minecraft:custom_data"));
+		assertTrue(below.has("!minecraft:lore"));
+	}
+
+	@Test
+	void nameSuppressionAlsoCoversUncarriedLocalDefaultNames() {
+		JsonObject input = item();
+		input.getAsJsonObject("components").addProperty("minecraft:custom_data", "d".repeat(1500));
+		JsonObject components = componentObject(InventoryDisplayWriter.project(input, ID, 1024));
+		assertFalse(components.has("minecraft:custom_name"));
+		assertFalse(components.has("minecraft:item_name"));
+		assertTrue(components.has("!minecraft:custom_name"));
+		assertTrue(components.has("!minecraft:item_name"));
+		assertTrue(components.has("!minecraft:custom_data"));
+		assertTrue(components.has("!minecraft:lore"));
+	}
+
 	private static JsonObject item() {
 		JsonObject item = new JsonObject(); item.addProperty("id", ID); item.add("components", new JsonObject()); return item;
 	}
