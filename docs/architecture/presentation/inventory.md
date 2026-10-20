@@ -138,8 +138,10 @@ can project the inventory selection kind
 from this existing tracking association rather than a second chat metadata
 cache.
 
-Choosing one inventory item from the preview and releasing creates a new Ping
-immediately; items are never accumulated into a staged multi-item selection.
+A submitted single-item selection creates a new Ping immediately; items are
+never accumulated into a staged multi-item selection, and the selector release
+and stay-open timing that submits that selection is owned by
+[wheel](../picking/wheel.md#inventory-list).
 The create passes the existing marker-admission authority and gates owned by
 [target validation](../authority/target_validation.md), with the selected item
 reference validated safely and immediately against the authoritative source
@@ -668,8 +670,18 @@ version remains a grey uncertain result. Data
 that is unknown, or known to be missing without a complete observation, is not
 zero and is distinct from an unknown consistency state. The exact localized
 labels are added as resource keys with the implementation; the English state
-names above define the semantics. The native HUD workflow that consumes these
+names above define the semantics.
+
+Absence of a preview request (never opened, closed, or purged) is not an empty
+`updating` preview; a present request with `updating` status is what keeps an
+open inventory list legitimately loading. The selector's cancellation and close
+response to a request that is no longer present is owned by
+[wheel](../picking/wheel.md#inventory-selection-stay-open); the inventory topic
+does not restate it.
+
+The native HUD workflow that consumes these
 states — direction trail, root-centre abandonment and downward marker
-cancellation, and candidate priority — remains owned by the picking capture and
-wheel contracts, and the inventory topic owns only the data and status
+cancellation, and candidate priority — remains owned by the [capture](../picking/capture.md) and
+[wheel](../picking/wheel.md) contracts, and the inventory topic owns only the
+data and status
 semantics it publishes to them.

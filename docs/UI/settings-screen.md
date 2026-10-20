@@ -54,11 +54,12 @@ The client scope has seven categories:
   Trail Opacity controls only the trail's
   visibility strength, independently of wheel and target opacity.
 - **Input Interaction**: Wheel Hold Time, Gesture Skips Long Press, Minimum
-  Gesture Hold, Long-Press Compatibility Mode, Compatibility Time Slice, and
-  Cancel Cone Half-Angle,
+  Gesture Hold, Long-Press Compatibility Mode, Compatibility Time Slice,
+  Cancel Cone Half-Angle, Double-Click Danger Window, and Double-Click Danger
+  Angle,
   followed by a Spatial selector gestures subgroup with Center Deadzone, Entry
   Stroke Length, Entry Dwell, Require Sustained Hover to Return, Back-Hover
-  Dwell, and Content Intent Selection.
+  Dwell, Content Intent Selection, and Inventory Selection Stay Open.
   The Content Intent Selection toggle enables the additional property and
   inventory-item Ping Type selection menus in the Content hierarchy; its
   tooltip states that a change applies to the next hold.
@@ -115,6 +116,18 @@ relationship is owned by
 [client configuration](../config/client.md#spatial-selector-interaction), and
 gesture timing is owned by
 [long-press timing](../architecture/input/long-press.md#optional-physical-hold-gesture).
+
+Double-Click Danger Window and Double-Click Danger Angle are the two controls of
+the [double-click Danger gesture](../architecture/input/double-click-danger.md);
+their keys and meanings are owned by
+[client configuration](../config/client.md#press-wheel-and-cancellation-interaction).
+The angle control's leftmost stop is its disabled value and presents the
+complete localized `<setting name>: <off value>` label rather than a bare zero;
+a non-zero value is presented as that setting's degree value. While compatibility
+mode is enabled the control is disabled and shows the same disabled label.
+Inventory Selection Stay Open is the
+[inventory stay-open](../architecture/picking/wheel.md#inventory-selection-stay-open)
+preference, and its tooltip states that a change applies to the next hold.
 
 ## Server performance category
 

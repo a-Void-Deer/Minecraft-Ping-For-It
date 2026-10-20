@@ -52,7 +52,11 @@ provenance from every optional producer, remains unexercised.
 
 `LongPressCompatibilityControllerTest` covers the ordinary rapid-click and
 asynchronous deferred-compatibility paths, with focused bounds coverage supplied
-by the applicable config-bounds tests. `LongPressCompatibilityDispatchTest`
+by the applicable config-bounds tests. It also covers enabling the mode while an
+asynchronous pre-enable baseline is active: the old released baseline remains
+the one that drains, the enabling press is ignored rather than superseding or
+aborting it, no virtual seed is adopted, and a completion frame creates that old
+default while only the next press becomes compatibility's. `LongPressCompatibilityDispatchTest`
 drives that controller over the real baseline lifecycle, courtesy limiter and
 dispatch receipt: a rejected or unready synchronous first default create cannot
 seed rapid input; a rejected or unready asynchronous first default create drops
@@ -800,6 +804,91 @@ the complete `ClientPingRuntime`, a GLFW window, `GuiGraphics`, or GPU submissio
 native-window/gameplay confirmation of inventory selection reachability after
 the item-Back resize handoff remains pending.
 
+## Double-click Danger and inventory stay-open
+
+Source-reviewed coverage exists for the double-click Danger derivation and the
+inventory stay-open selector session; this inventory is not a recorded run.
+
+`LookInputTrackerTest` covers signed net yaw/pitch accumulation with exact
+out-and-back cancellation, a reset advancing the generation fence, whole-baseline
+rejection of non-finite or overflowing input, the vanilla non-smoothed
+sensitivity and scoping conversion, strict three-dimensional yaw/pitch/diagonal
+angles, high-pitch and yaw-wrap virtual endpoints, accumulated pitch clamped
+only at the endpoint, a generation mismatch returning zero (the controller's
+generation-reset fixture separately proves recognition rejection), and
+degenerate-ray or null input rejection.
+
+`RapidDangerControllerTest` covers an undelayed first default create, every
+completed tap being flushed only after the first local create dispatch (a
+fixture uses four taps; the retained state is a bounded count, not a product
+tap cap), distinct tokens for each `danger` create while reusing the first
+target, a reentrant abort stopping the remaining flush, a
+non-qualifying first outcome clearing dependents without retry or fallback, a
+long candidate using its own press time and ray for the wheel, a released
+candidate remaining a frozen `danger` tap when no wheel opened, a
+look-generation reset invalidating the sequence, and live compatibility
+disabling recognition without aborting an ordinary baseline. It also covers a
+zero angle with compatibility disabled keeping every short press ordinary; an
+independently computed pure-yaw turn exactly at the tolerance rejected while a
+slightly smaller turn qualifies and a slightly larger one does not; an
+adjacent-window boundary qualifying while the angle still uses the first
+baseline; a press immediately past the window starting a new ordinary press; an
+externally turned camera without look input still deriving from the first target
+and frozen ray; and look input beyond tolerance rejecting even when the live
+camera ray is unchanged.
+
+`InventorySelectionStayControllerTest` covers the first release entering the
+stay and one short tap committing, a threshold release without a frame
+cancelling instead of submitting, a frame cancel swallowing the remaining
+physical edges, a path exit while held swallowing them, and a full lifecycle
+reset.
+
+`ClientPingRuntimeInteractionTest` adds the stay path: an enabled stay keeping
+the first release and a single tap selecting before one close; a threshold hold
+cancelling without `SELECT` or marker cancellation; a frame cancel swallowing the
+release; item Back returning to the list and staying until a list tap; a list
+Back leaving inventory ancestry and closing without a Content return; lifecycle
+abort closing the stay with mouse-ownership disposal; a reset revocation closing
+the selector with no stale row submittable, idle phase and restored mouse
+ownership; a policy purge of the preview request closing the selector; a
+revocation while a staying tap is held swallowing the remaining release; and a
+legitimate empty `updating` preview keeping the list open.
+
+The same fixtures add the Danger path: adjacent and third-or-later taps creating
+independent `danger` requests from the first frozen target; every completed
+pending tap flushing after the first local create, including under an advancing
+clock, where a following held candidate after the flush opens its own wheel
+without an extra Danger on release and a repeated release stays actionless, and
+a candidate without a pending flush uses its own down edge and press ray after
+the first capture completes; a reentrant abort during Danger validation
+dispatching no Danger while keeping the first ordinary create; a reentrant abort on the first flushed Danger
+stopping the remaining flush; a non-matching gap- or angle-mismatched fresh press
+superseding the pending first interaction and its admitted taps, with the old
+completion creating nothing and the new capture creating its own ordinary
+target; a transport failure or throttled first create clearing the sequence;
+compatibility enabling draining the first create without seeding `danger`; a
+compatibility disable observed on a press consuming that edge before rapid
+recognition; failed capture clearing pending taps without retry; a candidate hold
+using its own time and ray and releasing only the wheel; a candidate that never
+opened releasing at the tap boundary, including under an advancing clock where
+it contributes exactly one frozen Danger and repeated release or abort cannot
+double-commit; camera angle/window mismatches starting a fresh ordinary press;
+and live compatibility never producing `danger`.
+
+`SpatialSelectorSessionTest` covers the inventory path predicate over the list
+and an item submenu and its end at Content. `NativeSelectorMixinContractTest`
+covers the look-input hooks reading pre-update coordinates and bridging only
+after the vanilla move. Configuration, normalization, catalog, option-codec and
+locale coverage is inventoried in
+[configuration verification](configuration-ui.md#double-click-danger-and-inventory-stay-open-configuration).
+
+These are headless model, controller, runtime-port, session and mixin-contract
+seams. They do not establish native callback delivery, Mixin application,
+constructed or rendered settings screens, assembled locale labels, GPU
+submission, loader gameplay or multiplayer behavior; the pending live scenarios
+remain in the
+[manual matrix](manual-integration.md#pending-manual-and-integration-matrix).
+
 ## Known automated gaps
 
 - the shared client/server `entity_block` classification path end to end,
@@ -823,3 +912,7 @@ the item-Back resize handoff remains pending.
 - deterministic local-position ordering of equal-distance, same-kind local
   child hits: the x/y/z comparator is source-confirmed, but no test exercises
   position ordering; the focused exact-tie case pins only block versus fluid;
+- native mouse callback delivery and Mixin application for the
+  [double-click Danger](../../architecture/input/double-click-danger.md)
+  look-input bridge, including real spyglass, invert and ignored-initial-callback
+  behavior across loaders, are not exercised by the headless seams above;

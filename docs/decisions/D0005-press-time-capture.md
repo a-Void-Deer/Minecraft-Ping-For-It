@@ -20,6 +20,11 @@ Allow only the established narrow deferred-capture exception under
 Its sequencing and qualifying-dispatch rules preserve single interaction
 ownership rather than introducing a queue of creates.
 
+The repeated short-press Danger derivation is a client input policy over
+ordinary creates rather than another capture-timing exception: it never delays
+the first short press, reuses that interaction's frozen capture, and is owned by
+[double-click Danger](../architecture/input/double-click-danger.md).
+
 ## Rationale
 
 Press-time ray capture preserves the user's input intent across camera and
@@ -36,12 +41,16 @@ sequence.
   [D0009](D0009-precise-live-candidate-capture.md).
 - Do not let an async callback read the current camera: completion timing would
   change the captured intent.
-- Do not start a second capture while the first is pending: two interactions
-  would compete for ownership and dispatch.
+- Do not let two captures both hold interaction ownership: an ordinary fresh
+  press atomically replaces the prior token, while only the narrow compatibility
+  path defers a press without starting its capture.
 - Do not freeze deferred range/policy at the raw second press: those settings
   are read when the deferred capture actually starts.
 - Do not treat elapsed threshold as an opened wheel: opening requires a ready
   capture and a held present frame.
+- Do not delay the first short press to detect a repeat: a repeated-press
+  gesture is derived from ordinary creates, so it cannot change the first
+  action's timing or target.
 
 ## Consequences
 
@@ -55,6 +64,7 @@ ignored or abandon its exact interaction without affecting a newer one.
 [Capture](../architecture/picking/capture.md),
 [long-press timing](../architecture/input/long-press.md),
 [long-press compatibility](../architecture/input/long-press-compatibility.md),
+[double-click Danger](../architecture/input/double-click-danger.md),
 [wheel](../architecture/picking/wheel.md), [target model](../architecture/identity/target_model.md), and
 [server authority](D0004-server-authority.md).
 

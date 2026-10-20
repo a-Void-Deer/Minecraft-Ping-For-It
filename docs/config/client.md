@@ -50,6 +50,8 @@ here.
 | `longPressCompatibilityMode` | boolean | Enables the narrow rapid/deferred compatibility sequence; [long-press compatibility](../architecture/input/long-press-compatibility.md) owns its behavior. |
 | `longPressCompatibilitySliceMillis` | number, milliseconds | Compatibility adjacency slice. [Long-press timing](../architecture/input/long-press.md) owns its relation to the effective hold threshold. |
 | `cancelHalfConeAngleDegrees` | number, degrees | Half-angle for local own-marker cancellation; [wheel](../architecture/picking/wheel.md#cancel-marker-selection) owns candidate selection. |
+| `doubleClickDangerWindowMs` | number, milliseconds | Adjacent-press window for deriving repeated short-press `danger` creates; [double-click Danger](../architecture/input/double-click-danger.md) owns qualification and the adjacent-edge comparison. |
+| `doubleClickDangerAngleDegrees` | number, degrees | Angular tolerance for that gesture; [double-click Danger](../architecture/input/double-click-danger.md) owns the comparison, its zero-disabled meaning and the angle derivation. It is independent of `cancelHalfConeAngleDegrees` and never configures own-marker cancellation. |
 | `wheelOpacity` | number | Local opacity of the selector's visual underlay; [wheel](../architecture/picking/wheel.md#native-selector-presentation) owns what the underlay covers and how it layers. |
 | `wheelTargetOpacity` | number | Local opacity of text-bearing selector frames together with their labels; [wheel](../architecture/picking/wheel.md#native-selector-presentation) owns the layering. |
 | `wheelFontSize` | number | Local wheel-label text size. |
@@ -93,6 +95,7 @@ validation and the preference relationships below.
 | `spatialSelector.reduceMotion` | boolean | Reduces selector animation without changing gesture timing or selection. |
 | `spatialSelector.preciseCapturePeriodTicks` | positive integer, ticks | Live candidate capture period for the Precise branch while it is active. A change applies to the next hold, not to the running one. |
 | `spatialSelector.contentIntentEnabled` | boolean | Whether the Content hierarchy offers its additional property and inventory-item Ping Type selection menus; while disabled, an otherwise selectable property or a directly released inventory item requests the Attention annotation instead, without changing the whole-marker Ping Type. Frozen into the held gesture's snapshot like the other selector preferences. |
+| `spatialSelector.inventorySelectionStayOpenEnabled` | boolean | Opt-in stay-open session for an open selector's inventory list and item menu, disabled by default. [Wheel](../architecture/picking/wheel.md#inventory-selection-stay-open) owns the behavior. |
 
 The [inventory-list sizing contract](../architecture/picking/wheel.md#inventory-list)
 owns which surfaces these fractions size and how content demand and readable
@@ -116,11 +119,25 @@ restore that choice; the player must explicitly enable it again. Observing
 compatibility enabled can also end a pending shortcut under
 [wheel's input-handoff contract](../architecture/picking/wheel.md#opening-and-selection).
 
+The same priority applies to the double-click danger angle: enabling
+compatibility forces its effective stored value to zero, a non-zero value is
+rejected while compatibility remains active, and disabling compatibility leaves
+it at zero rather than restoring or retaining a previous angle.
+[Double-click Danger](../architecture/input/double-click-danger.md) owns the
+gesture itself.
+
 A loaded client document with both `longPressCompatibilityMode` and
 `spatialSelector.gestureSkipHoldEnabled` explicitly `true` is normalized by
 clearing the latter and scheduling the existing guarded writeback even at the
-same version. Missing shortcut members alone do not trigger a load rewrite. The shared normalization,
-changed-source guard, future-version protection and invalid-file recovery
+same version. Missing shortcut members alone do not trigger a load rewrite. A
+loaded client document whose double-click danger angle is non-zero while
+compatibility is enabled, or whose angle member is missing or `null` in that
+mode, resolves to the disabled zero value and schedules that same guarded
+writeback even at the same version; with compatibility disabled, a missing angle
+member keeps the model-initialized value and does not force a rewrite. A
+malformed non-numeric angle member is left to typed deserialization and
+invalid-file recovery. The shared normalization, changed-source guard,
+future-version protection and invalid-file recovery
 remain owned by
 [configuration revisioning](../architecture/config/revisioning.md#same-version-shape-normalization),
 and the controls' disabled presentation is owned by the

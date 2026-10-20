@@ -12,8 +12,10 @@ Every subsequent action operates on the captured context, except the Precise
 branch, whose candidates are live while that branch is active
 ([Precise](#precise)). An actually open
 selector has no elapsed-time auto close: it ends through a release, a
-cancellation, or an interaction lifecycle abort. Pre-open release behavior is
-owned by
+cancellation, or an interaction lifecycle abort. An enabled inventory surface
+stay-open is the confirmed release exception, owned by
+[inventory selection stay-open](#inventory-selection-stay-open). Pre-open
+release behavior is owned by
 [capture](capture.md#baseline-release-and-actual-wheel-opening).
 
 One held interaction consumes one immutable, validated
@@ -309,10 +311,12 @@ follower.
 
 ## Radial release result
 
-For a release of an actually open selector, the frozen menu geometry resolves
-the focused entry. A release inside the center deadzone abandons the session
-with no action. A release on a sector resolves that sector: a focused leaf
-commits exactly one action and ends the session; a precise leaf commits the
+Before the frozen-geometry adjudication below, a release first passes the
+[inventory selection stay-open](#inventory-selection-stay-open) handling; only
+a release that handling leaves to the ordinary result follows this section. A
+release inside the center deadzone abandons the session with no action. A
+release on a sector resolves that sector: a focused leaf commits exactly one
+action and ends the session; a precise leaf commits the
 last actually painted selectable candidate version and never initiates a new
 candidate capture; a reserved, disabled,
 navigation or actionless-branch entry reports its reason and never commits. A
@@ -520,9 +524,11 @@ from the underlay. A Forward stroke enters the selected row's
 item menu while content intent is enabled, and has no effect while it is
 disabled ([Content](#content)). Back uses the stroke when hover is disabled and
 the shared Back-hover timer when enabled; either returns one level.
-A release with a selected row commits through the inventory owner's single-item
-create path under the frozen content-intent mode; a release while the Back side
-is focused leaves without committing. Count, ordering, folding and
+Once the [inventory selection stay-open](#inventory-selection-stay-open)
+handling leaves it to the ordinary result, a release with a selected row commits
+through the inventory owner's single-item create path under the frozen
+content-intent mode; a release while the Back side is focused leaves without
+committing. Count, ordering, folding and
 item-selection semantics are owned by
 [inventory preview and tracking](../presentation/inventory.md#preview).
 
@@ -650,6 +656,42 @@ travel only: it never moves the crosshair off screen and is not a physical
 leave of Back that could release the shared held-Back block. Projection,
 resize, and system pointer synchronization likewise cannot release that block
 or manufacture side navigation.
+
+### Inventory selection stay-open
+
+An opt-in preference keeps an actually open selector's inventory surfaces open
+after release. Its key and local meaning belong to the
+[client configuration](../../config/client.md#spatial-selector-interaction); it
+freezes with the held interaction's snapshot and therefore applies to the next
+interaction rather than mutating the running one.
+
+While the preference is enabled and the inventory list or an item's radial
+submenu is the active surface, the first release of the held interaction
+(wherever it resolves, including inside the item menu's center deadzone or over
+a Back affordance) neither commits nor ends the session. It retains the
+interaction token, the inventory preview data and native input ownership, and
+the interaction's already-frozen settings remain in force. A later physical tap
+of the same Ping key whose release resolves a committable entry on that surface
+commits once
+under the ordinary release result; a hold that reaches the frozen long-press
+threshold cancels and closes instead, and a release is checked for that boundary
+even when no render frame was delivered. Vertical mouse-wheel selection stays
+available, and an item submenu's Back return to the list preserves the session.
+
+An inventory path exit cancels the whole stay-open selector and closes it,
+without sending a marker cancellation: this covers a list Back that leaves the
+inventory ancestry, a content revocation, and a permission revocation. The
+selector never remains open on Content after such an exit, and no stale row may
+submit. Focus loss, a screen transition, a world or level discontinuity, and a
+connection discontinuity abort it under
+[capture](capture.md#interaction-lifecycle-aborts). A committing release keeps
+the established SELECT-before-CLOSE ordering. The behavior adds no hold timeout
+or heartbeat because the inventory preview has none.
+
+This session takes precedence over
+[long-press compatibility](../input/long-press-compatibility.md) and
+[double-click Danger](../input/double-click-danger.md); lifecycle aborts still
+run first.
 
 ### Target-selection settings
 

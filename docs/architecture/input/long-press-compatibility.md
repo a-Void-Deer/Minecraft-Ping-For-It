@@ -15,7 +15,12 @@ and their timing relation is owned by [long-press timing](long-press.md).
 Compatibility mode and effective slice are observed at relevant raw edges and
 render frames. An observed enabled-to-disabled transition aborts the baseline
 interaction and compatibility sequence. Enabling does not abort an interaction.
-General reset, screen, world, and token-abort rules remain owned by
+While compatibility is observed enabled, the
+[double-click Danger](double-click-danger.md) gesture is unavailable and its
+recognition state is cleared without mutating a held snapshot, aborting an
+already-created first capture, or replaying a stored press; the two sequences
+never run together. General reset, screen, world, and
+token-abort rules remain owned by
 [capture](../picking/capture.md#interaction-lifecycle-aborts).
 
 Both paths require a successful local dispatch outcome for the preceding default

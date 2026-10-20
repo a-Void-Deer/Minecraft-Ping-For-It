@@ -4,9 +4,18 @@ Evidence rules and verification expectations are owned by the
 [verification guide](README.md). Pending live scenarios are listed in the
 [manual and integration matrix](manual-integration.md#pending-manual-and-integration-matrix).
 Inventory list gestures and navigation are inventoried under
-[interaction](interaction.md#inventory-list-gestures-and-navigation), and selector
-overlay layout and frame rendering under
-[rendering](rendering.md#selector-overlay-layout-and-frame-rendering).
+[interaction](interaction.md#inventory-list-gestures-and-navigation), and the
+stay-open selector path under
+[interaction](interaction.md#double-click-danger-and-inventory-stay-open);
+selector overlay layout and frame rendering are inventoried under
+[rendering](rendering.md#selector-overlay-layout-and-frame-rendering). The
+stay-open path reuses that ordinary single-item selection, already inventoried
+through the backend and selector-session fixtures; it changes when that
+selection is submitted, not the preview or tracking admission, so this page's
+foundation evidence is unchanged by it. Request absence versus a legitimate
+empty `updating` preview is exercised by the stay-open runtime fixtures
+inventoried under [interaction](interaction.md#double-click-danger-and-inventory-stay-open);
+it adds no preview-admission evidence here.
 
 ## Inventory preview and tracking foundation
 

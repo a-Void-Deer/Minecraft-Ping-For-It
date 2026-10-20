@@ -8,7 +8,14 @@ Target Type. An asynchronous path, such as Distant Horizons, starts at that
 press edge and completes capture in a later callback, potentially after release.
 The target-selection values are copied into the ordinary ray's immutable policy
 at capture start; their toggles and raycast meanings are owned by
-[selection policy](selection_policy.md).
+[selection policy](selection_policy.md). Every ordinary fresh press atomically
+replaces the interaction token, so a still-pending predecessor becomes stale and
+its later completion cannot publish into the new interaction. While a capture is
+pending, that interaction retains ownership of its token until it completes, is
+superseded, or is aborted; two captures never simultaneously hold valid
+interaction ownership. Only the narrow
+[long-press compatibility](../input/long-press-compatibility.md) path may defer
+a press without starting its capture.
 
 When the snapshot is ready, resolve its Target Type under the
 [catalog matching rules](../identity/catalogs.md). Freeze the resolved Target
@@ -102,6 +109,11 @@ Release and wheel-open outcomes are:
 | Ordinary or gesture eligibility reached but no wheel actually opened | Use the same default-create path, including pending-capture waiting. |
 | Wheel actually opened | Delegate release to [wheel](wheel.md#radial-release-result). |
 
+A press that qualifies under
+[double-click Danger](../input/double-click-danger.md) uses that gesture's
+`danger` create instead of the Target Type's default Ping Type; every other row
+above applies unchanged.
+
 Either eligibility path opens a wheel only after capture is ready, the viewport
 is valid, and a render/present frame occurs while the current interaction token
 is still owned and the key remains held. Neither elapsed time nor pointer
@@ -140,6 +152,16 @@ boundary, and compatibility-specific transition behavior are owned by
 
 Coverage and remaining input-lifecycle scenarios are inventoried in
 [verification](../../testing/verification/interaction.md#capture-wheel-and-cancellation).
+
+## Repeated short-press derivation
+
+A qualified repeated short press can request additional ordinary `danger`
+creates from the same frozen capture instead of starting an independent
+selection. [Double-click Danger](../input/double-click-danger.md) owns
+qualification, retained-capture reuse and the bounded dependent presses. Each
+derived create remains an ordinary press-time action with its own token and
+dispatch outcome, so it introduces no release-time ray, retargeted target or
+second deferred-capture path.
 
 ## Integration and authority boundaries
 

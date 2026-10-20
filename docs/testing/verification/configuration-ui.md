@@ -169,6 +169,40 @@ model and handler seams, not live settings-widget interaction. The runtime
 eligibility and trajectory evidence is inventoried in
 [interaction verification](interaction.md#gesture-shortcut-opening).
 
+## Double-click Danger and inventory stay-open configuration
+
+The two press preferences and the stay-open choice have source-reviewed model,
+handler, codec, catalog and resource coverage. None of it is a recorded run.
+
+`DoubleClickDangerConfigTest` covers the two press preferences as model and
+handler seams: defaults and bounds independent from the cancel half-cone;
+missing, null and out-of-range JSON values defaulting or clamping; compatibility
+clearing the angle and rejecting non-zero until disabled; validation and update
+enforcing the same zero; NaN recovering to the default while infinity clamps;
+string NaN loading as a finite default; filesystem-backed same-version
+normalization of decodable string numbers, `NaN` and `Infinity` under
+compatibility to the disabled zero with the guarded writeback, including
+retained unknown data and a materialized zero for a missing or null angle; no
+rewrite for an explicit zero or disabled compatibility; an ordinary round trip;
+failed-write retry; changed-source reload; and the separate typed invalid-file
+recovery for an undecodable value (defaults plus a broken-file backup), with a
+failed backup installing the protection that declines angle writes.
+
+`ClientConfigBoundsTest` pins the exact default, both clamps, NaN and infinity
+handling, and independence from the cancel cone. `SpatialSelectorSettingsTest`
+covers the inventory stay-open choice defaulting closed, missing and null
+members staying closed, the live setter affecting the next snapshot, and a held
+snapshot retaining its frozen choice. `ClientConfigLocalizationTest` covers the
+eight bundled locales' labels and tooltips, placeholder signatures, the
+shared off value, and the pinned Chinese and English off strings.
+`SettingsCategoryCatalogTest` places the window, angle and stay-open controls
+once each in the Input Interaction category. `OptionUtilsDecimalTest` covers
+every half-degree stop, out-of-range rejection, and the complete
+`<setting name>: <off value>` label at zero. These are model, handler, codec,
+catalog and resource seams, not a recorded run, live widget input, or a
+constructed or rendered settings screen; screen presentation remains owned by
+[configuration UI](../../UI/settings-screen.md#input-interaction-controls).
+
 ## Server-settings snapshots and updates
 
 `ServerSettingsModelTest` covers request correlation, stale responses, denial,
@@ -409,6 +443,11 @@ seams rather than native widget containers, mouse dispatch, or live focus lists.
   when compatibility is toggled are not exercised by a constructed settings
   screen; model clearing, catalog placement and resource presence do not prove
   native widget state;
+- a constructed settings screen's live disabled state, complete localized
+  zero-angle off label and inventory stay-open control input are not covered by
+  the model, codec, catalog or resource fixtures; pending native screen checks
+  remain in the
+  [manual matrix](manual-integration.md#pending-manual-and-integration-matrix);
 - inventory administration and spatial-selector configuration have model,
   persistence, strict wire, draft, catalog and focus-helper seams; live
   administration, native widget input/focus, permission changes, persistence,

@@ -5,7 +5,8 @@
 
 The current suite covers:
 
-- the fixed Target Type and Ping Type catalogs, including their values;
+- the fixed Target Type and Ping Type catalogs, including their values and the
+  `entity_block` ordered Ping Type set that includes `danger`;
 - numeric-priority and declaration-order Target Type resolution;
 - optional-content fail-soft matching;
 - target identity and the captured-ray flow;
@@ -30,7 +31,10 @@ external materialization: an ordinary admission-type rejection emits no WARN,
 while a throwing admission callback emits one WARN with the original message,
 cause, suppressed detail, source frame and committed external locator.
 Both paths reject, release the materialized reference and leave the marker store
-untouched. This is a headless service/callback seam, not a live provider,
+untouched. Its target-type admission cases accept `danger` for a resolved
+`entity_block`, record that whole-marker type on the stored marker, reject the
+disallowed `loot` type with `INVALID_PING_TYPE`, and keep only the accepted
+marker. This is a headless service/callback seam, not a live provider,
 deployed logging configuration or end-to-end server/client validation.
 
 `PacketHandlerTest` covers full buffer consumption after valid or corrupt

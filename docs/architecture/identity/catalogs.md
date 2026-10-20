@@ -17,7 +17,7 @@ The following declaration order, ordered Ping Type sets and defaults are fixed:
 | --- | ---: | --- | --- | --- |
 | `dropped_item` | 100 | entity | `loot, attention, danger` | `loot` |
 | `entity` | 200 | entity | `attention, danger, go_to` | `attention` |
-| `entity_block` | 250 | block | `attention, destroy, take, request` | `attention` |
+| `entity_block` | 250 | block | `attention, destroy, take, request, danger` | `attention` |
 | `block` | 300 | block | `attention, go_to, danger` | `attention` |
 | `location` | `Integer.MAX_VALUE` | location | `go_to, attention, danger` | `go_to` |
 
