@@ -69,6 +69,9 @@ public final class SpatialSelectorSettings {
 	/** Content property/item intent menus are opt-in and disabled by default. */
 	public static final boolean DEFAULT_CONTENT_INTENT_ENABLED = false;
 
+	/** Inventory selection remains closed after the first release unless opted in. */
+	public static final boolean DEFAULT_INVENTORY_SELECTION_STAY_OPEN_ENABLED = false;
+
 	public static final int MIN_GESTURE_SKIP_HOLD_MILLIS = 25;
 	public static final int MAX_GESTURE_SKIP_HOLD_MILLIS = 200;
 	public static final int DEFAULT_GESTURE_SKIP_HOLD_MILLIS = 75;
@@ -107,6 +110,7 @@ public final class SpatialSelectorSettings {
 	private boolean reduceMotion = false;
 	private int preciseCapturePeriodTicks = DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS;
 	private boolean contentIntentEnabled = DEFAULT_CONTENT_INTENT_ENABLED;
+	private boolean inventorySelectionStayOpenEnabled = DEFAULT_INVENTORY_SELECTION_STAY_OPEN_ENABLED;
 	private boolean gestureSkipHoldEnabled = false;
 	private int gestureSkipHoldMillis = DEFAULT_GESTURE_SKIP_HOLD_MILLIS;
 
@@ -210,7 +214,8 @@ public final class SpatialSelectorSettings {
 			clampTrailLength(trailLength), clampTrailOpacity(trailOpacity),
 			contentIntentEnabled, gestureSkipHoldEnabled, clampGestureSkipHoldMillis(gestureSkipHoldMillis),
 			clampInventoryMaxWidthFraction(inventoryMaxWidthFraction),
-			clampInventoryMaxHeightFraction(inventoryMaxHeightFraction));
+			clampInventoryMaxHeightFraction(inventoryMaxHeightFraction),
+			inventorySelectionStayOpenEnabled);
 	}
 
 	public record Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
@@ -218,7 +223,22 @@ public final class SpatialSelectorSettings {
 		boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
 		BigDecimal submenuRadiusScale, int trailLength, int trailOpacity,
 		boolean contentIntentEnabled, boolean gestureSkipHoldEnabled, int gestureSkipHoldMillis,
-		BigDecimal inventoryMaxWidthFraction, BigDecimal inventoryMaxHeightFraction) {
+		BigDecimal inventoryMaxWidthFraction, BigDecimal inventoryMaxHeightFraction,
+		boolean inventorySelectionStayOpenEnabled) {
+
+		/** Previous snapshot forms keep inventory selection closed after the first release. */
+		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,
+			boolean hoverEnabled, int hoverMillis,
+			boolean showTrail, boolean reduceMotion, int preciseCapturePeriodTicks,
+			BigDecimal submenuRadiusScale, int trailLength, int trailOpacity,
+			boolean contentIntentEnabled, boolean gestureSkipHoldEnabled, int gestureSkipHoldMillis,
+			BigDecimal inventoryMaxWidthFraction, BigDecimal inventoryMaxHeightFraction) {
+			this(deadzone, stroke, dwellMillis, rootDistance, hoverEnabled,
+				hoverMillis, showTrail, reduceMotion, preciseCapturePeriodTicks, submenuRadiusScale,
+				trailLength, trailOpacity, contentIntentEnabled, gestureSkipHoldEnabled, gestureSkipHoldMillis,
+				inventoryMaxWidthFraction, inventoryMaxHeightFraction,
+				DEFAULT_INVENTORY_SELECTION_STAY_OPEN_ENABLED);
+		}
 
 		/** Previous snapshot forms retain the initialized inventory panel limits. */
 		public Snapshot(int deadzone, int stroke, int dwellMillis, int rootDistance,

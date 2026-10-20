@@ -585,6 +585,16 @@ public class CommonClient {
 		Game = Minecraft.getInstance();
 		if (pingRuntime != null) pingRuntime.onMouseMove(window, x, y);
 	}
+
+	/** Raw ordinary mouse-look bridge; the runtime accumulator never reads the camera. */
+	public void onLookInput(double yawDegrees, double pitchDegrees) {
+		if (pingRuntime != null) pingRuntime.onLookInput(yawDegrees, pitchDegrees);
+	}
+
+	/** Starts a fresh look-input baseline after focus, capture, warp or cursor transitions. */
+	public void onLookInputReset() {
+		if (pingRuntime != null) pingRuntime.onLookInputReset();
+	}
 	public boolean onMouseScroll(long window, double horizontal, double vertical) {
 		Game = Minecraft.getInstance();
 		return pingRuntime != null && pingRuntime.onMouseScroll(window, horizontal, vertical);

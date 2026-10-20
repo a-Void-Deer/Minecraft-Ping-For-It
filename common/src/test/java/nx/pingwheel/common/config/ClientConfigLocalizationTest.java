@@ -93,6 +93,11 @@ class ClientConfigLocalizationTest {
 
 		assertContainsKey(enUs, "settings.pingforit.wheel_hold_millis");
 		assertContainsKey(enUs, "settings.pingforit.cancel_half_cone_angle_degrees");
+		assertContainsKey(enUs, "settings.pingforit.double_click_danger_window_millis");
+		assertContainsKey(enUs, "settings.pingforit.double_click_danger_window_millis.tooltip");
+		assertContainsKey(enUs, "settings.pingforit.double_click_danger_angle_degrees");
+		assertContainsKey(enUs, "settings.pingforit.double_click_danger_angle_degrees.tooltip");
+		assertContainsKey(enUs, "value.pingforit.off");
 		assertContainsKey(enUs, "settings.pingforit.wheel_inner_radius");
 		assertContainsKey(enUs, "settings.pingforit.wheel_outer_radius");
 		assertContainsKey(enUs, "settings.pingforit.wheel_opacity");
@@ -292,7 +297,8 @@ class ClientConfigLocalizationTest {
 			"settings.pingforit.spatial_selector.hover_enabled",
 			"settings.pingforit.spatial_selector.show_trail",
 			"settings.pingforit.spatial_selector.reduce_motion",
-			"settings.pingforit.spatial_selector.content_intent_enabled");
+			"settings.pingforit.spatial_selector.content_intent_enabled",
+			"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled");
 		Set<String> expectedKeys = new java.util.HashSet<>();
 		for (String key : java.util.stream.Stream.concat(formattedLabels.stream(), booleanLabels.stream()).toList()) {
 			expectedKeys.add(key);
@@ -432,6 +438,31 @@ class ClientConfigLocalizationTest {
 				() -> "the local feedback prefix must be the exact marker resource: " + locale);
 			nonBlankTranslation(json, locale, messageKey);
 		}
+	}
+
+	@Test
+	void doubleClickDangerAndInventoryStayOpenLabelsAreLocalized() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			for (String key : List.of(
+				"settings.pingforit.double_click_danger_window_millis",
+				"settings.pingforit.double_click_danger_angle_degrees")) {
+				String label = nonBlankTranslation(json, locale, key);
+				assertEquals(1, countOccurrences(label, "%s"), locale + ":" + key);
+				assertFalse(label.replace("%s", "").contains("%"), locale + ":" + key);
+			}
+			for (String key : List.of(
+				"settings.pingforit.double_click_danger_window_millis.tooltip",
+				"settings.pingforit.double_click_danger_angle_degrees.tooltip",
+				"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled",
+				"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip")) {
+				assertFalse(nonBlankTranslation(json, locale, key).contains("%"), locale + ":" + key);
+			}
+			nonBlankTranslation(json, locale, "value.pingforit.off");
+		}
+
+		assertEquals("已关闭", readLocaleJson("zh_cn").get("value.pingforit.off").getAsString());
+		assertEquals("Off", readLocaleJson("en_us").get("value.pingforit.off").getAsString());
 	}
 
 	private JsonObject readLocaleJson(String locale) throws IOException {

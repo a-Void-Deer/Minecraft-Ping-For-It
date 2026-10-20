@@ -124,6 +124,18 @@ class ClientConfigBoundsTest {
 	}
 
 	@Test
+	void doubleClickDangerBoundsAreIndependentFromTheCancelCone() {
+		assertEquals(100, ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_WINDOW_MS);
+		assertEquals(25, ClientConfigBounds.clampDoubleClickDangerWindowMs(Integer.MIN_VALUE));
+		assertEquals(300, ClientConfigBounds.clampDoubleClickDangerWindowMs(Integer.MAX_VALUE));
+		assertEquals(0.0, ClientConfigBounds.clampDoubleClickDangerAngleDegrees(-1.0));
+		assertEquals(3.5, ClientConfigBounds.clampDoubleClickDangerAngleDegrees(Double.NaN));
+		assertEquals(3.5, ClientConfigBounds.clampDoubleClickDangerAngleDegrees(3.5));
+		assertEquals(20.0, ClientConfigBounds.clampDoubleClickDangerAngleDegrees(Double.POSITIVE_INFINITY));
+		assertEquals(5, ClientConfigBounds.DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES);
+	}
+
+	@Test
 	void markerDisplayDurationKeepsFollowServerSentinelAndClampsCustomValues() {
 		assertEquals(0, ClientConfigBounds.clampMarkerDisplayDuration(Integer.MIN_VALUE));
 		assertEquals(0, ClientConfigBounds.clampMarkerDisplayDuration(0));

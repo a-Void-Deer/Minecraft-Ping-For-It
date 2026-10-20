@@ -889,6 +889,17 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private boolean inventoryEligible() {
 		return !(ordinary.resolvedTarget().target() instanceof Target.BlockTarget) || ordinary.face().isPresent();
 	}
+	/**
+	 * True while the inventory list or one of its item submenus is the active
+	 * navigation path. Leaving the list back to Content, or a programmatic exit
+	 * through unavailable content, ends this path.
+	 */
+	public boolean inventoryPathActive() {
+		if (!active) return false;
+		String activeMenu = activeMenuId();
+		return activeMenu != null && (activeMenu.equals(inventoryMenu)
+			|| activeMenu.startsWith(inventoryMenu + ":item:"));
+	}
 	private boolean isListActive() { return active && inventoryMenu.equals(activeMenuId()); }
 	private String itemMenu() { return inventoryMenu + ":item:" + menuToken(itemKey); }
 	private String activeMenuId() { var menu = activeMenu(); return menu == null ? null : menu.menuId(); }

@@ -189,6 +189,53 @@ class LongPressCompatibilityControllerTest {
 	}
 
 	@Test
+	void enablingModeWhileABaselineIsActiveDrainsItWithoutSupersedeAbortOrSeed() {
+		Harness h = harness(false, 200L, 20L);
+		h.port.asyncFirstCapture = true;
+		h.controller.onPress(0L);
+		h.controller.onRelease();
+		assertEquals(0, h.port.defaultCreates);
+
+		h.mode.set(true);
+		h.controller.onPress(15L);
+		assertEquals(1, h.port.normalStarts, "the pre-enable baseline is never superseded by a fresh press");
+		assertEquals(0, h.port.aborts, "enabling never aborts an existing ordinary baseline");
+
+		h.port.firstCaptureReady = true;
+		h.clock.now = 20L;
+		h.controller.onRenderFrame(false);
+		assertEquals(1, h.port.defaultCreates);
+		assertEquals(PingInteractionPhase.IDLE, h.port.phase);
+
+		h.controller.onPress(30L);
+		assertEquals(2, h.port.normalStarts, "only after idle does compatibility own a new press");
+		assertEquals(0, h.port.virtualStarts, "the drained baseline is not adopted or replayed as a seed");
+	}
+
+	@Test
+	void preEnableDrainUsesTheOldReleasedBaselineNotTheIgnoredNewPhysicalHold() {
+		Harness h = harness(false, 200L, 20L);
+		h.port.asyncFirstCapture = true;
+		h.controller.onPress(0L);
+		h.controller.onRelease();
+		assertEquals(0, h.port.defaultCreates);
+
+		h.mode.set(true);
+		h.controller.onPress(15L);
+		assertEquals(1, h.port.normalStarts);
+
+		h.port.firstCaptureReady = true;
+		h.clock.now = 20L;
+		h.controller.onRenderFrame(true);
+		assertEquals(1, h.port.defaultCreates,
+			"the ignored new down must not keep the already released old baseline logically held");
+		assertEquals(PingInteractionPhase.IDLE, h.port.phase);
+
+		h.controller.onPress(30L);
+		assertEquals(2, h.port.normalStarts, "compatibility owns only the next press");
+	}
+
+	@Test
 	void disablingModeOnTheNextFrameAbortsVirtualInteractionAndDoesNotReplay() {
 		Harness h = enabledHarness(200L, 20L);
 		h.click(0L);
@@ -400,6 +447,7 @@ class LongPressCompatibilityControllerTest {
 		private long nextToken;
 		private boolean firstPending;
 		private boolean currentReleaseObserved;
+		private boolean logicalHeld;
 		private boolean firstCaptureReady;
 		private boolean asyncFirstCapture;
 		private boolean captureRayAvailable = true;
@@ -421,6 +469,7 @@ class LongPressCompatibilityControllerTest {
 		@Override
 		public Optional<PingInteractionAction> pressAt(long rawPressTimestamp) {
 			normalStarts++;
+			logicalHeld = true;
 			currentPressTimestamp = rawPressTimestamp;
 			currentVirtual = false;
 			currentReleaseObserved = false;
@@ -450,6 +499,7 @@ class LongPressCompatibilityControllerTest {
 
 		@Override
 		public Optional<PingInteractionAction> release() {
+			logicalHeld = false;
 			currentReleaseObserved = true;
 			if (phase == PingInteractionPhase.WHEEL_OPEN) {
 				phase = PingInteractionPhase.IDLE;
@@ -534,12 +584,18 @@ class LongPressCompatibilityControllerTest {
 				aborts++;
 			}
 			phase = PingInteractionPhase.IDLE;
+			logicalHeld = false;
 			firstPending = false;
 		}
 
 		@Override
 		public PingInteractionPhase phase() {
 			return phase;
+		}
+
+		@Override
+		public boolean baselineHeld() {
+			return logicalHeld;
 		}
 
 		private int totalCreates() {

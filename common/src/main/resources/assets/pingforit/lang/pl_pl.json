@@ -417,4 +417,11 @@
   ,"settings.pingforit.spatial_selector.trail_opacity": "Krycie śladu: %s"
   ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Krycie tylko wspólnego śladu wskaźnika i wybranej opcji; nie przygasza menu, opcji, prowadnic ani łącznika."
   ,"unit.pingforit.points": "%s pkt"
+  ,"value.pingforit.off": "Wyłączone"
+  ,"settings.pingforit.double_click_danger_window_millis": "Okno zagrożenia podwójnego kliknięcia: %s"
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Kolejne naciśnięcia w tym oknie są traktowane jako jedno podwójne kliknięcie przy wyznaczaniu kąta zagrożenia. Dotyczy następnego naciśnięcia."
+  ,"settings.pingforit.double_click_danger_angle_degrees": "Kąt zagrożenia podwójnego kliknięcia: %s"
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Kąt zagrożenia podwójnego kliknięcia jest wyznaczany na podstawie aktywnego ruchu myszy. 0 wyłącza zagrożenie podwójnego kliknięcia; tryb zgodności długiego naciśnięcia zeruje go."
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "Zostaw wybór ekwipunku otwarty"
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Pozostawia listę przedmiotów ekwipunku otwartą po pierwszym zwolnieniu. Kolejne dotknięcia wybierają przedmiot, a przytrzymanie anuluje wybór. Dotyczy następnego przytrzymania."
 }

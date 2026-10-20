@@ -428,4 +428,11 @@
   ,"settings.pingforit.spatial_selector.trail_opacity": "Trail Opacity: %s"
   ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Opacity of the shared pointer and selected-option trail only; it does not dim the wheel, options, guides, or connector."
   ,"unit.pingforit.points": "%s points"
+  ,"value.pingforit.off": "Off"
+  ,"settings.pingforit.double_click_danger_window_millis": "Double-Click Danger Window: %s"
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Adjacent presses within this window are treated as one double-click when deriving the danger angle. Applies to the next press."
+  ,"settings.pingforit.double_click_danger_angle_degrees": "Double-Click Danger Angle: %s"
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Danger angle derived from active mouse input for consecutive presses within the window. 0 disables double-click danger; long-press compatibility mode clears it to 0."
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "Keep Inventory Selection Open"
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Keep the inventory item list open after the first release. Later taps select an item, and holding cancels the selection. Applies to the next hold."
 }

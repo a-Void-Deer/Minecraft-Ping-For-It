@@ -87,6 +87,14 @@ public final class LongPressCompatibilityController {
 		void abort();
 
 		PingInteractionPhase phase();
+
+		/**
+		 * The ordinary baseline's logical held state. This is not the new
+		 * physical key state observed while a pre-enable baseline drains.
+		 */
+		default boolean baselineHeld() {
+			return phase() != PingInteractionPhase.IDLE;
+		}
 	}
 
 	/** CREATE_SENT means admitted, recorded and handed to the sender, not server acceptance. */
@@ -122,6 +130,15 @@ public final class LongPressCompatibilityController {
 	private boolean modeObserved;
 	private boolean compatibilityEnabled;
 	private boolean modeDisabledTransitionObserved;
+	/**
+	 * Narrow false-to-true guard: an already-owned ordinary baseline is not
+	 * adopted, aborted, seeded or replayed. It simply finishes through its own
+	 * release/frame path, and compatibility owns only presses after it returns
+	 * to idle.
+	 */
+	private boolean drainingPreEnableBaseline;
+	/** Logical held state of the draining baseline, not a new physical press. */
+	private boolean drainingPreEnableBaselineHeld;
 	private boolean hasLastRawPressTimestamp;
 	private long lastRawPressTimestamp;
 	private boolean hasLastFrameTimestamp;
@@ -173,6 +190,30 @@ public final class LongPressCompatibilityController {
 		this.rawInputReset = Objects.requireNonNull(rawInputReset, "rawInputReset");
 	}
 
+	/** Explicit result for the raw/frame mode router. */
+	public enum ModeObservation { DISABLED, ENABLED, JUST_DISABLED }
+
+	/**
+	 * Observes the live mode at a raw/frame boundary without handling input.
+	 * This keeps the enabling transition and its narrow pre-enable drain guard
+	 * visible even while another controller owns the disabled-mode sequence.
+	 */
+	public boolean observeMode() {
+		return observeModeTransition() == ModeObservation.ENABLED;
+	}
+
+	/**
+	 * Distinguishes an ordinary disabled edge from the one raw edge that first
+	 * observed enabled-to-disabled. The latter already aborted the old baseline
+	 * and reset the raw claim, so it must be consumed rather than handed to the
+	 * rapid-controller as a fresh first press.
+	 */
+	public ModeObservation observeModeTransition() {
+		boolean enabled = syncMode();
+		if (enabled) return ModeObservation.ENABLED;
+		return modeDisabledTransitionObserved ? ModeObservation.JUST_DISABLED : ModeObservation.DISABLED;
+	}
+
 	/**
 	 * Handles one claimed raw press.  The timestamp is the physical monotonic
 	 * press timestamp, not a later tick or frame timestamp.
@@ -190,6 +231,15 @@ public final class LongPressCompatibilityController {
 		}
 
 		observeRawPressTime(rawPressTimestamp);
+
+		if (drainingPreEnableBaseline) {
+			// Do not supersede the pre-enable baseline with a fresh press; its
+			// own release/frame path finishes it without compatibility seeding.
+			if (port.phase() == PingInteractionPhase.IDLE) {
+				drainingPreEnableBaseline = false;
+				drainingPreEnableBaselineHeld = false;
+			} else return Optional.empty();
+		}
 
 		if (candidate != null) {
 			long threshold = effectiveSliceMillis();
@@ -265,6 +315,13 @@ public final class LongPressCompatibilityController {
 			return port.releaseOutcome().action();
 		}
 
+		if (drainingPreEnableBaseline) {
+			drainingPreEnableBaselineHeld = false;
+			BaselineOutcome outcome = port.releaseOutcome();
+			if (port.phase() == PingInteractionPhase.IDLE) drainingPreEnableBaseline = false;
+			return outcome.action();
+		}
+
 		if (candidate != null) {
 			return Optional.empty();
 		}
@@ -301,6 +358,17 @@ public final class LongPressCompatibilityController {
 		}
 
 		long now = observeFrameTime();
+
+		if (drainingPreEnableBaseline) {
+			// A new physical press that arrived during the drain is ignored; only
+			// the old baseline's own logical held/released state may advance it.
+			BaselineOutcome outcome = port.presentFrameOutcome(drainingPreEnableBaselineHeld, now);
+			if (port.phase() == PingInteractionPhase.IDLE) {
+				drainingPreEnableBaseline = false;
+				drainingPreEnableBaselineHeld = false;
+			}
+			return outcome.action();
+		}
 
 		if (candidate != null) {
 			long threshold = effectiveSliceMillis();
@@ -356,6 +424,8 @@ public final class LongPressCompatibilityController {
 	public void abort() {
 		port.abort();
 		clearInteractionState();
+		drainingPreEnableBaseline = false;
+		drainingPreEnableBaselineHeld = false;
 	}
 
 	/**
@@ -363,7 +433,8 @@ public final class LongPressCompatibilityController {
 	 * cleared on a lifecycle boundary (notably a seeded first click).
 	 */
 	public boolean hasPendingState() {
-		return normalInteraction != null || seed != null || candidate != null || deferredPress != null;
+		return normalInteraction != null || seed != null || candidate != null || deferredPress != null
+			|| drainingPreEnableBaseline;
 	}
 
 	private Optional<PingInteractionAction> startFreshPress(long rawPressTimestamp, CapturedRay frozenRay) {
@@ -589,8 +660,20 @@ public final class LongPressCompatibilityController {
 			// or frame.  The virtual interaction is always aborted without action.
 			port.abort();
 			clearInteractionState();
+			drainingPreEnableBaseline = false;
+			drainingPreEnableBaselineHeld = false;
 			rawInputReset.run();
 			modeDisabledTransitionObserved = true;
+		}
+
+		if (modeObserved && !compatibilityEnabled && enabled
+			&& port.phase() != PingInteractionPhase.IDLE) {
+			// Enabling never aborts an existing ordinary baseline and never
+			// adopts it as a compatibility seed. Keep it draining until its own
+			// release/frame path reaches idle, and preserve its logical held
+			// state separately from any new physical press.
+			drainingPreEnableBaseline = true;
+			drainingPreEnableBaselineHeld = port.baselineHeld();
 		}
 
 		modeObserved = true;
@@ -599,6 +682,8 @@ public final class LongPressCompatibilityController {
 		if (!enabled) {
 			// Disabled mode retains no compatibility state and delegates directly.
 			clearInteractionState();
+			drainingPreEnableBaseline = false;
+			drainingPreEnableBaselineHeld = false;
 		}
 
 		return enabled;

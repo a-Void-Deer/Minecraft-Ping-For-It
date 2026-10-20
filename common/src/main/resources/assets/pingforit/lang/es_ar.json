@@ -423,4 +423,11 @@
   ,"settings.pingforit.spatial_selector.trail_opacity": "Opacidad del rastro: %s"
   ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Opacidad solo del rastro compartido del puntero y la opción seleccionada; no atenúa el menú, las opciones, las guías ni el conector."
   ,"unit.pingforit.points": "%s puntos"
+  ,"value.pingforit.off": "Desactivado"
+  ,"settings.pingforit.double_click_danger_window_millis": "Ventana de peligro por doble clic: %s"
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Las pulsaciones consecutivas dentro de esta ventana cuentan como un doble clic al derivar el ángulo de peligro. Se aplica a la siguiente pulsación."
+  ,"settings.pingforit.double_click_danger_angle_degrees": "Ángulo de peligro por doble clic: %s"
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "El ángulo de peligro por doble clic se deriva de la entrada activa del ratón. 0 desactiva el peligro por doble clic; el modo de compatibilidad de pulsación larga lo pone a 0."
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "Mantener abierta la selección del inventario"
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Mantiene abierta la lista de objetos del inventario tras el primer soltar. Los toques posteriores seleccionan un objeto y mantener pulsado cancela la selección. Se aplica al siguiente mantener."
 }

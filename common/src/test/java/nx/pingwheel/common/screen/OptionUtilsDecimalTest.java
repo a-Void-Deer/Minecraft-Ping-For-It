@@ -4,7 +4,10 @@ import com.google.gson.JsonPrimitive;
 import com.mojang.serialization.JsonOps;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
+import nx.pingwheel.common.config.ClientConfigBounds;
 import nx.pingwheel.common.config.SpatialSelectorSettings;
+import nx.pingwheel.common.resource.LanguageUtils;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -33,6 +36,77 @@ class OptionUtilsDecimalTest {
 		OptionInstance<BigDecimal> option = option(value);
 		assertEquals(new BigDecimal("1.3"), value.get());
 		assertEquals(new BigDecimal("1.3"), option.get());
+	}
+
+	@Test
+	void decimalTextOmitsTrailingZerosAndKeepsExactHalfSteps() {
+		assertEquals("3.5", OptionUtils.formatDecimal(new BigDecimal("3.5")));
+		assertEquals("3", OptionUtils.formatDecimal(new BigDecimal("3.0")));
+		assertEquals("0", OptionUtils.formatDecimal(new BigDecimal("0.00")));
+		assertEquals("20", OptionUtils.formatDecimal(new BigDecimal("20.0")));
+	}
+
+	@Test
+	void dangerAngleOptionAddressesEveryHalfDegreeAndRejectsOutsideTheRange() throws ReflectiveOperationException {
+		AtomicReference<BigDecimal> value = new AtomicReference<>(new BigDecimal("3.5"));
+		OptionInstance<BigDecimal> option = OptionUtils.ofDecimal("test.danger.angle",
+			BigDecimal.valueOf(ClientConfigBounds.MIN_DOUBLE_CLICK_DANGER_ANGLE_DEGREES),
+			BigDecimal.valueOf(ClientConfigBounds.MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES),
+			BigDecimal.valueOf(ClientConfigBounds.DOUBLE_CLICK_DANGER_ANGLE_DEGREES_STEP),
+			number -> Component.literal(OptionUtils.formatDecimal(number)), null, value::get, value::set);
+
+		assertEquals(new BigDecimal("3.5"), option.get());
+		Object slider = option.values();
+		var fromSliderValue = slider.getClass().getMethod("fromSliderValue", double.class);
+		var toSliderValue = slider.getClass().getMethod("toSliderValue", Object.class);
+		fromSliderValue.setAccessible(true);
+		toSliderValue.setAccessible(true);
+		for (int position = 0; position <= 40; position++) {
+			BigDecimal expected = new BigDecimal("0.5").multiply(BigDecimal.valueOf(position));
+			double fraction = position / 40.0;
+			BigDecimal actual = (BigDecimal) fromSliderValue.invoke(slider, fraction);
+			assertEquals(0, expected.compareTo(actual), "slider position " + position);
+			double mappedFraction = (double) toSliderValue.invoke(slider, actual);
+			assertEquals(0, expected.compareTo((BigDecimal) fromSliderValue.invoke(slider, mappedFraction)));
+			var encoded = option.codec().encodeStart(JsonOps.INSTANCE, actual).getOrThrow();
+			assertEquals(0, expected.compareTo(encoded.getAsBigDecimal()));
+			assertEquals(0, expected.compareTo(option.codec().parse(JsonOps.INSTANCE, encoded).getOrThrow()));
+		}
+
+		assertTrue(option.codec().parse(JsonOps.INSTANCE, new JsonPrimitive(new BigDecimal("-0.5"))).error().isPresent());
+		assertTrue(option.codec().parse(JsonOps.INSTANCE, new JsonPrimitive(new BigDecimal("20.5"))).error().isPresent());
+	}
+
+	@Test
+	void decimalSettingLabelUsesTheFullLocalizedNameAndOffValueAtZero() {
+		Component label = OptionUtils.decimalSettingLabel(
+			"settings.pingforit.double_click_danger_angle_degrees", BigDecimal.ZERO,
+			LanguageUtils.VALUE_OFF, LanguageUtils.UNIT_DEGREES.getKey());
+
+		var setting = (TranslatableContents) label.getContents();
+		assertEquals("settings.pingforit.double_click_danger_angle_degrees", setting.getKey());
+		var off = (TranslatableContents) ((Component) setting.getArgs()[0]).getContents();
+		assertEquals("value.pingforit.off", off.getKey());
+	}
+
+	@Test
+	void decimalSettingLabelFormatsNonZeroDegreesWithoutATrailingZero() {
+		record ExpectedLabel(String rendered, String stored) {}
+		for (var expected : java.util.List.of(
+			new ExpectedLabel("3.5", "3.5"),
+			new ExpectedLabel("12", "12.0"),
+			new ExpectedLabel("0.5", "0.5"))) {
+			Component label = OptionUtils.decimalSettingLabel(
+				"settings.pingforit.double_click_danger_angle_degrees",
+				new BigDecimal(expected.stored()), LanguageUtils.VALUE_OFF,
+				LanguageUtils.UNIT_DEGREES.getKey());
+
+			var setting = (TranslatableContents) label.getContents();
+			assertEquals("settings.pingforit.double_click_danger_angle_degrees", setting.getKey());
+			var degrees = (TranslatableContents) ((Component) setting.getArgs()[0]).getContents();
+			assertEquals("unit.pingforit.degrees", degrees.getKey());
+			assertEquals(expected.rendered(), ((Component) degrees.getArgs()[0]).getString());
+		}
 	}
 
 	private static OptionInstance<BigDecimal> option(AtomicReference<BigDecimal> value) {

@@ -423,4 +423,11 @@
   ,"settings.pingforit.spatial_selector.trail_opacity": "Spurdeckkraft: %s"
   ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Deckkraft nur der gemeinsamen Zeiger- und Auswahlspur; dimmt weder Menü, Optionen, Hilfslinien noch Verbindungslinie."
   ,"unit.pingforit.points": "%s Punkte"
+  ,"value.pingforit.off": "Aus"
+  ,"settings.pingforit.double_click_danger_window_millis": "Doppelklick-Gefahrenfenster: %s"
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Aufeinanderfolgende Tastendrücke innerhalb dieses Zeitfensters gelten als ein Doppelklick, aus dem der Gefahrenwinkel abgeleitet wird. Gilt ab dem nächsten Tastendruck."
+  ,"settings.pingforit.double_click_danger_angle_degrees": "Doppelklick-Gefahrenwinkel: %s"
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Der Gefahrenwinkel eines Doppelklicks wird aus der aktiven Mausbewegung abgeleitet. 0 deaktiviert die Doppelklick-Gefahr; der Langdruck-Kompatibilitätsmodus setzt ihn auf 0."
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "Inventarauswahl offen halten"
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Hält die Inventarliste nach dem ersten Loslassen offen. Spätere Tipp-Berührungen wählen ein Objekt aus, Halten bricht die Auswahl ab. Gilt ab dem nächsten Halten."
 }

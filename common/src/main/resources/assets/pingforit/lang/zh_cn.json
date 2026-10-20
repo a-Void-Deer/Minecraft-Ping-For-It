@@ -425,4 +425,11 @@
   ,"settings.pingforit.spatial_selector.trail_opacity": "轨迹不透明度：%s"
   ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "仅控制指针与所选选项共享轨迹的不透明度；不影响转盘、选项、参考线或连接线。"
   ,"unit.pingforit.points": "%s 点"
+  ,"value.pingforit.off": "已关闭"
+  ,"settings.pingforit.double_click_danger_window_millis": "双击危险时间窗：%s"
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "相邻两次按下落在此时间窗内时，按一次双击处理并推导危险角度。作用于下一次按下。"
+  ,"settings.pingforit.double_click_danger_angle_degrees": "双击危险角度：%s"
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "双击危险角度按主动鼠标输入推导。0 表示关闭双击危险；长按兼容模式会将其清零。"
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "保持物品栏选择打开"
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "首次松开后保持物品栏物品列表打开；之后的轻点用于选择物品，按住则取消选择。作用于下一次按住。"
 }

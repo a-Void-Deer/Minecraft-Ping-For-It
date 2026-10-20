@@ -74,6 +74,7 @@ import nx.pingwheel.common.client.spatial.SelectorIntent;
 import nx.pingwheel.common.client.spatial.SpatialController;
 import nx.pingwheel.common.client.spatial.SpatialSelectorSession;
 import nx.pingwheel.common.client.spatial.PreciseCaptureRefresh;
+import nx.pingwheel.common.client.input.LookInputTracker;
 import nx.pingwheel.common.config.SpatialSelectorSettings;
 import nx.pingwheel.common.interaction.candidate.FrozenCandidateAcquisition;
 import nx.pingwheel.common.interaction.candidate.CandidateWorkLimits;
@@ -213,6 +214,12 @@ public final class ClientPingRuntime {
 	}
 	private final InteractionTimeSource timeSource;
 	private final LongPressCompatibilityController compatibilityController;
+	private final RapidDangerController rapidDangerController;
+	private final InventorySelectionStayController inventorySelectionStay =
+		new InventorySelectionStayController();
+	private final LookInputTracker lookInputTracker = new LookInputTracker();
+	/** One in-flight staying commit must not re-enter the first-release stay boundary. */
+	private boolean committingInventoryStay;
 	private final SelectedLocaleTranslationKeyCache selectedLocaleTranslationKeys =
 		new SelectedLocaleTranslationKeyCache();
 	private static final CancellationContext EMPTY_CANCELLATION_CONTEXT = createEmptyCancellationContext();
@@ -254,6 +261,11 @@ public final class ClientPingRuntime {
 	 */
 	private final ClientTargetNameResolver selectorTargetNames = new ClientTargetNameResolver();
 	private InteractionToken baselineToken;
+	/**
+	 * The fresh frozen-tap token is runtime-owned during validation so a
+	 * reentrant validator abort can invalidate it before any dispatch.
+	 */
+	private InteractionToken validatingFrozenTapToken;
 	private boolean baselineHeld;
 	private boolean baselineMenuOpened;
 	private boolean abortingScreenTransition;
@@ -350,6 +362,7 @@ public final class ClientPingRuntime {
 			() -> ClientConfig.HANDLER.getConfig().getLongPressCompatibilitySliceMillis(),
 			logger,
 			() -> interactionAccess.resetInput());
+		this.rapidDangerController = new RapidDangerController(new RuntimeRapidDangerPort());
 	}
 
 	/**
@@ -540,6 +553,7 @@ public final class ClientPingRuntime {
 	/** Marker expiry plus periodic Precise capture; ordinary interaction remains event/frame driven. */
 	public void onTick() {
 		observeInteractionLifecycle();
+		checkInventoryStayPath();
 		var lifecycle = interactionAccess.lifecycle();
 		if (lifecycle.level() == null || !lifecycle.player()) { contentChat.clear(); return; }
 
@@ -557,7 +571,28 @@ public final class ClientPingRuntime {
 	/** Handles a claimed physical press immediately on the client thread. */
 	public void onPress(long eventTimeMillis) {
 		if (!observeInteractionLifecycle()) return;
-		compatibilityController.onPress(eventTimeMillis);
+		if (checkInventoryStayPath()) return;
+		if (inventorySelectionStay.consuming()) {
+			inventorySelectionStay.press(eventTimeMillis);
+			return;
+		}
+		switch (compatibilityController.observeModeTransition()) {
+			case ENABLED -> {
+				rapidDangerController.disableForCompatibility();
+				compatibilityController.onPress(eventTimeMillis);
+				return;
+			}
+			case JUST_DISABLED -> {
+				// This edge already aborted the compatibility baseline and reset
+				// the raw claim; it must not become a fresh first press.
+				rapidDangerController.reset();
+				return;
+			}
+			case DISABLED -> {
+				if (!rapidDangerController.onPress(eventTimeMillis))
+					compatibilityController.onPress(eventTimeMillis);
+			}
+		}
 	}
 
 	/**
@@ -575,7 +610,19 @@ public final class ClientPingRuntime {
 	 */
 	public void onRelease() {
 		if (!observeInteractionLifecycle()) return;
-		compatibilityController.onRelease();
+		checkInventoryStayPath();
+		if (inventorySelectionStay.consuming()) {
+			releaseInventoryStay(timeSource.nowMillis());
+			return;
+		}
+		switch (compatibilityController.observeModeTransition()) {
+			case ENABLED -> {
+				rapidDangerController.disableForCompatibility();
+				compatibilityController.onRelease();
+			}
+			case JUST_DISABLED -> rapidDangerController.reset();
+			case DISABLED -> rapidDangerController.onRelease();
+		}
 	}
 
 	/**
@@ -590,7 +637,20 @@ public final class ClientPingRuntime {
 	 */
 	public void onRenderFrame(boolean keyDown) {
 		if (!observeInteractionLifecycle()) return;
-		compatibilityController.onRenderFrame(keyDown);
+		checkInventoryStayPath();
+		if (inventorySelectionStay.consuming()) {
+			presentInventoryStayFrame(keyDown);
+			synchronizeNativeInput();
+			return;
+		}
+		switch (compatibilityController.observeModeTransition()) {
+			case ENABLED -> {
+				rapidDangerController.disableForCompatibility();
+				compatibilityController.onRenderFrame(keyDown);
+			}
+			case JUST_DISABLED -> rapidDangerController.reset();
+			case DISABLED -> rapidDangerController.onRenderFrame(keyDown, timeSource.nowMillis());
+		}
 		synchronizeNativeInput();
 	}
 
@@ -600,8 +660,24 @@ public final class ClientPingRuntime {
 	 * resurrect the interaction.
 	 */
 	public void abort() {
+		rapidDangerController.reset();
+		inventorySelectionStay.reset();
 		compatibilityController.abort();
 		interactionAccess.resetInput();
+	}
+
+	/** Raw mouse-look bridge; the runtime owns the accumulator, never a later camera ray. */
+	public void onLookInput(double yawDegrees, double pitchDegrees) {
+		lookInputTracker.acceptDegrees(yawDegrees, pitchDegrees);
+	}
+
+	/** Starts a fresh look baseline after a focus, capture, warp or cursor lifecycle change. */
+	public void onLookInputReset() {
+		lookInputTracker.reset();
+	}
+
+	private boolean isCompatibilityLive() {
+		return ClientConfig.HANDLER.getConfig().isLongPressCompatibilityMode();
 	}
 
 	public void abortForScreenTransition() {
@@ -720,6 +796,18 @@ public final class ClientPingRuntime {
 		Optional<PingInteractionAction> action;
 		ClientPingActionDispatcher.DispatchOutcome sent = ClientPingActionDispatcher.DispatchOutcome.OTHER;
 		try {
+			if (!committingInventoryStay && !inventorySelectionStay.active()
+				&& machine.phase() == PingInteractionPhase.WHEEL_OPEN && selector != null
+				&& baselineToken != null && selectorSettings != null
+				&& selectorSettings.inventorySelectionStayOpenEnabled() && selector.inventoryPathActive()) {
+				// First release on the inventory list or an item submenu only
+				// stays. The terminal selector release API is deliberately not
+				// called, so token, session, preview and native ownership remain.
+				inventorySelectionStay.begin(machine.longPressMillis());
+				baselineMenuOpened = true;
+				return new LongPressCompatibilityController.BaselineOutcome(Optional.empty(),
+					LongPressCompatibilityController.DispatchOutcome.NOT_SENT, true);
+			}
 			if (machine.phase() == PingInteractionPhase.WHEEL_OPEN && selector != null && baselineToken != null) {
 				var opened = selector;
 				interactionAccess.inputFrame().ifPresent(frame -> constrainSelector(frame, now));
@@ -760,6 +848,80 @@ public final class ClientPingRuntime {
 		}
 	}
 
+	private void releaseInventoryStay(long now) {
+		InventorySelectionStayController.ReleaseDecision decision = inventorySelectionStay.release(now);
+		if (decision == InventorySelectionStayController.ReleaseDecision.NONE) return;
+		if (decision == InventorySelectionStayController.ReleaseDecision.CANCEL) {
+			cancelInventoryStay();
+			return;
+		}
+		// Consume the latest authorized content before committing so a revoked
+		// preview or removed row can never submit its stale reference.
+		if (selector != null) selector.tick(now);
+		if (!staySelectorAvailable()) {
+			cancelInventoryStay();
+			return;
+		}
+		committingInventoryStay = true;
+		try {
+			baselineRelease();
+		} finally {
+			committingInventoryStay = false;
+			inventorySelectionStay.close();
+		}
+	}
+
+	private void presentInventoryStayFrame(boolean keyDown) {
+		if (!inventorySelectionStay.active()) return;
+		long now = timeSource.nowMillis();
+		if (inventorySelectionStay.cancelOnFrame(now)) {
+			cancelInventoryStay();
+			return;
+		}
+		// The staying tap never drives the selector as a held wheel gesture; the
+		// selector still receives its ordinary frame tick and paint timing.
+		baselinePresentFrame(false, now);
+		checkInventoryStayPath();
+	}
+
+	private void refreshInventoryStayPath(long now) {
+		if (!inventorySelectionStay.active()) return;
+		// A packet/reload boundary is not a frame; consume its owned content
+		// once so authorization or source revocation is visible before any
+		// later release can submit a stale row.
+		if (selector != null) selector.tick(now);
+		checkInventoryStayPath();
+	}
+
+	/** @return true when an active staying selector was just closed by a path exit */
+	private boolean checkInventoryStayPath() {
+		if (!inventorySelectionStay.active()) return false;
+		if (selector == null || !selector.inventoryPathActive()) {
+			inventorySelectionStay.closeForPathExit();
+			cancelInventoryStay();
+			return true;
+		}
+		return false;
+	}
+
+	private boolean staySelectorAvailable() {
+		return selector != null && baselineToken != null && activeInteraction.isCurrent(baselineToken)
+			&& machine.phase() == PingInteractionPhase.WHEEL_OPEN && selector.inventoryPathActive();
+	}
+
+	/** Closes a staying selector without a create, a Cancel Marker or a Content return. */
+	private void cancelInventoryStay() {
+		InteractionToken cancelled = baselineToken;
+		machine.abort();
+		if (cancelled != null) activeInteraction.invalidate(cancelled);
+		baselineToken = null;
+		baselineHeld = false;
+		baselineMenuOpened = false;
+		finishSelector(true);
+		interactionAccess.syncMouse(machine.phase());
+		synchronizeNativeInput();
+	}
+
 	private LongPressCompatibilityController.BaselineOutcome baselinePresentFrame(boolean keyDown) {
 		return baselinePresentFrame(keyDown, timeSource.nowMillis());
 	}
@@ -768,13 +930,21 @@ public final class ClientPingRuntime {
 		boolean keyDown,
 		long frameTimeMillis
 	) {
+		return baselinePresentFrame(keyDown, frameTimeMillis, frameTimeMillis);
+	}
+
+	private LongPressCompatibilityController.BaselineOutcome baselinePresentFrame(
+		boolean keyDown,
+		long frameTimeMillis,
+		long observedTimeMillis
+	) {
 		InteractionToken presented = baselineToken;
 		if (!keyDown && machine.phase() != PingInteractionPhase.WHEEL_OPEN) baselineHeld = false;
 		var inputFrame = interactionAccess.inputFrame();
 		boolean presentable = inputFrame.isPresent();
 		if (!baselineHeld || ClientConfig.HANDLER.getConfig().isLongPressCompatibilityMode()) gestureSkipHold.reset();
 		inputFrame.ifPresentOrElse(gestureSkipHold::synchronize, gestureSkipHold::rePrime);
-		machine.presentFrameAt(keyDown && presentable, frameTimeMillis,
+		machine.presentFrameAt(keyDown && presentable, observedTimeMillis,
 			baselineHeld && gestureSkipHold.eligible(frameTimeMillis));
 		if (selectorContent != null && machine.phase() != PingInteractionPhase.IDLE) {
 			try { selectorContent.tick(); }
@@ -807,7 +977,7 @@ public final class ClientPingRuntime {
 		// short action on this frame.
 		boolean actionKeyDown = keyDown || machine.phase() == PingInteractionPhase.WHEEL_OPEN;
 		Optional<PingInteractionAction> action = machine.updateAt(actionKeyDown, WheelSelection.NONE,
-			emptyCancellationContext(), frameTimeMillis);
+			emptyCancellationContext(), observedTimeMillis);
 		if (baselineToken != presented || !activeInteraction.isCurrent(presented)) action = Optional.empty();
 		var sent = action.isPresent() ? dispatcher.dispatchOutcome(action.get()) : ClientPingActionDispatcher.DispatchOutcome.OTHER;
 		var outcome = baselineOutcome(action, sent);
@@ -827,6 +997,10 @@ public final class ClientPingRuntime {
 	private void baselineAbort() {
 		CapturedPingContext abortedCapture = activeInteraction.currentContext().orElse(null);
 		machine.abort();
+		if (validatingFrozenTapToken != null) {
+			activeInteraction.invalidate(validatingFrozenTapToken);
+			validatingFrozenTapToken = null;
+		}
 		if (baselineToken != null) activeInteraction.invalidate(baselineToken);
 		baselineHeld = false;
 		baselineToken = null;
@@ -987,6 +1161,8 @@ public final class ClientPingRuntime {
 	}
 
 	private void finishSelector(boolean hard, CapturedPingContext closingCapture) {
+		inventorySelectionStay.close();
+		committingInventoryStay = false;
 		gestureSkipHold.reset();
 		if (preciseRefresh != null) preciseRefresh.end();
 		preciseRefresh = null;
@@ -1122,6 +1298,7 @@ public final class ClientPingRuntime {
 	}
 	public void onMouseMove(long window, double x, double y) {
 		if (!observeInteractionLifecycle()) return;
+		checkInventoryStayPath();
 		if (selectorInput == null) {
 			if (!baselineHeld || baselineToken == null || !activeInteraction.isCurrent(baselineToken)
 				|| machine.phase() != PingInteractionPhase.PRESSED || ClientConfig.HANDLER.getConfig().isLongPressCompatibilityMode()) {
@@ -1138,9 +1315,12 @@ public final class ClientPingRuntime {
 			selectorInput.onMove(window, x, y, frame, now);
 		}, selectorInput::rePrime);
 		synchronizePreciseBranch();
+		checkInventoryStayPath();
 	}
 	public boolean onMouseScroll(long window, double horizontal, double vertical) {
-		if (!observeInteractionLifecycle() || selectorInput == null || machine.phase() != PingInteractionPhase.WHEEL_OPEN) return false;
+		if (!observeInteractionLifecycle()) return false;
+		checkInventoryStayPath();
+		if (selectorInput == null || machine.phase() != PingInteractionPhase.WHEEL_OPEN) return false;
 		var frame = interactionAccess.inputFrame();
 		if (frame.isEmpty()) { selectorInput.rePrime(); return false; }
 		constrainSelector(frame.get(), timeSource.nowMillis());
@@ -1194,6 +1374,79 @@ public final class ClientPingRuntime {
 		@Override
 		public PingInteractionPhase phase() {
 			return machine.phase();
+		}
+
+		@Override
+		public boolean baselineHeld() {
+			return ClientPingRuntime.this.baselineHeld;
+		}
+	}
+
+	private final class RuntimeRapidDangerPort implements RapidDangerController.Port {
+		@Override public Optional<PingInteractionAction> press(long rawPressTimestamp) {
+			return baselinePress(rawPressTimestamp);
+		}
+		@Override public Optional<PingInteractionAction> press(long rawPressTimestamp, CapturedRay pressRay) {
+			return baselinePress(rawPressTimestamp, pressRay);
+		}
+		@Override public Optional<CapturedRay> capturePressRay() {
+			return interactionAccess.capturePressRay();
+		}
+		@Override public LongPressCompatibilityController.BaselineOutcome releaseOutcome() {
+			return baselineRelease();
+		}
+		@Override public LongPressCompatibilityController.BaselineOutcome presentFrameOutcome(
+			boolean keyDown, long frameTimeMillis) {
+			return baselinePresentFrame(keyDown, frameTimeMillis);
+		}
+		@Override public LongPressCompatibilityController.BaselineOutcome presentFrameOutcome(
+			boolean keyDown, long frameTimeMillis, long observedTimeMillis) {
+			return baselinePresentFrame(keyDown, frameTimeMillis, observedTimeMillis);
+		}
+		@Override public void abortInteraction() {
+			baselineAbort();
+		}
+		@Override public Optional<PingInteractionAction> frozenDangerTap(long physicalDownTimeMillis,
+			CapturedPingContext firstCapture, PingType dangerType) {
+			long observed = timeSource.nowMillis();
+			if (observed < physicalDownTimeMillis) observed = physicalDownTimeMillis;
+			InteractionToken token = machine.pressFrozenTapAt(physicalDownTimeMillis, observed,
+				firstCapture, dangerType);
+			if (!activeInteraction.isCurrent(token)) return Optional.empty();
+			validatingFrozenTapToken = token;
+			try {
+				Optional<PingInteractionAction> action = machine.updateAt(false, WheelSelection.NONE,
+					emptyCancellationContext(), observed);
+				// Validation may have reentrantly aborted the runtime. The abort
+				// invalidates this exact token through baselineAbort, so a valid
+				// validator result can never dispatch after it.
+				if (!activeInteraction.isCurrent(token)) action = Optional.empty();
+				if (action.isPresent() && activeInteraction.isCurrent(token))
+					dispatcher.dispatchOutcome(action.get());
+				return action;
+			} finally {
+				if (validatingFrozenTapToken == token) validatingFrozenTapToken = null;
+				activeInteraction.invalidate(token);
+				interactionAccess.syncMouse(machine.phase());
+			}
+		}
+		@Override public PingInteractionPhase phase() {
+			return machine.phase();
+		}
+		@Override public long nowMillis() {
+			return timeSource.nowMillis();
+		}
+		@Override public RapidDangerController.LookSample lookSample() {
+			return RapidDangerController.LookSample.of(lookInputTracker.snapshot());
+		}
+		@Override public boolean compatibilityEnabled() {
+			return isCompatibilityLive();
+		}
+		@Override public int dangerWindowMillis() {
+			return ClientConfig.HANDLER.getConfig().getDoubleClickDangerWindowMs();
+		}
+		@Override public double dangerAngleDegrees() {
+			return ClientConfig.HANDLER.getConfig().getDoubleClickDangerAngleDegrees();
 		}
 	}
 
@@ -1775,6 +2028,7 @@ public final class ClientPingRuntime {
 					handleRejected(packet.requestId(), packet.requestKind(), packet.rejectReason());
 			}
 		}
+		if (inventorySelectionStay.active()) refreshInventoryStayPath(timeSource.nowMillis());
 	}
 
 	/** Read-only UI entry point; negotiation and raw values remain runtime-private. */
@@ -1804,6 +2058,7 @@ public final class ClientPingRuntime {
 			&& inventory.selectionResult(packet.commitId()) != null && packet.rejection() == MarkerRejectReason.TARGET_GONE
 			&& createRequestTracker.isLatest(CreateRequestTracker.Route.INVENTORY, packet.commitId()))
 			errorSink.showLocalError(PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE_KEY, PingInteractionAction.TargetGone.TARGET_GONE_COLOR);
+		if (inventorySelectionStay.active()) refreshInventoryStayPath(timeSource.nowMillis());
 	}
 
 	/** Caller supplies already-observed typed values; this method never samples the world. */

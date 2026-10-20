@@ -62,7 +62,7 @@ public final class TargetTypeCatalog {
 				"entity_block",
 				250,
 				TargetKind.BLOCK,
-				List.of(pingType(pingTypes, "attention"), pingType(pingTypes, "destroy"), pingType(pingTypes, "take"), pingType(pingTypes, "request")),
+				List.of(pingType(pingTypes, "attention"), pingType(pingTypes, "destroy"), pingType(pingTypes, "take"), pingType(pingTypes, "request"), pingType(pingTypes, "danger")),
 				pingType(pingTypes, "attention")
 			),
 			new TargetType(

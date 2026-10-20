@@ -12,7 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Checks real mapped callback ABI and effective registration, not a live Mixin transformation. */
@@ -126,6 +128,80 @@ class NativeSelectorMixinContractTest {
 			.anyMatch(annotation -> ((List<?>) value(annotation, "method")).stream()
 				.anyMatch(method -> method.toString().startsWith("onPress"))),
 			"raw presses/releases must still reach KeyMapping, including a mouse-bound ping release");
+	}
+	@Test void lookInputHooksReadPreUpdateCoordinatesAndBridgeOnlyAfterVanillaMove() throws Exception {
+		ClassNode bridge = readClass(MouseHandlerMixin.class, "MouseHandlerMixin.class");
+		var begin = method(bridge, "pingforit$lookInputBegin");
+		var end = method(bridge, "pingforit$lookInputEnd");
+
+		for (var hook : List.of(begin, end)) {
+			assertEquals("(JDDLorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;)V", hook.desc);
+			var inject = inject(hook);
+			assertEquals(List.of("onMove(JDD)V"), value(inject, "method"));
+			assertNull(value(inject, "cancellable"), "vanilla look bookkeeping must still run");
+		}
+		assertEquals("HEAD", atValue(begin));
+		assertEquals("TAIL", atValue(end));
+
+		var beginCalls = calls(begin);
+		for (String accessor : List.of("xpos", "ypos")) {
+			assertTrue(beginCalls.stream().anyMatch(call -> call.owner.equals("net/minecraft/client/MouseHandler")
+				&& call.name.equals(accessor) && call.desc.equals("()D")),
+				"the delta uses the coordinate before vanilla updates it: " + accessor);
+		}
+		assertTrue(beginCalls.stream().anyMatch(call -> call.owner.equals("nx/pingwheel/common/client/input/LookInputTracker")
+			&& call.name.equals("degreesFromPixels") && call.desc.equals("(DDZ)D")));
+		assertTrue(beginCalls.stream().anyMatch(call -> call.name.equals("onLookInputReset")),
+			"a focus loss resets the look baseline");
+		assertFalse(beginCalls.stream().anyMatch(call -> call.name.equals("onLookInput")),
+			"nothing is published before the vanilla callback completes");
+
+		for (var hook : List.of(begin, end)) {
+			assertFalse(fieldReads(hook).stream().anyMatch(read -> read.name.equals("accumulatedDX")
+				|| read.name.equals("accumulatedDY")),
+				"one callback must not reuse the per-frame accumulated movement");
+		}
+
+		var endCalls = calls(end);
+		assertTrue(endCalls.stream().anyMatch(call -> call.owner.equals("nx/pingwheel/common/CommonClient")
+			&& call.name.equals("onLookInput") && call.desc.equals("(DD)V")));
+		assertFalse(endCalls.stream().anyMatch(call -> call.name.equals("onMouseMove")),
+			"the selector's absolute-position hook remains separate");
+
+		var selector = method(bridge, "pingforit$selectorMove");
+		assertEquals("TAIL", atValue(selector));
+		assertTrue(calls(selector).stream().anyMatch(call -> call.owner.equals("nx/pingwheel/common/CommonClient")
+			&& call.name.equals("onMouseMove") && call.desc.equals("(JDD)V")));
+
+		for (String field : List.of("ignoreFirstMove", "mouseGrabbed")) {
+			assertTrue(bridge.fields.stream().anyMatch(fieldNode -> fieldNode.name.equals(field)
+				&& fieldNode.desc.equals("Z")), field);
+		}
+		for (String resetHook : List.of("pingforit$beforeCapture", "pingforit$reprime", "pingforit$cursorEntered")) {
+			assertTrue(calls(method(bridge, resetHook)).stream().anyMatch(call -> call.name.equals("onLookInputReset")),
+				resetHook + " starts a fresh look baseline");
+		}
+	}
+	private static MethodNode method(ClassNode node, String name) {
+		return node.methods.stream().filter(method -> method.name.equals(name)).findFirst().orElseThrow();
+	}
+	private static AnnotationNode inject(MethodNode method) {
+		return annotations(method.visibleAnnotations, method.invisibleAnnotations).stream()
+			.filter(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/Inject;"))
+			.findFirst().orElseThrow();
+	}
+	private static String atValue(MethodNode method) {
+		return (String) value((AnnotationNode) ((List<?>) value(inject(method), "at")).getFirst(), "value");
+	}
+	private static List<MethodInsnNode> calls(MethodNode method) {
+		var calls = new ArrayList<MethodInsnNode>();
+		for (var instruction : method.instructions) if (instruction instanceof MethodInsnNode call) calls.add(call);
+		return calls;
+	}
+	private static List<FieldInsnNode> fieldReads(MethodNode method) {
+		var reads = new ArrayList<FieldInsnNode>();
+		for (var instruction : method.instructions) if (instruction instanceof FieldInsnNode field) reads.add(field);
+		return reads;
 	}
 	private static ClassNode readClass(Class<?> type, String name) throws Exception {
 		ClassNode node = new ClassNode();

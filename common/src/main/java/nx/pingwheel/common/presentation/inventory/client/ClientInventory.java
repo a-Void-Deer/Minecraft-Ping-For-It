@@ -434,6 +434,15 @@ public final class ClientInventory {
 		return outcome;
 	}
 
+	/**
+	 * Whether this exact local preview request still exists. A purged request
+	 * is absent, unlike a legitimately still-updating empty preview, so a
+	 * consumer can distinguish revocation from normal loading.
+	 */
+	public boolean hasPreview(long requestId) {
+		return previews.containsKey(requestId);
+	}
+
 	/** Immutable preview projection; an unknown request yields an empty preview. */
 	public Preview preview(long requestId) {
 		PreviewState state = previews.get(requestId);

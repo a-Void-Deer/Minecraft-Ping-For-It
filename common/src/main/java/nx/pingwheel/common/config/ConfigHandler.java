@@ -491,7 +491,25 @@ public class ConfigHandler <T extends IConfig> {
 					changed = true;
 				}
 			}
-			return changed ? "client: obsolete policy or conflicting gesture preference normalized" : null;
+			// Compatibility mode owns a real zero angle, not a display-only mask.
+			// Normalize absent, null and non-zero raw values so a same-version load
+			// persists the same invariant the setters and validation enforce. A
+			// string that the typed double reader accepts (including "NaN") is
+			// normalized too; an undecodable value stays for typed recovery.
+			if (isTrue(root.get("longPressCompatibilityMode"))) {
+				JsonElement angle = root.get("doubleClickDangerAngleDegrees");
+				if (angle == null || angle.isJsonNull()) {
+					root.addProperty("doubleClickDangerAngleDegrees", 0.0);
+					changed = true;
+				} else {
+					Double decoded = decodedDouble(angle);
+					if (decoded != null && (Double.isNaN(decoded) || decoded != 0.0)) {
+						root.addProperty("doubleClickDangerAngleDegrees", 0.0);
+						changed = true;
+					}
+				}
+			}
+			return changed ? "client: obsolete policy or conflicting press preference normalized" : null;
 		}
 
 		return null;
@@ -499,6 +517,31 @@ public class ConfigHandler <T extends IConfig> {
 
 	private static boolean isTrue(JsonElement value) {
 		return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean() && value.getAsBoolean();
+	}
+
+	/**
+	 * Mirrors the typed Gson double reader for a present primitive: a JSON number
+	 * uses its numeric value, while a string uses {@link Double#parseDouble}.
+	 * Returns null when the value cannot be decoded as a double.
+	 */
+	private static Double decodedDouble(JsonElement value) {
+		if (value == null || !value.isJsonPrimitive()) return null;
+		var primitive = value.getAsJsonPrimitive();
+		if (primitive.isNumber()) {
+			try {
+				return primitive.getAsDouble();
+			} catch (RuntimeException failure) {
+				return null;
+			}
+		}
+		if (primitive.isString()) {
+			try {
+				return Double.parseDouble(primitive.getAsString());
+			} catch (NumberFormatException failure) {
+				return null;
+			}
+		}
+		return null;
 	}
 
 	private static String normalizeServerPresentationShape(JsonObject root) {

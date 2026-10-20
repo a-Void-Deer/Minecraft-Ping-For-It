@@ -15,6 +15,8 @@ import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.ResolvedTarget;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.TargetKind;
+import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
 import nx.pingwheel.common.interaction.candidate.Candidate;
@@ -443,9 +445,14 @@ class SpatialSelectorSessionTest {
 		var choices = current(session).choices();
 		assertEquals(List.of("danger", "content", "reserved-ne", "reserved-se", "cancel-marker", "precise", "intent", "settings"),
 			choices.stream().map(SpatialController.ChoiceView::id).toList());
-		assertTrue(choices.getFirst().disabled(), "entity-block disallows whole-marker danger");
+		assertFalse(choices.getFirst().disabled(), "entity-block allows whole-marker danger");
 		assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(1));
 		assertFalse(session.open(2), "a facade cannot reopen its old request fence");
+		var danger = session(target, Map.of(), false, new Content());
+		danger.open(0); focus(danger, "danger", 1);
+		var dangerIntent = assertInstanceOf(SelectorIntent.CreateTarget.class, danger.releaseIntent(2));
+		assertEquals("danger", dangerIntent.pingType().id());
+		assertSame(target, dangerIntent.candidate());
 		var cancel = session(target, Map.of(), false, new Content());
 		cancel.open(0); focus(cancel, "cancel-marker", 1);
 		assertInstanceOf(SelectorIntent.CancelOwnMarker.class, cancel.releaseIntent(2));
@@ -657,7 +664,20 @@ class SpatialSelectorSessionTest {
 
 	@Test
 	void unavailableDangerAndReservedAndBranchReleaseDoNotCreate() {
-		for (String id : List.of("danger", "reserved-ne", "content", "precise")) {
+		var noDangerType = new TargetType(
+			"test_without_danger", 250, TargetKind.BLOCK,
+			List.of(ping("attention")), ping("attention"));
+		var noDangerTarget = new SpatialSelectorSession.CapturedTarget("without-danger",
+			new ResolvedTarget(new Target.BlockTarget("minecraft:overworld", 1, 4, 5, "minecraft:chest"), noDangerType),
+			Optional.of(BlockFace.NORTH), Optional.of(new WorldVector(1, 2, 3)));
+		var unavailableDanger = session(noDangerTarget, Map.of(), false, new Content());
+		unavailableDanger.open(0);
+		assertTrue(current(unavailableDanger).choices().getFirst().disabled(),
+			"a test-only target type without danger keeps the root choice unavailable");
+		focus(unavailableDanger, "danger", 1);
+		assertInstanceOf(SelectorIntent.None.class, unavailableDanger.releaseIntent(2));
+
+		for (String id : List.of("reserved-ne", "content", "precise")) {
 			var session = session(target("ordinary", "entity_block", true), Map.of(), false, new Content());
 			session.open(0); focus(session, id, 1);
 			assertInstanceOf(SelectorIntent.None.class, session.releaseIntent(2));
@@ -1629,5 +1649,25 @@ class SpatialSelectorSessionTest {
 			"the item Back return keeps X and synchronizes Y to the retained option");
 		assertEquals(-100, session.snapshot().radial().pointer().y(), 1e-9);
 		assertTrue(session.snapshot().inventory().open());
+	}
+
+	@Test
+	void inventoryPathActiveCoversTheListAndItemSubmenuAndEndsAtContent() {
+		var session = openedList(false, new Content());
+		assertTrue(session.inventoryPathActive());
+		double forward = session.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		session.moveGui(forward * 200, 0, 290);
+		assertTrue(current(session).menuId().contains(":item:"));
+		assertTrue(session.inventoryPathActive(), "an item submenu remains on the inventory path");
+
+		var back = current(session).choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow();
+		focus(session, back.id(), 300);
+		session.tick(300 + session.snapshot().settings().dwellMillis() + 1);
+		assertTrue(current(session).menuId().endsWith(":inventory"));
+		assertTrue(session.inventoryPathActive(), "item Back returns to the staying list");
+
+		double backSign = session.snapshot().inventory().direction().back() == InventoryListModel.Side.LEFT ? -1 : 1;
+		session.moveGui(backSign * 200, 0, 700);
+		assertFalse(session.inventoryPathActive(), "leaving the list for Content ends the inventory path");
 	}
 }

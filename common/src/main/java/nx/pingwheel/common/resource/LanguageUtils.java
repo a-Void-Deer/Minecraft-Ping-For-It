@@ -12,6 +12,7 @@ public class LanguageUtils {
 
 	public static final MutableComponent VALUE_INFINITE = LanguageUtils.of("value", "infinite").get();
 	public static final MutableComponent VALUE_HIDDEN = LanguageUtils.of("value", "hidden").get();
+	public static final MutableComponent VALUE_OFF = LanguageUtils.of("value", "off").get();
 	public static final MutableComponent NEWLINE = Component.literal("\n");
 	public static final LanguageUtils UNIT_METERS = LanguageUtils.of("unit", "meters");
 	public static final LanguageUtils UNIT_PERCENT = LanguageUtils.of("unit", "percent");

@@ -511,6 +511,7 @@ class SpatialSelectorSettingsTest {
 				new BigDecimal("2"), 64, 25, true, true, 100))) {
 			assertEquals(defaults.inventoryMaxWidthFraction(), previous.inventoryMaxWidthFraction());
 			assertEquals(defaults.inventoryMaxHeightFraction(), previous.inventoryMaxHeightFraction());
+			assertFalse(previous.inventorySelectionStayOpenEnabled());
 		}
 
 		SpatialSelectorSettings.Snapshot canonical = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
@@ -521,6 +522,32 @@ class SpatialSelectorSettingsTest {
 		assertTrue(canonical.contentIntentEnabled());
 		assertTrue(canonical.gestureSkipHoldEnabled());
 		assertEquals(100, canonical.gestureSkipHoldMillis());
+	}
+
+	@Test
+	void inventorySelectionStayOpenDefaultsClosedAndFreezesIntoTheNextSnapshot() {
+		var defaults = new SpatialSelectorSettings();
+		assertFalse(defaults.isInventorySelectionStayOpenEnabled());
+		assertFalse(defaults.snapshot().inventorySelectionStayOpenEnabled());
+
+		for (String json : List.of("{}", "{\"inventorySelectionStayOpenEnabled\":null}")) {
+			var settings = new Gson().fromJson(json, SpatialSelectorSettings.class);
+			settings.validate();
+			assertFalse(settings.isInventorySelectionStayOpenEnabled(), json);
+			assertFalse(settings.snapshot().inventorySelectionStayOpenEnabled(), json);
+		}
+
+		var settings = new SpatialSelectorSettings();
+		var frozen = settings.snapshot();
+		settings.setInventorySelectionStayOpenEnabled(true);
+		assertTrue(settings.isInventorySelectionStayOpenEnabled());
+		assertFalse(frozen.inventorySelectionStayOpenEnabled(), "an existing hold keeps its frozen choice");
+		assertTrue(settings.snapshot().inventorySelectionStayOpenEnabled());
+
+		var canonical = new SpatialSelectorSettings.Snapshot(18, 50, 180, 55,
+			false, 500, true, false, 25, new BigDecimal("2"), 64, 25, true, true, 100,
+			new BigDecimal("0.475"), new BigDecimal("0.825"), true);
+		assertTrue(canonical.inventorySelectionStayOpenEnabled());
 	}
 
 	private static SpatialSelectorSettings explicitSettings() {

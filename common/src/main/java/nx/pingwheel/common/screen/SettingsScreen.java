@@ -592,12 +592,15 @@ public class SettingsScreen extends OptionsSubScreen {
 			case LONG_PRESS_COMPATIBILITY_MODE -> this.addOption(setting, this.getLongPressCompatibilityModeOption(), true);
 			case LONG_PRESS_COMPATIBILITY_SLICE_MILLIS -> this.addOption(setting, this.getLongPressCompatibilitySliceMillisOption(), true);
 			case CANCEL_HALF_CONE_ANGLE_DEGREES -> this.addOption(setting, this.getCancelHalfConeAngleDegreesOption(), true);
+			case DOUBLE_CLICK_DANGER_WINDOW -> this.addOption(setting, this.getDoubleClickDangerWindowMsOption(), true);
+			case DOUBLE_CLICK_DANGER_ANGLE -> this.addOption(setting, this.getDoubleClickDangerAngleDegreesOption(), true);
 			case SPATIAL_DEADZONE -> this.addOption(setting, this.getSpatialDeadzoneOption(), false);
 			case SPATIAL_STROKE -> this.addOption(setting, this.getSpatialStrokeOption(), false);
 			case SPATIAL_DWELL_MILLIS -> this.addOption(setting, this.getSpatialDwellOption(), false);
 			case SPATIAL_HOVER_ENABLED -> this.addOption(setting, this.getSpatialHoverEnabledOption(), true);
 			case SPATIAL_HOVER_MILLIS -> this.addOption(setting, this.getSpatialHoverMillisOption(), false);
 			case SPATIAL_CONTENT_INTENT_ENABLED -> this.addOption(setting, this.getSpatialContentIntentEnabledOption(), false);
+			case SPATIAL_INVENTORY_SELECTION_STAY_OPEN_ENABLED -> this.addOption(setting, this.getSpatialInventorySelectionStayOpenEnabledOption(), false);
 			case PRECISE_CAPTURE_PERIOD_TICKS -> this.addOption(setting, this.getPreciseCapturePeriodTicksOption(), false);
 			case CHANNEL -> this.addChannelRow();
 			case PING_VOLUME -> this.addOption(setting, this.getPingVolumeOption(), false);
@@ -621,6 +624,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		final AbstractWidget widget = option.createButton(Game.options, 0, 0, width);
 		if (setting == Setting.SPATIAL_GESTURE_SKIP_HOLD_ENABLED || setting == Setting.SPATIAL_GESTURE_SKIP_HOLD_MILLIS)
 			widget.active = !config.isLongPressCompatibilityMode();
+		if (setting == Setting.DOUBLE_CLICK_DANGER_ANGLE && config.isLongPressCompatibilityMode())
+			widget.active = false;
 		if (fullWidth) {
 			this.addFullWidth(setting.id(), widget);
 		} else {
@@ -2504,6 +2509,42 @@ public class SettingsScreen extends OptionsSubScreen {
 			value -> text.get(LanguageUtils.UNIT_DEGREES.get(value)),
 			config::getCancelHalfConeAngleDegrees,
 			config::setCancelHalfConeAngleDegrees);
+	}
+
+	private OptionInstance<Integer> getDoubleClickDangerWindowMsOption() {
+		final var text = LanguageUtils.settings("double_click_danger_window_millis");
+		return OptionUtils.ofInt(text.getKey(),
+			MIN_DOUBLE_CLICK_DANGER_WINDOW_MS,
+			MAX_DOUBLE_CLICK_DANGER_WINDOW_MS,
+			DOUBLE_CLICK_DANGER_WINDOW_MS_STEP,
+			value -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
+			() -> text.path("tooltip").get(),
+			config::getDoubleClickDangerWindowMs,
+			config::setDoubleClickDangerWindowMs);
+	}
+
+	private OptionInstance<BigDecimal> getDoubleClickDangerAngleDegreesOption() {
+		final var text = LanguageUtils.settings("double_click_danger_angle_degrees");
+		return OptionUtils.ofDecimal(text.getKey(),
+			BigDecimal.valueOf(MIN_DOUBLE_CLICK_DANGER_ANGLE_DEGREES),
+			BigDecimal.valueOf(MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES),
+			BigDecimal.valueOf(DOUBLE_CLICK_DANGER_ANGLE_DEGREES_STEP),
+			value -> OptionUtils.decimalSettingLabel(text.getKey(), value,
+				LanguageUtils.VALUE_OFF, LanguageUtils.UNIT_DEGREES.getKey()),
+			() -> text.path("tooltip").get(),
+			() -> BigDecimal.valueOf(config.isLongPressCompatibilityMode()
+				? 0.0
+				: config.getDoubleClickDangerAngleDegrees()),
+			value -> config.setDoubleClickDangerAngleDegrees(value.doubleValue()));
+	}
+
+	private OptionInstance<Boolean> getSpatialInventorySelectionStayOpenEnabledOption() {
+		SpatialSelectorSettings selector = config.getSpatialSelector();
+		final var text = LanguageUtils.settings("spatial_selector").path("inventory_selection_stay_open_enabled");
+		return OptionUtils.ofBool(text.getKey(),
+			selector::isInventorySelectionStayOpenEnabled,
+			selector::setInventorySelectionStayOpenEnabled,
+			() -> text.path("tooltip").get());
 	}
 
 	private OptionInstance<EntityBlockRenderMode> getEntityBlockRenderModeOption() {

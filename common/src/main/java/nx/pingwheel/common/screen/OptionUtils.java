@@ -4,6 +4,7 @@ import com.mojang.serialization.Codec;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -68,6 +69,24 @@ public class OptionUtils {
 				value -> value.divide(step, 0, RoundingMode.HALF_UP).intValueExact()),
 			Codec.doubleRange(min.doubleValue(), max.doubleValue()).xmap(BigDecimal::valueOf, BigDecimal::doubleValue),
 			getter.get(), setter);
+	}
+
+	/** Formats a grid value without float noise or a redundant trailing zero. */
+	public static String formatDecimal(BigDecimal value) {
+		return value.stripTrailingZeros().toPlainString();
+	}
+
+	/**
+	 * Builds the complete localized {@code <setting name>: <value>} label for a
+	 * decimal setting. Zero renders the supplied localized off value; non-zero
+	 * renders the plain decimal value through the supplied unit.
+	 */
+	public static MutableComponent decimalSettingLabel(String settingKey, BigDecimal value,
+		Component offValue, String unitKey) {
+		Component rendered = value.signum() == 0
+			? offValue
+			: Component.translatable(unitKey, Component.literal(formatDecimal(value)));
+		return Component.translatable(settingKey, rendered);
 	}
 
 	public static OptionInstance<Boolean> ofBool(String key, Supplier<Boolean> getter, Consumer<Boolean> setter, Supplier<Component> tooltipSupplier) {

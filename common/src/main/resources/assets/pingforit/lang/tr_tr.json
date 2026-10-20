@@ -417,4 +417,11 @@
   ,"settings.pingforit.spatial_selector.trail_opacity": "İz opaklığı: %s"
   ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Yalnızca işaretçi ve seçili seçeneğin ortak izinin opaklığı; menüyü, seçenekleri, kılavuzları veya bağlayıcıyı karartmaz."
   ,"unit.pingforit.points": "%s nokta"
+  ,"value.pingforit.off": "Kapalı"
+  ,"settings.pingforit.double_click_danger_window_millis": "Çift Tıklama Tehlike Aralığı: %s"
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Bu aralıktaki ardışık basışlar, tehlike açısı hesaplanırken tek bir çift tıklama sayılır. Sonraki basışa uygulanır."
+  ,"settings.pingforit.double_click_danger_angle_degrees": "Çift Tıklama Tehlike Açısı: %s"
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Çift tıklama tehlike açısı etkin fare girdisinden hesaplanır. 0 çift tıklama tehlikesini kapatır; uzun basma uyumluluk modu değeri 0 yapar."
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "Envanter Seçimini Açık Tut"
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "İlk bırakmadan sonra envanter öğe listesini açık tutar. Sonraki dokunuşlar bir öğe seçer, basılı tutmak seçimi iptal eder. Sonraki basılı tutmaya uygulanır."
 }

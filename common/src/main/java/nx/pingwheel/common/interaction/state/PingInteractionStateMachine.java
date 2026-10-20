@@ -76,6 +76,11 @@ public final class PingInteractionStateMachine {
 	private List<PingType> wheelPingTypes = List.of();
 	private long presentedRevision;
 	private Map<String, CapturedPingContext> presentedPrecise = Map.of();
+	/**
+	 * Set only by {@link #pressFrozenTapAt}: the already-admitted Ping Type a
+	 * short release must commit without another ray or ordinary default choice.
+	 */
+	private PingType frozenTapPingType;
 
 	/**
 	 * Actual paint admission, not a frame/tick readiness signal. The runtime calls
@@ -230,6 +235,71 @@ public final class PingInteractionStateMachine {
 	/** Alias for callers that prefer the existing {@code press(...)} naming. */
 	public InteractionToken press(long physicalPressTimeMillis) {
 		return pressAt(physicalPressTimeMillis);
+	}
+
+	/**
+	 * Starts one narrow frozen-target tap with a fresh token and no new raycast.
+	 *
+	 * <p>This is not a general capture entry point. It exists for a rapid
+	 * re-tap that must reuse an already admitted captured target while still
+	 * owning a brand-new interaction token (and therefore a new request id) and
+	 * still passing ordinary local validation on release. Only the context
+	 * identity is rebound to the fresh token; the target, ray and capture
+	 * metadata stay exactly those of the frozen capture. The supplied Ping Type
+	 * must already be admitted by the frozen Target Type.
+	 *
+	 * <p>The caller must start it from idle state and release it without a
+	 * wheel frame; a present frame deliberately cannot open a wheel for this
+	 * tap because it has no this-press capture.
+	 */
+	public InteractionToken pressFrozenTapAt(long physicalPressTimeMillis,
+		CapturedPingContext frozenCapture, PingType pingType) {
+		return pressFrozenTapAt(physicalPressTimeMillis, physicalPressTimeMillis, frozenCapture, pingType);
+	}
+
+	/**
+	 * Frozen tap with the physical press and the monotonic observation kept
+	 * distinct. The same observation value must be reused by the immediately
+	 * following release update; reading the clock again would advance it past
+	 * the already supplied observation and fail the monotonic guard.
+	 */
+	public InteractionToken pressFrozenTapAt(long physicalPressTimeMillis, long observedTimeMillis,
+		CapturedPingContext frozenCapture, PingType pingType) {
+		Objects.requireNonNull(frozenCapture, "frozenCapture");
+		Objects.requireNonNull(pingType, "pingType");
+		if (phase != PingInteractionPhase.IDLE) {
+			throw new IllegalStateException("frozen tap requires an idle interaction");
+		}
+		if (!frozenCapture.resolvedTarget().targetType().pingTypes().contains(pingType)) {
+			throw new IllegalArgumentException("frozen tap ping type is not admitted by the target type");
+		}
+		long now = observeTimeValue(observedTimeMillis);
+		if (physicalPressTimeMillis > now) {
+			throw new IllegalArgumentException(
+				"physical press time is in the future: " + physicalPressTimeMillis + " > " + now);
+		}
+
+		long configuredHoldMillis = readConfiguredThreshold(
+			"wheelHoldMillis",
+			wheelHoldMillisSupplier,
+			ClientConfigBounds.MIN_WHEEL_HOLD_MILLIS,
+			ClientConfigBounds.MAX_WHEEL_HOLD_MILLIS);
+		InteractionToken freshToken = coordinator.begin();
+		resetMachineState();
+		this.token = freshToken;
+		this.phase = PingInteractionPhase.PRESSED;
+		this.longPressMillis = configuredHoldMillis;
+		this.pressTimeMillis = physicalPressTimeMillis;
+		this.frozenTapPingType = pingType;
+		CapturedPingContext tapped = new CapturedPingContext(freshToken,
+			frozenCapture.resolvedTarget(), frozenCapture.ray(), frozenCapture.entityLocalGeometryMetadata(),
+			frozenCapture.blockHitFace(), frozenCapture.selectorCandidates());
+		if (!activeInteraction.tryComplete(freshToken, tapped)) {
+			resetMachineState();
+			throw new IllegalStateException("frozen tap token lost before completion");
+		}
+		logger.debug("frozen tap press: token={}", freshToken.sequence());
+		return freshToken;
 	}
 
 	private InteractionToken pressAtObserved(long physicalPressTimeMillis) {
@@ -499,6 +569,12 @@ public final class PingInteractionStateMachine {
 			return;
 		}
 
+		// A frozen-target tap has no this-press ray or capture and is a tap
+		// boundary only; a frame can never turn it into a wheel interaction.
+		if (frozenTapPingType != null) {
+			return;
+		}
+
 		if (!keyDown || releaseObserved || capture.isEmpty()) {
 			return;
 		}
@@ -540,6 +616,11 @@ public final class PingInteractionStateMachine {
 		return selection;
 	}
 
+	/** The effective long-press threshold frozen by the current (or last) press. */
+	public long longPressMillis() {
+		return longPressMillis;
+	}
+
 	private Optional<PingInteractionAction> updatePressed(
 		boolean keyDown,
 		Optional<CapturedPingContext> capture,
@@ -565,8 +646,10 @@ public final class PingInteractionStateMachine {
 			// The wheel is a real interaction only after presentFrame() has opened
 			// it. If release wins before that transition, commit the captured
 			// target's default ping regardless of tick-quantized elapsed time. This
-			// also handles a capture that completes after the key was released.
-			return commitPing(context, context.resolvedTarget().targetType().defaultPingType());
+			// also handles a capture that completes after the key was released. A
+			// frozen-target tap commits its already-admitted Ping Type instead.
+			return commitPing(context, frozenTapPingType != null
+				? frozenTapPingType : context.resolvedTarget().targetType().defaultPingType());
 		}
 
 		// Key still down: presentation-only threshold handling belongs to
@@ -696,6 +779,7 @@ public final class PingInteractionStateMachine {
 		selection = WheelSelection.NONE;
 		wheelPingTypes = List.of();
 		presentedRevision = 0; presentedPrecise = Map.of();
+		frozenTapPingType = null;
 	}
 
 	private long readConfiguredThreshold(

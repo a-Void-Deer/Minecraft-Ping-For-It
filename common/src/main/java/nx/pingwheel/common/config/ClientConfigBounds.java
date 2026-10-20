@@ -24,6 +24,20 @@ public final class ClientConfigBounds {
 	public static final int MAX_CANCEL_HALF_CONE_ANGLE_DEGREES = 90;
 	public static final int CANCEL_HALF_CONE_ANGLE_DEGREES_STEP = 1;
 
+	/**
+	 * Adjacent-press window and danger angle derived from active mouse input.
+	 * They are independent from the own-marker cancel half-cone.
+	 */
+	public static final int DEFAULT_DOUBLE_CLICK_DANGER_WINDOW_MS = 100;
+	public static final int MIN_DOUBLE_CLICK_DANGER_WINDOW_MS = 25;
+	public static final int MAX_DOUBLE_CLICK_DANGER_WINDOW_MS = 300;
+	public static final int DOUBLE_CLICK_DANGER_WINDOW_MS_STEP = 5;
+
+	public static final double DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES = 3.5;
+	public static final double MIN_DOUBLE_CLICK_DANGER_ANGLE_DEGREES = 0.0;
+	public static final double MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES = 20.0;
+	public static final double DOUBLE_CLICK_DANGER_ANGLE_DEGREES_STEP = 0.5;
+
 	public static final int DEFAULT_WHEEL_INNER_RADIUS = 8;
 	public static final int MIN_WHEEL_INNER_RADIUS = 6;
 	public static final int MAX_WHEEL_INNER_RADIUS = 120;
@@ -108,6 +122,19 @@ public final class ClientConfigBounds {
 			value,
 			MIN_CANCEL_HALF_CONE_ANGLE_DEGREES,
 			MAX_CANCEL_HALF_CONE_ANGLE_DEGREES);
+	}
+
+	public static int clampDoubleClickDangerWindowMs(int value) {
+		return Math.clamp(value, MIN_DOUBLE_CLICK_DANGER_WINDOW_MS, MAX_DOUBLE_CLICK_DANGER_WINDOW_MS);
+	}
+
+	/** Zero is the explicit disabled value; NaN recovers to the default like other clamps. */
+	public static double clampDoubleClickDangerAngleDegrees(double value) {
+		if (Double.isNaN(value)) return DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES;
+		return Math.clamp(
+			value,
+			MIN_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,
+			MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES);
 	}
 
 	public static int clampWheelInnerRadius(int value) {

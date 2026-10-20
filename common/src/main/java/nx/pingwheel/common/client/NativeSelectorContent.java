@@ -181,7 +181,11 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 				groups.add(new SpatialSelectorSession.ContentGroup(STRESS_GROUP_PATH, STRESS_GROUP_LABEL_KEY));
 		});
 		ClientInventory current = inventory.get();
-		ClientInventory.Preview state = current == null || request == ClientInventory.NO_REQUEST ? null : current.preview(request);
+		// A purged request is absent, not an empty UPDATING preview. Keeping the
+		// distinction lets normal initial loading stay on the list while a
+		// revoked/reset authorization removes the inventory branch entirely.
+		ClientInventory.Preview state = current == null || request == ClientInventory.NO_REQUEST
+			|| !current.hasPreview(request) ? null : current.preview(request);
 		SpatialSelectorSession.InventoryPreview<ClientInventory.PreviewEntryReference> list = null;
 		boolean reset = state != null && previousInventory != null
 			&& (state.baselineId() != previousInventory.baselineId() || state.statusRevision() != previousInventory.statusRevision()

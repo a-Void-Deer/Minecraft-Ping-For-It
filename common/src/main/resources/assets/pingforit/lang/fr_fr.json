@@ -422,4 +422,11 @@
   ,"settings.pingforit.spatial_selector.trail_opacity": "Opacité de la trace : %s"
   ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Opacité de la seule trace partagée du pointeur et de l'option sélectionnée ; n'atténue ni le menu, ni les options, ni les guides, ni le connecteur."
   ,"unit.pingforit.points": "%s points"
+  ,"value.pingforit.off": "Désactivé"
+  ,"settings.pingforit.double_click_danger_window_millis": "Fenêtre de danger de double-clic : %s"
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Les pressions consécutives dans cette fenêtre comptent comme un double-clic pour dériver l'angle de danger. S'applique à la prochaine pression."
+  ,"settings.pingforit.double_click_danger_angle_degrees": "Angle de danger de double-clic : %s"
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "L'angle de danger d'un double-clic est dérivé de l'entrée souris active. 0 désactive le danger de double-clic ; le mode de compatibilité d'appui long le remet à 0."
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "Garder la sélection d'inventaire ouverte"
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Garde la liste d'objets de l'inventaire ouverte après le premier relâchement. Les appuis suivants sélectionnent un objet, et maintenir annule la sélection. S'applique au prochain maintien."
 }

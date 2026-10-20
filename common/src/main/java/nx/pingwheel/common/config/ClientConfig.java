@@ -41,6 +41,10 @@ public class ClientConfig implements IConfig {
 	boolean longPressCompatibilityMode = false;
 	int longPressCompatibilitySliceMillis = ClientConfigBounds.DEFAULT_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS;
 	int cancelHalfConeAngleDegrees = ClientConfigBounds.DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES;
+	/** Adjacent-press window for deriving the double-click danger angle. */
+	int doubleClickDangerWindowMs = ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_WINDOW_MS;
+	/** Zero disables double-click danger; compatibility mode clears it to zero. */
+	double doubleClickDangerAngleDegrees = ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES;
 	int wheelOpacity = ClientConfigBounds.DEFAULT_WHEEL_OPACITY;
 	int wheelTargetOpacity = ClientConfigBounds.DEFAULT_WHEEL_TARGET_OPACITY;
 	/** Kept as wheelFontSize in JSON: this is the radial option-label value. */
@@ -172,7 +176,23 @@ public class ClientConfig implements IConfig {
 
 	public void setLongPressCompatibilityMode(boolean enabled) {
 		longPressCompatibilityMode = enabled;
-		if (enabled && spatialSelector != null) spatialSelector.setGestureSkipHoldEnabled(false);
+		if (enabled) {
+			doubleClickDangerAngleDegrees = 0.0;
+			if (spatialSelector != null) spatialSelector.setGestureSkipHoldEnabled(false);
+		}
+	}
+
+	public void setDoubleClickDangerWindowMs(int doubleClickDangerWindowMs) {
+		this.doubleClickDangerWindowMs = ClientConfigBounds.clampDoubleClickDangerWindowMs(doubleClickDangerWindowMs);
+	}
+
+	/**
+	 * Keeps zero as the disabled value. While compatibility mode is active a
+	 * non-zero request is rejected instead of being retained for later.
+	 */
+	public void setDoubleClickDangerAngleDegrees(double doubleClickDangerAngleDegrees) {
+		double clamped = ClientConfigBounds.clampDoubleClickDangerAngleDegrees(doubleClickDangerAngleDegrees);
+		this.doubleClickDangerAngleDegrees = longPressCompatibilityMode ? 0.0 : clamped;
 	}
 
 	public boolean isGestureSkipHoldEnabled() {
@@ -234,6 +254,7 @@ public class ClientConfig implements IConfig {
 		final int suppliedWheelHoldMillis = wheelHoldMillis;
 		final int suppliedLongPressCompatibilitySliceMillis = longPressCompatibilitySliceMillis;
 		final int suppliedCancelHalfConeAngleDegrees = cancelHalfConeAngleDegrees;
+		final int suppliedDoubleClickDangerWindowMs = doubleClickDangerWindowMs;
 		final int suppliedWheelOpacity = wheelOpacity;
 		final int suppliedWheelTargetOpacity = wheelTargetOpacity;
 		final int suppliedWheelFontSize = wheelFontSize;
@@ -263,6 +284,17 @@ public class ClientConfig implements IConfig {
 			"cancelHalfConeAngleDegrees",
 			suppliedCancelHalfConeAngleDegrees,
 			cancelHalfConeAngleDegrees);
+
+		doubleClickDangerWindowMs = ClientConfigBounds.clampDoubleClickDangerWindowMs(doubleClickDangerWindowMs);
+		warnIfChanged(
+			warningSink,
+			"doubleClickDangerWindowMs",
+			suppliedDoubleClickDangerWindowMs,
+			doubleClickDangerWindowMs);
+
+		doubleClickDangerAngleDegrees =
+			ClientConfigBounds.clampDoubleClickDangerAngleDegrees(doubleClickDangerAngleDegrees);
+		if (longPressCompatibilityMode) doubleClickDangerAngleDegrees = 0.0;
 
 		wheelOpacity = ClientConfigBounds.clampWheelOpacity(wheelOpacity);
 		warnIfChanged(warningSink, "wheelOpacity", suppliedWheelOpacity, wheelOpacity);
@@ -321,15 +353,18 @@ public class ClientConfig implements IConfig {
 
 	@Override
 	public void onUpdate() {
+		if (longPressCompatibilityMode) doubleClickDangerAngleDegrees = 0.0;
 		if (longPressCompatibilityMode && spatialSelector != null) spatialSelector.setGestureSkipHoldEnabled(false);
 		blockDisplayPolicy = BlockDisplayPolicy.compile(blockDisplayWhitelist, blockShapeBlacklist);
 		LOGGER.debug(
-			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, cancelHalfConeAngleDegrees=%d, wheelOpacity=%d, wheelTargetOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d, spatialSelector=%s"
+			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, cancelHalfConeAngleDegrees=%d, doubleClickDangerWindowMs=%d, doubleClickDangerAngleDegrees=%s, wheelOpacity=%d, wheelTargetOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d, spatialSelector=%s"
 				.formatted(
 					wheelHoldMillis,
 					longPressCompatibilityMode,
 					getEffectiveLongPressCompatibilitySliceMillis(),
 					cancelHalfConeAngleDegrees,
+					doubleClickDangerWindowMs,
+					doubleClickDangerAngleDegrees,
 					wheelOpacity,
 					wheelTargetOpacity,
 					wheelFontSize,

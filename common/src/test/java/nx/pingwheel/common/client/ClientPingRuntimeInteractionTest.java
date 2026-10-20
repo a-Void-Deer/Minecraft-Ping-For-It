@@ -40,6 +40,7 @@ import nx.pingwheel.common.interaction.candidate.CandidateHit;
 import nx.pingwheel.common.interaction.candidate.CaptureEquivalenceKey;
 import nx.pingwheel.common.interaction.candidate.FrozenCandidateAcquisition;
 import nx.pingwheel.common.interaction.candidate.PreciseTargetType;
+import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.TargetGoneReason;
 import nx.pingwheel.common.interaction.state.TargetValidation;
@@ -67,6 +68,9 @@ class ClientPingRuntimeInteractionTest {
 	private boolean oldCompatibility;
 	private boolean oldGesture;
 	private int oldGestureMillis, oldDeadzone;
+	private int oldDangerWindow;
+	private double oldDangerAngle;
+	private boolean oldInventoryStay;
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 	@BeforeEach void settings() {
@@ -76,9 +80,14 @@ class ClientPingRuntimeInteractionTest {
 		oldGesture = config.getSpatialSelector().isGestureSkipHoldEnabled();
 		oldGestureMillis = config.getSpatialSelector().getGestureSkipHoldMillis();
 		oldDeadzone = config.getSpatialSelector().getDeadzone();
+		oldDangerWindow = config.getDoubleClickDangerWindowMs();
+		oldDangerAngle = config.getDoubleClickDangerAngleDegrees();
+		oldInventoryStay = config.getSpatialSelector().isInventorySelectionStayOpenEnabled();
 		config.setWheelHoldMillis(250);
 		config.setLongPressCompatibilityMode(false); config.setLongPressCompatibilitySliceMillis(125);
 		config.setGestureSkipHoldEnabled(false); config.getSpatialSelector().setGestureSkipHoldMillis(75);
+		config.setDoubleClickDangerWindowMs(100); config.setDoubleClickDangerAngleDegrees(3.5);
+		config.getSpatialSelector().setInventorySelectionStayOpenEnabled(false);
 	}
 	@AfterEach void restoreSettings() {
 		var config = ClientConfig.HANDLER.getConfig();
@@ -87,6 +96,9 @@ class ClientPingRuntimeInteractionTest {
 		config.getSpatialSelector().setGestureSkipHoldEnabled(oldGesture);
 		config.getSpatialSelector().setGestureSkipHoldMillis(oldGestureMillis);
 		config.getSpatialSelector().setDeadzone(oldDeadzone);
+		config.setDoubleClickDangerWindowMs(oldDangerWindow);
+		config.setDoubleClickDangerAngleDegrees(oldDangerAngle);
+		config.getSpatialSelector().setInventorySelectionStayOpenEnabled(oldInventoryStay);
 	}
 
 	private static final class Access implements ClientPingRuntime.InteractionAccess {
@@ -175,10 +187,19 @@ class ClientPingRuntimeInteractionTest {
 	private static boolean disabled(Fixture f, String choiceId) {
 		return f.menu().choices().stream().filter(choice -> choice.id().equals(choiceId)).findFirst().orElseThrow().disabled();
 	}
+	private static final class ManualClock implements InteractionTimeSource {
+		long value;
+		boolean advanceOnRead;
+		public long nowMillis() {
+			return advanceOnRead ? ++value : value;
+		}
+	}
+
 	private static final class Fixture {
 		long now;
 		boolean fail, gone;
 		Runnable validationHook = () -> {};
+		final ManualClock clock = new ManualClock();
 		final Access access = new Access();
 		final List<IPacket> sent = new ArrayList<>();
 		final List<String> errors = new ArrayList<>();
@@ -205,7 +226,7 @@ class ClientPingRuntimeInteractionTest {
 				public String dimensionId() { return access.dimension; }
 				public long tick() { return now / 50; }
 			}, List.of(reader), (target, type) -> Optional.empty(), this::send);
-			runtime = ClientPingRuntime.createForInteraction((key, color) -> errors.add(key), this::send, policy, () -> now,
+			runtime = ClientPingRuntime.createForInteraction((key, color) -> errors.add(key), this::send, policy, clock,
 				target -> { validations.add(target); validationHook.run(); return gone ? TargetValidation.gone(TargetGoneReason.BLOCK_REPLACED) : TargetValidation.valid(); },
 				access, presentation, inventory, preview);
 			if (ready) negotiate(Set.of(PresentationBasic.NAME));
@@ -228,10 +249,10 @@ class ClientPingRuntimeInteractionTest {
 			runtime.onPresentationPacket(PresentationS2CPacket.reset(100, view, Map.of(
 				"entity_block", Map.of(PresentationBasic.ID, fields), "block", Map.of(PresentationBasic.ID, fields), "entity", Map.of(PresentationBasic.ID, fields))));
 		}
-		void press(long time) { now = time; runtime.onPress(time); }
-		void release(long time) { now = time; runtime.onRelease(); }
-		void frame(long time, boolean held) { now = time; runtime.onRenderFrame(held); }
-		void tick(long time) { now = time; runtime.onTick(); }
+		void press(long time) { now = time; clock.value = time; runtime.onPress(time); }
+		void release(long time) { now = time; clock.value = time; runtime.onRelease(); }
+		void frame(long time, boolean held) { now = time; clock.value = time; runtime.onRenderFrame(held); }
+		void tick(long time) { now = time; clock.value = time; runtime.onTick(); }
 		/** Recording the paint handoff only, not exercising GuiGraphics/GPU. */
 		void paint() {
 			var snapshot = snapshot(); runtime.acknowledgeSelectorPaint(snapshot, snapshot.radial().menus().getLast().choices().stream()
@@ -242,7 +263,7 @@ class ClientPingRuntimeInteractionTest {
 		double rawX = 1000, rawY = 700;
 		void prime() { access.mouseX = rawX; access.mouseY = rawY; runtime.onMouseMove(1, rawX, rawY); }
 		void move(double dx, double dy, long time) {
-			now = time; rawX += dx * access.frame.windowWidth() / access.frame.guiWidth();
+			now = time; clock.value = time; rawX += dx * access.frame.windowWidth() / access.frame.guiWidth();
 			rawY += dy * access.frame.windowHeight() / access.frame.guiHeight();
 			access.mouseX = rawX; access.mouseY = rawY; runtime.onMouseMove(1, rawX, rawY);
 		}
@@ -535,6 +556,172 @@ class ClientPingRuntimeInteractionTest {
 			&& c.kind() == InventoryC2SPacket.Kind.CLOSE && c.requestId() == request).findFirst().orElseThrow();
 		assertTrue(selected < closed); assertEquals(1, f.validations.size()); assertEquals(0, f.access.cancellations);
 	}
+	@Test void enabledInventoryStayKeepsFirstReleaseThenOneTapSelectsBeforeClosingOnce() {
+		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
+		Fixture f = new Fixture(); f.openList(); long request = f.request();
+		f.release(700);
+
+		assertTrue(f.selects().isEmpty());
+		assertTrue(f.runtime.selectorSnapshot().isPresent());
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase());
+		assertFalse(f.access.grabbed, "staying keeps native selector mouse ownership");
+		assertEquals(1, f.inventory.stats().previewChannels());
+		assertTrue(f.runtime.onMouseScroll(1, 0, 1), "scroll ownership remains while staying");
+		int captures = f.access.captures;
+
+		f.press(800); f.release(810);
+		assertEquals(captures, f.access.captures, "a staying tap never recaptures or reopens");
+		assertEquals(1, f.selects().size()); assertEquals("opaque", f.selects().getFirst().entryKey());
+		assertEquals(request, f.selects().getFirst().requestId());
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+		assertEquals(0, f.inventory.stats().previewChannels());
+		assertTrue(f.access.grabbed, "normal close restores the mouse ownership it released");
+		assertEquals(1, f.sent.stream().filter(p -> p instanceof InventoryC2SPacket c
+			&& c.kind() == InventoryC2SPacket.Kind.CLOSE && c.requestId() == request).count(),
+			"SELECT precedes exactly one CLOSE");
+		int selected = f.sent.indexOf(f.selects().getFirst());
+		int closed = java.util.stream.IntStream.range(0, f.sent.size()).filter(i -> f.sent.get(i) instanceof InventoryC2SPacket c
+			&& c.kind() == InventoryC2SPacket.Kind.CLOSE && c.requestId() == request).findFirst().orElseThrow();
+		assertTrue(selected < closed);
+	}
+
+	@Test void stayingHoldReachingTheFrozenThresholdCancelsWithoutSelectOrCancelMarker() {
+		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
+		Fixture f = new Fixture(); f.openList(); long request = f.request();
+		f.release(700);
+
+		f.press(1000); f.release(1250);
+		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+		assertEquals(0, f.access.cancellations);
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+		assertEquals(0, f.inventory.stats().previewChannels());
+		assertEquals(1, f.sent.stream().filter(p -> p instanceof InventoryC2SPacket c
+			&& c.kind() == InventoryC2SPacket.Kind.CLOSE && c.requestId() == request).count());
+	}
+
+	@Test void frameCancelSwallowsTheRemainingPhysicalReleaseWithoutASecondSubmit() {
+		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
+		Fixture f = new Fixture(); f.openList();
+		f.release(700);
+
+		f.press(1000); f.frame(1250, true);
+		assertTrue(f.selects().isEmpty()); assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+		f.release(1260);
+		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+	}
+
+	@Test void stayingItemBackReturnsToListAndStaysUntilThatListTapCommits() {
+		var settings = ClientConfig.HANDLER.getConfig().getSpatialSelector();
+		boolean oldContentIntent = settings.isContentIntentEnabled();
+		settings.setContentIntentEnabled(true);
+		settings.setInventorySelectionStayOpenEnabled(true);
+		try {
+			Fixture f = new Fixture(); f.openList();
+			double forward = f.snapshot().inventory().direction().forward() == nx.pingwheel.common.client.spatial.InventoryListModel.Side.RIGHT ? 1 : -1;
+			f.move(forward * 300, 0, 700);
+			assertTrue(f.snapshot().radial().menus().getLast().menuId().contains(":item:"));
+			f.release(710);
+			assertTrue(f.selects().isEmpty()); assertTrue(f.runtime.selectorSnapshot().isPresent());
+
+			String back = f.menu().choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow().id();
+			f.enterBack(back, 800);
+			assertTrue(f.snapshot().radial().menus().getLast().menuId().endsWith(":inventory"));
+			assertTrue(f.runtime.selectorSnapshot().isPresent(), "item Back to list remains on the staying path");
+			assertTrue(f.selects().isEmpty());
+
+			f.press(1000); f.release(1010);
+			assertEquals(1, f.selects().size()); assertEquals("opaque", f.selects().getFirst().entryKey());
+			assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		} finally {
+			settings.setContentIntentEnabled(oldContentIntent);
+			settings.setInventorySelectionStayOpenEnabled(false);
+		}
+	}
+
+	@Test void stayingListBackLeavesInventoryAncestryAndClosesWithoutContentReturn() {
+		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
+		Fixture f = new Fixture(); f.openList();
+		f.release(700);
+
+		f.move(-1000, 0, 800);
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+		assertEquals(0, f.access.cancellations);
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+	}
+
+	@Test void lifecycleAbortClosesAStayingSelectorAndKeepsItsMouseOwnershipDisposal() {
+		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
+		Fixture f = new Fixture(); f.openList();
+		f.release(700);
+		f.runtime.abortForScreenTransition();
+
+		assertTrue(f.access.screenDisposal);
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertEquals(0, f.inventory.stats().previewChannels());
+		f.release(800);
+		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+	}
+
+	@Test void resetRevocationClosesAStayingSelectorBeforeAnyStaleRowCanSubmit() {
+		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
+		Fixture f = new Fixture(); f.openList();
+		f.release(700);
+		f.reset(2, Set.of());
+
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+		assertTrue(f.access.grabbed, "revocation restores the mouse ownership released by the selector");
+		f.release(800);
+		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+		assertEquals(0, f.access.cancellations);
+	}
+
+	@Test void policyPurgeOfThePreviewRequestClosesAStayingSelector() {
+		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
+		Fixture f = new Fixture(); f.openList();
+		f.release(700);
+		f.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 100, 1, Set.of("block", "entity")).stamp(100, 1));
+
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+		f.release(800);
+		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+	}
+
+	@Test void revokingWhileAStayingTapIsHeldSwallowsItsRemainingRelease() {
+		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
+		Fixture f = new Fixture(); f.openList();
+		f.release(700);
+		f.press(800);
+		f.reset(2, Set.of());
+
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		f.release(810);
+		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+		assertEquals(0, f.access.cancellations);
+	}
+
+	@Test void legitimateUpdatingPreviewWithoutRowsKeepsTheStayingListOpen() {
+		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
+		Fixture f = new Fixture();
+		f.press(0); f.frame(250, true); f.prime();
+		f.enter("content", 260);
+		String list = f.menu().choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
+		f.enter(list, 460);
+		assertTrue(f.snapshot().inventory().open());
+		assertTrue(f.snapshot().inventory().entries().isEmpty(), "the preview is still legitimately loading");
+
+		f.release(700);
+		assertTrue(f.runtime.selectorSnapshot().isPresent());
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase());
+	}
+
 	@Test void longHeldSelectorDoesNotAutoCloseAndReleaseStillSelectsRow() {
 		Fixture f = new Fixture(); f.openList(); long request = f.request(); f.release(10250);
 		assertEquals(1, f.selects().size()); assertEquals("opaque", f.selects().getFirst().entryKey()); assertEquals(request, f.selects().getFirst().requestId());
@@ -900,6 +1087,302 @@ class ClientPingRuntimeInteractionTest {
 			assertEquals(4, f.access.liveRequests.size()); assertEquals(200, f.access.liveRequests.getLast().inputs().pingDistance());
 			assertEquals(nx.pingwheel.common.math.RaycastPolicy.FluidMode.ANY, f.access.liveRequests.getLast().inputs().policy().fluidMode());
 		} finally { settings.setPreciseCapturePeriodTicks(oldPeriod); config.setPingDistance(oldPing); config.setRaycastDistance(oldRaycast); config.setMarkFluids(oldFluid); }
+	}
+
+	@Test void adjacentSecondShortReleaseCreatesDangerFromFirstFrozenTargetWithNewRequest() {
+		Fixture f = new Fixture(); f.press(0); f.release(10);
+		assertEquals(1, f.creates().size()); assertEquals("attention", f.creates().getFirst().pingType());
+		CapturedRay firstRay = f.access.capturedRay;
+		f.access.snapshot = STONE; f.access.ray = new CapturedRay(new WorldVector(9, 9, 9), new WorldVector(1, 0, 0));
+
+		f.press(60); f.release(70);
+		assertEquals(2, f.creates().size());
+		var first = f.creates().get(0); var second = f.creates().get(1);
+		assertEquals("danger", second.pingType()); assertEquals(CHEST.target(), second.target());
+		assertNotEquals(first.requestId(), second.requestId(), "every re-tap is a fresh token and request id");
+		assertEquals(1, f.access.captures, "a short re-tap needs neither a second ray nor its capture result");
+		assertEquals(firstRay, f.access.capturedRay, "the first press ray remains frozen");
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+	}
+
+	@Test void thirdAndLaterAdjacentTapsAreIndependentDangersWithDistinctRequests() {
+		Fixture f = new Fixture(); f.press(0); f.release(10);
+		f.press(60); f.release(70); f.press(120); f.release(130);
+
+		assertEquals(3, f.creates().size());
+		assertNotEquals(f.creates().get(0).requestId(), f.creates().get(1).requestId());
+		assertNotEquals(f.creates().get(1).requestId(), f.creates().get(2).requestId());
+		assertEquals("danger", f.creates().get(1).pingType());
+		assertEquals("danger", f.creates().get(2).pingType());
+		assertEquals(CHEST.target(), f.creates().get(2).target());
+		assertEquals(1, f.access.captures);
+	}
+
+	@Test void pendingFirstCaptureReleasesEveryEarlierTapOnlyAfterItsLocalCreateSent() {
+		Fixture f = new Fixture(); f.access.pending = true; f.press(0); f.release(10);
+		f.press(60); f.release(70); f.press(120); f.release(130);
+		assertTrue(f.creates().isEmpty());
+
+		f.access.pending = false; f.access.completions.getFirst().run(); f.frame(500, false);
+		assertEquals(3, f.creates().size(), "the two admitted taps are not expired by the later completion time");
+		assertEquals("attention", f.creates().getFirst().pingType());
+		assertEquals("danger", f.creates().get(1).pingType());
+		assertEquals("danger", f.creates().get(2).pingType());
+		assertNotEquals(f.creates().get(0).requestId(), f.creates().get(1).requestId());
+		assertNotEquals(f.creates().get(1).requestId(), f.creates().get(2).requestId());
+	}
+
+	@Test void fourCompletedTapsBeforeTheFirstCaptureAllFlushAfterItsLocalCreateSent() {
+		Fixture f = new Fixture(); f.access.pending = true; f.press(0); f.release(10);
+		for (long down : new long[] { 50, 100, 150, 200 }) {
+			f.press(down); f.release(down + 10);
+		}
+		assertTrue(f.creates().isEmpty());
+
+		f.access.pending = false; f.access.completions.getFirst().run(); f.frame(5000, false);
+		assertEquals(5, f.creates().size());
+		assertEquals("attention", f.creates().getFirst().pingType());
+		for (int i = 1; i < 5; i++) assertEquals("danger", f.creates().get(i).pingType());
+		assertEquals(5, f.creates().stream().map(PresentationC2SPacket::requestId).distinct().count());
+	}
+
+	@Test void transportFailureOnTheFirstCreateClearsTheRapidSequence() {
+		Fixture f = new Fixture(); f.fail = true;
+		f.press(0); f.release(10); f.press(60); f.release(70);
+
+		assertTrue(f.creates().isEmpty());
+		assertEquals(2, f.access.captures);
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+	}
+
+	@Test void enablingCompatibilityDuringPendingRapidInputDrainsTheFirstCreateWithoutSeedingOrDanger() {
+		Fixture f = new Fixture(); f.access.pending = true; f.press(0); f.release(10);
+		f.press(60); f.release(70);
+		ClientConfig.HANDLER.getConfig().setLongPressCompatibilityMode(true);
+
+		f.access.pending = false; f.access.completions.getFirst().run(); f.frame(5000, false);
+		assertEquals(1, f.creates().size());
+		assertEquals("attention", f.creates().getFirst().pingType());
+		assertFalse(f.runtime.hasCompatibilityState());
+
+		f.press(5100); f.release(5110);
+		assertEquals(2, f.creates().size());
+		assertEquals("attention", f.creates().get(1).pingType());
+	}
+
+	@Test void advancingClockStillFlushesEveryPendingDangerWithOneConsistentObservation() {
+		Fixture f = new Fixture(); f.access.pending = true; f.clock.advanceOnRead = true;
+		f.press(100); f.release(110);
+		for (long down : new long[] { 150, 200, 250 }) {
+			f.press(down); f.release(down + 10);
+		}
+
+		f.access.pending = false; f.access.completions.getFirst().run(); f.frame(5000, false);
+		assertEquals(4, f.creates().size());
+		assertEquals("attention", f.creates().getFirst().pingType());
+		for (int i = 1; i < 4; i++) assertEquals("danger", f.creates().get(i).pingType());
+	}
+
+	@Test void advancingClockPresentsHeldCandidateAfterPendingDangerFlush() {
+		Fixture f = new Fixture(); f.access.pending = true; f.clock.advanceOnRead = true;
+		f.press(100); f.release(110);
+		f.press(150); f.release(160);
+		f.press(200);
+
+		f.access.pending = false; f.access.completions.getFirst().run();
+		assertDoesNotThrow(() -> f.frame(5000, true));
+
+		assertEquals(2, f.creates().size(), "the first ordinary create and one flushed pending Danger");
+		assertEquals("attention", f.creates().get(0).pingType());
+		assertEquals("danger", f.creates().get(1).pingType());
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase(),
+			"the held candidate's own baseline actually opened its wheel");
+		assertEquals(2, f.access.captures, "the first press and the held candidate captured once each");
+
+		f.release(5100);
+		assertEquals(2, f.creates().size(), "no wheel selection was made, so release adds no create");
+		assertEquals(1L, f.creates().stream().filter(create -> create.pingType().equals("danger")).count(),
+			"the actually opened wheel never also emits the candidate as Danger");
+		f.release(5200);
+		assertEquals(2, f.creates().size(), "a duplicate release stays actionless");
+	}
+
+	@Test void advancingClockPresentsHeldCandidateWithoutPendingDangerFlush() {
+		Fixture f = new Fixture(); f.access.pending = true; f.clock.advanceOnRead = true;
+		CapturedRay secondRay = new CapturedRay(new WorldVector(5, 5, 5), new WorldVector(1, 0, 0));
+		f.press(100); f.release(110);
+		f.access.ray = secondRay;
+		f.press(200);
+
+		f.access.pending = false; f.access.completions.getFirst().run();
+		assertDoesNotThrow(() -> f.frame(400, true));
+
+		assertEquals(1, f.creates().size(), "no pending Danger was admitted");
+		assertEquals("attention", f.creates().getFirst().pingType());
+		assertEquals(PingInteractionPhase.PRESSED, f.runtime.phase(),
+			"200 ms from the candidate's own down edge, not 300 ms from the first press");
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+
+		f.frame(460, true);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase());
+		assertEquals(secondRay, f.access.capturedRay, "the held candidate uses its own press ray");
+		assertEquals(2, f.access.captures, "the first press and the candidate baseline captured once each");
+	}
+
+	@Test void reentrantAbortInsideDangerValidationDispatchesNoDangerButKeepsTheFirstOrdinaryCreate() {
+		Fixture f = new Fixture(); f.press(0); f.release(10);
+		assertEquals(1, f.creates().size());
+		f.validationHook = f.runtime::abort;
+
+		f.press(60); f.release(70);
+
+		assertEquals(1, f.creates().size(), "the aborted frozen tap never reaches dispatch");
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertFalse(f.runtime.hasCompatibilityState());
+	}
+
+	@Test void reentrantAbortOnTheFirstFlushedDangerStopsAllRemainingPendingDangers() {
+		Fixture f = new Fixture(); f.access.pending = true;
+		f.press(0); f.release(10); f.press(50); f.release(60); f.press(100); f.release(110);
+		final int[] validations = {0};
+		f.validationHook = () -> { if (++validations[0] > 1) f.runtime.abort(); };
+
+		f.access.pending = false; f.access.completions.getFirst().run(); f.frame(5000, false);
+
+		assertEquals(1, f.creates().size(), "only the first ordinary create survives the reentrant abort");
+		assertEquals("attention", f.creates().getFirst().pingType());
+		assertEquals(2, validations[0], "the first danger validation aborted the flush");
+	}
+
+	@ParameterizedTest @ValueSource(strings = {"gap", "angle"})
+	void nonMatchingFreshPressSupersedesThePendingFirstAndItsAdmittedTaps(String mismatch) {
+		Fixture f = new Fixture(); f.access.pending = true;
+		f.press(0); f.release(10);
+		f.press(50); f.release(60);
+		int candidates = f.access.completions.size();
+		assertEquals(1, candidates);
+
+		f.access.snapshot = STONE;
+		if (mismatch.equals("angle")) f.runtime.onLookInput(30, 0);
+		f.press(mismatch.equals("angle") ? 100 : 300); f.release(mismatch.equals("angle") ? 110 : 310);
+		assertEquals(2, f.access.completions.size(), "the fresh non-matching press starts its own capture");
+		assertEquals(2, f.access.captures);
+
+		Runnable old = f.access.completions.get(0), current = f.access.completions.get(1);
+		old.run();
+		assertTrue(f.creates().isEmpty(), "the superseded completion cannot create or release a Danger");
+		current.run(); f.frame(5000, false);
+
+		assertEquals(1, f.creates().size());
+		assertEquals(STONE.target(), f.creates().getFirst().target());
+		assertEquals("attention", f.creates().getFirst().pingType());
+		assertTrue(f.access.completions.size() > 1);
+	}
+
+	@Test void failedFirstCaptureClearsPendingTapsWithoutRetryOrFallback() {
+		Fixture f = new Fixture(); f.access.pending = true; f.gone = true;
+		f.press(0); f.release(10); f.press(60); f.release(70);
+		f.access.pending = false; f.access.completions.getFirst().run(); f.frame(500, false);
+
+		assertTrue(f.creates().isEmpty()); assertEquals(1, f.errors.size());
+		assertTrue(f.runtime.selectorSnapshot().isEmpty()); assertEquals(1, f.access.captures);
+	}
+
+	@Test void throttledFirstCreateClearsTheRapidSequenceInsteadOfDispatchingDanger() {
+		Fixture f = new Fixture(new ClientRateLimitPolicy(1, 1000), true);
+		f.press(0); f.release(1); f.runtime.abort(); f.sent.clear();
+		f.access.pending = true;
+		f.press(20); f.release(30); f.press(60); f.release(70);
+		f.access.pending = false; f.access.completions.getLast().run(); f.frame(500, false);
+
+		assertTrue(f.creates().isEmpty()); assertEquals(2, f.access.captures);
+	}
+
+	@Test void candidateHoldUsesItsOwnPressTimeAndRayThenReleasesOnlyTheWheel() {
+		Fixture f = new Fixture(); f.press(0); f.release(10);
+		CapturedRay secondRay = new CapturedRay(new WorldVector(5, 5, 5), new WorldVector(1, 0, 0));
+		f.access.ray = secondRay; f.access.snapshot = STONE;
+
+		f.press(60); f.frame(300, true);
+		assertEquals(PingInteractionPhase.PRESSED, f.runtime.phase(),
+			"240 ms from this down and 300 ms from the first press are both below the frozen 250 ms threshold");
+		f.frame(311, true);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase());
+		assertEquals(secondRay, f.access.capturedRay);
+		f.release(320);
+		assertEquals(1, f.creates().size(), "an actually opened wheel owns its release and adds no Danger");
+		assertEquals(2, f.access.captures);
+	}
+
+	@Test void advancingClockCandidatePresentWithoutActualOpenReleasesExactlyOneFrozenDanger() {
+		Fixture f = new Fixture(); f.press(0); f.release(10);
+		assertEquals(1, f.creates().size());
+		f.press(60);
+		f.clock.advanceOnRead = true;
+		assertDoesNotThrow(() -> f.frame(200, true));
+		assertEquals(PingInteractionPhase.PRESSED, f.runtime.phase(),
+			"the candidate baseline started but the wheel did not actually open");
+
+		f.release(210);
+		assertEquals(2, f.creates().size(), "the short candidate contributes exactly one frozen Danger");
+		assertEquals("danger", f.creates().get(1).pingType());
+
+		f.release(220);
+		assertEquals(2, f.creates().size(), "a repeated release cannot replay the frozen tap");
+		f.runtime.abort();
+		assertEquals(2, f.creates().size(), "abort after the short release cannot double-commit");
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+	}
+
+	@Test void candidateHeldWithoutAFrameStillReleasesAtTapBoundaryRatherThanOpeningRetroactively() {
+		Fixture f = new Fixture(); f.press(0); f.release(10);
+		f.press(60); f.release(350);
+
+		assertEquals(2, f.creates().size()); assertEquals("danger", f.creates().get(1).pingType());
+		assertTrue(f.runtime.selectorSnapshot().isEmpty()); assertEquals(1, f.access.captures);
+	}
+
+	@Test void cameraAngleAndAdjacentWindowMismatchesStartAFreshOrdinaryPress() {
+		Fixture angle = new Fixture(); angle.press(0); angle.release(10);
+		angle.runtime.onLookInput(30, 0);
+		angle.press(60); angle.release(70);
+		assertEquals(2, angle.creates().size());
+		assertEquals("attention", angle.creates().get(1).pingType());
+		assertEquals(2, angle.access.captures);
+
+		Fixture gap = new Fixture(); gap.press(0); gap.release(10);
+		gap.press(200); gap.release(210);
+		assertEquals(2, gap.creates().size());
+		assertEquals("attention", gap.creates().get(1).pingType());
+	}
+
+	@Test void liveCompatibilityModeOwnsRapidInputAndNeverProducesDanger() {
+		ClientConfig.HANDLER.getConfig().setLongPressCompatibilityMode(true);
+		Fixture f = new Fixture(); f.press(0); f.release(10); f.press(60); f.release(70); f.frame(200, false);
+
+		assertEquals(1, f.creates().size()); assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertFalse(f.runtime.hasCompatibilityState());
+	}
+
+	@Test void liveCompatibilityDisableOnPressConsumesThatEdgeBeforeRapidRecognition() {
+		ClientConfig.HANDLER.getConfig().setLongPressCompatibilityMode(true);
+		Fixture f = new Fixture();
+		f.press(0); f.release(10);
+		int captures = f.access.captures, creates = f.creates().size();
+		ClientConfig.HANDLER.getConfig().setLongPressCompatibilityMode(false);
+
+		f.press(100);
+		assertEquals(captures, f.access.captures, "the first disabled edge must not start a rapid capture");
+		assertEquals(creates, f.creates().size());
+		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+		f.release(110);
+		assertEquals(captures, f.access.captures); assertEquals(creates, f.creates().size());
+
+		f.press(200); f.release(210);
+		assertEquals(captures + 1, f.access.captures);
+		assertEquals(creates + 1, f.creates().size());
+		assertFalse(f.runtime.hasCompatibilityState());
 	}
 
 	@Test void worldChangeAndNewHoldFenceLateLiveCompletionWithoutTouchingNewPreview() {

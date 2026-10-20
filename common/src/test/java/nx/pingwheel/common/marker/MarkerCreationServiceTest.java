@@ -327,6 +327,21 @@ class MarkerCreationServiceTest {
 	}
 
 	@Test
+	void createAllowsDangerForResolvedEntityBlock() {
+		newService();
+		Target requested = blockTarget();
+		validator.accepted(validated(requested, TargetMatchContext.none()));
+		resolver.resolves(requested, targetType("entity_block"));
+
+		MarkerCreateOutcome accepted = create(requested, "danger");
+
+		assertTrue(accepted.isAccepted());
+		assertEquals("danger", accepted.creation().orElseThrow().marker().pingType().id());
+		assertRejected(create(requested, "loot"), MarkerRejectReason.INVALID_PING_TYPE);
+		assertEquals(1, store.size());
+	}
+
+	@Test
 	void createRejectsUnknownPingType() {
 		newService();
 		Target requested = entityTarget(ENTITY_A);
