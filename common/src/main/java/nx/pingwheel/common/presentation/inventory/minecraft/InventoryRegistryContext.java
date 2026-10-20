@@ -17,9 +17,9 @@ import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceKey;
 
 /**
- * A finite encode-only registry context, detached from provider cache misses.
- * Entry classes identify field layouts; admission also proves their captured
- * containers and each native registry delegate. No provider method is invoked.
+ * Separate audited encode owners and an on-demand external-trusted native
+ * context. Auditing proves captured containers/delegates without provider calls;
+ * only the explicit external path may consult arbitrary provider internals.
  */
 final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 	/** Exact raw identity lookup, not a bucket traversal or a registry callback. */
@@ -39,11 +39,17 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 	private final RegistryOps.RegistryInfo<?>[] infos;
 	private final Optional<? extends RegistryOps.RegistryInfo<?>>[] results;
 	private final InventoryItemBudget budget;
+	private final HolderLookup.Provider provider;
+	private final InventoryResidentAccess raw;
+	private final InventoryComponentBounds bounds;
+	private RegistryOps<net.minecraft.nbt.Tag> externalOps;
+	private boolean audited;
 	private int size;
 
 	@SuppressWarnings("unchecked")
-	private InventoryRegistryContext(InventoryItemBudget budget) {
-		this.budget = budget;
+	private InventoryRegistryContext(HolderLookup.Provider provider, InventoryResidentAccess raw,
+		InventoryComponentBounds bounds, InventoryItemBudget budget) {
+		this.budget = budget; this.provider = provider; this.raw = raw; this.bounds = bounds;
 		// Only the seven selected encode-owner registries are retained. The
 		// native provider/root map pass remains fully admitted independently.
 		int capacity = 7;
@@ -55,11 +61,23 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 
 	static InventoryRegistryContext capture(HolderLookup.Provider provider, InventoryResidentAccess raw,
 		InventoryComponentBounds bounds, InventoryItemBudget budget) {
+		var context = prepare(provider, raw, bounds, budget);
+		context.requireAudited();
+		return context;
+	}
+
+	static InventoryRegistryContext prepare(HolderLookup.Provider provider, InventoryResidentAccess raw,
+		InventoryComponentBounds bounds, InventoryItemBudget budget) {
 		budget.work(128);
 		// Admit this context and its fixed arrays BEFORE inspecting any supplied
 		// root map. No builder/provider callback or context cache is constructed.
-		budget.allocate(4, 0, 4, 1);
-		var context = new InventoryRegistryContext(budget);
+		budget.allocate(5, 0, 8, 1);
+		return new InventoryRegistryContext(provider, raw, bounds, budget);
+	}
+
+	void requireAudited() {
+		if (audited) return;
+		budget.work(32);
 		Class<?> type = provider.getClass();
 		if (type == InventoryRegistryShapes.PROVIDER) {
 			Map<?, ?> entries = raw.builderEntries(provider);
@@ -80,7 +98,7 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 					// Encode-only use never calls the getter. Still certify its captured
 					// map layout, without traversing holder values or lazy suppliers.
 					bounds.mapPass(raw.builderElements(lookup));
-					context.addInfo((ResourceKey<?>) entry.getKey(), info, budget);
+					addInfo((ResourceKey<?>) entry.getKey(), info, budget);
 				} else {
 					Object lookup = info.owner();
 					if (lookup == null || lookup.getClass() != InventoryRegistryShapes.MAPPED_LOOKUP || info.getter() != lookup)
@@ -88,10 +106,10 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 					MappedRegistry<?> registry = mapped(raw.lookupRegistry(lookup));
 					if (raw.registryKey(registry) != entry.getKey() || raw.registryLookup(registry) != lookup
 						|| raw.registryLifecycle(registry) != info.elementsLifecycle()) InventoryComponentCertificate.refuse();
-					context.add(registry, raw, budget);
+					add(registry, raw, budget);
 				}
 			}
-			return context;
+			audited = true; return;
 		}
 		if (type == ROOT) {
 			Registry<?> delegate = raw.registryDelegate(provider);
@@ -108,9 +126,9 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 					InventoryComponentCertificate.refuse();
 				MappedRegistry<?> registry = mapped(raw.holderValue(entry.getValue()));
 				if (raw.registryKey(registry) != entry.getKey()) InventoryComponentCertificate.refuse();
-				context.add(registry, raw, budget);
+				add(registry, raw, budget);
 			}
-			return context;
+			audited = true; return;
 		}
 		if (type != RegistryAccess.ImmutableRegistryAccess.class && type != FROZEN) InventoryComponentCertificate.refuse();
 		Map<? extends ResourceKey<?>, ? extends Registry<?>> entries = raw.registries((RegistryAccess.ImmutableRegistryAccess) provider);
@@ -121,9 +139,22 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 			if (!needed(entry.getKey())) continue;
 			MappedRegistry<?> registry = mapped(entry.getValue());
 			if (raw.registryKey(registry) != entry.getKey()) InventoryComponentCertificate.refuse();
-			context.add(registry, raw, budget);
+			add(registry, raw, budget);
 		}
-		return context;
+		audited = true;
+	}
+
+	/**
+	 * Native adapter/cache and the provider's lookup/lifecycle/getter internals are
+	 * external-trusted here. No registry enumeration or audited-owner substitution.
+	 * The one Ping-owned RegistryOps wrapper is still admitted before construction.
+	 */
+	RegistryOps<net.minecraft.nbt.Tag> externalOps() {
+		if (externalOps == null) {
+			budget.work(32); budget.allocate(0, 0, 2, 1);
+			externalOps = RegistryOps.create(net.minecraft.nbt.NbtOps.INSTANCE, provider);
+		}
+		return externalOps;
 	}
 
 	private static boolean needed(ResourceKey<?> key) {
@@ -166,6 +197,7 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 	}
 
 	HolderOwner<?> owner(ResourceKey<?> key) {
+		requireAudited();
 		for (int index = 0; index < size; index++) {
 			budget.work(8);
 			if (keys[index] == key) return infos[index].owner();
@@ -175,6 +207,7 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 
 	@SuppressWarnings("unchecked")
 	@Override public <T> Optional<RegistryOps.RegistryInfo<T>> lookup(ResourceKey<? extends Registry<? extends T>> key) {
+		requireAudited();
 		for (int index = 0; index < size; index++) {
 			budget.work(8);
 			if (keys[index] == key) {

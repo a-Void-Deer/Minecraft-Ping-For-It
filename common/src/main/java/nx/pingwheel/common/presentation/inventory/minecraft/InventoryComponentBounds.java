@@ -59,6 +59,7 @@ final class InventoryComponentBounds {
 	private long nativeWork;
 	private long residentMapWork;
 	private long residentListCells;
+	private InventoryEncodingCost persistentEncoding;
 
 	InventoryComponentBounds(InventoryItemBudget budget, InventoryResidentAccess raw) {
 		this.budget = budget;
@@ -170,6 +171,91 @@ final class InventoryComponentBounds {
 	 */
 	NbtValue customData(Tag value) { return nbtValue(value, 0, true); }
 	NbtValue snapshotNbt(Tag value) { return nbtValue(value, 0, false); }
+
+	/**
+	 * Copies an external codec's successful persistent output without converting
+	 * through DynamicOps: native lists, typed empty lists, arrays and empty map keys
+	 * are identity data. Only exact, audited tag/backing classes are traversed.
+	 */
+	Tag ownedPersistentTag(Tag value, int depth) {
+		budget.work(64); budget.node(depth);
+		if (value == null) refuse("null persistent tag");
+		Class<?> type = value.getClass();
+		if (type == ByteTag.class || type == ShortTag.class || type == IntTag.class || type == LongTag.class
+			|| type == FloatTag.class || type == DoubleTag.class || type == StringTag.class) {
+			if (type == StringTag.class) budget.string(value.getAsString());
+			return value; // Exact native scalar classes are immutable.
+		}
+		if (type == ByteArrayTag.class || type == IntArrayTag.class || type == LongArrayTag.class) {
+			byte[] bytesValue = type == ByteArrayTag.class ? ((ByteArrayTag) value).getAsByteArray() : null;
+			int[] intsValue = type == IntArrayTag.class ? ((IntArrayTag) value).getAsIntArray() : null;
+			long[] longsValue = type == LongArrayTag.class ? ((LongArrayTag) value).getAsLongArray() : null;
+			if (bytesValue == null && intsValue == null && longsValue == null) refuse("null persistent array");
+			long bytes = bytesValue != null ? bytesValue.length : intsValue != null ? 4L * intsValue.length : 8L * longsValue.length;
+			budget.array(bytes); budget.allocate(bytes + 4, 0, 1, 2); budget.work(bytes); // inherited AbstractList.modCount
+			return bytesValue != null ? new ByteArrayTag(bytesValue.clone())
+				: intsValue != null ? new IntArrayTag(intsValue.clone()) : new LongArrayTag(longsValue.clone());
+		}
+		if (type != CompoundTag.class && type != ListTag.class) refuse("unsupported persistent tag implementation");
+		enter(value);
+		try {
+			if (type == CompoundTag.class) {
+				Map<?, ?> source = raw.compound((CompoundTag) value);
+				int size = mapPass(source);
+				budget.allocate(0, 0, 2L * size, 2);
+				String[] keys = new String[size]; Tag[] children = new Tag[size];
+				int index = 0;
+				if (size != 0) for (var entry : source.entrySet()) {
+					budget.work(32);
+					if (index == size || !(entry.getKey() instanceof String) || !(entry.getValue() instanceof Tag)) refuse("invalid persistent map entry");
+					String key = (String) entry.getKey(); budget.string(key);
+					for (int previous = 0; previous < index; previous++) {
+						budget.work(16L * (key.length() + 1));
+						if (key.equals(keys[previous])) refuse("duplicate persistent map key");
+					}
+					keys[index] = key; children[index++] = ownedPersistentTag((Tag) entry.getValue(), depth + 1);
+				}
+				if (index != size) refuse("changing persistent map");
+				if (persistentEncoding == null) {
+					budget.allocate(49, 0, 7, 1);
+					persistentEncoding = new InventoryEncodingCost(budget);
+				}
+				// Same default HashMap insertion schedule as the owned native writer;
+				// includes collision resizes, tree nodes and every discarded table.
+				persistentEncoding.reset(false); persistentEncoding.beginKeys();
+				for (int key = 0; key < size; key++) persistentEncoding.mapKey(keys[key]);
+				persistentEncoding.ownedKeyMap(); persistentEncoding.admit();
+				var owned = new CompoundTag();
+				for (int key = 0; key < size; key++) { budget.work(16); owned.put(keys[key], children[key]); }
+				return owned;
+			}
+			var tag = (ListTag) value;
+			List<?> source = list(raw.list(tag)); int size = source.size();
+			byte elementType = tag.getElementType();
+			if (elementType < Tag.TAG_END || elementType > Tag.TAG_LONG_ARRAY || (size != 0 && elementType == Tag.TAG_END)) refuse("invalid persistent list type");
+			if (size == 0) {
+				// Native copy preserves the type byte. With a proven empty exact
+				// backing there is no recursive copy: at most transform/iterator,
+				// ArrayList(Collection)/empty arrays and ListTag construction.
+				budget.allocate(64, 0, 12, 10); budget.work(512);
+				return tag.copy();
+			}
+			budget.allocate(13, 0, 2, 2); // ListTag + default ArrayList (both inherit modCount), no backing yet
+			var owned = new ListTag(); int capacity = 0;
+			for (int index = 0; index < size; index++) {
+				budget.work(64); Object child = source.get(index);
+				if (!(child instanceof Tag)) refuse("invalid persistent list entry");
+				Tag copied = ownedPersistentTag((Tag) child, depth + 1);
+				if (copied.getId() != elementType) refuse("invalid persistent list entry type");
+				if (index == capacity) {
+					int previous = capacity; capacity = capacity == 0 ? 10 : capacity + (capacity >> 1);
+					budget.allocate(0, 0, capacity, 1); budget.work(128L + 8L * previous);
+				}
+				owned.add(copied);
+			}
+			return owned;
+		} finally { leave(); }
+	}
 
 	private NbtValue nbtValue(Tag value, int depth, boolean convert) {
 		budget.work(64); // exact tag dispatch, getters and owned descriptor control

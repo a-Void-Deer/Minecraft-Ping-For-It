@@ -98,4 +98,52 @@ class InventoryComponentBoundsTest {
 		assertEquals(2, bounds.list(List.of("a", "b")).size());
 		budget.end();
 	}
+
+	@Test void persistentOwnedTreePreservesNativeKindsAndEmptyKeyWrappers() throws Exception {
+		var root = new CompoundTag();
+		var numbers = new ListTag(); numbers.add(IntTag.valueOf(7)); numbers.add(IntTag.valueOf(8));
+		var wrapper = new CompoundTag(); wrapper.putString("", "not an ops wrapper");
+		var wrappers = new ListTag(); wrappers.add(wrapper);
+		var typedEmpty = new ListTag();
+		var typeField = ListTag.class.getDeclaredField("type"); typeField.setAccessible(true);
+		typeField.setByte(typedEmpty, Tag.TAG_INT);
+		root.put("numbers", numbers); root.put("array", new net.minecraft.nbt.IntArrayTag(new int[] {7, 8}));
+		root.put("wrappers", wrappers); root.put("empty", typedEmpty);
+		byte[] expected = InventoryItemCodec.canonicalTag(root);
+		var budget = InventoryItemBudget.root(4096); budget.begin(4096);
+		var owned = (CompoundTag) new InventoryComponentBounds(budget, new InventoryResidentAccessFields()).ownedPersistentTag(root, 0);
+		assertArrayEquals(expected, InventoryItemCodec.canonicalTag(owned));
+		assertEquals(ListTag.class, owned.get("numbers").getClass());
+		assertEquals(net.minecraft.nbt.IntArrayTag.class, owned.get("array").getClass());
+		assertEquals(Tag.TAG_INT, ((ListTag) owned.get("empty")).getElementType());
+		assertEquals("not an ops wrapper", owned.getList("wrappers", Tag.TAG_COMPOUND).getCompound(0).getString(""));
+		numbers.add(IntTag.valueOf(9)); wrapper.putString("", "changed"); root.getIntArray("array")[0] = 9;
+		assertArrayEquals(expected, InventoryItemCodec.canonicalTag(owned));
+		assertNotSame(typedEmpty, owned.get("empty")); budget.end();
+	}
+
+	@Test void persistentOwnedTreeRefusesUnknownBackingAndCyclesWithoutCallbacks() throws Exception {
+		var root = new CompoundTag();
+		var map = new HashMap<String, Tag>() {
+			@Override public int size() { fail("unknown output map size"); return 0; }
+			@Override public java.util.Set<Map.Entry<String, Tag>> entrySet() { fail("unknown output map iterator"); return null; }
+		};
+		var field = CompoundTag.class.getDeclaredField("tags"); field.setAccessible(true); field.set(root, map);
+		var budget = InventoryItemBudget.root(4096); budget.begin(4096);
+		var bounds = new InventoryComponentBounds(budget, new InventoryResidentAccessFields());
+		assertThrows(InventoryItemBudget.RootLimitException.class, () -> bounds.ownedPersistentTag(root, 0));
+		var cycle = new CompoundTag(); cycle.put("self", cycle);
+		assertThrows(InventoryItemBudget.RootLimitException.class, () -> bounds.ownedPersistentTag(cycle, 0));
+		cycle.remove("self"); assertDoesNotThrow(() -> bounds.ownedPersistentTag(cycle, 0));
+		budget.end();
+	}
+
+	@Test void persistentCopyAllocationMustFitBeforeOutputConstruction() {
+		var budget = InventoryItemBudget.root(4096); budget.begin(4096);
+		var bounds = new InventoryComponentBounds(budget, new InventoryResidentAccessFields());
+		var array = new ByteArrayTag(new byte[] {1, 2, 3});
+		budget.allocate(2L * 1024 * 1024 - budget.rootAllocatedBytes() - 1, 0, 0, 0);
+		assertThrows(InventoryItemBudget.RootLimitException.class, () -> bounds.ownedPersistentTag(array, 0));
+		assertArrayEquals(new byte[] {1, 2, 3}, array.getAsByteArray()); budget.end();
+	}
 }

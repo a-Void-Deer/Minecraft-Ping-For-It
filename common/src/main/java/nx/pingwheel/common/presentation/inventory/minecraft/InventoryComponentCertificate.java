@@ -32,7 +32,7 @@ import net.minecraft.world.level.block.entity.BannerPatternLayers;
 import net.minecraft.world.level.block.entity.BeehiveBlockEntity;
 import net.minecraft.world.level.block.entity.PotDecorations;
 
-/** Closed resident encode certificates. Never consults DataComponentType.codec/cache. */
+/** Closed native resident encode certificates, separate from external-trusted codecs. */
 final class InventoryComponentCertificate {
 	private final InventoryItemBudget budget;
 	private final InventoryResidentAccess raw;
@@ -43,6 +43,7 @@ final class InventoryComponentCertificate {
 	private InventoryRegistryContext context;
 	private long laterListVisits;
 	private long laterCopyCells;
+	private boolean external;
 	private final InventoryEncodingCost encoding;
 	private final InventoryNativeCost nativeCost;
 	private static final Class<?> CURE_SET = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()).getClass();
@@ -112,10 +113,17 @@ final class InventoryComponentCertificate {
 	void admitRemovalNames(List<String> names, boolean display) {
 		encoding.reset(display);
 		// One schedule key and one actual output key; neither shares new backing.
-		for (int index = 0; index < names.size(); index++) { String name = names.get(index);
-			encoding.v(32 + 6L * (name.length() + 1), 0, 2, 6); encoding.w(24 + 6L * name.length()); }
+		for (int index = 0; index < names.size(); index++) removalNameCost(names.get(index));
 		encoding.admit();
 	}
+	void admitRemovalName(String name, boolean display) {
+		encoding.reset(display); removalNameCost(name); encoding.admit();
+	}
+	private void removalNameCost(String name) {
+		encoding.v(32 + 6L * (name.length() + 1), 0, 2, 6);
+		encoding.w(24 + 6L * name.length());
+	}
+	void planVisit() { budget.work(32); }
 	private void ownedCost(Owned owned) {
 		// Owned descriptors use indexed ArrayLists. Their cost walk is distinct
 		// from the producer streams and cannot borrow native collector work.
@@ -212,6 +220,18 @@ final class InventoryComponentCertificate {
 	}
 
 	void context(InventoryRegistryContext context) { this.context = context; }
+	void externalComponent() { external = true; }
+	boolean hasExternalComponents() { return external; }
+	InventoryExternalComponent external(Object value, Codec<?> codec, int depth) {
+		externalComponent();
+		budget.allocate(4, 0, 6, 1);
+		return new InventoryExternalComponent(value, codec, context, bounds, budget, depth);
+	}
+
+	static boolean nativeType(DataComponentType<?> type) {
+		return codec(type) != null || type == DataComponents.FOOD || type == DataComponents.CONTAINER
+			|| type == DataComponents.BUNDLE_CONTENTS || type == DataComponents.CHARGED_PROJECTILES;
+	}
 
 	static boolean transientType(DataComponentType<?> type) {
 		return type == DataComponents.CREATIVE_SLOT_LOCK || type == DataComponents.MAP_POST_PROCESSING;

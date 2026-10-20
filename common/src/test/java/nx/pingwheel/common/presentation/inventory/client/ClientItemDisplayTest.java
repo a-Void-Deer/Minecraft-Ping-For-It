@@ -178,6 +178,71 @@ class ClientItemDisplayTest {
 	}
 
 	@Test
+	void ordinaryNativeIconFamiliesRemainAvailableWithoutHoverCopyRestrictions() {
+		for (var item : List.of(Items.DIAMOND_PICKAXE, Items.WOODEN_AXE, Items.BOW, Items.TRIDENT, Items.GOLDEN_APPLE,
+			Items.ENCHANTED_GOLDEN_APPLE, Items.SUSPICIOUS_STEW, Items.FIREWORK_ROCKET, Items.FIREWORK_STAR,
+			Items.WHITE_BANNER, Items.COMPASS, Items.DEBUG_STICK, Items.DECORATED_POT, Items.WRITABLE_BOOK,
+			Items.WRITTEN_BOOK, Items.LEATHER_CHESTPLATE, Items.FILLED_MAP)) {
+			ItemStack source = new ItemStack(item); String encoded = json(source);
+			String id = BuiltInRegistries.ITEM.getKey(item).toString();
+			for (int resolve = 0; resolve < 2; resolve++) {
+				var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback", encoded);
+				assertFalse(display.stack().isEmpty(), id);
+				assertEquals(item, display.stack().getItem()); assertEquals(1, display.stack().getCount());
+			}
+		}
+	}
+
+	@Test
+	void explicitNativeFoodEffectsDecodeToOwnedOrdinaryIconsWithoutLosingProbabilityOrHiddenState() throws ReflectiveOperationException {
+		var hidden = new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.REGENERATION, 300, 0);
+		var resident = new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.REGENERATION, 100, 1, false, true, true, hidden);
+		var possible = new FoodProperties.PossibleEffect(resident, 0.25F);
+		var food = new FoodProperties(4, 0.3F, false, 1.6F, Optional.empty(), List.of(possible));
+		var ops = RegistryAccess.EMPTY.createSerializationContext(JsonOps.INSTANCE);
+		var foodJson = FoodProperties.DIRECT_CODEC.encodeStart(ops, food).result().orElseThrow();
+		assertFalse(foodJson.getAsJsonObject().getAsJsonArray("effects").isEmpty(), "explicit nonempty native codec output, not a prototype-only test");
+		var stackJson = new com.google.gson.JsonObject(); stackJson.addProperty("id", "minecraft:stone");
+		var components = new com.google.gson.JsonObject(); components.add("minecraft:food", foodJson); stackJson.add("components", components);
+		String encoded = stackJson.toString();
+		var first = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "fallback", encoded);
+		assertFalse(first.stack().isEmpty()); assertEquals(1, first.stack().getCount());
+		var actual = first.stack().get(DataComponents.FOOD).effects().getFirst();
+		assertEquals(0.25F, actual.probability());
+		var owned = ClientDisplayFoodAccess.resident(actual, 0, new ClientItemDisplay.Validation());
+		assertNotSame(resident, owned); assertSame(resident.getEffect(), owned.getEffect()); assertEquals(100, owned.getDuration());
+		var raw = InventoryResidentAccess.load();
+		var retained = ClientItemDisplay.cachedTransmittedPatch(RegistryAccess.EMPTY, "minecraft:stone", encoded).orElseThrow().get(DataComponents.FOOD).orElseThrow();
+		var source = ClientDisplayFoodAccess.resident(retained.effects().getFirst(), 0, new ClientItemDisplay.Validation());
+		assertNotSame(source, owned);
+		assertNull(raw.hidden(source), "native PossibleEffect encoding copies the effect and projects its hidden chain away");
+		assertNull(raw.hidden(owned));
+		owned.update(new net.minecraft.world.effect.MobEffectInstance(owned.getEffect(), 200, 1));
+		assertEquals(100, source.getDuration());
+		var next = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "fallback", encoded);
+		assertFalse(next.stack().isEmpty());
+		assertEquals(100, ClientDisplayFoodAccess.resident(next.stack().get(DataComponents.FOOD).effects().getFirst(), 0, new ClientItemDisplay.Validation()).getDuration());
+		assertEquals(1, ClientItemDisplay.decodeMisses());
+		// Direct ordinary detach tests both directions independently of codec's
+		// own MobEffectInstance copy/projection semantics.
+		ItemStack sourceStack = new ItemStack(Items.STONE); sourceStack.set(DataComponents.FOOD, food);
+		var patch = ClientDisplayWorkingCopy.overlay(sourceStack.getComponents(), DataComponentPatch.EMPTY, 0, new ClientItemDisplay.Validation());
+		var copied = ClientDisplayFoodAccess.resident(patch.get(DataComponents.FOOD).orElseThrow().effects().getFirst(), 0, new ClientItemDisplay.Validation());
+		assertNotSame(hidden, raw.hidden(copied)); assertEquals(300, raw.hidden(copied).getDuration());
+		resident.update(new net.minecraft.world.effect.MobEffectInstance(resident.getEffect(), 200, 1));
+		hidden.update(new net.minecraft.world.effect.MobEffectInstance(hidden.getEffect(), 400, 0));
+		assertEquals(100, copied.getDuration()); assertEquals(300, raw.hidden(copied).getDuration());
+	}
+
+	@Test void foodNativeWrapperReservesWorkBeforeConstruction() {
+		var effect = new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.REGENERATION, 100);
+		assertThrows(ClientItemDisplay.UnsafeDisplay.class, () -> ClientDisplayFoodAccess.wrap(effect, 0.25F, 0, new ClientItemDisplay.Validation(1, 4096)));
+		var wrapped = ClientDisplayFoodAccess.wrap(effect, 0.25F, 0, new ClientItemDisplay.Validation(64, 4096));
+		assertSame(effect, ClientDisplayFoodAccess.resident(wrapped, 0, new ClientItemDisplay.Validation()));
+		assertEquals(0.25F, wrapped.probability());
+	}
+
+	@Test
 	void omittedLoreAndShulkerContentsNeverReturnThroughDecodeFailureFallback() {
 		ItemStack shulker = new ItemStack(Items.SHULKER_BOX);
 		assertNotNull(shulker.get(DataComponents.LORE), "vanilla provides an inherited Lore component");
@@ -298,7 +363,7 @@ class ClientItemDisplayTest {
 			assertNotSame(original, copied);
 			assertEquals(decodeCallbacks + 1, callbacks.size(), "the copying getter must expose the reviewed defect");
 			callbacks.remove().run();
-			assertTrue(original.get(DataComponents.PROFILE).isResolved(), "the baseline callback targets the decoded nested head");
+			assertFalse(original.get(DataComponents.PROFILE).isResolved(), "the native decode callback cannot mutate the independently detached returned nested head");
 			assertFalse(copied.get(DataComponents.PROFILE).isResolved(), "the copy has a separate pending callback");
 			callbacks.remove().run();
 			assertTrue(copied.get(DataComponents.PROFILE).isResolved());
@@ -334,6 +399,86 @@ class ClientItemDisplayTest {
 			assertEquals("kept projectile", nested.getFirst().get(DataComponents.CUSTOM_NAME).getString());
 			assertEquals(new CustomModelData(9), nested.getFirst().get(DataComponents.CUSTOM_MODEL_DATA));
 		}
+	}
+
+	@Test
+	void everyOrdinaryItemHolderDetachesNestedTextStacksAndCountOnCacheHits() {
+		for (ItemStack holder : nestedHolders(new ItemStack(Items.STONE, 3))) {
+			String id = BuiltInRegistries.ITEM.getKey(holder.getItem()).toString();
+			ItemStack nested = heldItem(holder);
+			nested.set(DataComponents.CUSTOM_NAME, Component.literal("nested before"));
+			String encoded = json(holder);
+			// FOOD's native using_converts_to field is a SINGLE_ITEM_CODEC; the
+			// other holders carry count-bearing nested stacks. Compare the actual
+			// native wire semantics rather than this fixture's resident count.
+			int expectedCount = holder.has(DataComponents.FOOD) ? 1 : 3;
+			var first = ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback", encoded);
+			assertFalse(first.stack().isEmpty(), id);
+			ItemStack firstNested = heldItem(first.stack());
+			assertEquals(expectedCount, firstNested.getCount(), id);
+			((MutableComponent) firstNested.get(DataComponents.CUSTOM_NAME)).append(" changed");
+			firstNested.setCount(1);
+			int misses = ClientItemDisplay.decodeMisses();
+			var next = ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback", encoded);
+			assertFalse(next.stack().isEmpty(), id);
+			assertNotSame(firstNested, heldItem(next.stack()), id);
+			assertEquals("nested before", heldItem(next.stack()).get(DataComponents.CUSTOM_NAME).getString(), id);
+			assertEquals(expectedCount, heldItem(next.stack()).getCount(), id);
+			assertEquals(misses, ClientItemDisplay.decodeMisses(), "nested isolation keeps the cache: " + id);
+		}
+	}
+
+	private static ItemStack heldItem(ItemStack holder) {
+		InventoryResidentAccess raw = InventoryResidentAccess.load();
+		if (holder.has(DataComponents.CONTAINER)) return raw.container(holder.get(DataComponents.CONTAINER)).getFirst();
+		if (holder.has(DataComponents.BUNDLE_CONTENTS)) return raw.bundle(holder.get(DataComponents.BUNDLE_CONTENTS)).getFirst();
+		if (holder.has(DataComponents.CHARGED_PROJECTILES)) return raw.projectiles(holder.get(DataComponents.CHARGED_PROJECTILES)).getFirst();
+		return holder.get(DataComponents.FOOD).usingConvertsTo().orElseThrow();
+	}
+
+	@Test
+	void cachedBooksProfileDataAndPotionEffectsOwnTheirMutableValues() {
+		ItemStack book = new ItemStack(Items.WRITTEN_BOOK);
+		book.set(DataComponents.WRITTEN_BOOK_CONTENT, new net.minecraft.world.item.component.WrittenBookContent(
+			net.minecraft.server.network.Filterable.passThrough("title"), "author", 0,
+			List.of(new net.minecraft.server.network.Filterable<>(Component.literal("page"), Optional.of(Component.literal("filtered")))), true));
+		String bookJson = json(book);
+		ItemStack firstBook = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:written_book", "fallback", bookJson).stack();
+		assertFalse(firstBook.isEmpty());
+		var page = firstBook.get(DataComponents.WRITTEN_BOOK_CONTENT).pages().getFirst();
+		((MutableComponent) page.raw()).append(" changed"); ((MutableComponent) page.filtered().orElseThrow()).append(" changed");
+		ItemStack nextBook = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:written_book", "fallback", bookJson).stack();
+		assertEquals("page", nextBook.get(DataComponents.WRITTEN_BOOK_CONTENT).pages().getFirst().raw().getString());
+		assertEquals("filtered", nextBook.get(DataComponents.WRITTEN_BOOK_CONTENT).pages().getFirst().filtered().orElseThrow().getString());
+
+		ItemStack head = new ItemStack(Items.PLAYER_HEAD);
+		PropertyMap properties = new PropertyMap(); properties.put("textures", new Property("textures", "before"));
+		head.set(DataComponents.PROFILE, new ResolvableProfile(Optional.of("Name"), Optional.of(UUID.randomUUID()), properties));
+		String headJson = json(head);
+		ItemStack firstHead = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:player_head", "fallback", headJson).stack();
+		assertFalse(firstHead.isEmpty());
+		firstHead.get(DataComponents.PROFILE).properties().clear();
+		firstHead.get(DataComponents.PROFILE).gameProfile().getProperties().clear();
+		ItemStack nextHead = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:player_head", "fallback", headJson).stack();
+		assertEquals("before", nextHead.get(DataComponents.PROFILE).properties().get("textures").iterator().next().value());
+		assertEquals("before", nextHead.get(DataComponents.PROFILE).gameProfile().getProperties().get("textures").iterator().next().value());
+
+		ItemStack stone = new ItemStack(Items.STONE); CompoundTag data = new CompoundTag(); data.putString("key", "before");
+		stone.set(DataComponents.CUSTOM_DATA, CustomData.of(data)); String dataJson = json(stone);
+		ItemStack firstData = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "fallback", dataJson).stack();
+		assertFalse(firstData.isEmpty()); firstData.get(DataComponents.CUSTOM_DATA).getUnsafe().putString("key", "changed");
+		assertEquals("before", ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "fallback", dataJson).stack().get(DataComponents.CUSTOM_DATA).copyTag().getString("key"));
+
+		ItemStack potion = new ItemStack(Items.POTION);
+		potion.set(DataComponents.POTION_CONTENTS, new net.minecraft.world.item.alchemy.PotionContents(Optional.empty(), Optional.empty(),
+			List.of(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.REGENERATION, 100, 0))));
+		String potionJson = json(potion);
+		ItemStack firstPotion = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:potion", "fallback", potionJson).stack();
+		assertFalse(firstPotion.isEmpty());
+		var raw = InventoryResidentAccess.load();
+		assertTrue(raw.potion(firstPotion.get(DataComponents.POTION_CONTENTS)).getFirst().update(
+			new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.REGENERATION, 200, 0)));
+		assertEquals(100, raw.potion(ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:potion", "fallback", potionJson).stack().get(DataComponents.POTION_CONTENTS)).getFirst().getDuration());
 	}
 
 	private static String projectileJson(List<ItemStack> projectiles) {

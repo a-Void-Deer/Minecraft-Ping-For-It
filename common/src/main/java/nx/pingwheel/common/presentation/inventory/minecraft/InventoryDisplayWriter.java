@@ -6,11 +6,12 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.google.gson.internal.LazilyParsedNumber;
+import net.minecraft.resources.ResourceLocation;
 
 import nx.pingwheel.common.config.InventoryLimits;
 
 /** Owned display data only. A null projection means suppression cannot be represented safely. */
-final class InventoryDisplayWriter {
+public final class InventoryDisplayWriter {
 
 	private static final int DEPTH = 48;
 	private static final String LORE = "minecraft:lore";
@@ -38,6 +39,10 @@ final class InventoryDisplayWriter {
 		"minecraft:green_shulker_box", "minecraft:red_shulker_box", "minecraft:black_shulker_box");
 
 	private InventoryDisplayWriter() {}
+	/** Closed display-addition grammar only; performs no registry or codec access. */
+	public static boolean supportsComponent(ResourceLocation id) {
+		return id != null && id.getNamespace().equals("minecraft") && known(id.getPath());
+	}
 	static boolean shulker(String id) { return SHULKERS.contains(id); }
 
 	static long utf8(String value) {

@@ -56,11 +56,15 @@ final class InventoryItemFreezer {
 		String itemId = id(item); String label = label(item, itemId);
 		Plan plan; byte[] canonical; RegistryOps<Tag> nbtContext;
 		try {
-			InventoryRegistryContext context = InventoryRegistryContext.capture(registries, raw, bounds, budget);
+			InventoryRegistryContext context = InventoryRegistryContext.prepare(registries, raw, bounds, budget);
 			certificates.context(context);
 			plan = plan(input, 0, false);
-			// WHOLE root is certified before any static codec or native effect copy.
-			// Selected events are then admitted before their corresponding call.
+			// Pure native roots retain the closed provider certificate. A mixed
+			// root still demands it lazily for every native holder/registry path;
+			// only external codecs use the real provider's native adapter.
+			if (!certificates.hasExternalComponents()) context.requireAudited();
+			// Native families are certified before their static codecs/copies.
+			// External codecs are invoked only now, once for persistent identity.
 			budget.allocate(0, 0, 2, 1);
 			nbtContext = RegistryOps.create(NbtOps.INSTANCE, context);
 			Tag effective = plan.effective(nbtContext);
@@ -129,26 +133,36 @@ final class InventoryItemFreezer {
 			var patchEntries = new ArrayList<Map.Entry<DataComponentType<?>, Optional<?>>>(patchSize);
 			if (patchSize != 0) for (var entry : patch.entrySet()) {
 				budget.work(24);
+				if (entry.getValue() == null) InventoryComponentCertificate.refuse();
 				// Detach map entry wrapper itself; resident keys/values remain local.
 				budget.allocate(0, 0, 2, 1);
 				patchEntries.add(new java.util.AbstractMap.SimpleImmutableEntry<>(entry.getKey(), entry.getValue()));
 			}
 			if (defaultSize != 0) for (var entry : defaults.entrySet()) {
 				budget.work(32);
-				DataComponentType<?> type = entry.getKey(); if (InventoryComponentCertificate.transientType(type)) continue;
-				String typeId = typeId(type);
+				DataComponentType<?> type = entry.getKey();
 				Optional<?> override = null;
 				for (int changedIndex = 0; changedIndex < patchEntries.size(); changedIndex++) {
 					var changed = patchEntries.get(changedIndex); budget.work(8); if (changed.getKey() == type) { override = changed.getValue(); break; }
 				}
-				if (override == null) effective.add(new Entry(typeId, value(type, entry.getValue(), depth + 1)));
+				if (override != null) continue; // Never inspect a replaced/removed default value or codec.
+				String typeId = typeId(type);
+				if (InventoryComponentCertificate.transientType(type)) continue;
+				Codec<?> externalCodec = externalCodec(type);
+				budget.work(256);
+				if (!InventoryComponentCertificate.nativeType(type) && externalCodec == null) continue;
+				effective.add(new Entry(typeId, value(type, entry.getValue(), depth + 1, externalCodec)));
 			}
 			for (int index = 0; index < patchEntries.size(); index++) { var entry = patchEntries.get(index);
 				budget.work(32);
-				DataComponentType<?> type = entry.getKey(); if (InventoryComponentCertificate.transientType(type)) continue;
-				String typeId = typeId(type); Optional<?> optional = entry.getValue(); if (optional == null) InventoryComponentCertificate.refuse();
+				DataComponentType<?> type = entry.getKey(); String typeId = typeId(type);
+				if (InventoryComponentCertificate.transientType(type)) continue;
+				Codec<?> externalCodec = externalCodec(type);
+				budget.work(256);
+				if (!InventoryComponentCertificate.nativeType(type) && externalCodec == null) continue;
+				Optional<?> optional = entry.getValue(); if (optional == null) InventoryComponentCertificate.refuse();
 				if (optional.isEmpty()) removals.add(typeId);
-				else { var admitted = new Entry(typeId, value(type, optional.orElseThrow(), depth + 1)); effective.add(admitted); additions.add(admitted); }
+				else { var admitted = new Entry(typeId, value(type, optional.orElseThrow(), depth + 1, externalCodec)); effective.add(admitted); additions.add(admitted); }
 			}
 			return new Plan(itemId, count, effective, additions, removals, certificates);
 		} finally { bounds.leave(); }
@@ -159,8 +173,23 @@ final class InventoryItemFreezer {
 		InventoryComponentBounds.initialize(); InventoryRegistryContext.initialize();
 	}
 
-	private Value value(DataComponentType<?> type, Object value, int depth) {
+	private Codec<?> externalCodec(DataComponentType<?> type) {
+		budget.work(256); // closed native dispatch, not external getter internals
+		if (InventoryComponentCertificate.nativeType(type)) return null;
+		// Registration was established before this external-trusted descriptor
+		// getter. Preserve its real native cache wrapper; do not unwrap it.
+		budget.work(64);
+		Codec<?> codec = type.codec();
+		if (codec != null) certificates.externalComponent();
+		return codec;
+	}
+
+	private Value value(DataComponentType<?> type, Object value, int depth, Codec<?> externalCodec) {
 		budget.container(); budget.work(64);
+		if (externalCodec != null) {
+			budget.node(depth);
+			return new Value(type, certificates.external(value, externalCodec, depth), null, null, null, null, certificates, 0, 0, null);
+		}
 		if (type == DataComponents.CONTAINER || type == DataComponents.BUNDLE_CONTENTS || type == DataComponents.CHARGED_PROJECTILES) {
 			List<ItemStack> resident;
 			if (type == DataComponents.CONTAINER) { InventoryComponentCertificate.exact(value, ItemContainerContents.class); resident = raw.container((ItemContainerContents) value); }
@@ -206,9 +235,9 @@ final class InventoryItemFreezer {
 	}
 
 	private String typeId(DataComponentType<?> type) {
-		budget.work(128); // closed codec/type dispatch before registry access
-		if (InventoryComponentCertificate.codec(type) == null && type != DataComponents.FOOD && type != DataComponents.CONTAINER
-			&& type != DataComponents.BUNDLE_CONTENTS && type != DataComponents.CHARGED_PROJECTILES) InventoryComponentCertificate.refuse();
+		budget.work(128);
+		// Identity lookup uses the audited registry's IdentityHashMap: no codec,
+		// value, hashCode or formatting hook of an unregistered type is called.
 		budget.work(InventoryRegistryContext.valueWork(BuiltInRegistries.DATA_COMPONENT_TYPE, raw));
 		var key = BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type); certificates.resource(key);
 		int length = key.getNamespace().length() + key.getPath().length() + 1;
@@ -256,12 +285,16 @@ final class InventoryItemFreezer {
 			// max metadata key width is the admitted component resource name+!.
 			// Removal concatenations are separately admitted before construction.
 			certificate.admitRemovalNames(removals, display);
+			List<Entry> selected = display ? effective : additions;
+			if (display) for (int index = 0; index < selected.size(); index++) { Entry entry = selected.get(index);
+				certificate.planVisit();
+				if (entry.value.external()) certificate.admitRemovalName(entry.id, true);
+			}
 			// reset by admitRemovalNames: restart the allocation-free key schedule
 			certificate.beginMap(display);
-			List<Entry> selected = display ? effective : additions;
 			for (int index = 0; index < selected.size(); index++) { Entry entry = selected.get(index);
 				if (display && (entry.id.equals("minecraft:lore") || (entry.id.equals("minecraft:container") && InventoryDisplayWriter.shulker(id)))) continue;
-				certificate.mapKey(entry.id);
+				certificate.mapKey(display && entry.value.external() ? "!" + entry.id : entry.id);
 			}
 			for (int index = 0; index < removals.size(); index++) { String removed = removals.get(index);
 				if (!display || (!removed.equals("minecraft:lore")
@@ -271,7 +304,11 @@ final class InventoryItemFreezer {
 			certificate.endMap();
 			certificate.admitMap(countIncluded ? 3 : 2, 17, 10, display);
 			certificate.admitScalars(countIncluded ? 1 : 0, 0, 0, 1, display);
-			certificate.admitEmptyMaps(removals.size() + (display ? 2 : 0), display);
+			int suppressed = 0;
+			if (display) for (int index = 0; index < selected.size(); index++) {
+				certificate.planVisit(); if (selected.get(index).value.external()) suppressed++;
+			}
+			certificate.admitEmptyMaps(removals.size() + suppressed + (display ? 2 : 0), display);
 			var fields = new ArrayList<Pair<T, T>>(); fields.add(Pair.of(ops.createString("id"), ops.createString(id)));
 			if (countIncluded) fields.add(Pair.of(ops.createString("count"), ops.createInt(count)));
 			var patch = new ArrayList<Pair<T, T>>();
@@ -280,7 +317,8 @@ final class InventoryItemFreezer {
 			// saved items below still use the exact resident patch grammar.
 			for (int index = 0; index < selected.size(); index++) { Entry entry = selected.get(index);
 				if (display && (entry.id.equals("minecraft:lore") || (entry.id.equals("minecraft:container") && InventoryDisplayWriter.shulker(id)))) continue;
-				patch.add(Pair.of(ops.createString(entry.id), entry.value.encode(ops, display)));
+				if (display && entry.value.external()) patch.add(Pair.of(ops.createString("!" + entry.id), ops.emptyMap()));
+				else patch.add(Pair.of(ops.createString(entry.id), entry.value.encode(ops, display)));
 			}
 			for (int index = 0; index < removals.size(); index++) { String removed = removals.get(index);
 				if (!display || (!removed.equals("minecraft:lore")
@@ -299,8 +337,13 @@ final class InventoryItemFreezer {
 	private record Value(DataComponentType<?> type, Object resident, Codec<?> codec,
 		List<Slot> nested, Plan conversion, List<FoodEffect> effects, InventoryComponentCertificate certificate,
 		int firstEffect, int afterEffect, InventoryComponentCertificate.NativePasses passes) {
+		boolean external() { return resident instanceof InventoryExternalComponent; }
 		@SuppressWarnings("unchecked")
 		<T> T encode(DynamicOps<T> ops, boolean display) {
+			if (resident instanceof InventoryExternalComponent external) {
+				if (display) throw new IllegalStateException("external component is not display data");
+				return (T) external.encode();
+			}
 			certificate.admitEffectCopies(firstEffect, afterEffect);
 			if (passes != null) { certificate.admitPasses(passes); certificate.admitCostPass(passes); }
 			if (resident instanceof InventoryComponentCertificate.Owned || codec != null) certificate.admitValue(type, resident, display);

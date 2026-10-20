@@ -149,7 +149,7 @@ public final class ContentChatComposer {
 	 */
 	public static Function<String, Optional<Component>> itemDisplayDecoder(HolderLookup.Provider registryAccess) {
 		Objects.requireNonNull(registryAccess, "registryAccess");
-		return json -> ClientItemDisplay.decode(registryAccess, json).map(ClientItemDisplay::displayName);
+		return json -> ClientItemDisplay.decodeName(registryAccess, json);
 	}
 
 	/**

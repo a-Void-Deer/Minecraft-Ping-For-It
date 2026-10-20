@@ -58,6 +58,34 @@ class InventoryRegistryContextGuardTest {
 		assertEquals(0, calls.get());
 	}
 
+	@Test void preparedExternalContextUsesNativeOnDemandCustomLookupButCannotCertifyNativeOwners() {
+		var registryKey = ResourceKey.<String>createRegistryKey(ResourceLocation.parse("test:external_context"));
+		var registry = new MappedRegistry<String>(registryKey, Lifecycle.stable(), false);
+		Registry.register(registry, ResourceLocation.parse("test:value"), "value"); registry.freeze();
+		var calls = new AtomicInteger();
+		var provider = new HolderLookup.Provider() {
+			@Override public Stream<ResourceKey<? extends Registry<?>>> listRegistries() { throw new AssertionError("external context enumerated registries"); }
+			@SuppressWarnings("unchecked")
+			@Override public <T> Optional<HolderLookup.RegistryLookup<T>> lookup(ResourceKey<? extends Registry<? extends T>> key) {
+				calls.incrementAndGet(); assertSame(registryKey, key);
+				return Optional.of((HolderLookup.RegistryLookup<T>) registry.asLookup());
+			}
+			@Override public <T> RegistryOps<T> createSerializationContext(DynamicOps<T> ops) { throw new AssertionError("provider context override"); }
+		};
+		var budget = InventoryItemBudget.root(4096); budget.begin(4096);
+		var raw = new InventoryResidentAccessFields(); var bounds = new InventoryComponentBounds(budget, raw);
+		var context = InventoryRegistryContext.prepare(provider, raw, bounds, budget);
+		assertEquals(0, calls.get());
+		RegistryOps<net.minecraft.nbt.Tag> ops = context.externalOps();
+		assertEquals(0, calls.get()); assertSame(ops, context.externalOps());
+		assertSame(registry.asLookup(), ops.owner(registryKey).orElseThrow());
+		assertSame(registry.asLookup(), ops.getter(registryKey).orElseThrow());
+		assertEquals(1, calls.get(), "the real native adapter retains its ordinary lookup cache");
+		assertThrows(InventoryItemBudget.RootLimitException.class, () -> context.owner(Registries.BLOCK));
+		assertEquals(1, calls.get(), "audited native owners must not use the external adapter");
+		budget.end();
+	}
+
 	@Test void actualRootAndFrozenNativeContainersKeepDirectAndNamedSwordIdentity() {
 		oracle(new ItemStack(Items.DIAMOND_SWORD), builtin);
 		RegistryAccess frozen = new RegistryAccess.ImmutableRegistryAccess(builtin.registries()).freeze();
