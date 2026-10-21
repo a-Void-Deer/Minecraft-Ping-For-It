@@ -10,7 +10,9 @@ keeps the live Ping and original target identity instead of a source-instance
 generation is recorded in
 [D0008](../../decisions/D0008-inventory-source-recovery.md). The compatibility
 trade-off for native persistent component codecs is explained by
-[D0010](../../decisions/D0010-persistent-component-codec-trust.md).
+[D0010](../../decisions/D0010-persistent-component-codec-trust.md). The display
+default-inheritance trade-off is explained by
+[D0011](../../decisions/D0011-display-default-inheritance.md).
 
 This is the adopted contract for the confirmed inventory design. Coverage scope
 and pending runtime evidence for the ordinary-block and provider-confirmed
@@ -348,22 +350,52 @@ and does not turn a partial or failed encoding into a successful one.
 
 ### Display projection
 
-Preview and marked-item tracking carry one bounded serialized persistent
-display value per variant beside the item's registry-id label. The label is the
-registry translation fallback; the transmitted display data is what the client
-resolves into localized ordinary, custom and variant names and into
+Preview and marked-item tracking carry the registry item ID and one bounded
+serialized persistent display patch per variant beside the registry-id label.
+The label is the registry translation fallback; the transmitted patch is what
+the client resolves into localized ordinary, custom and variant names and into
 component-bearing item icons. Naming and sanitization precedence, including the
 custom-name forms, remain owned by
 [names and chat](../rendering/names_chat.md).
 
-The bounded display is deliberately separate from identity. Display always
-omits actual Lore and the contents of shulker-box items, regardless of size,
-including those in nested items or inherited prototype defaults. These display
-omissions do not remove data from an otherwise safe exact identity or fold its
-variants. Non-shulker container contents and bundle contents remain eligible
-for bounded display; the same omission applies to any shulker item nested
-inside them. This item-display rule does not hide the readable inventory of a
-placed shulker box.
+The bounded display is deliberately separate from identity. Identity keeps the
+complete server-effective native persistent semantics described above; the
+display value is a sparse persistent patch over the recipient's local prototype
+defaults, not a second identity or a complete component copy. An unmodified
+known persistent default that needs no special display projection is omitted,
+including mutable text, custom NBT and PROFILE values, while client-side
+isolation continues to guard whatever the local default supplies. Explicit
+additions follow their native persistent JSON form, and a patch value already
+known by the same native normalization to equal the default may be omitted
+without a separate equality pass or codec comparison. An explicit removal is
+always carried as a removal, so a local default cannot restore a component that
+was deliberately removed. Generic unknown components are never inherited; they
+remain explicitly suppressed even when the component is itself a default.
+Display transport leaves the exact key, count, selection reference, identity
+mode, aggregate fold and marker lifetime unchanged.
+
+Omitting an unmodified default means local inheritance, not that the two ends
+share a default. No default fingerprint, handshake or synchronized default
+version participates in this inheritance. A recipient whose local default
+differs may therefore render its own default where another recipient would have
+received a matching value; the display still presents the same authoritative
+identity.
+
+The bounded display always filters actual Lore and the contents of shulker-box
+items, regardless of size, including those in nested items or local prototype
+defaults. That filter is intentional display stripping, not the bandwidth
+omission of an unmodified default; the client-side display guard continues to
+suppress such content when a local default materializes it. Display stripping
+does not remove data from an otherwise safe exact identity or fold its variants.
+Non-shulker container contents and bundle contents remain eligible for bounded
+display; the same filter applies to any shulker item nested inside them. This
+item-display rule does not hide the readable inventory of a placed shulker box.
+
+A default that contains nested item or conversion state requiring sanitization —
+a non-empty container or bundle, a charged projectile, or food conversion — is
+not left to plain local inheritance. The display carries a sanitized sparse
+override for the affected child so an unsafe nested value cannot be introduced
+by inheriting the default.
 
 A registered persistent component unknown to Ping remains fully represented in
 identity. Its display value is retained only when bounded deep isolation and the
@@ -373,21 +405,36 @@ restore it. This does not promise preservation of every unknown icon field. If
 the required suppression cannot fit safely, the display is unavailable rather
 than an unsuppressed bare stack; exact identity remains intact.
 
-After those omissions, an oversized display degrades through the existing
-anti-abuse ladder — the remaining component display, then removal of the custom
-name and item name, then the bare stack — and never exceeds the per-item
-display ceiling. Display simplification, even to the bare stack, does not change
-exact keys, identity mode or counts. A naturally componentless item likewise
-needs no fallback. A restored icon is assembled only from the transmitted
-display projection: omitted values must not reappear through prototype defaults,
-the identity digest or a local world-inventory read. Omitted, transient or
-otherwise untransmitted component and model data is not reconstructed.
+After those strips, an oversized display degrades through the existing
+anti-abuse ladder — the remaining component display, then suppression of the
+custom name and item name, then explicit removal of carried component values —
+and never exceeds the per-item display ceiling. Name suppression also
+suppresses names that the patch does not carry, so a local default name does not
+appear in their place. The removal stage turns component values actually
+carried by the patch into explicit removals while preserving existing removals;
+it does not promise to clear every local default. Omitting a default for
+bandwidth is not a removal: the value inherits locally from first resolution,
+is not part of the retained patch, and is not restored by ceiling reprojection.
+If the explicit removals needed to keep the display safe exceed the ceiling,
+the display becomes unavailable rather than degrading to a bare icon that would
+inherit local defaults. Display simplification does not change exact keys,
+identity mode, counts or selection meaning. A naturally componentless item
+likewise needs no fallback.
 
-If client decoding, prototype defaults or a working-stack hook introduces an
-unsafe opaque component value that cannot be reliably isolated, presentation
-falls back to an empty icon and the registry-id label. It never turns a
-display-only failure into an aggregate, changes the exact selection identity,
-or discards authoritative counts.
+A restored icon is assembled from the transmitted patch and the local prototype
+defaults it deliberately inherits. Intentionally stripped values never reappear
+through those defaults, the identity digest or a local world-inventory read; the
+transmitted display data is the only source of component detail beyond the
+inherited defaults. Retained display state keeps only its owned serialized patch
+and does not read resident values or providers, invoke a codec, or re-expand an
+omitted value afterward.
+
+If client decoding, local prototype defaults or a working-stack hook introduces
+an unsafe opaque component value that cannot be reliably isolated, presentation
+falls back to an empty icon and the registry-id label. Omission is not a safety
+certificate: an inherited local default is subject to the same isolation and
+fail-soft rules. A display-only failure never turns into an aggregate, changes
+the exact selection identity, or discards authoritative counts.
 
 ### Identity refusal and aggregate folding
 
@@ -509,7 +556,7 @@ successful handoff publishes the new effective pair before replacement data,
 while a failed handoff leaves the previous data fenced; affected cuts receive
 fresh baseline and state fences, and compatible progress is preserved. Raising
 a ceiling may let a later fresh capture carry fuller data, but it never
-resurrects components omitted from an already retained display.
+resurrects components deliberately stripped from an already retained display.
 
 A client rejects a frame above its accepted size cap before mutating entry
 metadata, counts or revisions, and it discards an incompatible partial without

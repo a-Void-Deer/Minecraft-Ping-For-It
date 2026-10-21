@@ -45,7 +45,22 @@ with the destination left atomic; exact measurement matches an independent
 vanilla UTF codec for every response kind and maximal multibyte entries,
 allocates no display-sized buffers, and scales its workspace with the actual
 packet, and a failed write preserves the existing destination bytes and
-indices. `InventoryChecksumsTest` covers the entry checksum model.
+indices.
+
+`InventoryS2CPacketTest`'s sparse-display cases additionally compare a sparse
+display payload with a full-effective resident-patch baseline for stone, an
+ordinary tool and a damaged tool: a native full-map item JSON oracle round-trips
+count one and every effective component; both payloads keep the same item ID,
+label, exact catalog key and entry metadata; the production packet writer emits
+exactly its measured encoded size, `readSafe` consumes the complete frame
+without corruption and recovers the same packet and entries, and the sparse
+frame's actual encoded size is smaller than the full baseline. These are
+headless frame-codec assertions over a limited representative sample, not a
+live network or full send-queue/byte-budget measurement; the general packet and
+live-transport boundary remains owned by
+[identity and authority](identity-authority.md#domain-identity-and-authority).
+
+`InventoryChecksumsTest` covers the entry checksum model.
 `InventoryStrictDecodeTest` covers the strict version-one `OPEN` grammar on
 raw frames plus raw overflowing request/response frame
 numbers and strict helper rejection of overflowing or noncanonical varints and
@@ -449,6 +464,29 @@ additions, nested opaque spans, depth and UTF boundaries, suppression overflow,
 and all projection ladder outcomes. The
 [item identity and display owner](../../architecture/presentation/inventory.md#item-variants-and-component-fallback)
 defines their separation; no display-only refusal is identity-fold evidence.
+
+Sparse display-default inheritance has named headless assertions in
+`InventoryItemDisplayProjectionTest`, `InventoryGenericComponentCompatibilityTest`
+and `InventoryDisplayWriterTest`. The projection cases assert that unmodified
+ordinary defaults are omitted while the complete server-effective native
+persistent map still supplies canonical identity through an independent oracle;
+the intentional Lore suppression remains; explicit additions and removals
+survive; a native-normalized equal default stays omitted while a source-known
+explicit patch entry that still exists remains transmitted; and one sparse patch
+inherits the server prototype when decoded with the server item defaults and the
+client's local prototype after those client-side defaults change, with the
+fixture restored afterward.
+The generic-compatibility cases assert that an unknown default keeps complete
+identity while its display value is explicitly suppressed; that unmodified
+text, custom NBT and PROFILE defaults stay omitted; that non-empty container,
+bundle, charged-projectile and food-conversion defaults carry sanitized sparse
+child overrides without leaking nested content; and that empty container/bundle
+defaults and food without conversion remain ordinary inherited omissions. The
+writer cases assert fresh and retained sparse-ladder tombstones across
+consecutive tightening, no invented removal for an ordinary uncarried default,
+a cap derived from the actual encoded payload, and suppression of absent
+custom/item names.
+
 `InventoryDomainCodecTest` covers the closed code-owned inventory observation
 codec: the absolute display envelope round-trips within its bound, a display
 beyond the absolute bound is rejected before encoding, a wide display length is
@@ -483,13 +521,14 @@ old-cap frames cannot mutate, and the display cap is measured in exact UTF-8
 bytes rather than characters.
 
 `ClientItemDisplayTest` covers the client item-display decode seam: transmitted
-encoded display data decodes into an owned render stack while malformed,
-missing, unknown or oversized data keeps the registry-label text with an empty
-icon rather than restoring prototype defaults or displaying raw text; an
-identity mismatch is terminal for the icon as well. Successful decoded stacks
-keep enchantments, glint override, custom data and custom model data and are
-always count one regardless of the encoded source count; a normal variant keeps
-its stack-dependent localized name
+encoded display data decodes into an owned render stack, while a malformed,
+missing, unknown or oversized display payload keeps the registry-label text
+with an empty icon rather than displaying raw text; this decode-failure fallback
+does not stand in for a sparse patch's ordinary omitted defaults, whose local
+inheritance is covered above. An identity mismatch is terminal for the icon as
+well. Successful decoded stacks keep enchantments, glint override, custom data
+and custom model data and are always count one regardless of the encoded source
+count; a normal variant keeps its stack-dependent localized name
 while custom and item-name forms use the chat composition with flattened plain
 text; the bounded access-order cache refreshes recency, evicts the least
 recently resolved variant under pressure, stays within its entry and byte
@@ -688,13 +727,14 @@ Offroad, GPU rendering or a live game session.
 the inventory-bridge cases of `NativeSelectorContentTest`, and
 `SpatialInventoryLayoutTest` carry that display through the native bridge into
 the painted row projection: encoded display data survives both compatibility
-projections, the row hands native rendering an owned count-one stack carrying
-the transmitted components that cannot corrupt the next frame, custom names use
-the shared quoted composition, and missing data leaves an empty icon and the
-registry-label text without raw data. These are headless CPU, codec and
-native-painter seams over real vanilla constructor verification,
-resolvable-profile resolution and checked-executor handoff with only
-network/session and main-thread executor ports: no GPU rendering, external
+projections, the row hands native rendering an owned count-one stack whose
+transmitted patch is resolved against local prototype defaults while explicit
+removals stay suppressed, so it cannot corrupt the next frame; custom names use
+the shared quoted composition, and a malformed or missing display payload
+leaves an empty icon and the registry-label text without raw data. These are
+headless CPU, codec and native-painter seams over real vanilla constructor
+verification, resolvable-profile resolution and checked-executor handoff with
+only network/session and main-thread executor ports: no GPU rendering, external
 profile HTTP or live screen is exercised. `PlatformInventoryServiceContractTest`
 covers the loader service contract, including the optional snapshot-layout
 seam of the platform access bridge. `PlatformInventoryMemberGateTest` covers
@@ -935,6 +975,13 @@ remain pending.
   deep copying of known component hovers. Real FML/GLFW lifecycle, GPU rendering,
   language hot reload and asynchronous mutation after validation remain outside
   these seams;
+- sparse display-default assertions are headless codec, decode, projection and
+  writer seams, with a limited representative sample of actual inventory-frame
+  wire sizes through the production writer and reader. They do not exercise a
+  live GUI row, an installed mod's local item defaults, client/server default
+  drift across real installations, asynchronous component mutation, multiplayer
+  transport or transport timing; the full send-queue and byte-budget path
+  remains manual/integration evidence;
 - the provider-confirmed external inventory source against a live Sable runtime
   and world: live membership and sub-level checks, a real provider layout or
   capability, member-gate revocation between operations, a live item witness

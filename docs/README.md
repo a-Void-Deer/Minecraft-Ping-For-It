@@ -103,6 +103,7 @@ duplicate the exact constants, algorithms or error cases owned by topic docs.
 | [D0008 — Inventory source recovery](decisions/D0008-inventory-source-recovery.md) | Why inventory tracking keeps the live Ping and original target identity instead of a source-instance generation, and how invalidation, per-recipient baselines and a hard tracking deadline fence stale data without changing marker lifetime or external leases. |
 | [D0009 — Precise live candidate capture](decisions/D0009-precise-live-candidate-capture.md) | Why the Precise branch follows the current camera ray on a configured period while ordinary actions stay press-frozen, and how same-type competition, pending refreshes and release fencing work. |
 | [D0010 — Native persistent component codec trust](decisions/D0010-persistent-component-codec-trust.md) | Why native persistent semantics support unfamiliar registered components through explicit external trust without making display isolation or owned resource guards optional. |
+| [D0011 — Display default inheritance](decisions/D0011-display-default-inheritance.md) | Why item display travels as a sparse patch over local prototype defaults with explicit strips, and why no default fingerprint or handshake lets omission serve as a safety certificate. |
 
 ## Documentation maintenance
 
