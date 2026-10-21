@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -148,14 +147,10 @@ public final class SpatialOverlayRenderer {
 	/** The Precise branch's fixed slots: the five target types plus Back. */
 	static final int PRECISE_SLOT_COUNT = 6;
 	/**
-	 * Safe fraction of the adjacent-node chord for every Precise node's larger
-	 * painted extent. With the selected 1.12 and ordinary 0.95 node scales,
-	 * {@code 2.07 / 2 * 0.68 = 0.7038} stays below the 0.7071 minimum of
-	 * {@code max(|dx|, |dy|)} between adjacent equal-sector nodes, so node
-	 * resting frames cannot overlap at any menu rotation. A selected follower
-	 * leaves that fixed orbit and has no sibling-separation guarantee.
-	 * Constrained layout also reserves local pixels
-	 * for frame rounding and the disabled dashed border's inclusive endpoints.
+	 * Safe fraction of the adjacent-node chord used as every Precise node's
+	 * external preview cell. Title frames keep the ordinary natural single-line
+	 * bounds and are not constrained by this value; the cell also reserves local
+	 * pixels for its own rounding.
 	 */
 	static final double PRECISE_NODE_EXTENT_FRACTION = 0.68;
 	static final double ANIMATION_RATE_PER_MILLI = 0.02;
@@ -332,9 +327,10 @@ public final class SpatialOverlayRenderer {
 	record Follower(double originX, double originY, double deadzone) {}
 	/**
 	 * One node's paint payload. {@code targetDetail} is the caller-resolved
-	 * external name preview, or {@code null} for a title-only node. The menu's shared
-	 * {@code maxExtent} is retained even for disabled slots, Back and exit paint;
-	 * an infinite extent keeps ordinary menus unconstrained.
+	 * external name preview, or {@code null} for a title-only node. The Precise
+	 * menu's shared {@code maxExtent} is the preview wrapping cell, retained even
+	 * for disabled slots, Back and exit paint; an infinite extent means the node
+	 * has no external preview budget, as on ordinary menus.
 	 */
 	record NodePaint(SpatialController.ChoiceView choice, Component label, Component targetDetail,
 		boolean selected, double hoverProgress, double maxExtent, Follower follower) implements Paint {
@@ -453,7 +449,6 @@ public final class SpatialOverlayRenderer {
 		int top() { return (int) Math.round(-height / 2.0); }
 		int right() { return (int) Math.round(width / 2.0); }
 		int bottom() { return (int) Math.round(height / 2.0); }
-		double contentWidth() { return right() - left() - NODE_TEXT_INSET * 2.0; }
 		double titleTop(int lineHeight) { return -lineHeight * titleScale / 2.0; }
 		double detailScale() { return detail == null ? 0.0 : detail.scale(); }
 	}
@@ -481,23 +476,15 @@ public final class SpatialOverlayRenderer {
 		return new NodeLayout(width, height, optionScale, null);
 	}
 
-	/** Production planning seam: menu membership, not detail availability, owns the constraint. */
+	/**
+	 * Production planning seam: every title uses the ordinary natural single-line
+	 * bounds. Only the external name preview consumes the menu's finite cell, so
+	 * a candidate name can never resize, shrink or clip the title frame above it.
+	 */
 	static NodeLayout nodeLayout(NodePaint node, ToIntFunction<FormattedText> widths, int lineHeight, Style style,
 		StringSplitter splitter) {
 		Component label = nodeLabel(node.choice(), node.label());
-		double titleWidth = widths.applyAsInt(label);
-		NodeLayout layout;
-		if (!Double.isFinite(node.maxExtent())) {
-			layout = nodeLayout(titleWidth, lineHeight, style.optionTextScale());
-		} else {
-			double extent = constrainedExtent(node.maxExtent());
-			double titleScale = Math.min(style.optionTextScale(), (extent - NODE_VERTICAL_PADDING) / lineHeight);
-			layout = new NodeLayout(Math.min(extent, Math.max(MIN_BOX_WIDTH,
-				titleWidth * titleScale + NODE_TEXT_INSET * 2.0)),
-				Math.min(extent, Math.max(BOX_HEIGHT, lineHeight * titleScale + NODE_VERTICAL_PADDING)), titleScale, null);
-			layout = new NodeLayout(layout.width(), layout.height(),
-				visibleNodeScale(label, widths, layout.contentWidth(), layout.titleScale(), style.optionTextScale()), null);
-		}
+		NodeLayout layout = nodeLayout(widths.applyAsInt(label), lineHeight, style.optionTextScale());
 		if (node.targetDetail() == null) return layout;
 		Component text = SpatialTargetDetailText.limit(node.targetDetail());
 		if (text.getString().isBlank()) return layout;
@@ -523,48 +510,11 @@ public final class SpatialOverlayRenderer {
 		return splitter.splitLines(text, limit, net.minecraft.network.chat.Style.EMPTY);
 	}
 
-	/** Fit one visible glyph, never the whole name; keep the height-fit and readable floors. */
-	private static double visibleNodeScale(Component label, ToIntFunction<FormattedText> widths,
-		double contentWidth, double scale, double preference) {
-		var prefix = Component.empty();
-		label.visit((textStyle, text) -> {
-			int end = 0;
-			while (end < text.length()) {
-				int codePoint = text.codePointAt(end);
-				end += Character.charCount(codePoint);
-				if (!Character.isWhitespace(codePoint)) {
-					prefix.append(Component.literal(text.substring(0, end)).withStyle(textStyle));
-					return Optional.of(prefix);
-				}
-			}
-			prefix.append(Component.literal(text).withStyle(textStyle));
-			return Optional.empty();
-		}, net.minecraft.network.chat.Style.EMPTY);
-		int firstWidth = widths.applyAsInt(prefix);
-		if (firstWidth <= 0 || Math.floor(contentWidth / scale) >= firstWidth) return scale;
-		// A resource-pack glyph or whitespace prefix wider than the frame even at
-		// the floor cannot satisfy both constraints; retain the hard bounds/floor.
-		double floor = Math.min(preference, WheelLabelLayout.BASE_TEXT_SCALE);
-		return Math.min(scale, Math.max(floor, Math.nextDown(contentWidth / firstWidth)));
-	}
-
-	private static double constrainedExtent(double maxExtent) {
-		// Integer rounding and a dashed edge can otherwise exceed the chord budget.
-		return Math.max(MIN_BOX_WIDTH, Math.floor(maxExtent) - 2.0);
-	}
-
-	/** Same style-preserving font clipping used to paint a constrained node. */
-	static FormattedText clippedNodeText(Component label, double width, double scale, StringSplitter splitter) {
-		return splitter.headByWidth(label, Math.max(0, (int) Math.floor(width / scale)),
-			net.minecraft.network.chat.Style.EMPTY);
-	}
-
 	/**
-	 * Shared frame budget for every node of the Precise branch, also used as
-	 * the external preview's wrapping cell. The adjacent chord of the six equal
-	 * slots including Back bounds the frame's larger painted extent; the orbit
-	 * and scale are the same visual geometry the nodes are placed with, so no
-	 * radius or sector geometry changes. Preview glyphs are never frame-clipped.
+	 * Shared external preview wrapping cell for every node of the Precise branch.
+	 * The adjacent chord of the six equal slots including Back bounds that cell;
+	 * title frames keep the ordinary natural single-line bounds and are not
+	 * measured against it.
 	 */
 	static double preciseNodeExtentBudget(double viewportOrbit, double submenuRadiusScale) {
 		double radius = viewportOrbit * submenuRadiusScale;
@@ -1040,14 +990,25 @@ public final class SpatialOverlayRenderer {
 			List<SpatialLabelAvoidance.Label> labels = new ArrayList<>();
 			for (var target : targets) {
 				if (!target.key().owner().equals(menu.menuId()) || !(target.data() instanceof NodePaint node)) continue;
-				// Precise's separate constrained title/name layout and inventory Back's
-				// measured panel clearance retain their established geometry.
-				if (Double.isFinite(node.maxExtent())) continue;
 				NodeLayout box = nodeLayout(node, painter::width, painter.lineHeight(), style, painter.splitter());
 				double scale = (float) target.scale();
 				int edge = node.choice().disabled() || node.choice().reserved() ? BORDER_THICKNESS : 0;
+				// A title node owns the same visual space the frame path paints: its
+				// rounded title box plus any external preview below it. The union keeps
+				// a moved Precise node's candidate name clear of sibling slots too.
+				double left = box.left() * scale;
+				double top = box.top() * scale;
+				double right = (box.right() + edge) * scale;
+				double bottom = (box.bottom() + edge) * scale;
+				if (box.detail() != null) {
+					DetailLayout detail = box.detail();
+					left = Math.min(left, detail.left() * scale);
+					top = Math.min(top, detail.top() * scale);
+					right = Math.max(right, detail.right() * scale);
+					bottom = Math.max(bottom, detail.bottom() * scale);
+				}
 				labels.add(new SpatialLabelAvoidance.Label(target.key().entry(), target.x() - ox, target.y() - oy,
-					box.left() * scale, box.top() * scale, (box.right() + edge) * scale, (box.bottom() + edge) * scale,
+					left, top, right, bottom,
 					node.choice().startDegrees(), node.choice().spanDegrees(),
 					!node.selected() && !(itemMenu && node.choice().back()), node.selected()));
 			}
@@ -1055,7 +1016,7 @@ public final class SpatialOverlayRenderer {
 			for (int i = 0; i < targets.size(); i++) {
 				var target = targets.get(i);
 				if (!target.key().owner().equals(menu.menuId()) || !(target.data() instanceof NodePaint node)
-					|| node.selected() || Double.isFinite(node.maxExtent())) continue;
+					|| node.selected()) continue;
 				double dy = offsets.getOrDefault(target.key().entry(), 0.0);
 				if (dy == 0.0) continue;
 				// One ordinary finite transition owns the resulting pose. Appearance
@@ -1969,14 +1930,8 @@ public final class SpatialOverlayRenderer {
 			}
 
 			int textColor = choice.disabled() ? TEXT_DISABLED_COLOR : selected ? TEXT_COLOR : TEXT_DIMMED_COLOR;
-			if (Double.isFinite(node.maxExtent())) {
-				drawText(guiGraphics, font, Language.getInstance().getVisualOrder(
-					clippedNodeText(label, layout.contentWidth(), layout.titleScale(), font.getSplitter())),
-					left + NODE_TEXT_INSET, layout.titleTop(font.lineHeight), layout.titleScale(), textColor, alpha);
-			} else {
-				drawText(guiGraphics, font, label, left + 4.0,
-					layout.titleTop(font.lineHeight), layout.titleScale(), textColor, alpha);
-			}
+			drawText(guiGraphics, font, label, left + 4.0,
+				layout.titleTop(font.lineHeight), layout.titleScale(), textColor, alpha);
 			if (layout.detail() != null) {
 				DetailLayout detail = layout.detail();
 				for (int i = 0; i < detail.lines().size(); i++) {

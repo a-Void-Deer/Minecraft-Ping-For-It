@@ -26,10 +26,12 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Drives controller snapshots through production radial planning, NodePaint
- * layout, title clipping and external preview wrapping. Collision expectations
- * use the actual rounded frame bounds (including the disabled border's inclusive
- * endpoint), not six copies of a hypothetical merged box. Font advances model the vanilla
+ * Drives controller snapshots through the production radial-planning, node-layout,
+ * bounded label-avoidance and external-preview frame seams. Solvable crowds keep
+ * their painted frames and previews separated; enlarged crowds that exceed the
+ * bounded vertical budget instead assert complete readable titles, configured
+ * scale, unchanged horizontal anchors, bounded sector-preserving offsets and
+ * focused-pose stability, and may retain accepted overlap. Font advances model the vanilla
  * Latin bitmap advances and nine-pixel CJK test glyphs without loading a game client.
  * No GuiGraphics, GPU submission or manual rendering evidence is claimed.
  */
@@ -54,7 +56,7 @@ class SpatialOverlayRendererNodeLayoutTest {
 			for (var target : nodes) {
 				var node = (SpatialOverlayRenderer.NodePaint) target.data();
 				var layout = layout(node, style);
-				assertFalse(Double.isFinite(node.maxExtent()), "ordinary menus never gain the Precise constraint");
+				assertFalse(Double.isFinite(node.maxExtent()), "ordinary menus never gain the Precise preview cell");
 				assertEquals(width(node.label()) * style.optionTextScale() + 8.0, layout.width(), 1.0e-9);
 				assertTrue(layout.height() >= LINE_HEIGHT * style.optionTextScale() + 6.0);
 				assertEquals(style.optionTextScale(), layout.titleScale(), 1.0e-9);
@@ -64,11 +66,33 @@ class SpatialOverlayRendererNodeLayoutTest {
 	}
 
 	@Test
+	void preciseTitlesReuseOrdinaryNaturalBoundsInTheProductionFrame() {
+		var style = SpatialOverlayRenderer.Style.fromLegacyFontSizes(100, 100, 200, 100, 88.0, 1.5, true, true);
+		var controller = preciseController(230.0, true);
+		focus(controller, 5);
+		String chineseTitle = "方块实体（超长翻译：自定义名称）";
+		var painter = new RecordingFramePainter();
+		new SpatialOverlayRenderer.Session().drawFrame(controller.snapshot(), null,
+			choice -> Component.literal(choice.back() ? "返回" : chineseTitle), details(true), style, 0L,
+			new SpatialController.Viewport(400, 240, 0, 0), 400, 240, painter);
+
+		assertEquals(6, painter.nodes.size(), "five type slots and Back paint through the production frame");
+		for (var draw : painter.nodes) {
+			assertEquals(draw.node().choice().back() ? "返回" : chineseTitle, draw.node().label().getString(),
+				"the complete localized title reaches the production frame");
+			assertEquals(naturalWidth(draw.node(), style), draw.layout().width(), 1.0e-9,
+				"the precise title frame equals the ordinary natural measurement");
+			assertEquals(style.optionTextScale(), draw.layout().titleScale(), 1.0e-9);
+		}
+	}
+
+	@Test
 	void mixedPreciseFramesSeparateTheReportedEntityAndDisabledEntityBlockPair() {
 		var controller = preciseController(230.0, true);
 		focus(controller, 5); // Back selected: both regression nodes use the ordinary 0.95 scale.
 		var style = style(100, 100, 1.5);
 		var nodes = nodes(controller.snapshot(), details(false), style, 400.0, 240.0);
+		var painted = paintedNodes(controller.snapshot(), details(false), style, 400.0, 240.0);
 		var entity = (SpatialOverlayRenderer.NodePaint) nodes.get(1).data();
 		var entityBlock = (SpatialOverlayRenderer.NodePaint) nodes.get(2).data();
 
@@ -78,12 +102,15 @@ class SpatialOverlayRendererNodeLayoutTest {
 		assertEquals(170.0, midpoint(entity.choice()), 1.0e-9);
 		assertEquals(230.0, midpoint(entityBlock.choice()), 1.0e-9);
 		assertTrue(Double.isFinite(((SpatialOverlayRenderer.NodePaint) nodes.getLast().data()).maxExtent()),
-			"Back receives its containing menu's constraint even without a precise: ID");
-		assertFramesSeparated(nodes, style, "400x240, entry 230 degrees, Back selected");
+			"Back receives its containing menu's external preview cell even without a precise: ID");
+		assertFramesSeparated(painted, "400x240, entry 230 degrees, Back selected");
 	}
 
 	@Test
-	void mixedAndFullyAvailableRotatedMenusKeepRestingPaintedFramesSeparated() {
+	void mixedAndFullyAvailableRotatedMenusKeepBoundedReadableProductionLayout() {
+		// Enlarged complete-title crowds may retain bounded overlap; the confirmed
+		// contract here is bounded sector-preserving placement, not unconditional
+		// separation at every font/viewport combination.
 		double[][] viewports = {{400.0, 240.0}, {480.0, 270.0}, {960.0, 540.0}};
 		int[][] preferences = {{100, 100}, {400, 100}, {100, 500}, {1000, 500}};
 		for (double[] viewport : viewports) {
@@ -98,20 +125,13 @@ class SpatialOverlayRendererNodeLayoutTest {
 									focus(controller, selected);
 									var nodes = nodes(controller.snapshot(), details(chinese), style,
 										viewport[0], viewport[1], chinese);
+									var painted = paintedNodes(controller.snapshot(), details(chinese), style,
+										viewport[0], viewport[1], chinese);
 									assertEquals(6, nodes.size(), "the controller supplies five fixed slots and Back");
-									assertFramesSeparated(nodes, style, "viewport " + viewport[0] + "x" + viewport[1]
-										+ ", radius scale " + radiusScale + ", entry " + entryBearing + ", selected " + selected);
-									for (var target : nodes) {
-										var node = (SpatialOverlayRenderer.NodePaint) target.data();
-										var layout = layout(node, style);
-										assertTrue(Double.isFinite(node.maxExtent()));
-										assertTrue(layout.right() - layout.left() + 1 <= node.maxExtent(),
-											"rounded bounds plus a possible dashed endpoint stay within the budget");
-										assertTrue(layout.bottom() - layout.top() + 1 <= node.maxExtent());
-										assertFalse(clipped(node.label(), layout).isBlank(),
-											"a nonblank type or Back label must retain a visible glyph");
-										if (node.hasDetail()) assertPreviewOutside(layout);
-									}
+									assertEquals(6, painted.size(), "the production frame paints five fixed slots and Back");
+									assertBoundedReadableProductionLayout(controller.snapshot(), nodes, painted, style, chinese,
+										viewport[0], viewport[1], "viewport " + viewport[0] + "x" + viewport[1]
+											+ ", radius scale " + radiusScale + ", entry " + entryBearing + ", selected " + selected);
 								}
 							}
 						}
@@ -122,30 +142,33 @@ class SpatialOverlayRendererNodeLayoutTest {
 	}
 
 	@Test
-	void smallestChineseMenuRetainsVisibleBackDisabledTypeAndCandidateText() {
+	void smallestChineseMenuKeepsCompleteBoundedTitlesAndCandidateText() {
+		// This 400% crowd intentionally exceeds the bounded vertical budget. The
+		// confirmed behavior accepts residual overlap, while requiring complete
+		// titles, bounded sector-preserving moves and a stable selected Back.
 		var controller = preciseController(230.0, true);
 		focus(controller, 5);
 		var style = style(400, 100, 1.0);
 		var nodes = nodes(controller.snapshot(), details(true), style, 400.0, 240.0, true);
+		var painted = paintedNodes(controller.snapshot(), details(true), style, 400.0, 240.0, true);
 		for (int slot : new int[] {2, 5}) {
 			var node = (SpatialOverlayRenderer.NodePaint) nodes.get(slot).data();
-			var layout = layout(node, style);
 			assertFalse(node.hasDetail());
 			assertTrue(node.choice().disabled() || node.choice().back());
-			assertClipped(node.label(), layout);
-			assertTrue(layout.titleScale() >= style(100, 100, 1.0).optionTextScale());
 		}
 		var entity = (SpatialOverlayRenderer.NodePaint) nodes.get(1).data();
 		for (String name : new String[] {"猪", LONG_NAME.repeat(16), "自定义超长名字（钻石剑）".repeat(16)}) {
 			var node = new SpatialOverlayRenderer.NodePaint(entity.choice(), entity.label(), Component.literal(name),
 				entity.selected(), entity.hoverProgress(), entity.maxExtent());
 			var layout = layout(node, style);
-			assertFalse(clipped(node.label(), layout).isBlank());
+			assertEquals(naturalWidth(node, style), layout.width(), 1.0e-9,
+				"the preview never resizes its title frame");
 			assertFalse(layout.detail().text().getString().isBlank());
 			assertTrue(layout.detailScale() >= style(100, 100, 1.0).optionTextScale());
 			assertPreviewOutside(layout);
 		}
-		assertFramesSeparated(nodes, style, "Chinese 400x240, radius scale 1, option scale 2");
+		assertBoundedReadableProductionLayout(controller.snapshot(), nodes, painted, style, true, 400.0, 240.0,
+			"Chinese 400x240, radius scale 1, option scale 2");
 	}
 
 	@Test
@@ -196,7 +219,8 @@ class SpatialOverlayRendererNodeLayoutTest {
 		}
 		assertEquals(LONG_NAME.substring(0, 31) + "\u2026", longLayout.detail().text().getString());
 		assertEquals("W".repeat(32), paintedDetail(wideLayout));
-		assertTrue(wideLayout.detail().width() > wideLayout.contentWidth(), "preview uses cell space beyond the button inset");
+		assertTrue(wideLayout.detail().width() <= wideName.maxExtent() + 1.0,
+			"the preview wraps inside the shared cell, not the title frame's content width");
 		assertNull(plainLayout.detail(), "missing detail allocates no external text area");
 		assertEquals(0.0, plainLayout.detailScale());
 	}
@@ -359,21 +383,21 @@ class SpatialOverlayRendererNodeLayoutTest {
 		for (int selected = 0; selected < 6; selected++) {
 			focus(controller, selected);
 			for (boolean chinese : new boolean[] {false, true}) {
-				var nodes = nodes(controller.snapshot(), details(chinese), style, 400.0, 240.0, chinese);
-				assertEquals(6, nodes.size());
-				assertFramesSeparated(nodes, style, "default mixed six slots");
-				for (int a = 0; a < nodes.size(); a++) {
-					if (((SpatialOverlayRenderer.NodePaint) nodes.get(a).data()).follower() != null) continue;
-					var first = layout((SpatialOverlayRenderer.NodePaint) nodes.get(a).data(), style);
+				var painted = paintedNodes(controller.snapshot(), details(chinese), style, 400.0, 240.0, chinese);
+				assertEquals(6, painted.size());
+				assertFramesSeparated(painted, "default mixed six slots");
+				for (int a = 0; a < painted.size(); a++) {
+					if (painted.get(a).node().follower() != null) continue;
+					var first = painted.get(a).layout();
 					if (first.detail() == null) continue;
 					assertPreviewOutside(first);
 					assertTrue(first.detailScale() >= 0.5 && first.detailScale() <= style.inventoryTextScale());
-					assertTrue(first.detail().width() <= ((SpatialOverlayRenderer.NodePaint) nodes.get(a).data()).maxExtent() + 1.0,
+					assertTrue(first.detail().width() <= painted.get(a).node().maxExtent() + 1.0,
 						"wrapping uses the full shared cell, not an unrelated viewport or title limit");
-					for (int b = a + 1; b < nodes.size(); b++) {
-						if (((SpatialOverlayRenderer.NodePaint) nodes.get(b).data()).follower() != null) continue;
-						if (layout((SpatialOverlayRenderer.NodePaint) nodes.get(b).data(), style).detail() != null) {
-							assertFalse(overlap(detailBounds(nodes.get(a), style), detailBounds(nodes.get(b), style)),
+					for (int b = a + 1; b < painted.size(); b++) {
+						if (painted.get(b).node().follower() != null) continue;
+						if (painted.get(b).layout().detail() != null) {
+							assertFalse(overlap(detailBounds(painted.get(a)), detailBounds(painted.get(b))),
 								"default external previews must not collide: " + a + "/" + b + ", selected " + selected);
 						}
 					}
@@ -390,6 +414,8 @@ class SpatialOverlayRendererNodeLayoutTest {
 		String name = "Stone Stone Stone Stone (Egg)";
 		var nodes = nodes(controller.snapshot(), choice -> choice.id().equals("precise:dropped_item")
 			? Component.literal(name) : details(false).apply(choice), style, 400.0, 240.0);
+		var painted = paintedNodes(controller.snapshot(), choice -> choice.id().equals("precise:dropped_item")
+			? Component.literal(name) : details(false).apply(choice), style, 400.0, 240.0);
 		var node = (SpatialOverlayRenderer.NodePaint) nodes.getFirst().data();
 		var layout = layout(node, style);
 		assertEquals(29, codePoints(name));
@@ -403,11 +429,15 @@ class SpatialOverlayRendererNodeLayoutTest {
 		assertEquals(visualPoints(Component.literal(name.replace(" ", "")).getVisualOrderText()),
 			paintedVisualPoints(layout).stream().filter(point -> point.codePoint() != ' ').toList());
 		assertPreviewOutside(layout);
-		assertPreviewsClearSiblings(nodes, style, "208 degrees, Back focused");
+		assertPreviewsClearSiblings(painted, "208 degrees, Back focused");
 	}
 
 	@Test
-	void default200PercentOptionFontPreviewsClearSiblingFramesAndPreviewsAcrossRotations() {
+	void default200PercentOptionFontKeepsBoundedReadableProductionLayoutAcrossRotations() {
+		// At 200% the complete-title crowd can exceed the bounded vertical budget
+		// at some rotations; residual overlap is accepted, not an unconditional
+		// collision guarantee. Bounded offsets, sectors, anchors and the full text
+		// remain required across the complete rotation sweep.
 		var style = style(200, 100, 1.5);
 		for (boolean mixed : new boolean[] {false, true}) {
 			for (double entryBearing = 0.0; entryBearing < 360.0; entryBearing += 4.0) {
@@ -415,14 +445,16 @@ class SpatialOverlayRendererNodeLayoutTest {
 				for (int selected = 0; selected < 6; selected++) {
 					focus(controller, selected);
 					for (boolean chinese : new boolean[] {false, true}) {
-						var nodes = nodes(controller.snapshot(), choice -> {
+						Function<SpatialController.ChoiceView, Component> detailResolver = choice -> {
 							if (choice.id().equals("precise:dropped_item")) return Component.literal("Stone Stone Stone Stone (Egg)");
 							return details(chinese).apply(choice);
-						}, style, 400.0, 240.0, chinese);
+						};
+						var raw = nodes(controller.snapshot(), detailResolver, style, 400.0, 240.0, chinese);
+						var painted = paintedNodes(controller.snapshot(), detailResolver, style, 400.0, 240.0, chinese);
 						String scenario = "default option 200%, entry " + entryBearing + ", selected " + selected
 							+ ", mixed " + mixed + ", Chinese " + chinese;
-						assertFramesSeparated(nodes, style, scenario);
-						assertPreviewsClearSiblings(nodes, style, scenario);
+						assertBoundedReadableProductionLayout(controller.snapshot(), raw, painted, style, chinese,
+							400.0, 240.0, scenario);
 					}
 				}
 			}
@@ -464,7 +496,7 @@ class SpatialOverlayRendererNodeLayoutTest {
 	}
 
 	@Test
-	void titleHeightFitCannotConstrainTheExternalPreviewAndReadableFloorsRemain() {
+	void largeTitleFontsDoNotConstrainTheExternalPreviewAndReadableFloorsRemain() {
 		var controller = preciseController(230.0, false);
 		double radialBase = style(100, 100, 1.0).optionTextScale();
 		for (int[] preference : new int[][] {{1000, 100}, {100, 500}, {1000, 500}, {50, 25}}) {
@@ -474,9 +506,10 @@ class SpatialOverlayRendererNodeLayoutTest {
 			assertTrue(layout.titleScale() >= Math.min(radialBase, style.optionTextScale()) - 1.0e-9);
 			assertTrue(layout.detailScale() >= Math.min(radialBase, style.inventoryTextScale()) - 1.0e-9,
 				"a large title or target font cannot shrink the preview below the radial base size");
-			assertTrue(layout.titleScale() <= style.optionTextScale());
+			assertEquals(style.optionTextScale(), layout.titleScale(), 1.0e-9,
+				"the title keeps its configured size without a height fit");
+			assertEquals(naturalWidth(node, style), layout.width(), 1.0e-9);
 			assertTrue(layout.detailScale() <= style.inventoryTextScale());
-			assertTrue(layout.bottom() - layout.top() + 1 <= node.maxExtent());
 			assertEquals(32, codePoints(layout.detail().text().getString()));
 			assertPreviewOutside(layout);
 		}
@@ -527,7 +560,7 @@ class SpatialOverlayRendererNodeLayoutTest {
 	}
 
 	@Test
-	void constrainedSingleLineTypeClipsWithoutWidthDrivenFontShrinking() {
+	void preciseTypeTitleKeepsTheOrdinaryCompleteSingleLineBounds() {
 		var controller = preciseController(230.0, true);
 		var style = style(400, 100, 1.5);
 		var nodes = nodes(controller.snapshot(), details(false), style, 480.0, 270.0);
@@ -535,27 +568,11 @@ class SpatialOverlayRendererNodeLayoutTest {
 		var layout = layout(node, style);
 		assertFalse(node.hasDetail());
 		assertEquals(style.optionTextScale(), layout.titleScale(), 1.0e-9,
-			"this title fits vertically; its width must clip, not rescale");
-		assertClipped(node.label(), layout);
-	}
-
-	@Test
-	void clippedNodeTextKeepsItsComponentStyle() {
-		var label = Component.literal(LONG_NAME).withStyle(net.minecraft.network.chat.Style.EMPTY
-			.withColor(0x12AB56).withItalic(true));
-		var clipped = SpatialOverlayRenderer.clippedNodeText(label, 22.0, 1.0, FONT);
-		assertFalse(clipped.getString().isEmpty());
-		assertTrue(clipped.getString().length() < label.getString().length());
-		var styles = new ArrayList<net.minecraft.network.chat.Style>();
-		clipped.visit((style, text) -> {
-			if (!text.isEmpty()) styles.add(style);
-			return Optional.empty();
-		}, net.minecraft.network.chat.Style.EMPTY);
-		assertFalse(styles.isEmpty());
-		for (var style : styles) {
-			assertEquals(label.getStyle().getColor(), style.getColor());
-			assertTrue(style.isItalic());
-		}
+			"the configured title size is never reduced to fit a cell");
+		assertEquals(naturalWidth(node, style), layout.width(), 1.0e-9,
+			"the title frame measures the complete label exactly as an ordinary title does");
+		assertTrue(layout.width() > node.maxExtent(),
+			"the external preview cell cannot truncate the title above it");
 	}
 
 	@Test
@@ -604,6 +621,28 @@ class SpatialOverlayRendererNodeLayoutTest {
 		assertEquals(before.detail().height(), after.detail().height());
 		assertEquals(paintedDetail(before), paintedDetail(after), "exit paint keeps its frame constraint with its name");
 		assertFalse(exiting.getFirst().present());
+	}
+
+	private record FrameDraw(
+		SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> state,
+		SpatialOverlayRenderer.NodePaint node, SpatialOverlayRenderer.NodeLayout layout) {}
+
+	private static final class RecordingFramePainter implements SpatialOverlayRenderer.FramePainter {
+		final List<FrameDraw> nodes = new ArrayList<>();
+
+		public int lineHeight() { return LINE_HEIGHT; }
+		public int width(FormattedText text) { return SpatialOverlayRendererNodeLayoutTest.width(text); }
+		public StringSplitter splitter() { return FONT; }
+
+		public boolean paint(SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> state,
+			SpatialOverlayRenderer.NodeLayout layout, SpatialOverlayRenderer.Style style) {
+			if (state.present() && state.data() instanceof SpatialOverlayRenderer.NodePaint node && layout != null) {
+				nodes.add(new FrameDraw(state, node, layout));
+			}
+			return true;
+		}
+
+		public void connector(SpatialOverlayRenderer.GuideLine line, double alpha) {}
 	}
 
 	/** Bitmap advances read from vanilla 1.21.1 ascii/nonlatin_european assets; non-Latin test glyphs are explicit. */
@@ -677,6 +716,39 @@ class SpatialOverlayRendererNodeLayoutTest {
 		};
 	}
 
+	private static Function<SpatialController.ChoiceView, Component> labels(boolean chinese) {
+		return choice -> {
+			int slot = preciseSlot(choice);
+			return Component.literal(choice.back() ? (chinese ? "返回" : "Back")
+				: chinese && slot >= 0 ? ZH_TITLES[slot] : choice.label());
+		};
+	}
+
+	/** Same frozen layout preferences with transitions snapped, so the recorded pose is the resting plan. */
+	private static SpatialOverlayRenderer.Style settled(SpatialOverlayRenderer.Style style) {
+		return new SpatialOverlayRenderer.Style(style.opacityPercent(), style.targetOpacityPercent(),
+			style.optionTextScale(), style.inventoryTextScale(), style.rootDistance(), style.submenuRadiusScale(),
+			style.showTrail(), true, style.trailLength(), style.trailOpacityPercent(),
+			style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction());
+	}
+
+	/** Actual production frame path, including label avoidance, recorded as painted node poses. */
+	private static List<FrameDraw> paintedNodes(SpatialController.Snapshot snapshot,
+		Function<SpatialController.ChoiceView, Component> details, SpatialOverlayRenderer.Style style,
+		double guiWidth, double guiHeight, boolean chinese) {
+		var painter = new RecordingFramePainter();
+		new SpatialOverlayRenderer.Session().drawFrame(snapshot, null, labels(chinese), details, settled(style), 0L,
+			new SpatialController.Viewport((int) guiWidth, (int) guiHeight, 0, 0), guiWidth, guiHeight, painter);
+		String activeMenu = snapshot.menus().getLast().menuId();
+		return painter.nodes.stream().filter(draw -> draw.state().key().owner().equals(activeMenu)).toList();
+	}
+
+	private static List<FrameDraw> paintedNodes(SpatialController.Snapshot snapshot,
+		Function<SpatialController.ChoiceView, Component> details, SpatialOverlayRenderer.Style style,
+		double guiWidth, double guiHeight) {
+		return paintedNodes(snapshot, details, style, guiWidth, guiHeight, false);
+	}
+
 	private static List<SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>>
 		nodes(SpatialController.Snapshot snapshot, Function<SpatialController.ChoiceView, Component> details,
 			SpatialOverlayRenderer.Style style, double guiWidth, double guiHeight) {
@@ -687,11 +759,8 @@ class SpatialOverlayRendererNodeLayoutTest {
 		nodes(SpatialController.Snapshot snapshot, Function<SpatialController.ChoiceView, Component> details,
 			SpatialOverlayRenderer.Style style, double guiWidth, double guiHeight, boolean chinese) {
 		var targets = new ArrayList<SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>>();
-		SpatialOverlayRenderer.addRadial(targets, snapshot, choice -> {
-			int slot = preciseSlot(choice);
-			return Component.literal(choice.back() ? (chinese ? "返回" : "Back")
-				: chinese && slot >= 0 ? ZH_TITLES[slot] : choice.label());
-		}, details, guiWidth / 2.0, guiHeight / 2.0, SpatialOverlayRenderer.orbitFor(Math.min(guiWidth, guiHeight)),
+		SpatialOverlayRenderer.addRadial(targets, snapshot, labels(chinese), details, guiWidth / 2.0, guiHeight / 2.0,
+			SpatialOverlayRenderer.orbitFor(Math.min(guiWidth, guiHeight)),
 			style.rootDistance(), style.submenuRadiusScale());
 		String activeMenu = snapshot.menus().getLast().menuId();
 		return targets.stream().filter(target -> target.data() instanceof SpatialOverlayRenderer.NodePaint
@@ -716,16 +785,9 @@ class SpatialOverlayRendererNodeLayoutTest {
 			entity.selected(), entity.hoverProgress(), entity.maxExtent()), style);
 	}
 
-	private static String clipped(Component label, SpatialOverlayRenderer.NodeLayout layout) {
-		return SpatialOverlayRenderer.clippedNodeText(label, layout.contentWidth(), layout.titleScale(), FONT).getString();
-	}
-
-	private static void assertClipped(Component label, SpatialOverlayRenderer.NodeLayout layout) {
-		String clipped = clipped(label, layout);
-		assertFalse(clipped.isEmpty(), "clipping must retain readable glyphs, not vanish the line");
-		assertTrue(label.getString().startsWith(clipped));
-		assertTrue(clipped.length() < label.getString().length());
-		assertTrue(width(Component.literal(clipped)) * layout.titleScale() <= layout.contentWidth() + 1.0e-9);
+	private static double naturalWidth(SpatialOverlayRenderer.NodePaint node, SpatialOverlayRenderer.Style style) {
+		return Math.max(SpatialOverlayRenderer.MIN_BOX_WIDTH,
+			width(node.label()) * style.optionTextScale() + SpatialOverlayRenderer.NODE_TEXT_INSET * 2.0);
 	}
 
 	private static void assertPreviewOutside(SpatialOverlayRenderer.NodeLayout layout) {
@@ -739,6 +801,47 @@ class SpatialOverlayRendererNodeLayoutTest {
 		assertTrue(codePoints(layout.detail().text().getString()) <= 32);
 		for (var line : layout.detail().lines()) {
 			assertEquals(-line.width() * layout.detailScale() / 2.0, line.left(layout.detailScale()));
+		}
+	}
+
+	private static void assertBoundedReadableProductionLayout(SpatialController.Snapshot snapshot,
+		List<SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>> raw,
+		List<FrameDraw> painted, SpatialOverlayRenderer.Style style, boolean chinese,
+		double guiWidth, double guiHeight, String scenario) {
+		var menu = snapshot.menus().getLast();
+		double originX = guiWidth / 2.0 + menu.origin().x();
+		double originY = guiHeight / 2.0 + menu.origin().y();
+		for (FrameDraw draw : painted) {
+			var node = draw.node();
+			var layout = draw.layout();
+			assertEquals(labels(chinese).apply(node.choice()).getString(), node.label().getString(),
+				scenario + ": the complete title reaches the production frame");
+			assertTrue(Double.isFinite(node.maxExtent()), scenario + ": Precise keeps its finite preview cell");
+			assertEquals(style.optionTextScale(), layout.titleScale(), 1.0e-9,
+				scenario + ": configured title scale is preserved");
+			assertEquals(naturalWidth(node, style), layout.width(), 1.0e-9,
+				scenario + ": title frame measures the complete natural label");
+			if (layout.detail() != null) {
+				assertTrue(layout.detail().width() <= node.maxExtent() + 1.0,
+					scenario + ": preview wraps inside the shared cell");
+				assertPreviewOutside(layout);
+				assertEquals(layout.bottom() + SpatialOverlayRenderer.NODE_DETAIL_GAP, layout.detail().top(), 1.0e-9,
+					scenario + ": preview follows the complete title frame");
+			}
+			var target = raw.stream().filter(value -> value.key().entry().equals(draw.state().key().entry()))
+				.findFirst().orElseThrow();
+			assertEquals(target.x(), draw.state().x(), 1.0e-9, scenario + ": horizontal anchor is never moved");
+			if (node.selected() || node.follower() != null) {
+				assertEquals(target.y(), draw.state().y(), 1.0e-9, scenario + ": focused pose is never moved by avoidance");
+				continue;
+			}
+			double dy = draw.state().y() - target.y();
+			// Same confirmed bounded-neighborhood fixture used by SpatialLabelAvoidanceTest.
+			assertTrue(Math.abs(dy) <= 24.0 + 1.0e-9,
+				scenario + ": non-focused offset stays inside the bounded neighborhood");
+			double bearing = Math.toDegrees(Math.atan2(draw.state().x() - originX, originY - draw.state().y()));
+			double within = ((bearing - node.choice().startDegrees()) % 360.0 + 360.0) % 360.0;
+			assertTrue(within < node.choice().spanDegrees() + 1.0e-9, scenario + ": moved center stays in its sector");
 		}
 	}
 
@@ -780,42 +883,36 @@ class SpatialOverlayRendererNodeLayoutTest {
 			&& first.top() < second.bottom() && second.top() < first.bottom();
 	}
 
-	private static Bounds detailBounds(
-		SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> target,
-		SpatialOverlayRenderer.Style style) {
-		var detail = layout((SpatialOverlayRenderer.NodePaint) target.data(), style).detail();
-		double scale = (float) target.scale();
-		return new Bounds(target.x() + detail.left() * scale, target.y() + detail.top() * scale,
-			target.x() + detail.right() * scale, target.y() + detail.bottom() * scale);
+	private static Bounds detailBounds(FrameDraw draw) {
+		var detail = draw.layout().detail();
+		double scale = (float) draw.state().scale();
+		return new Bounds(draw.state().x() + detail.left() * scale, draw.state().y() + detail.top() * scale,
+			draw.state().x() + detail.right() * scale, draw.state().y() + detail.bottom() * scale);
 	}
 
-	private static List<Bounds> detailLineBounds(
-		SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> target,
-		SpatialOverlayRenderer.Style style) {
-		var detail = layout((SpatialOverlayRenderer.NodePaint) target.data(), style).detail();
+	private static List<Bounds> detailLineBounds(FrameDraw draw) {
+		var detail = draw.layout().detail();
 		if (detail == null) return List.of();
-		double scale = (float) target.scale();
+		double scale = (float) draw.state().scale();
 		var result = new ArrayList<Bounds>();
 		for (int i = 0; i < detail.lines().size(); i++) {
 			var line = detail.lines().get(i);
 			double top = detail.top() + LINE_HEIGHT * detail.scale() * i;
-			result.add(new Bounds(target.x() + line.left(detail.scale()) * scale, target.y() + top * scale,
-				target.x() - line.left(detail.scale()) * scale, target.y() + (top + LINE_HEIGHT * detail.scale()) * scale));
+			result.add(new Bounds(draw.state().x() + line.left(detail.scale()) * scale, draw.state().y() + top * scale,
+				draw.state().x() - line.left(detail.scale()) * scale, draw.state().y() + (top + LINE_HEIGHT * detail.scale()) * scale));
 		}
 		return result;
 	}
 
-	private static void assertPreviewsClearSiblings(
-		List<SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>> nodes,
-		SpatialOverlayRenderer.Style style, String scenario) {
+	private static void assertPreviewsClearSiblings(List<FrameDraw> nodes, String scenario) {
 		for (int a = 0; a < nodes.size(); a++) {
-			if (((SpatialOverlayRenderer.NodePaint) nodes.get(a).data()).follower() != null) continue;
-			for (Bounds preview : detailLineBounds(nodes.get(a), style)) {
+			if (nodes.get(a).node().follower() != null) continue;
+			for (Bounds preview : detailLineBounds(nodes.get(a))) {
 				for (int b = 0; b < nodes.size(); b++) {
 					if (a == b) continue;
-					if (((SpatialOverlayRenderer.NodePaint) nodes.get(b).data()).follower() != null) continue;
-					assertFalse(overlap(preview, bounds(nodes.get(b), style)), scenario + ", preview/frame pair " + a + "/" + b);
-					for (Bounds sibling : detailLineBounds(nodes.get(b), style)) {
+					if (nodes.get(b).node().follower() != null) continue;
+					assertFalse(overlap(preview, bounds(nodes.get(b))), scenario + ", preview/frame pair " + a + "/" + b);
+					for (Bounds sibling : detailLineBounds(nodes.get(b))) {
 						assertFalse(overlap(preview, sibling), scenario + ", preview/preview pair " + a + "/" + b);
 					}
 				}
@@ -823,30 +920,27 @@ class SpatialOverlayRendererNodeLayoutTest {
 		}
 	}
 
-	private static Bounds bounds(
-		SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> target,
-		SpatialOverlayRenderer.Style style) {
-		var node = (SpatialOverlayRenderer.NodePaint) target.data();
-		var layout = layout(node, style);
+	private static Bounds bounds(FrameDraw draw) {
+		var node = draw.node();
+		var layout = draw.layout();
 		// drawNode uses a float pose scale, and dashedLine can fill right/bottom inclusively.
-		double scale = (float) target.scale();
+		double scale = (float) draw.state().scale();
 		int endpoint = node.choice().disabled() || node.choice().reserved() ? 1 : 0;
-		return new Bounds(target.x() + layout.left() * scale, target.y() + layout.top() * scale,
-			target.x() + (layout.right() + endpoint) * scale, target.y() + (layout.bottom() + endpoint) * scale);
+		return new Bounds(draw.state().x() + layout.left() * scale, draw.state().y() + layout.top() * scale,
+			draw.state().x() + (layout.right() + endpoint) * scale,
+			draw.state().y() + (layout.bottom() + endpoint) * scale);
 	}
 
-	private static void assertFramesSeparated(
-		List<SpatialOverlayTransitions.Target<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint>> nodes,
-		SpatialOverlayRenderer.Style style, String scenario) {
+	private static void assertFramesSeparated(List<FrameDraw> nodes, String scenario) {
 		for (int a = 0; a < nodes.size(); a++) {
 			// Following nodes intentionally leave the collision-free resting orbit.
-			if (((SpatialOverlayRenderer.NodePaint) nodes.get(a).data()).follower() != null) continue;
-			Bounds first = bounds(nodes.get(a), style);
+			if (nodes.get(a).node().follower() != null) continue;
+			Bounds first = bounds(nodes.get(a));
 			for (int b = a + 1; b < nodes.size(); b++) {
-				if (((SpatialOverlayRenderer.NodePaint) nodes.get(b).data()).follower() != null) continue;
-				Bounds second = bounds(nodes.get(b), style);
-				assertFalse(overlap(first, second), scenario + ", overlapping pair " + nodes.get(a).key().entry()
-					+ "/" + nodes.get(b).key().entry() + ": " + first + " / " + second);
+				if (nodes.get(b).node().follower() != null) continue;
+				Bounds second = bounds(nodes.get(b));
+				assertFalse(overlap(first, second), scenario + ", overlapping pair " + nodes.get(a).state().key().entry()
+					+ "/" + nodes.get(b).state().key().entry() + ": " + first + " / " + second);
 			}
 		}
 	}

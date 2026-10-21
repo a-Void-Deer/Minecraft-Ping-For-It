@@ -187,18 +187,24 @@ class SpatialOverlayRendererFollowerTest {
 				assertEquals(1, state.alpha(), "moving radius/direction never restarts the appearance fade");
 				assertEquals(SpatialOverlayRenderer.NODE_FOCUSED_SCALE, state.scale(), 1.0e-12);
 			}
-			var line = painter.strokes.getFirst().line();
-			assertEquals(12, Math.hypot(line.x1() - ox, line.y1() - oy), 1e-9);
-			assertEquals(0, (line.x2() - line.x1()) * (py - oy) - (line.y2() - line.y1()) * (px - ox), 1e-8);
-			double scale = (float) state.scale();
-			double lx = (line.x2() - state.x()) / scale; double ly = (line.y2() - state.y()) / scale;
 			var layout = draw.layout();
-			assertTrue(lx >= layout.left() - 1e-8 && lx <= layout.right() + 1e-8);
-			assertTrue(ly >= layout.top() - 1e-8 && ly <= layout.bottom() + 1e-8);
-			assertTrue(Math.min(Math.min(Math.abs(lx - layout.left()), Math.abs(lx - layout.right())),
-				Math.min(Math.abs(ly - layout.top()), Math.abs(ly - layout.bottom()))) < 1e-8, "near actual title boundary, not target pose or preview");
-			assertTrue((line.x2() - state.x()) * (px - ox) + (line.y2() - state.y()) * (py - oy) < 0, "near not far edge");
-			assertEquals(state.alpha(), painter.strokes.getFirst().alpha());
+			if (painter.strokes.isEmpty()) {
+				assertFalse(uncoveredConnectorSegment(draw, painter.draws, ox, oy),
+					"a missing connector requires the painted frames to cover every remaining segment");
+			} else {
+				var stroke = painter.strokes.getFirst();
+				var line = stroke.line();
+				assertEquals(12, Math.hypot(line.x1() - ox, line.y1() - oy), 1e-9);
+				assertEquals(0, (line.x2() - line.x1()) * (py - oy) - (line.y2() - line.y1()) * (px - ox), 1e-8);
+				double scale = (float) state.scale();
+				double lx = (line.x2() - state.x()) / scale; double ly = (line.y2() - state.y()) / scale;
+				assertTrue(lx >= layout.left() - 1e-8 && lx <= layout.right() + 1e-8);
+				assertTrue(ly >= layout.top() - 1e-8 && ly <= layout.bottom() + 1e-8);
+				assertTrue(Math.min(Math.min(Math.abs(lx - layout.left()), Math.abs(lx - layout.right())),
+					Math.min(Math.abs(ly - layout.top()), Math.abs(ly - layout.bottom()))) < 1e-8, "near actual title boundary, not target pose or preview");
+				assertTrue((line.x2() - state.x()) * (px - ox) + (line.y2() - state.y()) * (py - oy) < 0, "near not far edge");
+				assertEquals(state.alpha(), stroke.alpha());
+			}
 			assertEquals(32, layout.detail().text().getString().codePointCount(0, layout.detail().text().getString().length()));
 			assertTrue(layout.detail().top() > layout.bottom(), "outside preview shares node pose and scale");
 			var guide = painter.draws.stream().filter(value -> value.state().key().owner().equals("precise")
@@ -474,6 +480,84 @@ class SpatialOverlayRendererFollowerTest {
 		var first = pose.last().pose().transform(new Vector4f(draw.layout().left(), draw.layout().top(), 0, 1));
 		var last = pose.last().pose().transform(new Vector4f(draw.layout().right(), draw.layout().bottom(), 0, 1));
 		return new double[] {first.x(), first.y(), last.x(), last.y()};
+	}
+
+	/**
+	 * Independent geometry check for a missing connector: the remaining circle-to-title
+	 * segment must be fully covered by the painted frames and previews. Uses the recorded
+	 * poses and layouts, not the renderer's own connector helper.
+	 */
+	private static boolean uncoveredConnectorSegment(Draw draw, List<Draw> draws, double originX, double originY) {
+		var state = draw.state();
+		var layout = draw.layout();
+		double dx = state.x() - originX, dy = state.y() - originY;
+		double radius = Math.hypot(dx, dy);
+		if (!(radius > 0.0)) return false;
+		double ux = dx / radius, uy = dy / radius;
+		double scale = (float) state.scale();
+		double horizontal = ux == 0.0 ? Double.POSITIVE_INFINITY
+			: (ux > 0.0 ? -layout.left() : layout.right()) * scale / Math.abs(ux);
+		double vertical = uy == 0.0 ? Double.POSITIVE_INFINITY
+			: (uy > 0.0 ? -layout.top() : layout.bottom()) * scale / Math.abs(uy);
+		double near = radius - Math.min(horizontal, vertical);
+		double deadzone = 12.0;
+		if (near <= deadzone) return false;
+		double x1 = originX + ux * deadzone, y1 = originY + uy * deadzone;
+		double x2 = originX + ux * near, y2 = originY + uy * near;
+		List<double[]> intervals = new ArrayList<>();
+		intervals.add(new double[] {0.0, 1.0});
+		for (Draw other : draws) {
+			if (!other.state().present() || !(other.state().data() instanceof SpatialOverlayRenderer.NodePaint node)
+				|| other.layout() == null) continue;
+			double otherScale = (float) other.state().scale();
+			int edge = node.choice().disabled() || node.choice().reserved() ? 1 : 0;
+			subtractSegmentInterval(intervals, x1, y1, x2, y2,
+				other.state().x() + other.layout().left() * otherScale - 1,
+				other.state().y() + other.layout().top() * otherScale - 1,
+				other.state().x() + (other.layout().right() + edge) * otherScale + 1,
+				other.state().y() + (other.layout().bottom() + edge) * otherScale + 1);
+			var detail = other.layout().detail();
+			if (detail != null) {
+				subtractSegmentInterval(intervals, x1, y1, x2, y2,
+					other.state().x() + detail.left() * otherScale - 1,
+					other.state().y() + detail.top() * otherScale - 1,
+					other.state().x() + detail.right() * otherScale + 1,
+					other.state().y() + detail.bottom() * otherScale + 1);
+			}
+		}
+		return intervals.stream().anyMatch(interval -> interval[1] - interval[0] > 1.0e-9);
+	}
+
+	private static void subtractSegmentInterval(List<double[]> intervals,
+		double ax, double ay, double bx, double by,
+		double left, double top, double right, double bottom) {
+		double dx = bx - ax, dy = by - ay;
+		double t0 = 0.0, t1 = 1.0;
+		double[] p = {-dx, dx, -dy, dy};
+		double[] q = {ax - left, right - ax, ay - top, bottom - ay};
+		for (int i = 0; i < p.length; i++) {
+			if (p[i] == 0.0) {
+				if (q[i] < 0.0) return;
+			} else {
+				double t = q[i] / p[i];
+				if (p[i] < 0.0) t0 = Math.max(t0, t);
+				else t1 = Math.min(t1, t);
+				if (t0 > t1) return;
+			}
+		}
+		if (t1 - t0 <= 1.0e-9) return;
+		List<double[]> next = new ArrayList<>(intervals.size() + 1);
+		for (double[] interval : intervals) {
+			double start = interval[0], end = interval[1];
+			if (t1 <= start + 1.0e-12 || t0 >= end - 1.0e-12) {
+				next.add(interval);
+				continue;
+			}
+			if (t0 > start + 1.0e-12) next.add(new double[] {start, Math.min(t0, end)});
+			if (t1 < end - 1.0e-12) next.add(new double[] {Math.max(t1, start), end});
+		}
+		intervals.clear();
+		intervals.addAll(next);
 	}
 
 	private static SpatialSelectorSession.CapturedTarget entity(int id) {
