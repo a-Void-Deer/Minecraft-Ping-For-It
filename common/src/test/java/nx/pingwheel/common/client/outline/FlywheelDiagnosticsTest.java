@@ -5,12 +5,40 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
+import org.apache.logging.log4j.Level;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 class FlywheelDiagnosticsTest {
+	@Test
+	void debugDisabledRecoveryStillObservesSuccessAndTheNextFailureIsATransition() {
+		List<FlywheelDiagnostics.Event> events = new ArrayList<>();
+		FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> 1L, events::add, level -> level == Level.WARN);
+		assertEquals(true, diagnostics.report("target", FlywheelDiagnosticReason.VISUAL_NULL, () -> "failure", null));
+		assertEquals(false, diagnostics.report("target", FlywheelDiagnosticReason.RENDERED,
+			() -> { throw new AssertionError("disabled DEBUG detail must remain lazy"); }, null));
+		assertEquals(true, diagnostics.report("target", FlywheelDiagnosticReason.VISUAL_NULL, () -> "failed again", null));
+		assertEquals(FlywheelDiagnostics.EventKind.REASON_TRANSITION, events.get(1).kind());
+	}
+
+	@Test
+	void disabledWarningDoesNotSpendAdmissionAndAnAdmittedSinkFailureDoes() {
+		AtomicBoolean enabled = new AtomicBoolean(false);
+		AtomicInteger calls = new AtomicInteger();
+		FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> 1L, event -> {
+			calls.incrementAndGet();
+			throw new IllegalStateException("sink failed");
+		}, level -> enabled.get());
+		assertEquals(false, diagnostics.report("target", FlywheelDiagnosticReason.VISUAL_NULL,
+			() -> { throw new AssertionError("disabled details"); }, null));
+		enabled.set(true);
+		assertEquals(true, diagnostics.report("target", FlywheelDiagnosticReason.VISUAL_NULL, () -> "enabled", null));
+		assertEquals(false, diagnostics.report("target", FlywheelDiagnosticReason.VISUAL_NULL, () -> "suppressed", null));
+		assertEquals(1, calls.get());
+	}
 	@Test
 	void firstTransitionHeartbeatAndRecoveryAreRateControlled() {
 		long[] now = { 0L };

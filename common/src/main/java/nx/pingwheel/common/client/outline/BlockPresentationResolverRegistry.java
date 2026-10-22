@@ -7,6 +7,10 @@ import java.util.Map;
 import java.util.Objects;
 
 import net.minecraft.world.level.BlockGetter;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Deterministic registry and resolver for client block presentations.
@@ -23,7 +27,7 @@ public final class BlockPresentationResolverRegistry {
 
 	private final Object lock = new Object();
 	private final Map<String, Registration> registrations = new LinkedHashMap<>();
-	private volatile List<BlockPresentationResolver> snapshot = List.of();
+	private volatile @Unmodifiable List<BlockPresentationResolver> snapshot = List.of();
 
 	/** Creates a registry with the deterministic vanilla resolvers installed. */
 	public BlockPresentationResolverRegistry() {
@@ -45,14 +49,15 @@ public final class BlockPresentationResolverRegistry {
 	 * Registers a resolver after validating its stable namespaced id. Invalid
 	 * and duplicate registrations return a harmless rejected handle.
 	 */
-	public Registration register(BlockPresentationResolver resolver) {
-		ValidatedResolver validatedResolver = validate(resolver);
+	public Registration register(@Nullable BlockPresentationResolver resolver) {
+		@Nullable ValidatedResolver validatedResolver = validate(resolver);
 		if (validatedResolver == null) {
 			return Registration.rejected();
 		}
 
 		synchronized (lock) {
 			if (registrations.containsKey(validatedResolver.id())) {
+				OutlineDiagnostics.rejected("block-presentation-register", validatedResolver.id(), "duplicate-id", null);
 				return Registration.rejected();
 			}
 
@@ -68,9 +73,9 @@ public final class BlockPresentationResolverRegistry {
 	 * Registers a specialization immediately before a known resolver while
 	 * preserving every other resolver's registration order.
 	 */
-	public Registration registerBefore(String anchorResolverId, BlockPresentationResolver resolver) {
-		ValidatedResolver validatedResolver = validate(resolver);
-		String anchorId = validateId(anchorResolverId);
+	public Registration registerBefore(@Nullable String anchorResolverId, @Nullable BlockPresentationResolver resolver) {
+		@Nullable ValidatedResolver validatedResolver = validate(resolver);
+		@Nullable String anchorId = validateId(anchorResolverId);
 		if (validatedResolver == null || anchorId == null) {
 			return Registration.rejected();
 		}
@@ -78,6 +83,7 @@ public final class BlockPresentationResolverRegistry {
 		synchronized (lock) {
 			if (!registrations.containsKey(anchorId)
 				|| registrations.containsKey(validatedResolver.id())) {
+				OutlineDiagnostics.rejected("block-presentation-register", validatedResolver.id(), "missing-anchor-or-duplicate", null);
 				return Registration.rejected();
 			}
 
@@ -98,7 +104,7 @@ public final class BlockPresentationResolverRegistry {
 	}
 
 	/** Returns the immutable registration-order resolver snapshot. */
-	public List<BlockPresentationResolver> snapshot() {
+	public @Unmodifiable List<BlockPresentationResolver> snapshot() {
 		return snapshot;
 	}
 
@@ -121,11 +127,17 @@ public final class BlockPresentationResolverRegistry {
 		}
 
 		for (BlockPresentationResolver resolver : snapshot) {
-			BlockPresentationResolution result;
+			@Nullable BlockPresentationResolution result;
 			try {
 				result = resolver.resolve(context);
 			} catch (Exception | LinkageError | AssertionError failure) {
+				Diagnostics.warn("block-presentation-resolve", resolver.getClass().getName(),
+					() -> "source=" + context.sourceSpec() + "; resolverClass=" + resolver.getClass().getName(), failure);
 				continue;
+			}
+			if (result == null) {
+				Diagnostics.event(Level.WARN, "block-presentation-resolve",
+					resolver.getClass().getName(), "null-resolution", () -> "source=" + context.sourceSpec());
 			}
 
 			if (result != null && result.handled()) {
@@ -173,23 +185,30 @@ public final class BlockPresentationResolverRegistry {
 			registrations.values().stream().map(Registration::resolver).toList()));
 	}
 
-	private static ValidatedResolver validate(BlockPresentationResolver resolver) {
+	private static @Nullable ValidatedResolver validate(@Nullable BlockPresentationResolver resolver) {
 		if (resolver == null) {
+			OutlineDiagnostics.rejected("block-presentation-register", "resolver", "null-resolver", null);
 			return null;
 		}
 
 		try {
-			String id = validateId(resolver.id());
+			@Nullable String id = validateId(resolver.id());
 			return id == null ? null : new ValidatedResolver(id, resolver);
 		} catch (Exception | LinkageError | AssertionError failure) {
+			OutlineDiagnostics.rejected("block-presentation-register", resolver.getClass().getName(), "resolver-id-failed", failure);
 			return null;
 		}
 	}
 
-	private static String validateId(String id) {
+	private static @Nullable String validateId(@Nullable String id) {
 		try {
-			return EntityBlockGeometrySourceIds.validate(id);
+			@Nullable String validated = EntityBlockGeometrySourceIds.validate(id);
+			if (validated == null) {
+				OutlineDiagnostics.rejected("block-presentation-register", String.valueOf(id), "invalid-id", null);
+			}
+			return validated;
 		} catch (Exception | LinkageError | AssertionError failure) {
+			OutlineDiagnostics.rejected("block-presentation-register", String.valueOf(id), "invalid-id", failure);
 			return null;
 		}
 	}
@@ -198,9 +217,9 @@ public final class BlockPresentationResolverRegistry {
 
 	/** Lifecycle handle for one exact resolver registration. */
 	public static final class Registration implements AutoCloseable {
-		private final BlockPresentationResolverRegistry registry;
-		private final String id;
-		private final BlockPresentationResolver resolver;
+		private final @Nullable BlockPresentationResolverRegistry registry;
+		private final @Nullable String id;
+		private final @Nullable BlockPresentationResolver resolver;
 		private boolean closed;
 
 		private Registration(
@@ -225,7 +244,7 @@ public final class BlockPresentationResolverRegistry {
 		}
 
 		private BlockPresentationResolver resolver() {
-			return resolver;
+			return Objects.requireNonNull(resolver);
 		}
 
 		/** Whether this handle owns an accepted registration. */

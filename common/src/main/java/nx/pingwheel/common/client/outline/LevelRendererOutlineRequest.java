@@ -7,7 +7,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
-import nx.pingwheel.common.Global;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Cached reflective probe for a {@code requestOutlineEffect()} hook on
@@ -57,17 +58,17 @@ public final class LevelRendererOutlineRequest {
 	 * the actual runtime class and stores missing resolutions as well, so an absent
 	 * hook on one renderer class cannot poison a later class that provides it.
 	 */
-	public static Method resolveMethod(Class<?> type, Function<Class<?>, Method> finder) {
+	public static @Nullable Method resolveMethod(Class<?> type, Function<Class<?>, @Nullable Method> finder) {
 		Objects.requireNonNull(type, "type");
 		Objects.requireNonNull(finder, "finder");
 
 		synchronized (LOCK) {
-			Optional<Method> cached = METHOD_CACHE.get(type);
+			@Nullable Optional<Method> cached = METHOD_CACHE.get(type);
 			if (cached != null) {
 				return cached.orElse(null);
 			}
 
-			Method method = finder.apply(type);
+			@Nullable Method method = finder.apply(type);
 			METHOD_CACHE.put(type, Optional.ofNullable(method));
 			if (METHOD_CACHE.size() > MAX_CACHE_ENTRIES) {
 				METHOD_CACHE.remove(METHOD_CACHE.keySet().iterator().next());
@@ -78,7 +79,7 @@ public final class LevelRendererOutlineRequest {
 	}
 
 	/** Public-method lookup of {@code requestOutlineEffect}; {@code null} when absent. */
-	public static Method findMethod(Class<?> type) {
+	public static @Nullable Method findMethod(Class<?> type) {
 		Objects.requireNonNull(type, "type");
 		try {
 			return type.getMethod(METHOD_NAME);
@@ -93,7 +94,7 @@ public final class LevelRendererOutlineRequest {
 	 * hook) is a normal no-op returning {@code false}. Any reflective
 	 * invocation failure is diagnosed and reported as {@code false}.
 	 */
-	public static boolean invoke(Object target, Method method) {
+	public static boolean invoke(Object target, @Nullable Method method) {
 		Objects.requireNonNull(target, "target");
 
 		if (method == null) {
@@ -104,8 +105,8 @@ public final class LevelRendererOutlineRequest {
 			method.invoke(target);
 			return true;
 		} catch (Exception | LinkageError | AssertionError failure) {
-			Global.LOGGER.warn(
-				"entity outline effect request failed; method=" + method.getName()
+			Diagnostics.warn("entity-outline-effect-request", target.getClass().getName(),
+				() -> "entity outline effect request failed; method=" + method.getName()
 					+ "; target=" + target.getClass().getName(),
 				failure);
 			return false;

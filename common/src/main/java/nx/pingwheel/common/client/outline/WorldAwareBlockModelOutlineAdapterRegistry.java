@@ -4,6 +4,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Deterministic internal registry for world-aware baked-model outline
@@ -21,7 +24,7 @@ public final class WorldAwareBlockModelOutlineAdapterRegistry {
 
 	private final Object lock = new Object();
 	private final Map<String, Registration> registrations = new LinkedHashMap<>();
-	private volatile List<WorldAwareBlockModelOutlineAdapter> snapshot = List.of();
+	private volatile @Unmodifiable List<WorldAwareBlockModelOutlineAdapter> snapshot = List.of();
 
 	public WorldAwareBlockModelOutlineAdapterRegistry() {
 	}
@@ -30,24 +33,28 @@ public final class WorldAwareBlockModelOutlineAdapterRegistry {
 	 * Registers an adapter after validating its stable namespaced id. Invalid
 	 * and duplicate registrations return a harmless rejected handle.
 	 */
-	public Registration register(WorldAwareBlockModelOutlineAdapter adapter) {
+	public Registration register(@Nullable WorldAwareBlockModelOutlineAdapter adapter) {
 		if (adapter == null) {
+			OutlineDiagnostics.rejected("world-aware-model-register", "adapter", "null-adapter", null);
 			return Registration.rejected();
 		}
 
-		final String id;
+		final @Nullable String id;
 		try {
 			id = EntityBlockGeometrySourceIds.validate(adapter.id());
 		} catch (Exception | LinkageError | AssertionError failure) {
+			OutlineDiagnostics.rejected("world-aware-model-register", adapter.getClass().getName(), "adapter-id-failed", failure);
 			return Registration.rejected();
 		}
 
 		if (id == null) {
+			OutlineDiagnostics.rejected("world-aware-model-register", adapter.getClass().getName(), "invalid-id", null);
 			return Registration.rejected();
 		}
 
 		synchronized (lock) {
 			if (registrations.containsKey(id)) {
+				OutlineDiagnostics.rejected("world-aware-model-register", id, "duplicate-id", null);
 				return Registration.rejected();
 			}
 
@@ -59,7 +66,7 @@ public final class WorldAwareBlockModelOutlineAdapterRegistry {
 	}
 
 	/** Returns the immutable registration-order snapshot. */
-	public List<WorldAwareBlockModelOutlineAdapter> snapshot() {
+	public @Unmodifiable List<WorldAwareBlockModelOutlineAdapter> snapshot() {
 		return snapshot;
 	}
 
@@ -84,9 +91,9 @@ public final class WorldAwareBlockModelOutlineAdapterRegistry {
 
 	/** Lifecycle handle for one exact internal adapter registration. */
 	public static final class Registration implements AutoCloseable {
-		private final WorldAwareBlockModelOutlineAdapterRegistry registry;
-		private final String id;
-		private final WorldAwareBlockModelOutlineAdapter adapter;
+		private final @Nullable WorldAwareBlockModelOutlineAdapterRegistry registry;
+		private final @Nullable String id;
+		private final @Nullable WorldAwareBlockModelOutlineAdapter adapter;
 		private boolean closed;
 
 		private Registration(
@@ -111,7 +118,7 @@ public final class WorldAwareBlockModelOutlineAdapterRegistry {
 		}
 
 		private WorldAwareBlockModelOutlineAdapter adapter() {
-			return adapter;
+			return Objects.requireNonNull(adapter);
 		}
 
 		/**

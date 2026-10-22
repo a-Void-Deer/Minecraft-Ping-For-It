@@ -4,8 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.Set;
 
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
@@ -21,6 +19,7 @@ import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.math.EntityLocalGeometryResult;
 import nx.pingwheel.common.math.EntityLocalGeometryResolver;
 import nx.pingwheel.common.math.EntityLocalRaycastRequest;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Typed Create boundary invoked only by the lazy Create-free ownership shell.
@@ -102,28 +101,7 @@ public final class CreateContraptionRaycastDelegate implements EntityLocalGeomet
 	 * detail outside this typed source's static linkage while still taking the
 	 * native contraption bounds from its own world exactly once per trace.
 	 */
-	private static BlockGetter nativeBoundsView(Contraption contraption) {
-		try {
-			Method method = Contraption.class.getMethod("getContraptionWorld");
-			Object value = method.invoke(contraption);
-			return value instanceof BlockGetter blockGetter ? blockGetter : null;
-		} catch (NoSuchMethodException | IllegalAccessException failure) {
-			return null;
-		} catch (InvocationTargetException failure) {
-			Throwable cause = failure.getCause();
-			if (cause instanceof RuntimeException runtimeFailure) {
-				throw runtimeFailure;
-			}
-			if (cause instanceof LinkageError linkageFailure) {
-				throw linkageFailure;
-			}
-			if (cause instanceof AssertionError assertionFailure) {
-				throw assertionFailure;
-			}
-			if (cause instanceof Error fatalFailure) {
-				throw fatalFailure;
-			}
-			return null;
-		}
+	private static @Nullable BlockGetter nativeBoundsView(Contraption contraption) {
+		return CreateContraptionNativeBounds.lookup(Contraption.class, contraption);
 	}
 }

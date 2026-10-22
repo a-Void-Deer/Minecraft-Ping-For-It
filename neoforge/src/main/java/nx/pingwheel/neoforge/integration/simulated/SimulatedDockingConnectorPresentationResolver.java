@@ -2,6 +2,10 @@ package nx.pingwheel.neoforge.integration.simulated;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.function.Supplier;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -36,8 +40,8 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 	private static final ResourceLocation OWNER_BLOCK_ENTITY_ID =
 		ResourceLocation.parse("simulated:docking_connector");
 
-	private static BlockPresentationResolverRegistry.Registration registration;
-	private final RegistryEntries injectedEntries;
+	private static @Nullable BlockPresentationResolverRegistry.Registration registration;
+	private final @Nullable RegistryEntries injectedEntries;
 
 	public SimulatedDockingConnectorPresentationResolver() {
 		injectedEntries = null;
@@ -97,8 +101,8 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 
 	@Override
 	public BlockPresentationResolution resolve(BlockPresentationContext context) {
-		RegistryEntries entries = injectedEntries == null ? lookupEntries() : injectedEntries;
-		BlockState pairedState = context.sourceState();
+		@Nullable RegistryEntries entries = injectedEntries == null ? lookupEntries() : injectedEntries;
+		@Nullable BlockState pairedState = context.sourceState();
 		if (pairedState == null || entries == null
 			|| pairedState.getBlock() != entries.pairedBlock()
 			|| !entries.pairedBlockId().equals(BuiltInRegistries.BLOCK.getKey(pairedState.getBlock()))) {
@@ -139,8 +143,8 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 			BlockPresentationRelation.PROXY_TO_OWNER));
 	}
 
-	private static RegistryEntries lookupEntries() {
-		Block pairedBlock = lookupBlock(PAIRED_BLOCK_ID);
+	private static @Nullable RegistryEntries lookupEntries() {
+		@Nullable Block pairedBlock = lookupBlock(PAIRED_BLOCK_ID);
 		if (pairedBlock == null) {
 			return null;
 		}
@@ -166,24 +170,25 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 	private record RegistryEntries(
 		Block pairedBlock,
 		ResourceLocation pairedBlockId,
-		Block ownerBlock,
+		@Nullable Block ownerBlock,
 		ResourceLocation ownerBlockId,
-		BlockEntityType<?> ownerBlockEntityType,
+		@Nullable BlockEntityType<?> ownerBlockEntityType,
 		ResourceLocation ownerBlockEntityId
 	) {}
 
-	private static Block lookupBlock(ResourceLocation id) {
-		try {
-			return BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
-		} catch (Exception | LinkageError | AssertionError ignored) {
-			return null;
-		}
+	private static @Nullable Block lookupBlock(ResourceLocation id) {
+		return lookupEntry("simulated-block-lookup", id, () -> BuiltInRegistries.BLOCK.getOptional(id));
 	}
 
-	private static BlockEntityType<?> lookupBlockEntityType(ResourceLocation id) {
+	private static @Nullable BlockEntityType<?> lookupBlockEntityType(ResourceLocation id) {
+		return lookupEntry("simulated-block-entity-lookup", id, () -> BuiltInRegistries.BLOCK_ENTITY_TYPE.getOptional(id));
+	}
+
+	static <T> @Nullable T lookupEntry(String operation, ResourceLocation id, Supplier<Optional<T>> lookup) {
 		try {
-			return BuiltInRegistries.BLOCK_ENTITY_TYPE.getOptional(id).orElse(null);
-		} catch (Exception | LinkageError | AssertionError ignored) {
+			return lookup.get().orElse(null);
+		} catch (Exception | LinkageError | AssertionError failure) {
+			Diagnostics.warn(operation, id.toString(), () -> "resolver=" + RESOLVER_ID, failure);
 			return null;
 		}
 	}

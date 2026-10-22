@@ -12,7 +12,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
-import nx.pingwheel.common.Global;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Internal common registry for loader-owned entity narrowphase adapters.
@@ -34,7 +37,7 @@ public final class EntityLocalGeometryRegistry {
 	private final Object lock = new Object();
 	private final List<Registration> registrations = new ArrayList<>();
 	private final Set<String> warnedDiagnosticKeys = ConcurrentHashMap.newKeySet();
-	private volatile List<Entry> snapshot = List.of();
+	private volatile @Unmodifiable List<Entry> snapshot = List.of();
 
 	/**
 	 * Registers a fixed-id owner for exact entity type registry ids.
@@ -53,7 +56,7 @@ public final class EntityLocalGeometryRegistry {
 		Objects.requireNonNull(entityTypeIds, "entityTypeIds");
 		Objects.requireNonNull(resolver, "resolver");
 
-		Set<ResourceLocation> exactTypeIds = copyExactTypeIds(entityTypeIds);
+		@Unmodifiable Set<ResourceLocation> exactTypeIds = copyExactTypeIds(entityTypeIds);
 
 		if (exactTypeIds.isEmpty()) {
 			throw new IllegalArgumentException("entityTypeIds must not be empty");
@@ -75,7 +78,7 @@ public final class EntityLocalGeometryRegistry {
 		}
 	}
 
-	private static Set<ResourceLocation> copyExactTypeIds(Collection<ResourceLocation> entityTypeIds) {
+	private static @Unmodifiable Set<ResourceLocation> copyExactTypeIds(Collection<ResourceLocation> entityTypeIds) {
 		var copied = new LinkedHashSet<ResourceLocation>();
 
 		for (ResourceLocation entityTypeId : entityTypeIds) {
@@ -108,7 +111,7 @@ public final class EntityLocalGeometryRegistry {
 					registration.sourceId,
 					registration.priority,
 					registration.entityTypeIds,
-					registration.resolver));
+					Objects.requireNonNull(registration.resolver)));
 			}
 		}
 
@@ -128,25 +131,38 @@ public final class EntityLocalGeometryRegistry {
 			failure);
 	}
 
-	private void warnOnce(String key, String message, Throwable failure) {
+	private void warnOnce(String key, String message, @Nullable Throwable failure) {
+		boolean enabled;
+		try {
+			enabled = Diagnostics.logger().isEnabled(Level.WARN);
+		} catch (RuntimeException | LinkageError ignored) {
+			enabled = false;
+		}
+		if (!enabled) {
+			return;
+		}
 		if (warnedDiagnosticKeys.add(key)) {
-			Global.LOGGER.warn(message, failure);
+			if (failure == null) {
+				Diagnostics.domainApprovedEvent(Level.WARN, "entity-local-geometry", key, "contract-or-registration", () -> message);
+			} else {
+				Diagnostics.domainApprovedFailure(Level.WARN, "entity-local-geometry", key, () -> message, failure);
+			}
 		}
 	}
 
 	static final class Snapshot {
 
 		private final EntityLocalGeometryRegistry registry;
-		private final List<Entry> entries;
+		private final @Unmodifiable List<Entry> entries;
 
-		private Snapshot(EntityLocalGeometryRegistry registry, List<Entry> entries) {
+		private Snapshot(EntityLocalGeometryRegistry registry, @Unmodifiable List<Entry> entries) {
 			this.registry = registry;
 			this.entries = entries;
 		}
 
-		Claim firstOwner(Entity candidate) {
+		@Nullable Claim firstOwner(Entity candidate) {
 			Objects.requireNonNull(candidate, "candidate");
-			ResourceLocation entityTypeId = BuiltInRegistries.ENTITY_TYPE.getKey(candidate.getType());
+			@Nullable ResourceLocation entityTypeId = BuiltInRegistries.ENTITY_TYPE.getKey(candidate.getType());
 
 			if (entityTypeId == null) {
 				return null;
@@ -178,8 +194,13 @@ public final class EntityLocalGeometryRegistry {
 
 		EntityLocalGeometryResult trace(Entity candidate, EntityLocalRaycastRequest request) {
 			try {
-				EntityLocalGeometryResult result = entry.resolver().trace(candidate, request);
-				return result == null ? EntityLocalGeometryResult.failed() : result;
+				@Nullable EntityLocalGeometryResult result = entry.resolver().trace(candidate, request);
+				if (result == null) {
+					registry.warnOnce("null-result:" + entry.sourceId(),
+						"entity local geometry source returned null; id=" + entry.sourceId(), null);
+					return EntityLocalGeometryResult.failed();
+				}
+				return result;
 			} catch (RuntimeException | LinkageError | AssertionError recoverableFailure) {
 				registry.warnCallbackFailure(entry.sourceId(), recoverableFailure);
 				return EntityLocalGeometryResult.failed();
@@ -190,7 +211,7 @@ public final class EntityLocalGeometryRegistry {
 	private record Entry(
 		ResourceLocation sourceId,
 		int priority,
-		Set<ResourceLocation> entityTypeIds,
+		@Unmodifiable Set<ResourceLocation> entityTypeIds,
 		EntityLocalGeometryResolver resolver
 	) {}
 
@@ -200,8 +221,8 @@ public final class EntityLocalGeometryRegistry {
 		private final EntityLocalGeometryRegistry registry;
 		private final ResourceLocation sourceId;
 		private final int priority;
-		private final Set<ResourceLocation> entityTypeIds;
-		private final EntityLocalGeometryResolver resolver;
+		private final @Unmodifiable Set<ResourceLocation> entityTypeIds;
+		private final @Nullable EntityLocalGeometryResolver resolver;
 		private final boolean accepted;
 		private boolean closed;
 
@@ -209,8 +230,8 @@ public final class EntityLocalGeometryRegistry {
 			EntityLocalGeometryRegistry registry,
 			ResourceLocation sourceId,
 			int priority,
-			Set<ResourceLocation> entityTypeIds,
-			EntityLocalGeometryResolver resolver,
+			@Unmodifiable Set<ResourceLocation> entityTypeIds,
+			@Nullable EntityLocalGeometryResolver resolver,
 			boolean accepted
 		) {
 			this.registry = registry;

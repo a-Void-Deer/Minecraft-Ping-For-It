@@ -8,7 +8,8 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
-import nx.pingwheel.common.Global;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 
 /**
@@ -36,13 +37,13 @@ public final class EntityBlockGeometryRunner {
 	public static final String BAKED_MODEL_SOURCE_ID = "pingforit:baked_model";
 
 	private final EntityBlockGeometrySourceRegistry registry;
-	private final List<EntityBlockGeometrySource> builtInSources;
+	private final @Unmodifiable List<EntityBlockGeometrySource> builtInSources;
 	private final Set<String> warnedFailureKeys = new HashSet<>();
-	private final WarningSink warningSink;
+	private final @Nullable WarningSink warningSink;
 
 	@FunctionalInterface
 	interface WarningSink {
-		void warn(String message, Throwable failure);
+		void warn(String message, @Nullable Throwable failure);
 	}
 
 	/**
@@ -56,20 +57,20 @@ public final class EntityBlockGeometryRunner {
 		EntityBlockGeometrySource bakedModelSource
 	) {
 		this(registry, blockEntityRendererSource, bakedModelSource,
-			EntityBlockGeometryRunner::warnGlobally);
+			null);
 	}
 
 	EntityBlockGeometryRunner(
 		EntityBlockGeometrySourceRegistry registry,
 		EntityBlockGeometrySource blockEntityRendererSource,
 		EntityBlockGeometrySource bakedModelSource,
-		WarningSink warningSink
+		@Nullable WarningSink warningSink
 	) {
 		this.registry = Objects.requireNonNull(registry, "registry");
 		this.builtInSources = List.of(
 			Objects.requireNonNull(blockEntityRendererSource, "blockEntityRendererSource"),
 			Objects.requireNonNull(bakedModelSource, "bakedModelSource"));
-		this.warningSink = Objects.requireNonNull(warningSink, "warningSink");
+		this.warningSink = warningSink;
 	}
 
 	/**
@@ -112,7 +113,7 @@ public final class EntityBlockGeometryRunner {
 		boolean rendered = false;
 		for (EntityBlockGeometrySource source : allowedSources) {
 			String sourceId = safeSourceId(source);
-			EntityBlockGeometryContext context = null;
+			@Nullable EntityBlockGeometryContext context = null;
 			try {
 				// A fresh context is important: a source must observe one immutable
 				// attempt snapshot and must not retain live render state across calls.
@@ -147,16 +148,19 @@ public final class EntityBlockGeometryRunner {
 		return rendered;
 	}
 
-	private static void reportOutcome(
+	private void reportOutcome(
 		BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver,
 		String sourceId,
 		EntityBlockGeometryOutcome outcome
 	) {
 		try {
 			outcomeObserver.accept(sourceId, outcome);
-		} catch (Exception | LinkageError | AssertionError ignored) {
+		} catch (Exception | LinkageError | AssertionError failure) {
 			// Presentation observers are auxiliary bookkeeping. A recoverable
 			// observer fault must not alter source ordering or fallback behavior.
+			warnOnce("observer:" + sourceId,
+				() -> "entity block geometry observer failed; id=" + sourceId + "; outcome=" + outcome,
+				failure);
 		}
 	}
 
@@ -165,8 +169,14 @@ public final class EntityBlockGeometryRunner {
 		EntityBlockGeometryContext context
 	) {
 		try {
-			EntityBlockGeometryOutcome outcome = source.attempt(context);
-			return outcome == null ? EntityBlockGeometryOutcome.FAILED : outcome;
+			@Nullable EntityBlockGeometryOutcome outcome = source.attempt(context);
+			if (outcome == null) {
+				String sourceId = safeSourceId(source);
+				warnOnce("null-outcome:" + sourceId,
+					() -> "entity block geometry source returned null; id=" + sourceId + "; context=" + context, null);
+				return EntityBlockGeometryOutcome.FAILED;
+			}
+			return outcome;
 		} catch (Exception | LinkageError | AssertionError failure) {
 			String sourceId = safeSourceId(source);
 			warnOnce(
@@ -178,26 +188,31 @@ public final class EntityBlockGeometryRunner {
 		}
 	}
 
-	void warnOnce(String key, Supplier<String> message, Throwable failure) {
+	void warnOnce(String key, Supplier<String> message, @Nullable Throwable failure) {
+		if (warningSink == null && !OutlineDiagnostics.enabled()) {
+			return;
+		}
 		if (!warnedFailureKeys.add(key)) {
 			return;
 		}
-		warningSink.warn(message.get(), failure);
-	}
-
-	private static void warnGlobally(String message, Throwable failure) {
-		if (failure == null) {
-			Global.LOGGER.warn(message);
+		if (warningSink == null) {
+			OutlineDiagnostics.approved("entity-block-geometry", key, message, failure);
 		} else {
-			Global.LOGGER.warn(message, failure);
+			OutlineDiagnostics.deliver(text -> warningSink.warn(text, null), message, failure);
 		}
 	}
 
-	private static String safeSourceId(EntityBlockGeometrySource source) {
+	private String safeSourceId(EntityBlockGeometrySource source) {
 		try {
-			String id = EntityBlockGeometrySourceIds.validate(source.id());
+			@Nullable String id = EntityBlockGeometrySourceIds.validate(source.id());
+			if (id == null) {
+				warnOnce("invalid-id:" + source.getClass().getName(),
+					() -> "entity block geometry source has invalid id; class=" + source.getClass().getName(), null);
+			}
 			return id == null ? EntityBlockGeometrySourceIds.INVALID : id;
 		} catch (Exception | LinkageError | AssertionError failure) {
+			warnOnce("source-id:" + source.getClass().getName(),
+				() -> "entity block geometry source id failed; class=" + source.getClass().getName(), failure);
 			return EntityBlockGeometrySourceIds.UNAVAILABLE;
 		}
 	}

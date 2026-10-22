@@ -39,6 +39,11 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
 
 import nx.pingwheel.common.Global;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.client.outline.FlywheelInstanceResolution;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import nx.pingwheel.common.client.outline.EntityBlockGeometryContext;
 import nx.pingwheel.common.client.outline.EntityBlockGeometryOutcome;
 import nx.pingwheel.common.client.outline.EntityBlockGeometrySource;
@@ -97,8 +102,8 @@ public final class CreateFlywheelGeometryAdapter {
 			Global.LOGGER.info("create/flywheel source registration succeeded: id={} handleState={}",
 				SOURCE_ID, registration.state());
 		} else {
-			Global.LOGGER.warn("create/flywheel source registration failed: id={} handleState={}",
-				SOURCE_ID, registration.state());
+			Diagnostics.event(Level.WARN, "create-flywheel-register", SOURCE_ID, "registration-rejected",
+				() -> "handleState=" + registration.state());
 		}
 	}
 
@@ -162,16 +167,23 @@ public final class CreateFlywheelGeometryAdapter {
 		}
 
 		@Override
-		public EntityBlockGeometryOutcome attempt(EntityBlockGeometryContext context) {
+		public EntityBlockGeometryOutcome attempt(@Nullable EntityBlockGeometryContext context) {
+			return CreateFlywheelGeometryAttempt.run(attempt -> attempt(context, attempt), result ->
+				diagnostics.report(targetKey(context), result.reason(), result.target(), result.details(), result.failure()));
+		}
+
+		private CreateFlywheelGeometryAttempt.Result attempt(
+			@Nullable EntityBlockGeometryContext context, CreateFlywheelGeometryAttempt attempt
+		) {
 			if (context == null || context.level() == null || context.blockPos() == null
 				|| context.targetKey() == null) {
 				return empty(context, FlywheelDiagnosticReason.CONTEXT_UNAVAILABLE,
 					null, null, null, () -> "level/position/target is unavailable");
 			}
 
-		VisualizationManagerImpl manager = null;
-		BlockEntityVisual<?> visual = null;
-		List<Instance> instances = null;
+		@Nullable VisualizationManagerImpl manager = null;
+		@Nullable BlockEntityVisual<?> visual = null;
+		@Nullable List<Instance> instances = null;
 		try {
 			try {
 				manager = VisualizationManagerImpl.get(context.level());
@@ -217,31 +229,17 @@ public final class CreateFlywheelGeometryAdapter {
 			}
 
 
-			List<ResolvedInstance> liveInstances = new ArrayList<>(instances.size());
-			int nonLiveInstanceCount = 0;
-			int resolutionFailureCount = 0;
-			for (Instance instance : instances) {
-				try {
-					LiveInstanceResolution resolution = resolveLiveInstance(instance, context);
-					if (resolution == null) {
-						nonLiveInstanceCount++;
-						continue;
-					}
-					liveInstances.add(new ResolvedInstance(
-						instance, resolution.instancer(), resolution.model(), resolution.environmentOrigin()));
-				} catch (Exception | LinkageError | AssertionError ignored) {
-					// A stale optional instance must not prevent valid sibling instances
-					// from contributing geometry. The state class is retained in the
-					// diagnostic list below for the next-frame retry.
-					nonLiveInstanceCount++;
-					resolutionFailureCount++;
-				}
-			}
+			FlywheelInstanceResolution.Batch<ResolvedInstance> resolutionBatch = attempt.resolve(instances, instance -> {
+				@Nullable LiveInstanceResolution resolution = resolveLiveInstance(instance, context);
+				return resolution == null ? null : new ResolvedInstance(
+					instance, resolution.instancer(), resolution.model(), resolution.environmentOrigin());
+			});
+			@Unmodifiable List<ResolvedInstance> liveInstances = resolutionBatch.live();
 
 			if (liveInstances.isEmpty()) {
 				final int collectedInstanceCount = instances.size();
-				final int skippedInstanceCount = nonLiveInstanceCount;
-				final int failedResolutionCount = resolutionFailureCount;
+				final int skippedInstanceCount = resolutionBatch.nonLiveCount();
+				final int failedResolutionCount = resolutionBatch.failureCount();
 				return empty(context, FlywheelDiagnosticReason.NO_INSTANCES,
 					manager, visual, instances,
 					() -> "no live instances; collectedInstanceCount=" + collectedInstanceCount
@@ -313,43 +311,34 @@ public final class CreateFlywheelGeometryAdapter {
 					manager, visual, instances, () -> "render tick values are non-finite");
 			}
 
-			List<InstanceGeometry> geometries = new ArrayList<>(liveInstances.size());
-			long triangleCount = 0L;
-
-			for (ResolvedInstance resolved : liveInstances) {
-				Instance instance = resolved.instance();
-				Model model = resolved.model();
-				ModelGeometry geometry;
-				try {
-					geometry = modelCache.get(model);
-				} catch (GeometryFormatException failure) {
-					return failed(context, failure.reason(), manager, visual, instances,
-						() -> "model extraction=" + failure.getMessage(), failure);
-				}
-
-				try {
-					triangleCount = Math.addExact(triangleCount, geometry.triangleCount());
-				} catch (ArithmeticException overflow) {
-					return empty(context, FlywheelDiagnosticReason.BUDGET_EXCEEDED,
-						manager, visual, instances, () -> "target triangle count overflow");
-				}
-
-				if (!FlywheelModelBudget.trianglesWithinBudget(
-					triangleCount, FlywheelModelBudget.MAX_TRIANGLES_PER_TARGET)) {
-					final long currentTriangleCount = triangleCount;
-					return empty(context, FlywheelDiagnosticReason.BUDGET_EXCEEDED,
-						manager, visual, instances,
-						() -> "triangleCount=" + currentTriangleCount + "; maxTargetTriangles="
-							+ FlywheelModelBudget.MAX_TRIANGLES_PER_TARGET);
-				}
-
-				geometries.add(new InstanceGeometry(instance, geometry, resolved.environmentOrigin()));
+			final VisualizationManagerImpl currentManager = manager;
+			final BlockEntityVisual<?> currentVisual = visual;
+			final List<Instance> currentInstances = instances;
+			final float currentOriginX = originX;
+			final float currentOriginY = originY;
+			final float currentOriginZ = originZ;
+			try {
+				return attempt.models(liveInstances,
+					resolved -> new InstanceGeometry(resolved.instance(), modelCache.get(resolved.model()), resolved.environmentOrigin()),
+					geometry -> geometry.model().triangleCount(),
+					(reason, detail) -> empty(context, reason, currentManager, currentVisual, currentInstances, detail),
+					geometries -> renderPlan(context, currentManager, currentVisual, currentInstances, geometries,
+						currentOriginX, currentOriginY, currentOriginZ, renderTicks, renderSeconds));
+			} catch (GeometryFormatException failure) {
+				return failed(context, failure.reason(), manager, visual, instances,
+					() -> "model extraction=" + failure.getMessage(), failure);
 			}
-
-			if (triangleCount == 0L) {
-				return empty(context, FlywheelDiagnosticReason.NO_INSTANCES,
-					manager, visual, instances, () -> "instances have no indexed triangles");
+			} catch (Exception | LinkageError | AssertionError failure) {
+				return failed(context, FlywheelDiagnosticReason.MASK_EMISSION_FAILED,
+					manager, visual, instances, () -> "unclassified source failure", failure);
 			}
+		}
+
+		private CreateFlywheelGeometryAttempt.Result renderPlan(
+			EntityBlockGeometryContext context, VisualizationManagerImpl manager, BlockEntityVisual<?> visual,
+			List<Instance> instances, List<InstanceGeometry> geometries, float originX, float originY, float originZ,
+			float renderTicks, float renderSeconds
+		) {
 
 			FlywheelSilhouetteMask.RenderPlan<ResourceLocation> plan;
 			try {
@@ -391,13 +380,12 @@ public final class CreateFlywheelGeometryAdapter {
 			} catch (FlywheelSilhouetteMask.CommitFailure failure) {
 				Throwable originalFailure = failure.getCause() == null ? failure : failure.getCause();
 				if (failure.verticesWritten() > 0) {
-					report(context, FlywheelDiagnosticReason.MASK_PARTIAL_EMISSION,
+					return result(EntityBlockGeometryOutcome.RENDERED, context, FlywheelDiagnosticReason.MASK_PARTIAL_EMISSION,
 						manager, visual, instances,
 						() -> "shared OutlineBufferSource commit was partial; verticesWritten="
 							+ failure.verticesWritten() + "; plannedTriangles=" + plannedTriangles
 							+ "; voxelFallbackSuppressed=true; retryNextFrame=true",
 						originalFailure);
-					return EntityBlockGeometryOutcome.RENDERED;
 				}
 				frameBudget.release(plannedTriangles);
 				return failed(context, FlywheelDiagnosticReason.MASK_EMISSION_FAILED,
@@ -411,14 +399,10 @@ public final class CreateFlywheelGeometryAdapter {
 					manager, visual, instances, () -> "vanilla outline mask emission failed", failure);
 			}
 
-			report(context, FlywheelDiagnosticReason.RENDERED, manager, visual, instances,
+			return result(EntityBlockGeometryOutcome.RENDERED, context, FlywheelDiagnosticReason.RENDERED,
+				manager, visual, instances,
 				() -> "planTriangles=" + plannedTriangles + "; maskVertices="
 					+ plannedTriangles * FlywheelModelBudget.MASK_VERTICES_PER_TRIANGLE, null);
-			return EntityBlockGeometryOutcome.RENDERED;
-			} catch (Exception | LinkageError | AssertionError failure) {
-				return failed(context, FlywheelDiagnosticReason.MASK_EMISSION_FAILED,
-					manager, visual, instances, () -> "unclassified source failure", failure);
-			}
 	}
 
 	private static BlockEntityVisualLookup liveVisualAt(VisualizationManagerImpl manager, BlockPos pos) {
@@ -466,7 +450,7 @@ public final class CreateFlywheelGeometryAdapter {
 		return IndirectInstancer.fromState(state);
 	}
 
-	private static LiveInstanceResolution resolveLiveInstance(
+	private static @Nullable LiveInstanceResolution resolveLiveInstance(
 		Instance instance,
 		EntityBlockGeometryContext context
 	) {
@@ -771,51 +755,49 @@ public final class CreateFlywheelGeometryAdapter {
 			matrix.m30(), matrix.m31(), matrix.m32(), matrix.m33());
 	}
 
-	private EntityBlockGeometryOutcome empty(
-		EntityBlockGeometryContext context,
+	private CreateFlywheelGeometryAttempt.Result empty(
+		@Nullable EntityBlockGeometryContext context,
 		FlywheelDiagnosticReason reason,
-		Object manager,
-		Object visual,
-		List<Instance> instances,
+		@Nullable Object manager,
+		@Nullable Object visual,
+		@Nullable List<Instance> instances,
 		Supplier<String> detail
 	) {
-		report(context, reason, manager, visual, instances, detail, null);
-		return EntityBlockGeometryOutcome.EMPTY;
+		return result(EntityBlockGeometryOutcome.EMPTY, context, reason, manager, visual, instances, detail, null);
 	}
 
-	private EntityBlockGeometryOutcome failed(
-		EntityBlockGeometryContext context,
+	private CreateFlywheelGeometryAttempt.Result failed(
+		@Nullable EntityBlockGeometryContext context,
 		FlywheelDiagnosticReason reason,
-		Object manager,
-		Object visual,
-		List<Instance> instances,
+		@Nullable Object manager,
+		@Nullable Object visual,
+		@Nullable List<Instance> instances,
 		Supplier<String> detail,
-		Throwable failure
+		@Nullable Throwable failure
 	) {
-		report(context, reason, manager, visual, instances, detail, failure);
-		return EntityBlockGeometryOutcome.FAILED;
+		return result(EntityBlockGeometryOutcome.FAILED, context, reason, manager, visual, instances, detail, failure);
 	}
 
-	private void report(
-		EntityBlockGeometryContext context,
+	private CreateFlywheelGeometryAttempt.Result result(
+		EntityBlockGeometryOutcome outcome,
+		@Nullable EntityBlockGeometryContext context,
 		FlywheelDiagnosticReason reason,
-		Object manager,
-		Object visual,
-		List<Instance> instances,
+		@Nullable Object manager,
+		@Nullable Object visual,
+		@Nullable List<Instance> instances,
 		Supplier<String> detail,
-		Throwable failure
+		@Nullable Throwable failure
 	) {
-		diagnostics.report(
-			targetKey(context), reason,
+		return new CreateFlywheelGeometryAttempt.Result(outcome, reason,
 			() -> targetDescription(context),
 			() -> diagnosticDetails(context, manager, visual, instances, detail), failure);
 	}
 
-	private static Object targetKey(EntityBlockGeometryContext context) {
+	private static @Nullable Object targetKey(@Nullable EntityBlockGeometryContext context) {
 		return context == null ? null : context.targetKey();
 	}
 
-	private static String targetDescription(EntityBlockGeometryContext context) {
+	private static String targetDescription(@Nullable EntityBlockGeometryContext context) {
 		if (context == null || context.targetKey() == null) {
 			return "<unknown-target>";
 		}
@@ -838,11 +820,11 @@ public final class CreateFlywheelGeometryAdapter {
 	}
 
 	private static String diagnosticDetails(
-		EntityBlockGeometryContext context,
-		Object manager,
-		Object visual,
-		List<Instance> instances,
-		Supplier<String> detail
+		@Nullable EntityBlockGeometryContext context,
+		@Nullable Object manager,
+		@Nullable Object visual,
+		@Nullable List<Instance> instances,
+		@Nullable Supplier<@Nullable String> detail
 	) {
 		StringBuilder result = new StringBuilder();
 		result.append(targetDescription(context));
@@ -869,7 +851,7 @@ public final class CreateFlywheelGeometryAdapter {
 			}
 		}
 		if (detail != null) {
-			String detailText = detail.get();
+			@Nullable String detailText = detail.get();
 			if (detailText != null && !detailText.isEmpty()) {
 				result.append("; ").append(detailText);
 			}
