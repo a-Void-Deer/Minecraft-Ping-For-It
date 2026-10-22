@@ -3,15 +3,16 @@ package nx.pingwheel.common.presentation.inventory;
 import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.function.Supplier;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryObservationSnapshot;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.source.SourceKey;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /**
  * Low-frequency inventory source diagnostics. Unexpected failures retain their
@@ -19,6 +20,7 @@ import nx.pingwheel.common.util.RateLimitedDiagnostics;
  * their independent reason gate. Logging never resolves a source or initializes
  * the platform services.
  */
+@NotNullByDefault
 final class InventoryCaptureDiagnostics {
 
 	private enum Reason {
@@ -46,15 +48,15 @@ final class InventoryCaptureDiagnostics {
 		warn("snapshot-step-failed", input, null, () -> "stage=snapshot-step", failure);
 	}
 
-	static void warn(String operation, InventorySourceInput input, SourceKey source, Supplier<String> detail, Throwable failure) {
+	static void warn(String operation, InventorySourceInput input, @Nullable SourceKey source, Supplier<String> detail, Throwable failure) {
 		if (expectedFailure(failure)) return;
-		RateLimitedDiagnostics.warn("inventory/" + operation, scope(input.target()),
+		Diagnostics.warn("inventory/" + operation, scope(input.target()),
 			() -> context(input) + (source == null ? "" : " source=" + source) + " " + detail.get()
 				+ (input.target() instanceof Target.ExternalBlockTarget external ? " locator=" + external.providerLocator() : ""), failure);
 	}
 
 	static boolean expectedFailure(Throwable failure) {
-		Throwable reason = failure instanceof InventorySourceAccess.CursorlessReadFailure ? failure.getCause() : failure;
+		@Nullable Throwable reason = failure instanceof InventorySourceAccess.CursorlessReadFailure ? failure.getCause() : failure;
 		return reason instanceof InventoryItemBudget.CaptureLimitException
 			|| reason instanceof InventoryObservationSnapshot.LimitException
 			|| reason instanceof InventorySourceUnavailableException;
@@ -84,31 +86,27 @@ final class InventoryCaptureDiagnostics {
 	}
 
 	static void boundExceeded(InventorySourceInput input, String detail) {
-		log(Reason.BOUND_EXCEEDED, input, detail);
+		log(Reason.BOUND_EXCEEDED, input, detail, null);
+	}
+
+	static void boundExceeded(InventorySourceInput input, String detail, Throwable failure) {
+		log(Reason.BOUND_EXCEEDED, input, detail, failure);
 	}
 
 	static void memoryDeferred(InventorySourceInput input) {
-		log(Reason.MEMORY_DEFERRED, input, "retained-capacity");
+		log(Reason.MEMORY_DEFERRED, input, "retained-capacity", null);
 	}
 
-	private static void log(Reason reason, InventorySourceInput input, String detail) {
+	private static void log(Reason reason, InventorySourceInput input, String detail, @Nullable Throwable failure) {
 		long now = System.nanoTime();
 		int index = reason.ordinal();
 		long last = LAST_LOGGED.get(index);
 		if (last != 0L && now - last < MIN_INTERVAL_NANOS) return;
 		if (!LAST_LOGGED.compareAndSet(index, last, now)) return;
-		try {
-			if (reason == Reason.MEMORY_DEFERRED) {
-				if (logger().isDebugEnabled()) logger().debug("inventory snapshot {} {} ({})", reason.token, context(input), detail);
-			} else if (logger().isWarnEnabled()) logger().warn("inventory snapshot {} {} ({})", reason.token, context(input), detail);
-		} catch (RuntimeException | LinkageError ignored) { /* diagnostics never affect capture */ }
-	}
-
-	private static Logger logger() {
-		return LoggerHolder.LOGGER;
-	}
-
-	private static final class LoggerHolder {
-		private static final Logger LOGGER = LogManager.getLogger("pingforit");
+		Level level = reason == Reason.MEMORY_DEFERRED ? Level.DEBUG : Level.WARN;
+		if (failure == null) Diagnostics.domainApprovedEvent(level, "inventory/snapshot", scope(input.target()), reason.token,
+			() -> context(input) + " detail=" + detail);
+		else Diagnostics.domainApprovedFailure(level, "inventory/snapshot", scope(input.target()),
+			() -> "reason=" + reason.token + " " + context(input) + " detail=" + detail, failure);
 	}
 }

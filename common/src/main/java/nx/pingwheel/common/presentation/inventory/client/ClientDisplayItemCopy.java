@@ -174,6 +174,6 @@ final class ClientDisplayItemCopy {
 	private static <T> T construct(Constructor<T> constructor, Object argument) {
 		if (constructor == null) throw new UnsafeDisplay();
 		try { return constructor.newInstance(argument); }
-		catch (ReflectiveOperationException unavailable) { throw new UnsafeDisplay(); }
+		catch (ReflectiveOperationException unavailable) { throw new UnsafeDisplay(unavailable); }
 	}
 }

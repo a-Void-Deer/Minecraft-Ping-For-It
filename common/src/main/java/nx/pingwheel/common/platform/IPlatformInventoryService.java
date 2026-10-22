@@ -17,7 +17,7 @@ import net.minecraft.world.Container;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /**
  * Loader bridge for item sources that expose a native, read-only inventory
@@ -281,7 +281,7 @@ public interface IPlatformInventoryService {
 			try { return checked(delegate::valid); }
 			catch (RuntimeException | LinkageError unavailable) {
 				if (!(unavailable instanceof InventorySourceUnavailableException))
-					RateLimitedDiagnostics.warn("inventory-guarded-access-valid", delegate.getClass().getName(),
+					Diagnostics.warn("inventory-guarded-access-valid", delegate.getClass().getName(),
 						() -> "delegateClass=" + delegate.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
 				return false;
 			}
@@ -356,14 +356,17 @@ public interface IPlatformInventoryService {
 		 * {@link MethodOwnership#UNCLASSIFIED} before any signature allocation.
 		 */
 		public static MethodOwnership methodOwnership(Object value, Class<?> owner, String name, Class<?>... arguments) {
-			Class<?> type = value.getClass();
+			@org.jetbrains.annotations.Nullable Class<?> type = value.getClass();
 			for (int depth = 0; type != null && depth < MAX_INHERITANCE_DEPTH; depth++, type = type.getSuperclass()) {
 				if (!reflectionShape(type, name, arguments)) return MethodOwnership.UNCLASSIFIED;
 				try {
 					Class<?> declaring = type.getDeclaredMethod(name, arguments).getDeclaringClass();
 					return declaring == owner ? MethodOwnership.PROVEN_INHERITED : MethodOwnership.PROVEN_OVERRIDE;
 				} catch (NoSuchMethodException absent) { /* continue through the bounded parent chain */ }
-				catch (SecurityException unavailable) { return MethodOwnership.UNCLASSIFIED; }
+				catch (SecurityException unavailable) {
+					Diagnostics.warn("inventory-resident-method", owner.getName(), () -> "method=" + name + " valueClass=" + value.getClass().getName(), unavailable);
+					return MethodOwnership.UNCLASSIFIED;
+				}
 			}
 			return MethodOwnership.UNCLASSIFIED;
 		}
@@ -380,27 +383,34 @@ public interface IPlatformInventoryService {
 		}
 
 		/** Only callers naming an inspected fixed library field may use this port. */
-		public static Object field(Object value, Class<?> owner, String name, Class<?> fieldType) {
+		public static @org.jetbrains.annotations.Nullable Object field(Object value, Class<?> owner, String name, Class<?> fieldType) {
 			if (!reflectionShape(owner, name)) return null;
 			try {
 				var field = owner.getDeclaredField(name);
 				if (field.getType() != fieldType || !field.trySetAccessible()) return null;
 				return field.get(value);
-			} catch (ReflectiveOperationException | RuntimeException unavailable) { return null; }
+			} catch (NoSuchFieldException absent) { return null; }
+			catch (ReflectiveOperationException | RuntimeException unavailable) {
+				Diagnostics.warn("inventory-resident-field", owner.getName(), () -> "field=" + name + " valueClass=" + value.getClass().getName(), unavailable);
+				return null;
+			}
 		}
 
 		/** size/get are constant-index native operations only for these exact backings. */
-		public static boolean nativeStacks(Object value) {
+		public static boolean nativeStacks(@org.jetbrains.annotations.Nullable Object value) {
 			return nativeStacks(value, NativeAccess.INSTANCE);
 		}
 		/** Same exact backing check through an injected raw-field port for headless tests. */
-		public static boolean nativeStacks(Object value,
+		public static boolean nativeStacks(@org.jetbrains.annotations.Nullable Object value,
 			nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess raw) {
 			if (value == null || value.getClass() != net.minecraft.core.NonNullList.class) return false;
 			try {
-				var list = raw.nonNullList((net.minecraft.core.NonNullList<?>) value);
+				@org.jetbrains.annotations.Nullable List<?> list = raw.nonNullList((net.minecraft.core.NonNullList<?>) value);
 				return list != null && (list.getClass() == ArrayList.class || list.getClass() == ARRAY_LIST_VIEW);
-			} catch (RuntimeException | LinkageError unavailable) { return false; }
+			} catch (RuntimeException | LinkageError unavailable) {
+				Diagnostics.warn("inventory-resident-stacks", raw.getClass().getName(), () -> "valueClass=" + value.getClass().getName(), unavailable);
+				return false;
+			}
 		}
 		/** No copying, construction, component access or hashing before the item guard. */
 		public static ResidentEntry stack(ItemStack stack) {

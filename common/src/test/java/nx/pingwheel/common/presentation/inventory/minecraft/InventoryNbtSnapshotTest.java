@@ -397,7 +397,10 @@ class InventoryNbtSnapshotTest {
 		assertThrows(InventoryNbtSnapshot.LimitException.class, () -> create(topology, BlockPos.ZERO, root));
 		CompoundTag cyclic = new CompoundTag();
 		cyclic.put("self", cyclic);
-		assertThrows(InventoryNbtSnapshot.LimitException.class, () -> create(topology, BlockPos.ZERO, cyclic));
+		var cycleFailure = assertThrows(InventoryNbtSnapshot.LimitException.class, () -> create(topology, BlockPos.ZERO, cyclic));
+		var structuralRefusal = assertInstanceOf(InventoryItemBudget.RootLimitException.class,
+			cycleFailure.getCause(), "native preflight keeps the original structural refusal");
+		assertTrue(structuralRefusal.getMessage().contains("cycle"));
 		ListTag hugeList = new ListTag();
 		for (int i = 0; i < 262145; i++) hugeList.add(IntTag.valueOf(1));
 		assertThrows(InventoryNbtSnapshot.LimitException.class, () -> create(topology, BlockPos.ZERO, hugeList));

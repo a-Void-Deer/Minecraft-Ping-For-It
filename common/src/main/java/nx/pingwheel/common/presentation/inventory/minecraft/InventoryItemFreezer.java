@@ -21,6 +21,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.*;
+import org.jetbrains.annotations.Nullable;
 
 /** Two-phase root transaction. Plans are ephemeral; only owned canonical/display data escape. */
 final class InventoryItemFreezer {
@@ -70,16 +71,18 @@ final class InventoryItemFreezer {
 			Tag effective = plan.effective(nbtContext);
 			canonical = InventoryItemCodec.canonicalTag(effective, budget);
 		} catch (InventoryItemBudget.RootLimitException | InventoryItemCodec.IdentityUnavailableException rejected) {
+			InventoryItemDiagnostics.refusal("inventory/item-identity", itemId, rejected);
 			return aggregate(itemId, label);
 		}
 		// Identity is final. Neither display admission nor retained-result failure
 		// is inside the identity-refusal catch; capture exhaustion always escapes.
-		String json;
+		@Nullable String json;
 		budget.beginDisplay();
 		try {
 			budget.allocate(0, 0, 2, 1); // RegistryOps.withParent JSON
 			json = InventoryDisplayWriter.project(plan.saved(nbtContext.withParent(JsonOps.INSTANCE), true, false), itemId, displayBytes, budget);
 		} catch (InventoryItemBudget.RootLimitException displayRefusal) {
+			InventoryItemDiagnostics.refusal("inventory/item-display", itemId, displayRefusal);
 			json = null;
 		}
 		var display = new InventoryItemCodec.Display(itemId, label, json, false);
@@ -92,7 +95,7 @@ final class InventoryItemFreezer {
 		// Root-local rejection is not empty and must not create a truncated digest.
 		// Fixed default suppression does not inspect any refused component value.
 		var display = InventoryItemCodec.aggregateDisplay(itemId, label, displayBytes);
-		String json = display.displayJson();
+		@Nullable String json = display.displayJson();
 		long retained = retained(0, itemId, label, json);
 		budget.retain(retained);
 		return new InventoryDetachedItem(itemId, InventoryIdentityMode.ALL_VARIANTS, display, null, retained);
@@ -143,14 +146,14 @@ final class InventoryItemFreezer {
 			if (defaultSize != 0) for (var entry : defaults.entrySet()) {
 				budget.work(32);
 				DataComponentType<?> type = entry.getKey();
-				Optional<?> override = null;
+				@Nullable Optional<?> override = null;
 				for (int changedIndex = 0; changedIndex < patchEntries.size(); changedIndex++) {
 					var changed = patchEntries.get(changedIndex); budget.work(8); if (changed.getKey() == type) { override = changed.getValue(); break; }
 				}
 				if (override != null) continue; // Never inspect a replaced/removed default value or codec.
 				String typeId = typeId(type);
 				if (InventoryComponentCertificate.transientType(type)) continue;
-				Codec<?> externalCodec = externalCodec(type);
+				@Nullable Codec<?> externalCodec = externalCodec(type);
 				budget.work(256);
 				if (!InventoryComponentCertificate.nativeType(type) && externalCodec == null) continue;
 				effective.add(new Entry(typeId, value(type, entry.getValue(), depth + 1, externalCodec), true));
@@ -159,7 +162,7 @@ final class InventoryItemFreezer {
 				budget.work(32);
 				DataComponentType<?> type = entry.getKey(); String typeId = typeId(type);
 				if (InventoryComponentCertificate.transientType(type)) continue;
-				Codec<?> externalCodec = externalCodec(type);
+				@Nullable Codec<?> externalCodec = externalCodec(type);
 				budget.work(256);
 				if (!InventoryComponentCertificate.nativeType(type) && externalCodec == null) continue;
 				Optional<?> optional = entry.getValue(); if (optional == null) InventoryComponentCertificate.refuse();
@@ -169,24 +172,24 @@ final class InventoryItemFreezer {
 			return new Plan(itemId, count, effective, additions, removals, certificates);
 		} finally { bounds.leave(); }
 	}
-	static boolean simpleMap(DataComponentMap map) { return map != null && map.getClass() == SIMPLE_MAP; }
+	static boolean simpleMap(@Nullable DataComponentMap map) { return map != null && map.getClass() == SIMPLE_MAP; }
 	static void initialize() {
 		// Fixed class identities are process initialization, never input work.
 		InventoryComponentBounds.initialize(); InventoryRegistryContext.initialize();
 	}
 
-	private Codec<?> externalCodec(DataComponentType<?> type) {
+	private @Nullable Codec<?> externalCodec(DataComponentType<?> type) {
 		budget.work(256); // closed native dispatch, not external getter internals
 		if (InventoryComponentCertificate.nativeType(type)) return null;
 		// Registration was established before this external-trusted descriptor
 		// getter. Preserve its real native cache wrapper; do not unwrap it.
 		budget.work(64);
-		Codec<?> codec = type.codec();
+		@Nullable Codec<?> codec = type.codec();
 		if (codec != null) certificates.externalComponent();
 		return codec;
 	}
 
-	private Value value(DataComponentType<?> type, Object value, int depth, Codec<?> externalCodec) {
+	private Value value(DataComponentType<?> type, Object value, int depth, @Nullable Codec<?> externalCodec) {
 		budget.container(); budget.work(64);
 		if (externalCodec != null) {
 			budget.node(depth);
@@ -210,7 +213,7 @@ final class InventoryItemFreezer {
 		if (type == DataComponents.FOOD) {
 			InventoryComponentCertificate.exact(value, FoodProperties.class); var food = (FoodProperties) value;
 			if (food.nutrition() < 0 || !Float.isFinite(food.saturation()) || !Float.isFinite(food.eatSeconds()) || food.eatSeconds() <= 0) InventoryComponentCertificate.refuse();
-			Plan conversion = null;
+			@Nullable Plan conversion = null;
 			if (food.usingConvertsTo().isPresent()) {
 				budget.allocate(0, 0, 1, 1);
 				conversion = plan(new InventoryResidentItem.Stack(food.usingConvertsTo().orElseThrow()), depth + 1, false);
@@ -222,13 +225,13 @@ final class InventoryItemFreezer {
 				budget.work(48);
 				InventoryComponentCertificate.exact(possible, FoodProperties.PossibleEffect.class); var effect = (FoodProperties.PossibleEffect) possible;
 				if (!Float.isFinite(effect.probability()) || effect.probability() < 0 || effect.probability() > 1) InventoryComponentCertificate.refuse();
-				MobEffectInstance resident = nativeAccess.foodEffect(effect); if (resident == null) InventoryComponentCertificate.refuse();
+				@Nullable MobEffectInstance resident = nativeAccess.foodEffect(effect); if (resident == null) InventoryComponentCertificate.refuse();
 				certificates.effectCopy(resident, depth + 1); admitted.add(new FoodEffect(resident, effect.probability()));
 			}
 			return new Value(type, food, null, null, conversion, admitted, certificates, firstEffect, certificates.effectCopyCount(), null);
 		}
-		Codec<?> codec = InventoryComponentCertificate.codec(type); if (codec == null) InventoryComponentCertificate.refuse();
-		Object owned = certificates.owned(type, value, depth);
+		@Nullable Codec<?> codec = InventoryComponentCertificate.codec(type); if (codec == null) InventoryComponentCertificate.refuse();
+		@Nullable Object owned = certificates.owned(type, value, depth);
 		if (owned != null) return new Value(type, owned, null, null, null, null, certificates, 0, 0, null);
 		int firstEffect = certificates.effectCopyCount();
 		certificates.beginNativePasses();
@@ -266,7 +269,7 @@ final class InventoryItemFreezer {
 		return (item instanceof net.minecraft.world.item.BlockItem && !alias ? "block." : "item.")
 			+ id.replace(':', '.').replace('/', '.');
 	}
-	private static long retained(int canonical, String id, String label, String json) {
+	private static long retained(int canonical, String id, String label, @Nullable String json) {
 		return InventoryItemBudget.add(canonical, 512L + 2L * (id.length() + label.length() + (json == null ? 0 : json.length())));
 	}
 
@@ -349,9 +352,9 @@ final class InventoryItemFreezer {
 		}
 	}
 
-	private record Value(DataComponentType<?> type, Object resident, Codec<?> codec,
-		List<Slot> nested, Plan conversion, List<FoodEffect> effects, InventoryComponentCertificate certificate,
-		int firstEffect, int afterEffect, InventoryComponentCertificate.NativePasses passes) {
+	private record Value(DataComponentType<?> type, @Nullable Object resident, @Nullable Codec<?> codec,
+		@Nullable List<Slot> nested, @Nullable Plan conversion, @Nullable List<FoodEffect> effects, InventoryComponentCertificate certificate,
+		int firstEffect, int afterEffect, InventoryComponentCertificate.@Nullable NativePasses passes) {
 		boolean external() { return resident instanceof InventoryExternalComponent; }
 		/**
 		 * A prototype default may be inherited only when no nested display data
@@ -372,8 +375,7 @@ final class InventoryItemFreezer {
 			if (passes != null) { certificate.admitPasses(passes); certificate.admitCostPass(passes); }
 			if (resident instanceof InventoryComponentCertificate.Owned || codec != null) certificate.admitValue(type, resident, display);
 			if (resident instanceof InventoryComponentCertificate.Owned owned) return owned.encode(ops);
-			if (codec != null) return ((Codec<Object>) codec).encodeStart(ops, resident).result()
-				.orElseThrow(() -> new InventoryItemBudget.RootLimitException("certified component does not encode"));
+			if (codec != null) return InventoryItemDiagnostics.complete(((Codec<Object>) codec).encodeStart(ops, resident), "certified component");
 			if (type == DataComponents.FOOD) {
 				var food = (FoodProperties) resident;
 				certificate.admitMap(2 + (food.canAlwaysEat() ? 1 : 0) + (food.eatSeconds() == 1.6F ? 0 : 1)
@@ -392,8 +394,7 @@ final class InventoryItemFreezer {
 					certificate.admitScalars(0, effect.probability == 1.0F ? 0 : 1, 0, 0, display);
 					certificate.admitFoodEffect(effect.resident, display);
 					var entry = new ArrayList<Pair<T, T>>();
-					T encoded = MobEffectInstance.CODEC.encodeStart(ops, new MobEffectInstance(effect.resident)).result()
-						.orElseThrow(() -> new InventoryItemBudget.RootLimitException("certified food effect does not encode"));
+					T encoded = InventoryItemDiagnostics.complete(MobEffectInstance.CODEC.encodeStart(ops, new MobEffectInstance(effect.resident)), "certified food effect");
 					entry.add(Pair.of(ops.createString("effect"), encoded));
 					if (effect.probability != 1.0F) entry.add(Pair.of(ops.createString("probability"), ops.createFloat(effect.probability)));
 					return ops.createMap(entry.stream());

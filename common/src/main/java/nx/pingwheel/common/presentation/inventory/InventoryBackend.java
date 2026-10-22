@@ -478,7 +478,7 @@ public final class InventoryBackend implements AutoCloseable {
 						prepared.commit(marker);
 						try { host.publishCreated(outcome); }
 						catch (RuntimeException | LinkageError publicationFailure) {
-							nx.pingwheel.common.util.RateLimitedDiagnostics.error("inventory/publish-created", host.getClass().getName(),
+							nx.pingwheel.common.diagnostics.Diagnostics.error("inventory/publish-created", host.getClass().getName(),
 								() -> "committed marker=" + outcome.marker().id() + " request=" + packet.requestId()
 									+ " commit=" + packet.commitId() + " owner=" + player + " epoch=" + session.epoch
 									+ " " + InventoryCaptureDiagnostics.context(preview.input), publicationFailure);
@@ -1091,7 +1091,10 @@ public final class InventoryBackend implements AutoCloseable {
 					preview.witnesses.putIfAbsent(key, witness);
 					preview.totals.put(id, total);
 				}
-			} catch (ArithmeticException overflow) { preview.terminal = true; publisher.status(preview.context, InventoryS2CPacket.Status.INCOMPLETE); }
+			} catch (ArithmeticException overflow) {
+				InventoryCaptureDiagnostics.warn("preview-count", preview.input, null, () -> "reason=count-overflow", overflow);
+				preview.terminal = true; publisher.status(preview.context, InventoryS2CPacket.Status.INCOMPLETE);
+			}
 			long actual = previewRetainedBytes(preview);
 			reservation.commit(actual); // never hide an underestimate with min(actual, upper)
 			preview.entries.forEach(RetainedMemoryLedger.Ticket::close); preview.entries.clear();
@@ -1217,7 +1220,12 @@ public final class InventoryBackend implements AutoCloseable {
 				if (item.aggregateRequired() && !lease.folded) retireTrackingGroup(lease);
 				lease.total = total; lease.count = count;
 			}
-		} catch (ArithmeticException overflow) { lease.consumer.stopMonitoringScan(); lease.scanning = false; lease.nextSweep = tick + settings.getTracking().getPeriodTicks(); for (Recipient recipient : lease.recipients.values()) publisher.status(recipient.context, InventoryS2CPacket.Status.INCOMPLETE); return; }
+		} catch (ArithmeticException overflow) {
+			InventoryCaptureDiagnostics.warn("tracking-count", lease.input, null, () -> "reason=count-overflow", overflow);
+			lease.consumer.stopMonitoringScan(); lease.scanning = false; lease.nextSweep = tick + settings.getTracking().getPeriodTicks();
+			for (Recipient recipient : lease.recipients.values()) publisher.status(recipient.context, InventoryS2CPacket.Status.INCOMPLETE);
+			return;
+		}
 		if (result.completeness() == CaptureResult.Completeness.CONTINUE) return;
 		lease.consumer.stopMonitoringScan();
 		lease.scanning = false; lease.nextSweep = tick + settings.getTracking().getPeriodTicks();

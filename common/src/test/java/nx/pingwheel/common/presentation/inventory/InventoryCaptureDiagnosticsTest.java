@@ -77,6 +77,27 @@ class InventoryCaptureDiagnosticsTest {
 		}
 	}
 
+	@Test void existingBoundReasonGateUsesApprovedBackendRatherThanTheFullGeneralWindow() throws ReflectiveOperationException {
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 4, 5, 6, "minecraft:chest"), new UUID(51, 4), BlockFace.NORTH);
+		var field = InventoryCaptureDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
+		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
+		long[] previous = new long[gate.length()];
+		for (int index = 0; index < gate.length(); index++) previous[index] = gate.getAndSet(index, 0);
+		try (var logs = new InventoryDiagnosticsTestCapture()) {
+			for (int index = 0; index < 65; index++) nx.pingwheel.common.diagnostics.Diagnostics.event(Level.WARN,
+				"inventory/test-window-" + index, "test", "filled", () -> "unrelated");
+			int before = logs.events().size();
+			InventoryCaptureDiagnostics.boundExceeded(input, "native-refusal");
+			InventoryCaptureDiagnostics.boundExceeded(input, "repeat-refusal");
+			assertEquals(before + 1, logs.events().size());
+			assertTrue(logs.messages().contains("detail=native-refusal"));
+			assertTrue(logs.events().getLast().getMessage().getFormattedMessage().startsWith("[PingForIt] "));
+			assertNull(logs.events().getLast().getThrown());
+		} finally {
+			for (int index = 0; index < gate.length(); index++) gate.set(index, previous[index]);
+		}
+	}
+
 	/** Captures the production lazy logger without touching Global or platform services. */
 	static final class Capture implements AutoCloseable {
 		private final Logger logger = (Logger) LogManager.getLogger("pingforit");

@@ -237,7 +237,7 @@ public final class InventoryItemBudget {
 	}
 
 	/** Root identity refusal, distinct from aborting the entire atomic capture. */
-	static final class RootLimitException extends IllegalStateException {
+	static class RootLimitException extends IllegalStateException {
 		RootLimitException(String reason) { super(reason); }
 		@Override public synchronized Throwable fillInStackTrace() { return this; }
 	}

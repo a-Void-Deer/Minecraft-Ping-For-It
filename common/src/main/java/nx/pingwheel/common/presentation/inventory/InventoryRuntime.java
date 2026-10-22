@@ -28,7 +28,7 @@ import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SourceAccess;
 import nx.pingwheel.common.presentation.source.SourceKey;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /** One server-lifetime owner of physical rounds, logical coverage and retained admission. */
 public final class InventoryRuntime implements AutoCloseable {
@@ -356,7 +356,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK)); return work.get();
 		} catch (RuntimeException | LinkageError failure) {
 			if (!InventoryCaptureDiagnostics.expectedFailure(failure))
-				RateLimitedDiagnostics.warn("inventory/runtime/preflight", work.getClass().getName(), () -> "tick=" + tick, failure);
+				Diagnostics.warn("inventory/runtime/preflight", work.getClass().getName(), () -> "tick=" + tick, failure);
 			return Optional.empty();
 		}
 		}
@@ -525,6 +525,7 @@ public final class InventoryRuntime implements AutoCloseable {
 				}
 			}
 		} catch (InventoryItemBudget.CaptureLimitException exceeded) {
+			InventoryCaptureDiagnostics.boundExceeded(consumer.input, "snapshot-discovery", exceeded);
 			if (round.physicalDelay != null) round.physicalDelay.cancel();
 			return InventorySourceAccess.Preparation.INCOMPLETE;
 		} catch (RuntimeException | LinkageError unavailable) {
@@ -535,10 +536,13 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private InventorySourceAccess.Preparation prepareSnapshot(Consumer consumer, Round round, InventoryValidationBudget.Allowance discovery) {
 		AdmittedSource source = round.source;
-		InventorySourceAccess.SnapshotPlan plan = source.snapshotPlan(discovery).orElse(null);
+		InventorySourceAccess.@org.jetbrains.annotations.Nullable SnapshotPlan plan = source.snapshotPlan(discovery).orElse(null);
 		long reads = plan == null ? 0 : plan.physicalReadUpperBound();
 		long work = plan == null ? 0 : plan.itemWorkUpperBoundUnits();
-		if (reads < 0 || reads > InventorySourceAccess.MAX_SLOTS || work < 0) return InventorySourceAccess.Preparation.INCOMPLETE;
+		if (reads < 0 || reads > InventorySourceAccess.MAX_SLOTS || work < 0) {
+			InventoryCaptureDiagnostics.boundExceeded(consumer.input, "snapshot-plan-reads-or-work reads=" + reads + " work=" + work);
+			return InventorySourceAccess.Preparation.INCOMPLETE;
+		}
 		var admission = physical.tryReserve(Map.of(CAPTURE_READS, reads, ITEM_WORK, work));
 		if (admission.isEmpty()) {
 			physicalDelay(consumer, (physical.remaining(CAPTURE_READS) < reads ? Reason.CAPTURE_COUNT.bit() : 0)

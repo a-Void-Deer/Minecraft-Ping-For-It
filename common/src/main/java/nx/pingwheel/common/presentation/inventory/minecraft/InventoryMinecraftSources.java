@@ -41,7 +41,7 @@ import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
 import nx.pingwheel.common.presentation.inventory.InventorySelection;
 import nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources;
 import nx.pingwheel.common.presentation.source.SourceKey;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /** Ordinary and provider-confirmed blocks. Every view is sided, read-only, loaded and owner-authorized. */
 public final class InventoryMinecraftSources {
@@ -147,7 +147,7 @@ public final class InventoryMinecraftSources {
 		try { return gate.test(pos); }
 		catch (RuntimeException | LinkageError unavailable) {
 			if (!(unavailable instanceof InventorySourceUnavailableException) && !(unavailable instanceof InventoryItemBudget.CaptureLimitException))
-				RateLimitedDiagnostics.warn("inventory-member-scope", gate.getClass().getName(),
+				Diagnostics.warn("inventory-member-scope", gate.getClass().getName(),
 					() -> "position=" + pos + " binding=" + binding + " face=" + face + " gateClass=" + gate.getClass().getName(), unavailable);
 			return false;
 		}

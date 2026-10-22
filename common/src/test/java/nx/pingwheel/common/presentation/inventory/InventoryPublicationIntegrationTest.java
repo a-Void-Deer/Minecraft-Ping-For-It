@@ -25,6 +25,42 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Replays the production publisher's ordered wire frames, not hand-ordered status/data fixtures. */
 class InventoryPublicationIntegrationTest {
+	@Test void actualCanonicalRefusalRetiresExactSelectionAndKeepsTheAuthoritativeLongGroupTotal() {
+		net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+		var catalog = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Catalog(net.minecraft.core.RegistryAccess.EMPTY);
+		var rejected = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE);
+		var payload = new net.minecraft.nbt.CompoundTag(); payload.putString("data", "\u0800".repeat(23000));
+		rejected.set(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.of(payload));
+		var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
+		settings.getPreview().setPeriodTicks(1); settings.setPhysicalSlotsPerTick(nx.pingwheel.common.config.IntLimit.finite(1));
+		var reads = new java.util.concurrent.atomic.AtomicInteger(); long firstAmount = 9_007_199_254_740_993L;
+		try (var logs = new InventoryDiagnosticsTestCapture(); var backend = new InventoryBackend(host,
+			new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2) {
+				@Override public InventoryDomainCodec.Item read(int slot) {
+					reads.incrementAndGet();
+					var encoded = catalog.encode(slot == 0 ? new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE) : rejected);
+					var display = encoded.display();
+					return new InventoryDomainCodec.Item(encoded.key(), slot == 0 ? firstAmount : 7, display.label(), display.displayJson(), display.aggregateRequired());
+				}
+			}), 16_000_000), 1)) {
+			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings);
+			long epoch = host.epoch(InventoryBackendTest.A);
+			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.open(epoch, 100, 1, 1, InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH), 0, settings);
+			backend.tick(0, settings);
+			var old = host.packets.stream().filter(packet -> !packet.entries().isEmpty()).findFirst().orElseThrow();
+			assertFalse(old.entries().getFirst().fallback());
+			backend.tick(1, settings);
+			var folded = host.packets.stream().filter(packet -> packet.entries().stream().anyMatch(InventoryS2CPacket.Entry::fallback)).reduce((a, b) -> b).orElseThrow();
+			assertEquals(1, folded.entries().size()); assertEquals(firstAmount + 7, folded.entries().getFirst().count());
+			assertNotEquals(old.entries().getFirst().key(), folded.entries().getFirst().key());
+			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.select(epoch, 100, 1, 1, 1, old.baselineId(), old.statusRevision(), old.entries().getFirst().key(), "danger"), 2, settings);
+			assertEquals(0, host.store.size()); assertEquals(2, reads.get(), "a retired exact reference is rejected before a new witness");
+			assertTrue(host.packets.stream().anyMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.REJECT));
+			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("canonical byte bound=65536"), logs.messages());
+			assertNull(logs.events().getFirst().getThrown());
+		}
+	}
+
 	static InventoryS2CPacket wire(InventoryS2CPacket packet) {
 		var buf = new FriendlyByteBuf(Unpooled.buffer());
 		try {

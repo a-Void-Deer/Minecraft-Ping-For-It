@@ -16,7 +16,7 @@ import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotSchemas;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /** Lazy tested-shape Vault access; never asks Create to initialize its combined capability. */
 public final class CreateVaultInventoryAccess {
@@ -111,9 +111,10 @@ public final class CreateVaultInventoryAccess {
 			return Optional.empty();
 		}
 	}
-	private static void failure(String operation, World world, BlockPos original, java.util.function.Supplier<String> detail, Throwable failure) {
-		if (failure instanceof InventorySourceUnavailableException) return;
-		RateLimitedDiagnostics.warn(operation, "create:item_vault",
+	private static void failure(String operation, @org.jetbrains.annotations.Nullable World world, BlockPos original, java.util.function.Supplier<String> detail, Throwable failure) {
+		@org.jetbrains.annotations.Nullable Throwable reason = failure instanceof java.lang.reflect.InvocationTargetException ? failure.getCause() : failure;
+		if (reason instanceof InventorySourceUnavailableException) return;
+		Diagnostics.warn(operation, "create:item_vault",
 			() -> "position=" + original + " worldClass=" + (world == null ? "none" : world.getClass().getName()) + " " + detail.get(), failure);
 	}
 	private record Layout(BlockPos controller, int width, int length, Direction.Axis axis, List<BlockPos> members, List<Integer> slotCounts, int slots) {}

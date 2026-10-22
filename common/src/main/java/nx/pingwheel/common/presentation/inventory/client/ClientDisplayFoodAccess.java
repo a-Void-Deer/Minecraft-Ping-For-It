@@ -57,7 +57,7 @@ final class ClientDisplayFoodAccess {
 			}
 			if (effect == null || effect.getClass() != MobEffectInstance.class) throw new UnsafeDisplay();
 			return (MobEffectInstance) effect;
-		} catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(); }
+		} catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(unavailable); }
 	}
 
 	/** Caller has already made exactly one bounded recursive effect copy. */
@@ -68,6 +68,6 @@ final class ClientDisplayFoodAccess {
 		budget.cells(8);
 		if (SHAPE == null || owned == null || owned.getClass() != MobEffectInstance.class) throw new UnsafeDisplay();
 		try { return SHAPE.constructor.newInstance(owned, probability); }
-		catch (ReflectiveOperationException unavailable) { throw new UnsafeDisplay(); }
+		catch (ReflectiveOperationException unavailable) { throw new UnsafeDisplay(unavailable); }
 	}
 }

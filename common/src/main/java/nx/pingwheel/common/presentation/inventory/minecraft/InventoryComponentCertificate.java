@@ -406,8 +406,7 @@ final class InventoryComponentCertificate {
 	private record OwnedDecorations(List<Decoration> entries) implements Owned {
 		public <T> T encode(DynamicOps<T> ops) {
 			return entries.isEmpty() ? ops.emptyMap() : ops.createMap(entries.stream().map(entry -> Pair.of(ops.createString(entry.key),
-				MapDecorations.Entry.CODEC.encodeStart(ops, entry.value).result()
-					.orElseThrow(() -> new InventoryItemBudget.RootLimitException("certified decoration does not encode")))));
+				InventoryItemDiagnostics.complete(MapDecorations.Entry.CODEC.encodeStart(ops, entry.value), "certified decoration"))));
 		}
 	}
 	private record StringField(String key, String value) {}
