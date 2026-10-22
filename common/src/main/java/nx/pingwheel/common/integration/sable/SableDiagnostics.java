@@ -6,7 +6,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-import nx.pingwheel.common.Global;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Structured, injectable diagnostics for the optional Sable boundary.
@@ -24,42 +27,56 @@ public interface SableDiagnostics {
 	String REFRESH_PREFIX = "[sable-refresh]";
 
 	/** Emits one structured DEBUG event. Fields are supplied as key/value pairs. */
-	void debug(String prefix, String stage, String reason, Object... fields);
+	void debug(String prefix, String stage, String reason, @Nullable Object... fields);
 
 	/**
-	 * Emits one structured DEBUG event and attaches the original throwable to the
-	 * Log4j event.  The throwable is intentionally not flattened or redacted.
+	 * Emits a controlled WARN failure with the original cause in a bounded report.
 	 */
 	void debugException(
-		String prefix, String stage, String reason, Throwable throwable, Object... fields
+		String prefix, String stage, String reason, Throwable throwable, @Nullable Object... fields
 	);
 
-	default void capture(String stage, String reason, Object... fields) {
+	default boolean enabled(Level level) { return true; }
+
+	/** These routes require admission by an existing Sable domain gate. */
+	default void approvedEvent(String prefix, String stage, String reason, @Nullable Object... fields) {
+		debug(prefix, stage, reason, fields);
+	}
+
+	default void approvedException(String prefix, String stage, String reason, Throwable failure, @Nullable Object... fields) {
+		debugException(prefix, stage, reason, failure, fields);
+	}
+
+	default void warning(String prefix, String stage, String reason, @Nullable Object... fields) {
+		debug(prefix, stage, reason, fields);
+	}
+
+	default void capture(String stage, String reason, @Nullable Object... fields) {
 		debug(CAPTURE_PREFIX, stage, reason, fields);
 	}
 
 	default void captureException(
-		String stage, String reason, Throwable throwable, Object... fields
+		String stage, String reason, Throwable throwable, @Nullable Object... fields
 	) {
 		debugException(CAPTURE_PREFIX, stage, reason, throwable, fields);
 	}
 
-	default void server(String stage, String reason, Object... fields) {
+	default void server(String stage, String reason, @Nullable Object... fields) {
 		debug(SERVER_PREFIX, stage, reason, fields);
 	}
 
 	default void serverException(
-		String stage, String reason, Throwable throwable, Object... fields
+		String stage, String reason, Throwable throwable, @Nullable Object... fields
 	) {
 		debugException(SERVER_PREFIX, stage, reason, throwable, fields);
 	}
 
-	default void refresh(String stage, String reason, Object... fields) {
+	default void refresh(String stage, String reason, @Nullable Object... fields) {
 		debug(REFRESH_PREFIX, stage, reason, fields);
 	}
 
 	default void refreshException(
-		String stage, String reason, Throwable throwable, Object... fields
+		String stage, String reason, Throwable throwable, @Nullable Object... fields
 	) {
 		debugException(REFRESH_PREFIX, stage, reason, throwable, fields);
 	}
@@ -68,13 +85,13 @@ public interface SableDiagnostics {
 	static SableDiagnostics noop() {
 		return new SableDiagnostics() {
 			@Override
-			public void debug(String prefix, String stage, String reason, Object... fields) {
+			public void debug(String prefix, String stage, String reason, @Nullable Object... fields) {
 				// intentionally empty
 			}
 
 			@Override
 			public void debugException(
-				String prefix, String stage, String reason, Throwable throwable, Object... fields
+				String prefix, String stage, String reason, Throwable throwable, @Nullable Object... fields
 			) {
 				// intentionally empty
 			}
@@ -82,22 +99,43 @@ public interface SableDiagnostics {
 	}
 
 	/**
-	 * A global implementation whose reference to {@link Global} is resolved only
-	 * when the first event is emitted.
+	 * Uses the shared backend and keeps formatting lazy until admission.
 	 */
 	static SableDiagnostics global() {
 		return new SableDiagnostics() {
 			@Override
-			public void debug(String prefix, String stage, String reason, Object... fields) {
-				Global.LOGGER.debug(format(prefix, stage, reason, fields));
+			public boolean enabled(Level level) { return Diagnostics.logger().isEnabled(level); }
+
+			@Override
+			public void debug(String prefix, String stage, String reason, @Nullable Object... fields) {
+				Diagnostics.event(Level.DEBUG, operation(stage, fields), prefix, reason,
+					() -> format(prefix, stage, reason, fields));
 			}
 
 			@Override
 			public void debugException(
-				String prefix, String stage, String reason, Throwable throwable, Object... fields
+				String prefix, String stage, String reason, Throwable throwable, @Nullable Object... fields
 			) {
-				Global.LOGGER.debug(format(prefix, stage, reason, fields),
-					Objects.requireNonNull(throwable, "throwable"));
+				Diagnostics.warn(operation(stage, fields), prefix,
+					() -> format(prefix, stage, reason, fields), throwable);
+			}
+
+			@Override
+			public void approvedEvent(String prefix, String stage, String reason, @Nullable Object... fields) {
+				Diagnostics.domainApprovedEvent(Level.DEBUG, operation(stage, fields), prefix, reason,
+					() -> format(prefix, stage, reason, fields));
+			}
+
+			@Override
+			public void approvedException(String prefix, String stage, String reason, Throwable failure, @Nullable Object... fields) {
+				Diagnostics.domainApprovedFailure(Level.WARN, operation(stage, fields), prefix,
+					() -> format(prefix, stage, reason, fields), failure);
+			}
+
+			@Override
+			public void warning(String prefix, String stage, String reason, @Nullable Object... fields) {
+				Diagnostics.event(Level.WARN, operation(stage, fields), prefix, reason,
+					() -> format(prefix, stage, reason, fields));
 			}
 		};
 	}
@@ -109,7 +147,7 @@ public interface SableDiagnostics {
 
 	/** Immutable event captured by {@link Recording}. */
 	record Event(
-		String prefix, String stage, String reason, List<Object> fields, Throwable throwable
+		String prefix, String stage, String reason, @Unmodifiable List<@Nullable Object> fields, @Nullable Throwable throwable
 	) {
 		public Event {
 			Objects.requireNonNull(prefix, "prefix");
@@ -128,35 +166,32 @@ public interface SableDiagnostics {
 		}
 
 		@Override
-		public synchronized void debug(String prefix, String stage, String reason, Object... fields) {
+		public synchronized void debug(String prefix, String stage, String reason, @Nullable Object... fields) {
 			events.add(new Event(prefix, stage, reason, copyFields(fields), null));
 		}
 
 		@Override
 		public synchronized void debugException(
-			String prefix, String stage, String reason, Throwable throwable, Object... fields
+			String prefix, String stage, String reason, Throwable throwable, @Nullable Object... fields
 		) {
 			events.add(new Event(
 				prefix, stage, reason, copyFields(fields), Objects.requireNonNull(throwable, "throwable")));
 		}
 
-		public synchronized List<Event> events() {
+		public synchronized @Unmodifiable List<Event> events() {
 			return List.copyOf(events);
 		}
 
-		private static List<Object> copyFields(Object[] fields) {
+		private static List<@Nullable Object> copyFields(@Nullable Object[] fields) {
 			Objects.requireNonNull(fields, "fields");
 			return new ArrayList<>(Arrays.asList(fields.clone()));
 		}
 	}
 
 	/**
-	 * Renders an event without using parameter substitution.  This lets the
-	 * throwable overload above remain the real Log4j throwable overload, which
-	 * preserves the complete stack trace under the repository's custom message
-	 * factory.
+	 * Renders detached context; the shared reporter bounds the resulting string.
 	 */
-	static String format(String prefix, String stage, String reason, Object... fields) {
+	static String format(String prefix, String stage, String reason, @Nullable Object... fields) {
 		Objects.requireNonNull(prefix, "prefix");
 		Objects.requireNonNull(stage, "stage");
 		Objects.requireNonNull(reason, "reason");
@@ -176,5 +211,14 @@ public interface SableDiagnostics {
 		}
 
 		return message.toString();
+	}
+
+	private static String operation(String stage, @Nullable Object... fields) {
+		for (int index = 0; index + 1 < fields.length; index += 2) {
+			if ("operation".equals(fields[index]) && fields[index + 1] instanceof String operation) {
+				return "sable." + stage + "." + operation;
+			}
+		}
+		return "sable." + stage;
 	}
 }

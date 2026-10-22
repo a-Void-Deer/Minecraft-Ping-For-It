@@ -1,13 +1,12 @@
 package nx.pingwheel.common.integration;
 
-import static nx.pingwheel.common.Global.LOGGER;
-import static nx.pingwheel.common.Global.debugException;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
 
 /**
  * Shared once-only {@link LinkageError} guard for optional-mod boundaries. A
  * link error disables the owning boundary for the rest of the session, warns
- * once with the integration id, and debug-logs a bounded safe exception
- * report.
+ * once with the integration id and original cause in one bounded report.
  */
 public final class IntegrationLinkGuard {
 	private final String integration;
@@ -30,14 +29,13 @@ public final class IntegrationLinkGuard {
 		}
 
 		warned = true;
-		LOGGER.warn("{} integration disabled", integration);
-		debugException(integration + " integration link error", error);
+		Diagnostics.domainApprovedFailure(Level.WARN, "integration-link", integration,
+			() -> integration + " integration disabled", error);
 	}
 
 	/**
 	 * Disables an optional boundary without emitting an exception report. This
-	 * is used by privacy-sensitive reflective adapters whose invocation context
-	 * must never reach logs.
+	 * requires the caller to own the failure report at its diagnostic boundary.
 	 */
 	public synchronized void disableSilently() {
 		disabled = true;

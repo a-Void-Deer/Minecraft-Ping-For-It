@@ -59,7 +59,7 @@ public final class ExternalBlockServerProviders {
 					"provider_id", externalProvider.providerId(),
 					"registered", true);
 			} else {
-				DIAGNOSTICS.server(
+				DIAGNOSTICS.warning(SableDiagnostics.SERVER_PREFIX,
 					"provider-selection",
 					"type-mismatch",
 					"provider_class", providerClass.getName(),

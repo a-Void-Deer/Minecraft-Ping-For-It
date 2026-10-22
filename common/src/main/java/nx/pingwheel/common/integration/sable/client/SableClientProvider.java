@@ -2,6 +2,8 @@ package nx.pingwheel.common.integration.sable.client;
 
 import java.util.Objects;
 import java.util.Optional;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -34,8 +36,8 @@ public final class SableClientProvider {
 	public static final String PROVIDER_ID = "sable";
 
 	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard(PROVIDER_ID);
-	private static volatile SableClientCompanionAccess access;
-	private static volatile SableClientCompanionAccess contentAccess;
+	private static volatile @Nullable SableClientCompanionAccess access;
+	private static volatile @Nullable SableClientCompanionAccess contentAccess;
 	private static volatile boolean contentUnavailable;
 	private static volatile SableDiagnostics diagnostics = SableDiagnostics.global();
 	private static final SablePresentationLogGate PRESENTATION_FAILURES =
@@ -142,6 +144,9 @@ public final class SableClientProvider {
 				if (!enabled() || !(level instanceof ClientLevel clientLevel)) return false;
 				try {
 					return getAccess().collectSupplemental(clientLevel, start, end, policy, context, cameraFeet, budget, collector);
+				} catch (nx.pingwheel.common.interaction.candidate.ExactNativeShapeClip.Incomplete incomplete) {
+					diagnostics.capture("supplemental-ray", "incomplete");
+					return false;
 				} catch (ReflectiveOperationException | RuntimeException failure) {
 					diagnostics.captureException("supplemental-ray", "unavailable-or-incomplete", failure,
 						"companion_contract", "1.6.0", "api", "getAllSubLevels/getPlot");
@@ -370,7 +375,10 @@ public final class SableClientProvider {
 		try {
 			net.minecraft.client.Minecraft game = net.minecraft.client.Minecraft.getInstance();
 			return game != null && game.level == level && game.isSameThread();
-		} catch (RuntimeException | LinkageError unavailable) { return false; }
+		} catch (RuntimeException | LinkageError unavailable) {
+			logPresentationException("content-thread-gate", unavailable);
+			return false;
+		}
 	}
 
 	private static boolean enabled() {
@@ -403,27 +411,13 @@ public final class SableClientProvider {
 						"provider_initialized", true,
 						"internal_access", current.hasInternalAccess());
 				} catch (ReflectiveOperationException failure) {
-					diagnostics.captureException(
-						"provider-init",
-						"reflection-failure",
-						failure,
-						"provider_initialized", false);
 					LINK_GUARD.disableSilently();
+					// The caller reports the escaping cause once at its operation boundary.
 					throw new IllegalStateException("Sable client integration is unavailable", failure);
 				} catch (RuntimeException failure) {
-					diagnostics.captureException(
-						"provider-init",
-						"runtime-failure",
-						failure,
-						"provider_initialized", false);
 					LINK_GUARD.disableSilently();
 					throw failure;
 				} catch (LinkageError failure) {
-					diagnostics.captureException(
-						"provider-init",
-						"linkage-error",
-						failure,
-						"provider_initialized", false);
 					LINK_GUARD.disableSilently();
 					throw failure;
 				}
@@ -439,9 +433,9 @@ public final class SableClientProvider {
 
 	/** Emits a capture fallback without making the runtime know logger details. */
 	public static void logCaptureFallback(
-		String fallback, String detailReason, String stage, Object... fields
+		String fallback, String detailReason, String stage, @Nullable Object... fields
 	) {
-		Object[] base = {
+		@Nullable Object[] base = {
 			"fallback", fallback,
 			"detail_reason", detailReason,
 			"fallback_stage", stage
@@ -454,37 +448,39 @@ public final class SableClientProvider {
 		PRESENTATION_FAILURES.clear();
 	}
 
-	private static Vec3 rayDirection(Vec3 rayStart, Vec3 rayEnd) {
+	private static @Nullable Vec3 rayDirection(@Nullable Vec3 rayStart, @Nullable Vec3 rayEnd) {
 		return rayStart == null || rayEnd == null ? null : rayEnd.subtract(rayStart);
 	}
 
-	static void logPresentationFailure(String operation, String reason, Object... fields) {
+	static void logPresentationFailure(String operation, String reason, @Nullable Object... fields) {
+		if (!diagnostics.enabled(Level.DEBUG)) return;
 		String key = presentationFailureKey(operation, reason, null, fields);
 		if (!PRESENTATION_FAILURES.shouldLog(key)) {
 			return;
 		}
 
-		diagnostics.capture("presentation", reason, append(
+		diagnostics.approvedEvent(SableDiagnostics.CAPTURE_PREFIX, "presentation", reason, append(
 			new Object[] {"operation", operation}, fields));
 	}
 
 	static void logPresentationException(
-		String operation, Throwable failure, Object... fields
+		String operation, Throwable failure, @Nullable Object... fields
 	) {
 		Objects.requireNonNull(failure, "failure");
+		if (!diagnostics.enabled(Level.WARN)) return;
 		String key = presentationFailureKey(
 			operation, "exception", failure.getClass().getName(), fields);
 		if (!PRESENTATION_FAILURES.shouldLog(key)) {
 			return;
 		}
 
-		diagnostics.captureException(
-			"presentation", "exception", failure,
+		diagnostics.approvedException(
+			SableDiagnostics.CAPTURE_PREFIX, "presentation", "exception", failure,
 			append(new Object[] {"operation", operation}, fields));
 	}
 
 	private static String presentationFailureKey(
-		String operation, String reason, String failureClass, Object[] fields
+		String operation, String reason, @Nullable String failureClass, @Nullable Object[] fields
 	) {
 		String targetIdentity = "none";
 		for (int index = 0; index + 1 < fields.length; index += 2) {
@@ -498,7 +494,7 @@ public final class SableClientProvider {
 			+ (failureClass == null ? "none" : failureClass) + "|" + targetIdentity;
 	}
 
-	private static String stableTargetIdentity(Object target) {
+	private static String stableTargetIdentity(@Nullable Object target) {
 		if (target instanceof Target.ExternalBlockTarget external) {
 			String stableId = external.stableTargetId();
 			String identity = stableId == null || stableId.isBlank()
@@ -510,8 +506,8 @@ public final class SableClientProvider {
 		return target == null ? "null" : target.getClass().getName();
 	}
 
-	private static Object[] append(Object[] first, Object[] second) {
-		Object[] result = new Object[first.length + second.length];
+	private static @Nullable Object[] append(@Nullable Object[] first, @Nullable Object[] second) {
+		@Nullable Object[] result = new Object[first.length + second.length];
 		System.arraycopy(first, 0, result, 0, first.length);
 		System.arraycopy(second, 0, result, first.length, second.length);
 		return result;

@@ -4,6 +4,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
+import nx.pingwheel.common.integration.IntegrationDiagnosticCapture;
+import org.apache.logging.log4j.Level;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -60,5 +62,21 @@ class SablePresentationLogGateTest {
 
 		assertEquals(1, diagnostics.events().size());
 		assertSame(first, diagnostics.events().get(0).throwable());
+	}
+
+	@Test
+	void debugDisabledPresentationStatusDoesNotSpendWarningAdmission() {
+		SableClientProvider.setDiagnosticsForTests(SableDiagnostics.global());
+		try (var capture = new IntegrationDiagnosticCapture(Level.WARN)) {
+			SableClientProvider.logPresentationFailure("resolve-name", "provider-unavailable", "target", "stable");
+			SableClientProvider.logPresentationException("resolve-name", new IllegalStateException("original failure"),
+				"target", "stable");
+			SableClientProvider.logPresentationException("resolve-name", new IllegalStateException("changed failure"),
+				"target", "stable");
+			assertEquals(1, capture.events().size());
+			assertEquals(Level.WARN, capture.events().getFirst().getLevel());
+			assertTrue(capture.events().getFirst().getMessage().getFormattedMessage().contains("original failure"));
+			org.junit.jupiter.api.Assertions.assertNull(capture.events().getFirst().getThrown());
+		}
 	}
 }

@@ -5,11 +5,12 @@ import java.util.Map;
 import java.util.Objects;
 
 import nx.pingwheel.common.marker.MarkerAnchor;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Keeps fixed-cadence external refreshes quiet when nothing observable has
- * changed.  It records state transitions only; the provider owns the actual
- * DEBUG emission and any throwable attached to it.
+ * changed. The provider owns emission; disabled reporting still observes
+ * state without spending a WARN.
  */
 final class SableRefreshLogGate {
 
@@ -20,7 +21,7 @@ final class SableRefreshLogGate {
 		Objects.requireNonNull(locator, "locator");
 		Objects.requireNonNull(anchor, "anchor");
 
-		Observation previous = observations.put(
+		@Nullable Observation previous = observations.put(
 			stableId, new Observation(Status.AVAILABLE, "available", locator, anchor));
 
 		// The first AVAILABLE observation establishes the baseline; only a later
@@ -37,6 +38,15 @@ final class SableRefreshLogGate {
 		return transition(stableId, Status.INVALID, reason, null, null);
 	}
 
+	boolean invalidFailure(String stableId, String reason, boolean reportEnabled) {
+		@Nullable Observation previous = observations.get(stableId);
+		boolean changed = invalid(stableId, reason);
+		boolean emit = changed || previous == null || !previous.failureReported();
+		boolean reported = reportEnabled && emit || previous != null && !changed && previous.failureReported();
+		observations.put(stableId, new Observation(Status.INVALID, reason, null, null, reported));
+		return reportEnabled && emit;
+	}
+
 	void remove(String stableId) {
 		if (stableId != null) {
 			observations.remove(stableId);
@@ -44,15 +54,15 @@ final class SableRefreshLogGate {
 	}
 
 	private boolean transition(
-		String stableId, Status status, String reason, String locator, MarkerAnchor anchor
+		String stableId, Status status, String reason, @Nullable String locator, @Nullable MarkerAnchor anchor
 	) {
 		Objects.requireNonNull(stableId, "stableId");
 		Objects.requireNonNull(reason, "reason");
 
-		Observation previous = observations.put(
-			stableId, new Observation(status, reason, locator, anchor));
-
-		return previous == null || previous.status() != status || !reason.equals(previous.reason());
+		@Nullable Observation previous = observations.get(stableId);
+		boolean changed = previous == null || previous.status() != status || !reason.equals(previous.reason());
+		if (changed) observations.put(stableId, new Observation(status, reason, locator, anchor));
+		return changed;
 	}
 
 	private enum Status {
@@ -62,7 +72,11 @@ final class SableRefreshLogGate {
 	}
 
 	private record Observation(
-		Status status, String reason, String locator, MarkerAnchor anchor
+		Status status, String reason, @Nullable String locator, @Nullable MarkerAnchor anchor,
+		boolean failureReported
 	) {
+		private Observation(Status status, String reason, @Nullable String locator, @Nullable MarkerAnchor anchor) {
+			this(status, reason, locator, anchor, false);
+		}
 	}
 }

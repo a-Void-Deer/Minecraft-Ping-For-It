@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.jetbrains.annotations.Nullable;
 
 import dev.ryanhcode.sable.companion.ClientSubLevelAccess;
 import dev.ryanhcode.sable.companion.SableCompanion;
@@ -47,11 +48,11 @@ final class SableClientCompanionAccess {
 	private static final double RAY_EPSILON = 0.35D;
 
 	private final SableCompanion companion;
-	private final SableClientInternalAccess internal;
+	private final @Nullable SableClientInternalAccess internal;
 	private final SableDiagnostics diagnostics;
 
 	private SableClientCompanionAccess(
-		SableCompanion companion, SableClientInternalAccess internal, SableDiagnostics diagnostics
+		SableCompanion companion, @Nullable SableClientInternalAccess internal, SableDiagnostics diagnostics
 	) {
 		this.companion = companion;
 		this.internal = internal;
@@ -64,7 +65,7 @@ final class SableClientCompanionAccess {
 
 	static SableClientCompanionAccess create(SableDiagnostics diagnostics)
 		throws ReflectiveOperationException {
-		SableClientInternalAccess internal;
+		@Nullable SableClientInternalAccess internal;
 
 		try {
 			internal = SableClientInternalAccess.create();
@@ -78,28 +79,10 @@ final class SableClientCompanionAccess {
 				failure,
 				"operation", "SableClientInternalAccess.create");
 			internal = null;
-		} catch (LinkageError failure) {
-			diagnostics.captureException(
-				"provider-init",
-				"internal-access-linkage-error",
-				failure,
-				"operation", "SableClientInternalAccess.create");
-			throw failure;
 		}
 
-		try {
-			return new SableClientCompanionAccess(
-				SableCompanion.INSTANCE,
-				internal,
-				diagnostics);
-		} catch (LinkageError failure) {
-			diagnostics.captureException(
-				"provider-init",
-				"companion-linkage-error",
-				failure,
-				"operation", "SableCompanion.INSTANCE");
-			throw failure;
-		}
+		// The outer provider owns reports for failures that escape initialization.
+		return new SableClientCompanionAccess(SableCompanion.INSTANCE, internal, diagnostics);
 	}
 
 	boolean hasInternalAccess() {
@@ -323,16 +306,6 @@ final class SableClientCompanionAccess {
 					"candidate", access,
 					"local_block_pos", localPos,
 					"local_hit", localHit);
-			} catch (LinkageError failure) {
-				diagnostics.captureException(
-					"candidate-rejection",
-					"candidate-linkage-error",
-					failure,
-					"candidate_index", queriedCandidates,
-					"candidate", access,
-					"local_block_pos", localPos,
-					"local_hit", localHit);
-				throw failure;
 			}
 		}
 
@@ -430,9 +403,15 @@ final class SableClientCompanionAccess {
 							bounds.maxX() + 1.0, bounds.maxY() + 1.0, bounds.maxZ() + 1.0), level,
 						pos -> {
 							try { return internal.contains(plot, pos, work); }
-							catch (ReflectiveOperationException failure) { throw new ExactNativeShapeClip.Incomplete(); }
+							catch (ReflectiveOperationException failure) {
+								diagnostics.captureException("supplemental-member-scan", "reflection-failure", failure,
+									"sublevel", id, "position", pos);
+								throw new ExactNativeShapeClip.Incomplete();
+							}
 						}, level::isLoaded);
 				} catch (ReflectiveOperationException failure) {
+					diagnostics.captureException("supplemental-sublevel-scan", "reflection-failure", failure,
+						"raw_index", index);
 					throw new ExactNativeShapeClip.Incomplete();
 				}
 			}
@@ -463,7 +442,11 @@ final class SableClientCompanionAccess {
 			physical, new MarkerAnchor(center.x, center.y, center.z));
 		return Optional.of(new ResolvedBlockReadSource(parent, descriptor, pos -> {
 			try { return SableClientProvider.currentContentLevel(parent) && contentMember(parent, locator.subLevelId(), pos); }
-			catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) { return false; }
+			catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+				SableClientProvider.logPresentationException("content-member-gate", unavailable,
+					"target", target, "position", pos);
+				return false;
+			}
 		}));
 	}
 

@@ -25,6 +25,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
 import org.joml.Vector3dc;
+import org.jetbrains.annotations.Nullable;
 
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetMatchContext;
@@ -60,8 +61,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 
 	private final IntegrationLinkGuard linkGuard = new IntegrationLinkGuard(PROVIDER_ID);
 	private final SableDiagnostics diagnostics;
-	private final ReflectiveApi api;
-	private MembershipApi membershipApi;
+	private final @Nullable ReflectiveApi api;
+	private @Nullable MembershipApi membershipApi;
 	private boolean contentUnavailable;
 	private long nextContentFailureLogNanos;
 	private final Map<MinecraftServer, ServerState> servers = new IdentityHashMap<>();
@@ -86,7 +87,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			"tracking_data_class", TRACKING_DATA_CLASS,
 			"tracking_point_class", TRACKING_POINT_CLASS);
 
-		ReflectiveApi discovered;
+		@Nullable ReflectiveApi discovered;
 
 		try {
 			discovered = ReflectiveApi.discover(diagnostics);
@@ -641,8 +642,12 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			return new ObservationResult.Available(new BlockObservation(
 				available.level(), available.position(), available.state()));
 		} catch (ReflectiveOperationException | RuntimeException failure) {
+			diagnostics.serverException("observe-block", "temporarily-unavailable", failure,
+				"committed_target", committed);
 			return new ObservationResult.TemporarilyUnavailable();
 		} catch (LinkageError failure) {
+			diagnostics.serverException("observe-block", "linkage-disabled", failure,
+				"committed_target", committed);
 			linkGuard.disableSilently();
 			return new ObservationResult.TemporarilyUnavailable();
 		}
@@ -702,9 +707,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		// Additive discovery and invocation failures cannot disable established capture/leases/Basic observation.
 		if (membershipApi == null || failure instanceof LinkageError) contentUnavailable = true;
 		long now = System.nanoTime();
-		if (nextContentFailureLogNanos == 0 || now - nextContentFailureLogNanos >= 0) {
+		if (diagnostics.enabled(org.apache.logging.log4j.Level.WARN)
+			&& (nextContentFailureLogNanos == 0 || now - nextContentFailureLogNanos >= 0)) {
 			nextContentFailureLogNanos = now + 5_000_000_000L;
-			diagnostics.serverException("content-read-source", "unavailable", failure, "provider", PROVIDER_ID);
+			diagnostics.approvedException(SableDiagnostics.SERVER_PREFIX, "content-read-source", "unavailable", failure,
+				"provider", PROVIDER_ID);
 		}
 		return Optional.empty();
 	}
@@ -1140,16 +1147,20 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	}
 
 	private RefreshResult refreshTemporary(
-		ServerState state,
-		String stableId,
+		@Nullable ServerState state,
+		@Nullable String stableId,
 		Target.ExternalBlockTarget committed,
 		String reason
 	) {
-		boolean emit = state == null || stableId == null
-			|| state.refreshDiagnostics.temporarilyUnavailable(stableId, reason);
+		if (state == null || stableId == null) {
+			diagnostics.refresh("refresh", "temporary-unavailable", "unavailable_reason", reason,
+				"stable_target_uuid", stableId, "committed_target", committed);
+			return new RefreshResult.TemporarilyUnavailable();
+		}
+		boolean emit = state.refreshDiagnostics.temporarilyUnavailable(stableId, reason);
 
 		if (emit) {
-			diagnostics.refresh(
+			diagnostics.approvedEvent(SableDiagnostics.REFRESH_PREFIX,
 				"refresh",
 				"temporary-unavailable",
 				"unavailable_reason", reason,
@@ -1161,18 +1172,29 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	}
 
 	private RefreshResult refreshInvalid(
-		ServerState state,
-		String stableId,
-		Target.ExternalBlockTarget committed,
+		@Nullable ServerState state,
+		@Nullable String stableId,
+		Target.@Nullable ExternalBlockTarget committed,
 		String reason,
-		Throwable failure
+		@Nullable Throwable failure
 	) {
-		boolean emit = state == null || stableId == null
-			|| state.refreshDiagnostics.invalid(stableId, reason);
+		if (state == null || stableId == null) {
+			if (failure == null) {
+				diagnostics.refresh("refresh", "invalidation", "invalidation_reason", reason,
+					"stable_target_uuid", stableId, "committed_target", committed);
+			} else {
+				diagnostics.refreshException("refresh", "exception", failure, "invalidation_reason", reason,
+					"stable_target_uuid", stableId, "committed_target", committed);
+			}
+			return new RefreshResult.Invalid();
+		}
+		boolean emit = (failure == null ? state.refreshDiagnostics.invalid(stableId, reason)
+				: state.refreshDiagnostics.invalidFailure(stableId, reason,
+					diagnostics.enabled(org.apache.logging.log4j.Level.WARN)));
 
 		if (emit) {
 			if (failure != null) {
-				diagnostics.refreshException(
+				diagnostics.approvedException(SableDiagnostics.REFRESH_PREFIX,
 					"refresh",
 					"exception",
 					failure,
@@ -1180,7 +1202,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 					"stable_target_uuid", stableId,
 					"committed_target", committed);
 			} else {
-				diagnostics.refresh(
+				diagnostics.approvedEvent(SableDiagnostics.REFRESH_PREFIX,
 					"refresh",
 					"invalidation",
 					"invalidation_reason", reason,
@@ -1202,7 +1224,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			stableId, available.locator().encode(), available.anchor());
 
 		if (changed) {
-			diagnostics.refresh(
+			diagnostics.approvedEvent(SableDiagnostics.REFRESH_PREFIX,
 				"refresh",
 				"locator-or-anchor-changed",
 				"stable_target_uuid", stableId,
@@ -1500,7 +1522,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		record TemporarilyUnavailable(String reason) implements LiveResult {
 		}
 
-		record Invalid(String reason, Throwable failure) implements LiveResult {
+		record Invalid(String reason, @Nullable Throwable failure) implements LiveResult {
 		}
 	}
 

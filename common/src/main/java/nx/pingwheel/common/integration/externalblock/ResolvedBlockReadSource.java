@@ -5,6 +5,8 @@ import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Synchronous game-thread handle. Never retain this value, its level, or its
@@ -19,9 +21,13 @@ public record ResolvedBlockReadSource(Level level, BlockReadSource descriptor,
 		Objects.requireNonNull(memberGate, "memberGate");
 	}
 
-	public boolean containsMember(BlockPos position) {
+	public boolean containsMember(@Nullable BlockPos position) {
 		if (position == null) return false;
 		try { return memberGate.test(position); }
-		catch (RuntimeException | LinkageError unavailable) { return false; }
+		catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("external-block.member-gate", descriptor.providerId(),
+				() -> "descriptor=" + descriptor + " position=" + position, unavailable);
+			return false;
+		}
 	}
 }
