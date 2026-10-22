@@ -217,10 +217,12 @@ an eligible item follower. The same case keeps the item Back/deadzone pointer
 visible, allows an eligible visible item follower to hide it, restores the
 parent radial deadzone feedback on leaving the list, and checks an inactive
 exit after that parent frame without connectors or choice acknowledgement.
-These are discrete snapshot/frame checks; they do not establish the complete
-animated crosshair handoff or crosshair/trail behavior during a direct
-active-list detached exit. The panel and row remeasurement fixture above does
-not establish those feedback paths. The
+Across moving follower poses, a connector is recorded only when painted frames
+and previews do not already cover the remaining circle-to-title segment; an
+independent segment-over-rectangle oracle over the recorded poses and layouts. These are recording-painter frame checks;
+they do not establish the complete animated crosshair handoff or crosshair/trail
+behavior during a direct active-list detached exit. The panel and row
+remeasurement fixture above does not establish those feedback paths. The
 [wheel owner](../../architecture/picking/wheel.md#inventory-list)
 defines the list/radial presentation handoff; recording paint does not establish
 native cursor visibility, `GuiGraphics` or GPU submission.
@@ -324,47 +326,45 @@ single sample and snaps under reduced motion; a resize reuses the last
 published offset; and the pointer chrome follows the published center rather
 than a stale interpolated GUI center, while an exit-transition chrome state
 keeps its detached paint geometry.
-`SpatialOverlayRendererNodeLayoutTest` drives real
-controller snapshots through the production radial-planning, node-layout,
-title-clipping and external-preview wrapping seams: ordinary menus keep the
-historical single-line bounds and floors; every node of a Precise menu — the
-five type slots including a disabled one, and Back — shares that menu's single
-frame extent budget, a candidate name never resizes or clips the title frame it
-is previewed beneath, and a title or target font preference stays independent
-while its row has room; a name at or below the 32-visible-code-point cap is
-shown whole and wrapped in the shared Precise width instead of being cut at the
-title button width, while a longer name keeps its first 31 visible code points
-plus one ellipsis; legacy formatting does not consume that visible cap, an
-ellipsis keeps the last retained visible glyph's style, and capping never reads
-the overflow tail while a formatting-only detail allocates no area; capping and
-wrapping preserve whole supplementary code points — including a pair split
-across component segments — whitespace, explicit styles and legacy-resolved
-styles, and a legacy-formatting preview with bold, reset and color sequences
-matches vanilla's resolved visual order and painted styles, while an incomplete
-legacy sequence never crosses a component boundary; the centered preview lines
-paint outside and below the frame at the readable scale floor, a larger title
-font preference can only reduce the preview's clearance and scale down to that
-floor without changing its visible text, the smallest viewport with large fonts
-keeps nonblank title, preview, Back and disabled-type text, and Back-hover
-progress keeps tracing the title frame when a preview is supplied;
-resting-layout frame-collision checks use the actual rounded bounds including
-the disabled border's inclusive endpoint across rotations, submenu-size tiers
-and viewports, the default plan keeps resting sibling previews separated at a
-readable scale, and under the default 200% option font a full rotation
-sweep with every slot selected in both languages, for mixed and fully available
-menus, keeps resting previews clear of sibling frames and previews,
-with the reported bearing-208 29-code-point name re-wrapping only after the
-title frame and gap are reserved while keeping its text complete; the painted
-preview retains every capped glyph, a vertically-fitting constrained title
-clips rather than shrinking its font while a clipped label keeps its component
-style, and the preview adds no opacity or admission layer while an exit
-transition retains its detached component and its painted preview. An overfull
-glyph-width stress case keeps the readable floor and applies no second
-truncation; arbitrary resource-pack font metrics remain a gap. A selected
-follower intentionally leaves the resting layout, so these collision guarantees
-do not apply to its moving frame or preview. These are pure projection, layout,
-clipping and production-frame recording-painter seams: no `GuiGraphics`, GPU,
-native callback or gameplay frame is involved.
+`SpatialOverlayRendererNodeLayoutTest` drives real controller snapshots through
+the production radial planning, node layout, bounded label avoidance and frame
+recording. Every title frame measures its complete single-line label at the
+configured title scale and the production frame receives that complete label;
+an external candidate preview consumes only the finite preview cell, so it
+never resizes, shrinks or clips the title frame it is previewed beneath, and a
+title or target font preference stays independent while its row has room.
+Solvable fixtures keep the recorded frames and previews separated using actual
+rounded bounds, including the disabled border's inclusive endpoint.
+Budget-exceeding fixtures spanning multiple viewports, enlarged option text,
+mixed or fully available menus, submenu-radius tiers and full rotation sweeps
+in both language fixtures record complete localized titles, the configured
+title scale, unchanged horizontal anchors and bounded vertical offsets whose
+centers stay in their original sectors, while selected, focused and following
+poses are not moved by avoidance. Those budget-exceeding cases accept residual
+overlap rather than shrinking, clipping or unbounded spreading.
+
+The preview-specific checks preserve the name's visible cap, whole-code-point
+and style handling, including supplementary code points split across component
+segments and legacy formatting that resolves to vanilla's painted order and
+styles; a formatting-only detail allocates no area, and capping never reads the
+overflow tail. A name within its visible cap is shown whole and wrapped in the
+preview cell rather than cut to the title frame's width, while an over-cap name
+keeps its retained visible text plus one ellipsis. The centered preview lines
+paint outside and below the frame at the readable floor; a larger title font
+preference can only reduce their clearance and scale down to that floor without
+changing their visible text. The smallest viewport with large fonts keeps
+complete titles and nonblank preview, Back and disabled-type text, and
+Back-hover progress keeps tracing the title frame when a preview is supplied.
+The painted preview retains every capped glyph, the preview budget never
+changes the title's configured scale or complete text, and the preview adds no
+opacity or admission layer while an exit transition retains its detached
+component and its painted preview. An overfull glyph-width stress case keeps
+the readable floor and applies no second truncation; arbitrary resource-pack
+font metrics remain a gap. A selected or following node intentionally leaves
+the resting layout, so these resting collision checks do not apply to its
+moving frame or preview. These are CPU layout and production-frame
+recording-painter checks: no `GuiGraphics`, GPU, native callback, gameplay frame
+or manual visual validation is involved.
 
 Tracking-line projection and its provider/runtime limitations are inventoried in
 [inventory verification](inventory.md#inventory-preview-and-tracking-foundation).

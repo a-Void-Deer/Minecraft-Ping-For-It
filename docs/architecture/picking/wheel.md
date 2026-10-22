@@ -117,25 +117,28 @@ blacklist, and mint green for transparent blocks. These are local action roles,
 not additional Ping Types, and their colors remain the same when focused or
 when a toggle changes state.
 
-Ordinary titles remain single-line at their configured text size. The active
-menu's unfocused title frames may move vertically within a bounded neighborhood
-to reduce overlap, with their centers staying in their original sectors. This
-moves the complete frame and its text together, without changing its width,
-height, horizontal anchor, sector, hit test, dwell, turn or release result.
-Placement retains a stable solution through small input changes and follows
-the existing finite transitions and reduced-motion preference. A changed text
-measurement or viewport is a visual relayout, never gesture input. Ancestor
-breadcrumbs, Precise title/name layouts, inventory rows and the inventory item
-menu's Back frame retain their own positioning rules.
+Titles remain single-line at their configured text size and are painted
+complete; each title frame takes its natural width from its own complete label.
+The active menu's unfocused title frames may move vertically within a bounded
+neighborhood to reduce overlap, with their centers staying in their original
+sectors. This moves the complete frame and its text together, without changing
+its width, height, horizontal anchor, sector, hit test, dwell, turn or release
+result. The area considered for an unfocused frame's bounded avoidance is the
+union of that frame and (in [precise](#precise)) any external name preview painted below it. Placement retains a stable solution
+through small input changes and follows the existing finite transitions and
+reduced-motion preference. A changed text measurement or viewport is a visual
+relayout, never gesture input. Ancestor breadcrumbs, inventory rows and the
+inventory item menu's Back frame retain their own positioning rules.
 
 The focused frame keeps its established pointer-following geometry and is
 painted above other titles, inventory content, ancestors and detached exit
 frames as one group of background, border, text and attached feedback. Former
 focus in an exit tail has no active-focus priority. Menu links lie below text,
 and the follower connector leaves painted title frames uncovered. The final
-pointer feedback still follows successful node painting. Limited space or
-exceptionally dense content may retain overlap: bounded, stable placement and
-readable focus take precedence over wrapping, shrinking or unbounded spreading.
+pointer feedback still follows successful node painting. Titles may retain
+overlap where space is limited or content exceptionally dense: bounded, stable
+placement and readable focus take precedence over wrapping, shrinking or
+unbounded spreading.
 
 Position, opacity and scale are smoothly interpolated for an unchanged entry,
 for appearance and disappearance, and across a radial/list mode switch. A
@@ -400,19 +403,18 @@ established unknown-name fallback, and a Location candidate uses the
 established Here name, under the
 [names and chat](../rendering/names_chat.md) composition rules; the branch adds
 no separate name or appearance preference. The preview never changes the title
-frame: that frame keeps its own bounds, and the preview is painted below it
-without frame background or border. The preview carries at most 32 visible
-Unicode code points, counted after vanilla legacy formatting; formatting
-sequences do not consume the visible budget. A name of at most 32 visible code
-points is shown whole — wrapped within the width shared by the Precise slots
-at a readable text size rather than cut at the title button's width — while a
-longer name keeps its first 31 visible code points followed by one ellipsis.
-Wrapping and capping preserve whole code points and each code point's explicit
-or legacy-resolved style; a glyph that still exceeds the shared width at that
+frame, and the preview is painted below it without frame background or border.
+The preview carries at most 32 visible Unicode code points, counted after
+vanilla legacy formatting; formatting sequences do not consume the visible
+budget. A name of at most 32 visible code points is shown whole — wrapped
+within the width shared by the Precise slots at a readable text size — while a longer name keeps its first 31
+visible code points followed by one ellipsis. Wrapping and capping preserve
+whole code points and each code point's explicit or legacy-resolved style; a
+glyph that still exceeds the shared width at that
 readable size is not truncated a second time. The preview moves, scales and
 fades with its node and follows the target opacity layer, and an exit tail
-keeps the name it was painted with. The separate,
-equal-width Back entry is navigation and is never a candidate.
+keeps the name it was painted with. The separate Back entry is navigation and
+is never a candidate.
 
 ### Content
 
