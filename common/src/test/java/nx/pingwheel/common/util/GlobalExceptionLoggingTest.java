@@ -1,6 +1,8 @@
 package nx.pingwheel.common.util;
 
 import nx.pingwheel.common.Global;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.Logger;
@@ -10,6 +12,7 @@ import org.apache.logging.log4j.core.config.Configuration;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GlobalExceptionLoggingTest {
@@ -39,7 +43,7 @@ class GlobalExceptionLoggingTest {
 				}
 
 				@Override
-				public Throwable getCause() {
+				public @Nullable Throwable getCause() {
 					reads.incrementAndGet();
 					return null;
 				}
@@ -61,6 +65,7 @@ class GlobalExceptionLoggingTest {
 	@Test
 	void enabledHelpersAndPublicRateLimitedApiEmitCorrectLevelsAndOneBoundedReport() {
 		try (Capture capture = new Capture(Level.ALL)) {
+			assertSame(Diagnostics.logger(), Global.LOGGER);
 			RuntimeException cause = failure("cause registry=othermod:machine", "resolve");
 			RuntimeException failure = new RuntimeException("original payload={name:Alice}", cause);
 			failure.setStackTrace(new StackTraceElement[] {
@@ -89,9 +94,20 @@ class GlobalExceptionLoggingTest {
 				assertTrue(message.contains("java.lang.RuntimeException"));
 				assertTrue(message.contains("provider.Inventory.read (Inventory.java:18)"));
 				assertTrue(message.contains("provider.Inventory.resolve"));
+				assertTrue(message.startsWith(Diagnostics.PREFIX));
 				assertNull(event.getThrown(), "No second, unbounded logger throwable rendering");
 				assertTrue(message.length() <= SafeExceptionReport.MAX_CHARACTERS + Global.MOD_PREFIX.length());
 			}
+		}
+	}
+
+	@Test
+	void legacyExceptionHelpersRetainTheirNoWindowBehavior() {
+		try (Capture capture = new Capture(Level.ALL)) {
+			RuntimeException failure = failure("original", "read");
+			Global.warnException("same context", failure);
+			Global.warnException("same context", failure);
+			assertEquals(2, capture.events.size());
 		}
 	}
 
@@ -107,7 +123,7 @@ class GlobalExceptionLoggingTest {
 		private final Logger logger = (Logger) Global.LOGGER;
 		private final LoggerContext context = logger.getContext();
 		private final Configuration configuration = context.getConfiguration();
-		private final LoggerConfig previousConfig = configuration.getLoggers().get(logger.getName());
+		private final @Nullable LoggerConfig previousConfig = configuration.getLoggers().get(logger.getName());
 		private final List<LogEvent> events = new ArrayList<>();
 		private final RateLimitedDiagnosticsTestScope diagnostics;
 		private final AbstractAppender appender = new AbstractAppender(
@@ -125,8 +141,7 @@ class GlobalExceptionLoggingTest {
 			captureConfig.addAppender(appender, Level.ALL, null);
 			configuration.removeLogger(logger.getName());
 			configuration.addLogger(logger.getName(), captureConfig);
-			// Apply to both Global's custom-message-factory logger and the lazy
-			// logger used by RateLimitedDiagnostics, whichever initializes first.
+			// The Global and diagnostics routes share one logger instance.
 			context.updateLoggers();
 			diagnostics = RateLimitedDiagnosticsTestScope.install();
 		}

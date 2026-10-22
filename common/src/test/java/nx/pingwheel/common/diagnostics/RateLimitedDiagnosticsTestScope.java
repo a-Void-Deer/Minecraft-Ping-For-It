@@ -1,8 +1,7 @@
-package nx.pingwheel.common.util;
+package nx.pingwheel.common.diagnostics;
 
 import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.jetbrains.annotations.NotNullByDefault;
 
 /**
  * Test-only scope that replaces the shared production diagnostics limiter with
@@ -21,34 +20,36 @@ import org.apache.logging.log4j.Logger;
  * another test. Nested scopes restore correctly, and tests must close the
  * scope with try-with-resources.
  */
+@NotNullByDefault
 public final class RateLimitedDiagnosticsTestScope implements AutoCloseable {
 
-	private final RateLimitedDiagnostics previous;
+	private final DiagnosticReporter previous;
 
-	private RateLimitedDiagnosticsTestScope(RateLimitedDiagnostics previous) {
+	private RateLimitedDiagnosticsTestScope(DiagnosticReporter previous) {
 		this.previous = previous;
 	}
 
 	/** Installs fresh limiter state for the current test; close restores the previous state. */
 	public static RateLimitedDiagnosticsTestScope install() {
-		Logger logger = LogManager.getLogger("pingforit");
-		RateLimitedDiagnostics isolated = new RateLimitedDiagnostics(System::nanoTime,
-			new RateLimitedDiagnostics.Sink() {
-				@Override
-				public boolean isEnabled(Level level) {
-					return logger.isEnabled(level);
-				}
-
-				@Override
-				public void log(Level level, String message) {
-					logger.log(level, message);
-				}
-			});
-		return new RateLimitedDiagnosticsTestScope(RateLimitedDiagnostics.swapProductionForTesting(isolated));
+		return new RateLimitedDiagnosticsTestScope(Diagnostics.swapProductionForTesting(
+			new DiagnosticReporter(System::nanoTime, new LoggerSink())));
 	}
 
 	@Override
 	public void close() {
-		RateLimitedDiagnostics.swapProductionForTesting(previous);
+		Diagnostics.swapProductionForTesting(previous);
+	}
+
+	@NotNullByDefault
+	private static final class LoggerSink implements DiagnosticReporter.Sink {
+		@Override
+		public boolean isEnabled(Level level) {
+			return Diagnostics.logger().isEnabled(level);
+		}
+
+		@Override
+		public void log(Level level, String message) {
+			Diagnostics.logger().log(level, message);
+		}
 	}
 }

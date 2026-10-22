@@ -9,7 +9,7 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
-import nx.pingwheel.common.util.RateLimitedDiagnosticsTestScope;
+import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;

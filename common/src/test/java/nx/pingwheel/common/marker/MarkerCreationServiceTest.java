@@ -35,7 +35,7 @@ import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
-import nx.pingwheel.common.util.RateLimitedDiagnosticsTestScope;
+import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
