@@ -1,5 +1,7 @@
 package nx.pingwheel.neoforge.integration.create.presentation;
 
+import nx.pingwheel.common.diagnostics.Diagnostics;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -169,6 +171,8 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 				: source.observe(target, requested, budget);
 			return observed == null ? null : project(observed, requested);
 		} catch (RuntimeException | LinkageError failure) {
+			Diagnostics.warn("create/presentation-source", ADAPTER_ID,
+				() -> "preview=" + preview + " target=" + target + " demand=" + requested, failure);
 			// A failed optional source cannot break Basic or another adapter.
 			return null;
 		}

@@ -4,6 +4,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.preview.PreviewFieldAccess;
@@ -51,11 +53,12 @@ public final class CreateCachedKineticPreview {
 		try {
 			network = source.hasNetwork();
 		} catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("create/preview-network", "kinetic", () -> "demand=" + demand, unavailable);
 			return Map.copyOf(result);
 		}
 		if (!network || !hasCachedTotals(source)) return Map.copyOf(result);
-		Float stress = wantsStress ? raw(source::cachedStress) : null;
-		Float capacity = wantsCapacity ? raw(source::cachedCapacity) : null;
+		@Nullable Float stress = wantsStress ? raw("stress", source::cachedStress) : null;
+		@Nullable Float capacity = wantsCapacity ? raw("capacity", source::cachedCapacity) : null;
 		if (demand.contains(CreatePresentationAdapter.STRESS) && stress != null) {
 			put(result, CreatePresentationAdapter.STRESS,
 				new PresentationValue.NumberValue(stress.doubleValue()), tick);
@@ -78,15 +81,17 @@ public final class CreateCachedKineticPreview {
 		try {
 			return source.hasCachedTotals();
 		} catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("create/preview-cached-access", "kinetic", () -> "cached totals bridge", unavailable);
 			return false;
 		}
 	}
 
-	private static Float raw(RawGetter getter) {
+	private static @Nullable Float raw(String field, RawGetter getter) {
 		try {
 			float value = getter.get();
 			return Float.isFinite(value) && value >= 0 ? value : null;
 		} catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("create/preview-cached-total", field, () -> "raw synchronized " + field, unavailable);
 			return null;
 		}
 	}

@@ -13,6 +13,8 @@ import org.spongepowered.asm.service.IClassBytecodeProvider;
 import org.spongepowered.asm.service.MixinService;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.loading.LoadingModList;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /** Independent fail-soft receipt gate; does not alter the existing summary/accessor plugin. */
 public final class CreatePreviewMixinPlugin implements IMixinConfigPlugin {
@@ -34,7 +36,10 @@ public final class CreatePreviewMixinPlugin implements IMixinConfigPlugin {
 			// NeoForge's ModLauncher provider supports transformed bytecode only;
 			// that lookup excludes Mixin and never initializes the Create class.
 			return compatibleTarget(bytecodeProvider.get().getClassNode(TARGET, true));
-		} catch (ClassNotFoundException | IOException | RuntimeException | LinkageError unavailable) { return false; }
+		} catch (ClassNotFoundException | IOException | RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("create/preview-mixin-gate", "receipt", () -> "target=" + target + " mixin=" + mixin, unavailable);
+			return false;
+		}
 	}
 	private static boolean testedCreatePresent() {
 		var loading = LoadingModList.get();
@@ -44,7 +49,7 @@ public final class CreatePreviewMixinPlugin implements IMixinConfigPlugin {
 		return mods.stream().anyMatch(mod -> mod.getModId().equals("create")
 			&& (mod.getVersion().toString().equals("6.0.10") || mod.getVersion().toString().equals("6.0.10-281")));
 	}
-	static boolean compatibleTarget(ClassNode node) {
+	static boolean compatibleTarget(@Nullable ClassNode node) {
 		if (node == null || !node.name.equals(TARGET.replace('.', '/'))) return false;
 		boolean moved = node.fields.stream().anyMatch(field -> field.name.equals("wasMoved") && field.desc.equals("Z")
 			&& (field.access & Opcodes.ACC_PROTECTED) != 0 && (field.access & Opcodes.ACC_STATIC) == 0);
@@ -56,7 +61,7 @@ public final class CreatePreviewMixinPlugin implements IMixinConfigPlugin {
 			&& (method.access & (Opcodes.ACC_STATIC | Opcodes.ACC_ABSTRACT)) == 0);
 	}
 	@Override public void onLoad(String mixinPackage) {}
-	@Override public String getRefMapperConfig() { return null; }
+	@Override public @Nullable String getRefMapperConfig() { return null; }
 	@Override public void acceptTargets(Set<String> own, Set<String> others) {}
 	@Override public List<String> getMixins() { return List.of(); }
 	@Override public void preApply(String target, ClassNode node, String mixin, IMixinInfo info) {}

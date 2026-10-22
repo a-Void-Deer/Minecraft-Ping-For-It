@@ -7,6 +7,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.presentation.PresentationAdapter;
@@ -29,12 +31,12 @@ public final class PresentationPreviewServer {
 		int intervalTicks(UUID player, String adapterId);
 		int scanBudget();
 		/** Validate target/type/range then observe only demand. Called after shared budget admission. */
-		Capture capture(UUID player, PresentationPreviewC2SPacket request, PresentationPreviewAccess authorized,
+		@Nullable Capture capture(UUID player, PresentationPreviewC2SPacket request, PresentationPreviewAccess authorized,
 			PresentationAdapter.CaptureBudget budget);
 		/** Real transport publication or explicit refusal; refusal never causes a recapture. */
 		boolean send(UUID player, PresentationPreviewS2CPacket packet);
 	}
-	public record Capture(PresentationSection section, PresentationPreviewS2CPacket.Status status) {
+	public record Capture(@Nullable PresentationSection section, PresentationPreviewS2CPacket.Status status) {
 		public Capture {
 			Objects.requireNonNull(status);
 			if ((status == PresentationPreviewS2CPacket.Status.RESULT) != (section != null))
@@ -76,7 +78,10 @@ public final class PresentationPreviewServer {
 		try {
 			return host.access(player, request.targetTypeId()).filter(value -> value.epoch() == request.epoch()
 				&& value.view() == request.view() && value.targetTypeId().equals(request.targetTypeId()));
-		} catch (RuntimeException | LinkageError denied) { return Optional.empty(); }
+		} catch (RuntimeException | LinkageError denied) {
+			Diagnostics.warn("presentation/preview-access", "server", () -> "player=" + player + " request=" + request, denied);
+			return Optional.empty();
+		}
 	}
 	public boolean handle(UUID player, PresentationPreviewC2SPacket request, long tick) {
 		if (request == null || request.isCorrupt() || tick < 0) return false;
@@ -148,9 +153,12 @@ public final class PresentationPreviewServer {
 			work.scan(); used++;
 			state.nextAdapterTick.put(request.adapterId(), add(tick, Math.max(1, host.intervalTicks(player, request.adapterId()))));
 			var budget = new PresentationAdapter.CaptureBudget(allowance);
-			Capture captured;
+			@Nullable Capture captured;
 			try { captured = host.capture(player, request, authorized.narrow(request.adapterId(), request.fields()), budget); }
-			catch (RuntimeException | LinkageError unavailable) { captured = null; }
+			catch (RuntimeException | LinkageError unavailable) {
+				Diagnostics.warn("presentation/preview-capture", request.adapterId(), () -> "player=" + player + " request=" + request, unavailable);
+				captured = null;
+			}
 			finally { for (int debit = allowance - budget.remaining(); debit > 0; debit--) work.scan(); }
 			iterator.remove();
 			var current = access(player, request).orElse(null);
@@ -173,7 +181,10 @@ public final class PresentationPreviewServer {
 			});
 			try { send(player, PresentationPreviewS2CPacket.result(request,
 				new PresentationSection(section.adapterId(), section.schema(), projected, false))); }
-			catch (RuntimeException | LinkageError unavailable) { reply(player, request, adapter.schema(), PresentationPreviewS2CPacket.Status.UNAVAILABLE); }
+			catch (RuntimeException | LinkageError unavailable) {
+				Diagnostics.warn("presentation/preview-result-encode", request.adapterId(), () -> "request=" + request, unavailable);
+				reply(player, request, adapter.schema(), PresentationPreviewS2CPacket.Status.UNAVAILABLE);
+			}
 		}
 		delayState = delayed ? DelayState.DELAYED : eligible ? DelayState.HEALTHY : waiting ? DelayState.NEUTRAL : DelayState.IDLE;
 		return used;
@@ -200,7 +211,11 @@ public final class PresentationPreviewServer {
 	}
 	private boolean send(UUID player, PresentationPreviewS2CPacket packet) {
 		try { return host.send(player, packet); }
-		catch (RuntimeException | LinkageError unavailable) { return false; }
+		catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("presentation/preview-result-send", packet.adapterId(),
+				() -> "player=" + player + " request=" + packet.requestId() + " status=" + packet.status(), unavailable);
+			return false;
+		}
 	}
 	private static long add(long tick, long delay) { return tick > Long.MAX_VALUE - delay ? Long.MAX_VALUE : tick + delay; }
 }

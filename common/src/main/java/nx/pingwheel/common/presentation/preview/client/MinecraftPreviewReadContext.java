@@ -1,6 +1,7 @@
 package nx.pingwheel.common.presentation.preview.client;
 
 import net.minecraft.client.Minecraft;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
 import net.minecraft.core.BlockPos;
@@ -53,7 +54,10 @@ public record MinecraftPreviewReadContext(ClientLevel level, long tick) implemen
 			BlockStatePredictionHandler handler = access.pingforit$predictionHandler();
 			if (!((Object) handler instanceof PreviewPredictionView predictions)
 				|| predictions.pingforit$hasPendingPrediction(pos)) return null;
-		} catch (RuntimeException | LinkageError unavailable) { return null; }
+		} catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("presentation/preview-prediction", "client", () -> "target=" + target, unavailable);
+			return null;
+		}
 		BlockState state = chunk.getBlockState(pos);
 		return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(target.blockRegistryId()) ? state : null;
 	}
@@ -75,7 +79,10 @@ public record MinecraftPreviewReadContext(ClientLevel level, long tick) implemen
 		if (!(target instanceof Target.ExternalBlockTarget external)) return null;
 		ResolvedBlockReadSource source;
 		try { source = SableClientProvider.resolvePreviewReadSource(level, external).orElse(null); }
-		catch (RuntimeException | LinkageError unavailable) { source = null; }
+		catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("presentation/preview-source", "sable", () -> "target=" + external, unavailable);
+			source = null;
+		}
 		if (source == null || !MinecraftBlockReadSources.sameReadBinding(source.descriptor().target(), external)) return null;
 		Target.BlockTarget physical = source.descriptor().blockTarget();
 		if (!physical.dimensionId().equals(dimensionId()) || blockState(physical) == null) return null;

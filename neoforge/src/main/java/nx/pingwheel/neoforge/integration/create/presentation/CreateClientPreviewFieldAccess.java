@@ -6,6 +6,7 @@ import java.util.Set;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.preview.PreviewFieldAccess;
 import nx.pingwheel.common.presentation.preview.PreviewObservation;
@@ -60,7 +61,10 @@ public final class CreateClientPreviewFieldAccess implements PreviewFieldAccess 
 	}
 	private static void put(Map<String, Outcome> result, String field, java.util.function.Supplier<PresentationValue> getter, long tick) {
 		try { result.put(field, new Observed(new PreviewObservation(getter.get(), PreviewObservation.Origin.CLIENT_SYNCED, tick, false))); }
-		catch (RuntimeException | LinkageError unavailable) { result.put(field, Missing.UNAVAILABLE); }
+		catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("create/preview-field", "kinetic", () -> "field=" + field + " tick=" + tick, unavailable);
+			result.put(field, Missing.UNAVAILABLE);
+		}
 	}
 
 	/** Live binding of the Create-free cached-totals projection seam. */

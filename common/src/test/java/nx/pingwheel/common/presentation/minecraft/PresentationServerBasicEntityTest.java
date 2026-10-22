@@ -32,6 +32,7 @@ import nx.pingwheel.common.name.TargetNameComposer;
 import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.name.TargetNameJsonCodec;
 import nx.pingwheel.common.presentation.PresentationBasic;
+import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 
@@ -200,6 +201,26 @@ class PresentationServerBasicEntityTest {
 		assertEquals(Map.of(PresentationBasic.HEALTH, new PresentationValue.NumberValue(7.5)), withName.fields(),
 			"a failed custom-name acquisition must not fall back to the base name");
 		assertEquals(2, pig.nameReads, "a composed-name demand must not repeat the getter read");
+	}
+
+	@Test void nameGetterAndEncoderFailuresReportBoundedWarningsWithoutDroppingHealth() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			TestLivingEntity pig = new TestLivingEntity(); pig.setHealth(7.5F); pig.customUnavailable = true;
+			for (int attempt = 0; attempt < 5; attempt++) {
+				var section = PresentationServer.basicEntity(Set.of(PresentationBasic.HEALTH, PresentationBasic.NAME), pig,
+					name -> { throw new AssertionError("failed getter must not encode"); });
+				assertEquals(Map.of(PresentationBasic.HEALTH, new PresentationValue.NumberValue(7.5)), section.fields());
+			}
+			pig.customUnavailable = false;
+			for (int attempt = 0; attempt < 5; attempt++) {
+				var section = PresentationServer.basicEntity(Set.of(PresentationBasic.HEALTH, PresentationBasic.NAME), pig,
+					name -> { throw new IllegalStateException("name encoding", new RuntimeException("name encoding cause")); });
+				assertEquals(Map.of(PresentationBasic.HEALTH, new PresentationValue.NumberValue(7.5)), section.fields());
+			}
+			assertEquals(2, capture.events().size());
+			assertTrue(capture.messages().stream().anyMatch(line -> line.contains("custom name unavailable")));
+			assertTrue(capture.messages().stream().anyMatch(line -> line.contains("name encoding cause")));
+		}
 	}
 
 	@Test void failedNameEncoderRetainsIndependentPlainCustomNameAndHealth() {

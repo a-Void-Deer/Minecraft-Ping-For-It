@@ -1,6 +1,7 @@
 package nx.pingwheel.common.presentation.client;
 
 import io.netty.buffer.Unpooled;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -82,7 +83,10 @@ public final class ClientPresentation {
 		try {
 			Object adapter = Class.forName(CREATE_FACTORY).getMethod("client").invoke(null);
 			return adapter instanceof PresentationAdapter present ? present : null;
+		} catch (ClassNotFoundException absent) {
+			return null;
 		} catch (ReflectiveOperationException | LinkageError | IllegalArgumentException ignored) {
+			Diagnostics.warn("presentation/optional-registration", "create", () -> "client adapter registration", ignored);
 			// Basic remains independently usable.
 			return null;
 		}
@@ -452,6 +456,7 @@ public final class ClientPresentation {
 			}
 			return List.copyOf(bounded);
 		} catch (RuntimeException ignored) {
+			Diagnostics.warn("presentation/hud-provider", "client", () -> "provider=" + providerId, ignored);
 			return List.of();
 		}
 	}

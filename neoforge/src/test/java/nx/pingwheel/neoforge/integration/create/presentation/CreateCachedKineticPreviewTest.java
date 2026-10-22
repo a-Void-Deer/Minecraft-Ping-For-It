@@ -4,12 +4,17 @@ import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
 
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.preview.PreviewFieldAccess;
 import nx.pingwheel.common.presentation.preview.PreviewObservation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 /** Create-free seam tests for the locally received cached kinetic network totals. */
 class CreateCachedKineticPreviewTest {
@@ -17,6 +22,33 @@ class CreateCachedKineticPreviewTest {
 	private static final String CAPACITY = CreatePresentationAdapter.CAPACITY;
 	private static final String AVAILABLE = CreatePresentationAdapter.AVAILABLE_CAPACITY;
 	private static final long TICK = 42L;
+
+	@Test void receiptGetterFailureStillPropagatesBeforeNetworkRecoveryBoundary() {
+		var failure = new IllegalStateException("receipt cause");
+		FakeSource source = new FakeSource() {
+			@Override public boolean receivedKinetics() { throw failure; }
+		};
+		try (var capture = new CreatePresentationDiagnosticCapture()) {
+			assertSame(failure, assertThrows(IllegalStateException.class, () -> observe(source, STRESS, CAPACITY, AVAILABLE)));
+			assertEquals(0, source.networkReads); assertEquals(0, source.stressReads); assertEquals(0, source.capacityReads);
+			assertTrue(capture.events().isEmpty(), "the enclosing preview reader owns a propagated receipt failure");
+		}
+	}
+
+	@Test void repeatedGetterFailureWarnsOnceWithoutHidingSiblingOrInventingDerivedZero() {
+		FakeSource source = new FakeSource();
+		source.stressFailure = new IllegalStateException("bounded stress failure", new RuntimeException("bounded stress cause"));
+		source.capacity = 4f;
+		try (var capture = new CreatePresentationDiagnosticCapture()) {
+			for (int attempt = 0; attempt < 5; attempt++) {
+				var values = observe(source, STRESS, CAPACITY, AVAILABLE);
+				assertUnavailable(values, STRESS); assertUnavailable(values, AVAILABLE); assertObserved(values, CAPACITY, 4);
+			}
+			assertEquals(5, source.capacityReads);
+			assertEquals(1, capture.events().size()); assertEquals(Level.WARN, capture.events().getFirst().getLevel());
+			assertTrue(capture.messages().getFirst().contains("bounded stress cause"));
+		}
+	}
 
 	@Test
 	void absentReceiptNeverReadsNetworkOrRawTotals() {
@@ -225,8 +257,8 @@ class CreateCachedKineticPreviewTest {
 		private boolean accessor = true;
 		private float stress;
 		private float capacity;
-		private RuntimeException stressFailure;
-		private RuntimeException capacityFailure;
+		private @Nullable RuntimeException stressFailure;
+		private @Nullable RuntimeException capacityFailure;
 		private int networkReads;
 		private int accessorReads;
 		private int stressReads;

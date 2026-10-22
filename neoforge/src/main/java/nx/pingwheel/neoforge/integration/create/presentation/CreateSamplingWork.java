@@ -4,6 +4,8 @@ import java.util.Objects;
 import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /** Create-free work ledger and the production vault/tank member-verification loop. */
 final class CreateSamplingWork {
@@ -27,7 +29,7 @@ final class CreateSamplingWork {
 
 	/** Admission precedes iteration; each attempted member stays paid even if its gate/read fails. */
 	boolean verifyShape(BlockPos origin, int x, int y, int z, CreateSamplingLimits limits,
-		Predicate<BlockPos> memberGate, Predicate<BlockPos> verifyMember) {
+		@Nullable Predicate<BlockPos> memberGate, Predicate<BlockPos> verifyMember) {
 		Objects.requireNonNull(origin, "origin");
 		Objects.requireNonNull(limits, "limits");
 		Objects.requireNonNull(verifyMember, "verifyMember");
@@ -45,9 +47,12 @@ final class CreateSamplingWork {
 	}
 
 	/** A rejected or throwing gate is unavailable, never permission to read the member. */
-	static boolean member(Predicate<BlockPos> memberGate, BlockPos position) {
+	static boolean member(@Nullable Predicate<BlockPos> memberGate, BlockPos position) {
 		if (memberGate == null) return true;
 		try { return memberGate.test(position); }
-		catch (RuntimeException | LinkageError unavailable) { return false; }
+		catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("create/presentation-member-gate", "collector", () -> "position=" + position, unavailable);
+			return false;
+		}
 	}
 }

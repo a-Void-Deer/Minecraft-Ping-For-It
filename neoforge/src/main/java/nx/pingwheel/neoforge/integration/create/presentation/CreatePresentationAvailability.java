@@ -1,6 +1,7 @@
 package nx.pingwheel.neoforge.integration.create.presentation;
 
 import net.neoforged.fml.ModList;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /** Safe to load before Create: contains no optional-mod classes. */
 public final class CreatePresentationAvailability {
@@ -18,6 +19,7 @@ public final class CreatePresentationAvailability {
 			return mods != null && mods.getMods().stream().anyMatch(mod ->
 				"create".equals(mod.getModId()) && testedVersion(mod.getVersion().toString()));
 		} catch (RuntimeException | LinkageError failure) {
+			Diagnostics.warn("create/presentation-availability", "loader", () -> "tested Create version lookup", failure);
 			return false;
 		}
 	}

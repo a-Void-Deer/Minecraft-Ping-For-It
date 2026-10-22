@@ -11,6 +11,8 @@ import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.PresentationCodec;
 import nx.pingwheel.common.presentation.PresentationField;
+import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
+import org.apache.logging.log4j.Level;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
@@ -102,6 +104,21 @@ class PresentationPreviewInnerSectionTest {
 		} finally { buf.release(); }
 	}
 	private static PresentationPreviewC2SPacket request() { return PresentationPreviewC2SPacket.read(31, 1, 1, TARGET, "block", ADAPTER, Set.of(FIELD)); }
+	@Test void strictRejectsReportReasonOrOriginalDecodeFailureWithoutSyntheticExceptions() {
+		try (var capture = new PresentationDiagnosticCapture(Level.DEBUG)) {
+			var wrongKind = wire(request(), inner(Site.SCHEMA, Encoding.CANONICAL, PresentationField.Kind.NUMBER, false));
+			for (int attempt = 0; attempt < 5; attempt++) assertNull(wrongKind.decodeSection(access(PresentationField.Kind.FLAG)));
+			assertEquals(1, capture.events().size());
+			assertTrue(capture.messages().getFirst().contains("reason=field-kind"));
+			assertFalse(capture.messages().getFirst().contains("Exception"));
+			var malformed = wire(request(), inner(Site.SCHEMA, Encoding.OVERFLOW, PresentationField.Kind.NUMBER, false));
+			for (int attempt = 0; attempt < 5; attempt++) assertNull(malformed.decodeSection(access(PresentationField.Kind.NUMBER)));
+			assertEquals(2, capture.events().size());
+			assertTrue(capture.messages().getLast().contains("presentation/preview-section-decode"));
+			assertTrue(capture.messages().getLast().contains("IllegalArgumentException"));
+			assertTrue(capture.events().stream().allMatch(event -> event.getLevel() == Level.DEBUG && event.getThrown() == null));
+		}
+	}
 	private static final class Context implements PreviewFieldAccess.ReadContext {
 		final Object level = new Object();
 		public Object levelIdentity() { return level; }

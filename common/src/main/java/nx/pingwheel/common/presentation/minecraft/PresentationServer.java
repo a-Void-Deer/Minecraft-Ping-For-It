@@ -1,5 +1,8 @@
 package nx.pingwheel.common.presentation.minecraft;
 
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.HolderLookup;
@@ -118,7 +121,10 @@ public final class PresentationServer {
 			Class<?> factory = Class.forName("nx.pingwheel.neoforge.integration.create.presentation.CreatePresentationAdapters");
 			Object adapter = factory.getMethod("server", MinecraftServer.class).invoke(null, server);
 			if (adapter instanceof PresentationAdapter present) registry.register(present);
+		} catch (ClassNotFoundException absent) {
+			// The NeoForge factory is normally absent on the other loaders.
 		} catch (ReflectiveOperationException | LinkageError | RuntimeException ignored) {
+			Diagnostics.warn("presentation/optional-registration", "create", () -> "server adapter registration", ignored);
 			// Optional integrations must not prevent Basic from negotiating.
 		}
 		policyFingerprint = settings().fingerprint();
@@ -553,7 +559,7 @@ public final class PresentationServer {
 		Source source = sourceFor(lease, adapter, policy, false);
 		work.scan();
 		source.nextSample = addTick(tick, policy.interval(adapter.adapterId(), adapter.minUpdateIntervalTicks()));
-		PresentationSection value = null;
+		@Nullable PresentationSection value = null;
 		try {
 			if (adapter.adapterId().equals(PresentationBasic.ID)) value = basicCapture.apply(demand);
 			else {
@@ -562,9 +568,17 @@ public final class PresentationServer {
 				try { value = adapter.collect(detached(lease.marker.target()), Set.copyOf(demand), budget); }
 				finally { for (int used = allowance - budget.remaining(); used > 0; used--) work.scan(); }
 			}
-		} catch (RuntimeException | LinkageError ignored) { value = null; }
+		} catch (RuntimeException | LinkageError ignored) {
+			Diagnostics.warn("presentation/capture", adapter.adapterId(),
+				() -> "target=" + lease.marker.target() + " demand=" + demand, ignored);
+			value = null;
+		}
 		try { value = sanitize(adapter, value, demand); }
-		catch (RuntimeException | LinkageError ignored) { value = null; }
+		catch (RuntimeException | LinkageError ignored) {
+			Diagnostics.warn("presentation/sanitize", adapter.adapterId(),
+				() -> "target=" + lease.marker.target() + " demand=" + demand, ignored);
+			value = null;
+		}
 		source.value = transition(adapter.adapterId(), adapter.schema(), source.value, demand, value);
 		source.observation = value == null || value.stale() ? Source.Observation.FAILED : Source.Observation.SUCCESS;
 		if (source.observation == Source.Observation.SUCCESS) source.successfulSerial = nextObservationSerial();
@@ -974,11 +988,19 @@ public final class PresentationServer {
 	static void sendProjectedSection(Session session, MarkerId markerId, PresentationAdapter adapter,
 		PresentationSection projected, Map<String, PresentationSection> sent,
 		java.util.function.Consumer<PresentationS2CPacket> delivery) {
+		String stage = "section-construction";
 		try {
-			delivery.accept(PresentationS2CPacket.section(session.epoch, session.view,
-				++session.revision, markerId, projected));
+			PresentationS2CPacket packet = PresentationS2CPacket.section(session.epoch, session.view,
+				++session.revision, markerId, projected);
+			stage = "transport";
+			delivery.accept(packet);
+			stage = "sent-state";
 			sent.put(adapter.adapterId(), projected);
 		} catch (RuntimeException oversized) {
+			String failedStage = stage;
+			Diagnostics.warn("presentation/send-section", adapter.adapterId(),
+				() -> "stage=" + failedStage + " marker=" + markerId + " epoch=" + session.epoch
+					+ " view=" + session.view + " revision=" + session.revision, oversized);
 			PresentationSection empty = new PresentationSection(adapter.adapterId(), adapter.schema(), Map.of(), true);
 			delivery.accept(PresentationS2CPacket.section(session.epoch, session.view,
 				++session.revision, markerId, empty));
@@ -1274,22 +1296,24 @@ public final class PresentationServer {
 			// The block entity's custom name is read once and feeds both the composed
 			// name and the separate plain custom-name field. A recoverable read failure
 			// omits only the dependent name fields.
-			Component custom = null;
+			@Nullable Component custom = null;
 			boolean customNameReadable = true;
 			try {
 				Object observed = blockEntity.get();
 				custom = observed instanceof Nameable named && named.hasCustomName() ? named.getCustomName() : null;
 			} catch (RuntimeException | LinkageError unavailable) {
+				Diagnostics.warn("presentation/basic-block-name-read", "minecraft", () -> "demand=" + demand, unavailable);
 				customNameReadable = false;
 			}
 			if (customNameReadable) {
 				if (demand.contains(PresentationBasic.NAME)) {
-					Component name = composeName(custom, state.getBlock().getName());
+					@Nullable Component name = composeName(custom, state.getBlock().getName());
 					if (name != null) {
 						try {
 							put(fields, demand, PresentationBasic.NAME,
 								new PresentationValue.Text(encodeName.apply(name)));
 						} catch (RuntimeException | LinkageError unavailable) {
+							Diagnostics.warn("presentation/basic-name-encode", "block", () -> "demand=" + demand, unavailable);
 							// NAME only; an independently captured plain custom name stays fresh.
 						}
 					}
@@ -1350,6 +1374,7 @@ public final class PresentationServer {
 				return externalName(ExternalBlockServerProviders.registry().resolveName(player.serverLevel(), target),
 					server.registryAccess(), TargetNameJsonCodec.UNKNOWN, demand);
 		} catch (RuntimeException unavailable) {
+			Diagnostics.warn("presentation/basic-external-name", "provider", () -> "target=" + target, unavailable);
 			// A failed source must not synthesize custom text or change the existing NAME fallback.
 		}
 		return new ExternalNameObservation(demand.contains(PresentationBasic.NAME) ? TargetNameJsonCodec.UNKNOWN : null, null);
@@ -1448,11 +1473,12 @@ public final class PresentationServer {
 				if (demand.contains(PresentationBasic.NAME)) name = Component.literal(player.getGameProfile().getName());
 				// A player target has no custom-name field; the profile name is never reused here.
 			} else {
-				Component custom = null;
+				@Nullable Component custom = null;
 				boolean customNameReadable = true;
 				try {
 					custom = entity.getCustomName();
 				} catch (RuntimeException | LinkageError unavailable) {
+					Diagnostics.warn("presentation/basic-entity-name-read", "minecraft", () -> "entityClass=" + entity.getClass().getName(), unavailable);
 					customNameReadable = false;
 				}
 				if (customNameReadable) {
@@ -1465,6 +1491,7 @@ public final class PresentationServer {
 			try {
 				put(fields, demand, PresentationBasic.NAME, new PresentationValue.Text(encodeName.apply(name)));
 			} catch (RuntimeException | LinkageError unavailable) {
+				Diagnostics.warn("presentation/basic-name-encode", "entity", () -> "entityClass=" + entity.getClass().getName(), unavailable);
 				// NAME only; every independently captured value stays fresh.
 			}
 		}
@@ -1477,12 +1504,13 @@ public final class PresentationServer {
 	 * reduction strips styles and events while preserving literal text. A
 	 * recoverable reduction failure leaves only this field absent.
 	 */
-	private static void putCustomName(Map<String, PresentationValue> fields, Set<String> demand, Component custom) {
+	private static void putCustomName(Map<String, PresentationValue> fields, Set<String> demand, @Nullable Component custom) {
 		if (!demand.contains(PresentationBasic.CUSTOM_NAME) || custom == null) return;
 		try {
 			String text = TargetNameComposer.plainText(custom, PresentationLimits.MAX_TEXT_BYTES);
 			if (!text.isEmpty()) put(fields, demand, PresentationBasic.CUSTOM_NAME, new PresentationValue.Text(text));
 		} catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("presentation/basic-custom-name", "minecraft", () -> "plain custom-name reduction", unavailable);
 			// An unreducible custom component stays absent; the composed name and every
 			// unrelated Basic field remain independently fresh.
 		}
@@ -1495,15 +1523,16 @@ public final class PresentationServer {
 	 * {@code Custom (Base)}. Mirrors {@link MinecraftTargetNameResolver} and
 	 * must never apply the strict composition to a possibly-absent name.
 	 */
-	static Component optionalName(Component customName, Component baseName) {
+	static Component optionalName(@Nullable Component customName, Component baseName) {
 		return customName != null ? TargetNameComposer.compose(customName, baseName) : baseName;
 	}
 
 	/** Composed-name build: a malformed custom component yields no composed name instead of failing the section. */
-	private static Component composeName(Component customName, Component baseName) {
+	private static @Nullable Component composeName(@Nullable Component customName, Component baseName) {
 		try {
 			return optionalName(customName, baseName);
 		} catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("presentation/basic-name-compose", "minecraft", () -> "optional custom/base composition", unavailable);
 			return null;
 		}
 	}
