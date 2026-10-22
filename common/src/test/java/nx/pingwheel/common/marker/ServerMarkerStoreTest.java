@@ -13,6 +13,8 @@ import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationPropertySelection;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -62,6 +64,32 @@ class ServerMarkerStoreTest {
 		return store.create(
 			owner, target, entityType(), attentionPingType(), new MarkerAnchor(0, 0, 0), arrival, expires,
 			List.of(recipients));
+	}
+
+	@Test
+	void externalRefreshAndRecipientCleanupPreserveImmutableSelectionsAndWinnerIdentity() {
+		ServerMarkerStore store = newStore();
+		var before = Target.ExternalBlockTarget.committed(OVERWORLD, "provider:test", "tracking-id",
+			"minecraft:chest", "locator-a", true);
+		var after = Target.ExternalBlockTarget.committed(OVERWORLD, "provider:test", "tracking-id",
+			"minecraft:chest", "locator-b", true);
+		var selections = List.of(PresentationPropertySelection.of(
+			PresentationPropertyRef.root("minecraft:basic", "minecraft:block.state"), "attention"));
+		var type = TARGET_TYPES.findById("entity_block").orElseThrow();
+		MarkerCreation created = store.create(OWNER, before, type, attentionPingType(), new MarkerAnchor(0, 0, 0),
+			10L, 100L, List.of(RECIPIENT_A, RECIPIENT_B), selections);
+		assertEquals(2, created.winnerChanges().size());
+		var refreshed = store.updateExternalTarget(created.marker().id(), after, new MarkerAnchor(1, 0, 0)).orElseThrow();
+		assertEquals(created.marker().id(), refreshed.id());
+		assertEquals(created.marker().targetKey(), refreshed.targetKey());
+		assertEquals(selections, refreshed.properties());
+		assertEquals(10L, refreshed.arrivalTick());
+		assertEquals(100L, refreshed.expiresAtTick());
+		store.forgetRecipient(RECIPIENT_A);
+		var retained = store.find(created.marker().id()).orElseThrow();
+		assertEquals(selections, retained.properties());
+		assertEquals(List.of(RECIPIENT_B), retained.recipients());
+		assertEquals(created.marker().id(), store.winnerFor(retained.targetKey(), RECIPIENT_B).orElseThrow().id());
 	}
 
 	@Test
@@ -145,6 +173,70 @@ class ServerMarkerStoreTest {
 		assertEquals(new MarkerId(0L), store.winnerFor(key, RECIPIENT_A).orElseThrow().id());
 		assertEquals(new MarkerId(1L), store.winnerFor(key, RECIPIENT_B).orElseThrow().id());
 		assertTrue(store.winnerFor(key, STRANGER).isEmpty());
+	}
+
+	@Test
+	void winnersForExcludesExpiredBeforeSelectionWithoutMutatingTheStore() {
+		ServerMarkerStore store = newStore();
+		Target target = entityTarget(UUID.randomUUID());
+		TargetKey key = TargetKey.from(target);
+
+		create(store, target, 10L, 100L, RECIPIENT_A); // id 0
+		MarkerCreation dueWinner = create(store, target, 20L, 100L, RECIPIENT_A); // id 1
+		create(store, target, 5L, 200L, RECIPIENT_A); // id 2
+
+		assertEquals(List.of(new MarkerId(1L)), winnerIds(store.winnersFor(RECIPIENT_A, 99L)));
+		assertEquals(List.of(new MarkerId(2L)), winnerIds(store.winnersFor(RECIPIENT_A, 100L)),
+			"a marker at its expiry tick must not mask an active same-target sibling");
+		assertTrue(store.winnersFor(RECIPIENT_A, 200L).isEmpty());
+		assertEquals(3, store.size(), "the baseline query must not expire or remove markers");
+		assertEquals(dueWinner.marker().id(), store.winnerFor(key, RECIPIENT_A).orElseThrow().id(),
+			"the stored winner is unchanged by a baseline query");
+	}
+
+	@Test
+	void winnersForIsRecipientScopedAndUsesArrivalThenIdOrdering() {
+		ServerMarkerStore store = newStore();
+		Target shared = entityTarget(UUID.randomUUID());
+		Target other = entityTarget(UUID.randomUUID());
+		TargetKey sharedKey = TargetKey.from(shared);
+		TargetKey otherKey = TargetKey.from(other);
+
+		create(store, shared, 20L, 200L, RECIPIENT_A); // id 0
+		create(store, other, 10L, 200L, RECIPIENT_A); // id 1
+		create(store, shared, 10L, 200L, RECIPIENT_B); // id 2
+		create(store, shared, 20L, 200L, RECIPIENT_A); // id 3: equal arrival, larger id
+
+		List<ServerMarker> forA = store.winnersFor(RECIPIENT_A, 100L);
+		assertEquals(List.of(new MarkerId(1L), new MarkerId(3L)), winnerIds(forA),
+			"one winner per target key, ordered by ascending marker id");
+		assertEquals(new MarkerId(3L), winnerId(forA, sharedKey),
+			"equal arrival resolves to the larger marker id");
+		assertEquals(new MarkerId(1L), winnerId(forA, otherKey));
+		assertEquals(List.of(new MarkerId(2L)), winnerIds(store.winnersFor(RECIPIENT_B, 100L)));
+		assertTrue(store.winnersFor(STRANGER, 100L).isEmpty());
+	}
+
+	@Test
+	void winnersForIsImmutableAndRejectsNullRecipient() {
+		ServerMarkerStore store = newStore();
+		create(store, entityTarget(UUID.randomUUID()), 10L, 100L, RECIPIENT_A);
+
+		assertThrows(NullPointerException.class, () -> store.winnersFor(null, 0L));
+		assertThrows(UnsupportedOperationException.class,
+			() -> store.winnersFor(RECIPIENT_A, 0L).add(null));
+	}
+
+	private static List<MarkerId> winnerIds(List<ServerMarker> winners) {
+		return winners.stream().map(ServerMarker::id).toList();
+	}
+
+	private static MarkerId winnerId(List<ServerMarker> winners, TargetKey key) {
+		return winners.stream()
+			.filter(marker -> marker.targetKey().equals(key))
+			.findFirst()
+			.orElseThrow()
+			.id();
 	}
 
 	@Test
@@ -573,5 +665,55 @@ class ServerMarkerStoreTest {
 		assertTrue(store.expire(1000L).winnerChanges().isEmpty());
 		assertTrue(store.removeOwnedBy(OWNER).removals().isEmpty());
 		assertTrue(store.winnerFor(TargetKey.from(entityTarget(UUID.randomUUID())), RECIPIENT_A).isEmpty());
+	}
+
+	@Test void canonicalPagesAreBoundedImmutableAndSkipHolesWithoutExtendingCapturedHighWater() {
+		ServerMarkerStore store = newStore();
+		assertEquals(-1, store.highWaterId());
+		assertTrue(store.pageAfter(-1, -1, 2).complete());
+		Target shared = entityTarget(new UUID(0, 999));
+		for (int i = 0; i < 7; i++) create(store, shared, i, 100, RECIPIENT_A);
+		long high = store.highWaterId();
+		var first = store.pageAfter(-1, high, 2);
+		assertEquals(List.of(new MarkerId(0), new MarkerId(1)), winnerIds(first.markers()));
+		assertEquals(1, first.afterId());
+		assertTrue(!first.complete());
+		assertThrows(UnsupportedOperationException.class, () -> first.markers().clear());
+		store.removeByServer(new MarkerId(1), MarkerRemovalReason.CANCELLED); // cursor itself disappeared
+		store.removeByServer(new MarkerId(2), MarkerRemovalReason.CANCELLED);
+		store.removeByServer(new MarkerId(5), MarkerRemovalReason.CANCELLED);
+		create(store, shared, 20, 100, RECIPIENT_A); // id 7 must wait for a new sweep
+		var second = store.pageAfter(first.afterId(), high, 2);
+		assertEquals(List.of(new MarkerId(3), new MarkerId(4)), winnerIds(second.markers()));
+		assertTrue(!second.complete());
+		var last = store.pageAfter(second.afterId(), high, 2);
+		assertEquals(List.of(new MarkerId(6)), winnerIds(last.markers()));
+		assertTrue(last.complete());
+		assertTrue(store.pageAfter(last.afterId(), high, 2).markers().isEmpty());
+		assertEquals(new MarkerId(7), store.winnerFor(TargetKey.from(shared), RECIPIENT_A).orElseThrow().id(),
+			"canonical discovery never changes winner selection");
+		assertEquals(2, first.markers().size(), "returned pages are detached from deletion");
+	}
+
+	@Test void canonicalPageSupportsMaximumIdAndRejectsInvalidBounds() {
+		ServerMarkerStore store = new ServerMarkerStore(new MarkerIdSource(Long.MAX_VALUE - 1));
+		Target target = entityTarget(new UUID(0, 991));
+		create(store, target, 0, 100, RECIPIENT_A);
+		create(store, target, 1, 100, RECIPIENT_A);
+		assertEquals(Long.MAX_VALUE, store.highWaterId());
+		var first = store.pageAfter(-1, Long.MAX_VALUE, 1);
+		assertEquals(Long.MAX_VALUE - 1, first.afterId());
+		assertTrue(!first.complete());
+		var last = store.pageAfter(first.afterId(), Long.MAX_VALUE, 1);
+		assertEquals(Long.MAX_VALUE, last.afterId());
+		assertTrue(last.complete());
+		assertTrue(store.pageAfter(Long.MAX_VALUE, Long.MAX_VALUE, 1).complete());
+		assertTrue(store.pageAfter(Long.MAX_VALUE, Long.MAX_VALUE, 1).markers().isEmpty());
+		assertThrows(IllegalArgumentException.class, () -> store.pageAfter(-2, 3, 1));
+		assertThrows(IllegalArgumentException.class, () -> store.pageAfter(-1, -2, 1));
+		assertThrows(IllegalArgumentException.class, () -> store.pageAfter(3, 2, 1));
+		assertThrows(IllegalArgumentException.class, () -> store.pageAfter(-1, 3, 0));
+		store.clear();
+		assertEquals(-1, store.highWaterId());
 	}
 }

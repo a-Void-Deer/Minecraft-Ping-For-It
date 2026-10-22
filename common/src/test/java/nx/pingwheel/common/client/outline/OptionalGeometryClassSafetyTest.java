@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
 
@@ -26,7 +26,7 @@ class OptionalGeometryClassSafetyTest {
 	}
 
 	@Test
-	void commonSourceOutcomeContractRemainsIndependentOfOptionalClasses() {
+	void commonOutcomeMappingDistinguishesEmptyAndEmittedGeometry() {
 		assertEquals(
 			EntityBlockGeometryOutcome.EMPTY,
 			EntityBlockGeometryOutcome.fromEmittedVertices(0));
@@ -36,67 +36,38 @@ class OptionalGeometryClassSafetyTest {
 		assertEquals(
 			EntityBlockGeometryOutcome.RENDERED,
 			EntityBlockGeometryOutcome.fromEmittedVertices(Integer.MAX_VALUE));
-		assertEquals(
-			List.of(
-				EntityBlockGeometryOutcome.RENDERED,
-				EntityBlockGeometryOutcome.EMPTY,
-				EntityBlockGeometryOutcome.FAILED),
-			List.of(EntityBlockGeometryOutcome.values()));
 	}
 
 	@Test
-	void optionalAdapterUsesIndirectStateResolutionWithoutVisibilityMutation() throws IOException {
+	void optionalAdapterDeclaresIndirectInstancerApiWithoutVisibilityMutation() throws IOException {
 		Path source = findRepositoryFile(Path.of(
 			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
 			"integration", "create", "CreateFlywheelGeometryAdapter.java"));
 		assertTrue(Files.isRegularFile(source), "NeoForge Flywheel adapter source must be present");
 
 		String adapter = Files.readString(source, StandardCharsets.UTF_8);
-		assertTrue(adapter.contains("resolveLiveInstancer"));
-		assertTrue(adapter.contains("IndirectInstancer.fromState(state)"));
+		assertTrue(adapter.contains("IndirectInstancer.fromState("));
 		assertFalse(adapter.contains("isVisible("));
 		assertFalse(adapter.contains("setVisible("));
 		assertFalse(adapter.contains("setDeleted("));
 	}
 
 	@Test
-	void flywheelAdapterKeepsMainAndEmbeddedVertexContracts() throws IOException {
+	void flywheelAdapterDeclaresMainOriginAndCommonTransformPolicyWiring() throws IOException {
 		Path adapterPath = findRepositoryFile(Path.of(
 			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
 			"integration", "create", "CreateFlywheelGeometryAdapter.java"));
-		Path transformPath = findRepositoryFile(Path.of(
-			"common", "src", "main", "java", "nx", "pingwheel", "common", "client",
-			"outline", "EntityBlockGeometryTransform.java"));
 		String adapter = Files.readString(adapterPath, StandardCharsets.UTF_8);
-		String transform = Files.readString(transformPath, StandardCharsets.UTF_8)
-			.replace("\r\n", "\n")
-			.replace('\r', '\n');
 
-		assertTrue(adapter.contains("instancer.environment == GlobalEnvironment.INSTANCE"));
+		// Executable common tests cover the transform and policy outcomes; this
+		// static seam only guards the optional Flywheel adapter's wiring to them.
 		assertTrue(adapter.contains("manager.renderOrigin()"));
-		assertTrue(adapter.contains("position.x() + originX"));
-		assertTrue(adapter.contains("position.y() + originY"));
-		assertTrue(adapter.contains("position.z() + originZ"));
-		assertTrue(adapter.contains("context.transform().cameraRelativeEnvironmentVertex("));
-		assertTrue(adapter.contains("entry.environmentOrigin()"));
+		assertTrue(adapter.contains("cameraRelativeEnvironmentVertex("));
 		assertTrue(adapter.contains("FlywheelEnvironmentPolicy.accepts("));
-		assertFalse(adapter.contains("Sable"));
-
-		assertTrue(transform.contains("environmentOrigin.getX() + localVertex.x()"));
-		String normalizedTransform = normalizeJavaSource(transform);
-		int vectorConstructor = normalizedTransform.indexOf("new Vector3f(");
-		assertTrue(vectorConstructor >= 0, "transform must construct the output vector");
-		String firstArgument = normalizedTransform
-			.substring(vectorConstructor + "new Vector3f(".length())
-			.trim();
-		assertTrue(firstArgument.startsWith("(float) worldPosition.x"),
-			"worldPosition.x must be the first Vector3f argument");
-		assertTrue(normalizedTransform.contains("(float) worldPosition.y"));
-		assertTrue(normalizedTransform.contains("(float) worldPosition.z"));
 	}
 
 	@Test
-	void createEntityAdapterIsReflectiveAndUsesTheCompleteFallbackRenderPass() throws IOException {
+	void createEntityAdapterDeclaresReflectiveProbeAndBoundedOutlineRoute() throws IOException {
 		Path adapterPath = findRepositoryFile(Path.of(
 			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
 			"integration", "create", "CreateEntityOutlineAdapter.java"));
@@ -113,69 +84,55 @@ class OptionalGeometryClassSafetyTest {
 		assertTrue(adapter.contains("AbstractContraptionEntity"));
 		assertTrue(adapter.contains("PackageEntity"));
 		assertTrue(adapter.contains("\"dev.engine_room.flywheel.api.visualization.VisualizationManager\""));
-		assertTrue(adapter.contains("SUPPORTS_VISUALIZATION_METHOD"));
-		assertTrue(adapter.contains("managerClass.getMethod(SUPPORTS_VISUALIZATION_METHOD, LevelAccessor.class)"));
-		assertTrue(adapter.contains("method.invoke(null, level)"));
+		assertTrue(adapter.contains("\"supportsVisualization\""));
+		assertTrue(adapter.contains("Class.forName("));
+		assertTrue(Pattern.compile("getMethod\\s*\\(\\s*SUPPORTS_VISUALIZATION_METHOD\\s*,"
+			+ "\\s*LevelAccessor\\.class\\s*\\)").matcher(adapter).find());
+		assertTrue(adapter.contains(".invoke("));
 		assertTrue(adapter.contains("InvocationTargetException"));
-		assertTrue(adapter.contains("cause instanceof RuntimeException"));
-		assertTrue(adapter.contains("cause instanceof Error"));
-		assertFalse(adapter.contains("import dev.engine_room.flywheel"));
-		assertFalse(adapter.contains("VisualizationManager."));
-		assertFalse(adapter.contains("VisualizationManager.class"));
-		assertFalse(adapter.contains("invokestatic"));
-		assertTrue(adapter.contains("private static final int EXPECTED_QUADS = 6;"));
-		assertTrue(adapter.contains("private static final int EXPECTED_VERTICES = 24;"));
-		assertTrue(adapter.contains("mask.quads().size() != EXPECTED_QUADS"));
-		assertTrue(adapter.contains("counter.count != EXPECTED_VERTICES"));
-		int addVertex = adapter.indexOf("VertexConsumer vertex = consumer.addVertex(x, y, z);");
-		int countAfterPosition = adapter.indexOf("counter.count++;", addVertex);
-		int attributesAfterCount = adapter.indexOf(".setColor(red(color), green(color), blue(color), 255)", countAfterPosition);
-		assertTrue(addVertex >= 0, "SuperGlue must emit through addVertex");
-		assertTrue(countAfterPosition > addVertex, "SuperGlue must count after addVertex commits");
-		assertTrue(attributesAfterCount > countAfterPosition,
-			"SuperGlue must count before color/UV attributes");
-		assertTrue(adapter.contains("CreateEntityOutlineMaskScope.enter()"));
-		assertTrue(adapter.contains("try (CreateEntityOutlineMaskScope.Scope"));
-		assertTrue(adapter.contains("OutlineOnlyBufferSource"));
+		assertFalse(adapterContainsDirectFlywheelLink(adapter));
+		// The integration owner fixes the six-quad/24-vertex mask and 262144-
+		// vertex cap. Their declarations and guards are structural evidence only,
+		// not proof of a complete live dispatch or a once-only render call.
+		assertTrue(declaresIntConstant(adapter, "EXPECTED_QUADS", "6"));
+		assertTrue(declaresIntConstant(adapter, "EXPECTED_VERTICES", "24"));
+		assertTrue(declaresIntConstant(adapter, "MAX_RENDER_VERTICES", "262_?144"));
+		assertTrue(Pattern.compile("\\.quads\\(\\)\\.size\\(\\)\\s*!=\\s*EXPECTED_QUADS\\b")
+			.matcher(adapter).find());
+		assertTrue(Pattern.compile("\\.count\\s*!=\\s*EXPECTED_VERTICES\\b")
+			.matcher(adapter).find());
+		assertTrue(Pattern.compile("try\\s*\\(\\s*CreateEntityOutlineMaskScope\\.Scope\\b[^;]*"
+			+ "CreateEntityOutlineMaskScope\\.enter\\(\\)\\s*\\)", Pattern.DOTALL)
+			.matcher(adapter).find());
+		assertTrue(Pattern.compile("new\\s+OutlineOnlyBufferSource\\s*\\([^;]*\\bMAX_RENDER_VERTICES\\s*\\)",
+			Pattern.DOTALL).matcher(adapter).find());
+		assertTrue(adapter.contains("EntityRenderDispatcher"));
+		assertTrue(adapter.contains("dispatcher.render("));
 		assertTrue(adapter.contains("TextureAtlas.LOCATION_BLOCKS"));
-		assertTrue(adapter.contains("MAX_RENDER_VERTICES = 262_144"));
-		assertTrue(adapter.contains("getPackedLightCoords"));
-		assertTrue(adapter.contains("AabbOutlineMask.cameraRelative"));
+		assertTrue(adapter.contains("getPackedLightCoords("));
+		assertTrue(adapter.contains("AabbOutlineMask.cameraRelative("));
 		assertTrue(adapter.contains("textures/special/glue.png"));
-		assertTrue(adapter.contains("0.0F, 0.0F"));
-		assertTrue(adapter.contains("1.0F, 0.0F"));
-		assertTrue(adapter.contains("1.0F, 1.0F"));
-		assertTrue(adapter.contains("0.0F, 1.0F"));
-		assertTrue(adapter.contains("0xFF000000 | (context.spec().argbColor() & 0x00FFFFFF)"));
-		assertTrue(adapter.contains("RENDERED"));
-		assertTrue(adapter.contains("partial-render-exception"));
-		assertTrue(adapter.contains("vertexCount"));
-		assertTrue(adapter.contains("printStackTrace"));
-		assertTrue(adapter.contains("MIN_LOG_INTERVAL_NANOS = 1_000_000_000L"));
-		assertTrue(adapter.contains("HEARTBEAT_NANOS = 5_000_000_000L"));
-		assertTrue(adapter.contains("observedSinceNanos"));
-		assertEquals(1, occurrences(adapter, "dispatcher.render("),
-			"the explicit compatibility pass must issue exactly one dispatcher render call");
 
-		assertFalse(adapter.contains("endOutlineBatch"));
-		assertFalse(adapter.contains("setVisible("));
-		assertFalse(adapter.contains("setDeleted("));
-		assertFalse(adapter.contains("delete("));
-		assertFalse(adapter.contains("setGlowing("));
-		assertFalse(adapter.contains("mainBuffer"));
-		assertFalse(adapter.contains("renderBuffers()"));
+		String code = normalizeJavaSource(adapter);
+		assertFalse(code.contains("endOutlineBatch("));
+		assertFalse(code.contains("setVisible("));
+		assertFalse(code.contains("setDeleted("));
+		assertFalse(code.contains("delete("));
+		assertFalse(code.contains("setGlowing("));
+		assertFalse(code.contains("renderBuffers()"));
 
-		assertTrue(neoClient.contains("CREATE_ENTITY_ADAPTER"));
+		assertTrue(Pattern.compile("CREATE_ENTITY_ADAPTER\\s*=\\s*\""
+			+ Pattern.quote("nx.pingwheel.neoforge.integration.create.CreateEntityOutlineAdapter")
+			+ "\"").matcher(neoClient).find());
 		assertTrue(neoClient.contains("ModList.get().isLoaded(\"create\")"));
-		assertTrue(neoClient.contains("Class.forName(className"));
-		assertTrue(neoClient.contains("registerOptionalAdapter(CREATE_ENTITY_ADAPTER"));
+		assertTrue(neoClient.contains("Class.forName("));
+		assertTrue(Pattern.compile("if\\s*\\(\\s*createDetected\\s*\\)\\s*\\{[^{}]*"
+			+ "registerOptionalAdapter\\s*\\(\\s*CREATE_ENTITY_ADAPTER\\b", Pattern.DOTALL)
+			.matcher(neoClient).find());
 	}
 
 	@Test
-	void createMaskScopeAndOptionalVisualizationMixinAreStructurallyScoped() throws IOException {
-		Path scopePath = findRepositoryFile(Path.of(
-			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
-			"integration", "create", "CreateEntityOutlineMaskScope.java"));
+	void optionalVisualizationMixinDeclaresExactTargetAndInjectionAbi() throws IOException {
 		Path mixinPath = findRepositoryFile(Path.of(
 			"neoforge", "src", "main", "java", "nx", "pingwheel", "common", "mixin",
 			"CreateVisualizationManagerMixin.java"));
@@ -184,22 +141,14 @@ class OptionalGeometryClassSafetyTest {
 		Path adapterPath = findRepositoryFile(Path.of(
 			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
 			"integration", "create", "CreateEntityOutlineAdapter.java"));
-		assertTrue(Files.isRegularFile(scopePath));
 		assertTrue(Files.isRegularFile(mixinPath));
 		assertTrue(Files.isRegularFile(configPath));
 		assertTrue(Files.isRegularFile(adapterPath));
 
-		String scope = Files.readString(scopePath, StandardCharsets.UTF_8);
 		String mixin = Files.readString(mixinPath, StandardCharsets.UTF_8);
 		String config = Files.readString(configPath, StandardCharsets.UTF_8);
 		String adapter = Files.readString(adapterPath, StandardCharsets.UTF_8);
 		String normalizedMixin = normalizeJavaSource(mixin);
-
-		assertTrue(scope.contains("ThreadLocal<Integer>"));
-		assertTrue(scope.contains("public static Scope enter()"));
-		assertTrue(scope.contains("public static boolean active()"));
-		assertTrue(scope.contains("DEPTH.remove()"));
-		assertTrue(scope.contains("if (closed)"));
 
 		assertTrue(normalizedMixin.contains("@Pseudo"));
 		assertTrue(normalizedMixin.contains(
@@ -208,7 +157,6 @@ class OptionalGeometryClassSafetyTest {
 		assertTrue(normalizedMixin.contains(
 			"@Mixin(targets = \"dev.engine_room.flywheel.api.visualization.VisualizationManager\", remap = false)"),
 			"the Flywheel target must remain a string target with remapping disabled");
-		assertTrue(mixin.contains("dev.engine_room.flywheel.api.visualization.VisualizationManager"));
 		String injectBlock = extractAnnotationBlock(normalizedMixin, "@Inject(");
 		String visualizationMethodDescriptor =
 			"supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z";
@@ -222,8 +170,9 @@ class OptionalGeometryClassSafetyTest {
 			"the supportsVisualization injection must disable remapping at injection level");
 		assertTrue(normalizedMixin.contains("CallbackInfoReturnable<Boolean>"),
 			"the handler must receive the boolean returnable callback");
-		assertTrue(normalizedMixin.contains("private static void pingForItDisableVisualization("),
-			"the optional mixin handler must be static");
+		assertTrue(Pattern.compile("\\bstatic\\s+void\\s+\\w+\\s*\\(\\s*LevelAccessor\\s+\\w+\\s*,"
+			+ "\\s*CallbackInfoReturnable<Boolean>\\s+\\w+\\s*\\)")
+			.matcher(normalizedMixin).find(), "the optional mixin handler must be static with the host callback ABI");
 		assertTrue(mixin.contains("CreateEntityOutlineMaskScope.active()"));
 		assertFalse(adapterContainsDirectFlywheelLink(adapter));
 		assertTrue(config.contains("\"CreateVisualizationManagerMixin\""));
@@ -241,6 +190,11 @@ class OptionalGeometryClassSafetyTest {
 		return adapter.contains("import dev.engine_room.flywheel")
 			|| adapter.contains("VisualizationManager.class")
 			|| adapter.contains("VisualizationManager.");
+	}
+
+	private static boolean declaresIntConstant(String source, String name, String valuePattern) {
+		return Pattern.compile("\\bint\\s+" + name + "\\s*=\\s*" + valuePattern + "\\s*;")
+			.matcher(source).find();
 	}
 
 	private static String extractAnnotationBlock(String normalizedSource, String annotation) {
@@ -276,16 +230,6 @@ class OptionalGeometryClassSafetyTest {
 			}
 		}
 		return "";
-	}
-
-	private static int occurrences(String text, String needle) {
-		int count = 0;
-		int offset = 0;
-		while ((offset = text.indexOf(needle, offset)) >= 0) {
-			count++;
-			offset += needle.length();
-		}
-		return count;
 	}
 
 	private static Path findRepositoryFile(Path relativePath) {

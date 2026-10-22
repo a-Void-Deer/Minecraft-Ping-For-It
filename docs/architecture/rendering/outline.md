@@ -54,7 +54,7 @@ validation, names, and cancellation remain fresh immediate lookups, unaffected
 by a render-path miss. Render-time position, tick delta, and projection are
 still evaluated each frame, and the existing last-live fallback remains in
 place. The lookup-algorithm and locator-resolver seams are inventoried in
-[testing and verification](../../testing/verification.md#render-entity-lookup-and-locator-resolver-seams).
+[testing and verification](../../testing/verification/rendering.md#render-entity-lookup-and-locator-resolver-seams).
 
 An index represents what was available when it was built. An entity added or
 replaced after construction may not be visible until a later pass, while a removed

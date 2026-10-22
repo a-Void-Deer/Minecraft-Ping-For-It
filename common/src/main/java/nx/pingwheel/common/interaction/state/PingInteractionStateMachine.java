@@ -1,12 +1,16 @@
 package nx.pingwheel.common.interaction.state;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import nx.pingwheel.common.config.ClientConfigBounds;
 import nx.pingwheel.common.domain.PingType;
+import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.interaction.ActiveInteraction;
 import nx.pingwheel.common.interaction.CapturedPingContext;
 import nx.pingwheel.common.interaction.InteractionToken;
@@ -28,8 +32,8 @@ import nx.pingwheel.common.interaction.wheel.WheelSelection;
  * <p>Timing is driven by an injected {@link InteractionTimeSource}; all hold
  * durations are computed from monotonic differences, and a clock that moves
  * backwards while an interaction is active is rejected with an
- * {@link IllegalStateException}. Presentation-only threshold and timeout
- * transitions are driven by {@link #presentFrame(boolean)} on GUI/render
+ * {@link IllegalStateException}. Presentation-only threshold transitions are
+ * driven by {@link #presentFrame(boolean)} on GUI/render
  * cadence, while {@link #update(boolean, WheelSelection, CancellationContext)}
  * remains the tick-authoritative action boundary. No Minecraft, networking, or
  * rendering concerns live here: phase 6 remains authoritative for validation
@@ -50,12 +54,6 @@ public final class PingInteractionStateMachine {
 	 */
 	public static final long LONG_PRESS_MILLIS = 300L;
 
-	/**
-	 * The default maximum wheel-open duration in milliseconds: once the wheel
-	 * has been open this long it closes with no action.
-	 */
-	public static final long WHEEL_TIMEOUT_MILLIS = 5000L;
-
 	private final PingCaptureCoordinator coordinator;
 	private final ActiveInteraction activeInteraction;
 	private final InteractionTimeSource timeSource;
@@ -63,23 +61,45 @@ public final class PingInteractionStateMachine {
 	private final CancelCandidatePicker cancelCandidatePicker;
 	private final PingInteractionLogger logger;
 	private final LongSupplier wheelHoldMillisSupplier;
-	private final LongSupplier wheelTimeoutMillisSupplier;
 	private final boolean supplierValuesUseClientConfigBounds;
 	private long longPressMillis = LONG_PRESS_MILLIS;
-	private long wheelTimeoutMillis = WHEEL_TIMEOUT_MILLIS;
 
 	private PingInteractionPhase phase = PingInteractionPhase.IDLE;
 	private InteractionToken token;
+	/** Release ports may re-enter an abort after the visible machine is terminal. */
+	private InteractionToken releasingSelectorToken;
 	private CapturedPingContext capturedContext;
 	private long pressTimeMillis;
-	private long wheelOpenTimeMillis;
 	private long lastObservedTimeMillis;
 	private boolean releaseObserved;
 	private WheelSelection selection = WheelSelection.NONE;
 	private List<PingType> wheelPingTypes = List.of();
+	private long presentedRevision;
+	private Map<String, CapturedPingContext> presentedPrecise = Map.of();
+	/**
+	 * Set only by {@link #pressFrozenTapAt}: the already-admitted Ping Type a
+	 * short release must commit without another ray or ordinary default choice.
+	 */
+	private PingType frozenTapPingType;
 
 	/**
-	 * Creates a state machine with the default thresholds.
+	 * Actual paint admission, not a frame/tick readiness signal. The runtime calls
+	 * this only after drawing the selector's immutable publication. A mode flag on
+	 * a release cannot authorize a cross-ray candidate absent this exact table.
+	 */
+	public boolean markSelectorPresented(InteractionToken expectedToken, long revision,
+		Map<String, CapturedPingContext> contexts) {
+		Objects.requireNonNull(contexts);
+		if (token != expectedToken || phase != PingInteractionPhase.WHEEL_OPEN || revision <= 0
+			|| revision < presentedRevision || !activeInteraction.isCurrent(expectedToken)) return false;
+		for (var value : contexts.values()) if (value.token() != expectedToken
+			|| !value.resolvedTarget().target().dimensionId().equals(capturedContext.resolvedTarget().target().dimensionId())) return false;
+		presentedPrecise = Map.copyOf(contexts); presentedRevision = revision;
+		return true;
+	}
+
+	/**
+	 * Creates a state machine with the default long-press threshold.
 	 */
 	public PingInteractionStateMachine(
 		PingCaptureCoordinator coordinator,
@@ -96,15 +116,13 @@ public final class PingInteractionStateMachine {
 			targetValidator,
 			cancelCandidatePicker,
 			logger,
-			() -> LONG_PRESS_MILLIS,
-			() -> WHEEL_TIMEOUT_MILLIS);
+			() -> LONG_PRESS_MILLIS);
 	}
 
 	/**
-	 * Creates a state machine whose interaction settings are read lazily from
-	 * the supplied providers. The hold threshold is read once by
-	 * {@link #press()}, and the wheel timeout is read once when the wheel opens,
-	 * so changing a live config never changes an interaction already in progress.
+	 * Creates a state machine whose long-press threshold is read lazily from the
+	 * supplied provider. The hold threshold is read once by {@link #press()}, so
+	 * changing a live config never changes an interaction already in progress.
 	 */
 	public PingInteractionStateMachine(
 		PingCaptureCoordinator coordinator,
@@ -113,8 +131,7 @@ public final class PingInteractionStateMachine {
 		TargetValidator targetValidator,
 		CancelCandidatePicker cancelCandidatePicker,
 		PingInteractionLogger logger,
-		LongSupplier wheelHoldMillisSupplier,
-		LongSupplier wheelTimeoutMillisSupplier
+		LongSupplier wheelHoldMillisSupplier
 	) {
 		this(
 			coordinator,
@@ -124,25 +141,23 @@ public final class PingInteractionStateMachine {
 			cancelCandidatePicker,
 			logger,
 			wheelHoldMillisSupplier,
-			wheelTimeoutMillisSupplier,
 			true);
 	}
 
 	/**
-	 * Creates a state machine with custom positive thresholds.
+	 * Creates a state machine with a custom positive long-press threshold.
 	 *
 	 * <p>Package-private test seam: production callers use the default
-	 * thresholds above.
+	 * threshold above.
 	 */
-		PingInteractionStateMachine(
+	PingInteractionStateMachine(
 		PingCaptureCoordinator coordinator,
 		ActiveInteraction activeInteraction,
 		InteractionTimeSource timeSource,
 		TargetValidator targetValidator,
 		CancelCandidatePicker cancelCandidatePicker,
 		PingInteractionLogger logger,
-		long longPressMillis,
-		long wheelTimeoutMillis
+		long longPressMillis
 	) {
 		this(
 			coordinator,
@@ -152,7 +167,6 @@ public final class PingInteractionStateMachine {
 			cancelCandidatePicker,
 			logger,
 			constantThresholdSupplier("longPressMillis", longPressMillis),
-			constantThresholdSupplier("wheelTimeoutMillis", wheelTimeoutMillis),
 			false);
 	}
 
@@ -164,7 +178,6 @@ public final class PingInteractionStateMachine {
 		CancelCandidatePicker cancelCandidatePicker,
 		PingInteractionLogger logger,
 		LongSupplier wheelHoldMillisSupplier,
-		LongSupplier wheelTimeoutMillisSupplier,
 		boolean supplierValuesUseClientConfigBounds
 	) {
 		this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
@@ -174,7 +187,6 @@ public final class PingInteractionStateMachine {
 		this.cancelCandidatePicker = Objects.requireNonNull(cancelCandidatePicker, "cancelCandidatePicker");
 		this.logger = Objects.requireNonNull(logger, "logger");
 		this.wheelHoldMillisSupplier = Objects.requireNonNull(wheelHoldMillisSupplier, "wheelHoldMillisSupplier");
-		this.wheelTimeoutMillisSupplier = Objects.requireNonNull(wheelTimeoutMillisSupplier, "wheelTimeoutMillisSupplier");
 		this.supplierValuesUseClientConfigBounds = supplierValuesUseClientConfigBounds;
 	}
 
@@ -225,6 +237,71 @@ public final class PingInteractionStateMachine {
 		return pressAt(physicalPressTimeMillis);
 	}
 
+	/**
+	 * Starts one narrow frozen-target tap with a fresh token and no new raycast.
+	 *
+	 * <p>This is not a general capture entry point. It exists for a rapid
+	 * re-tap that must reuse an already admitted captured target while still
+	 * owning a brand-new interaction token (and therefore a new request id) and
+	 * still passing ordinary local validation on release. Only the context
+	 * identity is rebound to the fresh token; the target, ray and capture
+	 * metadata stay exactly those of the frozen capture. The supplied Ping Type
+	 * must already be admitted by the frozen Target Type.
+	 *
+	 * <p>The caller must start it from idle state and release it without a
+	 * wheel frame; a present frame deliberately cannot open a wheel for this
+	 * tap because it has no this-press capture.
+	 */
+	public InteractionToken pressFrozenTapAt(long physicalPressTimeMillis,
+		CapturedPingContext frozenCapture, PingType pingType) {
+		return pressFrozenTapAt(physicalPressTimeMillis, physicalPressTimeMillis, frozenCapture, pingType);
+	}
+
+	/**
+	 * Frozen tap with the physical press and the monotonic observation kept
+	 * distinct. The same observation value must be reused by the immediately
+	 * following release update; reading the clock again would advance it past
+	 * the already supplied observation and fail the monotonic guard.
+	 */
+	public InteractionToken pressFrozenTapAt(long physicalPressTimeMillis, long observedTimeMillis,
+		CapturedPingContext frozenCapture, PingType pingType) {
+		Objects.requireNonNull(frozenCapture, "frozenCapture");
+		Objects.requireNonNull(pingType, "pingType");
+		if (phase != PingInteractionPhase.IDLE) {
+			throw new IllegalStateException("frozen tap requires an idle interaction");
+		}
+		if (!frozenCapture.resolvedTarget().targetType().pingTypes().contains(pingType)) {
+			throw new IllegalArgumentException("frozen tap ping type is not admitted by the target type");
+		}
+		long now = observeTimeValue(observedTimeMillis);
+		if (physicalPressTimeMillis > now) {
+			throw new IllegalArgumentException(
+				"physical press time is in the future: " + physicalPressTimeMillis + " > " + now);
+		}
+
+		long configuredHoldMillis = readConfiguredThreshold(
+			"wheelHoldMillis",
+			wheelHoldMillisSupplier,
+			ClientConfigBounds.MIN_WHEEL_HOLD_MILLIS,
+			ClientConfigBounds.MAX_WHEEL_HOLD_MILLIS);
+		InteractionToken freshToken = coordinator.begin();
+		resetMachineState();
+		this.token = freshToken;
+		this.phase = PingInteractionPhase.PRESSED;
+		this.longPressMillis = configuredHoldMillis;
+		this.pressTimeMillis = physicalPressTimeMillis;
+		this.frozenTapPingType = pingType;
+		CapturedPingContext tapped = new CapturedPingContext(freshToken,
+			frozenCapture.resolvedTarget(), frozenCapture.ray(), frozenCapture.entityLocalGeometryMetadata(),
+			frozenCapture.blockHitFace(), frozenCapture.selectorCandidates());
+		if (!activeInteraction.tryComplete(freshToken, tapped)) {
+			resetMachineState();
+			throw new IllegalStateException("frozen tap token lost before completion");
+		}
+		logger.debug("frozen tap press: token={}", freshToken.sequence());
+		return freshToken;
+	}
+
 	private InteractionToken pressAtObserved(long physicalPressTimeMillis) {
 		long configuredHoldMillis = readConfiguredThreshold(
 			"wheelHoldMillis",
@@ -251,8 +328,108 @@ public final class PingInteractionStateMachine {
 		if (token != null) {
 			activeInteraction.invalidate(token);
 		}
+		if (releasingSelectorToken != null) {
+			activeInteraction.invalidate(releasingSelectorToken);
+			releasingSelectorToken = null;
+		}
 
 		resetMachineState();
+	}
+
+	/**
+	 * Releases an actually opened native selector. All ownership checks precede
+	 * proposal evaluation; an old caller cannot release a newer interaction or
+	 * advance its clock. Pre-open/default release remains on
+	 * {@link #updateAt(boolean, WheelSelection, CancellationContext, long)}.
+	 *
+	 * <p>The candidate lookup must be the immutable table bound to this selector,
+	 * not a resolver or a world read. Ordinary contexts retain the press ray;
+	 * precise contexts must match the acknowledged paint table with their own
+	 * capture ray and metadata. Cancellation context is acquired lazily
+	 * only for an explicit Cancel. The machine is terminal before invoking any
+	 * caller port, so duplicate/reentrant releases and failing ports cannot commit
+	 * the same interaction twice. The result authorizes no sender side effect by
+	 * itself; the runtime still owns dispatch and its actual outcome.
+	 */
+	public <P> SelectorReleaseResult<P> releaseSelectorAt(
+		InteractionToken expectedToken,
+		long observedTimeMillis,
+		Supplier<SelectorReleaseProposal<P>> proposalSupplier,
+		Function<String, Optional<CapturedPingContext>> frozenCandidateContext,
+		Supplier<CancellationContext> cancellationContextSupplier
+	) {
+		Objects.requireNonNull(expectedToken, "expectedToken");
+		Objects.requireNonNull(proposalSupplier, "proposalSupplier");
+		Objects.requireNonNull(frozenCandidateContext, "frozenCandidateContext");
+		Objects.requireNonNull(cancellationContextSupplier, "cancellationContextSupplier");
+		if (token != expectedToken || phase != PingInteractionPhase.WHEEL_OPEN) {
+			return SelectorReleaseResult.empty();
+		}
+
+		observeTimeValue(observedTimeMillis);
+		Optional<CapturedPingContext> capture = activeInteraction.currentContext();
+		if (!activeInteraction.isCurrent(expectedToken) || capture.isEmpty()
+			|| capture.get() != capturedContext || capture.get().token() != expectedToken) {
+			resetMachineState();
+			return SelectorReleaseResult.empty();
+		}
+
+		CapturedPingContext openedCapture = capturedContext;
+		Map<String, CapturedPingContext> painted = presentedPrecise;
+		long paintRevision = presentedRevision;
+		resetMachineState();
+		releasingSelectorToken = expectedToken;
+		try {
+			return admitSelectorProposal(expectedToken, openedCapture, proposalSupplier,
+				frozenCandidateContext, cancellationContextSupplier, painted, paintRevision);
+		} finally {
+			if (releasingSelectorToken == expectedToken) releasingSelectorToken = null;
+		}
+	}
+
+	private <P> SelectorReleaseResult<P> admitSelectorProposal(InteractionToken expectedToken,
+		CapturedPingContext openedCapture, Supplier<SelectorReleaseProposal<P>> proposalSupplier,
+		Function<String, Optional<CapturedPingContext>> frozenCandidateContext,
+		Supplier<CancellationContext> cancellationContextSupplier, Map<String, CapturedPingContext> painted, long paintRevision) {
+		SelectorReleaseProposal<P> proposal = Objects.requireNonNull(proposalSupplier.get(), "proposal");
+		if (!activeInteraction.isCurrent(expectedToken)) return SelectorReleaseResult.empty();
+		return switch (proposal) {
+			case SelectorReleaseProposal.None<P> ignored -> SelectorReleaseResult.empty();
+			case SelectorReleaseProposal.Local<P> local ->
+				new SelectorReleaseResult<>(Optional.of(local.intent()), Optional.empty());
+			case SelectorReleaseProposal.Cancel<P> cancel -> {
+				CancellationContext cancellation = Objects.requireNonNull(cancellationContextSupplier.get(), "cancellationContext");
+				yield activeInteraction.isCurrent(expectedToken)
+					? new SelectorReleaseResult<>(Optional.of(cancel.intent()), pickCancellation(expectedToken, cancellation))
+					: SelectorReleaseResult.empty();
+			}
+			case SelectorReleaseProposal.Create<P> create -> {
+				Optional<CapturedPingContext> candidate = Objects.requireNonNull(
+					frozenCandidateContext.apply(create.candidateId()), "candidateContext");
+				if (!activeInteraction.isCurrent(expectedToken) || candidate.isEmpty()
+					|| !isSelectorCandidate(candidate.get(), openedCapture, create, painted, paintRevision)) {
+					yield SelectorReleaseResult.empty();
+				}
+				Optional<PingInteractionAction> action = validatePing(candidate.get(), create.pingType());
+				if (!activeInteraction.isCurrent(expectedToken)) yield SelectorReleaseResult.empty();
+				yield new SelectorReleaseResult<>(action.orElseThrow() instanceof PingInteractionAction.CreatePing
+					? Optional.of(create.intent()) : Optional.empty(), action);
+			}
+		};
+	}
+
+	private boolean isSelectorCandidate(CapturedPingContext candidate, CapturedPingContext openedCapture,
+		SelectorReleaseProposal.Create<?> proposal, Map<String, CapturedPingContext> painted, long paintRevision) {
+		return candidate.token() == openedCapture.token()
+			&& (proposal.admission() == SelectorReleaseProposal.Admission.PRESS_RAY
+				? candidate.ray().equals(openedCapture.ray())
+				: proposal.presentationRevision() == paintRevision && painted.get(proposal.candidateId()) == candidate)
+			&& candidate.resolvedTarget().target().dimensionId().equals(openedCapture.resolvedTarget().target().dimensionId())
+			&& candidate.resolvedTarget().equals(proposal.target())
+			&& (!(candidate.resolvedTarget().target() instanceof Target.ExternalBlockTarget external)
+				|| proposal.target().target() instanceof Target.ExternalBlockTarget claimedExternal
+					&& external.providerLocator().equals(claimedExternal.providerLocator()))
+			&& candidate.resolvedTarget().targetType().pingTypes().contains(proposal.pingType());
 	}
 
 	/**
@@ -325,7 +502,7 @@ public final class PingInteractionStateMachine {
 		}
 
 		if (phase == PingInteractionPhase.WHEEL_OPEN) {
-			return updateWheelOpen(keyDown, wheelSelection, cancellationContext, now);
+			return updateWheelOpen(keyDown, wheelSelection, cancellationContext);
 		}
 
 		return updatePressed(keyDown, capture, now);
@@ -335,10 +512,10 @@ public final class PingInteractionStateMachine {
 	 * Advances presentation-only timing from one GUI/render frame.
 	 *
 	 * <p>This method may open the wheel once a capture-ready interaction has
-	 * reached the long-press threshold, or silently close an already-open wheel
-	 * after its maximum duration. It never validates a target, consumes a wheel
-	 * selection, or emits an action. The press timestamp remains the baseline
-	 * even when the capture arrived asynchronously after the threshold.
+	 * reached the long-press threshold (or the caller supplies explicit alternative
+	 * eligibility at the frame boundary). It never validates a target, consumes a
+	 * wheel selection, or emits an action. The press timestamp remains the
+	 * baseline even when the capture arrived asynchronously after the threshold.
 	 *
 	 * <p>A release observed by a frame does not commit or cancel anything by
 	 * itself; the event/frame action path owns the single release action.
@@ -363,6 +540,11 @@ public final class PingInteractionStateMachine {
 	 * between two clock reads.
 	 */
 	public void presentFrameAt(boolean keyDown, long observedTimeMillis) {
+		presentFrameAt(keyDown, observedTimeMillis, false);
+	}
+
+	/** An explicit alternative eligibility never changes the frozen ordinary hold timer. */
+	public void presentFrameAt(boolean keyDown, long observedTimeMillis, boolean alternativeOpenEligible) {
 		if (phase == PingInteractionPhase.IDLE) {
 			return;
 		}
@@ -384,24 +566,23 @@ public final class PingInteractionStateMachine {
 		}
 
 		if (phase == PingInteractionPhase.WHEEL_OPEN) {
-			long openDuration = now - wheelOpenTimeMillis;
-
-			if (openDuration >= wheelTimeoutMillis) {
-				logger.debug("wheel timeout: token={} openMillis={}", token.sequence(), openDuration);
-				resetMachineState();
-			}
-
 			return;
 		}
 
-		if (!keyDown || capture.isEmpty()) {
+		// A frozen-target tap has no this-press ray or capture and is a tap
+		// boundary only; a frame can never turn it into a wheel interaction.
+		if (frozenTapPingType != null) {
+			return;
+		}
+
+		if (!keyDown || releaseObserved || capture.isEmpty()) {
 			return;
 		}
 
 		long elapsed = now - pressTimeMillis;
 
-		if (elapsed >= longPressMillis) {
-			openWheel(capture.get(), now);
+		if (elapsed >= longPressMillis || alternativeOpenEligible) {
+			openWheel(capture.get());
 		}
 	}
 
@@ -435,6 +616,11 @@ public final class PingInteractionStateMachine {
 		return selection;
 	}
 
+	/** The effective long-press threshold frozen by the current (or last) press. */
+	public long longPressMillis() {
+		return longPressMillis;
+	}
+
 	private Optional<PingInteractionAction> updatePressed(
 		boolean keyDown,
 		Optional<CapturedPingContext> capture,
@@ -460,8 +646,10 @@ public final class PingInteractionStateMachine {
 			// The wheel is a real interaction only after presentFrame() has opened
 			// it. If release wins before that transition, commit the captured
 			// target's default ping regardless of tick-quantized elapsed time. This
-			// also handles a capture that completes after the key was released.
-			return commitPing(context, context.resolvedTarget().targetType().defaultPingType());
+			// also handles a capture that completes after the key was released. A
+			// frozen-target tap commits its already-admitted Ping Type instead.
+			return commitPing(context, frozenTapPingType != null
+				? frozenTapPingType : context.resolvedTarget().targetType().defaultPingType());
 		}
 
 		// Key still down: presentation-only threshold handling belongs to
@@ -472,20 +660,8 @@ public final class PingInteractionStateMachine {
 	private Optional<PingInteractionAction> updateWheelOpen(
 		boolean keyDown,
 		WheelSelection wheelSelection,
-		CancellationContext cancellationContext,
-		long now
+		CancellationContext cancellationContext
 	) {
-		// Rendering normally owns visible timeout transitions, but a release tick
-		// can arrive after the last frame. The same observed monotonic timestamp
-		// must win before selection or release can commit an action.
-		long openDuration = now - wheelOpenTimeMillis;
-
-		if (openDuration >= wheelTimeoutMillis) {
-			logger.debug("wheel timeout: token={} openMillis={}", token.sequence(), openDuration);
-			resetMachineState();
-			return Optional.empty();
-		}
-
 		WheelSelection effective = normalizeSelection(wheelSelection);
 
 		if (!effective.equals(selection)) {
@@ -508,19 +684,9 @@ public final class PingInteractionStateMachine {
 		}
 
 		if (committed == WheelSelection.CENTER) {
-			Optional<CancelMarkerCandidate> candidate = cancelCandidatePicker.pick(cancellationContext);
-
-			if (candidate.isPresent()) {
-				logger.debug("cancel selected: token={} candidateCount={} markerId={}",
-					token.sequence(), cancellationContext.candidates().size(), candidate.get().markerId().value());
-				resetMachineState();
-				return Optional.of(new PingInteractionAction.CancelMarker(candidate.get().markerId()));
-			}
-
-			logger.debug("cancel empty: token={} candidateCount={}",
-				token.sequence(), cancellationContext.candidates().size());
+			InteractionToken releasedToken = token;
 			resetMachineState();
-			return Optional.empty();
+			return pickCancellation(releasedToken, cancellationContext);
 		}
 
 		// No selection (or an invalid sector normalised to None): no action.
@@ -529,33 +695,42 @@ public final class PingInteractionStateMachine {
 	}
 
 	private Optional<PingInteractionAction> commitPing(CapturedPingContext context, PingType pingType) {
+		resetMachineState();
+		return validatePing(context, pingType);
+	}
+
+	private Optional<PingInteractionAction> pickCancellation(InteractionToken releasedToken,
+		CancellationContext cancellationContext) {
+		Optional<CancelMarkerCandidate> candidate = cancelCandidatePicker.pick(cancellationContext);
+		if (candidate.isPresent()) {
+			logger.debug("cancel selected: token={} candidateCount={} markerId={}",
+				releasedToken.sequence(), cancellationContext.candidates().size(), candidate.get().markerId().value());
+			return Optional.of(new PingInteractionAction.CancelMarker(candidate.get().markerId()));
+		}
+		logger.debug("cancel empty: token={} candidateCount={}",
+			releasedToken.sequence(), cancellationContext.candidates().size());
+		return Optional.empty();
+	}
+
+	private Optional<PingInteractionAction> validatePing(CapturedPingContext context, PingType pingType) {
 		logger.debug("ping commit: token={} kind={} pingType={}",
-			token.sequence(), context.resolvedTarget().target().kind(), pingType.id());
+			context.token().sequence(), context.resolvedTarget().target().kind(), pingType.id());
 
 		TargetValidation validation = targetValidator.validate(context.resolvedTarget());
 
 		if (validation.isValid()) {
-			resetMachineState();
 			return Optional.of(new PingInteractionAction.CreatePing(context, pingType));
 		}
 
 		TargetGoneReason reason = validation.goneReason().orElseThrow();
 		logger.debug("target gone: token={} kind={} reason={}",
-			token.sequence(), context.resolvedTarget().target().kind(), reason);
-		resetMachineState();
+			context.token().sequence(), context.resolvedTarget().target().kind(), reason);
 		return Optional.of(new PingInteractionAction.TargetGone(context, reason));
 	}
 
-	private void openWheel(CapturedPingContext context, long now) {
-		long configuredTimeoutMillis = readConfiguredThreshold(
-			"wheelTimeoutMillis",
-			wheelTimeoutMillisSupplier,
-			ClientConfigBounds.MIN_WHEEL_TIMEOUT_MILLIS,
-			ClientConfigBounds.MAX_WHEEL_TIMEOUT_MILLIS);
+	private void openWheel(CapturedPingContext context) {
 		this.capturedContext = context;
 		this.wheelPingTypes = List.copyOf(context.resolvedTarget().targetType().pingTypes());
-		this.wheelOpenTimeMillis = now;
-		this.wheelTimeoutMillis = configuredTimeoutMillis;
 		this.selection = WheelSelection.NONE;
 		this.phase = PingInteractionPhase.WHEEL_OPEN;
 		logger.debug("wheel open: token={} pingTypeCount={}", token.sequence(), wheelPingTypes.size());
@@ -599,12 +774,12 @@ public final class PingInteractionStateMachine {
 		token = null;
 		capturedContext = null;
 		pressTimeMillis = 0L;
-		wheelOpenTimeMillis = 0L;
 		longPressMillis = LONG_PRESS_MILLIS;
-		wheelTimeoutMillis = WHEEL_TIMEOUT_MILLIS;
 		releaseObserved = false;
 		selection = WheelSelection.NONE;
 		wheelPingTypes = List.of();
+		presentedRevision = 0; presentedPrecise = Map.of();
+		frozenTapPingType = null;
 	}
 
 	private long readConfiguredThreshold(

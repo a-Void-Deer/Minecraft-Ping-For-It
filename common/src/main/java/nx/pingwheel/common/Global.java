@@ -34,26 +34,33 @@ public class Global {
 
 	/**
 	 * Logs a bounded exception report at debug level. The context must be a
-	 * caller-provided constant or safe scalar; the throwable is rendered before
-	 * it reaches Log4j and is never attached to the log event.
+	 * caller-provided detached scalar. Formatting, including original exception
+	 * messages and stacks, occurs only when DEBUG is enabled; the throwable is
+	 * never also attached to the log event for unbounded rendering.
 	 */
 	public static void debugException(String constantContext, Throwable throwable) {
-		LOGGER.debug(SafeExceptionReport.formatWithContext(constantContext, throwable));
+		if (LOGGER.isDebugEnabled()) {
+			LOGGER.debug(SafeExceptionReport.formatWithContext(constantContext, throwable));
+		}
 	}
 
 	/**
-	 * Logs a bounded exception report at warn level without attaching the
-	 * throwable to the Log4j event.
+	 * Logs original messages and stacks as one bounded report only when WARN is
+	 * enabled, without also attaching the throwable to the Log4j event.
 	 */
 	public static void warnException(String constantContext, Throwable throwable) {
-		LOGGER.warn(SafeExceptionReport.formatWithContext(constantContext, throwable));
+		if (LOGGER.isWarnEnabled()) {
+			LOGGER.warn(SafeExceptionReport.formatWithContext(constantContext, throwable));
+		}
 	}
 
 	/**
-	 * Logs a bounded exception report at error level without attaching the
-	 * throwable to the Log4j event.
+	 * Logs original messages and stacks as one bounded report only when ERROR is
+	 * enabled, without also attaching the throwable to the Log4j event.
 	 */
 	public static void errorException(String constantContext, Throwable throwable) {
-		LOGGER.error(SafeExceptionReport.formatWithContext(constantContext, throwable));
+		if (LOGGER.isErrorEnabled()) {
+			LOGGER.error(SafeExceptionReport.formatWithContext(constantContext, throwable));
+		}
 	}
 }

@@ -89,5 +89,5 @@ of rejection responses and the local invalid-target presentation are owned by
 
 Automated evidence and remaining reconnect, live-update, and sanitization
 coverage gaps are maintained centrally in
-[verification](../../testing/verification.md). This contract describes required
+[verification](../../testing/verification/identity-authority.md#rate-policy-courtesy-behavior). This contract describes required
 behavior rather than evidence that those integration paths have been exercised.

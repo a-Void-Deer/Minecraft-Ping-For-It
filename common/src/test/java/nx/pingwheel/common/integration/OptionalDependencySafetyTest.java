@@ -53,9 +53,7 @@ class OptionalDependencySafetyTest {
 
 	private static final List<String> FORBIDDEN_PACKAGE_FRAGMENTS = List.of(
 		"com/seibel/distanthorizons",
-		"dev/ryanhcode/sable",
-		"de/maxhenkel/voicechat",
-		"dev/ftb/mods/ftbteams");
+		"dev/ryanhcode/sable");
 
 	@Test
 	void stableClassesContainNoOptionalPackageReferences() throws IOException {
@@ -73,14 +71,10 @@ class OptionalDependencySafetyTest {
 	void boundariesAreNoOpsWhenFlagsDisabled() {
 		boolean distantHorizons = ModContext.HasDistantHorizons;
 		boolean sable = ModContext.HasSable;
-		boolean voiceChat = ModContext.HasVoiceChat;
-		boolean ftbTeams = ModContext.HasFTBTeams;
 
 		try {
 			ModContext.HasDistantHorizons = false;
 			ModContext.HasSable = false;
-			ModContext.HasVoiceChat = false;
-			ModContext.HasFTBTeams = false;
 
 			// Each call must short-circuit before touching the optional jars.
 			assertFalse(DistantHorizonsIntegration.traceDistantAsync(Vec3.ZERO, Vec3.ZERO, ignored -> {}));
@@ -90,15 +84,9 @@ class OptionalDependencySafetyTest {
 				"minecraft:overworld", "sable", UUID.randomUUID().toString(),
 				"minecraft:stone", "not-a-sable-locator", false);
 			assertTrue(SableClientProvider.resolvePosition(null, corrupt, 0.0F).isEmpty());
-			assertTrue(VoiceChatWrapper.getGroupId(null).isEmpty());
-			assertTrue(VoiceChatWrapper.getSelfGroupId().isEmpty());
-			assertTrue(FTBTeamsWrapper.getTeamId(null).isEmpty());
-			assertTrue(FTBTeamsWrapper.getSelfTeamId().isEmpty());
 		} finally {
 			ModContext.HasDistantHorizons = distantHorizons;
 			ModContext.HasSable = sable;
-			ModContext.HasVoiceChat = voiceChat;
-			ModContext.HasFTBTeams = ftbTeams;
 		}
 	}
 

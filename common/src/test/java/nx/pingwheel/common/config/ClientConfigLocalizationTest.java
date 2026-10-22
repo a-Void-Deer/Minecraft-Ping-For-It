@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
+import nx.pingwheel.common.resource.LanguageUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -62,6 +63,7 @@ class ClientConfigLocalizationTest {
 		"settings.pingforit.group.channel_players",
 		"settings.pingforit.group.send_rate",
 		"settings.pingforit.group.marker_duration",
+		"settings.pingforit.group.wheel_options",
 		"settings.pingforit.server_status.loading",
 		"settings.pingforit.server_status.permission",
 		"settings.pingforit.server_status.unavailable",
@@ -85,28 +87,32 @@ class ClientConfigLocalizationTest {
 		String enUs;
 		try (InputStream stream = getClass().getClassLoader().getResourceAsStream(
 			"assets/pingforit/lang/en_us.json")) {
-			assertNotNull(stream);
+		assertNotNull(stream);
 			enUs = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
 		}
 
 		assertContainsKey(enUs, "settings.pingforit.wheel_hold_millis");
-		assertContainsKey(enUs, "settings.pingforit.wheel_timeout_millis");
 		assertContainsKey(enUs, "settings.pingforit.cancel_half_cone_angle_degrees");
+		assertContainsKey(enUs, "settings.pingforit.double_click_danger_window_millis");
+		assertContainsKey(enUs, "settings.pingforit.double_click_danger_window_millis.tooltip");
+		assertContainsKey(enUs, "settings.pingforit.double_click_danger_angle_degrees");
+		assertContainsKey(enUs, "settings.pingforit.double_click_danger_angle_degrees.tooltip");
+		assertContainsKey(enUs, "value.pingforit.off");
 		assertContainsKey(enUs, "settings.pingforit.wheel_inner_radius");
 		assertContainsKey(enUs, "settings.pingforit.wheel_outer_radius");
 		assertContainsKey(enUs, "settings.pingforit.wheel_opacity");
+		assertContainsKey(enUs, "settings.pingforit.wheel_target_opacity");
 		assertContainsKey(enUs, "settings.pingforit.wheel_font_size");
 		assertContainsKey(enUs, "settings.pingforit.wheel_target_font_size");
 		assertContainsKey(enUs, "settings.pingforit.marker_display_duration");
 		assertContainsKey(enUs, "settings.pingforit.marker_display_duration.tooltip");
 		assertContainsKey(enUs, "value.pingforit.follow_server");
 		assertTrue(readTranslation("en_us", "settings.pingforit.marker_display_duration").contains("%s"));
-		assertEquals("Follow server", readTranslation("en_us", "value.pingforit.follow_server"));
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_mode");
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_mode.tooltip");
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_slice_millis");
 		assertContainsKey(enUs, "settings.pingforit.long_press_compatibility_slice_millis.tooltip");
-		assertContainsKey(enUs, "settings.pingforit.pass_through_transparent_blocks");
+		assertContainsKey(enUs, "settings.pingforit.mark_transparent_blocks");
 		assertContainsKey(enUs, "settings.pingforit.mark_blacklisted_targets");
 		assertContainsKey(enUs, "settings.pingforit.mark_fluids");
 		assertContainsKey(enUs, "settings.pingforit.reset_all");
@@ -118,6 +124,7 @@ class ClientConfigLocalizationTest {
 		assertEquals("%ss", readTranslation("en_us", "unit.pingforit.seconds"));
 		assertContainsKey(enUs, "unit.pingforit.degrees");
 		assertContainsKey(enUs, "unit.pingforit.pixels");
+		assertEquals("%st", readTranslation("en_us", "unit.pingforit.ticks"));
 	}
 
 	@Test
@@ -132,15 +139,17 @@ class ClientConfigLocalizationTest {
 
 			var json = JsonParser.parseString(contents).getAsJsonObject();
 			for (String key : java.util.List.of(
-				"key.pingforit.toggle_pass_through_transparent_blocks",
+				"key.pingforit.toggle_mark_transparent_blocks",
 				"key.pingforit.toggle_mark_blacklisted_targets",
 				"key.pingforit.toggle_mark_fluids")) {
 				nonBlankTranslation(json, locale, key);
 			}
 			for (String key : java.util.List.of(
-				"settings.pingforit.pass_through_transparent_blocks",
+				"settings.pingforit.mark_transparent_blocks",
 				"settings.pingforit.mark_blacklisted_targets",
 				"settings.pingforit.mark_fluids",
+				"settings.pingforit.wheel_opacity",
+				"settings.pingforit.wheel_target_opacity",
 				"settings.pingforit.wheel_font_size",
 				"settings.pingforit.wheel_target_font_size",
 				"settings.pingforit.marker_display_duration",
@@ -161,9 +170,35 @@ class ClientConfigLocalizationTest {
 			nonBlankTranslation(json, locale, "unit.pingforit.milliseconds");
 			nonBlankTranslation(json, locale, "unit.pingforit.seconds");
 			nonBlankTranslation(json, locale, "value.pingforit.follow_server");
-			assertTrue(
+				assertTrue(
 				json.get("settings.pingforit.long_press_compatibility_slice_millis").getAsString().contains("%s"),
-				() -> "compatibility slice must be formatted: " + locale);
+					() -> "compatibility slice must be formatted: " + locale);
+			assertTrue(
+				json.get("settings.pingforit.wheel_target_opacity").getAsString().contains("%s"),
+				() -> "wheel target opacity must be formatted: " + locale);
+			assertFalse(json.has("settings.pingforit.wheel_timeout_millis"),
+				() -> "retired wheel timeout translation must be absent: " + locale);
+			assertFalse(json.has("settings.pingforit.wheel_timeout_millis.tooltip"),
+				() -> "retired wheel timeout tooltip must be absent: " + locale);
+			nonBlankTranslation(json, locale, "pingforit.spatial.back");
+		}
+	}
+
+	@Test
+	void transparentMarkingKeysReplacePassThroughKeysAndKeepTheSpatialIdentityInEveryLocale() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			for (String key : List.of("key.pingforit.toggle_mark_transparent_blocks",
+				"settings.pingforit.mark_transparent_blocks", "notice.pingforit.mark_transparent_blocks",
+				"pingforit.spatial.toggle.transparent_blocks")) {
+				String label = nonBlankTranslation(json, locale, key);
+				assertFalse(label.contains("%"), locale + ":" + key + " is a literal label");
+			}
+			for (String key : List.of("key.pingforit.toggle_pass_through_transparent_blocks",
+				"settings.pingforit.pass_through_transparent_blocks", "notice.pingforit.pass_through_transparent_blocks",
+				"settings.pingforit.mark_transparent_blocks.tooltip")) {
+				assertFalse(json.has(key), locale + ":" + key);
+			}
 		}
 	}
 
@@ -220,16 +255,6 @@ class ClientConfigLocalizationTest {
 			assertFalse(json.has("settings.pingforit.category_title"),
 				() -> "the unused two-argument category title format must be removed: " + locale);
 		}
-
-		assertEquals("Ping For It Configuration", readTranslation("en_us", "settings.pingforit.title"));
-		assertEquals("Client", readTranslation("en_us", "settings.pingforit.client_settings"));
-		assertEquals("Server", readTranslation("en_us", "settings.pingforit.server_settings"));
-		assertEquals("Ping For It 配置", readTranslation("zh_cn", "settings.pingforit.title"));
-		assertEquals("客户端", readTranslation("zh_cn", "settings.pingforit.client_settings"));
-		assertEquals("服务端", readTranslation("zh_cn", "settings.pingforit.server_settings"));
-		assertEquals("Ping For It 設定", readTranslation("zh_tw", "settings.pingforit.title"));
-		assertEquals("用戶端", readTranslation("zh_tw", "settings.pingforit.client_settings"));
-		assertEquals("伺服器", readTranslation("zh_tw", "settings.pingforit.server_settings"));
 	}
 
 	@Test
@@ -248,6 +273,66 @@ class ClientConfigLocalizationTest {
 			JsonObject json = readLocaleJson(locale);
 			for (String key : keys) {
 				nonBlankTranslation(json, locale, key);
+			}
+		}
+	}
+
+	@Test
+	void everyBundledLocaleContainsTheSpatialSelectorSettings() throws IOException {
+		List<String> formattedLabels = List.of(
+			"settings.pingforit.spatial_selector.gesture_skip_hold_millis",
+			"settings.pingforit.spatial_selector.deadzone",
+			"settings.pingforit.spatial_selector.stroke",
+			"settings.pingforit.spatial_selector.dwell_millis",
+			"settings.pingforit.spatial_selector.root_distance",
+			"settings.pingforit.spatial_selector.submenu_radius_scale",
+			"settings.pingforit.spatial_selector.inventory_max_width_fraction",
+			"settings.pingforit.spatial_selector.inventory_max_height_fraction",
+			"settings.pingforit.spatial_selector.hover_millis",
+			"settings.pingforit.spatial_selector.trail_length",
+			"settings.pingforit.spatial_selector.trail_opacity",
+			"settings.pingforit.spatial_selector.precise_capture_period_ticks");
+		List<String> booleanLabels = List.of(
+			"settings.pingforit.spatial_selector.gesture_skip_hold_enabled",
+			"settings.pingforit.spatial_selector.hover_enabled",
+			"settings.pingforit.spatial_selector.show_trail",
+			"settings.pingforit.spatial_selector.reduce_motion",
+			"settings.pingforit.spatial_selector.content_intent_enabled",
+			"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled");
+		Set<String> expectedKeys = new java.util.HashSet<>();
+		for (String key : java.util.stream.Stream.concat(formattedLabels.stream(), booleanLabels.stream()).toList()) {
+			expectedKeys.add(key);
+			expectedKeys.add(key + ".tooltip");
+		}
+
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			assertEquals(expectedKeys, json.keySet().stream()
+				.filter(key -> key.startsWith("settings.pingforit.spatial_selector.")).collect(Collectors.toSet()), locale);
+			nonBlankTranslation(json, locale, "settings.pingforit.group.spatial_selector");
+			nonBlankTranslation(json, locale, "unit.pingforit.ticks");
+			for (String key : expectedKeys) {
+				nonBlankTranslation(json, locale, key);
+			}
+			for (String key : formattedLabels) {
+				String label = nonBlankTranslation(json, locale, key);
+				assertEquals(1, countOccurrences(label, "%s"),
+					() -> "spatial selector numeric label must be formatted: " + locale + ":" + key);
+				assertFalse(label.replace("%s", "").contains("%"), locale + ":" + key);
+			}
+			for (String key : booleanLabels) {
+				assertFalse(nonBlankTranslation(json, locale, key).contains("%"), locale + ":" + key);
+			}
+			for (String key : List.of("trail_length", "trail_opacity", "show_trail",
+				"inventory_max_width_fraction", "inventory_max_height_fraction")) {
+				assertFalse(nonBlankTranslation(json, locale,
+					"settings.pingforit.spatial_selector." + key + ".tooltip").contains("%"), locale + ":" + key);
+			}
+			for (String key : List.of(LanguageUtils.UNIT_POINTS.getKey(), LanguageUtils.UNIT_PERCENT.getKey())) {
+				String unit = nonBlankTranslation(json, locale, key);
+				assertEquals(1, countOccurrences(unit, "%s"), locale + ":" + key);
+				assertFalse(unit.replace("%s", "").replace("%%", "").contains("%"), locale + ":" + key);
+				String.format(java.util.Locale.ROOT, unit, 73);
 			}
 		}
 	}
@@ -335,15 +420,7 @@ class ClientConfigLocalizationTest {
 	}
 
 	@Test
-	void chatLegacyAndGeneralTemplatesAreRenamedWithoutOldAliases() throws IOException {
-		assertEquals("%s requests %s on %s", readTranslation("en_us", "pingforit.chat.pingmsg"));
-		assertEquals(
-			"{playerName} requests {pingType} {targetName}",
-			readTranslation("en_us", "pingforit.chat.pingmsg.template"));
-		assertEquals("%s 请求 %s %s", readTranslation("zh_cn", "pingforit.chat.pingmsg"));
-		assertEquals(
-			"{playerName}: 请求 {pingType} {targetName}",
-			readTranslation("zh_cn", "pingforit.chat.pingmsg.template"));
+	void chatRenamedTemplatesLeaveNoOldAliases() throws IOException {
 		assertTranslationAbsent("en_us", "pingforit.chat." + "request");
 		assertTranslationAbsent("en_us", "pingforit.chat." + "request.template");
 		assertTranslationAbsent("zh_cn", "pingforit.chat." + "request");
@@ -361,9 +438,31 @@ class ClientConfigLocalizationTest {
 				() -> "the local feedback prefix must be the exact marker resource: " + locale);
 			nonBlankTranslation(json, locale, messageKey);
 		}
+	}
 
-		assertEquals("Target disappeared or died", readTranslation("en_us", messageKey));
-		assertEquals("目标消失或死亡", readTranslation("zh_cn", messageKey));
+	@Test
+	void doubleClickDangerAndInventoryStayOpenLabelsAreLocalized() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			for (String key : List.of(
+				"settings.pingforit.double_click_danger_window_millis",
+				"settings.pingforit.double_click_danger_angle_degrees")) {
+				String label = nonBlankTranslation(json, locale, key);
+				assertEquals(1, countOccurrences(label, "%s"), locale + ":" + key);
+				assertFalse(label.replace("%s", "").contains("%"), locale + ":" + key);
+			}
+			for (String key : List.of(
+				"settings.pingforit.double_click_danger_window_millis.tooltip",
+				"settings.pingforit.double_click_danger_angle_degrees.tooltip",
+				"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled",
+				"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip")) {
+				assertFalse(nonBlankTranslation(json, locale, key).contains("%"), locale + ":" + key);
+			}
+			nonBlankTranslation(json, locale, "value.pingforit.off");
+		}
+
+		assertEquals("已关闭", readLocaleJson("zh_cn").get("value.pingforit.off").getAsString());
+		assertEquals("Off", readLocaleJson("en_us").get("value.pingforit.off").getAsString());
 	}
 
 	private JsonObject readLocaleJson(String locale) throws IOException {

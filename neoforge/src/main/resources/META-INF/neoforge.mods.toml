@@ -16,6 +16,12 @@ displayTest = "IGNORE_SERVER_VERSION"
 [[mixins]]
 config = "${mod_id}.mixins.json"
 
+[[mixins]]
+config = "pingforit.create-presentation.mixins.json"
+
+[[mixins]]
+config = "pingforit.create-preview.mixins.json"
+
 [[dependencies.${mod_id}]]
 modId = "neoforge"
 type = "required"

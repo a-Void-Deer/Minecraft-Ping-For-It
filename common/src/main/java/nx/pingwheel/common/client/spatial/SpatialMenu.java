@@ -1,0 +1,151 @@
+package nx.pingwheel.common.client.spatial;
+
+import java.util.List;
+import java.util.Objects;
+
+/**
+ * Immutable radial menu tree.
+ *
+ * <p>A menu owns an ordered list of {@link Choice entries}. An entry either
+ * commits an opaque {@code action}, opens a child {@link SpatialMenu}, or is a
+ * navigation ({@code back}), reserved, or disabled entry. The action string is
+ * deliberately opaque here: a later Minecraft adapter maps it to ping types,
+ * target selections, toggles, or cancellation without this model depending on
+ * any game class. A choice may also carry a nullable detached {@code outlineColor}
+ * (24-bit RGB) copied from its Ping Type or local action role, so a renderer never has to
+ * decode the opaque action to recover it.
+ *
+ * <p>Root entries carry the fixed geometry supplied by the caller through
+ * {@link Choice#withSector(double, double)} (for example the eight-way
+ * cardinal-55 / diagonal-35 layout). Every non-root menu computes equal sectors
+ * from its actual entry count, including the automatically appended Back
+ * entry, so no caller geometry is duplicated. An optional preferred bearing
+ * moves one choice between those equal non-Back slots without rotating them.
+ * {@code bearing} is degrees,
+ * {@code 0} is up and positive is clockwise.
+ */
+public record SpatialMenu(String id, List<Choice> choices, PreferredBearing preferredBearing) {
+
+	public SpatialMenu {
+		Objects.requireNonNull(id, "id");
+		choices = List.copyOf(Objects.requireNonNull(choices, "choices"));
+	}
+
+	/** Ordinary menus keep their declared order without a bearing preference. */
+	public SpatialMenu(String id, List<Choice> choices) {
+		this(id, choices, null);
+	}
+
+	/** A non-root choice prefers the containing slot, or the nearest non-Back slot when Back contains the bearing. */
+	public record PreferredBearing(String choiceId, double degrees) {
+		public PreferredBearing {
+			Objects.requireNonNull(choiceId, "choiceId");
+			if (!Double.isFinite(degrees)) throw new IllegalArgumentException("preferred bearing must be finite");
+		}
+	}
+
+	/** The preference is inert at the root or when the designated choice is absent. */
+	public SpatialMenu withPreferredBearing(String choiceId, double degrees) {
+		return new SpatialMenu(id, choices, new PreferredBearing(choiceId, degrees));
+	}
+
+	/** Convenience factory for a menu with the given ordered entries. */
+	public static SpatialMenu of(String id, Choice... choices) {
+		return new SpatialMenu(id, List.of(choices));
+	}
+
+	/**
+	 * One selectable entry. {@code bearing}/{@code span} are only meaningful
+	 * for caller-fixed geometry (root entries); they are null for equal-sector
+	 * child menus and must be provided together. {@code outlineColor} is a
+	 * detached 24-bit Ping Type or local-action outline colour, never decoded from the opaque
+	 * action.
+	 */
+	public record Choice(
+		String id,
+		String label,
+		String action,
+		SpatialMenu children,
+		boolean back,
+		boolean disabled,
+		boolean reserved,
+		Double bearing,
+		Double span,
+		Integer outlineColor
+	) {
+
+		public Choice {
+			Objects.requireNonNull(id, "id");
+
+			if ((bearing == null) != (span == null)) {
+				throw new IllegalArgumentException("bearing and span must be provided together: " + id);
+			}
+
+			if (span != null && !(span > 0.0)) {
+				throw new IllegalArgumentException("span must be positive: " + id);
+			}
+
+			if (back && (action != null || children != null)) {
+				throw new IllegalArgumentException("back entry cannot carry an action or children: " + id);
+			}
+
+			if (reserved && children != null) {
+				throw new IllegalArgumentException("reserved entry cannot carry children: " + id);
+			}
+
+			if (outlineColor != null && (outlineColor & 0xFF000000) != 0) {
+				throw new IllegalArgumentException("outlineColor must be a 24-bit RGB value: " + id);
+			}
+		}
+
+		/** A leaf entry that commits {@code action} on release. */
+		public static Choice leaf(String id, String label, String action) {
+			return new Choice(id, label, action, null, false, false, false, null, null, null);
+		}
+
+		/** A branch entry with no default release action. */
+		public static Choice branch(String id, String label, SpatialMenu children) {
+			return new Choice(id, label, null, children, false, false, false, null, null, null);
+		}
+
+		/** A branch entry that also commits {@code action} on release. */
+		public static Choice branch(String id, String label, String action, SpatialMenu children) {
+			return new Choice(id, label, action, children, false, false, false, null, null, null);
+		}
+
+		/** A focusable entry that never commits or opens anything. */
+		public static Choice reserved(String id, String label) {
+			return new Choice(id, label, null, null, false, false, true, null, null, null);
+		}
+
+		/** A focusable entry whose action and children are ignored. */
+		public static Choice disabled(String id, String label) {
+			return new Choice(id, label, null, null, false, true, false, null, null, null);
+		}
+
+		/** The navigation entry synthesized by the controller for a submenu. */
+		public static Choice back(String id) {
+			return new Choice(id, "pingforit.spatial.back", null, null, true, false, false, null, null, null);
+		}
+
+		/** Returns a copy carrying caller-fixed root geometry. */
+		public Choice withSector(double bearing, double span) {
+			return new Choice(id, label, action, children, back, disabled, reserved, bearing, span, outlineColor);
+		}
+
+		/** Returns a copy carrying a detached Ping Type or local-action outline colour (24-bit RGB). */
+		public Choice withOutlineColor(int outlineColor) {
+			return new Choice(id, label, action, children, back, disabled, reserved, bearing, span, outlineColor);
+		}
+
+		/** Whether this entry opens a menu with at least one choice. */
+		public boolean hasChildren() {
+			return children != null && !children.choices().isEmpty();
+		}
+
+		/** Whether this entry carries caller-fixed geometry. */
+		public boolean hasSector() {
+			return bearing != null && span != null;
+		}
+	}
+}

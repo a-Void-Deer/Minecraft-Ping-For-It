@@ -11,7 +11,7 @@ require reading every document. These documents describe the existing Minecraft
 | [Repository README](../README.md) | Tracked public entry point for project orientation, supported build/source sets, and install/build/verify commands. |
 | Topic documents and focused architecture contracts below | Normative, executable product contracts for their named subsystem. |
 | [Geometry-pipeline overview](architecture/geometry/geometry-pipeline.md) and decisions | Explanatory concepts, boundaries, and rationale. They link to, but do not replace, executable topic contracts. |
-| [Testing and verification](testing/verification.md) | Existing automated-coverage inventory, known gaps, evidence rules and pending manual/integration scenarios. |
+| [Testing and verification](testing/verification/README.md) | Existing automated-coverage inventory, known gaps, evidence rules and pending manual/integration scenarios. |
 
 Focused architecture contracts are normative for their named subsystem
 throughout input, picking, identity, authority, configuration, geometry, and
@@ -44,23 +44,28 @@ conflicts rather than silently choosing or dropping a requirement.
 | Understand the end-to-end data flow | [Architecture: geometry pipeline](architecture/geometry/geometry-pipeline.md) | Identity, capture, authority, presentation and geometry topics below |
 | Change Target/Marker identity or lifecycle | [Target model](architecture/identity/target_model.md) | [Validation](architecture/authority/target_validation.md), [winner selection](architecture/authority/ping_winner.md), Sable |
 | Change server marker creation, removal, expiry or audience lifetime | [Marker lifecycle](architecture/authority/marker_lifecycle.md) | [Target model](architecture/identity/target_model.md), validation and winner selection |
-| Change client marker synchronization, display deadlines or fallback | [Client marker state](architecture/markers/client-state.md) | [Marker lifecycle](architecture/authority/marker_lifecycle.md), [client configuration](config/client.md) and [names and chat](architecture/rendering/names_chat.md) |
+| Change client marker synchronization, display deadlines or fallback | [Client marker state](architecture/markers/client-state.md) | [Marker lifecycle](architecture/authority/marker_lifecycle.md), [client configuration](config/client.md), [presentation snapshot](architecture/presentation/presentation_snapshot.md) and [names and chat](architecture/rendering/names_chat.md) |
+| Change presentation snapshot negotiation, target fields, property selections, per-target-type policy or adapters | [Presentation snapshot](architecture/presentation/presentation_snapshot.md) | [Network protocol](architecture/network/protocol.md), [security](architecture/security.md), [client marker state](architecture/markers/client-state.md), [client configuration](config/client.md), [server configuration](config/server.md) and the affected integration |
+| Change shared source access, capture results, cost accounting or sync publication mechanics | [Shared source capture and sync](architecture/presentation/shared_sources.md) | [Presentation snapshot](architecture/presentation/presentation_snapshot.md), [network protocol](architecture/network/protocol.md), [server configuration](config/server.md), [testing and verification](testing/verification/shared-sources.md) |
+| Change inventory preview or tracking, item-variant identity, zero or component fallback, inventory budgets, or inventory source recovery | [Inventory preview and tracking](architecture/presentation/inventory.md) | [Shared source capture and sync](architecture/presentation/shared_sources.md), [D0008 — Inventory source recovery](decisions/D0008-inventory-source-recovery.md), [D0010 — Native persistent component codec trust](decisions/D0010-persistent-component-codec-trust.md), [marker lifecycle](architecture/authority/marker_lifecycle.md), [server configuration](config/server.md), [Create integration](integrations/create.md), [testing and verification](testing/verification/inventory.md) |
 | Change Target Types, Ping Types, priorities, defaults, keys or colors | [Catalogs](architecture/identity/catalogs.md) | Capture, names/chat and wheel |
-| Change press handling, asynchronous capture, target locking, or the actual wheel-open eligibility/freezing boundary | [Capture](architecture/picking/capture.md) | [Long-press timing](architecture/input/long-press.md), [Long-press compatibility](architecture/input/long-press-compatibility.md), [Selection policy](architecture/picking/selection_policy.md), [Wheel](architecture/picking/wheel.md), [D0005 — Press-time capture](decisions/D0005-press-time-capture.md), local geometry, rate policy |
+| Change press handling, asynchronous capture, target locking, or the actual wheel-open eligibility/freezing boundary | [Capture](architecture/picking/capture.md) | [Long-press timing](architecture/input/long-press.md), [Long-press compatibility](architecture/input/long-press-compatibility.md), [Double-click Danger](architecture/input/double-click-danger.md), [Selection policy](architecture/picking/selection_policy.md), [Wheel](architecture/picking/wheel.md), [D0005 — Press-time capture](decisions/D0005-press-time-capture.md), [D0009 — Precise live candidate capture](decisions/D0009-precise-live-candidate-capture.md), local geometry, rate policy |
+| Change Precise live candidate capture, its period, or Precise leaf enablement | [Precise live candidate capture](architecture/picking/capture.md#precise-live-candidate-capture) | [Wheel](architecture/picking/wheel.md#precise), [Range](architecture/picking/range.md#selector-candidate-supplements), [Selection policy](architecture/picking/selection_policy.md#raycast-use-and-blacklist-boundary), [Client configuration](config/client.md#spatial-selector-interaction), [D0009 — Precise live candidate capture](decisions/D0009-precise-live-candidate-capture.md), [verification](testing/verification/interaction.md#precise-live-candidate-capture) |
 | Change long-press threshold/slice timing | [Long-press timing](architecture/input/long-press.md) | Capture, wheel, client configuration, and compatibility when enabled |
-| Change rapid-click or deferred long-press compatibility | [Long-press compatibility](architecture/input/long-press-compatibility.md) | Capture, long-press timing, wheel, rate policy, and verification |
+| Change rapid-click or deferred long-press compatibility | [Long-press compatibility](architecture/input/long-press-compatibility.md) | Capture, long-press timing, wheel, rate policy, and [verification](testing/verification/interaction.md#capture-wheel-and-cancellation) |
+| Change the repeated short-press Danger gesture, its adjacent-press window or its angle tolerance | [Double-click Danger](architecture/input/double-click-danger.md) | [Capture](architecture/picking/capture.md), [catalogs](architecture/identity/catalogs.md), [client configuration](config/client.md), [configuration UI](UI/settings-screen.md), [long-press compatibility](architecture/input/long-press-compatibility.md), [D0005 — Press-time capture](decisions/D0005-press-time-capture.md) |
 | Change target-selection toggles, block/fluid modes or entity-selection blacklist | [Selection policy](architecture/picking/selection_policy.md) | [Capture](architecture/picking/capture.md), Create raycast |
 | Change exact entity picking or geometry ownership | [Local geometry picking](architecture/picking/local_geometry.md) | Create raycast integration and D0006 |
 | Change client capture distance, optional long-range traces or server range acceptance | [Range](architecture/picking/range.md) | [Capture](architecture/picking/capture.md), [Target validation](architecture/authority/target_validation.md), server configuration and the affected integration |
-| Change an already-open wheel's timeout, selection, or cancellation | [Wheel](architecture/picking/wheel.md) | Capture, client config and validation |
+| Change an already-open wheel's selection or cancellation | [Wheel](architecture/picking/wheel.md) | Capture, client config and validation |
 | Change target acceptance, admissibility or removal adjudication | [Target validation](architecture/authority/target_validation.md) | [Security](architecture/security.md), rate policy and identity |
-| Change registered marker/legacy packet ingress or client packet acceptance | [Network protocol](architecture/network/protocol.md) | [Target validation](architecture/authority/target_validation.md), client marker state and compatibility |
+| Change registered marker/legacy packet ingress or client packet acceptance | [Network protocol](architecture/network/protocol.md) | [Target validation](architecture/authority/target_validation.md), [presentation snapshot](architecture/presentation/presentation_snapshot.md), client marker state and compatibility |
 | Change local invalid-target or server-rejection feedback | [Ping feedback](UI/ping-feedback.md) | [Target validation](architecture/authority/target_validation.md), rate policy and client configuration |
 | Change which same-target ping is visible | [Ping winner](architecture/authority/ping_winner.md) | Identity, removal/expiry and external-target refresh |
-| Change how trusted identity is established, how unauthorized requests are rejected, or failure-isolation and diagnostic detail | [Security](architecture/security.md) | Validation, [rate policy](architecture/config/rate-limit.md) and the affected provider/source contract |
-| Change the complete client file/key catalogue, list syntax, locality, or format examples | [Client configuration](config/client.md) | Revisioning, capture, wheel, outline routing, and geometry modes |
-| Change the persisted server file catalogue, fields, or examples | [Server configuration](config/server.md) | Range, rate policy, marker lifecycle, and revisioning |
-| Change the client settings screen, its client/server scope and category workflow, external file action, reset, or screen exposure | [Configuration UI](UI/settings-screen.md) | Client configuration, server configuration, revisioning, and verification |
+| Change how trusted identity is established, how unauthorized requests are rejected, or failure-isolation and diagnostic detail | [Security](architecture/security.md) | Validation, [rate policy](architecture/config/rate-limit.md), [presentation snapshot](architecture/presentation/presentation_snapshot.md) and the affected provider/source contract |
+| Change the complete client file/key catalogue, list syntax, locality, or format examples | [Client configuration](config/client.md) | Revisioning, capture, wheel, outline routing, geometry modes, and [presentation snapshot](architecture/presentation/presentation_snapshot.md) policy application |
+| Change the persisted server file catalogue, fields, or examples | [Server configuration](config/server.md) | Range, rate policy, marker lifecycle, revisioning, and [presentation snapshot](architecture/presentation/presentation_snapshot.md) policy application |
+| Change the client settings screen, its client/server scope and category workflow, external file action, reset, or screen exposure | [Configuration UI](UI/settings-screen.md) | Client configuration, server configuration, revisioning, and [verification](testing/verification/configuration-ui.md) |
 | Change the remote server-configuration request, snapshot correlation, field mask, merge, apply, or no-ack transaction | [Changing server configuration](architecture/config/changing-server-config.md) | [Server configuration](config/server.md), [Server configuration authority](architecture/authority/server-config.md), [security](architecture/security.md), marker lifecycle, and revisioning |
 | Change who may edit server configuration, edit eligibility, or the required permission | [Server configuration authority](architecture/authority/server-config.md) | [Security](architecture/security.md), [Changing server configuration](architecture/config/changing-server-config.md), and revisioning |
 | Change config schema versions, preservation locks or migrations | [Configuration revisioning](architecture/config/revisioning.md) | [Client configuration](config/client.md), configuration UI, repository build entry |
@@ -69,14 +74,14 @@ conflicts rather than silently choosing or dropping a requirement.
 | Change native block-shape acquisition or edge generation | [VoxelShape geometry](architecture/geometry/voxel_shape.md) | Outline render state and D0002 |
 | Change GPU outline routing, shared render-entity lookup, or production render state | [Outline rendering](architecture/rendering/outline.md) | VoxelShape geometry, source outcomes and model placement |
 | Change multipart owner/master resolution, beds or doors | [Presentation subjects](architecture/rendering/presentation_subjects.md) | Geometry sources, D0003 and the affected integration |
-| Change model offset, placement or seeded variants | [Model placement](architecture/rendering/model_placement.md) | Outline routing and verification limitations |
+| Change model offset, placement or seeded variants | [Model placement](architecture/rendering/model_placement.md) | Outline routing and [verification limitations](testing/verification/rendering.md) |
 | Change target names, marker receipt feedback, chat templates or phrase emphasis | [Names and chat](architecture/rendering/names_chat.md) | Catalogs and authoritative validation |
 | Change Create/Flywheel support | [Create integration](integrations/create.md) | [Create raycast supplement](integrations/create-contraption-raycast.md), local geometry and geometry sources |
 | Change Sable/external-target support | [Sable integration](integrations/sable.md) | Target identity, validation, winner selection and presentation |
-| Change Simulated stand-in/optional-content support | [Simulated integration](integrations/simulated.md) | Selection policy, compatibility and testing/verification |
+| Change Simulated stand-in/optional-content support | [Simulated integration](integrations/simulated.md) | Selection policy, compatibility and [testing/verification](testing/verification/integrations.md#simulated-integration-coverage) |
 | Change loader, mod-ID or optional-content boundaries | [Compatibility](compatibility.md) | The affected integration and security |
-| Change build logic, source-set wiring, loader packaging or artifact identity verification | [Testing and verification](testing/verification.md#build-source-set-and-artifact-verification) | [Repository build instructions](../README.md#install-build-and-verify), compatibility and the affected loader build file |
-| Assess coverage or plan validation | [Testing and verification](testing/verification.md) | The changed topic and applicable decision |
+| Change build logic, source-set wiring, loader packaging or artifact identity verification | [Testing and verification](testing/verification/build-checks.md#build-source-set-and-artifact-verification) | [Repository build instructions](../README.md#install-build-and-verify), compatibility and the affected loader build file |
+| Assess coverage or plan validation | [Testing and verification](testing/verification/README.md) | The changed topic and applicable decision |
 
 Every topic document is reachable from the task table above or the decision
 index below.
@@ -94,12 +99,16 @@ duplicate the exact constants, algorithms or error cases owned by topic docs.
 | [D0004 — Server authority](decisions/D0004-server-authority.md) | Server validation, ownership, rate enforcement, recipient state and winner selection. |
 | [D0005 — Press-time capture](decisions/D0005-press-time-capture.md) | Press-ray locking, asynchronous completion, the actual-open boundary and narrow deferred compatibility. |
 | [D0006 — Exact owned geometry](decisions/D0006-exact-owned-geometry.md) | Why an owned non-hit cannot recover to a coarse AABB and how exact local shapes participate in picking. |
+| [D0007 — No meaningless tests](decisions/D0007-no-meaningless-tests.md) | Why tuning snapshots, inherited fixture defaults, source-shape assertions and fixed prose locks do not justify tests, and which static, protocol or deterministic boundaries remain legitimate. |
+| [D0008 — Inventory source recovery](decisions/D0008-inventory-source-recovery.md) | Why inventory tracking keeps the live Ping and original target identity instead of a source-instance generation, and how invalidation, per-recipient baselines and a hard tracking deadline fence stale data without changing marker lifetime or external leases. |
+| [D0009 — Precise live candidate capture](decisions/D0009-precise-live-candidate-capture.md) | Why the Precise branch follows the current camera ray on a configured period while ordinary actions stay press-frozen, and how same-type competition, pending refreshes and release fencing work. |
+| [D0010 — Native persistent component codec trust](decisions/D0010-persistent-component-codec-trust.md) | Why native persistent semantics support unfamiliar registered components through explicit external trust without making display isolation or owned resource guards optional. |
+| [D0011 — Display default inheritance](decisions/D0011-display-default-inheritance.md) | Why item display travels as a sparse patch over local prototype defaults with explicit strips, and why no default fingerprint or handshake lets omission serve as a safety certificate. |
 
 ## Documentation maintenance
 
-1. Put product direction and scope in `spec.md`, Agent procedure in `AGENTS.md`,
-   and software behavior in topic docs. Do not move product rules into
-   `AGENTS.md` as an enforcement shortcut.
+1. Put agent procedure in `AGENTS.md`, and software behavior in topic docs.
+   Do not move product rules into `AGENTS.md` as an enforcement shortcut.
 2. Update the owning topic for new behavior, the applicable decision only when
    rationale or a boundary changes, and verification when coverage, gaps or
    pending scenarios change.
@@ -111,7 +120,7 @@ duplicate the exact constants, algorithms or error cases owned by topic docs.
    in their picking, geometry, authority or security owners.
 5. Keep distinct terms distinct: model eligibility is not emitted geometry;
    picking `forAllBoxes` is not outline `forAllEdges`; canonical identity is not
-   presentation ownership; existing coverage is not a test run.
+   presentation ownership; e.g.
 6. Preserve product IDs, ordering, keys, canonical vocabularies, validation
    timing, fallback behavior, recoverable failure classes, and optional-mod
    boundaries. Do not mirror implementation numeric defaults, bounds, UI steps,

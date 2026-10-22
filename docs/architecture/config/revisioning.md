@@ -40,9 +40,8 @@ character makes the string invalid. For example:
 |  | `0.3.0-pfi-beta.1` |
 
 The original spelling is retained. For comparison, the `pfi` namespace is
-removed and `major.minor.patch-qualifier` is compared using the repository's
-[Maven-compatible version comparison](../../../common/src/main/java/nx/pingwheel/common/config/MavenComparableVersion.java);
-this is neither lexicographic comparison nor SemVer. For equal numeric cores,
+removed and `major.minor.patch-qualifier` is compared with Maven-compatible
+version ordering; this is neither lexicographic comparison nor SemVer. For equal numeric cores,
 `beta2 < beta10`, `rc1 < final`, `final == release`, and
 `01.002.000-pfi-beta1 == 1.2.0-pfi-beta1`.
 
@@ -73,14 +72,34 @@ the invalid row rather than being treated as a usable migration.
 ## Ordered migration and writeback
 
 Migration operates on a copy of the raw JSON root before the typed config is
-deserialized. The current server-only step applies when the stored version is
-older than `0.3.0-pfi-beta1` and the running version includes that migration
-target:
+deserialized. A step applies when the stored version is older than the step's
+target version and the running version includes that target.
+
+The server step at `0.3.0-pfi-beta1`:
 
 - if `syncDuration` is absent and `pingDuration` is present, copy the raw
   `pingDuration` value to `syncDuration`;
 - if `syncDuration` is already present, retain it rather than overwriting it;
 - remove `pingDuration` in either case.
+
+The client step at `0.5.0-pfi-beta1` retires the persisted wheel radius and
+timeout keys and translates the transparent-block selection toggle:
+
+- remove `wheelInnerRadius` and `wheelOuterRadius`;
+- remove `wheelTimeoutMillis`;
+- when `markTransparentBlocks` is absent, invert the decoded legacy
+  `passThroughTransparentBlocks` value so the block-shape selection effect is
+  preserved; an absent or `null` legacy value retains its old disabled meaning
+  and translates to `markTransparentBlocks: true`;
+- an existing `markTransparentBlocks` entry wins over the legacy entry; remove
+  `passThroughTransparentBlocks` in either case. When translation is needed, an
+  invalid legacy representation is left invalid for typed deserialization and
+  recovery rather than silently accepted as a boolean;
+- never derive spatial-selector values from retired radii, derive a replacement
+  lifetime from the retired timeout, or inject selector defaults in the raw
+  step; the config model initializes missing selector members;
+- retain unrelated entries, the persisted wheel appearance keys, and unknown
+  data.
 
 After the ordered steps, the migration stamps the current marker. Before the
 handler writes it, it compares the current on-disk bytes with the bytes read for
@@ -89,9 +108,48 @@ and reloads the current disk state instead of overwriting an external edit.
 
 The write uses the transformed raw root as its preservation base: serialized
 known configuration fields replace their corresponding entries, other retained
-raw entries survive, and the current marker is stamped again. If that write
-fails, the valid loaded configuration remains in memory and the migration stays
-pending for a later save attempt; it is not converted into invalid-file recovery.
+raw entries survive (including unknown members nested inside the client
+`spatialSelector` object), and the current marker is stamped again. If that
+write fails, the valid loaded configuration remains in memory and the migration
+stays pending for a later save attempt; it is not converted into invalid-file
+recovery.
+
+Client serialization at or after `0.5.0-pfi-beta1` also removes the retired
+wheel radius and timeout keys and `passThroughTransparentBlocks` from the
+document it writes, including the preservation base of a guarded writeback, so
+a later save cannot resurrect them. A same-version load is not rewritten merely
+because retired keys are present; the removal takes effect when that
+configuration is next serialized.
+
+## Same-version shape normalization
+
+Load-time normalization is separate from ordered version migration and also
+runs for a same-version or older load, composed after the ordered steps and
+before typed deserialization. It reconciles the persisted presentation shape
+and the explicitly conflicting client preference relations described below,
+failing closed on a malformed presentation shape:
+
+- A server document whose `presentation.targetTypes` map is present keeps that
+  map and drops the obsolete flat `presentation.white`, `presentation.black`,
+  and `presentation.whitelistOnly` members. When the map is absent, the flat
+  members' values are copied to every one of the five target-type rule sets and
+  the flat members are removed.
+- A malformed `presentation` object or malformed `targetTypes` map normalizes to
+  a deny-all rule for every target type. A malformed individual rule object
+  denies only its own target type. A malformed global permission override
+  normalizes to a global deny-all policy.
+- Unrelated server settings and every well-formed target-type rule survive
+  normalization; an existing new-shape map wins over the obsolete flat members.
+- A client document drops the obsolete `presentationReceive` and
+  `presentationDisplay` keys.
+- The explicitly conflicting client configs are normalized under the same writeback
+  guard described above; the conflict meanings and their key dependencies are
+  owned by [client configuration](../../config/client.md).
+
+A document with neither an obsolete or malformed shape nor those explicit
+preference conflicts is not rewritten for normalization alone. Future-version
+protection and the changed-source pending-migration guard are unchanged;
+normalization shares the same guarded writeback.
 
 ## Invalid-file recovery differs by config type
 

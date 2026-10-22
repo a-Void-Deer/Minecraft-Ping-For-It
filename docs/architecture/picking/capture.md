@@ -8,33 +8,121 @@ Target Type. An asynchronous path, such as Distant Horizons, starts at that
 press edge and completes capture in a later callback, potentially after release.
 The target-selection values are copied into the ordinary ray's immutable policy
 at capture start; their toggles and raycast meanings are owned by
-[selection policy](selection_policy.md).
+[selection policy](selection_policy.md). Every ordinary fresh press atomically
+replaces the interaction token, so a still-pending predecessor becomes stale and
+its later completion cannot publish into the new interaction. While a capture is
+pending, that interaction retains ownership of its token until it completes, is
+superseded, or is aborted; two captures never simultaneously hold valid
+interaction ownership. Only the narrow
+[long-press compatibility](../input/long-press-compatibility.md) path may defer
+a press without starting its capture.
 
 When the snapshot is ready, resolve its Target Type under the
 [catalog matching rules](../identity/catalogs.md). Freeze the resolved Target
 and Target Type for the rest of the interaction. Camera motion, target motion,
-and another entity entering
-the crosshair must not retarget or change the wheel. Release, selection, and
-timeout do not initiate a new selection ray.
+and another entity entering the crosshair must not retarget or change the
+ordinary short-press, Danger, Intent, Content, or Cancel action. Release and
+selection do not initiate a new selection ray. The Precise branch is the
+confirmed exception: its candidates are captured live from the current camera
+ray while that branch is active
+([Precise live candidate capture](#precise-live-candidate-capture)).
+
+A concrete block hit also retains the actual hit face from the press-time
+result, and the same-target capture and coordinator path carries that face
+forward. The frozen face is capture-only read context; its use for inventory
+source access is owned by
+[inventory preview and tracking](../presentation/inventory.md#provider-layer-and-safety);
+it is not part of the captured target identity or the marker identity. A miss
+result's direction is arbitrary and is ignored: only a concrete block hit
+establishes a face, and a location fallback never acquires one.
+
+An ordinary block face is a world-space hit direction. A provider-confirmed
+external block candidate instead retains the provider-local native hit
+direction: the actual native hit's own face, never a world-transformed
+direction, and never synthesized from a synthetic miss, an inside hit or an
+unobserved containment contact. A frozen face survives only while resolution
+preserves the exact block read binding, including an external candidate's
+opaque provider locator; two external candidates that compare equal as targets
+are not interchangeable and do not share a face. Every block candidate
+allocated at the same press edge retains its own actual hit face under these
+rules.
+
+## Precise live candidate capture
+
+The native selector's precise branch captures its bounded candidate set live
+from the current camera ray while that branch is active, on the configured
+[capture period](../../config/client.md#spatial-selector-interaction); entering
+the branch starts capture and leaving it pauses capture. Each live cast uses
+the hold's frozen
+[selection policy](selection_policy.md#raycast-use-and-blacklist-boundary) and
+range snapshot, so a settings change applies to the next hold rather than the
+running one. Release and selection never initiate another live cast. The live
+scan's range and its independence from the ordinary native trace and the
+Distant Horizons route are owned by
+[capture range](range.md#selector-candidate-supplements). It traverses the
+established native and provider pick paths under
+[local geometry](local_geometry.md); it defines no separate collision or
+display-extent rule.
+
+All candidates of one fixed Target Type compete by nearest actual hit from the
+live ray origin. A more specific class consumes its identity first; a generic
+class may skip an identity already consumed by a more specific class and
+compete for the next nearest. A type's candidate is certified only when the
+established native or provider pick path completed its bounded traversal
+within the candidate work budget; certification is not coverage of every
+registered shape or of block-display/outline eligibility. A scan that cannot
+complete disables that type's leaf even when an ordinary target of that type
+exists; the leaf never falls back to the ordinary result. While a refresh is
+in progress the leaf keeps the last certified
+candidate selectable, and a leaf with no previously certified candidate is
+disabled. Native categories publish first; the Distant Horizons location
+candidate completes independently and a final missing or incomplete result
+disables its leaf. Every live capture is bounded and generation-fenced: a late
+or stale asynchronous completion never publishes into the live set, the
+ordinary capture, or another interaction.
+
+Live candidates follow ordinary capture. An entity candidate uses the
+same canonical locator as ordinary capture, including the established
+experience-orb runtime-ID and multipart canonicalization rules
+([target model](../identity/target_model.md#ordinary-identities-and-lifecycle)).
+An external block candidate requires positive capture-local provider
+equivalence and never fabricates a server materialization ID. Sable's bounded
+transformed-behind discovery is owned by the
+[Sable integration](../../integrations/sable.md#supplemental-transformed-behind-discovery).
+The location class is derived rather than scanned: it uses the current concrete
+hit point when a live native trace has one and otherwise the independently
+completing Distant Horizons route. An exact-owned non-hit remains rejected
+under [local geometry](local_geometry.md); a candidate scan never revives its
+coarse bounds.
 
 ## Baseline release and actual wheel opening
 
-At the baseline press, freeze the effective long-press threshold. Its timing
-relationship is owned by [long-press timing](../input/long-press.md).
+At the baseline press, freeze the effective long-press threshold and the held
+interaction's spatial-selector settings snapshot. Ordinary and optional gesture
+eligibility are owned by [long-press timing](../input/long-press.md).
 Release and wheel-open outcomes are:
 
 | Interaction state at the release/present boundary | Outcome |
 | --- | --- |
-| Released before the frozen threshold, with capture ready | Create the captured target using that Target Type's default Ping Type. |
-| Released before the frozen threshold, with capture pending | Wait for capture, then create its default Ping Type. |
-| Threshold elapsed but no wheel actually opened | Use the same default-create path, including pending-capture waiting. |
+| Released before the frozen threshold without an actual wheel open, with capture ready | Create the captured target using that Target Type's default Ping Type. |
+| Released before the frozen threshold without an actual wheel open, with capture pending | Wait for capture, then create its default Ping Type. |
+| Ordinary or gesture eligibility reached but no wheel actually opened | Use the same default-create path, including pending-capture waiting. |
 | Wheel actually opened | Delegate release to [wheel](wheel.md#radial-release-result). |
 
-Holding beyond the threshold opens a wheel only after capture is ready and a
-render/present frame occurs while the key remains held. Elapsed time alone does
-not fabricate an opened wheel. [Wheel](wheel.md) owns timeout snapshot timing,
-its value, and its resulting close behavior. No release outcome samples the
-release-time camera or casts a release-time ray.
+A press that qualifies under
+[double-click Danger](../input/double-click-danger.md) uses that gesture's
+`danger` create instead of the Target Type's default Ping Type; every other row
+above applies unchanged.
+
+Either eligibility path opens a wheel only after capture is ready, the viewport
+is valid, and a render/present frame occurs while the current interaction token
+is still owned and the key remains held. Neither elapsed time nor pointer
+movement fabricates an opened wheel, and a capture completion after
+release or abort cannot open one retroactively. [Wheel](wheel.md) owns the
+actual-open selection, pre-open input handoff, and subsequent cancellation
+behavior. Both opening paths retain the ordinary press-frozen ray, target and
+Target Type. No release outcome samples the release-time camera or casts a
+release-time ray.
 
 ## Interaction lifecycle aborts
 
@@ -63,7 +151,17 @@ boundary, and compatibility-specific transition behavior are owned by
 [long-press compatibility](../input/long-press-compatibility.md).
 
 Coverage and remaining input-lifecycle scenarios are inventoried in
-[verification](../../testing/verification.md#capture-wheel-and-cancellation).
+[verification](../../testing/verification/interaction.md#capture-wheel-and-cancellation).
+
+## Repeated short-press derivation
+
+A qualified repeated short press can request additional ordinary `danger`
+creates from the same frozen capture instead of starting an independent
+selection. [Double-click Danger](../input/double-click-danger.md) owns
+qualification, retained-capture reuse and the bounded dependent presses. Each
+derived create remains an ordinary press-time action with its own token and
+dispatch outcome, so it introduces no release-time ray, retargeted target or
+second deferred-capture path.
 
 ## Integration and authority boundaries
 

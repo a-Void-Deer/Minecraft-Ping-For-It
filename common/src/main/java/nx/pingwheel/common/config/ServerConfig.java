@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 import nx.pingwheel.common.core.ServerCore;
+import nx.pingwheel.common.presentation.PresentationSettings;
 
 @Getter
 @Setter
@@ -19,9 +20,23 @@ public class ServerConfig implements IConfig {
 	@SerializedName("syncDuration")
 	int syncDuration = ServerConfigBounds.DEFAULT_SYNC_DURATION;
 	int pingDistance = 2048;
+	/** Server-authoritative Basic/extension allow lists, sampling limits and permissions. */
+	PresentationSettings presentation = PresentationSettings.serverDefaults();
+	/** Server-authoritative inventory preview/tracking budgets; additive object with defaults. */
+	InventorySettings inventory = InventorySettings.serverDefaults();
+	/** Controls administrator budget-delay messages only; WARN diagnostics remain enabled. */
+	boolean budgetDelayNotificationsEnabled = true;
+
+	public PresentationSettings getPresentation() {
+		return presentation;
+	}
 
 	@Override
 	public void validate() {
+		if (presentation == null) presentation = PresentationSettings.serverDefaults();
+		presentation.validate();
+		if (inventory == null) inventory = InventorySettings.serverDefaults();
+		inventory.validate();
 		if (defaultChannelMode == null) {
 			defaultChannelMode = ChannelMode.AUTO;
 		}

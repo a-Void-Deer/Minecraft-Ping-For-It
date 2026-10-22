@@ -7,15 +7,18 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetType;
+import nx.pingwheel.common.presentation.PresentationPropertySelection;
 
 /**
  * Server-authoritative bookkeeping for active {@link ServerMarker}s.
@@ -31,8 +34,7 @@ import nx.pingwheel.common.domain.TargetType;
  *
  * <h2>Determinism</h2>
  *
- * <p>Markers are held internally in a {@link LinkedHashMap} (insertion order,
- * which matches ascending {@link MarkerId} because ids are monotonic), and
+ * <p>Markers are held internally in a {@link TreeMap} (ascending id order), and
  * every marker list handed to callers is sorted by ascending {@link MarkerId}.
  *
  * <p>Winner changes are reported per {@code (targetKey, recipient)} pair and
@@ -53,7 +55,7 @@ import nx.pingwheel.common.domain.TargetType;
 public final class ServerMarkerStore {
 
 	private final MarkerIdSource idSource;
-	private final Map<MarkerId, ServerMarker> markers = new LinkedHashMap<>();
+	private final NavigableMap<MarkerId, ServerMarker> markers = new TreeMap<>();
 
 	public ServerMarkerStore(MarkerIdSource idSource) {
 		this.idSource = Objects.requireNonNull(idSource, "idSource");
@@ -77,6 +79,13 @@ public final class ServerMarkerStore {
 		long expiresAtTick,
 		List<UUID> recipients
 	) {
+		return create(owner, target, targetType, pingType, anchor, arrivalTick, expiresAtTick, recipients, List.of());
+	}
+
+	public synchronized MarkerCreation create(
+		UUID owner, Target target, TargetType targetType, PingType pingType, MarkerAnchor anchor,
+		long arrivalTick, long expiresAtTick, List<UUID> recipients, List<PresentationPropertySelection> properties
+	) {
 		ServerMarker marker = new ServerMarker(
 			idSource.nextId(),
 			owner,
@@ -86,7 +95,7 @@ public final class ServerMarkerStore {
 			anchor,
 			arrivalTick,
 			expiresAtTick,
-			recipients);
+			recipients, properties);
 
 		List<MarkerWinnerChange> winnerChanges = creationChanges(marker);
 
@@ -229,6 +238,39 @@ public final class ServerMarkerStore {
 		return Optional.ofNullable(markers.get(id));
 	}
 
+	/** Greatest currently active id, or -1 for an empty population. */
+	public synchronized long highWaterId() {
+		return markers.isEmpty() ? -1 : markers.lastKey().value();
+	}
+
+	/** Detached canonical discovery result. The cursor does not require its marker to remain active. */
+	public record MarkerPage(List<ServerMarker> markers, long afterId, boolean complete) {
+		public MarkerPage { markers = List.copyOf(markers); }
+	}
+
+	/**
+	 * Bounded ascending discovery within a previously captured high-water. -1
+	 * precedes id zero; ordered successors avoid arithmetic at Long.MAX_VALUE.
+	 * Neither paging nor completion checks enumerate the complete population.
+	 */
+	public synchronized MarkerPage pageAfter(long afterExclusive, long highWaterInclusive, int limit) {
+		if (afterExclusive < -1 || highWaterInclusive < -1 || afterExclusive > highWaterInclusive || limit <= 0)
+			throw new IllegalArgumentException("marker page bounds");
+		if (highWaterInclusive == -1) return new MarkerPage(List.of(), afterExclusive, true);
+		var remaining = afterExclusive == -1 ? markers : markers.tailMap(new MarkerId(afterExclusive), false);
+		var iterator = remaining.entrySet().iterator();
+		List<ServerMarker> page = new ArrayList<>(Math.min(limit, markers.size()));
+		long after = afterExclusive;
+		while (page.size() < limit && iterator.hasNext()) {
+			var entry = iterator.next();
+			if (entry.getKey().value() > highWaterInclusive) return new MarkerPage(page, after, true);
+			page.add(entry.getValue());
+			after = entry.getKey().value();
+		}
+		boolean complete = !iterator.hasNext() || iterator.next().getKey().value() > highWaterInclusive;
+		return new MarkerPage(page, after, complete);
+	}
+
 	/**
 	 * Replaces the locator and fallback anchor of an active external marker
 	 * without changing its marker id, owner, lifetime, audience, target key, or
@@ -257,7 +299,7 @@ public final class ServerMarkerStore {
 			anchor,
 			current.arrivalTick(),
 			current.expiresAtTick(),
-			current.recipients());
+			current.recipients(), current.properties());
 
 		markers.put(id, updated);
 		return Optional.of(updated);
@@ -294,6 +336,40 @@ public final class ServerMarkerStore {
 		Objects.requireNonNull(recipient, "recipient");
 
 		return MarkerWinner.winnerFor(markers.values(), key, recipient);
+	}
+
+	/**
+	 * The authoritative winner baseline for {@code recipient} at
+	 * {@code currentTick}: one active marker per {@link TargetKey} whose frozen
+	 * audience contains the recipient and whose expiry tick has not been
+	 * reached, selected by {@link MarkerWinner#ARRIVAL_THEN_ID}.
+	 *
+	 * <p>Markers at or past {@link ServerMarker#expiresAtTick()} are excluded
+	 * before selection, so a due marker that the store has not yet physically
+	 * removed cannot mask an active same-target sibling. The result is
+	 * immutable, sorted by ascending {@link MarkerId}, and the query never
+	 * mutates the store or reports winner transitions.
+	 */
+	public synchronized List<ServerMarker> winnersFor(UUID recipient, long currentTick) {
+		Objects.requireNonNull(recipient, "recipient");
+
+		Map<TargetKey, ServerMarker> winners = new LinkedHashMap<>();
+
+		for (ServerMarker marker : markers.values()) {
+			if (marker.expiresAtTick() <= currentTick || !marker.recipients().contains(recipient)) {
+				continue;
+			}
+
+			ServerMarker current = winners.get(marker.targetKey());
+
+			if (current == null || MarkerWinner.ARRIVAL_THEN_ID.compare(marker, current) > 0) {
+				winners.put(marker.targetKey(), marker);
+			}
+		}
+
+		return winners.values().stream()
+			.sorted(Comparator.comparing(ServerMarker::id))
+			.toList();
 	}
 
 	/**
@@ -444,7 +520,7 @@ public final class ServerMarkerStore {
 			marker.anchor(),
 			marker.arrivalTick(),
 			marker.expiresAtTick(),
-			recipients);
+			recipients, marker.properties());
 	}
 
 	/**

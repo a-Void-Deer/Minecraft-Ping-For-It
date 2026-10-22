@@ -2,6 +2,7 @@ package nx.pingwheel.common.network;
 
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
+import nx.pingwheel.common.config.ServerConfigBounds;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,9 +25,9 @@ class SyncDurationPolicyS2CPacketTest {
 	void negativeAndOutOfBoundsPoliciesAreCorrupt() {
 		assertTrue(new SyncDurationPolicyS2CPacket(-1).isCorrupt());
 		assertTrue(new SyncDurationPolicyS2CPacket(0).isCorrupt());
-		assertTrue(new SyncDurationPolicyS2CPacket(61).isCorrupt());
-		assertFalse(new SyncDurationPolicyS2CPacket(1).isCorrupt());
-		assertFalse(new SyncDurationPolicyS2CPacket(60).isCorrupt());
+		assertTrue(new SyncDurationPolicyS2CPacket(ServerConfigBounds.MAX_PING_DURATION + 1).isCorrupt());
+		assertFalse(new SyncDurationPolicyS2CPacket(ServerConfigBounds.MIN_PING_DURATION).isCorrupt());
+		assertFalse(new SyncDurationPolicyS2CPacket(ServerConfigBounds.MAX_PING_DURATION).isCorrupt());
 	}
 
 	@Test

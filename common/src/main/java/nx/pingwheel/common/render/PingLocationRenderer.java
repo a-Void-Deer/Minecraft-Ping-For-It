@@ -45,6 +45,13 @@ public class PingLocationRenderer {
 		// text never inherits a ping-type or team color. Its label sits above
 		// the distance label so the two never overlap at common GUI scales.
 		ctx.renderLabel(ping.getTargetName(), -2.75f, null, RenderColorPolicy.targetTextColor());
+		int line = 0;
+		for (String label : ping.getPresentationLabels()) {
+			if (line >= 3) break;
+			ctx.renderLabel(Component.literal(label), -4.0f - line * 1.25f, null,
+				RenderColorPolicy.targetTextColor());
+			line++;
+		}
 
 		final var isPlayerListHeld = config.getPlayerInfoMode() == PlayerInfoMode.HOLD && Game.options.keyPlayerList.isDown();
 		final var showVerbosePlayerInfo = config.getPlayerInfoMode() == PlayerInfoMode.ALWAYS || isPlayerListHeld;

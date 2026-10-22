@@ -5,11 +5,15 @@ import net.minecraft.server.level.ServerPlayer;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.core.ServerCore;
 import nx.pingwheel.common.integration.ModContext;
+import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformServerEventService;
 
@@ -51,11 +55,26 @@ public class CommonServer {
 	}
 
 	public void onMarkerCreatePacket(MinecraftServer server, ServerPlayer player, MarkerCreateC2SPacket packet) {
-		ServerCore.onMarkerCreate(server, player, packet);
+		// New authoritative marker requests require the negotiated v2 session.
 	}
 
 	public void onMarkerRemovePacket(MinecraftServer server, ServerPlayer player, MarkerRemoveC2SPacket packet) {
-		ServerCore.onMarkerRemove(server, player, packet);
+		// New authoritative marker requests require the negotiated v2 session.
+	}
+
+	public void onPresentationPacket(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet) {
+		ServerCore.onPresentationPacket(server, player, packet);
+	}
+	public void onPresentationPreview(MinecraftServer server, ServerPlayer player, PresentationPreviewC2SPacket packet) {
+		ServerCore.onPresentationPreview(server, player, packet);
+	}
+	public void onServerStopped(MinecraftServer server) {
+		nx.pingwheel.common.presentation.minecraft.PresentationServer.stopped(server);
+		nx.pingwheel.common.presentation.minecraft.BudgetDelayMonitoring.stopped(server);
+	}
+
+	public void onInventoryPacket(MinecraftServer server, ServerPlayer player, InventoryC2SPacket packet) {
+		ServerCore.onInventoryPacket(server, player, packet);
 	}
 
 	public void onServerConfigRequestPacket(MinecraftServer server, ServerPlayer player, ServerConfigRequestC2SPacket packet) {
@@ -64,6 +83,10 @@ public class CommonServer {
 
 	public void onServerConfigUpdatePacket(MinecraftServer server, ServerPlayer player, ServerConfigUpdateC2SPacket packet) {
 		ServerCore.onServerConfigUpdate(server, player, packet);
+	}
+
+	public void onServerPresentationPolicyPacket(MinecraftServer server, ServerPlayer player, ServerPresentationPolicyC2SPacket packet) {
+		ServerCore.onServerPresentationPolicy(server, player, packet);
 	}
 
 	public void onServerTick(MinecraftServer server) {

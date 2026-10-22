@@ -6,15 +6,17 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.network.chat.Component;
 
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.util.SafeExceptionReport;
 
 /**
  * Client-side decoding of authoritative target name JSON into display
  * components, using the current level's registry access.
  *
  * <p>Malformed or unparseable payloads never crash the HUD: they fall back to
- * the {@link TargetNameComposer#unknown() unknown} display name and emit one
- * safe debug record carrying the marker id and the exception class only —
- * never the JSON, a name, a UUID, a position, or a registry id.
+ * the {@link TargetNameComposer#unknown() unknown} display name. Production
+ * failures emit lazy, bounded, rate-limited DEBUG diagnostics carrying the
+ * marker id and original exception details, without separately attaching JSON.
  *
  * <p>The logger is injectable and defaults to a no-op, so pure tests never
  * initialize the game logger; the client composition root wires
@@ -35,25 +37,49 @@ public final class ClientTargetNameDecoder {
 		 */
 		void debug(String message, Object... args);
 
+		/** Reports a decode failure without attaching an unbounded logger throwable. */
+		default void debugException(MarkerId markerId, Throwable failure) {
+			debug(SafeExceptionReport.formatWithContext("target name decode failed: markerId="
+				+ markerId.value(), failure));
+		}
+
 		/**
 		 * A logger that discards every record.
 		 */
 		static Logger noop() {
-			return (message, args) -> {
-				// intentionally empty
+			return new Logger() {
+				@Override
+				public void debug(String message, Object... args) {
+					// intentionally empty
+				}
+
+				@Override
+				public void debugException(MarkerId markerId, Throwable failure) {
+					// Do not format discarded reports.
+				}
 			};
 		}
 
 		/**
 		 * A logger backed by the mod's global Log4j logger.
 		 *
-		 * <p>The reference to {@link nx.pingwheel.common.Global#LOGGER} is
-		 * deferred into the returned lambda body, so calling this factory does
-		 * not initialize the game logger; only the first {@code debug(...)}
-		 * invocation does.
+			 * <p>General debug messages resolve {@link nx.pingwheel.common.Global#LOGGER}
+			 * only when emitted. Exception reports use the lazy, platform-independent
+			 * rate-limited diagnostic logger instead. This factory initializes neither.
 		 */
 		static Logger global() {
-			return (message, args) -> nx.pingwheel.common.Global.LOGGER.debug(message, args);
+			return new Logger() {
+				@Override
+				public void debug(String message, Object... args) {
+					nx.pingwheel.common.Global.LOGGER.debug(message, args);
+				}
+
+				@Override
+				public void debugException(MarkerId markerId, Throwable failure) {
+					RateLimitedDiagnostics.debug("target-name-decode", ClientTargetNameDecoder.class.getName(),
+						() -> "markerId=" + markerId.value(), failure);
+				}
+			};
 		}
 	}
 
@@ -80,8 +106,7 @@ public final class ClientTargetNameDecoder {
 		try {
 			return Component.Serializer.fromJson(json.value(), registryAccess);
 		} catch (RuntimeException e) {
-			logger.debug("target name decode failed: markerId={} reason={}",
-				markerId.value(), e.getClass().getSimpleName());
+			logger.debugException(markerId, e);
 			return TargetNameComposer.unknown();
 		}
 	}

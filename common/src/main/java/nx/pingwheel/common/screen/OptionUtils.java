@@ -4,7 +4,10 @@ import com.mojang.serialization.Codec;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -50,6 +53,40 @@ public class OptionUtils {
 
 	public static OptionInstance<Boolean> ofBool(String key, Supplier<Boolean> getter, Consumer<Boolean> setter) {
 		return ofBool(key, getter, setter, null);
+	}
+
+	/** A decimal preference on an exact slider grid, without float rounding in persistence. */
+	public static OptionInstance<BigDecimal> ofDecimal(String key, BigDecimal min, BigDecimal max,
+		BigDecimal step, Function<BigDecimal, Component> formatter, Supplier<Component> tooltipSupplier,
+		Supplier<BigDecimal> getter, Consumer<BigDecimal> setter) {
+		int minimumIndex = min.divide(step).intValueExact();
+		int maximumIndex = max.divide(step).intValueExact();
+		return new OptionInstance<>(key,
+			tooltipSupplier == null ? OptionInstance.noTooltip() : value -> Tooltip.create(tooltipSupplier.get()),
+			(optionText, value) -> formatter.apply(getter.get()),
+			new OptionInstance.IntRange(minimumIndex, maximumIndex).xmap(
+				index -> step.multiply(BigDecimal.valueOf(index)),
+				value -> value.divide(step, 0, RoundingMode.HALF_UP).intValueExact()),
+			Codec.doubleRange(min.doubleValue(), max.doubleValue()).xmap(BigDecimal::valueOf, BigDecimal::doubleValue),
+			getter.get(), setter);
+	}
+
+	/** Formats a grid value without float noise or a redundant trailing zero. */
+	public static String formatDecimal(BigDecimal value) {
+		return value.stripTrailingZeros().toPlainString();
+	}
+
+	/**
+	 * Builds the complete localized {@code <setting name>: <value>} label for a
+	 * decimal setting. Zero renders the supplied localized off value; non-zero
+	 * renders the plain decimal value through the supplied unit.
+	 */
+	public static MutableComponent decimalSettingLabel(String settingKey, BigDecimal value,
+		Component offValue, String unitKey) {
+		Component rendered = value.signum() == 0
+			? offValue
+			: Component.translatable(unitKey, Component.literal(formatDecimal(value)));
+		return Component.translatable(settingKey, rendered);
 	}
 
 	public static OptionInstance<Boolean> ofBool(String key, Supplier<Boolean> getter, Consumer<Boolean> setter, Supplier<Component> tooltipSupplier) {

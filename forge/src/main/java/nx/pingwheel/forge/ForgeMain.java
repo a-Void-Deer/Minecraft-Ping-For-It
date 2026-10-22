@@ -8,7 +8,11 @@ import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.network.ChannelBuilder;
 import net.minecraftforge.network.EventNetworkChannel;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.server.ServerStoppedEvent;
 import nx.pingwheel.common.CommonServer;
+import nx.pingwheel.common.network.InventoryC2SPacket;
+import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
@@ -17,10 +21,16 @@ import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
+import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
 import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.forge.platform.PlatformNetworkServiceImpl;
@@ -42,15 +52,24 @@ public class ForgeMain {
 	public static final EventNetworkChannel SERVER_CONFIG_REQUEST_CHANNEL_C2S = ChannelBuilder.named(ServerConfigRequestC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel SERVER_CONFIG_UPDATE_CHANNEL_C2S = ChannelBuilder.named(ServerConfigUpdateC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C = ChannelBuilder.named(ServerConfigSnapshotS2CPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel SERVER_PRESENTATION_POLICY_CHANNEL_C2S = ChannelBuilder.named(ServerPresentationPolicyC2SPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel SERVER_PRESENTATION_POLICY_CHANNEL_S2C = ChannelBuilder.named(ServerPresentationPolicyS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_REMOVE_CHANNEL_C2S = ChannelBuilder.named(MarkerRemoveC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_CREATED_CHANNEL_S2C = ChannelBuilder.named(MarkerCreatedS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_REMOVED_CHANNEL_S2C = ChannelBuilder.named(MarkerRemovedS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_REJECTED_CHANNEL_S2C = ChannelBuilder.named(MarkerRejectedS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel MARKER_WINNER_CHANGED_CHANNEL_S2C = ChannelBuilder.named(MarkerWinnerChangedS2CPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel PRESENTATION_CHANNEL_C2S = ChannelBuilder.named(PresentationC2SPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel PRESENTATION_CHANNEL_S2C = ChannelBuilder.named(PresentationS2CPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel INVENTORY_CHANNEL_C2S = ChannelBuilder.named(InventoryC2SPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel INVENTORY_CHANNEL_S2C = ChannelBuilder.named(InventoryS2CPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel PRESENTATION_PREVIEW_CHANNEL_C2S = ChannelBuilder.named(PresentationPreviewC2SPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel PRESENTATION_PREVIEW_CHANNEL_S2C = ChannelBuilder.named(PresentationPreviewS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 
 	@SuppressWarnings({"java:S1118", "the public constructor is required by forge"})
 	public ForgeMain() {
 		CommonServer.INSTANCE.onInit();
+		MinecraftForge.EVENT_BUS.addListener((ServerStoppedEvent event) -> CommonServer.INSTANCE.onServerStopped(event.getServer()));
 
 		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> ForgeClient::new);
 
@@ -63,17 +82,29 @@ public class ForgeMain {
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigRequestC2SPacket.PACKET_ID, SERVER_CONFIG_REQUEST_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigUpdateC2SPacket.PACKET_ID, SERVER_CONFIG_UPDATE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerConfigSnapshotS2CPacket.PACKET_ID, SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerPresentationPolicyC2SPacket.PACKET_ID, SERVER_PRESENTATION_POLICY_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(ServerPresentationPolicyS2CPacket.PACKET_ID, SERVER_PRESENTATION_POLICY_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerRemoveC2SPacket.PACKET_ID, MARKER_REMOVE_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerCreatedS2CPacket.PACKET_ID, MARKER_CREATED_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerRemovedS2CPacket.PACKET_ID, MARKER_REMOVED_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerRejectedS2CPacket.PACKET_ID, MARKER_REJECTED_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(MarkerWinnerChangedS2CPacket.PACKET_ID, MARKER_WINNER_CHANGED_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationC2SPacket.PACKET_ID, PRESENTATION_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationS2CPacket.PACKET_ID, PRESENTATION_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(InventoryC2SPacket.PACKET_ID, INVENTORY_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(InventoryS2CPacket.PACKET_ID, INVENTORY_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationPreviewC2SPacket.PACKET_ID, PRESENTATION_PREVIEW_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationPreviewS2CPacket.PACKET_ID, PRESENTATION_PREVIEW_CHANNEL_S2C);
 		registerPacketHandler(PING_LOCATION_CHANNEL_C2S, PingLocationC2SPacket::readSafe, CommonServer.INSTANCE::onPingLocationPacket);
 		registerPacketHandler(UPDATE_CHANNEL_C2S, UpdateChannelC2SPacket::readSafe, CommonServer.INSTANCE::onChannelUpdatePacket);
 		registerPacketHandler(MARKER_CREATE_CHANNEL_C2S, MarkerCreateC2SPacket::readSafe, CommonServer.INSTANCE::onMarkerCreatePacket);
 		registerPacketHandler(MARKER_REMOVE_CHANNEL_C2S, MarkerRemoveC2SPacket::readSafe, CommonServer.INSTANCE::onMarkerRemovePacket);
 		registerPacketHandler(SERVER_CONFIG_REQUEST_CHANNEL_C2S, ServerConfigRequestC2SPacket::readSafe, CommonServer.INSTANCE::onServerConfigRequestPacket);
 		registerPacketHandler(SERVER_CONFIG_UPDATE_CHANNEL_C2S, ServerConfigUpdateC2SPacket::readSafe, CommonServer.INSTANCE::onServerConfigUpdatePacket);
+		registerPacketHandler(SERVER_PRESENTATION_POLICY_CHANNEL_C2S, ServerPresentationPolicyC2SPacket::readSafe, CommonServer.INSTANCE::onServerPresentationPolicyPacket);
+		registerPacketHandler(PRESENTATION_CHANNEL_C2S, PresentationC2SPacket::readSafe, CommonServer.INSTANCE::onPresentationPacket);
+		registerPacketHandler(INVENTORY_CHANNEL_C2S, InventoryC2SPacket::readSafe, CommonServer.INSTANCE::onInventoryPacket);
+		registerPacketHandler(PRESENTATION_PREVIEW_CHANNEL_C2S, PresentationPreviewC2SPacket::readSafe, CommonServer.INSTANCE::onPresentationPreview);
 	}
 
 	public static <T> void registerPacketHandler(EventNetworkChannel channel, Function<FriendlyByteBuf, T> packetReader, TriConsumer<MinecraftServer, ServerPlayer, T> packetHandler) {

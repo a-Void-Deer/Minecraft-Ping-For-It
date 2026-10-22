@@ -27,12 +27,16 @@ class ServerConfigSerializationTest {
 	}
 
 	@Test
-	void syncDurationValidationRetainsTheExistingBounds() {
+	void syncDurationValidationEnforcesTheSharedBounds() {
 		ServerConfig config = gson.fromJson("{\"syncDuration\":0}", ServerConfig.class);
 		config.validate();
 		assertEquals(ServerConfigBounds.MIN_PING_DURATION, config.getSyncDuration());
 
-		config.setSyncDuration(61);
+		config.setSyncDuration(23);
+		config.validate();
+		assertEquals(23, config.getSyncDuration());
+
+		config.setSyncDuration(ServerConfigBounds.MAX_PING_DURATION + 1);
 		config.validate();
 		assertEquals(ServerConfigBounds.MAX_PING_DURATION, config.getSyncDuration());
 	}

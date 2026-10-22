@@ -31,9 +31,12 @@ public final class SettingsNavigationModel {
 		INPUT_INTERACTION(Scope.CLIENT, "input"),
 		CHANNEL_NOTICES(Scope.CLIENT, "channel_notices"),
 		GEOMETRY_CONFIG(Scope.CLIENT, "geometry_config"),
+		CLIENT_PERFORMANCE(Scope.CLIENT, "performance"),
+		SERVER_PRESENTATION(Scope.SERVER, "server_presentation"),
 		CHANNEL_PLAYERS(Scope.SERVER, "channel_players"),
 		SEND_RATE(Scope.SERVER, "send_rate"),
-		MARKER_DURATION(Scope.SERVER, "marker_duration");
+		MARKER_DURATION(Scope.SERVER, "marker_duration"),
+		PERFORMANCE(Scope.SERVER, "performance");
 
 		private final Scope scope;
 		private final String id;
@@ -69,10 +72,13 @@ public final class SettingsNavigationModel {
 		CLIENT_INPUT_INTERACTION(Scope.CLIENT, Category.INPUT_INTERACTION),
 		CLIENT_CHANNEL_NOTICES(Scope.CLIENT, Category.CHANNEL_NOTICES),
 		CLIENT_GEOMETRY_CONFIG(Scope.CLIENT, Category.GEOMETRY_CONFIG),
+		CLIENT_PERFORMANCE(Scope.CLIENT, Category.CLIENT_PERFORMANCE),
 		SERVER_OVERVIEW(Scope.SERVER, null),
+		SERVER_PRESENTATION(Scope.SERVER, Category.SERVER_PRESENTATION),
 		SERVER_CHANNEL_PLAYERS(Scope.SERVER, Category.CHANNEL_PLAYERS),
 		SERVER_SEND_RATE(Scope.SERVER, Category.SEND_RATE),
-		SERVER_MARKER_DURATION(Scope.SERVER, Category.MARKER_DURATION);
+		SERVER_MARKER_DURATION(Scope.SERVER, Category.MARKER_DURATION),
+		SERVER_PERFORMANCE(Scope.SERVER, Category.PERFORMANCE);
 
 		private final Scope scope;
 		private final Category category;
@@ -124,12 +130,15 @@ public final class SettingsNavigationModel {
 			Category.WHEEL_APPEARANCE,
 			Category.INPUT_INTERACTION,
 			Category.CHANNEL_NOTICES,
-			Category.GEOMETRY_CONFIG),
+			Category.GEOMETRY_CONFIG,
+			Category.CLIENT_PERFORMANCE),
 		Scope.SERVER,
 		List.of(
 			Category.CHANNEL_PLAYERS,
 			Category.SEND_RATE,
-			Category.MARKER_DURATION));
+			Category.MARKER_DURATION,
+			Category.PERFORMANCE,
+			Category.SERVER_PRESENTATION));
 
 	private static final PageViewState EMPTY_VIEW_STATE = new PageViewState(0, null);
 
@@ -220,8 +229,42 @@ public final class SettingsNavigationModel {
 	}
 
 	/**
+	 * Applies the consequence of losing the local server edit permission. A
+	 * retained, still-viewable authoritative snapshot keeps the current server
+	 * leaf open as a read-only page; without one the server leaf cannot render
+	 * any values and its scope overview is forced. Reports whether the page
+	 * changed.
+	 */
+	public boolean onServerViewAccessLost(boolean canViewRetainedSnapshot) {
+		return this.onServerViewAccessLost(canViewRetainedSnapshot, canViewRetainedSnapshot);
+	}
+
+	/**
+	 * Applies a view-access change using the capability owned by the current leaf.
+	 * Ordinary server configuration and presentation policy are independent views.
+	 */
+	public boolean onServerViewAccessLost(
+		boolean canViewRetainedServerSettings,
+		boolean canViewRetainedPresentationPolicy
+	) {
+		if (current.scope() != Scope.SERVER || !current.isLeaf()) {
+			return false;
+		}
+
+		final boolean canViewCurrentLeaf = current == Page.SERVER_PRESENTATION
+			? canViewRetainedPresentationPolicy
+			: canViewRetainedServerSettings;
+		if (canViewCurrentLeaf) {
+			return false;
+		}
+
+		current = Page.SERVER_OVERVIEW;
+		return true;
+	}
+
+	/**
 	 * Routes to the server category that owns the first invalid numeric field.
-	 * The send-rate category is checked before marker duration so a mask that
+	 * Send rate is checked before marker duration, then Performance, so a mask that
 	 * contains several invalid fields lands deterministically.  A mask with no
 	 * invalid numeric field leaves the current page unchanged and reports
 	 * {@code false}.
@@ -234,6 +277,11 @@ public final class SettingsNavigationModel {
 
 		if ((invalidFieldMask & ServerConfigUpdate.SYNC_DURATION) != 0) {
 			current = Page.SERVER_MARKER_DURATION;
+			return true;
+		}
+
+		if ((invalidFieldMask & ServerConfigUpdate.ALL_INVENTORY_FIELDS) != 0) {
+			current = Page.SERVER_PERFORMANCE;
 			return true;
 		}
 

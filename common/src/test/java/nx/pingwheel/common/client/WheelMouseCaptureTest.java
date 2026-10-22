@@ -1,15 +1,16 @@
 package nx.pingwheel.common.client;
 
 import org.junit.jupiter.api.Test;
+import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
  * Pure tests for the {@link WheelMouseCapture} transition policy. Only the
  * static {@link WheelMouseCapture#nextAction(boolean, boolean, boolean, boolean)}
- * function is exercised here; the Minecraft {@code MouseHandler} glue in
- * {@code sync}/{@code close} is compile coverage only and cannot run without a
- * game client.
+ * function and the press guard are exercised here; ownership, native mode and
+ * reentrant transitions are exercised by {@link WheelMouseCaptureLifecycleTest}.
  *
  * <p>The policy is stateless over one sync snapshot: the same
  * (isOpen, releasedByWheel, screenOpen, mouseGrabbed) tuple always yields the
@@ -17,6 +18,18 @@ import static org.junit.jupiter.api.Assertions.assertSame;
  * closing mid-hold.
  */
 class WheelMouseCaptureTest {
+
+	@Test
+	void vanillaMousePressCannotRegrabAnOpenSelectorButScreenAndInactiveGrabsAreUnchanged() {
+		for (var phase : PingInteractionPhase.values()) {
+			for (boolean screen : new boolean[]{false, true}) {
+				for (boolean focused : new boolean[]{false, true}) {
+					assertEquals(phase == PingInteractionPhase.WHEEL_OPEN && !screen && focused,
+						WheelMouseCapture.preventVanillaGrab(phase, screen, focused));
+				}
+			}
+		}
+	}
 
 	@Test
 	void enteringWheelWithGrabbedMouseReleases() {
@@ -71,8 +84,8 @@ class WheelMouseCaptureTest {
 
 	@Test
 	void pendingRegrabKeepsWaitingWhileScreenOpen() {
-		// After the wheel closed with a screen open, later idle ticks must keep
-		// deferring until the screen is gone, then regrab.
+		// This policy sees a reconciled entitlement. A real screen handoff drops
+		// that entitlement before evaluating a later close (covered by lifecycle tests).
 		assertSame(WheelMouseCapture.Action.NONE, WheelMouseCapture.nextAction(false, true, true, false));
 		assertSame(WheelMouseCapture.Action.GRAB, WheelMouseCapture.nextAction(false, true, false, false));
 	}

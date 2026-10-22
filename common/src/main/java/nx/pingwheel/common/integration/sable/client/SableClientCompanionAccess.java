@@ -35,6 +35,11 @@ import nx.pingwheel.common.interaction.TargetSnapshot;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.name.TargetNameComposer;
 import nx.pingwheel.common.resolve.BlockEntityClassification;
+import nx.pingwheel.common.integration.externalblock.BlockReadSource;
+import nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource;
+import nx.pingwheel.common.marker.MarkerAnchor;
+import nx.pingwheel.common.interaction.candidate.*;
+import nx.pingwheel.common.math.RaycastPolicy;
 
 /** Direct Companion 1.6.0 calls, isolated from the common client runtime. */
 final class SableClientCompanionAccess {
@@ -384,7 +389,93 @@ final class SableClientCompanionAccess {
 			SableClientProvider.PROVIDER_ID,
 			best.registryId().toString(),
 			best.locator().encode(),
-			best.hasBlockEntity()));
+			best.hasBlockEntity(), observedLocalFace(hit)).withCandidateHit(new nx.pingwheel.common.interaction.candidate.CandidateHit(
+				new nx.pingwheel.common.interaction.cancel.WorldVector(
+					best.worldHit().x, best.worldHit().y, best.worldHit().z),
+				SableCaptureEquivalence.fromResolved(level.dimension().location().toString(), best.subLevelId(),
+					localPos.getX(), localPos.getY(), localPos.getZ(), best.registryId().toString()))));
+	}
+
+	/** Synthetic/MISS/containment contacts carry no arbitrary Direction as a face. */
+	static Optional<nx.pingwheel.common.domain.BlockFace> observedLocalFace(BlockHitResult hit) {
+		return hit == null || hit.getType() != net.minecraft.world.phys.HitResult.Type.BLOCK
+			|| hit instanceof UnobservedFaceBlockHitResult || hit.isInside()
+			? Optional.empty() : Optional.of(nx.pingwheel.common.domain.BlockFace.valueOf(hit.getDirection().name()));
+	}
+
+	/** Independent bounded local-plot trace, never derived from a parent-world block hit. */
+	boolean collectSupplemental(ClientLevel level, Vec3 start, Vec3 end, RaycastPolicy policy,
+		CollisionContext context, Vec3 cameraFeet, CandidateWorkBudget budget, CandidateCollector collector)
+		throws ReflectiveOperationException {
+		if (internal == null) return false;
+		List<?> raw = internal.loadedSubLevels(level, budget);
+		return SableSupplementalRaycaster.scan(new SableSupplementalRaycaster.Source() {
+			@Override public int size() { return raw.size(); }
+			@Override public SableSupplementalRaycaster.SubLevel at(int index, CandidateWorkBudget work) {
+				Object value = raw.get(index);
+				if (!(value instanceof ClientSubLevelAccess access)) throw new ExactNativeShapeClip.Incomplete();
+				try {
+					Object plot = internal.existingPlot(level, value, work);
+					if (plot == null) return null;
+					if (!work.callProvider()) throw new ExactNativeShapeClip.Incomplete();
+					UUID id = access.getUniqueId();
+					if (!work.callProvider()) throw new ExactNativeShapeClip.Incomplete();
+					Pose3dc pose = access.logicalPose();
+					if (id == null || pose == null) throw new ExactNativeShapeClip.Incomplete();
+					var bounds = internal.bounds(plot, work);
+					if (bounds == null) throw new ExactNativeShapeClip.Incomplete();
+					if (bounds.minX() > bounds.maxX() || bounds.minY() > bounds.maxY() || bounds.minZ() > bounds.maxZ()) return null;
+					return new SableSupplementalRaycaster.SubLevel(id, pose,
+						new net.minecraft.world.phys.AABB(bounds.minX(), bounds.minY(), bounds.minZ(),
+							bounds.maxX() + 1.0, bounds.maxY() + 1.0, bounds.maxZ() + 1.0), level,
+						pos -> {
+							try { return internal.contains(plot, pos, work); }
+							catch (ReflectiveOperationException failure) { throw new ExactNativeShapeClip.Incomplete(); }
+						}, level::isLoaded);
+				} catch (ReflectiveOperationException failure) {
+					throw new ExactNativeShapeClip.Incomplete();
+				}
+			}
+		}, level.dimension().location().toString(), start, end, policy, context, cameraFeet, budget, collector);
+	}
+
+	/** No render-pose/shape lookup, no content/BE getters, and no provider tracking state. */
+	Optional<ResolvedBlockReadSource> resolvePreviewReadSource(ClientLevel parent, Target.ExternalBlockTarget target)
+		throws ReflectiveOperationException {
+		if (internal == null || target == null || !SableClientProvider.PROVIDER_ID.equals(target.providerId())
+			|| !target.dimensionId().equals(parent.dimension().location().toString())) return Optional.empty();
+		Optional<SableExternalBlockLocator> parsed = SableExternalBlockLocator.parse(target.providerLocator());
+		ResourceLocation expectedId = ResourceLocation.tryParse(target.expectedBlockRegistryId());
+		if (parsed.isEmpty() || expectedId == null) return Optional.empty();
+		SableExternalBlockLocator locator = parsed.orElseThrow();
+		Object subLevel = internal.contentSubLevel(parent, locator.subLevelId());
+		if (!(subLevel instanceof ClientSubLevelAccess access)
+			|| !contentPositionMember(parent, locator.subLevelId(), locator.blockPos())) return Optional.empty();
+		BlockState state = parent.getBlockState(locator.blockPos());
+		ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		if (state.isAir() || !expectedId.equals(actualId)) return Optional.empty();
+		Pose3dc pose = access.logicalPose();
+		if (pose == null) return Optional.empty();
+		Vec3 center = pose.transformPosition(new Vec3(locator.x() + 0.5, locator.y() + 0.5, locator.z() + 0.5));
+		if (!finite(center)) return Optional.empty();
+		var physical = new Target.BlockTarget(target.dimensionId(), locator.x(), locator.y(), locator.z(), actualId.toString());
+		var descriptor = new BlockReadSource(target, SableClientProvider.PROVIDER_ID, locator.subLevelId().toString(),
+			physical, new MarkerAnchor(center.x, center.y, center.z));
+		return Optional.of(new ResolvedBlockReadSource(parent, descriptor, pos -> {
+			try { return SableClientProvider.currentContentLevel(parent) && contentMember(parent, locator.subLevelId(), pos); }
+			catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) { return false; }
+		}));
+	}
+
+	private boolean contentMember(ClientLevel parent, UUID id, BlockPos pos) throws ReflectiveOperationException {
+		return internal.contentSubLevel(parent, id) != null && contentPositionMember(parent, id, pos);
+	}
+
+	private boolean contentPositionMember(ClientLevel parent, UUID id, BlockPos pos) {
+		if (parent.isOutsideBuildHeight(pos)) return false;
+		SubLevelAccess containing = companion.getContaining(parent,
+			(net.minecraft.core.Position) new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5));
+		return containing != null && id.equals(containing.getUniqueId()) && parent.isLoaded(pos);
 	}
 
 	Vec3 projectOutOfSubLevel(ClientLevel level, Vec3 hitPosition) {

@@ -1,5 +1,6 @@
 # User-specific stuff
 .idea/
+.vscode/
 
 *.iml
 *.ipr
@@ -141,3 +142,5 @@ fabric/logs/
 /net/
 /com/
 feedback_log/
+/tmp/
+/logs/

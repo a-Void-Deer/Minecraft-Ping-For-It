@@ -1,6 +1,7 @@
 package nx.pingwheel.common.name;
 
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 import net.minecraft.core.BlockPos;
@@ -19,6 +20,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.integration.ExternalBlockServerProviders;
+import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.marker.MinecraftServerEntityLookup;
 
 import static nx.pingwheel.common.Global.LOGGER;
@@ -131,12 +133,18 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 	}
 
 	private Resolution resolveExternalBlock(ServerLevel level, Target.ExternalBlockTarget target) {
-		return ExternalBlockServerProviders.registry().resolveName(level, target)
-			.map(name -> name.customName()
-				.map(custom -> TargetNameComposer.compose(custom, name.vanillaName()))
-				.orElse(name.vanillaName()))
+		return availableExternalComponent(ExternalBlockServerProviders.registry().resolveName(level, target))
 			.map(Resolution::of)
 			.orElseGet(() -> Resolution.unavailable(FallbackReason.BLOCK_UNAVAILABLE));
+	}
+
+	/** Compose only an available provider name; the ordinary marker path owns any UNKNOWN fallback. */
+	public static Optional<Component> availableExternalComponent(
+		Optional<ExternalBlockServerProvider.ExternalBlockName> observed) {
+		Objects.requireNonNull(observed, "observed");
+		return observed.map(name -> name.customName()
+			.map(custom -> TargetNameComposer.compose(custom, name.vanillaName()))
+			.orElse(name.vanillaName()));
 	}
 
 	/**

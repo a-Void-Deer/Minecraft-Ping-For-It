@@ -12,6 +12,7 @@ security, and compatibility facts needed to understand the design. Exclude
 developer- or maintainer-only material such as class locations, line numbers,
 widget-specific tuning, and reference-implementation walkthroughs. Developer
 readership is not a reason to remove internal facts that the design requires.
+Therefore, NO links to code files or line numbers.
 
 ### Ownership
 
@@ -30,6 +31,10 @@ the user for permission & advice.
 Do not turn normative documentation into a changelog. Never add statements such as
 “X is now…”, “X is no longer…”, or “X currently uses…” merely because this task fixed
 that implementation. Update docs only when the enduring contract itself changed.
+
+Development history should NOT be written into long-term contract. Documentation should
+be timeless: if a future version keeps the same implementation, then the document should
+not need to be changed in the update.
 
 ### Numerical and tuning detail
 
@@ -65,3 +70,7 @@ Require implementation subagents to report possible documentation changes instea
 Decide whether those changes are needed, then either update the documentation yourself or assign a documentation-only subagent.
 
 If not sure whether something should be recorded, or where it should be, **ask the user** to help you make decision.
+
+## User Queries
+
+Users may ask you to explain documentation. When explaining, answer based on both documentation and code implementation, and for each point, give at least one in-game example or scenario to illustrate the point.

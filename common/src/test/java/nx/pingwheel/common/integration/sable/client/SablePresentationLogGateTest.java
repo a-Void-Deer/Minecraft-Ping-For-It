@@ -1,5 +1,6 @@
 package nx.pingwheel.common.integration.sable.client;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
@@ -10,6 +11,11 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SablePresentationLogGateTest {
+
+	@AfterEach
+	void restoreGlobalDiagnostics() {
+		SableClientProvider.setDiagnosticsForTests(SableDiagnostics.global());
+	}
 
 	@Test
 	void flickeringFailureUsesCadenceInsteadOfSuccessReset() {

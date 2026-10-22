@@ -1,0 +1,5 @@
+accessWidener v2 named
+accessible class net/minecraft/advancements/critereon/StatePropertiesPredicate$PropertyMatcher
+accessible class net/minecraft/advancements/critereon/StatePropertiesPredicate$ValueMatcher
+accessible class net/minecraft/advancements/critereon/StatePropertiesPredicate$ExactMatcher
+accessible class net/minecraft/advancements/critereon/StatePropertiesPredicate$RangedMatcher

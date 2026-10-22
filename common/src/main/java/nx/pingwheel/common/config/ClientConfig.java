@@ -27,22 +27,26 @@ public class ClientConfig implements IConfig {
 	int pingDistance = 2048;
 	boolean itemIconVisible = true;
 	boolean directionIndicatorVisible = true;
-	boolean passThroughTransparentBlocks = false;
+	boolean markTransparentBlocks = true;
 	boolean markBlacklistedTargets = false;
 	boolean markFluids = false;
 	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
 	TeamColorMode teamColorMode = TeamColorMode.FULL;
 	EntityBlockRenderMode entityBlockRenderMode = EntityBlockRenderMode.ALL;
+	/** Client-local spatial gesture and appearance preferences; additive with defaults. */
+	SpatialSelectorSettings spatialSelector = new SpatialSelectorSettings();
 	int pingSize = 100;
 	int configurationNoticeSize = ClientConfigBounds.DEFAULT_CONFIGURATION_NOTICE_SIZE;
 	int wheelHoldMillis = ClientConfigBounds.DEFAULT_WHEEL_HOLD_MILLIS;
 	boolean longPressCompatibilityMode = false;
 	int longPressCompatibilitySliceMillis = ClientConfigBounds.DEFAULT_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS;
-	int wheelTimeoutMillis = ClientConfigBounds.DEFAULT_WHEEL_TIMEOUT_MILLIS;
 	int cancelHalfConeAngleDegrees = ClientConfigBounds.DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES;
-	int wheelInnerRadius = ClientConfigBounds.DEFAULT_WHEEL_INNER_RADIUS;
-	int wheelOuterRadius = ClientConfigBounds.DEFAULT_WHEEL_OUTER_RADIUS;
+	/** Adjacent-press window for deriving the double-click danger angle. */
+	int doubleClickDangerWindowMs = ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_WINDOW_MS;
+	/** Zero disables double-click danger; compatibility mode clears it to zero. */
+	double doubleClickDangerAngleDegrees = ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES;
 	int wheelOpacity = ClientConfigBounds.DEFAULT_WHEEL_OPACITY;
+	int wheelTargetOpacity = ClientConfigBounds.DEFAULT_WHEEL_TARGET_OPACITY;
 	/** Kept as wheelFontSize in JSON: this is the radial option-label value. */
 	int wheelFontSize = ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE;
 	int wheelTargetFontSize = ClientConfigBounds.DEFAULT_WHEEL_TARGET_FONT_SIZE;
@@ -93,16 +97,16 @@ public class ClientConfig implements IConfig {
 		}
 	}
 
-	public void setWheelInnerRadius(int wheelInnerRadius) {
-		final var radii = ClientConfigBounds.clampWheelRadii(wheelInnerRadius, this.wheelOuterRadius);
-		this.wheelInnerRadius = radii.innerRadius();
-		this.wheelOuterRadius = radii.outerRadius();
+	/** Temporary nonpersisted bridge for the old wheel renderer during native-input integration. */
+	@Deprecated
+	public int getWheelInnerRadius() {
+		return ClientConfigBounds.DEFAULT_WHEEL_INNER_RADIUS;
 	}
 
-	public void setWheelOuterRadius(int wheelOuterRadius) {
-		final var radii = ClientConfigBounds.clampWheelRadii(this.wheelInnerRadius, wheelOuterRadius);
-		this.wheelInnerRadius = radii.innerRadius();
-		this.wheelOuterRadius = radii.outerRadius();
+	/** Temporary nonpersisted bridge; deliberately unrelated to spatial-selector settings. */
+	@Deprecated
+	public int getWheelOuterRadius() {
+		return ClientConfigBounds.DEFAULT_WHEEL_OUTER_RADIUS;
 	}
 
 	public void setWheelHoldMillis(int wheelHoldMillis) {
@@ -170,6 +174,40 @@ public class ClientConfig implements IConfig {
 		this.configurationNoticeSize = ClientConfigBounds.clampConfigurationNoticeSize(configurationNoticeSize);
 	}
 
+	public void setLongPressCompatibilityMode(boolean enabled) {
+		longPressCompatibilityMode = enabled;
+		if (enabled) {
+			doubleClickDangerAngleDegrees = 0.0;
+			if (spatialSelector != null) spatialSelector.setGestureSkipHoldEnabled(false);
+		}
+	}
+
+	public void setDoubleClickDangerWindowMs(int doubleClickDangerWindowMs) {
+		this.doubleClickDangerWindowMs = ClientConfigBounds.clampDoubleClickDangerWindowMs(doubleClickDangerWindowMs);
+	}
+
+	/**
+	 * Keeps zero as the disabled value. While compatibility mode is active a
+	 * non-zero request is rejected instead of being retained for later.
+	 */
+	public void setDoubleClickDangerAngleDegrees(double doubleClickDangerAngleDegrees) {
+		double clamped = ClientConfigBounds.clampDoubleClickDangerAngleDegrees(doubleClickDangerAngleDegrees);
+		this.doubleClickDangerAngleDegrees = longPressCompatibilityMode ? 0.0 : clamped;
+	}
+
+	public boolean isGestureSkipHoldEnabled() {
+		return !longPressCompatibilityMode && spatialSelector != null && spatialSelector.isGestureSkipHoldEnabled();
+	}
+
+	public void setGestureSkipHoldEnabled(boolean enabled) {
+		if (spatialSelector == null) spatialSelector = new SpatialSelectorSettings();
+		spatialSelector.setGestureSkipHoldEnabled(enabled && !longPressCompatibilityMode);
+	}
+
+	public void setWheelTargetOpacity(int wheelTargetOpacity) {
+		this.wheelTargetOpacity = ClientConfigBounds.clampWheelTargetOpacity(wheelTargetOpacity);
+	}
+
 	public void setBlockDisplayWhitelist(List<String> entries) {
 		List<String> copy = validatedEntries(entries, "blockDisplayWhitelist");
 		BlockDisplayPolicy nextPolicy = BlockDisplayPolicy.compile(copy, blockShapeBlacklist);
@@ -209,13 +247,16 @@ public class ClientConfig implements IConfig {
 		// client data never selects a new geometry route accidentally.
 		entityBlockRenderMode = EntityBlockRenderMode.effective(entityBlockRenderMode);
 
+		if (spatialSelector == null) spatialSelector = new SpatialSelectorSettings();
+		spatialSelector.validate();
+		if (longPressCompatibilityMode) spatialSelector.setGestureSkipHoldEnabled(false);
+
 		final int suppliedWheelHoldMillis = wheelHoldMillis;
 		final int suppliedLongPressCompatibilitySliceMillis = longPressCompatibilitySliceMillis;
-		final int suppliedWheelTimeoutMillis = wheelTimeoutMillis;
 		final int suppliedCancelHalfConeAngleDegrees = cancelHalfConeAngleDegrees;
-		final int suppliedWheelInnerRadius = wheelInnerRadius;
-		final int suppliedWheelOuterRadius = wheelOuterRadius;
+		final int suppliedDoubleClickDangerWindowMs = doubleClickDangerWindowMs;
 		final int suppliedWheelOpacity = wheelOpacity;
+		final int suppliedWheelTargetOpacity = wheelTargetOpacity;
 		final int suppliedWheelFontSize = wheelFontSize;
 		final int suppliedWheelTargetFontSize = wheelTargetFontSize;
 		final int suppliedConfigurationNoticeSize = configurationNoticeSize;
@@ -237,13 +278,6 @@ public class ClientConfig implements IConfig {
 			suppliedLongPressCompatibilitySliceMillis,
 			longPressCompatibilitySliceMillis);
 
-		wheelTimeoutMillis = ClientConfigBounds.clampWheelTimeoutMillis(wheelTimeoutMillis);
-		warnIfChanged(
-			warningSink,
-			"wheelTimeoutMillis",
-			suppliedWheelTimeoutMillis,
-			wheelTimeoutMillis);
-
 		cancelHalfConeAngleDegrees = ClientConfigBounds.clampCancelHalfConeAngleDegrees(cancelHalfConeAngleDegrees);
 		warnIfChanged(
 			warningSink,
@@ -251,14 +285,22 @@ public class ClientConfig implements IConfig {
 			suppliedCancelHalfConeAngleDegrees,
 			cancelHalfConeAngleDegrees);
 
-		final var radii = ClientConfigBounds.clampWheelRadii(wheelInnerRadius, wheelOuterRadius);
-		wheelInnerRadius = radii.innerRadius();
-		wheelOuterRadius = radii.outerRadius();
-		warnIfChanged(warningSink, "wheelInnerRadius", suppliedWheelInnerRadius, wheelInnerRadius);
-		warnIfChanged(warningSink, "wheelOuterRadius", suppliedWheelOuterRadius, wheelOuterRadius);
+		doubleClickDangerWindowMs = ClientConfigBounds.clampDoubleClickDangerWindowMs(doubleClickDangerWindowMs);
+		warnIfChanged(
+			warningSink,
+			"doubleClickDangerWindowMs",
+			suppliedDoubleClickDangerWindowMs,
+			doubleClickDangerWindowMs);
+
+		doubleClickDangerAngleDegrees =
+			ClientConfigBounds.clampDoubleClickDangerAngleDegrees(doubleClickDangerAngleDegrees);
+		if (longPressCompatibilityMode) doubleClickDangerAngleDegrees = 0.0;
 
 		wheelOpacity = ClientConfigBounds.clampWheelOpacity(wheelOpacity);
 		warnIfChanged(warningSink, "wheelOpacity", suppliedWheelOpacity, wheelOpacity);
+
+		wheelTargetOpacity = ClientConfigBounds.clampWheelTargetOpacity(wheelTargetOpacity);
+		warnIfChanged(warningSink, "wheelTargetOpacity", suppliedWheelTargetOpacity, wheelTargetOpacity);
 
 		wheelFontSize = ClientConfigBounds.clampWheelFontSize(wheelFontSize);
 		warnIfChanged(warningSink, "wheelFontSize", suppliedWheelFontSize, wheelFontSize);
@@ -311,21 +353,24 @@ public class ClientConfig implements IConfig {
 
 	@Override
 	public void onUpdate() {
+		if (longPressCompatibilityMode) doubleClickDangerAngleDegrees = 0.0;
+		if (longPressCompatibilityMode && spatialSelector != null) spatialSelector.setGestureSkipHoldEnabled(false);
 		blockDisplayPolicy = BlockDisplayPolicy.compile(blockDisplayWhitelist, blockShapeBlacklist);
 		LOGGER.debug(
-			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, wheelTimeoutMillis=%d, cancelHalfConeAngleDegrees=%d, wheelInnerRadius=%d, wheelOuterRadius=%d, wheelOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d"
+			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, cancelHalfConeAngleDegrees=%d, doubleClickDangerWindowMs=%d, doubleClickDangerAngleDegrees=%s, wheelOpacity=%d, wheelTargetOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d, spatialSelector=%s"
 				.formatted(
 					wheelHoldMillis,
 					longPressCompatibilityMode,
 					getEffectiveLongPressCompatibilitySliceMillis(),
-					wheelTimeoutMillis,
 					cancelHalfConeAngleDegrees,
-					wheelInnerRadius,
-					wheelOuterRadius,
+					doubleClickDangerWindowMs,
+					doubleClickDangerAngleDegrees,
 					wheelOpacity,
+					wheelTargetOpacity,
 					wheelFontSize,
 					wheelTargetFontSize,
-					configurationNoticeSize));
+					configurationNoticeSize,
+					spatialSelector));
 
 		if (Game != null) {
 			IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(getChannel()));

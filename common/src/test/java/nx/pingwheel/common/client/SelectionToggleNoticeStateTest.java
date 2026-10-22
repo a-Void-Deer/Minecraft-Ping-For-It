@@ -21,7 +21,7 @@ class SelectionToggleNoticeStateTest {
 	@Test
 	void aLaterToggleReplacesTheOnlyNoticeSlotAndRestartsLifetime() {
 		SelectionToggleNoticeState state = new SelectionToggleNoticeState(() -> 0L);
-		state.show(SelectionToggleNoticeState.Kind.PASS_THROUGH_TRANSPARENT_BLOCKS, true, 100L);
+		state.show(SelectionToggleNoticeState.Kind.MARK_TRANSPARENT_BLOCKS, true, 100L);
 		state.show(SelectionToggleNoticeState.Kind.MARK_FLUIDS, false, 150L);
 
 		SelectionToggleNoticeState.Snapshot snapshot = state.snapshot(150L).orElseThrow();

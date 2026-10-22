@@ -51,5 +51,5 @@ loss-recovery fallback is overwritten by a later authoritative update; see
 
 Multiplayer winner and equal-arrival tie scenarios remain pending verification
 work; the coverage inventory and gaps are owned by
-[testing and verification](../../testing/verification.md). Rationale is in
+[testing and verification](../../testing/verification/identity-authority.md). Rationale is in
 [D0004](../../decisions/D0004-server-authority.md).

@@ -1,11 +1,22 @@
 package nx.pingwheel.common.marker;
 
 import org.junit.jupiter.api.Test;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.config.Property;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,6 +30,12 @@ import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.presentation.PresentationPropertyIntent;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationPropertySelection;
+import nx.pingwheel.common.presentation.PresentationSection;
+import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.util.RateLimitedDiagnosticsTestScope;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -310,6 +327,21 @@ class MarkerCreationServiceTest {
 	}
 
 	@Test
+	void createAllowsDangerForResolvedEntityBlock() {
+		newService();
+		Target requested = blockTarget();
+		validator.accepted(validated(requested, TargetMatchContext.none()));
+		resolver.resolves(requested, targetType("entity_block"));
+
+		MarkerCreateOutcome accepted = create(requested, "danger");
+
+		assertTrue(accepted.isAccepted());
+		assertEquals("danger", accepted.creation().orElseThrow().marker().pingType().id());
+		assertRejected(create(requested, "loot"), MarkerRejectReason.INVALID_PING_TYPE);
+		assertEquals(1, store.size());
+	}
+
+	@Test
 	void createRejectsUnknownPingType() {
 		newService();
 		Target requested = entityTarget(ENTITY_A);
@@ -425,6 +457,109 @@ class MarkerCreationServiceTest {
 		assertNotEquals(candidate, marker.target());
 		assertTrue(marker.target() instanceof Target.ExternalBlockTarget external && external.isCommitted());
 		assertEquals(committed, MarkerSnapshot.from(marker).target());
+	}
+
+	@Test
+	void admissionRejectsAfterExternalMaterializationAndReleasesReferenceWithoutStoring() {
+		newService();
+		Target.ExternalBlockTarget candidate = externalCandidate();
+		Target.ExternalBlockTarget committed = committedExternalTarget();
+		RecordingExternalProvider provider = new RecordingExternalProvider(
+			new ExternalBlockServerProvider.MaterializationResult.Materialized(
+				new ExternalBlockServerProvider.MaterializedTarget(committed,
+					TargetMatchContext.blockEntityBlock(true), ANCHOR)));
+		validator.accepted(validated(candidate, TargetMatchContext.blockEntityBlock(true)));
+		resolver.resolves(candidate, targetType("entity_block"));
+		var ref = PresentationPropertyRef.root("minecraft:basic", "minecraft:block.state");
+		var intent = PresentationPropertyIntent.observed(ref,
+			new PresentationValue.RecordValue(Map.of("facing", new PresentationValue.Text("north"))));
+		Target[] actual = {null};
+		MarkerCreateOutcome rejected = service.createWithExternalTransaction(transaction(provider), OWNER, candidate,
+			"attention", 10L, 110L, List.of(RECIPIENT), List.of(intent),
+			(target, type, owner, recipients, intents) -> {
+				actual[0] = target;
+				assertEquals("entity_block", type);
+				assertEquals(OWNER, owner);
+				assertEquals(List.of(RECIPIENT), recipients);
+				assertEquals(List.of(intent), intents);
+				return MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST);
+			});
+		assertRejected(rejected, MarkerRejectReason.INVALID_REQUEST);
+		assertEquals(committed, actual[0], "admission must see the materialized target, never its candidate");
+		assertEquals(1, provider.materializeCalls);
+		assertEquals(1, provider.releaseCalls);
+		assertEquals(0, store.size());
+	}
+
+	@Test
+	void admissionTypeRejectionAndCaptureFailureBothReleaseMaterializedReference() {
+		newService();
+		Target.ExternalBlockTarget candidate = externalCandidate();
+		Target.ExternalBlockTarget committed = committedExternalTarget();
+		RecordingExternalProvider provider = new RecordingExternalProvider(
+			new ExternalBlockServerProvider.MaterializationResult.Materialized(
+				new ExternalBlockServerProvider.MaterializedTarget(committed,
+					TargetMatchContext.blockEntityBlock(true), ANCHOR)));
+		validator.accepted(validated(candidate, TargetMatchContext.blockEntityBlock(true)));
+		resolver.resolves(candidate, targetType("entity_block"));
+		var intent = PresentationPropertyIntent.of(PresentationPropertyRef.root("minecraft:basic", "minecraft:block.state"),
+			new PresentationValue.RecordValue(Map.of()), "request");
+		var transaction = transaction(provider);
+		var failure = new IllegalStateException("source unavailable payload={name:Alice}",
+			new IllegalArgumentException("cause registry=provider:machine"));
+		failure.setStackTrace(new StackTraceElement[] {
+			new StackTraceElement("provider.PropertySource", "read", "PropertySource.java", 37)
+		});
+		failure.addSuppressed(new IllegalStateException("close failed position=(1,2,3)"));
+		try (var diagnostics = new DiagnosticCapture()) {
+			assertRejected(service.createWithExternalTransaction(transaction, OWNER, candidate, "attention", 10L,
+				110L, List.of(RECIPIENT), List.of(intent),
+				(target, type, owner, recipients, intents) ->
+					MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_PING_TYPE)),
+				MarkerRejectReason.INVALID_PING_TYPE);
+			assertTrue(diagnostics.events.isEmpty(), "An ordinary admission rejection is not a warning");
+			assertRejected(service.createWithExternalTransaction(transaction, OWNER, candidate, "attention", 10L,
+				110L, List.of(RECIPIENT), List.of(intent),
+				(target, type, owner, recipients, intents) -> { throw failure; }),
+				MarkerRejectReason.INVALID_REQUEST);
+			assertEquals(1, diagnostics.events.size());
+			LogEvent event = diagnostics.events.getFirst();
+			assertEquals(Level.WARN, event.getLevel());
+			String report = event.getMessage().getFormattedMessage();
+			assertTrue(report.contains("source unavailable payload={name:Alice}"));
+			assertTrue(report.contains("cause registry=provider:machine"));
+			assertTrue(report.contains("close failed position=(1,2,3)"));
+			assertTrue(report.contains("provider.PropertySource.read (PropertySource.java:37)"));
+			assertTrue(report.contains(committed.providerLocator()), "Diagnose the committed read binding, not just its candidate");
+		}
+		assertEquals(2, provider.releaseCalls);
+		assertEquals(0, store.size());
+	}
+
+	@Test
+	void acceptedAdmissionSeedsActualValueWithoutChangingLifetimeOrWinnerAndSurvivesAudienceChange() {
+		newService();
+		Target requested = blockTarget();
+		validator.accepted(validated(requested, TargetMatchContext.none()));
+		resolver.resolves(requested, targetType("block"));
+		var ref = PresentationPropertyRef.root("minecraft:basic", "minecraft:target.name");
+		var intent = PresentationPropertyIntent.of(ref, new PresentationValue.Text("client claim"), "attention");
+		var section = new PresentationSection("minecraft:basic", 1,
+			Map.of(ref.fieldId(), new PresentationValue.Text("server truth")), false);
+		MarkerCreateOutcome accepted = service.create(null, OWNER, requested, "attention", 21L, 121L,
+			List.of(RECIPIENT, OWNER), List.of(intent), (target, type, owner, recipients, intents) ->
+				MarkerCreationService.AdmissionResult.accepted(List.of(PresentationPropertySelection.of(ref, "attention")),
+					Map.of(section.adapterId(), section)));
+		assertTrue(accepted.isAccepted());
+		ServerMarker marker = accepted.creation().orElseThrow().marker();
+		assertEquals(List.of(PresentationPropertySelection.of(ref, "attention")), marker.properties());
+		assertEquals("server truth", ((PresentationValue.Text) accepted.sourceSeeds().get(section.adapterId())
+			.fields().get(ref.fieldId())).value());
+		assertEquals(21L, marker.arrivalTick());
+		assertEquals(121L, marker.expiresAtTick());
+		assertEquals(2, accepted.creation().orElseThrow().winnerChanges().size());
+		store.forgetRecipient(RECIPIENT);
+		assertEquals(marker.properties(), store.find(marker.id()).orElseThrow().properties());
 	}
 
 	// --- resolver contract failures ----------------------------------------------
@@ -576,6 +711,37 @@ class MarkerCreationServiceTest {
 	}
 
 	// --- fakes -------------------------------------------------------------------
+
+	private static final class DiagnosticCapture implements AutoCloseable {
+		private final Logger logger = (Logger) LogManager.getLogger("pingforit");
+		private final LoggerContext context = logger.getContext();
+		private final Configuration configuration = context.getConfiguration();
+		private final LoggerConfig previous = configuration.getLoggers().get(logger.getName());
+		private final List<LogEvent> events = new ArrayList<>();
+		private final RateLimitedDiagnosticsTestScope diagnostics;
+		private final AbstractAppender appender = new AbstractAppender(
+			"marker-admission-diagnostics", null, null, true, Property.EMPTY_ARRAY) {
+			@Override public void append(LogEvent event) { events.add(event.toImmutable()); }
+		};
+
+		private DiagnosticCapture() {
+			appender.start();
+			LoggerConfig capture = new LoggerConfig(logger.getName(), Level.WARN, false);
+			capture.addAppender(appender, Level.WARN, null);
+			configuration.removeLogger(logger.getName());
+			configuration.addLogger(logger.getName(), capture);
+			context.updateLoggers();
+			diagnostics = RateLimitedDiagnosticsTestScope.install();
+		}
+
+		@Override public void close() {
+			diagnostics.close();
+			configuration.removeLogger(logger.getName());
+			if (previous != null) configuration.addLogger(logger.getName(), previous);
+			context.updateLoggers();
+			appender.stop();
+		}
+	}
 
 	private static final class RecordingValidator implements AuthoritativeTargetValidator {
 

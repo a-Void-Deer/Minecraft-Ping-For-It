@@ -54,7 +54,7 @@ class TargetTypeCatalogTest {
 			List.of("attention", "danger", "go_to"),
 			target("entity").pingTypes().stream().map(PingType::id).toList());
 		assertEquals(
-			List.of("attention", "destroy", "take", "request"),
+			List.of("attention", "destroy", "take", "request", "danger"),
 			target("entity_block").pingTypes().stream().map(PingType::id).toList());
 		assertEquals(
 			List.of("attention", "go_to", "danger"),

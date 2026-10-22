@@ -14,13 +14,26 @@ final class ConfigVersionUpdater {
 	private static final String SYNC_DURATION_KEY = "syncDuration";
 	private static final PingForItVersion SYNC_DURATION_INTRODUCED_VERSION =
 		PingForItVersion.parse("0.3.0-pfi-beta1");
+	static final PingForItVersion SPATIAL_SELECTOR_INTRODUCED_VERSION =
+		PingForItVersion.parse("0.5.0-pfi-beta1");
+	static final PingForItVersion WHEEL_TIMEOUT_REMOVED_VERSION =
+		SPATIAL_SELECTOR_INTRODUCED_VERSION;
+	static final PingForItVersion MARK_TRANSPARENT_BLOCKS_INTRODUCED_VERSION =
+		SPATIAL_SELECTOR_INTRODUCED_VERSION;
+	private static final String LEGACY_TRANSPARENT_BLOCKS_KEY = "passThroughTransparentBlocks";
+	private static final String MARK_TRANSPARENT_BLOCKS_KEY = "markTransparentBlocks";
 
 	private static final List<MigrationStep> MIGRATION_STEPS = orderedSteps(List.of(
 		new MigrationStep(
 			SYNC_DURATION_INTRODUCED_VERSION,
 			ServerConfig.class,
 			ConfigVersionUpdater::migrateLegacyServerDuration,
-			"syncDuration: pingDuration -> syncDuration")
+			"syncDuration: pingDuration -> syncDuration"),
+		new MigrationStep(
+			SPATIAL_SELECTOR_INTRODUCED_VERSION,
+			ClientConfig.class,
+			ConfigVersionUpdater::migrateClientBeta1,
+			"client: retired wheel keys removed; transparent block selection renamed and inverted")
 	));
 
 	private ConfigVersionUpdater() {}
@@ -88,6 +101,45 @@ final class ConfigVersionUpdater {
 		}
 
 		root.remove(LEGACY_SYNC_DURATION_KEY);
+	}
+
+	static void removeLegacyWheelRadii(JsonObject root) {
+		root.remove("wheelInnerRadius");
+		root.remove("wheelOuterRadius");
+		// New preferences are initialized by the model, not copied or injected here.
+	}
+
+	static void removeRetiredWheelKeys(JsonObject root) {
+		removeLegacyWheelRadii(root);
+		removeLegacyWheelTimeout(root);
+	}
+
+	private static void migrateClientBeta1(JsonObject root) {
+		removeRetiredWheelKeys(root);
+		if (!root.has(MARK_TRANSPARENT_BLOCKS_KEY)) {
+			var legacy = root.get(LEGACY_TRANSPARENT_BLOCKS_KEY);
+			if (legacy == null || legacy.isJsonNull()) {
+				// Missing/null used the old false default, which selected OUTLINE.
+				root.addProperty(MARK_TRANSPARENT_BLOCKS_KEY, true);
+			} else if (legacy.isJsonPrimitive()
+				&& (legacy.getAsJsonPrimitive().isBoolean() || legacy.getAsJsonPrimitive().isString())) {
+				// Match Gson's boolean adapter: strings use Boolean.parseBoolean.
+				root.addProperty(MARK_TRANSPARENT_BLOCKS_KEY, !legacy.getAsBoolean());
+			} else {
+				// Keep malformed types malformed for the existing typed load/recovery
+				// path; getAsBoolean would silently coerce a JSON number to false.
+				root.add(MARK_TRANSPARENT_BLOCKS_KEY, legacy.deepCopy());
+			}
+		}
+		removeLegacyTransparentBlockToggle(root);
+	}
+
+	static void removeLegacyTransparentBlockToggle(JsonObject root) {
+		root.remove(LEGACY_TRANSPARENT_BLOCKS_KEY);
+	}
+
+	static void removeLegacyWheelTimeout(JsonObject root) {
+		root.remove("wheelTimeoutMillis");
 	}
 
 	private static List<MigrationStep> orderedSteps(List<MigrationStep> steps) {

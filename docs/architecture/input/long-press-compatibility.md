@@ -6,17 +6,21 @@ a queue of creates. Its persisted fields are catalogued in
 [client configuration](../../config/client.md#press-wheel-and-cancellation-interaction),
 and their timing relation is owned by [long-press timing](long-press.md).
 
-> **Current implementation-conformance gaps.** The create-only dispatch gate
-> for both paths has known gaps. Their concrete defect explanation and pending
-> regression matrix are maintained only in
-> [verification](../../testing/verification.md#known-automated-gaps).
+> **Dispatch-boundary evidence.** The create-only dispatch gate for both paths
+> is covered by the declined-create regressions inventoried in
+> [testing and verification](../../testing/verification/interaction.md#capture-wheel-and-cancellation).
 
 ## Observed mode and slice
 
 Compatibility mode and effective slice are observed at relevant raw edges and
 render frames. An observed enabled-to-disabled transition aborts the baseline
 interaction and compatibility sequence. Enabling does not abort an interaction.
-General reset, screen, world, and token-abort rules remain owned by
+While compatibility is observed enabled, the
+[double-click Danger](double-click-danger.md) gesture is unavailable and its
+recognition state is cleared without mutating a held snapshot, aborting an
+already-created first capture, or replaying a stored press; the two sequences
+never run together. General reset, screen, world, and
+token-abort rules remain owned by
 [capture](../picking/capture.md#interaction-lifecycle-aborts).
 
 Both paths require a successful local dispatch outcome for the preceding default
@@ -43,8 +47,8 @@ the slice ends adjacency; equality remains eligible. At termination, a wheel
 that actually opened and remains open follows ordinary
 [wheel release](../picking/wheel.md#radial-release-result). If it never
 opened, the still-pressed baseline aborts; if it already closed, the candidate
-is discarded. Neither outcome emits another default tap. Timeout, lifecycle
-abort, or observed disabling can end the sequence sooner.
+is discarded. Neither outcome emits another default tap. Lifecycle abort or
+observed disabling can end the sequence sooner.
 
 ## Pending-first-capture deferred fresh press
 

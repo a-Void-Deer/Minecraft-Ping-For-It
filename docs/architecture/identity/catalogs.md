@@ -17,7 +17,7 @@ The following declaration order, ordered Ping Type sets and defaults are fixed:
 | --- | ---: | --- | --- | --- |
 | `dropped_item` | 100 | entity | `loot, attention, danger` | `loot` |
 | `entity` | 200 | entity | `attention, danger, go_to` | `attention` |
-| `entity_block` | 250 | block | `attention, destroy, take, request` | `attention` |
+| `entity_block` | 250 | block | `attention, destroy, take, request, danger` | `attention` |
 | `block` | 300 | block | `attention, go_to, danger` | `attention` |
 | `location` | `Integer.MAX_VALUE` | location | `go_to, attention, danger` | `go_to` |
 
@@ -64,3 +64,9 @@ the established default icon and tint behavior. Ping Type controls chat,
 outline color, text emphasis, wheel presentation and optional icon; exact
 [chat composition](../rendering/names_chat.md) and
 [wheel behavior](../picking/wheel.md) remain separate contracts.
+
+The whole-marker Ping Type list above is independent of the code-defined
+property Ping Type policy used for individual presentation properties. That
+separate policy and its target-selector grammar are owned by
+[presentation snapshot](../presentation/presentation_snapshot.md#property-ping);
+it defines no new whole-marker Ping Type.

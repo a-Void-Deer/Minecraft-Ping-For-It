@@ -20,10 +20,14 @@ public final class ServerConfigUpdateService {
 		}
 
 		final var authoritative = current.withCanEdit(hasPermission);
-		if (!hasPermission || update == null || !update.isValid()) {
+		if (!hasPermission || !current.isSafe() || update == null || !update.isValid()) {
 			return new Result(false, authoritative);
 		}
 
-		return new Result(true, update.applyTo(authoritative));
+		final var merged = update.appliedTo(authoritative);
+		if (merged.isEmpty()) {
+			return new Result(false, authoritative);
+		}
+		return new Result(true, merged.get());
 	}
 }

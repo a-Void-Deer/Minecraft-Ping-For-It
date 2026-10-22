@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
 
@@ -23,49 +24,40 @@ class SimulatedDockingConnectorPresentationResolverContractTest {
 		"src/main/java/nx/pingwheel/neoforge/NeoClient.java";
 
 	@Test
-	void resolverPinsPairedConnectorOwnerPresentationContract() throws IOException {
+	void resolverDeclaresSimulatedRegistryIdsAndProductionLookupBoundary() throws IOException {
 		String source = readProjectFile(RESOLVER_SOURCE);
 
-		assertTrue(source.contains("simulated:paired_docking_connector"));
-		assertTrue(source.contains("simulated:docking_connector"));
-		assertTrue(source.contains("BlockStateProperties.FACING"));
-		assertTrue(source.contains("pairedState.getValue(BlockStateProperties.FACING)"));
-		assertTrue(source.contains("pairedPos.relative(towardOwner)"));
-		assertTrue(source.contains("towardOwner.getOpposite()"));
-		assertTrue(source.contains("BlockStateProperties.POWERED"));
-		assertTrue(source.contains("getBlockEntity(ownerPos)"));
-		assertTrue(source.contains("ownerBlockEntity.getType() != entries.ownerBlockEntityType()"));
-		assertTrue(source.contains("BlockPresentationRelation.PROXY_TO_OWNER"));
-		assertTrue(source.contains("\"entity_block\""));
-		assertTrue(source.contains("return BlockPresentationResolution.UNHANDLED"));
-		assertTrue(source.contains("return BlockPresentationResolution.handled(List.of())"));
-		assertTrue(source.contains("new BlockRenderSubject"));
-		assertTrue(source.contains("registration != null"));
-		assertTrue(source.contains("BlockPresentationResolverRegistry.Registration registration"));
-
-		assertFalse(source.contains("dev.simulated_team"));
-		assertFalse(source.contains("EXTENDED"));
-		assertFalse(source.contains("getEntities"));
-		assertFalse(source.contains("getChunk"));
-		assertFalse(source.contains("scan"));
-		assertFalse(source.contains("reflection"));
+		// The executable NeoForge stand-in tests cover facing, powered, owner
+		// selection, and handled-empty outcomes; they bypass these real IDs.
+		assertTrue(registryIdBinding(source, "PAIRED_BLOCK_ID", "simulated:paired_docking_connector"));
+		assertTrue(registryIdBinding(source, "OWNER_BLOCK_ID", "simulated:docking_connector"));
+		assertTrue(registryIdBinding(source, "OWNER_BLOCK_ENTITY_ID", "simulated:docking_connector"));
+		assertTrue(source.contains("BuiltInRegistries.BLOCK.getOptional("));
+		assertTrue(source.contains("BuiltInRegistries.BLOCK_ENTITY_TYPE.getOptional("));
+		assertTrue(source.contains("BuiltInRegistries.BLOCK.getKey("));
+		assertTrue(source.contains("BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey("));
+		assertTrue(source.contains("BlockPresentationResolverRegistry.INSTANCE.register("));
 	}
 
 	@Test
-	void neoClientUsesOnlyStringReflectiveOptionalLoadingAfterModCheck() throws IOException {
+	void neoClientDeclaresSimulatedGatedReflectiveRegistration() throws IOException {
 		String source = readProjectFile(NEO_CLIENT_SOURCE);
 
-		assertTrue(source.contains(
-			"nx.pingwheel.neoforge.integration.simulated.SimulatedDockingConnectorPresentationResolver"));
-		assertTrue(source.contains("ModList.get().isLoaded(\"simulated\")"));
-		assertTrue(source.contains("registerOptionalResolver("));
-		assertTrue(source.contains("Class.forName(className, true, NeoClient.class.getClassLoader())"));
-		assertTrue(source.contains("lastSimulatedResolverState"));
-		assertTrue(source.contains(
-			"case \"simulated-docking-connector-presentation\" -> previous = lastSimulatedResolverState"));
+		assertTrue(Pattern.compile("SIMULATED_DOCKING_CONNECTOR_RESOLVER\\s*=\\s*\""
+			+ Pattern.quote("nx.pingwheel.neoforge.integration.simulated.SimulatedDockingConnectorPresentationResolver")
+			+ "\"").matcher(source).find());
+		assertTrue(Pattern.compile("if\\s*\\(\\s*ModList\\.get\\(\\)\\.isLoaded\\(\"simulated\"\\)"
+			+ "\\s*\\)\\s*\\{\\s*registerOptionalResolver\\s*\\(\\s*"
+			+ "SIMULATED_DOCKING_CONNECTOR_RESOLVER\\b").matcher(source).find());
+		assertTrue(source.contains("Class.forName("));
+		assertTrue(source.contains("getMethod(\"register\")"));
 		assertFalse(source.contains(
-			"import nx.pingwheel.neoforge.integration.simulated.SimulatedDockingConnectorPresentationResolver"));
-		assertFalse(source.contains("Class<SimulatedDockingConnectorPresentationResolver>"));
+			"import nx.pingwheel.neoforge.integration.simulated."));
+	}
+
+	private static boolean registryIdBinding(String source, String role, String id) {
+		return Pattern.compile("\\b" + role + "\\s*=\\s*ResourceLocation\\.parse\\(\\s*\""
+			+ id + "\"\\s*\\)").matcher(source).find();
 	}
 
 	private static String readProjectFile(String relativePath) throws IOException {

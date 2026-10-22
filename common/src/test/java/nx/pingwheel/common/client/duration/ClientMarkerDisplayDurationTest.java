@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
+import nx.pingwheel.common.config.ClientConfigBounds;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
@@ -33,7 +34,8 @@ class ClientMarkerDisplayDurationTest {
 		assertEquals(20L, ClientMarkerDisplayDuration.durationTicks(1, snapshot));
 		assertEquals(1200L, ClientMarkerDisplayDuration.durationTicks(60, snapshot));
 		assertEquals(160L, ClientMarkerDisplayDuration.durationTicks(-1, snapshot));
-		assertEquals(1200L, ClientMarkerDisplayDuration.durationTicks(61, snapshot));
+		assertEquals((long) ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION * 20,
+			ClientMarkerDisplayDuration.durationTicks(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION + 1, snapshot));
 	}
 
 	@Test

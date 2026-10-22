@@ -73,13 +73,20 @@ class SettingsNavigationModelTest {
 		var client = SettingsNavigationModel.categories(Scope.CLIENT);
 		var server = SettingsNavigationModel.categories(Scope.SERVER);
 
-		assertEquals(6, client.size());
-		assertEquals(3, server.size());
+		assertEquals(7, client.size());
+		assertEquals(5, server.size());
 		assertEquals(
-			List.of("display", "selection", "wheel_appearance", "input", "channel_notices", "geometry_config"),
+			List.of(
+				"display",
+				"selection",
+				"wheel_appearance",
+				"input",
+				"channel_notices",
+				"geometry_config",
+				"performance"),
 			client.stream().map(Category::id).toList());
 		assertEquals(
-			List.of("channel_players", "send_rate", "marker_duration"),
+			List.of("channel_players", "send_rate", "marker_duration", "performance", "server_presentation"),
 			server.stream().map(Category::id).toList());
 		assertThrows(UnsupportedOperationException.class, () -> client.add(Category.MARKER_DISPLAY));
 
@@ -106,6 +113,49 @@ class SettingsNavigationModelTest {
 				.count());
 		assertEquals(Page.CLIENT_OVERVIEW, Page.overview(Scope.CLIENT));
 		assertEquals(Page.SERVER_OVERVIEW, Page.overview(Scope.SERVER));
+	}
+
+	@Test
+	void serverPresentationIsIndependentFromOrdinaryServerViewAccess() {
+		var navigation = new SettingsNavigationModel();
+		navigation.selectScope(Scope.SERVER);
+		assertTrue(navigation.openCategory(Category.SERVER_PRESENTATION));
+		assertEquals(Page.SERVER_PRESENTATION, navigation.current());
+		assertTrue(navigation.onServerViewAccessLost(true, false));
+		assertEquals(Page.SERVER_OVERVIEW, navigation.current());
+
+		navigation.openCategory(Category.SERVER_PRESENTATION);
+		assertFalse(navigation.onServerViewAccessLost(false, true));
+		assertEquals(Page.SERVER_PRESENTATION, navigation.current());
+	}
+
+	@Test
+	void serverPresentationRetainsViewportAcrossScopeSwitches() {
+		var navigation = new SettingsNavigationModel();
+		navigation.selectScope(Scope.SERVER);
+		navigation.openCategory(Category.SERVER_PRESENTATION);
+		navigation.saveViewStateBeforeNavigation(22, "server_black_field");
+		assertEquals(22, navigation.scrollAmount());
+		assertEquals("server_black_field", navigation.focusKey());
+
+		navigation.selectScope(Scope.CLIENT);
+		navigation.openCategory(Category.MARKER_DISPLAY);
+		navigation.forcePage(Page.SERVER_PRESENTATION);
+		assertEquals(22, navigation.scrollAmount());
+		assertEquals("server_black_field", navigation.focusKey());
+	}
+
+	@Test
+	void clientPerformanceIsIndependentFromTheServerPerformanceCategory() {
+		var navigation = new SettingsNavigationModel();
+
+		assertTrue(navigation.openCategory(Category.CLIENT_PERFORMANCE));
+		assertEquals(Page.CLIENT_PERFORMANCE, navigation.current());
+		assertEquals(Scope.CLIENT, navigation.scope());
+		assertFalse(navigation.openCategory(Category.PERFORMANCE));
+		assertEquals(Page.CLIENT_PERFORMANCE, navigation.current());
+		assertEquals(Category.PERFORMANCE.id(), Category.CLIENT_PERFORMANCE.id());
+		assertEquals(Page.SERVER_PERFORMANCE, Category.PERFORMANCE.page());
 	}
 
 	@Test
@@ -237,5 +287,51 @@ class SettingsNavigationModelTest {
 		serverSettings.setRateLimitText("");
 		assertTrue(navigation.routeToInvalidServerDraft(serverSettings.invalidFieldMask()));
 		assertEquals(Page.SERVER_SEND_RATE, navigation.current());
+	}
+
+	@Test
+	void serverPermissionRevocationKeepsTheLeafWhenTheSnapshotIsStillViewable() {
+		var navigation = new SettingsNavigationModel();
+		navigation.selectScope(Scope.SERVER);
+		navigation.openCategory(Category.SEND_RATE);
+
+		assertFalse(navigation.onServerViewAccessLost(true));
+		assertEquals(Page.SERVER_SEND_RATE, navigation.current());
+		assertTrue(navigation.isLeaf());
+	}
+
+	@Test
+	void serverPermissionRevocationForcesTheOverviewWithoutAViewableSnapshot() {
+		var navigation = new SettingsNavigationModel();
+		navigation.selectScope(Scope.SERVER);
+		navigation.openCategory(Category.CHANNEL_PLAYERS);
+
+		assertTrue(navigation.onServerViewAccessLost(false));
+		assertEquals(Page.SERVER_OVERVIEW, navigation.current());
+		assertTrue(navigation.isOverview());
+
+		// The seam never touches a client page.
+		navigation.selectScope(Scope.CLIENT);
+		navigation.openCategory(Category.MARKER_DISPLAY);
+		assertFalse(navigation.onServerViewAccessLost(false));
+		assertEquals(Page.CLIENT_MARKER_DISPLAY, navigation.current());
+	}
+
+	@Test
+	void inventoryInvalidMaskRoutesToPerformanceAndKeepsItsOwnViewport() {
+		var navigation = new SettingsNavigationModel();
+		navigation.selectScope(Scope.SERVER);
+		navigation.openCategory(Category.PERFORMANCE);
+		navigation.saveViewStateBeforeNavigation(120, "inventory.tracking_grace_periods");
+		navigation.selectScope(Scope.CLIENT);
+		assertTrue(navigation.routeToInvalidServerDraft(ServerConfigUpdate.INVENTORY_TRACKING_GRACE_PERIODS));
+		assertEquals(Page.SERVER_PERFORMANCE, navigation.current());
+		assertEquals(120, navigation.scrollAmount());
+		assertEquals("inventory.tracking_grace_periods", navigation.focusKey());
+		assertFalse(navigation.onServerViewAccessLost(true, false));
+		assertEquals(Page.SERVER_PERFORMANCE, navigation.current());
+		assertTrue(navigation.routeToInvalidServerDraft(ServerConfigUpdate.SYNC_DURATION
+			| ServerConfigUpdate.INVENTORY_PENDING_MEMORY_MIB));
+		assertEquals(Page.SERVER_MARKER_DURATION, navigation.current());
 	}
 }

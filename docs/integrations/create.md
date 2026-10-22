@@ -6,9 +6,10 @@ live state, or rejected registrations must fail soft without breaking ordinary
 entity, block, or location pings. Common registries and outcome contracts remain
 free of Create and Flywheel dependencies.
 
-The integration has three separate primary routes--contraption press-time
-picking, entity outlines, and Flywheel entity-block geometry--plus narrow block
-presentation resolvers. Their gates and lifecycles are independent.
+The integration has three separate primary rendering routes--contraption
+press-time picking, entity outlines, and Flywheel entity-block geometry--plus
+narrow block presentation resolvers and a server-side presentation summary
+adapter. Their gates and lifecycles are independent.
 
 ## Contraption press-time picking
 
@@ -24,7 +25,7 @@ The generic owner-result rules, native kernel and capture metadata are owned by
 [entity-local picking](../architecture/picking/local_geometry.md) and
 the rejected coarse-bound alternative is explained by
 [D0006](../decisions/D0006-exact-owned-geometry.md). Manual scenarios are owned by
-[verification](../testing/verification.md#pending-manual-and-integration-matrix).
+[verification](../testing/verification/manual-integration.md#pending-manual-and-integration-matrix).
 
 ## Create entity-outline source
 
@@ -110,6 +111,167 @@ more vertices is `RENDERED` for that frame, while pre-commit plan failures are
 registration handle, and keep full detailed diagnostics lazy, bounded, and
 rate-controlled.
 
+## Create presentation summary adapter
+
+A fourth, rendering-independent route registers adapter `create:presentation`
+(schema 1) in the versioned presentation snapshot. The client's manifest-only
+registration never loads Create classes; the server registers a lazy,
+server-thread sampling source. The generic negotiation, demand-driven
+capture, policy, and projection contracts are owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md).
+
+The manifest declares kinetic speed (`create:kinetic.speed`, a record of
+effective/theoretical signed RPM and a moving flag), `create:kinetic.has_network`,
+`create:kinetic.overstressed`, `create:kinetic.stress`, `create:kinetic.capacity`,
+and `create:kinetic.available_capacity` as enabled by default, and the item-vault
+(`create:inventory.summary`) and fluid-tank (`create:fluid.summary`) registry-ID
+summaries as disabled by default. `create:kinetic.capacity` and
+`create:kinetic.stress` are numbers holding the network's total stress capacity
+and its used stress; the derived number `create:kinetic.available_capacity`
+equals `create:kinetic.capacity` minus `create:kinetic.stress` and may be
+negative. A demand for the derived field reads the raw capacity/stress pair
+once, but projection still carries only the demanded, authorized fields; the
+derived field adds no new annotation, and no property create requires a capacity
+context. Stress keeps its raw used-stress meaning and is not reinterpreted when
+it is disabled or omitted; the game's overstress state remains the separate
+`create:kinetic.overstressed` flag. Kinetic quantities use the SU unit, and a
+used-stress display may optionally include a percent only when the same
+authorized received projection also contains a capacity greater than zero; with
+a zero capacity the percent is undefined and omitted. There is no utilization
+field, and the percent is never clamped to 100%. The kinetic fields are
+default-enabled, so an unmatched kinetic field is authorized for capture and
+projection under the recipient's policy unless a block rule matches or
+whitelist-only mode is on, and the server policy page's outcome label reflects
+that default. Default
+authorization is not display: the RPM HUD line appears only when the default
+display reference selects it or a create carries a non-null property Ping
+annotation naming it, and no target type's default reference currently selects
+RPM. The disabled summaries stay disabled until explicitly allowed. Item and
+fluid summaries are record values keyed by registry ID; an uploaded property
+selection may address one nested registry-ID entry of such a summary. The property reference, recapture, authority, and
+display contract is owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md#property-ping).
+Selector evaluation and the outcome labels are owned
+by [presentation snapshot](../architecture/presentation/presentation_snapshot.md#per-target-type-field-policy).
+Sampling is requested only for demanded fields and for a supported whole-block
+input. This includes an ordinary whole block and a committed, validated Sable
+external-block target, provided the current provider registry identity still
+matches the committed expected identity. A committed external read resolves the
+provider's active committed source binding and its member scope, and uses the
+provider's current tracking-point position for the whole-block collector path;
+it does not make the detached placeholder coordinates or opaque locator a
+sampling position, and no legacy observation fallback serves a committed
+external read. On this committed route, an unrecognized provider, a missing or
+inactive lease, wrong dimensions, unloaded chunks, mismatched state, or a
+member outside the resolved scope is unavailable rather than asserted. Entity,
+contraption-constituent, partial-geometry, and generic foreign-provider targets
+are not thereby added to this route. A server interval override can only raise
+the adapter's declared minimum sampling cadence.
+
+Vault and tank member verification charges each visited member before its gate
+or read and never refunds a failed attempt: a rejected, throwing or
+budget-exhausted member keeps the whole visited prefix paid, so a rejected
+structure cannot appear cheaper than the work it performed.
+
+A separate preview entry accepts an uncommitted Sable external candidate
+through a provider-confirmed read source. It resolves the candidate through the
+same provider source as the generic external-block preview, keeps the original
+detached candidate identity instead of the physical coordinates, and admits
+only positions inside the resolved source's member scope: the root and every
+controller, item-vault or fluid-tank member must pass that positive membership
+check before its state, block entity or capability read. A candidate without a
+resolved positive binding, or a member outside it, is unavailable rather than
+read. This preview entry is separate from the committed collection route and
+does not widen it, and it remains under the same tested-version and
+lazy-loading gates.
+
+Kinetic reads use Create's public speed, network, and overstress getters. Cached
+network stress and capacity, and the derived available capacity computed from
+them, additionally require a signature-gated accessor. That accessor stays
+minimal: it shadows exactly the two protected instance `float` fields holding
+stress and capacity, and the derived field adds no third shadowed field.
+The tested Create version is `6.0.10` (`6.0.10-281` artifact). The runtime
+Create mod metadata must report a tested version for the summary adapter to be
+registered at all; an absent or untested version registers no Create adapter
+and disables the whole summary route, with no public bridge for an unknown
+version. Within that gate, the dedicated cached-accessor mixin additionally
+requires an ASM shape check that `KineticBlockEntity` still has those two
+protected instance `float` fields the accessor shadows; a shape mismatch
+disables only the cached stress/capacity/available-capacity route, while speed,
+network, and overstress continue through the public getters, and the adapter
+stays optional.
+
+### Client kinetic preview
+
+A separate client preview reader answers `create:kinetic.speed`,
+`create:kinetic.has_network`, and `create:kinetic.overstressed` locally for a
+live block whose kinetic block entity has a reliable client receipt.
+The receipt is accepted only for a client-applied update of a non-virtual,
+non-moved block entity with the expected field shape, and a later failed or
+empty update invalidates the earlier receipt; a removed or virtual block entity
+yields no local value. A provider-confirmed external candidate may use this
+reader only through its provider source and the same receipt gate; without that
+evidence its kinetic fields fall back per field.
+
+The same reader also answers the cached network totals
+(`create:kinetic.stress`, `create:kinetic.capacity`, and the derived
+`create:kinetic.available_capacity`) for an ordinary live block or a
+provider-confirmed external candidate, using the reliable receipt, the client
+cached-field accessor, and the network-present and finite, non-negative gates.
+A missing receipt or network, a removed or virtual block entity, or a raw value
+that fails its gate yields no local value for that field rather than an
+asserted zero; a genuinely received zero remains valid observed data. Those
+local totals are last-synchronized values, not guaranteed current world state;
+an authoritative property create still recaptures them, as owned by
+[property Ping](../architecture/presentation/presentation_snapshot.md#property-ping).
+A field the reader cannot observe locally falls back per field to the
+authorized server preview; registry-ID summaries have no local quantity
+guarantee and always use that fallback, owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md#target-content-preview).
+The receipt gate is independent of the cached-accessor gate, and the reader
+loads Create classes lazily: speed, network, and overstress stay receipt-backed
+without that accessor, while the cached totals need both gates.
+
+Inventory and fluid sampling verify the whole controller structure before
+asking a capability: item vaults are read from the verified controller's block
+item-handler capability, and fluid tanks from the verified controller's block
+fluid-handler capability. Creative tanks, an active boiler's input-only water
+handler, removed parts, mismatched controllers, or incomplete verification are
+unavailable rather than reported as empty. Amounts are detached and aggregated
+by registry ID only; fluid amounts use NeoForge 1.21.1 millibuckets. Summaries
+carry explicit `partial` and `scanned` markers, bound scan work independently of
+output cardinality, and never retain block entities, handlers, stacks, or
+components.
+
+The route fails soft: absent, untested, drifted, or throwing Create state yields
+no Create adapter or an unavailable/stale section, and Basic, the base Sable
+integration, and unrelated pings keep working. Loader registration, version
+gates, and the cached-accessor shape gate have unit and ASM-node seam coverage
+only; no installed-Create in-game presentation scenario has run yet, as
+recorded in [verification](../testing/verification/integrations.md#create-presentation-adapters).
+
+## Vault inventory provider
+
+The Vault inventory source is a NeoForge-only inventory provider registered
+independently of the registry-ID `create:inventory.summary` presentation field
+above; it is an ordinary source for the inventory preview and tracking domain,
+not a registry-ID aggregate. It is available only under the tested Create
+version gate, and a captured topology requires every member position to be
+loaded and recognized, with the original position inside the verified
+controller structure, before any member content is read; an unloaded, removed,
+mismatched or incomplete member makes the source unavailable. A
+provider-confirmed read scope gates the root, the controller and every member
+before its state, relation or local handler is read, and the gate is re-checked
+for reads through an already acquired member or handler, so a revoked member or
+handler is unavailable rather than read. The source
+identity is a canonical controller alias, and the captured layout keeps each
+member's position, controller/member role, and its own inventory segments so
+per-member slot boundaries and variants stay distinct. Unlike the summary, it
+reads each verified member's local inventory rather than the controller's
+combined item-handler capability. Snapshot capture, recovery, budget and
+variant semantics remain owned by
+[inventory preview and tracking](../architecture/presentation/inventory.md).
+
 ## Create block presentation resolvers
 
 ### EntityBlock doors
@@ -148,5 +310,5 @@ target; only presentation selects the master rendering form.
 ## Verification boundary
 
 Build and automated-coverage evidence is owned by
-[verification](../testing/verification.md), including the
-[pending Create gameplay and performance scenarios](../testing/verification.md#pending-manual-and-integration-matrix).
+[verification](../testing/verification/README.md), including the
+[pending Create gameplay and performance scenarios](../testing/verification/manual-integration.md#pending-manual-and-integration-matrix).

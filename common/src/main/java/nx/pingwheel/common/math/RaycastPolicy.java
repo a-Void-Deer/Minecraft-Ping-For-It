@@ -21,12 +21,12 @@ public record RaycastPolicy(
 
 	/** Builds the policy sampled from the persistent target-selection toggles. */
 	public static RaycastPolicy from(
-		boolean passThroughTransparentBlocks,
+		boolean markTransparentBlocks,
 		boolean markBlacklistedTargets,
 		boolean markFluids
 	) {
 		return new RaycastPolicy(
-			passThroughTransparentBlocks ? BlockMode.VISUAL : BlockMode.OUTLINE,
+			markTransparentBlocks ? BlockMode.OUTLINE : BlockMode.VISUAL,
 			markFluids ? FluidMode.ANY : FluidMode.NONE,
 			markBlacklistedTargets);
 	}

@@ -50,6 +50,32 @@ public final class TargetNameComposer {
 	}
 
 	/**
+	 * The plain, unstyled custom-name text used by the separate custom-name
+	 * target field: the same literal reduction {@link #compose} applies to its
+	 * custom part (styles and events removed), bounded to at most
+	 * {@code maxUtf8Bytes} UTF-8 bytes without splitting a code point.
+	 * Literal braces, quotes, parentheses and non-ASCII code points are
+	 * preserved. An empty component flattens to an empty string; the caller
+	 * decides absence.
+	 */
+	public static String plainText(Component customName, int maxUtf8Bytes) {
+		Objects.requireNonNull(customName, "customName");
+		if (maxUtf8Bytes <= 0) return "";
+
+		String text = customName.getString();
+		int end = 0;
+		int bytes = 0;
+		while (end < text.length()) {
+			int codePoint = text.codePointAt(end);
+			int width = codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
+			if (bytes + width > maxUtf8Bytes) break;
+			bytes += width;
+			end += Character.charCount(codePoint);
+		}
+		return end == text.length() ? text : text.substring(0, end);
+	}
+
+	/**
 	 * The fixed display name for a pure location target ({@code HERE},
 	 * localized through {@code pingforit.target.here}). Plain translatable, no
 	 * color.

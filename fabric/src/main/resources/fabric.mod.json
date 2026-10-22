@@ -17,6 +17,7 @@
 	},
 	"license": "${license}",
 	"icon": "icon.png",
+	"accessWidener": "pingforit.accesswidener",
 	"environment": "*",
 	"entrypoints": {
 		"client": [
@@ -27,13 +28,11 @@
 		],
 		"modmenu": [
 			"nx.pingwheel.fabric.integration.ModMenuIntegration"
-		],
-		"voicechat": [
-			"nx.pingwheel.common.integration.VoiceChatIntegration"
 		]
 	},
 	"mixins": [
-		"${mod_id}.mixins.json"
+		"${mod_id}.mixins.json",
+		"${mod_id}.fabric-resident-storage.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=${fabric_loader_version}",

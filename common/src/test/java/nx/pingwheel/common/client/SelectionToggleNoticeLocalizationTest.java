@@ -22,14 +22,14 @@ class SelectionToggleNoticeLocalizationTest {
 			try (InputStream stream = getClass().getClassLoader().getResourceAsStream(path)) {
 				assertTrue(stream != null, "missing language resource: " + path);
 				String json = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-				assertTrue(json.contains('"' + SelectionToggleNoticeState.Kind.PASS_THROUGH_TRANSPARENT_BLOCKS.translationKey() + '"'), path);
+				assertTrue(json.contains('"' + SelectionToggleNoticeState.Kind.MARK_TRANSPARENT_BLOCKS.translationKey() + '"'), path);
 				assertTrue(json.contains('"' + SelectionToggleNoticeState.Kind.MARK_BLACKLISTED_TARGETS.translationKey() + '"'), path);
 				assertTrue(json.contains('"' + SelectionToggleNoticeState.Kind.MARK_FLUIDS.translationKey() + '"'), path);
 				assertTrue(json.contains('"' + LanguageUtils.keyOf("notice", "on") + '"'), path);
 				assertTrue(json.contains('"' + LanguageUtils.keyOf("notice", "off") + '"'), path);
 				assertTrue(json.contains('"' + LanguageUtils.settings("configuration_notice_size").getKey() + '"'), path);
 				if (locale.equals("zh_cn")) {
-					assertTrue(json.contains("\"notice.pingforit.pass_through_transparent_blocks\": \"标记穿过透明方块: \""), path);
+					assertTrue(json.contains("\"notice.pingforit.mark_transparent_blocks\": \"标记透明方块: \""), path);
 					assertTrue(json.contains("\"notice.pingforit.mark_blacklisted_targets\": \"标记黑名单目标: \""), path);
 					assertTrue(json.contains("\"notice.pingforit.mark_fluids\": \"标记液体: \""), path);
 					assertTrue(json.contains("\"notice.pingforit.on\": \"开\""), path);

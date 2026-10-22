@@ -2,23 +2,30 @@ package nx.pingwheel.common.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonIOException;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import lombok.Getter;
 import lombok.SneakyThrows;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.util.SafeExceptionReport;
 import nx.pingwheel.common.platform.IPlatformContextService;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -31,6 +38,7 @@ import static nx.pingwheel.common.Global.MOD_ID;
 public class ConfigHandler <T extends IConfig> {
 
 	private final Gson gson;
+	private final Gson documentGson;
 	private final Class<T> configType;
 	private final Path configPath;
 	private final boolean recoverInvalidConfig;
@@ -80,7 +88,16 @@ public class ConfigHandler <T extends IConfig> {
 		BackupWriter backupWriter,
 		String modVersion,
 		AtomicConfigWriter atomicConfigWriter) {
-		this.gson = new GsonBuilder().setPrettyPrinting().create();
+		this.gson = new GsonBuilder()
+			.setPrettyPrinting()
+			// IntLimit carries its model default in the owning field, so a
+			// persisted object that omits or nulls the finite value needs
+			// presence-aware parsing before InventorySettings validation.
+			.registerTypeAdapter(IntLimit.class, new IntLimitDeserializer())
+			.create();
+		// Model nulls remain omitted above; explicit nulls already present in the
+		// merged raw document must survive its final tree-only serialization.
+		this.documentGson = gson.newBuilder().serializeNulls().create();
 		this.configType = Objects.requireNonNull(configType, "configType");
 		this.configPath = Objects.requireNonNull(configPath, "configPath");
 		this.backupWriter = Objects.requireNonNull(backupWriter, "backupWriter");
@@ -297,6 +314,13 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	private T deserializeConfig(JsonElement root) {
+		if (usesLegacyTransparentBlockToggle()) {
+			// A handler running below the boundary still reads the old schema. Keep
+			// a future-named raw member in the preservation base, not in the model.
+			JsonObject modelRoot = root.getAsJsonObject().deepCopy();
+			modelRoot.addProperty("markTransparentBlocks", !legacyTransparentBlockToggle(modelRoot));
+			root = modelRoot;
+		}
 		T loaded = gson.fromJson(root, configType);
 		if (loaded == null) {
 			throw new IllegalStateException("config JSON is empty");
@@ -314,6 +338,13 @@ public class ConfigHandler <T extends IConfig> {
 			throw new IllegalStateException("serialized config root is not an object");
 		}
 
+		if (configType == ClientConfig.class) {
+			removeKeys(serialized.getAsJsonObject(), REMOVED_CLIENT_PRESENTATION_KEYS);
+		}
+		if (usesLegacyTransparentBlockToggle()) {
+			projectLegacyTransparentBlockToggle(serialized.getAsJsonObject(), rootToPreserve);
+		}
+
 		if (rootToPreserve != null) {
 			if (!rootToPreserve.isJsonObject()) {
 				throw new IllegalStateException("migration root is not an object");
@@ -321,14 +352,66 @@ public class ConfigHandler <T extends IConfig> {
 
 			var merged = rootToPreserve.getAsJsonObject().deepCopy();
 			for (var entry : serialized.getAsJsonObject().entrySet()) {
+				if (configType == ClientConfig.class && entry.getKey().equals("spatialSelector")
+					&& merged.has(entry.getKey()) && merged.get(entry.getKey()).isJsonObject()
+					&& entry.getValue().isJsonObject()) {
+					// Additive selector fields replace only their own entries. Keep unknown
+					// nested preferences in the guarded migration preservation base.
+					JsonObject selector = merged.getAsJsonObject(entry.getKey());
+					for (var preference : entry.getValue().getAsJsonObject().entrySet()) {
+						selector.add(preference.getKey(), preference.getValue());
+					}
+					continue;
+				}
 				merged.add(entry.getKey(), entry.getValue());
 			}
 			serialized = merged;
 		}
 
+		if (configType == ClientConfig.class
+			&& modVersion.compareTo(ConfigVersionUpdater.SPATIAL_SELECTOR_INTRODUCED_VERSION) >= 0) {
+			// Even a preservation-base merge must not resurrect retired radius keys.
+			ConfigVersionUpdater.removeLegacyWheelRadii(serialized.getAsJsonObject());
+		}
+		if (configType == ClientConfig.class
+			&& modVersion.compareTo(ConfigVersionUpdater.WHEEL_TIMEOUT_REMOVED_VERSION) >= 0) {
+			ConfigVersionUpdater.removeLegacyWheelTimeout(serialized.getAsJsonObject());
+		}
+		if (configType == ClientConfig.class
+			&& modVersion.compareTo(ConfigVersionUpdater.MARK_TRANSPARENT_BLOCKS_INTRODUCED_VERSION) >= 0) {
+			ConfigVersionUpdater.removeLegacyTransparentBlockToggle(serialized.getAsJsonObject());
+		}
+
 		JsonElement marker = new com.google.gson.JsonPrimitive(modVersion.originalVersion());
 		serialized.getAsJsonObject().add(ConfigVersionUpdater.VERSION_KEY, marker);
-		return gson.toJson(serialized);
+		return documentGson.toJson(serialized);
+	}
+
+	private boolean usesLegacyTransparentBlockToggle() {
+		return configType == ClientConfig.class
+			&& modVersion.compareTo(ConfigVersionUpdater.MARK_TRANSPARENT_BLOCKS_INTRODUCED_VERSION) < 0;
+	}
+
+	private boolean legacyTransparentBlockToggle(JsonObject root) {
+		// Use the existing Gson boolean adapter, including its invalid-type errors.
+		return Boolean.TRUE.equals(gson.fromJson(root.get("passThroughTransparentBlocks"), Boolean.class));
+	}
+
+	private void projectLegacyTransparentBlockToggle(JsonObject serialized, JsonElement rootToPreserve) {
+		boolean passThrough = !((ClientConfig) config).isMarkTransparentBlocks();
+		serialized.remove("markTransparentBlocks");
+		if (rootToPreserve != null && rootToPreserve.isJsonObject()) {
+			JsonObject preserved = rootToPreserve.getAsJsonObject();
+			if (preserved.has("passThroughTransparentBlocks")
+				&& legacyTransparentBlockToggle(preserved) == passThrough) {
+				// Let the guarded merge retain an unchanged legacy raw value. Omitting
+				// the future key above likewise leaves any pre-existing unknown one alone.
+				return;
+			}
+		}
+		// Fresh files, ordinary saves and pending edits must persist the model's
+		// actual selection effect without prematurely introducing the future key.
+		serialized.addProperty("passThroughTransparentBlocks", passThrough);
 	}
 
 	private VersionedConfig readVersionedConfig(String serialized, byte[] sourceBytes) {
@@ -342,8 +425,14 @@ public class ConfigHandler <T extends IConfig> {
 		PingForItVersion configVersion = PingForItVersion.parse(rawConfigVersion);
 		int comparison = configVersion.compareTo(modVersion);
 		if (comparison == 0) {
+			String shapeUpdate = normalizeRawShape(root);
 			return new VersionedConfig(
-				root, configVersion, false, false, List.of(), sourceBytes);
+				root,
+				configVersion,
+				shapeUpdate != null,
+				false,
+				shapeUpdate == null ? List.of() : List.of(shapeUpdate),
+				sourceBytes);
 		}
 
 		LOGGER.warn(
@@ -356,13 +445,368 @@ public class ConfigHandler <T extends IConfig> {
 
 		ConfigVersionUpdater.MigrationResult migration =
 			ConfigVersionUpdater.update(root, configType, configVersion, modVersion);
+		String shapeUpdate = normalizeRawShape(migration.root());
+		List<String> updates = shapeUpdate == null
+			? migration.updates()
+			: appendedUpdate(migration.updates(), shapeUpdate);
 		return new VersionedConfig(
 			migration.root(),
 			configVersion,
 			true,
 			false,
-			migration.updates(),
+			updates,
 			sourceBytes);
+	}
+
+	private static final List<String> REMOVED_CLIENT_PRESENTATION_KEYS =
+		List.of("presentationReceive", "presentationDisplay");
+	private static final List<String> LEGACY_FLAT_PRESENTATION_KEYS =
+		List.of("white", "black", "whitelistOnly");
+
+	/**
+	 * Same-version raw-shape and preference reconciliation. Only exact obsolete
+	 * shapes or an explicitly conflicting client gesture pair are rewritten:
+	 * the legacy flat server policy is copied to every target type
+	 * when the new map is absent, the new map wins and drops the flat keys when
+	 * present, and the removed client presentation keys are stripped. A future or
+	 * unrecognized shape is preserved for the version guard, and no unrelated
+	 * user data is touched. Returns a non-null description only when the raw root
+	 * changed, so an untouched file is never rewritten. Client gesture
+	 * reconciliation also uses this preservation base and changed-source guard.
+	 */
+	private String normalizeRawShape(JsonObject root) {
+		if (configType == ServerConfig.class) {
+			return normalizeServerPresentationShape(root);
+		}
+
+		if (configType == ClientConfig.class) {
+			boolean changed = removeKeys(root, REMOVED_CLIENT_PRESENTATION_KEYS);
+			// Reconcile only an explicit conflicting pair, through the same guarded
+			// writeback as other normalization. Future/protected files never reach it.
+			if (isTrue(root.get("longPressCompatibilityMode")) && root.has("spatialSelector")
+				&& root.get("spatialSelector").isJsonObject()) {
+				JsonObject selector = root.getAsJsonObject("spatialSelector");
+				if (isTrue(selector.get("gestureSkipHoldEnabled"))) {
+					selector.addProperty("gestureSkipHoldEnabled", false);
+					changed = true;
+				}
+			}
+			// Compatibility mode owns a real zero angle, not a display-only mask.
+			// Normalize absent, null and non-zero raw values so a same-version load
+			// persists the same invariant the setters and validation enforce. A
+			// string that the typed double reader accepts (including "NaN") is
+			// normalized too; an undecodable value stays for typed recovery.
+			if (isTrue(root.get("longPressCompatibilityMode"))) {
+				JsonElement angle = root.get("doubleClickDangerAngleDegrees");
+				if (angle == null || angle.isJsonNull()) {
+					root.addProperty("doubleClickDangerAngleDegrees", 0.0);
+					changed = true;
+				} else {
+					Double decoded = decodedDouble(angle);
+					if (decoded != null && (Double.isNaN(decoded) || decoded != 0.0)) {
+						root.addProperty("doubleClickDangerAngleDegrees", 0.0);
+						changed = true;
+					}
+				}
+			}
+			return changed ? "client: obsolete policy or conflicting press preference normalized" : null;
+		}
+
+		return null;
+	}
+
+	private static boolean isTrue(JsonElement value) {
+		return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean() && value.getAsBoolean();
+	}
+
+	/**
+	 * Mirrors the typed Gson double reader for a present primitive: a JSON number
+	 * uses its numeric value, while a string uses {@link Double#parseDouble}.
+	 * Returns null when the value cannot be decoded as a double.
+	 */
+	private static Double decodedDouble(JsonElement value) {
+		if (value == null || !value.isJsonPrimitive()) return null;
+		var primitive = value.getAsJsonPrimitive();
+		if (primitive.isNumber()) {
+			try {
+				return primitive.getAsDouble();
+			} catch (RuntimeException failure) {
+				return null;
+			}
+		}
+		if (primitive.isString()) {
+			try {
+				return Double.parseDouble(primitive.getAsString());
+			} catch (NumberFormatException failure) {
+				return null;
+			}
+		}
+		return null;
+	}
+
+	private static String normalizeServerPresentationShape(JsonObject root) {
+		JsonElement presentationElement = root.get("presentation");
+		if (presentationElement == null) {
+			return null;
+		}
+
+		if (!presentationElement.isJsonObject()) {
+			// A malformed security-sensitive policy object must fail closed instead of
+			// failing the whole config into a reset that allows every field. The new
+			// deny state wins over any legacy shape because the whole object is replaced.
+			root.add("presentation", failClosedPresentation());
+			return "presentation: malformed policy object replaced with deny-all target types";
+		}
+
+		JsonObject presentation = presentationElement.getAsJsonObject();
+		boolean changed = false;
+		boolean globalDeny = false;
+
+		JsonElement targetTypesElement = presentation.get("targetTypes");
+		if (targetTypesElement != null) {
+			if (targetTypesElement.isJsonObject()) {
+				JsonObject normalized = normalizeTargetTypeRules(targetTypesElement.getAsJsonObject());
+				if (!normalized.equals(targetTypesElement)) {
+					presentation.add("targetTypes", normalized);
+					changed = true;
+				}
+			} else {
+				// The malformed new map is authoritative over the legacy flat keys: it is
+				// replaced by an explicit deny-all map for every existing target type so a
+				// same-version and an older-version load both stay fail closed.
+				presentation.add("targetTypes", failClosedTargetTypes());
+				changed = true;
+			}
+			changed |= removeKeys(presentation, LEGACY_FLAT_PRESENTATION_KEYS);
+		} else if (presentation.has("white") || presentation.has("black") || presentation.has("whitelistOnly")) {
+			presentation.add("targetTypes", validFlatRuleShape(presentation)
+				? flatRuleCopies(presentation)
+				: failClosedTargetTypes());
+			removeKeys(presentation, LEGACY_FLAT_PRESENTATION_KEYS);
+			changed = true;
+		}
+
+		JsonElement permissionElement = presentation.get("permissionLevels");
+		if (permissionElement != null) {
+			if (permissionElement.isJsonObject()) {
+				JsonObject sanitized = sanitizeIntegralMap(permissionElement.getAsJsonObject());
+				if (!sanitized.equals(permissionElement)) {
+					presentation.add("permissionLevels", sanitized);
+					changed = true;
+					globalDeny = true;
+				}
+			} else {
+				// A malformed global permission structure denies every target type
+				// durably instead of reaching the reset-to-allow recovery path.
+				presentation.remove("permissionLevels");
+				changed = true;
+				globalDeny = true;
+			}
+		}
+
+		JsonElement intervalsElement = presentation.get("updateIntervals");
+		if (intervalsElement != null) {
+			if (intervalsElement.isJsonObject()) {
+				JsonObject sanitized = sanitizeIntegralMap(intervalsElement.getAsJsonObject());
+				if (!sanitized.equals(intervalsElement)) {
+					presentation.add("updateIntervals", sanitized);
+					changed = true;
+				}
+			} else {
+				// Interval overrides are non-security: a malformed shape degrades to
+				// "no overrides" through the existing skip/default validation.
+				presentation.remove("updateIntervals");
+				changed = true;
+			}
+		}
+
+		changed |= removeNonIntegral(presentation, "minUpdateIntervalTicks");
+		changed |= removeNonIntegral(presentation, "scanBudget");
+
+		if (globalDeny) {
+			presentation.add("targetTypes", failClosedTargetTypes());
+			changed = true;
+		}
+
+		return changed ? "presentation: security-sensitive shapes normalized fail closed" : null;
+	}
+
+	private static JsonObject normalizeTargetTypeRules(JsonObject raw) {
+		JsonObject normalized = new JsonObject();
+		for (String id : PresentationSettings.TARGET_TYPE_IDS) {
+			JsonElement entry = raw.get(id);
+			if (entry == null || !entry.isJsonObject() || !validRuleShape(entry.getAsJsonObject())) {
+				// A missing, non-object, or partially mistyped type rule fails closed
+				// instead of silently becoming the allow-by-default rule shape.
+				normalized.add(id, denyAllRule());
+				continue;
+			}
+			normalized.add(id, entry.deepCopy());
+		}
+		return normalized;
+	}
+
+	private static JsonObject flatRuleCopies(JsonObject presentation) {
+		JsonObject targetTypes = new JsonObject();
+		for (String id : PresentationSettings.TARGET_TYPE_IDS) {
+			JsonObject rules = new JsonObject();
+			copyIfPresent(presentation, "white", rules);
+			copyIfPresent(presentation, "black", rules);
+			copyIfPresent(presentation, "whitelistOnly", rules);
+			targetTypes.add(id, rules);
+		}
+		return targetTypes;
+	}
+
+	private static boolean validFlatRuleShape(JsonObject presentation) {
+		return validStringArrayMember(presentation, "white")
+			&& validStringArrayMember(presentation, "black")
+			&& validBooleanMember(presentation, "whitelistOnly");
+	}
+
+	private static boolean validRuleShape(JsonObject rule) {
+		return validStringArrayMember(rule, "white")
+			&& validStringArrayMember(rule, "black")
+			&& validBooleanMember(rule, "whitelistOnly")
+			&& validChildBlackMember(rule);
+	}
+
+	/**
+	 * A present {@code childBlack} member must be an array of addressable nested
+	 * adapter/field/record-path references; a missing member keeps the model's
+	 * semantic default. Any malformed, duplicate, empty-path, or over-capacity
+	 * entry fails the whole rule shape closed, so the target type is replaced by
+	 * the durable deny-all rule instead of silently discarding the security
+	 * member and leaving the type allowed.
+	 */
+	private static boolean validChildBlackMember(JsonObject rule) {
+		JsonElement value = rule.get("childBlack");
+		if (value == null) return true;
+		if (!value.isJsonArray()) return false;
+		JsonArray array = value.getAsJsonArray();
+		if (array.size() > PresentationSettings.MAX_CHILD_BLACK_REFS) return false;
+		HashSet<PresentationPropertyRef> unique = new HashSet<>();
+		for (JsonElement element : array) {
+			PresentationPropertyRef ref = parseChildDenyRef(element);
+			if (ref == null || ref.isRoot() || !unique.add(ref)) return false;
+		}
+		return true;
+	}
+
+	/** A well-formed reference object, or null when any part is mistyped or invalid. */
+	private static PresentationPropertyRef parseChildDenyRef(JsonElement element) {
+		if (element == null || !element.isJsonObject()) return null;
+		JsonObject object = element.getAsJsonObject();
+		JsonElement adapterId = object.get("adapterId");
+		JsonElement fieldId = object.get("fieldId");
+		JsonElement recordPath = object.get("recordPath");
+		if (!isString(adapterId) || !isString(fieldId) || recordPath == null || !recordPath.isJsonArray()) return null;
+		List<String> keys = new ArrayList<>();
+		for (JsonElement key : recordPath.getAsJsonArray()) {
+			if (!isString(key)) return null;
+			keys.add(key.getAsString());
+		}
+		try {
+			return new PresentationPropertyRef(adapterId.getAsString(), fieldId.getAsString(), keys);
+		} catch (RuntimeException ex) {
+			return null;
+		}
+	}
+
+	private static boolean isString(JsonElement element) {
+		return element != null && element.isJsonPrimitive() && element.getAsJsonPrimitive().isString();
+	}
+
+	/** A present member must have the exact JSON type; a missing member keeps the documented default. */
+	private static boolean validStringArrayMember(JsonObject object, String key) {
+		JsonElement value = object.get(key);
+		if (value == null) return true;
+		if (!value.isJsonArray()) return false;
+		for (JsonElement element : value.getAsJsonArray()) {
+			if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) return false;
+		}
+		return true;
+	}
+
+	private static boolean validBooleanMember(JsonObject object, String key) {
+		JsonElement value = object.get(key);
+		if (value == null) return true;
+		return value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean();
+	}
+
+	/** Keeps only entries whose value deserializes to an int without coercion or overflow. */
+	private static JsonObject sanitizeIntegralMap(JsonObject raw) {
+		JsonObject sanitized = new JsonObject();
+		for (var entry : raw.entrySet()) {
+			if (isIntegralNumber(entry.getValue())) sanitized.add(entry.getKey(), entry.getValue());
+		}
+		return sanitized;
+	}
+
+	private static boolean removeNonIntegral(JsonObject object, String key) {
+		JsonElement value = object.get(key);
+		if (value == null) return false;
+		if (isIntegralNumber(value)) return false;
+		object.remove(key);
+		return true;
+	}
+
+	private static boolean isIntegralNumber(JsonElement element) {
+		if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) return false;
+		BigDecimal value;
+		try {
+			value = element.getAsBigDecimal();
+		} catch (RuntimeException ex) {
+			return false;
+		}
+		return value.stripTrailingZeros().scale() <= 0
+			&& value.compareTo(BigDecimal.valueOf(Integer.MIN_VALUE)) >= 0
+			&& value.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) <= 0;
+	}
+
+	private static JsonObject failClosedPresentation() {
+		JsonObject presentation = new JsonObject();
+		presentation.add("targetTypes", failClosedTargetTypes());
+		return presentation;
+	}
+
+	private static JsonObject failClosedTargetTypes() {
+		JsonObject targetTypes = new JsonObject();
+		for (String id : PresentationSettings.TARGET_TYPE_IDS) {
+			targetTypes.add(id, denyAllRule());
+		}
+		return targetTypes;
+	}
+
+	private static JsonObject denyAllRule() {
+		JsonObject rules = new JsonObject();
+		rules.add("white", new JsonArray());
+		JsonArray black = new JsonArray();
+		black.add("*:*");
+		rules.add("black", black);
+		rules.addProperty("whitelistOnly", true);
+		return rules;
+	}
+
+	private static void copyIfPresent(JsonObject source, String key, JsonObject target) {
+		JsonElement value = source.get(key);
+		if (value != null) {
+			target.add(key, value.deepCopy());
+		}
+	}
+
+	private static boolean removeKeys(JsonObject root, List<String> keys) {
+		boolean removed = false;
+		for (String key : keys) {
+			removed |= root.remove(key) != null;
+		}
+		return removed;
+	}
+
+	private static List<String> appendedUpdate(List<String> updates, String update) {
+		List<String> merged = new java.util.ArrayList<>(updates);
+		merged.add(update);
+		return List.copyOf(merged);
 	}
 
 	private void rejectFutureConfig(PingForItVersion configVersion) {

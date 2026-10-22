@@ -22,9 +22,17 @@ dependencies {
     modCompileOnly("com.terraformersmc:modmenu:4.1.2") {
         exclude(group: "net.fabricmc.fabric-api")
     }
+
+    // Headless tests exercise the native sided inventory wrappers.
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+}
+
+test {
+    useJUnitPlatform()
 }
 
 loom {
+    accessWidenerPath = file("src/main/resources/pingforit.accesswidener")
     runs {
         client {
             client()

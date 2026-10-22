@@ -35,6 +35,8 @@ public final class SableClientProvider {
 
 	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard(PROVIDER_ID);
 	private static volatile SableClientCompanionAccess access;
+	private static volatile SableClientCompanionAccess contentAccess;
+	private static volatile boolean contentUnavailable;
 	private static volatile SableDiagnostics diagnostics = SableDiagnostics.global();
 	private static final SablePresentationLogGate PRESENTATION_FAILURES =
 		new SablePresentationLogGate();
@@ -122,6 +124,35 @@ public final class SableClientProvider {
 			logCaptureFallback("EXTERNAL_CAPTURE_FAILED", "linkage-error", "capture");
 			return Optional.empty();
 		}
+	}
+
+	/** Native mapping plus a separate transformed provider ray; ordinary capture remains unchanged. */
+	public static nx.pingwheel.common.interaction.candidate.CandidateBlockCapture candidateBlocks() {
+		var nativeBlocks = nx.pingwheel.common.interaction.candidate.CandidateBlockCapture.nativeBlocks();
+		return new nx.pingwheel.common.interaction.candidate.CandidateBlockCapture() {
+			@Override public Result capture(net.minecraft.world.level.Level level, BlockHitResult hit,
+				Vec3 start, Vec3 end, nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget) {
+				return nativeBlocks.capture(level, hit, start, end, budget);
+			}
+			@Override public boolean collectSupplemental(net.minecraft.world.level.Level level, Vec3 start, Vec3 end,
+				nx.pingwheel.common.math.RaycastPolicy policy, CollisionContext context, Vec3 cameraFeet,
+				nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget,
+				nx.pingwheel.common.interaction.candidate.CandidateCollector collector) {
+				if (!ModContext.HasSable) return true;
+				if (!enabled() || !(level instanceof ClientLevel clientLevel)) return false;
+				try {
+					return getAccess().collectSupplemental(clientLevel, start, end, policy, context, cameraFeet, budget, collector);
+				} catch (ReflectiveOperationException | RuntimeException failure) {
+					diagnostics.captureException("supplemental-ray", "unavailable-or-incomplete", failure,
+						"companion_contract", "1.6.0", "api", "getAllSubLevels/getPlot");
+					return false;
+				} catch (LinkageError failure) {
+					diagnostics.captureException("supplemental-ray", "linkage-unavailable", failure,
+						"companion_contract", "1.6.0", "api", "getAllSubLevels/getPlot");
+					return false;
+				}
+			}
+		};
 	}
 
 	/**
@@ -299,6 +330,47 @@ public final class SableClientProvider {
 			LINK_GUARD.disableSilently();
 			return Optional.empty();
 		}
+	}
+
+	/** Independently guarded Content source lookup; never calls the render-shape route. */
+	public static Optional<nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource> resolvePreviewReadSource(
+		ClientLevel level, Target.ExternalBlockTarget target
+	) {
+		if (!ModContext.HasSable || contentUnavailable || !currentContentLevel(level) || target == null
+			|| !PROVIDER_ID.equals(target.providerId())
+			|| !target.dimensionId().equals(level.dimension().location().toString())) return Optional.empty();
+		try {
+			SableClientCompanionAccess current = contentAccess;
+			if (current == null) {
+				synchronized (SableClientProvider.class) {
+					current = contentAccess;
+					if (current == null) {
+						current = SableClientCompanionAccess.create(diagnostics);
+						if (!current.hasInternalAccess()) {
+							contentUnavailable = true;
+							return Optional.empty();
+						}
+						contentAccess = current;
+					}
+				}
+			}
+			return current.resolvePreviewReadSource(level, target);
+		} catch (ReflectiveOperationException | LinkageError unavailable) {
+			contentUnavailable = true;
+			logPresentationException("content-read-source", unavailable, "target", target);
+			return Optional.empty();
+		} catch (RuntimeException unavailable) {
+			logPresentationException("content-read-source", unavailable, "target", target);
+			return Optional.empty();
+		}
+	}
+
+	static boolean currentContentLevel(ClientLevel level) {
+		if (level == null || contentUnavailable || !ModContext.HasSable) return false;
+		try {
+			net.minecraft.client.Minecraft game = net.minecraft.client.Minecraft.getInstance();
+			return game != null && game.level == level && game.isSameThread();
+		} catch (RuntimeException | LinkageError unavailable) { return false; }
 	}
 
 	private static boolean enabled() {

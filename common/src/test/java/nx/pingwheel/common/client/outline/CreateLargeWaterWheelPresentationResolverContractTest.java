@@ -1,13 +1,14 @@
 package nx.pingwheel.common.client.outline;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
 
@@ -25,55 +26,63 @@ class CreateLargeWaterWheelPresentationResolverContractTest {
 		"src/main/java/nx/pingwheel/neoforge/NeoClient.java";
 
 	@Test
-	void resolverUsesCreateMasterResolutionWithoutDiscoveryFallbacks() throws IOException {
+	void resolverDeclaresCreateStructuralBlockHostBinding() throws IOException {
 		String source = readProjectFile(RESOLVER_SOURCE);
 
-		assertTrue(source.contains("WaterWheelStructuralBlock"));
-		assertTrue(source.contains("LargeWaterWheelBlock"));
-		assertTrue(source.contains("sourceState.getBlock() instanceof WaterWheelStructuralBlock"));
-		assertTrue(source.contains("return BlockPresentationResolution.UNHANDLED"));
-		assertTrue(source.contains("sourceBlock.stillValid"));
-		assertTrue(source.contains("sourcePos, sourceState, false"));
-		assertTrue(source.contains("WaterWheelStructuralBlock.getMaster"));
-		assertTrue(source.contains("context.world(), sourcePos, sourceState"));
-		assertTrue(source.indexOf("sourceBlock.stillValid")
-			< source.indexOf("WaterWheelStructuralBlock.getMaster"));
+		assertTrue(source.contains("instanceof WaterWheelStructuralBlock"));
+		assertTrue(source.contains("instanceof LargeWaterWheelBlock"));
+		assertTrue(source.contains("stillValid("));
+		assertTrue(source.contains("WaterWheelStructuralBlock.getMaster("));
+		assertTrue(source.contains("BuiltInRegistries.BLOCK.getKey("));
 		assertTrue(source.contains("BlockPresentationRelation.PROXY_TO_OWNER"));
 		assertTrue(source.contains("\"entity_block\""));
 		assertTrue(source.contains("\"create:large_water_wheel\""));
-		assertTrue(source.contains("masterPos"));
-		assertTrue(source.contains("masterState"));
-		assertTrue(source.contains("LARGE_WATER_WHEEL_ID"));
-		assertTrue(source.contains("BlockPresentationResolution.handled(List.of())"));
-		assertTrue(source.contains("registration != null"));
-		assertTrue(source.contains("BlockPresentationResolverRegistry.Registration registration"));
-		assertTrue(source.indexOf("new BlockRenderSubject")
-			== source.lastIndexOf("new BlockRenderSubject"));
+		assertTrue(source.contains("BlockPresentationResolverRegistry.INSTANCE.register("));
 
-		assertFalse(source.contains("getBlockEntity"));
-		assertFalse(source.contains("visualAtPos"));
-		assertFalse(source.contains("getChunk"));
-		assertFalse(source.contains("getEntities"));
-		assertFalse(source.contains("scan"));
+		// Master selection must use Create's structural relation, not an
+		// unrelated block entity, chunk, entity, or Flywheel visual search.
+		assertFalse(source.contains("getBlockEntity("));
+		assertFalse(source.contains("visualAtPos("));
+		assertFalse(source.contains("getChunk("));
+		assertFalse(source.contains("getEntities("));
 	}
 
 	@Test
-	void createRegistrationIsReflectiveAndIndependentOfFlywheel() throws IOException {
+	void createOnlyBranchDeclaresReflectiveWheelRegistrationWithoutFlywheelGate() throws IOException {
 		String source = readProjectFile(NEO_CLIENT_SOURCE);
 
-		assertTrue(source.contains(
-			"nx.pingwheel.neoforge.integration.create.CreateLargeWaterWheelPresentationResolver"));
+		assertTrue(Pattern.compile("CREATE_WATER_WHEEL_RESOLVER\\s*=\\s*\""
+			+ Pattern.quote("nx.pingwheel.neoforge.integration.create.CreateLargeWaterWheelPresentationResolver")
+			+ "\"").matcher(source).find());
 		assertFalse(source.contains(
 			"import nx.pingwheel.neoforge.integration.create.CreateLargeWaterWheelPresentationResolver"));
-		int createBranch = source.indexOf("if (createDetected) {");
-		int wheelRegistration = source.indexOf("CREATE_WATER_WHEEL_RESOLVER", createBranch);
-		int flywheelBranch = source.indexOf("if (createDetected && flywheelDetected)", createBranch);
-		assertNotEquals(-1, createBranch);
-		assertTrue(wheelRegistration > createBranch);
-		assertTrue(wheelRegistration < flywheelBranch);
-		assertTrue(source.contains(
-			"registerOptionalResolver(CREATE_WATER_WHEEL_RESOLVER, \"create-water-wheel-presentation\")"));
-		assertTrue(source.contains("Class.forName(className, true, NeoClient.class.getClassLoader())"));
+		assertTrue(Pattern.compile("createDetected\\s*=\\s*ModList\\.get\\(\\)\\.isLoaded"
+			+ "\\(\"create\"\\)").matcher(source).find());
+		String createOnly = ifBody(source, "createDetected");
+		String createAndFlywheel = ifBody(source, "createDetected\\s*&&\\s*flywheelDetected");
+		assertFalse(createOnly.isEmpty(), "Create-only registration gate must exist");
+		assertFalse(createAndFlywheel.isEmpty(), "Flywheel-specific gate must be separate");
+		assertTrue(Pattern.compile("registerOptionalResolver\\s*\\(\\s*CREATE_WATER_WHEEL_RESOLVER\\b")
+			.matcher(createOnly).find());
+		assertFalse(createAndFlywheel.contains("CREATE_WATER_WHEEL_RESOLVER"));
+		assertTrue(source.contains("Class.forName("));
+	}
+
+	private static String ifBody(String source, String condition) {
+		Matcher gate = Pattern.compile("if\\s*\\(\\s*" + condition + "\\s*\\)\\s*\\{").matcher(source);
+		if (!gate.find()) {
+			return "";
+		}
+		int openingBrace = gate.end() - 1;
+		int depth = 0;
+		for (int index = openingBrace; index < source.length(); index++) {
+			if (source.charAt(index) == '{') {
+				depth++;
+			} else if (source.charAt(index) == '}' && --depth == 0) {
+				return source.substring(openingBrace, index + 1);
+			}
+		}
+		return "";
 	}
 
 	private static String readProjectFile(String relativePath) throws IOException {

@@ -7,7 +7,7 @@ hold the ping key when a choice is needed, and show friends what you mean.
 
 ## Release
 
-- Version: `0.4.2-pfi-beta1`
+- Version: `0.5.0-pfi-beta1`
 - Minecraft: `1.21.1`
 - Java: `21`
 - Loaders: Fabric, Forge, and NeoForge
@@ -24,9 +24,13 @@ type. The complete press-time capture and freezing contract is owned by
 There are seven predefined ping types: **Attention**, **Danger**, **Go To**,
 **Loot**, **Destroy**, **Take**, and **Request**. A short press uses the
 captured target type's default. Holding the key opens a wheel for that target's
-available types; the center cancels the nearest eligible marker owned by you;
-the wheel can also time out without acting. The authoritative type catalogue is
-owned by [Catalogs](docs/architecture/identity/catalogs.md).
+available types; releasing at the center abandons the selector session with no
+action. The root's down (180°) Cancel Marker action explicitly requests
+cancellation of the nearest eligible marker you own. The wheel's interaction
+and cancellation behavior is owned by
+[Wheel interaction](docs/architecture/picking/wheel.md), and the authoritative
+type catalogue is owned by
+[Catalogs](docs/architecture/identity/catalogs.md).
 
 Markers, target validation, ownership, shared-target winner selection, and rate
 limiting are server-authoritative. The client only mirrors the server's create
@@ -62,23 +66,27 @@ settings, and wheel text use Minecraft localization.
 | Open settings | Unbound (rebindable) |
 
 The ping key's short release sends the default type; holding it opens the
-wheel. The wheel center is the cancel action, not another ping type.
+wheel. Releasing at the center abandons the current selector session with no
+action; the root's down (180°) Cancel Marker action explicitly requests
+cancellation of the nearest eligible marker you own.
 
 - `/pingforit` or `/pingforit help` shows command help.
-- `/pingforit config` opens the settings GUI. Its server section is available
-  to players with the required server permission and edits authoritative server
-  settings; the exact edit authority and required permission are owned by
+- `/pingforit config` opens the settings GUI. Its server section lets connected
+  players view authoritative server settings; editing requires server permission.
+  The exact edit authority and required permission are owned by
   [Server configuration authority](docs/architecture/authority/server-config.md).
 - `/pingforit channel` reads or changes the player's ping channel.
 
 ## Configuration
 
 The client and server settings are stored in configurable JSON files under
-`config/`. The settings GUI includes client controls and, when permitted, the
-server section; it has no GUI list editor, and its block-list action saves and
-closes the screen before opening the client file. Exact filenames, keys, list
-syntax, close/save behavior, external-edit reload timing, and reset semantics
-are owned by the [client configuration](docs/config/client.md),
+`config/`. The settings GUI includes client controls and, for connected players,
+a view of authoritative server settings; only editing requires permission.
+Client-side lists have no GUI list editor: the block-list action
+saves and closes the screen before opening the client file, while the server
+presentation policy selector provides its own GUI add and remove editing. Exact
+filenames, keys, list syntax, close/save behavior, external-edit reload timing,
+and reset semantics are owned by the [client configuration](docs/config/client.md),
 [server configuration](docs/config/server.md), and
 [configuration UI](docs/UI/settings-screen.md) contracts.
 

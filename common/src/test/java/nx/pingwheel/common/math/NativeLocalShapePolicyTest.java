@@ -62,14 +62,14 @@ class NativeLocalShapePolicyTest {
 		// Deliberately supply the children far-to-near: the scanner, not child-map
 		// order, must select the closest eligible native surface.
 		List<BlockPos> suppliedPositions = List.of(stonePos, waterPos, glassPos);
-		for (boolean passThroughTransparentBlocks : new boolean[] {false, true}) {
+		for (boolean markTransparentBlocks : new boolean[] {false, true}) {
 			for (boolean markFluids : new boolean[] {false, true}) {
 				RaycastPolicy policy = RaycastPolicy.from(
-					passThroughTransparentBlocks, false, markFluids);
+					markTransparentBlocks, false, markFluids);
 				LocalGeometryHit hit = trace(
 					start, end, policy, view, suppliedPositions, ignored -> false).orElseThrow();
 
-				if (!passThroughTransparentBlocks) {
+				if (markTransparentBlocks) {
 					assertHit(hit, glassPos, LocalGeometryKind.BLOCK, "minecraft:glass", Optional.empty(),
 						0.25, new Vec3(2.0, 0.5, 0.5));
 				} else if (markFluids) {
@@ -231,7 +231,7 @@ class NativeLocalShapePolicyTest {
 		assertTrue(nativeThinShape.bounds().maxX - nativeThinShape.bounds().minX < 1.0,
 			"the near child must remain a native thin shape rather than a unit-block probe");
 
-		LocalGeometryHit hit = trace(start, end, RaycastPolicy.from(false, false, false), view,
+		LocalGeometryHit hit = trace(start, end, RaycastPolicy.from(true, false, false), view,
 			suppliedPositions, ignored -> false).orElseThrow();
 		double entryX = nearThinPos.getX() + nativeThinShape.bounds().minX;
 		assertHit(hit, nearThinPos, LocalGeometryKind.BLOCK, "minecraft:iron_bars", Optional.empty(),
@@ -249,8 +249,8 @@ class NativeLocalShapePolicyTest {
 			stonePos, Blocks.STONE.defaultBlockState()));
 		Vec3 start = new Vec3(0.0, 0.5, 0.5);
 		Vec3 end = new Vec3(5.0, 0.5, 0.5);
-		RaycastPolicy policyAtPress = RaycastPolicy.from(true, false, false);
-		RaycastPolicy laterToggleSnapshot = RaycastPolicy.from(false, false, true);
+		RaycastPolicy policyAtPress = RaycastPolicy.from(false, false, false);
+		RaycastPolicy laterToggleSnapshot = RaycastPolicy.from(true, false, true);
 
 		LocalGeometryHit pressTimeHit = trace(start, end, policyAtPress, view,
 			List.of(stonePos, waterPos, glassPos), ignored -> false).orElseThrow();

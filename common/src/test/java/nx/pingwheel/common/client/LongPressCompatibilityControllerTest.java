@@ -20,11 +20,15 @@ import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
+import nx.pingwheel.common.client.LongPressCompatibilityController.BaselineOutcome;
+import nx.pingwheel.common.client.LongPressCompatibilityController.DispatchOutcome;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LongPressCompatibilityControllerTest {
@@ -185,6 +189,53 @@ class LongPressCompatibilityControllerTest {
 	}
 
 	@Test
+	void enablingModeWhileABaselineIsActiveDrainsItWithoutSupersedeAbortOrSeed() {
+		Harness h = harness(false, 200L, 20L);
+		h.port.asyncFirstCapture = true;
+		h.controller.onPress(0L);
+		h.controller.onRelease();
+		assertEquals(0, h.port.defaultCreates);
+
+		h.mode.set(true);
+		h.controller.onPress(15L);
+		assertEquals(1, h.port.normalStarts, "the pre-enable baseline is never superseded by a fresh press");
+		assertEquals(0, h.port.aborts, "enabling never aborts an existing ordinary baseline");
+
+		h.port.firstCaptureReady = true;
+		h.clock.now = 20L;
+		h.controller.onRenderFrame(false);
+		assertEquals(1, h.port.defaultCreates);
+		assertEquals(PingInteractionPhase.IDLE, h.port.phase);
+
+		h.controller.onPress(30L);
+		assertEquals(2, h.port.normalStarts, "only after idle does compatibility own a new press");
+		assertEquals(0, h.port.virtualStarts, "the drained baseline is not adopted or replayed as a seed");
+	}
+
+	@Test
+	void preEnableDrainUsesTheOldReleasedBaselineNotTheIgnoredNewPhysicalHold() {
+		Harness h = harness(false, 200L, 20L);
+		h.port.asyncFirstCapture = true;
+		h.controller.onPress(0L);
+		h.controller.onRelease();
+		assertEquals(0, h.port.defaultCreates);
+
+		h.mode.set(true);
+		h.controller.onPress(15L);
+		assertEquals(1, h.port.normalStarts);
+
+		h.port.firstCaptureReady = true;
+		h.clock.now = 20L;
+		h.controller.onRenderFrame(true);
+		assertEquals(1, h.port.defaultCreates,
+			"the ignored new down must not keep the already released old baseline logically held");
+		assertEquals(PingInteractionPhase.IDLE, h.port.phase);
+
+		h.controller.onPress(30L);
+		assertEquals(2, h.port.normalStarts, "compatibility owns only the next press");
+	}
+
+	@Test
 	void disablingModeOnTheNextFrameAbortsVirtualInteractionAndDoesNotReplay() {
 		Harness h = enabledHarness(200L, 20L);
 		h.click(0L);
@@ -218,6 +269,120 @@ class LongPressCompatibilityControllerTest {
 		assertFalse(joined.contains("{"));
 	}
 
+	@Test
+	void emittedButRejectedDefaultCreateDoesNotSeedRapidCompatibility() {
+		Harness h = enabledHarness(200L, 20L);
+		h.port.dispatchOutcome = DispatchOutcome.NOT_SENT;
+		h.click(0L);
+		assertFalse(h.controller.hasPendingState(), "courtesy-rejected/unready create is not dispatch proof");
+		h.controller.onPress(15L);
+		assertEquals(0, h.port.virtualStarts);
+		assertEquals(2, h.port.normalStarts, "the next independent press remains ordinary, not a replay");
+	}
+
+	@Test
+	void asyncRapidPressCannotStartVirtualCaptureAfterRejectedCreate() {
+		Harness h = enabledHarness(200L, 20L);
+		h.port.asyncFirstCapture = true;
+		h.port.dispatchOutcome = DispatchOutcome.NOT_SENT;
+		h.controller.onPress(0L);
+		h.controller.onRelease();
+		h.controller.onPress(15L);
+		h.controller.onRelease();
+		h.port.firstCaptureReady = true;
+		h.frame(20L);
+		assertEquals(1, h.port.defaultCreates, "one action emitted, not qualifying dispatch");
+		assertEquals(0, h.port.virtualStarts);
+		assertEquals(1, h.port.normalStarts);
+		assertFalse(h.controller.hasPendingState());
+	}
+
+	@Test
+	void deferredPressIsDiscardedAfterRejectedCreateAndNeverReplayed() {
+		Harness h = pendingDeferred();
+		h.port.dispatchOutcome = DispatchOutcome.NOT_SENT;
+		h.port.firstCaptureReady = true;
+		h.frame(31L);
+		assertEquals(1, h.port.normalStarts);
+		assertEquals(0, h.port.virtualStarts);
+		assertFalse(h.controller.hasPendingState());
+		h.frame(100L);
+		assertEquals(1, h.port.defaultCreates, "dropped action must not be queued or retried");
+	}
+
+	@Test
+	void targetGoneCannotLaunchDeferredCapture() {
+		Harness h = pendingDeferred();
+		h.port.firstTargetGone = true;
+		h.port.firstCaptureReady = true;
+		h.clock.now = 31L;
+		assertTrue(h.controller.onRenderFrame(false).orElseThrow() instanceof PingInteractionAction.TargetGone);
+		assertEquals(1, h.port.normalStarts);
+		assertEquals(0, h.port.virtualStarts);
+		assertFalse(h.controller.hasPendingState());
+	}
+
+	@Test
+	void dispatchedNonDefaultOrPreviouslyOpenedCreateCannotSeedOrLaunchDeferredCapture() {
+		for (boolean menuOpened : new boolean[] { false, true }) {
+			Harness rapid = enabledHarness(200L, 20L);
+			rapid.port.nonDefaultType = !menuOpened;
+			rapid.port.reportedMenuOpened = menuOpened;
+			rapid.click(0L);
+			assertFalse(rapid.controller.hasPendingState());
+			rapid.controller.onPress(15L);
+			assertEquals(0, rapid.port.virtualStarts);
+
+			Harness deferred = pendingDeferred();
+			deferred.port.nonDefaultType = !menuOpened;
+			deferred.port.reportedMenuOpened = menuOpened;
+			deferred.port.firstCaptureReady = true;
+			deferred.frame(31L);
+			assertEquals(0, deferred.port.virtualStarts);
+			assertEquals(1, deferred.port.normalStarts);
+			assertFalse(deferred.controller.hasPendingState());
+		}
+	}
+
+	@Test
+	void legacyActionOnlyPortRemainsUsableButNeverClaimsSuccessfulDispatch() {
+		Harness h = enabledHarness(200L, 20L);
+		var legacy = new LongPressCompatibilityController.InteractionPort() {
+			public Optional<PingInteractionAction> pressAt(long now) { return h.port.pressAt(now); }
+			public Optional<PingInteractionAction> release() { return h.port.release(); }
+			public Optional<PingInteractionAction> presentFrame(boolean held) { return h.port.presentFrame(held); }
+			public void abort() { h.port.abort(); }
+			public PingInteractionPhase phase() { return h.port.phase(); }
+		};
+		var controller = new LongPressCompatibilityController(legacy, h.clock, () -> true, () -> 200L,
+			() -> 20L, h.logger);
+		controller.onPress(0L);
+		assertInstanceOf(PingInteractionAction.CreatePing.class, controller.onRelease().orElseThrow());
+		assertFalse(controller.hasPendingState(), "no invented successful dispatch from the default bridge");
+		controller.onPress(15L);
+		assertEquals(2, h.port.normalStarts);
+		assertEquals(0, h.port.virtualStarts);
+	}
+
+	@Test
+	void createReceiptRejectsAbsentOrNonCreateAction() {
+		assertThrows(IllegalArgumentException.class,
+			() -> new BaselineOutcome(Optional.empty(), DispatchOutcome.CREATE_SENT, false));
+		assertThrows(IllegalArgumentException.class, () -> new BaselineOutcome(
+			Optional.of(new PingInteractionAction.CancelMarker(new nx.pingwheel.common.domain.MarkerId(1))),
+			DispatchOutcome.CREATE_SENT, false));
+	}
+
+	private static Harness pendingDeferred() {
+		Harness h = enabledHarness(200L, 20L);
+		h.port.asyncFirstCapture = true;
+		h.controller.onPress(0L);
+		h.controller.onRelease();
+		h.controller.onPress(30L);
+		h.controller.onRelease();
+		return h;
+	}
+
 	private static Harness enabledHarness(long holdMillis, long sliceMillis) {
 		return harness(true, holdMillis, sliceMillis);
 	}
@@ -229,6 +394,7 @@ class LongPressCompatibilityControllerTest {
 		AtomicLong slice = new AtomicLong(sliceMillis);
 		RecordingLogger logger = new RecordingLogger();
 		FakePort port = new FakePort(clock);
+		port.dispatchOutcome = DispatchOutcome.CREATE_SENT;
 		LongPressCompatibilityController controller = new LongPressCompatibilityController(
 			port,
 			clock,
@@ -281,10 +447,15 @@ class LongPressCompatibilityControllerTest {
 		private long nextToken;
 		private boolean firstPending;
 		private boolean currentReleaseObserved;
+		private boolean logicalHeld;
 		private boolean firstCaptureReady;
 		private boolean asyncFirstCapture;
 		private boolean captureRayAvailable = true;
 		private boolean commitVirtualWheel;
+		private DispatchOutcome dispatchOutcome = DispatchOutcome.NOT_SENT;
+		private boolean reportedMenuOpened;
+		private boolean firstTargetGone;
+		private boolean nonDefaultType;
 		private int normalStarts;
 		private int virtualStarts;
 		private int defaultCreates;
@@ -298,6 +469,7 @@ class LongPressCompatibilityControllerTest {
 		@Override
 		public Optional<PingInteractionAction> pressAt(long rawPressTimestamp) {
 			normalStarts++;
+			logicalHeld = true;
 			currentPressTimestamp = rawPressTimestamp;
 			currentVirtual = false;
 			currentReleaseObserved = false;
@@ -327,6 +499,7 @@ class LongPressCompatibilityControllerTest {
 
 		@Override
 		public Optional<PingInteractionAction> release() {
+			logicalHeld = false;
 			currentReleaseObserved = true;
 			if (phase == PingInteractionPhase.WHEEL_OPEN) {
 				phase = PingInteractionPhase.IDLE;
@@ -354,6 +527,32 @@ class LongPressCompatibilityControllerTest {
 			defaultCreates++;
 			firstPending = false;
 			return Optional.of(createAction());
+		}
+
+		@Override
+		public BaselineOutcome releaseOutcome() {
+			boolean opened = reportedMenuOpened || phase == PingInteractionPhase.WHEEL_OPEN;
+			return outcome(release(), opened);
+		}
+
+		@Override
+		public BaselineOutcome presentFrameOutcome(boolean keyDown) {
+			boolean opened = reportedMenuOpened || phase == PingInteractionPhase.WHEEL_OPEN;
+			return outcome(presentFrame(keyDown), opened || phase == PingInteractionPhase.WHEEL_OPEN);
+		}
+
+		@Override
+		public BaselineOutcome presentFrameOutcome(boolean keyDown, long now) {
+			return presentFrameOutcome(keyDown);
+		}
+
+		private BaselineOutcome outcome(Optional<PingInteractionAction> action, boolean opened) {
+			if (firstTargetGone && action.isPresent()) {
+				var create = (PingInteractionAction.CreatePing) action.get();
+				return new BaselineOutcome(Optional.of(new PingInteractionAction.TargetGone(create.context(),
+					nx.pingwheel.common.interaction.state.TargetGoneReason.BLOCK_REPLACED)), DispatchOutcome.NOT_SENT, opened);
+			}
+			return new BaselineOutcome(action, action.isPresent() ? dispatchOutcome : DispatchOutcome.NOT_SENT, opened);
 		}
 
 		@Override
@@ -385,12 +584,18 @@ class LongPressCompatibilityControllerTest {
 				aborts++;
 			}
 			phase = PingInteractionPhase.IDLE;
+			logicalHeld = false;
 			firstPending = false;
 		}
 
 		@Override
 		public PingInteractionPhase phase() {
 			return phase;
+		}
+
+		@Override
+		public boolean baselineHeld() {
+			return logicalHeld;
 		}
 
 		private int totalCreates() {
@@ -401,7 +606,9 @@ class LongPressCompatibilityControllerTest {
 			var snapshot = TargetSnapshotFactory.location("minecraft:overworld", 0, 0, 0);
 			ResolvedTarget resolved = RESOLVER.resolve(snapshot.target(), snapshot.matchContext());
 			CapturedPingContext context = new CapturedPingContext(token, resolved);
-			PingType type = resolved.targetType().defaultPingType();
+			PingType type = nonDefaultType
+				? nx.pingwheel.common.domain.PingTypeCatalog.builtIn().findById("attention").orElseThrow()
+				: resolved.targetType().defaultPingType();
 			return new PingInteractionAction.CreatePing(context, type);
 		}
 	}

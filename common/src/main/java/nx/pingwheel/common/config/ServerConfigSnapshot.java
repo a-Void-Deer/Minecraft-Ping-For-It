@@ -12,7 +12,9 @@ public record ServerConfigSnapshot(
 	boolean playerTrackingEnabled,
 	int msToRegenerate,
 	int rateLimit,
-	int syncDuration
+	int syncDuration,
+	InventoryConfigValues inventory,
+	boolean budgetDelayNotificationsEnabled
 ) {
 	public ServerConfigSnapshot(
 		boolean canEdit,
@@ -24,10 +26,24 @@ public record ServerConfigSnapshot(
 			ServerConfigBounds.DEFAULT_SYNC_DURATION);
 	}
 
-	public ServerConfigSnapshot {
-		if (defaultChannelMode == null) {
-			defaultChannelMode = ChannelMode.AUTO;
-		}
+	/** Source-compatible constructor; old Java callers get independent inventory defaults. */
+	public ServerConfigSnapshot(
+		boolean canEdit,
+		ChannelMode defaultChannelMode,
+		boolean playerTrackingEnabled,
+		int msToRegenerate,
+		int rateLimit,
+		int syncDuration) {
+		this(canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, InventoryConfigValues.defaults());
+	}
+
+	/** Source-compatible constructor; existing Java callers enable administrator notices. */
+	public ServerConfigSnapshot(
+		boolean canEdit, ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, InventoryConfigValues inventory) {
+		this(canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, inventory, true);
 	}
 
 	public static ServerConfigSnapshot from(ServerConfig config, boolean canEdit) {
@@ -37,7 +53,9 @@ public record ServerConfigSnapshot(
 			config.isPlayerTrackingEnabled(),
 			safeNonNegative(config.getMsToRegenerate()),
 			safeNonNegative(config.getRateLimit()),
-			ServerConfigBounds.clampSyncDuration(config.getSyncDuration()));
+			ServerConfigBounds.clampSyncDuration(config.getSyncDuration()),
+			InventoryConfigValues.from(config.getInventory()),
+			config.isBudgetDelayNotificationsEnabled());
 	}
 
 	public ServerConfigSnapshot withCanEdit(boolean canEdit) {
@@ -47,7 +65,9 @@ public record ServerConfigSnapshot(
 			playerTrackingEnabled,
 			msToRegenerate,
 			rateLimit,
-			syncDuration);
+			syncDuration,
+			inventory,
+			budgetDelayNotificationsEnabled);
 	}
 
 	public boolean isSafe() {
@@ -55,7 +75,8 @@ public record ServerConfigSnapshot(
 			&& msToRegenerate >= 0
 			&& rateLimit >= 0
 			&& syncDuration >= ServerConfigBounds.MIN_PING_DURATION
-			&& syncDuration <= ServerConfigBounds.MAX_PING_DURATION;
+			&& syncDuration <= ServerConfigBounds.MAX_PING_DURATION
+			&& inventory != null && inventory.isSafe();
 	}
 
 	private static int safeNonNegative(int value) {

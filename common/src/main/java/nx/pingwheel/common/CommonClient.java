@@ -40,15 +40,23 @@ import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.interaction.MinecraftEntityTargetAdapter;
 import nx.pingwheel.common.name.ClientTargetNameDecoder;
+import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
 import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
+import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Operation;
+import nx.pingwheel.common.presentation.client.ServerPresentationPolicyState;
+import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.common.platform.IPlatformContextService;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
@@ -56,7 +64,6 @@ import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.render.OverlayRenderer;
 import nx.pingwheel.common.render.SelectionToggleNoticeRenderer;
-import nx.pingwheel.common.render.WheelOverlayRenderer;
 import nx.pingwheel.common.render.WorldRenderContext;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.util.InputUtils;
@@ -74,6 +81,17 @@ public class CommonClient {
 	private static ClientRateLimitPolicy storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 	private static ClientSyncDurationPolicy storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 	private static final InteractionTimeSource INTERACTION_TIME_SOURCE = InteractionTimeSource.system();
+	private static final ServerPresentationPolicyState SERVER_PRESENTATION_POLICY_STATE =
+		new ServerPresentationPolicyState(
+			INTERACTION_TIME_SOURCE::nowMillis,
+			ServerPresentationPolicyState.DEFAULT_REQUEST_TIMEOUT_MILLIS);
+
+	/**
+	 * Connection-scoped inventory preview/tracking session. Created on join and
+	 * dropped on leave so no channel, entry metadata or unknown-baseline buffer
+	 * can leak across connections; null while not connected.
+	 */
+	private static ClientInventory inventory;
 
 	/** Runs the registered entity-outline sources over the production registry. */
 	private static final EntityOutlineRunner ENTITY_OUTLINE_RUNNER =
@@ -89,7 +107,7 @@ public class CommonClient {
 		IPlatformClientEventService.INSTANCE.registerLeaveServerEvent(this::onLeaveServer);
 
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_PING);
-		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_PASS_THROUGH_TRANSPARENT_BLOCKS);
+		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_MARK_TRANSPARENT_BLOCKS);
 		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_MARK_BLACKLISTED_TARGETS);
 		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_MARK_FLUIDS);
 		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
@@ -108,6 +126,16 @@ public class CommonClient {
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 		pingRuntime = createPingRuntimeIfInWorld();
+		inventory = new ClientInventory(IPlatformNetworkService.INSTANCE::sendToServer);
+		if (pingRuntime != null) pingRuntime.inventory(inventory);
+
+		// A fresh connection-scoped policy view starts unknown and asks the
+		// server for an authoritative read. A server without the versioned route
+		// silently skips the send, so the view stays unknown instead of empty.
+		long policyRequestId = SERVER_PRESENTATION_POLICY_STATE.beginConnection();
+		if (policyRequestId != ServerPresentationPolicyState.NO_PENDING_REQUEST) {
+			IPlatformNetworkService.INSTANCE.sendToServer(ServerPresentationPolicyC2SPacket.read(policyRequestId));
+		}
 
 		IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(ClientConfig.HANDLER.getConfig().getChannel()));
 	}
@@ -120,6 +148,14 @@ public class CommonClient {
 		pingRuntime = null;
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
+		if (inventory != null) {
+			inventory.reset();
+			inventory = null;
+		}
+		// Connection-scoped display decode cache; the next connection decodes
+		// against its own registry context instead of reusing old variants.
+		ClientItemDisplay.reset();
+		SERVER_PRESENTATION_POLICY_STATE.resetForDisconnect();
 		MarkerOverlayState.INSTANCE.clear();
 		EntityOutlineState.INSTANCE.clear();
 		BlockOutlineState.INSTANCE.clear();
@@ -211,30 +247,34 @@ public class CommonClient {
 			return;
 		}
 
-		abortInteractionIfActive(false);
+		if (pingRuntime != null) pingRuntime.abortForScreenTransition();
+		InputUtils.resetPingInteraction();
 	}
 
 	private void abortInteractionIfActive(boolean resetAllInputState) {
-		boolean claimedInput = InputUtils.isPingHotkeyDown();
-		boolean activeInteraction = pingRuntime != null
-			&& pingRuntime.phase() != PingInteractionPhase.IDLE;
-		boolean compatibilityState = pingRuntime != null && pingRuntime.hasCompatibilityState();
-
 		if (resetAllInputState) {
 			InputUtils.resetPingHold();
 		} else {
 			InputUtils.resetPingInteraction();
 		}
-		if (activeInteraction || claimedInput || compatibilityState) {
-			if (pingRuntime != null) {
-				pingRuntime.abort();
-			}
-		}
+		// Hard lifecycle disposal also ends an idle paint tail and compatibility seed.
+		if (pingRuntime != null) pingRuntime.abort();
 	}
 
 	public void onTickStart() {
 		Game = Minecraft.getInstance();
 		GameContext.updateDimension();
+
+		// Expire a presentation policy request that outlived the bounded timeout
+		// so the settings UI can retry instead of waiting forever.
+		SERVER_PRESENTATION_POLICY_STATE.tick();
+
+		// Drive HELLO negotiation and the inventory resync/unknown-baseline
+		// timers; the session exists only between join and leave.
+		if (inventory != null) {
+			if (pingRuntime != null) pingRuntime.inventory(inventory);
+			inventory.tick(true);
+		}
 
 		if (pingRuntime == null) {
 			pingRuntime = createPingRuntimeIfInWorld();
@@ -257,10 +297,13 @@ public class CommonClient {
 
 	public void onRenderWorld(WorldRenderContext ctx) {
 		GameContext.beginRenderEntityLookupFrame();
+		if (pingRuntime != null) pingRuntime.refreshPresentationDisplay();
 		MarkerOverlayState.INSTANCE.prepare(
 			ctx,
 			pingRuntime == null ? null : pingRuntime.store(),
-			pingRuntime == null ? null : pingRuntime.nameStore());
+			pingRuntime == null ? null : pingRuntime.nameStore(),
+			pingRuntime == null ? null : pingRuntime.presentation());
+		if (pingRuntime != null) pingRuntime.prepareInventoryTracking(ctx);
 		prepareEntityOutlines();
 		prepareBlockOutlines();
 
@@ -532,8 +575,34 @@ public class CommonClient {
 
 	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
 		OverlayRenderer.draw(guiGraphics, tickDelta);
-		WheelOverlayRenderer.draw(guiGraphics, tickDelta);
+		if (pingRuntime != null) {
+			pingRuntime.drawInventoryTracking(guiGraphics);
+			pingRuntime.drawSelector(guiGraphics);
+		}
 	}
+
+	public void onMouseMove(long window, double x, double y) {
+		Game = Minecraft.getInstance();
+		if (pingRuntime != null) pingRuntime.onMouseMove(window, x, y);
+	}
+
+	/** Raw ordinary mouse-look bridge; the runtime accumulator never reads the camera. */
+	public void onLookInput(double yawDegrees, double pitchDegrees) {
+		if (pingRuntime != null) pingRuntime.onLookInput(yawDegrees, pitchDegrees);
+	}
+
+	/** Starts a fresh look-input baseline after focus, capture, warp or cursor transitions. */
+	public void onLookInputReset() {
+		if (pingRuntime != null) pingRuntime.onLookInputReset();
+	}
+	public boolean onMouseScroll(long window, double horizontal, double vertical) {
+		Game = Minecraft.getInstance();
+		return pingRuntime != null && pingRuntime.onMouseScroll(window, horizontal, vertical);
+	}
+	public void onMouseCaptureChanged() {
+		if (pingRuntime != null) pingRuntime.rePrimeSelectorInput();
+	}
+	public boolean isSelectorMouseTransition() { return pingRuntime != null && pingRuntime.isSelectorMouseTransition(); }
 
 	/** Draws the latest toggle notice in a late HUD pass, after vanilla HUD layers. */
 	public void onRenderToggleNotice(GuiGraphics guiGraphics) {
@@ -600,35 +669,44 @@ public class CommonClient {
 	 * rate control.
 	 */
 	public void onMarkerCreatedPacket(MarkerCreatedS2CPacket packet) {
-		if (packet.isCorrupt() || pingRuntime == null) {
-			return;
-		}
-
-		pingRuntime.applyCreated(packet);
+		// Old packet IDs cannot supply the negotiated epoch/Basic name policy.
 	}
 
 	public void onMarkerRemovedPacket(MarkerRemovedS2CPacket packet) {
-		if (packet.isCorrupt() || pingRuntime == null) {
-			return;
-		}
-
-		pingRuntime.applyRemoved(packet.markerId(), packet.reason());
+		// Legacy marker route is disabled in the upgraded protocol.
 	}
 
 	public void onMarkerRejectedPacket(MarkerRejectedS2CPacket packet) {
-		if (packet.isCorrupt() || pingRuntime == null) {
-			return;
-		}
-
-		pingRuntime.handleRejected(packet.requestId(), packet.requestKind(), packet.reason());
+		// Legacy marker route is disabled in the upgraded protocol.
 	}
 
 	public void onMarkerWinnerChangedPacket(MarkerWinnerChangedS2CPacket packet) {
-		if (packet.isCorrupt() || pingRuntime == null) {
-			return;
-		}
+		// Legacy marker route is disabled in the upgraded protocol.
+	}
 
-		pingRuntime.applyWinnerChanged(packet.targetKey(), packet.winnerId());
+	public void onPresentationPacket(PresentationS2CPacket packet) {
+		if (pingRuntime != null) pingRuntime.onPresentationPacket(packet);
+	}
+
+	/**
+	 * Inventory S2C delegate: routes one decoded response into the
+	 * connection-scoped session. Corrupt or epoch-mismatched packets are
+	 * counted and dropped inside the session; no world or UI state is touched.
+	 */
+	public void onInventoryPacket(InventoryS2CPacket packet) {
+		if (pingRuntime != null) pingRuntime.onInventoryPacket(packet);
+	}
+
+	/**
+	 * The nullable connection-scoped inventory session for UI call sites; null
+	 * while disconnected, so callers gate on a non-null session before
+	 * {@code open}, {@code select}, {@code preview} or {@code tracking}.
+	 */
+	public ClientInventory getInventory() {
+		return inventory;
+	}
+	public void onPresentationPreview(nx.pingwheel.common.network.PresentationPreviewS2CPacket packet) {
+		if (pingRuntime != null) pingRuntime.onPresentationPreview(packet);
 	}
 
 	/**
@@ -698,6 +776,72 @@ public class CommonClient {
 	}
 
 	/**
+	 * Applies one server presentation policy snapshot on the client thread. The
+	 * connection-scoped state rejects stale request ids, error snapshots, and
+	 * unsolicited revisions that do not extend the known view, so a missing
+	 * route leaves the view unknown instead of an authoritative empty rule view.
+	 */
+	public void onServerPresentationPolicyPacket(ServerPresentationPolicyS2CPacket packet) {
+		if (packet == null || packet.isCorrupt()) {
+			LOGGER.warn("received invalid server presentation policy from server");
+			return;
+		}
+
+		SERVER_PRESENTATION_POLICY_STATE.applySnapshot(
+			packet.requestId(),
+			packet.revision(),
+			packet.status(),
+			packet.canEdit(),
+			packet.rules());
+	}
+
+	/**
+	 * The connection-scoped presentation policy view for UI call sites. The
+	 * view is unknown until the server answers, so callers must gate on
+	 * {@link ServerPresentationPolicyState#isKnown()} before rendering its
+	 * selector lists as authoritative.
+	 */
+	public ServerPresentationPolicyState getServerPresentationPolicyState() {
+		return SERVER_PRESENTATION_POLICY_STATE;
+	}
+
+	/**
+	 * Requests a fresh authoritative policy read and returns the correlated
+	 * request id, or {@link ServerPresentationPolicyState#NO_PENDING_REQUEST}
+	 * while disconnected. Used on join and by the settings UI.
+	 */
+	public long requestPresentationPolicyRead() {
+		long requestId = SERVER_PRESENTATION_POLICY_STATE.beginReadRequest();
+
+		if (requestId != ServerPresentationPolicyState.NO_PENDING_REQUEST) {
+			IPlatformNetworkService.INSTANCE.sendToServer(ServerPresentationPolicyC2SPacket.read(requestId));
+		}
+
+		return requestId;
+	}
+
+	/**
+	 * Sends one presentation policy mutation only when the last authoritative
+	 * snapshot granted edit; the server independently authorizes every
+	 * operation, so a false client hint can never bypass the permission check.
+	 */
+	public boolean requestPresentationPolicyMutation(
+		String targetTypeId,
+		Operation operation,
+		String selector,
+		boolean whitelistOnly
+	) {
+		var packet = SERVER_PRESENTATION_POLICY_STATE.beginMutation(targetTypeId, operation, selector, whitelistOnly);
+
+		if (packet.isEmpty()) {
+			return false;
+		}
+
+		IPlatformNetworkService.INSTANCE.sendToServer(packet.get());
+		return true;
+	}
+
+	/**
 	 * Creates a fresh runtime only when a live level and player exist. Returns
 	 * {@code null} otherwise so a menu state (including the post-leave main
 	 * menu) never creates or recreates a runtime.
@@ -715,6 +859,7 @@ public class CommonClient {
 			new MinecraftLocalErrorSink(),
 			IPlatformNetworkService.INSTANCE::sendToServer,
 			storedRateLimitPolicy,
-			INTERACTION_TIME_SOURCE);
+			INTERACTION_TIME_SOURCE,
+			true);
 	}
 }

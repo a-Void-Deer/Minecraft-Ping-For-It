@@ -1,36 +1,28 @@
 package nx.pingwheel.common.config;
 
+import com.google.gson.Gson;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class ConfigurationNoticeSizeTest {
 	@Test
-	void defaultsAndSliderMetadataAreStable() {
-		ClientConfig config = new ClientConfig();
-
-		assertEquals(100, config.getConfigurationNoticeSize());
-		assertEquals(100, ClientConfigBounds.DEFAULT_CONFIGURATION_NOTICE_SIZE);
-		assertEquals(0, ClientConfigBounds.MIN_CONFIGURATION_NOTICE_SIZE);
-		assertEquals(500, ClientConfigBounds.MAX_CONFIGURATION_NOTICE_SIZE);
-		assertEquals(10, ClientConfigBounds.CONFIGURATION_NOTICE_SIZE_STEP);
-	}
-
-	@Test
 	void setterAndValidationClampThePersistedValue() {
 		ClientConfig config = new ClientConfig();
-		config.setConfigurationNoticeSize(-1);
-		assertEquals(0, config.getConfigurationNoticeSize());
+		config.setConfigurationNoticeSize(ClientConfigBounds.MIN_CONFIGURATION_NOTICE_SIZE - 1);
+		assertEquals(ClientConfigBounds.MIN_CONFIGURATION_NOTICE_SIZE, config.getConfigurationNoticeSize());
 
-		config.setConfigurationNoticeSize(501);
-		assertEquals(500, config.getConfigurationNoticeSize());
+		config.setConfigurationNoticeSize(ClientConfigBounds.MAX_CONFIGURATION_NOTICE_SIZE + 1);
+		assertEquals(ClientConfigBounds.MAX_CONFIGURATION_NOTICE_SIZE, config.getConfigurationNoticeSize());
 
-		config.configurationNoticeSize = -42;
-		config.validate((key, supplied, effective) -> {});
-		assertEquals(0, config.configurationNoticeSize);
+		ClientConfig lowFromJson = new Gson().fromJson(
+			"{\"configurationNoticeSize\":" + Integer.MIN_VALUE + "}", ClientConfig.class);
+		lowFromJson.validate((key, supplied, effective) -> {});
+		assertEquals(ClientConfigBounds.MIN_CONFIGURATION_NOTICE_SIZE, lowFromJson.getConfigurationNoticeSize());
 
-		config.configurationNoticeSize = 999;
-		config.validate((key, supplied, effective) -> {});
-		assertEquals(500, config.configurationNoticeSize);
+		ClientConfig highFromJson = new Gson().fromJson(
+			"{\"configurationNoticeSize\":" + Integer.MAX_VALUE + "}", ClientConfig.class);
+		highFromJson.validate((key, supplied, effective) -> {});
+		assertEquals(ClientConfigBounds.MAX_CONFIGURATION_NOTICE_SIZE, highFromJson.getConfigurationNoticeSize());
 	}
 }

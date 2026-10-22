@@ -3,6 +3,7 @@ package nx.pingwheel.common.interaction;
 import java.util.UUID;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.EntityCaptureMetadata;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.TargetMatchContext;
@@ -114,6 +115,29 @@ public final class TargetSnapshotFactory {
 	}
 
 	/**
+	 * A block snapshot carrying dimension, position, block registry id, the
+	 * transient block classification, and the capture-only face of the
+	 * ordinary block hit. The face never participates in target identity and is
+	 * meaningful only for this ordinary block target.
+	 */
+	public static TargetSnapshot block(
+		String dimensionId,
+		int x,
+		int y,
+		int z,
+		String blockRegistryId,
+		boolean hasBlockEntity,
+		BlockFace blockHitFace
+	) {
+		return new TargetSnapshot(
+			new Target.BlockTarget(dimensionId, x, y, z, blockRegistryId),
+			TargetMatchContext.blockEntityBlock(hasBlockEntity),
+			java.util.Optional.empty(),
+			java.util.Optional.empty(),
+			java.util.Optional.of(blockHitFace));
+	}
+
+	/**
 	 * An external block snapshot with an explicit provider locator and
 	 * provider-derived block-entity classification. An empty stable target id
 	 * represents the uncommitted C2S candidate form.
@@ -153,6 +177,26 @@ public final class TargetSnapshotFactory {
 		boolean hasBlockEntity
 	) {
 		return externalBlock(dimensionId, providerId, "", expectedBlockRegistryId, providerLocator, hasBlockEntity);
+	}
+
+	/** Builds an external candidate with an observed provider-local native face, if any. */
+	public static TargetSnapshot externalBlockCandidate(
+		String dimensionId, String providerId, String expectedBlockRegistryId, String providerLocator,
+		boolean hasBlockEntity, BlockFace blockHitFace
+	) {
+		return externalBlockCandidate(dimensionId, providerId, expectedBlockRegistryId, providerLocator,
+			hasBlockEntity, java.util.Optional.of(blockHitFace));
+	}
+
+	/** Builds an external candidate with an observed provider-local native face, if any. */
+	public static TargetSnapshot externalBlockCandidate(
+		String dimensionId, String providerId, String expectedBlockRegistryId, String providerLocator,
+		boolean hasBlockEntity, java.util.Optional<BlockFace> blockHitFace
+	) {
+		Target.ExternalBlockTarget target = Target.ExternalBlockTarget.candidate(
+			dimensionId, providerId, expectedBlockRegistryId, providerLocator, hasBlockEntity);
+		return new TargetSnapshot(target, TargetMatchContext.blockEntityBlock(hasBlockEntity),
+			java.util.Optional.empty(), java.util.Optional.empty(), blockHitFace);
 	}
 
 	/** Builds a committed external block snapshot. */

@@ -15,13 +15,17 @@ import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.ProfilerFiller;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.command.ClientCommandBuilder;
+import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
 import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
@@ -64,6 +68,9 @@ public class FabricClient implements ClientModInitializer {
 			ServerConfigSnapshotS2CPacket.PACKET_TYPE,
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onServerConfigSnapshotPacket(packet)));
 		ClientPlayNetworking.registerGlobalReceiver(
+			ServerPresentationPolicyS2CPacket.PACKET_TYPE,
+			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onServerPresentationPolicyPacket(packet)));
+		ClientPlayNetworking.registerGlobalReceiver(
 			MarkerCreatedS2CPacket.PACKET_TYPE,
 			(packet, context) -> {
 				final var client = context.client();
@@ -91,6 +98,14 @@ public class FabricClient implements ClientModInitializer {
 				client.execute(() -> CommonClient.INSTANCE.onMarkerWinnerChangedPacket(packet));
 			}
 		);
+		ClientPlayNetworking.registerGlobalReceiver(
+			PresentationS2CPacket.PACKET_TYPE,
+			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onPresentationPacket(packet)));
+		ClientPlayNetworking.registerGlobalReceiver(
+			InventoryS2CPacket.PACKET_TYPE,
+			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onInventoryPacket(packet)));
+		ClientPlayNetworking.registerGlobalReceiver(PresentationPreviewS2CPacket.PACKET_TYPE,
+			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onPresentationPreview(packet)));
 
 		// resource reload
 		ResourceManagerHelper.get(PackType.CLIENT_RESOURCES)

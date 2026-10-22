@@ -1,12 +1,20 @@
 package nx.pingwheel.common.client;
 
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.Set;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.locale.Language;
@@ -21,10 +29,17 @@ import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.client.marker.EntityMarkerPoint;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
+import nx.pingwheel.common.presentation.client.ClientPresentation;
+import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.client.duration.ClientMarkerDisplayDuration;
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.chat.PingChatBuilder;
+import nx.pingwheel.common.chat.ContentChatComposer;
+import nx.pingwheel.common.chat.PendingContentChatController;
+import nx.pingwheel.common.presentation.PresentationReceiptContent;
+import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.MarkerId;
@@ -52,6 +67,29 @@ import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.PingInteractionStateMachine;
+import nx.pingwheel.common.interaction.state.SelectorReleaseProposal;
+import nx.pingwheel.common.client.spatial.NativeSelectorInput;
+import nx.pingwheel.common.client.spatial.GestureSkipHold;
+import nx.pingwheel.common.client.spatial.SelectorIntent;
+import nx.pingwheel.common.client.spatial.SpatialController;
+import nx.pingwheel.common.client.spatial.SpatialSelectorSession;
+import nx.pingwheel.common.client.spatial.PreciseCaptureRefresh;
+import nx.pingwheel.common.client.input.LookInputTracker;
+import nx.pingwheel.common.config.SpatialSelectorSettings;
+import nx.pingwheel.common.interaction.candidate.FrozenCandidateAcquisition;
+import nx.pingwheel.common.interaction.candidate.CandidateWorkLimits;
+import nx.pingwheel.common.interaction.candidate.Candidate;
+import nx.pingwheel.common.interaction.candidate.CaptureEquivalenceKey;
+import nx.pingwheel.common.interaction.candidate.PreciseSlot;
+import nx.pingwheel.common.interaction.candidate.PreciseTargetType;
+import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.preview.ClientPresentationPreview;
+import nx.pingwheel.common.presentation.preview.client.MinecraftPreviewReadContext;
+import nx.pingwheel.common.presentation.preview.client.PreviewLocalReaders;
+import nx.pingwheel.common.presentation.InventoryItemPingTypes;
+import nx.pingwheel.common.presentation.PresentationPropertyPingTypes;
+import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
+import nx.pingwheel.common.render.SpatialOverlayRenderer;
 import nx.pingwheel.common.interaction.wheel.WheelSelection;
 import nx.pingwheel.common.client.LongPressCompatibilityController;
 import nx.pingwheel.common.integration.DistantHorizonsIntegration;
@@ -65,15 +103,18 @@ import nx.pingwheel.common.marker.MarkerRequestKind;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.math.Raycast;
+import nx.pingwheel.common.name.ClientTargetNameResolver;
 import nx.pingwheel.common.name.ClientTargetNameStore;
 import nx.pingwheel.common.name.ClientTargetNameDecoder;
 import nx.pingwheel.common.name.TargetNameComposer;
 import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
+import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
 import nx.pingwheel.common.util.InputUtils;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 import nx.pingwheel.common.math.RaycastPolicy;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -94,7 +135,7 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
  *   <li>the shared {@link ActiveInteraction} plus
  *       {@link PingCaptureCoordinator} freeze the key-down capture;</li>
  *   <li>the {@link PingInteractionStateMachine} applies short/long-press,
- *       wheel, cancellation, and timeout rules;</li>
+ *       wheel, and cancellation rules;</li>
  *   <li>the {@link WheelMouseCapture} releases the mouse for the open wheel
  *       and re-grabs it only when this runtime released it;</li>
  *   <li>the {@link ClientPingActionDispatcher} maps the single emitted action
@@ -104,14 +145,14 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
 	 * <p>Press and release events arrive directly from the client-thread
 	 * {@code KeyMapping} hooks. Each rendered frame advances monotonic timing,
 	 * selection, pending asynchronous capture completion, and mouse capture once;
-	 * the client tick retains only fallback marker expiry housekeeping. One fresh
+	 * the client tick handles marker expiry and the independent Precise refresh. One fresh
 	 * runtime is created per world join and dropped on leave (see
 	 * {@code CommonClient}), so interaction and marker state can never leak across
 	 * connections.
  *
- * <p>Logging only ever carries safe fields: token sequences, request/marker
- * ids, ping type ids, target kinds, candidate counts, and reasons. UUIDs,
- * positions, names, and colors are never logged.
+ * <p>Routine interaction decisions use debug logging. Unexpected optional
+ * content failures retain bounded exception and capture detail in rate-limited
+ * WARN reports without changing the established unavailable/fallback outcomes.
  */
 public final class ClientPingRuntime {
 
@@ -139,12 +180,49 @@ public final class ClientPingRuntime {
 	private final WheelMouseCapture wheelMouseCapture;
 	private final CreateRequestTracker createRequestTracker;
 	private final ClientCreateRateLimiter createRateLimiter;
+	private final ClientPresentation presentation;
+	private final PresentationReceiptFeedback presentationReceiptFeedback;
+	private final PendingContentChatController contentChat;
+
+	/** Receipt effects and detached decoding only; a metadata upsert never repeats sound or ordinary chat. */
+	interface PresentationReceiptFeedback {
+		void play(MarkerSnapshot snapshot);
+		void chat(String ownerName, MarkerSnapshot snapshot, Component targetName);
+		default boolean ready() { return Game != null && Game.level != null && Game.player != null; }
+		default Optional<Component> name(String json) {
+			return Game == null || Game.level == null ? Optional.empty()
+				: ContentChatComposer.nameJsonDecoder(Game.level.registryAccess()).apply(json);
+		}
+		default Optional<Component> item(String json) {
+			return Game == null || Game.level == null ? Optional.empty()
+				: ContentChatComposer.itemDisplayDecoder(Game.level.registryAccess()).apply(json);
+		}
+		default String template(PingType type) { return null; }
+		/**
+		 * The full localized content-template source. The default adapts the
+		 * legacy single-template port, so existing feedback implementations keep
+		 * their established list defaults; production overrides this with the
+		 * selected-locale source implementing all three template methods.
+		 */
+		default ContentChatComposer.TemplateSource templates() { return this::template; }
+		default void content(Component message) {
+			Minecraft game = Game;
+			if (game == null || game.level == null || game.player == null) return;
+			try { game.player.displayClientMessage(message, false); }
+			catch (RuntimeException unavailable) { /* No log or ordinary fallback for a content receipt. */ }
+		}
+	}
 	private final InteractionTimeSource timeSource;
 	private final LongPressCompatibilityController compatibilityController;
+	private final RapidDangerController rapidDangerController;
+	private final InventorySelectionStayController inventorySelectionStay =
+		new InventorySelectionStayController();
+	private final LookInputTracker lookInputTracker = new LookInputTracker();
+	/** One in-flight staying commit must not re-enter the first-release stay boundary. */
+	private boolean committingInventoryStay;
 	private final SelectedLocaleTranslationKeyCache selectedLocaleTranslationKeys =
 		new SelectedLocaleTranslationKeyCache();
 	private static final CancellationContext EMPTY_CANCELLATION_CONTEXT = createEmptyCancellationContext();
-	private ClientLevel observedLevel;
 	private String observedDimension;
 
 	/**
@@ -162,6 +240,81 @@ public final class ClientPingRuntime {
 	 * resolution fails or the interaction ends.
 	 */
 	private CapturedRay pendingRay;
+	private InteractionAccess interactionAccess;
+	private ClientPresentationPreview contentPreview;
+	private NativeSelectorContent selectorContent;
+	private SpatialSelectorSession<ClientInventory.PreviewEntryReference> selector;
+	private NativeSelectorInput selectorInput;
+	private final GestureSkipHold gestureSkipHold = new GestureSkipHold();
+	private final SpatialOverlayRenderer.Session selectorPaint = new SpatialOverlayRenderer.Session();
+	private final Map<String, CapturedPingContext> selectorContexts = new LinkedHashMap<>();
+	private SpatialSelectorSettings.Snapshot selectorSettings;
+	private RaycastPolicy selectorPolicy;
+	private double selectorNativeDistance, selectorPingDistance;
+	private PreciseCaptureRefresh preciseRefresh;
+	private SpatialOverlayRenderer.Style selectorStyle;
+	private final SelectorToggleLabels selectorToggleLabels = new SelectorToggleLabels(
+		() -> raycastPolicy(ClientConfig.HANDLER.getConfig()));
+	/**
+	 * Localized display names for the Precise branch's captured candidates,
+	 * sampled from the frozen target only. The resolver itself is stateless.
+	 */
+	private final ClientTargetNameResolver selectorTargetNames = new ClientTargetNameResolver();
+	private InteractionToken baselineToken;
+	/**
+	 * The fresh frozen-tap token is runtime-owned during validation so a
+	 * reentrant validator abort can invalidate it before any dispatch.
+	 */
+	private InteractionToken validatingFrozenTapToken;
+	private boolean baselineHeld;
+	private boolean baselineMenuOpened;
+	private boolean abortingScreenTransition;
+	private Object observedWorldIdentity;
+	private Object observedScreenIdentity;
+	private List<nx.pingwheel.common.render.InventoryTrackingRenderer.MarkerLines> trackingPaint = List.of();
+
+	/** Production-used Minecraft boundary; recordings exercise the same runtime/coordinator/selector path. */
+	interface InteractionAccess {
+		record Lifecycle(Object level, String dimension, Object screen, boolean player, boolean focused, boolean overlay) {}
+		Lifecycle lifecycle();
+		Optional<CapturedRay> capturePressRay();
+		void capture(InteractionToken token, CapturedRay ray, CaptureCompletion completion);
+		default PreciseCaptureRefresh.Scan capturePrecise(PreciseCaptureRefresh.Request request) {
+			return PreciseCaptureRefresh.Scan.incomplete();
+		}
+		default boolean capturePreciseDistant(PreciseCaptureRefresh.Request request,
+			java.util.function.Consumer<PreciseCaptureRefresh.Outcome> completion) { return false; }
+		CancellationContext cancellation(CapturedRay ray);
+		void syncMouse(PingInteractionPhase phase);
+		void disposeMouse(boolean screenTransition);
+		Optional<NativeSelectorInput.Frame> inputFrame();
+		default Optional<GestureSkipHold.Position> mousePosition() { return Optional.empty(); }
+		SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style);
+		default SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame) {
+			var geometry = listGeometry(style);
+			return new SpatialSelectorSession.ListGeometry(geometry.visibleRows(), geometry.width(), geometry.headerHeight(),
+				geometry.rowHeight(), geometry.footerHeight(), itemMenuClearance(style, frame));
+		}
+		default SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame,
+			nx.pingwheel.common.render.SpatialInventoryView view) { return listGeometry(style, frame); }
+		default nx.pingwheel.common.render.SpatialInventoryView.RowDisplay inventoryDisplay(
+			nx.pingwheel.common.render.SpatialInventoryView.Row row) { return null; }
+		/**
+		 * Distance from the inventory panel's forward edge to the item-menu
+		 * centre. The headless compatibility fallback uses the port's explicit
+		 * list geometry; production overrides it with the renderer's measured
+		 * metric so no session-owned formula exists.
+		 */
+		default double itemMenuClearance(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame) {
+			return listGeometry(style).childClearance();
+		}
+		void resetInput();
+		void applyToggle(SelectorIntent.CaptureToggle toggle, long timeMillis);
+	}
+	@FunctionalInterface
+	interface CaptureCompletion {
+		void complete(TargetSnapshot snapshot, Optional<FrozenCandidateAcquisition> candidates);
+	}
 
 	private ClientPingRuntime(
 		ClientMarkerStore markerStore,
@@ -174,7 +327,9 @@ public final class ClientPingRuntime {
 		WheelMouseCapture wheelMouseCapture,
 		CreateRequestTracker createRequestTracker,
 		ClientCreateRateLimiter createRateLimiter,
-		InteractionTimeSource timeSource
+		InteractionTimeSource timeSource,
+		ClientPresentation presentation,
+		PresentationReceiptFeedback presentationReceiptFeedback
 	) {
 		this.markerStore = Objects.requireNonNull(markerStore, "markerStore");
 		this.activeInteraction = Objects.requireNonNull(activeInteraction, "activeInteraction");
@@ -186,7 +341,19 @@ public final class ClientPingRuntime {
 		this.wheelMouseCapture = Objects.requireNonNull(wheelMouseCapture, "wheelMouseCapture");
 		this.createRequestTracker = Objects.requireNonNull(createRequestTracker, "createRequestTracker");
 		this.createRateLimiter = Objects.requireNonNull(createRateLimiter, "createRateLimiter");
+		this.presentation = presentation;
+		this.presentationReceiptFeedback = presentationReceiptFeedback == null ? new PresentationReceiptFeedback() {
+			@Override public void play(MarkerSnapshot snapshot) { playCreatedSoundOnce(snapshot); }
+			@Override public void chat(String ownerName, MarkerSnapshot snapshot, Component targetName) {
+				sendCreatedChat(ownerName, snapshot, targetName);
+			}
+			@Override public ContentChatComposer.TemplateSource templates() { return contentChatTemplates(); }
+		} : presentationReceiptFeedback;
+		this.contentChat = new PendingContentChatController(ClientInventory.MAX_TRACKED_CHANNELS,
+			this::currentContentReceipt, this.presentationReceiptFeedback::name, this.presentationReceiptFeedback::item,
+			this.presentationReceiptFeedback.templates(), this.presentationReceiptFeedback::content);
 		this.timeSource = Objects.requireNonNull(timeSource, "timeSource");
+		this.interactionAccess = new MinecraftInteractionAccess();
 		this.compatibilityController = new LongPressCompatibilityController(
 			new RuntimeInteractionPort(),
 			timeSource,
@@ -194,7 +361,8 @@ public final class ClientPingRuntime {
 			() -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis(),
 			() -> ClientConfig.HANDLER.getConfig().getLongPressCompatibilitySliceMillis(),
 			logger,
-			InputUtils::resetPingHold);
+			() -> interactionAccess.resetInput());
+		this.rapidDangerController = new RapidDangerController(new RuntimeRapidDangerPort());
 	}
 
 	/**
@@ -237,6 +405,17 @@ public final class ClientPingRuntime {
 		ClientRateLimitPolicy rateLimitPolicy,
 		InteractionTimeSource timeSource
 	) {
+		return create(errorSink, packetSender, rateLimitPolicy, timeSource, false);
+	}
+
+	/** The production connection uses the versioned presentation transport exclusively. */
+	public static ClientPingRuntime create(
+		ClientPingActionDispatcher.LocalErrorSink errorSink,
+		ClientPingActionDispatcher.PacketSender packetSender,
+		ClientRateLimitPolicy rateLimitPolicy,
+		InteractionTimeSource timeSource,
+		boolean negotiatePresentation
+	) {
 		return create(
 			errorSink,
 			packetSender,
@@ -244,7 +423,8 @@ public final class ClientPingRuntime {
 			timeSource,
 			snapshot -> ClientMarkerDisplayDuration.durationTicks(
 				ClientConfig.HANDLER.getConfig().getEffectiveMarkerDisplayDuration(),
-				snapshot));
+				snapshot),
+			negotiatePresentation);
 	}
 
 	/**
@@ -258,6 +438,30 @@ public final class ClientPingRuntime {
 		ClientRateLimitPolicy rateLimitPolicy,
 		InteractionTimeSource timeSource,
 		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy
+	) {
+		return create(errorSink, packetSender, rateLimitPolicy, timeSource, displayDurationPolicy, false);
+	}
+
+	private static ClientPingRuntime create(
+		ClientPingActionDispatcher.LocalErrorSink errorSink,
+		ClientPingActionDispatcher.PacketSender packetSender,
+		ClientRateLimitPolicy rateLimitPolicy,
+		InteractionTimeSource timeSource,
+		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy,
+		boolean negotiatePresentation
+	) {
+		return create(errorSink, packetSender, rateLimitPolicy, timeSource, displayDurationPolicy,
+			negotiatePresentation, null);
+	}
+
+	static ClientPingRuntime create(
+		ClientPingActionDispatcher.LocalErrorSink errorSink,
+		ClientPingActionDispatcher.PacketSender packetSender,
+		ClientRateLimitPolicy rateLimitPolicy,
+		InteractionTimeSource timeSource,
+		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy,
+		boolean negotiatePresentation,
+		PresentationReceiptFeedback feedback
 	) {
 		Objects.requireNonNull(errorSink, "errorSink");
 		Objects.requireNonNull(packetSender, "packetSender");
@@ -281,10 +485,12 @@ public final class ClientPingRuntime {
 			new CancelCandidatePicker(
 				() -> ClientConfig.HANDLER.getConfig().getCancelHalfConeAngleDegrees()),
 			logger,
-			() -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis(),
-			() -> ClientConfig.HANDLER.getConfig().getWheelTimeoutMillis());
+			() -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis());
+		ClientPresentation presentation = negotiatePresentation
+			? new ClientPresentation(packetSender::sendToServer)
+			: null;
 
-		return new ClientPingRuntime(
+		ClientPingRuntime runtime = new ClientPingRuntime(
 			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDurationPolicy),
 			activeInteraction,
 			coordinator,
@@ -294,68 +500,99 @@ public final class ClientPingRuntime {
 				errorSink,
 				logger,
 				createRequestTracker,
-				createRateLimiter),
+				createRateLimiter,
+				presentation),
 			errorSink,
 			logger,
 			new WheelMouseCapture(logger),
 			createRequestTracker,
 			createRateLimiter,
-			timeSource);
+			timeSource,
+			presentation,
+			feedback);
+		if (presentation != null) runtime.contentPreview = new ClientPresentationPreview(presentation::previewAccess,
+			() -> Game == null || Game.level == null ? null : new MinecraftPreviewReadContext(Game.level, runtime.localTick),
+			PreviewLocalReaders.create(), (target, type) -> Optional.empty(), packetSender::sendToServer);
+		return runtime;
 	}
 
-	/**
-	 * The client tick entry point below handles housekeeping only; interaction
-	 * advancement is event/frame driven.
-	 *
-	 * <p>Does nothing while no valid level/player is available. Press and release
-	 * edges are handled immediately by their event methods; rendered frames
-	 * advance the machine with the current key state and queued wheel selection.
-	 * A live cancellation context is built only for a wheel release that can
-	 * perform cancellation. The returned action is dispatched at most once.
-	 * Finally the wheel mouse capture is synced with whatever phase the machine
-	 * ended in, and the marker store's fallback expiry runs against the
-	 * incremented local tick.
-	 *
-	 * <p>The queued wheel selection is consumed exactly once per frame and the
-	 * queued slot is reset to {@link WheelSelection#NONE} before the update,
-	 * so a selection must be refreshed by a later GUI frame to be seen again:
-	 * if rendering stops, a release commits {@code NONE} instead of a stale
-	 * center/sector selection.
-	 *
-	 * <p>While the machine is idle there is no interaction to feed, so the
-	 * live cancellation context (which walks every locally owned marker) is
-	 * not built at all; only the mouse capture sync and the fallback expiry
-	 * run.
-	 */
-	/** Handles client-tick marker expiry only; interaction input is event/frame driven. */
+	/** Headless construction keeps all interaction behavior in this runtime; only world/input ports differ. */
+	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
+		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
+		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
+		ClientPresentation presentation, ClientInventory inventory, ClientPresentationPreview preview) {
+		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
+			ClientMarker::serverDurationTicks, new PresentationReceiptFeedback() {
+				public void play(MarkerSnapshot snapshot) {}
+				public void chat(String owner, MarkerSnapshot snapshot, Component name) {}
+			});
+	}
+
+	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
+		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
+		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
+		ClientPresentation presentation, ClientInventory inventory, ClientPresentationPreview preview,
+		ClientMarkerStore.DisplayDurationPolicy displayDuration, PresentationReceiptFeedback feedback) {
+		var active = new ActiveInteraction();
+		var coordinator = new PingCaptureCoordinator(DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()),
+			active, PingCaptureLogger.noop());
+		var logger = PingInteractionLogger.noop();
+		var limiter = new ClientCreateRateLimiter(clock, policy);
+		var tracker = new CreateRequestTracker();
+		var machine = new PingInteractionStateMachine(coordinator, active, clock, validator, new CancelCandidatePicker(),
+			logger, () -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis());
+		var runtime = new ClientPingRuntime(new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDuration), active, coordinator, machine,
+			new ClientPingActionDispatcher(sender, errors, logger, tracker, limiter, presentation), errors, logger,
+			new WheelMouseCapture(logger), tracker, limiter, clock, presentation, feedback);
+		runtime.interactionAccess = Objects.requireNonNull(access);
+		runtime.contentPreview = preview;
+		runtime.inventory(inventory);
+		return runtime;
+	}
+
+	/** Marker expiry plus periodic Precise capture; ordinary interaction remains event/frame driven. */
 	public void onTick() {
-		Minecraft game = Game;
+		observeInteractionLifecycle();
+		checkInventoryStayPath();
+		var lifecycle = interactionAccess.lifecycle();
+		if (lifecycle.level() == null || !lifecycle.player()) { contentChat.clear(); return; }
 
-		if (game == null || game.level == null || game.player == null) {
-			compatibilityController.abort();
-			InputUtils.resetPingHold();
-			return;
+		if (presentation != null) {
+			presentation.tick(Game != null && Game.getConnection() != null);
+			syncPresentationNames();
 		}
-
-		observeWorldContinuity(game);
-
 		localTick++;
+		synchronizePreciseBranch();
+		if (preciseRefresh != null) preciseRefresh.tick(localTick);
 		expireFallbackMarkers();
+		reconcileContentReceipts();
 	}
 
 	/** Handles a claimed physical press immediately on the client thread. */
 	public void onPress(long eventTimeMillis) {
-		Minecraft game = Game;
-
-		if (game == null || game.level == null || game.player == null) {
-			compatibilityController.abort();
-			InputUtils.resetPingHold();
+		if (!observeInteractionLifecycle()) return;
+		if (checkInventoryStayPath()) return;
+		if (inventorySelectionStay.consuming()) {
+			inventorySelectionStay.press(eventTimeMillis);
 			return;
 		}
-
-		observeWorldContinuity(game);
-
-		compatibilityController.onPress(eventTimeMillis);
+		switch (compatibilityController.observeModeTransition()) {
+			case ENABLED -> {
+				rapidDangerController.disableForCompatibility();
+				compatibilityController.onPress(eventTimeMillis);
+				return;
+			}
+			case JUST_DISABLED -> {
+				// This edge already aborted the compatibility baseline and reset
+				// the raw claim; it must not become a fresh first press.
+				rapidDangerController.reset();
+				return;
+			}
+			case DISABLED -> {
+				if (!rapidDangerController.onPress(eventTimeMillis))
+					compatibilityController.onPress(eventTimeMillis);
+			}
+		}
 	}
 
 	/**
@@ -372,42 +609,49 @@ public final class ClientPingRuntime {
 	 * render frame commits it once the frozen capture arrives.
 	 */
 	public void onRelease() {
-		Minecraft game = Game;
-
-		if (game == null || game.level == null || game.player == null) {
-			compatibilityController.abort();
-			InputUtils.resetPingHold();
+		if (!observeInteractionLifecycle()) return;
+		checkInventoryStayPath();
+		if (inventorySelectionStay.consuming()) {
+			releaseInventoryStay(timeSource.nowMillis());
 			return;
 		}
-
-		observeWorldContinuity(game);
-
-		compatibilityController.onRelease();
+		switch (compatibilityController.observeModeTransition()) {
+			case ENABLED -> {
+				rapidDangerController.disableForCompatibility();
+				compatibilityController.onRelease();
+			}
+			case JUST_DISABLED -> rapidDangerController.reset();
+			case DISABLED -> rapidDangerController.onRelease();
+		}
 	}
 
 	/**
 	 * Advances presentation-only interaction timing for one GUI/render frame.
 	 *
 	 * <p>The frame path makes a capture-ready held interaction visible as an open
-	 * wheel, silently closes timed-out wheels, consumes the current wheel
-	 * selection, and completes a release whose asynchronous capture arrived
+	 * selector and completes a release whose asynchronous capture arrived
 	 * after the release event. It is the sole per-frame interaction path.
 	 * Mouse capture is synchronized on this single frame path (and immediate
 	 * release/press events) so visible transitions preserve the existing
 	 * release/re-grab semantics without duplicate transitions.
 	 */
 	public void onRenderFrame(boolean keyDown) {
-		Minecraft game = Game;
-
-		if (game == null || game.level == null || game.player == null) {
-			compatibilityController.abort();
-			InputUtils.resetPingHold();
+		if (!observeInteractionLifecycle()) return;
+		checkInventoryStayPath();
+		if (inventorySelectionStay.consuming()) {
+			presentInventoryStayFrame(keyDown);
+			synchronizeNativeInput();
 			return;
 		}
-
-		observeWorldContinuity(game);
-
-		compatibilityController.onRenderFrame(keyDown);
+		switch (compatibilityController.observeModeTransition()) {
+			case ENABLED -> {
+				rapidDangerController.disableForCompatibility();
+				compatibilityController.onRenderFrame(keyDown);
+			}
+			case JUST_DISABLED -> rapidDangerController.reset();
+			case DISABLED -> rapidDangerController.onRenderFrame(keyDown, timeSource.nowMillis());
+		}
+		synchronizeNativeInput();
 	}
 
 	/**
@@ -416,8 +660,30 @@ public final class ClientPingRuntime {
 	 * resurrect the interaction.
 	 */
 	public void abort() {
+		rapidDangerController.reset();
+		inventorySelectionStay.reset();
 		compatibilityController.abort();
-		InputUtils.resetPingHold();
+		interactionAccess.resetInput();
+	}
+
+	/** Raw mouse-look bridge; the runtime owns the accumulator, never a later camera ray. */
+	public void onLookInput(double yawDegrees, double pitchDegrees) {
+		lookInputTracker.acceptDegrees(yawDegrees, pitchDegrees);
+	}
+
+	/** Starts a fresh look baseline after a focus, capture, warp or cursor lifecycle change. */
+	public void onLookInputReset() {
+		lookInputTracker.reset();
+	}
+
+	private boolean isCompatibilityLive() {
+		return ClientConfig.HANDLER.getConfig().isLongPressCompatibilityMode();
+	}
+
+	public void abortForScreenTransition() {
+		abortingScreenTransition = true;
+		try { abort(); }
+		finally { abortingScreenTransition = false; }
 	}
 
 	/**
@@ -430,11 +696,14 @@ public final class ClientPingRuntime {
 	 */
 	public void close() {
 		abort();
-		InputUtils.resetPingHold();
+		contentChat.clear();
 		markerStore.clear();
+		if (presentation != null) presentation.close();
 		nameStore.clear();
 		MarkerOverlayState.INSTANCE.clear();
-		observedLevel = null;
+		observedWorldIdentity = null;
+		observedScreenIdentity = null;
+		trackingPaint = List.of();
 		observedDimension = null;
 	}
 
@@ -446,29 +715,27 @@ public final class ClientPingRuntime {
 		return compatibilityController.hasPendingState();
 	}
 
-	private void observeWorldContinuity(Minecraft game) {
-		ClientLevel currentLevel = game.level;
-		String currentDimension = currentLevel.dimension().location().toString();
-
-		if (observedLevel != null
-			&& (observedLevel != currentLevel || !Objects.equals(observedDimension, currentDimension))) {
-			compatibilityController.abort();
-			InputUtils.resetPingHold();
-			pendingRay = null;
-			wheelSelection = WheelSelection.NONE;
+	private boolean observeInteractionLifecycle() {
+		var lifecycle = interactionAccess.lifecycle();
+		boolean screenChanged = observedScreenIdentity != lifecycle.screen();
+		boolean discontinuity = observedWorldIdentity != null && (observedWorldIdentity != lifecycle.level()
+			|| !Objects.equals(observedDimension, lifecycle.dimension()) || screenChanged);
+		if (discontinuity || lifecycle.level() == null || !lifecycle.player() || !lifecycle.focused()
+			|| lifecycle.screen() != null || lifecycle.overlay()) {
+			if (lifecycle.level() != null && lifecycle.player() && lifecycle.focused() && !lifecycle.overlay()
+				&& (screenChanged || lifecycle.screen() != null)) abortForScreenTransition();
+			else abort();
 		}
-
-		observedLevel = currentLevel;
-		observedDimension = currentDimension;
+		observedWorldIdentity = lifecycle.level();
+		observedDimension = lifecycle.dimension();
+		observedScreenIdentity = lifecycle.screen();
+		return !discontinuity && lifecycle.level() != null && lifecycle.player() && lifecycle.focused()
+			&& lifecycle.screen() == null && !lifecycle.overlay();
 	}
 
 	/** The baseline press path used by the compatibility controller. */
 	private Optional<PingInteractionAction> baselinePress(long rawPressTimestamp) {
-		InteractionToken token = machine.pressAt(rawPressTimestamp);
-		pendingRay = null;
-		captureImmediately(token);
-		wheelMouseCapture.sync(machine.phase(), Game);
-		return Optional.empty();
+		return baselinePress(rawPressTimestamp, interactionAccess.capturePressRay().orElse(null));
 	}
 
 	/** Baseline press path with a ray captured by a rapid second physical press. */
@@ -477,27 +744,231 @@ public final class ClientPingRuntime {
 		CapturedRay pressRay
 	) {
 		InteractionToken token = machine.pressAt(rawPressTimestamp);
+		finishSelector(false);
+		selectorPaint.reset(); // A new hold never inherits the departing hold's visual history or clock.
+		if (!activeInteraction.isCurrent(token)) return Optional.empty();
+		baselineToken = token;
+		baselineHeld = true;
+		baselineMenuOpened = false;
+		ClientConfig config = ClientConfig.HANDLER.getConfig();
+		selectorSettings = config.getSpatialSelector().snapshot();
+		if (config.isGestureSkipHoldEnabled()) {
+			gestureSkipHold.begin(rawPressTimestamp, selectorSettings.gestureSkipHoldMillis(), selectorSettings.deadzone());
+		}
+		selectorPolicy = raycastPolicy(config);
+		selectorPingDistance = config.getPingDistance();
+		selectorNativeDistance = Math.min(config.getRaycastDistance(), selectorPingDistance);
+		selectorStyle = SpatialOverlayRenderer.Style.fromLegacyFontSizes(config.getWheelOpacity(), config.getWheelTargetOpacity(), config.getWheelFontSize(),
+			config.getWheelTargetFontSize(), selectorSettings.rootDistance(), selectorSettings.submenuRadiusScale().doubleValue(),
+			selectorSettings.showTrail(), selectorSettings.reduceMotion(), selectorSettings.trailLength(), selectorSettings.trailOpacity(),
+			selectorSettings.inventoryMaxWidthFraction().doubleValue(), selectorSettings.inventoryMaxHeightFraction().doubleValue());
 		pendingRay = null;
-		captureImmediately(token, pressRay);
-		wheelMouseCapture.sync(machine.phase(), Game);
+		if (pressRay == null) machine.abort();
+		else {
+			pendingRay = pressRay;
+			try { interactionAccess.capture(token, pressRay, (snapshot, candidates) -> completeCapture(token, snapshot, pressRay, candidates)); }
+			catch (RuntimeException | LinkageError failure) { if (baselineToken == token) baselineAbort(); throw failure; }
+		}
+		interactionAccess.syncMouse(machine.phase());
+		// A previous screen/selector may relinquish native ownership during sync;
+		// sample the settled press baseline rather than that owner's coordinates.
+		if (baselineToken == token && gestureSkipHold.active())
+			interactionAccess.inputFrame().ifPresent(frame -> interactionAccess.mousePosition().ifPresent(position ->
+				gestureSkipHold.onMove(frame.window(), position.x(), position.y(), frame, rawPressTimestamp)));
 		return Optional.empty();
 	}
 
-	private Optional<PingInteractionAction> baselineRelease() {
-		Optional<PingInteractionAction> action = advanceInteraction(false);
-		wheelMouseCapture.sync(machine.phase(), Game);
-		return action;
+	/**
+	 * The one mapping from the persistent target-selection settings to the
+	 * immutable raycast policy: sampled at hold start for capture and re-sampled
+	 * live by the selector toggle labels.
+	 */
+	private static RaycastPolicy raycastPolicy(ClientConfig config) {
+		return RaycastPolicy.from(config.isMarkTransparentBlocks(), config.isMarkBlacklistedTargets(), config.isMarkFluids());
 	}
 
-	private Optional<PingInteractionAction> baselinePresentFrame(boolean keyDown) {
+	private LongPressCompatibilityController.BaselineOutcome baselineRelease() {
+		InteractionToken releasing = baselineToken;
+		baselineHeld = false;
+		gestureSkipHold.reset();
+		if (preciseRefresh != null) preciseRefresh.leave();
+		long now = timeSource.nowMillis();
+		Optional<PingInteractionAction> action;
+		ClientPingActionDispatcher.DispatchOutcome sent = ClientPingActionDispatcher.DispatchOutcome.OTHER;
+		try {
+			if (!committingInventoryStay && !inventorySelectionStay.active()
+				&& machine.phase() == PingInteractionPhase.WHEEL_OPEN && selector != null
+				&& baselineToken != null && selectorSettings != null
+				&& selectorSettings.inventorySelectionStayOpenEnabled() && selector.inventoryPathActive()) {
+				// First release on the inventory list or an item submenu only
+				// stays. The terminal selector release API is deliberately not
+				// called, so token, session, preview and native ownership remain.
+				inventorySelectionStay.begin(machine.longPressMillis());
+				baselineMenuOpened = true;
+				return new LongPressCompatibilityController.BaselineOutcome(Optional.empty(),
+					LongPressCompatibilityController.DispatchOutcome.NOT_SENT, true);
+			}
+			if (machine.phase() == PingInteractionPhase.WHEEL_OPEN && selector != null && baselineToken != null) {
+				var opened = selector;
+				interactionAccess.inputFrame().ifPresent(frame -> constrainSelector(frame, now));
+				var releaseContexts = new LinkedHashMap<>(selectorContexts);
+				opened.presentedPrecise().ifPresent(painted -> releaseContexts.putAll(painted.contexts()));
+				var candidates = Map.copyOf(releaseContexts);
+				var ray = pendingRay;
+				var content = selectorContent;
+				var result = machine.releaseSelectorAt(releasing, now, () -> proposal(opened.releaseIntent(now)),
+					id -> Optional.ofNullable(candidates.get(id)), () -> interactionAccess.cancellation(ray));
+				action = result.action();
+				if (baselineToken != releasing || !activeInteraction.isCurrent(releasing)) action = Optional.empty();
+				else if (result.admittedIntent().isPresent()) {
+					SelectorIntent<ClientInventory.PreviewEntryReference> intent = result.admittedIntent().get();
+					if (intent instanceof SelectorIntent.ToggleNextCapture<ClientInventory.PreviewEntryReference> toggle)
+						interactionAccess.applyToggle(toggle.toggle(), now);
+					else if (intent instanceof SelectorIntent.SelectInventory<ClientInventory.PreviewEntryReference> selected) {
+						dispatchInventory(selected.reference(), selected.itemType().id());
+					} else if (intent instanceof SelectorIntent.CreateProperty<ClientInventory.PreviewEntryReference> property) {
+						var authorized = content == null ? Optional.<PresentationPropertyIntent>empty()
+							: content.intent(property.property().ref(), property.property().pingTypeId());
+						if (baselineToken == releasing && activeInteraction.isCurrent(releasing) && authorized.isPresent() && action.isPresent()
+							&& propertyTypes(candidates.get(property.candidate().candidateId())).contains(
+								PingTypeCatalog.builtIn().findById(property.property().pingTypeId()).orElseThrow()))
+							sent = dispatcher.dispatchOutcome(action.get(), List.of(property.property()));
+					} else if (action.isPresent()) sent = dispatcher.dispatchOutcome(action.get());
+				} else if (action.isPresent()) sent = dispatcher.dispatchOutcome(action.get());
+			} else {
+				action = machine.updateAt(false, WheelSelection.NONE, emptyCancellationContext(), now);
+				if (baselineToken != releasing || !activeInteraction.isCurrent(releasing)) action = Optional.empty();
+				if (action.isPresent()) sent = dispatcher.dispatchOutcome(action.get());
+			}
+			return baselineOutcome(action, sent);
+		} finally {
+			if (baselineToken == releasing && machine.phase() == PingInteractionPhase.IDLE) finishSelector(false);
+			interactionAccess.syncMouse(machine.phase());
+			synchronizeNativeInput();
+		}
+	}
+
+	private void releaseInventoryStay(long now) {
+		InventorySelectionStayController.ReleaseDecision decision = inventorySelectionStay.release(now);
+		if (decision == InventorySelectionStayController.ReleaseDecision.NONE) return;
+		if (decision == InventorySelectionStayController.ReleaseDecision.CANCEL) {
+			cancelInventoryStay();
+			return;
+		}
+		// Consume the latest authorized content before committing so a revoked
+		// preview or removed row can never submit its stale reference.
+		if (selector != null) selector.tick(now);
+		if (!staySelectorAvailable()) {
+			cancelInventoryStay();
+			return;
+		}
+		committingInventoryStay = true;
+		try {
+			baselineRelease();
+		} finally {
+			committingInventoryStay = false;
+			inventorySelectionStay.close();
+		}
+	}
+
+	private void presentInventoryStayFrame(boolean keyDown) {
+		if (!inventorySelectionStay.active()) return;
+		long now = timeSource.nowMillis();
+		if (inventorySelectionStay.cancelOnFrame(now)) {
+			cancelInventoryStay();
+			return;
+		}
+		// The staying tap never drives the selector as a held wheel gesture; the
+		// selector still receives its ordinary frame tick and paint timing.
+		baselinePresentFrame(false, now);
+		checkInventoryStayPath();
+	}
+
+	private void refreshInventoryStayPath(long now) {
+		if (!inventorySelectionStay.active()) return;
+		// A packet/reload boundary is not a frame; consume its owned content
+		// once so authorization or source revocation is visible before any
+		// later release can submit a stale row.
+		if (selector != null) selector.tick(now);
+		checkInventoryStayPath();
+	}
+
+	/** @return true when an active staying selector was just closed by a path exit */
+	private boolean checkInventoryStayPath() {
+		if (!inventorySelectionStay.active()) return false;
+		if (selector == null || !selector.inventoryPathActive()) {
+			inventorySelectionStay.closeForPathExit();
+			cancelInventoryStay();
+			return true;
+		}
+		return false;
+	}
+
+	private boolean staySelectorAvailable() {
+		return selector != null && baselineToken != null && activeInteraction.isCurrent(baselineToken)
+			&& machine.phase() == PingInteractionPhase.WHEEL_OPEN && selector.inventoryPathActive();
+	}
+
+	/** Closes a staying selector without a create, a Cancel Marker or a Content return. */
+	private void cancelInventoryStay() {
+		InteractionToken cancelled = baselineToken;
+		machine.abort();
+		if (cancelled != null) activeInteraction.invalidate(cancelled);
+		baselineToken = null;
+		baselineHeld = false;
+		baselineMenuOpened = false;
+		finishSelector(true);
+		interactionAccess.syncMouse(machine.phase());
+		synchronizeNativeInput();
+	}
+
+	private LongPressCompatibilityController.BaselineOutcome baselinePresentFrame(boolean keyDown) {
 		return baselinePresentFrame(keyDown, timeSource.nowMillis());
 	}
 
-	private Optional<PingInteractionAction> baselinePresentFrame(
+	private LongPressCompatibilityController.BaselineOutcome baselinePresentFrame(
 		boolean keyDown,
 		long frameTimeMillis
 	) {
-		machine.presentFrameAt(keyDown, frameTimeMillis);
+		return baselinePresentFrame(keyDown, frameTimeMillis, frameTimeMillis);
+	}
+
+	private LongPressCompatibilityController.BaselineOutcome baselinePresentFrame(
+		boolean keyDown,
+		long frameTimeMillis,
+		long observedTimeMillis
+	) {
+		InteractionToken presented = baselineToken;
+		if (!keyDown && machine.phase() != PingInteractionPhase.WHEEL_OPEN) baselineHeld = false;
+		var inputFrame = interactionAccess.inputFrame();
+		boolean presentable = inputFrame.isPresent();
+		if (!baselineHeld || ClientConfig.HANDLER.getConfig().isLongPressCompatibilityMode()) gestureSkipHold.reset();
+		inputFrame.ifPresentOrElse(gestureSkipHold::synchronize, gestureSkipHold::rePrime);
+		machine.presentFrameAt(keyDown && presentable, observedTimeMillis,
+			baselineHeld && gestureSkipHold.eligible(frameTimeMillis));
+		if (selectorContent != null && machine.phase() != PingInteractionPhase.IDLE) {
+			try { selectorContent.tick(); }
+			catch (RuntimeException | LinkageError unavailable) {
+				RateLimitedDiagnostics.warn("selector-content-update", NativeSelectorContent.class.getName(),
+					() -> "selector content update unavailable capture=" + activeInteraction.currentContext().orElse(null)
+						+ " phase=" + machine.phase() + " tick=" + localTick, unavailable);
+			}
+		}
+		if (machine.phase() == PingInteractionPhase.WHEEL_OPEN) {
+			baselineMenuOpened = true;
+			if (selector == null) openSelector(frameTimeMillis);
+			if (selector != null && presentable) {
+				var frame = inputFrame.orElseThrow();
+				prepareInventoryGeometry(frame, frameTimeMillis);
+				// The interaction frame owns projection publication. Paint consumes it unchanged.
+				long nowNanos = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(frameTimeMillis);
+				selector.constrainPointer(selectorPaint.prepareViewport(selector.snapshot().radial(), frame.guiWidth(), frame.guiHeight(),
+					selectorStyle, nowNanos), frameTimeMillis);
+				selector.tick(frameTimeMillis);
+				selector.constrainPointer(selectorPaint.retargetViewport(selector.snapshot().radial(), selectorStyle, nowNanos), frameTimeMillis);
+			}
+			synchronizePreciseBranch();
+		}
 		// Raw release edges own wheel commit/cancellation.  A stale false key
 		// state on a later frame must not make the frame path walk every owned
 		// marker; keep an already-open wheel logically held until its release
@@ -505,29 +976,355 @@ public final class ClientPingRuntime {
 		// asynchronous capture that completes after release can commit its one
 		// short action on this frame.
 		boolean actionKeyDown = keyDown || machine.phase() == PingInteractionPhase.WHEEL_OPEN;
-		Optional<PingInteractionAction> action = advanceInteraction(actionKeyDown, frameTimeMillis);
+		Optional<PingInteractionAction> action = machine.updateAt(actionKeyDown, WheelSelection.NONE,
+			emptyCancellationContext(), observedTimeMillis);
+		if (baselineToken != presented || !activeInteraction.isCurrent(presented)) action = Optional.empty();
+		var sent = action.isPresent() ? dispatcher.dispatchOutcome(action.get()) : ClientPingActionDispatcher.DispatchOutcome.OTHER;
+		var outcome = baselineOutcome(action, sent);
+		if (baselineToken == presented && machine.phase() == PingInteractionPhase.IDLE) finishSelector(false);
+		interactionAccess.syncMouse(machine.phase());
+		return outcome;
+	}
 
-		// A frame-side timeout/transition must not leave a prior GUI selection
-		// queued for the next frame. Selection is meaningful only while the wheel
-		// remains open; it is preserved between open frames by the runtime's normal
-		// wheel input path.
-		if (machine.phase() != PingInteractionPhase.WHEEL_OPEN) {
-			wheelSelection = WheelSelection.NONE;
-		}
-
-		if (machine.phase() == PingInteractionPhase.IDLE) {
-			pendingRay = null;
-		}
-
-		wheelMouseCapture.sync(machine.phase(), Game);
-		return action;
+	private LongPressCompatibilityController.BaselineOutcome baselineOutcome(Optional<PingInteractionAction> action,
+		ClientPingActionDispatcher.DispatchOutcome sent) {
+		return new LongPressCompatibilityController.BaselineOutcome(action,
+			sent == ClientPingActionDispatcher.DispatchOutcome.CREATE_SENT
+				? LongPressCompatibilityController.DispatchOutcome.CREATE_SENT : LongPressCompatibilityController.DispatchOutcome.NOT_SENT,
+			baselineMenuOpened);
 	}
 
 	private void baselineAbort() {
+		CapturedPingContext abortedCapture = activeInteraction.currentContext().orElse(null);
 		machine.abort();
-		pendingRay = null;
-		wheelSelection = WheelSelection.NONE;
-		wheelMouseCapture.close(Game);
+		if (validatingFrozenTapToken != null) {
+			activeInteraction.invalidate(validatingFrozenTapToken);
+			validatingFrozenTapToken = null;
+		}
+		if (baselineToken != null) activeInteraction.invalidate(baselineToken);
+		baselineHeld = false;
+		baselineToken = null;
+		finishSelector(true, abortedCapture);
+		interactionAccess.disposeMouse(abortingScreenTransition);
+	}
+
+	private void startHeldPreview(CapturedPingContext capture) {
+		if (!baselineHeld || baselineToken != capture.token() || selectorContent != null) return;
+		selectorContent = new NativeSelectorContent(capture, contentPreview, () -> inventory, this::propertyTypes, this::inventoryTypes,
+			ref -> {
+				String key = "settings.pingforit.presentation.field." + ref.fieldId().replace(':', '_').replace('.', '_') + ".name";
+				if (Language.getInstance().has(key)) return Component.translatable(key);
+				String advertised = presentation == null ? ref.fieldId() : presentation.previewAccess(capture.resolvedTarget().targetType().id())
+					.map(access -> access.adapters().get(ref.adapterId())).map(adapter -> adapter.fields().get(ref.fieldId()))
+					.map(nx.pingwheel.common.presentation.PresentationField::label).orElse(ref.fieldId());
+				return Component.literal(advertised.substring(0, Math.min(64, advertised.length())));
+			},
+			json -> {
+				if (Game == null || Game.level == null) return null;
+				try { return Component.Serializer.fromJson(json, Game.level.registryAccess()); }
+				catch (RuntimeException | LinkageError invalid) {
+					RateLimitedDiagnostics.warn("selector-content-name-decode", NativeSelectorContent.class.getName(),
+						() -> "selector target name unavailable capture=" + capture + " nameJson=" + json, invalid);
+					return null;
+				}
+			});
+		try { selectorContent.begin(interactionAccess.lifecycle().level()); }
+		catch (RuntimeException | LinkageError unavailable) {
+			RateLimitedDiagnostics.warn("selector-content-init", NativeSelectorContent.class.getName(),
+				() -> "selector preview unavailable capture=" + capture + " tick=" + localTick, unavailable);
+		}
+	}
+
+	private List<PingType> propertyTypes(CapturedPingContext context) {
+		Target target = context.resolvedTarget().target();
+		String registry = null;
+		Set<String> tags = Set.of();
+		if (target instanceof Target.BlockTarget block) registry = block.blockRegistryId();
+		else if (target instanceof Target.ExternalBlockTarget external) registry = external.expectedBlockRegistryId();
+		else if (target instanceof Target.EntityTarget entity) {
+			Entity live = Game == null || Game.level == null ? null : GameContext.getEntity(entity.locator());
+			if (live != null && !live.isRemoved() && target.dimensionId().equals(Game.level.dimension().location().toString())) {
+				registry = BuiltInRegistries.ENTITY_TYPE.getKey(live.getType()).toString();
+				tags = BuiltInRegistries.ENTITY_TYPE.getHolder(BuiltInRegistries.ENTITY_TYPE.getKey(live.getType())).stream()
+					.flatMap(holder -> holder.tags()).map(tag -> tag.location().toString()).collect(java.util.stream.Collectors.toSet());
+			}
+		}
+		if (registry != null && !(target instanceof Target.EntityTarget)) {
+			var id = ResourceLocation.tryParse(registry);
+			if (id != null && BuiltInRegistries.BLOCK.containsKey(id))
+				tags = BuiltInRegistries.BLOCK.getHolder(id).stream().flatMap(holder -> holder.tags()).map(tag -> tag.location().toString())
+					.collect(java.util.stream.Collectors.toSet());
+		}
+		return PresentationPropertyPingTypes.builtIn().effective(registry, tags).stream()
+			.flatMap(id -> PingTypeCatalog.builtIn().findById(id).stream()).toList();
+	}
+
+	/**
+	 * The inventory item policy for the held target's accepted block registry:
+	 * the property policy plus a deduplicated {@code take} only for an actual
+	 * chest tag. Inventory menus open only for ordinary or provider-backed block
+	 * containers, so this reads the accepted registry holder's tags without a
+	 * new world look; a Sable candidate contributes only its client-expected
+	 * registry, the same accepted menu gate the property policy already uses.
+	 */
+	private List<PingType> inventoryTypes(CapturedPingContext context) {
+		Target target = context.resolvedTarget().target();
+		String registry = null;
+		if (target instanceof Target.BlockTarget block) registry = block.blockRegistryId();
+		else if (target instanceof Target.ExternalBlockTarget external) registry = external.expectedBlockRegistryId();
+		Set<String> tags = Set.of();
+		if (registry != null) {
+			var id = ResourceLocation.tryParse(registry);
+			if (id != null && BuiltInRegistries.BLOCK.containsKey(id))
+				tags = BuiltInRegistries.BLOCK.getHolder(id).stream().flatMap(holder -> holder.tags()).map(tag -> tag.location().toString())
+					.collect(java.util.stream.Collectors.toSet());
+		}
+		return InventoryItemPingTypes.builtIn().effective(registry, tags).stream()
+			.flatMap(id -> PingTypeCatalog.builtIn().findById(id).stream()).toList();
+	}
+
+	private void openSelector(long now) {
+		CapturedPingContext context = activeInteraction.currentContext().filter(value -> value.token() == baselineToken).orElse(null);
+		if (context == null) return;
+		startHeldPreview(context);
+		if (context.token() != baselineToken || !activeInteraction.isCurrent(context.token())
+			|| machine.phase() != PingInteractionPhase.WHEEL_OPEN) return;
+		selectorContexts.clear();
+		SpatialSelectorSession.CapturedTarget ordinary = new SpatialSelectorSession.CapturedTarget("ordinary", context.resolvedTarget(),
+			context.blockHitFace(), Optional.empty());
+		selectorContexts.put("ordinary", context);
+		if (context.selectorCandidates().isPresent()) {
+			var set = context.selectorCandidates().get();
+			var candidate = set.ordinary();
+			selectorContexts.put(Integer.toString(candidate.candidateId()), context);
+			ordinary = new SpatialSelectorSession.CapturedTarget(Integer.toString(candidate.candidateId()), candidate.resolvedTarget(),
+				context.blockHitFace(), Optional.of(candidate.worldHit()));
+		}
+		long request = selectorContent == null ? ClientInventory.NO_REQUEST : selectorContent.requestId();
+		var fence = new SpatialSelectorSession.ContentFence(context.token().sequence(), request, context.token().sequence(), ordinary.candidateId());
+		var content = selectorContent;
+		var opened = new SpatialSelectorSession<>(ordinary, Map.of(), selectorSettings, fence,
+			(target, bound) -> {
+				try { return content == null ? null : content.read(target, bound); }
+				catch (RuntimeException | LinkageError unavailable) {
+					RateLimitedDiagnostics.warn("selector-content-read", NativeSelectorContent.class.getName(),
+						() -> "selector content projection unavailable target=" + target + " fence=" + bound
+							+ " capture=" + context, unavailable);
+					return null;
+				}
+			}, interactionAccess.listGeometry(selectorStyle));
+		selector = opened;
+		Object level = interactionAccess.lifecycle().level();
+		opened.beginLivePrecise(context.token(), level);
+		var token = context.token();
+		preciseRefresh = new PreciseCaptureRefresh(token, level, selectorSettings.preciseCapturePeriodTicks(),
+			() -> interactionAccess.capturePressRay().map(ray -> new PreciseCaptureRefresh.Inputs(token, level, ray,
+				selectorPolicy, selectorNativeDistance, selectorPingDistance)),
+			() -> selector == opened && baselineHeld && baselineToken == token && activeInteraction.isCurrent(token)
+				&& interactionAccess.lifecycle().level() == level && machine.phase() == PingInteractionPhase.WHEEL_OPEN,
+			interactionAccess::capturePrecise, interactionAccess::capturePreciseDistant,
+			update -> { if (selector == opened && baselineToken == token && interactionAccess.lifecycle().level() == level)
+				opened.updatePrecise(update, timeSource.nowMillis()); });
+		boolean replay = gestureSkipHold.active();
+		var trajectory = gestureSkipHold.take();
+		// Keep sample timing and corners, not merely the final pointer. This only
+		// seeds gesture history; machine eligibility still belongs to this frame.
+		opened.open(replay ? trajectory.pressTimeMillis() : now);
+		interactionAccess.inputFrame().ifPresent(frame -> constrainSelector(frame, replay ? trajectory.pressTimeMillis() : now));
+		if (replay) for (var sample : trajectory.samples()) {
+			if (selector != opened || context.token() != baselineToken || !activeInteraction.isCurrent(context.token())) return;
+			opened.moveGui(sample.deltaX(), sample.deltaY(), sample.timeMillis());
+		}
+		if (selector != opened || context.token() != baselineToken || !activeInteraction.isCurrent(context.token())) return;
+		selectorInput = new NativeSelectorInput(opened);
+		selectorInput.open();
+	}
+
+	private SelectorReleaseProposal<SelectorIntent<ClientInventory.PreviewEntryReference>> proposal(
+		SelectorIntent<ClientInventory.PreviewEntryReference> intent) {
+		return switch (intent) {
+			case SelectorIntent.None<ClientInventory.PreviewEntryReference> ignored -> new SelectorReleaseProposal.None<>();
+			case SelectorIntent.CancelOwnMarker<ClientInventory.PreviewEntryReference> cancel -> new SelectorReleaseProposal.Cancel<>(cancel);
+			case SelectorIntent.ToggleNextCapture<ClientInventory.PreviewEntryReference> toggle -> new SelectorReleaseProposal.Local<>(toggle);
+			case SelectorIntent.CreateTarget<ClientInventory.PreviewEntryReference> create -> new SelectorReleaseProposal.Create<>(
+				create.candidate().candidateId(), create.candidate().resolvedTarget(), create.pingType(), create,
+				create.admission(), create.presentationRevision());
+			case SelectorIntent.CreateProperty<ClientInventory.PreviewEntryReference> property -> new SelectorReleaseProposal.Create<>(
+				property.candidate().candidateId(), property.candidate().resolvedTarget(), property.mainType(), property);
+			case SelectorIntent.SelectInventory<ClientInventory.PreviewEntryReference> selected -> new SelectorReleaseProposal.Create<>(
+				selected.candidate().candidateId(), selected.candidate().resolvedTarget(), selected.mainType(), selected);
+		};
+	}
+
+	private void finishSelector(boolean hard) {
+		finishSelector(hard, activeInteraction.currentContext().orElse(null));
+	}
+
+	private void finishSelector(boolean hard, CapturedPingContext closingCapture) {
+		inventorySelectionStay.close();
+		committingInventoryStay = false;
+		gestureSkipHold.reset();
+		if (preciseRefresh != null) preciseRefresh.end();
+		preciseRefresh = null;
+		if (baselineToken != null) activeInteraction.invalidate(baselineToken);
+		baselineToken = null;
+		baselineHeld = false;
+		if (selectorInput != null) selectorInput.release();
+		if (selector != null) selector.abort();
+		selector = null; selectorInput = null;
+		NativeSelectorContent old = selectorContent;
+		selectorContent = null;
+		selectorContexts.clear(); pendingRay = null; wheelSelection = WheelSelection.NONE;
+		if (hard) selectorPaint.reset();
+		try { if (old != null) old.close(); }
+		catch (RuntimeException | LinkageError unavailable) {
+			RateLimitedDiagnostics.warn("selector-content-close", NativeSelectorContent.class.getName(),
+				() -> "selector preview close unavailable capture=" + closingCapture + " hard=" + hard
+					+ " tick=" + localTick, unavailable);
+		}
+	}
+
+	public Optional<SpatialSelectorSession.Snapshot> selectorSnapshot() {
+		interactionAccess.inputFrame().ifPresent(frame -> constrainSelector(frame, timeSource.nowMillis()));
+		return selector == null ? Optional.empty() : Optional.of(selector.snapshot());
+	}
+	private void constrainSelector(NativeSelectorInput.Frame frame, long nowMillis) {
+		if (selector == null) return;
+		prepareInventoryGeometry(frame, nowMillis);
+		selector.constrainPointer(selectorPaint.lastViewport(frame.guiWidth(), frame.guiHeight()), nowMillis);
+	}
+	/**
+	 * Interaction geometry is measured before viewport confinement and before
+	 * move/scroll/release/tick paths. Paint-only frames use the same preparation
+	 * without advancing interaction time.
+	 */
+	private void prepareInventoryGeometry(NativeSelectorInput.Frame frame, long nowMillis) {
+		if (selector == null || selectorStyle == null) return;
+		selector.prepareInventoryGeometry(view -> interactionAccess.listGeometry(selectorStyle, frame, view),
+			interactionAccess::inventoryDisplay, nowMillis);
+	}
+	public void drawSelector(GuiGraphics graphics) {
+		var inputFrame = interactionAccess.inputFrame();
+		if (inputFrame.isEmpty()) return;
+		if (selectorStyle == null || (selector == null && !selectorPaint.isAnimating())) return;
+		constrainSelector(inputFrame.get(), timeSource.nowMillis());
+		var opened = selector;
+		var snapshot = opened == null ? null : opened.snapshot();
+		Function<SpatialController.ChoiceView, Component> details = snapshot == null ? null
+			: new SelectorPreciseTargetLabels(snapshot, selectorTargetNames::resolve)::detail;
+		selectorPaint.drawFrame(graphics, snapshot == null ? null : snapshot.radial(),
+			snapshot == null ? null : snapshot.inventoryView(), this::selectorChoiceLabel, details, selectorStyle,
+			java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeSource.nowMillis()),
+			snapshot == null ? selectorPaint.lastViewport(inputFrame.get().guiWidth(), inputFrame.get().guiHeight()) : snapshot.viewport());
+		acknowledgeSelectorPaint(opened, snapshot, selectorPaint.paintedChoiceIds());
+	}
+
+	/**
+	 * The selector's live label resolver: target-selection toggles gain their
+	 * live ON/OFF state; every other choice keeps the held-content or default
+	 * translation-key behavior unchanged.
+	 */
+	private Component selectorChoiceLabel(SpatialController.ChoiceView choice) {
+		Component toggleLabel = selectorToggleLabels.label(choice);
+		if (toggleLabel != null) return toggleLabel;
+		return selectorContent == null
+			? choice.label() == null ? Component.empty() : Component.translatable(choice.label())
+			: selectorContent.label(choice.label());
+	}
+	/** Actual renderer handoff; a headless recording may acknowledge only paint it exercised. */
+	void acknowledgeSelectorPaint(SpatialSelectorSession.Snapshot snapshot, Set<String> paintedChoiceIds) {
+		acknowledgeSelectorPaint(selector, snapshot, paintedChoiceIds);
+	}
+	private void acknowledgeSelectorPaint(SpatialSelectorSession<ClientInventory.PreviewEntryReference> opened,
+		SpatialSelectorSession.Snapshot snapshot, Set<String> paintedChoiceIds) {
+		if (opened == null || selector != opened || baselineToken == null || !activeInteraction.isCurrent(baselineToken)) return;
+		opened.markPresented(snapshot, paintedChoiceIds).ifPresent(frame ->
+			machine.markSelectorPresented(baselineToken, frame.revision(), frame.contexts()));
+	}
+	private void synchronizePreciseBranch() {
+		if (preciseRefresh == null) return;
+		if (selector != null && selector.isPreciseBranchActive() && baselineHeld) preciseRefresh.enter(localTick);
+		else preciseRefresh.leave();
+	}
+	public void prepareInventoryTracking(nx.pingwheel.common.render.WorldRenderContext frame) {
+		if (inventory == null || Game == null || Game.level == null) { trackingPaint = List.of(); return; }
+		String dimension = Game.level.dimension().location().toString();
+		var lines = new java.util.ArrayList<nx.pingwheel.common.render.InventoryTrackingRenderer.MarkerLines>();
+		for (var marker : markerStore.hudRenderMarkers()) {
+			if (!dimension.equals(marker.target().dimensionId())) continue;
+			var entries = nx.pingwheel.common.render.InventoryTrackingRenderer.lines(inventory.tracking(marker.id()));
+			if (entries.isEmpty()) continue;
+			WorldVector point = MarkerOverlayState.INSTANCE.lookupPresentationPosition(marker.id(), marker.target(), dimension)
+				.orElseGet(() -> candidatePosition(marker, dimension));
+			Vec3 position = new Vec3(point.x(), point.y(), point.z());
+			var screen = nx.pingwheel.common.math.MathUtils.worldToScreen(position, frame.modelViewMatrix, frame.projectionMatrix);
+			if (screen == null || screen.isBehindCamera()) continue;
+			double distance = frame.camera.getPosition().distanceTo(position);
+			float scale = (float) Math.max(1.0, 2.0 / Math.pow(distance, 0.3)) * 0.5f * ClientConfig.HANDLER.getConfig().getPingSize() / 100f;
+			lines.add(new nx.pingwheel.common.render.InventoryTrackingRenderer.MarkerLines(screen.x, screen.y, scale, entries));
+		}
+		trackingPaint = List.copyOf(lines);
+	}
+	public void drawInventoryTracking(GuiGraphics graphics) {
+		nx.pingwheel.common.render.InventoryTrackingRenderer.draw(graphics, trackingPaint);
+	}
+	public void onPresentationPreview(PresentationPreviewS2CPacket packet) {
+		if (contentPreview != null && selectorContent != null && observeInteractionLifecycle()) contentPreview.accept(packet);
+	}
+	public void rePrimeSelectorInput() {
+		if (selectorInput != null) selectorInput.rePrime();
+		gestureSkipHold.rePrime();
+	}
+	/** Entry can precede a pending real position callback; validate ownership without replacing its baseline. */
+	public void onMouseCursorEntered() { synchronizeNativeInput(); }
+	public void onVanillaMouseCaptureChanged(boolean grabbing) { wheelMouseCapture.vanillaCaptureChanged(grabbing); rePrimeSelectorInput(); }
+	private final WheelMouseCapture.InputTransition mouseInputTransition = new WheelMouseCapture.InputTransition() {
+		public void before() { rePrimeSelectorInput(); }
+		public void after(double x, double y) {
+			if (selectorInput != null) interactionAccess.inputFrame().ifPresentOrElse(
+				frame -> selectorInput.prime(x, y, frame), selectorInput::rePrime);
+		}
+	};
+	public boolean isSelectorMouseTransition() { return selectorInput != null || wheelMouseCapture.isTransitioning(); }
+	private void synchronizeNativeInput() {
+		if (selectorInput == null) {
+			interactionAccess.inputFrame().ifPresentOrElse(gestureSkipHold::synchronize, gestureSkipHold::rePrime);
+			return;
+		}
+		interactionAccess.inputFrame().ifPresentOrElse(frame -> {
+			constrainSelector(frame, timeSource.nowMillis());
+			selectorInput.synchronize(frame);
+		}, selectorInput::rePrime);
+	}
+	public void onMouseMove(long window, double x, double y) {
+		if (!observeInteractionLifecycle()) return;
+		checkInventoryStayPath();
+		if (selectorInput == null) {
+			if (!baselineHeld || baselineToken == null || !activeInteraction.isCurrent(baselineToken)
+				|| machine.phase() != PingInteractionPhase.PRESSED || ClientConfig.HANDLER.getConfig().isLongPressCompatibilityMode()) {
+				gestureSkipHold.reset(); return;
+			}
+			interactionAccess.inputFrame().ifPresentOrElse(frame ->
+				gestureSkipHold.onMove(window, x, y, frame, timeSource.nowMillis()), gestureSkipHold::rePrime);
+			return;
+		}
+		if (machine.phase() != PingInteractionPhase.WHEEL_OPEN) return;
+		interactionAccess.inputFrame().ifPresentOrElse(frame -> {
+			long now = timeSource.nowMillis();
+			constrainSelector(frame, now);
+			selectorInput.onMove(window, x, y, frame, now);
+		}, selectorInput::rePrime);
+		synchronizePreciseBranch();
+		checkInventoryStayPath();
+	}
+	public boolean onMouseScroll(long window, double horizontal, double vertical) {
+		if (!observeInteractionLifecycle()) return false;
+		checkInventoryStayPath();
+		if (selectorInput == null || machine.phase() != PingInteractionPhase.WHEEL_OPEN) return false;
+		var frame = interactionAccess.inputFrame();
+		if (frame.isEmpty()) { selectorInput.rePrime(); return false; }
+		constrainSelector(frame.get(), timeSource.nowMillis());
+		return selectorInput.onScroll(window, horizontal, vertical, frame.get(), timeSource.nowMillis());
 	}
 
 	private final class RuntimeInteractionPort implements LongPressCompatibilityController.InteractionPort {
@@ -544,22 +1341,29 @@ public final class ClientPingRuntime {
 
 		@Override
 		public Optional<CapturedRay> capturePressRay() {
-			return ClientPingRuntime.this.capturePressRay();
+			return interactionAccess.capturePressRay();
 		}
 
 		@Override
 		public Optional<PingInteractionAction> release() {
-			return baselineRelease();
+			return releaseOutcome().action();
 		}
+		@Override public LongPressCompatibilityController.BaselineOutcome releaseOutcome() { return baselineRelease(); }
 
 		@Override
 		public Optional<PingInteractionAction> presentFrame(boolean keyDown) {
+			return presentFrameOutcome(keyDown).action();
+		}
+		@Override public LongPressCompatibilityController.BaselineOutcome presentFrameOutcome(boolean keyDown) {
 			return baselinePresentFrame(keyDown);
 		}
 
 		@Override
 		public Optional<PingInteractionAction> presentFrame(boolean keyDown, long frameTimeMillis) {
-			return baselinePresentFrame(keyDown, frameTimeMillis);
+			return presentFrameOutcome(keyDown, frameTimeMillis).action();
+		}
+		@Override public LongPressCompatibilityController.BaselineOutcome presentFrameOutcome(boolean keyDown, long time) {
+			return baselinePresentFrame(keyDown, time);
 		}
 
 		@Override
@@ -571,48 +1375,156 @@ public final class ClientPingRuntime {
 		public PingInteractionPhase phase() {
 			return machine.phase();
 		}
+
+		@Override
+		public boolean baselineHeld() {
+			return ClientPingRuntime.this.baselineHeld;
+		}
 	}
 
-	private Optional<PingInteractionAction> advanceInteraction(boolean keyDown) {
-		return advanceInteraction(keyDown, null);
+	private final class RuntimeRapidDangerPort implements RapidDangerController.Port {
+		@Override public Optional<PingInteractionAction> press(long rawPressTimestamp) {
+			return baselinePress(rawPressTimestamp);
+		}
+		@Override public Optional<PingInteractionAction> press(long rawPressTimestamp, CapturedRay pressRay) {
+			return baselinePress(rawPressTimestamp, pressRay);
+		}
+		@Override public Optional<CapturedRay> capturePressRay() {
+			return interactionAccess.capturePressRay();
+		}
+		@Override public LongPressCompatibilityController.BaselineOutcome releaseOutcome() {
+			return baselineRelease();
+		}
+		@Override public LongPressCompatibilityController.BaselineOutcome presentFrameOutcome(
+			boolean keyDown, long frameTimeMillis) {
+			return baselinePresentFrame(keyDown, frameTimeMillis);
+		}
+		@Override public LongPressCompatibilityController.BaselineOutcome presentFrameOutcome(
+			boolean keyDown, long frameTimeMillis, long observedTimeMillis) {
+			return baselinePresentFrame(keyDown, frameTimeMillis, observedTimeMillis);
+		}
+		@Override public void abortInteraction() {
+			baselineAbort();
+		}
+		@Override public Optional<PingInteractionAction> frozenDangerTap(long physicalDownTimeMillis,
+			CapturedPingContext firstCapture, PingType dangerType) {
+			long observed = timeSource.nowMillis();
+			if (observed < physicalDownTimeMillis) observed = physicalDownTimeMillis;
+			InteractionToken token = machine.pressFrozenTapAt(physicalDownTimeMillis, observed,
+				firstCapture, dangerType);
+			if (!activeInteraction.isCurrent(token)) return Optional.empty();
+			validatingFrozenTapToken = token;
+			try {
+				Optional<PingInteractionAction> action = machine.updateAt(false, WheelSelection.NONE,
+					emptyCancellationContext(), observed);
+				// Validation may have reentrantly aborted the runtime. The abort
+				// invalidates this exact token through baselineAbort, so a valid
+				// validator result can never dispatch after it.
+				if (!activeInteraction.isCurrent(token)) action = Optional.empty();
+				if (action.isPresent() && activeInteraction.isCurrent(token))
+					dispatcher.dispatchOutcome(action.get());
+				return action;
+			} finally {
+				if (validatingFrozenTapToken == token) validatingFrozenTapToken = null;
+				activeInteraction.invalidate(token);
+				interactionAccess.syncMouse(machine.phase());
+			}
+		}
+		@Override public PingInteractionPhase phase() {
+			return machine.phase();
+		}
+		@Override public long nowMillis() {
+			return timeSource.nowMillis();
+		}
+		@Override public RapidDangerController.LookSample lookSample() {
+			return RapidDangerController.LookSample.of(lookInputTracker.snapshot());
+		}
+		@Override public boolean compatibilityEnabled() {
+			return isCompatibilityLive();
+		}
+		@Override public int dangerWindowMillis() {
+			return ClientConfig.HANDLER.getConfig().getDoubleClickDangerWindowMs();
+		}
+		@Override public double dangerAngleDegrees() {
+			return ClientConfig.HANDLER.getConfig().getDoubleClickDangerAngleDegrees();
+		}
 	}
 
-	private Optional<PingInteractionAction> advanceInteraction(boolean keyDown, Long observedTimeMillis) {
-		if (machine.phase() == PingInteractionPhase.IDLE) {
-			wheelSelection = WheelSelection.NONE;
-			pendingRay = null;
-			return Optional.empty();
+	private final class MinecraftInteractionAccess implements InteractionAccess {
+		public Lifecycle lifecycle() {
+			Minecraft game = Game;
+			return new Lifecycle(game == null ? null : game.level,
+				game == null || game.level == null ? null : game.level.dimension().location().toString(),
+				game == null ? null : game.screen, game != null && game.player != null,
+				game != null && game.isWindowActive(), game != null && game.getOverlay() != null);
 		}
-
-		WheelSelection consumedSelection = wheelSelection;
-		wheelSelection = WheelSelection.NONE;
-		// Cancellation is resolved only when the open wheel is released.  While
-		// pressed, including every hover/selection frame, the machine only needs
-		// O(1) state advancement and the empty sentinel below.
-		boolean cancellationMayBeNeeded = machine.phase() == PingInteractionPhase.WHEEL_OPEN && !keyDown;
-		var cancellationContext = cancellationMayBeNeeded
-			? buildCancellationContext()
-			: emptyCancellationContext();
-		Optional<PingInteractionAction> action = observedTimeMillis == null
-			? machine.update(keyDown, consumedSelection, cancellationContext)
-			: machine.updateAt(keyDown, consumedSelection, cancellationContext, observedTimeMillis);
-
-		if (action.isPresent()) {
-			dispatcher.dispatch(action.get());
+		public Optional<CapturedRay> capturePressRay() { return ClientPingRuntime.this.capturePressRay(); }
+		public void capture(InteractionToken token, CapturedRay ray, CaptureCompletion completion) { captureImmediately(token, ray, completion); }
+		public PreciseCaptureRefresh.Scan capturePrecise(PreciseCaptureRefresh.Request request) { return capturePreciseNative(request); }
+		public boolean capturePreciseDistant(PreciseCaptureRefresh.Request request,
+			java.util.function.Consumer<PreciseCaptureRefresh.Outcome> completion) { return startPreciseDistant(request, completion); }
+		public CancellationContext cancellation(CapturedRay ray) { return buildCancellationContext(); }
+		public void syncMouse(PingInteractionPhase phase) {
+			if (Game == null) return;
+			wheelMouseCapture.sync(phase, Game, mouseInputTransition);
 		}
-
-		if (machine.phase() == PingInteractionPhase.IDLE) {
-			pendingRay = null;
-			wheelSelection = WheelSelection.NONE;
+		public void disposeMouse(boolean screenTransition) { wheelMouseCapture.close(Game, screenTransition, mouseInputTransition); rePrimeSelectorInput(); }
+		public Optional<NativeSelectorInput.Frame> inputFrame() {
+			if (Game == null) return Optional.empty();
+			var window = Game.getWindow();
+			if (window.getScreenWidth() <= 0 || window.getScreenHeight() <= 0
+				|| window.getGuiScaledWidth() <= 0 || window.getGuiScaledHeight() <= 0) return Optional.empty();
+			return Optional.of(new NativeSelectorInput.Frame(window.getWindow(), window.getScreenWidth(), window.getScreenHeight(),
+				window.getGuiScaledWidth(), window.getGuiScaledHeight(), Game.isWindowActive(), Game.mouseHandler.isMouseGrabbed(), wheelMouseCapture.ownsInput(Game)));
 		}
-
-		return action;
+		public Optional<GestureSkipHold.Position> mousePosition() {
+			return Game == null ? Optional.empty() : Optional.of(new GestureSkipHold.Position(Game.mouseHandler.xpos(), Game.mouseHandler.ypos()));
+		}
+		public SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style) {
+			return measuredListGeometry(style, Game.getWindow().getGuiScaledWidth(), Game.getWindow().getGuiScaledHeight());
+		}
+		public SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame) {
+			return measuredListGeometry(style, frame.guiWidth(), frame.guiHeight());
+		}
+		public SpatialSelectorSession.ListGeometry listGeometry(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame,
+			nx.pingwheel.common.render.SpatialInventoryView view) {
+			return SpatialSelectorSession.ListGeometry.fromMetrics(nx.pingwheel.common.render.SpatialInventoryLayout.measure(
+				view, frame.guiWidth(), frame.guiHeight(), Game.font.lineHeight, style.inventoryTextScale(),
+				style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), Game.font::width),
+				measuredItemMenuClearance(style, frame.guiWidth(), frame.guiHeight()));
+		}
+		public nx.pingwheel.common.render.SpatialInventoryView.RowDisplay inventoryDisplay(
+			nx.pingwheel.common.render.SpatialInventoryView.Row row) {
+			try {
+				var display = nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.resolve(row.itemId(), row.label(), row.displayJson());
+				return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(display.name(), display.stack());
+			} catch (RuntimeException | LinkageError unavailable) {
+				return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(Component.translatable(row.label()));
+			}
+		}
+		private SpatialSelectorSession.ListGeometry measuredListGeometry(SpatialOverlayRenderer.Style style, int width, int height) {
+			return SpatialSelectorSession.ListGeometry.fromMetrics(nx.pingwheel.common.render.SpatialInventoryLayout.measure(
+				width, height, Game.font.lineHeight, style.inventoryTextScale(), style.inventoryMaxWidthFraction(),
+				style.inventoryMaxHeightFraction()), measuredItemMenuClearance(style, width, height));
+		}
+		public double itemMenuClearance(SpatialOverlayRenderer.Style style, NativeSelectorInput.Frame frame) {
+			return measuredItemMenuClearance(style, frame.guiWidth(), frame.guiHeight());
+		}
+		private double measuredItemMenuClearance(SpatialOverlayRenderer.Style style, int guiWidth, int guiHeight) {
+			double backLabelWidth = Game.font.width(Component.translatable("pingforit.spatial.back"));
+			return SpatialOverlayRenderer.itemMenuClearance(guiWidth, guiHeight, Game.font.lineHeight, backLabelWidth, style);
+		}
+		public void resetInput() {
+			if (abortingScreenTransition) InputUtils.resetPingInteraction();
+			else InputUtils.resetPingHold();
+		}
+		public void applyToggle(SelectorIntent.CaptureToggle toggle, long timeMillis) { InputUtils.applySelectorToggle(toggle, timeMillis); }
 	}
 
 	/**
 	 * Supplies a valid, allocation-free context for machine paths that cannot
-	 * cancel.  The real context (and its owned-marker scan) is built only for a
-	 * wheel release or center selection.
+	 * cancel. The real context (and its owned-marker scan) is built only for an
+	 * explicitly committed native Cancel.
 	 */
 	private static CancellationContext emptyCancellationContext() {
 		return EMPTY_CANCELLATION_CONTEXT;
@@ -645,16 +1557,6 @@ public final class ClientPingRuntime {
 	 * abandoned for its exact token (see {@link #completeDistantHit}) so the
 	 * state machine resets to idle instead of waiting forever.
 	 */
-	private void captureImmediately(InteractionToken token) {
-		CapturedRay pressRay = capturePressRay().orElse(null);
-		if (pressRay == null) {
-			activeInteraction.invalidate(token);
-			return;
-		}
-
-		captureImmediately(token, pressRay);
-	}
-
 	/** Captures only the immutable press ray; no target ray cast is performed. */
 	private Optional<CapturedRay> capturePressRay() {
 		Minecraft game = Game;
@@ -676,7 +1578,72 @@ public final class ClientPingRuntime {
 		}
 	}
 
-	private void captureImmediately(InteractionToken token, CapturedRay pressRay) {
+	/** Live scan never completes the ordinary coordinator or writes its pending ray. */
+	private PreciseCaptureRefresh.Scan capturePreciseNative(PreciseCaptureRefresh.Request request) {
+		var inputs = request.inputs();
+		Minecraft game = Game;
+		if (game == null || game.level != inputs.level() || game.cameraEntity == null
+			|| !activeInteraction.isCurrent(inputs.token())) return PreciseCaptureRefresh.Scan.incomplete();
+		ClientLevel level = game.level;
+		var trace = Raycast.traceDirectionalCandidates(inputs.token(), inputs.ray(), inputs.nativeDistance(),
+			inputs.pingDistance(), inputs.policy(), CandidateWorkLimits.defaults());
+		if (trace.isEmpty()) return PreciseCaptureRefresh.Scan.incomplete();
+		var selection = trace.orElseThrow().ordinarySelection();
+		HitResult hit = selection.hitResult();
+		TargetSnapshot reference;
+		Vec3 origin = vector(inputs.ray().origin()), direction = vector(inputs.ray().direction());
+		if (hit.getType() == HitResult.Type.BLOCK && ModContext.HasSable) {
+			var external = SableClientProvider.capture(level, (BlockHitResult) hit, origin,
+				origin.add(direction.scale(inputs.nativeDistance())));
+			var projected = external.isPresent() ? Optional.<Vec3>empty() : SableIntegration.projectOutOfSubLevel(level, hit.getLocation());
+			reference = external.orElseGet(() -> projected.map(point -> TargetSnapshotFactory.location(
+				level.dimension().location().toString(), point.x, point.y, point.z))
+				.orElseGet(() -> MinecraftTargetSnapshotFactory.fromCandidateSelection(level, selection)));
+		} else reference = MinecraftTargetSnapshotFactory.fromCandidateSelection(level, selection);
+		var resolver = DefaultTargetResolver.builtIn(TargetResolutionLogger.global());
+		var resolved = resolver.resolve(reference.target(), reference.matchContext());
+		var allocated = trace.orElseThrow().candidates().finish(reference, resolved, resolver);
+		var nativeSlots = new java.util.EnumMap<PreciseTargetType, PreciseCaptureRefresh.Outcome>(PreciseTargetType.class);
+		for (var type : PreciseTargetType.values()) if (type != PreciseTargetType.LOCATION) {
+			var slot = allocated.slot(type);
+			nativeSlots.put(type, slot.candidateId().map(id -> PreciseCaptureRefresh.Outcome.available(allocated.candidate(id).orElseThrow()))
+				.orElseGet(() -> slot.availability() == PreciseSlot.Availability.INCOMPLETE
+					? PreciseCaptureRefresh.Outcome.incomplete() : PreciseCaptureRefresh.Outcome.missing()));
+		}
+		var location = allocated.slot(PreciseTargetType.LOCATION).candidateId()
+			.map(id -> PreciseCaptureRefresh.Outcome.available(allocated.candidate(id).orElseThrow()))
+			.orElseGet(PreciseCaptureRefresh.Outcome::incomplete);
+		return new PreciseCaptureRefresh.Scan(nativeSlots, location, hit.getType() == HitResult.Type.MISS && ModContext.HasDistantHorizons);
+	}
+	private static Vec3 vector(WorldVector value) { return new Vec3(value.x(), value.y(), value.z()); }
+	private boolean startPreciseDistant(PreciseCaptureRefresh.Request request,
+		java.util.function.Consumer<PreciseCaptureRefresh.Outcome> completion) {
+		Minecraft game = Game;
+		var inputs = request.inputs();
+		if (game == null || game.level != inputs.level() || !ModContext.HasDistantHorizons) return false;
+		ClientLevel level = game.level;
+		try {
+			return DistantHorizonsIntegration.traceDistantAsync(vector(inputs.ray().origin()), vector(inputs.ray().direction()),
+				distant -> game.execute(() -> {
+					if (game.level != level || baselineToken != inputs.token() || !activeInteraction.isCurrent(inputs.token())) return;
+					// A no-hit/failure uses this request's native miss, not the latest camera.
+					Vec3 point = distant.map(HitResult::getLocation).orElseGet(() -> vector(inputs.ray().origin())
+						.add(vector(inputs.ray().direction()).scale(inputs.nativeDistance())));
+					var snapshot = TargetSnapshotFactory.location(level.dimension().location().toString(), point.x, point.y, point.z);
+					var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.global()).resolve(snapshot.target(), snapshot.matchContext());
+					WorldVector worldPoint = new WorldVector(point.x, point.y, point.z);
+					completion.accept(PreciseCaptureRefresh.Outcome.available(new Candidate(0, resolved, worldPoint,
+						FrozenCandidateAcquisition.distance(inputs.ray().origin(), worldPoint), Optional.empty(), Optional.empty(),
+						CaptureEquivalenceKey.nativeTarget(resolved.target()))));
+				}));
+		} catch (LinkageError failure) {
+			ModContext.HasDistantHorizons = false;
+			DistantHorizonsIntegration.logUnguardedLinkFailure(failure);
+			return false;
+		}
+	}
+
+	private void captureImmediately(InteractionToken token, CapturedRay pressRay, CaptureCompletion completion) {
 		Minecraft game = Game;
 
 		if (game == null || game.cameraEntity == null || game.level == null) {
@@ -696,17 +1663,11 @@ public final class ClientPingRuntime {
 			pressRay.direction().z());
 
 		pendingRay = pressRay;
-		ClientConfig config = ClientConfig.HANDLER.getConfig();
-		var distance = Math.min(
-			config.getRaycastDistance(),
-			config.getPingDistance());
-
-		RaycastPolicy raycastPolicy = RaycastPolicy.from(
-			config.isPassThroughTransparentBlocks(),
-			config.isMarkBlacklistedTargets(),
-			config.isMarkFluids());
-		var raycastSelection = Raycast.traceDirectionalDetailed(
-			rayOrigin, cameraDirection, distance, raycastPolicy);
+		var distance = selectorNativeDistance;
+		var trace = Raycast.traceDirectionalCandidates(token, pressRay, distance, selectorPingDistance, selectorPolicy,
+			CandidateWorkLimits.defaults());
+		var raycastSelection = trace.map(Raycast.SelectorTrace::ordinarySelection);
+		Optional<FrozenCandidateAcquisition> acquisition = trace.map(Raycast.SelectorTrace::candidates);
 		var hitResult = raycastSelection.map(nx.pingwheel.common.math.RaycastSelection::hitResult).orElse(null);
 
 		if (hitResult == null || hitResult.getType() == HitResult.Type.MISS) {
@@ -739,7 +1700,7 @@ public final class ClientPingRuntime {
 				try {
 					scheduled = DistantHorizonsIntegration.traceDistantAsync(
 						rayOrigin, cameraDirection,
-						distantHit -> completeDistantHit(game, level, token, fallbackMiss, pressRay, distantHit));
+						distantHit -> completeDistantHit(game, level, token, fallbackMiss, pressRay, distantHit, acquisition, completion));
 				} catch (LinkageError error) {
 					ModContext.HasDistantHorizons = false;
 					DistantHorizonsIntegration.logUnguardedLinkFailure(error);
@@ -747,10 +1708,10 @@ public final class ClientPingRuntime {
 				}
 
 				if (!scheduled) {
-					completeCapture(token, MinecraftTargetSnapshotFactory.from(level, missHit), pressRay);
+					completion.complete(MinecraftTargetSnapshotFactory.fromCandidateHitResult(level, missHit), acquisition);
 				}
 			} else {
-				completeCapture(token, MinecraftTargetSnapshotFactory.from(level, missHit), pressRay);
+				completion.complete(MinecraftTargetSnapshotFactory.fromCandidateHitResult(level, missHit), acquisition);
 			}
 
 			return;
@@ -766,7 +1727,7 @@ public final class ClientPingRuntime {
 				rayOrigin.add(cameraDirection.scale(distance)));
 
 			if (sableCandidate.isPresent()) {
-				completeCapture(token, sableCandidate.get(), pressRay);
+				completion.complete(sableCandidate.get(), acquisition);
 				return;
 			}
 
@@ -780,9 +1741,9 @@ public final class ClientPingRuntime {
 					"PROJECTED_LOCATION", "external-capture-failed", "projection",
 					"hit_location", hitResult.getLocation(),
 					"projected_position", projectedPos);
-				completeCapture(token, TargetSnapshotFactory.location(
+				completion.complete(TargetSnapshotFactory.location(
 					game.level.dimension().location().toString(),
-					projectedPos.x, projectedPos.y, projectedPos.z), pressRay);
+					projectedPos.x, projectedPos.y, projectedPos.z), acquisition);
 				return;
 			}
 		}
@@ -794,9 +1755,9 @@ public final class ClientPingRuntime {
 				"block_pos", hitResult instanceof BlockHitResult blockHit ? blockHit.getBlockPos() : null);
 		}
 
-		completeCapture(token, raycastSelection
-			.map(selection -> MinecraftTargetSnapshotFactory.from(game.level, selection))
-			.orElseGet(() -> MinecraftTargetSnapshotFactory.from(game.level, hitResult)), pressRay);
+		completion.complete(raycastSelection
+			.map(selection -> MinecraftTargetSnapshotFactory.fromCandidateSelection(game.level, selection))
+			.orElseGet(() -> MinecraftTargetSnapshotFactory.fromCandidateHitResult(game.level, hitResult)), acquisition);
 	}
 
 	/**
@@ -821,7 +1782,9 @@ public final class ClientPingRuntime {
 		InteractionToken token,
 		HitResult vanillaMiss,
 		CapturedRay pressRay,
-		Optional<BlockHitResult> distantHit
+		Optional<BlockHitResult> distantHit,
+		Optional<FrozenCandidateAcquisition> acquisition,
+		CaptureCompletion completion
 	) {
 		game.execute(() -> {
 			if (!activeInteraction.isCurrent(token)) {
@@ -837,7 +1800,7 @@ public final class ClientPingRuntime {
 
 			HitResult appliedHit = distantHit.map(hit -> (HitResult) hit).orElse(vanillaMiss);
 
-			completeCapture(token, MinecraftTargetSnapshotFactory.from(levelAtPress, appliedHit), pressRay);
+			completion.complete(MinecraftTargetSnapshotFactory.fromCandidateHitResult(levelAtPress, appliedHit), acquisition);
 		});
 	}
 
@@ -846,8 +1809,12 @@ public final class ClientPingRuntime {
 	 * completion clears only this interaction's pending ray; a stale callback or
 	 * a duplicate completion can never clear a newer/accepted capture.
 	 */
-	private void completeCapture(InteractionToken token, TargetSnapshot snapshot, CapturedRay pressRay) {
-		Optional<CapturedPingContext> completed = captureCoordinator.complete(token, snapshot, pressRay);
+	private void completeCapture(InteractionToken token, TargetSnapshot snapshot, CapturedRay pressRay,
+		Optional<FrozenCandidateAcquisition> candidates) {
+		if (baselineToken != token || !activeInteraction.isCurrent(token)) return;
+		if (!observeInteractionLifecycle() || baselineToken != token || !activeInteraction.isCurrent(token)) return;
+		Optional<CapturedPingContext> completed = captureCoordinator.complete(token, snapshot, pressRay, candidates);
+		completed.ifPresent(this::startHeldPreview);
 
 		if (completed.isEmpty()
 			&& activeInteraction.isCurrent(token)
@@ -958,7 +1925,10 @@ public final class ClientPingRuntime {
 		// the independent display deadline causes the client record to be
 		// removed, so cleanup follows final record removal rather than sync loss.
 		for (ClientMarker marker : expired) {
+			contentChat.cancel(marker.id());
 			nameStore.onRemoved(marker.id());
+			if (inventory != null) inventory.markerRemoved(marker.id());
+			if (presentation != null) presentation.evict(marker.id());
 		}
 
 		logger.debug("marker client lifetime ended: count={} ids={}",
@@ -994,7 +1964,9 @@ public final class ClientPingRuntime {
 
 		List<ClientMarker> superseded = markerStore.onCreated(snapshot, localTick);
 		for (ClientMarker marker : superseded) {
+			contentChat.cancel(marker.id());
 			nameStore.onRemoved(marker.id());
+			if (presentation != null) presentation.evict(marker.id());
 		}
 		nameStore.onCreated(snapshot.id(), targetName);
 
@@ -1008,6 +1980,206 @@ public final class ClientPingRuntime {
 			snapshot.target().kind(),
 			snapshot.targetTypeId(),
 			snapshot.pingTypeId());
+	}
+
+	/** Sole production S2C path for versioned marker and presentation messages. */
+	public void onPresentationPacket(PresentationS2CPacket packet) {
+		if (presentation == null || packet == null || packet.isCorrupt()) return;
+		if (!presentationReceiptFeedback.ready()) contentChat.clear();
+		switch (packet.kind()) {
+			case OFFER -> presentation.offer(packet);
+			case RESET -> {
+				if (presentation.reset(packet)) {
+					contentChat.reset();
+					if (inventory != null) inventory.presentationReset(packet.epoch(), packet.view());
+					syncPresentationNames();
+				}
+			}
+			case CREATED -> {
+				if (!presentation.current(packet) || packet.markerId() == null
+					|| markerStore.isAuthoritativelyRemoved(packet.markerId())) return;
+				if (!presentation.initial(packet)) return;
+				updatePresentationName(packet.markerId());
+				applyPresentationCreated(packet);
+			}
+			case SECTION -> {
+				// A store tombstone is also "known". Do not decode a section for
+				// a marker absent from the marker runtime.
+				if (!presentation.current(packet) || packet.markerId() == null
+					|| markerStore.marker(packet.markerId()).isEmpty()) return;
+				if (presentation.section(packet)) {
+					updatePresentationName(packet.markerId());
+					attemptContentReceipt(packet.markerId());
+				}
+			}
+			case REMOVED -> {
+				if (!presentation.current(packet)) return;
+				presentation.removed(packet.markerId(), packet.revision(),
+					packet.removalReason() == MarkerRemovalReason.EXPIRED);
+				applyRemoved(packet.markerId(), packet.removalReason());
+				if (inventory != null) inventory.markerRemoved(packet.markerId());
+				if (markerStore.marker(packet.markerId()).isEmpty()) presentation.evict(packet.markerId());
+			}
+			case WINNER -> {
+				if (presentation.current(packet)) applyWinnerChanged(packet.targetKey(), packet.winnerId());
+			}
+			case REJECT -> {
+				if (presentation.current(packet))
+					handleRejected(packet.requestId(), packet.requestKind(), packet.rejectReason());
+			}
+		}
+		if (inventorySelectionStay.active()) refreshInventoryStayPath(timeSource.nowMillis());
+	}
+
+	/** Read-only UI entry point; negotiation and raw values remain runtime-private. */
+	public ClientPresentation presentation() {
+		return presentation;
+	}
+	private nx.pingwheel.common.presentation.inventory.client.ClientInventory inventory;
+	public void inventory(nx.pingwheel.common.presentation.inventory.client.ClientInventory inventory) {
+		this.inventory = inventory;
+		if (inventory != null && presentation != null && presentation.ready()) {
+			inventory.presentationReset(presentation.epoch(), presentation.sessionView());
+		}
+	}
+	public nx.pingwheel.common.presentation.inventory.client.ClientInventory.DispatchOutcome dispatchInventory(
+		nx.pingwheel.common.presentation.inventory.client.ClientInventory.PreviewEntryReference reference, String itemPingType) {
+		return inventory == null ? nx.pingwheel.common.presentation.inventory.client.ClientInventory.DispatchOutcome.NOT_READY
+			: inventory.select(reference, itemPingType, dispatcher::dispatchInventory);
+	}
+	public void onInventoryPacket(nx.pingwheel.common.network.InventoryS2CPacket packet) {
+		if (inventory == null) return;
+		var previous = packet == null ? null : inventory.selectionResult(packet.commitId());
+		inventory.accept(packet);
+		// The packet can have been rejected: only the post-accept stores supply data.
+		if (packet != null && packet.markerId() != null) attemptContentReceipt(packet.markerId());
+		else reconcileContentReceipts();
+		if (previous == null && packet != null && !packet.isCorrupt() && packet.kind() == nx.pingwheel.common.network.InventoryS2CPacket.Kind.REJECT
+			&& inventory.selectionResult(packet.commitId()) != null && packet.rejection() == MarkerRejectReason.TARGET_GONE
+			&& createRequestTracker.isLatest(CreateRequestTracker.Route.INVENTORY, packet.commitId()))
+			errorSink.showLocalError(PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE_KEY, PingInteractionAction.TargetGone.TARGET_GONE_COLOR);
+		if (inventorySelectionStay.active()) refreshInventoryStayPath(timeSource.nowMillis());
+	}
+
+	/** Caller supplies already-observed typed values; this method never samples the world. */
+	public void dispatchPropertyPing(PingInteractionAction.CreatePing frozenAction,
+		List<PresentationPropertyIntent> properties) {
+		dispatcher.dispatch(frozenAction, properties);
+	}
+
+	/** Keep the legacy name-render facade synchronized before each world frame. */
+	public void refreshPresentationDisplay() {
+		if (presentation != null) syncPresentationNames();
+	}
+
+	private void applyPresentationCreated(PresentationS2CPacket packet) {
+		MarkerSnapshot snapshot = packet.snapshot();
+		String ownerName = packet.ownerName();
+		if (snapshot == null || ownerName == null || markerStore.isAuthoritativelyRemoved(snapshot.id())) return;
+		boolean newlySeen = isNewMarkerReceipt(markerStore, snapshot.id());
+		List<ClientMarker> superseded = markerStore.onCreated(snapshot, localTick);
+		for (ClientMarker marker : superseded) {
+			contentChat.cancel(marker.id());
+			nameStore.onRemoved(marker.id());
+			presentation.evict(marker.id());
+			if (inventory != null) inventory.markerRemoved(marker.id());
+		}
+		if (inventory != null) inventory.markerCreated(snapshot);
+		if (newlySeen) {
+			presentationReceiptFeedback.play(snapshot);
+			if (packet.content().kind() == PresentationReceiptContent.Kind.WHOLE)
+				presentationReceiptFeedback.chat(ownerName, snapshot, presentationTargetName(snapshot.id()));
+			else if (contentChat.begin(packet, true)) attemptContentReceipt(snapshot.id());
+		}
+		else if (packet.content().kind() == PresentationReceiptContent.Kind.SUPPRESSED) contentChat.cancel(snapshot.id());
+		else attemptContentReceipt(snapshot.id());
+	}
+
+	private PendingContentChatController.Current currentContentReceipt(MarkerId id) {
+		ClientMarker marker = markerStore.marker(id).orElse(null);
+		Map<String, Set<String>> fields = new LinkedHashMap<>();
+		if (presentation != null && marker != null) presentation.previewAccess(marker.targetTypeId()).ifPresent(access ->
+			access.adapters().forEach((adapter, descriptor) -> fields.put(adapter, descriptor.fields().keySet())));
+		var authorization = inventory == null || presentation == null || marker == null ? Optional.<Boolean>empty()
+			: inventory.authorization(presentation.epoch(), presentation.sessionView(), marker.targetTypeId());
+		return new PendingContentChatController.Current(presentation == null ? 0 : presentation.epoch(),
+			presentation == null ? 0 : presentation.sessionView(), presentation != null && presentation.ready()
+				&& presentationReceiptFeedback.ready(), marker != null && marker.isSynchronized()
+				&& !markerStore.isAuthoritativelyRemoved(id),
+			marker == null ? null : PendingContentChatController.MarkerIdentity.of(marker), fields,
+			authorization.map(allowed -> allowed ? PendingContentChatController.Authorization.ALLOWED
+				: PendingContentChatController.Authorization.DENIED).orElse(PendingContentChatController.Authorization.UNKNOWN),
+			presentation == null ? PresentationView.empty() : presentation.view(id),
+			inventory == null ? null : inventory.tracking(id));
+	}
+
+	private void attemptContentReceipt(MarkerId id) {
+		if (!presentationReceiptFeedback.ready() || presentation == null || !presentation.ready()) {
+			contentChat.clear();
+			return;
+		}
+		contentChat.attempt(id);
+	}
+
+	/** Tick/accepted policy housekeeping uses actual synchronized membership, never HUD visibility. */
+	private void reconcileContentReceipts() {
+		if (!presentationReceiptFeedback.ready() || presentation == null || !presentation.ready()) {
+			contentChat.clear();
+			return;
+		}
+		var live = markerStore.allMarkers().stream().filter(marker -> marker.isSynchronized()
+			&& !markerStore.isAuthoritativelyRemoved(marker.id())).map(ClientMarker::id)
+			.collect(java.util.stream.Collectors.toSet());
+		contentChat.retainLive(live);
+		for (MarkerId id : live) contentChat.attempt(id);
+	}
+
+	/**
+	 * The production content-template construction shared with the headless
+	 * runtime receipt verification: the selected-locale presence predicate
+	 * chooses each override, while values always come from the merged
+	 * language. The returned source implements all three template methods.
+	 */
+	static ContentChatComposer.TemplateSource contentChatTemplates(Predicate<String> hasSelectedLocaleKey) {
+		Objects.requireNonNull(hasSelectedLocaleKey, "hasSelectedLocaleKey");
+		return ContentChatComposer.localized(hasSelectedLocaleKey, key -> Language.getInstance().getOrDefault(key));
+	}
+
+	private ContentChatComposer.TemplateSource contentChatTemplates() {
+		return contentChatTemplates(key -> {
+			Minecraft game = Game;
+			return game != null && selectedLocaleTranslationKeys.contains(game.getLanguageManager().getSelected(),
+				Language.getInstance(), game.getResourceManager(), key);
+		});
+	}
+
+	private Component presentationTargetName(MarkerId id) {
+		var value = presentation.view(id).field(ClientPresentation.BASIC, ClientPresentation.NAME);
+		if (!(value instanceof PresentationValue.Text text) || Game == null || Game.level == null) {
+			return TargetNameComposer.unknown();
+		}
+		try {
+			return ClientTargetNameDecoder.decode(id, new TargetNameJson(text.value()), Game.level.registryAccess());
+		} catch (IllegalArgumentException invalid) {
+			return TargetNameComposer.unknown();
+		}
+	}
+
+	private void updatePresentationName(MarkerId id) {
+		var value = presentation.view(id).field(ClientPresentation.BASIC, ClientPresentation.NAME);
+		if (value instanceof PresentationValue.Text text) {
+			try {
+				nameStore.onCreated(id, new TargetNameJson(text.value()));
+				return;
+			} catch (IllegalArgumentException invalid) {
+				// A malformed name is never displayed or kept after a policy change.
+			}
+		}
+		nameStore.onRemoved(id);
+	}
+
+	private void syncPresentationNames() {
+		for (ClientMarker marker : markerStore.allMarkers()) updatePresentationName(marker.id());
 	}
 
 	/**
@@ -1045,6 +2217,14 @@ public final class ClientPingRuntime {
 		MarkerCreatedS2CPacket packet, MarkerSnapshot snapshot, TargetNameJson targetName
 	) {
 		Minecraft game = Game;
+		Component resolvedTargetName = game == null || game.level == null
+			? TargetNameComposer.unknown()
+			: ClientTargetNameDecoder.decode(snapshot.id(), targetName, game.level.registryAccess());
+		sendCreatedChat(packet.ownerName(), snapshot, resolvedTargetName);
+	}
+
+	private void sendCreatedChat(String ownerName, MarkerSnapshot snapshot, Component resolvedTargetName) {
+		Minecraft game = Game;
 
 		if (game == null || game.player == null) {
 			return;
@@ -1063,9 +2243,6 @@ public final class ClientPingRuntime {
 				return;
 			}
 
-			Component resolvedTargetName = game.level == null
-				? TargetNameComposer.unknown()
-				: ClientTargetNameDecoder.decode(snapshot.id(), targetName, game.level.registryAccess());
 			String template;
 
 			try {
@@ -1083,7 +2260,7 @@ public final class ClientPingRuntime {
 			}
 
 			Component message = PingChatBuilder.build(
-				template, packet.ownerName(), pingType.get(), resolvedTargetName);
+				template, ownerName, pingType.get(), resolvedTargetName);
 			game.player.displayClientMessage(message, false);
 		} catch (RuntimeException exception) {
 			logger.debugException("marker chat display failed: malformed server payload", exception);
@@ -1098,6 +2275,8 @@ public final class ClientPingRuntime {
 	public void applyRemoved(MarkerId markerId, MarkerRemovalReason reason) {
 		Objects.requireNonNull(markerId, "markerId");
 		Objects.requireNonNull(reason, "reason");
+		contentChat.cancel(markerId);
+		if (inventory != null) inventory.markerRemoved(markerId);
 
 		boolean knownBeforeRemoval = markerStore.marker(markerId).isPresent();
 		List<ClientMarker> removed = markerStore.onRemoved(markerId, reason, localTick);
@@ -1108,7 +2287,9 @@ public final class ClientPingRuntime {
 		}
 
 		for (ClientMarker removedMarker : removed) {
+			contentChat.cancel(removedMarker.id());
 			nameStore.onRemoved(removedMarker.id());
+			if (presentation != null) presentation.evict(removedMarker.id());
 		}
 
 		logger.debug("marker removed applied: markerId={} reason={}", markerId.value(), reason);
@@ -1123,7 +2304,10 @@ public final class ClientPingRuntime {
 
 		List<ClientMarker> superseded = markerStore.onWinnerChanged(targetKey, winnerId);
 		for (ClientMarker marker : superseded) {
+			contentChat.cancel(marker.id());
 			nameStore.onRemoved(marker.id());
+			if (presentation != null) presentation.evict(marker.id());
+			if (inventory != null) inventory.markerRemoved(marker.id());
 		}
 
 		logger.debug("marker winner applied: kind={} winner={}",
@@ -1205,7 +2389,7 @@ public final class ClientPingRuntime {
 	 * Returns the frozen capture and wheel choices only while the wheel is
 	 * visibly open.  GUI code must use this read-only snapshot rather than
 	 * performing a new target selection; no snapshot is exposed during a press,
-	 * release, timeout, or idle phase.
+	 * release, or idle phase.
 	 */
 	public Optional<WheelPresentationSnapshot> wheelPresentation() {
 		if (machine.phase() != PingInteractionPhase.WHEEL_OPEN) {
@@ -1234,18 +2418,12 @@ public final class ClientPingRuntime {
 		return machine.selection();
 	}
 
-	/**
-	 * The wheel selection currently queued as input for the next tick
-	 * (initially {@link WheelSelection#NONE}).
-	 */
+	/** Retired renderer's compatibility slot; it cannot commit native selector actions. */
 	public WheelSelection wheelSelection() {
 		return wheelSelection;
 	}
 
-	/**
-	 * Replaces the wheel selection consumed by the next
-	 * {@link #onRenderFrame(boolean)} call.
-	 */
+	/** Retained for source compatibility with the inactive legacy renderer, not native input. */
 	public void setWheelSelection(WheelSelection selection) {
 		this.wheelSelection = Objects.requireNonNull(selection, "selection");
 	}

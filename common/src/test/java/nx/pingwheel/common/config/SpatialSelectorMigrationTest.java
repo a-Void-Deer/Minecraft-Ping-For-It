@@ -1,0 +1,683 @@
+package nx.pingwheel.common.config;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/** Retired wheel-key removal is a release-boundary migration, not same-version normalization. */
+class SpatialSelectorMigrationTest {
+	private static final String TIMEOUT_TARGET = "0.5.0-pfi-beta1";
+	private static final String LEGACY = "0.4.2-pfi-beta1";
+
+	/** Contract-owned inventory-panel fraction bounds used as explicit boundary probes. */
+	private static final BigDecimal WIDTH_FRACTION_MIN = new BigDecimal("0.20");
+	private static final BigDecimal WIDTH_FRACTION_MAX = new BigDecimal("0.80");
+	private static final BigDecimal HEIGHT_FRACTION_MIN = new BigDecimal("0.30");
+	private static final BigDecimal HEIGHT_FRACTION_MAX = new BigDecimal("0.95");
+
+	@Test
+	void removedGlideIsUnknownDataWithoutASameVersionLoadRewrite(
+		@TempDir Path directory) throws IOException {
+		Path freshPath = directory.resolve("fresh.json");
+		var fresh = new ConfigHandler<>(ClientConfig.class, freshPath, TIMEOUT_TARGET);
+		fresh.load();
+		assertFalse(read(freshPath).getAsJsonObject("spatialSelector").has("targetGlide"));
+		var expected = fresh.getConfig().getSpatialSelector().snapshot();
+		for (String value : List.of("null", "0.25", "20", "{\"unused\":true}")) {
+			Path path = directory.resolve("current.json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37,\"spatialSelector\":{\"targetGlide\":" + value + "}}\n")
+				.getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+			assertEquals(expected, handler.getConfig().getSpatialSelector().snapshot(),
+				"the removed member cannot change any live selector preference");
+			assertEquals(37, handler.getConfig().getPingVolume());
+			assertArrayEquals(original, Files.readAllBytes(path), "unknown nested data does not schedule a rewrite");
+			assertTrue(handler.saveSafely());
+			assertArrayEquals(original, Files.readAllBytes(path), "an untouched same-version save is a no-op");
+			var reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			reloaded.load();
+			assertEquals(expected, reloaded.getConfig().getSpatialSelector().snapshot());
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void crossingTheExactReleaseBoundaryRemovesRetiredWheelKeysWithoutInjectingDefaults() {
+		for (String old : List.of("0.2.0-pfi-beta1", LEGACY, "0.5.0-pfi-beta0")) {
+			JsonObject source = legacyRoot(old);
+			JsonObject migrated = update(source, ClientConfig.class, old, TIMEOUT_TARGET);
+			assertNoRetiredWheelKeys(migrated);
+			assertFalse(migrated.has("spatialSelector"), "defaults must come from model initialization");
+			assertEquals(source.get("unknown"), migrated.get("unknown"));
+			assertEquals(source.get("wheelOpacity"), migrated.get("wheelOpacity"));
+			assertEquals(source.get("wheelFontSize"), migrated.get("wheelFontSize"));
+			assertEquals(source.get("wheelTargetFontSize"), migrated.get("wheelTargetFontSize"));
+			assertEquals(TIMEOUT_TARGET, migrated.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
+			assertTrue(source.has("wheelInnerRadius"), "migration must not mutate its source");
+			assertTrue(source.has("wheelOuterRadius"));
+			assertTrue(source.has("wheelTimeoutMillis"));
+		}
+	}
+
+	@Test
+	void aRunningVersionBelowTheTargetDoesNotRetireTheRadiusKeys() {
+		JsonObject source = legacyRoot(LEGACY);
+		JsonObject migrated = update(source, ClientConfig.class, LEGACY, "0.5.0-pfi-beta0");
+		assertEquals(source.get("wheelInnerRadius"), migrated.get("wheelInnerRadius"));
+		assertEquals(source.get("wheelOuterRadius"), migrated.get("wheelOuterRadius"));
+		assertEquals(source.get("wheelTimeoutMillis"), migrated.get("wheelTimeoutMillis"));
+	}
+
+	@Test
+	void migrationDoesNotConsumeKeysFromAtOrAfterTheIntroductionOrFromTheServer() {
+		for (String old : List.of(TIMEOUT_TARGET, "00.005.000-pfi-beta1", "0.5.0-pfi-beta2")) {
+			JsonObject source = legacyRoot(old);
+			JsonObject migrated = update(source, ClientConfig.class, old, "0.6.0-pfi-beta1");
+			assertEquals(source.get("wheelInnerRadius"), migrated.get("wheelInnerRadius"));
+			assertEquals(source.get("wheelOuterRadius"), migrated.get("wheelOuterRadius"));
+			assertEquals(source.get("wheelTimeoutMillis"), migrated.get("wheelTimeoutMillis"));
+		}
+		JsonObject source = legacyRoot(LEGACY);
+		JsonObject migrated = update(source, ServerConfig.class, LEGACY, TIMEOUT_TARGET);
+		assertTrue(migrated.has("wheelInnerRadius"));
+		assertTrue(migrated.has("wheelOuterRadius"));
+		assertTrue(migrated.has("wheelTimeoutMillis"));
+	}
+
+	@Test
+	void timeoutUpgradePersistsDefaultsAndSaveCannotResurrectTheRetiredKey(@TempDir Path directory)
+		throws IOException {
+		Path path = directory.resolve("client.json");
+		JsonObject source = legacyRoot(LEGACY);
+		Files.writeString(path, source.toString(), StandardCharsets.UTF_8);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		handler.load();
+		assertFalse(read(path).has("wheelTimeoutMillis"));
+		assertEquals(source.get("unknown"), read(path).get("unknown"));
+		assertEquals(new ClientConfig().getWheelTargetOpacity(), handler.getConfig().getWheelTargetOpacity());
+		assertNoRetiredWheelKeys(read(path));
+		handler.getConfig().setWheelTargetOpacity(45);
+		assertTrue(handler.saveSafely());
+		ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		reloaded.load();
+		assertEquals(45, reloaded.getConfig().getWheelTargetOpacity());
+		assertNoRetiredWheelKeys(read(path));
+
+		JsonObject stale = read(path);
+		stale.addProperty("wheelTimeoutMillis", 3000);
+		byte[] original = stale.toString().getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+		reloaded.load();
+		assertArrayEquals(original, Files.readAllBytes(path), "same-version load must not rewrite the file");
+		reloaded.getConfig().setWheelTargetOpacity(65);
+		assertTrue(reloaded.saveSafely());
+		assertNoRetiredWheelKeys(read(path));
+		assertEquals(65, read(path).get("wheelTargetOpacity").getAsInt());
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void targetVersionUpgradePersistsAutomaticDefaultsAndKeepsExistingAppearanceAndUnknownData(
+		@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("client.json");
+		JsonObject source = legacyRoot(LEGACY);
+		Files.writeString(path, source.toString(), StandardCharsets.UTF_8);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		handler.load();
+
+		assertEquals(new SpatialSelectorSettings(), handler.getConfig().getSpatialSelector());
+		assertEquals(35, handler.getConfig().getWheelOpacity());
+		assertEquals(250, handler.getConfig().getWheelFontSize());
+		assertEquals(80, handler.getConfig().getWheelTargetFontSize());
+		JsonObject persisted = read(path);
+		assertNoRetiredWheelKeys(persisted);
+		assertEquals(source.get("unknown"), persisted.get("unknown"));
+		assertEquals(new Gson().toJsonTree(new SpatialSelectorSettings()), persisted.get("spatialSelector"));
+		assertEquals(TIMEOUT_TARGET, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void partialSelectorKeepsItsExplicitValuesAndUnknownNestedDataDuringUpgrade(
+		@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("client.json");
+		JsonObject source = legacyRoot(LEGACY);
+		JsonObject selector = JsonParser.parseString("""
+			{"targetGlide":1.5,"hoverEnabled":true,"hoverMillis":750,
+			 "rootDistance":90,"trailLength":64,"trailOpacity":73,"unknownPreference":{"enabled":true}}
+			""").getAsJsonObject();
+		source.add("spatialSelector", selector);
+		Files.writeString(path, source.toString(), StandardCharsets.UTF_8);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		handler.load();
+
+		SpatialSelectorSettings expected = new Gson().fromJson(selector, SpatialSelectorSettings.class);
+		assertEquals(expected, handler.getConfig().getSpatialSelector());
+		JsonObject persisted = read(path).getAsJsonObject("spatialSelector");
+		assertEquals(selector.get("unknownPreference"), persisted.get("unknownPreference"));
+		assertEquals(selector.get("targetGlide"), persisted.get("targetGlide"),
+			"the removed preference follows the existing guarded nested-unknown preservation rule");
+		for (var entry : new Gson().toJsonTree(expected).getAsJsonObject().entrySet()) {
+			assertEquals(entry.getValue(), persisted.get(entry.getKey()), entry.getKey());
+		}
+	}
+
+	@Test
+	void sameVersionTrailDefaultsNullAndExplicitValuesNeverRewriteAndRoundTripWithoutMigration(
+		@TempDir Path directory) throws IOException {
+		for (String selectorJson : List.of("", ",\"spatialSelector\":null", ",\"spatialSelector\":{}",
+			",\"spatialSelector\":{\"trailLength\":null,\"trailOpacity\":null}",
+			",\"spatialSelector\":{\"trailLength\":64,\"trailOpacity\":null}",
+			",\"spatialSelector\":{\"trailLength\":null,\"trailOpacity\":0}",
+			",\"spatialSelector\":{\"trailLength\":64,\"trailOpacity\":0,\"unknownPreference\":true}",
+			",\"spatialSelector\":{\"trailLength\":64,\"trailOpacity\":73}")) {
+			Path path = directory.resolve("client.json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37,\"wheelOpacity\":35,\"wheelTargetOpacity\":45,\"unknown\":true"
+				+ selectorJson + "}\n").getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+			int length = selectorJson.contains("\"trailLength\":64") ? 64 : SpatialSelectorSettings.DEFAULT_TRAIL_LENGTH;
+			int opacity = selectorJson.contains("\"trailOpacity\":0") ? 0
+				: selectorJson.contains("\"trailOpacity\":73") ? 73 : SpatialSelectorSettings.DEFAULT_TRAIL_OPACITY;
+			var frozen = handler.getConfig().getSpatialSelector().snapshot();
+			assertEquals(length, frozen.trailLength());
+			assertEquals(opacity, frozen.trailOpacity());
+			assertEquals(37, handler.getConfig().getPingVolume());
+			assertEquals(35, handler.getConfig().getWheelOpacity());
+			assertEquals(45, handler.getConfig().getWheelTargetOpacity());
+			assertArrayEquals(original, Files.readAllBytes(path), "trail defaults are not a load migration");
+			assertTrue(handler.saveSafely());
+			assertArrayEquals(original, Files.readAllBytes(path), "an untouched same-version save is a no-op");
+
+			handler.getConfig().setPingVolume(38);
+			assertTrue(handler.saveSafely());
+			JsonObject persisted = read(path).getAsJsonObject("spatialSelector");
+			assertEquals(length, persisted.get("trailLength").getAsInt());
+			assertEquals(opacity, persisted.get("trailOpacity").getAsInt());
+			var reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			reloaded.load();
+			assertEquals(frozen, reloaded.getConfig().getSpatialSelector().snapshot());
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void sameVersionAbsentAndPartialSelectorGainModelDefaultsWithoutALoadRewrite(
+		@TempDir Path directory) throws IOException {
+		for (String selectorJson : List.of("", ",\"spatialSelector\":{\"hoverEnabled\":true}")) {
+			Path path = directory.resolve("client.json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET + "\",\"pingVolume\":37"
+				+ selectorJson + "}\n").getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+			ClientConfig expected = new Gson().fromJson(new String(original, StandardCharsets.UTF_8), ClientConfig.class);
+			assertEquals(expected.getSpatialSelector(), handler.getConfig().getSpatialSelector());
+			assertEquals(37, handler.getConfig().getPingVolume());
+			assertArrayEquals(original, Files.readAllBytes(path));
+		}
+	}
+
+	@Test
+	void sameVersionDeadzoneDefaultsNullAndExplicitValuesNeverRewriteAndPersistWithoutRescaling(
+		@TempDir Path directory) throws IOException {
+		Path freshPath = directory.resolve("fresh.json");
+		var fresh = new ConfigHandler<>(ClientConfig.class, freshPath, TIMEOUT_TARGET);
+		fresh.load();
+		assertEquals(SpatialSelectorSettings.DEFAULT_DEADZONE,
+			read(freshPath).getAsJsonObject("spatialSelector").get("deadzone").getAsInt(),
+			"a fresh file persists the current default deadzone");
+
+		for (String selectorJson : List.of("", ",\"spatialSelector\":null", ",\"spatialSelector\":{}",
+			",\"spatialSelector\":{\"deadzone\":null}", ",\"spatialSelector\":{\"deadzone\":18}",
+			",\"spatialSelector\":{\"deadzone\":12}", ",\"spatialSelector\":{\"deadzone\":32}")) {
+			Path path = directory.resolve("client.json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET + "\",\"pingVolume\":37"
+				+ selectorJson + "}\n").getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+			int deadzone = selectorJson.contains("\"deadzone\":18") ? 18
+				: selectorJson.contains("\"deadzone\":12") ? 12
+				: selectorJson.contains("\"deadzone\":32") ? 32
+				: SpatialSelectorSettings.DEFAULT_DEADZONE;
+			assertEquals(deadzone, handler.getConfig().getSpatialSelector().snapshot().deadzone(),
+				"a valid saved deadzone is retained without rescaling");
+			assertArrayEquals(original, Files.readAllBytes(path), "deadzone defaults are not a load rewrite");
+			assertTrue(handler.saveSafely());
+			assertArrayEquals(original, Files.readAllBytes(path), "an untouched same-version save is a no-op");
+			var reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			reloaded.load();
+			assertEquals(deadzone, reloaded.getConfig().getSpatialSelector().snapshot().deadzone());
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void preTargetWritebackKeepsOldRadiusDataUntilTheTargetUpgrade(@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("client.json");
+		JsonObject source = legacyRoot(LEGACY);
+		Files.writeString(path, source.toString(), StandardCharsets.UTF_8);
+		new ConfigHandler<>(ClientConfig.class, path, "0.4.3-pfi-beta1").load();
+		assertEquals(source.get("wheelInnerRadius"), read(path).get("wheelInnerRadius"));
+		assertEquals(source.get("wheelOuterRadius"), read(path).get("wheelOuterRadius"));
+		new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET).load();
+		assertNoRetiredWheelKeys(read(path));
+	}
+
+	@Test
+	void currentVersionLoadIsNotRetiredKeyNormalizationButATargetSaveCannotResurrectRetiredKeys(
+		@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("client.json");
+		byte[] original = legacyRoot(TIMEOUT_TARGET).toString().getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		handler.load();
+		assertArrayEquals(original, Files.readAllBytes(path));
+		handler.getConfig().setPingVolume(37);
+		assertTrue(handler.saveSafely());
+		assertNoRetiredWheelKeys(read(path));
+	}
+
+	@Test
+	void everyExplicitSelectorPreferenceRoundTripsIndependentlyOfAppearance(@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("client.json");
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		SpatialSelectorSettings preferences = new Gson().fromJson("""
+			{"deadzone":28,"stroke":70,"dwellMillis":230,"rootDistance":90,
+			 "hoverEnabled":true,"hoverMillis":750,"showTrail":false,"reduceMotion":true,
+			 "preciseCapturePeriodTicks":25,"trailLength":64,"trailOpacity":73}
+			""", SpatialSelectorSettings.class);
+		handler.getConfig().setSpatialSelector(preferences);
+		handler.getConfig().setWheelOpacity(35);
+		handler.getConfig().setWheelFontSize(250);
+		handler.getConfig().setWheelTargetFontSize(80);
+		assertTrue(handler.saveSafely());
+		ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		reloaded.load();
+		assertEquals(preferences, reloaded.getConfig().getSpatialSelector());
+		assertEquals(35, reloaded.getConfig().getWheelOpacity());
+		assertEquals(250, reloaded.getConfig().getWheelFontSize());
+		assertEquals(80, reloaded.getConfig().getWheelTargetFontSize());
+		assertNoRetiredWheelKeys(read(path));
+	}
+
+	@Test
+	void aNullNestedSelectorRecoversModelDefaultsWithoutResettingOtherSettings(@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("client.json");
+		byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+			+ "\",\"pingVolume\":37,\"spatialSelector\":null}\n").getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		handler.load();
+		assertEquals(new SpatialSelectorSettings(), handler.getConfig().getSpatialSelector());
+		assertEquals(37, handler.getConfig().getPingVolume());
+		assertArrayEquals(original, Files.readAllBytes(path));
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void futureVersionGuardKeepsAllBytesAndRefusesSaveAndReset(@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("client.json");
+		JsonObject futureRoot = legacyRoot("0.5.0-pfi-beta2");
+		futureRoot.add("spatialSelector", JsonParser.parseString(
+			"{\"inventoryMaxWidthFraction\":null,\"inventoryMaxHeightFraction\":1.5,"
+				+ "\"unknownPreference\":true}").getAsJsonObject());
+		byte[] original = futureRoot.toString().getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		handler.load();
+		SpatialSelectorSettings fallback = handler.getConfig().getSpatialSelector();
+		SpatialSelectorSettings expectedDefaults = new ClientConfig().getSpatialSelector();
+		assertEquals(expectedDefaults, fallback, "future-version fallback uses normal model initialization");
+		assertDecimalEquals(expectedDefaults.getInventoryMaxWidthFraction(),
+			fallback.snapshot().inventoryMaxWidthFraction());
+		assertDecimalEquals(expectedDefaults.getInventoryMaxHeightFraction(),
+			fallback.snapshot().inventoryMaxHeightFraction());
+		handler.getConfig().getSpatialSelector().setHoverEnabled(true);
+		handler.getConfig().getSpatialSelector().setInventoryMaxWidthFraction(new BigDecimal("0.45"));
+		assertFalse(handler.saveSafely());
+		handler.resetToDefaults();
+		assertEquals(new SpatialSelectorSettings(), handler.getConfig().getSpatialSelector());
+		assertArrayEquals(original, Files.readAllBytes(path));
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void failedWriteRetainsUsablePreferencesAndRetryDiscardsTheStaleSourceBeforeMigration(
+		@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("client.json");
+		byte[] original = legacyRoot(LEGACY).toString().getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path,
+			(source, backup, bytes) -> fail("valid migration must not enter broken-file recovery"), TIMEOUT_TARGET,
+			(destination, serialized) -> { throw new IOException("injected write failure"); });
+		handler.load();
+		assertEquals(35, handler.getConfig().getWheelOpacity());
+		assertEquals(new SpatialSelectorSettings(), handler.getConfig().getSpatialSelector());
+		assertArrayEquals(original, Files.readAllBytes(path));
+
+		byte[] external = legacyRoot("0.6.0-pfi-beta1").toString().getBytes(StandardCharsets.UTF_8);
+		Files.write(path, external);
+		assertFalse(handler.saveSafely());
+		assertArrayEquals(external, Files.readAllBytes(path));
+		assertFalse(handler.saveSafely());
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void sameVersionContentIntentMissingNullAndExplicitValuesNeverRewrite(@TempDir Path directory) throws IOException {
+		for (String selectorJson : List.of("", ",\"spatialSelector\":null", ",\"spatialSelector\":{}",
+			",\"spatialSelector\":{\"contentIntentEnabled\":null}",
+			",\"spatialSelector\":{\"contentIntentEnabled\":true}",
+			",\"spatialSelector\":{\"contentIntentEnabled\":false}")) {
+			Path path = directory.resolve("client.json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37" + selectorJson + "}\n").getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			var handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+			boolean expected = selectorJson.contains(":true");
+			assertEquals(expected, handler.getConfig().getSpatialSelector().isContentIntentEnabled());
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"content-intent defaults and explicit values are not a load rewrite");
+			assertTrue(handler.saveSafely());
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"an untouched same-version save is a no-op");
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void explicitContentIntentChoicePersistsAndResetRestoresTheDisabledDefault(@TempDir Path directory)
+		throws IOException {
+		Path path = directory.resolve("client.json");
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		handler.load();
+		handler.getConfig().getSpatialSelector().setContentIntentEnabled(true);
+		assertTrue(handler.saveSafely());
+		assertTrue(read(path).getAsJsonObject("spatialSelector").get("contentIntentEnabled").getAsBoolean());
+
+		ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		reloaded.load();
+		assertTrue(reloaded.getConfig().getSpatialSelector().isContentIntentEnabled());
+		assertTrue(reloaded.getConfig().getSpatialSelector().snapshot().contentIntentEnabled());
+
+		reloaded.resetToDefaults();
+		assertFalse(reloaded.getConfig().getSpatialSelector().isContentIntentEnabled());
+		assertFalse(read(path).getAsJsonObject("spatialSelector").get("contentIntentEnabled").getAsBoolean(),
+			"reset persists the disabled content-intent default");
+	}
+
+	@Test
+	void sameVersionSelectorWithoutInventoryFractionsUsesModelDefaultsWithoutRewrite(
+		@TempDir Path directory) throws IOException {
+		SpatialSelectorSettings expected = new ClientConfig().getSpatialSelector();
+		for (String selectorJson : List.of("", ",\"spatialSelector\":{}")) {
+			Path path = directory.resolve("missing.json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37" + selectorJson + "}\n").getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+
+			SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
+			assertEquals(expected, selector);
+			assertDecimalEquals(expected.getInventoryMaxWidthFraction(),
+				selector.snapshot().inventoryMaxWidthFraction());
+			assertDecimalEquals(expected.getInventoryMaxHeightFraction(),
+				selector.snapshot().inventoryMaxHeightFraction());
+			assertEquals(37, handler.getConfig().getPingVolume());
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"missing additive selector members are not a load rewrite");
+			assertTrue(handler.saveSafely());
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"an untouched same-version save is a no-op");
+
+			ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			reloaded.load();
+			assertEquals(expected, reloaded.getConfig().getSpatialSelector());
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void explicitInventoryFractionsRoundTripWithoutQuantizationThroughARealSave(
+		@TempDir Path directory) throws IOException {
+		List<BigDecimal[]> values = List.of(
+			new BigDecimal[] {new BigDecimal("0.45"), new BigDecimal("0.85")},
+			new BigDecimal[] {new BigDecimal("0.333"), new BigDecimal("0.777")});
+		int index = 0;
+		for (BigDecimal[] pair : values) {
+			Path path = directory.resolve("explicit-" + index++ + ".json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37,\"spatialSelector\":{"
+				+ "\"inventoryMaxWidthFraction\":" + pair[0]
+				+ ",\"inventoryMaxHeightFraction\":" + pair[1] + "}}\n")
+				.getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+
+			SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
+			assertDecimalEquals(pair[0], selector.getInventoryMaxWidthFraction());
+			assertDecimalEquals(pair[1], selector.getInventoryMaxHeightFraction());
+			assertDecimalEquals(pair[0], selector.snapshot().inventoryMaxWidthFraction());
+			assertDecimalEquals(pair[1], selector.snapshot().inventoryMaxHeightFraction());
+			assertTrue(WIDTH_FRACTION_MIN.compareTo(pair[0]) <= 0
+				&& pair[0].compareTo(WIDTH_FRACTION_MAX) <= 0, "the width test point is inside its legal interval");
+			assertTrue(HEIGHT_FRACTION_MIN.compareTo(pair[1]) <= 0
+				&& pair[1].compareTo(HEIGHT_FRACTION_MAX) <= 0, "the height test point is inside its legal interval");
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"explicit in-range values are loaded without a rewrite");
+
+			handler.getConfig().setPingVolume(38);
+			assertTrue(handler.saveSafely());
+			JsonObject persisted = read(path).getAsJsonObject("spatialSelector");
+			assertDecimalEquals(pair[0], persisted.get("inventoryMaxWidthFraction").getAsBigDecimal());
+			assertDecimalEquals(pair[1], persisted.get("inventoryMaxHeightFraction").getAsBigDecimal());
+
+			ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			reloaded.load();
+			assertEquals(38, reloaded.getConfig().getPingVolume());
+			assertDecimalEquals(pair[0],
+				reloaded.getConfig().getSpatialSelector().getInventoryMaxWidthFraction());
+			assertDecimalEquals(pair[1],
+				reloaded.getConfig().getSpatialSelector().getInventoryMaxHeightFraction());
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void nullAndOutOfRangeInventoryFractionsLegalizeThroughTheHandler(
+		@TempDir Path directory) throws IOException {
+		SpatialSelectorSettings modelDefaults = new ClientConfig().getSpatialSelector();
+		List<FractionExpectation> cases = List.of(
+			new FractionExpectation(
+				"{\"inventoryMaxWidthFraction\":null,\"inventoryMaxHeightFraction\":null}",
+				modelDefaults.getInventoryMaxWidthFraction(), modelDefaults.getInventoryMaxHeightFraction(), true),
+			new FractionExpectation(
+				"{\"inventoryMaxWidthFraction\":0.10,\"inventoryMaxHeightFraction\":1.20}",
+				WIDTH_FRACTION_MIN, HEIGHT_FRACTION_MAX, false));
+		int index = 0;
+		for (FractionExpectation expected : cases) {
+			Path path = directory.resolve("normalized-" + index++ + ".json");
+			byte[] original = ("{\"pingforit-version\":\"" + TIMEOUT_TARGET
+				+ "\",\"pingVolume\":37,\"spatialSelector\":" + expected.selectorJson() + "}\n")
+				.getBytes(StandardCharsets.UTF_8);
+			Files.write(path, original);
+			ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			handler.load();
+
+			SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
+			if (expected.modelDefaults()) assertEquals(modelDefaults, selector);
+			assertDecimalEquals(expected.width(), selector.getInventoryMaxWidthFraction());
+			assertDecimalEquals(expected.height(), selector.getInventoryMaxHeightFraction());
+			assertDecimalEquals(expected.width(), selector.snapshot().inventoryMaxWidthFraction());
+			assertDecimalEquals(expected.height(), selector.snapshot().inventoryMaxHeightFraction());
+			assertEquals(37, handler.getConfig().getPingVolume());
+			assertArrayEquals(original, Files.readAllBytes(path),
+				"legalization is in-memory and does not rewrite a same-version source");
+
+			handler.getConfig().setPingVolume(38);
+			assertTrue(handler.saveSafely());
+			JsonObject persisted = read(path).getAsJsonObject("spatialSelector");
+			assertDecimalEquals(selector.getInventoryMaxWidthFraction(),
+				persisted.get("inventoryMaxWidthFraction").getAsBigDecimal());
+			assertDecimalEquals(selector.getInventoryMaxHeightFraction(),
+				persisted.get("inventoryMaxHeightFraction").getAsBigDecimal());
+
+			ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+			reloaded.load();
+			assertEquals(selector, reloaded.getConfig().getSpatialSelector());
+		}
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void olderVersionMissingInventoryFractionsGainDefaultsOnTheExistingMigrationWrite(
+		@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("legacy-missing.json");
+		JsonObject source = legacyRoot(LEGACY);
+		JsonObject rawSelector = JsonParser.parseString(
+			"{\"hoverEnabled\":true,\"unknownPreference\":{\"enabled\":true}}").getAsJsonObject();
+		source.add("spatialSelector", rawSelector);
+		Files.writeString(path, source.toString(), StandardCharsets.UTF_8);
+
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		handler.load();
+
+		SpatialSelectorSettings expected = new ClientConfig().getSpatialSelector();
+		expected.setHoverEnabled(true);
+		SpatialSelectorSettings selector = handler.getConfig().getSpatialSelector();
+		assertEquals(expected, selector);
+		assertDecimalEquals(expected.getInventoryMaxWidthFraction(),
+			selector.snapshot().inventoryMaxWidthFraction());
+		assertDecimalEquals(expected.getInventoryMaxHeightFraction(),
+			selector.snapshot().inventoryMaxHeightFraction());
+
+		JsonObject persisted = read(path);
+		JsonObject persistedSelector = persisted.getAsJsonObject("spatialSelector");
+		assertDecimalEquals(selector.getInventoryMaxWidthFraction(),
+			persistedSelector.get("inventoryMaxWidthFraction").getAsBigDecimal());
+		assertDecimalEquals(selector.getInventoryMaxHeightFraction(),
+			persistedSelector.get("inventoryMaxHeightFraction").getAsBigDecimal());
+		assertEquals(rawSelector.get("unknownPreference"), persistedSelector.get("unknownPreference"));
+		assertEquals(source.get("unknown"), persisted.get("unknown"));
+		assertEquals(TIMEOUT_TARGET, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
+		assertNoRetiredWheelKeys(persisted);
+
+		ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		reloaded.load();
+		assertEquals(expected, reloaded.getConfig().getSpatialSelector());
+		assertNoBackup(directory);
+	}
+
+	@Test
+	void explicitInventoryFractionsAndUnknownNestedDataSurviveARealSaveThroughThePendingMigration(
+		@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("legacy-explicit.json");
+		JsonObject source = legacyRoot(LEGACY);
+		JsonObject rawSelector = JsonParser.parseString("""
+			{"inventoryMaxWidthFraction":0.45,"inventoryMaxHeightFraction":0.85,
+			 "unknownPreference":{"enabled":true}}
+			""").getAsJsonObject();
+		source.add("spatialSelector", rawSelector);
+		byte[] original = source.toString().getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+
+		AtomicBoolean failWrite = new AtomicBoolean(true);
+		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, path,
+			(sourcePath, backup, bytes) -> fail("valid migration must not enter broken-file recovery"),
+			TIMEOUT_TARGET,
+			(destination, serialized) -> {
+				if (failWrite.get()) throw new IOException("injected migration write failure");
+				Files.writeString(destination, serialized, StandardCharsets.UTF_8);
+			});
+		handler.load();
+		assertArrayEquals(original, Files.readAllBytes(path));
+		SpatialSelectorSettings loaded = handler.getConfig().getSpatialSelector();
+		assertDecimalEquals(new BigDecimal("0.45"), loaded.getInventoryMaxWidthFraction());
+		assertDecimalEquals(new BigDecimal("0.85"), loaded.getInventoryMaxHeightFraction());
+
+		handler.getConfig().setPingVolume(38);
+		failWrite.set(false);
+		assertTrue(handler.saveSafely());
+
+		JsonObject persisted = read(path);
+		assertEquals(38, persisted.get("pingVolume").getAsInt());
+		JsonObject persistedSelector = persisted.getAsJsonObject("spatialSelector");
+		assertDecimalEquals(loaded.getInventoryMaxWidthFraction(),
+			persistedSelector.get("inventoryMaxWidthFraction").getAsBigDecimal());
+		assertDecimalEquals(loaded.getInventoryMaxHeightFraction(),
+			persistedSelector.get("inventoryMaxHeightFraction").getAsBigDecimal());
+		assertEquals(rawSelector.get("unknownPreference"), persistedSelector.get("unknownPreference"));
+		assertEquals(source.get("unknown"), persisted.get("unknown"));
+		assertEquals(TIMEOUT_TARGET, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
+
+		ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, path, TIMEOUT_TARGET);
+		reloaded.load();
+		assertEquals(38, reloaded.getConfig().getPingVolume());
+		assertEquals(loaded, reloaded.getConfig().getSpatialSelector());
+		assertNoBackup(directory);
+	}
+
+	private static JsonObject legacyRoot(String version) {
+		JsonObject root = JsonParser.parseString("""
+			{"wheelInnerRadius":63,"wheelOuterRadius":231,"wheelOpacity":35,
+			 "wheelTimeoutMillis":3000,"wheelFontSize":250,"wheelTargetFontSize":80,
+			 "unknown":{"list":[1,true,"x"]}}
+			""").getAsJsonObject();
+		root.addProperty(ConfigVersionUpdater.VERSION_KEY, version);
+		return root;
+	}
+
+	private static JsonObject update(JsonObject root, Class<? extends IConfig> type, String old, String current) {
+		return ConfigVersionUpdater.update(root, type, PingForItVersion.parse(old), PingForItVersion.parse(current)).root();
+	}
+
+	private static JsonObject read(Path path) throws IOException {
+		return JsonParser.parseString(Files.readString(path, StandardCharsets.UTF_8)).getAsJsonObject();
+	}
+
+	private static void assertDecimalEquals(BigDecimal expected, BigDecimal actual) {
+		assertNotNull(actual);
+		assertEquals(0, expected.compareTo(actual), "expected " + expected + " but was " + actual);
+	}
+
+	private record FractionExpectation(
+		String selectorJson, BigDecimal width, BigDecimal height, boolean modelDefaults) {}
+
+	private static void assertNoRadii(JsonObject root) {
+		assertFalse(root.has("wheelInnerRadius"));
+		assertFalse(root.has("wheelOuterRadius"));
+	}
+
+	private static void assertNoRetiredWheelKeys(JsonObject root) {
+		assertNoRadii(root);
+		assertFalse(root.has("wheelTimeoutMillis"));
+	}
+
+	private static void assertNoBackup(Path directory) throws IOException {
+		try (var paths = Files.list(directory)) {
+			assertFalse(paths.anyMatch(path -> path.getFileName().toString().contains(".broken-")));
+		}
+	}
+}

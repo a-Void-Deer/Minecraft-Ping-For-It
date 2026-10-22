@@ -1,5 +1,6 @@
 package nx.pingwheel.common.client;
 
+import java.util.List;
 import java.util.Objects;
 
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
@@ -10,6 +11,11 @@ import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.presentation.client.ClientPresentation;
+import nx.pingwheel.common.presentation.PresentationPropertyIntent;
+import nx.pingwheel.common.network.InventoryC2SPacket;
+import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 
 /**
  * The pure, phase-7 client dispatcher between {@link PingInteractionAction}s
@@ -31,6 +37,8 @@ import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
  * {@link ClientPingRuntime}.
  */
 public final class ClientPingActionDispatcher {
+	/** Local sender outcome, never server acceptance. */
+	public enum DispatchOutcome { CREATE_SENT, OTHER, NOT_READY, THROTTLED, TRANSPORT_FAILED }
 
 	/**
 	 * Sends one client-to-server packet.
@@ -59,6 +67,7 @@ public final class ClientPingActionDispatcher {
 	private final PingInteractionLogger logger;
 	private final CreateRequestTracker createRequestTracker;
 	private final ClientCreateRateLimiter createRateLimiter;
+	private final ClientPresentation presentation;
 
 	public ClientPingActionDispatcher(
 		PacketSender packetSender,
@@ -67,11 +76,24 @@ public final class ClientPingActionDispatcher {
 		CreateRequestTracker createRequestTracker,
 		ClientCreateRateLimiter createRateLimiter
 	) {
+		this(packetSender, errorSink, logger, createRequestTracker, createRateLimiter, null);
+	}
+
+	/** The production route requires a negotiated presentation session. */
+	public ClientPingActionDispatcher(
+		PacketSender packetSender,
+		LocalErrorSink errorSink,
+		PingInteractionLogger logger,
+		CreateRequestTracker createRequestTracker,
+		ClientCreateRateLimiter createRateLimiter,
+		ClientPresentation presentation
+	) {
 		this.packetSender = Objects.requireNonNull(packetSender, "packetSender");
 		this.errorSink = Objects.requireNonNull(errorSink, "errorSink");
 		this.logger = Objects.requireNonNull(logger, "logger");
 		this.createRequestTracker = Objects.requireNonNull(createRequestTracker, "createRequestTracker");
 		this.createRateLimiter = Objects.requireNonNull(createRateLimiter, "createRateLimiter");
+		this.presentation = presentation;
 	}
 
 	/**
@@ -95,37 +117,71 @@ public final class ClientPingActionDispatcher {
 	 * Maps one interaction outcome onto its side effects.
 	 */
 	public void dispatch(PingInteractionAction action) {
-		Objects.requireNonNull(action, "action");
-
-		switch (action) {
-			case PingInteractionAction.CreatePing create -> dispatchCreate(create);
-			case PingInteractionAction.CancelMarker cancel -> dispatchCancel(cancel);
-			case PingInteractionAction.TargetGone gone -> dispatchTargetGone(gone);
-		}
+		dispatch(action, List.of());
 	}
 
-	private void dispatchCreate(PingInteractionAction.CreatePing create) {
+	/** Programmatic property-ping entry point; payloads remain detached observations. */
+	public void dispatch(PingInteractionAction action, List<PresentationPropertyIntent> properties) {
+		dispatchOutcome(action, properties);
+	}
+
+	public DispatchOutcome dispatchOutcome(PingInteractionAction action) {
+		return dispatchOutcome(action, List.of());
+	}
+
+	public DispatchOutcome dispatchOutcome(PingInteractionAction action, List<PresentationPropertyIntent> properties) {
+		Objects.requireNonNull(action, "action");
+		List<PresentationPropertyIntent> requested = List.copyOf(properties);
+		return switch (action) {
+			case PingInteractionAction.CreatePing create -> dispatchCreate(create, requested);
+			case PingInteractionAction.CancelMarker cancel -> { dispatchCancel(cancel); yield DispatchOutcome.OTHER; }
+			case PingInteractionAction.TargetGone gone -> { dispatchTargetGone(gone); yield DispatchOutcome.OTHER; }
+		};
+	}
+
+	private DispatchOutcome dispatchCreate(PingInteractionAction.CreatePing create, List<PresentationPropertyIntent> properties) {
+		if (presentation != null && !presentation.ready()) return DispatchOutcome.NOT_READY;
+		if (presentation != null && properties.stream().anyMatch(property ->
+			!presentation.propertyAllowed(create.context().resolvedTarget().targetType().id(), property.ref())))
+			return DispatchOutcome.NOT_READY;
 		long requestId = create.context().token().sequence();
 		var target = create.context().resolvedTarget().target();
 		var policy = createRateLimiter.policy();
-
 		if (!createRateLimiter.tryAcquire()) {
 			logger.debugCreateThrottled(requestId, policy.rateLimit(), policy.msToRegenerate());
-			return;
+			return DispatchOutcome.THROTTLED;
 		}
-
-		createRequestTracker.onCreateDispatched(requestId);
-
-		packetSender.sendToServer(new MarkerCreateC2SPacket(requestId, target, create.pingType().id()));
-
-		logger.debug("dispatch create: requestId={} kind={} pingType={}",
-			requestId, target.kind(), create.pingType().id());
+		var attempt = createRequestTracker.beginDispatch(CreateRequestTracker.Route.PRESENTATION, requestId);
+		try {
+			packetSender.sendToServer(presentation == null
+				? new MarkerCreateC2SPacket(requestId, target, create.pingType().id())
+				: PresentationC2SPacket.create(presentation.epoch(), requestId, target, create.pingType().id(), properties));
+		} catch (RuntimeException failed) {
+			createRequestTracker.failedDispatch(attempt);
+			return DispatchOutcome.TRANSPORT_FAILED;
+		}
+		logger.debug("dispatch create: requestId={} kind={} pingType={}", requestId, target.kind(), create.pingType().id());
+		return DispatchOutcome.CREATE_SENT;
+	}
+	public ClientInventory.DispatchOutcome dispatchInventory(InventoryC2SPacket packet) {
+		if (packet == null || packet.isCorrupt() || packet.kind() != InventoryC2SPacket.Kind.SELECT || presentation == null || !presentation.ready()
+			|| packet.presentationEpoch() != presentation.epoch() || packet.view() != presentation.sessionView()) return ClientInventory.DispatchOutcome.NOT_READY;
+		if (!createRateLimiter.tryAcquire()) return ClientInventory.DispatchOutcome.THROTTLED;
+		try { packetSender.sendToServer(packet); }
+		catch (RuntimeException failed) { return ClientInventory.DispatchOutcome.TRANSPORT_FAILED; }
+		createRequestTracker.onCreateDispatched(CreateRequestTracker.Route.INVENTORY, packet.commitId());
+		return ClientInventory.DispatchOutcome.SENT;
 	}
 
 	private void dispatchCancel(PingInteractionAction.CancelMarker cancel) {
+		if (presentation != null && !presentation.ready()) {
+			return;
+		}
 		MarkerId markerId = cancel.markerId();
 
-		packetSender.sendToServer(new MarkerRemoveC2SPacket(markerId));
+		packetSender.sendToServer(presentation == null
+			? new MarkerRemoveC2SPacket(markerId)
+			: PresentationC2SPacket.remove(presentation.epoch(), markerId));
 
 		logger.debug("dispatch cancel: markerId={}", markerId.value());
 	}

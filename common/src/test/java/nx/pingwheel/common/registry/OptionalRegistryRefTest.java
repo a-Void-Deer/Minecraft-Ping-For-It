@@ -3,6 +3,7 @@ package nx.pingwheel.common.registry;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -39,20 +40,20 @@ class OptionalRegistryRefTest {
 
 	@Test
 	void lookupReceivesStableIds() {
-		AtomicInteger registrySeen = new AtomicInteger();
-		AtomicInteger entrySeen = new AtomicInteger();
+		AtomicReference<String> registrySeen = new AtomicReference<>();
+		AtomicReference<String> entrySeen = new AtomicReference<>();
 
 		RegistryLookup lookup = (registryId, entryId) -> {
-			registrySeen.set(registryId.length());
-			entrySeen.set(entryId.length());
+			registrySeen.set(registryId);
+			entrySeen.set(entryId);
 			return true;
 		};
 
 		OptionalRegistryRef ref = new OptionalRegistryRef("minecraft:block", "minecraft:stone");
 		ref.isPresent(lookup);
 
-		assertEquals("minecraft:block".length(), registrySeen.get());
-		assertEquals("minecraft:stone".length(), entrySeen.get());
+		assertEquals("minecraft:block", registrySeen.get());
+		assertEquals("minecraft:stone", entrySeen.get());
 	}
 
 	@Test

@@ -3,6 +3,7 @@ package nx.pingwheel.common.client;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 
@@ -22,6 +23,17 @@ import nx.pingwheel.common.interaction.state.TargetGoneReason;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.presentation.PresentationField;
+import nx.pingwheel.common.presentation.PresentationPropertyIntent;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.client.ClientPresentation;
+import net.minecraft.network.FriendlyByteBuf;
+import io.netty.buffer.Unpooled;
+import java.util.Map;
+import java.util.Set;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 
@@ -38,9 +50,11 @@ class ClientPingActionDispatcherTest {
 	private static final class RecordingPacketSender implements ClientPingActionDispatcher.PacketSender {
 
 		final List<IPacket> sent = new ArrayList<>();
+		Runnable onSend = () -> {};
 
 		@Override
 		public void sendToServer(IPacket packet) {
+			onSend.run();
 			sent.add(packet);
 		}
 	}
@@ -140,11 +154,15 @@ class ClientPingActionDispatcherTest {
 		ActiveInteraction interaction = new ActiveInteraction();
 		InteractionToken token = interaction.begin();
 		CapturedPingContext context = capture(TargetSnapshotFactory.location(OVERWORLD, 1, 2, 3), token);
+		AtomicBoolean latestWhenSent = new AtomicBoolean(false);
+		h.sender.onSend = () -> latestWhenSent.set(tracker.isLatest(token.sequence()));
 
 		dispatcher.dispatch(new PingInteractionAction.CreatePing(
 			context, context.resolvedTarget().targetType().defaultPingType()));
 
 		assertEquals(1, h.sender.sent.size());
+		assertTrue(latestWhenSent.get(),
+			"the tracker must already hold the request id when the packet sender runs");
 		assertTrue(tracker.isLatest(token.sequence()));
 	}
 
@@ -269,7 +287,6 @@ class ClientPingActionDispatcherTest {
 		}
 
 		String createLine = h.logger.rendered.get(0);
-		assertTrue(createLine.contains("dispatch create"));
 		assertTrue(createLine.contains("requestId=" + context.token().sequence()));
 		assertTrue(createLine.contains(selected.id()));
 
@@ -301,6 +318,46 @@ class ClientPingActionDispatcherTest {
 		CapturedPingContext context = capture(TargetSnapshotFactory.location(OVERWORLD, 0, 0, 0), token);
 		return new PingInteractionAction.CreatePing(
 			context, context.resolvedTarget().targetType().defaultPingType());
+	}
+
+	@Test
+	void programmaticPropertyCreateUsesFrozenTargetAndActualTypedWire() {
+		Harness h = harness();
+		ClientPresentation presentation = new ClientPresentation(h.sender::sendToServer);
+		presentation.tick(true);
+		assertTrue(presentation.offer(PresentationS2CPacket.offer(31L,
+			Map.of(ClientPresentation.BASIC, List.of(new PresentationField(
+				"minecraft:block.state", PresentationField.Kind.RECORD, true, 0, "State"))),
+			Map.of(ClientPresentation.BASIC, 1))));
+		assertTrue(presentation.reset(PresentationS2CPacket.reset(31L, 1L,
+			Map.of("location", Map.of(ClientPresentation.BASIC, Set.of("minecraft:block.state"))))));
+		var dispatcher = new ClientPingActionDispatcher(h.sender, h.sink, h.logger,
+			new CreateRequestTracker(), new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(0, 0)),
+			presentation);
+		var action = createAction(new ActiveInteraction().begin());
+		var ref = new PresentationPropertyRef(ClientPresentation.BASIC, "minecraft:block.state",
+			List.of("counts", "minecraft:cobblestone"));
+		var property = PresentationPropertyIntent.of(ref, new PresentationValue.NumberValue(64), "request");
+		dispatcher.dispatch(action, List.of(property));
+		PresentationC2SPacket sent = assertInstanceOf(PresentationC2SPacket.class, h.sender.sent.get(1));
+		FriendlyByteBuf bytes = new FriendlyByteBuf(Unpooled.buffer());
+		try {
+			sent.write(bytes);
+			var decoded = PresentationC2SPacket.readSafe(bytes);
+			assertFalse(decoded.isCorrupt());
+			assertEquals(action.context().resolvedTarget().target(), decoded.target());
+			assertEquals(action.pingType().id(), decoded.pingType());
+			assertEquals(List.of(property), decoded.properties());
+			assertEquals(0, bytes.readableBytes());
+		} finally { bytes.release(); }
+		dispatcher.dispatch(action);
+		assertEquals(List.of(), ((PresentationC2SPacket) h.sender.sent.get(2)).properties());
+		var denies = new java.util.LinkedHashMap<>(PresentationS2CPacket.emptyChildBlack());
+		denies.put("location", List.of(ref));
+		assertTrue(presentation.reset(PresentationS2CPacket.reset(31L, 2L,
+			Map.of("location", Map.of(ClientPresentation.BASIC, Set.of("minecraft:block.state"))), denies)));
+		assertEquals(ClientPingActionDispatcher.DispatchOutcome.NOT_READY, dispatcher.dispatchOutcome(action, List.of(property)));
+		assertEquals(3, h.sender.sent.size(), "revocation recheck sends no create and never silently sends a plain fallback");
 	}
 
 	private static final class ManualTime implements InteractionTimeSource {

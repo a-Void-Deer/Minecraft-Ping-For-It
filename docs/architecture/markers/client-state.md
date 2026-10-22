@@ -7,8 +7,10 @@ local winner projection. The server's authoritative record lifetime is owned by
 [marker lifecycle](../authority/marker_lifecycle.md); recipient-scoped
 authoritative winner selection is owned by
 [ping winner](../authority/ping_winner.md). State-message acceptance is owned by
-[network protocol](../network/protocol.md), and new-marker receipt notifications
-are owned by [names and chat](../rendering/names_chat.md).
+[network protocol](../network/protocol.md); the mask/pruning rules and
+retention of the presentation values delivered with a record are owned by
+[presentation snapshot](../presentation/presentation_snapshot.md), and new-marker
+receipt notifications are owned by [names and chat](../rendering/names_chat.md).
 
 ## Record states and lifetimes
 
@@ -75,10 +77,14 @@ records, winners, and tombstones; it is not a permanent cross-clear history.
 A merely local fallback-`STALE` record has no authoritative-removal tombstone
 and can recover to `SYNCHRONIZED` if a later same-ID snapshot arrives; while the
 record remains stored, that recovery still does not change its existing visual
-deadline. Once local housekeeping has finally deleted a record after its visual
-deadline, a later same-ID create is treated as a new insertion and receives a
-new visual deadline. Automated coverage of this behavior remains a gap tracked in
-[verification](../../testing/verification.md).
+deadline. When local housekeeping finally deletes a record after its visual
+deadline, the client also evicts that marker's retained presentation values and
+leaves a session-scoped eviction tombstone, so a delayed same-ID create cannot
+resurrect the marker in that session; the eviction-tombstone retention rule is
+owned by
+[presentation snapshot](../presentation/presentation_snapshot.md#client-retention-and-display).
+Automated coverage of the complete production orchestration remains a gap
+tracked in [verification](../../testing/verification/identity-authority.md).
 
 The fallback branches above are state-specific. A visually expired
 `SYNCHRONIZED` record remains stored until its own fallback deadline is due; at

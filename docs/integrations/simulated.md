@@ -30,4 +30,4 @@ an owner or falling through as a different target.
 The default `simulated:honey_glue` entity blacklist belongs to entity candidate
 filtering. It does not establish that a live Simulated runtime has been loaded
 or validated; live-mod-session coverage remains an integration gap documented
-in [verification](../testing/verification.md).
+in [verification](../testing/verification/integrations.md#simulated-integration-coverage).

@@ -15,6 +15,7 @@ import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.ServerConfigUpdateService;
 import nx.pingwheel.common.domain.PingTypeCatalog;
+import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.integration.ExternalBlockServerProviders;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
@@ -34,6 +35,7 @@ import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.marker.ServerMarkerStore;
 import nx.pingwheel.common.name.MinecraftTargetNameResolver;
 import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
@@ -42,6 +44,17 @@ import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
 import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
+import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
+import nx.pingwheel.common.presentation.PresentationPropertyIntent;
+import nx.pingwheel.common.presentation.PresentationSettings;
+import nx.pingwheel.common.presentation.ServerPresentationPolicyService;
+import nx.pingwheel.common.presentation.minecraft.BudgetDelayMonitoring;
+import nx.pingwheel.common.presentation.minecraft.PresentationServer;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryServer;
+import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
@@ -52,11 +65,14 @@ import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.RateLimiter;
+import nx.pingwheel.common.util.RateLimitedDiagnostics;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static nx.pingwheel.common.Global.CLIENT_COMMAND_ROOT;
 import static nx.pingwheel.common.Global.LOGGER;
@@ -73,6 +89,13 @@ public class ServerCore {
 	private static final HashMap<UUID, String> PLAYER_CHANNELS = new HashMap<>();
 	private static final HashMap<UUID, RateLimiter> PLAYER_RATES = new HashMap<>();
 	private static final SyncDurationPolicyTracker SYNC_DURATION_POLICY = new SyncDurationPolicyTracker();
+
+	/**
+	 * Monotonic in-memory revision of the presentation policy rule view. It
+	 * advances once per applied mutation and resets with the server instance, so
+	 * a client can order rule-view snapshots within one connection.
+	 */
+	private static final AtomicLong PRESENTATION_POLICY_REVISION = new AtomicLong();
 
 	/**
 	 * The shared, server-authoritative marker store. It is replaced on common
@@ -109,6 +132,9 @@ public class ServerCore {
 	 * remain to synchronize after a reset, so this is a plain drop.
 	 */
 	public static synchronized void initMarkers() {
+		BudgetDelayMonitoring.reset();
+		PresentationServer.reset();
+		InventoryServer.reset();
 		if (ACTIVE_SERVER != null && MARKER_STORE != null) {
 			releaseExternalMarkers(ACTIVE_SERVER, MARKER_STORE.allMarkers());
 			MARKER_STORE.clear();
@@ -118,6 +144,7 @@ public class ServerCore {
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
 		ACTIVE_SERVER = null;
 		SYNC_DURATION_POLICY.reset();
+		PRESENTATION_POLICY_REVISION.set(0L);
 	}
 
 	/**
@@ -141,10 +168,14 @@ public class ServerCore {
 			MARKER_STORE.clear();
 			ExternalBlockServerProviders.close(ACTIVE_SERVER);
 			SYNC_DURATION_POLICY.reset();
+			PRESENTATION_POLICY_REVISION.set(0L);
 		}
 
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
 		ACTIVE_SERVER = server;
+		BudgetDelayMonitoring.sink(server);
+		PresentationServer.activate(server);
+		InventoryServer.activate(server);
 
 		LOGGER.debug(() -> "marker store initialized for server instance 0x%s".formatted(
 			Integer.toHexString(System.identityHashCode(server))));
@@ -309,6 +340,8 @@ public class ServerCore {
 			LOGGER.debug("server settings update rejected: invalid update");
 			return;
 		}
+		final var inventoryCandidate = (update.changedFields() & ServerConfigUpdate.ALL_INVENTORY_FIELDS) != 0
+			? plan.snapshot().inventory().toSettings() : null;
 
 		if ((update.changedFields() & ServerConfigUpdate.DEFAULT_CHANNEL_MODE) != 0) {
 			config.setDefaultChannelMode(update.defaultChannelMode());
@@ -326,6 +359,10 @@ public class ServerCore {
 			config.setSyncDuration(update.syncDuration());
 		}
 
+		if (inventoryCandidate != null) config.setInventory(inventoryCandidate);
+		if ((update.changedFields() & ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED) != 0) {
+			config.setBudgetDelayNotificationsEnabled(update.budgetDelayNotificationsEnabled());
+		}
 		config.validate();
 		ServerConfig.HANDLER.save();
 	}
@@ -335,6 +372,143 @@ public class ServerCore {
 			new ServerConfigSnapshotS2CPacket(
 				requestId,
 				ServerConfigSnapshot.from(ServerConfig.HANDLER.getConfig(), canEdit)),
+			player);
+	}
+
+	/**
+	 * Handles one presentation policy rule-view read or mutation. Reads are
+	 * allowed for every authenticated player and disclose only the three
+	 * presentation selector values. Every mutation rechecks inherent permission
+	 * level 3 on the server thread immediately before the atomic service
+	 * mutation.
+	 *
+	 * <p>The mutation is transactional: the service runs against a detached
+	 * exact-field copy, the live config object is only replaced after the
+	 * candidate was validated and persisted, and a failed persistence rolls the
+	 * previous settings object back before answering. An applied change
+	 * advances the in-memory revision exactly once and is sent to the requester
+	 * and to every other connected route-capable peer; a no-op or rejected
+	 * request never rewrites the config, advances the revision, or broadcasts.
+	 * Peers without the versioned route receive nothing, because every platform
+	 * send service checks route presence before sending.
+	 */
+	public static void onServerPresentationPolicy(
+		MinecraftServer server,
+		ServerPlayer player,
+		ServerPresentationPolicyC2SPacket packet) {
+		if (packet == null || packet.isCorrupt()) {
+			LOGGER.debug("presentation policy request rejected: invalid packet");
+			return;
+		}
+
+		final ServerConfig config = ServerConfig.HANDLER.getConfig();
+		final PresentationSettings settings = config == null ? null : config.getPresentation();
+		final boolean canEdit = player.hasPermissions(3);
+
+		if (packet.operation() == ServerPresentationPolicyService.Operation.READ) {
+			sendPresentationPolicySnapshot(
+				player,
+				packet.requestId(),
+				ServerPresentationPolicyService.Status.OK,
+				canEdit,
+				ServerPresentationPolicyService.readAll(settings),
+				PRESENTATION_POLICY_REVISION.get());
+			return;
+		}
+
+		if (settings == null) {
+			sendPresentationPolicySnapshot(
+				player,
+				packet.requestId(),
+				ServerPresentationPolicyService.Status.INVALID,
+				canEdit,
+				ServerPresentationPolicyService.readAll(null),
+				PRESENTATION_POLICY_REVISION.get());
+			return;
+		}
+
+		final PresentationSettings candidate = ServerPresentationPolicyService.detachedCopy(settings);
+		final var result = ServerPresentationPolicyService.mutateSelectedRules(
+			canEdit, candidate, packet.targetTypeId(), packet.operation(), packet.selector(), packet.whitelistOnly());
+
+		if (!result.applied()) {
+			// Denied, invalid, duplicate, missing, full, and no-op requests never
+			// touch the persisted config, the revision, or other clients.
+			sendPresentationPolicySnapshot(
+				player,
+				packet.requestId(),
+				result.status(),
+				canEdit,
+				ServerPresentationPolicyService.readAll(settings),
+				PRESENTATION_POLICY_REVISION.get());
+			return;
+		}
+
+		// Transactional swap: the original settings object is only replaced after
+		// the validated candidate is persisted, so a failed save restores the
+		// exact previous rule view instead of leaving a half-applied state.
+		config.setPresentation(candidate);
+		boolean saved;
+
+		try {
+			config.validate();
+			saved = ServerConfig.HANDLER.saveSafely();
+		} catch (RuntimeException ex) {
+			RateLimitedDiagnostics.warn("presentation-policy-save", "server-config",
+				() -> "presentation policy validation/save failed: path=%s requestId=%d operation=%s targetType=%s selector=%s whitelistOnly=%s player=%s"
+					.formatted(ServerConfig.HANDLER.getConfigPath(), packet.requestId(), packet.operation(),
+						packet.targetTypeId(), packet.selector(), packet.whitelistOnly(), player.getUUID()), ex);
+			saved = false;
+		}
+
+		if (!saved) {
+			config.setPresentation(settings);
+			sendPresentationPolicySnapshot(
+				player,
+				packet.requestId(),
+				ServerPresentationPolicyService.Status.FAILED,
+				canEdit,
+				ServerPresentationPolicyService.readAll(settings),
+				PRESENTATION_POLICY_REVISION.get());
+			return;
+		}
+
+		final long revision = PRESENTATION_POLICY_REVISION.incrementAndGet();
+		final Map<String, ServerPresentationPolicyService.RulesView> appliedRules =
+			ServerPresentationPolicyService.readAll(candidate);
+
+		sendPresentationPolicySnapshot(
+			player, packet.requestId(), result.status(), canEdit, appliedRules, revision);
+
+		for (ServerPlayer recipient : server.getPlayerList().getPlayers()) {
+			if (recipient == player) {
+				continue;
+			}
+
+			sendPresentationPolicySnapshot(
+				recipient,
+				0L,
+				ServerPresentationPolicyService.Status.OK,
+				recipient.hasPermissions(3),
+				appliedRules,
+				revision);
+		}
+	}
+
+	private static void sendPresentationPolicySnapshot(
+		ServerPlayer player,
+		long requestId,
+		ServerPresentationPolicyService.Status status,
+		boolean canEdit,
+		Map<String, ServerPresentationPolicyService.RulesView> rules,
+		long revision) {
+		IPlatformNetworkService.INSTANCE.sendToClient(
+			new ServerPresentationPolicyS2CPacket(
+				requestId,
+				revision,
+				status,
+				canEdit,
+				rules),
 			player);
 	}
 
@@ -414,13 +588,43 @@ public class ServerCore {
 	 * server-authoritative duration.
 	 */
 	public static void onMarkerCreate(MinecraftServer server, ServerPlayer player, MarkerCreateC2SPacket packet) {
+		// Marker creation now requires the new negotiated route and session epoch.
+	}
+
+	public static void onInventoryPacket(MinecraftServer server, ServerPlayer player, InventoryC2SPacket packet) {
+		if (server == null || player == null || !server.isSameThread() || player.serverLevel().getServer() != server) return;
+		ensureMarkerStore(server);
+		InventoryServer.handle(server, player, packet);
+	}
+
+	public static void onPresentationPacket(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet) {
+		PresentationServer.activate(server);
+		if (packet == null || packet.isCorrupt()) return;
+		if (packet.kind() == PresentationC2SPacket.Kind.HELLO) {
+			ensureMarkerStore(server);
+			PresentationServer.negotiate(server, player, packet, markerStore());
+			return;
+		}
+		if (!PresentationServer.accepts(player, packet)) return;
+		switch (packet.kind()) {
+			case CREATE -> onMarkerCreate(server, player, packet.requestId(), packet.target(), packet.pingType(), packet.properties());
+			case REMOVE -> onMarkerRemove(server, player, packet.markerId());
+			default -> { }
+		}
+	}
+
+	/** Read-only route: thread/session admission and queueing, never marker creation or source reads. */
+	public static void onPresentationPreview(MinecraftServer server, ServerPlayer player, PresentationPreviewC2SPacket packet) {
+		PresentationServer.preview(server, player, packet);
+	}
+
+	private static void onMarkerCreate(MinecraftServer server, ServerPlayer player, long requestId,
+		Target requestedTarget, String requestedPingType, List<PresentationPropertyIntent> properties) {
 		ensureMarkerStore(server);
 
-		final long requestId = packet.requestId() >= 0L ? packet.requestId() : 0L;
-
-		if (packet.isCorrupt()) {
+		if (requestedTarget == null || requestedPingType == null || requestedPingType.isBlank() || requestId < 0L) {
 			LOGGER.debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.INVALID_REQUEST));
-			sendReject(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.INVALID_REQUEST);
+			PresentationServer.rejected(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.INVALID_REQUEST);
 			return;
 		}
 
@@ -429,7 +633,7 @@ public class ServerCore {
 
 		if (SERVER_CONFIG.getRateLimit() > 0 && rateLimiter.checkExceeded()) {
 			LOGGER.debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.RATE_LIMITED));
-			sendReject(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.RATE_LIMITED);
+			PresentationServer.rejected(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.RATE_LIMITED);
 			return;
 		}
 
@@ -438,13 +642,13 @@ public class ServerCore {
 
 		if (channel.isEmpty() && defaultChannelMode == ChannelMode.DISABLED) {
 			LOGGER.debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.CHANNEL_DISABLED));
-			sendReject(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.CHANNEL_DISABLED);
+			PresentationServer.rejected(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.CHANNEL_DISABLED);
 			return;
 		}
 
 		if (channel.isEmpty() && defaultChannelMode == ChannelMode.TEAM_ONLY && !TeamContextHandler.hasTeam(player)) {
 			LOGGER.debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.CHANNEL_DISABLED));
-			sendReject(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.CHANNEL_DISABLED);
+			PresentationServer.rejected(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.CHANNEL_DISABLED);
 			return;
 		}
 
@@ -456,19 +660,20 @@ public class ServerCore {
 
 		final var outcome = markerService(server).create(
 			player.serverLevel(),
-			player.getUUID(), packet.target(), packet.pingTypeId(), arrivalTick, expiresAtTick, recipients);
+			player.getUUID(), requestedTarget, requestedPingType, arrivalTick, expiresAtTick, recipients,
+			properties, (committed, finalType, audienceOwner, audience, intents) ->
+				PresentationServer.admit(server, player, committed, finalType, audience, intents));
 
 		if (!outcome.isAccepted()) {
 			final var reason = outcome.rejectReason().orElseThrow();
 
 			LOGGER.debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, reason));
-			sendReject(player, requestId, MarkerRequestKind.CREATE, reason);
+			PresentationServer.rejected(player, requestId, MarkerRequestKind.CREATE, reason);
 			return;
 		}
 
 		final var creation = outcome.creation().orElseThrow();
 		final var marker = creation.marker();
-		final var targetName = outcome.targetName().orElseThrow();
 
 		LOGGER.debug(() -> "marker create accepted: requestId=%d markerId=%d kind=%s targetType=%s pingType=%s recipients=%d".formatted(
 			requestId,
@@ -478,12 +683,10 @@ public class ServerCore {
 			marker.pingType().id(),
 			marker.recipients().size()));
 
-		// Fixed ordering for every accepted marker: first the created packet
-		// (marker, authoritative name, and authoritative owner profile name),
-		// then the winner changes. Chat is emitted client-side from the packet,
-		// so each recipient uses its selected language exactly once.
-		sendMarkerCreated(playerList, marker, targetName, player.getGameProfile().getName());
-		sendWinnerChanges(playerList, creation.winnerChanges(), null);
+		// Basic name and details are projected independently for every negotiated recipient.
+		PresentationServer.created(server, marker, outcome.targetName().orElseThrow(),
+			player.getGameProfile().getName(), outcome.sourceSeeds());
+		sendPresentationWinnerChanges(playerList, creation.winnerChanges(), null);
 	}
 
 	/**
@@ -493,17 +696,68 @@ public class ServerCore {
 	 * rate-limited, matching the established legacy convention.
 	 */
 	public static void onMarkerRemove(MinecraftServer server, ServerPlayer player, MarkerRemoveC2SPacket packet) {
-		ensureMarkerStore(server);
+		// This legacy ingress is disabled; the negotiated presentation route calls the private adjudicator.
+	}
 
-		if (packet.isCorrupt()) {
-			final long requestId = packet.markerId() != null ? packet.markerId().value() : 0L;
+	/** Immediate dedicated create; no queued retry, SECTION intent or client-supplied audience. */
+	public static InventoryBackend.Created createInventory(MinecraftServer server, ServerPlayer player,
+		InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
+		if (player == null || !server.isSameThread()) return new InventoryBackend.Created(null, MarkerRejectReason.INVALID_REQUEST);
+		ensureMarkerStore(server);
+		PLAYER_RATES.putIfAbsent(player.getUUID(), new RateLimiter());
+		if (SERVER_CONFIG.getRateLimit() > 0 && PLAYER_RATES.get(player.getUUID()).checkExceeded())
+			return new InventoryBackend.Created(null, MarkerRejectReason.RATE_LIMITED);
+		String channel = PLAYER_CHANNELS.getOrDefault(player.getUUID(), "");
+		ChannelMode mode = SERVER_CONFIG.getDefaultChannelMode();
+		if (channel.isEmpty() && (mode == ChannelMode.DISABLED || mode == ChannelMode.TEAM_ONLY && !TeamContextHandler.hasTeam(player)))
+			return new InventoryBackend.Created(null, MarkerRejectReason.CHANNEL_DISABLED);
+		List<UUID> audience = snapshotRecipients(server.getPlayerList(), player, channel, mode);
+		long now = server.getTickCount();
+		var outcome = markerService(server).createDedicated(player.serverLevel(), player.getUUID(), frozen.target(), frozen.defaultPingType(),
+			now, now + SERVER_CONFIG.getSyncDuration() * (long) TICKS_PER_SECOND, audience, (target, type, owner, recipients, intents) -> {
+				var policy = PresentationServer.inventoryPolicy(owner).orElse(null);
+				MarkerRejectReason rejection = policy == null || !policy.types().contains(type) ? MarkerRejectReason.INVALID_REQUEST : admission.prepare(target, type, recipients);
+				return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of()) : MarkerCreationService.AdmissionResult.rejected(rejection);
+			});
+		if (!outcome.isAccepted()) return new InventoryBackend.Created(null, outcome.rejectReason().orElseThrow());
+		var creation = outcome.creation().orElseThrow();
+		// Committed storage only: the backend installs the tracking sidecar and
+		// publishes the CREATED/winner changes after it exists.
+		return new InventoryBackend.Created(creation.marker(), null, outcome.targetName().orElseThrow(), creation.winnerChanges());
+	}
+
+	/**
+	 * Committed dedicated publication. The tracking sidecar already exists, so
+	 * the atomic initial projects the inventory receipt kind. Storage is
+	 * committed: a publication failure is logged and never becomes a retryable
+	 * rejection, and the existing Basic-known-recipient gate still precedes
+	 * every inventory data frame.
+	 */
+	public static void publishInventoryCreated(MinecraftServer server, InventoryBackend.Created created) {
+		if (created == null || created.marker() == null) return;
+		ServerPlayer owner = server.getPlayerList().getPlayer(created.marker().owner());
+		if (owner == null) return;
+		try {
+			PresentationServer.created(server, created.marker(), created.authoritativeName(), owner.getGameProfile().getName());
+			sendPresentationWinnerChanges(server.getPlayerList(), created.winnerChanges(), null);
+		} catch (RuntimeException | LinkageError deliveryFailure) {
+			RateLimitedDiagnostics.error("inventory-create-publish", "server-marker",
+				() -> "inventory create publication failed after commit: marker=" + created.marker()
+					+ " winnerChanges=" + created.winnerChanges(), deliveryFailure);
+		}
+	}
+
+	private static void onMarkerRemove(MinecraftServer server, ServerPlayer player, MarkerId requestedMarkerId) {
+		ensureMarkerStore(server);
+		if (requestedMarkerId == null) {
+			final long requestId = 0L;
 
 			LOGGER.debug(() -> "marker remove rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.INVALID_REQUEST));
-			sendReject(player, requestId, MarkerRequestKind.REMOVE, MarkerRejectReason.INVALID_REQUEST);
+			PresentationServer.rejected(player, requestId, MarkerRequestKind.REMOVE, MarkerRejectReason.INVALID_REQUEST);
 			return;
 		}
 
-		final var markerId = packet.markerId();
+		final var markerId = requestedMarkerId;
 		final var result = markerStore().removeOwned(player.getUUID(), markerId);
 
 		switch (result.status()) {
@@ -512,16 +766,17 @@ public class ServerCore {
 				releaseExternal(server, removal.marker());
 
 				LOGGER.debug(() -> "marker remove accepted: markerId=%d reason=%s".formatted(markerId.value(), removal.reason()));
-				sendMarkerRemoved(server.getPlayerList(), removal, null);
-				sendWinnerChanges(server.getPlayerList(), result.winnerChanges(), null);
+				PresentationServer.forget(removal.marker().id());
+				sendPresentationRemoved(server.getPlayerList(), removal, null);
+				sendPresentationWinnerChanges(server.getPlayerList(), result.winnerChanges(), null);
 			}
 			case NOT_FOUND -> {
 				LOGGER.debug(() -> "marker remove rejected: requestId=%d reason=%s".formatted(markerId.value(), MarkerRejectReason.NOT_FOUND));
-				sendReject(player, markerId.value(), MarkerRequestKind.REMOVE, MarkerRejectReason.NOT_FOUND);
+				PresentationServer.rejected(player, markerId.value(), MarkerRequestKind.REMOVE, MarkerRejectReason.NOT_FOUND);
 			}
 			case NOT_OWNER -> {
 				LOGGER.debug(() -> "marker remove rejected: requestId=%d reason=%s".formatted(markerId.value(), MarkerRejectReason.NOT_OWNER));
-				sendReject(player, markerId.value(), MarkerRequestKind.REMOVE, MarkerRejectReason.NOT_OWNER);
+				PresentationServer.rejected(player, markerId.value(), MarkerRequestKind.REMOVE, MarkerRejectReason.NOT_OWNER);
 			}
 		}
 	}
@@ -537,7 +792,9 @@ public class ServerCore {
 			ensureMarkerStore(server);
 		}
 
-		final var batch = markerStore().expire(server.getTickCount());
+		final var store = markerStore();
+		PresentationServer.tick(server, store);
+		final var batch = store.expire(server.getTickCount());
 
 		final var playerList = server.getPlayerList();
 
@@ -547,15 +804,23 @@ public class ServerCore {
 
 			for (final var removal : batch.removals()) {
 				releaseExternal(server, removal.marker());
-				sendMarkerRemoved(playerList, removal, null);
+				PresentationServer.forget(removal.marker().id());
+				for (UUID recipientId : removal.marker().recipients()) {
+					ServerPlayer recipient = playerList.getPlayer(recipientId);
+					if (recipient != null) PresentationServer.removed(recipient, removal.marker().id(), removal.reason());
+				}
 			}
-
-			sendWinnerChanges(playerList, batch.winnerChanges(), null);
+			for (MarkerWinnerChange change : batch.winnerChanges()) {
+				ServerPlayer recipient = playerList.getPlayer(change.recipientId());
+				if (recipient != null) PresentationServer.winner(recipient, change.targetKey(), change.currentWinner());
+			}
 		}
 
 		if (server.getTickCount() % EXTERNAL_REFRESH_INTERVAL_TICKS == 0) {
 			refreshExternalMarkers(server);
 		}
+		InventoryServer.tick(server);
+		BudgetDelayMonitoring.finishTick(server);
 	}
 
 	/**
@@ -576,10 +841,18 @@ public class ServerCore {
 
 		for (final var removal : removed.removals()) {
 			releaseExternal(server, removal.marker());
-			sendMarkerRemoved(playerList, removal, player.getUUID());
+			PresentationServer.forget(removal.marker().id());
+			for (UUID recipientId : removal.marker().recipients()) {
+				if (recipientId.equals(player.getUUID())) continue;
+				ServerPlayer recipient = playerList.getPlayer(recipientId);
+				if (recipient != null) PresentationServer.removed(recipient, removal.marker().id(), removal.reason());
+			}
 		}
-
-		sendWinnerChanges(playerList, removed.winnerChanges(), player.getUUID());
+		for (MarkerWinnerChange change : removed.winnerChanges()) {
+			if (change.recipientId().equals(player.getUUID())) continue;
+			ServerPlayer recipient = playerList.getPlayer(change.recipientId());
+			if (recipient != null) PresentationServer.winner(recipient, change.targetKey(), change.currentWinner());
+		}
 
 		final var dropped = store.forgetRecipient(player.getUUID());
 
@@ -593,6 +866,8 @@ public class ServerCore {
 		PLAYER_CHANNELS.remove(player.getUUID());
 		PLAYER_RATES.remove(player.getUUID());
 		SYNC_DURATION_POLICY.forget(player.getUUID());
+		PresentationServer.disconnect(player.getUUID());
+		InventoryServer.disconnect(player.getUUID());
 	}
 
 	/**
@@ -604,7 +879,6 @@ public class ServerCore {
 		final var store = markerStore();
 		final var registry = ExternalBlockServerProviders.registry();
 		final var playerList = server.getPlayerList();
-		final var nameResolver = new MinecraftTargetNameResolver(server);
 
 		for (final ServerMarker marker : store.allMarkers()) {
 			if (!(marker.target() instanceof Target.ExternalBlockTarget external)) {
@@ -622,7 +896,10 @@ public class ServerCore {
 			if (result instanceof ExternalBlockServerProvider.RefreshResult.Available available) {
 				try {
 					sameTargetKey = marker.targetKey().equals(nx.pingwheel.common.marker.TargetKey.from(available.target()));
-				} catch (RuntimeException ignored) {
+				} catch (RuntimeException invalidRefresh) {
+					RateLimitedDiagnostics.warn("external-marker-refresh-key", external.providerId(),
+						() -> "markerId=" + marker.id() + " committedTarget=" + external
+							+ " refreshedTarget=" + available.target(), invalidRefresh);
 					sameTargetKey = false;
 				}
 			}
@@ -651,11 +928,7 @@ public class ServerCore {
 					continue;
 				}
 
-				ServerPlayer owner = playerList.getPlayer(updated.owner());
-				if (owner != null) {
-					TargetNameJson targetName = nameResolver.resolveName(updated.owner(), updated.target());
-					sendMarkerCreated(playerList, updated, targetName, owner.getGameProfile().getName());
-				}
+				PresentationServer.updated(server, updated);
 
 				continue;
 			}
@@ -664,8 +937,9 @@ public class ServerCore {
 			if (removalResult.status() == nx.pingwheel.common.marker.MarkerRemovalResult.Status.REMOVED) {
 				final var removal = removalResult.removal().orElseThrow();
 				releaseExternal(server, removal.marker());
-				sendMarkerRemoved(playerList, removal, null);
-				sendWinnerChanges(playerList, removalResult.winnerChanges(), null);
+				PresentationServer.forget(removal.marker().id());
+				sendPresentationRemoved(playerList, removal, null);
+				sendPresentationWinnerChanges(playerList, removalResult.winnerChanges(), null);
 			}
 		}
 	}
@@ -680,6 +954,7 @@ public class ServerCore {
 	}
 
 	private static void releaseExternal(MinecraftServer server, ServerMarker marker) {
+		InventoryServer.remove(marker.id());
 		if (marker.target() instanceof Target.ExternalBlockTarget external) {
 			ExternalBlockServerProviders.registry().release(
 				server, external, Long.toString(marker.id().value()));
@@ -786,6 +1061,22 @@ public class ServerCore {
 				IPlatformNetworkService.INSTANCE.sendToClient(
 					new MarkerWinnerChangedS2CPacket(change.targetKey(), change.currentWinner()), recipient);
 			}
+		}
+	}
+
+	private static void sendPresentationRemoved(PlayerList playerList, MarkerRemoval removal, UUID excluded) {
+		for (UUID recipientId : removal.marker().recipients()) {
+			if (excluded != null && excluded.equals(recipientId)) continue;
+			ServerPlayer recipient = playerList.getPlayer(recipientId);
+			if (recipient != null) PresentationServer.removed(recipient, removal.marker().id(), removal.reason());
+		}
+	}
+
+	private static void sendPresentationWinnerChanges(PlayerList playerList, List<MarkerWinnerChange> changes, UUID excluded) {
+		for (MarkerWinnerChange change : changes) {
+			if (excluded != null && excluded.equals(change.recipientId())) continue;
+			ServerPlayer recipient = playerList.getPlayer(change.recipientId());
+			if (recipient != null) PresentationServer.winner(recipient, change.targetKey(), change.currentWinner());
 		}
 	}
 

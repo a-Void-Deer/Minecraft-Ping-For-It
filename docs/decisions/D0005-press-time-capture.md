@@ -10,12 +10,20 @@ Preserve press-time intent across synchronous and asynchronous completion.
 [Capture](../architecture/picking/capture.md) owns the sampling, target locking,
 release outcomes and actual-wheel-open boundary;
 [wheel interaction](../architecture/picking/wheel.md) owns an opened wheel's
-timeout and selection behavior.
+selection and cancellation behavior. The confirmed Precise live-candidate
+exception is recorded in
+[D0009](D0009-precise-live-candidate-capture.md): only the Precise branch
+re-casts while it is active, and ordinary press-time freezing is unchanged.
 
 Allow only the established narrow deferred-capture exception under
 [long-press compatibility](../architecture/input/long-press-compatibility.md).
 Its sequencing and qualifying-dispatch rules preserve single interaction
 ownership rather than introducing a queue of creates.
+
+The repeated short-press Danger derivation is a client input policy over
+ordinary creates rather than another capture-timing exception: it never delays
+the first short press, reuses that interaction's frozen capture, and is owned by
+[double-click Danger](../architecture/input/double-click-danger.md).
 
 ## Rationale
 
@@ -23,25 +31,31 @@ Press-time ray capture preserves the user's input intent across camera and
 target movement. It also makes synchronous and asynchronous capture obey the
 same sampling rule. Delaying only the narrow compatibility capture prevents
 parallel interaction ownership while allowing the established compatibility
-sequence. Tying wheel timeout to actual presentation avoids consuming a UI
-duration before the wheel exists.
+sequence.
 
 ## Why not other approaches
 
-- Do not raycast on release or wheel movement: that can retarget the action.
+- Do not raycast on release, and do not retarget an ordinary press-frozen action
+  on wheel movement: that can change the action the player started. The
+  confirmed Precise live-capture exception is recorded in
+  [D0009](D0009-precise-live-candidate-capture.md).
 - Do not let an async callback read the current camera: completion timing would
   change the captured intent.
-- Do not start a second capture while the first is pending: two interactions
-  would compete for ownership and dispatch.
+- Do not let two captures both hold interaction ownership: an ordinary fresh
+  press atomically replaces the prior token, while only the narrow compatibility
+  path defers a press without starting its capture.
 - Do not freeze deferred range/policy at the raw second press: those settings
   are read when the deferred capture actually starts.
 - Do not treat elapsed threshold as an opened wheel: opening requires a ready
   capture and a held present frame.
+- Do not delay the first short press to detect a repeat: a repeated-press
+  gesture is derived from ordinary creates, so it cannot change the first
+  action's timing or target.
 
 ## Consequences
 
 Capture state must retain a token, frozen ray and asynchronous completion
-ownership. Release, wheel selection, cancellation and timeout consume that
+ownership. Release, wheel selection and cancellation consume that
 context and never initiate a new selection ray. A stale callback must be
 ignored or abandon its exact interaction without affecting a newer one.
 
@@ -50,8 +64,9 @@ ignored or abandon its exact interaction without affecting a newer one.
 [Capture](../architecture/picking/capture.md),
 [long-press timing](../architecture/input/long-press.md),
 [long-press compatibility](../architecture/input/long-press-compatibility.md),
+[double-click Danger](../architecture/input/double-click-danger.md),
 [wheel](../architecture/picking/wheel.md), [target model](../architecture/identity/target_model.md), and
 [server authority](D0004-server-authority.md).
 
 Coverage and pending integration evidence are owned by
-[verification](../testing/verification.md#capture-wheel-and-cancellation).
+[verification](../testing/verification/interaction.md#capture-wheel-and-cancellation).
