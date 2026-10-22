@@ -7,6 +7,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
 import nx.pingwheel.common.domain.PingType;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Builds ping chat lines. The established three-argument form remains the
@@ -111,10 +114,10 @@ public final class PingChatBuilder {
 	 * @param targetName the trusted target name component
 	 */
 	public static Component build(
-		String template, String playerName, PingType pingType, Component targetName
+		@Nullable String template, String playerName, PingType pingType, Component targetName
 	) {
+		if (template == null) return build(playerName, pingType, targetName);
 		try {
-			Objects.requireNonNull(template, "template");
 			Objects.requireNonNull(playerName, "playerName");
 			Objects.requireNonNull(pingType, "pingType");
 			Objects.requireNonNull(targetName, "targetName");
@@ -138,7 +141,7 @@ public final class PingChatBuilder {
 					int close = template.indexOf('}', index + 1);
 
 					if (close < 0) {
-						throw new IllegalArgumentException("unmatched template opening brace");
+						return rejectedTemplate("unmatched-opening-brace", playerName, pingType, targetName);
 					}
 
 					appendLiteral(message, literal);
@@ -156,7 +159,7 @@ public final class PingChatBuilder {
 							message.append(targetName);
 							hasTargetName = true;
 						}
-						default -> throw new IllegalArgumentException("unknown template placeholder");
+						default -> { return rejectedTemplate("unknown-placeholder", playerName, pingType, targetName); }
 					}
 
 					index = close + 1;
@@ -170,7 +173,7 @@ public final class PingChatBuilder {
 						continue;
 					}
 
-					throw new IllegalArgumentException("unmatched template closing brace");
+					return rejectedTemplate("unmatched-closing-brace", playerName, pingType, targetName);
 				}
 
 				literal.append(current);
@@ -180,13 +183,19 @@ public final class PingChatBuilder {
 			appendLiteral(message, literal);
 
 			if (!hasPlayerName || !hasPingType || !hasTargetName) {
-				return build(playerName, pingType, targetName);
+				return rejectedTemplate("missing-placeholder", playerName, pingType, targetName);
 			}
 
 			return message;
-		} catch (RuntimeException ignored) {
+		} catch (RuntimeException unavailable) {
+			Diagnostics.warn("chat/whole-template-build", "template", () -> "using legacy template", unavailable);
 			return build(playerName, pingType, targetName);
 		}
+	}
+
+	private static Component rejectedTemplate(String reason, String playerName, PingType pingType, Component targetName) {
+		Diagnostics.event(Level.DEBUG, "chat/whole-template", "template", reason, () -> "using legacy template");
+		return build(playerName, pingType, targetName);
 	}
 
 	private static void appendLiteral(MutableComponent message, StringBuilder literal) {

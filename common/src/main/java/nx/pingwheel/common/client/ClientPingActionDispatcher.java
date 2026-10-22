@@ -5,6 +5,8 @@ import java.util.Objects;
 
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
@@ -67,7 +69,7 @@ public final class ClientPingActionDispatcher {
 	private final PingInteractionLogger logger;
 	private final CreateRequestTracker createRequestTracker;
 	private final ClientCreateRateLimiter createRateLimiter;
-	private final ClientPresentation presentation;
+	private final @Nullable ClientPresentation presentation;
 
 	public ClientPingActionDispatcher(
 		PacketSender packetSender,
@@ -86,7 +88,7 @@ public final class ClientPingActionDispatcher {
 		PingInteractionLogger logger,
 		CreateRequestTracker createRequestTracker,
 		ClientCreateRateLimiter createRateLimiter,
-		ClientPresentation presentation
+		@Nullable ClientPresentation presentation
 	) {
 		this.packetSender = Objects.requireNonNull(packetSender, "packetSender");
 		this.errorSink = Objects.requireNonNull(errorSink, "errorSink");
@@ -158,17 +160,23 @@ public final class ClientPingActionDispatcher {
 				: PresentationC2SPacket.create(presentation.epoch(), requestId, target, create.pingType().id(), properties));
 		} catch (RuntimeException failed) {
 			createRequestTracker.failedDispatch(attempt);
+			Diagnostics.warn("client-send/create", "transport",
+				() -> "requestId=" + requestId + " kind=" + target.kind() + " pingType=" + create.pingType().id(), failed);
 			return DispatchOutcome.TRANSPORT_FAILED;
 		}
 		logger.debug("dispatch create: requestId={} kind={} pingType={}", requestId, target.kind(), create.pingType().id());
 		return DispatchOutcome.CREATE_SENT;
 	}
-	public ClientInventory.DispatchOutcome dispatchInventory(InventoryC2SPacket packet) {
+	public ClientInventory.DispatchOutcome dispatchInventory(@Nullable InventoryC2SPacket packet) {
 		if (packet == null || packet.isCorrupt() || packet.kind() != InventoryC2SPacket.Kind.SELECT || presentation == null || !presentation.ready()
 			|| packet.presentationEpoch() != presentation.epoch() || packet.view() != presentation.sessionView()) return ClientInventory.DispatchOutcome.NOT_READY;
 		if (!createRateLimiter.tryAcquire()) return ClientInventory.DispatchOutcome.THROTTLED;
 		try { packetSender.sendToServer(packet); }
-		catch (RuntimeException failed) { return ClientInventory.DispatchOutcome.TRANSPORT_FAILED; }
+		catch (RuntimeException failed) {
+			Diagnostics.warn("client-send/select", "transport",
+				() -> "commitId=" + packet.commitId() + " epoch=" + packet.presentationEpoch() + " view=" + packet.view(), failed);
+			return ClientInventory.DispatchOutcome.TRANSPORT_FAILED;
+		}
 		createRequestTracker.onCreateDispatched(CreateRequestTracker.Route.INVENTORY, packet.commitId());
 		return ClientInventory.DispatchOutcome.SENT;
 	}

@@ -17,6 +17,7 @@ import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.domain.EntityLocator;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry;
 import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
@@ -312,7 +313,9 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 			}
 
 			return name;
-		} catch (RuntimeException e) {
+		} catch (RuntimeException failure) {
+			Diagnostics.warn("marker-target-name-resolve", nameResolver.getClass().getName(),
+				() -> "targetKind=" + normalized.kind() + " target=" + normalized, failure);
 			return FAIL_SAFE_NAME;
 		}
 	}

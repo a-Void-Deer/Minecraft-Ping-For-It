@@ -115,6 +115,7 @@ import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
 import nx.pingwheel.common.util.InputUtils;
 import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.math.RaycastPolicy;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -197,7 +198,7 @@ public final class ClientPingRuntime {
 			return Game == null || Game.level == null ? Optional.empty()
 				: ContentChatComposer.itemDisplayDecoder(Game.level.registryAccess()).apply(json);
 		}
-		default String template(PingType type) { return null; }
+		default @Nullable String template(PingType type) { return null; }
 		/**
 		 * The full localized content-template source. The default adapts the
 		 * legacy single-template port, so existing feedback implementations keep
@@ -209,7 +210,10 @@ public final class ClientPingRuntime {
 			Minecraft game = Game;
 			if (game == null || game.level == null || game.player == null) return;
 			try { game.player.displayClientMessage(message, false); }
-			catch (RuntimeException unavailable) { /* No log or ordinary fallback for a content receipt. */ }
+			catch (RuntimeException unavailable) {
+				nx.pingwheel.common.diagnostics.Diagnostics.warn("chat/content-display", "client",
+					() -> "accepted content receipt display failed", unavailable);
+			}
 		}
 	}
 	private final InteractionTimeSource timeSource;
@@ -1499,6 +1503,8 @@ public final class ClientPingRuntime {
 				var display = nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.resolve(row.itemId(), row.label(), row.displayJson());
 				return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(display.name(), display.stack());
 			} catch (RuntimeException | LinkageError unavailable) {
+				nx.pingwheel.common.diagnostics.Diagnostics.warn("selector/inventory-row-display", "client",
+					() -> "itemId=" + row.itemId() + " label=" + row.label(), unavailable);
 				return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(Component.translatable(row.label()));
 			}
 		}
@@ -2243,7 +2249,7 @@ public final class ClientPingRuntime {
 				return;
 			}
 
-			String template;
+			@Nullable String template;
 
 			try {
 				Language language = Language.getInstance();
@@ -2255,7 +2261,9 @@ public final class ClientPingRuntime {
 						game.getResourceManager(),
 						key));
 				template = language.getOrDefault(templateKey);
-			} catch (RuntimeException ignored) {
+			} catch (RuntimeException unavailable) {
+				nx.pingwheel.common.diagnostics.Diagnostics.warn("chat/template-lookup", "client",
+					() -> "pingType=" + pingTypeId, unavailable);
 				template = null;
 			}
 
@@ -2263,7 +2271,8 @@ public final class ClientPingRuntime {
 				template, ownerName, pingType.get(), resolvedTargetName);
 			game.player.displayClientMessage(message, false);
 		} catch (RuntimeException exception) {
-			logger.debugException("marker chat display failed: malformed server payload", exception);
+			nx.pingwheel.common.diagnostics.Diagnostics.warn("chat/marker-display", "client",
+				() -> "markerId=" + snapshot.id().value(), exception);
 		}
 	}
 

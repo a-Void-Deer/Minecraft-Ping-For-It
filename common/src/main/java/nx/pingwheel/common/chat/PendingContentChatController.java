@@ -14,6 +14,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.network.InventoryS2CPacket;
@@ -201,6 +202,8 @@ public final class PendingContentChatController {
 					? formatter.properties(author, target, inputs.projection(), capture.content().selectedRefs())
 					: formatter.inventory(author, target, inputs.tracking().entries().getFirst());
 			} catch (RuntimeException unavailable) {
+				Diagnostics.warn("chat/content-compose", "receipt",
+					() -> "markerId=" + id.value() + " kind=" + capture.content().kind() + "; receipt remains pending", unavailable);
 				return false; // No partial or ordinary fallback on formatting failure.
 			}
 			if (message == null || message.isEmpty() || pending.get(id) != capture) return false;

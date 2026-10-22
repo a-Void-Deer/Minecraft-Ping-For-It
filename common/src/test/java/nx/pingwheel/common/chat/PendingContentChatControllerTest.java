@@ -27,6 +27,8 @@ import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.testing.DiagnosticLogCapture;
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -348,6 +350,34 @@ class PendingContentChatControllerTest {
 		assertThrows(IllegalStateException.class, () -> f.controller.attempt(ID));
 		assertEquals(0, f.controller.pendingCount());
 		assertFalse(f.controller.attempt(ID));
+	}
+
+	@Test void formattingFailureIsDiagnosedOnceWhilePendingCanRetryAndSinkFailureStillEscapes() {
+		try (var logs = new DiagnosticLogCapture()) {
+			Fixture f = new Fixture();
+			LifecycleFormatter formatter = new LifecycleFormatter();
+			f.controller = new PendingContentChatController(4, f::current, formatter, message -> {
+				throw new IllegalStateException("sink-sentinel");
+			});
+			f.projection(ID, namedCustom("Selected", true, false));
+			assertTrue(f.begin(PresentationReceiptContent.properties(List.of(CUSTOM))));
+			formatter.onProperties = () -> {
+				throw new IllegalStateException("formatter-sentinel", new RuntimeException("formatter-root-sentinel"));
+			};
+			assertFalse(f.controller.attempt(ID));
+			assertFalse(f.controller.attempt(ID));
+			assertEquals(1, f.controller.pendingCount());
+			assertTrue(f.sent.isEmpty());
+			assertEquals(1, logs.operation("chat/content-compose").size());
+			var event = logs.operation("chat/content-compose").getFirst();
+			assertEquals(Level.WARN, event.getLevel());
+			assertNull(event.getThrown());
+			assertTrue(event.getMessage().getFormattedMessage().contains("formatter-root-sentinel"));
+			formatter.onProperties = () -> {};
+			assertEquals("sink-sentinel", assertThrows(IllegalStateException.class, () -> f.controller.attempt(ID)).getMessage());
+			assertEquals(0, f.controller.pendingCount());
+			assertFalse(f.controller.attempt(ID));
+		}
 	}
 
 	@Test void composerRevocationOrValueReplacementIsRevalidatedBeforeEmission() {

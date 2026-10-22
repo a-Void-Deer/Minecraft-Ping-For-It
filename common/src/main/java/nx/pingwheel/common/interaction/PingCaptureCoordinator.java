@@ -57,7 +57,7 @@ public final class PingCaptureCoordinator {
 	 * frozen capture (if any) untouched.
 	 *
 	 * <p>A {@link RuntimeException} thrown by the resolver is contained here:
-	 * a safe debug message is logged (token sequence, target kind, dimension id,
+	 * a controlled warning is logged (token sequence, target kind, dimension id,
 	 * and exception simple class name only) and {@link Optional#empty()} is
 	 * returned, leaving the token current and uncompleted so a caller may retry.
 	 */
@@ -113,7 +113,8 @@ public final class PingCaptureCoordinator {
 			// Contain the resolver failure: never propagate resolver internals, never
 			// complete the token, and never log the exception message or any target
 			// identity beyond the safe kind/dimension fields.
-			logger.debug("capture reject: resolve failure token={} kind={} dimension={} cause={}",
+			logger.warnRestricted("capture/resolve", "resolver-failure",
+				"capture reject: resolve failure token={} kind={} dimension={} cause={}",
 				token.sequence(), snapshot.target().kind(), snapshot.target().dimensionId(),
 				failure.getClass().getSimpleName());
 			return Optional.empty();
@@ -129,7 +130,8 @@ public final class PingCaptureCoordinator {
 			try {
 				selectorCandidates = Optional.of(candidates.orElseThrow().finish(snapshot, resolved, targetResolver));
 			} catch (RuntimeException failure) {
-				logger.debug("selector capture unavailable: token={} cause={}",
+				logger.warnRestricted("capture/finalize-candidates", "finalization-failure",
+					"selector capture unavailable: token={} cause={}",
 					token.sequence(), failure.getClass().getSimpleName());
 			}
 		}

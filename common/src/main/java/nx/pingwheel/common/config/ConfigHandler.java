@@ -12,8 +12,10 @@ import lombok.Getter;
 import lombok.SneakyThrows;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSettings;
-import nx.pingwheel.common.util.SafeExceptionReport;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.platform.IPlatformContextService;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -151,9 +153,8 @@ public class ConfigHandler <T extends IConfig> {
 
 	private boolean saveInternal(boolean force) {
 		if (saveProtection != SaveProtection.NONE) {
-			LOGGER.warn(
-				"Config save skipped; type=%s path=%s reason=%s; the original file was preserved"
-					.formatted(configType.getSimpleName(), configPath, saveProtection.description));
+			Diagnostics.event(Level.DEBUG, "config/save", configType.getName(), "protected",
+				() -> "path=" + configPath + " reason=" + saveProtection.description + "; original file preserved");
 			return false;
 		}
 
@@ -169,9 +170,7 @@ public class ConfigHandler <T extends IConfig> {
 			config.onUpdate();
 			writeSerializedConfig(serializeConfig());
 		} catch (Exception e) {
-			LOGGER.warn(
-				"Config save failed; type=%s path=%s reason=%s"
-					.formatted(configType.getSimpleName(), configPath, safeLogReason(e)));
+			logFailure("save", "config save failed", e);
 			return false;
 		}
 
@@ -223,15 +222,13 @@ public class ConfigHandler <T extends IConfig> {
 			}
 		} catch (Exception e) {
 			config = null;
-			LOGGER.error(
-				"Config load failed; type=%s path=%s reason=%s"
-					.formatted(configType.getSimpleName(), configPath, safeLogReason(e)));
+			Diagnostics.error("config/load", configType.getName(),
+				() -> "path=" + configPath + " defaults will be restored", e);
 		}
 
 		if (config == null) {
 			config = createDefaultConfig();
 			saveProtection = SaveProtection.NONE;
-			LOGGER.error("Config is broken -> reset to defaults");
 
 			save();
 			return;
@@ -243,7 +240,7 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	private void loadWithClientRecovery() {
-		byte[] originalBytes = null;
+		byte @Nullable [] originalBytes = null;
 
 		try {
 			originalBytes = Files.readAllBytes(configPath);
@@ -272,10 +269,10 @@ public class ConfigHandler <T extends IConfig> {
 		}
 	}
 
-	private void recoverClientConfig(byte[] originalBytes, Exception failure) {
+	private void recoverClientConfig(byte @Nullable [] originalBytes, Exception failure) {
 		pendingMigration = null;
 		String reason = safeReason(failure);
-		LOGGER.warn("Client config load failed; defaults will be restored; reason=" + safeLogReason(failure));
+		logFailure("load", "client defaults will be restored", failure);
 
 		BackupResult backup = backupOriginal(originalBytes);
 		config = createDefaultConfig();
@@ -283,9 +280,7 @@ public class ConfigHandler <T extends IConfig> {
 		if (backup.failure() != null) {
 			saveProtection = SaveProtection.INVALID_FILE;
 			configHash = config.hashCode();
-			LOGGER.warn(
-				"Client config backup failed; original file was preserved and defaults remain in memory; reason="
-					+ safeLogReason(backup.failure()));
+			logFailure("backup", "original file preserved; defaults remain in memory", backup.failure());
 			return;
 		}
 
@@ -295,13 +290,12 @@ public class ConfigHandler <T extends IConfig> {
 			writeSerializedConfig(header + serializeConfig());
 			configHash = config.hashCode();
 			saveProtection = SaveProtection.NONE;
-			LOGGER.warn("Client config was reset after load failure; backup was written");
+			Diagnostics.event(Level.DEBUG, "config/reset", configType.getName(), "recovered",
+				() -> "path=" + configPath + " backup=" + backup.path());
 		} catch (Exception writeFailure) {
 			saveProtection = SaveProtection.INVALID_FILE;
 			configHash = config.hashCode();
-			LOGGER.warn(
-				"Client config reset file could not be written; original backup is available; reason="
-					+ safeLogReason(writeFailure));
+			logFailure("reset", "reset file could not be written; original backup is available", writeFailure);
 		}
 	}
 
@@ -435,9 +429,8 @@ public class ConfigHandler <T extends IConfig> {
 				sourceBytes);
 		}
 
-		LOGGER.warn(
-			"Config version mismatch; type=%s path=%s configVersion=%s modVersion=%s"
-				.formatted(configType.getSimpleName(), configPath, configVersion, modVersion));
+		Diagnostics.event(Level.DEBUG, "config/version", configType.getName(), "mismatch",
+			() -> "path=" + configPath + " configVersion=" + configVersion + " modVersion=" + modVersion);
 
 		if (comparison > 0) {
 			return new VersionedConfig(root, configVersion, false, true, List.of(), sourceBytes);
@@ -813,9 +806,9 @@ public class ConfigHandler <T extends IConfig> {
 		config = createDefaultConfig();
 		configHash = config.hashCode();
 		saveProtection = SaveProtection.FUTURE_VERSION;
-		LOGGER.warn(
-			"Future config version rejected; type=%s path=%s configVersion=%s modVersion=%s; defaults are in memory and the file will not be rewritten"
-				.formatted(configType.getSimpleName(), configPath, configVersion, modVersion));
+		Diagnostics.event(Level.WARN, "config/load", configType.getName(), "future-version",
+			() -> "path=" + configPath + " configVersion=" + configVersion + " modVersion=" + modVersion
+				+ "; defaults in memory; original file preserved");
 	}
 
 	private boolean savePendingMigration() {
@@ -837,14 +830,8 @@ public class ConfigHandler <T extends IConfig> {
 			config.onUpdate();
 			writeSerializedConfig(serializeConfig(migration.root()));
 		} catch (Exception failure) {
-			LOGGER.warn(
-				"Config migration write failed; type=%s path=%s configVersion=%s modVersion=%s; the valid loaded config was retained and a later save will retry; reason=%s"
-					.formatted(
-						configType.getSimpleName(),
-						configPath,
-						migration.configVersion(),
-						modVersion,
-						safeLogReason(failure)));
+			logFailure("migration-write", "configVersion=" + migration.configVersion() + " modVersion=" + modVersion
+				+ "; valid loaded config retained; later save will retry", failure);
 			return false;
 		}
 
@@ -871,8 +858,8 @@ public class ConfigHandler <T extends IConfig> {
 		try {
 			currentBytes = Files.readAllBytes(configPath);
 		} catch (Exception failure) {
-			return discardStalePendingMigration(
-				"the config file could not be read; reason=" + safeLogReason(failure));
+			logFailure("migration-source-read", "pending migration discarded; reloading disk state", failure);
+			return discardStalePendingMigration("the config file could not be read");
 		}
 
 		if (!Arrays.equals(migration.sourceBytes(), currentBytes)) {
@@ -883,9 +870,8 @@ public class ConfigHandler <T extends IConfig> {
 
 	private boolean discardStalePendingMigration(String reason) {
 		pendingMigration = null;
-		LOGGER.warn(
-			"Pending config migration discarded; type=%s path=%s because the disk configuration changed; %s; reloading current disk state"
-				.formatted(configType.getSimpleName(), configPath, reason));
+		Diagnostics.event(Level.DEBUG, "config/migration", configType.getName(), "source-changed",
+			() -> "path=" + configPath + " reason=" + reason + "; reloading current disk state");
 		load();
 		return false;
 	}
@@ -896,9 +882,8 @@ public class ConfigHandler <T extends IConfig> {
 			return;
 		}
 
-		LOGGER.warn(
-			"Loaded config into memory; migration writeback is pending; type=%s path=%s"
-				.formatted(configType.getSimpleName(), configPath));
+		Diagnostics.event(Level.DEBUG, "config/migration", configType.getName(), "write-pending",
+			() -> "path=" + configPath + "; loaded config in memory; migration writeback pending");
 	}
 
 	private void writeSerializedConfig(String serialized) throws Exception {
@@ -940,7 +925,7 @@ public class ConfigHandler <T extends IConfig> {
 		}
 	}
 
-	private BackupResult backupOriginal(byte[] originalBytes) {
+	private BackupResult backupOriginal(byte @Nullable [] originalBytes) {
 		Path backupPath = uniqueSibling(".broken-" + UUID.randomUUID() + ".bak");
 
 		try {
@@ -955,8 +940,8 @@ public class ConfigHandler <T extends IConfig> {
 		} catch (Exception failure) {
 			try {
 				Files.deleteIfExists(backupPath);
-			} catch (IOException ignored) {
-				// Keep the original warning privacy-safe and do not mask the cause.
+			} catch (IOException cleanupFailure) {
+				Diagnostics.debug("config/backup-cleanup", configType.getName(), () -> "path=" + backupPath, cleanupFailure);
 			}
 			return new BackupResult(null, failure);
 		}
@@ -1001,12 +986,8 @@ public class ConfigHandler <T extends IConfig> {
 		return parserOrIoReason(failure);
 	}
 
-	private static String safeLogReason(Throwable failure) {
-		if (failure instanceof ConfigValidationException validationFailure) {
-			return sanitizeComment(validationFailure.safeSummary());
-		}
-
-		return sanitizeComment(SafeExceptionReport.format(failure).replaceAll("\\R+", " "));
+	private void logFailure(String operation, String context, @Nullable Throwable failure) {
+		Diagnostics.warn("config/" + operation, configType.getName(), () -> "path=" + configPath + " " + context, failure);
 	}
 
 	private static String parserOrIoReason(Throwable failure) {
@@ -1054,7 +1035,7 @@ public class ConfigHandler <T extends IConfig> {
 		return sanitized.toString().isBlank() ? "unknown" : sanitized.toString();
 	}
 
-	private record BackupResult(Path path, Exception failure) {}
+	private record BackupResult(@Nullable Path path, @Nullable Exception failure) {}
 
 	private record VersionedConfig(
 		JsonElement root,
