@@ -90,11 +90,39 @@ duplicate fallback render. Config recovery must preserve original bytes under
 
 ## Diagnostic detail and user feedback
 
-Keep detailed optional/render diagnostics lazy, bounded and rate-controlled,
+Unexpected failures and consequential degradation produce rate-controlled
+warnings that remain visible at an INFO threshold. The report identifies the
+failed operation and its known handling or affected capability.
+
+Report an exception at the boundary that consumes it into a fallback, rejection
+or disabled capability, while the original exception is still available. A
+significant degradation without an exception is considered a diagnostic event. Increasing a report's severity does not widen its
+permitted information: restricted capture diagnostics retain their established
+field restrictions.
+
+Keep detailed optional/render diagnostics bounded and rate-controlled,
 including complete exception details. Rate-controlled diagnostics may retain
 complete target, position, registry, class, material, component and payload
 details without redaction. Frequency limits must not be replaced by deleting
 the information needed to diagnose a failed optional integration.
+
+Diagnostic limits cover the final report, including context and exception
+relationships, with explicit truncation when a bound is reached. A formatted
+exception is not also submitted for a second, unbounded expansion. Disabled or
+suppressed reports do not evaluate detailed context. Admission state does not
+retain target objects, exception instances or deferred context across reports.
+
+General diagnostic windows isolate debug, warning and error capacity so that
+debug traffic cannot consume warning or error admission. A domain that owns a
+transition, heartbeat, once-only or accounting-cycle gate uses that gate without
+an additional general window. Observing a domain outcome and consuming a report
+opportunity are distinct: a disabled debug report must not hide a later warning
+transition. Domain reset and retry semantics remain with their topic owners.
+
+Diagnostic suppression or a recoverable diagnostic-output failure does not
+change authority, accounting, fallback, retry or marker lifetime. An admitted
+report attempt may consume its reporting opportunity even when output fails. Logging does not expand a business boundary's
+recoverable exception set.
 
 Do not add toast or action-bar feedback for rate or integration failures. The
 required local invalid-target message, including its color and chat output, is

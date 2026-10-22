@@ -32,6 +32,27 @@ admission or the no-op formatting bypass, and does not infer custom callbacks'
 internal DEBUG enablement. Shared production-helper evidence is inventoried in
 [shared exception diagnostics](integrations.md#shared-exception-diagnostics).
 
+`TargetNameDiagnosticsTest` covers the injected client entity-name lookup seam:
+expected absence returns the unknown name without a warning, while a throwing
+lookup keeps that fallback and repeated failures emit one warning retaining the
+original message and cause without an attached throwable. It does not exercise
+the real client-world getters, block/external lookup, server name encoding or
+the decoder's production logger admission.
+
+`OutlineDiagnosticsTest` covers common production runner and registry seams:
+throwing model claims allow the next adapter and a later retry, null outcomes
+and throwing observers retain the successful sibling result with independent
+once-only warnings, and a failed source ID or rejected duplicate cannot
+displace an accepted registration. Failure warnings retain the original cause
+in one bounded string without an attached throwable; a throwing sink consumes
+only the report opportunity, not later source attempts, and log-level changes do
+not reset an already emitted warning. `BlockPresentationResolverTest` also
+asserts cause-bearing warnings while a failed resolver leaves later resolution
+or the ordinary direct subject usable. These are headless source, resolver and
+logging seams, not render-frame or GPU execution. Optional Flywheel and Create
+diagnostic seams are inventoried under
+[optional rendering coverage](integrations.md#optional-rendering-structural-coverage).
+
 ## Selector overlay layout and frame rendering
 
 `SpatialOverlayRendererTimingTest` covers renderer timing models.

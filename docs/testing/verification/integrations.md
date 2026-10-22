@@ -16,14 +16,24 @@ string conversion, while fatal message-accessor failures propagate unchanged.
 Its logger seam receives one complete formatted string without a second
 throwable argument.
 
-`RateLimitedDiagnosticsTest` covers WARN/ERROR reports through a recording sink:
+`RateLimitedDiagnosticsTest` covers diagnostic reports through a recording sink:
 disabled-level laziness, duplicate suppression despite message/request churn,
 independent stage, scope, exception-type and source-location admissions, exact
 window recovery and clock wraparound, bounded capacity without active-entry
 eviction, counted low-frequency overflow summaries, bounded long fields and
-distinct long scopes, and concurrent duplicate admission. Recoverable context
+distinct long scopes, concurrent duplicate admission, and independent capacity
+and overflow accounting for debug, warning and error reports. A blocking context
+does not retain the admission lock. Recoverable context
 failures retain the original exception, recoverable sink failures remain
-fail-soft, and a fatal context failure propagates.
+fail-soft while consuming the admitted reporting opportunity, and a fatal
+context failure propagates.
+
+`DiagnosticsTest` covers shared admission through compatibility and direct
+entries, bounded exception-free degradation events, and domain-approved reports
+without a second window. Real-appender assertions cover a single bounded
+message with no attached throwable. An isolated-classloader seam exercises the
+diagnostic entry while platform classes are unavailable; it does not establish
+actual loader startup behavior.
 
 `GlobalExceptionLoggingTest` uses a real Log4j test appender to cover disabled
 DEBUG/WARN/ERROR helpers not reading throwable accessors and the disabled public
@@ -32,6 +42,7 @@ helpers and public rate-limited DEBUG/WARN/ERROR routes emit their intended
 levels, retaining
 context, original messages, causes, suppressed details and source frames in one
 bounded report without an attached throwable for additional logger rendering.
+The compatibility and direct entries share the same prefixed logging backend.
 The common real-appender fixtures install isolated limiter instances with a
 Log4j-backed test sink and restore the previous instances after capture; public
 static routes and bounded formatting remain exercised. This isolation is not
@@ -40,6 +51,28 @@ These are helper and test-configured logging seams, not deployed appender,
 layout, asynchronous logging, live provider, loader/Mixin or game-session
 evidence. They do not establish that every integration call site emits the
 required diagnostic details.
+
+## Optional failure diagnostics
+
+`IntegrationFailureDiagnosticsTest` captures shared-backend Log4j events for a
+linkage guard disabling once with its original cause, ordinary Sable failures
+sharing warning admission, and domain-approved Sable exceptions bypassing a
+second window. Its Distant Horizons completion case unwraps an asynchronous
+failure, reports its original cause, completes once with no hit, and lets a
+throwing completion callback propagate. These are direct guard, diagnostic and
+completion seams, not an installed Sable or Distant Horizons runtime, an actual
+asynchronous trace, loader startup or game-session evidence.
+
+`ExternalBlockRegistryDiagnosticsTest` covers throwing and null-result providers
+at validation, materialization, refresh, name, observation and candidate/committed
+read-source dispatch: warnings retain provider identity and the original cause
+or null-result event without an attached throwable, while the tested invalid,
+temporarily-unavailable and empty outcomes remain intact. Missing-provider and
+ordinary temporary refresh results stay quiet, and an `AssertionError` from
+refresh propagates. Cleanup failures still allow later provider and reference
+cleanup; a throwing member predicate denies access and reports its cause. These
+fixtures use fake providers and uninitialized server/level tokens, not live
+world validation or provider lifecycle evidence.
 
 ## Create presentation adapters
 
@@ -70,6 +103,28 @@ capacity reuses that pair with double promotion over extreme finite floats; an
 undemanded family field is neither read nor published, so the raw pair never
 leaks into the projection; and a throwing or linkage-failing raw accessor or a
 non-finite or negative raw value loses only its own field).
+Its diagnostic cases additionally cover a repeated cached-stress failure
+warning once while capacity stays observed and derived capacity stays
+unavailable; a receipt-getter failure still propagates before network access
+without a local report. `CreatePresentationCollectorBudgetTest` also asserts
+that a throwing member gate reports its cause once while its attempted member
+check stays paid and the member read remains unreached.
+
+`CreatePresentationKineticDiagnosticsTest` executes a copied compiled production
+kinetic method with the optional Create class symbol replaced by a controllable
+block-entity stand-in. Runtime or linkage failure in a public kinetic getter
+makes the whole kinetic result unavailable; a failed cached getter retains the
+successful sibling, and fatal getter errors propagate without a local report.
+Test-appender assertions retain causes and distinguish these consuming
+boundaries. This headless bytecode harness does not load a Create runtime or
+establish live getter, collector, mixin or block-entity behavior.
+
+The diagnostic cases in `CreatePresentationMixinPluginTest` and
+`CreatePreviewMixinPluginTest` cover a throwing bytecode-provider callback
+closing its gate with one cause-bearing warning, while an ordinary disabled
+version/mod gate remains silent and does not discover bytecode. These are
+injected discovery callbacks, not loader-startup or mixin-application evidence.
+
 `CreateMixinLoaderGateTest` goes beyond the constructed ASM node field-shape
 gates: it reads the already-resolved compile-only Create artifact as bytes and
 drives both production plugins headlessly through the real ModLauncher bytecode
@@ -130,6 +185,14 @@ owns the shared geometry coverage. Create-specific coverage exercises:
 These tests preserve whole-entity identity and exercise the non-optional engine
 boundaries. They do not constitute an in-game Create validation.
 
+`CreateContraptionNativeBoundsTest` exercises the production-used reflective
+lookup helper with stand-ins: a missing method or checked invocation failure
+reports its cause and leaves bounds unavailable, a wrong return shape remains
+unavailable, and runtime or fatal invocation causes propagate unchanged. The
+shell-loading failure case in `CreateContraptionRaycastAdapterTest` also asserts
+one bounded full report without an attached throwable. Neither seam exercises
+an installed Create contraption or its live native bounds.
+
 ## Sable integration coverage
 
 The linked [Sable integration](../../integrations/sable.md) topic remains the
@@ -184,8 +247,18 @@ provider-observation and diagnostic evidence:
   installs only its own face without changing the frozen ordinary face. It does
   not exercise an installed Sable client, live list/reflection access, server
   materialization, or inventory reads;
+- `SableObservationFailureDiagnosticsTest` drives the production observation
+  catch with an injected throwing reflective tracking-point stand-in: runtime
+  and linkage failures return temporary unavailability and emit one warning
+  retaining the original cause without an attached throwable, leaving existing
+  reference and entry counts intact; linkage additionally disables the shared
+  guard and makes a later refresh invalid. Its refresh-transition case reports a
+  warning after a debug-only state observation, suppresses the duplicate and
+  admits a different stable target without a second general window;
 - `SableRefreshLogGateTest` checks decision state for tested locator or reason
-  changes and duplicates, rather than a refresh operation or log sink;
+  changes and duplicates, disabled reporting observing state without consuming a
+  later warning, and removal or recovery permitting a new failure report. It
+  does not itself run a refresh operation or log sink;
 - `SableDiagnosticsTest` and `SableServerDiagnosticsTest` check selected event
   metadata and record fields, including same-throwable identity for a server
   exception and constructed-invalid or `LinkageError` cases;
@@ -193,7 +266,10 @@ provider-observation and diagnostic evidence:
   absent and diagnostic presence from explicit `logCaptureFallback` calls with
   a reason; and
 - `SablePresentationLogGateTest` checks cadence, capacity, repeated
-  failure-class key de-duplication, and throwable identity.
+  failure-class key de-duplication, and throwable identity. Its shared-backend
+  case covers a disabled debug status followed by one warning for repeated
+  presentation exceptions, retaining the first cause without an attached
+  throwable.
 
 These seams do not load a Sable runtime or establish live provider reflection
 (including the additive content membership discovery), materialization,
@@ -202,8 +278,10 @@ the client-side chunk and prediction gates of a provider-resolved physical
 block, a live multi-member content capability, or refresh, multiplayer,
 GUI, network or in-game behavior described by those topic sections.
 The registry, content resolver and stable-entry tests are narrow
-production-used seams with fake access and in-memory state, not live
-server/world evidence.
+production-used seams with fake access and in-memory state. The
+observation-failure fixture installs reflective stand-ins into uninitialized
+provider, server and level tokens; invoking that catch is not installed-Sable
+reflection, live server/world or tracking-point lifecycle evidence.
 The external model and fallback routes also resolve provider presentation
 independently; therefore this evidence cannot guarantee that provider-local
 multipart or subject-type decisions came from one immutable shared snapshot.
@@ -216,7 +294,11 @@ external exception to the shared-subject contract in
 Executable stand-in resolver tests cover paired-owner resolution, the facing
 relationship, powered owner, owner block-entity identity, and handled-empty
 results. Separate static guards cover the production registry identities and
-optional registration wiring. The stand-ins do not exercise real registry
+optional registration wiring. `SimulatedRegistryDiagnosticsTest` exercises the
+production-used lookup helper with injected callbacks: ordinary absence is
+silent, a throwing lookup returns unavailable and retries, and the warning
+retains the registry ID and original cause without an attached throwable.
+The stand-ins and injected callbacks do not exercise real registry
 lookup, and the static guards do not establish a running loader lifecycle, an
 installed Simulated runtime, or in-game presentation.
 
@@ -226,6 +308,40 @@ Executable common tests cover class loading with optional dependencies absent
 and the distinction between empty and positive geometry output. Separate
 coordinate-transform and environment-policy tests cover their own common
 behavioral seams.
+
+`FlywheelInstanceResolutionTest` exercises the production-used attempt-local
+resolution helper: failed and missing handles do not discard valid siblings,
+later attempts still run, and the immutable result retains the first original
+failure for a cause-bearing diagnostic without an attached throwable. It covers
+mixed and all-failed batches, not live Flywheel handle resolution.
+`CreateFlywheelGeometryAttemptTest` exercises the production-used attempt and
+model-loop seams with recording callbacks: mixed resolution followed by a
+zero-triangle or over-budget sibling stops before planning while retaining the
+first resolution failure and retrying the valid sibling on later attempts. A
+later model or terminal failure retains both original cause chains through a
+fresh wrapper without mutating either original exception, and supplied FAILED
+or RENDERED terminal outcomes stay unchanged. Each attempt selects one report,
+repeated identical reports are domain-suppressed without formatting either
+failure, and a subsequent clean attempt retains no earlier failure. These are
+headless attempt/model and diagnostic seams, not live Flywheel resolution,
+geometry emission, shared-buffer partial commits or GPU evidence.
+`FlywheelDiagnosticsTest` covers a DEBUG-disabled recovery still allowing the
+next warning transition, disabled warning levels preserving admission, and a
+throwing admitted sink consuming the reporting opportunity.
+`CreateEntityOutlineDiagnosticGateTest` covers the entity adapter's
+production-used admission gate: disabled-debug recovery, debounce and heartbeat,
+warning-level changes without resetting consumed admission, bounded retained
+state and teardown. This gate coverage does not execute the adapter's private
+full-report construction, dispatcher, mask scope or GPU path.
+
+`CreateEntityOutlineBackendProbeTest` exercises the production-used cached probe
+with injected class lookups: disabled WARN reads no message, cause or stack
+accessor, a suppressed report reads neither message nor cause, and admitted
+formatting happens after cached availability is published and outside the probe
+monitor. Concurrent requests perform one probe and share its availability;
+normal optional-class absence stays silent. Its bounded cause-bearing report
+has no attached throwable. These are probe and logging seams, not live backend
+discovery, visualization support, loader startup or entity dispatch.
 
 Static guards cover optional reflective registration, loader-specific host API
 bindings, integration wiring, and the optional visualization mixin's target and
@@ -243,7 +359,8 @@ and successful compilation are not substitutes for exercising them.
   the constructed ASM field-shape gate for the cached network accessor, the
   real-loader gate decisions over the actual Create archive bytes, the
   Create-free cached-kinetic-preview receipt/network/accessor and per-field
-  fallback rules, and the external-block `observeSource`
+  fallback rules, the kinetic-method bytecode failure harness and diagnostic
+  callback seams above, and the external-block `observeSource`
   position/demand/budget route and candidate preview entry with recording
   access, but no automated test runs the production collector's own per-member
   checks or captures a real Create collector's vault or tank controller/member
@@ -254,11 +371,12 @@ and successful compilation are not substitutes for exercising them.
   manual evidence for the freshness of a last-synchronized cached network total
   remain pending, so a last reliable client sync may be stale until an
   authoritative recapture;
-- detailed diagnostic behavior in the private
-  `CreateEntityOutlineAdapter.EntityDiagnostics` path.
+- full-report construction and delivery in the private Create entity-outline
+  diagnostic path; its admission gate and separate backend probe have the
+  headless coverage above.
 
-Coverage of Flywheel diagnostics or another adapter's diagnostic helper does
-not close the private `EntityDiagnostics` gap.
+Coverage of the entity admission gate, backend probe, Flywheel diagnostics or
+another adapter's helper does not close that full-report gap.
 
 ## Sable-specific gaps
 
@@ -271,8 +389,8 @@ Sable-specific gaps remain for:
   provider against a real `ServerLevel` and loaded sublevel, including current
   tracking-point relocation, sublevel rotation/translation, state or registry
   identity change, unload/reload, no-force-load behavior, and marker/session
-  lifetime; the new observation tests use fake world-access tokens or in-memory
-  entry/reference maps;
+  lifetime; the observation tests use fake world-access tokens, in-memory
+  entry/reference maps or an injected throwing reflective stand-in;
 - the additive content read source against a live Sable runtime: companion
   containment and unique-id membership reflection, live sub-level identity and
   loaded-member checks, a live multi-member content capability, and the

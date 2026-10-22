@@ -37,6 +37,14 @@ disallowed `loot` type with `INVALID_PING_TYPE`, and keep only the accepted
 marker. This is a headless service/callback seam, not a live provider,
 deployed logging configuration or end-to-end server/client validation.
 
+Its authoritative-name cases cover a null or throwing resolver retaining the
+external creation's fallback name and committed target, and the validator's
+name helper returning its fail-safe name. Null results emit no warning; thrown
+runtime failures emit one bounded warning with resolver identity, original
+message and cause and no attached throwable. The validator helper is invoked
+reflectively with uninitialized server/player tokens, not through world-backed
+target validation.
+
 `PacketHandlerTest` covers full buffer consumption after valid or corrupt
 decoding and a failed fallback constructor preserving its reflection failure
 cause while still draining the buffer. It does not assert the actual DEBUG
@@ -79,6 +87,14 @@ actual sound playback or GUI chat delivery, packet ordering over a connection,
 or client rendering. The public entry wiring of this path is source-inspected,
 not runtime-verified.
 
+`ClientBusinessDiagnosticsTest` covers failed create and inventory SELECT
+transport callbacks through the dispatcher: warnings retain the original message
+and cause without an attached throwable, the prior dispatch receipt remains
+current, and the next attempt remains throttled rather than refunding the
+consumed courtesy token. Its create case also checks that only one transport
+attempt occurs. These are headless dispatcher and recording-log seams, not live
+packet transport or server acceptance.
+
 ## Rate-policy courtesy behavior
 
 The current suite covers the create-only client token-bucket courtesy gate,
@@ -91,9 +107,10 @@ client coverage does not close the server and end-to-end policy
 
 - the complete `ServerCore` operation ordering and channel/admission matrix in
   an end-to-end server path;
-- independent call-site diagnostic fixtures for the `ServerCore` and
-  `ClientPingRuntime` exception-log catch paths; the admission logging evidence
-  above does not establish those branches;
+- independent call-site diagnostic fixtures for `ServerCore` and the game-backed
+  chat-display, template-lookup and selector exception-log catch paths in
+  `ClientPingRuntime`; the admission, dispatcher and headless pending-composition
+  evidence does not establish those branches;
 - same-ID marker creation after local record deletion in the full client
   runtime: production final deletion evicts retained presentation values under
   a session tombstone, so the late create is dropped, while the isolated

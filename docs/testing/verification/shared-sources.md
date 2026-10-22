@@ -116,7 +116,12 @@ cooldown. They cover disabled messages preserving diagnostics and evidence,
 failed or recipient-less notice retry, permission and authoritative-host
 eligibility, live flag reads, server-lifetime replacement/stop, recoverable
 sink failures and fatal-error propagation through recording ports. These are
-not live WARN capture or administrator-message delivery.
+not live WARN capture or administrator-message delivery. A test-appender case in
+`BudgetDelayMonitoringTest` also drives the production summary-reporting entry:
+adjacent closed delayed cycles each emit one WARN without a second general
+diagnostic window or an attached throwable, while repeated closure of the same
+cycle emits no duplicate. This is headless report delivery, not a live server
+cycle or administrator notification.
 
 `InventoryBudgetDelayStateTest` and `InventoryBudgetDelayIntegrationTest`
 exercise production physical, logical, projection, publication and control-delay
