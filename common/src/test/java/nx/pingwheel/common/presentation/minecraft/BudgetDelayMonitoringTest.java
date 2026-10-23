@@ -10,6 +10,8 @@ import net.minecraft.network.chat.contents.TranslatableContents;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
+import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
+import org.apache.logging.log4j.Level;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayEvent;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayState;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Module;
@@ -25,6 +27,21 @@ class BudgetDelayMonitoringTest {
 
 	private static final long SECOND = 1_000_000_000L;
 	private static final Module PRESENTATION = Module.PRESENTATION;
+
+	@Test void productionDiagnosticsReportEveryAdjacentClosedCycleWithoutAnotherWindow() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			var monitor = new nx.pingwheel.common.presentation.budget.BudgetDelayMonitor(BudgetDelayMonitoring::reportSummary, modules -> false);
+			for (long cycle = 0; cycle < 2; cycle++) {
+				monitor.observe(event(PRESENTATION, cycle, cycle, "pending", Quantity.of(Unit.REQUEST_ADAPTER, 1), Reason.SOURCE_WORK.bit()));
+				monitor.state(PRESENTATION, cycle, cycle, DelayState.DELAYED);
+				monitor.endCycle(PRESENTATION, cycle, cycle);
+				monitor.endCycle(PRESENTATION, cycle, cycle);
+			}
+			assertEquals(2, capture.events().size());
+			assertTrue(capture.events().stream().allMatch(event -> event.getLevel() == Level.WARN && event.getThrown() == null));
+			assertTrue(capture.messages().get(0).contains("cycle=0")); assertTrue(capture.messages().get(1).contains("cycle=1"));
+		}
+	}
 
 	private static final class Player implements BudgetDelayMonitoring.Recipient {
 		final UUID id;

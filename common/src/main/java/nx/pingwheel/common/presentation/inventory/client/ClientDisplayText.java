@@ -292,13 +292,13 @@ final class ClientDisplayText {
 		static void parse(TranslatableContents fresh, String template, Consumer<FormattedText> sink, Runnable invalid) {
 			if (PARSE == null) throw new UnsafeDisplay();
 			try { PARSE.invoke(fresh, template, sink); }
-			catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(); }
+			catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(unavailable); }
 			catch (InvocationTargetException failure) {
-				Throwable cause = failure.getCause();
+				@org.jetbrains.annotations.Nullable Throwable cause = failure.getCause();
 				if (cause instanceof TranslatableFormatException) invalid.run();
 				else if (cause instanceof RuntimeException runtime) throw runtime;
 				else if (cause instanceof Error error) throw error;
-				else throw new UnsafeDisplay();
+				else throw new UnsafeDisplay(failure);
 			}
 		}
 	}

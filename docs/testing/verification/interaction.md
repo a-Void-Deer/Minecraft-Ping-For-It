@@ -79,6 +79,18 @@ reaching cancellation and then being rejected by the server without a local
 fallback. Frozen press-ray behavior and the pending-capture/wheel interaction
 boundary otherwise have focused test coverage.
 
+`ClientBusinessDiagnosticsTest` captures warning events from failed ordinary
+resolution and optional candidate finalization. Its restricted-capture cases
+retain the exception type and permitted context while excluding the tested
+private message/cause text, registry IDs, entity identity and block-position
+sentinel.
+A failed ordinary resolution leaves the current token uncompleted; failed
+candidate finalization keeps the ordinary completion without selector
+candidates. Its Precise refresh cases retain original native-scan and
+distant-start causes while leaving native slots incomplete or the location
+missing. These are headless coordinator and refresh-controller seams, not live
+input, native world scanning or a Distant Horizons trace.
+
 ### Gesture shortcut opening
 
 `GestureSkipHoldTest` covers the passive pre-open input model: the minimum wait

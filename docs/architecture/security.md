@@ -90,11 +90,10 @@ duplicate fallback render. Config recovery must preserve original bytes under
 
 ## Diagnostic detail and user feedback
 
-Keep detailed optional/render diagnostics lazy, bounded and rate-controlled,
-including complete exception details. Rate-controlled diagnostics may retain
-complete target, position, registry, class, material, component and payload
-details without redaction. Frequency limits must not be replaced by deleting
-the information needed to diagnose a failed optional integration.
+[Diagnostics and logging](logging.md) owns severity, report admission, bounded
+exception detail, disclosure restrictions and diagnostic-output isolation.
+Those reporting rules do not replace the authority and business-failure
+boundaries above.
 
 Do not add toast or action-bar feedback for rate or integration failures. The
 required local invalid-target message, including its color and chat output, is

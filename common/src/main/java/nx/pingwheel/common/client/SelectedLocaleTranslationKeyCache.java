@@ -12,8 +12,10 @@ import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
 
 import nx.pingwheel.common.Global;
-
-import static nx.pingwheel.common.Global.LOGGER;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Caches the translation keys supplied by the currently selected locale's own
@@ -39,7 +41,7 @@ public final class SelectedLocaleTranslationKeyCache {
 
 	@FunctionalInterface
 	public interface SnapshotLoader {
-		Set<String> load(String selectedLanguageCode, ResourceManager resourceManager);
+		@Nullable Set<String> load(String selectedLanguageCode, @Nullable ResourceManager resourceManager);
 	}
 
 	@FunctionalInterface
@@ -53,9 +55,9 @@ public final class SelectedLocaleTranslationKeyCache {
 	}
 
 	private final SnapshotLoader snapshotLoader;
-	private Object cachedLanguageIdentity;
-	private String cachedLanguageCode;
-	private Set<String> cachedKeys = Set.of();
+	private @Nullable Object cachedLanguageIdentity;
+	private @Nullable String cachedLanguageCode;
+	private @Unmodifiable Set<String> cachedKeys = Set.of();
 	private boolean initialized;
 
 	public SelectedLocaleTranslationKeyCache() {
@@ -76,7 +78,7 @@ public final class SelectedLocaleTranslationKeyCache {
 	public boolean contains(
 		String selectedLanguageCode,
 		Language language,
-		ResourceManager resourceManager,
+		@Nullable ResourceManager resourceManager,
 		String key
 	) {
 		return contains(selectedLanguageCode, (Object) language, resourceManager, key);
@@ -89,7 +91,7 @@ public final class SelectedLocaleTranslationKeyCache {
 	public boolean contains(
 		String selectedLanguageCode,
 		Object languageIdentity,
-		ResourceManager resourceManager,
+		@Nullable ResourceManager resourceManager,
 		String key
 	) {
 		Objects.requireNonNull(selectedLanguageCode, "selectedLanguageCode");
@@ -108,9 +110,9 @@ public final class SelectedLocaleTranslationKeyCache {
 	private void rebuild(
 		String selectedLanguageCode,
 		Object languageIdentity,
-		ResourceManager resourceManager
+		@Nullable ResourceManager resourceManager
 	) {
-		Set<String> loadedKeys;
+		@Nullable Set<String> loadedKeys;
 
 		try {
 			loadedKeys = snapshotLoader.load(selectedLanguageCode, resourceManager);
@@ -128,7 +130,7 @@ public final class SelectedLocaleTranslationKeyCache {
 
 	private static Set<String> loadSelectedLocaleKeys(
 		String selectedLanguageCode,
-		ResourceManager resourceManager
+		@Nullable ResourceManager resourceManager
 	) {
 		Objects.requireNonNull(resourceManager, "resourceManager");
 
@@ -167,7 +169,8 @@ public final class SelectedLocaleTranslationKeyCache {
 		Set<String> keys = new HashSet<>();
 		for (T resource : resources) {
 			if (resource == null) {
-				logFailure(RESOURCE_PARSE_FAILED, new NullPointerException("resource"));
+				Diagnostics.domainApprovedEvent(Level.DEBUG, "locale/resource", "selected-locale", "null-resource",
+					() -> RESOURCE_PARSE_FAILED);
 				continue;
 			}
 
@@ -191,7 +194,7 @@ public final class SelectedLocaleTranslationKeyCache {
 	}
 
 	private static void logFailure(String reason, Throwable exception) {
-		String exceptionClass = exception == null ? "unknown" : exception.getClass().getName();
-		LOGGER.debug(reason + ": " + exceptionClass);
+		// Cache rebuild/resource traversal already gates attempts to this reload.
+		Diagnostics.domainApprovedFailure(Level.WARN, "locale/resource", "selected-locale", () -> reason, exception);
 	}
 }

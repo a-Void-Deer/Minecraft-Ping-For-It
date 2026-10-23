@@ -12,7 +12,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 
-import static nx.pingwheel.common.Global.LOGGER;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
 
 /**
  * Server-side presentation policy: one independent field-selector rule set per
@@ -84,7 +85,7 @@ public final class PresentationSettings {
 		if (targetTypes == null) {
 			targetTypes = new LinkedHashMap<>();
 			denyAll = true;
-			LOGGER.warn("Presentation target-type policy missing; denying all presentation fields");
+			Diagnostics.event(Level.WARN, "presentation/settings", "policy", "missing-target-types", () -> "denying all presentation fields");
 		}
 
 		Map<String, RuleSet> checked = new LinkedHashMap<>();
@@ -92,30 +93,30 @@ public final class PresentationSettings {
 			RuleSet rules = targetTypes.get(id);
 			if (rules == null) {
 				rules = RuleSet.denyAll();
-				LOGGER.warn("Presentation policy for target type {} missing; denying its fields", id);
+				Diagnostics.event(Level.WARN, "presentation/settings", "policy", "missing-target-type", () -> "targetType=" + id + " denying its fields");
 			} else {
 				rules.validate();
 			}
 			checked.put(id, rules);
 		}
 		if (targetTypes.size() > TARGET_TYPE_IDS.size())
-			LOGGER.warn("Unknown presentation target-type policy entries ignored");
+			Diagnostics.event(Level.WARN, "presentation/settings", "policy", "unknown-target-types", () -> "unknown target-type entries ignored");
 		targetTypes = checked;
 
 		if (permissionLevels == null || permissionLevels.size() > MAX_OVERRIDES) {
 			denyAll = true;
 			permissionLevels = Map.of();
-			LOGGER.warn("Invalid presentation permission overrides; denying all presentation fields");
+			Diagnostics.event(Level.WARN, "presentation/settings", "policy", "invalid-permissions", () -> "denying all presentation fields");
 		} else {
 			Map<String, Integer> checkedLevels = new TreeMap<>();
 			for (var entry : permissionLevels.entrySet()) {
 				if (!validId(entry.getKey()) || entry.getValue() == null) {
 					denyAll = true;
-					LOGGER.warn("Invalid presentation permission override; denying all presentation fields");
+					Diagnostics.event(Level.WARN, "presentation/settings", "policy", "invalid-permission", () -> "override=" + entry + " denying all presentation fields");
 					continue;
 				}
 				int level = Math.clamp(entry.getValue(), 0, 4);
-				if (level != entry.getValue()) LOGGER.warn("Presentation permission level clamped");
+				if (level != entry.getValue()) Diagnostics.event(Level.WARN, "presentation/settings", "policy", "clamped-permission", () -> "override=" + entry + " clamped=" + level);
 				checkedLevels.put(entry.getKey(), level);
 			}
 			permissionLevels = Map.copyOf(checkedLevels);
@@ -123,12 +124,12 @@ public final class PresentationSettings {
 
 		if (updateIntervals == null || updateIntervals.size() > MAX_OVERRIDES) {
 			updateIntervals = Map.of();
-			LOGGER.warn("Invalid presentation update intervals; using declared adapter intervals");
+			Diagnostics.event(Level.WARN, "presentation/settings", "sampling", "invalid-intervals", () -> "using declared adapter intervals");
 		} else {
 			Map<String, Integer> checkedIntervals = new TreeMap<>();
 			for (var entry : updateIntervals.entrySet()) {
 				if (!validId(entry.getKey()) || entry.getValue() == null) {
-					LOGGER.warn("Invalid presentation update interval ignored");
+					Diagnostics.event(Level.WARN, "presentation/settings", "sampling", "invalid-interval", () -> "ignored override=" + entry);
 					continue;
 				}
 				checkedIntervals.put(entry.getKey(), Math.clamp(entry.getValue(), 1, MAX_INTERVAL_TICKS));
@@ -140,8 +141,8 @@ public final class PresentationSettings {
 		int oldBudget = scanBudget;
 		minUpdateIntervalTicks = Math.clamp(minUpdateIntervalTicks, 1, MAX_INTERVAL_TICKS);
 		scanBudget = Math.clamp(scanBudget, 0, MAX_SCAN_BUDGET);
-		if (oldInterval != minUpdateIntervalTicks) LOGGER.warn("Presentation minUpdateIntervalTicks clamped to {}", minUpdateIntervalTicks);
-		if (oldBudget != scanBudget) LOGGER.warn("Presentation scanBudget clamped to {}", scanBudget);
+		if (oldInterval != minUpdateIntervalTicks) Diagnostics.event(Level.WARN, "presentation/settings", "sampling", "clamped-interval", () -> "minUpdateIntervalTicks=" + minUpdateIntervalTicks);
+		if (oldBudget != scanBudget) Diagnostics.event(Level.WARN, "presentation/settings", "sampling", "clamped-budget", () -> "scanBudget=" + scanBudget);
 
 		if (denyAll) {
 			// A global structural failure must not become allow-by-default after a
@@ -163,6 +164,7 @@ public final class PresentationSettings {
 		try {
 			return rules.policy();
 		} catch (RuntimeException ex) {
+			Diagnostics.warn("presentation/policy-compile", "settings", () -> "targetType=" + targetTypeId, ex);
 			return denyAllPolicy();
 		}
 	}
@@ -354,30 +356,30 @@ public final class PresentationSettings {
 
 			if (white == null || white.size() > MAX_SELECTORS || black == null || black.size() > MAX_SELECTORS) {
 				denyAll = true;
-				LOGGER.warn("Presentation selectors missing or over capacity; denying fields for this target type");
+				Diagnostics.event(Level.WARN, "presentation/settings", "selectors", "missing-or-over-capacity", () -> "denying fields for this target type");
 			} else {
 				for (String selector : white) {
 					if (validSelector(selector)) validWhite.add(selector);
-					else LOGGER.warn("Invalid presentation allow selector ignored");
+					else Diagnostics.event(Level.WARN, "presentation/settings", "selectors", "invalid-allow", () -> "ignored selector=" + selector);
 				}
 				for (String selector : black) {
 					if (validSelector(selector)) validBlack.add(selector);
 					else {
 						denyAll = true;
-						LOGGER.warn("Invalid presentation deny selector; denying fields for this target type");
+						Diagnostics.event(Level.WARN, "presentation/settings", "selectors", "invalid-deny", () -> "selector=" + selector + " denying fields for this target type");
 					}
 				}
 			}
 
 			if (childBlack == null || childBlack.size() > MAX_CHILD_BLACK_REFS) {
 				denyAll = true;
-				LOGGER.warn("Presentation child deny list missing or over capacity; denying fields for this target type");
+				Diagnostics.event(Level.WARN, "presentation/settings", "selectors", "invalid-child-list", () -> "denying fields for this target type");
 			} else {
 				Set<PresentationPropertyRef> unique = new HashSet<>();
 				for (PresentationPropertyRef ref : childBlack) {
 					if (ref == null || ref.isRoot() || !unique.add(ref)) {
 						denyAll = true;
-						LOGGER.warn("Invalid presentation child deny reference; denying fields for this target type");
+						Diagnostics.event(Level.WARN, "presentation/settings", "selectors", "invalid-child-reference", () -> "reference=" + ref + " denying fields for this target type");
 					} else {
 						validChildBlack.add(ref);
 					}
@@ -403,6 +405,7 @@ public final class PresentationSettings {
 			try {
 				return new PresentationPolicy(white, black, whitelistOnly, childBlack);
 			} catch (RuntimeException ex) {
+				Diagnostics.warn("presentation/policy-compile", "rules", () -> "white=" + white + " black=" + black + " childBlack=" + childBlack, ex);
 				return denyAllPolicy();
 			}
 		}

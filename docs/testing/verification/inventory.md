@@ -826,7 +826,51 @@ access failure; the direct external-port tests above do not establish that
 failure's log delivery.
 `InventoryRuntimeTest` separately checks failed plan discovery with consumer,
 round and source context, the attempted prefix still paid, no capture/read and
-no retained or reserved leak.
+no retained or reserved leak. Its snapshot-discovery limit case also preserves
+the original bound in the incomplete outcome's report without a content read
+or reserved-memory leak. `InventoryScannerTest` asserts a count-overflow warning
+without an attached throwable while the scan stays incomplete and retains its
+already accumulated exact count. `InventoryCaptureDiagnosticsTest` additionally
+checks that its existing bound-reason gate reaches the shared backend even
+when the general warning window is full, without a second admission window.
+
+`InventoryItemFailureDiagnosticsTest` covers actual canonical-byte refusal
+producing an all-variants aggregate without changing a safe exact identity or
+lossless long totals, while intentional display stripping and ceiling
+projection stay silent. At the freezer seam, only the tested display root-limit
+refusal retains exact canonical identity with unavailable display; ordinary
+runtime and linkage getter failures propagate unchanged to the source owner
+without an exact result or a duplicate local report. Native snapshot and client
+display decoding reject incomplete codec results without adopting partial data
+or retaining native error-payload text; client refusal keeps the empty-icon
+fallback and reports the trusted stage and fixed refusal description. A
+catalogue guard after a successful freeze does not falsely report an identity
+aggregate. The real-Catalog refusal case in
+`InventoryPublicationIntegrationTest` additionally drives the production
+backend's preview fold: the authoritative long group total survives and the
+retired exact selection is rejected before a new witness or marker creation.
+That case uses a recording packet host, not client replay or live transport.
+
+`InventoryGenericComponentCompatibilityTest` checks that a codec error retains
+aggregate identity without its partial payload and reports only the trusted
+stage and fixed refusal description. With WARN enabled or disabled, native
+error-message suppliers are never evaluated; snapshot rejection and an admitted
+warning likewise do not invoke the failing decoder's supplier. The rejection
+path retains neither that supplier nor its partial result. These assertions do
+not promise the native codec's original error text. Ordinary throwable reports
+remain covered separately by the cause-bearing diagnostic seams on this page.
+`InventoryNbtSnapshotTest` checks the original structural refusal remains the
+cause of a snapshot limit failure. `ClientItemDisplayOpaqueComponentsTest`
+distinguishes silent safety suppression from a throwing name hook: repeated
+runtime hook failures retain the original cause in one warning without an
+attached throwable and keep display unavailable. Its constructor and native
+decode-context cases keep runtime-failure fallbacks, while a runtime failure
+reading cached defaults also evicts that entry. Linkage failures at those
+boundaries, the reflective render constructor and the name hook propagate to
+the caller without a local fallback report; a propagated cached-default failure
+does not run fallback eviction. These are finite headless codec, snapshot, hook
+and test-appender seams, not installed-mod codecs, live profile callbacks or
+running-loader evidence.
 
 `InventoryMinecraftDiagnosticsTest` checks layout callback messages, causes,
 suppressed details, frames and read context, cross-position warning suppression
@@ -849,8 +893,9 @@ warning and no extra lookup, while Fabric checks the throwing-version fallback.
 NeoForge's `CreateVaultInventoryDiagnosticsTest` checks silent revocation,
 unloaded members and topology changes against the recording member fixture,
 and throwing lookup, validation or snapshot metadata preserving unavailable or
-absent results with cause-bearing warnings. These do not install Create or
-launch any loader or Mixin runtime.
+absent results with cause-bearing warnings. Loader lookup/gate and Vault
+callback assertions also check bounded messages without an attached throwable.
+These do not install Create or launch any loader or Mixin runtime.
 
 `InventorySyncPublisherTest` checks transport failure reports while retries keep
 the same immutable packet and charge each handoff; repeated failure suppresses
@@ -903,7 +948,8 @@ remain pending.
 - inventory call-site logging coverage is limited to the
   [diagnostic seams above](#failure-diagnostic-seams). Other runtime
   probe/projection branches, capture-handle source-close and standalone
-  snapshot/ticket-close diagnostics, scanner/broker and legacy preview-server branches lack
+  snapshot/ticket-close diagnostics, scanner branches beyond the asserted
+  count-overflow case, broker and legacy preview-server branches lack
   direct log-event assertions. Test appenders do not establish production
   file-appender delivery or low-frequency behavior in a prolonged live soak;
 - default-cap capture, live selection and fresh tracking have headless native

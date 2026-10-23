@@ -9,7 +9,10 @@ import java.util.function.Supplier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
-import nx.pingwheel.common.Global;
+import nx.pingwheel.common.util.SafeExceptionReport;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import nx.pingwheel.common.math.EntityLocalGeometryRegistry;
 import nx.pingwheel.common.math.EntityLocalGeometryResolver;
 import nx.pingwheel.common.math.EntityLocalGeometryResult;
@@ -30,34 +33,34 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 	private static final String DELEGATE_CLASS_NAME =
 		"nx.pingwheel.neoforge.integration.create.CreateContraptionRaycastDelegate";
 	private static final int PRIORITY = 100;
-	private static final List<ResourceLocation> CLAIMED_ENTITY_TYPE_IDS = List.of(
+	private static final @Unmodifiable List<ResourceLocation> CLAIMED_ENTITY_TYPE_IDS = List.of(
 		ResourceLocation.fromNamespaceAndPath("create", "stationary_contraption"),
 		ResourceLocation.fromNamespaceAndPath("create", "contraption"),
 		ResourceLocation.fromNamespaceAndPath("create", "carriage_contraption"),
 		ResourceLocation.fromNamespaceAndPath("create", "gantry_contraption"));
 
-	private static EntityLocalGeometryRegistry.Registration registration;
-	private static CreateContraptionRaycastAdapter source;
+	private static @Nullable EntityLocalGeometryRegistry.Registration registration;
+	private static @Nullable CreateContraptionRaycastAdapter source;
 
 	private final DelegateLoader delegateLoader;
 	private final Diagnostics diagnostics;
-	private Delegate delegate;
+	private @Nullable Delegate delegate;
 	private DelegateState delegateState = DelegateState.UNRESOLVED;
 
 	private CreateContraptionRaycastAdapter() {
-		this(new ReflectiveDelegateLoader(), (message, failure) -> Global.LOGGER.warn(message, failure));
+		this(new ReflectiveDelegateLoader(), null);
 	}
 
 	CreateContraptionRaycastAdapter(DelegateLoader delegateLoader) {
-		this(delegateLoader, (message, failure) -> Global.LOGGER.warn(message, failure));
+		this(delegateLoader, null);
 	}
 
-	CreateContraptionRaycastAdapter(DelegateLoader delegateLoader, DiagnosticSink diagnosticSink) {
+	CreateContraptionRaycastAdapter(DelegateLoader delegateLoader, @Nullable DiagnosticSink diagnosticSink) {
 		this.delegateLoader = Objects.requireNonNull(delegateLoader, "delegateLoader");
-		this.diagnostics = new Diagnostics(Objects.requireNonNull(diagnosticSink, "diagnosticSink"));
+		this.diagnostics = new Diagnostics(diagnosticSink);
 	}
 
-	static List<ResourceLocation> claimedEntityTypeIds() {
+	static @Unmodifiable List<ResourceLocation> claimedEntityTypeIds() {
 		return CLAIMED_ENTITY_TYPE_IDS;
 	}
 
@@ -98,17 +101,22 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 	}
 
 	@Override
-	public EntityLocalGeometryResult trace(Entity candidate, EntityLocalRaycastRequest request) {
+	public EntityLocalGeometryResult trace(@Nullable Entity candidate, EntityLocalRaycastRequest request) {
 		Objects.requireNonNull(request, "request");
-		Delegate resolvedDelegate = delegate(candidate, request);
+		@Nullable Delegate resolvedDelegate = delegate(candidate, request);
 
 		if (resolvedDelegate == null) {
 			return EntityLocalGeometryResult.unavailable();
 		}
 
 		try {
-			EntityLocalGeometryResult result = resolvedDelegate.trace(candidate, request);
-			return result == null ? EntityLocalGeometryResult.failed() : result;
+			@Nullable EntityLocalGeometryResult result = resolvedDelegate.trace(candidate, request);
+			if (result == null) {
+				nx.pingwheel.common.diagnostics.Diagnostics.event(Level.WARN, "create-contraption-trace", SOURCE_ID,
+					"null-result", () -> "delegate returned null; ownedCandidateRemainsFailed=true");
+				return EntityLocalGeometryResult.failed();
+			}
+			return result;
 		} catch (LinkageError | AssertionError structuralFailure) {
 			markUnavailable();
 			diagnostics.report(candidate, request, structuralFailure instanceof LinkageError
@@ -117,7 +125,7 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 		}
 	}
 
-	private synchronized Delegate delegate(Entity candidate, EntityLocalRaycastRequest request) {
+	private synchronized @Nullable Delegate delegate(@Nullable Entity candidate, EntityLocalRaycastRequest request) {
 		if (delegateState == DelegateState.READY) {
 			return delegate;
 		}
@@ -151,7 +159,7 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 
 	@FunctionalInterface
 	interface DiagnosticSink {
-		void warn(String message, Throwable failure);
+		void warn(String message, @Nullable Throwable failure);
 	}
 
 	interface DelegateLoader {
@@ -159,7 +167,7 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 	}
 
 	interface Delegate {
-		EntityLocalGeometryResult trace(Entity candidate, EntityLocalRaycastRequest request);
+		EntityLocalGeometryResult trace(@Nullable Entity candidate, EntityLocalRaycastRequest request);
 	}
 
 	private enum DelegateState {
@@ -177,23 +185,32 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 		private static final int MAX_KEYS = 256;
 		private static final long MIN_LOG_INTERVAL_NANOS = 5_000_000_000L;
 
-		private final DiagnosticSink sink;
+		private final @Nullable DiagnosticSink sink;
 		private final LinkedHashMap<String, Long> lastLogged = new LinkedHashMap<>(16, 0.75F, true);
 
-		private Diagnostics(DiagnosticSink sink) {
+		private Diagnostics(@Nullable DiagnosticSink sink) {
 			this.sink = sink;
 		}
 
 		private void report(
-			Entity entity,
+			@Nullable Entity entity,
 			EntityLocalRaycastRequest request,
 			String category,
 			Throwable failure
 		) {
+			if (sink == null) {
+				try {
+					if (!nx.pingwheel.common.diagnostics.Diagnostics.logger().isEnabled(Level.WARN)) {
+						return;
+					}
+				} catch (RuntimeException | LinkageError ignored) {
+					return;
+				}
+			}
 			long now = System.nanoTime();
 			String key = category + ':' + entityKey(entity);
 			synchronized (lastLogged) {
-				Long previous = lastLogged.get(key);
+				@Nullable Long previous = lastLogged.get(key);
 				if (previous != null && now - previous < MIN_LOG_INTERVAL_NANOS) {
 					return;
 				}
@@ -207,7 +224,16 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 				lastLogged.put(key, now);
 			}
 
-			sink.warn(fullDetails(entity, request, category), failure);
+			if (sink == null) {
+				nx.pingwheel.common.diagnostics.Diagnostics.domainApprovedFailure(Level.WARN,
+					"create-contraption-shell", SOURCE_ID, () -> fullDetails(entity, request, category), failure);
+			} else {
+				try {
+					sink.warn(SafeExceptionReport.formatWithContext(fullDetails(entity, request, category), failure), null);
+				} catch (RuntimeException | LinkageError ignored) {
+					// The domain admission remains consumed when an injected sink fails.
+				}
+			}
 		}
 
 		private void clear() {
@@ -216,7 +242,7 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 			}
 		}
 
-		private static String entityKey(Entity entity) {
+		private static String entityKey(@Nullable Entity entity) {
 			if (entity == null) {
 				return "<null>";
 			}
@@ -225,7 +251,7 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 		}
 
 		private static String fullDetails(
-			Entity entity,
+			@Nullable Entity entity,
 			EntityLocalRaycastRequest request,
 			String category
 		) {

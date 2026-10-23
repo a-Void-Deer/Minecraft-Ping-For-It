@@ -16,6 +16,7 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.domain.TargetResolver;
 import nx.pingwheel.common.domain.TargetType;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry;
 import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
@@ -427,7 +428,9 @@ public final class MarkerCreationService {
 		try {
 			TargetNameJson resolved = nameResolver.resolveName(owner, target);
 			return resolved == null ? fallback : resolved;
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			Diagnostics.warn("marker-create-name-resolve", nameResolver.getClass().getName(),
+				() -> "targetKind=" + target.kind() + " target=" + target, failure);
 			return fallback;
 		}
 	}

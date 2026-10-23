@@ -6,7 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import nx.pingwheel.common.Global;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Deterministic registry for optional/modded entity-block geometry sources.
@@ -29,19 +30,19 @@ public final class EntityBlockGeometrySourceRegistry {
 
 	private final Object lock = new Object();
 	private final Map<String, Registration> registrations = new LinkedHashMap<>();
-	private final WarningSink warningSink;
-	private volatile List<EntityBlockGeometrySource> snapshot = List.of();
+	private final @Nullable WarningSink warningSink;
+	private volatile @Unmodifiable List<EntityBlockGeometrySource> snapshot = List.of();
 
 	public EntityBlockGeometrySourceRegistry() {
-		this(WarningSink.global());
+		this(null);
 	}
 
 	/**
 	 * Injectable constructor for headless tests; production callers should use
 	 * the default registry warning sink.
 	 */
-	EntityBlockGeometrySourceRegistry(WarningSink warningSink) {
-		this.warningSink = Objects.requireNonNull(warningSink, "warningSink");
+	EntityBlockGeometrySourceRegistry(@Nullable WarningSink warningSink) {
+		this.warningSink = warningSink;
 	}
 
 	/**
@@ -53,28 +54,28 @@ public final class EntityBlockGeometrySourceRegistry {
 	 * source, and closing a rejected duplicate handle can never remove that
 	 * winner.</p>
 	 */
-	public Registration register(EntityBlockGeometrySource source) {
+	public Registration register(@Nullable EntityBlockGeometrySource source) {
 		if (source == null) {
-			warningSink.warn(EntityBlockGeometrySourceIds.INVALID, "null-source");
+			warn(EntityBlockGeometrySourceIds.INVALID, "null-source", null);
 			return Registration.rejected();
 		}
 
-		final String id;
+		final @Nullable String id;
 		try {
 			id = EntityBlockGeometrySourceIds.validate(source.id());
 		} catch (Exception | LinkageError | AssertionError failure) {
-			warningSink.warn(EntityBlockGeometrySourceIds.UNAVAILABLE, "source-id-lookup-failed");
+			warn(EntityBlockGeometrySourceIds.UNAVAILABLE, "source-id-lookup-failed", failure);
 			return Registration.rejected();
 		}
 
 		if (id == null) {
-			warningSink.warn(EntityBlockGeometrySourceIds.INVALID, "invalid-source-id");
+			warn(EntityBlockGeometrySourceIds.INVALID, "invalid-source-id", null);
 			return Registration.rejected();
 		}
 
 		synchronized (lock) {
 			if (registrations.containsKey(id)) {
-				warningSink.warn(id, "duplicate-id-first-registration-kept");
+				warn(id, "duplicate-id-first-registration-kept", null);
 				return Registration.rejected();
 			}
 
@@ -89,7 +90,7 @@ public final class EntityBlockGeometrySourceRegistry {
 	 * Returns the immutable registration-order snapshot. Retrieval is a single
 	 * volatile read; callers must not retain a context from an attempt.
 	 */
-	public List<EntityBlockGeometrySource> snapshot() {
+	public @Unmodifiable List<EntityBlockGeometrySource> snapshot() {
 		return snapshot;
 	}
 
@@ -119,9 +120,9 @@ public final class EntityBlockGeometrySourceRegistry {
 	 * teardown.
 	 */
 	public static final class Registration implements AutoCloseable {
-		private final EntityBlockGeometrySourceRegistry registry;
-		private final String id;
-		private final EntityBlockGeometrySource source;
+		private final @Nullable EntityBlockGeometrySourceRegistry registry;
+		private final @Nullable String id;
+		private final @Nullable EntityBlockGeometrySource source;
 		private boolean closed;
 
 		private Registration(
@@ -146,7 +147,7 @@ public final class EntityBlockGeometrySourceRegistry {
 		}
 
 		private EntityBlockGeometrySource source() {
-			return source;
+			return Objects.requireNonNull(source);
 		}
 
 		/** Whether this handle owns an accepted registration rather than a no-op rejection. */
@@ -162,6 +163,20 @@ public final class EntityBlockGeometrySourceRegistry {
 		}
 	}
 
+	private void warn(String sourceId, String category, @Nullable Throwable failure) {
+		if (warningSink == null) {
+			OutlineDiagnostics.rejected("entity-block-source-register", sourceId, category, failure);
+		} else if (failure == null) {
+			try {
+				warningSink.warn(sourceId, category);
+			} catch (RuntimeException | LinkageError ignored) {
+				// A diagnostic sink must not reject a later valid registration.
+			}
+		} else {
+			OutlineDiagnostics.deliver(text -> warningSink.warn(sourceId, text), () -> category, failure);
+		}
+	}
+
 	@FunctionalInterface
 	interface WarningSink {
 		void warn(String sourceId, String category);
@@ -173,9 +188,7 @@ public final class EntityBlockGeometrySourceRegistry {
 		}
 
 		static WarningSink global() {
-			return (sourceId, category) -> Global.LOGGER.warn(
-				"entity block geometry source registration ignored; id=%s; category=%s"
-					.formatted(sourceId, category));
+			return (sourceId, category) -> OutlineDiagnostics.rejected("entity-block-source-register", sourceId, category, null);
 		}
 	}
 }

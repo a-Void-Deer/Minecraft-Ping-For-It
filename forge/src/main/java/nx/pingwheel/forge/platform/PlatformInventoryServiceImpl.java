@@ -23,7 +23,7 @@ import net.minecraft.world.WorldlyContainer;
 
 import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /**
  * Forge item-handler provider for the platform inventory bridge.
@@ -80,7 +80,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			return handler.map(found -> new HandlerAccess(found, () -> memberGate.test(position)));
 		} catch (RuntimeException | LinkageError failure) {
 			if (!(failure instanceof InventorySourceUnavailableException))
-				RateLimitedDiagnostics.warn("inventory-capability-find", "forge:item_handler",
+				Diagnostics.warn("inventory-capability-find", "forge:item_handler",
 					() -> "position=" + pos + " face=" + side + " worldClass=" + world.getClass().getName()
 						+ " blockEntityClass=" + blockEntity.getClass().getName(), failure);
 			return Optional.empty();
@@ -219,7 +219,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			try { return memberGate.getAsBoolean(); }
 			catch (RuntimeException | LinkageError unavailable) {
 				if (!(unavailable instanceof InventorySourceUnavailableException))
-					RateLimitedDiagnostics.warn("inventory-handler-valid", handler.getClass().getName(),
+					Diagnostics.warn("inventory-handler-valid", handler.getClass().getName(),
 						() -> "handlerClass=" + handler.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
 				return false;
 			}

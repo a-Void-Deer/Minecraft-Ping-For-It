@@ -10,6 +10,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
@@ -68,20 +70,20 @@ public final class ClientPresentationPreview {
 		}
 	}
 	private final AccessSource accessSource;
-	private final Supplier<? extends PreviewFieldAccess.ReadContext> contextSource;
+	private final Supplier<? extends PreviewFieldAccess.@Nullable ReadContext> contextSource;
 	private final Map<String, PreviewFieldAccess> readers;
 	private final RetainedSource retained;
 	private final Consumer<PresentationPreviewC2SPacket> sender;
 	private final Map<PresentationPropertyRef, PreviewFieldAccess.Outcome> fields = new LinkedHashMap<>();
 	private final Map<PresentationPropertyRef, PreviewFieldAccess.Missing> attempted = new LinkedHashMap<>();
-	private Binding binding;
-	private UUID interactionId;
-	private PresentationPreviewAccess access;
-	private PresentationPreviewC2SPacket pending;
+	private @Nullable Binding binding;
+	private @Nullable UUID interactionId;
+	private @Nullable PresentationPreviewAccess access;
+	private @Nullable PresentationPreviewC2SPacket pending;
 	private long deadline, nextRequest = 1, nextSendTick, lastTick;
 
 	public ClientPresentationPreview(AccessSource accessSource,
-		Supplier<? extends PreviewFieldAccess.ReadContext> contextSource, List<PreviewFieldAccess> readers,
+		Supplier<? extends PreviewFieldAccess.@Nullable ReadContext> contextSource, List<PreviewFieldAccess> readers,
 		RetainedSource retained, Consumer<PresentationPreviewC2SPacket> sender) {
 		this.accessSource = Objects.requireNonNull(accessSource);
 		this.contextSource = Objects.requireNonNull(contextSource);
@@ -105,14 +107,15 @@ public final class ClientPresentationPreview {
 			sender.accept(PresentationPreviewC2SPacket.cancel(old.epoch(), old.view(), old.requestId()));
 		}
 	}
-	private PreviewFieldAccess.ReadContext synchronize() {
+	private @Nullable PreviewFieldAccess.ReadContext synchronize() {
 		if (binding == null) return null;
-		var context = contextSource.get();
+		@Nullable PreviewFieldAccess.ReadContext context = contextSource.get();
 		if (context == null || context.levelIdentity() != binding.levelIdentity
 			|| !binding.target.dimensionId().equals(context.dimensionId())) { abort(); return null; }
 		if (context.tick() < 0) { abort(); return null; }
 		lastTick = Math.max(lastTick, context.tick());
-		var current = accessSource.current(binding.targetTypeId).filter(value -> value.targetTypeId().equals(binding.targetTypeId)).orElse(null);
+		@Nullable PresentationPreviewAccess current = accessSource.current(binding.targetTypeId)
+			.filter(value -> value.targetTypeId().equals(binding.targetTypeId)).orElse(null);
 		if (!Objects.equals(access, current)) {
 			try { cancelPending(); }
 			finally { fields.clear(); attempted.clear(); access = current; }
@@ -130,7 +133,11 @@ public final class ClientPresentationPreview {
 			if (reader != null) try {
 				local = reader.observe(binding.target, adapter.getValue().fields().keySet(), context);
 				if (local == null) local = Map.of();
-			} catch (RuntimeException | LinkageError unavailable) { local = Map.of(); }
+			} catch (RuntimeException | LinkageError unavailable) {
+				Diagnostics.warn("presentation/preview-reader", adapter.getKey(),
+					() -> "target=" + binding.target + " fields=" + adapter.getValue().fields().keySet(), unavailable);
+				local = Map.of();
+			}
 			for (var field : adapter.getValue().fields().entrySet()) {
 				var ref = PresentationPropertyRef.root(adapter.getKey(), field.getKey());
 				var outcome = local.get(field.getKey());
@@ -147,9 +154,12 @@ public final class ClientPresentationPreview {
 				}
 			}
 		}
-		RetainedSnapshot cached;
+		@Nullable RetainedSnapshot cached;
 		try { cached = retained.observed(binding.target, binding.targetTypeId).orElse(null); }
-		catch (RuntimeException | LinkageError unavailable) { cached = null; }
+		catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("presentation/preview-cache", "client", () -> "target=" + binding.target, unavailable);
+			cached = null;
+		}
 		if (cached != null && binding.target.equals(cached.target()) && binding.targetTypeId.equals(cached.targetTypeId())
 			// Empty external IDs deliberately alias candidates; they cannot identify a cached marker.
 			&& !(binding.target instanceof Target.ExternalBlockTarget external && external.isCandidate())) {
@@ -197,7 +207,11 @@ public final class ClientPresentationPreview {
 			deadline = tick > Long.MAX_VALUE - PresentationPreviewLimits.REQUEST_TICKS ? Long.MAX_VALUE : tick + PresentationPreviewLimits.REQUEST_TICKS;
 			for (String field : missing) fields.putIfAbsent(PresentationPropertyRef.root(adapter, field), PreviewFieldAccess.Missing.PENDING);
 			try { sender.accept(pending); }
-			catch (RuntimeException failure) { var failed = pending; pending = null; finishMissing(failed, PreviewFieldAccess.Missing.UNAVAILABLE); throw failure; }
+			catch (RuntimeException failure) {
+				var failed = pending; pending = null; finishMissing(failed, PreviewFieldAccess.Missing.UNAVAILABLE);
+				// The interaction boundary reports transport failures after this local cleanup.
+				throw failure;
+			}
 			return;
 		}
 	}

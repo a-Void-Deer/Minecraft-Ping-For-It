@@ -15,6 +15,8 @@ import nx.pingwheel.common.interaction.candidate.Candidate;
 import nx.pingwheel.common.interaction.candidate.PreciseSlot.Availability;
 import nx.pingwheel.common.interaction.candidate.PreciseTargetType;
 import nx.pingwheel.common.math.RaycastPolicy;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Main-thread live capture owner, independent of ordinary capture completion.
@@ -101,8 +103,8 @@ public final class PreciseCaptureRefresh {
 	private final Map<PreciseTargetType, Slot> slots = new EnumMap<>(PreciseTargetType.class);
 	private boolean active, ended;
 	private long nextTick, generation, revision, branchEpoch, locationGeneration;
-	private Inputs latestInputs;
-	private Pending inFlight, queued;
+	private @Nullable Inputs latestInputs;
+	private @Nullable Pending inFlight, queued;
 
 	public PreciseCaptureRefresh(InteractionToken token, Object level, int period,
 		Supplier<Optional<Inputs>> inputs, BooleanSupplier current, NativeCapture nativeCapture,
@@ -138,7 +140,11 @@ public final class PreciseCaptureRefresh {
 		long epoch = branchEpoch;
 		Scan scan;
 		try { scan = Objects.requireNonNull(nativeCapture.capture(request)); }
-		catch (RuntimeException | LinkageError unavailable) { scan = Scan.incomplete(); }
+		catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("precise/native-capture", "client",
+				() -> "generation=" + request.generation() + " token=" + token.sequence(), unavailable);
+			scan = Scan.incomplete();
+		}
 		if (!active || ended || epoch != branchEpoch || request.generation() != generation || !owned(request.inputs())) return;
 		latestInputs = request.inputs();
 		for (var entry : scan.nativeSlots().entrySet()) slots.put(entry.getKey(), new Slot(generation, latestInputs, entry.getValue()));
@@ -158,13 +164,17 @@ public final class PreciseCaptureRefresh {
 		inFlight = pending;
 		boolean scheduled;
 		try { scheduled = distantCapture.start(pending.request(), outcome -> complete(pending, outcome)); }
-		catch (RuntimeException | LinkageError unavailable) { scheduled = false; }
+		catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("precise/distant-start", "client",
+				() -> "generation=" + pending.request().generation() + " token=" + token.sequence(), unavailable);
+			scheduled = false;
+		}
 		if (!scheduled) complete(pending, pending.fallback());
 	}
-	private void complete(Pending pending, Outcome outcome) {
+	private void complete(Pending pending, @Nullable Outcome outcome) {
 		if (inFlight != pending) return; // duplicates, ended requests and out-of-order callbacks
 		inFlight = null;
-		Pending successor = queued; queued = null;
+		@Nullable Pending successor = queued; queued = null;
 		if (active && !ended && pending.branchEpoch() == branchEpoch && owned(pending.request().inputs())
 			&& pending.request().generation() > locationGeneration) {
 			if (outcome == null || outcome.candidate().filter(value -> !PreciseTargetType.LOCATION.matches(value.resolvedTarget())).isPresent())

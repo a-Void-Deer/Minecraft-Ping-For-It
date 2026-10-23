@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Nullable;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -112,7 +113,7 @@ class CreateContraptionRaycastAdapterTest {
 	void shellLoadFailureIsUnavailableAndLogsOneBoundedFullDiagnostic() {
 		AtomicInteger loads = new AtomicInteger();
 		List<String> messages = new ArrayList<>();
-		List<Throwable> failures = new ArrayList<>();
+		List<@Nullable Throwable> failures = new ArrayList<>();
 		LinkageError failure = new LinkageError("missing optional Create linkage");
 		CreateContraptionRaycastAdapter adapter = new CreateContraptionRaycastAdapter(() -> {
 			loads.incrementAndGet();
@@ -127,7 +128,9 @@ class CreateContraptionRaycastAdapterTest {
 		assertEquals(1, loads.get());
 		assertEquals(1, messages.size(), "one entity/category key must be rate limited");
 		assertEquals(1, failures.size());
-		assertSame(failure, failures.get(0));
+		assertEquals(null, failures.get(0), "the sink receives one bounded report, not a raw throwable");
+		assertTrue(messages.get(0).contains("missing optional Create linkage"));
+		assertTrue(messages.get(0).contains("CreateContraptionRaycastAdapterTest"));
 
 		String diagnostic = messages.get(0);
 		assertTrue(diagnostic.contains("sourceId=pingforit:create_contraption_raycast"));

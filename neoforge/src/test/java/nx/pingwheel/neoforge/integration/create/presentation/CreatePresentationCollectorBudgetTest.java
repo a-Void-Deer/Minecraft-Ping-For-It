@@ -19,6 +19,19 @@ class CreatePresentationCollectorBudgetTest {
 	private static final CreateSamplingLimits LIMITS = new CreateSamplingLimits(128, 128, 16, 16, 256, 2048);
 	private static final BlockPos ORIGIN = new BlockPos(18, 64, -4);
 
+	@Test void repeatedThrowingMemberGateReportsBoundedCauseAndKeepsReadUnpaidAndUnreached() {
+		try (var capture = new CreatePresentationDiagnosticCapture()) {
+			for (int attempt = 0; attempt < 5; attempt++) {
+				var work = new CreateSamplingWork(4);
+				assertFalse(work.verifyShape(ORIGIN, 1, 1, 1, LIMITS, part -> {
+					throw new IllegalStateException("gate failed", new RuntimeException("gate cause"));
+				}, part -> { throw new AssertionError("failed gate cannot read member"); }));
+				assertEquals(1, work.used());
+			}
+			assertEquals(1, capture.events().size()); assertTrue(capture.messages().getFirst().contains("gate cause"));
+		}
+	}
+
 	@ParameterizedTest
 	@CsvSource({ "8,4,4", "4,8,4" })
 	void rejectedLastMemberKeepsTheEntireVisitedPrefixPaid(int x, int y, int z) {

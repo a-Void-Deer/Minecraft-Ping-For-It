@@ -36,6 +36,7 @@ class PlatformInventoryDiagnosticsTest {
 			assertTrue(PlatformInventoryServiceImpl.find(world, BlockPos.ZERO, Direction.NORTH, pos -> true).isEmpty());
 			assertTrue(PlatformInventoryServiceImpl.find(world, new BlockPos(8, 0, 0), Direction.NORTH, pos -> true).isEmpty());
 			assertEquals(2, calls.get()); assertEquals(1, capture.events.size());
+			assertNull(capture.events.getFirst().getThrown()); assertTrue(capture.message().length() <= nx.pingwheel.common.util.SafeExceptionReport.MAX_CHARACTERS);
 			assertTrue(capture.message().contains("Fabric lookup failure")); assertTrue(capture.message().contains("Fabric lookup cause"));
 			assertTrue(capture.message().contains("face=" + Direction.NORTH)); assertTrue(capture.message().contains(entity.getClass().getName()));
 		}

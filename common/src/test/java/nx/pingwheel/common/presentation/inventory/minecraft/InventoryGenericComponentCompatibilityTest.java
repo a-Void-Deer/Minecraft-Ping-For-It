@@ -85,6 +85,8 @@ class InventoryGenericComponentCompatibilityTest {
 	private static final AtomicInteger GUARDED_TRAP_CALLS = new AtomicInteger();
 	private static final AtomicInteger UNREGISTERED_CALLS = new AtomicInteger();
 	private static final AtomicInteger PARTIAL_CALLS = new AtomicInteger();
+	private static final AtomicInteger PARTIAL_DECODE_CALLS = new AtomicInteger();
+	private static final AtomicInteger ERROR_MESSAGE_CALLS = new AtomicInteger();
 	private static final AtomicInteger OVERSIZED_CALLS = new AtomicInteger();
 	private static final AtomicInteger PROVIDER_CALLS = new AtomicInteger();
 
@@ -150,10 +152,11 @@ class InventoryGenericComponentCompatibilityTest {
 	private static final Codec<Object> PARTIAL_ERROR_CODEC = new Codec<>() {
 		@Override public <T> DataResult<T> encode(Object input, DynamicOps<T> ops, T prefix) {
 			PARTIAL_CALLS.incrementAndGet();
-			return DataResult.error(() -> "foreign codec error", ops.createString("partial-secret"));
+			return DataResult.error(() -> { ERROR_MESSAGE_CALLS.incrementAndGet(); throw new AssertionError("native error supplier must not run"); }, ops.createString("partial-secret"));
 		}
 		@Override public <T> DataResult<Pair<Object, T>> decode(DynamicOps<T> ops, T input) {
-			return DataResult.error(() -> "decode unused");
+			PARTIAL_DECODE_CALLS.incrementAndGet();
+			return DataResult.error(() -> { ERROR_MESSAGE_CALLS.incrementAndGet(); throw new AssertionError("native error supplier must not run"); });
 		}
 	};
 
@@ -359,12 +362,45 @@ class InventoryGenericComponentCompatibilityTest {
 		stack.set(partialErrorComponent, new Object());
 
 		PARTIAL_CALLS.set(0);
-		var frozen = freeze(stack);
-		assertTrue(PARTIAL_CALLS.get() > 0, "the registered codec was actually invoked");
-		assertEquals(InventoryIdentityMode.ALL_VARIANTS, frozen.identityMode());
-		assertNull(frozen.canonicalForCatalog());
-		assertTrue(frozen.display().aggregateRequired());
-		assertFalse(frozen.display().displayJson().contains("partial-secret"));
+		ERROR_MESSAGE_CALLS.set(0);
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+			var frozen = freeze(stack);
+			assertTrue(PARTIAL_CALLS.get() > 0, "the registered codec was actually invoked");
+			assertEquals(InventoryIdentityMode.ALL_VARIANTS, frozen.identityMode());
+			assertNull(frozen.canonicalForCatalog());
+			assertTrue(frozen.display().aggregateRequired());
+			assertFalse(frozen.display().displayJson().contains("partial-secret"));
+			assertEquals(0, ERROR_MESSAGE_CALLS.get(), "WARN admission cannot authorize a native error callback");
+			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("stage=external component"));
+			assertTrue(logs.messages().contains("native error detail not evaluated"));
+			assertFalse(logs.messages().contains("partial-secret")); assertNull(logs.events().getFirst().getThrown());
+		}
+	}
+
+	@Test void snapshotDecodeFailureAndWarningNeverEvaluateNativeErrorSupplier() {
+		var entry = new CompoundTag(); entry.putInt("Slot", 0); entry.putString("id", "minecraft:stone"); entry.putInt("count", 1);
+		var components = new CompoundTag(); components.putInt("pingforit_test:partial_error", 1); entry.put("components", components);
+		var items = new ListTag(); items.add(entry);
+		var index = InventorySnapshotSchemas.index(items, 1, List.of(0));
+		PARTIAL_DECODE_CALLS.set(0); ERROR_MESSAGE_CALLS.set(0);
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+			var failure = assertThrows(InventorySnapshotSchemas.ReadFailureException.class, () -> index.read(0, registries));
+			assertTrue(PARTIAL_DECODE_CALLS.get() > 0, "the native entry codec reached the registered failing decoder");
+			nx.pingwheel.common.diagnostics.Diagnostics.warn("inventory/test-snapshot-decode", "minecraft", () -> "stage=items-entry", failure);
+			assertTrue(failure.getMessage().contains("Minecraft items codec rejected"));
+			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("Minecraft items codec rejected"));
+			assertEquals(0, ERROR_MESSAGE_CALLS.get(), "neither the rejection accessor nor admitted WARN may evaluate the supplier");
+			assertNull(logs.events().getFirst().getThrown());
+		}
+	}
+
+	@Test void disabledIdentityDiagnosticsNeverEvaluateNativeCodecErrorMessage() {
+		var stack = new ItemStack(Items.STONE); stack.set(partialErrorComponent, new Object());
+		ERROR_MESSAGE_CALLS.set(0);
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.ERROR)) {
+			assertEquals(InventoryIdentityMode.ALL_VARIANTS, freeze(stack).identityMode());
+			assertEquals(0, ERROR_MESSAGE_CALLS.get()); assertTrue(logs.events().isEmpty());
+		}
 	}
 
 	@Test void throwingCodecPropagatesAndLeavesTheCaptureBudgetReusable() {
@@ -814,7 +850,7 @@ class InventoryGenericComponentCompatibilityTest {
 				result.close();
 				throw failure;
 			}
-			set(registry, "frozen", wasFrozen);
+			BuiltInRegistries.DATA_COMPONENT_TYPE.freeze();
 			return result;
 		}
 

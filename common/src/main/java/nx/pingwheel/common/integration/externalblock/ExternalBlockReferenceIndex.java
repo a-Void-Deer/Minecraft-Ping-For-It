@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /**
  * Pure lifecycle bookkeeping for provider-owned tracking points.
@@ -158,7 +159,9 @@ public final class ExternalBlockReferenceIndex {
 			removeEntry(entry);
 			try {
 				removePoint.accept(entry.stableId);
-			} catch (RuntimeException ignored) {
+			} catch (RuntimeException failure) {
+				Diagnostics.warn("external-block.reference-close", entry.locator.providerId(),
+					() -> "stableId=" + entry.stableId + " locator=" + entry.locator, failure);
 				// One provider cleanup failure must not prevent later points from
 				// being retired during server teardown.
 			}

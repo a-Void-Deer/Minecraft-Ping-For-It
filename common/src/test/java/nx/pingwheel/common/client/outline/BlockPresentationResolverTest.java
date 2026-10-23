@@ -383,11 +383,12 @@ class BlockPresentationResolverTest {
 
 	@Test
 	void recoverableExceptionForwardsToLaterHandledResolver() {
+		try (OutlineDiagnosticCapture capture = new OutlineDiagnosticCapture(org.apache.logging.log4j.Level.WARN)) {
 		BlockPresentationResolverRegistry registry = new BlockPresentationResolverRegistry(false);
 		BlockPos pos = new BlockPos(33, 70, 34);
 		BlockState state = Blocks.STONE.defaultBlockState();
 		registry.register(resolver("test:exception", context -> {
-			throw new IllegalStateException("recoverable");
+			throw new IllegalStateException("resolver-original", new IllegalArgumentException("resolver-cause"));
 		}));
 		registry.register(resolver("test:later-exception", context ->
 			BlockPresentationResolution.handled(subject("after-exception", pos, state))));
@@ -395,6 +396,11 @@ class BlockPresentationResolverTest {
 		BlockPresentation presentation = registry.resolve(world(Map.of(pos, state)), sourceSpec(pos, state, "block"));
 
 		assertEquals("after-exception", presentation.renderSubjects().get(0).subjectId());
+		assertEquals(1, capture.events.size());
+		assertTrue(capture.events.getFirst().getMessage().getFormattedMessage().contains("resolver-original"));
+		assertTrue(capture.events.getFirst().getMessage().getFormattedMessage().contains("resolver-cause"));
+		assertEquals(null, capture.events.getFirst().getThrown());
+		}
 	}
 
 	@Test
@@ -468,6 +474,7 @@ class BlockPresentationResolverTest {
 
 	@Test
 	void throwingResolverFailsSoftToNextResolution() {
+		try (OutlineDiagnosticCapture capture = new OutlineDiagnosticCapture(org.apache.logging.log4j.Level.WARN)) {
 		BlockPresentationResolverRegistry registry = new BlockPresentationResolverRegistry(false);
 		BlockPos pos = new BlockPos(36, 70, 37);
 		BlockState state = Blocks.STONE.defaultBlockState();
@@ -478,6 +485,10 @@ class BlockPresentationResolverTest {
 		BlockPresentation presentation = registry.resolve(world(Map.of(pos, state)), sourceSpec(pos, state, "block"));
 
 		assertEquals("direct", presentation.renderSubjects().get(0).subjectId());
+		assertEquals(1, capture.events.size());
+		assertTrue(capture.events.getFirst().getMessage().getFormattedMessage().contains("optional resolver failure"));
+		assertEquals(null, capture.events.getFirst().getThrown());
+		}
 	}
 
 	@Test

@@ -10,6 +10,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.name.TargetNameJson;
@@ -23,6 +24,7 @@ import nx.pingwheel.common.presentation.client.PresentationPropertyFormatter;
 import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Component-level content-message composer for the first-receipt content
@@ -54,11 +56,11 @@ public final class ContentChatComposer {
 	/** The localized template source for one derived annotation Ping Type. */
 	@FunctionalInterface
 	public interface TemplateSource {
-		String template(PingType annotationType);
+		@Nullable String template(PingType annotationType);
 
 		/** Compatible defaults keep existing lambda/constructor ports functional. */
-		default String multipleTemplate() { return ContentChatTemplate.DEFAULT_MULTIPLE_TEMPLATE; }
-		default String entryTemplate(PingType annotationType) { return ContentChatTemplate.DEFAULT_ENTRY_TEMPLATE; }
+		default @Nullable String multipleTemplate() { return ContentChatTemplate.DEFAULT_MULTIPLE_TEMPLATE; }
+		default @Nullable String entryTemplate(PingType annotationType) { return ContentChatTemplate.DEFAULT_ENTRY_TEMPLATE; }
 	}
 
 	private static final String INVENTORY_STATUS_PREFIX = "pingforit.spatial.inventory.";
@@ -73,24 +75,25 @@ public final class ContentChatComposer {
 	 */
 	public static TemplateSource localized(
 		Predicate<String> hasSelectedLocaleKey,
-		Function<String, String> templateValue
+		Function<String, @Nullable String> templateValue
 	) {
 		Objects.requireNonNull(hasSelectedLocaleKey, "hasSelectedLocaleKey");
 		Objects.requireNonNull(templateValue, "templateValue");
 		return new TemplateSource() {
-			@Override public String template(PingType annotationType) {
+			@Override public @Nullable String template(PingType annotationType) {
 				return lookup(() -> ContentChatTemplate.selectTemplateKey(annotationType, hasSelectedLocaleKey));
 			}
-			@Override public String multipleTemplate() {
+			@Override public @Nullable String multipleTemplate() {
 				return lookup(() -> ContentChatTemplate.MULTIPLE_TEMPLATE_KEY);
 			}
-			@Override public String entryTemplate(PingType annotationType) {
+			@Override public @Nullable String entryTemplate(PingType annotationType) {
 				return lookup(() -> ContentChatTemplate.selectEntryKey(annotationType, hasSelectedLocaleKey));
 			}
-			private String lookup(java.util.function.Supplier<String> key) {
+			private @Nullable String lookup(java.util.function.Supplier<String> key) {
 				try {
 					return templateValue.apply(key.get());
 				} catch (RuntimeException unavailable) {
+					Diagnostics.warn("chat/content-locale-lookup", "templates", () -> "localized template unavailable", unavailable);
 					return null;
 				}
 			}
@@ -134,6 +137,7 @@ public final class ContentChatComposer {
 			try {
 				return Optional.of(TargetNameJsonCodec.decode(new TargetNameJson(json), registryAccess));
 			} catch (RuntimeException malformed) {
+				Diagnostics.debug("chat/content-name-decode", "name-json", () -> "authoritative name unavailable", malformed);
 				return Optional.empty();
 			}
 		};
@@ -244,15 +248,15 @@ public final class ContentChatComposer {
 			templates.template(annotationType), author, annotationType, target, content));
 	}
 
-	private static Component propertyValue(
+	private static @Nullable Component propertyValue(
 		PresentationView view,
 		PresentationPropertyRef ref,
 		Function<String, Optional<Component>> nameJsonDecoder
 	) {
-		PresentationValue value = view.property(ref);
+		@Nullable PresentationValue value = view.property(ref);
 		if (value == null) return null;
 		if (value instanceof PresentationValue.Text text) {
-			Component rendered = textValue(ref, text.value(), nameJsonDecoder);
+			@Nullable Component rendered = textValue(ref, text.value(), nameJsonDecoder);
 			return rendered == null ? null
 				: Component.translatable(ContentChatTemplate.FIELD_KEY,
 					PresentationPropertyFormatter.fieldLabel(view, ref), rendered);
@@ -260,11 +264,13 @@ public final class ContentChatComposer {
 		try {
 			return PresentationPropertyFormatter.valueComponent(view, ref);
 		} catch (RuntimeException unavailable) {
+			Diagnostics.warn("chat/content-property-format", ref.adapterId(),
+				() -> "field=" + ref.fieldId(), unavailable);
 			return null;
 		}
 	}
 
-	private static Component textValue(
+	private static @Nullable Component textValue(
 		PresentationPropertyRef ref,
 		String text,
 		Function<String, Optional<Component>> nameJsonDecoder
@@ -273,6 +279,8 @@ public final class ContentChatComposer {
 			try {
 				return nameJsonDecoder.apply(text).orElse(null);
 			} catch (RuntimeException malformed) {
+				Diagnostics.warn("chat/content-name-formatter", ref.adapterId(),
+					() -> "field=" + ref.fieldId(), malformed);
 				return null;
 			}
 		}
@@ -284,16 +292,18 @@ public final class ContentChatComposer {
 		return Component.literal(text);
 	}
 
-	private static Component displayName(
+	private static @Nullable Component displayName(
 		ClientInventory.EntryView entry,
 		Function<String, Optional<Component>> displayDecoder
 	) {
 		if (entry.displayJson() != null && !entry.displayJson().isBlank()) {
 			try {
-				Component decoded = displayDecoder.apply(entry.displayJson()).orElse(null);
+				@Nullable Component decoded = displayDecoder.apply(entry.displayJson()).orElse(null);
 				if (decoded != null) return decoded;
 			} catch (RuntimeException malformed) {
 				// A malformed server display never becomes raw text or an exception.
+				Diagnostics.warn("chat/content-item-formatter", "item-display",
+					() -> "itemId=" + entry.itemId() + "; using localized base name", malformed);
 			}
 		}
 		return entry.label() == null || entry.label().isBlank()

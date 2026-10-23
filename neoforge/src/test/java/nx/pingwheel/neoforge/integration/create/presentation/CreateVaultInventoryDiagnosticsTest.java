@@ -43,9 +43,11 @@ class CreateVaultInventoryDiagnosticsTest {
 			assertEquals(2, capture.events.size());
 			for (var event : capture.events) {
 				assertEquals(Level.WARN, event.getLevel());
+				assertNull(event.getThrown());
 				String message = event.getMessage().getFormattedMessage();
 				assertTrue(message.contains("Vault callback failed")); assertTrue(message.contains("Vault callback cause"));
 				assertTrue(message.contains("create:item_vault")); assertTrue(message.contains("position="));
+				assertTrue(message.length() <= nx.pingwheel.common.util.SafeExceptionReport.MAX_CHARACTERS);
 			}
 		}
 	}

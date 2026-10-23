@@ -12,10 +12,10 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 import static nx.pingwheel.common.Global.LOGGER;
-import static nx.pingwheel.common.Global.debugException;
-import static nx.pingwheel.common.Global.warnException;
 
 /**
  * Dedicated boundary for the optional Distant Horizons integration: every
@@ -33,7 +33,7 @@ public class DistantHorizonsIntegration {
 
 	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard("distanthorizons");
 
-	private static IDhApiTerrainDataCache terrainCache = null;
+	private static @Nullable IDhApiTerrainDataCache terrainCache = null;
 	private static Instant lastCacheLoad = Instant.EPOCH;
 
 	/**
@@ -45,10 +45,8 @@ public class DistantHorizonsIntegration {
 	 *         when the integration is gated off, disabled, or failed to
 	 *         schedule, in which case no completion is ever invoked and the
 	 *         caller must fall back itself. A scheduling rejection (for
- *         example a {@code RejectedExecutionException}) does not disable
- *         the integration: a bounded, sanitized exception diagnostic is
- *         debug logged without throwable messages or payload data, and the
- *         caller falls back itself.
+	 *         example a {@code RejectedExecutionException}) does not disable
+	 *         the integration; a controlled WARN preserves the failure details.
 	 */
 	public static boolean traceDistantAsync(Vec3 rayStart, Vec3 direction, Consumer<Optional<BlockHitResult>> completion) {
 		if (!ModContext.HasDistantHorizons || LINK_GUARD.disabled()) {
@@ -63,36 +61,30 @@ public class DistantHorizonsIntegration {
 			LINK_GUARD.disable(error);
 			return false;
 		} catch (RuntimeException error) {
-			// Scheduling was rejected before the trace body ever ran. The integration
-			// stays enabled, and the bounded, sanitized exception diagnostic contains
-			// no throwable messages or payload data. The caller completes its own
-			// synchronous fallback.
-			debugException("distanthorizons schedule failed", error);
+			Diagnostics.warn("distanthorizons.schedule", "distanthorizons",
+				() -> "rayStart=" + rayStart + " direction=" + direction, error);
 			return false;
 		}
 
-		future.whenComplete((result, throwable) -> {
-			if (throwable != null) {
-				Throwable root = rootCause(throwable);
-
-				if (root instanceof LinkageError linkError) {
-					// The guard emits its once-only integration warning and debug-logs a
-					// bounded, sanitized exception diagnostic without messages or payload data.
-					LINK_GUARD.disable(linkError);
-				} else {
-					// The bounded report includes only exception structure and
-					// source-frame fields; messages and payload data never reach the log.
-					debugException("distanthorizons trace failed", root);
-				}
-
-				completion.accept(Optional.empty());
-				return;
-			}
-
-			completion.accept(result != null ? result : Optional.empty());
-		});
+		future.whenComplete((result, throwable) -> completeTrace(rayStart, direction, result, throwable, completion));
 
 		return true;
+	}
+
+	static void completeTrace(Vec3 rayStart, Vec3 direction, @Nullable Optional<BlockHitResult> result,
+		@Nullable Throwable throwable, Consumer<Optional<BlockHitResult>> completion) {
+		if (throwable != null) {
+			Throwable root = rootCause(throwable);
+			if (root instanceof LinkageError linkError) {
+				LINK_GUARD.disable(linkError);
+			} else {
+				Diagnostics.warn("distanthorizons.trace", "distanthorizons",
+					() -> "rayStart=" + rayStart + " direction=" + direction, root);
+			}
+			completion.accept(Optional.empty());
+			return;
+		}
+		completion.accept(result != null ? result : Optional.empty());
 	}
 
 	/**
@@ -106,7 +98,7 @@ public class DistantHorizonsIntegration {
 		Throwable root = throwable;
 
 		for (int depth = 0; depth < 16; depth++) {
-			Throwable cause = root.getCause();
+			@Nullable Throwable cause = root.getCause();
 
 			if (cause == null || cause == root) {
 				break;
@@ -134,7 +126,7 @@ public class DistantHorizonsIntegration {
 				return Optional.empty();
 			}
 
-			final IDhApiTerrainDataCache cache;
+			final @Nullable IDhApiTerrainDataCache cache;
 
 			// Refresh the cache under the lock, then ray cast outside it.
 			synchronized (CACHE_LOCK) {
@@ -193,15 +185,14 @@ public class DistantHorizonsIntegration {
 	/**
 	 * Reports a {@link LinkageError} that escaped this boundary before the
 	 * guard could handle it (for example one thrown while linking the trace
-	 * call itself), without duplicating the guard's own warning. Only the
-	 * bounded safe report is logged: the payload of an unexpected link error
-	 * may carry environment details that must never reach the log.
+	 * call itself), without duplicating the guard's own warning.
 	 */
 	public static void logUnguardedLinkFailure(LinkageError error) {
 		if (LINK_GUARD.disabled()) {
 			return;
 		}
 
-		warnException("distanthorizons integration disabled: unguarded link failure", error);
+		Diagnostics.warn("distanthorizons.unguarded-link", "distanthorizons",
+			() -> "distanthorizons integration disabled: unguarded link failure", error);
 	}
 }

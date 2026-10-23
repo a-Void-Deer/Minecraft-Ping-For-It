@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /** One server-thread-confined, bounded observation. A new sweep uses a new scanner. */
 public final class InventoryScanner implements AutoCloseable {
@@ -125,10 +125,12 @@ public final class InventoryScanner implements AutoCloseable {
 				state = State.INCOMPLETE;
 			}
 		} catch (ArithmeticException failure) {
+			Diagnostics.warn("inventory/scanner-count", source.getClass().getName(),
+				() -> "reason=count-overflow cursor=" + cursor + " expected=" + expected + " previewAll=" + previewAll, failure);
 			state = State.INCOMPLETE;
 		} catch (RuntimeException | LinkageError failure) {
 			if (!InventoryCaptureDiagnostics.expectedFailure(failure))
-				RateLimitedDiagnostics.warn("inventory/scanner-step", source.getClass().getName(),
+				Diagnostics.warn("inventory/scanner-step", source.getClass().getName(),
 					() -> "sourceClass=" + source.getClass().getName() + " cursor=" + cursor + " expected=" + expected + " previewAll=" + previewAll, failure);
 			state = State.UNAVAILABLE;
 			counts.clear();

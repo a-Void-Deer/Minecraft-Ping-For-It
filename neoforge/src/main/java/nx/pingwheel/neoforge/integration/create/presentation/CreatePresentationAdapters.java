@@ -1,5 +1,7 @@
 package nx.pingwheel.neoforge.integration.create.presentation;
 
+import nx.pingwheel.common.diagnostics.Diagnostics;
+
 import java.util.Objects;
 import java.util.Set;
 
@@ -179,7 +181,10 @@ public final class CreatePresentationAdapters {
 	private static boolean admitted(java.util.function.Predicate<BlockPos> memberGate, BlockPos position) {
 		if (memberGate == null) return true;
 		try { return memberGate.test(position); }
-		catch (RuntimeException | LinkageError unavailable) { return false; }
+		catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("create/presentation-member-gate", "source", () -> "position=" + position, unavailable);
+			return false;
+		}
 	}
 
 	private static final class ServerSource implements CreatePresentationAdapter.Source, SourceAccess {

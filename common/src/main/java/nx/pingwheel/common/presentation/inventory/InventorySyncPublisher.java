@@ -26,7 +26,7 @@ import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /** Actual bounded dedicated publication. Queued cuts remain immutable until fully transmitted. */
 public final class InventorySyncPublisher implements SyncPublisher, AutoCloseable {
@@ -667,7 +667,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		}
 	}
 	private void warn(String operation, State state, InventoryS2CPacket packet, Throwable failure) {
-		RateLimitedDiagnostics.warn("inventory/publisher/" + operation, transport.getClass().getName() + "/" + packet.kind(),
+		Diagnostics.warn("inventory/publisher/" + operation, transport.getClass().getName() + "/" + packet.kind(),
 			() -> "kind=" + packet.kind() + " request=" + packet.requestId() + " recipient=" + state.context.recipient()
 				+ " marker=" + packet.markerId() + " epoch=" + packet.epoch() + " presentationEpoch=" + packet.presentationEpoch()
 				+ " view=" + packet.view() + " baseline=" + packet.baselineId() + " stateRevision=" + packet.statusRevision()

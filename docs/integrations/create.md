@@ -71,9 +71,8 @@ recoverable exception after shared-buffer vertices have been committed is
 `RENDERED` for that frame with a partial-emission diagnostic. The integration
 does not redefine those outcomes.
 
-Keep diagnostics lazy, bounded, and rate-controlled while retaining complete
-entity, class, payload, and exception details. Retain and close the registration
-handle during deterministic teardown.
+Diagnostics follow the shared [logging contract](../architecture/logging.md).
+Retain and close the registration handle during deterministic teardown.
 
 ## Create/Flywheel entity-block geometry
 
@@ -108,8 +107,8 @@ Zero committed output and recoverable partial commits follow the common outcome
 contract. In particular, a shared-buffer commit that fails after writing one or
 more vertices is `RENDERED` for that frame, while pre-commit plan failures are
 `FAILED` or `EMPTY` according to the observed result. Retain and close the
-registration handle, and keep full detailed diagnostics lazy, bounded, and
-rate-controlled.
+registration handle; diagnostics follow the shared
+[logging contract](../architecture/logging.md).
 
 ## Create presentation summary adapter
 

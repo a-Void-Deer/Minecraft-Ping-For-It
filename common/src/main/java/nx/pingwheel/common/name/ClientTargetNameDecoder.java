@@ -6,7 +6,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.network.chat.Component;
 
 import nx.pingwheel.common.domain.MarkerId;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.util.SafeExceptionReport;
 
 /**
@@ -76,7 +76,7 @@ public final class ClientTargetNameDecoder {
 
 				@Override
 				public void debugException(MarkerId markerId, Throwable failure) {
-					RateLimitedDiagnostics.debug("target-name-decode", ClientTargetNameDecoder.class.getName(),
+					Diagnostics.debug("target-name-decode", ClientTargetNameDecoder.class.getName(),
 						() -> "markerId=" + markerId.value(), failure);
 				}
 			};

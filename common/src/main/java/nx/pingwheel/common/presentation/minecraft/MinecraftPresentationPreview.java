@@ -1,5 +1,7 @@
 package nx.pingwheel.common.presentation.minecraft;
 
+import nx.pingwheel.common.diagnostics.Diagnostics;
+
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -88,7 +90,10 @@ final class MinecraftPresentationPreview implements PresentationPreviewServer.Ho
 		// read or provider name resolution; membership is provider state, not a
 		// second world read.
 		try { if (!memberGate.test(position)) return null; }
-		catch (RuntimeException | LinkageError unavailable) { return null; }
+		catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("presentation/preview-member-gate", "server", () -> "target=" + target + " member=" + position, unavailable);
+			return null;
+		}
 		BlockState state = null;
 		if (demand.contains(PresentationBasic.BLOCK_STATE)) {
 			state = readState.get();

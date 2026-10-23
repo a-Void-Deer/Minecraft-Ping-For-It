@@ -23,7 +23,8 @@ import nx.pingwheel.common.integration.ExternalBlockServerProviders;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.marker.MinecraftServerEntityLookup;
 
-import static nx.pingwheel.common.Global.LOGGER;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
 
 /**
  * The Minecraft 1.21.1 server adapter of {@link AuthoritativeTargetNameResolver}.
@@ -54,15 +55,14 @@ import static nx.pingwheel.common.Global.LOGGER;
  * </ul>
  *
  * <p>Unavailable targets fall back to the
- * {@link TargetNameJsonCodec#UNKNOWN unknown} name payload. The only logging
- * happens on that fallback path and carries the target kind and a safe reason
- * class only — never names, JSON, UUIDs, positions, or registry ids.
+ * {@link TargetNameJsonCodec#UNKNOWN unknown} name payload. Expected absence
+ * emits a controlled scalar debug event; consumed lookup/encoding exceptions
+ * retain their original bounded details in a controlled warning.
  */
 public final class MinecraftTargetNameResolver implements AuthoritativeTargetNameResolver {
 
 	/**
-	 * Safe fallback classifications; only these names (or an exception class
-	 * simple name) may appear in the fallback debug log.
+	 * Expected absence classifications used by the scalar fallback debug event.
 	 */
 	private enum FallbackReason {
 		REQUESTER_UNAVAILABLE,
@@ -106,7 +106,9 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 
 			return TargetNameJsonCodec.encode(resolution.component(), server.registryAccess());
 		} catch (RuntimeException e) {
-			return fallback(normalizedTarget, e.getClass().getSimpleName());
+			Diagnostics.warn("target-name/server-lookup", "minecraft",
+				() -> "kind=" + normalizedTarget.kind() + "; using unknown name", e);
+			return TargetNameJsonCodec.UNKNOWN;
 		}
 	}
 
@@ -219,8 +221,8 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 	 * reason class only. Never names, JSON, UUIDs, positions, or registry ids.
 	 */
 	private TargetNameJson fallback(Target target, String reasonClass) {
-		LOGGER.debug(() -> "authoritative target name unavailable, using unknown: kind={} reason={}".formatted(
-			target.kind(), reasonClass));
+		Diagnostics.event(Level.DEBUG, "target-name/server-lookup", "minecraft", reasonClass,
+			() -> "kind=" + target.kind() + "; using unknown name");
 		return TargetNameJsonCodec.UNKNOWN;
 	}
 }

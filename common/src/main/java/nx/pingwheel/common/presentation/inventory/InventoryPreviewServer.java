@@ -19,7 +19,7 @@ import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket.Entry;
 import nx.pingwheel.common.network.InventoryS2CPacket.Status;
 import nx.pingwheel.common.presentation.source.SourceKey;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /** Server-thread preview sessions. World access and packet transport are supplied by the host. */
 public final class InventoryPreviewServer {
@@ -196,7 +196,7 @@ public final class InventoryPreviewServer {
 			resolution = host.resolve(session.player, request.target);
 		} catch (RuntimeException | LinkageError unavailable) {
 			if (!InventoryCaptureDiagnostics.expectedFailure(unavailable))
-				RateLimitedDiagnostics.warn("inventory/legacy-preview-resolve", InventoryCaptureDiagnostics.scope(request.target),
+				Diagnostics.warn("inventory/legacy-preview-resolve", InventoryCaptureDiagnostics.scope(request.target),
 					() -> "request=" + request.id + " recipient=" + session.player + " epoch=" + session.epoch
 						+ " " + InventoryCaptureDiagnostics.targetContext(request.target), unavailable);
 			resolution = Optional.empty();
@@ -391,7 +391,7 @@ public final class InventoryPreviewServer {
 		// A throwing send may have handed off data; charge conservatively and retry the same immutable value.
 		try { host.send(session.player, packet); return true; }
 		catch (RuntimeException transportFailure) {
-			RateLimitedDiagnostics.warn("inventory/legacy-preview-send", host.getClass().getName() + "/" + packet.kind(),
+			Diagnostics.warn("inventory/legacy-preview-send", host.getClass().getName() + "/" + packet.kind(),
 				() -> "kind=" + packet.kind() + " request=" + packet.requestId() + " recipient=" + session.player
 					+ " epoch=" + packet.epoch() + " baseline=" + packet.baselineId() + " part=" + packet.partIndex() + "/" + packet.partCount(), transportFailure);
 			return false;

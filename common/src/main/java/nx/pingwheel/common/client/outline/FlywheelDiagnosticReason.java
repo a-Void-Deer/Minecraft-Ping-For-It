@@ -15,6 +15,7 @@ public enum FlywheelDiagnosticReason {
 	MANAGER_STORAGE_UNAVAILABLE("manager-storage-unavailable"),
 	VISUAL_NULL("visual-null"),
 	NO_INSTANCES("no-instances"),
+	INSTANCE_RESOLUTION_FAILED("instance-resolution"),
 	UNSUPPORTED_TYPE("unsupported"),
 	MODEL_UNAVAILABLE("model"),
 	MESH_EXTRACTION_FAILED("mesh"),

@@ -441,7 +441,7 @@ public final class InventorySourceAccess implements SourceAccess {
 			} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException
 				| nx.pingwheel.common.presentation.inventory.minecraft.InventoryObservationSnapshot.LimitException failure) {
 				preparationFailure = failure;
-				InventoryCaptureDiagnostics.boundExceeded(input, "capture-work-or-structure");
+				InventoryCaptureDiagnostics.boundExceeded(input, "capture-work-or-structure", failure);
 				return settle(Preparation.INCOMPLETE);
 			} catch (RuntimeException | LinkageError failure) {
 				preparationFailure = failure;
@@ -533,7 +533,7 @@ public final class InventorySourceAccess implements SourceAccess {
 						return snapshotCaptured(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, page), CaptureResult.Availability.READABLE,
 							complete ? CaptureResult.Completeness.COMPLETE : terminal ? CaptureResult.Completeness.INCOMPLETE : CaptureResult.Completeness.CONTINUE);
 					} catch (InventoryItemBudget.CaptureLimitException exhausted) {
-						InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace");
+						InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace", exhausted);
 						terminal = true;
 						releaseRetained(exhausted);
 						return snapshotCaptured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
@@ -608,13 +608,13 @@ public final class InventorySourceAccess implements SourceAccess {
 					used = Math.min(allowance, failure.attemptedVisits());
 					terminal = true;
 					if (failure.getCause() instanceof InventoryItemBudget.CaptureLimitException) {
-						InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace");
+						InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace", failure);
 						return captured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
 					}
 					InventoryCaptureDiagnostics.warn("live-step", input, descriptor.key(), () -> "cursor=" + cursor + " expected=" + expected, failure);
 					return captured(null, CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
 				} catch (InventoryItemBudget.CaptureLimitException exhausted) {
-					InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace");
+					InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace", exhausted);
 					terminal = true;
 					return captured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
 				} catch (RuntimeException | LinkageError unavailable) {

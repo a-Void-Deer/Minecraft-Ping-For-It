@@ -9,7 +9,10 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import net.minecraft.world.entity.Entity;
-import nx.pingwheel.common.Global;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Deterministic registry for optional/modded entity-outline sources.
@@ -36,20 +39,20 @@ public final class EntityOutlineSourceRegistry {
 
 	private final Object lock = new Object();
 	private final Map<String, Registration> registrations = new LinkedHashMap<>();
-	private final WarningSink warningSink;
+	private final @Nullable WarningSink warningSink;
 	private final Set<String> warnedKeys = ConcurrentHashMap.newKeySet();
-	private volatile List<EntityOutlineSource> snapshot = List.of();
+	private volatile @Unmodifiable List<EntityOutlineSource> snapshot = List.of();
 
 	public EntityOutlineSourceRegistry() {
-		this(WarningSink.global());
+		this(null);
 	}
 
 	/**
 	 * Injectable constructor for headless tests; production callers should use
 	 * the default registry warning sink.
 	 */
-	EntityOutlineSourceRegistry(WarningSink warningSink) {
-		this.warningSink = Objects.requireNonNull(warningSink, "warningSink");
+	EntityOutlineSourceRegistry(@Nullable WarningSink warningSink) {
+		this.warningSink = warningSink;
 	}
 
 	/**
@@ -61,31 +64,31 @@ public final class EntityOutlineSourceRegistry {
 	 * source, and closing a rejected duplicate handle can never remove that
 	 * winner.</p>
 	 */
-	public Registration register(EntityOutlineSource source) {
+	public Registration register(@Nullable EntityOutlineSource source) {
 		if (source == null) {
-			warningSink.warn("entity outline source registration ignored; id="
+			rejected("null-source", "entity outline source registration ignored; id="
 				+ EntityBlockGeometrySourceIds.INVALID + "; category=null-source", null);
 			return Registration.rejected();
 		}
 
-		final String id;
+		final @Nullable String id;
 		try {
 			id = EntityBlockGeometrySourceIds.validate(source.id());
 		} catch (Exception | LinkageError | AssertionError failure) {
-			warningSink.warn("entity outline source registration ignored; id="
+			rejected("source-id-lookup-failed", "entity outline source registration ignored; id="
 				+ EntityBlockGeometrySourceIds.UNAVAILABLE + "; category=source-id-lookup-failed", failure);
 			return Registration.rejected();
 		}
 
 		if (id == null) {
-			warningSink.warn("entity outline source registration ignored; id="
+			rejected("invalid-source-id", "entity outline source registration ignored; id="
 				+ EntityBlockGeometrySourceIds.INVALID + "; category=invalid-source-id", null);
 			return Registration.rejected();
 		}
 
 		synchronized (lock) {
 			if (registrations.containsKey(id)) {
-				warningSink.warn("entity outline source registration ignored; id="
+				rejected("duplicate-id:" + id, "entity outline source registration ignored; id="
 					+ id + "; category=duplicate-id-first-registration-kept", null);
 				return Registration.rejected();
 			}
@@ -101,7 +104,7 @@ public final class EntityOutlineSourceRegistry {
 	 * Returns the immutable registration-order snapshot. Retrieval is a single
 	 * volatile read; callers must not retain a context from an attempt.
 	 */
-	public List<EntityOutlineSource> snapshot() {
+	public @Unmodifiable List<EntityOutlineSource> snapshot() {
 		return snapshot;
 	}
 
@@ -145,11 +148,31 @@ public final class EntityOutlineSourceRegistry {
 	 * spam one log line per entity per frame while still being retried on
 	 * every call.
 	 */
-	void warnOnce(String key, java.util.function.Supplier<String> message, Throwable failure) {
+	void warnOnce(String key, java.util.function.Supplier<String> message, @Nullable Throwable failure) {
+		if (warningSink == null && !OutlineDiagnostics.enabled()) {
+			return;
+		}
 		if (!warnedKeys.add(key)) {
 			return;
 		}
-		warningSink.warn(message.get(), failure);
+		if (warningSink == null) {
+			OutlineDiagnostics.approved("entity-outline-source", key, message, failure);
+		} else {
+			OutlineDiagnostics.deliver(text -> warningSink.warn(text, null), message, failure);
+		}
+	}
+
+	private void rejected(String category, String message, @Nullable Throwable failure) {
+		if (warningSink == null) {
+			if (failure == null) {
+				Diagnostics.event(Level.WARN,
+					"entity-outline-register", category, "registration-rejected", () -> message);
+			} else {
+				Diagnostics.warn("entity-outline-register", category, () -> message, failure);
+			}
+		} else {
+			OutlineDiagnostics.deliver(text -> warningSink.warn(text, null), () -> message, failure);
+		}
 	}
 
 	private static String describeEntity(Entity entity) {
@@ -188,9 +211,9 @@ public final class EntityOutlineSourceRegistry {
 	 * teardown.
 	 */
 	public static final class Registration implements AutoCloseable {
-		private final EntityOutlineSourceRegistry registry;
-		private final String id;
-		private final EntityOutlineSource source;
+		private final @Nullable EntityOutlineSourceRegistry registry;
+		private final @Nullable String id;
+		private final @Nullable EntityOutlineSource source;
 		private boolean closed;
 
 		private Registration(
@@ -215,7 +238,7 @@ public final class EntityOutlineSourceRegistry {
 		}
 
 		private EntityOutlineSource source() {
-			return source;
+			return Objects.requireNonNull(source);
 		}
 
 		/** Whether this handle owns an accepted registration rather than a no-op rejection. */
@@ -231,18 +254,24 @@ public final class EntityOutlineSourceRegistry {
 		}
 	}
 
-	private static String safeSourceId(EntityOutlineSource source) {
+	private String safeSourceId(EntityOutlineSource source) {
 		try {
-			String id = EntityBlockGeometrySourceIds.validate(source.id());
+			@Nullable String id = EntityBlockGeometrySourceIds.validate(source.id());
+			if (id == null) {
+				warnOnce("invalid-id:" + source.getClass().getName(),
+					() -> "entity outline source has invalid id; class=" + source.getClass().getName(), null);
+			}
 			return id == null ? EntityBlockGeometrySourceIds.INVALID : id;
 		} catch (Exception | LinkageError | AssertionError failure) {
+			warnOnce("source-id:" + source.getClass().getName(),
+				() -> "entity outline source id failed; class=" + source.getClass().getName(), failure);
 			return EntityBlockGeometrySourceIds.UNAVAILABLE;
 		}
 	}
 
 	@FunctionalInterface
 	interface WarningSink {
-		void warn(String message, Throwable failure);
+		void warn(String message, @Nullable Throwable failure);
 
 		static WarningSink noop() {
 			return (message, failure) -> {
@@ -252,11 +281,7 @@ public final class EntityOutlineSourceRegistry {
 
 		static WarningSink global() {
 			return (message, failure) -> {
-				if (failure == null) {
-					Global.LOGGER.warn(message);
-				} else {
-					Global.LOGGER.warn(message, failure);
-				}
+				OutlineDiagnostics.approved("entity-outline-source", "source", () -> message, failure);
 			};
 		}
 	}

@@ -3,6 +3,7 @@ package nx.pingwheel.common.presentation;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.network.StrictPacketCodec;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -79,6 +80,8 @@ public final class PresentationCodec {
 			write(probe, section);
 			return section;
 		} catch (RuntimeException notEncodable) {
+			Diagnostics.warn("presentation/preencode", section.adapterId(),
+				() -> "schema=" + section.schema() + " fields=" + section.fields().keySet() + " stale=" + section.stale(), notEncodable);
 			return new PresentationSection(section.adapterId(), section.schema(), Map.of(), true);
 		} finally { probe.release(); }
 	}

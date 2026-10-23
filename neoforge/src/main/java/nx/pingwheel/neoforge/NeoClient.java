@@ -9,6 +9,8 @@ import net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
 import nx.pingwheel.common.CommonClient;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.command.ClientCommandBuilder;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
@@ -31,14 +33,14 @@ public class NeoClient {
 		"nx.pingwheel.neoforge.integration.create.CreateDoorPresentationResolver";
 	private static final String SIMULATED_DOCKING_CONNECTOR_RESOLVER =
 		"nx.pingwheel.neoforge.integration.simulated.SimulatedDockingConnectorPresentationResolver";
-	private static Boolean lastCreateDetected;
-	private static Boolean lastFlywheelDetected;
-	private static String lastEntityAdapterState;
-	private static String lastContraptionRaycastAdapterState;
-	private static String lastFlywheelAdapterState;
-	private static String lastWaterWheelResolverState;
-	private static String lastCreateDoorResolverState;
-	private static String lastSimulatedResolverState;
+	private static @Nullable Boolean lastCreateDetected;
+	private static @Nullable Boolean lastFlywheelDetected;
+	private static @Nullable String lastEntityAdapterState;
+	private static @Nullable String lastContraptionRaycastAdapterState;
+	private static @Nullable String lastFlywheelAdapterState;
+	private static @Nullable String lastWaterWheelResolverState;
+	private static @Nullable String lastCreateDoorResolverState;
+	private static @Nullable String lastSimulatedResolverState;
 	private static boolean entityAdapterResolved;
 	private static boolean contraptionRaycastAdapterResolved;
 	private static boolean flywheelAdapterResolved;
@@ -123,8 +125,8 @@ public class NeoClient {
 			logAdapterState("create-contraption-raycast", "reflection-success; sourceHandleState=" + state);
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
 			logAdapterState("create-contraption-raycast", "reflection-failure; sourceHandleState=failed");
-			LOGGER.warn(
-				"optional adapter registration failed; adapter=create-contraption-raycast"
+			Diagnostics.warn("optional-adapter-register", CREATE_CONTRAPTION_RAYCAST_ADAPTER,
+				() -> "optional adapter registration failed; adapter=create-contraption-raycast"
 					+ "; class=" + CREATE_CONTRAPTION_RAYCAST_ADAPTER + "; sourceHandleState=failed",
 				failure);
 		}
@@ -144,8 +146,8 @@ public class NeoClient {
 			logAdapterState(adapterName, "reflection-success; sourceHandleState=" + state);
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
 			logAdapterState(adapterName, "reflection-failure; sourceHandleState=failed");
-			LOGGER.warn(
-				"optional adapter registration failed; adapter=" + adapterName
+			Diagnostics.warn("optional-adapter-register", className,
+				() -> "optional adapter registration failed; adapter=" + adapterName
 					+ "; class=" + className + "; sourceHandleState=failed",
 				failure);
 		}
@@ -167,8 +169,8 @@ public class NeoClient {
 			logResolverState(resolverName, "reflection-success; registrationState=" + state);
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
 			logResolverState(resolverName, "reflection-failure; registrationState=failed");
-			LOGGER.warn(
-				"optional resolver registration failed; resolver=" + resolverName
+			Diagnostics.warn("optional-resolver-register", className,
+				() -> "optional resolver registration failed; resolver=" + resolverName
 					+ "; class=" + className + "; registrationState=failed",
 				failure);
 		}
@@ -207,8 +209,8 @@ public class NeoClient {
 			logAdapterState("create-contraption-raycast", "not-loaded");
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
 			logAdapterState("create-contraption-raycast", "close-failure; sourceHandleState=close-failure");
-			LOGGER.warn(
-				"optional adapter teardown failed; adapter=create-contraption-raycast"
+			Diagnostics.warn("optional-adapter-close", CREATE_CONTRAPTION_RAYCAST_ADAPTER,
+				() -> "optional adapter teardown failed; adapter=create-contraption-raycast"
 					+ "; class=" + CREATE_CONTRAPTION_RAYCAST_ADAPTER
 					+ "; sourceHandleState=close-failure",
 				failure);
@@ -226,8 +228,8 @@ public class NeoClient {
 			logAdapterState(adapterName, "not-loaded");
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
 			logAdapterState(adapterName, "close-failure; sourceHandleState=close-failure");
-			LOGGER.warn(
-				"optional adapter teardown failed; adapter=" + adapterName
+			Diagnostics.warn("optional-adapter-close", className,
+				() -> "optional adapter teardown failed; adapter=" + adapterName
 					+ "; class=" + className + "; sourceHandleState=close-failure",
 				failure);
 		} finally {
@@ -240,7 +242,7 @@ public class NeoClient {
 	}
 
 	private static void logAdapterState(String adapterName, String state) {
-		String previous = switch (adapterName) {
+		@Nullable String previous = switch (adapterName) {
 			case "create-entity" -> lastEntityAdapterState;
 			case "create-contraption-raycast" -> lastContraptionRaycastAdapterState;
 			default -> lastFlywheelAdapterState;
@@ -260,7 +262,7 @@ public class NeoClient {
 	}
 
 	private static void logResolverState(String resolverName, String state) {
-		String previous;
+		@Nullable String previous;
 		switch (resolverName) {
 			case "simulated-docking-connector-presentation" -> previous = lastSimulatedResolverState;
 			case "create-door-presentation" -> previous = lastCreateDoorResolverState;

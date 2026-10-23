@@ -2,6 +2,9 @@ package nx.pingwheel.neoforge.mixin.presentation;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import nx.pingwheel.neoforge.integration.create.presentation.CreatePresentationDiagnosticCapture;
+import org.apache.logging.log4j.Level;
 
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.Opcodes;
@@ -10,6 +13,21 @@ import org.objectweb.asm.tree.FieldNode;
 
 class CreatePresentationMixinPluginTest {
 	private static final String KINETIC = "com/simibubi/create/content/kinetics/base/KineticBlockEntity";
+
+	@Test void actualProviderFailureClosesGateAndWarnsOnceWhileNormalAbsenceStaysSilent() {
+		try (var capture = new CreatePresentationDiagnosticCapture()) {
+			var absent = new CreatePresentationMixinPlugin(() -> false, () -> { throw new AssertionError("absent mod cannot discover bytecode"); });
+			assertFalse(absent.shouldApplyMixin(KINETIC.replace('/', '.'), "nx.pingwheel.neoforge.mixin.presentation.KineticCachedNetworkMixin"));
+			assertTrue(capture.events().isEmpty());
+			var broken = new CreatePresentationMixinPlugin(() -> true, () -> {
+				throw new IllegalStateException("bytecode provider failed", new RuntimeException("bytecode provider cause"));
+			});
+			for (int attempt = 0; attempt < 5; attempt++) assertFalse(broken.shouldApplyMixin(KINETIC.replace('/', '.'),
+				"nx.pingwheel.neoforge.mixin.presentation.KineticCachedNetworkMixin"));
+			assertEquals(1, capture.events().size()); assertEquals(Level.WARN, capture.events().getFirst().getLevel());
+			assertTrue(capture.messages().getFirst().contains("bytecode provider cause"));
+		}
+	}
 
 	@Test
 	void onlyExactTargetWithBothProtectedInstanceFloatsIsCompatible() {

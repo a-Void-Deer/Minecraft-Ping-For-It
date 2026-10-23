@@ -14,6 +14,16 @@ The current suite covers:
 - config-version marker, precedence, migration, client/server recovery, and
   future-version preservation seams.
 
+`ConfigHandlerDiagnosticsTest` covers filesystem-backed load-validation,
+backup, save and recovery-reset failures. Warning reports retain long original
+message tails and root causes within the diagnostic bound, without an attached
+throwable; the generated recovery reason remains a separate safe one-line
+comment. Failed backup preserves the original bytes and blocks save/reset
+writes while leaving defaults in memory; failed initial save creates no file,
+and failed recovery-reset preserves the original source and blocks subsequent
+saves. These are handler and injected-failure seams, not a live settings screen
+or client/server persistence session.
+
 `TransparentBlockSelectionMigrationTest` contains filesystem-backed fixtures
 for the transparent-toggle transformation at the existing client beta1
 boundary: legacy decoded values retain their actual raycast effect, a present

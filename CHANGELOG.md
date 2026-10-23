@@ -2,7 +2,7 @@
 
 Baseline: `0.4.2-beta1` (commit `2f2446dd0cb36a92205cae79d76577681a42a5df`)
 
-This update replaces the old ping wheel with a full spatial selection menu, adds server-backed content and inventory information to pings, reworks input and configuration. It also removes the FTB Teams and Simple Voice Chat integrations.
+This update replaces the old ping wheel with a full spatial selection menu, adds server-backed content and inventory information to pings, reworks input and logging. It also removes the FTB Teams and Simple Voice Chat integrations.
 
 ## Spatial selection menu
 
@@ -15,28 +15,35 @@ This update replaces the old ping wheel with a full spatial selection menu, adds
 ## Content and property markers
 
 - A ping can now carry property or item content. For each authorized attribute you can choose a Ping Type (for example an intent or color) independently of the marker's main type.
-- The server recaptures the actual values when the ping is created, so a marker reflects the current world state rather than the client's preview.
+- The server recaptures the actual values of the selected target when the ping is created.
 - The base attributes include the target name and custom name, entity health, item identity, block state, and other authorized fields.
+    - Mainly on blocks & entity blocks.
 - Content pings show their values in the HUD and in a dedicated localized chat message that keeps each selected entry's own phrase.
-- Client-local observations are preferred; the server's bounded preview is used only for fields the client cannot observe itself.
+- Client-local observations are preferred.
 
 ## Inventory preview and tracking
 
 - Inventory preview and tracking are available by default and need no separate opt-in. Selecting an inventory row creates an ordinary marker with an item annotation; its count keeps updating for the marker's lifetime.
 - Item variants are folded when an exact identity cannot be encoded, and unknown, incomplete, and unavailable states are shown explicitly.
-- Options let you keep the Content intent selection menus enabled or disabled, and keep an inventory list open after the first key release.
+- Options let you enable the feature to keep the Content intent selection menus enabled or disabled, or keep inventory lists open after the first key release.(OFF by default)
 - Inventory reads use the block face you were looking at.
 
 ## Input and gestures
 
-- Double-click Danger: repeating a short press within a short window and without turning the view too far derives an extra Danger ping from the first capture.
-- An optional gesture shortcut can open the selector before the normal long-press threshold (off by default).
+- Double-click Danger: repeating a short press within a short window and without turning the view too far derives an extra Danger ping from the first capture.(ON by default)
+- An optional gesture shortcut can open the selector before the normal long-press threshold (OFF by default).
 - Long-press compatibility mode still takes priority and disables the gestures above while it is active.
 
 ## Server administration
 
 - The settings screen adds a Server Presentation editor that shows each target type's allow and block rules and whitelist-only mode. Players without permission can view the authoritative server settings but cannot edit them.
 - The Performance category manages the inventory preview and tracking budgets, caps, byte allowances, refresh and heartbeat cadence, and the administrator notifications.
+
+## Diagnostics and logging
+
+- Better diagnostics cover actual failures and important degradation in capture, content & inventory handling, sending, rendering, and optional integrations.
+- Unexpected failures and important degradation produce warnings visible at an INFO log threshold.
+- Repeated reports are suppressed and counted, with independent DEBUG, WARN and ERROR capacity.
 
 ## Integrations
 

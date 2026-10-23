@@ -16,6 +16,8 @@ import org.spongepowered.asm.service.MixinService;
 
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.loading.LoadingModList;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Fail-closed guard, evaluated before applying any Create accessor. Uses ASM
@@ -47,7 +49,7 @@ public final class CreatePresentationMixinPlugin implements IMixinConfigPlugin {
 	public void onLoad(String mixinPackage) {}
 
 	@Override
-	public String getRefMapperConfig() {
+	public @Nullable String getRefMapperConfig() {
 		return null;
 	}
 
@@ -66,6 +68,8 @@ public final class CreatePresentationMixinPlugin implements IMixinConfigPlugin {
 				.getClassNode(TARGET, true);
 			return compatibleTarget(target);
 		} catch (ClassNotFoundException | IOException | RuntimeException | LinkageError failure) {
+			Diagnostics.warn("create/presentation-mixin-gate", "cached-network",
+				() -> "target=" + targetClassName + " mixin=" + mixinClassName, failure);
 			return false;
 		}
 	}
@@ -81,14 +85,14 @@ public final class CreatePresentationMixinPlugin implements IMixinConfigPlugin {
 			"create".equals(mod.getModId()) && testedVersion(mod.getVersion().toString()));
 	}
 
-	static boolean testedVersion(String version) {
+	static boolean testedVersion(@Nullable String version) {
 		// The runtime 6.0.10 metadata is not an artifact fingerprint; the
 		// separate ASM field check still refuses incompatible layouts.
 		return TESTED_MOD_VERSION.equals(version) || TESTED_ARTIFACT_VERSION.equals(version);
 	}
 
 	/** Package-local test seam for the exact fields required by our shadows. */
-	static boolean compatibleTarget(ClassNode target) {
+	static boolean compatibleTarget(@Nullable ClassNode target) {
 		return target != null && TARGET.replace('.', '/').equals(target.name)
 			&& matchingFloat(target, "stress") && matchingFloat(target, "capacity");
 	}

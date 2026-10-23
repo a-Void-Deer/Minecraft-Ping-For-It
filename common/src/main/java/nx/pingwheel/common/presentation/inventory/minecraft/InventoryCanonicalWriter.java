@@ -5,6 +5,7 @@ import net.minecraft.nbt.*;
 
 /** Fixed-cap owned canonical output, with direct UTF-8 and bounded insertion sorting. */
 final class InventoryCanonicalWriter {
+	private static final String BYTE_BOUND_REASON = "canonical byte bound=" + InventoryItemCodec.MAX_CANONICAL_BYTES;
 	private final byte[] bytes;
 	private final InventoryItemBudget budget;
 	private int cursor;
@@ -113,7 +114,9 @@ final class InventoryCanonicalWriter {
 		room(width); work(8L * width);
 		for (int shift = (width - 1) * 8; shift >= 0; shift -= 8) bytes[cursor++] = (byte) (value >>> shift);
 	}
-	private void room(long additional) { if (additional > bytes.length - cursor) refuse(); }
+	private void room(long additional) {
+		if (additional > bytes.length - cursor) throw new InventoryItemCodec.IdentityUnavailableException(BYTE_BOUND_REASON);
+	}
 	private void allocate(long payload, long references, long objects) {
 		if (budget != null) budget.allocate(payload, 0, references, objects);
 	}

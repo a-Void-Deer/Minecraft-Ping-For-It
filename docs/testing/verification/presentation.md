@@ -325,6 +325,24 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
   caps, case-sensitive duplicate rejection, not-found and invalid removal, and
   immutable non-mutating results.
 
+`PresentationDiagnosticsTest` covers real test-appender events alongside the
+store, policy, codec and HUD-provider outcomes: marker-history exhaustion warns
+once while existing data remains usable, only a store reset rearms that
+domain warning, section-history refusal stays quiet, a throwing permission
+provider or invalid compiled policy still denies, oversized pre-encoding keeps
+the empty-stale fallback, and a throwing HUD provider keeps its empty labels.
+`PresentationServerDiagnosticsTest` covers collector and sanitization failures
+retaining demanded stale values while advancing cadence, property-capture
+failure rejecting the whole admission without seeds, and section-construction
+versus transport failure diagnostics. The sending seam keeps its revisioned
+empty-stale fallback and propagates a failed fallback without a third attempt.
+`PresentationServerBasicEntityTest` additionally asserts cause-bearing warnings
+for failed name getters and encoders while independently demanded health stays
+available. These are headless production-call-site and recording-delivery
+seams, not a live HUD, permission provider, world capture or transport run;
+shared logger evidence and its limits are inventoried under
+[shared exception diagnostics](integrations.md#shared-exception-diagnostics).
+
 `ClientPingActionDispatcherTest` covers a typed property create using the
 frozen target on the actual wire and an exact child revocation rejecting that
 create without sending and without silently falling back to a plain create;
@@ -435,6 +453,18 @@ has foundation and production-seam tests, not a live client/server validation:
   main-thread handoff, client-only prediction-guard and queue-cleanup evidence.
   It does not exercise transport registration or mixin application in a game.
 
+`PresentationPreviewDiagnosticsTest` covers throwing local and retained-cache
+readers reporting their causes while the one-shot server fallback times out
+without invented values. A throwing client request sender first clears pending
+state to unavailable, then rethrows the same exception without a duplicate
+local report or retry; a headless runtime case reports it at the existing
+interaction boundary. Client access/context failures retain their propagation
+boundary, and a failed cancel still clears pending state and the aborted
+binding before propagating. Server access failure still denies and capture
+failure returns unavailable; a failed send does not trigger another source
+read. These use fake reader, world and transport ports with a test appender,
+not live preview delivery or input.
+
 Optional Create receipt and preview-gate evidence is recorded under
 [Create content preview](integrations.md#create-content-preview).
 
@@ -521,10 +551,13 @@ store and port coverage rather than live chat evidence:
   inside the name or composer callbacks cannot send late output, reentrancy
   cannot duplicate and the sink runs only after the pending is removed, a
   throwing sink cannot leave a duplicate while a throwing composer can retry
-  fresh data, revocation or value replacement is revalidated before emission,
-  an exact child revocation cancels the pending capture even while its root
-  value and annotation remain, a revocation during formatting is rechecked
-  before the chat sink,
+  fresh data. Its diagnostic case repeats a formatter failure with one warning
+  retaining the root cause and no attached throwable while the receipt stays
+  pending; a repaired formatter can reach the sink, whose failure still escapes
+  after consuming the receipt. Revocation or value replacement is revalidated
+  before emission, an exact child revocation cancels the pending capture even
+  while its root value and annotation remain, a revocation during formatting is
+  rechecked before the chat sink,
   and a clear/rebegin or a new inventory baseline cannot emit the old capture;
 - `PendingContentChatAcceptedStoresTest` drives the controller from real
   accepted presentation and inventory stores: accepted Basic completes exactly
@@ -565,7 +598,22 @@ store and port coverage rather than live chat evidence:
   override is used while a fallback-locale override present only in the merged
   language is never inherited, an entry without an override falls back to the
   localized entry template, and the single complete message colors only each
-  entry's own annotation phrase and never repeats on a later update.
+  entry's own annotation phrase and never repeats on a later update. Its failure
+  case keeps an accepted marker and immediate sound hook after a throwing name
+  formatter, reports the composition cause, and completes once on a later tick
+  after repair without source or network work. A throwing injected content sink
+  propagates without retracting the marker and consumes the receipt, so later
+  updates produce neither a duplicate nor an ordinary fallback.
+
+`ChatDiagnosticsTest` covers controlled debug events for malformed whole/content
+templates while preserving each family's fallback, and a throwing locale
+selection lookup producing a warning with the original root cause while using
+the safe content fallback. Its captured events carry no attached throwable.
+`ClientBusinessDiagnosticsTest` additionally covers a locale-key cache failure
+reported once at warning level under an INFO threshold for one language identity
+without repeated loading, then successful key recovery when that identity changes.
+Ordinary absent resources and keys do not produce warnings. These are resource
+lookup callbacks and cache seams, not an actual resource reload or locale switch.
 
 These are headless model, codec, store and composer seams over recording
 effect, world and input ports. They do not exercise live packet transport or

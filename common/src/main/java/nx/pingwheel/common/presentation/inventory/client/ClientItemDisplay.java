@@ -61,6 +61,8 @@ import nx.pingwheel.common.chat.ContentChatTemplate;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryDisplayWriter;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemDiagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Shared client-side projection of one server-bounded inventory display value.
@@ -222,8 +224,8 @@ public final class ClientItemDisplay {
 
 	/** Fixed native constructor descriptor; never discovers a hook on arbitrary values. */
 	private static final class NativeStack {
-		private static final Constructor<ItemStack> CONSTRUCTOR = constructor();
-		private static Constructor<ItemStack> constructor() {
+		private static final @Nullable Constructor<ItemStack> CONSTRUCTOR = constructor();
+		private static @Nullable Constructor<ItemStack> constructor() {
 			try {
 				Constructor<ItemStack> result = ItemStack.class.getDeclaredConstructor(net.minecraft.world.level.ItemLike.class, int.class, PatchedDataComponentMap.class);
 				return result.trySetAccessible() ? result : null;
@@ -235,8 +237,8 @@ public final class ClientItemDisplay {
 			catch (InvocationTargetException failure) {
 				if (failure.getCause() instanceof RuntimeException runtime) throw runtime;
 				if (failure.getCause() instanceof Error error) throw error;
-				throw new UnsafeDisplay();
-			} catch (ReflectiveOperationException unavailable) { throw new UnsafeDisplay(); }
+				throw new IllegalStateException("native display constructor failed", failure);
+			} catch (ReflectiveOperationException unavailable) { throw new IllegalStateException("native display constructor unavailable", unavailable); }
 		}
 	}
 
@@ -244,7 +246,7 @@ public final class ClientItemDisplay {
 	// least recently resolved variant instead of the oldest insertion.
 	private static final Map<CacheKey, Snapshot> DECODED = new LinkedHashMap<>(16, 0.75f, true);
 	private static long retainedBytes;
-	private static HolderLookup.Provider cachedRegistry;
+	private static HolderLookup.@Nullable Provider cachedRegistry;
 	private static int decodeMisses;
 
 	private ClientItemDisplay() {}
@@ -254,7 +256,7 @@ public final class ClientItemDisplay {
 	 * registry context. Null or unavailable registry access keeps an empty icon
 	 * and the supplied label instead of throwing.
 	 */
-	public static Display resolve(String itemId, String label, String displayJson) {
+	public static Display resolve(String itemId, String label, @Nullable String displayJson) {
 		return resolve(currentRegistryAccess(), itemId, label, displayJson);
 	}
 
@@ -264,7 +266,7 @@ public final class ClientItemDisplay {
 	 * supplied item ID falls back to an empty icon and the
 	 * registry translation key.
 	 */
-	public static Display resolve(HolderLookup.Provider registryAccess, String itemId, String label, String displayJson) {
+	public static Display resolve(HolderLookup.@Nullable Provider registryAccess, String itemId, String label, @Nullable String displayJson) {
 		Validation budget = new Validation();
 		try {
 			Optional<Snapshot> snapshot = transmitted(registryAccess, itemId, displayJson, budget);
@@ -281,6 +283,7 @@ public final class ClientItemDisplay {
 			budget.sameLanguage();
 			return new Display(safe ? working : ItemStack.EMPTY, name);
 		} catch (RuntimeException unavailable) {
+			failure("inventory/client-display-resolve", itemId, unavailable);
 			return rejectSnapshot(itemId, displayJson, label);
 		}
 	}
@@ -295,23 +298,25 @@ public final class ClientItemDisplay {
 	 * caller keeps the registry translation key fallback; raw text never leaves
 	 * a failed decode.
 	 */
-	public static Optional<ItemStack> decode(HolderLookup.Provider registryAccess, String json) {
+	public static Optional<ItemStack> decode(HolderLookup.@Nullable Provider registryAccess, @Nullable String json) {
 		Validation budget = new Validation();
 		try {
 			return decodeSnapshot(registryAccess, json, budget).map(snapshot -> snapshot.namingStack(budget))
 				.filter(stack -> supportedComponents(stack.getComponents(), 0, budget));
 		} catch (RuntimeException unavailable) {
+			failure("inventory/client-display-decode", null, unavailable);
 			return Optional.empty();
 		}
 	}
 
 	/** Safe shared chat/name entrance, including effective-graph checks after getName. */
-	public static Optional<Component> decodeName(HolderLookup.Provider registryAccess, String json) {
+	public static Optional<Component> decodeName(HolderLookup.@Nullable Provider registryAccess, @Nullable String json) {
 		Validation budget = new Validation();
 		try {
 			return decodeSnapshot(registryAccess, json, budget).map(snapshot -> snapshot.namingStack(budget))
 				.map(stack -> checkedName(stack, budget));
 		} catch (RuntimeException unavailable) {
+			failure("inventory/client-display-name", null, unavailable);
 			return Optional.empty();
 		}
 	}
@@ -336,7 +341,7 @@ public final class ClientItemDisplay {
 		// even reading that name and before any owned formatting or composition.
 		if (!supportedComponents(stack.getComponents(), 0, budget)) throw new UnsafeDisplay();
 		budget.characters(description);
-		Component custom = stack.get(DataComponents.CUSTOM_NAME);
+		@Nullable Component custom = stack.get(DataComponents.CUSTOM_NAME);
 		// ITEM_NAME is also server-provided component data, not a trusted registry name.
 		if (custom == null) custom = stack.get(DataComponents.ITEM_NAME);
 		// Keep the item implementation's normal localized variant name when no
@@ -409,7 +414,7 @@ public final class ClientItemDisplay {
 		return Optional.empty();
 	}
 
-	private static Optional<Snapshot> transmitted(HolderLookup.Provider registryAccess, String itemId, String displayJson, Validation budget) {
+	private static Optional<Snapshot> transmitted(HolderLookup.@Nullable Provider registryAccess, String itemId, @Nullable String displayJson, Validation budget) {
 		if (registryAccess == null || displayJson == null || displayJson.length() > InventoryS2CPacket.MAX_DISPLAY_BYTES || displayJson.isBlank()) {
 			return Optional.empty();
 		}
@@ -423,11 +428,12 @@ public final class ClientItemDisplay {
 		// A retained snapshot passed the identity check when it was decoded, and
 		// the key includes the supplied item id, so a keyed hit is already known
 		// to describe the opaque selection identity.
-		Snapshot cached = DECODED.get(key);
+		@Nullable Snapshot cached = DECODED.get(key);
 		if (cached != null) {
 			try {
 				if (supportedSnapshot(cached, 0, budget)) return Optional.of(cached);
 			} catch (RuntimeException unavailable) {
+				failure("inventory/client-display-cache", itemId, unavailable);
 				// A failed effective-map lookup is not permission to reuse values.
 			}
 			DECODED.remove(key);
@@ -447,7 +453,7 @@ public final class ClientItemDisplay {
 	 * for its item load-verification hook to capture. Native component codecs
 	 * may construct and verify nested stacks before eligibility is known.
 	 */
-	private static Optional<Snapshot> decodeSnapshot(HolderLookup.Provider registryAccess, String json, Validation budget) {
+	private static Optional<Snapshot> decodeSnapshot(HolderLookup.@Nullable Provider registryAccess, @Nullable String json, Validation budget) {
 		if (registryAccess == null || json == null || json.length() > InventoryS2CPacket.MAX_DISPLAY_BYTES || json.isBlank()) {
 			return Optional.empty();
 		}
@@ -461,13 +467,21 @@ public final class ClientItemDisplay {
 			JsonElement element = JsonParser.parseString(json);
 			if (!supportedAdditions(element, 0, budget)) return Optional.empty();
 			replaceFlat(element, 0, budget);
-			return SNAPSHOT_CODEC
-				.parse(registryAccess.createSerializationContext(JsonOps.INSTANCE), element)
-				.result()
+			var decoded = SNAPSHOT_CODEC.parse(registryAccess.createSerializationContext(JsonOps.INSTANCE), element);
+			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected("inventory/client-display-codec", "persistent display patch");
+			return decoded.result()
 				.filter(snapshot -> supportedSnapshot(snapshot, 0, budget));
 		} catch (RuntimeException malformed) {
+			failure("inventory/client-display-codec", null, malformed);
 			return Optional.empty();
 		}
+	}
+
+	private static void failure(String operation, @Nullable String itemId, Throwable failure) {
+		// A normal safety/budget refusal is deliberate display suppression, as
+		// are Lore/shulker stripping and ceiling reprojection. Hooks and codecs
+		// throwing their own exceptions are unexpected failures.
+		if (!(failure instanceof UnsafeDisplay) || failure.getCause() != null) InventoryItemDiagnostics.displayFailure(operation, itemId, failure);
 	}
 
 	/**
@@ -666,7 +680,9 @@ public final class ClientItemDisplay {
 			// Legacy item/entity forms flatten their text into SNBT. This text
 			// has already passed its own item-bearing-position guard above.
 			replaceFlat(value, depth, budget);
-			Optional<Component> text = ComponentSerialization.CODEC.parse(JsonOps.INSTANCE, value).result();
+			var decoded = ComponentSerialization.CODEC.parse(JsonOps.INSTANCE, value);
+			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected("inventory/client-display-legacy-codec", "legacy display text");
+			Optional<Component> text = decoded.result();
 			if (text.isEmpty() || !supportedText(text.get(), depth, budget)) return false;
 			String plain = ClientDisplayText.own(text.get(), depth, budget).plain();
 			// This JsonElement belongs to the parsed wire tree. Replace the legacy
@@ -749,6 +765,7 @@ public final class ClientItemDisplay {
 	}
 	static final class UnsafeDisplay extends RuntimeException {
 		UnsafeDisplay() { super(null, null, false, false); }
+		UnsafeDisplay(Throwable cause) { super(null, cause, false, false); }
 	}
 
 	private static final Set<Class<?>> SAFE_LISTS = Set.of(ArrayList.class,
@@ -993,7 +1010,7 @@ public final class ClientItemDisplay {
 				// inherits Item's empty verifier; otherwise a later getter could
 				// inject opaque state after this read-only validation has finished.
 				return cached == null ? NO_LOAD_HOOK.get(item.getClass()) : supportedComponents(cached.getComponents(), depth, budget);
-			} catch (IllegalAccessException unavailable) { return false; }
+			} catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(unavailable); }
 		}
 		static HoverEvent.ItemStackInfo owned(HoverEvent.ItemStackInfo info, int depth, Validation budget) {
 			budget.visit(depth);
@@ -1018,7 +1035,7 @@ public final class ClientItemDisplay {
 				// not run another item hook against a newly constructed stack.
 				STACK.set(owned, working);
 				return owned;
-			} catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(); }
+			} catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(unavailable); }
 		}
 		private static final Field COUNT = nativeField(HoverEvent.ItemStackInfo.class, int.class);
 		private static int count(HoverEvent.ItemStackInfo info) throws IllegalAccessException {
@@ -1035,7 +1052,7 @@ public final class ClientItemDisplay {
 		static boolean matches(ItemLore lore) {
 			if (lore.styledLines().getClass() != TYPE || LIST == null || FUNCTION == null) return false;
 			try { return LIST.get(lore.styledLines()) == lore.lines() && FUNCTION.get(lore.styledLines()) == FUNCTION.get(SAMPLE.styledLines()); }
-			catch (IllegalAccessException unavailable) { return false; }
+			catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(unavailable); }
 		}
 	}
 
@@ -1082,17 +1099,19 @@ public final class ClientItemDisplay {
 		return new Display(ItemStack.EMPTY, fallbackName(label));
 	}
 
-	private static Display rejectSnapshot(String itemId, String displayJson, String label) {
+	private static Display rejectSnapshot(String itemId, @Nullable String displayJson, String label) {
+		if (displayJson == null) return unavailable(label);
 		CacheKey key = new CacheKey(itemId, displayJson);
 		if (DECODED.remove(key) != null) retainedBytes -= chargeOf(key);
 		return unavailable(label);
 	}
 
-	private static HolderLookup.Provider currentRegistryAccess() {
+	private static HolderLookup.@Nullable Provider currentRegistryAccess() {
 		try {
 			Minecraft game = Minecraft.getInstance();
 			return game == null || game.level == null ? null : game.level.registryAccess();
 		} catch (RuntimeException unavailable) {
+			failure("inventory/client-display-registry", null, unavailable);
 			return null;
 		}
 	}

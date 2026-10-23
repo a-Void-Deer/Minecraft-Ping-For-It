@@ -4,6 +4,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -44,14 +46,17 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 		}
 	}
 	/** Physical block binding plus its member scope; no level or provider object escapes. */
-	public record SafeBlockSource(Target.BlockTarget block, java.util.function.Predicate<BlockPos> memberGate) {
+	public record SafeBlockSource(Target.BlockTarget block, java.util.function.@Nullable Predicate<BlockPos> memberGate) {
 		public SafeBlockSource {
 			java.util.Objects.requireNonNull(block, "block");
 		}
 		public boolean containsMember(BlockPos position) {
 			if (memberGate == null) return true;
 			try { return memberGate.test(position); }
-			catch (RuntimeException | LinkageError unavailable) { return false; }
+			catch (RuntimeException | LinkageError unavailable) {
+				Diagnostics.warn("presentation/preview-member-gate", "client", () -> "block=" + block + " member=" + position, unavailable);
+				return false;
+			}
 		}
 	}
 	@Override public String adapterId() { return PresentationBasic.ID; }
@@ -166,6 +171,7 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 				Component custom;
 				try { custom = entity.getCustomName(); }
 				catch (RuntimeException | LinkageError unavailable) {
+					Diagnostics.warn("presentation/preview-name-read", "entity", () -> "entityClass=" + entity.getClass().getName(), unavailable);
 					if (demand.contains(PresentationBasic.NAME)) result.put(PresentationBasic.NAME, Missing.UNAVAILABLE);
 					if (demand.contains(PresentationBasic.CUSTOM_NAME)) result.put(PresentationBasic.CUSTOM_NAME, Missing.UNAVAILABLE);
 					return Map.copyOf(result);
@@ -185,15 +191,21 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 		return Map.copyOf(result);
 	}
 	/** The plain custom-name observation; an absent or empty custom name is not an empty value. */
-	private static void putCustomName(Map<String, Outcome> result, Component custom, long tick) {
+	private static void putCustomName(Map<String, Outcome> result, @Nullable Component custom, long tick) {
 		if (custom == null) return;
 		try {
 			String text = TargetNameComposer.plainText(custom, PresentationLimits.MAX_TEXT_BYTES);
 			if (!text.isEmpty()) put(result, PresentationBasic.CUSTOM_NAME, () -> new PresentationValue.Text(text), tick);
-		} catch (RuntimeException | LinkageError unavailable) { result.put(PresentationBasic.CUSTOM_NAME, Missing.UNAVAILABLE); }
+		} catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("presentation/preview-custom-name", "minecraft", () -> "plain custom-name reduction", unavailable);
+			result.put(PresentationBasic.CUSTOM_NAME, Missing.UNAVAILABLE);
+		}
 	}
 	private static void put(Map<String, Outcome> result, String id, java.util.function.Supplier<PresentationValue> getter, long tick) {
 		try { result.put(id, new Observed(new PreviewObservation(getter.get(), PreviewObservation.Origin.CLIENT_SYNCED, tick, false))); }
-		catch (RuntimeException | LinkageError unavailable) { result.put(id, Missing.UNAVAILABLE); }
+		catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("presentation/preview-field", "minecraft", () -> "field=" + id + " tick=" + tick, unavailable);
+			result.put(id, Missing.UNAVAILABLE);
+		}
 	}
 }

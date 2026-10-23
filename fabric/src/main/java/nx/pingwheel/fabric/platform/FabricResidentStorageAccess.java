@@ -8,6 +8,8 @@ import nx.pingwheel.fabric.mixin.inventory.SingleStackStorageResidentInvoker;
 import nx.pingwheel.fabric.mixin.inventory.InventorySlotResidentAccessor;
 import nx.pingwheel.fabric.mixin.inventory.InventoryStorageResidentAccessor;
 import nx.pingwheel.common.platform.IPlatformInventoryService.ResidentReads;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /** Narrow raw-field/invoker port; none of these methods certify its delegates. */
 interface FabricResidentStorageAccess {
@@ -15,7 +17,7 @@ interface FabricResidentStorageAccess {
 	default ItemStack stack(SingleStackStorage storage) {
 		return ((SingleStackStorageResidentInvoker) storage).pingforit$residentStack();
 	}
-	default SingleStackStorage mappedSlot(StorageView<?> view) {
+	default @Nullable SingleStackStorage mappedSlot(StorageView<?> view) {
 		// Mixin accessors require the exact field descriptor. Its package-private
 		// InventorySlotWrapper type cannot be named here; a mixin in that library
 		// package would reserve/block the library's own classes at runtime. Read
@@ -25,7 +27,11 @@ interface FabricResidentStorageAccess {
 			Class<?> slotType = Class.forName("net.fabricmc.fabric.impl.transfer.item.InventorySlotWrapper", false, getClass().getClassLoader());
 			Object slot = ResidentReads.field(view, owner, "slotWrapper", slotType);
 			return slot instanceof SingleStackStorage storage ? storage : null;
-		} catch (ClassNotFoundException | LinkageError unavailable) { return null; }
+		} catch (ClassNotFoundException absent) { return null; }
+		catch (LinkageError failure) {
+			Diagnostics.warn("inventory-resident-slot", "fabric:transfer", () -> "viewClass=" + view.getClass().getName(), failure);
+			return null;
+		}
 	}
 	default Container inventory(SingleStackStorage slot) {
 		var storage = ((InventorySlotResidentAccessor) slot).pingforit$storage();

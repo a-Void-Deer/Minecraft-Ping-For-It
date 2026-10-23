@@ -1,6 +1,8 @@
 package nx.pingwheel.common.presentation.minecraft;
 
 import nx.pingwheel.common.marker.MarkerCreationService;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.presentation.*;
 
@@ -89,9 +91,11 @@ final class ServerPropertyAdmission {
 				return MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST);
 			Set<String> demand = new LinkedHashSet<>(entry.getValue());
 			demand.addAll(extraDemand.getOrDefault(entry.getKey(), Set.of()));
-			PresentationSection sampled;
+			@Nullable PresentationSection sampled;
 			try { sampled = capture.capture(adapter, Set.copyOf(demand), budget); }
 			catch (RuntimeException | LinkageError failure) {
+				Diagnostics.warn("presentation/property-capture", adapter.adapterId(),
+					() -> "demand=" + demand + " context=" + context, failure);
 				return MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST);
 			}
 			PresentationSection neutral = PresentationServer.sanitize(adapter, sampled, demand);

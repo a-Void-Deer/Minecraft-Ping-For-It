@@ -1,5 +1,10 @@
 package nx.pingwheel.common.presentation;
 
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -22,18 +27,18 @@ public final class PresentationStore {
 		final Map<String, Long> clearedSections = new HashMap<>();
 		boolean frozen;
 		boolean sectionHistoryFull;
-		String targetTypeId;
-		PresentationPropertyRef defaultRef;
+		@Nullable String targetTypeId;
+		@Nullable PresentationPropertyRef defaultRef;
 	}
 
 	public long epoch() { return epoch; }
 	public long viewGeneration() { return viewGeneration; }
-	public String targetTypeId(long markerId) {
-		MarkerState marker = markers.get(markerId);
+	public @Nullable String targetTypeId(long markerId) {
+		@Nullable MarkerState marker = markers.get(markerId);
 		return marker == null ? null : marker.targetTypeId;
 	}
-	public PresentationPropertyRef defaultRef(long markerId) {
-		MarkerState marker = markers.get(markerId);
+	public @Nullable PresentationPropertyRef defaultRef(long markerId) {
+		@Nullable MarkerState marker = markers.get(markerId);
 		return marker == null ? null : marker.defaultRef;
 	}
 	public boolean isKnown(long markerId) { return markers.containsKey(markerId) || tombstones.containsKey(markerId); }
@@ -64,16 +69,16 @@ public final class PresentationStore {
 	}
 
 	public void initial(long epoch, long view, long markerId, String targetTypeId,
-		PresentationPropertyRef defaultRef, PresentationSection basic) {
+		@Nullable PresentationPropertyRef defaultRef, PresentationSection basic) {
 		initial(epoch, view, markerId, targetTypeId, defaultRef, basic, 0);
 	}
 
 	public void initial(long epoch, long view, long markerId, String targetTypeId,
-		PresentationPropertyRef defaultRef, PresentationSection basic, long revision) {
+		@Nullable PresentationPropertyRef defaultRef, PresentationSection basic, long revision) {
 		if (!current(epoch, view) || isKnown(markerId) || markerHistoryFull
 			|| !PresentationSettings.isKnownTargetType(targetTypeId) || defaultRef == null) return;
 		if (markers.size() + tombstones.size() >= MAX_MARKER_HISTORY) {
-			markerHistoryFull = true;
+			markHistoryFull();
 			return;
 		}
 		MarkerState marker = new MarkerState();
@@ -134,8 +139,8 @@ public final class PresentationStore {
 		forget(markerId, revision);
 	}
 
-	public Map<String, Entry> sections(long markerId) {
-		MarkerState marker = markers.get(markerId);
+	public @Unmodifiable Map<String, Entry> sections(long markerId) {
+		@Nullable MarkerState marker = markers.get(markerId);
 		return marker == null ? Map.of() : Map.copyOf(marker.sections);
 	}
 
@@ -143,13 +148,22 @@ public final class PresentationStore {
 	public void evict(long markerId) { forget(markerId, 0); }
 
 	private void forget(long markerId, long revision) {
-		MarkerState removed = markers.remove(markerId);
+		@Nullable MarkerState removed = markers.remove(markerId);
 		if (removed == null && !tombstones.containsKey(markerId)
 			&& markers.size() + tombstones.size() >= MAX_MARKER_HISTORY) {
-			markerHistoryFull = true;
+			markHistoryFull();
 			return;
 		}
 		tombstones.merge(markerId, revision, Math::max);
+	}
+
+	private void markHistoryFull() {
+		if (markerHistoryFull) return;
+		markerHistoryFull = true;
+		// This sticky transition is the frequency gate; only reset restores admission.
+		Diagnostics.domainApprovedEvent(Level.WARN, "presentation/history", "marker-store", "capacity-exhausted",
+			() -> "epoch=" + epoch + " view=" + viewGeneration + " markers=" + markers.size()
+				+ " tombstones=" + tombstones.size() + " limit=" + MAX_MARKER_HISTORY);
 	}
 
 	private boolean current(long epoch, long view) {

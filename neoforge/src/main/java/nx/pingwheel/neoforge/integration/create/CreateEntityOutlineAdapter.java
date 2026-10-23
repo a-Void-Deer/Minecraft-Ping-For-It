@@ -1,12 +1,5 @@
 package nx.pingwheel.neoforge.integration.create;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.Objects;
 
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -22,10 +15,13 @@ import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.phys.Vec3;
 
 import nx.pingwheel.common.Global;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.util.SafeExceptionReport;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.client.outline.AabbOutlineMask;
 import nx.pingwheel.common.client.outline.EntityBlockGeometryOutcome;
 import nx.pingwheel.common.client.outline.EntityOutlineContext;
@@ -54,11 +50,12 @@ public final class CreateEntityOutlineAdapter {
 	private static final String SUPPORTS_VISUALIZATION_METHOD = "supportsVisualization";
 	private static final RenderType SUPER_GLUE_OUTLINE = RenderType.outline(
 		ResourceLocation.fromNamespaceAndPath("create", "textures/special/glue.png"));
-	private static final BackendProbe BACKEND_PROBE = new BackendProbe();
+	private static final CreateEntityOutlineBackendProbe BACKEND_PROBE =
+		new CreateEntityOutlineBackendProbe(FLYWHEEL_VISUALIZATION_MANAGER, SUPPORTS_VISUALIZATION_METHOD);
 
-	private static EntityOutlineSourceRegistry.Registration registration;
-	private static EntitySelectionBlacklist.Registration selectionBlacklistRegistration;
-	private static CreateEntityOutlineSource source;
+	private static @Nullable EntityOutlineSourceRegistry.Registration registration;
+	private static @Nullable EntitySelectionBlacklist.Registration selectionBlacklistRegistration;
+	private static @Nullable CreateEntityOutlineSource source;
 
 	private CreateEntityOutlineAdapter() {}
 
@@ -69,8 +66,8 @@ public final class CreateEntityOutlineAdapter {
 		}
 
 		CreateEntityOutlineSource candidate = new CreateEntityOutlineSource();
-		EntityOutlineSourceRegistry.Registration outlineHandle = null;
-		EntitySelectionBlacklist.Registration blacklistHandle = null;
+		@Nullable EntityOutlineSourceRegistry.Registration outlineHandle = null;
+		@Nullable EntitySelectionBlacklist.Registration blacklistHandle = null;
 		try {
 			outlineHandle = EntityOutlineSourceRegistry.INSTANCE.register(candidate);
 			blacklistHandle = EntitySelectionBlacklist.INSTANCE.register(
@@ -99,16 +96,16 @@ public final class CreateEntityOutlineAdapter {
 			Global.LOGGER.info("Create entity outline source registration succeeded: id={} handleState={}",
 				SOURCE_ID, registrationState());
 		} else {
-			Global.LOGGER.warn("Create entity outline source registration rejected: id={} handleState={}",
-				SOURCE_ID, registrationState());
+			Diagnostics.event(Level.WARN, "create-entity-register", SOURCE_ID, "registration-rejected",
+				() -> "handleState=" + registrationState());
 		}
 	}
 
 	/** Called reflectively at client teardown; safe to call repeatedly. */
 	public static synchronized void close() {
-		EntitySelectionBlacklist.Registration retainedBlacklistRegistration = selectionBlacklistRegistration;
-		EntityOutlineSourceRegistry.Registration retainedRegistration = registration;
-		CreateEntityOutlineSource retainedSource = source;
+		@Nullable EntitySelectionBlacklist.Registration retainedBlacklistRegistration = selectionBlacklistRegistration;
+		@Nullable EntityOutlineSourceRegistry.Registration retainedRegistration = registration;
+		@Nullable CreateEntityOutlineSource retainedSource = source;
 		try {
 			if (retainedBlacklistRegistration != null) {
 				retainedBlacklistRegistration.close();
@@ -141,108 +138,6 @@ public final class CreateEntityOutlineAdapter {
 		return registration.accepted() ? "registered" : "rejected";
 	}
 
-	/**
-	 * Cached optional-backend boundary.  The class and method lookup happens at
-	 * most once; each subsequent backend check only invokes the retained method.
-	 * The target class name is intentionally a string so this adapter remains
-	 * loadable when Flywheel is absent.
-	 */
-	private static final class BackendProbe {
-		private volatile Availability availability;
-
-		private Evaluation evaluate(LevelAccessor level) throws ReflectiveOperationException {
-			Availability current = availability();
-			if (!current.available()) {
-				return new Evaluation(false, false, current.description());
-			}
-
-			return new Evaluation(true, invokeSupports(current.method(), level), current.description());
-		}
-
-		private Availability availability() {
-			Availability current = availability;
-			if (current != null) {
-				return current;
-			}
-
-			synchronized (this) {
-				current = availability;
-				if (current == null) {
-					current = resolve();
-					availability = current;
-				}
-				return current;
-			}
-		}
-
-		private Availability resolve() {
-			try {
-				Class<?> managerClass = Class.forName(
-					FLYWHEEL_VISUALIZATION_MANAGER, false,
-					CreateEntityOutlineAdapter.class.getClassLoader());
-				Method method = managerClass.getMethod(SUPPORTS_VISUALIZATION_METHOD, LevelAccessor.class);
-				if (!Modifier.isStatic(method.getModifiers()) || method.getReturnType() != boolean.class) {
-					return unavailable("method-signature-invalid", null);
-				}
-				return new Availability(method, true, "present", null);
-			} catch (ClassNotFoundException failure) {
-				return unavailable("class-missing", failure);
-			} catch (NoSuchMethodException failure) {
-				return unavailable("method-missing", failure);
-			} catch (LinkageError | SecurityException | AssertionError failure) {
-				return unavailable("probe-failed", failure);
-			}
-		}
-
-		private static Availability unavailable(String description, Throwable failure) {
-			return new Availability(null, false, description, failure);
-		}
-
-		private String diagnosticDescription() {
-			Availability current = availability;
-			return current == null ? "not-probed" : current.description();
-		}
-
-		private Throwable diagnosticFailure() {
-			Availability current = availability;
-			return current == null ? null : current.failure();
-		}
-
-		private static boolean invokeSupports(Method method, LevelAccessor level)
-			throws ReflectiveOperationException {
-			try {
-				Object result = method.invoke(null, level);
-				if (!(result instanceof Boolean supported)) {
-					throw new ReflectiveOperationException(
-						"supportsVisualization returned a non-boolean value: " + result);
-				}
-				return supported;
-			} catch (InvocationTargetException failure) {
-				Throwable cause = failure.getCause();
-				if (cause instanceof RuntimeException runtimeFailure) {
-					throw runtimeFailure;
-				}
-				if (cause instanceof Error errorFailure) {
-					throw errorFailure;
-				}
-				if (cause == null) {
-					throw new ReflectiveOperationException(
-						"supportsVisualization failed without a cause", failure);
-				}
-				throw new ReflectiveOperationException(
-					"supportsVisualization threw a checked exception", cause);
-			}
-		}
-
-		private record Availability(
-			Method method,
-			boolean available,
-			String description,
-			Throwable failure
-		) {}
-
-		private record Evaluation(boolean available, boolean enabled, String description) {}
-	}
 
 	private static final class CreateEntityOutlineSource implements EntityOutlineSource {
 		private final EntityDiagnostics diagnostics = new EntityDiagnostics();
@@ -273,7 +168,7 @@ public final class CreateEntityOutlineAdapter {
 			}
 
 			try {
-				BackendProbe.Evaluation backend = BACKEND_PROBE.evaluate(entity.level());
+				CreateEntityOutlineBackendProbe.Evaluation backend = BACKEND_PROBE.evaluate(entity.level());
 				if (!backend.available()) {
 					diagnostics.report(entity, "backend-unavailable", backend.description(), false, 0, null,
 						EntityBlockGeometryOutcome.EMPTY);
@@ -317,7 +212,7 @@ public final class CreateEntityOutlineAdapter {
 				return EntityBlockGeometryOutcome.FAILED;
 			}
 
-			final BackendProbe.Evaluation backend;
+			final CreateEntityOutlineBackendProbe.Evaluation backend;
 			try {
 				backend = BACKEND_PROBE.evaluate(entity.level());
 			} catch (Exception | LinkageError | AssertionError failure) {
@@ -555,76 +450,47 @@ public final class CreateEntityOutlineAdapter {
 	 * and exception stack trace.
 	 */
 	private static final class EntityDiagnostics {
-		private static final int MAX_STATES = 256;
-		private static final long MIN_LOG_INTERVAL_NANOS = 1_000_000_000L;
-		private static final long HEARTBEAT_NANOS = 5_000_000_000L;
-
-		private final LinkedHashMap<String, State> states = new LinkedHashMap<>(16, 0.75F, true);
+		private final CreateEntityOutlineDiagnosticGate gate = new CreateEntityOutlineDiagnosticGate(System::nanoTime);
 
 		private void report(
-			Entity entity,
+			@Nullable Entity entity,
 			String reason,
 			String backend,
 			boolean scope,
 			int vertexCount,
-			Throwable failure,
-			EntityBlockGeometryOutcome outcome
+			@Nullable Throwable failure,
+			@Nullable EntityBlockGeometryOutcome outcome
 		) {
-			long now = System.nanoTime();
 			String key = entityKey(entity);
 			String result = outcome == null ? "UNKNOWN" : outcome.name();
-			boolean log;
-			synchronized (states) {
-				State previous = states.get(key);
-				if (previous == null) {
-					log = true;
-				} else {
-					boolean currentChanged = !previous.reason.equals(reason)
-						|| !previous.outcome.equals(result);
-					boolean pendingTransition = !previous.loggedReason.equals(reason)
-						|| !previous.loggedOutcome.equals(result);
-					log = pendingTransition
-						? now - previous.lastLoggedNanos >= MIN_LOG_INTERVAL_NANOS
-							&& now - (currentChanged ? now : previous.observedSinceNanos)
-								>= MIN_LOG_INTERVAL_NANOS
-						: now - previous.lastLoggedNanos >= HEARTBEAT_NANOS;
-				}
-
-				if (previous == null && states.size() >= MAX_STATES) {
-					Iterator<String> iterator = states.keySet().iterator();
-					if (iterator.hasNext()) {
-						iterator.next();
-						iterator.remove();
-					}
-				}
-
-				states.put(key, previous == null
-					? new State(reason, result, reason, result, now, now)
-					: new State(
-						reason,
-						result,
-						log ? reason : previous.loggedReason,
-						log ? result : previous.loggedOutcome,
-						log ? now : previous.lastLoggedNanos,
-						previous.reason.equals(reason) && previous.outcome.equals(result)
-							? previous.observedSinceNanos : now));
+			Level level = failure != null || outcome == EntityBlockGeometryOutcome.FAILED
+				|| (reason.equals("backend-unavailable") && !backend.equals("class-missing")) || reason.equals("outline-buffer-unavailable")
+				|| reason.startsWith("nonfinite") || reason.contains("mismatch")
+				? Level.WARN : Level.DEBUG;
+			boolean enabled;
+			try {
+				enabled = Diagnostics.logger().isEnabled(level);
+			} catch (RuntimeException | LinkageError ignored) {
+				enabled = false;
 			}
-
-			if (!log) {
+			if (!gate.admit(key, reason, result, enabled, level == Level.DEBUG)) {
 				return;
 			}
 
-			Global.LOGGER.debug("Create entity outline diagnostic: {}",
-				fullDetails(entity, reason, result, backend, scope, vertexCount, failure));
-		}
-
-		private void clear() {
-			synchronized (states) {
-				states.clear();
+			if (failure == null) {
+				Diagnostics.domainApprovedEvent(level, "create-entity-outline", SOURCE_ID, reason,
+					() -> fullDetails(entity, reason, result, backend, scope, vertexCount));
+			} else {
+				Diagnostics.domainApprovedFailure(level, "create-entity-outline", SOURCE_ID,
+					() -> fullDetails(entity, reason, result, backend, scope, vertexCount), failure);
 			}
 		}
 
-		private static String entityKey(Entity entity) {
+		private void clear() {
+			gate.clear();
+		}
+
+		private static String entityKey(@Nullable Entity entity) {
 			if (entity == null) {
 				return "<null>";
 			}
@@ -636,13 +502,12 @@ public final class CreateEntityOutlineAdapter {
 		}
 
 		private static String fullDetails(
-			Entity entity,
+			@Nullable Entity entity,
 			String reason,
 			String outcome,
 			String backend,
 			boolean scope,
-			int vertexCount,
-			Throwable failure
+			int vertexCount
 		) {
 			StringBuilder details = new StringBuilder()
 				.append("sourceId=").append(SOURCE_ID)
@@ -654,7 +519,7 @@ public final class CreateEntityOutlineAdapter {
 				.append("; vertexCount=").append(vertexCount);
 
 			if (entity == null) {
-				return details.append("; entity=<null>").append(exceptionDetails(failure)).toString();
+				return details.append("; entity=<null>").toString();
 			}
 
 			try {
@@ -665,37 +530,11 @@ public final class CreateEntityOutlineAdapter {
 					.append("; position=").append(position)
 					.append("; class=").append(entity.getClass().getName());
 			} catch (Exception | LinkageError | AssertionError descriptorFailure) {
-				details.append("; entityDescriptorFailure=").append(descriptorFailure);
+				details.append("; entityDescriptorFailure=").append(SafeExceptionReport.format(descriptorFailure));
 			}
 
-			Throwable backendFailure = BACKEND_PROBE.diagnosticFailure();
-			if (backendFailure != null) {
-				details.append("; backendProbeException=").append(stackTrace(backendFailure));
-			}
-			return details.append(exceptionDetails(failure)).toString();
+			return details.toString();
 		}
 
-		private static String exceptionDetails(Throwable failure) {
-			if (failure == null) {
-				return "";
-			}
-
-			return "; exception=" + stackTrace(failure);
-		}
-
-		private static String stackTrace(Throwable failure) {
-			StringWriter stack = new StringWriter();
-			failure.printStackTrace(new PrintWriter(stack));
-			return stack.toString();
-		}
-
-		private record State(
-			String reason,
-			String outcome,
-			String loggedReason,
-			String loggedOutcome,
-			long lastLoggedNanos,
-			long observedSinceNanos
-		) {}
 	}
 }

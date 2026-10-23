@@ -2,6 +2,8 @@ package nx.pingwheel.neoforge.integration.create.presentation;
 
 import java.util.Objects;
 import java.util.function.Predicate;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 import static nx.pingwheel.neoforge.integration.create.presentation.CreateSamplingWork.member;
 
@@ -39,9 +41,9 @@ public final class CreatePresentationCollector {
 	 * absent; speed is signed RPM, cached stress and capacity are network totals
 	 * in Create SU, and effective motion respects overstress/server tick freeze.
 	 */
-	public record Kinetic(boolean available, Float effectiveSpeed, Float theoreticalSpeed,
-		Boolean moving, Boolean hasNetwork, Boolean overStressed, Float networkStress,
-		Float networkCapacity) {
+	public record Kinetic(boolean available, @Nullable Float effectiveSpeed, @Nullable Float theoreticalSpeed,
+		@Nullable Boolean moving, @Nullable Boolean hasNetwork, @Nullable Boolean overStressed, @Nullable Float networkStress,
+		@Nullable Float networkCapacity) {
 		public static Kinetic unavailable() {
 			return new Kinetic(false, null, null, null, null, null, null, null);
 		}
@@ -130,6 +132,7 @@ public final class CreatePresentationCollector {
 				? readTank(level, tank, limits, work, memberGate) : BoundedCreateSummary.Summary.unavailable();
 			return new Sample(k, i, f, work.used(), true);
 		} catch (RuntimeException | LinkageError failure) {
+			Diagnostics.warn("create/presentation-capture", "collector", () -> "position=" + pos + " workUsed=" + work.used(), failure);
 			return unavailableSample(work.used());
 		}
 	}
@@ -146,9 +149,9 @@ public final class CreatePresentationCollector {
 			return Kinetic.unavailable();
 		}
 		try {
-			Float effective = null;
-			Float theoretical = null;
-			Boolean moving = null;
+			@Nullable Float effective = null;
+			@Nullable Float theoretical = null;
+			@Nullable Boolean moving = null;
 			if (speed) {
 				float e = be.getSpeed();
 				float t = be.getTheoreticalSpeed();
@@ -158,12 +161,12 @@ public final class CreatePresentationCollector {
 					moving = e != 0;
 				}
 			}
-			Boolean network = null;
+			@Nullable Boolean network = null;
 			if (networkRequested || stressRequested || capacityRequested) {
 				network = be.hasNetwork();
 			}
-			Float stress = null;
-			Float capacity = null;
+			@Nullable Float stress = null;
+			@Nullable Float capacity = null;
 			if (Boolean.TRUE.equals(network) && (stressRequested || capacityRequested)) {
 				try {
 					if (be instanceof CreateCachedNetworkView cached) {
@@ -174,6 +177,7 @@ public final class CreatePresentationCollector {
 									stress = s;
 								}
 							} catch (RuntimeException | LinkageError ignored) {
+								Diagnostics.warn("create/presentation-cached-stress", "kinetic", () -> "cached stress getter", ignored);
 								// A broken stress accessor cannot hide capacity or speed.
 							}
 						}
@@ -184,17 +188,22 @@ public final class CreatePresentationCollector {
 									capacity = c;
 								}
 							} catch (RuntimeException | LinkageError ignored) {
+								Diagnostics.warn("create/presentation-cached-capacity", "kinetic", () -> "cached capacity getter", ignored);
 								// A broken capacity accessor cannot hide stress or speed.
 							}
 						}
 					}
 				} catch (RuntimeException | LinkageError ignored) {
+					Diagnostics.warn("create/presentation-cached-bridge", "kinetic", () -> "cached network bridge", ignored);
 					// The public getter route remains usable if the bridge drifts.
 				}
 			}
 			return new Kinetic(true, effective, theoretical, moving, network,
 				overStressed ? be.isOverStressed() : null, stress, capacity);
 		} catch (RuntimeException | LinkageError failure) {
+			Diagnostics.warn("create/presentation-kinetic", "collector",
+				() -> "speed=" + speed + " network=" + networkRequested + " overstressed=" + overStressed
+					+ " stress=" + stressRequested + " capacity=" + capacityRequested, failure);
 			return Kinetic.unavailable();
 		}
 	}
@@ -270,6 +279,8 @@ public final class CreatePresentationCollector {
 						summary.add(id == null ? null : id.toString(), stack.getCount());
 					}
 				} catch (RuntimeException | LinkageError failure) {
+					int failedSlot = slot;
+					Diagnostics.warn("create/presentation-vault-slot", "item-vault", () -> "slot=" + failedSlot + " slots=" + slots, failure);
 					summary.markPartial();
 					interrupted = true;
 					break;
@@ -279,6 +290,7 @@ public final class CreatePresentationCollector {
 			work.take(result.scanned());
 			return interrupted ? BoundedCreateSummary.Summary.incomplete() : result;
 		} catch (RuntimeException | LinkageError failure) {
+			Diagnostics.warn("create/presentation-vault", "item-vault", () -> "workUsed=" + work.used(), failure);
 			return BoundedCreateSummary.Summary.unavailable();
 		}
 	}
@@ -360,6 +372,8 @@ public final class CreatePresentationCollector {
 						summary.add(id == null ? null : id.toString(), stack.getAmount());
 					}
 				} catch (RuntimeException | LinkageError failure) {
+					int failedTank = tank;
+					Diagnostics.warn("create/presentation-tank-entry", "fluid-tank", () -> "tank=" + failedTank + " tanks=" + tanks, failure);
 					summary.markPartial();
 					interrupted = true;
 					break;
@@ -369,6 +383,7 @@ public final class CreatePresentationCollector {
 			work.take(result.scanned());
 			return interrupted ? BoundedCreateSummary.Summary.incomplete() : result;
 		} catch (RuntimeException | LinkageError failure) {
+			Diagnostics.warn("create/presentation-tank", "fluid-tank", () -> "workUsed=" + work.used(), failure);
 			return BoundedCreateSummary.Summary.unavailable();
 		}
 	}

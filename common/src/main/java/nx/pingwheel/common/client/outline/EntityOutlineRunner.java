@@ -5,7 +5,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
-import nx.pingwheel.common.Global;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Runs the registered entity-outline sources for one resolved live entity.
@@ -29,11 +29,11 @@ import nx.pingwheel.common.Global;
 public final class EntityOutlineRunner {
 	private final EntityOutlineSourceRegistry registry;
 	private final Set<String> warnedFailureKeys = ConcurrentHashMap.newKeySet();
-	private final WarningSink warningSink;
+	private final @Nullable WarningSink warningSink;
 
 	@FunctionalInterface
 	interface WarningSink {
-		void warn(String message, Throwable failure);
+		void warn(String message, @Nullable Throwable failure);
 	}
 
 	/**
@@ -41,12 +41,12 @@ public final class EntityOutlineRunner {
 	 * {@link EntityOutlineSourceRegistry#INSTANCE}.
 	 */
 	public EntityOutlineRunner(EntityOutlineSourceRegistry registry) {
-		this(registry, EntityOutlineRunner::warnGlobally);
+		this(registry, null);
 	}
 
-	EntityOutlineRunner(EntityOutlineSourceRegistry registry, WarningSink warningSink) {
+	EntityOutlineRunner(EntityOutlineSourceRegistry registry, @Nullable WarningSink warningSink) {
 		this.registry = Objects.requireNonNull(registry, "registry");
-		this.warningSink = Objects.requireNonNull(warningSink, "warningSink");
+		this.warningSink = warningSink;
 	}
 
 	/**
@@ -98,8 +98,14 @@ public final class EntityOutlineRunner {
 		EntityOutlineContext context
 	) {
 		try {
-			EntityBlockGeometryOutcome outcome = source.attempt(context);
-			return outcome == null ? EntityBlockGeometryOutcome.FAILED : outcome;
+			@Nullable EntityBlockGeometryOutcome outcome = source.attempt(context);
+			if (outcome == null) {
+				String sourceId = safeSourceId(source);
+				warnOnce("null-outcome:" + sourceId,
+					() -> "entity outline source returned null; id=" + sourceId + "; context=" + context, null);
+				return EntityBlockGeometryOutcome.FAILED;
+			}
+			return outcome;
 		} catch (Exception | LinkageError | AssertionError failure) {
 			String sourceId = safeSourceId(source);
 			warnOnce(
@@ -116,26 +122,31 @@ public final class EntityOutlineRunner {
 	 * category that has not been warned before, so a broken source cannot
 	 * spam per-frame logs while still being retried on every call.
 	 */
-	void warnOnce(String key, Supplier<String> message, Throwable failure) {
+	void warnOnce(String key, Supplier<String> message, @Nullable Throwable failure) {
+		if (warningSink == null && !OutlineDiagnostics.enabled()) {
+			return;
+		}
 		if (!warnedFailureKeys.add(key)) {
 			return;
 		}
-		warningSink.warn(message.get(), failure);
-	}
-
-	private static void warnGlobally(String message, Throwable failure) {
-		if (failure == null) {
-			Global.LOGGER.warn(message);
+		if (warningSink == null) {
+			OutlineDiagnostics.approved("entity-outline", key, message, failure);
 		} else {
-			Global.LOGGER.warn(message, failure);
+			OutlineDiagnostics.deliver(text -> warningSink.warn(text, null), message, failure);
 		}
 	}
 
-	private static String safeSourceId(EntityOutlineSource source) {
+	private String safeSourceId(EntityOutlineSource source) {
 		try {
-			String id = EntityBlockGeometrySourceIds.validate(source.id());
+			@Nullable String id = EntityBlockGeometrySourceIds.validate(source.id());
+			if (id == null) {
+				warnOnce("invalid-id:" + source.getClass().getName(),
+					() -> "entity outline source has invalid id; class=" + source.getClass().getName(), null);
+			}
 			return id == null ? EntityBlockGeometrySourceIds.INVALID : id;
 		} catch (Exception | LinkageError | AssertionError failure) {
+			warnOnce("source-id:" + source.getClass().getName(),
+				() -> "entity outline source id failed; class=" + source.getClass().getName(), failure);
 			return EntityBlockGeometrySourceIds.UNAVAILABLE;
 		}
 	}

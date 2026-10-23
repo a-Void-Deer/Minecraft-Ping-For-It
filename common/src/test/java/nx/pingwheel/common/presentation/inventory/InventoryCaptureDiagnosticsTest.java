@@ -9,7 +9,7 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
-import nx.pingwheel.common.util.RateLimitedDiagnosticsTestScope;
+import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
@@ -74,6 +74,27 @@ class InventoryCaptureDiagnosticsTest {
 			logs.report("test-unexpected-direct", Level.WARN, broken.getMessage(), "real provider callback failure", "direct callback");
 			logs.report("test-unexpected-cursorless", Level.WARN, broken.getMessage(), "real provider callback failure", "cursorless callback");
 			assertEquals(2, logs.events.size(), "classification uses the explicit type, never an exception message");
+		}
+	}
+
+	@Test void existingBoundReasonGateUsesApprovedBackendRatherThanTheFullGeneralWindow() throws ReflectiveOperationException {
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 4, 5, 6, "minecraft:chest"), new UUID(51, 4), BlockFace.NORTH);
+		var field = InventoryCaptureDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
+		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
+		long[] previous = new long[gate.length()];
+		for (int index = 0; index < gate.length(); index++) previous[index] = gate.getAndSet(index, 0);
+		try (var logs = new InventoryDiagnosticsTestCapture()) {
+			for (int index = 0; index < 65; index++) nx.pingwheel.common.diagnostics.Diagnostics.event(Level.WARN,
+				"inventory/test-window-" + index, "test", "filled", () -> "unrelated");
+			int before = logs.events().size();
+			InventoryCaptureDiagnostics.boundExceeded(input, "native-refusal");
+			InventoryCaptureDiagnostics.boundExceeded(input, "repeat-refusal");
+			assertEquals(before + 1, logs.events().size());
+			assertTrue(logs.messages().contains("detail=native-refusal"));
+			assertTrue(logs.events().getLast().getMessage().getFormattedMessage().startsWith("[PingForIt] "));
+			assertNull(logs.events().getLast().getThrown());
+		} finally {
+			for (int index = 0; index < gate.length(); index++) gate.set(index, previous[index]);
 		}
 	}
 

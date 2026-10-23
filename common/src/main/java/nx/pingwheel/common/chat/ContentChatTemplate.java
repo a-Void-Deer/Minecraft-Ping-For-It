@@ -11,6 +11,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
 import nx.pingwheel.common.domain.PingType;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.presentation.client.PresentationPropertyFormatter;
 
 /**
@@ -90,20 +93,20 @@ public final class ContentChatTemplate {
 	 * Builds the message from one selected template, falling back to the safe
 	 * default resource when the selected template is missing or malformed.
 	 */
-	public static Component build(String template, Component author, PingType annotationType,
+	public static Component build(@Nullable String template, Component author, PingType annotationType,
 		Component target, Component content) {
 		return parse(template, author, annotationType, target, content)
 			.orElseGet(() -> parse(DEFAULT_TEMPLATE, author, annotationType, target, content).orElseThrow());
 	}
 
 	/** Builds an outer list message without inventing a whole-set annotation phrase. */
-	public static Component buildMultiple(String template, Component author, Component target, Component content) {
+	public static Component buildMultiple(@Nullable String template, Component author, Component target, Component content) {
 		return parseMultiple(template, author, target, content)
 			.orElseGet(() -> parseMultiple(DEFAULT_MULTIPLE_TEMPLATE, author, target, content).orElseThrow());
 	}
 
 	/** Validates the outer family with only author, target and content as required tokens. */
-	public static Optional<Component> parseMultiple(String template, Component author, Component target, Component content) {
+	public static Optional<Component> parseMultiple(@Nullable String template, Component author, Component target, Component content) {
 		Objects.requireNonNull(author, "author");
 		Objects.requireNonNull(target, "target");
 		Objects.requireNonNull(content, "content");
@@ -111,18 +114,19 @@ public final class ContentChatTemplate {
 	}
 
 	/** Builds one independently annotated entry; only its own type word is colored. */
-	public static Component buildEntry(String template, PingType annotationType, Component content) {
+	public static Component buildEntry(@Nullable String template, PingType annotationType, Component content) {
 		return parseEntry(template, annotationType, content)
 			.orElseGet(() -> parseEntry(DEFAULT_ENTRY_TEMPLATE, annotationType, content).orElseThrow());
 	}
 
 	/** Validates one entry with only type and content as required tokens. */
-	public static Optional<Component> parseEntry(String template, PingType annotationType, Component content) {
+	public static Optional<Component> parseEntry(@Nullable String template, PingType annotationType, Component content) {
 		Objects.requireNonNull(annotationType, "annotationType");
 		Objects.requireNonNull(content, "content");
 		try {
 			return parse(template, Map.of(TYPE, PresentationPropertyFormatter.pingTypeDisplay(annotationType), CONTENT, content));
 		} catch (RuntimeException unavailable) {
+			Diagnostics.warn("chat/content-entry-build", "template", () -> "entry construction unavailable", unavailable);
 			return Optional.empty();
 		}
 	}
@@ -133,7 +137,7 @@ public final class ContentChatTemplate {
 	 * isolated brace, or missing required placeholder yields an empty result so
 	 * the caller can use the safe default.
 	 */
-	public static Optional<Component> parse(String template, Component author, PingType annotationType,
+	public static Optional<Component> parse(@Nullable String template, Component author, PingType annotationType,
 		Component target, Component content) {
 		Objects.requireNonNull(author, "author");
 		Objects.requireNonNull(annotationType, "annotationType");
@@ -143,11 +147,12 @@ public final class ContentChatTemplate {
 			return parse(template, Map.of(AUTHOR, author, TYPE, PresentationPropertyFormatter.pingTypeDisplay(annotationType),
 				TARGET, target, CONTENT, content));
 		} catch (RuntimeException unavailable) {
+			Diagnostics.warn("chat/content-template-build", "template", () -> "message construction unavailable", unavailable);
 			return Optional.empty();
 		}
 	}
 
-	private static Optional<Component> parse(String template, Map<String, Component> tokens) {
+	private static Optional<Component> parse(@Nullable String template, Map<String, Component> tokens) {
 		if (template == null) return Optional.empty();
 
 		try {
@@ -167,13 +172,13 @@ public final class ContentChatTemplate {
 
 					int close = template.indexOf('}', index + 1);
 
-					if (close < 0) return Optional.empty();
+					if (close < 0) return rejectedTemplate("unmatched-opening-brace");
 
 					appendLiteral(message, literal);
 
 					String token = template.substring(index + 1, close);
-					Component replacement = tokens.get(token);
-					if (replacement == null) return Optional.empty();
+					@Nullable Component replacement = tokens.get(token);
+					if (replacement == null) return rejectedTemplate("unknown-placeholder");
 					message.append(replacement);
 					present.add(token);
 
@@ -188,7 +193,7 @@ public final class ContentChatTemplate {
 						continue;
 					}
 
-					return Optional.empty();
+					return rejectedTemplate("unmatched-closing-brace");
 				}
 
 				literal.append(current);
@@ -197,11 +202,17 @@ public final class ContentChatTemplate {
 
 			appendLiteral(message, literal);
 
-			if (!present.containsAll(tokens.keySet())) return Optional.empty();
+			if (!present.containsAll(tokens.keySet())) return rejectedTemplate("missing-placeholder");
 			return Optional.of(message);
-		} catch (RuntimeException ignored) {
+		} catch (RuntimeException unavailable) {
+			Diagnostics.warn("chat/content-template-parse", "template", () -> "component construction unavailable", unavailable);
 			return Optional.empty();
 		}
+	}
+
+	private static Optional<Component> rejectedTemplate(String reason) {
+		Diagnostics.event(Level.DEBUG, "chat/content-template", "template", reason, () -> "using safe content template");
+		return Optional.empty();
 	}
 
 	private static void appendLiteral(MutableComponent message, StringBuilder literal) {

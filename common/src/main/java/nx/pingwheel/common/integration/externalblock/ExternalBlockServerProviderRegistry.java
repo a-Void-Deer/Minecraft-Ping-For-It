@@ -12,6 +12,10 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Deterministic registry and dispatch boundary for external block providers.
@@ -42,11 +46,11 @@ public final class ExternalBlockServerProviderRegistry {
 		return providers.isEmpty();
 	}
 
-	public synchronized List<ExternalBlockServerProvider> providers() {
+	public synchronized @Unmodifiable List<ExternalBlockServerProvider> providers() {
 		return List.copyOf(new ArrayList<>(providers.values()));
 	}
 
-	public synchronized ExternalBlockServerProvider find(String providerId) {
+	public synchronized @Nullable ExternalBlockServerProvider find(@Nullable String providerId) {
 		return providerId == null ? null : providers.get(providerId);
 	}
 
@@ -64,11 +68,13 @@ public final class ExternalBlockServerProviderRegistry {
 		}
 
 		try {
-			ExternalBlockServerProvider.ValidationResult result = provider.validate(level, candidate);
+			ExternalBlockServerProvider.@Nullable ValidationResult result = provider.validate(level, candidate);
+			if (result == null) nullResult("validate", provider);
 			return result == null
 				? new ExternalBlockServerProvider.ValidationResult.Invalid()
 				: result;
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			failure("validate", provider, failure);
 			return new ExternalBlockServerProvider.ValidationResult.Invalid();
 		}
 	}
@@ -87,11 +93,13 @@ public final class ExternalBlockServerProviderRegistry {
 		}
 
 		try {
-			ExternalBlockServerProvider.MaterializationResult result = provider.materialize(level, candidate);
+			ExternalBlockServerProvider.@Nullable MaterializationResult result = provider.materialize(level, candidate);
+			if (result == null) nullResult("materialize", provider);
 			return result == null
 				? new ExternalBlockServerProvider.MaterializationResult.Invalid()
 				: result;
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			failure("materialize", provider, failure);
 			return new ExternalBlockServerProvider.MaterializationResult.Invalid();
 		}
 	}
@@ -110,11 +118,13 @@ public final class ExternalBlockServerProviderRegistry {
 		}
 
 		try {
-			ExternalBlockServerProvider.RefreshResult result = provider.refresh(level, committed);
+			ExternalBlockServerProvider.@Nullable RefreshResult result = provider.refresh(level, committed);
+			if (result == null) nullResult("refresh", provider);
 			return result == null
 				? new ExternalBlockServerProvider.RefreshResult.Invalid()
 				: result;
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			failure("refresh", provider, failure);
 			return new ExternalBlockServerProvider.RefreshResult.Invalid();
 		}
 	}
@@ -153,18 +163,25 @@ public final class ExternalBlockServerProviderRegistry {
 				return java.util.Optional.empty();
 			}
 			return result;
-		} catch (RuntimeException | LinkageError unavailable) { return java.util.Optional.empty(); }
+		} catch (RuntimeException | LinkageError unavailable) {
+			failure(preview ? "preview-source-binding" : "committed-source-binding", provider, unavailable);
+			return java.util.Optional.empty();
+		}
 	}
 
-	static java.util.Optional<ResolvedBlockReadSource> invokeReadSource(ExternalBlockServerProvider provider,
-		ServerLevel level, Target.ExternalBlockTarget target, boolean preview) {
+	static java.util.Optional<ResolvedBlockReadSource> invokeReadSource(@Nullable ExternalBlockServerProvider provider,
+		@Nullable ServerLevel level, Target.@Nullable ExternalBlockTarget target, boolean preview) {
 		if (provider == null || target == null || target.isCandidate() != preview) return java.util.Optional.empty();
 		try {
 			if (!target.providerId().equals(provider.providerId())) return java.util.Optional.empty();
-			var result = preview ? provider.resolvePreviewReadSource(level, target)
+			@Nullable var result = preview ? provider.resolvePreviewReadSource(level, target)
 				: provider.resolveCommittedReadSource(level, target);
+			if (result == null) nullResult(preview ? "preview-read-source" : "committed-read-source", provider);
 			return result == null ? java.util.Optional.empty() : result;
-		} catch (RuntimeException | LinkageError unavailable) { return java.util.Optional.empty(); }
+		} catch (RuntimeException | LinkageError unavailable) {
+			failure(preview ? "preview-read-source" : "committed-read-source", provider, unavailable);
+			return java.util.Optional.empty();
+		}
 	}
 
 	/** Resolves and validates one current committed external block observation. */
@@ -191,7 +208,7 @@ public final class ExternalBlockServerProviderRegistry {
 		if (provider == null || invoker == null) {
 			return new ExternalBlockServerProvider.ObservationResult.TemporarilyUnavailable();
 		}
-		ExternalBlockServerProvider.ObservationResult result = invokeObservation(invoker, levelToken, committed);
+		ExternalBlockServerProvider.ObservationResult result = invokeObservation(invoker, levelToken, committed, provider);
 		return validateObservation(serverToken, levelToken, committed, result, access);
 	}
 
@@ -277,18 +294,27 @@ public final class ExternalBlockServerProviderRegistry {
 	static ExternalBlockServerProvider.ObservationResult invokeObservation(
 		ExternalBlockServerProvider provider, ServerLevel level, Target.ExternalBlockTarget committed
 	) {
-		return invokeObservation((ignored, target) -> provider.observeBlock(level, target), level, committed);
+		return invokeObservation((ignored, target) -> provider.observeBlock(level, target), level, committed, provider);
 	}
 
 	static ExternalBlockServerProvider.ObservationResult invokeObservation(
 		ObservationInvoker invoker, Object level, Target.ExternalBlockTarget committed
 	) {
+		return invokeObservation(invoker, level, committed, null);
+	}
+
+	private static ExternalBlockServerProvider.ObservationResult invokeObservation(
+		ObservationInvoker invoker, Object level, Target.ExternalBlockTarget committed,
+		@Nullable ExternalBlockServerProvider provider
+	) {
 		try {
-			ExternalBlockServerProvider.ObservationResult result = invoker.observe(level, committed);
+			ExternalBlockServerProvider.@Nullable ObservationResult result = invoker.observe(level, committed);
+			if (result == null) nullResult("observe-block", provider);
 			return result == null
 				? new ExternalBlockServerProvider.ObservationResult.TemporarilyUnavailable()
 				: result;
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			failure("observe-block", provider, failure);
 			return new ExternalBlockServerProvider.ObservationResult.TemporarilyUnavailable();
 		}
 	}
@@ -307,10 +333,12 @@ public final class ExternalBlockServerProviderRegistry {
 		}
 
 		try {
-			java.util.Optional<ExternalBlockServerProvider.ExternalBlockName> result =
+			java.util.@Nullable Optional<ExternalBlockServerProvider.ExternalBlockName> result =
 				provider.resolveName(level, committed);
+			if (result == null) nullResult("resolve-name", provider);
 			return result == null ? java.util.Optional.empty() : result;
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			failure("resolve-name", provider, failure);
 			return java.util.Optional.empty();
 		}
 	}
@@ -335,7 +363,8 @@ public final class ExternalBlockServerProviderRegistry {
 
 		try {
 			provider.observeValidationDistance(level, target, anchor, distance, withinRange);
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			failure("observe-validation-distance", provider, failure);
 			// Diagnostics must never change authoritative validation behavior.
 		}
 	}
@@ -354,7 +383,8 @@ public final class ExternalBlockServerProviderRegistry {
 
 		try {
 			provider.release(server, committed);
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			failure("release", provider, failure);
 			// Provider cleanup is deliberately fail-soft. A later server close can
 			// still give the provider one final opportunity to release its index.
 		}
@@ -376,7 +406,8 @@ public final class ExternalBlockServerProviderRegistry {
 
 		try {
 			provider.release(server, committed, markerId);
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			failure("release", provider, failure);
 			// Provider cleanup is deliberately fail-soft, as in the legacy overload.
 		}
 	}
@@ -390,7 +421,8 @@ public final class ExternalBlockServerProviderRegistry {
 		for (ExternalBlockServerProvider provider : providers()) {
 			try {
 				provider.close(server);
-			} catch (RuntimeException | LinkageError ignored) {
+			} catch (RuntimeException | LinkageError failure) {
+				failure("close", provider, failure);
 				// Optional provider teardown must not destabilize server shutdown.
 			}
 		}
@@ -399,5 +431,19 @@ public final class ExternalBlockServerProviderRegistry {
 	/** Removes all registrations. Intended for optional-integration bootstrap. */
 	public synchronized void clear() {
 		providers.clear();
+	}
+
+	private static String providerScope(@Nullable ExternalBlockServerProvider provider) {
+		return provider == null ? "external-provider" : provider.getClass().getName();
+	}
+
+	private static void failure(String operation, @Nullable ExternalBlockServerProvider provider, Throwable failure) {
+		Diagnostics.warn("external-block." + operation, providerScope(provider),
+			() -> "External block provider operation failed", failure);
+	}
+
+	private static void nullResult(String operation, @Nullable ExternalBlockServerProvider provider) {
+		Diagnostics.event(Level.WARN, "external-block." + operation, providerScope(provider), "null-result",
+			() -> "External block provider returned null");
 	}
 }

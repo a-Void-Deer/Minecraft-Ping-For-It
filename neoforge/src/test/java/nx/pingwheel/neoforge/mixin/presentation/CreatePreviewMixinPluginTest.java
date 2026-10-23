@@ -5,9 +5,23 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.junit.jupiter.api.Test;
+import nx.pingwheel.neoforge.integration.create.presentation.CreatePresentationDiagnosticCapture;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CreatePreviewMixinPluginTest {
+	@Test void receiptGateReportsActualFailureButNormalUntestedOrShapeMissStaysSilent() {
+		String target = "com.simibubi.create.content.kinetics.base.KineticBlockEntity";
+		String mixin = "nx.pingwheel.neoforge.mixin.presentation.KineticPreviewReceiptMixin";
+		try (var capture = new CreatePresentationDiagnosticCapture()) {
+			assertFalse(new CreatePreviewMixinPlugin(() -> false, () -> { throw new AssertionError("no discovery"); }).shouldApplyMixin(target, mixin));
+			assertTrue(capture.events().isEmpty());
+			var plugin = new CreatePreviewMixinPlugin(() -> true, () -> {
+				throw new IllegalStateException("receipt bytecode failed", new RuntimeException("receipt bytecode cause"));
+			});
+			for (int attempt = 0; attempt < 5; attempt++) assertFalse(plugin.shouldApplyMixin(target, mixin));
+			assertEquals(1, capture.events().size()); assertTrue(capture.messages().getFirst().contains("receipt bytecode cause"));
+		}
+	}
 	private static ClassNode shape() {
 		var node = new ClassNode(); node.name = "com/simibubi/create/content/kinetics/base/KineticBlockEntity";
 		node.fields.add(new FieldNode(Opcodes.ACC_PROTECTED, "wasMoved", "Z", null, null));

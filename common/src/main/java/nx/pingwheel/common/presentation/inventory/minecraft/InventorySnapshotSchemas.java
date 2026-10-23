@@ -21,6 +21,7 @@ import net.minecraft.world.item.ItemStack;
 
 import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
+import org.jetbrains.annotations.Nullable;
 
 /** Code-registered parsers of inventory-only payloads, not arbitrary block NBT. */
 public final class InventorySnapshotSchemas {
@@ -154,7 +155,7 @@ public final class InventorySnapshotSchemas {
 		private ItemsIndex(CompoundTag[] entries) { this.entries = entries; }
 
 		IPlatformInventoryService.Entry read(int visibleIndex, HolderLookup.Provider registries) {
-			CompoundTag entry = entries[visibleIndex];
+			@Nullable CompoundTag entry = entries[visibleIndex];
 			if (entry == null) return IPlatformInventoryService.Entry.empty();
 			// Registered component codecs also see a detached input, so even a
 			// mutable component decoder cannot rewrite this frozen sparse index.

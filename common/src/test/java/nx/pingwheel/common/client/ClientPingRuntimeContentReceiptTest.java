@@ -53,6 +53,8 @@ import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.render.SpatialOverlayRenderer;
+import nx.pingwheel.common.testing.DiagnosticLogCapture;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -426,6 +428,36 @@ class ClientPingRuntimeContentReceiptTest {
   f.assertNoSourceOrNetworkWork();
  }
 
+ @Test void formatterFailureWaitsForTickAndDeliveryFailureDoesNotRetractAcceptedMarker() {
+  try (var logs = new DiagnosticLogCapture()) {
+   Fixture f = new Fixture(200);
+   f.feedback.nameFailure = new IllegalStateException("runtime-name-sentinel", new RuntimeException("runtime-name-root"));
+   f.created(PresentationReceiptContent.properties(List.of(HEALTH)), basic(true));
+   assertTrue(f.runtime.store().marker(ID).isPresent());
+   assertEquals(1, f.feedback.sounds.size());
+   assertTrue(f.feedback.ordinary.isEmpty()); assertTrue(f.feedback.content.isEmpty());
+   assertEquals(1, logs.operation("chat/content-compose").size());
+   assertTrue(logs.operation("chat/content-compose").getFirst().getMessage().getFormattedMessage().contains("runtime-name-root"));
+   f.feedback.nameFailure = null;
+   f.tick();
+   assertEquals(1, f.feedback.content.size());
+   assertTrue(f.feedback.ordinary.isEmpty());
+   f.assertNoSourceOrNetworkWork();
+
+   Fixture delivery = new Fixture(200);
+   delivery.feedback.contentFailure = new IllegalStateException("runtime-delivery-sentinel");
+   assertThrows(IllegalStateException.class,
+    () -> delivery.created(PresentationReceiptContent.properties(List.of(HEALTH)), basic(true)));
+   assertTrue(delivery.runtime.store().marker(ID).isPresent(), "chat sink failure never retracts an accepted marker");
+   delivery.feedback.contentFailure = null;
+   delivery.tick(); delivery.section(2, ID, basic(true));
+   assertTrue(delivery.feedback.content.isEmpty(), "a throwing sink has already consumed its receipt");
+   assertTrue(delivery.feedback.ordinary.isEmpty());
+   assertEquals(1, delivery.feedback.sounds.size());
+   delivery.assertNoSourceOrNetworkWork();
+  }
+ }
+
  private static final class Fixture {
   final List<IPacket> sent = new ArrayList<>();
   final Feedback feedback = new Feedback();
@@ -466,19 +498,26 @@ class ClientPingRuntimeContentReceiptTest {
 
  private static final class Feedback implements ClientPingRuntime.PresentationReceiptFeedback {
   boolean available = true;
+  @Nullable RuntimeException nameFailure, contentFailure;
   ContentChatComposer.TemplateSource templates;
   final List<MarkerSnapshot> sounds = new ArrayList<>(), ordinary = new ArrayList<>();
   final List<Component> content = new ArrayList<>();
   public void play(MarkerSnapshot snapshot) { sounds.add(snapshot); }
   public void chat(String author, MarkerSnapshot marker, Component name) { ordinary.add(marker); }
   public boolean ready() { return available; }
-  public Optional<Component> name(String json) { return ContentChatComposer.nameJsonDecoder(RegistryAccess.EMPTY).apply(json); }
+  public Optional<Component> name(String json) {
+   if (nameFailure != null) throw nameFailure;
+   return ContentChatComposer.nameJsonDecoder(RegistryAccess.EMPTY).apply(json);
+  }
   public Optional<Component> item(String json) { return ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(json); }
   public String template(PingType type) { return ContentChatTemplate.DEFAULT_TEMPLATE; }
   public ContentChatComposer.TemplateSource templates() {
    return templates == null ? this::template : templates;
   }
-  public void content(Component message) { content.add(message); }
+  public void content(Component message) {
+   if (contentFailure != null) throw contentFailure;
+   content.add(message);
+  }
  }
 
  private static final class Access implements ClientPingRuntime.InteractionAccess {

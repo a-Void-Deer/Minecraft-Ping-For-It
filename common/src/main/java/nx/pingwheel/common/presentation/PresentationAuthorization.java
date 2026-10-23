@@ -1,5 +1,8 @@
 package nx.pingwheel.common.presentation;
 
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
+
 import java.util.UUID;
 
 /** Replaceable recipient permission check, independent of field policy and subscription. */
@@ -14,12 +17,14 @@ public interface PresentationAuthorization {
 		private Holder() {}
 	}
 
-	static boolean canSee(UUID recipient, PresentationField field, int actualLevel, int requiredLevel) {
+	static boolean canSee(@Nullable UUID recipient, @Nullable PresentationField field, int actualLevel, int requiredLevel) {
 		if (recipient == null || field == null || actualLevel < 0 || actualLevel > 4
 			|| requiredLevel < 0 || requiredLevel > 4) return false;
 		try {
 			return Holder.provider.allows(recipient, field, actualLevel, requiredLevel);
 		} catch (RuntimeException | LinkageError ex) {
+			Diagnostics.warn("presentation/permission", "provider",
+				() -> "recipient=" + recipient + " field=" + field.id() + " actual=" + actualLevel + " required=" + requiredLevel, ex);
 			return false;
 		}
 	}
@@ -30,20 +35,22 @@ public interface PresentationAuthorization {
 	 * default, then the recipient permission callback decides the effective
 	 * required level. A missing setting, field or target type denies.
 	 */
-	static boolean fieldAllowed(PresentationSettings settings, UUID recipient, int actualLevel,
-		PresentationField field, String targetTypeId) {
+	static boolean fieldAllowed(@Nullable PresentationSettings settings, @Nullable UUID recipient, int actualLevel,
+		@Nullable PresentationField field, @Nullable String targetTypeId) {
 		if (settings == null || field == null || targetTypeId == null) return false;
 		try {
 			return settings.policyFor(targetTypeId).allows(field.id(), field.enabledByDefault())
 				&& canSee(recipient, field, actualLevel,
 					settings.permission(field.id(), field.permissionLevel()));
 		} catch (RuntimeException | LinkageError ex) {
+			Diagnostics.warn("presentation/policy", "authorization",
+				() -> "targetType=" + targetTypeId + " field=" + field.id(), ex);
 			return false;
 		}
 	}
 
 	/** Replace the permission provider; null restores vanilla permission-level comparison. */
-	static void setProvider(PresentationAuthorization provider) {
+	static void setProvider(@Nullable PresentationAuthorization provider) {
 		Holder.provider = provider == null ? Holder.VANILLA : provider;
 	}
 }

@@ -25,9 +25,11 @@ class PlatformInventoryDiagnosticsTest {
 				throw new IllegalStateException("NeoForge gate failure", new RuntimeException("NeoForge gate cause"));
 			}).valid());
 			assertEquals(1, capture.events.size()); assertEquals(Level.WARN, capture.events.getFirst().getLevel());
+			assertNull(capture.events.getFirst().getThrown());
 			String message = capture.events.getFirst().getMessage().getFormattedMessage();
 			assertTrue(message.contains("NeoForge gate failure")); assertTrue(message.contains("NeoForge gate cause"));
 			assertTrue(message.contains("handlerClass=" + ItemStackHandler.class.getName())); assertTrue(message.contains("position="));
+			assertTrue(message.length() <= nx.pingwheel.common.util.SafeExceptionReport.MAX_CHARACTERS);
 		}
 	}
 	private static final class Capture implements AutoCloseable {

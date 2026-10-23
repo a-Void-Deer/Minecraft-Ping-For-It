@@ -303,6 +303,31 @@ class InventoryRuntimeTest {
 			runtime.advance(1, settings); assertEquals(InventorySourceAccess.Preparation.INCOMPLETE, runtime.prepare(next)); assertEquals(2, captures.get());
 		}
 	}
+
+	@Test void snapshotDiscoveryCaptureLimitIsIncompleteAndReportsItsOriginalBound() throws ReflectiveOperationException {
+		var settings = InventorySettings.serverDefaults(); var owner = new UUID(41, 40); var reads = new AtomicInteger();
+		// Isolate the existing domain gate, whose lifetime spans runtime fixtures.
+		var field = InventoryCaptureDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
+		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
+		long[] previous = new long[gate.length()];
+		for (int index = 0; index < gate.length(); index++) previous[index] = gate.getAndSet(index, 0);
+		try (var logs = new InventoryDiagnosticsTestCapture(); var runtime = new InventoryRuntime(i -> Optional.of(new Source(i, reads, 1) {
+			@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan(InventoryValidationBudget.Allowance allowance) {
+				var empty = new InventoryValidationBudget.Allowance(new InventoryValidationBudget.Cost(0, 0, 0));
+				empty.debit(new InventoryValidationBudget.Cost(0, 0, 1));
+				throw new AssertionError("expected refusal");
+			}
+		}), settings.pendingMemoryBytes())) {
+			runtime.advance(0, settings); var consumer = runtime.attach(input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
+			assertEquals(InventorySourceAccess.Preparation.INCOMPLETE, runtime.prepare(consumer));
+			assertEquals(0, reads.get()); assertEquals(0, runtime.memory().reserved());
+			assertTrue(logs.messages().contains("detail=snapshot-discovery"), logs.messages());
+			assertTrue(logs.messages().contains("inventory validation"), logs.messages());
+			assertNull(logs.events().getFirst().getThrown());
+		} finally {
+			for (int index = 0; index < gate.length(); index++) gate.set(index, previous[index]);
+		}
+	}
 	@Test void ordinaryDefaultAdmissionIsStructurallyServiceableWithOneRootScratch() {
 		var settings = InventorySettings.serverDefaults(); var owner = new UUID(40, 6); var reads = new AtomicInteger();
 		try (var runtime = new InventoryRuntime(i -> Optional.of(new Source(i, reads, 1)), settings.pendingMemoryBytes())) {

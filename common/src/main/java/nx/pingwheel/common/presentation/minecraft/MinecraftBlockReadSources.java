@@ -1,6 +1,7 @@
 package nx.pingwheel.common.presentation.minecraft;
 
 import java.util.Optional;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -51,7 +52,10 @@ public final class MinecraftBlockReadSources {
 				new MarkerAnchor(target.x() + 0.5, target.y() + 0.5, target.z() + 0.5));
 			return Optional.of(new ResolvedBlockReadSource(level, descriptor,
 				member -> !level.isOutsideBuildHeight(member) && level.isLoaded(member)));
-		} catch (RuntimeException | LinkageError unavailable) { return Optional.empty(); }
+		} catch (RuntimeException | LinkageError unavailable) {
+			Diagnostics.warn("presentation/block-read-source", "minecraft", () -> "target=" + target, unavailable);
+			return Optional.empty();
+		}
 	}
 
 	/** Preserve the original external metadata and normalized coordinates, not physical read coordinates. */

@@ -12,11 +12,15 @@ import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
 
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerLevel;
-import java.util.Arrays;
+import net.minecraft.server.level.ServerPlayer;
 import java.util.ArrayList;
+import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -28,18 +32,21 @@ import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.domain.TargetResolver;
 import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
+import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
+import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
 import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
-import nx.pingwheel.common.util.RateLimitedDiagnosticsTestScope;
+import nx.pingwheel.common.util.SafeExceptionReport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MarkerCreationServiceTest {
@@ -457,6 +464,101 @@ class MarkerCreationServiceTest {
 		assertNotEquals(candidate, marker.target());
 		assertTrue(marker.target() instanceof Target.ExternalBlockTarget external && external.isCommitted());
 		assertEquals(committed, MarkerSnapshot.from(marker).target());
+	}
+
+	@Test
+	void externalNameResolverFailureKeepsFallbackAndReportsBoundedFailure() {
+		newService();
+		Target.ExternalBlockTarget candidate = externalCandidate();
+		Target.ExternalBlockTarget committed = committedExternalTarget();
+		RecordingExternalProvider provider = new RecordingExternalProvider(
+			new ExternalBlockServerProvider.MaterializationResult.Materialized(
+				new ExternalBlockServerProvider.MaterializedTarget(
+					committed, TargetMatchContext.blockEntityBlock(true), ANCHOR)));
+		validator.accepted(validated(candidate, TargetMatchContext.blockEntityBlock(true)));
+		resolver.resolves(candidate, targetType("entity_block"));
+		RuntimeException failure = new IllegalStateException("name lookup unavailable",
+			new IllegalArgumentException("resolver cause"));
+		AuthoritativeTargetNameResolver nameResolver = (requester, target) -> { throw failure; };
+		service = new MarkerCreationService(store, resolver, PING_TYPES, validator, MarkerCreationLogger.noop(),
+			new nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry(), nameResolver);
+
+		try (var diagnostics = new DiagnosticCapture()) {
+			AuthoritativeTargetNameResolver nullNameResolver = (requester, target) -> null;
+			MarkerCreationService nullNameService = new MarkerCreationService(store, resolver, PING_TYPES, validator,
+				MarkerCreationLogger.noop(), new nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry(),
+				nullNameResolver);
+			MarkerCreateOutcome nullResult = nullNameService.createWithExternalTransaction(transaction(provider), OWNER, candidate,
+				"attention", 10L, 110L, List.of(RECIPIENT));
+			assertTrue(nullResult.isAccepted());
+			assertEquals(Optional.of(DEFAULT_NAME), nullResult.targetName());
+			assertTrue(diagnostics.events.isEmpty(), "an ordinary null resolver result is not a warning");
+
+			service = new MarkerCreationService(store, resolver, PING_TYPES, validator, MarkerCreationLogger.noop(),
+				new nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry(), nameResolver);
+			MarkerCreateOutcome outcome = service.createWithExternalTransaction(transaction(provider), OWNER, candidate,
+				"attention", 10L, 110L, List.of(RECIPIENT));
+			assertTrue(outcome.isAccepted());
+			assertEquals(Optional.of(DEFAULT_NAME), outcome.targetName());
+			assertEquals(committed, outcome.creation().orElseThrow().marker().target());
+			assertEquals(1, diagnostics.events.size());
+			LogEvent event = diagnostics.events.getFirst();
+			String report = event.getMessage().getFormattedMessage();
+			assertEquals(Level.WARN, event.getLevel());
+			assertTrue(report.contains("marker-create-name-resolve"));
+			assertTrue(report.contains(nameResolver.getClass().getName()));
+			assertTrue(report.contains("name lookup unavailable"));
+			assertTrue(report.contains("resolver cause"));
+			assertTrue(report.length() <= SafeExceptionReport.MAX_CHARACTERS);
+			assertNull(event.getThrown(), "the bounded formatted report must not attach the raw Throwable");
+		}
+	}
+
+	@Test
+	void minecraftValidatorNameResolverFailureKeepsFailSafeAndReportsBoundedFailure() throws Exception {
+		RuntimeException failure = new IllegalStateException("authoritative name unavailable",
+			new IllegalArgumentException("name source failed"));
+		AuthoritativeTargetNameResolver nameResolver = (requester, target) -> { throw failure; };
+		MinecraftAuthoritativeTargetValidator validator = new MinecraftAuthoritativeTargetValidator(
+			allocateUninitialized(DedicatedServer.class), 64, true, nameResolver);
+		MinecraftAuthoritativeTargetValidator nullResultValidator = new MinecraftAuthoritativeTargetValidator(
+			allocateUninitialized(DedicatedServer.class), 64, true, (requester, target) -> null);
+		Method resolveNameSafely = MinecraftAuthoritativeTargetValidator.class.getDeclaredMethod(
+			"resolveNameSafely", ServerPlayer.class, Target.class);
+		resolveNameSafely.setAccessible(true);
+		ServerPlayer requester = allocateUninitialized(ServerPlayer.class);
+		requester.setUUID(OWNER);
+		Target target = entityTarget(ENTITY_A);
+
+		try (var diagnostics = new DiagnosticCapture()) {
+			TargetNameJson nullResult = TargetNameJson.class.cast(Objects.requireNonNull(
+				resolveNameSafely.invoke(nullResultValidator, requester, target)));
+			assertEquals(MinecraftAuthoritativeTargetValidator.FAIL_SAFE_NAME, nullResult);
+			assertTrue(diagnostics.events.isEmpty(), "an ordinary null resolver result is not a warning");
+
+			TargetNameJson result = TargetNameJson.class.cast(
+				Objects.requireNonNull(resolveNameSafely.invoke(validator, requester, target)));
+			assertEquals(MinecraftAuthoritativeTargetValidator.FAIL_SAFE_NAME, result);
+			assertEquals(1, diagnostics.events.size());
+			LogEvent event = diagnostics.events.getFirst();
+			String report = event.getMessage().getFormattedMessage();
+			assertEquals(Level.WARN, event.getLevel());
+			assertTrue(report.contains("marker-target-name-resolve"));
+			assertTrue(report.contains(nameResolver.getClass().getName()));
+			assertTrue(report.contains("authoritative name unavailable"));
+			assertTrue(report.contains("name source failed"));
+			assertTrue(report.length() <= SafeExceptionReport.MAX_CHARACTERS);
+			assertNull(event.getThrown(), "the bounded formatted report must not attach the raw Throwable");
+		}
+	}
+
+	private static <T> T allocateUninitialized(Class<T> type) throws ReflectiveOperationException {
+		Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
+		var unsafeField = unsafeClass.getDeclaredField("theUnsafe");
+		unsafeField.setAccessible(true);
+		Object unsafe = Objects.requireNonNull(unsafeField.get(null));
+		return Objects.requireNonNull(type.cast(
+			unsafeClass.getMethod("allocateInstance", Class.class).invoke(unsafe, type)));
 	}
 
 	@Test

@@ -71,12 +71,17 @@ class OptionalGeometryClassSafetyTest {
 		Path adapterPath = findRepositoryFile(Path.of(
 			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
 			"integration", "create", "CreateEntityOutlineAdapter.java"));
+		Path probePath = findRepositoryFile(Path.of(
+			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge",
+			"integration", "create", "CreateEntityOutlineBackendProbe.java"));
 		Path neoClientPath = findRepositoryFile(Path.of(
 			"neoforge", "src", "main", "java", "nx", "pingwheel", "neoforge", "NeoClient.java"));
 		assertTrue(Files.isRegularFile(adapterPath), "NeoForge entity adapter source must be present");
+		assertTrue(Files.isRegularFile(probePath), "NeoForge reflective backend probe source must be present");
 		assertTrue(Files.isRegularFile(neoClientPath), "NeoForge client source must be present");
 
 		String adapter = Files.readString(adapterPath, StandardCharsets.UTF_8);
+		String probe = Files.readString(probePath, StandardCharsets.UTF_8);
 		String neoClient = Files.readString(neoClientPath, StandardCharsets.UTF_8);
 
 		assertTrue(adapter.contains("pingforit:create_entity_outline"));
@@ -85,12 +90,17 @@ class OptionalGeometryClassSafetyTest {
 		assertTrue(adapter.contains("PackageEntity"));
 		assertTrue(adapter.contains("\"dev.engine_room.flywheel.api.visualization.VisualizationManager\""));
 		assertTrue(adapter.contains("\"supportsVisualization\""));
-		assertTrue(adapter.contains("Class.forName("));
-		assertTrue(Pattern.compile("getMethod\\s*\\(\\s*SUPPORTS_VISUALIZATION_METHOD\\s*,"
-			+ "\\s*LevelAccessor\\.class\\s*\\)").matcher(adapter).find());
-		assertTrue(adapter.contains(".invoke("));
-		assertTrue(adapter.contains("InvocationTargetException"));
+		assertTrue(Pattern.compile("new\\s+CreateEntityOutlineBackendProbe\\s*\\(\\s*"
+			+ "FLYWHEEL_VISUALIZATION_MANAGER\\s*,\\s*SUPPORTS_VISUALIZATION_METHOD\\s*\\)")
+			.matcher(adapter).find());
+		assertTrue(adapter.contains("BACKEND_PROBE.evaluate("));
+		assertTrue(probe.contains("Class.forName("));
+		assertTrue(Pattern.compile("getMethod\\s*\\(\\s*\\w+\\s*,"
+			+ "\\s*LevelAccessor\\.class\\s*\\)").matcher(probe).find());
+		assertTrue(probe.contains(".invoke("));
+		assertTrue(probe.contains("InvocationTargetException"));
 		assertFalse(adapterContainsDirectFlywheelLink(adapter));
+		assertFalse(adapterContainsDirectFlywheelLink(probe));
 		// The integration owner fixes the six-quad/24-vertex mask and 262144-
 		// vertex cap. Their declarations and guards are structural evidence only,
 		// not proof of a complete live dispatch or a once-only render call.

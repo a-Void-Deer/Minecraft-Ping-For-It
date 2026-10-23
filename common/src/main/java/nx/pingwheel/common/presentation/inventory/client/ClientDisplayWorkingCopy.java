@@ -523,14 +523,14 @@ final class ClientDisplayWorkingCopy {
 	private static <T> T construct(Constructor<T> constructor, Object... args) {
 		if (constructor == null) throw new UnsafeDisplay();
 		try { return constructor.newInstance(args); }
-		catch (ReflectiveOperationException unavailable) { throw new UnsafeDisplay(); }
+		catch (ReflectiveOperationException unavailable) { throw new UnsafeDisplay(unavailable); }
 	}
 	private static Object get(Field field, Object source) {
 		if (field == null) throw new UnsafeDisplay();
-		try { return field.get(source); } catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(); }
+		try { return field.get(source); } catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(unavailable); }
 	}
 	private static void set(Field field, Object target, Object value) {
 		if (field == null) throw new UnsafeDisplay();
-		try { field.set(target, value); } catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(); }
+		try { field.set(target, value); } catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(unavailable); }
 	}
 }

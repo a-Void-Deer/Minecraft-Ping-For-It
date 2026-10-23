@@ -104,7 +104,13 @@ class InventoryScannerTest {
 
 	@Test void overflowAndEntryBoundsCannotMasqueradeAsCompleteTotals() {
 		var source = new Source(new InventoryScanner.Stack(A, Long.MAX_VALUE), new InventoryScanner.Stack(A, 1));
-		assertEquals(InventoryScanner.State.INCOMPLETE, scanner(source, Set.of(A)).step(2).state());
+		try (var logs = new InventoryDiagnosticsTestCapture()) {
+			var result = scanner(source, Set.of(A)).step(2);
+			assertEquals(InventoryScanner.State.INCOMPLETE, result.state());
+			assertEquals(Long.MAX_VALUE, result.counts().get(A));
+			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("reason=count-overflow"));
+			assertNull(logs.events().getFirst().getThrown());
+		}
 		var two = new Source(new InventoryScanner.Stack(A, 1), new InventoryScanner.Stack(B, 1));
 		var bounded = new InventoryScanner(two, Set.of(), Set.of(), true, 1).step(2);
 		assertEquals(InventoryScanner.State.INCOMPLETE, bounded.state());

@@ -12,9 +12,11 @@ import java.util.UUID;
 
 import com.google.gson.JsonObject;
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.JsonOps;
 
 import net.minecraft.SharedConstants;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.MappedRegistry;
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
@@ -31,6 +33,8 @@ import net.minecraft.network.chat.contents.SelectorContents;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.RegistryOps;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.network.Filterable;
 import net.minecraft.world.entity.EntityType;
@@ -426,6 +430,96 @@ class ClientItemDisplayOpaqueComponentsTest {
 		int namesBefore = item.nameCalls;
 		assertTrue(decoder.apply(payload("")).isEmpty());
 		assertEquals(namesBefore, item.nameCalls, "constructor hook injection is rejected before name composition");
+	}
+
+	@Test void throwingNameHookReportsOriginalCauseOnceWhileNormalSafetySuppressionStaysSilent() {
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+			item.nameHook = stack -> stack.set(persistent, opaque);
+			assertUnavailable(resolve(payload(""))); assertTrue(logs.events().isEmpty());
+			item.nameHook = stack -> { throw new IllegalStateException("name hook failed", new RuntimeException("display hook root cause")); };
+			assertUnavailable(resolve(payload(""))); assertUnavailable(resolve(payload("")));
+			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("display hook root cause"));
+			assertTrue(logs.messages().contains("operation=inventory/client-display-resolve")); assertNull(logs.events().getFirst().getThrown());
+		}
+	}
+
+	@Test void constructorRuntimeFailuresKeepDisplayFallbacksButLinkageErrorsPropagate() {
+		String encoded = payload("");
+		var runtime = new IllegalStateException("display constructor failed", new RuntimeException("constructor root cause"));
+		item.hook = stack -> { throw runtime; };
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+			assertUnavailable(resolve(encoded));
+			assertTrue(ClientItemDisplay.decode(RegistryAccess.EMPTY, encoded).isEmpty());
+			assertTrue(ClientItemDisplay.decodeName(RegistryAccess.EMPTY, encoded).isEmpty());
+			assertEquals(3, logs.events().size()); assertTrue(logs.messages().contains("constructor root cause"));
+		}
+		var linkage = new LinkageError("display constructor linkage failure");
+		item.hook = stack -> { throw linkage; };
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+			assertSame(linkage, assertThrows(LinkageError.class, () -> resolve(encoded)));
+			assertSame(linkage, assertThrows(LinkageError.class, () -> ClientItemDisplay.decode(RegistryAccess.EMPTY, encoded)));
+			assertSame(linkage, assertThrows(LinkageError.class, () -> ClientItemDisplay.decodeName(RegistryAccess.EMPTY, encoded)));
+			assertTrue(logs.events().isEmpty(), "the caller still owns a propagated linkage failure");
+		}
+	}
+
+	@Test void renderConstructorAndNameHookLinkageErrorsStillReachTheCaller() {
+		var linkage = new LinkageError("display hook linkage failure");
+		item.hook = stack -> { if (stack.has(DataComponents.CUSTOM_MODEL_DATA)) throw linkage; };
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+			assertSame(linkage, assertThrows(LinkageError.class, () -> resolve(payload("\"minecraft:custom_model_data\":7"))),
+				"the reflective render constructor must not turn a linkage failure into display fallback");
+			item.hook = stack -> {};
+			item.nameHook = stack -> { throw linkage; };
+			assertSame(linkage, assertThrows(LinkageError.class, () -> resolve(payload(""))));
+			assertSame(linkage, assertThrows(LinkageError.class, () -> ClientItemDisplay.decodeName(RegistryAccess.EMPTY, payload(""))));
+			assertTrue(logs.events().isEmpty());
+		}
+	}
+
+	@Test void cachedDefaultRuntimeFailureEvictsButLinkageFailurePropagatesWithoutFallback() {
+		String encoded = payload("");
+		assertFalse(resolve(encoded).stack().isEmpty()); assertEquals(1, ClientItemDisplay.cachedEntryCount());
+		item.componentsReadHook = () -> { throw new IllegalStateException("cached defaults failed"); };
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+			assertUnavailable(resolve(encoded)); assertEquals(0, ClientItemDisplay.cachedEntryCount());
+			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("operation=inventory/client-display-cache"));
+		}
+		item.componentsReadHook = () -> {};
+		assertFalse(resolve(encoded).stack().isEmpty()); assertEquals(1, ClientItemDisplay.cachedEntryCount());
+		var linkage = new LinkageError("cached defaults linkage failure");
+		item.componentsReadHook = () -> { throw linkage; };
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+			assertSame(linkage, assertThrows(LinkageError.class, () -> resolve(encoded)));
+			assertEquals(1, ClientItemDisplay.cachedEntryCount(), "a propagated failure does not execute fallback eviction");
+			assertTrue(logs.events().isEmpty());
+		}
+	}
+
+	@Test void nativeDecodeContextRuntimeFailureFallsBackButLinkageFailurePropagates() {
+		String encoded = payload("");
+		for (Throwable failure : List.of(new IllegalStateException("native display context failed"), new LinkageError("native display context linkage failure"))) {
+			var provider = new HolderLookup.Provider() {
+				@Override public java.util.stream.Stream<ResourceKey<? extends Registry<?>>> listRegistries() { throw new AssertionError("context fails first"); }
+				@Override public <T> Optional<HolderLookup.RegistryLookup<T>> lookup(ResourceKey<? extends Registry<? extends T>> key) { throw new AssertionError("context fails first"); }
+				@Override public <T> RegistryOps<T> createSerializationContext(DynamicOps<T> ops) {
+					if (failure instanceof RuntimeException runtime) throw runtime;
+					throw (LinkageError) failure;
+				}
+			};
+			try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+				if (failure instanceof RuntimeException) {
+					assertUnavailable(ClientItemDisplay.resolve(provider, itemId(), "fallback.registry.label", encoded));
+					assertTrue(ClientItemDisplay.decode(provider, encoded).isEmpty()); assertTrue(ClientItemDisplay.decodeName(provider, encoded).isEmpty());
+					assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("operation=inventory/client-display-codec"));
+				} else {
+					assertSame(failure, assertThrows(LinkageError.class, () -> ClientItemDisplay.resolve(provider, itemId(), "fallback.registry.label", encoded)));
+					assertSame(failure, assertThrows(LinkageError.class, () -> ClientItemDisplay.decode(provider, encoded)));
+					assertSame(failure, assertThrows(LinkageError.class, () -> ClientItemDisplay.decodeName(provider, encoded)));
+					assertTrue(logs.events().isEmpty());
+				}
+			}
+		}
 	}
 
 	@Test void descriptionHookIsFencedBeforeAnyNewCustomTextCanBeFormatted() {
@@ -867,13 +961,14 @@ class ClientItemDisplayOpaqueComponentsTest {
 
 	private static final class FixtureItem extends Item {
 		DataComponentMap defaults;
+		Runnable componentsReadHook = () -> {};
 		Consumer<ItemStack> hook = stack -> {};
 		Consumer<ItemStack> nameHook = stack -> {};
 		Consumer<ItemStack> descriptionHook = stack -> {};
 		Component nameResult = Component.literal("fixture-derived name");
 		int nameCalls;
 		FixtureItem() { super(new Item.Properties()); defaults = super.components(); }
-		@Override public DataComponentMap components() { return defaults; }
+		@Override public DataComponentMap components() { componentsReadHook.run(); return defaults; }
 		@Override public void verifyComponentsAfterLoad(ItemStack stack) { hook.accept(stack); }
 		@Override public Component getName(ItemStack stack) { nameCalls++; nameHook.accept(stack); return nameResult; }
 		@Override public String getDescriptionId(ItemStack stack) { descriptionHook.accept(stack); return "item.pingforit.fixture"; }

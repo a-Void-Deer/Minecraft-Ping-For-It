@@ -216,12 +216,13 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 			// extension's copy. It is not A1's missing native copy certificate or
 			// a new claim about arbitrary subsequent counter/decoder work.
 			bounds.nbt(payload);
-		} catch (InventoryItemBudget.RootLimitException failure) { throw new LimitException("native snapshot payload refused"); }
+		} catch (InventoryItemBudget.RootLimitException failure) { throw new LimitException("native snapshot payload refused", failure); }
 		finally { budget.end(); }
 	}
 
 	public static final class LimitException extends IllegalStateException {
 		public LimitException(String reason) { super(reason); }
+		public LimitException(String reason, Throwable cause) { super(reason, cause); }
 	}
 
 	private static final class SegmentState {

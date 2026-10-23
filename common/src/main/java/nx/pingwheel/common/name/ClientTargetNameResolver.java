@@ -93,9 +93,8 @@ public final class ClientTargetNameResolver {
 					.orElseGet(TargetNameComposer::unknown);
 			};
 		} catch (RuntimeException unavailable) {
-			// Rendering must remain safe when a client-side registry/entity is
-			// changing during a frame.  Do not include names or target identity in
-			// a diagnostic; the presentation fallback needs no log at all.
+			nx.pingwheel.common.diagnostics.Diagnostics.warn("target-name/client-lookup", lookup.getClass().getName(),
+				() -> "kind=" + target.kind() + "; using unknown name", unavailable);
 			return TargetNameComposer.unknown();
 		}
 	}

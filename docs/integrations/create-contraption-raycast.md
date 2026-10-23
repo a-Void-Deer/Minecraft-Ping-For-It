@@ -61,8 +61,9 @@ The Create-free ownership shell is registered after the Create mod-ID check and
 lazily loads the Create-dependent delegate. Ownership of the known IDs survives
 delegate unavailability, preserving the common owned-candidate contract after an
 optional linkage failure. Its registration is closed on client-session teardown
-and reset for re-registration. Detailed failure diagnostics are bounded;
-targeting does not add toast or action-bar feedback.
+and reset for re-registration. Failure reports follow
+[diagnostics and logging](../architecture/logging.md); player-feedback limits
+remain with [security](../architecture/security.md#diagnostic-detail-and-user-feedback).
 
 The integration supplies the snapshot-local block view and collision context to
 the common scanner. Missing or portal-hidden local positions are air. Fluid

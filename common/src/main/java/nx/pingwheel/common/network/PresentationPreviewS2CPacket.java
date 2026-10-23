@@ -3,6 +3,10 @@ package nx.pingwheel.common.network;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import nx.pingwheel.common.presentation.PresentationCodec;
 import nx.pingwheel.common.presentation.PresentationIds;
 import nx.pingwheel.common.presentation.PresentationSection;
@@ -11,7 +15,7 @@ import nx.pingwheel.common.presentation.preview.PresentationPreviewLimits;
 
 /** Framed bytes remain undecoded until current request authorization is available. */
 public record PresentationPreviewS2CPacket(int protocol, long epoch, long view, long requestId,
-	String adapterId, int schema, Status status, byte[] sectionBytes) implements IPacket {
+	@Nullable String adapterId, int schema, @Nullable Status status, byte @Unmodifiable [] sectionBytes) implements IPacket {
 	public enum Status { RESULT, UNAVAILABLE, DEFERRED, REJECTED }
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath("pingforit-s2c", "presentation-preview-v1");
 	public static final Type<PresentationPreviewS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
@@ -19,7 +23,7 @@ public record PresentationPreviewS2CPacket(int protocol, long epoch, long view, 
 		sectionBytes = sectionBytes.clone();
 		if (sectionBytes.length > PresentationCodec.MAX_SECTION_BYTES + 5) throw new IllegalArgumentException("preview section bytes");
 	}
-	@Override public byte[] sectionBytes() { return sectionBytes.clone(); }
+	@Override public byte @Unmodifiable [] sectionBytes() { return sectionBytes.clone(); }
 	public PresentationPreviewS2CPacket() { this(0, 0, 0, 0, null, 0, null, new byte[0]); }
 	public PresentationPreviewS2CPacket(FriendlyByteBuf buf) { this(decode(buf)); }
 	private PresentationPreviewS2CPacket(PresentationPreviewS2CPacket packet) {
@@ -41,19 +45,30 @@ public record PresentationPreviewS2CPacket(int protocol, long epoch, long view, 
 	 * An unaccepted field is skipped before typed decoding and rejects the whole
 	 * response. Any received annotation is invalid.
 	 */
-	public PresentationSection decodeSection(PresentationPreviewAccess access) {
-		if (isCorrupt() || status != Status.RESULT || access.epoch() != epoch || access.view() != view) return null;
+	public @Nullable PresentationSection decodeSection(PresentationPreviewAccess access) {
+		if (isCorrupt() || status != Status.RESULT || access.epoch() != epoch || access.view() != view)
+			return rejectSection("header-or-view");
 		var accepted = access.adapters().get(adapterId);
-		if (accepted == null || accepted.schema() != schema) return null;
+		if (accepted == null || accepted.schema() != schema) return rejectSection("adapter-or-schema");
 		FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(sectionBytes));
 		try {
 			PresentationSection section = PresentationCodec.readStrict(buf, accepted.fields()::containsKey);
 			if (buf.isReadable() || !adapterId.equals(section.adapterId()) || schema != section.schema()
-				|| section.stale() || !section.annotations().isEmpty()) return null;
-			for (var entry : section.fields().entrySet()) if (!accepted.fields().get(entry.getKey()).accepts(entry.getValue())) return null;
+				|| section.stale() || !section.annotations().isEmpty()) return rejectSection("section-metadata-or-annotations");
+			for (var entry : section.fields().entrySet()) if (!accepted.fields().get(entry.getKey()).accepts(entry.getValue()))
+				return rejectSection("field-kind");
 			return section;
-		} catch (RuntimeException invalid) { return null; }
+		} catch (RuntimeException invalid) {
+			Diagnostics.debug("presentation/preview-section-decode", "client", () -> "adapter=" + adapterId
+				+ " schema=" + schema + " request=" + requestId + " bytes=" + sectionBytes.length, invalid);
+			return null;
+		}
 		finally { buf.release(); }
+	}
+	private @Nullable PresentationSection rejectSection(String reason) {
+		Diagnostics.event(Level.DEBUG, "presentation/preview-section-reject", "client", reason,
+			() -> "adapter=" + adapterId + " schema=" + schema + " request=" + requestId + " bytes=" + sectionBytes.length);
+		return null;
 	}
 	@Override public void write(FriendlyByteBuf buf) {
 		if (isCorrupt()) throw new IllegalArgumentException("corrupt preview response");

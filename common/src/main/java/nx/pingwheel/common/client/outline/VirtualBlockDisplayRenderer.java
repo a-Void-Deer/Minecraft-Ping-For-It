@@ -38,8 +38,10 @@ import nx.pingwheel.common.mixin.DisplayBlockDisplayAccessor;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.integration.sable.client.SableClientProvider;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
 
-import static nx.pingwheel.common.Global.LOGGER;
 
 /**
  * Main-thread model-outline pass: renders the vanilla model glow for winning
@@ -148,8 +150,8 @@ public final class VirtualBlockDisplayRenderer {
 	private final Map<String, Integer> frameFailures = new LinkedHashMap<>();
 
 	private boolean displayCreationWarned;
-	private ClientLevel cachedLevel;
-	private Display.BlockDisplay cachedDisplay;
+	private @Nullable ClientLevel cachedLevel;
+	private @Nullable Display.BlockDisplay cachedDisplay;
 	private final EntityBlockGeometryRunner entityBlockGeometryRunner;
 
 	private VirtualBlockDisplayRenderer() {
@@ -239,8 +241,8 @@ public final class VirtualBlockDisplayRenderer {
 
 		if (!frameFailures.isEmpty()) {
 			int attempts = frameFailures.values().stream().mapToInt(Integer::intValue).sum();
-			LOGGER.debug(
-				"block outline model pass: %d attempts failed across %d block types; voxel fallback applied"
+			Diagnostics.domainApprovedEvent(Level.DEBUG, "block-outline-frame", "aggregate", "source-failures",
+				() -> "block outline model pass: %d attempts failed across %d block types; voxel fallback applied"
 					.formatted(attempts, frameFailures.size()));
 		}
 	}
@@ -613,6 +615,8 @@ public final class VirtualBlockDisplayRenderer {
 			try {
 				claims = adapter.handles(context);
 			} catch (Exception | LinkageError | AssertionError failure) {
+				Diagnostics.warn("world-aware-model-handles", adapter.getClass().getName(),
+					() -> "adapter=" + adapterId(adapter) + "; context=" + context, failure);
 				continue;
 			}
 
@@ -851,7 +855,7 @@ public final class VirtualBlockDisplayRenderer {
 	 * recreating it when the level identity changed or after
 	 * {@link #clear()}. The display is never added to the level.
 	 */
-	private Display.BlockDisplay displayFor(ClientLevel level) {
+	private @Nullable Display.BlockDisplay displayFor(ClientLevel level) {
 		if (cachedDisplay != null && cachedLevel == level) {
 			return cachedDisplay;
 		}
@@ -861,9 +865,9 @@ public final class VirtualBlockDisplayRenderer {
 			cachedLevel = level;
 			return cachedDisplay;
 		} catch (Exception | LinkageError | AssertionError throwable) {
-			if (!displayCreationWarned) {
+			if (!displayCreationWarned && OutlineDiagnostics.enabled()) {
 				displayCreationWarned = true;
-				LOGGER.warn(
+				Diagnostics.domainApprovedFailure(Level.WARN, "virtual-display-create", Display.BlockDisplay.class.getName(),
 					() -> "unable to create virtual block display; stage=display-creation; class="
 						+ Display.BlockDisplay.class.getName(),
 					throwable);
@@ -891,24 +895,24 @@ public final class VirtualBlockDisplayRenderer {
 	 * preformatted message includes the complete target, registry, position,
 	 * source/block class, failure stage ({@code render}, {@code geometry-runner},
 	 * or {@code flush}), and
-	 * exception class; the original throwable is attached so its complete
-	 * causal/suppressed stack is retained. The session-level warning still
+	 * exception class; bounded exception formatting preserves the original
+	 * causal/suppressed stack. The session-level warning still
 	 * prevents per-frame warning spam.
 	 */
 	private void recordFailure(
 		String registryId,
-		BlockPos position,
-		BlockState blockState,
-		TargetKey targetKey,
-		Object sourceTarget,
+		@Nullable BlockPos position,
+		@Nullable BlockState blockState,
+		@Nullable TargetKey targetKey,
+		@Nullable Object sourceTarget,
 		FailureRoute route,
 		FailureStage stage,
 		Throwable throwable
 	) {
 		frameFailures.merge(registryId, 1, Integer::sum);
 
-		if (warnOnceRegistryIds.add(registryId)) {
-			LOGGER.warn(
+		if (OutlineDiagnostics.enabled() && warnOnceRegistryIds.add(registryId)) {
+			Diagnostics.domainApprovedFailure(Level.WARN, "block-outline-model", registryId,
 				() -> failureMessage(
 					registryId, position, blockState, targetKey, sourceTarget,
 					route, stage, throwable),
@@ -918,13 +922,13 @@ public final class VirtualBlockDisplayRenderer {
 
 	private static String failureMessage(
 		String registryId,
-		BlockPos position,
-		BlockState blockState,
-		TargetKey targetKey,
-		Object sourceTarget,
+		@Nullable BlockPos position,
+		@Nullable BlockState blockState,
+		@Nullable TargetKey targetKey,
+		@Nullable Object sourceTarget,
 		FailureRoute route,
 		FailureStage stage,
-		Throwable throwable
+		@Nullable Throwable throwable
 	) {
 		String blockClass = blockState == null || blockState.getBlock() == null
 			? "<null>" : blockState.getBlock().getClass().getName();
@@ -946,7 +950,7 @@ public final class VirtualBlockDisplayRenderer {
 			+ "; voxelFallback=applied";
 	}
 
-	private static String targetDescription(TargetKey targetKey) {
+	private static String targetDescription(@Nullable TargetKey targetKey) {
 		if (targetKey == null) {
 			return "<unknown>";
 		}
@@ -980,9 +984,10 @@ public final class VirtualBlockDisplayRenderer {
 
 	private static String adapterId(WorldAwareBlockModelOutlineAdapter adapter) {
 		try {
-			String id = EntityBlockGeometrySourceIds.validate(adapter.id());
+			@Nullable String id = EntityBlockGeometrySourceIds.validate(adapter.id());
 			return id == null ? EntityBlockGeometrySourceIds.INVALID : id;
 		} catch (Exception | LinkageError | AssertionError failure) {
+			Diagnostics.warn("world-aware-model-id", adapter.getClass().getName(), () -> "adapter id lookup failed", failure);
 			return EntityBlockGeometrySourceIds.UNAVAILABLE;
 		}
 	}

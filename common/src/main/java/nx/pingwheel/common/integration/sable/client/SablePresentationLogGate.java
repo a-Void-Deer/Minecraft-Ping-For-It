@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.LongSupplier;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Bounds and rate-limits diagnostics for presentation failures.
@@ -47,7 +48,7 @@ final class SablePresentationLogGate {
 
 	private boolean shouldLog(String key, long nowNanos) {
 		evictExpired(nowNanos);
-		Long previous = lastLoggedNanos.get(key);
+		@Nullable Long previous = lastLoggedNanos.get(key);
 
 		if (previous != null && nowNanos - previous < intervalNanos) {
 			return false;

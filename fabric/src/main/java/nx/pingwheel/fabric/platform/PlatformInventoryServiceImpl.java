@@ -28,7 +28,7 @@ import net.minecraft.world.item.Items;
 import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /**
  * Fabric Transfer provider for the platform inventory bridge.
@@ -87,7 +87,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			return Optional.of(new EnumeratedAccess(storage, gate));
 		} catch (RuntimeException | LinkageError failure) {
 			if (!(failure instanceof InventorySourceUnavailableException))
-				RateLimitedDiagnostics.warn("inventory-capability-find", "fabric:transfer",
+				Diagnostics.warn("inventory-capability-find", "fabric:transfer",
 					() -> "position=" + pos + " face=" + side + " worldClass=" + world.getClass().getName()
 						+ " blockEntityClass=" + (blockEntity == null ? "none" : blockEntity.getClass().getName()), failure);
 			return Optional.empty();
@@ -99,7 +99,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			return OptionalLong.of(storage.getVersion());
 		} catch (RuntimeException | LinkageError failure) {
 			if (!(failure instanceof InventorySourceUnavailableException))
-				RateLimitedDiagnostics.warn("inventory-storage-version", storage.getClass().getName(),
+				Diagnostics.warn("inventory-storage-version", storage.getClass().getName(),
 					() -> "storageClass=" + storage.getClass().getName(), failure);
 			return OptionalLong.empty();
 		}
@@ -127,13 +127,17 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 
 	/** Fixed library field identities, not a namespace-based provider allowlist. */
 	private static final class NativeSlots {
-		static final Class<?> SIDED_SLOT = libraryClass("net.fabricmc.fabric.impl.transfer.item.SidedInventorySlotWrapper");
-		static final Class<?> SLOT = libraryClass("net.fabricmc.fabric.impl.transfer.item.InventorySlotWrapper");
-		static final Class<?> INVENTORY = libraryClass("net.fabricmc.fabric.impl.transfer.item.InventoryStorageImpl");
-		static final Class<?> SIDED_INVENTORY = libraryClass("net.fabricmc.fabric.impl.transfer.item.SidedInventoryStorageImpl");
-		private static Class<?> libraryClass(String name) {
+		static final @org.jetbrains.annotations.Nullable Class<?> SIDED_SLOT = libraryClass("net.fabricmc.fabric.impl.transfer.item.SidedInventorySlotWrapper");
+		static final @org.jetbrains.annotations.Nullable Class<?> SLOT = libraryClass("net.fabricmc.fabric.impl.transfer.item.InventorySlotWrapper");
+		static final @org.jetbrains.annotations.Nullable Class<?> INVENTORY = libraryClass("net.fabricmc.fabric.impl.transfer.item.InventoryStorageImpl");
+		static final @org.jetbrains.annotations.Nullable Class<?> SIDED_INVENTORY = libraryClass("net.fabricmc.fabric.impl.transfer.item.SidedInventoryStorageImpl");
+		private static @org.jetbrains.annotations.Nullable Class<?> libraryClass(String name) {
 			try { return Class.forName(name, false, PlatformInventoryServiceImpl.class.getClassLoader()); }
-			catch (ClassNotFoundException | LinkageError unavailable) { return null; }
+			catch (ClassNotFoundException absent) { return null; }
+			catch (LinkageError failure) {
+				Diagnostics.warn("inventory-resident-class", "fabric:transfer", () -> "class=" + name, failure);
+				return null;
+			}
 		}
 	}
 	private static SingleStackStorage mappedStack(StorageView<ItemVariant> view, FabricResidentStorageAccess raw, ResidentScope scope) {
@@ -302,7 +306,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			try { return memberGate.getAsBoolean(); }
 			catch (RuntimeException | LinkageError unavailable) {
 				if (!(unavailable instanceof InventorySourceUnavailableException))
-					RateLimitedDiagnostics.warn("inventory-storage-valid", storage.getClass().getName(),
+					Diagnostics.warn("inventory-storage-valid", storage.getClass().getName(),
 						() -> "storageClass=" + storage.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
 				return false;
 			}
@@ -418,7 +422,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			try { return memberGate.getAsBoolean(); }
 			catch (RuntimeException | LinkageError unavailable) {
 				if (!(unavailable instanceof InventorySourceUnavailableException))
-					RateLimitedDiagnostics.warn("inventory-storage-valid", storage.getClass().getName(),
+					Diagnostics.warn("inventory-storage-valid", storage.getClass().getName(),
 						() -> "storageClass=" + storage.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
 				return false;
 			}

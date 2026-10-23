@@ -211,6 +211,8 @@ public class Raycast {
 			}
 		} catch (RuntimeException | LinkageError failure) {
 			// Discard certification, not the independently completed ordinary trace.
+			nx.pingwheel.common.diagnostics.Diagnostics.warn("precise/entity-scan", "native",
+				() -> "token=" + token.sequence() + " dimension=" + level.dimension().location(), failure);
 		}
 		try {
 			boolean[] providerComplete = {true};
@@ -241,6 +243,8 @@ public class Raycast {
 			}
 		} catch (RuntimeException | LinkageError failure) {
 			// A partial native/provider scan cannot certify a nearest block.
+			nx.pingwheel.common.diagnostics.Diagnostics.warn("precise/block-scan", "native",
+				() -> "token=" + token.sequence() + " dimension=" + level.dimension().location(), failure);
 		}
 		return Optional.of(new SelectorTrace(ordinary, new FrozenCandidateAcquisition(token, ray, pingDistance,
 			world(ordinary.hitResult().getLocation()), collector.evidence(), certified)));
