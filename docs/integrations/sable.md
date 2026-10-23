@@ -196,9 +196,8 @@ Ping-Type checks. MarkerRemove still requires ownership of the active marker.
 Server-settings editing remains the separate permission-level-3 operation documented in
 [security](../architecture/security.md).
 
-Reflection and provider failures are logged through bounded, rate-controlled
-diagnostics with complete exception details where the diagnostics contract
-requires them; they do not become hard dependencies for unrelated pings.
+Reflection and provider failures follow
+[diagnostics and logging](../architecture/logging.md).
 
 Related contracts: [target identity](../architecture/identity/target_model.md),
 [presentation subjects](../architecture/rendering/presentation_subjects.md),

@@ -62,7 +62,8 @@ conflicts rather than silently choosing or dropping a requirement.
 | Change registered marker/legacy packet ingress or client packet acceptance | [Network protocol](architecture/network/protocol.md) | [Target validation](architecture/authority/target_validation.md), [presentation snapshot](architecture/presentation/presentation_snapshot.md), client marker state and compatibility |
 | Change local invalid-target or server-rejection feedback | [Ping feedback](UI/ping-feedback.md) | [Target validation](architecture/authority/target_validation.md), rate policy and client configuration |
 | Change which same-target ping is visible | [Ping winner](architecture/authority/ping_winner.md) | Identity, removal/expiry and external-target refresh |
-| Change how trusted identity is established, how unauthorized requests are rejected, or failure-isolation and diagnostic detail | [Security](architecture/security.md) | Validation, [rate policy](architecture/config/rate-limit.md), [presentation snapshot](architecture/presentation/presentation_snapshot.md) and the affected provider/source contract |
+| Change how trusted identity is established, how unauthorized requests are rejected, or business-failure isolation | [Security](architecture/security.md) | Validation, [rate policy](architecture/config/rate-limit.md), [presentation snapshot](architecture/presentation/presentation_snapshot.md) and the affected provider/source contract |
+| Change diagnostic severity, report identity, admission, bounded exception detail, disclosure or logging-output isolation | [Diagnostics and logging](architecture/logging.md) | [Security](architecture/security.md), the affected domain's cadence and lifecycle contract, and [diagnostics evidence](testing/verification/integrations.md#shared-exception-diagnostics) |
 | Change the complete client file/key catalogue, list syntax, locality, or format examples | [Client configuration](config/client.md) | Revisioning, capture, wheel, outline routing, geometry modes, and [presentation snapshot](architecture/presentation/presentation_snapshot.md) policy application |
 | Change the persisted server file catalogue, fields, or examples | [Server configuration](config/server.md) | Range, rate policy, marker lifecycle, revisioning, and [presentation snapshot](architecture/presentation/presentation_snapshot.md) policy application |
 | Change the client settings screen, its client/server scope and category workflow, external file action, reset, or screen exposure | [Configuration UI](UI/settings-screen.md) | Client configuration, server configuration, revisioning, and [verification](testing/verification/configuration-ui.md) |
@@ -117,7 +118,7 @@ duplicate the exact constants, algorithms or error cases owned by topic docs.
    named behavior. Neither form is a Java file, class, or line-number tour.
 4. Integration docs contain mod-specific gates and implementations. Generic
    picking-owner, geometry-source, outcome, lifecycle and failure contracts stay
-   in their picking, geometry, authority or security owners.
+   in their picking, geometry, authority, security or logging owners.
 5. Keep distinct terms distinct: model eligibility is not emitted geometry;
    picking `forAllBoxes` is not outline `forAllEdges`; canonical identity is not
    presentation ownership; e.g.

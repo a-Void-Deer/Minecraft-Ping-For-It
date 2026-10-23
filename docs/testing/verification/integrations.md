@@ -6,6 +6,9 @@ for scenarios that remain pending.
 
 ## Shared exception diagnostics
 
+The behavior contract is owned by
+[diagnostics and logging](../../architecture/logging.md).
+
 `SafeExceptionReportTest` covers original messages, exception types, source
 frames, causes and suppressed relationships without redaction; recognizable
 control-character escapes with readable structural line breaks; separate

@@ -381,11 +381,12 @@ items for the same target. A bounded summary shows at most ten work-item
 descriptions and an extra observed-work count: that count is the observed items
 not displayed, not unique targets or an estimate of unvisited server backlog.
 Unknown quantities remain unknown, and saturated counters are lower bounds,
-not fabricated exact totals. Diagnostic context is detached and bounded; it
-contains no source lookup, world object, sampled field/item content or raw NBT.
-Monitoring performs no capture, provider or world read. Recoverable diagnostic
-or notice failures cannot change accounting, cadence, publication or authority;
-fatal resource failures are not swallowed.
+not fabricated exact totals. General report bounds and output isolation are
+owned by [diagnostics and logging](../logging.md). Monitoring context additionally
+contains no source lookup, world object, sampled field/item content or raw NBT;
+monitoring performs no capture, provider or world read. Recoverable notice
+failures cannot change accounting, cadence, publication or authority; fatal
+resource failures are not swallowed.
 
 Continuous delay is evaluated from fresh server-tick evidence with monotonic
 real time, not TPS or game ticks. Outstanding resource-blocked work remains

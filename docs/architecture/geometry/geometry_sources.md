@@ -88,9 +88,8 @@ an invocation attempt.
 
 Shared geometry-source failure isolation follows the
 [security owner](../security.md), including which failures are recoverable and
-which fatal JVM/resource errors propagate. Detailed diagnostics remain lazy,
-bounded, and rate-controlled while retaining complete target, component,
-payload, and exception details.
+which fatal JVM/resource errors propagate. Report detail and frequency admission
+follow [diagnostics and logging](../logging.md).
 
 ## Internal optional-source registry
 

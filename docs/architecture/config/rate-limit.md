@@ -81,9 +81,10 @@ The separate pending-capture input sequence is defined in
 
 ## Feedback and evidence
 
-Rejection feedback, rate-controlled diagnostic detail, and user-visible
-feedback boundaries are owned by [security](../security.md). Client processing
-of rejection responses and the local invalid-target presentation are owned by
+Diagnostic reporting is owned by [diagnostics and logging](../logging.md), and
+the rate/integration user-feedback boundary by [security](../security.md).
+Client processing of rejection responses and the local invalid-target
+presentation are owned by
 [ping feedback](../../UI/ping-feedback.md), with rejection outcomes owned by
 [target validation](../authority/target_validation.md).
 
