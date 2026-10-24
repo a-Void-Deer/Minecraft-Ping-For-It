@@ -289,7 +289,7 @@ subsequently correct the pointer.
 
 The translation is smoothly interpolated like the other selector transitions,
 and reduced motion snaps it immediately. It does not change gesture thresholds
-or selection rules; projection-only corrections do not count as gesture input.
+or selection rules.
 
 While a radial child menu is active, each ancestor radial menu keeps only the
 entry through which the active path descends, together with its Back

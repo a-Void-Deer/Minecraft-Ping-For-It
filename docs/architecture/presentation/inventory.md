@@ -159,9 +159,7 @@ tags, while the server decides the annotation's allowance from the actual
 provider-confirmed physical block and its live tags, so a client-expected
 registry or a merely claimed tag never authorizes the annotation. The
 annotation's quantity starts unknown, and its first authoritative count follows the
-complete-observation rules in [Tracking](#tracking). The first tracking
-observation uses a fresh authoritative capture; it reuses neither the preview
-snapshot nor its count.
+complete-observation rules in [Tracking](#tracking).
 
 The first batch is sorted by count immediately rather than after the scan
 finishes. Newly discovered batches may reorder entries only before the user has
@@ -717,10 +715,3 @@ open inventory list legitimately loading. The selector's cancellation and close
 response to a request that is no longer present is owned by
 [wheel](../picking/wheel.md#inventory-selection-stay-open); the inventory topic
 does not restate it.
-
-The native HUD workflow that consumes these
-states — direction trail, root-centre abandonment and downward marker
-cancellation, and candidate priority — remains owned by the [capture](../picking/capture.md) and
-[wheel](../picking/wheel.md) contracts, and the inventory topic owns only the
-data and status
-semantics it publishes to them.

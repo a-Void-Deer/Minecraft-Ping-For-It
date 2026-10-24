@@ -57,16 +57,8 @@ Each topic page keeps its coverage and local known automated gaps together.
 
 ## Known automated gaps
 
-The following gaps remain open until direct evidence closes them:
-
-- [Identity and authority](identity-authority.md#known-automated-gaps)
-- [Presentation](presentation.md#known-automated-gaps)
-- [Interaction](interaction.md#known-automated-gaps)
-- [Configuration and settings UI](configuration-ui.md#known-automated-gaps)
-- [Shared sources](shared-sources.md#known-automated-gaps)
-- [Inventory](inventory.md#known-automated-gaps)
-- [Rendering](rendering.md#known-automated-gaps)
-- [Integrations](integrations.md#known-automated-gaps)
+The gaps linked in the [coverage inventory](#existing-automated-coverage-inventory)
+remain open until direct evidence closes them.
 
 Build evidence is scoped separately in [build checks](build-checks.md), and
 pending live scenarios remain in the

@@ -57,9 +57,9 @@ silent/debug-only outcomes for other responses, are owned by
 
 Optional-mod gates and lazy/reflective boundaries prevent linkage failures from
 breaking unrelated pings. Render registries use immutable snapshots and
-retained, idempotently closed registration handles. Rendering uses local/scoped
-state, not persistent vanilla glowing/team mutations. Flywheel adapters must
-not revive or mutate stale/hidden/deleted/foreign handles.
+retained, idempotently closed registration handles. [Outline rendering](rendering/outline.md#common-entity-outlines)
+owns scoped render-state isolation; [Create/Flywheel](../integrations/create.md#createflywheel-entity-block-geometry)
+owns live visual-handle access.
 
 For geometry source attempts, only `Exception`, `LinkageError` and
 `AssertionError` are recoverable. Fatal JVM/resource errors propagate. This
@@ -67,8 +67,8 @@ enumeration scopes only the shared geometry-source attempt; it is not a general
 optional-integration or registry catch policy. A partial recoverable emission
 follows the exact
 [source outcome contract](geometry/geometry_sources.md), not a blanket catch or
-duplicate fallback render. Config recovery must preserve original bytes under
-[client invalid-file recovery](config/revisioning.md#invalid-file-recovery-differs-by-config-type).
+duplicate fallback render. [Configuration revisioning](config/revisioning.md#invalid-file-recovery-differs-by-config-type)
+owns the distinct client and server recovery rules.
 
 ## Diagnostic detail and user feedback
 
