@@ -102,6 +102,10 @@ public final class InventorySourceAccess implements SourceAccess {
 	 * the source offers no usable snapshot support.
 	 */
 	public interface InventoryHandle extends SourceAccess.Handle {
+		/** Additive typed seam; legacy routes keep their encoding and evidence until native integration. */
+		default InventoryStep.Outcome stepInventory(CostLedger ledger, InventoryCatalogAdmission admission) {
+			return InventoryStep.fromLegacy(step(ledger, admission));
+		}
 		/** One cumulative allowance for every item consumed by this step, never retained by the handle. */
 		default StepOutcome step(CostLedger ledger, InventoryCatalogAdmission admission) { return step(ledger); }
 		/** Admit before prepareSnapshot, including its initial/final source.valid calls. */

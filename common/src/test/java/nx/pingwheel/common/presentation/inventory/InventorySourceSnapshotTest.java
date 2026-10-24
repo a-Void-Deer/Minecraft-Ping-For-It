@@ -20,6 +20,7 @@ import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SourceAccess;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Nullable;
 import org.apache.logging.log4j.Level;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -247,6 +248,26 @@ class InventorySourceSnapshotTest {
 		var second = step(handle, grant(1));
 		assertEquals(CaptureResult.Completeness.COMPLETE, second.completeness());
 		assertEquals(CaptureResult.Consistency.EVENTUAL, second.consistency(), "later steps never promote unknown evidence");
+	}
+
+	@Test void typedCompatibilityStepsKeepSnapshotEvidenceAndAbsoluteEmptySlotsWithoutPayloadMix() {
+		var source = new TestSource();
+		var values = new ArrayList<InventoryDomainCodec.@Nullable Item>(); values.add(item(1)); values.add(null); values.add(item(2));
+		var snapshot = new TestSnapshot(values, 1024, InventorySourceAccess.SnapshotEvidence.ATOMIC_DETACHED);
+		source.plan = new TestPlan(2048, () -> Optional.of(snapshot));
+		var memory = new RetainedMemoryLedger(4096);
+		var admission = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryCatalogAdmission(Long.MAX_VALUE, Long.MAX_VALUE);
+		try (var handle = open(source, grant(0))) {
+			assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(memory));
+			var first = ((InventoryStep.Outcome.Captured) handle.stepInventory(grant(2), admission)).step();
+			assertEquals(0, first.firstSlot()); assertEquals(2, first.slots().size()); assertSame(null, first.slots().get(1));
+			assertTrue(first.metadata().payload().isEmpty()); assertEquals(CaptureResult.Consistency.VERIFIED, first.metadata().consistency());
+			assertEquals(InventoryStep.SweepEvidence.NONE, first.evidence(), "an atomic snapshot is not native incremental sweep evidence");
+			var last = ((InventoryStep.Outcome.Captured) handle.stepInventory(grant(2), admission)).step();
+			assertEquals(2, last.firstSlot()); assertEquals(item(2), last.slots().getFirst());
+			assertEquals(CaptureResult.Completeness.COMPLETE, last.metadata().completeness()); assertEquals(0, source.liveReads.get());
+		}
+		assertEquals(0, memory.retained());
 	}
 
 	@Test
@@ -994,20 +1015,20 @@ class InventorySourceSnapshotTest {
 	}
 
 	static class TestSnapshot implements InventorySourceAccess.InventorySnapshot {
-		private final List<InventoryDomainCodec.Item> slots;
+		private final List<InventoryDomainCodec.@Nullable Item> slots;
 		private final long retained;
 		private final InventorySourceAccess.SnapshotEvidence evidence;
 		final AtomicInteger reads = new AtomicInteger(), closes = new AtomicInteger();
 		boolean throwOnClose;
 		boolean throwFatalOnClose;
-		TestSnapshot(List<InventoryDomainCodec.Item> slots, long retained, InventorySourceAccess.SnapshotEvidence evidence) {
+		TestSnapshot(List<InventoryDomainCodec.@Nullable Item> slots, long retained, InventorySourceAccess.SnapshotEvidence evidence) {
 			this.slots = slots; this.retained = retained; this.evidence = evidence;
 		}
-		TestSnapshot(List<InventoryDomainCodec.Item> slots, long retained) {
+		TestSnapshot(List<InventoryDomainCodec.@Nullable Item> slots, long retained) {
 			this(slots, retained, InventorySourceAccess.SnapshotEvidence.ATOMIC_DETACHED);
 		}
 		@Override public int slots() { return slots.size(); }
-		@Override public InventoryDomainCodec.Item read(int index) { reads.incrementAndGet(); return slots.get(index); }
+		@Override public @Nullable InventoryDomainCodec.Item read(int index) { reads.incrementAndGet(); return slots.get(index); }
 		@Override public long retainedBytes() { return retained; }
 		@Override public InventorySourceAccess.SnapshotEvidence evidence() { return evidence; }
 		@Override public void close() {

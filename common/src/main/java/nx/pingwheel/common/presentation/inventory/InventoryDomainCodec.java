@@ -10,6 +10,7 @@ import java.util.Objects;
 
 import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.presentation.source.CaptureResult;
+import org.jetbrains.annotations.Nullable;
 
 /** Code-owned detached encoding; it never uses SECTION values or doubles for counts. */
 public final class InventoryDomainCodec {
@@ -21,7 +22,7 @@ public final class InventoryDomainCodec {
 	public static final int MAX_BYTES = CODEC.bound();
 	/** Absolute display JSON bound: the largest legal display budget. */
 	public static final int MAX_DISPLAY_BYTES = InventoryLimits.MAX_DISPLAY_BYTES;
-	public record Item(InventoryScanner.Key key, long count, String label, String displayJson, boolean stripped) {
+	public record Item(InventoryScanner.Key key, long count, String label, @Nullable String displayJson, boolean stripped) {
 		public Item {
 			Objects.requireNonNull(key);
 			Objects.requireNonNull(label);
@@ -35,7 +36,7 @@ public final class InventoryDomainCodec {
 	private InventoryDomainCodec() {}
 
 	/** Empty bytes mean an actually observed empty slot, not an unavailable read. */
-	public static CaptureResult.OpaqueValue encode(Item item) {
+	public static CaptureResult.OpaqueValue encode(@Nullable Item item) {
 		if (item == null) return CaptureResult.OpaqueValue.forCodec(CODEC, new byte[0]);
 		try {
 			ByteArrayOutputStream bytes = new ByteArrayOutputStream(128);
@@ -53,7 +54,7 @@ public final class InventoryDomainCodec {
 		} catch (IOException impossible) { throw new IllegalStateException(impossible); }
 	}
 
-	public static Item decode(CaptureResult.OpaqueValue value) {
+	public static @Nullable Item decode(CaptureResult.OpaqueValue value) {
 		Objects.requireNonNull(value, "value");
 		int size = value.size();
 		if (size == 0) return null;
@@ -63,7 +64,7 @@ public final class InventoryDomainCodec {
 			InventoryScanner.Key key = new InventoryScanner.Key(text(in, 256), text(in, 256));
 			long count = in.readLong();
 			String label = text(in, 1024);
-			String json = in.readBoolean() ? display(in) : null;
+			@Nullable String json = in.readBoolean() ? display(in) : null;
 			Item item = new Item(key, count, label, json, in.readBoolean());
 			if (in.available() != 0) throw new IllegalArgumentException("trailing observation");
 			return item;

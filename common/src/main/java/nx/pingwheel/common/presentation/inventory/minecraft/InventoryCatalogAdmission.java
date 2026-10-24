@@ -15,8 +15,9 @@ public final class InventoryCatalogAdmission {
 	static final int TABLE_CAPACITY = 512;
 	// Clone header40; digest/hex/both String coders408; Key+Encoded112;
 	// nullable replacement Display65; Builder+two summary records252;
-	// one stackless identity-refusal Throwable84. No input-proportional slack.
-	private static final long FIXED_BYTES = 40 + 408 + 112 + 65 + 252 + 84;
+	// one stackless capacity-refusal Throwable88 (includes its typed limit).
+	// No input-proportional slack.
+	private static final long FIXED_BYTES = 40 + 408 + 112 + 65 + 252 + 88;
 	private static final InventoryItemBudget.CaptureLimitException EXHAUSTED =
 		new InventoryItemBudget.CaptureLimitException("inventory catalog admission exhausted");
 	/** Four scalar longs; caller admits this metadata before constructing a grant. */
