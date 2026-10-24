@@ -17,6 +17,12 @@ empty `updating` preview is exercised by the stay-open runtime fixtures
 inventoried under [interaction](interaction.md#double-click-danger-and-inventory-stay-open);
 it adds no preview-admission evidence here.
 
+The [patch-only contract](../../architecture/presentation/inventory.md#item-variants-and-component-fallback)
+has test-source assertions inventoried below. Reading those assertions does not
+establish that they passed; the completed integration run and remaining live
+verification gaps are scoped
+[below](#patch-only-identity-and-display-verification-pending).
+
 ## Inventory preview and tracking foundation
 
 The inventory foundation has headless coverage for the preview route and its
@@ -50,8 +56,10 @@ indices.
 `InventoryS2CPacketTest`'s sparse-display cases additionally compare a sparse
 display payload with a full-effective resident-patch baseline for stone, an
 ordinary tool and a damaged tool: a native full-map item JSON oracle round-trips
-count one and every effective component; both payloads keep the same item ID,
-label, exact catalog key and entry metadata; the production packet writer emits
+count one and every effective component. The synthetic full-map patch has a
+different native variant key; the wire-size comparison deliberately assigns
+both display payloads the same authoritative selection metadata rather than
+treating their source patches as identical. The production packet writer emits
 exactly its measured encoded size, `readSafe` consumes the complete frame
 without corruption and recovers the same packet and entries, and the sparse
 frame's actual encoded size is smaller than the full baseline. These are
@@ -59,6 +67,9 @@ headless frame-codec assertions over a limited representative sample, not a
 live network or full send-queue/byte-budget measurement; the general packet and
 live-transport boundary remains owned by
 [identity and authority](identity-authority.md#domain-identity-and-authority).
+An additional packet round trip distinguishes an ID-only terminal display from
+unavailable `null`, preserving exact long counts, revisions and selection keys
+without setting the aggregate flag.
 
 `InventoryChecksumsTest` covers the entry checksum model.
 `InventoryStrictDecodeTest` covers the strict version-one `OPEN` grammar on
@@ -238,6 +249,19 @@ disconnected outcomes. Aggregate-display work-refusal cases keep retirement and
 the retained count retryable before constructing the bounded display. Current-view
 control and aggregate-witness cases pass in the recorded focused run; they remain
 headless authority and recording-transport evidence.
+`InventoryPatchIdentityFlowTest` adds backend assertions across preview, live
+selection witness and the first fresh tracking capture: two exact keys of one
+item ID remain separate rows and selecting either witnesses its own slot and
+tracks only its count. One key with decorated, ID-only or unavailable display
+forms remains one selectable row with summed authoritative counts; display
+variation does not change selection meaning. Supplying the raw exact key
+instead of the request-scoped opaque reference is rejected. The fixture assembles
+all parts of one completed preview cut without mixing sparse publications, then
+drives tracking to its first complete snapshot within an explicit tick bound.
+The fixture supplies
+pre-frozen stand-in keys and a recording transport that measures real packets;
+it does not exercise native patch encoding, replay frames into the real client,
+or prove a live provider-to-client path.
 `InventoryReconfigurationTest` drives the production cap-change flow headlessly
 through the real backend, publisher, wire and client endpoint: a higher configured
 cap captures and delivers the full retained display; lowering gates item data until
@@ -255,7 +279,12 @@ the default memory limit.
 `InventorySyncPublisherTest` covers the production publisher headlessly: the
 same-recipient per-period SNAPSHOT byte total spans multiple targets, revoke
 and memory defer encode and send nothing, and an indivisible oversized preview
-batch terminates incomplete instead of waiting forever. Retained entry versions
+batch terminates incomplete instead of waiting forever. Its independent
+fragment-budget case retains an admitted large display while sending is
+blocked, then asserts that the identical display payload is sent when the
+allowance rises; scheduling pressure does not strip it. This fixture supplies
+preprojected display text and does not exercise native item projection.
+Retained entry versions
 are owned by object identity and stay charged while any offered, delivered,
 pending or admitted reference remains, so a delivered version survives a gated
 replacement or a group replacement until the group commits, admitted-only
@@ -384,16 +413,20 @@ section machinery. `InventoryItemCodecTest` and `VanillaInventorySourceTest`
 cover the ordinary-block item codec and source: canonical persistent component
 identity with sorted bounded canonical bytes and digest-collision rejection,
 partial display omission keeping identity without claiming component fallback,
-and safe exact versus unsafe-identity aggregate selection. Additional component
-fidelity and ordinary-item tests compare admitted persistent encodings against
-independent native-codec oracles, including prototype defaults, explicit
-removals, supported tools, equipment and food, nested items and potion-copy
-semantics. `InventoryVanillaComponentCoverageTest` includes eight durable-item
-defaults and a nonempty PROFILE with signed and unsigned properties in its
-native persistent-identity comparisons. `InventoryRegistryContextGuardTest`
+and safe exact versus unsafe-identity aggregate selection.
+`InventoryComponentFidelityTest`, `InventoryVanillaComponentCoverageTest` and the
+ordinary-source, adventure, encoding-admission, native-error, native-text-stack
+and primitive-argument fixtures compare canonical identity with the native
+persistent-patch codec. Native-family controls explicitly restore tool,
+equipment, food and other component values into patches, rather than relying on
+inherited defaults to exercise value encoding. The vanilla coverage also
+includes a nonempty PROFILE with signed and unsigned properties.
+`InventoryRegistryContextGuardTest`
 compares both nonempty enchantment component forms, including stored
 enchantments, with tooltip visibility enabled and disabled against the native
-codec. In the audited native fast path, registry-context and holder guards test
+codec. Its sword control explicitly carries `TOOL`, preserving direct and named
+holder-set coverage under both root and frozen registry contexts. In the audited
+native fast path, registry-context and holder guards test
 unknown providers stopping before callbacks, owner compatibility, unbound holders
 and admitted native lookup shapes; that refusal is not a blanket restriction on
 the generic external-trusted codec route. `InventoryItemFrontGuardTest`'s
@@ -405,15 +438,40 @@ and primitive argument cases cover context admission before map access, capture
 exhaustion, actual component descriptors, a large literal-name exact-identity
 control, native success/error paths and refusal before unsafe numeric callbacks.
 
+`InventoryPatchesTest` has direct assertions for the shared reader: surviving
+equal-default additions and redundant removals, no reconstruction of
+native-normalized entries, unchanged copy-on-write state and backing identity,
+no prototype traversal or value comparison, and reconstruction with independent
+backing and caller-owned mutable values. Array, open-hash and empty native
+backings exercise admission and capacity-read accounting. Unsupported outer
+maps/backings, malformed entries and invalid capacities refuse before the
+visitor; admission and visitor failures propagate unchanged.
+
+`InventoryPatchIdentityTest` compares directly supplied patches with
+`DataComponentPatch.CODEC`, including an exact empty patch whose nonempty digest
+is separate from the item ID and aggregate sentinel. Raw equal-default additions
+and redundant removals stay distinct, native-erased changes stay absent, and
+root count does not change identity. Container, bundle, projectile and food
+conversion cases compare child patch, count, slot and order semantics with the
+native codec. Raw-access traps fence prototype/default reads for both resident
+stack and standalone-patch inputs. These are native encoding seams, not live
+provider or installed-mod evidence.
+Four additional nested-family controls distinguish a truly empty child patch
+from transient-only additions or removals: independent native child and outer
+codecs preserve the present-but-empty `components` envelope, slot/list order and
+each family's native count form. Their canonical identities reflect that saved
+envelope distinction while their ordinary displays agree. Separate root controls
+keep empty and transient-only patches canonically identical.
+
 The generic compatibility, external-context and owned-return-tree cases here
 inventory assertion scope, not an execution log.
-`InventoryGenericComponentCompatibilityTest` compares registered scalar,
-record and map component identities with the full effective native persistent
-map, including a cache-wrapped codec. Its fixtures assert distinct keys for
-different values, equal identity for implicit and explicitly equal defaults,
-override/removal without encoding a shadowed prototype, transient exclusion,
-and refusal before an unregistered codec is invoked. Error-with-partial and
-oversized returned encodings assert aggregate mode without partial canonical
+`InventoryGenericComponentCompatibilityTest` compares registered scalar, record
+and map identities with native persistent-patch encoding, including a
+cache-wrapped codec. It asserts distinct implicit-empty and still-explicit
+equal-default identities, override/removal without prototype encoding, transient
+addition and removal exclusion, and refusal before an unregistered codec runs.
+Error-with-partial and oversized returned encodings assert aggregate mode
+without partial canonical
 identity; a throwing codec case asserts exception propagation and subsequent
 reuse of the capture budget. Server-side display assertions keep exact identity
 while omitting the opaque value with an explicit removal and retaining an
@@ -422,7 +480,7 @@ asserts that display tightening and reinterning retain the exact key without
 re-encoding the resident component; a native encoding-cache hit cannot mask a
 repeat call in that fixture. A real custom `Registry<Integer>` key is resolved
 through two supplied providers with different registered values: each result is
-compared with its provider's native persistent-map oracle, the resulting bytes
+compared with its provider's native encoding oracle, the resulting bytes
 differ, and returning to the first provider reproduces its bytes. These are not
 client decode, working-stack-hook, installed-mod or live tracking cases.
 
@@ -446,46 +504,43 @@ remain owned by
 exercises padding boundaries, sticky digest collisions and map treeification,
 and checks exact/one-short grants and refusal before mutation. SUN-provider
 bootstrap acceptance is exercised on the test JVM, not arbitrary providers or
-JDKs. These finite oracles and the passing named-holder comparisons are not a
+JDKs. These finite oracles and the named-holder comparisons are not a
 whole-root numerical certificate. Native JSON stack-growth tests observe actual
 writer array identities, compare equal-node depth boundaries, and exercise
 pre-call refusal versus exact-allowance native-codec controls.
-`InventoryItemDisplayProjectionTest` covers the configured display cap: a
-configured cap preserves a display beyond the default bound, partial or complete
-display omission preserves identity, and monotone tightening never re-expands
-retained displays. Fitting-envelope and malformed-input cases preserve unavailable
-projection without reconstructing defaults. `InventoryItemUnavailableDisplayTest`
-covers
-nullable projection with unchanged metadata and shared canonical bytes, malformed
-input, bounded aggregate metadata, shulker removals and name aliases.
+`InventoryItemDisplayProjectionTest` supplies configured-cap, unchanged-identity,
+monotone-tightening, fitting-envelope and malformed-input assertions.
+`InventoryPatchIdentityTest` additionally reaches the terminal display through
+actual registered removal patches, compares native identity at high and low
+caps, and retains the same key and terminal display through catalogue tightening,
+a later raise and reinterning. `InventoryItemUnavailableDisplayTest` checks
+terminal reprojection with shared canonical bytes and adjusted retained cost,
+while malformed input remains unavailable. It also covers bounded aggregate
+metadata, shulker removals and name aliases.
 `InventoryDisplayWriterTest` independently exercises retained-input syntax,
 escaped and duplicate component aliases, conflicting removals, unknown
-additions, nested opaque spans, depth and UTF boundaries, suppression overflow,
-and all projection ladder outcomes. The
+additions, nested opaque spans, depth and UTF boundaries, and the ordinary
+projection ladder. Fresh and retained suppression-size overflow assert canonical
+ID-only output. Terminal grammar cases distinguish that exact form from
+whitespace, escaped keys, mismatched or invalid IDs and an ordinary empty
+`components` object; a maximum-length legal ID fits, and repeated reprojection
+at lower or higher caps stays terminal. Nonfinite values, malformed/late invalid
+entries and work-budget refusal do not gain the size-terminal recovery. The
 [item identity and display owner](../../architecture/presentation/inventory.md#item-variants-and-component-fallback)
 defines their separation; no display-only refusal is identity-fold evidence.
 
-Sparse display-default inheritance has named headless assertions in
+Sparse display-default inheritance has headless fixture families in
 `InventoryItemDisplayProjectionTest`, `InventoryGenericComponentCompatibilityTest`
-and `InventoryDisplayWriterTest`. The projection cases assert that unmodified
-ordinary defaults are omitted while the complete server-effective native
-persistent map still supplies canonical identity through an independent oracle;
-the intentional Lore suppression remains; explicit additions and removals
-survive; a native-normalized equal default stays omitted while a source-known
-explicit patch entry that still exists remains transmitted; and one sparse patch
-inherits the server prototype when decoded with the server item defaults and the
-client's local prototype after those client-side defaults change, with the
-fixture restored afterward.
-The generic-compatibility cases assert that an unknown default keeps complete
-identity while its display value is explicitly suppressed; that unmodified
-text, custom NBT and PROFILE defaults stay omitted; that non-empty container,
-bundle, charged-projectile and food-conversion defaults carry sanitized sparse
-child overrides without leaking nested content; and that empty container/bundle
-defaults and food without conversion remain ordinary inherited omissions. The
-writer cases assert fresh and retained sparse-ladder tombstones across
-consecutive tightening, no invented removal for an ordinary uncarried default,
-a cap derived from the actual encoded payload, and suppression of absent
-custom/item names.
+and `InventoryDisplayWriterTest`. Native local-inheritance, explicit-entry and
+ordinary-tombstone assertions distinguish native-normalized omissions from
+surviving equal-default additions. Server default-read traps accompany unknown,
+mutable-text, NBT, PROFILE and nonempty nested-default fixtures: defaults supply
+neither identity input nor synthetic display overrides or unknown-component
+tombstones. Explicit nested container, bundle, projectile and food-conversion
+patches retain sanitized sparse child displays. A local-default-drift fixture
+decodes one sparse patch against different server and client defaults and
+restores the registry afterward. Execution evidence and its limits are scoped
+[below](#patch-only-identity-and-display-verification-pending).
 
 `InventoryDomainCodecTest` covers the closed code-owned inventory observation
 codec: the absolute display envelope round-trips within its bound, a display
@@ -537,9 +592,11 @@ cached render stack; same-id variants stay distinct while identical payloads
 reuse a template without aliasing; transmitted component removals survive the
 retained naming and render stacks; and real vanilla delayed and warmed-inline
 unresolved profile callbacks resolve owned working stacks without changing the
-retained transmitted outer profile, name or display. Nested Lore or shulker
-contents, including defaults materialized by native decoding, suppress unsafe
-icons while supported ordinary nested contents remain. Projectile safety tests
+retained transmitted outer profile, name or display. Explicit nested Lore and
+shulker-content fixtures exercise icon safety while supported ordinary explicit
+nested contents remain. Separate inherited-default assertions below deliberately
+retain local nested values; they do not certify or sanitize those defaults.
+Projectile safety tests
 compare with an independent native-decode callback baseline and prove the guard
 adds no post-decode copied-stack PROFILE callbacks, including repeated cache
 hits. Native nested decode may itself enqueue callbacks; the selected unresolved
@@ -547,9 +604,10 @@ head fixture runs a queued decode callback without resolving its detached
 returned head. These controls do not establish callback-free decoding or general
 asynchronous PROFILE isolation.
 
-Ordinary native-family controls keep supported tool, food, book, firework, banner
-and map icons available on initial resolution and cache reuse, independently of
-the narrower item-hover copier. Working-value mutation fixtures isolate custom
+Ordinary native-family controls exercise tool, food, book, firework, banner and
+map icons on initial resolution and cache reuse, independently of the narrower
+item-hover copier; they do not certify inherited-default isolation.
+Explicit working-value mutation fixtures isolate custom
 name text from both later cache hits and the previously composed name; container,
 bundle, projectile and food-conversion child stacks retain their native encoded
 count semantics while later hits isolate child-stack and nested-text mutations.
@@ -574,8 +632,12 @@ constructor and codec-produced capture against the native constructor's anchor,
 and exercises field-only resident access without invoking a supplier. Its direct
 copy controls isolate resident and hidden effects; unknown counting, throwing and
 other-call-site suppliers refuse with zero callbacks and without source mutation.
-An unknown-default display refusal keeps the accepted exact entry, long count
-and selection reference unchanged. Loader-local test service fixtures supply
+Accepted metadata after explicit-patch refusal is checked by the common client
+fixture below. NeoForge's inherited-FOOD fixture retains the native default
+reference without invoking its unknown supplier, while preserving the exact
+entry, long count and selection reference and using the terminal registry label.
+Loader-local test service
+fixtures supply
 fixed-field resident ports without applying Mixins; these are codec/access and
 ownership seams, not production service wiring, module-runtime or loader-launch
 evidence. They add no permission to execute foreign suppliers.
@@ -592,43 +654,65 @@ spent root allowances refuse with zero collection/hook callbacks in the selected
 fixtures. These are finite native-copy and refusal seams, not general proof of
 effect internals or live effect-icon rendering.
 
-`ClientItemDisplayOpaqueComponentsTest`'s registered opaque-component fixture
-rejects unknown JSON additions before their native value codec runs, while
-allowing an explicit registered removal to suppress a mutable prototype default.
-Decode and cache-hit cases check effective components, including a formerly safe
-cached payload whose item defaults later become opaque; refused snapshots are not
-retained. Unregistered and transient opaque defaults also fail closed. The
-fixture's traps distinguish the guard's value access from comparisons performed
-by a native item hook: the guard adds no opaque-value hashing, encoding or
-comparison in these cases.
+`ClientItemDisplayOpaqueComponentsTest` supplies registered-opaque-component,
+explicit-removal, codec-admission and hook assertions. Unknown explicit JSON
+additions refuse before their native value codec runs, including supported
+nested-item and text-hover entrances. Explicit removals suppress an unknown
+mutable default without comparisons. Conversely, registered, unregistered and
+transient opaque defaults remain inherited across cache hits without codec or
+value-comparison calls; default changes do not invalidate the transmitted-patch
+cache. A common headless default-wrapper fixture traps enumeration and counts
+value reads through resolve and copies. A selected inherited custom name takes
+one native name lookup without probing the lower name or other defaults, through
+resolve, chat and public naming; the terminal skips name lookup. These are native
+selection checks, not default-graph traversal. The fixture is not an installed owo wrapper,
+production Mixin or loader-runtime test.
+
+Inherited Lore and nested container, bundle, projectile and food-conversion
+fixtures assert native reference inheritance without sanitization, owned
+deep-copying or invented patch entries. An explicit projectile still owns its
+child patch while that child inherits an opaque default. These controls are
+specific native-construction seams, not universal default-graph safety claims.
 
 Constructor-hook injections into naming and render stacks, a naming hook that
-mutates its stack, and codec-only naming construction assert refusal after the
-effective component map becomes opaque. The display result is an empty icon and
-the registry label, without publishing the hook-derived name. Pre-decode cases
-include unknown additions inside container, bundle, charged-projectile and food
-conversion items and a custom-name `show_item` text hover; a nested-container
-opaque-default case refuses before native nested-stack hashing.
+mutates its stack, and codec-only naming construction exercise hook-written
+outer-patch refusal seams. Those checks remain required after the patch-only
+transition. The assertions reject opaque hook additions before publishing a
+derived name, check transmitted-patch precedence without losing unrelated
+constructor additions/removals, and suppress ordinary icons when construction or
+naming reintroduces explicit Lore.
 
 Known-value hook fixtures distinguish naming, retained transmission and render
 ownership: an in-place description-hook text edit affects the composed name but
 not the cached patch or render text, and a constructor-supplied mutable item name
-is detached before publication. Codec-only naming controls detach default Lore's
-raw and styled lines without changing its styling; an ordinary adventure-predicate
-control preserves the native predicate while isolating its NBT across cache hits.
-These controls do not authorize Lore in an ordinary icon.
+is detached before publication. An ordinary explicit adventure-predicate control
+preserves the native predicate while isolating its NBT across cache hits.
+The default-Lore fixture instead asserts shared native references and visible
+local mutation, without suppressing the ordinary icon merely for inheritance.
+These controls do not authorize explicit Lore in an ordinary icon.
 
-The per-call validation seam shares finite visit, depth and character allowances
-across JSON, effective component children, native text snapshots and expansion,
-name checks and icon traversal for each resolve, stack decode or name decode.
-A shared native projectile DAG with late unsafe text refuses within an independent
-fixture work envelope through both resolve and the production chat decoder,
-without reaching naming.
-A text-cycle case likewise stays within that envelope. These assertions do not
-require exhaustion of a particular production cap and do not bound native
-callback internals or elapsed time.
+Name-source assertions in `ClientDisplayTextTest` compare all 36 default and
+explicit-name addition/removal combinations with native hover-name precedence
+through resolve, cache reuse, decoded stacks and chat. Separate controls keep
+the terminal on its registry label and distinguish equal-text, different-reference
+names. Public-name and description-hook alias cases in that suite and
+`ClientItemDisplayOpaqueComponentsTest` assert that detaching explicit patch
+values preserves the native selected name's provenance: an inherited higher
+name is not quoted because a lower explicit name aliases it, and a fallback
+`getName` hook cannot retroactively quote a name it just wrote. Returned text is
+owned, caller patch backing and mutable values stay unchanged, and public naming
+adds no load hook or repeated fallback-name call. These assertions are included
+in the completed integration run below.
 
-Effective native text fixtures include custom and item names, raw and styled
+The per-call validation fixtures exercise finite visit, depth and character
+allowances across JSON, native text snapshots and expansion, name checks and icon
+traversal for resolve, stack decode and name decode. Shared native
+projectile-DAG and text-cycle fixtures inject explicit constructor-patch values
+and assert refusal inside an independent work envelope, including production
+chat, without reaching naming in the late-unsafe-DAG case. These finite envelopes
+do not bound native callback internals or elapsed time.
+
+Native text fixtures include custom and item names, raw and styled
 Lore, and raw and filtered written-book pages. They follow translation arguments,
 siblings, selector and NBT separators, `show_text`, `show_entity` names and
 `show_item` children. Hover validation observes the fixed native item descriptor
@@ -637,11 +721,14 @@ the fixtures reject a cached hover stack mutated after the first safe resolution
 a nested JSON hover whose item has an opaque-injecting constructor hook, and a
 deferred hover with an item-load hook without starting that hook. Writable-book
 fixtures reject opaque non-string page shapes without formatting them, while
-supported native text, hover and filtered book values remain available.
+supported native text, hover and filtered book values remain available. Cases
+contrast inherited text with the same value explicitly restored by a hook;
+inherited values remain native while unsafe explicit text refuses. They do not
+establish default-graph validation.
 
-Production item-chat decoder fixtures target name decoding, with immediate
-effective-graph barriers after description lookup and naming, before newly
-introduced text can be formatted or the next hook runs. They reject constructor
+Production item-chat decoder fixtures target name decoding and barriers after
+description lookup and naming, before newly introduced text can be formatted or
+the next hook runs. Explicit-hook and returned-text fixtures reject constructor
 and naming mutations, including injected root text or book pages, contain a
 naming-hook exception, and reject an unsafe returned hover or an unknown
 translation-argument object without formatting it. Normal trusted names retain
@@ -672,15 +759,18 @@ codec or hook internal resource.
 
 Embedded NBT-path controls refuse excessive structure before native path
 recompilation during resident text copying. The opaque-component fixtures exercise
-the same refusal through wire text, prototype defaults, returned names,
-description-hook text and constructor-hook text, including production chat.
+the same refusal through wire text, returned names, description-hook text and
+constructor-hook text, including production chat. The contrasting local-default
+case inherits the native value without applying that traversal to the default.
 
 Embedded-selector SNBT controls in `ClientDisplayTextTest` refuse excessive
 nesting before native selector recompilation in `SelectorContents`, selector-valued
 `ScoreContents` and `EntityDataSource`. The opaque-component fixtures exercise
-those forms through wire text, prototype defaults, returned names and text
+those forms through wire text, returned names and text
 introduced by description, name and load hooks, including resolve, decode and
-production chat entrances. Small native-parser positive controls preserve native
+production chat entrances. Contrasting local defaults retain native references
+and do not acquire Ping graph-validation guarantees.
+Small native-parser positive controls preserve native
 unresolved text for ordinary selector options, quotes/escapes and non-structural
 quoted brackets, including native-ignored trailing suffixes. Separate literal
 score-name and block-data controls retain native text and absolute, relative and
@@ -705,7 +795,12 @@ including explicit false versus inherited flags. Item-hover controls detach
 nested projectile text and Lore from source mutation while preserving native
 Lore styling. A registered mutable-prototype fixture checks that transmitted text
 equal to the prototype remains distinct through resolve and item-hover copying,
-and the hover keeps that text after prototype mutation. Item-hover coverage is
+and the hover keeps that text after prototype mutation. Additional
+`ClientDisplayTextTest` cases preserve raw equal-default additions and explicit
+removals through working and repeated item-hover copies, isolating explicit text
+from prototype, source and earlier-copy mutations. A separate empty-patch case
+keeps inherited text and Lore as native references through repeated hover copies
+and observes later local mutation. Item-hover coverage is
 limited to concrete copier-supported shapes, not deep-copy support for every
 display-supported component. The item-hover snapshot path has no admitted copier
 for nonempty container/bundle graphs, food/effect state, PROFILE and other
@@ -716,12 +811,23 @@ restrictions on supported PROFILE, food, container or bundle values.
 
 A client preview fixture keeps the accepted exact reference, long count and
 selection fences unchanged after display refusal and dispatches that same
-selection. Vanilla positive controls keep supported defaults and custom model
-data in independently owned count-one stacks across repeated resolves; ordinary
-Lore still suppresses only the icon while a safe name remains usable. These are
-finite synchronous fixtures, not a guarantee for every native hook, mod-supplied
+selection. Vanilla positive controls exercise native inherited defaults and
+explicit custom model data in count-one stacks across repeated resolves; owned
+mutable-value assertions apply to explicit patches, not the default graph.
+Explicit Lore still suppresses only the icon while a safe name remains usable.
+These are finite synchronous fixtures, not a guarantee for every native hook, mod-supplied
 text implementation or later asynchronous mutation, and do not exercise installed
 Offroad, GPU rendering or a live game session.
+
+The canonical-terminal cases in `ClientItemDisplayOpaqueComponentsTest` assert
+a count-one native default icon with the registry label, inherited local name,
+Lore and opaque values, an empty retained transmitted patch, repeated cache
+reuse, and no description/name-hook invocation. Name-only decoding and the chat
+decoder decline a terminal-derived item name. A composed inventory-message
+fixture preserves the registry label, exact long count and selection key without
+an item hover. Mismatched identity, malformed/null payloads and explicit opaque
+constructor injection still refuse. These are client resolver and chat seams,
+not a live row or GPU rendering test.
 
 `SpatialInventoryRowDisplayTest`,
 the inventory-bridge cases of `NativeSelectorContentTest`, and
@@ -864,13 +970,14 @@ cause of a snapshot limit failure. `ClientItemDisplayOpaqueComponentsTest`
 distinguishes silent safety suppression from a throwing name hook: repeated
 runtime hook failures retain the original cause in one warning without an
 attached throwable and keep display unavailable. Its constructor and native
-decode-context cases keep runtime-failure fallbacks, while a runtime failure
-reading cached defaults also evicts that entry. Linkage failures at those
-boundaries, the reflective render constructor and the name hook propagate to
-the caller without a local fallback report; a propagated cached-default failure
-does not run fallback eviction. These are finite headless codec, snapshot, hook
-and test-appender seams, not installed-mod codecs, live profile callbacks or
-running-loader evidence.
+decode-context cases exercise runtime-failure fallbacks and linkage propagation.
+The cached-construction failure fixture throws from the item's native
+components getter: a runtime failure uses the resolve-stage fallback and evicts
+the cached entry, while a linkage failure propagates without fallback eviction.
+It does not assert Ping traversal or revalidation of inherited defaults.
+These are finite headless codec,
+snapshot, hook and test-appender seams, not installed-mod codecs, live profile
+callbacks or running-loader evidence.
 
 `InventoryMinecraftDiagnosticsTest` checks layout callback messages, causes,
 suppressed details, frames and read context, cross-position warning suppression
@@ -935,6 +1042,73 @@ optional-provider wiring,
 [manual inventory matrix](manual-integration.md#pending-manual-and-integration-matrix)
 remain pending.
 
+## Patch-only identity and display verification pending
+
+The [inventory owner](../../architecture/presentation/inventory.md#item-variants-and-component-fallback)
+and [D0012](../../decisions/D0012-explicit-patch-identity-and-display.md) define the
+accepted boundary. The test-source inventory above includes the shared-reader,
+native patch oracle, server projection, client explicit-value/default-inheritance,
+pre-frozen-key backend flow and publisher scheduling assertions.
+
+The completed integration run used Java 21 from PowerShell with UTF-8 output and
+redirected logs. It exited zero with `BUILD SUCCESSFUL` for:
+
+```powershell
+.\gradlew.bat --no-daemon --console=plain --continue :common:test :fabric:test :forge:test :neoforge:test :fabric:build :forge:build :neoforge:build verifyModIdentity
+```
+
+All four modules' main compilation, test compilation and tests executed in that
+run. All 466 JUnit XML reports were fresh, with these results and no errors:
+
+| Module | Tests | Passed | Failed | Skipped |
+| --- | --- | --- | --- | --- |
+| Common | 4554 | 4554 | 0 | 0 |
+| Fabric | 22 | 22 | 0 | 0 |
+| Forge | 25 | 25 | 0 | 0 |
+| NeoForge | 170 | 170 | 0 | 0 |
+| Total | 4771 | 4771 | 0 | 0 |
+
+This includes all five Flow, eleven patch-identity, nine shared-reader, eight
+registry-context, fifty-two opaque-client, twenty-three client-text, eight
+NeoForge food and nineteen content-chat cases. All three loader builds and
+Javadoc tasks completed, and `verifyModIdentity` passed with three shippable jars
+produced. The non-document input manifest stayed unchanged across the run and
+report checks. Whitespace, conflict-marker, new-file and documentation
+link/anchor/fence checks also passed. Build and artifact evidence boundaries
+remain owned by [build checks](build-checks.md); pending verification here is
+the live behavior described below.
+
+Separately, an isolated `OwoDerivedComponentMapProbe` passed with the real
+`DerivedComponentMap` class: its CodeSource resolved to the installed
+`owo-lib-neoforge-0.12.15.6-beta.1+1.21.jar`. Direct `javac` and `java` invocations
+both exited zero, with `PROBE_RESULT=PASS`, using a classpath derived from the
+Gradle test worker. For stone and cooked porkchop, an exact native
+`PatchedDataComponentMap` with the real owo wrapper as its prototype produced
+the same canonical identity and display as an unwrapped same-patch control,
+matching the independent native persistent-patch codec oracle. Cases included
+explicit additions, an equal-default addition, removals and an empty patch;
+manually seeded differing wrapper name/food values stayed outside projection.
+Supplying the wrapper directly as the outer map was correctly refused.
+
+That probe passed against the final compiled Common main and test classes from
+the successful integration run. It manually
+constructed the post-Mixin map shape and seeded the wrapper delegate without
+calling `derive`; it did not apply Item/ItemStack Mixins, start FML, or exercise
+client naming, rendering or networking. It establishes the real jar class's
+prototype shape against those final classes, not automatic mod wiring or
+client behavior. No Gradle invocation or game session formed part of the
+probe.
+
+The native oracle, pre-frozen-key backend flow, wire round trip and client
+resolver fixtures are complementary seams, not one native-container-to-live-row
+test. The publisher budget fixture starts from preprojected data, and the client
+wrapper fixture models a local default map rather than installing owo; the
+separate real-jar probe has only the baseline and construction scope above.
+Automatic Mixins, live installed-mod behavior, loader lifecycle, default drift across real
+installations, delayed transport, GUI rows, tracking HUD and GPU behavior remain
+outside that source evidence. Live scenarios remain in the
+[manual matrix](manual-integration.md#inventory).
+
 ## Known automated gaps
 
 - the inventory preview-foundation, production runtime and publication tests
@@ -969,9 +1143,11 @@ remain pending.
   returned-tree fixtures cannot establish a universal bound on those internals;
 - generic registered-component compatibility, external-context and owned-tree
   assertions do not establish installed Offroad or other mod runtime
-  compatibility, or live preview-to-tracking identity fidelity. The client
-  opaque-default, hook and text-snapshot fixtures remain local seams, not safety
-  guarantees for arbitrary hooks or asynchronous component mutation;
+  compatibility, or live preview-to-tracking identity fidelity. The
+  [patch-only transition](#patch-only-identity-and-display-verification-pending)
+  passed the complete integration run. Client hook and explicit-value
+  text-snapshot fixtures remain local seams, not safety guarantees for arbitrary
+  hooks, inherited defaults or asynchronous component mutation;
 - isolated named-host Mixin probes cover the selected raw ports on captured
   Common, Fabric and NeoForge compiled inputs, with Forge registry/builder reads
   and all-profile exported getter-body checks; separate RGB overwrite probes
@@ -1015,15 +1191,17 @@ remain pending.
   create PROFILE callbacks before icon eligibility is known; selected detached
   nested-head and ordinary mutable-value controls do not establish callback-free
   decode or general asynchronous PROFILE isolation. Opaque-component,
-  parser-admission and text/working-stack fixtures cover specific default,
-  native-text-child, expansion/cache, isolation and hook boundaries, not arbitrary
+  parser-admission and text/working-stack fixtures cover specific explicit-value,
+  returned-text, expansion/cache, isolation and hook boundaries, not arbitrary
   mod codec/hook internals, every mod-supplied text implementation or universal
   deep copying of known component hovers. Real FML/GLFW lifecycle, GPU rendering,
   language hot reload and asynchronous mutation after validation remain outside
   these seams;
-- sparse display-default assertions are headless codec, decode, projection and
-  writer seams, with a limited representative sample of actual inventory-frame
-  wire sizes through the production writer and reader. They do not exercise a
+- sparse display-default fixture families are headless codec, decode, projection
+  and writer seams, with a limited representative sample of actual inventory-frame
+  wire sizes through the production writer and reader. Patch-only and terminal
+  assertions passed the integration run scoped above. These fixture
+  families do not exercise a
   live GUI row, an installed mod's local item defaults, client/server default
   drift across real installations, asynchronous component mutation, multiplayer
   transport or transport timing; the full send-queue and byte-budget path

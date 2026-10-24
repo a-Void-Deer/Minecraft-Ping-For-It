@@ -16,6 +16,8 @@ variant.
 
 [Inventory](../architecture/presentation/inventory.md#item-variants-and-component-fallback)
 owns component classification, identity, display and the precise trust boundary.
+[D0012](D0012-explicit-patch-identity-and-display.md) explains why the component
+input is the actual explicit patch, without changing this codec-trust decision.
 [Shared sources](../architecture/presentation/shared_sources.md#cost-accounting)
 owns generic admission and accounting, not the component policy.
 

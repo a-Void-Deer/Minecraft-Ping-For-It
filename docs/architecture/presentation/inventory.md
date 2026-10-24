@@ -12,7 +12,10 @@ generation is recorded in
 trade-off for native persistent component codecs is explained by
 [D0010](../../decisions/D0010-persistent-component-codec-trust.md). The display
 default-inheritance trade-off is explained by
-[D0011](../../decisions/D0011-display-default-inheritance.md).
+[D0011](../../decisions/D0011-display-default-inheritance.md). The actual-patch
+identity and processing boundary, and the size-only default-icon exception, are
+explained by
+[D0012](../../decisions/D0012-explicit-patch-identity-and-display.md).
 
 Coverage scope and pending runtime evidence for the ordinary-block and
 provider-confirmed external preview and tracking, item-choice create and native
@@ -294,24 +297,39 @@ conclusion.
 
 ## Item variants and component fallback
 
-Variant identity is the item ID plus its canonical persistent component bytes.
-The identity encoding covers the effective persistent component map after
-applying prototype defaults, patch additions and overrides, and explicit
-removals, under the native persistent-codec semantics. Exactness means that
-persistent encoding, including its native copy or projection semantics, not
-preservation of every raw resident field or hidden runtime chain. The same item
-ID with different persistent enchantments, damage or custom name is an
-independent entry and consumes its own quota when its identity is safe to encode.
+Variant identity is the item ID plus the canonical persistent encoding of the
+actual explicit `DataComponentPatch` supplied by the current resident item or
+provider. Persistent additions and explicit removals both contribute, including
+an addition equal to a prototype default or a removal with no effective value,
+as long as that entry still exists in the actual patch. Entries already removed
+by native normalization are not reconstructed. Prototype, default and derived
+components do not enter Ping identity, and root stack count is not part of the
+variant key. Nested saved items retain their native persistent patch and count
+semantics. Exactness means that encoding, including native copy or projection
+semantics, not preservation of every raw field or hidden runtime chain. The same
+item ID with different safely encodable persistent patches is an independent
+entry and consumes its own quota.
 
 ### Component classification and encoding trust
 
-A registered component type with a native persistent codec contributes its
-complete native persistent encoding even when Ping does not recognize the type
-or its value shape. The native codec, not a Ping-owned type catalogue or registry
-namespace, defines its persistent semantics. A native codec of `null` marks
-transient state, which is excluded from variant identity. An unregistered type
-without a reliable component registry ID is refused before its codec is called;
-neither inventing an ID nor dropping the component can produce an exact identity.
+A registered component type present in the explicit patch with a native
+persistent codec contributes its complete native persistent encoding even when
+Ping does not recognize the type or its value shape. The native codec, not a
+Ping-owned type catalogue or registry namespace, defines its persistent
+semantics. A native codec of `null` marks transient state, whose additions and
+removals are excluded from variant identity. An unregistered patch type without
+a reliable component registry ID is refused before its codec is called; neither
+inventing an ID nor dropping the component can produce an exact identity.
+
+Server capture and client display use the same patch-entry reading contract.
+Ping reads only the actual outer explicit patch and follows admitted explicit
+values, including nested items' own patches. It does not expand, inspect,
+sanitize or copy a prototype/default/derived component graph. There is no
+component-layer reader, mod-specific component-wrapper adapter or reflective
+wrapper discovery; an unsupported outer patch representation is refused rather
+than replaced with an effective-map read. Native stack construction, naming and
+rendering may inherit local defaults through Minecraft or the installed mod;
+that behavior does not make those defaults Ping-owned or Ping-certified.
 
 The audited native fast path retains its bounded, certified processing and
 refusal rules. Registered persistent types outside that fast path use their
@@ -353,20 +371,15 @@ custom-name forms, remain owned by
 [names and chat](../rendering/names_chat.md).
 
 The bounded display is deliberately separate from identity. Identity keeps the
-complete server-effective native persistent semantics described above; the
-display value is a sparse persistent patch over the recipient's local prototype
-defaults, not a second identity or a complete component copy. An unmodified
-known persistent default that needs no special display projection is omitted,
-including mutable text, custom NBT and PROFILE values, while client-side
-isolation continues to guard whatever the local default supplies. Explicit
-additions follow their native persistent JSON form, and a patch value already
-known by the same native normalization to equal the default may be omitted
-without a separate equality pass or codec comparison. An explicit removal is
-always carried as a removal, so a local default cannot restore a component that
-was deliberately removed. Generic unknown components are never inherited; they
-remain explicitly suppressed even when the component is itself a default.
-Display transport leaves the exact key, count, selection reference, identity
-mode, aggregate fold and marker lifetime unchanged.
+complete persistent explicit patch described above; the display is a sparse
+persistent patch over the recipient's local prototype defaults, not a second
+identity or a complete component copy. Defaults are absent because Ping does not
+read them, including mutable text, custom NBT, PROFILE and nested-item defaults.
+Explicit additions follow their native persistent JSON form; an equal-default
+entry still present in the actual patch is not omitted by a Ping comparison.
+An explicit removal is carried as a removal through the ordinary display
+ladder. Display transport leaves the exact key, count, selection reference,
+identity mode, aggregate fold and marker lifetime unchanged.
 
 Omitting an unmodified default means local inheritance, not that the two ends
 share a default. No default fingerprint, handshake or synchronized default
@@ -375,73 +388,81 @@ differs may therefore render its own default where another recipient would have
 received a matching value; the display still presents the same authoritative
 identity.
 
-The bounded display always filters actual Lore and the contents of shulker-box
-items, regardless of size, including those in nested items or local prototype
-defaults. That filter is intentional display stripping, not the bandwidth
-omission of an unmodified default; the client-side display guard continues to
-suppress such content when a local default materializes it. Display stripping
-does not remove data from an otherwise safe exact identity or fold its variants.
-Non-shulker container contents and bundle contents remain eligible for bounded
-display; the same filter applies to any shulker item nested inside them. This
-item-display rule does not hide the readable inventory of a placed shulker box.
+Ordinary display projection explicitly suppresses Lore and the contents of
+shulker-box items regardless of size, including nested items reached through an
+explicit patch value. Those fixed tombstones are generated without reading a
+default. Non-shulker container contents and bundle contents remain eligible for
+bounded display; the same projection applies to any explicit nested shulker
+item. Display stripping does not remove data from an otherwise safe exact
+identity or fold its variants, and this item-display rule does not hide the
+readable inventory of a placed shulker box.
 
-A default that contains nested item or conversion state requiring sanitization —
-a non-empty container or bundle, a charged projectile, or food conversion — is
-not left to plain local inheritance. The display carries a sanitized sparse
-override for the affected child so an unsafe nested value cannot be introduced
-by inheriting the default.
-
-A registered persistent component unknown to Ping remains fully represented in
-identity. Its display value is retained only when bounded deep isolation and the
-display safety rules can be established. Otherwise only that display value is
-omitted, with an explicit component removal so client prototype defaults cannot
-restore it. This does not promise preservation of every unknown icon field. If
-the required suppression cannot fit safely, the display is unavailable rather
-than an unsuppressed bare stack; exact identity remains intact.
+There is no default-nested-content sanitization or synthesized override for a
+default container, bundle, charged projectile or food conversion. Such defaults
+are inherited natively, not recursively authenticated by Ping. Likewise, a
+registered persistent component unknown to Ping contributes its complete value
+to identity only when explicitly present; its explicit display addition becomes
+a component-removal tombstone. An unknown component present only in a default is
+neither read nor suppressed by Ping. Display does not promise preservation of
+every unknown icon field or isolation of inherited defaults.
 
 After those strips, an oversized display degrades through the existing
-anti-abuse ladder — the remaining component display, then suppression of the
-custom name and item name, then explicit removal of carried component values —
-and never exceeds the per-item display ceiling. Name suppression also
-suppresses names that the patch does not carry, so a local default name does not
-appear in their place. The removal stage turns component values actually
-carried by the patch into explicit removals while preserving existing removals;
-it does not promise to clear every local default. Omitting a default for
-bandwidth is not a removal: the value inherits locally from first resolution,
-is not part of the retained patch, and is not restored by ceiling reprojection.
-If the explicit removals needed to keep the display safe exceed the ceiling,
-the display becomes unavailable rather than degrading to a bare icon that would
-inherit local defaults. Display simplification does not change exact keys,
-identity mode, counts or selection meaning. A naturally componentless item
-likewise needs no fallback.
+anti-abuse ladder — the remaining clean component display, then suppression of
+the custom name and item name, then explicit removal of carried component
+values. Name suppression also suppresses names that the patch does not carry,
+without reading a local default. The removal stage turns component values
+actually carried by the patch into explicit removals while preserving existing
+removals; it does not clear every local default.
 
-A restored icon is assembled from the transmitted patch and the local prototype
-defaults it deliberately inherits. Intentionally stripped values never reappear
-through those defaults, the identity digest or a local world-inventory read; the
-transmitted display data is the only source of component detail beyond the
-inherited defaults. Retained display state keeps only its owned serialized patch
-and does not read resident values or providers, invoke a codec, or re-expand an
-omitted value afterward.
+If that final removal patch still exceeds the per-item display ceiling, size
+exhaustion alone permits one terminal exception: the item ID with an empty
+patch, yielding the native default icon while retaining the registry-id label
+and count. It deliberately discards the previous tombstones and may inherit
+values those tombstones suppressed. The existing `displayJson` value's canonical
+form `{"id":"namespace:item"}` represents this
+terminal display; there is no new wire field, quality flag or protocol version,
+and aggregate identity is not used as a marker. The minimal ID-only form fits
+every legal display ceiling. A naturally empty source patch still follows the
+ordinary fixed-suppression rules; it is not a reason to skip the ladder.
 
-If client decoding, local prototype defaults or a working-stack hook introduces
-an unsafe opaque component value that cannot be reliably isolated, presentation
-falls back to an empty icon and the registry-id label. Omission is not a safety
-certificate: an inherited local default is subject to the same isolation and
-fail-soft rules. A display-only failure never turns into an aggregate, changes
-the exact selection identity, or discards authoritative counts.
+Display structure errors, display-codec failures and processing-budget refusals
+do not permit this size exception. They keep display unavailable (`null`), with an empty icon
+and the registry-id label. Both display outcomes preserve exact keys, identity
+mode, counts and selection meaning. The projection is completed against the
+per-item ceiling before queue admission; a shortage of period send bytes never
+changes the chosen display.
+
+A restored icon is assembled from the transmitted patch and the local defaults
+it inherits. Outside the terminal size exception, an explicit tombstone prevents
+the corresponding default from restoring that value. Retained display state
+keeps only its owned serialized patch and does not read resident values or
+providers, invoke a codec, or re-expand an omitted value afterward. Reprojection
+recognizes the canonical ID-only terminal form and keeps it unchanged without
+adding tombstones back; unavailable `null` likewise remains unavailable.
+Increasing a ceiling does not restore a discarded patch in retained state.
+
+Ping's display isolation, value checks and processing budgets cover explicit
+mutable patch values, not inherited prototype/default/derived graphs. Explicit
+outer-patch entries introduced by native construction or a working-stack hook
+remain subject to those checks before publication; the native origin does not
+exempt them. A display-only decoding or explicit-patch isolation failure falls
+back to an empty icon and the registry-id label, never an aggregate, a different
+selection identity or discarded authoritative counts. Native default inheritance
+is not a promise of default deep-copy isolation or effective-graph safety.
 
 ### Identity refusal and aggregate folding
 
-An unsafe or oversized complete persistent identity requires the grey "All
+An unsafe or oversized complete persistent patch identity requires the grey "All
 variants" aggregate; a display cap or display-only reprojection never does.
 Real component encode errors or partial results, missing reliable registration,
 and unsafe or oversized returned identity trees retain the identity-refusal
 behavior. Dropping an unknown persistent component and labelling the remainder
 exact is forbidden. A modded registry ID or unfamiliar registered persistent
 type alone does not require fallback. Unsafe or oversized nested persistent data
-affects the outer entry's identity and therefore its item-ID group. The aggregate
-still requires a trustworthy item ID and authoritative amount: a failed source
-read is unavailable, not an empty entry or an invented aggregate. The existing
+reached through the explicit patch affects the outer entry's identity and
+therefore its item-ID group; inherited defaults are not identity input. The
+aggregate still requires a trustworthy item ID and authoritative amount: a
+failed source read is unavailable, not an empty entry or an invented aggregate. The existing
 `COMPONENT_TOO_LONG` status
 identifier denotes this aggregate identity mode. Its bare-item display represents
 the group rather than any particular variant.
@@ -556,8 +577,10 @@ metadata, counts or revisions, and it discards an incompatible partial without
 losing the marker's existing count state. Whole-entry delivery remains subject
 to the existing independent rate, queue and memory budgets: raising a ceiling
 does not promise entry delivery, and it neither accumulates budget credit nor
-introduces a budget-dependent fallback. The size ceilings add no
-acknowledgement and no byte fragmentation.
+introduces a budget-dependent fallback. Display projection precedes queue
+admission; a frame, period, queue or memory refusal never buys a smaller display
+or an oversize send reservation. The size ceilings add no acknowledgement, byte
+fragmentation or compression scheme.
 
 The shared scan allowance is configurable and measured in slots. It is charged
 by the parse work that consumes a captured source snapshot, and a source with no
