@@ -46,10 +46,11 @@ A connection reaches presentation readiness in stages:
   the accepted server field policy, and the client has no local receive or
   display filter to intersect. The child deny map is likewise server-selected
   and complete: one list per target type, carrying the exact nested references
-  that are not independently selectable or annotatable. A reset whose child
-  deny map omits a target type, names an unknown type, or carries a duplicate,
-  root, or malformed reference is rejected, and the mask and the child deny map
-  are validated before either replaces the previous authorization. There is no
+  that are not independently selectable or annotatable. The field mask and
+  complete child deny map must both pass
+  [RESET wire validation](../network/protocol.md#presentation-snapshot-route-presentation-v1)
+  before either replaces the previous authorization; a rejected RESET leaves
+  both unchanged. There is no
   client subscription, no field acknowledgement, and no subscription
   generation.
 - Only a `RESET` for the offered epoch and a non-regressing view turns the
@@ -104,9 +105,9 @@ only the fields advertised by the accepted `OFFER` after the local adapter and
 field ID/kind compatibility check; only the accepted offer populates it, and no
 offline local-manifest catalogue is published. An accepted entry keeps the
 server's advertised default enablement and label, never the local manifest's
-metadata for that ID. Entries are grouped by the namespace of the field ID, not
-by the owning adapter's mod ID, and a field ID that occurs more than once
-renders once. The offered catalogue contains compatible fields only and need not
+metadata for that ID. Catalogue presentation is owned by the
+[configuration UI](../../UI/settings-screen.md#server-presentation-category).
+The offered catalogue contains compatible fields only and need not
 list every field the server supports. A structurally invalid offer is rejected
 before any
 connection state changes and publishes no catalogue; a structurally valid offer
@@ -125,8 +126,8 @@ An adapter's delivery mode is either the legacy framed `SECTION` route or
 a dedicated adapter owns its own request, collection and publication path and
 is never sampled, masked, published or rendered by the section machinery — it
 is not charged or sent as an empty section, and its collector is never reached
-from that route. The inventory adapter (`pingforit:inventory`, schema 1) is the
-first dedicated adapter: it declares one record field,
+from that route. The inventory adapter (`pingforit:inventory`, schema 1) is
+dedicated: it declares one record field,
 `pingforit:inventory.items`, enabled by default at permission level zero, and
 its values travel only on the dedicated inventory route owned by
 [network protocol](../network/protocol.md). Dedicated adapters share the same
@@ -358,10 +359,12 @@ topic owns policy application:
 The persisted per-target-type field policy is also exposed through its own
 versioned route (`server-presentation-policy-v1`), independent of both the
 marker session above and the ordinary server-configuration request/update
-transaction. A read request carries a positive request identifier and is
-answered with all five target-type rule views — each type's white list, black
-list, whitelist-only flag, and persisted child deny list — the server's
-in-memory rule-view revision, a status, and the recipient's edit hint. Only
+transaction. This route carries only its own policy wire version; it does not
+decode other policy wire versions or use fallback compatibility. A read request
+carries a positive request identifier and is answered with all five target-type
+rule views — each type's white list, black list, whitelist-only flag, and
+persisted child deny list — the server's in-memory rule-view revision, a status,
+and the recipient's edit hint. Only
 those selector values and child deny references are disclosed; sampling limits,
 permission and interval overrides, and every other persisted server setting
 never travel on this route. The client mirror retains all five views, including
@@ -459,9 +462,8 @@ The [wheel](../picking/wheel.md) owns the branch's native
 presentation, navigation, selection input and lifecycle, and
 [capture](../picking/capture.md#interaction-lifecycle-aborts) owns the
 interaction abort; this section owns the preview's field authorization,
-provenance and fallback mechanics. This is the adopted contract for the
-confirmed preview design; coverage scope and pending runtime evidence are owned
-by [testing and verification](../../testing/verification/presentation.md#target-content-preview).
+provenance and fallback mechanics. Coverage scope and pending runtime evidence
+are owned by [testing and verification](../../testing/verification/presentation.md#target-content-preview).
 
 - **Field authorization.** A preview value is eligible only under the current
   accepted presentation epoch and view. The field must be included by the
@@ -520,8 +522,8 @@ by [testing and verification](../../testing/verification/presentation.md#target-
   fallback samples with bounded residual work under the existing per-tick work
   and capture budget; it adds no direct unbudgeted ingress read, no continuous
   polling or heartbeat, and no migration onto the inventory route. It reuses the
-  established capture helper, so the Basic, create and `SECTION` semantics and
-  their global bounds are unchanged and no second capture owner is introduced.
+  capture path shared by Basic, create and `SECTION` under their global bounds,
+  and introduces no second capture owner.
   An external-block candidate is first put through the server's nonallocating
   provider validation and range/type acceptance, and its exact read binding
   including the opaque provider locator must still match before any provider
@@ -688,22 +690,14 @@ and the receipt waits under the names-and-chat lifecycle.
 
 ## Legacy and superseded routes
 
-Legacy location packets keep their existing legacy behavior and are not part of
-this subsystem. The superseded authoritative marker C2S create/remove routes are
-registered but disabled: their handlers perform no marker mutation, so only the
-negotiated presentation `CREATE`/`REMOVE` intents reach the private admission
-and removal adjudicators. The superseded marker S2C create/remove/reject/winner
-handlers are also registered no-ops; because they carry no negotiated epoch or
-Basic section, a valid old marker name packet can never supply the new client's
-display name or marker state. The old S2C route is retained only as inert
-ingress, and the retained values/name used for chat and labels come from the
-Basic atomic initial described above.
-
-The `presentation-v1` and `server-presentation-policy-v1` route IDs do not
-decode another presentation or policy wire version, and no fallback
-decodes them. Whether any exact legacy registration remains registered as inert
-ingress is checked by the source owner; this contract promises no automatic
-decode or compatibility shim for a previous wire version.
+Legacy location packets keep their existing legacy behavior and are outside this
+subsystem. The superseded marker routes are registered but inert, as specified
+by [network protocol](../network/protocol.md#registered-ingress-and-current-effects);
+because they carry no negotiated epoch or Basic section, an old marker name
+packet can never supply this client's display name or marker state. Chat and
+label values come from the Basic atomic initial described above. The
+`presentation-v1` route's ID/version binding is owned by
+[network protocol](../network/protocol.md#presentation-snapshot-route-presentation-v1).
 
 ## Evidence
 

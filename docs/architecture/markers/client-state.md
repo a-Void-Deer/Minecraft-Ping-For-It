@@ -111,9 +111,8 @@ slot is currently exposed for the target — because no authoritative winner has
 arrived yet, or the winner record is unknown, mismatched, or its visual deadline
 has elapsed — while other same-target records remain visually active, the HUD
 instead presents the record selected by the authoritative ordering defined in
-[ping winner](../authority/ping_winner.md#deterministic-authoritative-ordering):
-latest server arrival time, then larger Marker ID on an equal arrival. A target
-with no visually active record contributes nothing to the HUD.
+[ping winner](../authority/ping_winner.md#deterministic-authoritative-ordering).
+A target with no visually active record contributes nothing to the HUD.
 
 This selection is presentation-only. It does not modify authoritative winner
 slots, stored records, synchronization state, or visual deadlines, and it neither

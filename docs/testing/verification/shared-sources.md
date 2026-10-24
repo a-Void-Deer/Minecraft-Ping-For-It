@@ -141,6 +141,10 @@ suite; no live server, notification, heap/TPS or soak result follows from these 
 
 ## Known automated gaps
 
+- `SourceAccessTest` exercises a fake source, while
+  [legacy section capture](presentation.md#presentation-snapshot-negotiation-policy-and-adapters)
+  has separate headless production-seam coverage. These fixtures do not establish
+  legacy-to-domain-unit cost mapping or cross-path deduplication;
 - the shared-source identity, opaque-payload, result, access-contract,
   snapshot-preparation, sync-publication declaration, counter/retained-memory
   and combined-admission primitives have the headless coverage inventoried

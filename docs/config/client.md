@@ -1,16 +1,16 @@
 # Client configuration
 
-This topic owns the complete persisted client-file catalogue, file grammar, and
-local authority boundary. It does not define server configuration, server
-acceptance, marker-lifetime authority, configuration recovery, or configuration-UI
-workflow.
+This topic owns the complete persisted client-file catalogue, file grammar, local
+authority boundary, and shared client/server version-marker grammar. It does not
+define the server field catalogue, server acceptance, marker-lifetime authority,
+configuration recovery, or configuration-UI workflow.
 
 ## File, metadata, and locality
 
 The client configuration file is `pingforit.json`. Its persisted fields are
 catalogued below. `pingforit-version` is an additional handler-owned metadata
-key rather than a catalogued field; its grammar, migrations, and recovery
-behavior belong to
+key rather than a catalogued field; its format is owned by
+[Version marker](#version-marker), while comparison, migrations, and recovery belong to
 [configuration revisioning](../architecture/config/revisioning.md).
 
 Every setting below is client-local. It can affect local input, capture, or
@@ -19,15 +19,39 @@ lifetime. A chosen channel is notified to the server when applicable, but the
 server remains authoritative for its own channel acceptance and marker state;
 see [target validation](../architecture/authority/target_validation.md).
 
-Current implementation defaults, validation metadata, and widget definitions
-are intentionally not mirrored here; the
-[configuration UI](../UI/settings-screen.md) owns which controls are exposed.
+## Version marker
+
+This format applies to both the client and server configuration files.
+
+An existing configuration file must parse to a JSON object containing
+`"pingforit-version"` as a string. A missing marker, `null`, a non-string
+primitive, an object/array marker, or a blank string is invalid before version
+parsing begins. The string must then match the Ping For It version grammar.
+
+The full-string grammar is:
+
+```text
+\A([0-9]+)\.([0-9]+)\.([0-9]+)-pfi-([A-Za-z0-9]+)\z
+```
+
+It has three nonnegative decimal digit sequences (each permits leading zeros and
+arbitrary width), the lowercase literal `-pfi-`, and a nonempty ASCII
+alphanumeric qualifier. There is no trimming: whitespace or any other extra
+character makes the string invalid. For example:
+
+| Valid | Invalid |
+| --- | --- |
+| `0.3.0-pfi-beta1` | `0.3.0` |
+|  | `0.3.0-beta1` |
+|  | `0.3.0-PFI-beta1` |
+|  | `0.3.0-pfi-beta.1` |
+
+Version comparison, migration, serialization, protection, and recovery are owned
+by [configuration revisioning](../architecture/config/revisioning.md).
 
 ## Persisted field catalogue
 
-Numbers use JSON numeric form. Units are stated where they are meaningful to the
-field; implementation defaults and numeric bounds are deliberately not mirrored
-here.
+Numbers use JSON numeric form. Units are stated where meaningful.
 
 ### Sound, reach, and local presentation
 
@@ -150,8 +174,7 @@ Gesture behavior is owned by
 [wheel](../architecture/picking/wheel.md#headless-spatial-menu-model), which
 also owns the
 [Back-hover return state](../architecture/picking/wheel.md#back-hover-return-state)
-and the model's native-integration boundary. Numeric ranges, steps, and defaults
-remain implementation values.
+and the model's native-integration boundary.
 
 ### Block display lists
 
@@ -182,22 +205,12 @@ policy exists. The removal and recovery behavior is owned by
 versioned presentation field policy is server-owned; its persisted shape is
 catalogued in [server configuration](server.md#presentation-policy-object).
 
-`wheelInnerRadius` and `wheelOuterRadius` are retired keys with no persisted
-meaning. They are removed by the version-boundary migration and from every
-client serialization at or after that boundary, so a later save cannot
-resurrect them; removal, migration, and preservation behavior is owned by
-[configuration revisioning](../architecture/config/revisioning.md). The keys do
-not configure the live wheel, whose release boundaries are owned by
-[wheel](../architecture/picking/wheel.md#radial-release-result).
-
-`wheelTimeoutMillis` is a retired key with no persisted meaning. It is removed
-by the version-boundary migration and from every client serialization at or
-after that boundary, so a later save cannot resurrect it; removal, migration,
-and preservation behavior is owned by
-[configuration revisioning](../architecture/config/revisioning.md). It no
-longer configures any selector lifetime; the open selector's interaction
-lifetime is owned by
-[wheel](../architecture/picking/wheel.md#opening-and-selection).
+`wheelInnerRadius`, `wheelOuterRadius`, and `wheelTimeoutMillis` are retired keys
+with no persisted meaning. Their removal, migration, and serialization behavior
+are owned by
+[configuration revisioning](../architecture/config/revisioning.md#ordered-migration-and-writeback).
+They configure neither the live wheel's radial boundaries nor its interaction
+lifetime; those behaviors are owned by [wheel](../architecture/picking/wheel.md).
 
 ### Channel preferences
 

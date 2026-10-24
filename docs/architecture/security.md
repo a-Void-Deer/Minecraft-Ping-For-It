@@ -23,10 +23,8 @@ selection lives in [ping winner](authority/ping_winner.md).
 Presentation snapshot values are projected per recipient from trusted server
 state: a field is captured and sent only when that recipient's negotiated
 manifest, server-selected mask, field policy, and permission all allow it. A
-missing replacement permission provider falls back to the vanilla
-permission-level comparison, while a throwing provider or an invalid level
-input denies access. A client cannot widen its own projection, permission
-level, or retained values by sending presentation data. Negotiation, permission
+client cannot widen its own projection, permission level, or retained values by
+sending presentation data. Negotiation, permission
 evaluation, selector policy, and the client store boundaries are owned by
 [presentation snapshot](presentation/presentation_snapshot.md).
 

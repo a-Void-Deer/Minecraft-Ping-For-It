@@ -40,12 +40,6 @@ unauthorized removal are silent no-ops or rejections. Their
 selection and authorization rules are owned by
 [wheel](../architecture/picking/wheel.md) and
 [target validation](../architecture/authority/target_validation.md).
-Recoverable geometry uses its separate
-[source outcome contract](../architecture/geometry/geometry_sources.md); fatal
-JVM/resource errors must not be swallowed. These boundaries are established
-product boundaries, not evidence of a completed security audit; see
-[security](../architecture/security.md) and
-[D0004](../decisions/D0004-server-authority.md).
 
 ## Presentation
 

@@ -23,6 +23,10 @@ each owner rather than being forced into one artificial file. Secondary pages
 retain only the necessary interface semantics and a link; they do not copy the
 exact detailed rule, counters, constants, or failure matrix.
 
+Integration pages own mod-specific gates and behavior. Generic picking,
+geometry-source and outcome, lifecycle, security, and diagnostic contracts
+remain with their respective topic owners.
+
 Practical ownership review: if changing one fact would require the same
 substantive detail to be edited in more than one place, that fact has more than
 one claimed owner and should be consolidated into its primary owner. A change
@@ -105,29 +109,3 @@ duplicate the exact constants, algorithms or error cases owned by topic docs.
 | [D0009 — Precise live candidate capture](decisions/D0009-precise-live-candidate-capture.md) | Why the Precise branch follows the current camera ray on a configured period while ordinary actions stay press-frozen, and how same-type competition, pending refreshes and release fencing work. |
 | [D0010 — Native persistent component codec trust](decisions/D0010-persistent-component-codec-trust.md) | Why native persistent semantics support unfamiliar registered components through explicit external trust without making display isolation or owned resource guards optional. |
 | [D0011 — Display default inheritance](decisions/D0011-display-default-inheritance.md) | Why item display travels as a sparse patch over local prototype defaults with explicit strips, and why no default fingerprint or handshake lets omission serve as a safety certificate. |
-
-## Documentation maintenance
-
-1. Put agent procedure in `AGENTS.md`, and software behavior in topic docs.
-   Do not move product rules into `AGENTS.md` as an enforcement shortcut.
-2. Update the owning topic for new behavior, the applicable decision only when
-   rationale or a boundary changes, and verification when coverage, gaps or
-   pending scenarios change.
-3. The geometry-pipeline architecture page describes stages, boundaries and
-   owner navigation. Focused architecture contracts are normative for their
-   named behavior. Neither form is a Java file, class, or line-number tour.
-4. Integration docs contain mod-specific gates and implementations. Generic
-   picking-owner, geometry-source, outcome, lifecycle and failure contracts stay
-   in their picking, geometry, authority, security or logging owners.
-5. Keep distinct terms distinct: model eligibility is not emitted geometry;
-   picking `forAllBoxes` is not outline `forAllEdges`; canonical identity is not
-   presentation ownership; e.g.
-6. Preserve product IDs, ordering, keys, canonical vocabularies, validation
-   timing, fallback behavior, recoverable failure classes, and optional-mod
-   boundaries. Do not mirror implementation numeric defaults, bounds, UI steps,
-   or clamp formulas across normative pages; link the actual implementation
-   reference when live tuning metadata is needed. Label inferred rationale and
-   never invent historical evidence.
-7. Check links, headings, fences and the relevant coverage inventory after a
-   documentation change. Do not claim runtime or manual validation from document
-   review alone.

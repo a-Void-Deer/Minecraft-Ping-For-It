@@ -17,10 +17,6 @@ independently configure server behavior. The client file has a separate
 `pingDistance` key; the two configuration objects are distinct even where names
 match.
 
-The server configuration object is the typed persisted schema. It applies live
-validation, numeric bounds, and fallbacks; those implementation values are
-deliberately not mirrored here.
-
 The six top-level scalar fields other than `pingDistance`, and the twenty-one
 `inventory` administration settings, can also be changed over the
 client/server connection through
@@ -51,8 +47,7 @@ exposes the remote settings and the presentation policy controls.
 ## Presentation policy object
 
 The `presentation` object persists one rule set per target type; the client
-file has no presentation policy shape. Numeric bounds and defaults are applied
-by the implementation.
+file has no presentation policy shape.
 
 | Member | JSON form | Meaning |
 | --- | --- | --- |
@@ -76,21 +71,12 @@ separator. For example, `create:kinetic.*`, `*:target.name`, and `*:*` are valid
 selectors.
 
 A child reference is one `childBlack` entry: an object with `adapterId`,
-`fieldId`, and a nonempty `recordPath` array of literal record keys; it
-addresses exactly one entry inside a record-valued field. Matching is exact over
-the complete tuple — there is no prefix, wildcard, case-folded, dotted-path, or
-sequence-index form — so a record key is never parsed as selector syntax and a
-sequence element is never addressable. A matching reference denies the addressed
-child entry as an independent presentation entry: it is not offered for property
-selection and carries no property Ping annotation, independently of the
-field-selector outcome, so a top-field allow match cannot re-authorize it and a
-selection or annotation naming it never restores it. It is not a value
-redaction: the parent field stays authorized with its full value, so a denied
-child is not removed from the parent's value, and a root value remains governed
-by the field selectors — the whole `create:kinetic.speed` record, for example,
-can still be authorized and formatted when both of its RPM entries are denied. A
-reference naming a missing field or an absent optional adapter is retained but
-inert, and it never grants access.
+`fieldId`, and a nonempty `recordPath` array of literal record keys. It identifies
+one record child by the exact complete tuple; there is no prefix, wildcard,
+case-folded, dotted-path, or sequence-index form. Child denial prevents
+independent property selection and annotation without redacting the parent
+record value. Detailed policy application is owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md#per-target-type-field-policy).
 
 By default each target type's rule set denies two child references, and a
 present rule set whose `childBlack` member is absent receives them: the
@@ -100,11 +86,8 @@ An explicit empty array is a deliberate opt-out and stays empty, and an explicit
 nonempty list is retained rather than overwritten. A target-type entry missing
 from the map keeps its deny-all outcome instead of receiving defaults.
 
-Field selectors are evaluated against the marker's exact target type: allow,
-then deny, then the field's manifest default, with an allow match winning over a
-deny match and whitelist-only denying an unmatched field. Evaluation, the
-derived recipient mask, child-reference application, and the client consequence
-are owned by
+Each rule set applies to the marker's exact target type. Evaluation precedence,
+recipient masks, child-deny application, and client consequences are owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md#per-target-type-field-policy).
 Property Ping override selectors are a different grammar that matches a
 target's registry ID or tags rather than field IDs; it is owned by
@@ -144,9 +127,8 @@ is no tracking-duration member: the tracking deadline follows the Ping's own
 marker lifetime, owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md).
 
-Numeric bounds, grids and defaults are applied by the implementation and are
-deliberately not mirrored here. A finite cap is always positive; zero is not a
-disable sentinel, except for the heartbeat member where zero is the explicit
+A finite cap is always positive; zero is not a disable sentinel, except for the
+heartbeat member where zero is the explicit
 "periodic heartbeat disabled" value and other repair and status paths remain
 active.
 
@@ -180,7 +162,7 @@ array or an unbounded work loop.
 | `tracking.globalByteMultiplier` | multiplier object | Tracking global period byte allowance on the global multiplier grid. |
 | `tracking.resyncMinPeriods` | number, periods | Bounded abnormal-resynchronization cooldown; it is also the negotiated interval that bounds the unknown-baseline stream buffer. Positive and with no unlimited mode; buffer semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md#tracking). |
 | `tracking.heartbeatPeriods` | number, periods | Periodic checksum heartbeat cadence. `0` disables only the periodic heartbeat and is not an unlimited value; other repair and status paths remain active. |
-| `tracking.gracePeriods` | number, periods | Rolling smoothing window for global wire accounting: the number of periods `n` in the confirmed excess-smoothing algorithm owned by [inventory preview and tracking](../architecture/presentation/inventory.md#budgets-queues-and-memory). It is independent of the resynchronization cooldown and of the bounded unknown-baseline stream window. |
+| `tracking.gracePeriods` | number, periods | Rolling smoothing window for global wire accounting, measured in accounting periods. It is independent of the resynchronization cooldown and the unknown-baseline stream buffer window; accounting behavior is owned by [inventory preview and tracking](../architecture/presentation/inventory.md#budgets-queues-and-memory). |
 
 A limit object has the stable JSON form
 `{"unlimited": boolean, "value": number}`; a multiplier object has the form
@@ -217,13 +199,15 @@ by [changing server configuration](../architecture/config/changing-server-config
 
 ## Version marker
 
-The file also carries the `pingforit-version` metadata marker. Its presence,
-grammar, comparison, migration, protection, and recovery rules are owned by
+The file also carries the `pingforit-version` metadata marker. Its format is
+owned by [client configuration](client.md#version-marker) and applies to both
+configuration files. Comparison, migration, serialization, protection, and
+recovery are owned by
 [configuration revisioning](../architecture/config/revisioning.md).
 
 ## Example
 
-Illustrative shape only.
+Illustrative partial document; the values are examples, not defaults.
 
 ```json
 {

@@ -16,9 +16,9 @@ equal-arrival tie-breaker. Losing markers remain active.
 
 The server enforces create rate limits for every client. The client token bucket
 is only a create-time courtesy gate; rejected courtesy creates are dropped and
-not tracked as dispatched. Remove and channel-update behavior remains
-unchanged. External providers may have their explicitly documented refresh
-exception; ordinary committed markers are not continuously revalidated.
+not tracked as dispatched. External providers may have their explicitly
+documented refresh exception; ordinary committed markers are not continuously
+revalidated.
 
 ## Rationale
 
@@ -59,7 +59,6 @@ provider state needs explicit materialization and refresh handling.
 [rate policy](../architecture/config/rate-limit.md), and
 [Sable](../integrations/sable.md).
 
-Focused tests named by the current coverage include
-`AuthoritativeTargetValidationTest`, `MarkerCreationServiceTest`,
-`MarkerWinnerTest`, `ServerMarkerStoreTest`, `MarkerPacketCodecTest`, and the
-rate-policy tests. Test existence and a test run remain separate evidence claims.
+Coverage and remaining verification gaps are owned by
+[identity and authority verification](../testing/verification/identity-authority.md)
+and [integration verification](../testing/verification/integrations.md).

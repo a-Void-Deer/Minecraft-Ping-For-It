@@ -125,7 +125,7 @@ state below:
 | --- | --- |
 | Primitive mode | `VertexFormat.Mode.LINES` |
 | Shader | Vanilla `rendertype_lines` |
-| Width | Fixed and wider than vanilla selection lines; the live value is owned by [`BlockOutlineRenderType.LINE_WIDTH`](../../../common/src/main/java/nx/pingwheel/common/client/outline/BlockOutlineRenderType.java) |
+| Width | Fixed and wider than vanilla selection lines |
 | Depth | `NO_DEPTH_TEST`, with the effective comparison `GL_ALWAYS` |
 | Writes | `COLOR_WRITE` only; do not write depth |
 | Submission | Late composite submission, after normal outline-source success is known |
