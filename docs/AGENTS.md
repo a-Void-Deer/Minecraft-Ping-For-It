@@ -1,76 +1,89 @@
 # Documentation Folder Rules
 
-## All Agents
+Read [README.md](README.md) before any other work under `docs/`.
 
-Read `README.md` in this folder before working or searching under `docs/`.
+## Scope
 
-### Scope and exclusions
+Document system design and behavior, including the internal details needed to
+understand formats, state lifecycles, relationships, authority, security, and
+compatibility. Exclude code walkthroughs and incidental implementation structure,
+such as class locations and source line numbers.
 
-Documentation describes system design and behavior, not implementation detail.
-Retain the behavior, formats, state lifecycles, relationships, authority,
-security, and compatibility facts needed to understand the design. Exclude
-developer- or maintainer-only material such as class locations, line numbers,
-widget-specific tuning, and reference-implementation walkthroughs. Developer
-readership is not a reason to remove internal facts that the design requires.
-Therefore, NO links to code files or line numbers.
+Keep authoring and agent procedures in `AGENTS.md`, outside product documentation.
 
-### Ownership
+## Ownership and exact detail
 
-Assign each substantive fact one primary owner based on change responsibility,
-following the public ownership policy in [README.md](README.md). Other documents
-retain only the necessary interface semantics, an ownership pointer, and a link;
-they do not copy catalogues, constants, algorithms, or tuning values.
+Follow the ownership policy in `README.md`. Give each substantive fact one
+primary owner based on change responsibility. Other pages may retain necessary
+interface semantics and a link; do not duplicate detailed rules, catalogues,
+algorithms, or values.
 
-### Modification
+Do not link product documentation to source-code files or line numbers.
 
-Before modifying documentation or tests, ask: would this file still need to change
-if the bug had never existed and the implementation had always been correct? If no,
-normally do not modify it. If modifying it is necessary, explain reasons and ask
-the user for permission & advice.
+Keep implementation tuning defaults, bounds, UI steps, and clamp formulas in
+code or an existing implementation reference. Do not reproduce these tuning
+values in topic or configuration pages. Link to an existing documentation
+reference when needed.
 
-Do not turn normative documentation into a changelog. Never add statements such as
-“X is now…”, “X is no longer…”, or “X currently uses…” merely because this task fixed
-that implementation. Update docs only when the enduring contract itself changed.
+Preserve exact facts that define behavior, including protocol IDs, grammar
+tokens, numeric sentinels, permission requirements, ordering, and relationship
+invariants.
 
-Development history should NOT be written into long-term contract. Documentation should
-be timeless: if a future version keeps the same implementation, then the document should
-not need to be changed in the update.
+The client and server configuration pages own their complete filenames, keys,
+formats, legal enum values and selectors, meanings, useful examples,
+relationships, locality, authority, and references. Keep configuration grammar
+examples and their literal tokens in those pages.
 
-### Numerical and tuning detail
+## Writing style
 
-Keep implementation numeric defaults, bounds, UI steps, and clamp formulas in
-code or an existing implementation reference. Config catalogues describe
-semantics and format rather than mirroring those values; link their source when
-needed, and do not create another numeric catalogue.
+Identify the page's reader question and document type: behavioral contract,
+architecture explanation, decision record, reference, verification inventory,
+or navigation. Use a form appropriate to that purpose.
 
-This restriction covers tuning values, not every exact fact. Relationship
-invariants remain normative, as do the meaning of numeric sentinels, permission
-policy, and protocol IDs or grammar/format values where they define behavior.
+Keep statements that contribute necessary behavior, relationships, rationale,
+reference information, evidence, or navigation. Omit generic assurances and
+statements about unaffected subsystems unless they specify a requirement or
+resolve a plausible ambiguity in the page.
 
-Config client and server documents own their complete filenames, keys, formats,
-legal enum values and selectors, their meanings, helpful examples, relations,
-locality, authority, and references. Keep config grammar examples and their
-actual tokens in the config owner.
+Preserve negative statements that exclude a plausible implementation, clarify
+authority or side effects, define failure behavior, or limit an evidence claim.
 
-## Subagents
+After drafting or during reviewing, ask: "What useful information or connection would the reader
+lose if this sentence were removed?" Delete sentences with no defensible
+contribution. Keep editorial explanations and deletion justifications outside
+the finished document.
 
-Do **not** modify `docs/` unless both are true:
+## When to update
 
-- you are **explicitly authorized** to edit documentation;
-- your assigned task contains **no code changes**.
+Update the owning document when its subject changes or existing information is
+incorrect, missing, or unclear. A code fix alone does not require changing an
+already accurate behavioral contract.
 
-Otherwise, do not edit `docs/`. Report the documentation changes you believe are needed and return these rules to the main agent.
+Keep fix narratives and incidental development history out of behavioral
+contracts. Do not add "now," "no longer," or "currently" merely to describe a
+completed fix. Decision records may include relevant decision context and
+status; verification records may include coverage, results, limitations, and
+gaps.
 
-Code-change authorization does not imply documentation authorization.
+Assess test changes separately under
+[D0007: No meaningless tests](decisions/D0007-no-meaningless-tests.md).
 
-## Main Agent
+## Agent roles
 
-Require implementation subagents to report possible documentation changes instead of editing docs.
+Subagents may edit `docs/` only when explicitly authorized to edit documentation
+and assigned a task containing no code changes. Otherwise, report proposed
+documentation changes to the main agent.
 
-Decide whether those changes are needed, then either update the documentation yourself or assign a documentation-only subagent.
+The main agent decides which changes are needed, then makes them or delegates
+a documentation-only task. Resolve routine content and placement questions
+using `README.md` and these rules. Ask the user when unresolved uncertainty
+about intended behavior, document authority, or task scope prevents a correct
+change.
 
-If not sure whether something should be recorded, or where it should be, **ask the user** to help you make decision.
+## Explaining documentation
 
-## User Queries
+When explaining implemented behavior, consult the owning documentation and
+relevant code when available. Distinguish the documented contract from verified
+implementation behavior, and report discrepancies or missing evidence.
 
-Users may ask you to explain documentation. When explaining, answer based on both documentation and code implementation, and for each point, give at least one in-game example or scenario to illustrate the point.
+Include an in-game example or scenario when it clarifies the behavior.
