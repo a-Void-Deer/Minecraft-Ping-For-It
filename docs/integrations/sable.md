@@ -190,11 +190,6 @@ presentation snapshot contract.
 
 Sable names are resolved from authoritative live block state and, when present,
 the live `Nameable` block entity. Sable adds no administrator permission.
-MarkerCreate still requires an authenticated sender and passes server
-rate/channel policy, range, provider validation/materialization and allowed
-Ping-Type checks. MarkerRemove still requires ownership of the active marker.
-Server-settings editing remains the separate permission-level-3 operation documented in
-[security](../architecture/security.md).
 
 Reflection and provider failures follow
 [diagnostics and logging](../architecture/logging.md).

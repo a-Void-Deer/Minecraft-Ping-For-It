@@ -313,9 +313,8 @@ unchanged rather than re-sending or zeroing it; a tombstone has domain meaning
 and is not zero.
 
 A state or baseline fence discards data older than it. Publication re-projects
-against the current server policy and session at send time. There is no
-`SUBSCRIBE` intent and a client cannot widen its own authorization; budget
-exhaustion schedules a defer, while an unavailable or invalid source maps to the
+against the current server policy and session at send time. Budget exhaustion
+schedules a defer, while an unavailable or invalid source maps to the
 result availability and the domain status or fence, never to a defer and never
 to a pretend-complete publication.
 

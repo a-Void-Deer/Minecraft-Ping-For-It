@@ -85,7 +85,6 @@ Its result remains subject to [target locking](../architecture/picking/capture.m
 
 A future whole-versus-constituent option can derive its target from this frozen hit. A moving constituent must not be identified by an ordinary world `BlockTarget`. A future provider would need the dimension, exact contraption owner UUID, local block position, and expected registry identity, together with authoritative validation and lifecycle handling. Existing external-block provider facilities are a possible foundation, not an implemented Create constituent provider.
 
-Whole-entity requests retain the [common authority boundary](../architecture/picking/local_geometry.md#frozen-metadata-and-whole-entity-identity).
 The exact-surface versus server-anchor distance distinction is owned by
 [range acceptance](../architecture/picking/range.md#server-acceptance).
 

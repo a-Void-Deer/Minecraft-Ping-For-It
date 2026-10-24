@@ -138,5 +138,4 @@ bookkeeping only. They do not grant cancellation authority or extend the
 server-active lifetime. The wheel's local own-marker candidate rule is owned by
 [wheel interaction](../picking/wheel.md); any resulting removal request still
 passes the server's active-status and ownership check under
-[target validation](../authority/target_validation.md). Local retention is not
-server removal eligibility.
+[target validation](../authority/target_validation.md).

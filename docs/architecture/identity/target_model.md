@@ -47,8 +47,7 @@ the current block render state. Explicitly supported external-target markers
 retain their established periodic invalidation exception. Pure locations retain
 existing location-ping semantics.
 
-Existing ping lifetime, range, cooldown and comparable mechanics are preserved
-unless an explicit product requirement changes them. Pre-commit validation is
+Pre-commit validation is
 owned by [target validation](../authority/target_validation.md); the local
 invalid-target message is owned by [ping feedback](../../UI/ping-feedback.md).
 
@@ -122,8 +121,7 @@ round trips, are owned by the
 External locator/anchor refresh continuity, including the preserved marker
 fields, is owned by
 [marker lifecycle](../authority/marker_lifecycle.md) and the
-[Sable integration](../../integrations/sable.md#refresh-lifecycle). This
-continuity within the fork does not imply original-mod protocol support.
+[Sable integration](../../integrations/sable.md#refresh-lifecycle).
 
 Packet roles are specified in [network protocol](../network/protocol.md); the
 server's selection of visible same-target state is specified in

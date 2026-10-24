@@ -64,12 +64,7 @@ vertices. Each quad uses fixed UVs `(0,0)-(1,0)-(1,1)-(0,1)`, the Create glue
 texture, and the exact opaque ping color. This direct mask remains independent
 of Flywheel visualization support.
 
-The adapter follows the common
-[source outcome contract](../architecture/geometry/geometry_sources.md). Normal zero output
-is `EMPTY`; a recoverable exception with no committed vertex is `FAILED`; a
-recoverable exception after shared-buffer vertices have been committed is
-`RENDERED` for that frame with a partial-emission diagnostic. The integration
-does not redefine those outcomes.
+The adapter follows the common [source outcome contract](../architecture/geometry/geometry_sources.md#common-per-attempt-outcome-contract).
 
 Diagnostics follow the shared [logging contract](../architecture/logging.md).
 Retain and close the registration handle during deterministic teardown.
@@ -103,11 +98,8 @@ its original UVs. Preserve Create's scrolling-UV calculation exactly:
 diff + fract(speed * renderTicks + offset) * scale
 ```
 
-Zero committed output and recoverable partial commits follow the common outcome
-contract. In particular, a shared-buffer commit that fails after writing one or
-more vertices is `RENDERED` for that frame, while pre-commit plan failures are
-`FAILED` or `EMPTY` according to the observed result. Retain and close the
-registration handle; diagnostics follow the shared
+This source follows the common [source outcome contract](../architecture/geometry/geometry_sources.md#common-per-attempt-outcome-contract).
+Retain and close the registration handle; diagnostics follow the shared
 [logging contract](../architecture/logging.md).
 
 ## Create presentation summary adapter

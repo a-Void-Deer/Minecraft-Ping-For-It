@@ -101,7 +101,7 @@ validation and the preference relationships below.
 
 | Key | JSON form | Local meaning |
 | --- | --- | --- |
-| `spatialSelector` | object | Container for the preferences below; never sent to the server and cannot alter server policy. |
+| `spatialSelector` | object | Container for the preferences below; never sent to the server. |
 | `spatialSelector.gestureSkipHoldEnabled` | boolean | Opt-in gesture shortcut, disabled by default, allowing a physical Ping-key hold and displacement to qualify for early selector opening. [Long-press timing](../architecture/input/long-press.md#optional-physical-hold-gesture) owns eligibility; compatibility mode takes priority under the preference relationship below. |
 | `spatialSelector.gestureSkipHoldMillis` | number, milliseconds | Minimum continuous physical hold before the optional gesture shortcut may qualify, independent of the ordinary long-press threshold. |
 | `spatialSelector.deadzone` | number, GUI pixels | Radial center deadzone and inventory-side intent threshold; [wheel](../architecture/picking/wheel.md#inventory-list) owns how the same held value applies at a list panel edge. |

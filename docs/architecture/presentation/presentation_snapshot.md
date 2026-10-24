@@ -259,10 +259,9 @@ guarantee.
 Each recipient's projection is recomputed independently: a field is sent only
 when that recipient's session manifest includes the field with the same kind,
 the marker's target-type rule set and the recipient's server-derived mask include
-the field, and the recipient's actual vanilla permission level meets the field's
-required level (which a server permission override may replace). A child-denied exact
-reference is never annotated even when its root field is projected, and the
-parent value stays complete.
+the field, and permission evaluation allows the recipient to receive it. A
+child-denied exact reference is never annotated even when its root field is
+projected, and the parent value stays complete.
 
 An absent or evicted observation and a budget-deferred turn are not failed
 captures: they neither replace a section with empty fresh data nor manufacture
@@ -309,10 +308,7 @@ Permission evaluation is replaceable and independent of field policy and
 projection. The default compares the recipient's actual level to the required
 level; a replacement provider receives the same recipient, field, actual, and
 required inputs and may allow or deny, but a provider that throws, or an
-out-of-range actual/required level, denies access. Clients cannot widen their own
-projection: there is no client field list, and a client cannot grant itself a
-field, a permission level, a marker removal, or winner state by sending
-presentation values.
+out-of-range actual/required level, denies access.
 
 ## Per-target-type field policy
 
@@ -445,8 +441,7 @@ receive the retained store itself, and registered UI providers
 are manifest-only: a provider supplies at most three short HUD lines (longer
 lines are truncated and blank lines dropped), can narrow the supplied view but
 cannot acquire a store, sender, or capture callback, and switching or failing a
-provider performs no network or source work. Display text is presentation only;
-it never changes marker identity, winner slots, or server state.
+provider performs no network or source work.
 
 ## Target content preview
 
