@@ -34,7 +34,12 @@ class InventoryOrdinarySourceInventoryTest {
 			assertNotNull(modifiers); assertEquals(2, modifiers.modifiers().size());
 			assertTrue(modifiers.modifiers().stream().allMatch(entry -> entry.slot() == EquipmentSlotGroup.MAINHAND));
 			Tool tool = stack.get(DataComponents.TOOL); assertNotNull(tool); assertEquals(2, tool.rules().size());
-			var nativeTag = DataComponentMap.CODEC.encodeStart(registry.createSerializationContext(NbtOps.INSTANCE), stack.getComponents()).result().orElseThrow();
+			// Exercise the admitted native value graph explicitly, rather than
+			// relying on defaults which are outside patch identity.
+			((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).restorePatch(
+				net.minecraft.core.component.DataComponentPatch.builder().set(DataComponents.ATTRIBUTE_MODIFIERS, modifiers)
+					.set(DataComponents.TOOL, tool).build());
+			var nativeTag = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(registry.createSerializationContext(NbtOps.INSTANCE), ((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).asPatch()).result().orElseThrow();
 			var detached = InventoryItemCodec.freeze(new InventoryResidentItem.Stack(stack), registry, 4096,
 				InventoryItemBudget.root(4096), new InventoryResidentAccessFields(), new InventoryTestNativeAccess());
 			assertEquals(InventoryIdentityMode.EXACT, detached.identityMode());

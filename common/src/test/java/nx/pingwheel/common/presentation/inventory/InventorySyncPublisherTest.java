@@ -324,6 +324,8 @@ class InventorySyncPublisherTest {
 			publisher.advance(3, settings); publisher.drain();
 			assertTrue(transport.sent.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && !p.entries().isEmpty()),
 				"the same retained cut sends once its independent budget allows");
+			assertEquals("d".repeat(4096), transport.sent.stream().filter(p -> !p.entries().isEmpty()).findFirst().orElseThrow()
+				.entries().getFirst().displayJson(), "period/fragment pressure queues the already projected payload, never strips it");
 			publisher.cancel(context);
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());

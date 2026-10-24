@@ -16,17 +16,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class InventoryItemUnavailableDisplayTest {
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
-	@Test void unrepresentableTighteningKeepsIdentityAndCanonicalSharing() {
+	@Test void sizeTerminalTighteningKeepsIdentityAndCanonicalSharing() {
 		String json = "{\"id\":\"minecraft:stone\",\"components\":{" +
 			"\"!test:" + "a".repeat(1100) + "\":{}}}";
 		var display = new InventoryItemCodec.Display("minecraft:stone", "block.minecraft.stone", json, false);
 		byte[] canonical = {1, 2, 3};
 		var detached = new InventoryDetachedItem(display.itemId(), InventoryIdentityMode.EXACT, display, canonical, 4096);
 		var projected = InventoryItemCodec.reproject(display, RegistryAccess.EMPTY, 1024);
-		assertNull(projected.displayJson()); assertFalse(projected.aggregateRequired());
+		assertEquals("{\"id\":\"minecraft:stone\"}", projected.displayJson()); assertFalse(projected.aggregateRequired());
 		var replacement = detached.withDisplay(projected);
 		assertSame(canonical, replacement.canonicalForCatalog()); assertEquals(InventoryIdentityMode.EXACT, replacement.identityMode());
-		assertEquals(detached.retainedBytes() - 2L * json.length(), replacement.retainedBytes());
+		assertEquals(detached.retainedBytes() - 2L * (json.length() - projected.displayJson().length()), replacement.retainedBytes());
 		assertSame(projected, InventoryItemCodec.reproject(projected, RegistryAccess.EMPTY, 4096));
 	}
 

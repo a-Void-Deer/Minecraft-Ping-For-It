@@ -160,6 +160,15 @@ final class InventoryComponentBounds {
 		return inspected.entryWork();
 	}
 
+	/** Shared patch helper already checked the exact native backing once. */
+	void patchPass(int size, int capacity) {
+		cardinality(size);
+		if (size == 0) return;
+		mapTraversal(InventoryItemBudget.add(capacity, size));
+		// Conservative ordinary native iterator and one entry wrapper per cell.
+		budget.allocate(32 + 4L * size, 0, 2L * size + 5, size + 4L);
+	}
+
 	/** Whole NBT preflight, with NO copy, encoding, hashing or SNBT formatting. */
 	void nbt(Tag value) { nbt(value, 0); }
 

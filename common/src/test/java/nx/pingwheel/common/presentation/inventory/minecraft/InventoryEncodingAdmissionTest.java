@@ -35,7 +35,7 @@ class InventoryEncodingAdmissionTest {
 	private static void oracle(ItemStack stack) {
 		var result = freeze(stack, new InventoryResidentAccessFields());
 		assertEquals(InventoryIdentityMode.EXACT, result.identityMode());
-		var original = DataComponentMap.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), stack.getComponents()).result().orElseThrow();
+		var original = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), ((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).asPatch()).result().orElseThrow();
 		assertArrayEquals(InventoryItemCodec.canonicalTag(original), result.canonicalForCatalog());
 	}
 	@Test void unnamedRgbLeafMatchesOriginalFormatterIncludingMaskAndUppercase() {

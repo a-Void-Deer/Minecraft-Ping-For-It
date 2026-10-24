@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
@@ -21,9 +22,6 @@ import com.google.common.collect.ImmutableList;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.JsonOps;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import it.unimi.dsi.fastutil.objects.Reference2ObjectArrayMap;
-import it.unimi.dsi.fastutil.objects.Reference2ObjectMaps;
-import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.Holder;
@@ -62,7 +60,10 @@ import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryDisplayWriter;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemDiagnostics;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryPatches;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Shared client-side projection of one server-bounded inventory display value.
@@ -74,7 +75,8 @@ import org.jetbrains.annotations.Nullable;
  * tracking annotations cannot drift apart. Decoding never reads a world,
  * chest, entity or server object, and a missing, malformed, oversized or
  * registry-unknown value fails softly to an empty icon plus the registry
- * translation key. A failed display never authorizes prototype reconstruction.
+ * translation key. Only the canonical size-terminal payload authorizes a
+ * default icon with that registry label; unavailable data never does.
  *
  * <p>Decoding is identity-aware: the decoded registry ID must equal the
  * supplied opaque item ID, otherwise the value fails soft to an empty icon
@@ -97,10 +99,10 @@ import org.jetbrains.annotations.Nullable;
  * stack through the real constructor, where the native callback may resolve a
  * PROFILE as usual. The transmitted identity and the name derived from it
  * therefore stay stable across resolves and cache hits.
- * Only the shared display-supported types may survive in the effective
- * components: a prototype or item hook cannot introduce an opaque value into
- * the cache's working stacks. The guard observes component type registry IDs,
- * never unknown values, and display refusal does not alter selection identity.
+ * Only the shared display-supported types may survive as explicit additions.
+ * Local defaults remain native inheritance: Ping neither enumerates nor copies
+ * them. Hook-written explicit values pass the same raw-patch guard, and display
+ * refusal does not alter selection identity.
  * Native component codecs can still construct nested stacks and start their
  * callbacks during decoding. Known mutable nested values are detached for each
  * consumer without repeating nested load-verification work; callbacks already
@@ -114,14 +116,14 @@ import org.jetbrains.annotations.Nullable;
  * {@link #reset()} clears it. A metadata revision that carries identical JSON
  * reuses the same snapshot without re-decoding the payload.
  */
+@NotNullByDefault
 public final class ClientItemDisplay {
 
 	/**
 	 * Resolved display projection: an independently owned count-one working
 	 * stack, or EMPTY when unavailable, plus its independently resolved localized
-	 * name. Mutating or resolving the stack never changes the helper's retained
-	 * snapshot, a later resolution or another
-	 * caller's result.
+	 * name. Explicit mutable additions are owned independently of the retained
+	 * patch and later resolutions. Local defaults retain native shared references.
 	 */
 	public record Display(ItemStack stack, Component name) {
 		public Display {
@@ -137,7 +139,7 @@ public final class ClientItemDisplay {
 	private static final int MAX_ICON_DEPTH = 48;
 	// Finite expanded occurrences, matching the existing item structure-guard
 	// scale. One public resolve/decode/name operation shares this allowance across
-	// JSON, effective items, text and every post-hook recheck; no child resets it.
+	// JSON, explicit patch children, text and post-hook rechecks; no child resets it.
 	private static final int MAX_VALIDATION_VISITS = 4096;
 	// Covers sequential predecode, naming and render rechecks of a legal wire
 	// value without making default/hook text work unbounded by total characters.
@@ -146,7 +148,7 @@ public final class ClientItemDisplay {
 	private static int validationVisits;
 	private static boolean validationWorkExhausted;
 
-	private record CacheKey(String itemId, String displayJson) {}
+	private record CacheKey(@Nullable String itemId, String displayJson) {}
 
 	/**
 	 * The exact {@link ItemStack#SINGLE_ITEM_CODEC} grammar — non-air item
@@ -178,11 +180,8 @@ public final class ClientItemDisplay {
 		 */
 		ItemStack workingStack(Validation budget) {
 			budget.visit(0);
-			DataComponentMap prototype = item.value().components();
-			if (!supportedOverlay(prototype, RAW.patch(patch), 0, budget)) throw new UnsafeDisplay();
-			DataComponentPatch owned = ClientDisplayWorkingCopy.overlay(prototype, patch, 0, budget);
-			budget.cells(RAW.patch(owned).size());
-			PatchedDataComponentMap components = new PatchedDataComponentMap(prototype);
+			DataComponentPatch owned = ClientDisplayWorkingCopy.copy(patch, 0, budget);
+			PatchedDataComponentMap components = new PatchedDataComponentMap(item.value().components());
 			components.restorePatch(owned);
 			// Same native constructor and one load hook as the public patch
 			// constructor, but skip fromPatch's resident deep-equality normalization.
@@ -208,15 +207,12 @@ public final class ClientItemDisplay {
 		ItemStack namingStack(Validation budget) {
 			budget.visit(0);
 			ItemStack naming = new ItemStack(item);
-			// Constructor hooks return to an immediate effective-map fence. Apply
+			// Constructor hooks return to an immediate raw-patch fence. Apply
 			// the admitted patch without native normalization/deep equals, which
 			// could otherwise compare resident translation caches or fold an owned
 			// text value back into the mutable prototype.
-			admitComponentMap(RAW.patch(patch), budget);
-			if (!supportedComponents(naming.getComponents(), RAW.patch(patch).keySet(), 0, budget)) throw new UnsafeDisplay();
 			PatchedDataComponentMap components = (PatchedDataComponentMap) naming.getComponents();
 			DataComponentPatch owned = ClientDisplayWorkingCopy.overlay(components, patch, 0, budget);
-			budget.cells(RAW.patch(owned).size());
 			components.restorePatch(owned);
 			return naming;
 		}
@@ -256,7 +252,7 @@ public final class ClientItemDisplay {
 	 * registry context. Null or unavailable registry access keeps an empty icon
 	 * and the supplied label instead of throwing.
 	 */
-	public static Display resolve(String itemId, String label, @Nullable String displayJson) {
+	public static Display resolve(@Nullable String itemId, @Nullable String label, @Nullable String displayJson) {
 		return resolve(currentRegistryAccess(), itemId, label, displayJson);
 	}
 
@@ -266,11 +262,17 @@ public final class ClientItemDisplay {
 	 * supplied item ID falls back to an empty icon and the
 	 * registry translation key.
 	 */
-	public static Display resolve(HolderLookup.@Nullable Provider registryAccess, String itemId, String label, @Nullable String displayJson) {
+	public static Display resolve(HolderLookup.@Nullable Provider registryAccess, @Nullable String itemId, @Nullable String label, @Nullable String displayJson) {
 		Validation budget = new Validation();
 		try {
 			Optional<Snapshot> snapshot = transmitted(registryAccess, itemId, displayJson, budget);
 			if (snapshot.isEmpty()) return unavailable(label);
+			if (InventoryDisplayWriter.isDefaultIcon(itemId, displayJson)) {
+				ItemStack working = snapshot.get().workingStack(budget);
+				boolean safe = safeIcon(working, 0, budget);
+				budget.sameLanguage();
+				return new Display(safe ? working : ItemStack.EMPTY, fallbackName(label));
+			}
 			// Retain only the transmission. Both the hook-free transmitted name
 			// application and the real render constructor get private outer stacks.
 			ItemStack naming = snapshot.get().namingStack(budget);
@@ -309,11 +311,13 @@ public final class ClientItemDisplay {
 		}
 	}
 
-	/** Safe shared chat/name entrance, including effective-graph checks after getName. */
+	/** Shared chat/name entrance, including explicit-patch checks after getName. */
 	public static Optional<Component> decodeName(HolderLookup.@Nullable Provider registryAccess, @Nullable String json) {
 		Validation budget = new Validation();
 		try {
-			return decodeSnapshot(registryAccess, json, budget).map(snapshot -> snapshot.namingStack(budget))
+			return decodeSnapshot(registryAccess, json, budget)
+				.filter(snapshot -> !InventoryDisplayWriter.isDefaultIcon(BuiltInRegistries.ITEM.getKey(snapshot.item().value()).toString(), json))
+				.map(snapshot -> snapshot.namingStack(budget))
 				.map(stack -> checkedName(stack, budget));
 		} catch (RuntimeException unavailable) {
 			failure("inventory/client-display-name", null, unavailable);
@@ -330,7 +334,10 @@ public final class ClientItemDisplay {
 	 */
 	public static Component displayName(ItemStack stack) {
 		Objects.requireNonNull(stack, "stack");
-		return checkedName(stack, new Validation());
+		Validation budget = new Validation();
+		// Name preparation may replace explicit values after description hooks.
+		// Public callers keep their own patch and never receive those mutations.
+		return checkedName(ClientDisplayWorkingCopy.stack(stack, 0, budget), budget);
 	}
 
 	private static Component checkedName(ItemStack stack, Validation budget) {
@@ -341,19 +348,30 @@ public final class ClientItemDisplay {
 		// even reading that name and before any owned formatting or composition.
 		if (!supportedComponents(stack.getComponents(), 0, budget)) throw new UnsafeDisplay();
 		budget.characters(description);
-		@Nullable Component custom = stack.get(DataComponents.CUSTOM_NAME);
-		// ITEM_NAME is also server-provided component data, not a trusted registry name.
-		if (custom == null) custom = stack.get(DataComponents.ITEM_NAME);
-		// Keep the item implementation's normal localized variant name when no
-		// untrusted name override is present (for example, a potion's base name).
+		// A description hook can alias a lower-priority explicit name to an
+		// inherited higher-priority name. Detach explicit values before recording
+		// provenance, without reading or replacing the native default base.
+		ClientDisplayWorkingCopy.detach(stack, budget);
+		budget.cells(2);
+		@Nullable Component[] names = new Component[2];
+		visitPatch(stack.getComponents(), budget, (type, value) -> {
+			if (type == DataComponents.CUSTOM_NAME && value.isPresent()) names[0] = (Component) value.get();
+			if (type == DataComponents.ITEM_NAME && value.isPresent()) names[1] = (Component) value.get();
+		});
+		// Native selection owns CUSTOM_NAME > ITEM_NAME > item-name precedence,
+		// including mixtures of explicit entries, removals and inherited defaults.
+		budget.visit(0);
+		Component returned = stack.getHoverName();
+		if (!supportedComponents(stack.getComponents(), 0, budget)) throw new UnsafeDisplay();
+		// Compare only detached PRE-call references: a fallback getName hook may
+		// write and return a new name, but that field did not select this result.
+		// No value equals/hash or default getter can establish this provenance.
+		boolean explicit = returned == names[0] || returned == names[1];
 		Component result;
-		if (custom == null) {
-			budget.visit(0);
-			Component returned = stack.getItem().getName(stack);
-			if (!supportedComponents(stack.getComponents(), 0, budget)) throw new UnsafeDisplay();
+		if (!explicit) {
 			result = ClientDisplayText.snapshot(returned, 0, budget);
 		} else {
-			String plain = ClientDisplayText.own(custom, 0, budget).plain();
+			String plain = ClientDisplayText.own(returned, 0, budget).plain();
 			Component quoted = Component.translatable(ContentChatTemplate.QUOTE_KEY, Component.literal(plain));
 			result = ClientDisplayText.snapshot(Component.translatable(ContentChatTemplate.CUSTOM_ITEM_NAME_KEY,
 				quoted, Component.translatable(description)), 0, budget);
@@ -401,7 +419,7 @@ public final class ClientItemDisplay {
 	 * not a product value. The entry-set scan avoids refreshing access-order
 	 * recency.
 	 */
-	static Optional<DataComponentPatch> cachedTransmittedPatch(HolderLookup.Provider registryAccess, String itemId, String displayJson) {
+	static Optional<DataComponentPatch> cachedTransmittedPatch(HolderLookup.Provider registryAccess, @Nullable String itemId, @Nullable String displayJson) {
 		if (cachedRegistry != registryAccess || displayJson == null) {
 			return Optional.empty();
 		}
@@ -414,7 +432,7 @@ public final class ClientItemDisplay {
 		return Optional.empty();
 	}
 
-	private static Optional<Snapshot> transmitted(HolderLookup.@Nullable Provider registryAccess, String itemId, @Nullable String displayJson, Validation budget) {
+	private static Optional<Snapshot> transmitted(HolderLookup.@Nullable Provider registryAccess, @Nullable String itemId, @Nullable String displayJson, Validation budget) {
 		if (registryAccess == null || displayJson == null || displayJson.length() > InventoryS2CPacket.MAX_DISPLAY_BYTES || displayJson.isBlank()) {
 			return Optional.empty();
 		}
@@ -434,7 +452,7 @@ public final class ClientItemDisplay {
 				if (supportedSnapshot(cached, 0, budget)) return Optional.of(cached);
 			} catch (RuntimeException unavailable) {
 				failure("inventory/client-display-cache", itemId, unavailable);
-				// A failed effective-map lookup is not permission to reuse values.
+				// A failed raw-patch inspection is not permission to reuse values.
 			}
 			DECODED.remove(key);
 			retainedBytes -= chargeOf(key);
@@ -466,6 +484,10 @@ public final class ClientItemDisplay {
 			admitSyntax(json, 0, budget);
 			JsonElement element = JsonParser.parseString(json);
 			if (!supportedAdditions(element, 0, budget)) return Optional.empty();
+			// A root without components is the size terminal only in its canonical
+			// wire spelling. Native nested item grammar still permits sparse children.
+			if (!element.getAsJsonObject().has("components")
+				&& !InventoryDisplayWriter.isDefaultIcon(element.getAsJsonObject().get("id").getAsString(), json)) return Optional.empty();
 			replaceFlat(element, 0, budget);
 			var decoded = SNAPSHOT_CODEC.parse(registryAccess.createSerializationContext(JsonOps.INSTANCE), element);
 			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected("inventory/client-display-codec", "persistent display patch");
@@ -489,11 +511,11 @@ public final class ClientItemDisplay {
 	 * opaque item ID before the display is accepted, otherwise the icon and its
 	 * name could describe a different item than the selection identity.
 	 */
-	private static boolean matchesSuppliedItem(String itemId, Snapshot snapshot) {
+	private static boolean matchesSuppliedItem(@Nullable String itemId, Snapshot snapshot) {
 		if (itemId == null || itemId.isBlank()) {
 			return false;
 		}
-		ResourceLocation supplied = ResourceLocation.tryParse(itemId);
+		@Nullable ResourceLocation supplied = ResourceLocation.tryParse(itemId);
 		return supplied != null && supplied.equals(BuiltInRegistries.ITEM.getKey(snapshot.item().value()));
 	}
 
@@ -519,23 +541,21 @@ public final class ClientItemDisplay {
 	private static boolean supportedAdditions(JsonElement stack, int depth, Validation budget) {
 		budget.visit(depth);
 		if (!stack.isJsonObject()) return false;
-		JsonElement itemId = stack.getAsJsonObject().get("id");
+		@Nullable JsonElement itemId = stack.getAsJsonObject().get("id");
 		if (itemId == null || !itemId.isJsonPrimitive() || !itemId.getAsJsonPrimitive().isString()) return false;
-		ResourceLocation itemKey = ResourceLocation.tryParse(itemId.getAsString());
-		Item item = itemKey == null ? null : BuiltInRegistries.ITEM.getOptional(itemKey).orElse(null);
+		@Nullable ResourceLocation itemKey = ResourceLocation.tryParse(itemId.getAsString());
+		@Nullable Item item = itemKey == null ? null : BuiltInRegistries.ITEM.getOptional(itemKey).orElse(null);
 		if (item == null) return false;
-		JsonElement components = stack.getAsJsonObject().get("components");
-		if (components == null) return supportedComponents(item.components(), depth, budget);
+		@Nullable JsonElement components = stack.getAsJsonObject().get("components");
+		if (components == null) return true;
 		if (!components.isJsonObject()) return false;
-		Set<DataComponentType<?>> patched = Collections.newSetFromMap(new IdentityHashMap<>());
 		for (Map.Entry<String, JsonElement> entry : components.getAsJsonObject().entrySet()) {
 			budget.visit(depth);
-				// The native codec owns removal syntax and registered-type validity;
+			// The native codec owns removal syntax and registered-type validity;
 			// a removal never asks an opaque component for its value codec.
 			boolean removal = entry.getKey().startsWith("!");
-			ResourceLocation id = ResourceLocation.tryParse(removal ? entry.getKey().substring(1) : entry.getKey());
-			DataComponentType<?> type = id == null ? null : BuiltInRegistries.DATA_COMPONENT_TYPE.get(id);
-			if (type != null) patched.add(type);
+			@Nullable ResourceLocation id = ResourceLocation.tryParse(removal ? entry.getKey().substring(1) : entry.getKey());
+			@Nullable DataComponentType<?> type = id == null ? null : BuiltInRegistries.DATA_COMPONENT_TYPE.get(id);
 			if (removal) {
 				continue;
 			}
@@ -543,7 +563,7 @@ public final class ClientItemDisplay {
 			JsonElement value = entry.getValue();
 			if (type == DataComponents.CONTAINER || type == DataComponents.BUNDLE_CONTENTS || type == DataComponents.CHARGED_PROJECTILES) {
 				if (!value.isJsonArray()) return false;
-				for (JsonElement nested : value.getAsJsonArray()) {
+				for (@Nullable JsonElement nested : value.getAsJsonArray()) {
 					if (type == DataComponents.CONTAINER) {
 						if (!nested.isJsonObject()) return false;
 						nested = nested.getAsJsonObject().get("item");
@@ -551,19 +571,19 @@ public final class ClientItemDisplay {
 					if (nested == null || !supportedAdditions(nested, depth + 1, budget)) return false;
 				}
 			} else if (type == DataComponents.FOOD && value.isJsonObject()) {
-				JsonElement nested = value.getAsJsonObject().get("using_converts_to");
+				@Nullable JsonElement nested = value.getAsJsonObject().get("using_converts_to");
 				if (nested != null && !supportedAdditions(nested, depth + 1, budget)) return false;
 			} else if (type == DataComponents.CUSTOM_NAME || type == DataComponents.ITEM_NAME) {
 				if (!supportedFlatText(value, depth + 1, budget)) return false;
 			} else if (type == DataComponents.LORE && value.isJsonArray()) {
 				for (JsonElement line : value.getAsJsonArray()) if (!supportedFlatText(line, depth + 1, budget)) return false;
 			} else if (type == DataComponents.WRITTEN_BOOK_CONTENT && value.isJsonObject()) {
-				JsonElement pages = value.getAsJsonObject().get("pages");
+				@Nullable JsonElement pages = value.getAsJsonObject().get("pages");
 				if (pages != null && pages.isJsonArray()) {
 					for (JsonElement page : pages.getAsJsonArray()) {
 						budget.visit(depth);
 						if (page.isJsonObject()) {
-							JsonElement raw = page.getAsJsonObject().get("raw"), filtered = page.getAsJsonObject().get("filtered");
+							@Nullable JsonElement raw = page.getAsJsonObject().get("raw"), filtered = page.getAsJsonObject().get("filtered");
 							if (raw != null && !supportedFlatText(raw, depth + 1, budget)) return false;
 							if (filtered != null && !supportedFlatText(filtered, depth + 1, budget)) return false;
 						} else if (!supportedFlatText(page, depth + 1, budget)) return false;
@@ -571,9 +591,7 @@ public final class ClientItemDisplay {
 				}
 			}
 		}
-		// Nested native holder codecs can hash their decoded stacks. Fence opaque
-		// defaults from those calls as well as from later cache/render consumers.
-		return supportedComponents(item.components(), patched, depth, budget);
+		return true;
 	}
 
 	private static boolean supportedFlatText(JsonElement value, int depth, Validation budget) {
@@ -613,12 +631,13 @@ public final class ClientItemDisplay {
 		budget.visit(depth);
 		if (value.isJsonObject()) {
 			for (var entry : value.getAsJsonObject().entrySet()) {
-				JsonElement replacement = budget.flat.get(entry.getValue());
+				@Nullable JsonElement replacement = budget.flat.get(entry.getValue());
 				if (replacement != null) entry.setValue(replacement); else replaceFlat(entry.getValue(), depth + 1, budget);
 			}
 		} else if (value.isJsonArray()) {
 			for (int i = 0; i < value.getAsJsonArray().size(); i++) {
-				JsonElement child = value.getAsJsonArray().get(i), replacement = budget.flat.get(child);
+				JsonElement child = value.getAsJsonArray().get(i);
+				@Nullable JsonElement replacement = budget.flat.get(child);
 				if (replacement != null) value.getAsJsonArray().set(i, replacement); else replaceFlat(child, depth + 1, budget);
 			}
 		}
@@ -630,41 +649,41 @@ public final class ClientItemDisplay {
 		if (value.isJsonArray()) {
 			for (JsonElement child : value.getAsJsonArray()) if (!supportedText(child, depth + 1, budget)) return false;
 		} else if (value.isJsonObject()) {
-			JsonElement path = value.getAsJsonObject().get("nbt");
+			@Nullable JsonElement path = value.getAsJsonObject().get("nbt");
 			if (path != null && path.isJsonPrimitive() && path.getAsJsonPrimitive().isString()) ClientDisplaySyntax.nbt(path.getAsString(), depth, budget);
 			for (String field : new String[] {"selector", "entity"}) {
-				JsonElement selector = value.getAsJsonObject().get(field);
+				@Nullable JsonElement selector = value.getAsJsonObject().get(field);
 				if (selector != null && selector.isJsonPrimitive() && selector.getAsJsonPrimitive().isString()) ClientDisplaySyntax.selector(selector.getAsString(), depth, budget);
 			}
-			JsonElement score = value.getAsJsonObject().get("score");
+			@Nullable JsonElement score = value.getAsJsonObject().get("score");
 			if (score != null && score.isJsonObject()) {
-				JsonElement name = score.getAsJsonObject().get("name");
+				@Nullable JsonElement name = score.getAsJsonObject().get("name");
 				if (name != null && name.isJsonPrimitive() && name.getAsJsonPrimitive().isString()) ClientDisplaySyntax.selector(name.getAsString(), depth, budget);
 			}
 			for (String field : new String[] {"extra", "with", "separator"}) {
-				JsonElement child = value.getAsJsonObject().get(field);
+				@Nullable JsonElement child = value.getAsJsonObject().get(field);
 				if (child != null && !supportedText(child, depth + 1, budget)) return false;
 			}
-			JsonElement hover = value.getAsJsonObject().get("hoverEvent");
+			@Nullable JsonElement hover = value.getAsJsonObject().get("hoverEvent");
 			if (hover != null && hover.isJsonObject()) {
-				JsonElement action = hover.getAsJsonObject().get("action"), contents = hover.getAsJsonObject().get("contents");
+				@Nullable JsonElement action = hover.getAsJsonObject().get("action"), contents = hover.getAsJsonObject().get("contents");
 				if (action != null && action.isJsonPrimitive() && action.getAsJsonPrimitive().isString()) {
 					// Native decoding can try the legacy alternative after a failed
 					// modern payload, even when both fields are present.
-					JsonElement legacy = hover.getAsJsonObject().get("value");
+					@Nullable JsonElement legacy = hover.getAsJsonObject().get("value");
 					if (legacy != null && !supportedLegacyHover(action.getAsString(), legacy, depth + 1, budget)) return false;
 					if (legacy != null && budget.legacy.containsKey(legacy)) hover.getAsJsonObject().add("value", budget.legacy.get(legacy));
 					if (contents == null) return legacy != null;
 					if (action.getAsString().equals("show_item")) {
 						if (contents.isJsonPrimitive() && contents.getAsJsonPrimitive().isString()) {
-							ResourceLocation id = ResourceLocation.tryParse(contents.getAsString());
-							Item item = id == null ? null : BuiltInRegistries.ITEM.getOptional(id).orElse(null);
-							if (item != null && !supportedComponents(item.components(), depth + 1, budget)) return false;
+							@Nullable ResourceLocation id = ResourceLocation.tryParse(contents.getAsString());
+							@Nullable Item item = id == null ? null : BuiltInRegistries.ITEM.getOptional(id).orElse(null);
+							if (item == null) return false;
 						} else if (contents.isJsonObject() && !supportedAdditions(contents, depth + 1, budget)) return false;
 					} else if (action.getAsString().equals("show_text")) {
 						if (!supportedText(contents, depth + 1, budget)) return false;
 					} else if (action.getAsString().equals("show_entity") && contents.isJsonObject()) {
-						JsonElement name = contents.getAsJsonObject().get("name");
+						@Nullable JsonElement name = contents.getAsJsonObject().get("name");
 						if (name != null && !supportedText(name, depth + 1, budget)) return false;
 					}
 				}
@@ -724,13 +743,13 @@ public final class ClientItemDisplay {
 		ClientDisplaySyntax.json(text, depth, budget);
 	}
 
-	private static boolean supportedComponent(DataComponentType<?> type) {
-		ResourceLocation id = type == null ? null : BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type);
+	private static boolean supportedComponent(@Nullable DataComponentType<?> type) {
+		@Nullable ResourceLocation id = type == null ? null : BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type);
 		return id != null && InventoryDisplayWriter.supportsComponent(id);
 	}
 
 	/** One root owns all expanded occurrences; aliases are revisited, never memoized across item hooks. */
-	static final class Validation {
+	static final class Validation implements InventoryPatches.Admission {
 		private int visits, characters;
 		private final int visitLimit, characterLimit;
 		final Map<JsonElement, JsonElement> flat = new IdentityHashMap<>(), legacy = new IdentityHashMap<>();
@@ -747,7 +766,7 @@ public final class ClientItemDisplay {
 			if (visits >= visitLimit) { validationWorkExhausted = true; throw new UnsafeDisplay(); }
 			validationVisits = ++visits;
 		}
-		boolean characters(String value) {
+		boolean characters(@Nullable String value) {
 			if (value == null || value.length() > characterLimit - characters) throw new UnsafeDisplay();
 			characters += value.length();
 			return true;
@@ -762,17 +781,17 @@ public final class ClientItemDisplay {
 		}
 		int remainingVisits() { return visitLimit - visits; }
 		void sameLanguage() { if (net.minecraft.locale.Language.getInstance() != language) throw new UnsafeDisplay(); }
+		@Override public void inspect() { visit(0); }
+		@Override public void traverse(int entries, int capacity) { cells(entries); cells(capacity); }
 	}
 	static final class UnsafeDisplay extends RuntimeException {
 		UnsafeDisplay() { super(null, null, false, false); }
 		UnsafeDisplay(Throwable cause) { super(null, cause, false, false); }
 	}
 
-	private static final Set<Class<?>> SAFE_LISTS = Set.of(ArrayList.class,
+	private static final @Unmodifiable Set<Class<?>> SAFE_LISTS = Set.of(ArrayList.class,
 		List.of().getClass(), List.of(1).getClass(), Collections.emptyList().getClass(), Collections.singletonList(1).getClass(),
 		Arrays.asList(1).getClass(), ImmutableList.of().getClass(), ImmutableList.of(1).getClass());
-	private static final Class<?> SIMPLE_COMPONENTS = DataComponentMap.builder().set(DataComponents.MAX_STACK_SIZE, 1).build().getClass();
-	private static final Class<?> EMPTY_COMPONENT_MAP = Reference2ObjectMaps.emptyMap().getClass();
 
 	/** Exact known list backings only; pay every cell before iterator construction or lazy filtering. */
 	static List<?> admittedList(List<?> list, Validation budget) {
@@ -784,70 +803,34 @@ public final class ClientItemDisplay {
 	}
 
 	private static boolean supportedSnapshot(Snapshot snapshot, int depth, Validation budget) {
-		return supportedOverlay(snapshot.item().value().components(), RAW.patch(snapshot.patch()), depth, budget);
+		return supportedPatch(snapshot.patch(), depth, budget);
 	}
 
-	static boolean supportedComponents(DataComponentMap components, int depth, Validation budget) {
-		if (components != null && components.getClass() == PatchedDataComponentMap.class) {
-			var patched = (PatchedDataComponentMap) components;
-			return supportedOverlay(RAW.prototype(patched), RAW.patch(patched), Set.of(), depth, budget);
-		}
-		return supportedComponents(components, Set.of(), depth, budget);
-	}
-
-	private static boolean supportedComponents(DataComponentMap components, Set<DataComponentType<?>> omitted, int depth, Validation budget) {
+	static boolean supportedComponents(@Nullable DataComponentMap components, int depth, Validation budget) {
 		budget.visit(depth);
-		if (components == DataComponentMap.EMPTY) return true;
-		if (components.getClass() == PatchedDataComponentMap.class) {
-			var patched = (PatchedDataComponentMap) components;
-			return supportedOverlay(RAW.prototype(patched), RAW.patch(patched), omitted, depth, budget);
-		}
-		if (components.getClass() != SIMPLE_COMPONENTS) return false;
-		// Do not create PatchedDataComponentMap.keySet's combined copy before
-		// allowance admission; this native raw map has separately bounded capacity.
-		Map<DataComponentType<?>, Object> values = RAW.simple(components);
-		admitComponentMap(values, budget);
-		for (var entry : values.entrySet()) {
-			if (!omitted.contains(entry.getKey()) && !supportedComponent(entry.getKey())) return false;
-		}
-		for (var entry : values.entrySet()) {
-			budget.visit(depth);
-			if (!omitted.contains(entry.getKey()) && !supportedValue(entry.getKey(), entry.getValue(), depth, budget)) return false;
-		}
+		visitPatch(components, budget, (type, value) -> supportedEntry(type, value, depth, budget));
 		return true;
 	}
 
-	private static boolean supportedOverlay(DataComponentMap prototype, Map<DataComponentType<?>, Optional<?>> patch, int depth, Validation budget) {
-		return supportedOverlay(prototype, patch, Set.of(), depth, budget);
-	}
-
-	private static boolean supportedOverlay(DataComponentMap prototype, Map<DataComponentType<?>, Optional<?>> patch,
-		Set<DataComponentType<?>> omitted, int depth, Validation budget) {
+	static boolean supportedPatch(@Nullable DataComponentPatch patch, int depth, Validation budget) {
 		budget.visit(depth);
-		if (prototype != DataComponentMap.EMPTY && prototype.getClass() != SIMPLE_COMPONENTS) return false;
-		admitComponentMap(patch, budget);
-		budget.cells(omitted.size());
-		Set<DataComponentType<?>> masked = Collections.newSetFromMap(new IdentityHashMap<>());
-		masked.addAll(omitted);
-		for (var entry : patch.entrySet()) {
-			budget.visit(depth);
-			masked.add(entry.getKey());
-			if (!omitted.contains(entry.getKey()) && entry.getValue().isPresent() && !supportedComponent(entry.getKey())) return false;
-		}
-		if (!supportedComponents(prototype, masked, depth, budget)) return false;
-		for (var entry : patch.entrySet()) {
-			budget.visit(depth);
-			if (!omitted.contains(entry.getKey()) && entry.getValue().isPresent()
-				&& !supportedValue(entry.getKey(), entry.getValue().get(), depth, budget)) return false;
-		}
+		visitPatch(patch, budget, (type, value) -> supportedEntry(type, value, depth, budget));
 		return true;
 	}
 
-	static void admitComponentMap(Map<?, ?> values, Validation budget) {
-		Class<?> type = values.getClass();
-		if (type != Reference2ObjectArrayMap.class && type != Reference2ObjectOpenHashMap.class && type != EMPTY_COMPONENT_MAP) throw new UnsafeDisplay();
-		budget.cells(values.size());
-		if (type == Reference2ObjectOpenHashMap.class) budget.cells(RAW.referenceMapCapacity(values));
+	private static void supportedEntry(DataComponentType<?> type, Optional<?> value, int depth, Validation budget) {
+		budget.visit(depth);
+		if (value.isPresent() && (!supportedComponent(type) || !supportedValue(type, value.get(), depth, budget))) throw new UnsafeDisplay();
+	}
+
+	static int visitPatch(@Nullable DataComponentMap components, Validation budget, BiConsumer<DataComponentType<?>, Optional<?>> visitor) {
+		try { return InventoryPatches.forEach(components, RAW, budget, visitor); }
+		catch (InventoryPatches.UnsupportedPatchException unsupported) { throw new UnsafeDisplay(); }
+	}
+
+	static int visitPatch(@Nullable DataComponentPatch patch, Validation budget, BiConsumer<DataComponentType<?>, Optional<?>> visitor) {
+		try { return InventoryPatches.forEach(patch, RAW, budget, visitor); }
+		catch (InventoryPatches.UnsupportedPatchException unsupported) { throw new UnsafeDisplay(); }
 	}
 
 	private static boolean supportedValue(DataComponentType<?> type, Object value, int depth, Validation budget) {
@@ -857,7 +840,7 @@ public final class ClientItemDisplay {
 		if (type == DataComponents.CHARGED_PROJECTILES) return supportedItems(RAW.projectiles((ChargedProjectiles) value), depth, budget);
 		if (type == DataComponents.FOOD) {
 			var nested = ((FoodProperties) value).usingConvertsTo();
-			return nested.isEmpty() || supportedComponents(nested.get().getComponents(), depth + 1, budget);
+			return nested.isEmpty() || nested.get().isEmpty() || supportedComponents(nested.get().getComponents(), depth + 1, budget);
 		}
 		if (type == DataComponents.LORE) {
 			ItemLore lore = (ItemLore) value;
@@ -886,7 +869,7 @@ public final class ClientItemDisplay {
 		return true;
 	}
 
-	private static boolean filterableString(Filterable<?> value, Validation budget) {
+	private static boolean filterableString(@Nullable Filterable<?> value, Validation budget) {
 		budget.visit(0);
 		return value != null && value.raw() instanceof String raw && budget.characters(raw)
 			&& (value.filtered().isEmpty() || value.filtered().get() instanceof String filtered && budget.characters(filtered));
@@ -895,19 +878,19 @@ public final class ClientItemDisplay {
 	private static boolean supportedItems(List<ItemStack> items, int depth, Validation budget) {
 		for (Object item : admittedList(items, budget)) {
 			budget.visit(depth);
-			if (!(item instanceof ItemStack stack) || !supportedComponents(stack.getComponents(), depth + 1, budget)) return false;
+			if (!(item instanceof ItemStack stack) || (!stack.isEmpty() && !supportedComponents(stack.getComponents(), depth + 1, budget))) return false;
 		}
 		return true;
 	}
 
 	/** Native text fields only. Unknown implementations and arguments fail before formatting callbacks. */
-	private static boolean supportedText(Component value, int depth, Validation budget) {
+	private static boolean supportedText(@Nullable Component value, int depth, Validation budget) {
 		if (!supportedTextGraph(value, depth, budget)) return false;
 		ClientDisplayText.certify(value, depth, budget);
 		return true;
 	}
 
-	private static boolean supportedTextGraph(Component value, int depth, Validation budget) {
+	private static boolean supportedTextGraph(@Nullable Component value, int depth, Validation budget) {
 		budget.visit(depth);
 		if (value == null || value.getClass() != MutableComponent.class) return false;
 		ComponentContents contents = value.getContents();
@@ -975,12 +958,12 @@ public final class ClientItemDisplay {
 
 	/** Exact native hover descriptors, not field discovery on arbitrary component values. */
 	static final class HoverStack {
-		private static final Field ITEM = nativeField(HoverEvent.ItemStackInfo.class, Holder.class);
-		private static final Field PATCH = nativeField(HoverEvent.ItemStackInfo.class, DataComponentPatch.class);
-		private static final Field STACK = nativeField(HoverEvent.ItemStackInfo.class, ItemStack.class);
-		private static final java.lang.reflect.Method VERIFY = verifier();
-		private static java.lang.reflect.Method verifier() {
-			java.lang.reflect.Method result = null;
+		private static final @Nullable Field ITEM = nativeField(HoverEvent.ItemStackInfo.class, Holder.class);
+		private static final @Nullable Field PATCH = nativeField(HoverEvent.ItemStackInfo.class, DataComponentPatch.class);
+		private static final @Nullable Field STACK = nativeField(HoverEvent.ItemStackInfo.class, ItemStack.class);
+		private static final java.lang.reflect.@Nullable Method VERIFY = verifier();
+		private static java.lang.reflect.@Nullable Method verifier() {
+			java.lang.reflect.@Nullable Method result = null;
 			for (var method : Item.class.getDeclaredMethods()) {
 				if (!java.lang.reflect.Modifier.isStatic(method.getModifiers()) && method.getReturnType() == void.class
 					&& Arrays.equals(method.getParameterTypes(), new Class<?>[] {ItemStack.class})) {
@@ -996,14 +979,14 @@ public final class ClientItemDisplay {
 				catch (ReflectiveOperationException | RuntimeException unavailable) { return false; }
 			}
 		};
-		static boolean supported(HoverEvent.ItemStackInfo info, int depth, Validation budget) {
+		static boolean supported(HoverEvent.@Nullable ItemStackInfo info, int depth, Validation budget) {
 			budget.visit(depth);
 			if (info == null || info.getClass() != HoverEvent.ItemStackInfo.class || ITEM == null || PATCH == null || STACK == null) return false;
 			try {
 				Holder<?> holder = (Holder<?>) ITEM.get(info);
 				DataComponentPatch patch = (DataComponentPatch) PATCH.get(info);
-				if (!(holder.value() instanceof Item item) || !supportedOverlay(item.components(), RAW.patch(patch), depth, budget)) return false;
-				ItemStack cached = (ItemStack) STACK.get(info);
+				if (!(holder.value() instanceof Item item) || !supportedPatch(patch, depth, budget)) return false;
+				@Nullable ItemStack cached = (ItemStack) STACK.get(info);
 				// Never call getItemStack(): its lazy construction runs item hooks
 				// and starts extra PROFILE work. Already materialized state is checked too.
 				// An unmaterialized hover is eligible only when lazy construction
@@ -1016,7 +999,7 @@ public final class ClientItemDisplay {
 			budget.visit(depth);
 			if (!supported(info, depth, budget)) throw new UnsafeDisplay();
 			try {
-				ItemStack cached = (ItemStack) STACK.get(info);
+				@Nullable ItemStack cached = (ItemStack) STACK.get(info);
 				ItemStack working;
 				if (cached == null) {
 					@SuppressWarnings("unchecked") Holder<Item> holder = (Holder<Item>) ITEM.get(info);
@@ -1037,7 +1020,7 @@ public final class ClientItemDisplay {
 				return owned;
 			} catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(unavailable); }
 		}
-		private static final Field COUNT = nativeField(HoverEvent.ItemStackInfo.class, int.class);
+		private static final @Nullable Field COUNT = nativeField(HoverEvent.ItemStackInfo.class, int.class);
 		private static int count(HoverEvent.ItemStackInfo info) throws IllegalAccessException {
 			if (COUNT == null) throw new UnsafeDisplay();
 			return COUNT.getInt(info);
@@ -1047,8 +1030,8 @@ public final class ClientItemDisplay {
 	static final class LoreView {
 		private static final ItemLore SAMPLE = new ItemLore(List.of());
 		private static final Class<?> TYPE = SAMPLE.styledLines().getClass();
-		private static final Field LIST = nativeField(TYPE, List.class);
-		private static final Field FUNCTION = nativeField(TYPE, com.google.common.base.Function.class);
+		private static final @Nullable Field LIST = nativeField(TYPE, List.class);
+		private static final @Nullable Field FUNCTION = nativeField(TYPE, com.google.common.base.Function.class);
 		static boolean matches(ItemLore lore) {
 			if (lore.styledLines().getClass() != TYPE || LIST == null || FUNCTION == null) return false;
 			try { return LIST.get(lore.styledLines()) == lore.lines() && FUNCTION.get(lore.styledLines()) == FUNCTION.get(SAMPLE.styledLines()); }
@@ -1057,9 +1040,9 @@ public final class ClientItemDisplay {
 	}
 
 	/** Fixed, class-initialization-only descriptor lookup; unavailable access rejects display. */
-	static Field nativeField(Class<?> owner, Class<?> type) {
+	static @Nullable Field nativeField(Class<?> owner, Class<?> type) {
 		try {
-			Field result = null;
+			@Nullable Field result = null;
 			for (Field field : owner.getDeclaredFields()) {
 				if (!java.lang.reflect.Modifier.isStatic(field.getModifiers()) && field.getType() == type) {
 					if (result != null || !field.trySetAccessible()) return null;
@@ -1074,32 +1057,36 @@ public final class ClientItemDisplay {
 	private static boolean safeIcon(ItemStack stack, int depth, Validation budget) {
 		budget.visit(depth);
 		if (stack.isEmpty()) return true;
-		ItemLore lore = stack.get(DataComponents.LORE);
-		if (lore != null && !lore.lines().isEmpty()) return false;
-		ItemContainerContents container = stack.get(DataComponents.CONTAINER);
-		if (container != null) {
-			boolean shulker = stack.getItem() instanceof BlockItem blockItem && blockItem.getBlock() instanceof ShulkerBoxBlock;
-			for (Object nested : admittedList(RAW.container(container), budget)) {
-				if (!(nested instanceof ItemStack child) || (!child.isEmpty() && (shulker || !safeIcon(child, depth + 1, budget)))) return false;
+		boolean[] safe = {true};
+		visitPatch(stack.getComponents(), budget, (type, value) -> {
+			budget.visit(depth);
+			if (value.isEmpty()) return;
+			Object addition = value.get();
+			if (type == DataComponents.LORE && !((ItemLore) addition).lines().isEmpty()) safe[0] = false;
+			if (type == DataComponents.CONTAINER || type == DataComponents.BUNDLE_CONTENTS || type == DataComponents.CHARGED_PROJECTILES) {
+				List<ItemStack> children = type == DataComponents.CONTAINER ? RAW.container((ItemContainerContents) addition)
+					: type == DataComponents.BUNDLE_CONTENTS ? RAW.bundle((BundleContents) addition) : RAW.projectiles((ChargedProjectiles) addition);
+				boolean shulker = type == DataComponents.CONTAINER && stack.getItem() instanceof BlockItem blockItem && blockItem.getBlock() instanceof ShulkerBoxBlock;
+				for (Object nested : admittedList(children, budget)) {
+					if (!(nested instanceof ItemStack child) || (!child.isEmpty() && (shulker || !safeIcon(child, depth + 1, budget)))) safe[0] = false;
+				}
+			} else if (type == DataComponents.FOOD) {
+				var child = ((FoodProperties) addition).usingConvertsTo();
+				if (child.isPresent() && !safeIcon(child.get(), depth + 1, budget)) safe[0] = false;
 			}
-		}
-		BundleContents bundle = stack.get(DataComponents.BUNDLE_CONTENTS);
-		if (bundle != null) for (Object nested : admittedList(RAW.bundle(bundle), budget)) if (!(nested instanceof ItemStack child) || !safeIcon(child, depth + 1, budget)) return false;
-		ChargedProjectiles projectiles = stack.get(DataComponents.CHARGED_PROJECTILES);
-		if (projectiles != null) for (Object nested : admittedList(RAW.projectiles(projectiles), budget)) if (!(nested instanceof ItemStack child) || !safeIcon(child, depth + 1, budget)) return false;
-		FoodProperties food = stack.get(DataComponents.FOOD);
-		return food == null || food.usingConvertsTo().isEmpty() || safeIcon(food.usingConvertsTo().get(), depth + 1, budget);
+		});
+		return safe[0];
 	}
 
-	private static Component fallbackName(String label) {
+	private static Component fallbackName(@Nullable String label) {
 		return label == null || label.isBlank() ? Component.empty() : Component.translatable(label);
 	}
 
-	private static Display unavailable(String label) {
+	private static Display unavailable(@Nullable String label) {
 		return new Display(ItemStack.EMPTY, fallbackName(label));
 	}
 
-	private static Display rejectSnapshot(String itemId, @Nullable String displayJson, String label) {
+	private static Display rejectSnapshot(@Nullable String itemId, @Nullable String displayJson, @Nullable String label) {
 		if (displayJson == null) return unavailable(label);
 		CacheKey key = new CacheKey(itemId, displayJson);
 		if (DECODED.remove(key) != null) retainedBytes -= chargeOf(key);
@@ -1116,7 +1103,7 @@ public final class ClientItemDisplay {
 		}
 	}
 
-	private static int utf8Length(String value) {
+	private static int utf8Length(@Nullable String value) {
 		return value == null ? 0 : value.getBytes(StandardCharsets.UTF_8).length;
 	}
 }

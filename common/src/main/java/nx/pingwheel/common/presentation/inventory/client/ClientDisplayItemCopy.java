@@ -2,12 +2,9 @@ package nx.pingwheel.common.presentation.inventory.client;
 
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
-import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
-import net.minecraft.core.component.DataComponentMap;
 import net.minecraft.core.component.DataComponentPatch;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
@@ -22,78 +19,52 @@ import net.minecraft.world.item.component.*;
 import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.UnsafeDisplay;
 import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.Validation;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryPatches;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 /** Narrow, non-codec copier for the concrete item graphs retained by name hovers. */
+@NotNullByDefault
 final class ClientDisplayItemCopy {
 
 	private static final InventoryResidentAccess RAW = InventoryResidentAccess.load();
-	private static final Class<?> SIMPLE = DataComponentMap.builder().set(DataComponents.MAX_STACK_SIZE, 1).build().getClass();
-	private static final Constructor<ChargedProjectiles> PROJECTILES = constructor(ChargedProjectiles.class, List.class);
+	private static final @Nullable Constructor<ChargedProjectiles> PROJECTILES = constructor(ChargedProjectiles.class, List.class);
 	private ClientDisplayItemCopy() {}
 
 	static ItemStack copy(ItemStack source, int depth, Validation budget) {
 		budget.visit(depth);
 		if (source.isEmpty()) return ItemStack.EMPTY;
 		if (!ClientItemDisplay.supportedComponents(source.getComponents(), depth, budget)) throw new UnsafeDisplay();
-		Map<DataComponentType<?>, Object> values = new IdentityHashMap<>();
-		collect(source.getComponents(), values, depth, budget);
-		return assemble(source.getItem(), source.getCount(), values, depth, budget);
+		DataComponentPatch.Builder patch = DataComponentPatch.builder();
+		ClientItemDisplay.visitPatch(source.getComponents(), budget, (type, addition) -> {
+			budget.visit(depth); budget.cells(1); InventoryPatches.put(patch, type, addition.map(child -> value(type, child, depth, budget)));
+		});
+		PatchedDataComponentMap components = ((PatchedDataComponentMap) source.getComponents()).copy();
+		components.restorePatch(patch.build());
+		return assemble(source.getItem(), source.getCount(), components, depth, budget);
 	}
 
 	static ItemStack copy(Item item, int count, DataComponentPatch patch, int depth, Validation budget) {
-		Map<DataComponentType<?>, Object> values = new IdentityHashMap<>();
-		collect(item.components(), values, depth, budget);
-		ClientItemDisplay.admitComponentMap(RAW.patch(patch), budget);
-		for (var entry : RAW.patch(patch).entrySet()) {
-			budget.visit(depth);
-			if (entry.getValue().isPresent()) values.put(entry.getKey(), entry.getValue().get());
-			else values.remove(entry.getKey());
-		}
-		return assemble(item, count, values, depth, budget);
+		if (!ClientItemDisplay.supportedPatch(patch, depth, budget)) throw new UnsafeDisplay();
+		DataComponentPatch.Builder owned = DataComponentPatch.builder();
+		ClientItemDisplay.visitPatch(patch, budget, (type, addition) -> {
+			budget.visit(depth); budget.cells(1); InventoryPatches.put(owned, type, addition.map(child -> value(type, child, depth, budget)));
+		});
+		PatchedDataComponentMap components = new PatchedDataComponentMap(item.components());
+		components.restorePatch(owned.build());
+		return assemble(item, count, components, depth, budget);
 	}
 
-	private static ItemStack assemble(Item item, int count, Map<DataComponentType<?>, Object> values, int depth, Validation budget) {
+	private static ItemStack assemble(Item item, int count, PatchedDataComponentMap components, int depth, Validation budget) {
 		budget.visit(depth);
 		// Deferred hovers are admitted only for the inherited no-op verifier.
 		// Materialized hovers need the same property: copying must not add profile
 		// callbacks or retain an item hook's producer-owned mutable return values.
 		if (!ClientItemDisplay.HoverStack.NO_LOAD_HOOK.get(item.getClass())) throw new UnsafeDisplay();
-		budget.cells(values.size());
-		DataComponentPatch.Builder patch = DataComponentPatch.builder();
-		for (var entry : values.entrySet()) {
-			budget.visit(depth);
-			put(patch, entry.getKey(), value(entry.getKey(), entry.getValue(), depth, budget));
-		}
 		budget.visit(depth);
-		ItemStack result = new ItemStack(item, count);
+		ItemStack result = ClientDisplayWorkingCopy.noLoadStack(item, count, components);
 		if (!ClientItemDisplay.supportedComponents(result.getComponents(), depth, budget)) throw new UnsafeDisplay();
-		// Include removals of defaults, then restore rather than normalize. A
-		// native set/fromPatch compares equal text and silently restores shared
-		// prototype components, defeating deep isolation.
-		Map<DataComponentType<?>, Object> defaults = new IdentityHashMap<>();
-		collect(item.components(), defaults, depth, budget);
-		for (DataComponentType<?> type : defaults.keySet()) if (!values.containsKey(type)) { budget.visit(depth); patch.remove(type); }
-		budget.cells(values.size() + defaults.size());
-		((PatchedDataComponentMap) result.getComponents()).restorePatch(patch.build());
 		return result;
-	}
-
-	private static void collect(DataComponentMap components, Map<DataComponentType<?>, Object> values, int depth, Validation budget) {
-		budget.visit(depth);
-		if (components == DataComponentMap.EMPTY) return;
-		if (components.getClass() == PatchedDataComponentMap.class) {
-			PatchedDataComponentMap map = (PatchedDataComponentMap) components;
-			collect(RAW.prototype(map), values, depth, budget);
-			ClientItemDisplay.admitComponentMap(RAW.patch(map), budget);
-			for (var entry : RAW.patch(map).entrySet()) {
-				budget.visit(depth);
-				if (entry.getValue().isPresent()) values.put(entry.getKey(), entry.getValue().get()); else values.remove(entry.getKey());
-			}
-		} else {
-			if (components.getClass() != SIMPLE) throw new UnsafeDisplay();
-			ClientItemDisplay.admitComponentMap(RAW.simple(components), budget);
-			for (var entry : RAW.simple(components).entrySet()) { budget.visit(depth); values.put(entry.getKey(), entry.getValue()); }
-		}
 	}
 
 	static Object value(DataComponentType<?> type, Object value, int depth, Validation budget) {
@@ -165,13 +136,11 @@ final class ClientDisplayItemCopy {
 		});
 		return new Filterable<>(raw, filtered);
 	}
-	@SuppressWarnings({"unchecked", "rawtypes"})
-	private static void put(DataComponentPatch.Builder patch, DataComponentType<?> type, Object value) { patch.set((DataComponentType) type, value); }
-	private static <T> Constructor<T> constructor(Class<T> owner, Class<?>... parameters) {
+	private static <T> @Nullable Constructor<T> constructor(Class<T> owner, Class<?>... parameters) {
 		try { Constructor<T> result = owner.getDeclaredConstructor(parameters); return result.trySetAccessible() ? result : null; }
 		catch (ReflectiveOperationException | RuntimeException unavailable) { return null; }
 	}
-	private static <T> T construct(Constructor<T> constructor, Object argument) {
+	private static <T> T construct(@Nullable Constructor<T> constructor, Object argument) {
 		if (constructor == null) throw new UnsafeDisplay();
 		try { return constructor.newInstance(argument); }
 		catch (ReflectiveOperationException unavailable) { throw new UnsafeDisplay(unavailable); }

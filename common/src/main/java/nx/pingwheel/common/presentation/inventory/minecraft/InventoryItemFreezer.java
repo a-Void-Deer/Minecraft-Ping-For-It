@@ -2,8 +2,8 @@ package nx.pingwheel.common.presentation.inventory.minecraft;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
+import java.util.function.BiConsumer;
 
 import com.google.gson.JsonElement;
 import com.mojang.datafixers.util.Pair;
@@ -22,10 +22,12 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.*;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.UnmodifiableView;
 
 /** Two-phase root transaction. Plans are ephemeral; only owned canonical/display data escape. */
+@NotNullByDefault
 final class InventoryItemFreezer {
-	private static final Class<?> SIMPLE_MAP = DataComponentMap.builder().set(DataComponents.MAX_STACK_SIZE, 1).build().getClass();
 	private final InventoryItemBudget budget;
 	private final InventoryResidentAccess raw;
 	private final InventoryItemNativeAccess nativeAccess;
@@ -68,8 +70,8 @@ final class InventoryItemFreezer {
 			// External codecs are invoked only now, once for persistent identity.
 			budget.allocate(0, 0, 2, 1);
 			nbtContext = RegistryOps.create(NbtOps.INSTANCE, context);
-			Tag effective = plan.effective(nbtContext);
-			canonical = InventoryItemCodec.canonicalTag(effective, budget);
+			Tag patch = plan.patch(nbtContext, false);
+			canonical = InventoryItemCodec.canonicalTag(patch, budget);
 		} catch (InventoryItemBudget.RootLimitException | InventoryItemCodec.IdentityUnavailableException rejected) {
 			InventoryItemDiagnostics.refusal("inventory/item-identity", itemId, rejected);
 			return aggregate(itemId, label);
@@ -104,75 +106,56 @@ final class InventoryItemFreezer {
 	private Plan plan(InventoryResidentItem input, int depth, boolean nestedCount) {
 		budget.node(depth); budget.work(32); bounds.enter(input instanceof InventoryResidentItem.Stack stack ? stack.resident() : input);
 		try {
-			Item item; DataComponentMap prototype; Map<DataComponentType<?>, Optional<?>> patch; int count = 1;
+			Item item; int count = 1;
 			if (input instanceof InventoryResidentItem.Stack stack) {
 				if (stack.resident().isEmpty()) throw new InventoryItemBudget.InvalidInputException("an empty stack carries no item identity");
 				item = stack.resident().getItem(); count = nestedCount ? stack.resident().getCount() : 1;
-				DataComponentMap components = stack.resident().getComponents();
-				InventoryComponentCertificate.exact(components, PatchedDataComponentMap.class);
-				prototype = raw.prototype((PatchedDataComponentMap) components); patch = raw.patch((PatchedDataComponentMap) components);
 			} else {
-				var variant = (InventoryResidentItem.Patch) input; item = variant.item(); prototype = raw.itemComponents(item); patch = raw.patch(variant.residentPatch());
+				item = ((InventoryResidentItem.Patch) input).item();
 			}
 			if (nestedCount && (count < 1 || count > 99)) InventoryComponentCertificate.refuse();
 			String itemId = id(item);
-			Map<DataComponentType<?>, Object> defaults;
-			if (prototype == DataComponentMap.EMPTY) defaults = Map.of();
-			else {
-				if (prototype.getClass() != SIMPLE_MAP) InventoryComponentCertificate.refuse();
-				defaults = raw.simple(prototype);
-			}
-			int defaultSize = bounds.mapPass(defaults); int patchSize = bounds.mapPass(patch);
-			// Four ArrayList shells/backings, Plan, <=n Entry and <=n Value
-			// descriptors (Entry's two references and origin flag, and Value's
-			// eight reference fields and two int fields, stay inside this fixed
-			// object/reference model).
-			long n = defaultSize + patchSize;
-			budget.allocate(36 + 8 * n, 0, 9L + 11L * defaultSize + 14L * patchSize, 9 + 2 * n);
-			// Exact capacities effective[d+p], additions[p], removals[p],
-			// detached patch entries[p]. There are no growth/trim arrays.
-			budget.work(64 + 24L * (defaultSize + patchSize));
-			var effective = new ArrayList<Entry>(defaultSize + patchSize);
-			var additions = new ArrayList<Entry>(patchSize);
-			var removals = new ArrayList<String>(patchSize);
-			var patchEntries = new ArrayList<Map.Entry<DataComponentType<?>, Optional<?>>>(patchSize);
-			if (patchSize != 0) for (var entry : patch.entrySet()) {
-				budget.work(24);
-				if (entry.getValue() == null) InventoryComponentCertificate.refuse();
-				// Detach map entry wrapper itself; resident keys/values remain local.
-				budget.allocate(0, 0, 2, 1);
-				patchEntries.add(new java.util.AbstractMap.SimpleImmutableEntry<>(entry.getKey(), entry.getValue()));
-			}
-			if (defaultSize != 0) for (var entry : defaults.entrySet()) {
-				budget.work(32);
-				DataComponentType<?> type = entry.getKey();
-				@Nullable Optional<?> override = null;
-				for (int changedIndex = 0; changedIndex < patchEntries.size(); changedIndex++) {
-					var changed = patchEntries.get(changedIndex); budget.work(8); if (changed.getKey() == type) { override = changed.getValue(); break; }
-				}
-				if (override != null) continue; // Never inspect a replaced/removed default value or codec.
-				String typeId = typeId(type);
-				if (InventoryComponentCertificate.transientType(type)) continue;
-				@Nullable Codec<?> externalCodec = externalCodec(type);
-				budget.work(256);
-				if (!InventoryComponentCertificate.nativeType(type) && externalCodec == null) continue;
-				effective.add(new Entry(typeId, value(type, entry.getValue(), depth + 1, externalCodec), true));
-			}
-			for (int index = 0; index < patchEntries.size(); index++) { var entry = patchEntries.get(index);
-				budget.work(32);
-				DataComponentType<?> type = entry.getKey(); String typeId = typeId(type);
-				if (InventoryComponentCertificate.transientType(type)) continue;
-				@Nullable Codec<?> externalCodec = externalCodec(type);
-				budget.work(256);
-				if (!InventoryComponentCertificate.nativeType(type) && externalCodec == null) continue;
-				Optional<?> optional = entry.getValue(); if (optional == null) InventoryComponentCertificate.refuse();
-				if (optional.isEmpty()) removals.add(typeId);
-				else { var admitted = new Entry(typeId, value(type, optional.orElseThrow(), depth + 1, externalCodec), false); effective.add(admitted); additions.add(admitted); }
-			}
-			return new Plan(itemId, count, effective, additions, removals, certificates);
+			budget.allocate(8, 0, 4, 1);
+			var collector = new PatchPlan(depth);
+			boolean patchPresent = false;
+			try {
+				if (input instanceof InventoryResidentItem.Stack stack)
+					patchPresent = InventoryPatches.forEach(stack.resident().getComponents(), raw, collector, collector) != 0;
+				else patchPresent = InventoryPatches.forEach(((InventoryResidentItem.Patch) input).residentPatch(), raw, collector, collector) != 0;
+			} catch (InventoryPatches.UnsupportedPatchException unsupported) { InventoryComponentCertificate.refuse(); }
+			return new Plan(itemId, count, patchPresent, collector.additions(), collector.removals(), certificates);
 		} finally { bounds.leave(); }
 	}
-	static boolean simpleMap(@Nullable DataComponentMap map) { return map != null && map.getClass() == SIMPLE_MAP; }
+
+	@NotNullByDefault
+	private final class PatchPlan implements InventoryPatches.Admission, BiConsumer<DataComponentType<?>, Optional<?>> {
+		private final int depth;
+		private @Nullable ArrayList<Entry> additions;
+		private @Nullable ArrayList<String> removals;
+		private PatchPlan(int depth) { this.depth = depth; }
+		@Override public void inspect() {
+			budget.work(256 + InventoryExternalFields.READ_WORK);
+			budget.allocate(4, 0, 5, 1); // Fixed unsupported-shape exception, no trace.
+		}
+		@Override public void traverse(int size, int capacity) {
+			bounds.patchPass(size, capacity);
+			// Two exact-capacity lists, Plan (including its one-byte raw-patch
+			// presence flag) and at most one Entry/Value per cell.
+			budget.allocate(21 + 8L * size, 0, 7L + 12L * size, 5L + 2L * size);
+			additions = new ArrayList<>(size); removals = new ArrayList<>(size);
+		}
+		@Override public void accept(DataComponentType<?> type, Optional<?> optional) {
+			budget.work(288);
+			String typeId = typeId(type); // Registration precedes any external descriptor getter.
+			if (InventoryComponentCertificate.transientType(type)) return;
+			@Nullable Codec<?> externalCodec = externalCodec(type);
+			if (!InventoryComponentCertificate.nativeType(type) && externalCodec == null) return;
+			if (optional.isEmpty()) removals().add(typeId);
+			else additions().add(new Entry(typeId, value(type, optional.orElseThrow(), depth + 1, externalCodec)));
+		}
+		private ArrayList<Entry> additions() { return java.util.Objects.requireNonNull(additions); }
+		private ArrayList<String> removals() { return java.util.Objects.requireNonNull(removals); }
+	}
 	static void initialize() {
 		// Fixed class identities are process initialization, never input work.
 		InventoryComponentBounds.initialize(); InventoryRegistryContext.initialize();
@@ -273,36 +256,27 @@ final class InventoryItemFreezer {
 		return InventoryItemBudget.add(canonical, 512L + 2L * (id.length() + label.length() + (json == null ? 0 : json.length())));
 	}
 
-	private record Entry(String id, Value value, boolean fromPrototype) {}
-	private record Slot(int slot, Plan item) {}
-	private record FoodEffect(MobEffectInstance resident, float probability) {}
+	@NotNullByDefault private record Entry(String id, Value value) {}
+	@NotNullByDefault private record Slot(int slot, Plan item) {}
+	@NotNullByDefault private record FoodEffect(MobEffectInstance resident, float probability) {}
 
-	private record Plan(String id, int count, List<Entry> effective, List<Entry> additions,
-		List<String> removals, InventoryComponentCertificate certificate) {
-		<T> T effective(DynamicOps<T> ops) {
-			certificate.beginMap(false);
-			for (int index = 0; index < effective.size(); index++) certificate.mapKey(effective.get(index).id);
-			certificate.endMap();
-			return ops.createMap(effective.stream().map(entry -> Pair.of(ops.createString(entry.id), entry.value.encode(ops, false))));
-		}
-		<T> T saved(DynamicOps<T> ops, boolean display, boolean countIncluded) {
+	@NotNullByDefault
+	private record Plan(String id, int count, boolean patchPresent, @UnmodifiableView List<Entry> additions,
+		@UnmodifiableView List<String> removals, InventoryComponentCertificate certificate) {
+		<T> T patch(DynamicOps<T> ops, boolean display) {
 			// Producer ArrayLists/Pairs/streams and both native owned map outputs;
 			// max metadata key width is the admitted component resource name+!.
 			// Removal concatenations are separately admitted before construction.
 			certificate.admitRemovalNames(removals, display);
-			List<Entry> selected = display ? effective : additions;
+			@UnmodifiableView List<Entry> selected = additions;
 			if (display) for (int index = 0; index < selected.size(); index++) { Entry entry = selected.get(index);
 				certificate.planVisit();
-				// Unknown display values, and defaults that need a sanitized nested
-				// projection, are sent explicitly; an untouched known default is
-				// inherited from the client prototype instead. Provenance is already
-				// the native patch's normalization, so no value comparison runs here.
-				if (displayEmitted(entry) && entry.value.external()) certificate.admitRemovalName(entry.id, true);
+				if (entry.value.external()) certificate.admitRemovalName(entry.id, true);
 			}
 			// reset by admitRemovalNames: restart the allocation-free key schedule
 			certificate.beginMap(display);
 			for (int index = 0; index < selected.size(); index++) { Entry entry = selected.get(index);
-				if (display) { certificate.planVisit(); if (!displayEmitted(entry)) continue; }
+				if (display) certificate.planVisit();
 				if (display && InventoryDisplayWriter.forcedSuppression(entry.id, id)) continue;
 				certificate.mapKey(display && entry.value.external() ? "!" + entry.id : entry.id);
 			}
@@ -312,24 +286,17 @@ final class InventoryItemFreezer {
 			}
 			if (display) { certificate.mapKey("!minecraft:lore"); if (InventoryDisplayWriter.shulker(id)) certificate.mapKey("!minecraft:container"); }
 			certificate.endMap();
-			certificate.admitMap(countIncluded ? 3 : 2, 17, 10, display);
-			certificate.admitScalars(countIncluded ? 1 : 0, 0, 0, 1, display);
 			int suppressed = 0;
 			if (display) for (int index = 0; index < selected.size(); index++) {
 				Entry entry = selected.get(index); certificate.planVisit();
-				if (!displayEmitted(entry) || InventoryDisplayWriter.forcedSuppression(entry.id, id)) continue;
+				if (InventoryDisplayWriter.forcedSuppression(entry.id, id)) continue;
 				if (entry.value.external()) suppressed++;
 			}
 			certificate.admitEmptyMaps(removals.size() + suppressed + (display ? 2 : 0), display);
-			var fields = new ArrayList<Pair<T, T>>(); fields.add(Pair.of(ops.createString("id"), ops.createString(id)));
-			if (countIncluded) fields.add(Pair.of(ops.createString("count"), ops.createInt(count)));
 			var patch = new ArrayList<Pair<T, T>>();
-			// Display sends only positive display entries plus explicit removals;
-			// untouched prototype defaults stay omitted so the client inherits its
-			// local prototype. Nested item contents are still emitted recursively
-			// whenever their sanitized form must replace an unsafe inherited default.
+			// Both identity and display read only the actual explicit patch.
 			for (int index = 0; index < selected.size(); index++) { Entry entry = selected.get(index);
-				if (display) { certificate.planVisit(); if (!displayEmitted(entry)) continue; }
+				if (display) certificate.planVisit();
 				if (display && InventoryDisplayWriter.forcedSuppression(entry.id, id)) continue;
 				if (display && entry.value.external()) patch.add(Pair.of(ops.createString("!" + entry.id), ops.emptyMap()));
 				else patch.add(Pair.of(ops.createString(entry.id), entry.value.encode(ops, display)));
@@ -343,28 +310,26 @@ final class InventoryItemFreezer {
 				patch.add(Pair.of(ops.createString("!minecraft:lore"), ops.emptyMap()));
 				if (InventoryDisplayWriter.shulker(id)) patch.add(Pair.of(ops.createString("!minecraft:container"), ops.emptyMap()));
 			}
-			if (!patch.isEmpty()) fields.add(Pair.of(ops.createString("components"), ops.createMap(patch.stream())));
-			return ops.createMap(fields.stream());
+			return ops.createMap(patch.stream());
 		}
 
-		private static boolean displayEmitted(Entry entry) {
-			return entry.value.external() || !entry.fromPrototype || entry.value.displayOverrideRequired();
+		<T> T saved(DynamicOps<T> ops, boolean display, boolean countIncluded) {
+			certificate.admitMap(countIncluded ? 3 : 2, 17, 10, display);
+			certificate.admitScalars(countIncluded ? 1 : 0, 0, 0, 1, display);
+			var fields = new ArrayList<Pair<T, T>>(); fields.add(Pair.of(ops.createString("id"), ops.createString(id)));
+			if (countIncluded) fields.add(Pair.of(ops.createString("count"), ops.createInt(count)));
+			// Native saved-item codecs test the raw patch before its codec filters
+			// transient entries; a transient-only patch still emits components:{}.
+			if (display || patchPresent) fields.add(Pair.of(ops.createString("components"), patch(ops, display)));
+			return ops.createMap(fields.stream());
 		}
 	}
 
+	@NotNullByDefault
 	private record Value(DataComponentType<?> type, @Nullable Object resident, @Nullable Codec<?> codec,
-		@Nullable List<Slot> nested, @Nullable Plan conversion, @Nullable List<FoodEffect> effects, InventoryComponentCertificate certificate,
+		@Nullable @UnmodifiableView List<Slot> nested, @Nullable Plan conversion, @Nullable @UnmodifiableView List<FoodEffect> effects, InventoryComponentCertificate certificate,
 		int firstEffect, int afterEffect, InventoryComponentCertificate.@Nullable NativePasses passes) {
 		boolean external() { return resident instanceof InventoryExternalComponent; }
-		/**
-		 * A prototype default may be inherited only when no nested display data
-		 * needs the writer's recursive Lore/shulker/unknown suppression. An unknown
-		 * value and a non-empty contained-item graph are therefore explicit
-		 * overrides; an empty graph or conversion-free food remains inheritable.
-		 */
-		boolean displayOverrideRequired() {
-			return external() || (nested != null && !nested.isEmpty()) || conversion != null;
-		}
 		@SuppressWarnings("unchecked")
 		<T> T encode(DynamicOps<T> ops, boolean display) {
 			if (resident instanceof InventoryExternalComponent external) {

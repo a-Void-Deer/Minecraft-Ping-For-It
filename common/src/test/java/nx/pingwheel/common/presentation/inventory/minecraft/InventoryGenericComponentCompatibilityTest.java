@@ -66,8 +66,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * Generic registered-persistent-component compatibility through the public
  * freeze entry point.
  *
- * <p>The expected identity is always the full effective component map encoded
- * by the native persistent map codec and then passed through the established
+ * <p>The expected identity is the actual persistent patch encoded
+ * by the native persistent patch codec and then passed through the established
  * canonical-tag oracle. The tests do not call the external-component helper,
  * registry-audit internals, or the owned-tag copier directly.
  *
@@ -298,7 +298,7 @@ class InventoryGenericComponentCompatibilityTest {
 		assertFalse(frozen.display().displayJson().contains("424242"));
 	}
 
-	@Test void prototypeDefaultAndExplicitEqualValueHaveSameExactIdentity() {
+	@Test void prototypeDefaultAndStillExplicitEqualValueHaveDistinctPatchIdentity() {
 		var prototype = DataComponentMap.builder().addAll(Items.STONE.components())
 			.set(guardedComponent, GUARDED_SAFE).set(cachedInt, 7).build();
 		var raw = prototypeRaw(prototype);
@@ -307,9 +307,9 @@ class InventoryGenericComponentCompatibilityTest {
 			.set(guardedComponent, GUARDED_SAFE).set(cachedInt, 7).build();
 		var explicit = freezePatch(explicitPatch, raw);
 
-		assertExact(implicit, PatchedDataComponentMap.fromPatch(prototype, DataComponentPatch.EMPTY));
-		assertExact(explicit, PatchedDataComponentMap.fromPatch(prototype, explicitPatch));
-		assertArrayEquals(implicit.canonicalForCatalog(), explicit.canonicalForCatalog());
+		assertExact(implicit, DataComponentPatch.EMPTY);
+		assertExact(explicit, explicitPatch);
+		assertFalse(Arrays.equals(implicit.canonicalForCatalog(), explicit.canonicalForCatalog()));
 		assertEquals(0, GUARDED_TRAP_CALLS.get());
 	}
 
@@ -321,13 +321,13 @@ class InventoryGenericComponentCompatibilityTest {
 		GUARDED_TRAP_CALLS.set(0);
 		var overridePatch = DataComponentPatch.builder().set(guardedComponent, GUARDED_SAFE).build();
 		var overridden = freezePatch(overridePatch, raw);
-		assertExact(overridden, PatchedDataComponentMap.fromPatch(prototype, overridePatch));
+		assertExact(overridden, overridePatch);
 		assertEquals(0, GUARDED_TRAP_CALLS.get());
 
 		GUARDED_TRAP_CALLS.set(0);
 		var removalPatch = DataComponentPatch.builder().remove(guardedComponent).build();
 		var removed = freezePatch(removalPatch, raw);
-		assertExact(removed, PatchedDataComponentMap.fromPatch(prototype, removalPatch));
+		assertExact(removed, removalPatch);
 		assertEquals(0, GUARDED_TRAP_CALLS.get());
 	}
 
@@ -339,6 +339,10 @@ class InventoryGenericComponentCompatibilityTest {
 		var frozen = freeze(stack);
 		assertExact(frozen, stack.getComponents());
 		assertEquals(freeze(new ItemStack(Items.STONE)).display().displayJson(), frozen.display().displayJson());
+		var removal = DataComponentPatch.builder().remove(transientComponent).build();
+		var removed = freezePatch(removal, new InventoryResidentAccessFields());
+		assertExact(removed, removal);
+		assertArrayEquals(frozen.canonicalForCatalog(), removed.canonicalForCatalog(), "transient removals are excluded too");
 	}
 
 	@Test void unregisteredPersistentComponentNeverInvokesItsCodec() {
@@ -520,18 +524,16 @@ class InventoryGenericComponentCompatibilityTest {
 		assertTrue(frozen.display().aggregateRequired());
 	}
 
-	@Test void defaultUnknownComponentKeepsExactIdentityButIsDisplaySuppressed() {
+	@Test void defaultUnknownComponentIsNeitherReadEncodedNorSuppressedByPatchProjection() {
 		var prototype = DataComponentMap.builder().addAll(Items.STONE.components())
 			.set(cachedInt, 810004).build();
-		var raw = prototypeRaw(prototype);
-
 		CACHED_INT_CALLS.set(0);
-		var frozen = freezePatch(DataComponentPatch.EMPTY, raw);
-		assertTrue(CACHED_INT_CALLS.get() > 0, "complete native identity encodes the registered default");
-		assertExact(frozen, prototype);
+		var frozen = freezeDefaults(Items.STONE, prototype);
+		assertEquals(0, CACHED_INT_CALLS.get(), "an unmodified default never enters the patch plan");
+		assertExact(frozen, DataComponentPatch.EMPTY);
 
 		var components = displayComponents(frozen.display());
-		assertTrue(components.has("!pingforit_test:cached_int"), "a default unknown component stays explicitly suppressed");
+		assertFalse(components.has("!pingforit_test:cached_int"), "patch projection does not certify or suppress defaults");
 		assertFalse(components.has("pingforit_test:cached_int"));
 		assertFalse(frozen.display().displayJson().contains("810004"));
 	}
@@ -546,8 +548,8 @@ class InventoryGenericComponentCompatibilityTest {
 				Optional.of(new java.util.UUID(1, 2)), properties))
 			.build();
 
-		var frozen = freezePatch(DataComponentPatch.EMPTY, prototypeRaw(prototype));
-		assertExact(frozen, prototype);
+		var frozen = freezeDefaults(Items.STONE, prototype);
+		assertExact(frozen, DataComponentPatch.EMPTY);
 		var components = displayComponents(frozen.display());
 		for (String key : List.of("minecraft:custom_name", "minecraft:custom_data", "minecraft:profile")) {
 			assertFalse(components.has(key), () -> "unmodified mutable default must inherit locally: " + key);
@@ -557,7 +559,7 @@ class InventoryGenericComponentCompatibilityTest {
 		assertTrue(components.has("!minecraft:lore"));
 	}
 
-	@Test void defaultNestedItemStateCarriesSanitizedSparseOverrides() {
+	@Test void explicitNestedItemStateCarriesSanitizedSparsePatches() {
 		var shulkerPrototype = DataComponentMap.builder().addAll(Items.BLUE_SHULKER_BOX.components())
 			.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(List.of(new ItemStack(Items.DIAMOND, 4))))
 			.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("default secret"))))
@@ -570,8 +572,12 @@ class InventoryGenericComponentCompatibilityTest {
 			DataComponentMap.builder().addAll(Items.DIAMOND.components()).set(cachedInt, 424242).build());
 
 		var shulker = new ItemStack(Items.BLUE_SHULKER_BOX);
+		((PatchedDataComponentMap) shulker.getComponents()).restorePatch(DataComponentPatch.builder()
+			.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(List.of(new ItemStack(Items.DIAMOND, 4))))
+			.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("default secret")))).build());
 		var sword = new ItemStack(Items.DIAMOND_SWORD);
 		var unknown = new ItemStack(Items.DIAMOND);
+		unknown.set(cachedInt, 424242);
 		var nested = List.of(shulker, sword, unknown);
 
 		assertSanitizedNested(Items.CHEST, DataComponents.CONTAINER,
@@ -584,17 +590,38 @@ class InventoryGenericComponentCompatibilityTest {
 			new FoodProperties(4, 0.3F, false, 1.6F, Optional.of(shulker), List.of()), overrides);
 	}
 
+	@Test void nonemptyNestedDefaultsAreNotExpandedIntoDisplayOverrides() {
+		var child = new ItemStack(Items.BLUE_SHULKER_BOX);
+		child.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(List.of(new ItemStack(Items.DIAMOND, 4))));
+		child.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("default secret"))));
+		assertInheritedNestedDefault(Items.CHEST, DataComponents.CONTAINER, ItemContainerContents.fromItems(List.of(child)));
+		assertInheritedNestedDefault(Items.BUNDLE, DataComponents.BUNDLE_CONTENTS, new BundleContents(List.of(child)));
+		assertInheritedNestedDefault(Items.CROSSBOW, DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.of(child));
+		assertInheritedNestedDefault(Items.APPLE, DataComponents.FOOD,
+			new FoodProperties(4, 0.3F, false, 1.6F, Optional.of(child), List.of()));
+	}
+
+	private static <T> void assertInheritedNestedDefault(Item item, DataComponentType<T> type, T value) {
+		var prototype = DataComponentMap.builder().addAll(item.components()).set(type, value).build();
+		var frozen = freezeDefaults(item, prototype); assertExact(frozen, DataComponentPatch.EMPTY);
+		String key = BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type).toString();
+		var components = displayComponents(frozen.display());
+		assertFalse(components.has(key)); assertFalse(components.has("!" + key));
+		assertFalse(frozen.display().displayJson().contains("default secret"));
+		assertFalse(frozen.display().displayJson().contains("minecraft:blue_shulker_box"));
+	}
+
 	@Test void emptyDefaultCollectionsAndFoodWithoutConversionStayInherited() {
 		var emptyContainerPrototype = DataComponentMap.builder().addAll(Items.CHEST.components())
 			.set(DataComponents.CONTAINER, ItemContainerContents.EMPTY).build();
-		var chest = freezePatch(Items.CHEST, DataComponentPatch.EMPTY, prototypeRaw(emptyContainerPrototype));
+		var chest = freezeDefaults(Items.CHEST, emptyContainerPrototype);
 		var chestComponents = displayComponents(chest.display());
 		assertFalse(chestComponents.has("minecraft:container"));
 		assertFalse(chestComponents.has("!minecraft:container"));
 
 		var emptyBundlePrototype = DataComponentMap.builder().addAll(Items.BUNDLE.components())
 			.set(DataComponents.BUNDLE_CONTENTS, BundleContents.EMPTY).build();
-		var bundle = freezePatch(Items.BUNDLE, DataComponentPatch.EMPTY, prototypeRaw(emptyBundlePrototype));
+		var bundle = freezeDefaults(Items.BUNDLE, emptyBundlePrototype);
 		var bundleComponents = displayComponents(bundle.display());
 		assertFalse(bundleComponents.has("minecraft:bundle_contents"));
 		assertFalse(bundleComponents.has("!minecraft:bundle_contents"));
@@ -602,7 +629,7 @@ class InventoryGenericComponentCompatibilityTest {
 		var plainFood = new FoodProperties(4, 0.3F, false, 1.6F, Optional.empty(), List.of());
 		var applePrototype = DataComponentMap.builder().addAll(Items.APPLE.components())
 			.set(DataComponents.FOOD, plainFood).build();
-		var apple = freezePatch(Items.APPLE, DataComponentPatch.EMPTY, prototypeRaw(applePrototype));
+		var apple = freezeDefaults(Items.APPLE, applePrototype);
 		var appleComponents = displayComponents(apple.display());
 		assertFalse(appleComponents.has("minecraft:food"));
 		assertFalse(appleComponents.has("!minecraft:food"));
@@ -610,14 +637,14 @@ class InventoryGenericComponentCompatibilityTest {
 
 	private static <T> void assertSanitizedNested(Item outerItem, DataComponentType<T> type, T value,
 		Map<Item, DataComponentMap> nestedOverrides) {
-		var outerPrototype = DataComponentMap.builder().addAll(outerItem.components()).set(type, value).build();
 		var overrides = new java.util.HashMap<>(nestedOverrides);
-		overrides.put(outerItem, outerPrototype);
-		var frozen = freezePatch(outerItem, DataComponentPatch.EMPTY, prototypeOverrides(overrides));
+		var patch = DataComponentPatch.builder().set(type, value).build();
+		var frozen = freezePatch(outerItem, patch, prototypeOverrides(overrides));
+		assertExact(frozen, patch);
 
 		var components = displayComponents(frozen.display());
 		var key = BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type).toString();
-		assertTrue(components.has(key), () -> "a default requiring sanitization carries an override: " + key);
+		assertTrue(components.has(key), () -> "an explicit nested patch remains represented: " + key);
 		assertFalse(frozen.display().displayJson().contains("default secret"));
 
 		var display = JsonParser.parseString(frozen.display().displayJson()).getAsJsonObject();
@@ -704,24 +731,25 @@ class InventoryGenericComponentCompatibilityTest {
 
 	private static InventoryResidentAccess prototypeRaw(DataComponentMap prototype) {
 		return new InventoryResidentAccessFields() {
-			@Override public DataComponentMap itemComponents(Item item) { return prototype; }
+			@Override public DataComponentMap itemComponents(Item item) { throw new AssertionError("Ping inspected item defaults"); }
+			@Override public DataComponentMap prototype(PatchedDataComponentMap map) { throw new AssertionError("Ping inspected prototype"); }
 		};
 	}
 
-	/** Item prototypes are server defaults for Patch inputs and resident defaults for nested stacks. */
+	private static InventoryDetachedItem freezeDefaults(Item item, DataComponentMap prototype) {
+		ItemStack stack = new ItemStack(item);
+		try {
+			Field components = ItemStack.class.getDeclaredField("components"); components.setAccessible(true);
+			components.set(stack, new PatchedDataComponentMap(prototype));
+		} catch (ReflectiveOperationException failure) { throw new AssertionError("native stack component fixture", failure); }
+		return freeze(new InventoryResidentItem.Stack(stack), registries, DISPLAY, InventoryItemBudget.root(DISPLAY), prototypeRaw(prototype));
+	}
+
+	/** Ping must never consult defaults, including on recursively planned items. */
 	private static InventoryResidentAccess prototypeOverrides(Map<Item, DataComponentMap> overrides) {
-		var actual = new InventoryResidentAccessFields();
 		return new InventoryResidentAccessFields() {
-			@Override public DataComponentMap itemComponents(Item item) {
-				return overrides.getOrDefault(item, actual.itemComponents(item));
-			}
-			@Override public DataComponentMap prototype(PatchedDataComponentMap map) {
-				DataComponentMap original = actual.prototype(map);
-				for (var entry : overrides.entrySet()) {
-					if (entry.getKey().components() == original) return entry.getValue();
-				}
-				return original;
-			}
+			@Override public DataComponentMap itemComponents(Item item) { throw new AssertionError("Ping inspected nested item defaults"); }
+			@Override public DataComponentMap prototype(PatchedDataComponentMap map) { throw new AssertionError("Ping inspected nested prototype"); }
 		};
 	}
 
@@ -730,18 +758,19 @@ class InventoryGenericComponentCompatibilityTest {
 	}
 
 	private static Tag assertExact(InventoryDetachedItem actual, DataComponentMap effective, HolderLookup.Provider provider) {
-		assertEquals(InventoryIdentityMode.EXACT, actual.identityMode());
-		assertFalse(actual.display().aggregateRequired());
-		Tag expected = nativePersistentMap(effective, provider);
-		assertArrayEquals(InventoryItemCodec.canonicalTag(expected), actual.canonicalForCatalog());
-		return expected;
+		return assertExact(actual, ((PatchedDataComponentMap) effective).asPatch(), provider);
 	}
 
-	private static Tag nativePersistentMap(DataComponentMap map, HolderLookup.Provider provider) {
-		DataComponentMap persistent = map.filter(type -> !type.isTransient());
-		return DataComponentMap.makeCodec(DataComponentType.PERSISTENT_CODEC)
-			.encodeStart(provider.createSerializationContext(NbtOps.INSTANCE), persistent)
-			.result().orElseThrow();
+	private static Tag assertExact(InventoryDetachedItem actual, DataComponentPatch patch) {
+		return assertExact(actual, patch, registries);
+	}
+
+	private static Tag assertExact(InventoryDetachedItem actual, DataComponentPatch patch, HolderLookup.Provider provider) {
+		assertEquals(InventoryIdentityMode.EXACT, actual.identityMode());
+		assertFalse(actual.display().aggregateRequired());
+		Tag expected = DataComponentPatch.CODEC.encodeStart(provider.createSerializationContext(NbtOps.INSTANCE), patch).result().orElseThrow();
+		assertArrayEquals(InventoryItemCodec.canonicalTag(expected), actual.canonicalForCatalog());
+		return expected;
 	}
 
 	private static JsonObject displayComponents(InventoryItemCodec.Display display) {

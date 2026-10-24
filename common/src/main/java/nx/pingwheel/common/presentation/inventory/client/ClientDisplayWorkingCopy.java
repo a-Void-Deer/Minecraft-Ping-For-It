@@ -40,90 +40,94 @@ import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.Unsaf
 import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.Validation;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryNativeTraversal;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryPatches;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 /** Per-consumer native mutable values, distinct from the stricter lazy-hover copier. */
+@NotNullByDefault
 final class ClientDisplayWorkingCopy {
 
 	private static final InventoryResidentAccess RAW = InventoryResidentAccess.load();
-	private static final Class<?> SIMPLE = DataComponentMap.builder().set(DataComponents.MAX_STACK_SIZE, 1).build().getClass();
-	private static final Constructor<ItemStack> EMPTY_STACK = constructor(ItemStack.class, Void.class);
-	private static final Field STACK_ITEM = ClientItemDisplay.nativeField(ItemStack.class, Item.class);
-	private static final Field STACK_COMPONENTS = ClientItemDisplay.nativeField(ItemStack.class, PatchedDataComponentMap.class);
-	private static final Constructor<ItemContainerContents> CONTAINER = constructor(ItemContainerContents.class, int.class);
-	private static final Field CONTAINER_HASH = ClientItemDisplay.nativeField(ItemContainerContents.class, int.class);
-	private static final Constructor<BundleContents> BUNDLE = constructor(BundleContents.class, List.class, org.apache.commons.lang3.math.Fraction.class);
-	private static final Constructor<ChargedProjectiles> PROJECTILES = constructor(ChargedProjectiles.class, List.class);
-	private static final Constructor<ItemEnchantments> ENCHANTMENTS = constructor(ItemEnchantments.class, it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap.class, boolean.class);
-	private static final Constructor<CustomData> CUSTOM_DATA = constructor(CustomData.class, CompoundTag.class);
-	private static final Constructor<AdventureModePredicate> ADVENTURE = constructor(AdventureModePredicate.class, List.class, boolean.class, List.class);
-	private static final Field ADVENTURE_TOOLTIP = tooltipField();
+	private static final @Nullable Constructor<ItemStack> EMPTY_STACK = constructor(ItemStack.class, Void.class);
+	private static final @Nullable Field STACK_ITEM = ClientItemDisplay.nativeField(ItemStack.class, Item.class);
+	private static final @Nullable Field STACK_COMPONENTS = ClientItemDisplay.nativeField(ItemStack.class, PatchedDataComponentMap.class);
+	private static final @Nullable Constructor<ItemContainerContents> CONTAINER = constructor(ItemContainerContents.class, int.class);
+	private static final @Nullable Field CONTAINER_HASH = ClientItemDisplay.nativeField(ItemContainerContents.class, int.class);
+	private static final @Nullable Constructor<BundleContents> BUNDLE = constructor(BundleContents.class, List.class, org.apache.commons.lang3.math.Fraction.class);
+	private static final @Nullable Constructor<ChargedProjectiles> PROJECTILES = constructor(ChargedProjectiles.class, List.class);
+	private static final @Nullable Constructor<ItemEnchantments> ENCHANTMENTS = constructor(ItemEnchantments.class, it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap.class, boolean.class);
+	private static final @Nullable Constructor<CustomData> CUSTOM_DATA = constructor(CustomData.class, CompoundTag.class);
+	private static final @Nullable Constructor<AdventureModePredicate> ADVENTURE = constructor(AdventureModePredicate.class, List.class, boolean.class, List.class);
+	private static final @Nullable Field ADVENTURE_TOOLTIP = tooltipField();
 	private static final Class<?> PROFILE_MAP = com.google.common.collect.LinkedHashMultimap.create().getClass();
-	private static final Field HIDDEN_EFFECT = ClientItemDisplay.nativeField(MobEffectInstance.class, MobEffectInstance.class);
+	private static final @Nullable Field HIDDEN_EFFECT = ClientItemDisplay.nativeField(MobEffectInstance.class, MobEffectInstance.class);
 
 	private ClientDisplayWorkingCopy() {}
 
-	static DataComponentPatch overlay(DataComponentMap prototype, DataComponentPatch patch, int depth, Validation budget) {
-		Map<DataComponentType<?>, Object> defaults = new IdentityHashMap<>(), effective = new IdentityHashMap<>();
-		collect(prototype, defaults, depth, budget);
-		budget.cells(defaults.size()); effective.putAll(defaults);
-		// When restoring onto an existing native map, keep removals introduced by
-		// its hook as well as removals in the transmitted patch. Otherwise clearing
-		// that map would silently resurrect a default from its root prototype.
-		DataComponentMap root = prototype;
-		while (root.getClass() == PatchedDataComponentMap.class) { budget.visit(++depth); root = RAW.prototype((PatchedDataComponentMap) root); }
-		if (prototype != root) collect(root, defaults, depth, budget);
-		ClientItemDisplay.admitComponentMap(RAW.patch(patch), budget);
-		for (var entry : RAW.patch(patch).entrySet()) {
-			budget.visit(depth);
-			if (entry.getValue().isPresent()) effective.put(entry.getKey(), entry.getValue().get()); else effective.remove(entry.getKey());
-		}
-		budget.cells(effective.size() + defaults.size());
+	/** Constructor additions/removals survive unless the transmitted patch replaces them. */
+	static DataComponentPatch overlay(DataComponentMap constructorComponents, DataComponentPatch patch, int depth, Validation budget) {
+		if (constructorComponents != DataComponentMap.EMPTY
+			&& !ClientItemDisplay.supportedComponents(constructorComponents, depth, budget)) throw new UnsafeDisplay();
+		DataComponentPatch.Builder merged = DataComponentPatch.builder();
+		if (constructorComponents != DataComponentMap.EMPTY) ClientItemDisplay.visitPatch(constructorComponents, budget, (type, value) -> {
+			budget.visit(depth); budget.cells(1); InventoryPatches.put(merged, type, value);
+		});
+		ClientItemDisplay.visitPatch(patch, budget, (type, value) -> {
+			budget.visit(depth); budget.cells(1); InventoryPatches.put(merged, type, value);
+		});
+		return copy(merged.build(), depth, budget);
+	}
+
+	static DataComponentPatch copy(DataComponentPatch patch, int depth, Validation budget) {
+		if (!ClientItemDisplay.supportedPatch(patch, depth, budget)) throw new UnsafeDisplay();
 		DataComponentPatch.Builder owned = DataComponentPatch.builder();
-		for (var entry : effective.entrySet()) { budget.visit(depth); put(owned, entry.getKey(), value(entry.getKey(), entry.getValue(), depth, budget)); }
-		for (var type : defaults.keySet()) if (!effective.containsKey(type)) { budget.visit(depth); owned.remove(type); }
-		return owned.build(); // type-identity keys only; no value hash/equals.
+		ClientItemDisplay.visitPatch(patch, budget, (type, addition) -> {
+			budget.visit(depth);
+			budget.cells(1);
+			InventoryPatches.put(owned, type, addition.map(child -> value(type, child, depth, budget)));
+		});
+		return owned.build();
+	}
+
+	private static DataComponentPatch copy(DataComponentMap components, int depth, Validation budget) {
+		if (!ClientItemDisplay.supportedComponents(components, depth, budget)) throw new UnsafeDisplay();
+		DataComponentPatch.Builder owned = DataComponentPatch.builder();
+		ClientItemDisplay.visitPatch(components, budget, (type, addition) -> {
+			budget.visit(depth);
+			budget.cells(1);
+			InventoryPatches.put(owned, type, addition.map(child -> value(type, child, depth, budget)));
+		});
+		return owned.build();
 	}
 
 	static void detach(ItemStack stack, Validation budget) {
 		if (stack.getComponents().getClass() != PatchedDataComponentMap.class) throw new UnsafeDisplay();
-		DataComponentPatch owned = overlay(stack.getComponents(), DataComponentPatch.EMPTY, 0, budget);
-		budget.cells(RAW.patch(owned).size());
+		DataComponentPatch owned = copy(stack.getComponents(), 0, budget);
 		((PatchedDataComponentMap) stack.getComponents()).restorePatch(owned);
 	}
 
-	private static void collect(DataComponentMap source, Map<DataComponentType<?>, Object> result, int depth, Validation budget) {
-		budget.visit(depth);
-		if (source == DataComponentMap.EMPTY) return;
-		if (source.getClass() == PatchedDataComponentMap.class) {
-			var map = (PatchedDataComponentMap) source;
-			collect(RAW.prototype(map), result, depth + 1, budget);
-			ClientItemDisplay.admitComponentMap(RAW.patch(map), budget);
-			for (var entry : RAW.patch(map).entrySet()) {
-				budget.visit(depth);
-				if (entry.getValue().isPresent()) result.put(entry.getKey(), entry.getValue().get()); else result.remove(entry.getKey());
-			}
-		} else {
-			if (source.getClass() != SIMPLE) throw new UnsafeDisplay();
-			ClientItemDisplay.admitComponentMap(RAW.simple(source), budget);
-			for (var entry : RAW.simple(source).entrySet()) { budget.visit(depth); result.put(entry.getKey(), entry.getValue()); }
-		}
-	}
-
-	private static ItemStack stack(ItemStack source, int depth, Validation budget) {
+	/** Private working owner for public name callers and nested copies; no load hook. */
+	static ItemStack stack(ItemStack source, int depth, Validation budget) {
 		budget.visit(depth);
 		if (source.isEmpty()) return ItemStack.EMPTY;
-		if (!ClientItemDisplay.supportedComponents(source.getComponents(), depth, budget)) throw new UnsafeDisplay();
-		DataComponentPatch patch = overlay(source.getComponents(), DataComponentPatch.EMPTY, depth, budget);
+		DataComponentPatch patch = copy(source.getComponents(), depth, budget);
 		budget.visit(depth);
 		// The exact native empty constructor initializes only fields, with no
 		// item verification. Populate ONLY the new object, not EMPTY or a source
 		// stack. Nested copies must not repeat PROFILE/load callbacks.
-		ItemStack result = construct(EMPTY_STACK, (Object) null);
-		set(STACK_ITEM, result, source.getItem());
-		PatchedDataComponentMap components = new PatchedDataComponentMap(DataComponentMap.EMPTY);
-		budget.cells(RAW.patch(patch).size()); components.restorePatch(patch);
+		// Native copy carries the existing local default base transparently. Only
+		// explicit mutable additions are replaced; no prototype is inspected.
+		PatchedDataComponentMap components = ((PatchedDataComponentMap) source.getComponents()).copy();
+		components.restorePatch(patch);
+		return noLoadStack(source.getItem(), source.getCount(), components);
+	}
+
+	static ItemStack noLoadStack(Item item, int count, PatchedDataComponentMap components) {
+		ItemStack result = construct(EMPTY_STACK, (@Nullable Object) null);
+		set(STACK_ITEM, result, item);
 		set(STACK_COMPONENTS, result, components);
-		result.setCount(source.getCount());
+		result.setCount(count);
 		return result;
 	}
 
@@ -318,7 +322,7 @@ final class ClientDisplayWorkingCopy {
 		exact(source.getEffect(), Holder.Reference.class);
 		if (HIDDEN_EFFECT == null) throw new UnsafeDisplay();
 		EffectCuresCopy.admit(source, budget);
-		MobEffectInstance hidden = RAW.hidden(source), ownedHidden = hidden == null ? null : effect(hidden, depth + 1, budget);
+		@Nullable MobEffectInstance hidden = RAW.hidden(source), ownedHidden = hidden == null ? null : effect(hidden, depth + 1, budget);
 		// Native copy preserves NeoForge's explicit cures without holder.value()
 		// or fillEffectCures. Its BlendState is fresh and hiddenEffect is null on
 		// every loader. Only the NEW owner receives the recursively owned chain.
@@ -331,18 +335,18 @@ final class ClientDisplayWorkingCopy {
 	private static final class EffectCuresCopy {
 		private static final boolean PRESENT = java.util.Arrays.stream(MobEffectInstance.class.getDeclaredFields())
 			.anyMatch(field -> !Modifier.isStatic(field.getModifiers()) && field.getType() == Set.class);
-		private static final Field CURES = ClientItemDisplay.nativeField(MobEffectInstance.class, Set.class);
+		private static final @Nullable Field CURES = ClientItemDisplay.nativeField(MobEffectInstance.class, Set.class);
 		private record Shape(sun.misc.Unsafe read, Class<?> set, Class<?> keys, Class<?> cure, Field name,
 			long map, long view, long owner, long table) {}
-		private static final Shape SHAPE = PRESENT ? shape() : null;
+		private static final @Nullable Shape SHAPE = PRESENT ? shape() : null;
 
-		private static Shape shape() {
+		private static @Nullable Shape shape() {
 			if (!InventoryNativeTraversal.runtimeSupported() || CURES == null) return null;
 			try {
 				var map = new IdentityHashMap<Object, Boolean>(); Class<?> set = Collections.newSetFromMap(map).getClass(), keys = map.keySet().getClass();
 				Class<?> cure = Class.forName("net.neoforged.neoforge.common.EffectCure", false, MobEffectInstance.class.getClassLoader());
 				if (!Modifier.isFinal(cure.getModifiers())) return null;
-				Field name = ClientItemDisplay.nativeField(cure, String.class);
+				@Nullable Field name = ClientItemDisplay.nativeField(cure, String.class);
 				if (name == null || !Modifier.isFinal(name.getModifiers())) return null;
 				for (Field field : cure.getDeclaredFields()) if (!Modifier.isStatic(field.getModifiers()) && !field.equals(name)) return null;
 				// java.base does not expose these backing fields. Cache read-only
@@ -355,7 +359,7 @@ final class ClientDisplayWorkingCopy {
 			} catch (ReflectiveOperationException | RuntimeException unavailable) { return null; }
 		}
 		private static long offset(sun.misc.Unsafe read, Class<?> owner, Class<?> type) throws NoSuchFieldException {
-			Field result = null;
+			@Nullable Field result = null;
 			for (Field field : owner.getDeclaredFields()) if (!Modifier.isStatic(field.getModifiers()) && field.getType() == type) {
 				if (result != null) throw new NoSuchFieldException(); result = field;
 			}
@@ -367,9 +371,9 @@ final class ClientDisplayWorkingCopy {
 			// hidden field install. No resident method except exact native getters.
 			budget.cells(16);
 			if (!PRESENT) return;
-			Shape shape = SHAPE; if (shape == null) throw new UnsafeDisplay();
+			@Nullable Shape shape = SHAPE; if (shape == null) throw new UnsafeDisplay();
 			budget.cells(32); // Fixed reads, six native owners/iterator and scalar/reference fields.
-			Object set = get(CURES, source); exact(set, shape.set);
+			@Nullable Object set = get(CURES, source); exact(set, shape.set);
 			Object backing = shape.read.getObject(set, shape.map); exact(backing, IdentityHashMap.class);
 			Object view = shape.read.getObject(set, shape.view); exact(view, shape.keys);
 			if (shape.read.getObject(view, shape.owner) != backing) throw new UnsafeDisplay();
@@ -443,7 +447,7 @@ final class ClientDisplayWorkingCopy {
 			});
 			predicates.add(new BlockPredicate(predicate.blocks().map(set -> holders(set, budget)), properties, nbt));
 		}
-		Object stored = get(ADVENTURE_TOOLTIP, source);
+		@Nullable Object stored = get(ADVENTURE_TOOLTIP, source);
 		if (!(stored instanceof List<?> list)) throw new UnsafeDisplay();
 		List<Component> tooltip = new ArrayList<>();
 		for (Object child : ClientItemDisplay.admittedList(list, budget)) tooltip.add(ClientDisplayText.snapshot((Component) child, depth + 1, budget));
@@ -451,11 +455,11 @@ final class ClientDisplayWorkingCopy {
 		// world reference. Preserve the checked native tooltip, independently owned.
 		return construct(ADVENTURE, predicates, source.showInTooltip(), tooltip);
 	}
-	private static final Field TRIM_TOOLTIP = ClientItemDisplay.nativeField(net.minecraft.world.item.armortrim.ArmorTrim.class, boolean.class);
+	private static final @Nullable Field TRIM_TOOLTIP = ClientItemDisplay.nativeField(net.minecraft.world.item.armortrim.ArmorTrim.class, boolean.class);
 	private static boolean trimTooltip(net.minecraft.world.item.armortrim.ArmorTrim source) { return (Boolean) get(TRIM_TOOLTIP, source); }
-	private static Field tooltipField() {
+	private static @Nullable Field tooltipField() {
 		try {
-			Field result = null;
+			@Nullable Field result = null;
 			for (Field field : AdventureModePredicate.class.getDeclaredFields()) {
 				if (field.getType() == List.class && field.getGenericType() instanceof java.lang.reflect.ParameterizedType signature
 					&& java.util.Arrays.equals(signature.getActualTypeArguments(), new java.lang.reflect.Type[] {Component.class})) {
@@ -513,23 +517,21 @@ final class ClientDisplayWorkingCopy {
 		}
 		throw new UnsafeDisplay();
 	}
-	private static void exact(Object value, Class<?> type) { if (value == null || value.getClass() != type) throw new UnsafeDisplay(); }
-	@SuppressWarnings({"unchecked", "rawtypes"})
-	private static void put(DataComponentPatch.Builder patch, DataComponentType<?> type, Object value) { patch.set((DataComponentType) type, value); }
-	private static <T> Constructor<T> constructor(Class<T> owner, Class<?>... parameters) {
+	private static void exact(@Nullable Object value, Class<?> type) { if (value == null || value.getClass() != type) throw new UnsafeDisplay(); }
+	private static <T> @Nullable Constructor<T> constructor(Class<T> owner, Class<?>... parameters) {
 		try { var result = owner.getDeclaredConstructor(parameters); return result.trySetAccessible() ? result : null; }
 		catch (ReflectiveOperationException | RuntimeException unavailable) { return null; }
 	}
-	private static <T> T construct(Constructor<T> constructor, Object... args) {
+	private static <T> T construct(@Nullable Constructor<T> constructor, @Nullable Object... args) {
 		if (constructor == null) throw new UnsafeDisplay();
 		try { return constructor.newInstance(args); }
 		catch (ReflectiveOperationException unavailable) { throw new UnsafeDisplay(unavailable); }
 	}
-	private static Object get(Field field, Object source) {
+	private static @Nullable Object get(@Nullable Field field, Object source) {
 		if (field == null) throw new UnsafeDisplay();
 		try { return field.get(source); } catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(unavailable); }
 	}
-	private static void set(Field field, Object target, Object value) {
+	private static void set(@Nullable Field field, Object target, @Nullable Object value) {
 		if (field == null) throw new UnsafeDisplay();
 		try { field.set(target, value); } catch (IllegalAccessException unavailable) { throw new UnsafeDisplay(unavailable); }
 	}

@@ -46,7 +46,7 @@ import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
  * container source.
  *
  * <p>Variant identity is the item registry id plus the canonical persistent
- * component bytes, keyed by their SHA-256 digest. The canonical form is
+ * raw persistent patch bytes, keyed by their SHA-256 digest. The canonical form is
  * produced here rather than by {@link CompoundTag#toString()}: compound keys
  * are sorted recursively, list order and every NBT tag type are preserved, and
  * the output is bounded. A digest alone is not identity evidence, so the
@@ -70,6 +70,10 @@ import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
  * increase.
  */
 public final class InventoryItemCodec {
+	@org.jetbrains.annotations.NotNullByDefault
+	private static final class LockComponents {
+		private static final Class<?> SIMPLE = DataComponentMap.builder().set(DataComponents.MAX_STACK_SIZE, 1).build().getClass();
+	}
 
 	/** Internal guard for one canonical component payload; not a product value. */
 	public static final int MAX_CANONICAL_BYTES = 65536;
@@ -89,8 +93,8 @@ public final class InventoryItemCodec {
 	public static final int MAX_DISPLAY_BYTES = 4096;
 
 	/**
-	 * Smallest legal effective display cap. A particular suppression envelope
-	 * can still be unavailable at this cap without changing exact identity.
+	 * Smallest legal effective display cap. Size-only exhaustion reaches an
+	 * ID-only default icon without changing exact identity.
 	 */
 	private static final int MIN_DISPLAY_BYTES =
 		(int) InventorySizeScale.DISPLAY.bytes(InventorySizeScale.DISPLAY.minimumMultiplier());
@@ -156,7 +160,7 @@ public final class InventoryItemCodec {
 	 * UTF-8 byte bound. A null JSON is an unavailable icon projection; metadata
 	 * and exact/aggregate identity remain usable independently.
 	 */
-	public record Display(String itemId, String label, String displayJson, boolean componentsStripped) {
+	public record Display(String itemId, String label, @org.jetbrains.annotations.Nullable String displayJson, boolean componentsStripped) {
 		public Display {
 			Objects.requireNonNull(itemId, "itemId");
 			Objects.requireNonNull(label, "label");
@@ -531,7 +535,7 @@ public final class InventoryItemCodec {
 
 	/**
 	 * Bounded display projection at the default 4 KiB cap. Identity is computed
-	 * from the full component set before this step; display-only components may
+	 * from the actual persistent patch before this step; display-only components may
 	 * be omitted to fit the bound without changing identity.
 	 * Identity refusal, not display omission, controls the aggregate bit.
 	 */
@@ -613,7 +617,7 @@ public final class InventoryItemCodec {
 			if (size != 0) for (var entry : patch.entrySet()) if (entry.getKey() == DataComponents.CUSTOM_NAME) { name = entry.getValue().orElse(null); replaced = true; }
 			if (!replaced) {
 				var prototype = raw.prototype(patched); if (prototype == DataComponentMap.EMPTY) return false;
-				if (!InventoryItemFreezer.simpleMap(prototype)) InventoryComponentCertificate.refuse();
+				if (prototype == null || prototype.getClass() != LockComponents.SIMPLE) InventoryComponentCertificate.refuse();
 				var defaults = raw.simple(prototype); int count = bounds.mapPass(defaults);
 				if (count != 0) for (var entry : defaults.entrySet()) if (entry.getKey() == DataComponents.CUSTOM_NAME) name = entry.getValue();
 			}

@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -509,6 +510,24 @@ class InventoryS2CPacketTest {
 	}
 
 	@Test
+	void defaultIconTerminalAndUnavailableDisplayRemainDistinctWithExactLongMetadata() {
+		String terminal = "{\"id\":\"minecraft:stone\"}";
+		var exact = new InventoryS2CPacket.Entry("exact-selection", "minecraft:stone", "block.minecraft.stone",
+			terminal, BIG, BIG + 1, false, null);
+		var unavailable = new InventoryS2CPacket.Entry("unavailable-selection", "minecraft:stone", "block.minecraft.stone",
+			null, BIG, BIG + 1, false, null);
+		var packet = InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, BIG, BIG, new MarkerId(BIG),
+			1, 1, 1, 0, 1, true, InventoryS2CPacket.Status.READY, BIG + 2, List.of(exact, unavailable));
+		var decoded = roundTrip(packet);
+		assertEquals(List.of(exact, unavailable), decoded.entries());
+		assertEquals(BIG, decoded.entries().getFirst().count());
+		assertTrue(nx.pingwheel.common.presentation.inventory.minecraft.InventoryDisplayWriter.isDefaultIcon(
+			decoded.entries().getFirst().itemId(), decoded.entries().getFirst().displayJson()));
+		assertNull(decoded.entries().get(1).displayJson());
+		assertFalse(decoded.entries().getFirst().fallback());
+	}
+
+	@Test
 	void maximumDisplayRealItemPayloadRoundTripsAtTheOfferEffectiveBoundary() {
 		DisplayFixture fixture = maximumDisplayFixture(Items.STONE, InventoryS2CPacket.MAX_DISPLAY_BYTES);
 		assertEquals(InventoryS2CPacket.MAX_DISPLAY_BYTES, utf8(fixture.json()), "independent UTF-8 measurement");
@@ -955,11 +974,13 @@ class InventoryS2CPacketTest {
 		var sparseKey = catalog.intern(sparse).key();
 		var legacyKey = catalog.intern(legacy).key();
 		assertFalse(sparseKey.componentsKey().isEmpty(), fixture + ": fixture identity is exact");
-		assertEquals(sparseKey, legacyKey, fixture + ": display payload never changes the server variant identity");
+		assertNotEquals(sparseKey, legacyKey, fixture + ": a synthetic full-effective patch is a different raw patch identity");
 
 		InventoryS2CPacket.Entry sparseEntry = wireEntry(sparseKey.componentsKey(), sparse.display(),
 			sparse.display().displayJson());
-		InventoryS2CPacket.Entry legacyEntry = wireEntry(legacyKey.componentsKey(), legacy.display(),
+		// Compare transport projections for the same authoritative selection;
+		// the full-effective payload is only a synthetic display-size baseline.
+		InventoryS2CPacket.Entry legacyEntry = wireEntry(sparseKey.componentsKey(), legacy.display(),
 			legacy.display().displayJson());
 		assertSameWireIdentity(sparseEntry, legacyEntry);
 

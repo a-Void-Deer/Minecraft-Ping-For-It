@@ -37,7 +37,7 @@ class InventoryPrimitiveArgumentCostTest {
 			var actual = InventoryItemCodec.freeze(new InventoryResidentItem.Stack(stack), registries, 4096,
 				InventoryItemBudget.root(4096), new InventoryResidentAccessFields(), new InventoryTestNativeAccess());
 			assertEquals(InventoryIdentityMode.EXACT, actual.identityMode(), argument.getClass().getName());
-			var nativeTag = DataComponentMap.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), stack.getComponents()).result().orElseThrow();
+			var nativeTag = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), ((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).asPatch()).result().orElseThrow();
 			assertArrayEquals(InventoryItemCodec.canonicalTag(nativeTag), actual.canonicalForCatalog());
 		}
 	}

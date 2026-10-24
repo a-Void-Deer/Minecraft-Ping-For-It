@@ -42,7 +42,7 @@ class InventoryRegistryContextGuardTest {
 	}
 	private static void oracle(ItemStack stack, HolderLookup.Provider provider) {
 		var frozen = freeze(stack, provider); assertEquals(InventoryIdentityMode.EXACT, frozen.identityMode());
-		var original = DataComponentMap.CODEC.encodeStart(provider.createSerializationContext(NbtOps.INSTANCE), stack.getComponents()).result().orElseThrow();
+		var original = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(provider.createSerializationContext(NbtOps.INSTANCE), ((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).asPatch()).result().orElseThrow();
 		assertArrayEquals(InventoryItemCodec.canonicalTag(original), frozen.canonicalForCatalog());
 	}
 
@@ -87,9 +87,15 @@ class InventoryRegistryContextGuardTest {
 	}
 
 	@Test void actualRootAndFrozenNativeContainersKeepDirectAndNamedSwordIdentity() {
-		oracle(new ItemStack(Items.DIAMOND_SWORD), builtin);
+		var stack = new ItemStack(Items.DIAMOND_SWORD);
+		Tool tool = java.util.Objects.requireNonNull(stack.get(DataComponents.TOOL));
+		assertInstanceOf(HolderSet.Direct.class, tool.rules().get(0).blocks());
+		assertInstanceOf(HolderSet.Named.class, tool.rules().get(1).blocks());
+		((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).restorePatch(
+			net.minecraft.core.component.DataComponentPatch.builder().set(DataComponents.TOOL, tool).build());
+		oracle(stack, builtin);
 		RegistryAccess frozen = new RegistryAccess.ImmutableRegistryAccess(builtin.registries()).freeze();
-		oracle(new ItemStack(Items.DIAMOND_SWORD), frozen);
+		oracle(stack, frozen);
 	}
 
 	@Test void missingOwnerRefusesBeforeFileInlineTraversal() {

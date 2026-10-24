@@ -177,14 +177,14 @@ class InventoryDisplayWriterTest {
 	}
 
 	@Test
-	void suppressionOverflowIsExplicitlyUnavailableForFreshAndRetainedInput() {
+	void suppressionSizeOverflowUsesCanonicalDefaultIconForFreshAndRetainedInput() {
 		JsonObject input = item();
 		JsonObject components = input.getAsJsonObject("components");
 		components.add("!example:" + "a".repeat(1100), new JsonObject());
-		assertNull(InventoryDisplayWriter.project(input, ID, 1024));
+		assertEquals("{\"id\":\"minecraft:stone\"}", InventoryDisplayWriter.project(input, ID, 1024));
 		String retained = InventoryDisplayWriter.project(input, ID, 4096);
 		assertNotNull(retained);
-		assertNull(InventoryDisplayWriter.reproject(retained, ID, 1024));
+		assertEquals("{\"id\":\"minecraft:stone\"}", InventoryDisplayWriter.reproject(retained, ID, 1024));
 		assertTrue(componentObject(InventoryDisplayWriter.bare(ID)).has("!minecraft:lore"));
 	}
 
@@ -237,7 +237,53 @@ class InventoryDisplayWriterTest {
 		assertEquals(99, object(InventoryDisplayWriter.reproject(output, ID, 1024)).get("count").getAsInt());
 		assertTrue(output.contains("-0.0"));
 		data.addProperty("nonfinite", Double.NaN);
-		assertTrue(componentObject(InventoryDisplayWriter.project(input, ID, 1024)).has("!minecraft:custom_data"));
+		assertNull(InventoryDisplayWriter.project(input, ID, 1024), "nonfinite data is invalid, not a size terminal");
+	}
+
+	@Test
+	void terminalGrammarIsExactAndNeverRehydratesAfterCapChanges() {
+		String maximum = "example:" + "a".repeat(248);
+		JsonObject input = new JsonObject(); input.addProperty("id", maximum);
+		JsonObject values = new JsonObject();
+		for (int i = 0; i < 140; i++) values.add("!example:component_" + i, new JsonObject());
+		input.add("components", values);
+		String expected = "{\"id\":\"" + maximum + "\"}";
+		String terminal = InventoryDisplayWriter.project(input, maximum, 1024);
+		assertEquals(expected, terminal);
+		assertEquals(265, wire(terminal), "maximum legal ID-only JSON fits below every cap");
+		assertTrue(InventoryDisplayWriter.isDefaultIcon(maximum, terminal));
+		assertEquals(terminal, InventoryDisplayWriter.reproject(terminal, maximum, 1024));
+		assertEquals(terminal, InventoryDisplayWriter.reproject(terminal, maximum, InventoryLimits.MAX_DISPLAY_BYTES));
+		assertFalse(InventoryDisplayWriter.isDefaultIcon(ID, terminal));
+		assertFalse(InventoryDisplayWriter.isDefaultIcon(maximum, null));
+		assertFalse(InventoryDisplayWriter.isDefaultIcon(ID, " {\"id\":\"minecraft:stone\"}"));
+		assertFalse(InventoryDisplayWriter.isDefaultIcon(ID, "{\"id\":\"minecraft:stone\",\"components\":{}}"));
+		assertFalse(InventoryDisplayWriter.isDefaultIcon(ID, "{\"\\u0069d\":\"minecraft:stone\"}"));
+		assertFalse(InventoryDisplayWriter.isDefaultIcon("invalid", "{\"id\":\"invalid\"}"));
+	}
+
+	@Test
+	void oversizeMembersNeverHideAnInvalidLateEntryOrValue() {
+		JsonObject input = item(); JsonObject values = input.getAsJsonObject("components");
+		for (int i = 0; i < 140; i++) values.add("!example:component_" + i, new JsonObject());
+		values.add("example:unknown", new JsonObject());
+		assertNull(InventoryDisplayWriter.project(input, ID, 1024));
+		values.remove("example:unknown");
+		values.addProperty("minecraft:custom_data", Double.NaN);
+		assertNull(InventoryDisplayWriter.project(input, ID, 1024));
+		assertNull(InventoryDisplayWriter.reproject(envelope("\"!example:" + "a".repeat(1100) + "\":{},\"example:unknown\":{}"), ID, 1024));
+	}
+
+	@Test
+	void displayWorkRefusalNeverBecomesASizeTerminal() {
+		JsonObject input = item();
+		input.getAsJsonObject("components").add("!example:" + "a".repeat(1100), new JsonObject());
+		var budget = InventoryItemBudget.root(1024); budget.begin(1024); budget.beginDisplay();
+		try {
+			budget.work(12L * 1024 * 1024);
+			org.junit.jupiter.api.Assertions.assertThrows(InventoryItemBudget.RootLimitException.class,
+				() -> InventoryDisplayWriter.project(input, ID, 1024, budget));
+		} finally { budget.end(); }
 	}
 
 	@Test

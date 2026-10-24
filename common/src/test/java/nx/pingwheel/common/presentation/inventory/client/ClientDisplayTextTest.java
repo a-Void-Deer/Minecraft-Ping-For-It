@@ -16,7 +16,9 @@ import net.minecraft.core.MappedRegistry;
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.component.DataComponentMap;
+import net.minecraft.core.component.DataComponentPatch;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.component.PatchedDataComponentMap;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
@@ -31,12 +33,15 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ChargedProjectiles;
 
+import nx.pingwheel.common.chat.ContentChatTemplate;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.jetbrains.annotations.NotNullByDefault;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@NotNullByDefault
 class ClientDisplayTextTest {
 
 	/**
@@ -202,6 +207,211 @@ class ClientDisplayTextTest {
 			assertNotSame(prototypeText, copiedName);
 		} finally {
 			ClientItemDisplay.reset();
+		}
+	}
+
+	@Test void rawEqualAdditionAndRemovalSurviveWorkingAndRepeatedHoverCopies() throws ReflectiveOperationException {
+		try (RegistryEdit registry = new RegistryEdit(BuiltInRegistries.ITEM)) {
+			MutableComponent localName = Component.literal("equal explicit name");
+			var lore = new net.minecraft.world.item.component.ItemLore(List.of(Component.literal("local lore")));
+			DataComponentMap defaults = DataComponentMap.builder().set(DataComponents.CUSTOM_NAME, localName)
+				.set(DataComponents.LORE, lore).build();
+			PrototypeTextItem item = new PrototypeTextItem(defaults);
+			Registry.register(BuiltInRegistries.ITEM, ResourceLocation.parse("pingforit:raw_patch_copy_fixture"), item);
+			BuiltInRegistries.ITEM.freeze();
+			MutableComponent explicit = Component.literal("equal explicit name");
+			ItemStack source = new ItemStack(item);
+			((PatchedDataComponentMap) source.getComponents()).restorePatch(DataComponentPatch.builder()
+				.set(DataComponents.CUSTOM_NAME, explicit).remove(DataComponents.LORE).build());
+			assertEquals(localName, explicit, "an independently equal resident value must stay explicitly patched");
+			var raw = nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess.load();
+			DataComponentPatch copied = ClientDisplayWorkingCopy.overlay(source.getComponents(), DataComponentPatch.EMPTY, 0, new ClientItemDisplay.Validation());
+			assertEquals(2, raw.patch(copied).size());
+			assertTrue(copied.get(DataComponents.LORE).isEmpty());
+			assertNotSame(explicit, copied.get(DataComponents.CUSTOM_NAME).orElseThrow());
+			ItemStack hoverCopy = ClientDisplayItemCopy.copy(source, 0, new ClientItemDisplay.Validation());
+			ItemStack repeated = ClientDisplayItemCopy.copy(hoverCopy, 0, new ClientItemDisplay.Validation());
+			for (ItemStack result : List.of(hoverCopy, repeated)) {
+				assertNull(result.get(DataComponents.LORE));
+				assertEquals(2, raw.patch((PatchedDataComponentMap) result.getComponents()).size());
+				assertNotSame(localName, result.get(DataComponents.CUSTOM_NAME));
+				assertNotSame(explicit, result.get(DataComponents.CUSTOM_NAME));
+			}
+			localName.append(" default changed"); explicit.append(" source changed");
+			((MutableComponent) hoverCopy.get(DataComponents.CUSTOM_NAME)).append(" first changed");
+			assertEquals("equal explicit name", repeated.get(DataComponents.CUSTOM_NAME).getString());
+			assertEquals("equal explicit name", copied.get(DataComponents.CUSTOM_NAME).orElseThrow().getString());
+		}
+	}
+
+	@Test void defaultTextAndLoreStayNativeReferencesAcrossHoverCopies() throws ReflectiveOperationException {
+		try (RegistryEdit registry = new RegistryEdit(BuiltInRegistries.ITEM)) {
+			MutableComponent name = Component.literal("local inherited");
+			var lore = new net.minecraft.world.item.component.ItemLore(List.of(Component.literal("inherited lore")));
+			PrototypeTextItem item = new PrototypeTextItem(DataComponentMap.builder().set(DataComponents.CUSTOM_NAME, name).set(DataComponents.LORE, lore).build());
+			Registry.register(BuiltInRegistries.ITEM, ResourceLocation.parse("pingforit:inherited_hover_fixture"), item);
+			BuiltInRegistries.ITEM.freeze();
+			ItemStack source = new ItemStack(item);
+			ItemStack copied = ClientDisplayItemCopy.copy(source, 0, new ClientItemDisplay.Validation());
+			ItemStack repeated = ClientDisplayItemCopy.copy(copied, 0, new ClientItemDisplay.Validation());
+			for (ItemStack stack : List.of(copied, repeated)) {
+				assertSame(name, stack.get(DataComponents.CUSTOM_NAME));
+				assertSame(lore, stack.get(DataComponents.LORE));
+				assertTrue(nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess.load()
+					.patch((PatchedDataComponentMap) stack.getComponents()).isEmpty());
+			}
+			name.append(" changed locally");
+			assertEquals("local inherited changed locally", repeated.get(DataComponents.CUSTOM_NAME).getString());
+		}
+	}
+
+	@Test void nativeDefaultNamePrecedenceSurvivesResolveCacheChatAndExplicitRemovalsButNotSizeTerminal() throws ReflectiveOperationException {
+		for (int defaults = 0; defaults < 3; defaults++) {
+			ClientItemDisplay.reset();
+			try (RegistryEdit registry = new RegistryEdit(BuiltInRegistries.ITEM)) {
+				MutableComponent localItemName = Component.literal("Local Item Name");
+				MutableComponent localCustomName = Component.literal("Local Custom Name");
+				Item.Properties properties = new Item.Properties();
+				if (defaults != 1) properties.component(DataComponents.ITEM_NAME, localItemName);
+				if (defaults != 0) properties.component(DataComponents.CUSTOM_NAME, localCustomName);
+				// Exact native Item, with no getName/description/load-hook overrides.
+				Item item = new Item(properties);
+				String id = "pingforit:native_default_name_fixture_" + defaults;
+				Registry.register(BuiltInRegistries.ITEM, ResourceLocation.parse(id), item);
+				BuiltInRegistries.ITEM.freeze();
+				Component expected = defaults == 0 ? localItemName : localCustomName;
+				assertEquals(expected.getString(), new ItemStack(item).getHoverName().getString(), "independent native precedence control");
+				String ordinary = "{\"id\":\"" + id + "\",\"components\":{}}";
+				for (int attempt = 0; attempt < 2; attempt++) {
+					var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback.registry.label", ordinary);
+					assertFalse(display.stack().isEmpty());
+					assertEquals(expected, display.name(), "inherited names use native hover-name precedence without Ping quoting");
+					assertNotSame(expected, display.name(), "returned text is still an owned snapshot");
+					assertSame(expected, display.stack().getHoverName(), "icon defaults remain native references");
+					Component chatName = ClientItemDisplay.decodeName(RegistryAccess.EMPTY, ordinary).orElseThrow();
+					assertEquals(expected, chatName); assertNotSame(expected, chatName);
+				}
+				assertEquals(1, ClientItemDisplay.decodeMisses(), "ordinary repeated resolution reuses its patch snapshot");
+
+				String terminal = "{\"id\":\"" + id + "\"}";
+				for (int attempt = 0; attempt < 2; attempt++) {
+					var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback.registry.label", terminal);
+					assertFalse(display.stack().isEmpty()); assertSame(expected, display.stack().getHoverName());
+					assertEquals("fallback.registry.label", assertInstanceOf(TranslatableContents.class, display.name().getContents()).getKey());
+					assertTrue(ClientItemDisplay.decodeName(RegistryAccess.EMPTY, terminal).isEmpty(), "terminal chat must keep the registry fallback");
+				}
+				assertEquals(2, ClientItemDisplay.decodeMisses(), "terminal has its own reusable empty-patch snapshot");
+
+				String removePreferred = "{\"id\":\"" + id + "\",\"components\":{\"!minecraft:"
+					+ (defaults == 0 ? "item_name" : "custom_name") + "\":{}}}";
+				var removed = ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback.registry.label", removePreferred);
+				assertFalse(removed.stack().isEmpty());
+				Component removalExpected = defaults == 2 ? localItemName : Component.translatable(item.getDescriptionId());
+				assertEquals(removalExpected, removed.name());
+				assertEquals(removalExpected, ClientItemDisplay.decodeName(RegistryAccess.EMPTY, removePreferred).orElseThrow());
+				assertNull(removed.stack().get(defaults == 0 ? DataComponents.ITEM_NAME : DataComponents.CUSTOM_NAME));
+				String removeBoth = "{\"id\":\"" + id + "\",\"components\":{\"!minecraft:custom_name\":{},\"!minecraft:item_name\":{}}}";
+				Component base = ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback.registry.label", removeBoth).name();
+				assertEquals(item.getDescriptionId(), assertInstanceOf(TranslatableContents.class, base.getContents()).getKey());
+				assertEquals(base, ClientItemDisplay.decodeName(RegistryAccess.EMPTY, removeBoth).orElseThrow());
+			} finally { ClientItemDisplay.reset(); }
+		}
+	}
+
+	@Test void nativeSelectedNameControlsQuotingAcrossDefaultAdditionAndRemovalMatrix() throws ReflectiveOperationException {
+		// Each name independently has no patch, an addition or a removal; the
+		// four native default combinations include neither, either and both names.
+		for (int defaults = 0; defaults < 4; defaults++) {
+			ClientItemDisplay.reset();
+			try (RegistryEdit registry = new RegistryEdit(BuiltInRegistries.ITEM)) {
+				Component localCustom = Component.literal("Local Custom");
+				Component localItem = Component.literal("Local Item");
+				Item.Properties properties = new Item.Properties();
+				if ((defaults & 1) != 0) properties.component(DataComponents.CUSTOM_NAME, localCustom);
+				if ((defaults & 2) != 0) properties.component(DataComponents.ITEM_NAME, localItem);
+				Item item = new Item(properties); // No custom getName or item hooks.
+				String id = "pingforit:mixed_name_matrix_" + defaults;
+				Registry.register(BuiltInRegistries.ITEM, ResourceLocation.parse(id), item);
+				BuiltInRegistries.ITEM.freeze();
+				for (int custom = 0; custom < 3; custom++) for (int itemName = 0; itemName < 3; itemName++) {
+					JsonObject patch = new JsonObject();
+					if (custom == 1) patch.addProperty("minecraft:custom_name", "\"Explicit Custom\"");
+					else if (custom == 2) patch.add("!minecraft:custom_name", new JsonObject());
+					if (itemName == 1) patch.addProperty("minecraft:item_name", "\"Explicit Item\"");
+					else if (itemName == 2) patch.add("!minecraft:item_name", new JsonObject());
+					JsonObject payload = new JsonObject(); payload.addProperty("id", id); payload.add("components", patch);
+					String wire = payload.toString();
+					boolean hasCustom = custom == 1 || custom == 0 && (defaults & 1) != 0;
+					boolean hasItem = itemName == 1 || itemName == 0 && (defaults & 2) != 0;
+					Component selected = hasCustom ? (custom == 1 ? Component.literal("Explicit Custom") : localCustom)
+						: hasItem ? (itemName == 1 ? Component.literal("Explicit Item") : localItem) : Component.translatable(item.getDescriptionId());
+					boolean explicit = hasCustom ? custom == 1 : hasItem && itemName == 1;
+					Component expected = explicit ? Component.translatable(ContentChatTemplate.CUSTOM_ITEM_NAME_KEY,
+						Component.translatable(ContentChatTemplate.QUOTE_KEY, Component.literal(selected.getString())),
+						Component.translatable(item.getDescriptionId())) : selected;
+					String scenario = "defaults=" + defaults + ", custom patch=" + custom + ", item-name patch=" + itemName;
+					int misses = ClientItemDisplay.decodeMisses();
+					for (int attempt = 0; attempt < 2; attempt++) {
+						var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback.registry.label", wire);
+						assertFalse(display.stack().isEmpty(), scenario);
+						assertEquals(selected, display.stack().getHoverName(), "native icon selection: " + scenario);
+						assertEquals(expected, display.name(), "row name and quoting: " + scenario);
+						assertEquals(expected, ClientItemDisplay.decodeName(RegistryAccess.EMPTY, wire).orElseThrow(), "chat name: " + scenario);
+						assertEquals(expected, ClientItemDisplay.displayName(ClientItemDisplay.decode(RegistryAccess.EMPTY, wire).orElseThrow()), "decoded stack name: " + scenario);
+					}
+					assertEquals(misses + 1, ClientItemDisplay.decodeMisses(), "matrix case is reused on cache hit: " + scenario);
+				}
+			} finally { ClientItemDisplay.reset(); }
+		}
+	}
+
+	@Test void equalTextDoesNotMisclassifyAnInheritedCustomNameAsAnExplicitItemName() throws ReflectiveOperationException {
+		ClientItemDisplay.reset();
+		try (RegistryEdit registry = new RegistryEdit(BuiltInRegistries.ITEM)) {
+			MutableComponent inherited = Component.literal("same text");
+			Item item = new Item(new Item.Properties().component(DataComponents.CUSTOM_NAME, inherited));
+			String id = "pingforit:equal_mixed_name_fixture";
+			Registry.register(BuiltInRegistries.ITEM, ResourceLocation.parse(id), item); BuiltInRegistries.ITEM.freeze();
+			String wire = "{\"id\":\"" + id + "\",\"components\":{\"minecraft:item_name\":\"\\\"same text\\\"\"}}";
+			for (int attempt = 0; attempt < 2; attempt++) {
+				var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback.registry.label", wire);
+				assertFalse(display.stack().isEmpty());
+				assertSame(inherited, display.stack().getHoverName());
+				assertNotSame(inherited, display.stack().get(DataComponents.ITEM_NAME));
+				assertEquals(inherited, display.name(), "equal explicit item-name text must not add quoting to the selected inherited custom name");
+				assertNotSame(inherited, display.name());
+				assertEquals(inherited, ClientItemDisplay.decodeName(RegistryAccess.EMPTY, wire).orElseThrow());
+			}
+			inherited.append(" changed");
+			assertEquals("same text changed", ClientItemDisplay.resolve(RegistryAccess.EMPTY, id, "fallback.registry.label", wire).name().getString());
+			assertEquals(1, ClientItemDisplay.decodeMisses());
+		} finally { ClientItemDisplay.reset(); }
+	}
+
+	@Test void publicNameLookupDetachesAnAliasedExplicitLowerNameWithoutChangingTheCallerPatch() throws ReflectiveOperationException {
+		ClientItemDisplay.reset();
+		try (RegistryEdit registry = new RegistryEdit(BuiltInRegistries.ITEM)) {
+			MutableComponent shared = Component.literal("Shared Native Custom").withColor(0x314159)
+				.withStyle(style -> style.withItalic(true));
+			Item item = new Item(new Item.Properties().component(DataComponents.CUSTOM_NAME, shared));
+			Registry.register(BuiltInRegistries.ITEM, ResourceLocation.parse("pingforit:public_alias_name_fixture"), item);
+			BuiltInRegistries.ITEM.freeze();
+			ItemStack caller = new ItemStack(item);
+			caller.set(DataComponents.ITEM_NAME, shared);
+			var raw = nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess.load();
+			var before = raw.patch((PatchedDataComponentMap) caller.getComponents());
+			assertSame(shared, before.get(DataComponents.ITEM_NAME).orElseThrow());
+			Component first = ClientItemDisplay.displayName(caller);
+			Component second = ClientItemDisplay.displayName(caller);
+			for (Component name : List.of(first, second)) {
+				assertEquals(shared, name, "default CUSTOM_NAME wins without quoting despite the caller's same-reference explicit ITEM_NAME");
+				assertNotSame(shared, name); assertEquals(shared.getStyle(), name.getStyle());
+			}
+			assertSame(before, raw.patch((PatchedDataComponentMap) caller.getComponents()), "the caller's actual patch backing is not restored or rewritten");
+			assertEquals(1, before.size()); assertSame(shared, before.get(DataComponents.ITEM_NAME).orElseThrow());
+			assertSame(shared, caller.get(DataComponents.ITEM_NAME)); assertSame(shared, caller.getHoverName());
+			shared.append(" changed after lookup");
+			assertEquals("Shared Native Custom", first.getString()); assertEquals("Shared Native Custom", second.getString());
 		}
 	}
 
