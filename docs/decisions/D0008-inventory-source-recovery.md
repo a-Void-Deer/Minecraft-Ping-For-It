@@ -2,16 +2,11 @@
 
 ## Status
 
-Confirmed product decision for planned inventory tracking. This record explains
-the intended boundary; it does not implement inventory tracking and does not
-assert that the presentation route or any existing subsystem already
-carries inventory status, revision or baseline behavior. Execution and behavior
-contract updates, and coverage evidence, are tasks of implementation. The
-confirmed boundaries are now adopted by
-[inventory preview and tracking](../architecture/presentation/inventory.md),
-and the generic shared capture and sync mechanics are owned by
-[shared source capture and sync](../architecture/presentation/shared_sources.md);
-this record remains the reason and boundary record.
+Confirmed product decision represented by
+[inventory preview and tracking](../architecture/presentation/inventory.md).
+Generic capture and sync mechanics are owned by
+[shared source capture and sync](../architecture/presentation/shared_sources.md).
+This record explains the identity and recovery rationale.
 
 ## Decision
 
@@ -57,11 +52,10 @@ provider source generation.
 Status revisions, baselines and invalidation remain required fences: they keep
 queued or in-flight valid data from before an invalidation from resurrecting the
 invalid state, and data from before a recovery baseline from overwriting the
-recovered state. Their detailed execution contract — inventory statuses, wire
-messages, baseline and revision mechanics, and numeric bounds — belongs to
-[inventory preview and tracking](../architecture/presentation/inventory.md)
-and its network owner during implementation; this record deliberately does not
-specify that algorithm or catalogue.
+recovered state. Inventory statuses, baseline and revision mechanics, and
+execution details are owned by
+[inventory preview and tracking](../architecture/presentation/inventory.md);
+wire messages are owned by [network protocol](../architecture/network/protocol.md).
 
 The inventory tracking duration ends in a hard stop. The hard deadline follows
 the Ping's own marker lifetime exactly: there is no independent inventory
@@ -73,12 +67,10 @@ usual and is not extended by tracking, invalidation or recovery. An expired or
 removed Ping never recovers, and a fresh ping after the old one is a new
 lifetime with its own identity and baselines.
 
-External providers keep their established stable target IDs, leases and removal
-rules. Ordinary-block replacement tolerance does not extend or revive an expired
-external lease, and the same-type replacement rule does not collapse or rewrite
-target identity globally. Entity and private-inventory contexts are not
-rewritten by this ordinary-block decision; any such tracking requires its own
-owning contract.
+This ordinary-block decision does not change external provider identity, lease
+or removal rules, and replacement tolerance cannot revive an expired lease.
+Entity and private-inventory tracking require their own owning contracts; see
+[inventory source identity and recovery](../architecture/presentation/inventory.md#source-identity-invalidation-and-recovery).
 
 ## Rationale
 
@@ -129,14 +121,11 @@ one continuous Ping even while inventory tracking invalidates and re-baselines.
 
 ## Consequences
 
-The eventual inventory implementation must carry per-Ping+recipient inventory
-status and baseline state strong enough to fence queued and in-flight updates,
-and must distinguish invalidation, recovery, hard-stop invalidation and
-per-recipient resynchronization. Existing marker, presentation and provider
-owners keep their current semantics; this record adds an explanatory boundary
-only. Coverage evidence and the pending-scenario inventory remain owned by
-[testing and verification](../testing/verification/inventory.md) and are updated by the
-implementation, not by this decision.
+Inventory tracking requires per-Ping+recipient status and baseline fences
+against queued and in-flight stale updates. These fences do not replace marker
+identity, marker lifetime or provider authority. Coverage and pending runtime
+evidence remain owned by
+[testing and verification](../testing/verification/inventory.md).
 
 ## Related docs
 

@@ -84,8 +84,8 @@ identity unmaterialized under the ordinary
 [candidate and committed identity](#candidate-and-committed-identity) contract
 below; the provider ray never materializes a tracking identity itself. This
 path discovers targets only; it reads no inventory and grants no inventory
-preview or tracking. Numeric engine limits remain implementation values, and
-the integration's established provider API gate still applies.
+preview or tracking. The integration's established provider API gate still
+applies.
 
 ## Candidate and committed identity
 
@@ -113,7 +113,7 @@ matching block registry ID, logical pose, and finite transformed validation
 anchor. The normal server range check uses that anchor. Validation allocates no
 tracking reference.
 
-After validation, `MarkerCreationService` initially classifies the normalized
+After validation, server marker creation first classifies the normalized
 target and checks the requested Ping Type's membership. Only then does provider
 materialization resolve live state again, create or reuse a tracking reference,
 and replace the target/anchor with committed values. The service reclassifies
@@ -190,11 +190,6 @@ presentation snapshot contract.
 
 Sable names are resolved from authoritative live block state and, when present,
 the live `Nameable` block entity. Sable adds no administrator permission.
-MarkerCreate still requires an authenticated sender and passes server
-rate/channel policy, range, provider validation/materialization and allowed
-Ping-Type checks. MarkerRemove still requires ownership of the active marker.
-Server-settings editing remains the separate permission-level-3 operation documented in
-[security](../architecture/security.md).
 
 Reflection and provider failures follow
 [diagnostics and logging](../architecture/logging.md).

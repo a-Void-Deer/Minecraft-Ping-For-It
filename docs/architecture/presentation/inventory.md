@@ -14,14 +14,11 @@ trade-off for native persistent component codecs is explained by
 default-inheritance trade-off is explained by
 [D0011](../../decisions/D0011-display-default-inheritance.md).
 
-This is the adopted contract for the confirmed inventory design. Coverage scope
-and pending runtime evidence for the ordinary-block and provider-confirmed
-external preview and tracking,
-item-choice create and native input/HUD seams are owned by
-[testing and verification](../../testing/verification/inventory.md). The existing
-one-shot capture and whole-section presentation paths keep their present
-semantics, and the existing server gates for permission, range, lock state and
-safe reads are unchanged. Wire routes and message families are owned by
+Coverage scope and pending runtime evidence for the ordinary-block and
+provider-confirmed external preview and tracking, item-choice create and native
+input/HUD seams are owned by
+[testing and verification](../../testing/verification/inventory.md). Wire routes
+and message families are owned by
 [network protocol](../network/protocol.md); persisted keys, bounds and defaults
 are owned by the configuration topics. Marker lifetime remains owned by
 [marker lifecycle](../authority/marker_lifecycle.md), target identity by
@@ -97,7 +94,7 @@ Entity and private-inventory contexts require their own owning contract.
 ## Preview
 
 Inventory preview and tracking are enabled by default; no separate user
-opt-in switch gates them. Each request still passes the existing server gates:
+opt-in switch gates them. Each request passes the existing server gates:
 target and field permission, range acceptance, lock state, and safe-read
 validation. The preview resolves accepted ordinary-block targets and
 uncommitted provider-confirmed external candidates; entity, private-inventory,
@@ -162,9 +159,7 @@ tags, while the server decides the annotation's allowance from the actual
 provider-confirmed physical block and its live tags, so a client-expected
 registry or a merely claimed tag never authorizes the annotation. The
 annotation's quantity starts unknown, and its first authoritative count follows the
-complete-observation rules in [Tracking](#tracking). The first tracking
-observation uses a fresh authoritative capture; it reuses neither the preview
-snapshot nor its count.
+complete-observation rules in [Tracking](#tracking).
 
 The first batch is sorted by count immediately rather than after the scan
 finishes. Newly discovered batches may reorder entries only before the user has
@@ -271,10 +266,9 @@ A periodic heartbeat carries only checksum and watermark information and never
 resends state. A positive heartbeat value selects the periodic cadence within
 the configured range, while an explicit zero disables the periodic heartbeat;
 zero is its own value, not an unlimited sentinel, and does not disable other
-repair or status messages. The configured numeric range and its default are
-implementation and configuration values, not catalogued here. Abnormal
-resynchronization uses a bounded retry cooldown; the initial push for a new Ping
-is exempt from that cooldown but is not exempt from the byte budget.
+repair or status messages. Abnormal resynchronization uses a bounded retry
+cooldown; the initial push for a new Ping is exempt from that cooldown but is not
+exempt from the byte budget.
 
 A stream whose baseline is unknown is buffered only for the negotiated
 resynchronization interval, measured in tracking periods; no independent
@@ -518,7 +512,7 @@ keeps its existing live route, whose completed non-atomic observations may
 remain uncertain. Temporary memory pressure may defer a capture and must not be
 reported as a completed or empty snapshot. Limit and failure events keep fixed
 work, the structure guard and the finite shared memory, and are logged at low
-frequency with the reason and the source contextd.
+frequency with the reason and the source context.
 
 ## Budgets, queues and memory
 
@@ -527,8 +521,7 @@ the server keeps a shared source-scan allowance plus per-recipient wire-byte
 accounting. Quota identity is preview-client for preview and target for
 tracking, and neither is multiplied per recipient. The server-authoritative
 per-client and global send-byte multipliers scale the byte allowances; they are
-server settings, not a client display scale or UI preference, and their numeric
-ranges and steps stay in implementation and configuration owners.
+server settings, not a client display scale or UI preference.
 
 Two finite server ceilings are separate from the five period send-byte
 multipliers, from the queue bounds and from pending memory: one bounds the
@@ -593,18 +586,16 @@ not being encoded; shared data occupies one real memory cost while byte fan-out
 is charged per send; and the source cache, client assembly, and unknown streams
 each keep an independent finite engineering bound.
 
-Global wire accounting keeps its confirmed smoothing algorithm. With a period
+Global wire accounting uses excess smoothing. With a period
 base `B`, actual sends `s_i` in a period, and excess
 `e_i = max(0, s_i - B)`, a rolling window of `n` periods satisfies
 `sum(e_i) <= n * B`, and the unused base allowance of a period is not carried
-over. The single-period peak is `(n + 1) * B` and the rolling window total is
-`2 * n * B`. The send queue capacity is four times the average bound, where
-the average bound is `2 * B`; the preview send queue instead holds four global
-server period byte amounts. The default values of `B` and `n` are
-implementation and configuration values and are not catalogued here. A fixed
-internal control reserve plus a ratio covers status and control traffic; the
-reserve and ratio are tuning values owned by implementation, and control bytes
-are still charged to the total and prioritized.
+over. The single-period peak is at most `(n + 1) * B`, the rolling window total
+is at most `2 * n * B`, and the average bound is `2 * B`. Preview and tracking
+send queues have separate finite capacities derived from their corresponding
+global byte allowances and remain subject to shared pending-memory admission.
+A fixed internal control reserve plus a ratio covers status and control
+traffic; control bytes are charged to the total and prioritized.
 
 Snapshot bytes are bounded on two axes at once. A per-fragment cap and a
 per-client period total are both enforced. The period total spans all targets
@@ -716,8 +707,7 @@ sweep that is neither a verified detached snapshot nor backed by a stable
 version remains a grey uncertain result. Data
 that is unknown, or known to be missing without a complete observation, is not
 zero and is distinct from an unknown consistency state. The exact localized
-labels are added as resource keys with the implementation; the English state
-names above define the semantics.
+labels are resource keys; the English state names above define the semantics.
 
 Absence of a preview request (never opened, closed, or purged) is not an empty
 `updating` preview; a present request with `updating` status is what keeps an
@@ -725,10 +715,3 @@ open inventory list legitimately loading. The selector's cancellation and close
 response to a request that is no longer present is owned by
 [wheel](../picking/wheel.md#inventory-selection-stay-open); the inventory topic
 does not restate it.
-
-The native HUD workflow that consumes these
-states — direction trail, root-centre abandonment and downward marker
-cancellation, and candidate priority — remains owned by the [capture](../picking/capture.md) and
-[wheel](../picking/wheel.md) contracts, and the inventory topic owns only the
-data and status
-semantics it publishes to them.

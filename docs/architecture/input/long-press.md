@@ -45,5 +45,4 @@ Pre-open motion and the native input handoff are owned by
 The opened selector's lifetime and selection behavior are owned by
 [wheel](../picking/wheel.md#opening-and-selection);
 [long-press compatibility](long-press-compatibility.md) owns the rapid and
-deferred sequences. These local settings neither grant server acceptance nor
-alter authoritative marker lifetime.
+deferred sequences.

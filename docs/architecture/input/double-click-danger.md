@@ -34,10 +34,9 @@ therefore each qualify on their own adjacency and still derive the same
 `danger` intent, so a sequence can continue beyond a single pair. A tolerance at
 the angle boundary does not qualify, and a zero tolerance disables the gesture
 entirely rather than demanding an exactly unchanged ray. The window and the
-tolerance are bounded implementation values; the
+tolerance are bounded; the
 [client configuration](../../config/client.md#press-wheel-and-cancellation-interaction)
-catalogue owns their keys and meanings, while numeric defaults, bounds and
-control steps are not mirrored here.
+catalogue owns their keys and meanings.
 
 ## Capture, identity and dispatch
 

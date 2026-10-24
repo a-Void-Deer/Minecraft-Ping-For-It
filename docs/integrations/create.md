@@ -38,7 +38,7 @@ closure.
 - `SuperGlueEntity` is claimed independently of Flywheel visualization.
 - `AbstractContraptionEntity` and `PackageEntity` are claimed only when
   `VisualizationManager.supportsVisualization` is enabled and execution is
-  outside the nesting-safe `CreateEntityOutlineMaskScope`.
+  outside the adapter's nesting-safe mask scope.
 - If those conditions are not met, the adapter does not claim the entity and
   the common ping outline remains the only route.
 
@@ -46,10 +46,10 @@ closure.
 
 For one claimed contraption or package entity, on the render thread issue
 exactly one direct `EntityRenderDispatcher.render` call into the shared outline
-buffer through `OutlineOnlyBufferSource`. Use a fresh PoseStack, interpolated
+buffer through an outline-only buffer source. Use a fresh PoseStack, interpolated
 camera-relative position and yaw, the current partial tick, dispatcher light,
-the block-atlas texture fallback, and a **262144-vertex** cap. The call runs
-inside the nesting-safe mask scope.
+the block-atlas texture fallback, and a fixed vertex budget that bounds the
+dispatch. The call runs inside the nesting-safe mask scope.
 
 Do not flush the shared buffer, call `endOutlineBatch`, mutate entity visibility
 or glowing state, or invoke separate state-mutating render helpers. The scope
@@ -64,12 +64,7 @@ vertices. Each quad uses fixed UVs `(0,0)-(1,0)-(1,1)-(0,1)`, the Create glue
 texture, and the exact opaque ping color. This direct mask remains independent
 of Flywheel visualization support.
 
-The adapter follows the common
-[source outcome contract](../architecture/geometry/geometry_sources.md). Normal zero output
-is `EMPTY`; a recoverable exception with no committed vertex is `FAILED`; a
-recoverable exception after shared-buffer vertices have been committed is
-`RENDERED` for that frame with a partial-emission diagnostic. The integration
-does not redefine those outcomes.
+The adapter follows the common [source outcome contract](../architecture/geometry/geometry_sources.md#common-per-attempt-outcome-contract).
 
 Diagnostics follow the shared [logging contract](../architecture/logging.md).
 Retain and close the registration handle during deterministic teardown.
@@ -81,7 +76,7 @@ This is a separate optional source for `entity_block` presentation under mode
 lazily only after both Create and Flywheel mod-ID checks and register it through
 the common optional entity-block geometry registry. Its current source ID is an
 implementation identifier, not a public compatibility or stability promise.
-The current Flywheel **1.0.6** support contract includes both direct instancing
+The Flywheel **1.0.6** support contract includes both direct instancing
 and indirect backends; it is not a compatibility promise for arbitrary versions.
 
 For every attempt, resolve current live state rather than retaining stale visual
@@ -103,11 +98,8 @@ its original UVs. Preserve Create's scrolling-UV calculation exactly:
 diff + fract(speed * renderTicks + offset) * scale
 ```
 
-Zero committed output and recoverable partial commits follow the common outcome
-contract. In particular, a shared-buffer commit that fails after writing one or
-more vertices is `RENDERED` for that frame, while pre-commit plan failures are
-`FAILED` or `EMPTY` according to the observed result. Retain and close the
-registration handle; diagnostics follow the shared
+This source follows the common [source outcome contract](../architecture/geometry/geometry_sources.md#common-per-attempt-outcome-contract).
+Retain and close the registration handle; diagnostics follow the shared
 [logging contract](../architecture/logging.md).
 
 ## Create presentation summary adapter
@@ -144,7 +136,7 @@ whitelist-only mode is on, and the server policy page's outcome label reflects
 that default. Default
 authorization is not display: the RPM HUD line appears only when the default
 display reference selects it or a create carries a non-null property Ping
-annotation naming it, and no target type's default reference currently selects
+annotation naming it, and no target type's default reference selects
 RPM. The disabled summaries stay disabled until explicitly allowed. Item and
 fluid summaries are record values keyed by registry ID; an uploaded property
 selection may address one nested registry-ID entry of such a summary. The property reference, recapture, authority, and
@@ -243,11 +235,7 @@ output cardinality, and never retain block entities, handlers, stacks, or
 components.
 
 The route fails soft: absent, untested, drifted, or throwing Create state yields
-no Create adapter or an unavailable/stale section, and Basic, the base Sable
-integration, and unrelated pings keep working. Loader registration, version
-gates, and the cached-accessor shape gate have unit and ASM-node seam coverage
-only; no installed-Create in-game presentation scenario has run yet, as
-recorded in [verification](../testing/verification/integrations.md#create-presentation-adapters).
+no Create adapter or an unavailable/stale section.
 
 ## Vault inventory provider
 
@@ -288,12 +276,10 @@ is already classified as `entity_block`. The specialized resolver runs before
 the generic vanilla door resolver, reuses its validated lower/upper composite,
 and preserves the source `entity_block` type on both subjects.
 
-Create's lower door BER owns the complete two-block renderer, but the upper
-subject is covered only after the lower subject's exact BER source reports
-`RENDERED`. A baked-model or Flywheel success, an attempted BER, ownership,
-`EMPTY`, `FAILED`, or unavailable geometry cannot claim that coverage. Until
-then, upper-subject sources and fallback remain eligible. The generic coverage
-contract is in [presentation subjects](../architecture/rendering/presentation_subjects.md).
+Create's lower door BER renders the complete two-block door; the upper subject
+is covered only after the lower subject's exact BER source reports `RENDERED`,
+under the [source-conditioned coverage](../architecture/rendering/presentation_subjects.md#source-conditioned-coverage)
+contract. Until then, upper-subject sources and fallback remain eligible.
 
 ### Large water-wheel master proxy
 
@@ -309,5 +295,5 @@ target; only presentation selects the master rendering form.
 ## Verification boundary
 
 Build and automated-coverage evidence is owned by
-[verification](../testing/verification/README.md), including the
+[verification](../testing/verification/integrations.md#create-presentation-adapters), including the
 [pending Create gameplay and performance scenarios](../testing/verification/manual-integration.md#pending-manual-and-integration-matrix).

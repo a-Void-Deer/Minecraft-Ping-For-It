@@ -15,20 +15,11 @@ in-packet channel and legacy forwarding path. See
 [network protocol](network/protocol.md) for the deliberately narrow
 legacy-versus-authoritative boundary.
 
-Clients cannot authorize marker removal or select a server winner by sending
-presentation values. Detailed packet and invalidation timing lives in
-[target validation](authority/target_validation.md); deterministic winner
-selection lives in [ping winner](authority/ping_winner.md).
-
-Presentation snapshot values are projected per recipient from trusted server
-state: a field is captured and sent only when that recipient's negotiated
-manifest, server-selected mask, field policy, and permission all allow it. A
-missing replacement permission provider falls back to the vanilla
-permission-level comparison, while a throwing provider or an invalid level
-input denies access. A client cannot widen its own projection, permission
-level, or retained values by sending presentation data. Negotiation, permission
-evaluation, selector policy, and the client store boundaries are owned by
-[presentation snapshot](presentation/presentation_snapshot.md).
+Presentation snapshot values come from server-side capture. Client-uploaded
+property observations are untrusted claims; accepted selections use
+server-recaptured values.
+[Presentation snapshot](presentation/presentation_snapshot.md) owns negotiation,
+field authorization, projection, and retention.
 
 Entity-local geometry remains client capture metadata, while whole-entity
 identity and anchor validation are a server boundary; the server does not claim
@@ -40,25 +31,16 @@ validation/materialization before gaining committed identity; see
 
 ## Server configuration update enforcement
 
-The server derives the requester's identity and permission from trusted
-server-side state, checks the current editing authority for every configuration
-update before mutation, and rejects corrupt or unauthorized updates without
-changing configuration state. The presentation policy mutation route is
-enforced by the same mechanism: every mutation derives the connected player's
-permission from trusted server-side state and rechecks the current editing
-authority before any persisted state can change, and an unauthorized, corrupt,
-or invalid mutation never changes configuration state. Neither a client-provided
-edit hint nor a request identifier is an authorization credential. Who may read
-or edit is owned by
+For configuration updates and presentation policy mutations, the server derives
+the requester's identity and permission from trusted server-side state and
+rechecks current editing authority before mutation. Corrupt, invalid, or
+unauthorized requests leave configuration state unchanged. Neither a
+client-provided edit hint nor a request identifier is an authorization
+credential. Who may read or edit is owned by
 [server configuration authority](authority/server-config.md); the
 request/correlation, merge, and rule-view transaction is owned by
 [changing server configuration](config/changing-server-config.md) and
 [presentation snapshot](presentation/presentation_snapshot.md).
-
-The operations covered by this settings authority, including the boundaries of
-ordinary `MarkerCreate` and `MarkerRemove`, are owned by
-[server configuration authority](authority/server-config.md) and
-[target validation](authority/target_validation.md).
 
 ## Rate and malformed-state handling
 
@@ -75,9 +57,9 @@ silent/debug-only outcomes for other responses, are owned by
 
 Optional-mod gates and lazy/reflective boundaries prevent linkage failures from
 breaking unrelated pings. Render registries use immutable snapshots and
-retained, idempotently closed registration handles. Rendering uses local/scoped
-state, not persistent vanilla glowing/team mutations. Flywheel adapters must
-not revive or mutate stale/hidden/deleted/foreign handles.
+retained, idempotently closed registration handles. [Outline rendering](rendering/outline.md#common-entity-outlines)
+owns scoped render-state isolation; [Create/Flywheel](../integrations/create.md#createflywheel-entity-block-geometry)
+owns live visual-handle access.
 
 For geometry source attempts, only `Exception`, `LinkageError` and
 `AssertionError` are recoverable. Fatal JVM/resource errors propagate. This
@@ -85,8 +67,8 @@ enumeration scopes only the shared geometry-source attempt; it is not a general
 optional-integration or registry catch policy. A partial recoverable emission
 follows the exact
 [source outcome contract](geometry/geometry_sources.md), not a blanket catch or
-duplicate fallback render. Config recovery must preserve original bytes under
-[client invalid-file recovery](config/revisioning.md#invalid-file-recovery-differs-by-config-type).
+duplicate fallback render. [Configuration revisioning](config/revisioning.md#invalid-file-recovery-differs-by-config-type)
+owns the distinct client and server recovery rules.
 
 ## Diagnostic detail and user feedback
 

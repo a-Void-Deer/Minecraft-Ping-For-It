@@ -88,10 +88,9 @@ The server scope has five categories:
   Window.
 - **Server Presentation**: Server Policy.
 
-The category structure supports later categories; it defines no configuration
-field of its own. Each option's value semantics and persisted form remain owned
-by the configuration catalogues, and this page owns only which options are
-exposed under which category and whether a group edits local or server policy.
+Each option's value semantics and persisted form remain owned by the
+configuration catalogues, and this page owns only which options are exposed
+under which category and whether a group edits local or server policy.
 
 The screen exposes no controls for the hidden native raycast cap or the four
 direction-indicator safe-area insets; their file semantics remain in the client
@@ -146,7 +145,7 @@ the finite text, so switching a row to unlimited never discards the finite
 value, including text that is currently invalid. The multiplier fields that
 have an unlimited mode, and the pending-memory field, offer native step buttons
 that use the confirmed grids and steps without floating-point rounding. The
-persisted keys, bounds, grid normalization, and unlimited semantics are owned
+persisted keys, normalization behavior, and unlimited semantics are owned
 by [server configuration](../config/server.md#inventory-policy-object) and
 [inventory preview and tracking](../architecture/presentation/inventory.md).
 
@@ -174,9 +173,11 @@ The client scope has no presentation-policy category. The server scope's
 Server Presentation category contains only the Server Policy editor, with one
 target-type selection over exactly the five fixed target types. The editor has
 no property-entry control: property selections are not configured in the GUI.
-Its field list is the fields advertised by the connection's accepted offer after
-the local ID/kind compatibility check, so it shows only compatible fields and is
-unknown — not an authoritative empty list — until a valid offer is accepted.
+The field list uses the connection's
+[accepted field catalogue](../architecture/presentation/presentation_snapshot.md#field-manifest-and-value-model).
+Until that catalogue is known, the page displays an unknown state rather than an
+empty list. Entries are grouped by the field ID's namespace, not the owning
+adapter's mod ID, and a repeated field ID produces one row.
 The policy snapshot and status are independent of the ordinary
 server-settings view, so that view does not gate entry to or viewability of this
 policy page.
@@ -209,16 +210,15 @@ which also owns the accepted field-catalog metadata, the per-target-type
 application, and the outcome evaluation these rows display. The mutation
 permission threshold is owned by
 [server configuration authority](../architecture/authority/server-config.md).
-Selector grammar and the persisted shape are owned by the configuration
-catalogues.
+Selector grammar and persisted shape are owned by
+[server configuration](../config/server.md#presentation-policy-object).
 
 ## Marker display duration option
 
-All options displays the complete label
-`<setting name>: <value>`, with both the setting name and the current value
-localized, both when the value is an explicit duration and when it uses a string. The value semantics are owned by
-[client configuration](../config/client.md); this page owns only the displayed
-label.
+The Marker Display Duration option displays the complete localized label
+`<setting name>: <value>` for both explicit durations and the follow-server value.
+Its value semantics are owned by
+[client configuration](../config/client.md); this page owns its displayed label.
 
 This label contract covers that option; it does not define a general label rule
 for other client options or for the server-settings fields.

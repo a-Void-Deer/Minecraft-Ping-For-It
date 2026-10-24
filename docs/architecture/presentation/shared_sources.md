@@ -2,15 +2,8 @@
 
 This topic owns the generic, domain-neutral mechanism shared by presentation
 sources: source access, capture results, cost accounting, and sync publication.
-It is the adopted contract for the approved shared-source mechanism: the
-server-side source-access contract, the detached source-key and capture-result
-models, the cost ledgers, and the sync publisher are integrated through the
-production runtime, source wrapper and publisher seams. Coverage scope and
-pending runtime evidence are owned by
-[testing and verification](../../testing/verification/shared-sources.md). The existing
-one-shot adapter capture path, the per-marker cache, and whole-section
-replacement keep their present semantics on their current routes, and this
-adoption does not rewrite those routes.
+Coverage scope and pending runtime evidence are owned by
+[testing and verification](../../testing/verification/shared-sources.md).
 
 Inventory domain policy — item identity, preview and tracking behavior, zero and
 component-fallback rules, and recovery deadlines — is owned by
@@ -106,10 +99,11 @@ capture bounds. A migrated source wrapper maps the actual observed domain units
 and the existing work or capture counters without double-charging the same
 counter or dropping an independent guard; a legacy one-shot capture-budget
 scan cannot be converted into domain units without an explicit bridge cost
-mapping. Legacy paths without such a mapping stay on their current route and
-are covered by contract tests only. A migrated observation uses its exclusive
-provider path; unmigrated paths are unchanged and no cross-path deduplication
-is claimed.
+mapping. Legacy paths without such a mapping stay on their current route. A
+migrated observation uses its exclusive provider path; unmigrated paths are
+unchanged and no cross-path deduplication is claimed. Evidence limitations are
+tracked in
+[known automated gaps](../../testing/verification/shared-sources.md#known-automated-gaps).
 
 ## Capture results
 
@@ -224,14 +218,11 @@ unavailable. The inventory-specific classification and native persistent-codec
 route are owned by
 [inventory](inventory.md#component-classification-and-encoding-trust).
 
-Units are owned by code. Inventory's charged unit is the slot: consuming a
-captured snapshot's parse statistics spends the shared scan allowance and the
-per-client or per-target logical progress, while capture, copy and freeze are
-bounded by fixed work and the finite memory guard instead. A source with no
-snapshot support keeps its live route and is charged by its live slots, and
-future tank or read units would be domain-specific examples rather than
-registered units of this contract. The supported snapshot shapes are owned by
-[inventory](inventory.md#detached-snapshot-capture-and-schema).
+Units are owned by code. A domain defines its charging unit and the logical
+progress its consumers record; no shared unit conversion is defined.
+Inventory's slot unit and its distinction between parse charging and fixed-work
+capture, copy and freeze are owned by
+[inventory](inventory.md#budgets-queues-and-memory).
 
 Four ledgers stay separate — shared scan work, logical progress, wire bytes,
 and retained memory — with no mixed or weighted unit and no universal
@@ -322,9 +313,8 @@ unchanged rather than re-sending or zeroing it; a tombstone has domain meaning
 and is not zero.
 
 A state or baseline fence discards data older than it. Publication re-projects
-against the current server policy and session at send time. There is no
-`SUBSCRIBE` intent and a client cannot widen its own authorization; budget
-exhaustion schedules a defer, while an unavailable or invalid source maps to the
+against the current server policy and session at send time. Budget exhaustion
+schedules a defer, while an unavailable or invalid source maps to the
 result availability and the domain status or fence, never to a defer and never
 to a pretend-complete publication.
 
@@ -377,8 +367,8 @@ separate units, never a mixed-unit total. One work item's observation is counted
 once per cycle; additional limiting reasons do not duplicate that item or its
 quantity. Shared physical work is not multiplied by consumers or recipients,
 while independently blocked logical or publication stages may be separate work
-items for the same target. A bounded summary shows at most ten work-item
-descriptions and an extra observed-work count: that count is the observed items
+items for the same target. A bounded summary shows sample work-item descriptions
+and an extra observed-work count: that count is the observed items
 not displayed, not unique targets or an estimate of unvisited server backlog.
 Unknown quantities remain unknown, and saturated counters are lower bounds,
 not fabricated exact totals. General report bounds and output isolation are
@@ -399,14 +389,14 @@ and are not eligible to dispatch a notice. Incomplete discovery cannot prove
 global health or idleness while eligible sweep members remain unconsidered; unseen
 work is not counted as observed delay either.
 
-After at least ten continuous real seconds of evidenced delay, when messages
-are enabled and cooldown permits, the server sends one consolidated
+When continuous evidenced delay reaches the notification threshold, messages
+are enabled and the global cooldown permits, the server sends one consolidated
 administrator notice for the currently qualified modules to eligible recipients.
-A global five-real-minute cooldown follows a successfully delivered notice,
-not separate cooldowns per module or recipient. No eligible recipient or a
-failed handoff consumes no delivered-notice cooldown, and elapsed time without
-another observed delayed tick cannot trigger a notice. The server-owned switch
-is catalogued by
+A global cooldown follows a successfully delivered notice,
+not separate cooldowns per module or recipient. Neither an attempt without an
+eligible recipient nor a failed handoff consumes delivered-notice cooldown, and
+elapsed time without another observed delayed tick cannot trigger a notice. The
+server-owned switch is catalogued by
 [server configuration](../../config/server.md#persisted-fields): disabling
 messages leaves WARN, accounting and delay evidence active. Live setting changes
 preserve cooldown; replacing or stopping the server lifetime clears monitoring

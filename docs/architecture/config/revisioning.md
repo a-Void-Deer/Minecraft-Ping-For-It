@@ -1,18 +1,18 @@
 # Configuration schema revisioning and recovery
 
-This topic owns the JSON schema marker, version comparison, migration and
+This topic owns marker serialization, version comparison, migration and
 recovery behavior shared by the client and server configuration files. It
 describes the behavior of the configuration handler, not a release-compatibility
 promise.
 
 ## Marker and serialization
 
-An existing configuration file must parse to a JSON object containing
-`"pingforit-version"` as a string. A missing marker, `null`, a non-string
-primitive, an object/array marker, or a blank string is invalid before version
-parsing begins. The string must then match the Ping For It version grammar. A
-missing configuration file is instead initialized with defaults and written
-through the normal serialization path.
+Existing configuration files use the shared
+[version-marker format](../../config/client.md#version-marker). Marker validation
+precedes version comparison; an invalid marker follows
+[invalid-file recovery](#invalid-file-recovery-differs-by-config-type). A missing
+configuration file is instead initialized with defaults and written through the
+normal serialization path.
 
 Whenever that path actually serializes a configuration—new defaults, an ordinary
 save, a reset/recovery write, or a migration write—it stamps
@@ -21,23 +21,8 @@ loaded and validated; it is not rewritten merely because it was loaded.
 
 ## Version-string grammar and comparison
 
-The full-string grammar is:
-
-```text
-\A([0-9]+)\.([0-9]+)\.([0-9]+)-pfi-([A-Za-z0-9]+)\z
-```
-
-It has three nonnegative decimal digit sequences (each permits leading zeros and
-arbitrary width), the lowercase literal `-pfi-`, and a nonempty ASCII
-alphanumeric qualifier. There is no trimming: whitespace or any other extra
-character makes the string invalid. For example:
-
-| Valid | Invalid |
-| --- | --- |
-| `0.3.0-pfi-beta1` | `0.3.0` |
-|  | `0.3.0-beta1` |
-|  | `0.3.0-PFI-beta1` |
-|  | `0.3.0-pfi-beta.1` |
+The shared [version-marker grammar](../../config/client.md#version-marker)
+defines valid input for comparison.
 
 The original spelling is retained. For comparison, the `pfi` namespace is
 removed and `major.minor.patch-qualifier` is compared with Maven-compatible

@@ -1,9 +1,7 @@
 # Wheel interaction and cancellation
 
-> **Coverage.** This topic states the adopted native-selector interaction.
-> Coverage scope and pending runtime evidence for its headless controller,
-> session, candidate-allocation, transition/renderer and native input seams are
-> owned by [testing and verification](../../testing/verification/interaction.md).
+> **Coverage.** This topic states the native-selector interaction contract.
+> Coverage scope and pending runtime evidence are owned by [testing and verification](../../testing/verification/interaction.md#headless-spatial-radial-menu).
 
 ## Opening and selection
 
@@ -291,7 +289,7 @@ subsequently correct the pointer.
 
 The translation is smoothly interpolated like the other selector transitions,
 and reduced motion snaps it immediately. It does not change gesture thresholds
-or selection rules; projection-only corrections do not count as gesture input.
+or selection rules.
 
 While a radial child menu is active, each ancestor radial menu keeps only the
 entry through which the active path descends, together with its Back
@@ -381,13 +379,11 @@ Its candidates are captured live from the current camera ray while the branch
 is active, under
 [Precise live candidate capture](capture.md#precise-live-candidate-capture):
 entering the branch starts capture, leaving it pauses, and the hold's frozen
-settings still change only on the next hold. A type's leaf is enabled only
-while that type has a currently certified candidate. An incomplete scan
-disables the leaf even when an ordinary target of that type exists; a refresh
-in progress keeps the last certified candidate selectable, and a leaf with no
-certified candidate is disabled. A focused fixed-type leaf keeps its focus when
-the live target changes. Each available leaf creates its assigned canonical
-candidate using that candidate's own Target Type default Ping Type; release
+settings still change only on the next hold. Leaf enablement and certification
+follow [Precise live candidate capture](capture.md#precise-live-candidate-capture).
+A focused fixed-type leaf keeps its focus when the live target changes. Each
+available leaf creates its assigned canonical candidate using that candidate's
+own Target Type default Ping Type; release
 follows [Radial release result](#radial-release-result). Each enabled leaf also
 shows its captured candidate's actual display name as a preview below its own
 fixed type title frame and outside that frame; a leaf with no captured
@@ -404,17 +400,16 @@ established Here name, under the
 [names and chat](../rendering/names_chat.md) composition rules; the branch adds
 no separate name or appearance preference. The preview never changes the title
 frame, and the preview is painted below it without frame background or border.
-The preview carries at most 32 visible Unicode code points, counted after
-vanilla legacy formatting; formatting sequences do not consume the visible
-budget. A name of at most 32 visible code points is shown whole — wrapped
-within the width shared by the Precise slots at a readable text size — while a longer name keeps its first 31
-visible code points followed by one ellipsis. Wrapping and capping preserve
-whole code points and each code point's explicit or legacy-resolved style; a
-glyph that still exceeds the shared width at that
-readable size is not truncated a second time. The preview moves, scales and
-fades with its node and follows the target opacity layer, and an exit tail
-keeps the name it was painted with. The separate Back entry is navigation and
-is never a candidate.
+The preview carries a bounded visible code-point budget, counted after vanilla
+legacy formatting; formatting sequences do not consume it. A name within the
+budget is shown whole — wrapped within the width shared by the Precise slots at
+a readable text size — while an over-budget name reserves the final visible
+code point for one ellipsis. Wrapping and capping preserve whole code points and
+each code point's explicit or legacy-resolved style; a glyph that still exceeds
+the shared width at that readable size is not truncated a second time. The
+preview moves, scales and fades with its node and follows the target opacity
+layer, and an exit tail keeps the name it was painted with. The separate Back
+entry is navigation and is never a candidate.
 
 ### Content
 
@@ -819,7 +814,4 @@ block, and a new session always starts unblocked. When the hover preference is
 disabled, the session stays inert and never triggers.
 
 The preference keys and their local authority are owned by
-[client configuration](../../config/client.md#spatial-selector-interaction);
-their numeric range, step, and default remain implementation values. Coverage
-for the native screen and input integration and game-feel validation is owned
-by [testing and verification](../../testing/verification/interaction.md).
+[client configuration](../../config/client.md#spatial-selector-interaction).

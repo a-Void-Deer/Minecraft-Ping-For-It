@@ -61,19 +61,18 @@ send-byte multipliers; `InventorySizeScaleTest` covers the ordered legal
 positions and their exact byte and quanta conversion, half-up normalization,
 pair legality, frame-priority reconcile and ordered position stepping.
 `SpatialSelectorSettingsTest` covers the spatial-selector settings snapshot and
-bounds. Hover, deadzone, stroke, dwell, root-distance, and submenu-radius-scale
-clamping saturate on both sides, a missing, explicit-null or fresh-file center
-deadzone initializes the current confirmed default while every valid saved
-deadzone value, including the previous default and both bounds, is retained
-literally without rescaling and a held snapshot keeps its frozen deadzone, the
-distance and timing clamps stay exact over their whole valid interval, the
-spatial distance defaults
-and bounds preserve their half-scale relationship, null and out-of-range nested
-values validate without throwing, the opt-in Back-hover default stays disabled,
+bounds. A missing, explicit-null or fresh-file center deadzone initializes the
+current confirmed default while representative valid saved deadzone values,
+including both bounds, are retained literally without rescaling and a held
+snapshot keeps its frozen deadzone, the
+distance and timing clamps preserve the valid interval and saturate on both
+sides, every supported stroke can leave every supported center deadzone, and
+null and out-of-range nested values validate without throwing, the opt-in
+Back-hover default stays disabled,
 a missing or explicit-null submenu radius scale gains the confirmed default and
 the value clamps and freezes into the snapshot, the precise capture period
-clamps to its persisted range, defaults to its minimum, and freezes into the
-snapshot, the content-intent choice defaults disabled for fresh, missing and
+clamps to its persisted range and freezes into the snapshot, the content-intent
+choice defaults disabled for fresh, missing and
 null values, an explicit choice is retained and freezes into the held snapshot
 while the live setter supplies the next snapshot, the canonical snapshot
 constructor carries the choice while every previous constructor form defaults
@@ -82,8 +81,11 @@ the submenu radius scale and precise capture period, raw-JSON validation and a
 frozen snapshot clamp every value without resetting boolean choices, a frozen
 session snapshot never follows later config edits, root distance and gesture
 preferences stay independent in both mutation directions, and fresh defaults do
-not alias another client's mutable preferences. `SpatialSelectorMigrationTest`
-contains filesystem-backed cases for the obsolete preference catalogued by
+not alias another client's mutable preferences. The suite also contains literal
+tuning assertions for spatial distance defaults and bounds and the Precise
+capture period; these do not establish a half-scale relationship.
+`SpatialSelectorMigrationTest` contains filesystem-backed cases for the obsolete
+preference catalogued by
 [client configuration](../../config/client.md#obsolete-keys): fresh output omits
 it, existing null, numeric and object-shaped values do not affect the live
 snapshot, a same-version load and untouched save preserve the source bytes,
@@ -198,9 +200,10 @@ failed-write retry; changed-source reload; and the separate typed invalid-file
 recovery for an undecodable value (defaults plus a broken-file backup), with a
 failed backup installing the protection that declines angle writes.
 
-`ClientConfigBoundsTest` pins the exact default, both clamps, NaN and infinity
-handling, and independence from the cancel cone. `SpatialSelectorSettingsTest`
-covers the inventory stay-open choice defaulting closed, missing and null
+`ClientConfigBoundsTest` exercises direct window and angle clamps, including NaN
+and positive infinity, and also contains literal default assertions.
+`SpatialSelectorSettingsTest` covers the inventory stay-open choice defaulting
+closed, missing and null
 members staying closed, the live setter affecting the next snapshot, and a held
 snapshot retaining its frozen choice. `ClientConfigLocalizationTest` covers the
 eight bundled locales' labels and tooltips, placeholder signatures, the

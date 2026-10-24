@@ -125,8 +125,7 @@ to a location at the player's authoritative current position.
 
 A negotiated marker-remove intent carries a marker identity/request. The server
 checks that the requester owns the active marker, then synchronizes a valid
-removal. Stale or unauthorized requests are safely ignored or rejected. Another
-player's marker cannot be cancelled even if a modified client requests it.
+removal. Stale or unauthorized requests are safely ignored or rejected.
 Ordinary marker creation and removal are not OP-gated; the ownership contract
 governs removal.
 
