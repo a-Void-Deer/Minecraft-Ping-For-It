@@ -41,6 +41,77 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** UNRUN. Actual native source and lazy observation path, with the unchanged default memory cap. */
 class InventoryCatalogNativeReadWiringTest {
+	@Test void indexedReadAndExactWitnessAcquireMetadataBeforeGetterAndFreezeBeforeProviderPostcheck() {
+		for (boolean external : new boolean[] {false, true}) for (boolean witness : new boolean[] {false, true})
+			for (boolean revoke : new boolean[] {false, true}) {
+			var stack = new ItemStack(Items.STONE, 7);
+			var name = net.minecraft.network.chat.Component.literal("getter-time");
+			stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, name);
+			var expected = new InventoryItemCodec.Catalog(RegistryAccess.EMPTY).encode(stack);
+			var selection = new InventorySelection(expected.key(), "minecraft:stone", expected.display().label(), expected.display().displayJson(), false, "danger");
+			var events = new ArrayList<String>(); boolean[] returned = {false}, valid = {true};
+			var state = Blocks.BEEHIVE.defaultBlockState();
+			var entity = new net.minecraft.world.level.block.entity.BeehiveBlockEntity(BlockPos.ZERO, state);
+			var world = new InventoryMinecraftSources.SourceWorld() {
+				@Override public boolean isLoaded(BlockPos pos) { return pos.equals(BlockPos.ZERO); }
+				@Override public BlockState blockState(BlockPos pos) { return state; }
+				@Override public BlockEntity blockEntity(BlockPos pos) { return entity; }
+				@Override public boolean onServerThread() { return true; }
+				@Override public ItemStack heldKey() { return ItemStack.EMPTY; }
+				@Override public HolderLookup.Provider registries() {
+					events.add("registries");
+					if (returned[0]) { stack.setCount(0); name.append("-registry"); }
+					return RegistryAccess.EMPTY;
+				}
+			};
+			var access = new IPlatformInventoryService.Access() {
+				@Override public Optional<String> alias() { return Optional.of("test:resident-order"); }
+				@Override public boolean valid() { return valid[0]; }
+				@Override public int slots() { return 1; }
+				@Override public boolean stableCursor() { return true; }
+				@Override public java.util.OptionalLong version() { return java.util.OptionalLong.empty(); }
+				@Override public IPlatformInventoryService.Entry read(int slot) { throw new AssertionError("no Entry copy"); }
+				@Override public boolean visit(int limit, java.util.function.Consumer<IPlatformInventoryService.Entry> consumer) { throw new AssertionError("indexed only"); }
+				@Override public IPlatformInventoryService.ResidentEntry readResident(int slot) { throw new AssertionError("must enter immediate boundary"); }
+				@Override public boolean consumeResident(int slot, IPlatformInventoryService.ResidentVisitor visitor) {
+					events.add("getter"); returned[0] = true;
+					boolean more = visitor.visit(new IPlatformInventoryService.ResidentEntry(new InventoryResidentItem.Stack(stack), 9007199254740993L));
+					events.add("postcheck"); stack.setCount(0); name.append("-postcheck"); valid[0] = !revoke;
+					return more;
+				}
+			};
+			var input = external ? new InventorySourceInput(Target.ExternalBlockTarget.candidate("minecraft:overworld", "sable", "minecraft:beehive", "test", true),
+				new UUID(82, 2), BlockFace.NORTH) : new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 0, 0, 0, "minecraft:beehive"), new UUID(82, 2), BlockFace.NORTH);
+			InventorySourceAccess.Source source;
+			if (external) {
+				var descriptor = new nx.pingwheel.common.integration.externalblock.BlockReadSource((Target.ExternalBlockTarget) input.target(), "sable", "test",
+					new Target.BlockTarget("minecraft:overworld", 0, 0, 0, "minecraft:beehive"), new nx.pingwheel.common.marker.MarkerAnchor(0, 0, 0));
+				var binding = new InventoryMinecraftSources.ExternalBinding(world, descriptor, BlockPos.ZERO::equals, (pos, face) -> Optional.of(access));
+				source = InventoryMinecraftSources.resolveExternal(input, () -> Optional.of(binding), () -> true,
+					entry -> { throw new AssertionError("no compatibility codec"); }).orElseThrow();
+			} else {
+				var view = new InventoryMinecraftSources.View("test:resident-order", List.of(), List.of(), access);
+				source = new InventoryMinecraftSources.Source(input, view, () -> true, () -> view,
+					entry -> { throw new AssertionError("no compatibility codec"); }, world, null);
+			}
+			events.clear();
+			try (source) {
+				if (revoke && witness && !external) assertFalse(source.matchesSelection(0, selection));
+				else if (revoke) assertThrows(InventorySourceUnavailableException.class, () -> {
+					if (witness) source.matchesSelection(0, selection); else source.read(0);
+				});
+				else if (witness) assertTrue(source.matchesSelection(0, selection), "exact witness must match getter-time patch");
+				else {
+					var item = source.read(0); assertNotNull(item); assertEquals(9007199254740993L, item.count());
+					assertEquals(expected.key(), item.key()); assertFalse(item.displayJson().contains("postcheck")); assertFalse(item.displayJson().contains("registry"));
+				}
+			}
+			assertEquals("registries", events.getFirst());
+			int getter = events.indexOf("getter"); assertTrue(getter > 0);
+			assertEquals(List.of("getter", "postcheck"), events.subList(getter, events.size()));
+			assertEquals(0, stack.getCount()); assertEquals("getter-time-postcheck", name.getString(), "provider really reused count and mutable patch value");
+		}
+	}
 
 	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
 	private static final class Chest extends ChestBlockEntity implements BaseContainerLockAccessor {

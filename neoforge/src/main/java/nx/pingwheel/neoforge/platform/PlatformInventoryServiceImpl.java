@@ -77,7 +77,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		private final java.util.function.Predicate<BlockPos> memberGate;
 		private final nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess raw;
 		private final nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.Scratch scratch;
-		private ResidentScope residentScope;
+		private @Nullable ResidentScope residentScope;
 
 		HandlerAccess(IItemHandler handler, BlockPos position, java.util.function.Predicate<BlockPos> memberGate) {
 			this(handler, position, memberGate, nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess.load());
@@ -298,14 +298,23 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 
 		@Override
 		public ResidentEntry readResident(int slot) {
+			@Nullable ResidentEntry[] result = new ResidentEntry[1];
+			consumeResident(slot, entry -> { result[0] = entry; return true; });
+			return Objects.requireNonNull(result[0]);
+		}
+
+		@Override
+		public boolean consumeResident(int slot, ResidentVisitor visitor) {
+			Objects.requireNonNull(visitor, "visitor");
 			// Unknown read/helper graphs retain LIVE/EXTERNAL_TRUST, not certification.
 			supportsDetachedSlotCapture();
 			Objects.checkIndex(slot, slots());
 			requireMember();
 			ItemStack stack = content(slot);
+			boolean more = visitor.visit(ResidentReads.stack(stack));
 			requireMember();
 			if (residentScope != null && !residentScope.valid()) throw new InventorySourceUnavailableException("inventory source revoked during resident read");
-			return ResidentReads.stack(stack);
+			return more;
 		}
 
 		@Override

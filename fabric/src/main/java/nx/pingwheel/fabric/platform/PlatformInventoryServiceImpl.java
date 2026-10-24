@@ -140,7 +140,8 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			}
 		}
 	}
-	private static SingleStackStorage mappedStack(StorageView<ItemVariant> view, FabricResidentStorageAccess raw, ResidentScope scope) {
+	private static @org.jetbrains.annotations.Nullable SingleStackStorage mappedStack(StorageView<ItemVariant> view,
+		FabricResidentStorageAccess raw, @org.jetbrains.annotations.Nullable ResidentScope scope) {
 		if (view == null) throw new IllegalStateException("provider returned a null storage view");
 		if (view.getClass() == NativeSlots.SIDED_SLOT) {
 			if (scope != null && ResidentReads.field(view, NativeSlots.SIDED_SLOT, "direction", Direction.class) != scope.face())
@@ -152,15 +153,15 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		return view instanceof SingleStackStorage stack ? stack : null;
 	}
 
-	private static ResidentEntry residentEntry(StorageView<ItemVariant> view, BooleanSupplier memberGate,
-		FabricResidentStorageAccess raw, ResidentScope scope, int visibleSlot, boolean positional,
-		nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.Scratch scratch) {
+	private static boolean consumeEntry(@org.jetbrains.annotations.Nullable StorageView<ItemVariant> view, BooleanSupplier memberGate,
+		FabricResidentStorageAccess raw, @org.jetbrains.annotations.Nullable ResidentScope scope, int visibleSlot, boolean positional,
+		nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.Scratch scratch, ResidentVisitor visitor) {
 		requireMember(memberGate);
 		if (view == null) throw new IllegalStateException("provider returned a null storage view");
 		// This exact wrapper forwards all content reads to the already mapped slot.
 		// Never ask its getResource/getUnderlyingView to undo the frozen face mapping.
-		SingleStackStorage mapped = mappedStack(view, raw, scope);
-		if (mapped != null) return residentStack(mapped, memberGate, raw, scope, visibleSlot, positional, scratch);
+		@org.jetbrains.annotations.Nullable SingleStackStorage mapped = mappedStack(view, raw, scope);
+		if (mapped != null) return consumeStack(mapped, memberGate, raw, scope, visibleSlot, positional, scratch, visitor);
 
 		// Do not bypass a virtualized getter: altered graphs stay EXTERNAL_TRUST.
 		if (view instanceof SingleVariantStorage<?> storage
@@ -170,29 +171,28 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			&& nativeVariant(storage.variant)) {
 			long amount = storage.amount;
 			if (amount < 0) throw new IllegalStateException("provider reported a negative item amount");
-			if (amount == 0) return ResidentEntry.empty();
+			if (amount == 0) return visitor.visit(ResidentEntry.empty());
 			if (!(storage.variant instanceof ItemVariant resource))
 				throw new IllegalStateException("provider returned a non-item variant");
-			return residentVariant(resource, amount, memberGate);
+			return consumeVariant(resource, amount, memberGate, visitor);
 		}
 
 		// EXTERNAL_TRUST: finitely many external getters, no claim about their
 		// internals. Known SingleStackStorage conversions were intercepted above.
 		boolean blank = view.isResourceBlank();
+		if (blank) return visitor.visit(ResidentEntry.empty());
 		requireMember(memberGate);
-		if (blank) return ResidentEntry.empty();
 		long amount = view.getAmount();
-		requireMember(memberGate);
 		if (amount < 0) throw new IllegalStateException("provider reported a negative item amount");
-		if (amount == 0) return ResidentEntry.empty();
-		ItemVariant resource = view.getResource();
+		if (amount == 0) return visitor.visit(ResidentEntry.empty());
 		requireMember(memberGate);
-		return residentVariant(resource, amount, memberGate);
+		ItemVariant resource = view.getResource();
+		return consumeVariant(resource, amount, memberGate, visitor);
 	}
 
-	private static ResidentEntry residentStack(SingleStackStorage storage, BooleanSupplier memberGate,
-		FabricResidentStorageAccess raw, ResidentScope scope, int visibleSlot, boolean positional,
-		nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.Scratch scratch) {
+	private static boolean consumeStack(SingleStackStorage storage, BooleanSupplier memberGate,
+		FabricResidentStorageAccess raw, @org.jetbrains.annotations.Nullable ResidentScope scope, int visibleSlot, boolean positional,
+		nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.Scratch scratch, ResidentVisitor visitor) {
 		requireMember(memberGate);
 		if (storage.getClass() == NativeSlots.SLOT) {
 			// Raw fields establish only the already selected slot, not permission
@@ -230,45 +230,40 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			// Preserve virtualized semantics under explicit EXTERNAL_TRUST. Call
 			// only changed getters; an inherited getResource would construct/hash
 			// ItemVariant, so obtain that value from the raw stack instead.
-			var blankStack = nativeBlank ? raw.stack(storage) : null;
+			boolean blank = nativeBlank ? Objects.requireNonNull(raw.stack(storage), "resident stack").isEmpty() : storage.isResourceBlank();
+			if (blank) return visitor.visit(ResidentEntry.empty());
 			requireMember(memberGate);
-			boolean blank = nativeBlank ? Objects.requireNonNull(blankStack, "resident stack").isEmpty() : storage.isResourceBlank();
-			requireMember(memberGate);
-			if (blank) return ResidentEntry.empty();
 			long amount = nativeAmount ? Objects.requireNonNull(raw.stack(storage), "resident stack").getCount() : storage.getAmount();
-			requireMember(memberGate);
 			if (amount < 0) throw new IllegalStateException("provider reported a negative item amount");
-			if (amount == 0) return ResidentEntry.empty();
+			if (amount == 0) return visitor.visit(ResidentEntry.empty());
+			requireMember(memberGate);
 			if (!nativeResource) {
 				ItemVariant resource = storage.getResource();
-				requireMember(memberGate);
-				return residentVariant(resource, amount, memberGate);
+				return consumeVariant(resource, amount, memberGate, visitor);
 			}
 			var stack = Objects.requireNonNull(raw.stack(storage), "resident stack");
-			requireMember(memberGate);
-			return new ResidentEntry(new InventoryResidentItem.Stack(stack), amount);
+			return visitor.visit(new ResidentEntry(new InventoryResidentItem.Stack(stack), amount));
 		}
 		// InventorySlotWrapper's inspected getStack is a direct mapped Container
 		// read. Other concrete getStack implementations are EXTERNAL_TRUST: the
 		// base API permits copying. The invoker itself is not certification.
 		var stack = raw.stack(storage);
-		requireMember(memberGate);
-		return ResidentReads.stack(stack);
+		return visitor.visit(ResidentReads.stack(stack));
 	}
 
-	private static ResidentEntry residentVariant(ItemVariant resource, long amount, BooleanSupplier memberGate) {
+	private static boolean consumeVariant(@org.jetbrains.annotations.Nullable ItemVariant resource, long amount,
+		BooleanSupplier memberGate, ResidentVisitor visitor) {
 		if (resource == null) throw new IllegalStateException("provider returned a null item variant");
 		requireMember(memberGate);
 		// ItemVariantImpl's inherited getObject/getComponents are resident fields.
 		// Unknown implementations keep the same finite EXTERNAL_TRUST getter port;
 		// neither route calls toStack/getCachedStack/equals/hashCode.
-		var item = resource.getItem();
+		@org.jetbrains.annotations.Nullable var item = resource.getItem();
 		requireMember(memberGate);
 		if (item == null || item == Items.AIR) throw new IllegalStateException("positive amount requires an item variant");
-		var patch = resource.getComponents();
-		requireMember(memberGate);
+		@org.jetbrains.annotations.Nullable var patch = resource.getComponents();
 		if (patch == null) throw new IllegalStateException("provider returned a null item patch");
-		return new ResidentEntry(new InventoryResidentItem.Patch(item, patch), amount);
+		return visitor.visit(new ResidentEntry(new InventoryResidentItem.Patch(item, patch), amount));
 	}
 
 	private static boolean nativeVariant(Object resource) {
@@ -287,7 +282,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		private final BooleanSupplier memberGate;
 		private final FabricResidentStorageAccess raw;
 		private final nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.Scratch scratch;
-		private ResidentScope residentScope;
+		private @org.jetbrains.annotations.Nullable ResidentScope residentScope;
 
 		SlottedAccess(SlottedStorage<ItemVariant> storage) {
 			this(storage, () -> true);
@@ -340,13 +335,22 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 
 		@Override
 		public ResidentEntry readResident(int slot) {
+			@org.jetbrains.annotations.Nullable ResidentEntry[] result = new ResidentEntry[1];
+			consumeResident(slot, entry -> { result[0] = entry; return true; });
+			return Objects.requireNonNull(result[0]);
+		}
+
+		@Override
+		public boolean consumeResident(int slot, ResidentVisitor visitor) {
+			Objects.requireNonNull(visitor, "visitor");
 			Objects.checkIndex(slot, slots());
 			requireMember(memberGate);
 			StorageView<ItemVariant> view = storage.getSlot(slot);
 			requireMember(memberGate);
-			ResidentEntry entry = residentEntry(view, memberGate, raw, residentScope, slot, true, scratch);
+			boolean more = consumeEntry(view, memberGate, raw, residentScope, slot, true, scratch, visitor);
+			requireMember(memberGate);
 			if (residentScope != null && !residentScope.valid()) throw new InventorySourceUnavailableException("inventory source revoked during resident read");
-			return entry;
+			return more;
 		}
 
 		@Override
@@ -403,7 +407,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		private final BooleanSupplier memberGate;
 		private final FabricResidentStorageAccess raw;
 		private final nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.Scratch scratch;
-		private ResidentScope residentScope;
+		private @org.jetbrains.annotations.Nullable ResidentScope residentScope;
 
 		EnumeratedAccess(Storage<ItemVariant> storage) {
 			this(storage, () -> true);
@@ -462,11 +466,10 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 				requireMember(memberGate); boolean next = iterator.hasNext(); requireMember(memberGate);
 				if (!next) return new ResidentVisit(visited, true);
 				requireMember(memberGate); StorageView<ItemVariant> view = iterator.next(); requireMember(memberGate);
-				ResidentEntry entry = residentEntry(view, memberGate, raw, residentScope, visited, false, scratch);
+				boolean more = consumeEntry(view, memberGate, raw, residentScope, visited, false, scratch, visitor);
+				requireMember(memberGate);
 				if (residentScope != null && !residentScope.valid()) throw new InventorySourceUnavailableException("inventory source revoked during resident read");
 				visited++;
-				boolean more = visitor.visit(entry);
-				requireMember(memberGate);
 				if (!more) return new ResidentVisit(visited, false);
 			}
 			requireMember(memberGate); boolean complete = !iterator.hasNext(); requireMember(memberGate);

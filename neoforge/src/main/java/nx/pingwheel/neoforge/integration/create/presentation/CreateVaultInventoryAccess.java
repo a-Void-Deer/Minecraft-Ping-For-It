@@ -216,6 +216,12 @@ public final class CreateVaultInventoryAccess {
 			} catch (ReflectiveOperationException failure) { throw new IllegalStateException("Vault resident graph unavailable", failure); }
 		}
 		@Override public IPlatformInventoryService.ResidentEntry readResident(int slot) {
+			@org.jetbrains.annotations.Nullable IPlatformInventoryService.ResidentEntry[] result = new IPlatformInventoryService.ResidentEntry[1];
+			consumeResident(slot, entry -> { result[0] = entry; return true; });
+			return java.util.Objects.requireNonNull(result[0]);
+		}
+		@Override public boolean consumeResident(int slot, IPlatformInventoryService.ResidentVisitor visitor) {
+			java.util.Objects.requireNonNull(visitor, "visitor");
 			if (!valid()) throw new InventorySourceUnavailableException("Vault topology changed");
 			java.util.Objects.checkIndex(slot, slots());
 			try {
@@ -227,12 +233,11 @@ public final class CreateVaultInventoryAccess {
 						member.auditedLocal(live); // classify before getter; false is LIVE/EXTERNAL_TRUST, not atomic
 						if (live.getSlots() != count) throw new InventorySourceUnavailableException("Vault local mapping changed");
 						var stack = live.getStackInSlot(slot);
-						// Callback-free post-getter gate: only world member membership is
-						// rechecked here, never a provider metadata getter that could reuse
-						// the returned stack. The caller consumes the value synchronously and
-						// runs the final all-member validation after that freeze.
+						boolean more = visitor.visit(IPlatformInventoryService.ResidentReads.stack(stack));
+						// The borrowed value is detached before even membership callbacks;
+						// the caller still runs final all-member topology validation.
 						requireMembersHeld();
-						return IPlatformInventoryService.ResidentReads.stack(stack);
+						return more;
 					}
 					slot -= count;
 				}

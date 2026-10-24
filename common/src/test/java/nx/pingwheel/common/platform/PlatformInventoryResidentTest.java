@@ -9,6 +9,41 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PlatformInventoryResidentTest {
+	@Test void guardedConsumptionDetachesBeforeTheNextGateAndStillRejectsRevocation() {
+		net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+		for (boolean revoke : new boolean[] {false, true}) {
+			var stack = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE, 7);
+			var name = net.minecraft.network.chat.Component.literal("getter-time");
+			stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, name);
+			AtomicBoolean returned = new AtomicBoolean(); AtomicInteger mutations = new AtomicInteger();
+			var access = new OldAccess() {
+				@Override public IPlatformInventoryService.ResidentEntry readResident(int slot) {
+					returned.set(true);
+					return new IPlatformInventoryService.ResidentEntry(
+						new nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem.Stack(stack), 9007199254740993L);
+				}
+			}.guardedBy(() -> {
+				if (!returned.get()) return true;
+				mutations.incrementAndGet(); stack.setCount(0); name.append("-mutated"); return !revoke;
+			});
+			@org.jetbrains.annotations.Nullable nx.pingwheel.common.presentation.inventory.minecraft.InventoryDetachedItem[] frozen =
+				new nx.pingwheel.common.presentation.inventory.minecraft.InventoryDetachedItem[1];
+			IPlatformInventoryService.ResidentVisitor visitor = entry -> {
+				assertEquals(0, mutations.get()); assertEquals(9007199254740993L, entry.amount());
+				assertEquals(7, stack.getCount());
+				frozen[0] = nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.freeze(entry.item(),
+					net.minecraft.core.RegistryAccess.EMPTY, 4096,
+					nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.root(4096));
+				return false;
+			};
+			if (revoke) assertThrows(IllegalStateException.class, () -> access.consumeResident(0, visitor));
+			else assertFalse(access.consumeResident(0, visitor));
+			assertEquals(1, mutations.get()); assertEquals(0, stack.getCount());
+			assertEquals("getter-time-mutated", name.getString());
+			assertNotNull(frozen[0]); assertTrue(frozen[0].display().displayJson().contains("getter-time"));
+			assertFalse(frozen[0].display().displayJson().contains("mutated"));
+		}
+	}
 	@Test void reflectionShapeRefusesOversizedLookupNamesBeforeConstructingMissingMethodMessages() {
 		String oversized = "missing".repeat(100);
 		assertFalse(IPlatformInventoryService.ResidentReads.reflectionShape(String.class, oversized));

@@ -46,7 +46,9 @@ class CreateVaultInventoryAccessTest {
 			@Override public ItemStack getStackInSlot(int slot) { allowed.remove(other); return new ItemStack(Items.STONE); }
 		};
 		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH, allowed::contains).orElseThrow();
-		assertThrows(IllegalStateException.class, () -> access.readResident(0));
+		var consumed = new java.util.concurrent.atomic.AtomicInteger();
+		assertThrows(IllegalStateException.class, () -> access.consumeResident(0, entry -> { consumed.incrementAndGet(); return true; }));
+		assertEquals(1, consumed.get(), "detachment is provisional; failed final membership must still reject the operation");
 	}
 	@Test void threeLayoutsPerSlotAndFixedDiscoveryPassesConsumeTheAdmittedAllocation() {
 		World world = World.pair();
@@ -85,9 +87,10 @@ class CreateVaultInventoryAccessTest {
 		World world = World.pair();
 		class Reusing extends Handler {
 			final ItemStack scratch = new ItemStack(Items.STONE, 7);
+			final net.minecraft.network.chat.MutableComponent name = net.minecraft.network.chat.Component.literal("getter-time");
 			int metadataCalls, metadataAtRead; boolean returned;
-			Reusing() { super(1); }
-			@Override public int getSlots() { metadataCalls++; if (returned) scratch.setCount(0); return 1; }
+			Reusing() { super(1); scratch.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, name); }
+			@Override public int getSlots() { metadataCalls++; if (returned) { scratch.setCount(0); name.append("-metadata"); } return 1; }
 			@Override public ItemStack getStackInSlot(int slot) {
 				scratch.setCount(7); returned = true; metadataAtRead = metadataCalls; return scratch;
 			}
@@ -95,20 +98,30 @@ class CreateVaultInventoryAccessTest {
 		var handler = new Reusing(); world.members.get(BlockPos.ZERO).handler = handler;
 		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
 		assertFalse(access.supportsDetachedSlotCapture(), "the overridden getter remains LIVE/EXTERNAL_TRUST");
-		ItemStack[] consumed = new ItemStack[1];
+		var membershipMutations = new java.util.concurrent.atomic.AtomicInteger();
+		world.afterLoaded = ignored -> {
+			if (handler.returned && membershipMutations.getAndIncrement() == 0) {
+				handler.scratch.setCount(0); handler.name.append("-membership");
+			}
+		};
+		@org.jetbrains.annotations.Nullable String[] consumed = new String[1];
 		var observed = access.observeResident(1, entry -> {
 			assertEquals(handler.metadataAtRead, handler.metadataCalls, "no provider metadata may run before synchronous consumption/freezing");
+			assertEquals(0, membershipMutations.get(), "even membership callbacks must follow the handoff");
 			assertEquals(7L, entry.amount());
 			var resident = ((nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem.Stack) entry.item()).resident();
 			assertSame(handler.scratch, resident); assertEquals(7, resident.getCount());
-			consumed[0] = resident.copy(); // detached stand-in for the common freezer, tested separately
+			consumed[0] = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(com.mojang.serialization.JsonOps.INSTANCE,
+				resident.getComponentsPatch()).getOrThrow().toString();
 			return true;
 		});
 		assertEquals(1, observed.visited());
+		assertTrue(membershipMutations.get() > 0); assertTrue(handler.name.getString().contains("membership"));
 		assertTrue(access.valid(), "all-member topology validation still runs after consumption");
 		assertTrue(handler.metadataCalls > handler.metadataAtRead);
 		assertTrue(handler.scratch.isEmpty(), "positive control: the next metadata callback reuses the temporary stack");
-		assertEquals(7, consumed[0].getCount()); assertSame(Items.STONE, consumed[0].getItem());
+		assertNotNull(consumed[0]); assertTrue(consumed[0].contains("getter-time"));
+		assertFalse(consumed[0].contains("metadata")); assertFalse(consumed[0].contains("membership"));
 		world.members.get(new BlockPos(1, 0, 0)).controller = new BlockPos(9, 0, 0);
 		assertFalse(access.valid(), "a final all-member relation change must still reject publication");
 	}

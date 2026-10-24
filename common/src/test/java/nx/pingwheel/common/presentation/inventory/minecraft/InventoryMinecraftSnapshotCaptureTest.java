@@ -589,6 +589,36 @@ class InventoryMinecraftSnapshotCaptureTest {
 		try (var source = source(world, input, admitted, () -> admitted)) { assertTrue(source.snapshotPlan().isEmpty()); }
 		assertEquals(0, calls.get()); assertEquals(0, access.reads.get());
 	}
+	@Test void providerSnapshotUsesTheImmediateConsumerAndRejectsFinalRevocationAfterFreezing() {
+		for (boolean revoke : new boolean[] {false, true}) {
+			World world = new World(); var state = Blocks.BEEHIVE.defaultBlockState(); world.put(FIRST, state, new BeehiveBlockEntity(FIRST, state));
+			var topology = layout(FIRST, List.of(new InventorySnapshotLayout.Member(FIRST, "minecraft:beehive", "minecraft:beehive", "target",
+				List.of(segment(1, List.of(0))))));
+			var stack = new ItemStack(Items.STONE, 7); var name = Component.literal("getter-time"); stack.set(DataComponents.CUSTOM_NAME, name);
+			boolean[] valid = {true}; var mutations = new AtomicInteger();
+			var access = new Access(1, Optional.of("test:provider"), topology) {
+				@Override public boolean valid() { return valid[0]; }
+				@Override public boolean supportsDetachedSlotCapture() { return true; }
+				@Override public IPlatformInventoryService.ResidentEntry readResident(int slot) { throw new AssertionError("snapshot must consume inside the getter boundary"); }
+				@Override public boolean consumeResident(int slot, IPlatformInventoryService.ResidentVisitor visitor) {
+					boolean more = visitor.visit(new IPlatformInventoryService.ResidentEntry(new InventoryResidentItem.Stack(stack), 9007199254740993L));
+					stack.setCount(0); name.append("-postcheck"); mutations.incrementAndGet(); valid[0] = !revoke;
+					return more;
+				}
+			};
+			var input = input("minecraft:beehive", FIRST); var admitted = InventoryMinecraftSources.view(world, input, (pos, face) -> Optional.of(access));
+			try (var source = source(world, input, admitted, () -> admitted)) {
+				var plan = source.snapshotPlan().orElseThrow();
+				if (revoke) assertThrows(InventorySourceUnavailableException.class, plan::capture);
+				else try (var snapshot = plan.capture().orElseThrow()) {
+					var item = snapshot.read(0); assertEquals(9007199254740993L, item.count()); assertFalse(item.aggregateRequired());
+					assertTrue(item.displayJson().contains("getter-time")); assertFalse(item.displayJson().contains("postcheck"));
+				}
+				assertEquals(1, plan.attemptedPhysicalReads()); assertEquals(1, mutations.get());
+				assertEquals(0, stack.getCount()); assertEquals("getter-time-postcheck", name.getString());
+			}
+		}
+	}
 
 	@Test void placedColouredAndUncolouredShulkersRemainOrdinaryContainerSources() {
 		for (var block : List.of(Blocks.SHULKER_BOX, Blocks.RED_SHULKER_BOX)) {

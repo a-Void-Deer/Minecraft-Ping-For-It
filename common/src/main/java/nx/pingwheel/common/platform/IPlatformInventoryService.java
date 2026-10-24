@@ -117,7 +117,7 @@ public interface IPlatformInventoryService {
 	 * Never retain, compare, hash or format this record or its resident item.
 	 * The independent provider amount is not normalized to a Minecraft stack count.
 	 */
-	record ResidentEntry(InventoryResidentItem item, long amount) {
+	record ResidentEntry(@org.jetbrains.annotations.Nullable InventoryResidentItem item, long amount) {
 		public ResidentEntry {
 			if (amount < 0) throw new IllegalArgumentException("negative item amount");
 			if ((amount == 0) != (item == null))
@@ -128,7 +128,7 @@ public interface IPlatformInventoryService {
 
 	@FunctionalInterface
 	interface ResidentVisitor {
-		/** Consume/freeze this entry synchronously, before the next provider read. */
+		/** Consume/freeze synchronously; no provider metadata callback may precede this handoff. */
 		boolean visit(ResidentEntry entry);
 	}
 
@@ -207,9 +207,22 @@ public interface IPlatformInventoryService {
 		 * A caller must admit and charge each attempted getter even if it throws.
 		 * Unverified implementations remain LIVE under EXTERNAL_TRUST: only their
 		 * invocation count is bounded, not their internal work or allocation.
+		 * This compatibility return can already be stale after provider postchecks;
+		 * consumers needing getter-time state use {@link #consumeResident} instead.
 		 */
 		default ResidentEntry readResident(int slot) {
 			throw new UnsupportedOperationException("provider has no resident reader");
+		}
+
+		/**
+		 * Consume the borrowed item immediately after the final content getter and
+		 * authoritative amount read, before any provider postcheck. The visitor
+		 * must detach everything it needs; its result is provisional until this
+		 * call and the caller's final authority checks succeed. Native providers
+		 * with postchecks override this compatibility default inside their read.
+		 */
+		default boolean consumeResident(int slot, ResidentVisitor visitor) {
+			return Objects.requireNonNull(visitor, "visitor").visit(readResident(slot));
 		}
 
 		/**
@@ -225,7 +238,7 @@ public interface IPlatformInventoryService {
 			if (count < 0) throw new IllegalStateException("provider reported a negative slot count");
 			int bound = Math.min(count, limit);
 			for (int slot = 0; slot < bound; slot++) {
-				if (!visitor.visit(readResident(slot))) return new ResidentVisit(slot + 1, false);
+				if (!consumeResident(slot, visitor)) return new ResidentVisit(slot + 1, false);
 			}
 			return new ResidentVisit(bound, count <= limit);
 		}
@@ -291,6 +304,12 @@ public interface IPlatformInventoryService {
 		@Override public OptionalLong version() { return checked(delegate::version); }
 		@Override public Entry read(int slot) { return checked(() -> delegate.read(slot)); }
 		@Override public ResidentEntry readResident(int slot) { return checked(() -> delegate.readResident(slot)); }
+		@Override public boolean consumeResident(int slot, ResidentVisitor visitor) {
+			Objects.requireNonNull(visitor, "visitor");
+			requireMember();
+			boolean more = delegate.consumeResident(slot, visitor);
+			requireMember(); return more;
+		}
 		@Override public Access scopedResidents(ResidentScope scope) { return checked(() -> delegate.scopedResidents(scope)).guardedBy(memberGate); }
 		@Override public boolean supportsDetachedSlotCapture() { return checked(delegate::supportsDetachedSlotCapture); }
 		@Override public ResidentVisit observeResident(int limit, ResidentVisitor visitor) {
@@ -299,7 +318,7 @@ public interface IPlatformInventoryService {
 			if (!stableCursor()) throw new UnsupportedOperationException("cursorless provider requires internal member gates");
 			// Re-enumerate through this decorator's indexed reads: delegating the
 			// whole loop could skip the gate between delegate slots/read calls.
-			ResidentVisit observed = Access.super.observeResident(limit, entry -> checked(() -> visitor.visit(entry)));
+			ResidentVisit observed = Access.super.observeResident(limit, visitor);
 			requireMember(); return observed;
 		}
 		@Override public Budgeted observe(int limit) {

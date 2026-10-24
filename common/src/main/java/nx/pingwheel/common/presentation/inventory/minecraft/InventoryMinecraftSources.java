@@ -679,15 +679,16 @@ public final class InventoryMinecraftSources {
 		@Override public InventoryDomainCodec.Item read(int slot, InventoryCatalogAdmission admission) {
 			return readOwned(slot, Objects.requireNonNull(admission));
 		}
-		private InventoryDomainCodec.Item readOwned(int slot, InventoryCatalogAdmission admission) {
+		private @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item readOwned(int slot, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
 			if (!valid()) throw new InventorySourceUnavailableException("inventory view changed");
 			if (world == null) {
 				if (liveAccess != null) return decode(codec, liveAccess.read(slot), admission);
 				var value = readResident(original, null, slot);
 				return value.amount() == 0 ? null : decode(codec, new IPlatformInventoryService.Entry(((InventoryResidentItem.Stack) value.item()).resident(), value.amount()), admission);
 			}
-			var resident = readResident(original, liveAccess, slot);
-			var item = freezeItem(residentCatalog, world.registries(), displayBytes, resident, InventoryItemBudget.root(displayBytes), admission);
+			var registries = world.registries();
+			var budget = InventoryItemBudget.root(displayBytes);
+			@org.jetbrains.annotations.Nullable var item = readFrozen(original, liveAccess, slot, residentCatalog, registries, displayBytes, budget, admission);
 			if (!valid()) throw new InventorySourceUnavailableException("inventory authority revoked during read");
 			return item;
 		}
@@ -719,11 +720,12 @@ public final class InventoryMinecraftSources {
 		@Override public boolean matchesSelection(int slot, InventorySelection selection, InventoryCatalogAdmission admission) {
 			return matchesSelectionOwned(slot, selection, Objects.requireNonNull(admission));
 		}
-		private boolean matchesSelectionOwned(int slot, InventorySelection selection, InventoryCatalogAdmission admission) {
+		private boolean matchesSelectionOwned(int slot, InventorySelection selection, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
 			if (world == null) return matches(readOwned(slot, admission), selection);
 			if (!valid()) return false;
-			var resident = readResident(original, liveAccess, slot);
-			boolean present = witness(resident, selection, residentCatalog, world.registries(), displayBytes, InventoryItemBudget.root(displayBytes), admission);
+			var registries = world.registries();
+			var budget = InventoryItemBudget.root(displayBytes);
+			boolean present = witnessSlot(original, liveAccess, slot, selection, residentCatalog, registries, displayBytes, budget, admission);
 			return valid() && present;
 		}
 		@Override public InventorySourceAccess.SelectionWitness observeSelection(int limit, InventorySelection selection) {
@@ -810,12 +812,12 @@ public final class InventoryMinecraftSources {
 		InventoryContainerReads.Scratch scratch = new InventoryContainerReads.Scratch();
 		if (!captureSupported(view, world, scratch)) throw new InventorySourceUnavailableException("resident capture graph changed");
 		BooleanSupplier authority = frozenAuthority(input, view, members, physical, world);
-		InventoryObservationSnapshot captured = InventoryObservationSnapshot.capture(layout,
+		InventoryObservationSnapshot captured = InventoryObservationSnapshot.captureResidents(layout,
 			new BlockPos(physical.position().x(), physical.position().y(), physical.position().z()), world.registries(), displayBytes, upperBound,
-			index -> {
+			(index, visitor) -> {
 				validation.debit(readCost);
 				if (!captureSupported(view, world, scratch)) throw new InventorySourceUnavailableException("resident capture graph changed before read");
-				attemptedRead.run(); return readResident(view, view.access, index);
+				attemptedRead.run(); return consumeResident(view, view.access, index, visitor);
 			}, () -> {
 				validation.debit(authorityCost);
 				if (!authority.getAsBoolean()) throw new InventorySourceUnavailableException("capture authority or topology revoked");
@@ -939,13 +941,37 @@ public final class InventoryMinecraftSources {
 			}
 		};
 	}
-	private static IPlatformInventoryService.ResidentEntry readResident(View view, IPlatformInventoryService.Access access, int index) {
+	private static IPlatformInventoryService.ResidentEntry readResident(View view, @org.jetbrains.annotations.Nullable IPlatformInventoryService.Access access, int index) {
 		if (access != null) return access.readResident(index);
 		Slot slot = view.slots.get(index);
 		return IPlatformInventoryService.ResidentReads.stack(slot.container.getItem(slot.index));
 	}
-	private static InventoryDomainCodec.Item freezeItem(InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries,
-		int displayBytes, IPlatformInventoryService.ResidentEntry resident, InventoryItemBudget budget, InventoryCatalogAdmission admission) {
+	private static boolean consumeResident(View view, @org.jetbrains.annotations.Nullable IPlatformInventoryService.Access access,
+		int index, IPlatformInventoryService.ResidentVisitor visitor) {
+		if (access != null) return access.consumeResident(index, visitor);
+		Slot slot = view.slots.get(index);
+		return visitor.visit(IPlatformInventoryService.ResidentReads.stack(slot.container.getItem(slot.index)));
+	}
+	private static @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item readFrozen(View view,
+		@org.jetbrains.annotations.Nullable IPlatformInventoryService.Access access, int slot, InventoryItemCodec.Catalog catalog,
+		HolderLookup.Provider registries, int displayBytes, InventoryItemBudget budget, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
+		@org.jetbrains.annotations.Nullable InventoryDomainCodec.Item[] result = new InventoryDomainCodec.Item[1];
+		consumeResident(view, access, slot, resident -> {
+			result[0] = freezeItem(catalog, registries, displayBytes, resident, budget, admission); return true;
+		});
+		return result[0];
+	}
+	private static boolean witnessSlot(View view, @org.jetbrains.annotations.Nullable IPlatformInventoryService.Access access,
+		int slot, InventorySelection selection, InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries, int displayBytes,
+		InventoryItemBudget budget, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
+		boolean[] present = {false};
+		consumeResident(view, access, slot, resident -> {
+			present[0] = witness(resident, selection, catalog, registries, displayBytes, budget, admission); return true;
+		});
+		return present[0];
+	}
+	private static @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item freezeItem(InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries,
+		int displayBytes, IPlatformInventoryService.ResidentEntry resident, InventoryItemBudget budget, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
 		if (resident.amount() == 0) return null;
 		var detached = InventoryItemCodec.freeze(resident.item(), registries, displayBytes, budget);
 		var encoded = admission == null ? catalog.intern(detached) : catalog.intern(detached, admission);
@@ -978,7 +1004,8 @@ public final class InventoryMinecraftSources {
 		return new InventorySourceAccess.Page(values, visited.complete());
 	}
 	private static boolean witness(IPlatformInventoryService.ResidentEntry resident, InventorySelection selection,
-		InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries, int displayBytes, InventoryItemBudget budget, InventoryCatalogAdmission admission) {
+		InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries, int displayBytes, InventoryItemBudget budget,
+		@org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
 		if (resident.amount() == 0) return false;
 		if (selection.aggregate()) {
 			var item = switch (resident.item()) {
@@ -988,7 +1015,7 @@ public final class InventoryMinecraftSources {
 			var id = BuiltInRegistries.ITEM.getKey(item);
 			return id != null && id.toString().equals(selection.itemId());
 		}
-		var item = freezeItem(catalog, registries, displayBytes, resident, budget, admission);
+		@org.jetbrains.annotations.Nullable var item = freezeItem(catalog, registries, displayBytes, resident, budget, admission);
 		return item != null && !item.aggregateRequired() && item.key().equals(selection.exact());
 	}
 	private static InventorySourceAccess.SelectionWitness witnessResident(IPlatformInventoryService.Access access, int limit,
@@ -1135,12 +1162,14 @@ public final class InventoryMinecraftSources {
 		@Override public InventoryDomainCodec.Item read(int slot, InventoryCatalogAdmission admission) {
 			return readOwned(slot, Objects.requireNonNull(admission));
 		}
-		private InventoryDomainCodec.Item readOwned(int slot, InventoryCatalogAdmission admission) {
+		private @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item readOwned(int slot, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
 			Current live = current();
 			View current = live.view();
 			requireMembers(live);
-			var resident = readResident(current, current.access, slot);
-			var item = freezeItem(catalog(live), live.binding().world().registries(), displayBytes, resident, InventoryItemBudget.root(displayBytes), admission);
+			var catalog = catalog(live);
+			var registries = live.binding().world().registries();
+			var budget = InventoryItemBudget.root(displayBytes);
+			@org.jetbrains.annotations.Nullable var item = readFrozen(current, current.access, slot, catalog, registries, displayBytes, budget, admission);
 			requireMembers(live); current();
 			return item;
 		}
@@ -1174,10 +1203,12 @@ public final class InventoryMinecraftSources {
 		@Override public boolean matchesSelection(int slot, InventorySelection selection, InventoryCatalogAdmission admission) {
 			return matchesSelectionOwned(slot, selection, Objects.requireNonNull(admission));
 		}
-		private boolean matchesSelectionOwned(int slot, InventorySelection selection, InventoryCatalogAdmission admission) {
+		private boolean matchesSelectionOwned(int slot, InventorySelection selection, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
 			Current live = current(); requireMembers(live);
-			var resident = readResident(live.view(), live.view().access, slot);
-			boolean present = witness(resident, selection, catalog(live), live.binding().world().registries(), displayBytes, InventoryItemBudget.root(displayBytes), admission);
+			var catalog = catalog(live);
+			var registries = live.binding().world().registries();
+			var budget = InventoryItemBudget.root(displayBytes);
+			boolean present = witnessSlot(live.view(), live.view().access, slot, selection, catalog, registries, displayBytes, budget, admission);
 			requireMembers(live); current(); return present;
 		}
 		@Override public InventorySourceAccess.SelectionWitness observeSelection(int limit, InventorySelection selection) {

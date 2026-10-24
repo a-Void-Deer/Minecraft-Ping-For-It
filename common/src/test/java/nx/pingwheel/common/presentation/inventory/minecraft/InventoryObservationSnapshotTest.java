@@ -142,6 +142,32 @@ class InventoryObservationSnapshotTest {
 			assertEquals(4, reads.get(), "consumption never reacquires a provider value");
 		}
 	}
+	@Test void synchronousCaptureFreezesBeforeProviderPostchecksAndNeverReturnsARevokedSnapshot() {
+		for (boolean revoke : new boolean[] {false, true}) {
+			var layout = layout(); var stack = new ItemStack(Items.STONE, 7);
+			var mutations = new AtomicInteger();
+			var allowance = new InventoryValidationBudget.Allowance(InventoryValidationBudget.capture(layout, false, false, layout.members().size()));
+			InventoryObservationSnapshot.ResidentReader reader = (index, visitor) -> {
+				stack.setCount(7); var name = Component.literal("slot-" + index); stack.set(DataComponents.CUSTOM_NAME, name);
+				boolean more = visitor.visit(new IPlatformInventoryService.ResidentEntry(new InventoryResidentItem.Stack(stack), 9007199254740993L + index));
+				stack.setCount(0); name.append("-postcheck"); mutations.incrementAndGet();
+				if (revoke) throw new InventorySourceUnavailableException("revoked after synchronous freeze");
+				return more;
+			};
+			if (revoke) {
+				assertThrows(InventorySourceUnavailableException.class, () -> InventoryObservationSnapshot.captureResidents(layout, BlockPos.ZERO,
+					RegistryAccess.EMPTY, display(), InventoryObservationSnapshot.memoryUpperBound(layout, display()), reader, () -> true, allowance));
+				assertEquals(1, mutations.get(), "a failed provider postcheck stops capture without returning partial data");
+			} else try (var snapshot = InventoryObservationSnapshot.captureResidents(layout, BlockPos.ZERO,
+				RegistryAccess.EMPTY, display(), InventoryObservationSnapshot.memoryUpperBound(layout, display()), reader, () -> true, allowance)) {
+				assertEquals(4, mutations.get()); assertEquals(0, stack.getCount());
+				for (int index = 0; index < snapshot.slots(); index++) {
+					var item = snapshot.read(index); assertEquals(9007199254740993L + index, item.count());
+					assertTrue(item.displayJson().contains("slot-" + index)); assertFalse(item.displayJson().contains("postcheck"));
+				}
+			}
+		}
+	}
 	@Test void tighteningReprojectsUnreadFrozenDisplaysSoLaterReadsNeverParseTheOldInput() {
 		var layout = layout(); int wideCap = 32768;
 		ItemStack stack = new ItemStack(Items.STONE, 4);

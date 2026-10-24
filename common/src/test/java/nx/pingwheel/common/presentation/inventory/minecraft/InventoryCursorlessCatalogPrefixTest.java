@@ -48,18 +48,20 @@ class InventoryCursorlessCatalogPrefixTest {
 
 	private static final class World implements InventoryMinecraftSources.SourceWorld {
 		boolean refuseRegistries;
+		Runnable registryRead = () -> {};
 		@Override public boolean isLoaded(BlockPos pos) { throw new AssertionError("no world lookup"); }
 		@Override public BlockState blockState(BlockPos pos) { throw new AssertionError("no world lookup"); }
 		@Override public BlockEntity blockEntity(BlockPos pos) { throw new AssertionError("no world lookup"); }
 		@Override public boolean onServerThread() { return true; }
 		@Override public ItemStack heldKey() { return ItemStack.EMPTY; }
 		@Override public HolderLookup.Provider registries() {
+			registryRead.run();
 			if (refuseRegistries) throw new InventoryItemBudget.CaptureLimitException("before provider entry");
 			return RegistryAccess.EMPTY;
 		}
 	}
 	/** Like the native cursorless contract: one handoff for every physical view, blanks included. */
-	private static final class Views implements IPlatformInventoryService.Access {
+	private static class Views implements IPlatformInventoryService.Access {
 		final int count, blank;
 		int reads, calls, receivedLimit, providerFailure = -1;
 		Views(int count, int blank) { this.count = count; this.blank = blank; }
@@ -79,6 +81,40 @@ class InventoryCursorlessCatalogPrefixTest {
 				if (!visitor.visit(entry)) return new IPlatformInventoryService.ResidentVisit(index + 1, false);
 			}
 			return new IPlatformInventoryService.ResidentVisit(Math.min(count, limit), count <= limit);
+		}
+	}
+	@Test void cursorlessPageAndExactWitnessFreezeBeforeProviderReuseWithMetadataAlreadyAcquired() {
+		for (boolean select : new boolean[] {false, true}) for (boolean revoke : new boolean[] {false, true}) {
+			var world = new World(); var stack = new ItemStack(Items.STONE, 7);
+			var name = net.minecraft.network.chat.Component.literal("getter-time");
+			stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, name);
+			var expected = new InventoryItemCodec.Catalog(RegistryAccess.EMPTY).encode(stack);
+			var selection = new InventorySelection(expected.key(), "minecraft:stone", expected.display().label(), expected.display().displayJson(), false, "danger");
+			var events = new java.util.ArrayList<String>(); boolean[] returned = {false}, valid = {true};
+			world.registryRead = () -> { events.add("registries"); if (returned[0]) name.append("-registry"); };
+			var views = new Views(1, -1) {
+				@Override public boolean valid() { return valid[0]; }
+				@Override public IPlatformInventoryService.ResidentVisit observeResident(int limit, IPlatformInventoryService.ResidentVisitor visitor) {
+					events.add("getter"); returned[0] = true; reads++;
+					boolean more = visitor.visit(new IPlatformInventoryService.ResidentEntry(new InventoryResidentItem.Stack(stack), AMOUNT));
+					events.add("postcheck"); stack.setCount(0); name.append("-postcheck");
+					valid[0] = !revoke;
+					return new IPlatformInventoryService.ResidentVisit(1, more);
+				}
+			};
+			try (var source = source(world, views)) {
+				events.clear();
+				if (revoke) assertThrows(InventorySourceUnavailableException.class, () -> {
+					if (select) source.observeSelection(1, selection); else source.enumerate(1);
+				});
+				else if (select) { var witness = source.observeSelection(1, selection); assertTrue(witness.present()); assertEquals(1, witness.visited()); }
+				else {
+					var page = source.enumerate(1); assertTrue(page.complete()); var item = page.slots().getFirst();
+					assertEquals(AMOUNT, item.count()); assertEquals(expected.key(), item.key()); assertFalse(item.displayJson().contains("postcheck"));
+				}
+			}
+			assertEquals(List.of("registries", "getter", "postcheck"), events);
+			assertEquals(0, stack.getCount()); assertEquals("getter-time-postcheck", name.getString());
 		}
 	}
 	private static InventoryMinecraftSources.Source source(World world, Views views) {

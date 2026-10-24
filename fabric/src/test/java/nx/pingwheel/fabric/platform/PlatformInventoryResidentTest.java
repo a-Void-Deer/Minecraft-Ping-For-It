@@ -19,6 +19,78 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PlatformInventoryResidentTest {
+	@Test void slottedAndCursorlessStackHandoffsFreezeBeforeScopeReuseAndKeepLongAmounts() {
+		for (boolean cursorless : new boolean[] {false, true}) for (boolean revoke : new boolean[] {false, true}) {
+			boolean[] returned = {false}; AtomicInteger mutations = new AtomicInteger();
+			var storage = new StackStorage() {
+				@Override protected ItemStack getStack() { returned[0] = true; return super.getStack(); }
+				@Override public long getAmount() { return 9007199254740993L; }
+			};
+			var name = net.minecraft.network.chat.Component.literal("getter-time");
+			storage.stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, name);
+			var scope = new nx.pingwheel.common.platform.IPlatformInventoryService.ResidentScope() {
+				@Override public net.minecraft.core.Direction face() { return net.minecraft.core.Direction.NORTH; }
+				@Override public boolean valid() {
+					mutations.incrementAndGet(); storage.stack.setCount(0); name.append("-mutated"); return !revoke;
+				}
+				@Override public boolean allows(net.minecraft.world.Container value) { return false; }
+				@Override public boolean audited(net.minecraft.world.Container value) { return false; }
+				@Override public @org.jetbrains.annotations.Nullable java.util.List<Integer> slots(net.minecraft.world.Container value) { return null; }
+			};
+			var access = (cursorless
+				? new PlatformInventoryServiceImpl.EnumeratedAccess(storage, () -> true, storage.raw())
+				: new PlatformInventoryServiceImpl.SlottedAccess(storage, () -> true, storage.raw())).scopedResidents(scope);
+			@org.jetbrains.annotations.Nullable String[] frozen = new String[1];
+			nx.pingwheel.common.platform.IPlatformInventoryService.ResidentVisitor visitor = entry -> {
+				assertTrue(returned[0]); assertEquals(0, mutations.get()); assertEquals(9007199254740993L, entry.amount());
+				assertEquals(7, storage.stack.getCount());
+				// Detached explicit-patch oracle; the full freezer is exercised in common.
+				frozen[0] = DataComponentPatch.CODEC.encodeStart(com.mojang.serialization.JsonOps.INSTANCE,
+					((InventoryResidentItem.Stack) entry.item()).resident().getComponentsPatch()).getOrThrow().toString();
+				return false;
+			};
+			Runnable consume = () -> { if (cursorless) access.observeResident(1, visitor); else assertFalse(access.consumeResident(0, visitor)); };
+			if (revoke) assertThrows(IllegalStateException.class, consume::run); else consume.run();
+			assertEquals(1, mutations.get()); assertEquals(0, storage.stack.getCount()); assertEquals("getter-time-mutated", name.getString());
+			assertNotNull(frozen[0]); assertTrue(frozen[0].contains("getter-time"));
+			assertFalse(frozen[0].contains("mutated"));
+		}
+	}
+
+	@Test void slottedAndCursorlessVariantPatchIsFrozenBeforeTheNextMemberCallback() {
+		for (boolean cursorless : new boolean[] {false, true}) {
+			var name = net.minecraft.network.chat.Component.literal("patch-at-getter");
+			var patch = DataComponentPatch.builder().set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, name).build();
+			boolean[] returned = {false}; AtomicInteger mutations = new AtomicInteger();
+			var resource = (ItemVariant) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {ItemVariant.class}, (proxy, method, args) -> switch (method.getName()) {
+				case "getItem", "getObject" -> Items.STONE;
+				case "getComponents" -> { returned[0] = true; yield patch; }
+				case "isBlank" -> false;
+				default -> throw new AssertionError("conversion/hash trap: " + method.getName());
+			});
+			var storage = new SingleVariantStorage<ItemVariant>() {
+				@Override protected ItemVariant getBlankVariant() { return resource; }
+				@Override protected long getCapacity(ItemVariant variant) { throw new AssertionError("capacity"); }
+			};
+			storage.variant = resource; storage.amount = 9007199254740993L;
+			java.util.function.BooleanSupplier gate = () -> {
+				if (returned[0] && mutations.getAndIncrement() == 0) name.append("-mutated"); return true;
+			};
+			nx.pingwheel.common.platform.IPlatformInventoryService.Access access = cursorless
+				? new PlatformInventoryServiceImpl.EnumeratedAccess(storage, gate) : new PlatformInventoryServiceImpl.SlottedAccess(storage, gate);
+			@org.jetbrains.annotations.Nullable String[] frozen = new String[1];
+			var observed = access.observeResident(1, entry -> {
+				assertEquals(0, mutations.get()); assertEquals(9007199254740993L, entry.amount());
+				frozen[0] = DataComponentPatch.CODEC.encodeStart(com.mojang.serialization.JsonOps.INSTANCE,
+					((InventoryResidentItem.Patch) entry.item()).residentPatch()).getOrThrow().toString();
+				return false;
+			});
+			assertEquals(1, observed.visited()); assertFalse(observed.complete()); assertTrue(mutations.get() > 0);
+			assertEquals("patch-at-getter-mutated", name.getString()); assertNotNull(frozen[0]);
+			assertTrue(frozen[0].contains("patch-at-getter"));
+			assertFalse(frozen[0].contains("mutated"));
+		}
+	}
 	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
 
 	private static class StackStorage extends SingleStackStorage {

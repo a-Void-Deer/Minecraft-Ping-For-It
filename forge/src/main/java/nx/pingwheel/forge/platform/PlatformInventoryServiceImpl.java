@@ -93,7 +93,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		private final BooleanSupplier memberGate;
 		private final nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess raw;
 		private final nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.Scratch scratch;
-		private ResidentScope residentScope;
+		private @org.jetbrains.annotations.Nullable ResidentScope residentScope;
 
 		HandlerAccess(IItemHandler handler) {
 			this(handler, () -> true);
@@ -312,15 +312,24 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 
 		@Override
 		public ResidentEntry readResident(int slot) {
+			@org.jetbrains.annotations.Nullable ResidentEntry[] result = new ResidentEntry[1];
+			consumeResident(slot, entry -> { result[0] = entry; return true; });
+			return Objects.requireNonNull(result[0]);
+		}
+
+		@Override
+		public boolean consumeResident(int slot, ResidentVisitor visitor) {
+			Objects.requireNonNull(visitor, "visitor");
 			// Classify before any provider getter. False remains LIVE/EXTERNAL_TRUST;
 			// an altered helper is never certified or bypassed via raw stacks.
 			supportsDetachedSlotCapture();
 			Objects.checkIndex(slot, slots());
 			requireMember();
 			ItemStack stack = content(slot);
+			boolean more = visitor.visit(ResidentReads.stack(stack));
 			requireMember();
 			if (residentScope != null && !residentScope.valid()) throw new InventorySourceUnavailableException("inventory source revoked during resident read");
-			return ResidentReads.stack(stack);
+			return more;
 		}
 
 		@Override
