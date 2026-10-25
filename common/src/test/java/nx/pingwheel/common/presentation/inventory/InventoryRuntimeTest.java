@@ -126,8 +126,8 @@ class InventoryRuntimeTest {
 			assertSame(round, InventoryBackendTest.field(consumer, "round")); assertEquals(0, InventoryBackendTest.field(consumer, "cursor"));
 			assertEquals(3, source.discoveryGrants.size());
 			for (var grant : source.discoveryGrants) assertSame(source.discoveryGrants.getFirst(), grant);
-			assertNotSame(source.discoveryGrants.getFirst(), source.captureGrant);
-			assertEquals(17, source.discoveryGrants.getFirst().attemptedWorkUnits());
+			assertSame(source.discoveryGrants.getFirst(), source.captureGrant);
+			assertEquals(28, source.discoveryGrants.getFirst().attemptedWorkUnits());
 			assertEquals(28, itemLedger(runtime).used(itemWorkCounter()), "17 discovery + 11 capture, without a second capture-validation debit");
 			assertEquals(1, source.captures); assertEquals(0, source.reads.get()); assertEquals(0, runtime.memory().reserved());
 		}

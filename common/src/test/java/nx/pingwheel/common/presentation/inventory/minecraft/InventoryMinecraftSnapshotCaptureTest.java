@@ -55,6 +55,30 @@ class InventoryMinecraftSnapshotCaptureTest {
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
+	@Test void initialExternalResolutionRefusesZeroAndOneShortBeforeBindingWorldOrMappingCallbacks() {
+		World world = new World(); world.addChest(FIRST, Blocks.CHEST.defaultBlockState(), Items.STONE, 1);
+		var external = Target.ExternalBlockTarget.candidate("minecraft:overworld", "sable", "minecraft:chest", "admitted", true);
+		var request = new InventorySourceInput(external, OWNER, BlockFace.NORTH);
+		var descriptor = new nx.pingwheel.common.integration.externalblock.BlockReadSource(external, "sable", "test",
+			new Target.BlockTarget("minecraft:overworld", 0, 0, 0, "minecraft:chest"), new nx.pingwheel.common.marker.MarkerAnchor(0, 0, 0));
+		AtomicInteger bindings = new AtomicInteger();
+		InventoryMinecraftSources.ExternalBindingResolver resolver = () -> {
+			bindings.incrementAndGet(); return Optional.of(new InventoryMinecraftSources.ExternalBinding(world, descriptor, world::isLoaded, (pos, face) -> Optional.empty()));
+		};
+		var cost = InventoryMinecraftSources.resolutionValidationCost(request);
+		for (var shortCost : List.of(InventoryValidationBudget.NONE, new InventoryValidationBudget.Cost(cost.allocationBytes(), cost.workspaceBytes(), cost.workUnits() - 1))) {
+			var grant = new InventoryValidationBudget.Allowance(shortCost);
+			assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> InventoryMinecraftSources.resolveExternal(request, resolver, () -> true,
+				entry -> null, 4096, ignored -> {}, ignored -> nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary.EMPTY, grant));
+			assertEquals(0, bindings.get()); assertEquals(0, grant.attemptedWorkUnits());
+		}
+		var full = new InventoryValidationBudget.Allowance(cost);
+		try (var source = InventoryMinecraftSources.resolveExternal(request, resolver, () -> true, entry -> null, 4096,
+			ignored -> {}, ignored -> nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary.EMPTY, full).orElseThrow()) {
+			assertEquals(27, source.slots()); assertEquals(1, bindings.get()); assertEquals(cost.workUnits(), full.attemptedWorkUnits());
+		}
+	}
+
 	@Test void normalLockLootUnloadAndTopologyLossDoNotProduceWarnings() {
 		World world = new World(); Chest chest = world.addChest(FIRST, Blocks.CHEST.defaultBlockState(), Items.STONE, 1);
 		var input = input("minecraft:chest", FIRST); var admitted = view(world, input);

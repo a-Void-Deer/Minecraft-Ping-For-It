@@ -154,7 +154,13 @@ class InventoryCatalogNativeReadWiringTest {
 		}
 		var settings = InventorySettings.serverDefaults(); assertEquals(16, settings.getPendingMemoryMiB());
 		var input = input();
-		try (var runtime = new InventoryRuntime((request, cap) -> Optional.of(source(world, request, cap)), settings.pendingMemoryBytes())) {
+		try (var runtime = new InventoryRuntime(new InventoryRuntime.SourceResolver() {
+			@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput request) { return InventoryMinecraftSources.resolutionValidationCost(request); }
+			@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput request, int cap) { throw new AssertionError("resolution dropped caller allowance"); }
+			@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput request, int cap, InventoryValidationBudget.Allowance allowance) {
+				allowance.debit(resolutionValidationCost(request)); return Optional.of(source(world, request, cap));
+			}
+		}, settings.pendingMemoryBytes())) {
 			runtime.advance(0, settings);
 			var preview = runtime.attach(input, new InventoryRuntime.PreviewSubject(input.readOwner())).orElseThrow();
 			var observed = new ArrayList<InventoryDomainCodec.Item>(); InventoryRuntime.Observation last = null;
@@ -164,6 +170,7 @@ class InventoryCatalogNativeReadWiringTest {
 			assertNotNull(last); assertEquals(slots, observed.size()); assertEquals(slots, world.reads());
 			assertEquals(CaptureResult.Completeness.COMPLETE, last.result().completeness());
 			assertEquals(CaptureResult.Consistency.VERIFIED, last.result().consistency()); assertFalse(observed.getFirst().aggregateRequired());
+			preview.retainCompleted(); assertEquals(Optional.of(true), runtime.probe(preview), "publication evidence stays admitted under the unchanged default memory cap");
 			var chosen = observed.getFirst();
 			var selection = new InventorySelection(chosen.key(), chosen.key().itemId(), chosen.label(), chosen.displayJson(), false, "danger");
 			assertTrue(runtime.selectionPresent(input, selection, 0)); assertEquals(slots + 1, world.reads(), "SELECT is a live witness, never the captured count");

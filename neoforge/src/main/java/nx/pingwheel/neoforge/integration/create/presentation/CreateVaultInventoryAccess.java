@@ -96,13 +96,26 @@ public final class CreateVaultInventoryAccess {
 		return nativeLocal(handler, nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess.load());
 	}
 	static boolean nativeLocal(IItemHandler handler, nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess raw) {
-		return handler instanceof ItemStackHandler
-			&& IPlatformInventoryService.ResidentReads.inherits(handler, ItemStackHandler.class, "getSlots")
-			&& IPlatformInventoryService.ResidentReads.inherits(handler, ItemStackHandler.class, "getStackInSlot", int.class)
-			&& IPlatformInventoryService.ResidentReads.inherits(handler, ItemStackHandler.class, "validateSlotIndex", int.class)
+		return handler instanceof ItemStackHandler && localOwnership.get(handler.getClass())
 			&& IPlatformInventoryService.ResidentReads.nativeStacks(IPlatformInventoryService.ResidentReads.field(handler,
 				ItemStackHandler.class, "stacks", net.minecraft.core.NonNullList.class), raw);
 	}
+	/** Only declaration ownership is class-stable. Backing storage, scope and current local handler are always rechecked. */
+	private static final ClassValue<Boolean> localOwnership = new ClassValue<>() {
+		@Override protected Boolean computeValue(Class<?> type) {
+			return inherits(type, "getSlots") && inherits(type, "getStackInSlot", int.class) && inherits(type, "validateSlotIndex", int.class);
+		}
+		private boolean inherits(Class<?> type, String name, Class<?>... parameters) {
+			@org.jetbrains.annotations.Nullable Class<?> current = type;
+			for (int depth = 0; current != null && depth < 32; depth++, current = current.getSuperclass()) {
+				if (!IPlatformInventoryService.ResidentReads.reflectionShape(current, name, parameters)) return false;
+				try { return current.getDeclaredMethod(name, parameters).getDeclaringClass() == ItemStackHandler.class; }
+				catch (NoSuchMethodException absent) { /* bounded parent walk */ }
+				catch (SecurityException unavailable) { return false; }
+			}
+			return false;
+		}
+	};
 	static Optional<IPlatformInventoryService.Access> find(World world, BlockPos original, Direction face) {
 		if (face == null) return Optional.empty();
 		try { return Optional.of(new Segmented(world, original, layout(world, original))); }
@@ -117,7 +130,8 @@ public final class CreateVaultInventoryAccess {
 		Diagnostics.warn(operation, "create:item_vault",
 			() -> "position=" + original + " worldClass=" + (world == null ? "none" : world.getClass().getName()) + " " + detail.get(), failure);
 	}
-	private record Layout(BlockPos controller, int width, int length, Direction.Axis axis, List<BlockPos> members, List<Integer> slotCounts, int slots) {}
+	private record Layout(BlockPos controller, int width, int length, Direction.Axis axis,
+		@org.jetbrains.annotations.Unmodifiable List<BlockPos> members, @org.jetbrains.annotations.Unmodifiable List<Integer> slotCounts, int slots) {}
 	private static Object call(BlockEntity entity, String name) throws ReflectiveOperationException {
 		IPlatformInventoryService.ResidentReads.requireReflectionShape(entity.getClass(), name);
 		return entity.getClass().getMethod(name).invoke(entity);
@@ -174,38 +188,67 @@ public final class CreateVaultInventoryAccess {
 		}
 		return new Layout(controller, width, length, axis, List.copyOf(members), List.copyOf(counts), slots);
 	}
+	/** Compare the frozen positions and local boundaries without rebuilding lists, offsets or boxed mappings. */
+	private static boolean matches(World world, BlockPos original, Layout expected, InventorySnapshotLayout frozenLayout) throws ReflectiveOperationException {
+		Member part = world.loaded(original);
+		if (!expected.controller.equals(part.controller())) return false;
+		Member master = world.loaded(expected.controller);
+		if (!master.isController() || !expected.controller.equals(master.controller())
+			|| !"create:item_vault".equals(master.blockId()) || master.width() != expected.width
+			|| master.length() != expected.length || master.axis() != expected.axis) return false;
+		// All members pass their live relation/membership gates before any local handler is acquired.
+		for (int index = 0; index < expected.members.size(); index++) {
+			Member member = world.loaded(expected.members.get(index));
+			if (!frozenLayout.members().get(index).blockId().equals(member.blockId())
+				|| !frozenLayout.members().get(index).blockEntityId().equals(member.blockEntityId()) || !expected.controller.equals(member.controller())
+				|| member.axis() != expected.axis) return false;
+		}
+		for (int index = 0; index < expected.members.size(); index++)
+			if (world.loaded(expected.members.get(index)).local().getSlots() != expected.slotCounts.get(index)) return false;
+		return true;
+	}
 	private static final class Segmented implements IPlatformInventoryService.Access {
 		final World world; final BlockPos original; final Layout expected;
-		Segmented(World world, BlockPos original, Layout expected) { this.world = world; this.original = original; this.expected = expected; }
-		@Override public Optional<String> alias() { return Optional.of(world.dimension() + "|vault|" + expected.controller.toShortString() + "|create:item_vault"); }
+		final String alias;
+		final InventorySnapshotLayout frozenLayout;
+		final int @org.jetbrains.annotations.Unmodifiable [] offsets;
+		Segmented(World world, BlockPos original, Layout expected) throws ReflectiveOperationException {
+			this.world = world; this.original = original; this.expected = expected;
+			alias = world.dimension() + "|vault|" + expected.controller.toShortString() + "|create:item_vault";
+			List<InventorySnapshotLayout.Member> members = new ArrayList<>(expected.members.size());
+			offsets = new int[expected.members.size() + 1];
+			int absolute = 0;
+			for (int index = 0; index < expected.members.size(); index++) {
+				BlockPos position = expected.members.get(index); Member member = world.loaded(position);
+				int count = expected.slotCounts.get(index);
+				offsets[index] = absolute; absolute += count;
+				var segment = new InventorySnapshotLayout.Segment("Inventory.Items", InventorySnapshotSchemas.ITEMS, count,
+					java.util.stream.IntStream.range(0, count).boxed().toList());
+				members.add(new InventorySnapshotLayout.Member(position, member.blockId(), member.blockEntityId(),
+					position.equals(expected.controller) ? "controller" : "member", List.of(segment)));
+			}
+			offsets[expected.members.size()] = absolute;
+			frozenLayout = new InventorySnapshotLayout(alias, "axis=" + expected.axis.name() + ";width=" + expected.width + ";length=" + expected.length,
+				expected.controller, members);
+		}
+		@Override public Optional<String> alias() { return Optional.of(alias); }
 		@Override public boolean valid() {
-			try { return expected.equals(layout(world, original)); }
+			try { return matches(world, original, expected, frozenLayout); }
 			catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
 				failure("inventory-vault-valid", world, original, () -> "expected=" + expected, unavailable);
 				return false;
 			}
 		}
 		@Override public Optional<InventorySnapshotLayout> snapshotLayout() {
-			if (!valid()) return Optional.empty();
-			try {
-				List<InventorySnapshotLayout.Member> members = new ArrayList<>(expected.members.size());
-				for (int index = 0; index < expected.members.size(); index++) {
-					BlockPos position = expected.members.get(index);
-					Member member = world.loaded(position);
-					int localSlots = expected.slotCounts.get(index);
-					List<Integer> visibleSlots = java.util.stream.IntStream.range(0, localSlots).boxed().toList();
-					var segment = new InventorySnapshotLayout.Segment("Inventory.Items", InventorySnapshotSchemas.ITEMS, localSlots, visibleSlots);
-					members.add(new InventorySnapshotLayout.Member(position, member.blockId(), member.blockEntityId(),
-						position.equals(expected.controller) ? "controller" : "member", List.of(segment)));
-				}
-				String layoutData = "axis=" + expected.axis.name() + ";width=" + expected.width + ";length=" + expected.length;
-				return Optional.of(new InventorySnapshotLayout(alias().orElseThrow(), layoutData, expected.controller, members));
-			} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
-				failure("inventory-vault-snapshot-layout", world, original, () -> "expected=" + expected, unavailable);
-				return Optional.empty();
-			}
+			return valid() ? Optional.of(frozenLayout) : Optional.empty();
 		}
 		@Override public int slots() { return expected.slots; }
+		private int memberIndex(int slot) {
+			// Upper bound keeps empty segments from stealing a slot at the same prefix offset.
+			int low = 0, high = expected.members.size();
+			while (low < high) { int middle = (low + high) >>> 1; if (offsets[middle + 1] <= slot) low = middle + 1; else high = middle; }
+			return low;
+		}
 		@Override public boolean stableCursor() { return true; }
 		@Override public OptionalLong version() { return OptionalLong.empty(); }
 		@Override public boolean supportsDetachedSlotCapture() {
@@ -225,24 +268,20 @@ public final class CreateVaultInventoryAccess {
 			if (!valid()) throw new InventorySourceUnavailableException("Vault topology changed");
 			java.util.Objects.checkIndex(slot, slots());
 			try {
-				for (int index = 0; index < expected.members.size(); index++) {
-					int count = expected.slotCounts.get(index);
-					if (slot < count) {
-						BlockPos position = expected.members.get(index);
-						Member member = world.loaded(position); IItemHandler live = member.local();
-						member.auditedLocal(live); // classify before getter; false is LIVE/EXTERNAL_TRUST, not atomic
-						if (live.getSlots() != count) throw new InventorySourceUnavailableException("Vault local mapping changed");
-						var stack = live.getStackInSlot(slot);
-						boolean more = visitor.visit(IPlatformInventoryService.ResidentReads.stack(stack));
-						// The borrowed value is detached before even membership callbacks;
-						// the caller still runs final all-member topology validation.
-						requireMembersHeld();
-						return more;
-					}
-					slot -= count;
-				}
+				int index = memberIndex(slot), local = slot - offsets[index];
+				int count = expected.slotCounts.get(index);
+				BlockPos position = expected.members.get(index);
+				Member member = world.loaded(position); IItemHandler live = member.local();
+				member.auditedLocal(live); // classify before getter; false is LIVE/EXTERNAL_TRUST, not atomic
+				if (live.getSlots() != count) throw new InventorySourceUnavailableException("Vault local mapping changed");
+				requireMembersHeld(); // the final local metadata callback cannot authorize a now-revoked sibling
+				var stack = live.getStackInSlot(local);
+				boolean more = visitor.visit(IPlatformInventoryService.ResidentReads.stack(stack));
+				// Even membership and metadata callbacks run only after synchronous detachment.
+				requireMembersHeld();
+				if (!valid()) throw new InventorySourceUnavailableException("Vault topology revoked during resident read");
+				return more;
 			} catch (ReflectiveOperationException failure) { throw new IllegalStateException("Vault local resident read unavailable", failure); }
-			throw new IllegalStateException("Vault resident mapping changed");
 		}
 		/** Every frozen member position still resolves under the current member gate. */
 		private void requireMembersHeld() {
@@ -258,18 +297,13 @@ public final class CreateVaultInventoryAccess {
 			if (!valid()) throw new InventorySourceUnavailableException("Vault topology changed");
 			java.util.Objects.checkIndex(slot, slots());
 			try {
-				for (int index = 0; index < expected.members.size(); index++) {
-					int count = expected.slotCounts.get(index);
-					if (slot < count) {
-						IItemHandler live = world.loaded(expected.members.get(index)).local();
-						if (live.getSlots() != count) throw new InventorySourceUnavailableException("Vault mapping changed");
-						var stack = live.getStackInSlot(slot);
-						return stack.isEmpty() ? IPlatformInventoryService.Entry.empty() : new IPlatformInventoryService.Entry(stack.copyWithCount(1), stack.getCount());
-					}
-					slot -= count;
-				}
+				int index = memberIndex(slot), local = slot - offsets[index];
+				int count = expected.slotCounts.get(index);
+				IItemHandler live = world.loaded(expected.members.get(index)).local();
+				if (live.getSlots() != count) throw new InventorySourceUnavailableException("Vault mapping changed");
+				var stack = live.getStackInSlot(local);
+				return stack.isEmpty() ? IPlatformInventoryService.Entry.empty() : new IPlatformInventoryService.Entry(stack.copyWithCount(1), stack.getCount());
 			} catch (ReflectiveOperationException failure) { throw new IllegalStateException("Vault local read unavailable", failure); }
-			throw new IllegalStateException("Vault mapping changed");
 		}
 		@Override public boolean visit(int limit, java.util.function.Consumer<IPlatformInventoryService.Entry> consumer) {
 			for (int i = 0; i < Math.min(limit, slots()); i++) consumer.accept(read(i)); return slots() <= limit;

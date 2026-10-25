@@ -59,6 +59,10 @@ public final class InventoryRuntime implements AutoCloseable {
 	@FunctionalInterface
 	public interface SourceResolver {
 		Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int displayBytes);
+		default InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) { return InventoryValidationBudget.NONE; }
+		default Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int displayBytes, InventoryValidationBudget.Allowance allowance) {
+			return resolve(input, displayBytes);
+		}
 	}
 	/**
 	 * Registry-aware detached display reprojection port. Production supplies the
@@ -340,7 +344,34 @@ public final class InventoryRuntime implements AutoCloseable {
 			try (var grant = workAdmission.get()) {
 				var catalog = new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(displayCap),
 					checkedMultiply(bound, InventoryCatalogAdmission.workUpperBound(displayCap)));
-				try { return new InventorySourceAccess(input, i -> resolve(i, displayCap)).selectionPresent(selection, witness, bound, physical, catalog); }
+				try {
+					var probe = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+					if (probe.isEmpty()) return false;
+					try (var admittedProbe = probe.get()) {
+					var resolution = validation(resolver.resolutionValidationCost(input), new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), authorityWorkspaceBytes());
+					if (resolution.isEmpty()) return false;
+					InventoryValidationBudget.Allowance allowance;
+					InventorySourceAccess.@org.jetbrains.annotations.Nullable Source source;
+					try (var operation = resolution.get()) {
+						allowance = operation.allowance;
+						admittedProbe.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+						source = resolver.resolve(input, displayCap, allowance).orElse(null);
+					}
+					if (source == null) return false;
+					try (source) {
+						var read = validation(source.evidenceValidationCost().plus(source.readValidationCost(source.stableCursor() ? 1 : bound)), allowance, authorityWorkspaceBytes());
+						if (read.isEmpty()) return false;
+						try (var readGrant = read.get()) {
+							// The outer operation owns close even when slot/provider admission refuses before resolver invocation.
+							var borrowed = new AdmittedSource(source, false);
+							return new InventorySourceAccess(input, i -> Optional.of(borrowed)).selectionPresent(selection, witness, bound, physical, catalog, allowance);
+						}
+					}
+					}
+				} catch (RuntimeException | LinkageError failure) {
+					InventoryCaptureDiagnostics.warn("runtime/selection", input, null, () -> "witness=" + witness, failure);
+					return false;
+				}
 				finally { grant.commit(Map.of(ITEM_WORK, checkedAdd(
 					checkedMultiply(physical.used(InventorySourceAccess.PHYSICAL) - before, InventoryItemBudget.freezeWorkUpperBound(displayCap)), catalog.attemptedWork()))); }
 			}
@@ -394,11 +425,42 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (current == null) return InventoryDomainCodec.MAX_DISPLAY_BYTES;
 		return clampDisplayBytes((int) current.effectiveDisplayBytes());
 	}
-	private Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input) {
-		return resolve(input, effectiveDisplayCap());
+	/** One caller-owned synchronous allowance. No ticket or allowance survives the operation. */
+	private final class ValidationOperation implements AutoCloseable {
+		final InventoryValidationBudget.Allowance allowance;
+		final RetainedMemoryLedger.Ticket workspace;
+		final CostLedger.Ticket work;
+		final long before;
+		ValidationOperation(InventoryValidationBudget.Cost cost, RetainedMemoryLedger.Ticket workspace, CostLedger.Ticket work, InventoryValidationBudget.Allowance allowance) {
+			this.allowance = allowance; before = allowance.attemptedWorkUnits(); allowance.admitAdditional(cost); this.workspace = workspace; this.work = work;
+		}
+		@Override public void close() {
+			try { work.commit(Map.of(ITEM_WORK, allowance.attemptedWorkUnits() - before)); }
+			finally { allowance.releaseUnusedAdmission(); try { work.close(); } finally { workspace.close(); } }
+		}
 	}
-	private Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int displayBytes) {
-		return resolver.resolve(input, displayBytes);
+	private Optional<ValidationOperation> validation(InventoryValidationBudget.Cost cost) {
+		return validation(cost, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE));
+	}
+	private Optional<ValidationOperation> validation(InventoryValidationBudget.Cost cost, InventoryValidationBudget.Allowance allowance) {
+		return validation(cost, allowance, 0);
+	}
+	private Optional<ValidationOperation> validation(InventoryValidationBudget.Cost cost, InventoryValidationBudget.Allowance allowance, long coveredWorkspace) {
+		var workspace = memory.tryReserve(Math.max(0, cost.workspaceBytes() - coveredWorkspace));
+		if (workspace.isEmpty()) return Optional.empty();
+		var work = physical.tryReserve(Map.of(ITEM_WORK, cost.workUnits()));
+		if (work.isEmpty()) { workspace.get().close(); return Optional.empty(); }
+		return Optional.of(new ValidationOperation(cost, workspace.get(), work.get(), allowance));
+	}
+	private InventorySourceAccess sourceAccess(InventorySourceInput input, int cap,
+		java.util.function.UnaryOperator<InventorySourceAccess.Source> decorate) {
+		return new InventorySourceAccess(input, new InventorySourceAccess.Resolver() {
+			@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput value) { return resolver.resolutionValidationCost(value); }
+			@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput value) { return resolver.resolve(value, cap).map(decorate); }
+			@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput value, InventoryValidationBudget.Allowance allowance) {
+				return resolver.resolve(value, cap, allowance).map(decorate);
+			}
+		});
 	}
 	/** Encoded copies, decoded UTF-16 strings, page/map/index and consumer-list overlaps. */
 	private static long slotWorkspaceBytes(int displayBytes) {
@@ -447,14 +509,23 @@ public final class InventoryRuntime implements AutoCloseable {
 	/** Capture storage stays with the handle; this wrapper owns only attempted fixed work. */
 	private final class AdmittedSource implements InventorySourceAccess.Source {
 		private final InventorySourceAccess.Source delegate;
+		private final boolean ownsDelegate;
 		private final InventoryDisplayProjection projection = new InventoryDisplayProjection();
 		private InventorySourceAccess.SnapshotPlan plan;
 		private boolean discovered, captured, captureAttempted;
-		AdmittedSource(InventorySourceAccess.Source delegate) { this.delegate = delegate; }
+		private long captureValidationWork;
+		AdmittedSource(InventorySourceAccess.Source delegate) { this(delegate, true); }
+		AdmittedSource(InventorySourceAccess.Source delegate, boolean ownsDelegate) { this.delegate = delegate; this.ownsDelegate = ownsDelegate; }
 		@Override public SourceKey key() { return delegate.key(); }
 		@Override public boolean valid() { return delegate.valid(); }
 		@Override public boolean valid(InventoryValidationBudget.Allowance allowance) { return delegate.valid(allowance); }
 		@Override public InventoryValidationBudget.Cost discoveryValidationCost() { return delegate.discoveryValidationCost(); }
+		@Override public InventoryValidationBudget.Cost evidenceValidationCost() { return delegate.evidenceValidationCost(); }
+		@Override public InventoryValidationBudget.Cost readValidationCost(int slots) { return delegate.readValidationCost(slots); }
+		@Override public InventoryDomainCodec.@org.jetbrains.annotations.Nullable Item read(int slot, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) { return delegate.read(slot, admission, allowance); }
+		@Override public InventorySourceAccess.Page enumerate(int limit, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) { return delegate.enumerate(limit, admission, allowance); }
+		@Override public boolean matchesSelection(int slot, InventorySelection selection, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) { return delegate.matchesSelection(slot, selection, admission, allowance); }
+		@Override public InventorySourceAccess.SelectionWitness observeSelection(int limit, InventorySelection selection, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) { return delegate.observeSelection(limit, selection, admission, allowance); }
 		@Override public boolean stableCursor() { return delegate.stableCursor(); }
 		@Override public int slots() { return delegate.slots(); }
 		@Override public InventoryDomainCodec.Item read(int slot) { return delegate.read(slot); }
@@ -496,15 +567,16 @@ public final class InventoryRuntime implements AutoCloseable {
 				@Override public Optional<InventorySourceAccess.InventorySnapshot> capture(InventoryValidationBudget.Allowance allowance) {
 					// The handle has acquired the plan's E/W/R/K grant before this call.
 					captureAttempted = true;
-					var result = plan.capture(allowance);
-					captured = result.isPresent();
-					return result;
+					long before = allowance.attemptedWorkUnits();
+					try {
+						var result = plan.capture(allowance); captured = result.isPresent(); return result;
+					} finally { captureValidationWork = allowance.attemptedWorkUnits() - before; }
 				}
 			});
 		}
-		@Override public void close() { delegate.close(); }
+		@Override public void close() { if (ownsDelegate) delegate.close(); }
 	}
-	private InventorySourceAccess.Preparation prepareSnapshot(Consumer consumer, Round round) {
+	private InventorySourceAccess.Preparation prepareSnapshot(Consumer consumer, Round round, InventoryValidationBudget.Allowance discovery) {
 		// Pure Cost metadata may construct bounded records: admit the existing fixed
 		// authority scratch first, then extend it only to the discovery peak, not
 		// cumulative allocation. This same scratch also covers legacy lock checks.
@@ -519,9 +591,12 @@ public final class InventoryRuntime implements AutoCloseable {
 				var admission = physical.tryReserve(Map.of(ITEM_WORK, cost.workUnits()));
 				if (admission.isEmpty()) { physicalDelay(consumer, Reason.PUBLICATION_WORK.bit(), -1); return InventorySourceAccess.Preparation.DEFERRED; }
 				try (var grant = admission.get()) {
-					var discovery = new InventoryValidationBudget.Allowance(cost);
-					try { return prepareSnapshot(consumer, round, discovery); }
-					finally { grant.commit(Map.of(ITEM_WORK, discovery.attemptedWorkUnits())); }
+					long before = discovery.attemptedWorkUnits(); discovery.admitAdditional(cost);
+					try { return capturePreparedSnapshot(consumer, round, discovery); }
+					finally {
+						try { grant.commit(Map.of(ITEM_WORK, discovery.attemptedWorkUnits() - before - round.source.captureValidationWork)); }
+						finally { round.source.captureValidationWork = 0; discovery.releaseUnusedAdmission(); }
+					}
 				}
 			}
 		} catch (InventoryItemBudget.CaptureLimitException exceeded) {
@@ -534,7 +609,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			return InventorySourceAccess.Preparation.UNAVAILABLE;
 		}
 	}
-	private InventorySourceAccess.Preparation prepareSnapshot(Consumer consumer, Round round, InventoryValidationBudget.Allowance discovery) {
+	private InventorySourceAccess.Preparation capturePreparedSnapshot(Consumer consumer, Round round, InventoryValidationBudget.Allowance discovery) {
 		AdmittedSource source = round.source;
 		InventorySourceAccess.@org.jetbrains.annotations.Nullable SnapshotPlan plan = source.snapshotPlan(discovery).orElse(null);
 		long reads = plan == null ? 0 : plan.physicalReadUpperBound();
@@ -553,6 +628,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		source.captureAttempted = false;
 		try (var grant = admission.get()) {
 			try {
+				if (plan != null) discovery.admitAdditional(plan.validationCost());
 				var outcome = round.handle.prepareSnapshot(memory, discovery);
 				// The handle's documented DEFERRED means plan memory refused before capture.
 				if (outcome == InventorySourceAccess.Preparation.DEFERRED) physicalDelay(consumer, Reason.MEMORY.bit(), -1);
@@ -564,7 +640,8 @@ public final class InventoryRuntime implements AutoCloseable {
 				long attempted = plan == null ? 0 : plan.attemptedPhysicalReads() - (long) before;
 				if (attempted < 0 || attempted > reads) throw new IllegalStateException("capture exceeded attempted read admission");
 				// A throwing capture pays every attempted root, never only its successful output.
-				long attemptedWork = source.captureAttempted ? work : 0;
+				long attemptedWork = source.captureAttempted ? Math.min(work, checkedAdd(
+					checkedMultiply(attempted, InventoryItemBudget.freezeWorkUpperBound(round.handle.displayBytes())), source.captureValidationWork)) : 0;
 				grant.commit(Map.of(CAPTURE_READS, attempted, ITEM_WORK, attemptedWork));
 			}
 		}
@@ -592,11 +669,25 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (ticket.isEmpty()) return Optional.empty();
 		try (var grant = ticket.get()) {
 			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-			try (var source = resolve(input).orElse(null)) {
-				boolean valid = source != null && source.valid();
+			var resolution = validation(resolver.resolutionValidationCost(input), new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), authorityWorkspaceBytes());
+			if (resolution.isEmpty()) return Optional.empty();
+			InventoryValidationBudget.Allowance allowance;
+			InventorySourceAccess.@org.jetbrains.annotations.Nullable Source resolved;
+			try (var operation = resolution.get()) {
+				allowance = operation.allowance;
+				resolved = resolver.resolve(input, effectiveDisplayCap(), allowance).orElse(null);
+			}
+			try (var source = resolved) {
+				if (source == null) { retireInvalid(input); return Optional.of(false); }
+				var evidence = validation(source.evidenceValidationCost(), allowance, authorityWorkspaceBytes());
+				if (evidence.isEmpty()) return Optional.empty();
+				boolean valid;
+				try (var operation = evidence.get()) { valid = source.valid(allowance); }
 				if (!valid) retireInvalid(input);
 				return Optional.of(valid);
 			}
+		} catch (InventoryItemBudget.CaptureLimitException deferred) {
+			return Optional.empty();
 		} catch (RuntimeException | LinkageError unavailable) {
 			InventoryCaptureDiagnostics.warn("runtime/input-probe", input, null, () -> "tick=" + tick, unavailable);
 			retireInvalid(input); return Optional.of(false);
@@ -614,6 +705,12 @@ public final class InventoryRuntime implements AutoCloseable {
 			return result;
 		}
 		int calls = (completed != null && scanning != null && completed != scanning ? 2 : 1) + (consumer.bindingEvidence == null ? 0 : 1);
+		var validationCost = consumer.bindingEvidence == null ? InventoryValidationBudget.NONE : consumer.bindingEvidence.evidenceValidationCost();
+		if (completed != null) validationCost = validationCost.plus(completed.handle.evidenceValidationCost());
+		if (scanning != null && scanning != completed) validationCost = validationCost.plus(scanning.handle.evidenceValidationCost());
+		var validation = validation(validationCost);
+		if (validation.isEmpty()) { delay(consumer, consumer.probeDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "probe"); return Optional.empty(); }
+		try (var operation = validation.get()) {
 		var workspace = memory.tryReserve(authorityWorkspaceBytes());
 		if (workspace.isEmpty()) { delay(consumer, consumer.probeDelay, Reason.MEMORY.bit(), "probe"); return Optional.empty(); }
 		try (var reserved = workspace.get()) {
@@ -625,12 +722,15 @@ public final class InventoryRuntime implements AutoCloseable {
 				try {
 					if (consumer.bindingEvidence != null) {
 						used++;
-						if (!bindingEvidenceValid(consumer)) { consumer.discardObservation(); return Optional.of(false); }
+						try {
+							if (!bindingEvidenceValid(consumer, operation.allowance)) { consumer.discardObservation(); return Optional.of(false); }
+						} catch (InventoryItemBudget.CaptureLimitException deferred) { return Optional.empty(); }
 					}
 					for (Round round : completed == null ? List.of(scanning) : scanning == null || completed == scanning ? List.of(completed) : List.of(completed, scanning)) {
 						used++; // attempted validity calls remain charged, including exceptions and invalid retirement
 						boolean valid;
-						try { valid = !round.closed && round.handle.evidenceValid(); }
+						try { valid = !round.closed && round.handle.evidenceValid(operation.allowance); }
+						catch (InventoryItemBudget.CaptureLimitException deferred) { return Optional.empty(); }
 						catch (RuntimeException | LinkageError unavailable) { warn("evidence-probe", consumer, round, unavailable); valid = false; }
 						if (!valid) { retire(round, unavailable(consumer.input.viewKey())); return Optional.of(false); }
 					}
@@ -642,6 +742,7 @@ public final class InventoryRuntime implements AutoCloseable {
 				}
 			}
 		}
+		}
 	}
 
 	public Optional<Observation> step(Consumer consumer) {
@@ -649,15 +750,18 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	/** Fix the physical capture route before scan or logical allowance is considered. */
 	public InventorySourceAccess.Preparation prepare(Consumer consumer) {
+		return prepare(consumer, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE));
+	}
+	private InventorySourceAccess.Preparation prepare(Consumer consumer, InventoryValidationBudget.Allowance allowance) {
 		if (consumer.closed) return InventorySourceAccess.Preparation.UNAVAILABLE;
 		if (consumer.invalidObservation != null || consumer.pendingObservation != null)
 			return InventorySourceAccess.Preparation.UNAVAILABLE;
 		Round handoff = consumer.completedRound == null ? null : consumer.completedRound.successor;
 		if (consumer.round == null && consumer.completedRound != null && !consumer.completedRound.predecessors.isEmpty())
 			return InventorySourceAccess.Preparation.DEFERRED; // finish the physical handoff before another replacement forks
-		var bindingCheck = checkBindingEvidence(consumer);
+		var bindingCheck = checkBindingEvidence(consumer, allowance);
 		if (bindingCheck != InventorySourceAccess.Preparation.READY) return bindingCheck;
-		if (consumer.round == null && handoff != null && consumer.input.sameBinding(handoff.input)) return prepareHandoff(consumer, handoff);
+		if (consumer.round == null && handoff != null && consumer.input.sameBinding(handoff.input)) return prepareHandoff(consumer, handoff, allowance);
 		if (consumer.round == null) {
 			for (Consumer peer : consumers) if (handoff == null && peer != consumer && peer.round != null && peer.input.sameBinding(consumer.input)
 				&& (!(consumer.input.target() instanceof nx.pingwheel.common.domain.Target.ExternalBlockTarget) || consumer.input.sameBinding(peer.round.input))
@@ -680,9 +784,14 @@ public final class InventoryRuntime implements AutoCloseable {
 			try {
 				int displayCap = effectiveDisplayCap();
 				AdmittedSource[] resolvedSource = new AdmittedSource[1];
-				var access = new InventorySourceAccess(consumer.input, i -> resolve(i, displayCap).map(source -> resolvedSource[0] = new AdmittedSource(source)));
+				var access = sourceAccess(consumer.input, displayCap, source -> resolvedSource[0] = new AdmittedSource(source));
 				var scope = new SourceAccess.ReadScope(consumer.input.viewKey(), Set.of("pingforit:inventory.items"));
-				var resolved = access.resolve(MinecraftBlockReadSources.detached(consumer.input.target()), scope, physical);
+				var resolution = validation(resolver.resolutionValidationCost(consumer.input), allowance, authorityWorkspaceBytes());
+				if (resolution.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
+				SourceAccess.ResolveResult resolved;
+				try (var operation = resolution.get()) {
+					resolved = access.resolve(MinecraftBlockReadSources.detached(consumer.input.target()), scope, physical, operation.allowance);
+				}
 				if (!(resolved instanceof SourceAccess.ResolveResult.Available available)) {
 					if (resolved == SourceAccess.ResolveResult.Unresolved.DEFERRED) {
 						delay(consumer, consumer.admissionDelay, providerReasons(1, InventorySourceAccess.PROVIDER_CALL_WORK), "admission");
@@ -709,7 +818,7 @@ public final class InventoryRuntime implements AutoCloseable {
 						ownsReservation = false; openedHandle = null;
 					}
 					if (ownsReservation) { retained.get().close(); ownsReservation = false; }
-					return prepareHandoff(consumer, handoff);
+					return prepareHandoff(consumer, handoff, allowance);
 				}
 				Round round = rounds.get(available.descriptor().key());
 				// A newly selected Ping never inherits a completed preview count.
@@ -733,7 +842,7 @@ public final class InventoryRuntime implements AutoCloseable {
 					ownsReservation = false; openedHandle = null;
 				}
 				join(consumer, round);
-				var admittedBinding = checkBindingEvidence(consumer);
+				var admittedBinding = checkBindingEvidence(consumer, allowance);
 				if (admittedBinding != InventorySourceAccess.Preparation.READY) return admittedBinding;
 			} finally {
 				try { if (openedHandle != null) openedHandle.close(); }
@@ -750,7 +859,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		try (var grant = admission.get()) {
 			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L,
 				InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-			InventorySourceAccess.Preparation outcome = prepareSnapshot(consumer, round);
+			InventorySourceAccess.Preparation outcome = prepareSnapshot(consumer, round, allowance);
 			if (outcome != InventorySourceAccess.Preparation.DEFERRED) round.preparation = outcome;
 			return outcome;
 		}
@@ -764,13 +873,17 @@ public final class InventoryRuntime implements AutoCloseable {
 		consumer.bindingEvidence = handle; consumer.bindingMemory = ticket;
 		return true;
 	}
-	private boolean bindingEvidenceValid(Consumer consumer) {
-		try { return consumer.bindingEvidence == null || consumer.bindingEvidence.evidenceValid(); }
+	private boolean bindingEvidenceValid(Consumer consumer, InventoryValidationBudget.Allowance allowance) {
+		try { return consumer.bindingEvidence == null || consumer.bindingEvidence.evidenceValid(allowance); }
+		catch (InventoryItemBudget.CaptureLimitException deferred) { throw deferred; }
 		catch (RuntimeException | LinkageError unavailable) { warn("binding-probe", consumer, consumer.round, unavailable); return false; }
 	}
 	/** Cache consumption checks its own original binding, not only the peer whose physical sweep was shared. */
-	private InventorySourceAccess.Preparation checkBindingEvidence(Consumer consumer) {
+	private InventorySourceAccess.Preparation checkBindingEvidence(Consumer consumer, InventoryValidationBudget.Allowance allowance) {
 		if (consumer.bindingEvidence == null) return InventorySourceAccess.Preparation.READY;
+		var validation = validation(consumer.bindingEvidence.evidenceValidationCost(), allowance);
+		if (validation.isEmpty()) { delay(consumer, consumer.probeDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "probe"); return InventorySourceAccess.Preparation.DEFERRED; }
+		try (var operation = validation.get()) {
 		var workspace = memory.tryReserve(authorityWorkspaceBytes());
 		if (workspace.isEmpty()) { delay(consumer, consumer.probeDelay, Reason.MEMORY.bit(), "probe"); return InventorySourceAccess.Preparation.DEFERRED; }
 		try (var reserved = workspace.get()) {
@@ -779,15 +892,21 @@ public final class InventoryRuntime implements AutoCloseable {
 			if (admission.isEmpty()) { delay(consumer, consumer.probeDelay, providerReasons(1, InventorySourceAccess.PROVIDER_CALL_WORK), "probe"); return InventorySourceAccess.Preparation.DEFERRED; }
 			try (var grant = admission.get()) {
 				grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-				if (!bindingEvidenceValid(consumer)) { consumer.discardObservation(); return InventorySourceAccess.Preparation.UNAVAILABLE; }
+				try {
+					if (!bindingEvidenceValid(consumer, operation.allowance)) { consumer.discardObservation(); return InventorySourceAccess.Preparation.UNAVAILABLE; }
+				} catch (InventoryItemBudget.CaptureLimitException deferred) { return InventorySourceAccess.Preparation.DEFERRED; }
 				consumer.probeDelay.progress(cycle(consumer));
 				return InventorySourceAccess.Preparation.READY;
 			}
 		}
+		}
 	}
-	private InventorySourceAccess.Preparation prepareHandoff(Consumer consumer, Round handoff) {
-		var bindingCheck = checkBindingEvidence(consumer);
+	private InventorySourceAccess.Preparation prepareHandoff(Consumer consumer, Round handoff, InventoryValidationBudget.Allowance allowance) {
+		var bindingCheck = checkBindingEvidence(consumer, allowance);
 		if (bindingCheck != InventorySourceAccess.Preparation.READY) return bindingCheck;
+		var validation = validation(handoff.handle.evidenceValidationCost(), allowance);
+		if (validation.isEmpty()) { delay(consumer, consumer.probeDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "probe"); return InventorySourceAccess.Preparation.DEFERRED; }
+		try (var operation = validation.get()) {
 		// A cached successor may be consumed after its original scanner's tick. Validate its
 		// own retained evidence, not just the slow peer's still-published predecessor.
 		var workspace = memory.tryReserve(authorityWorkspaceBytes());
@@ -800,7 +919,8 @@ public final class InventoryRuntime implements AutoCloseable {
 				grant.commit(Map.of(InventorySourceAccess.PROBES, 1L,
 					InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 				boolean valid;
-				try { valid = !handoff.closed && handoff.handle.evidenceValid(); }
+				try { valid = !handoff.closed && handoff.handle.evidenceValid(operation.allowance); }
+				catch (InventoryItemBudget.CaptureLimitException deferred) { return InventorySourceAccess.Preparation.DEFERRED; }
 				catch (RuntimeException | LinkageError unavailable) { warn("handoff-probe", consumer, handoff, unavailable); valid = false; }
 				if (!valid) {
 					Observation invalid = unavailable(consumer.input.viewKey());
@@ -809,16 +929,18 @@ public final class InventoryRuntime implements AutoCloseable {
 				}
 			}
 		}
+		}
 		join(consumer, handoff);
 		consumer.probeDelay.progress(cycle(consumer));
-		return handoff.preparation == null ? prepare(consumer) : handoff.preparation;
+		return handoff.preparation == null ? prepare(consumer, allowance) : handoff.preparation;
 	}
 	public Optional<Observation> step(Consumer consumer, int slotBound) {
 		if (slotBound < 1 || slotBound > InventorySourceAccess.MAX_STEP) throw new IllegalArgumentException("inventory step bound");
 		if (consumer.closed) return Optional.empty();
 		if (consumer.invalidObservation != null) return Optional.of(consumer.invalidObservation);
 		if (consumer.pendingObservation != null) return Optional.of(consumer.pendingObservation);
-		InventorySourceAccess.Preparation preparation = prepare(consumer);
+		var operationAllowance = new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE);
+		InventorySourceAccess.Preparation preparation = prepare(consumer, operationAllowance);
 		if (preparation == InventorySourceAccess.Preparation.DEFERRED) return Optional.empty();
 		if (consumer.invalidObservation != null) return Optional.of(consumer.invalidObservation);
 		if (preparation != InventorySourceAccess.Preparation.READY) {
@@ -876,7 +998,7 @@ public final class InventoryRuntime implements AutoCloseable {
 				if (consumer.cursor < round.slots.size()) logicalRefusal(consumer, cap, globalCap, global);
 				return Optional.empty();
 			}
-			SourceAccess.StepOutcome outcome = zeroAllowanceStep(consumer);
+			SourceAccess.StepOutcome outcome = zeroAllowanceStep(consumer, operationAllowance);
 			if (outcome instanceof SourceAccess.StepOutcome.Deferred) {
 				if (!consumer.zeroAdmissionRefused) logicalRefusal(consumer, cap, globalCap, global);
 				return Optional.empty();
@@ -915,7 +1037,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			int bounded = Math.min(memoryBound, (int) Math.min(physicalRemaining(),
 				Math.max(0, physical.remaining(InventorySourceAccess.PROVIDER_WORK) / InventorySourceAccess.PROVIDER_CALL_WORK - 1)));
 			if (bounded == 0) {
-				SourceAccess.StepOutcome outcome = zeroAllowanceAdmitted(consumer);
+				SourceAccess.StepOutcome outcome = zeroAllowanceAdmitted(consumer, operationAllowance);
 				if (outcome instanceof SourceAccess.StepOutcome.Deferred) {
 					physicalDelay(consumer, scanReasons(available, readDisplayCap), physicalRemaining() == 0 ? available : -1);
 					workspace.get().close(); return Optional.empty();
@@ -943,7 +1065,9 @@ public final class InventoryRuntime implements AutoCloseable {
 				CostLedger step = new CostLedger(Map.of(InventorySourceAccess.PHYSICAL, (long) bounded, InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, workBound));
 				var catalogAdmission = new InventoryCatalogAdmission(rootWorkspace,
 					checkedMultiply(bounded, InventoryCatalogAdmission.workUpperBound(readDisplayCap)));
-				try { result = round.handle.step(step, catalogAdmission); }
+				var validation = validation(round.handle.stepValidationCost(bounded), operationAllowance, rootWorkspace);
+				if (validation.isEmpty()) { physicalDelay(consumer, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), -1); return Optional.empty(); }
+				try (var operation = validation.get()) { result = round.handle.step(step, catalogAdmission, operation.allowance); }
 				finally { physicalTicket.commit(Map.of(InventorySourceAccess.PHYSICAL, bounded - step.remaining(InventorySourceAccess.PHYSICAL),
 					InventorySourceAccess.PROBES, 1L - step.remaining(InventorySourceAccess.PROBES), InventorySourceAccess.PROVIDER_WORK, workBound - step.remaining(InventorySourceAccess.PROVIDER_WORK),
 					// Keep the existing attempted-slot envelope for source authority,
@@ -1031,7 +1155,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			&& result.coverage().expected().isPresent() && result.coverage().expected().getAsLong() == 0
 			&& result.payload().isEmpty();
 	}
-	private SourceAccess.StepOutcome zeroAllowanceStep(Consumer consumer) {
+	private SourceAccess.StepOutcome zeroAllowanceStep(Consumer consumer, InventoryValidationBudget.Allowance allowance) {
 		consumer.zeroAdmissionRefused = false;
 		var workspace = memory.tryReserve(authorityWorkspaceBytes());
 		if (workspace.isEmpty()) {
@@ -1039,10 +1163,10 @@ public final class InventoryRuntime implements AutoCloseable {
 			return new SourceAccess.StepOutcome.Deferred();
 		}
 		try (var held = workspace.get()) {
-			return zeroAllowanceAdmitted(consumer);
+			return zeroAllowanceAdmitted(consumer, allowance);
 		}
 	}
-	private SourceAccess.StepOutcome zeroAllowanceAdmitted(Consumer consumer) {
+	private SourceAccess.StepOutcome zeroAllowanceAdmitted(Consumer consumer, InventoryValidationBudget.Allowance allowance) {
 		consumer.zeroAdmissionRefused = false;
 		Map<CostLedger.Counter, Long> limits = Map.of(InventorySourceAccess.PHYSICAL, 0L, InventorySourceAccess.PROBES, 1L,
 			InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK);
@@ -1054,7 +1178,12 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 		try (var grant = admission.get()) {
 			CostLedger step = new CostLedger(limits);
-			SourceAccess.StepOutcome outcome = consumer.round.handle.step(step);
+			var validation = validation(consumer.round.handle.stepValidationCost(0), allowance);
+			if (validation.isEmpty()) { consumer.zeroAdmissionRefused = true; physicalDelay(consumer, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), -1); return new SourceAccess.StepOutcome.Deferred(); }
+			SourceAccess.StepOutcome outcome;
+			try (var operation = validation.get()) {
+				outcome = consumer.round.handle.step(step, new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(effectiveDisplayCap()), 0), operation.allowance);
+			}
 			grant.commit(Map.of(InventorySourceAccess.PHYSICAL, 0L,
 				InventorySourceAccess.PROBES, 1L - step.remaining(InventorySourceAccess.PROBES),
 				InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK - step.remaining(InventorySourceAccess.PROVIDER_WORK)));

@@ -53,16 +53,20 @@ class CreateVaultInventoryDiagnosticsTest {
 	}
 	@Test void throwingSnapshotMetadataRemainsAbsentAndReportsFullCause() {
 		var world = CreateVaultInventoryAccessTest.World.pair();
+		boolean[] broken = {false};
 		world.members.put(BlockPos.ZERO, new CreateVaultInventoryAccessTest.Member() {
 			{ master = true; }
-			@Override public String blockEntityId() { throw new IllegalStateException("Vault descriptor failure", new RuntimeException("Vault descriptor cause")); }
+			@Override public String blockEntityId() {
+				if (broken[0]) throw new IllegalStateException("Vault descriptor failure", new RuntimeException("Vault descriptor cause"));
+				return super.blockEntityId();
+			}
 		});
 		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
 		try (var capture = new Capture()) {
-			assertTrue(access.valid()); assertTrue(access.snapshotLayout().isEmpty());
+			broken[0] = true; assertTrue(access.snapshotLayout().isEmpty());
 			assertEquals(1, capture.events.size()); assertEquals(Level.WARN, capture.events.getFirst().getLevel());
 			String message = capture.events.getFirst().getMessage().getFormattedMessage();
-			assertTrue(message.contains("inventory-vault-snapshot-layout")); assertTrue(message.contains("Vault descriptor cause"));
+			assertTrue(message.contains("inventory-vault-valid")); assertTrue(message.contains("Vault descriptor cause"));
 		}
 	}
 	private static final class Capture implements AutoCloseable {

@@ -11,6 +11,8 @@ import java.util.function.Supplier;
 import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryCatalogAdmission;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
@@ -102,6 +104,13 @@ public final class InventorySourceAccess implements SourceAccess {
 	 * the source offers no usable snapshot support.
 	 */
 	public interface InventoryHandle extends SourceAccess.Handle {
+		default InventoryValidationBudget.Cost evidenceValidationCost() { return InventoryValidationBudget.NONE; }
+		default InventoryValidationBudget.Cost stepValidationCost(int slots) { return InventoryValidationBudget.NONE; }
+		default boolean evidenceValid(InventoryValidationBudget.Allowance allowance) { return evidenceValid(); }
+		default StepOutcome step(CostLedger ledger, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) { return admission == null ? step(ledger) : step(ledger, admission); }
+		default InventoryStep.Outcome stepInventory(CostLedger ledger, InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return InventoryStep.fromLegacy(step(ledger, admission, allowance));
+		}
 		/** Additive typed seam; legacy routes keep their encoding and evidence until native integration. */
 		default InventoryStep.Outcome stepInventory(CostLedger ledger, InventoryCatalogAdmission admission) {
 			return InventoryStep.fromLegacy(step(ledger, admission));
@@ -137,6 +146,17 @@ public final class InventorySourceAccess implements SourceAccess {
 	}
 
 	public interface Source extends AutoCloseable {
+		default InventoryValidationBudget.Cost evidenceValidationCost() { return InventoryValidationBudget.NONE; }
+		/** Includes nested validity, member, mapping and provider metadata callbacks for the whole operation. */
+		default InventoryValidationBudget.Cost readValidationCost(int slots) { return InventoryValidationBudget.NONE; }
+		default InventoryDomainCodec.@Nullable Item read(int slot, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) { return admission == null ? read(slot) : read(slot, admission); }
+		default Page enumerate(int limit, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) { return admission == null ? enumerate(limit) : enumerate(limit, admission); }
+		default boolean matchesSelection(int slot, InventorySelection selection, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return admission == null ? matchesSelection(slot, selection) : matchesSelection(slot, selection, admission);
+		}
+		default SelectionWitness observeSelection(int limit, InventorySelection selection, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return admission == null ? observeSelection(limit, selection) : observeSelection(limit, selection, admission);
+		}
 		/** Pure metadata, available before any validation/discovery callback. */
 		default nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost discoveryValidationCost() {
 			return new nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost(0, 0, 0);
@@ -205,25 +225,40 @@ public final class InventorySourceAccess implements SourceAccess {
 	public record Page(java.util.List<InventoryDomainCodec.Item> slots, boolean complete) {
 		public Page { slots = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(slots)); }
 	}
-	private final Function<InventorySourceInput, Optional<Source>> resolver;
+	public interface Resolver {
+		Optional<Source> resolve(InventorySourceInput input);
+		InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input);
+		default Optional<Source> resolve(InventorySourceInput input, InventoryValidationBudget.Allowance allowance) { return resolve(input); }
+	}
+	private final Resolver resolver;
 	private final InventorySourceInput input;
 	private Source prepared;
 
 	public InventorySourceAccess(InventorySourceInput input, Function<InventorySourceInput, Optional<Source>> resolver) {
+		this(input, new Resolver() {
+			@Override public Optional<Source> resolve(InventorySourceInput value) { return resolver.apply(value); }
+			@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput value) { return InventoryValidationBudget.NONE; }
+		});
+	}
+	public InventorySourceAccess(InventorySourceInput input, Resolver resolver) {
 		this.input = Objects.requireNonNull(input);
 		this.resolver = Objects.requireNonNull(resolver);
 	}
 	/** Immediate authority check at a retained slot witness, or one bounded cursorless observation. */
 	public boolean selectionPresent(InventorySelection selection, int witness, int observationBound, CostLedger ledger) {
-		return selectionPresentOwned(selection, witness, observationBound, ledger, null);
+		return selectionPresentOwned(selection, witness, observationBound, ledger, null, null);
 	}
 	/** The same caller-backed allowance follows the entire live witness. */
 	public boolean selectionPresent(InventorySelection selection, int witness, int observationBound, CostLedger ledger,
 		InventoryCatalogAdmission admission) {
-		return selectionPresentOwned(selection, witness, observationBound, ledger, Objects.requireNonNull(admission));
+		return selectionPresentOwned(selection, witness, observationBound, ledger, Objects.requireNonNull(admission), null);
+	}
+	public boolean selectionPresent(InventorySelection selection, int witness, int observationBound, CostLedger ledger,
+		InventoryCatalogAdmission catalog, InventoryValidationBudget.Allowance allowance) {
+		return selectionPresentOwned(selection, witness, observationBound, ledger, catalog, Objects.requireNonNull(allowance));
 	}
 	private boolean selectionPresentOwned(InventorySelection selection, int witness, int observationBound, CostLedger ledger,
-		InventoryCatalogAdmission catalog) {
+		@Nullable InventoryCatalogAdmission catalog, InventoryValidationBudget.@Nullable Allowance validation) {
 		int limit = (int) Math.min(observationBound, Math.min(ledger.remaining(PHYSICAL), Math.max(0, ledger.remaining(PROVIDER_WORK) / PROVIDER_CALL_WORK - 1)));
 		if (limit == 0 || witness < 0 || witness >= MAX_SLOTS) return false;
 		var admission = ledger.tryReserve(Map.of(PHYSICAL, (long) limit, PROBES, 1L, PROVIDER_WORK, (limit + 1L) * PROVIDER_CALL_WORK));
@@ -232,18 +267,20 @@ public final class InventorySourceAccess implements SourceAccess {
 		try (var ticket = admission.get()) {
 			String sourceClass = "unresolved";
 			try {
-				Source source = resolver.apply(input).orElse(null);
+				@Nullable Source source = (validation == null ? resolver.resolve(input) : resolver.resolve(input, validation)).orElse(null);
 				Throwable primary = null;
 				try {
 					if (source != null) sourceClass = source.getClass().getName();
-					if (source == null || !source.valid()) return false;
+					if (source == null || !(validation == null ? source.valid() : source.valid(validation))) return false;
 					if (source.stableCursor()) {
 						if (witness >= source.slots()) return false;
 						used = 1;
-						return catalog == null ? source.matchesSelection(witness, selection) : source.matchesSelection(witness, selection, catalog);
+						return validation != null ? source.matchesSelection(witness, selection, catalog, validation)
+							: catalog == null ? source.matchesSelection(witness, selection) : source.matchesSelection(witness, selection, catalog);
 					}
 					used = limit;
-					SelectionWitness observed = catalog == null ? source.observeSelection(limit, selection) : source.observeSelection(limit, selection, catalog);
+					SelectionWitness observed = validation != null ? source.observeSelection(limit, selection, catalog, validation)
+						: catalog == null ? source.observeSelection(limit, selection) : source.observeSelection(limit, selection, catalog);
 					if (observed.visited() > limit) return false;
 					used = observed.visited();
 					return observed.present();
@@ -297,6 +334,9 @@ public final class InventorySourceAccess implements SourceAccess {
 		}
 	}
 	@Override public ResolveResult resolve(PresentationAdapter.DetachedTarget target, ReadScope scope, CostLedger ledger) {
+		return resolve(target, scope, ledger, null);
+	}
+	public ResolveResult resolve(PresentationAdapter.DetachedTarget target, ReadScope scope, CostLedger ledger, InventoryValidationBudget.@Nullable Allowance validation) {
 		if (!scope.viewKey().equals(input.viewKey()) || !matches(target)) return ResolveResult.Unresolved.UNSUPPORTED;
 		var ticket = ledger.tryReserve(Map.of(PROBES, 1L, PROVIDER_WORK, PROVIDER_CALL_WORK));
 		if (ticket.isEmpty()) return ResolveResult.Unresolved.DEFERRED;
@@ -308,7 +348,7 @@ public final class InventorySourceAccess implements SourceAccess {
 				sourceClass = previous.getClass().getName(); previous.close();
 			}
 			sourceClass = "unresolved";
-			prepared = resolver.apply(input).orElse(null);
+			prepared = (validation == null ? resolver.resolve(input) : resolver.resolve(input, validation)).orElse(null);
 			if (prepared == null) return ResolveResult.Unresolved.UNAVAILABLE;
 			sourceClass = prepared.getClass().getName();
 			if (!prepared.key().readScope().equals(scope.viewKey())) {
@@ -317,6 +357,10 @@ public final class InventorySourceAccess implements SourceAccess {
 			}
 			return new ResolveResult.Available(new Descriptor(prepared.key(), 1,
 				new Capabilities(!prepared.stableCursor(), prepared.stableCursor(), prepared.version().isPresent())));
+		} catch (InventoryItemBudget.CaptureLimitException deferred) {
+			@Nullable Source failed = prepared; prepared = null;
+			closeAttemptSource("resolve-close", failed, deferred, () -> "stage=resolve-admission");
+			return ResolveResult.Unresolved.DEFERRED;
 		} catch (RuntimeException | LinkageError unavailable) {
 			Source failed = prepared; prepared = null;
 			closeAttemptSource("resolve-close", failed, unavailable, () -> "stage=resolve");
@@ -367,6 +411,11 @@ public final class InventorySourceAccess implements SourceAccess {
 		@Override public nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost discoveryValidationCost() { return source.discoveryValidationCost(); }
 		@Override public java.util.Set<String> demand() { return scope.demand(); }
 		@Override public boolean evidenceValid() { return !closed && source.valid(); }
+		@Override public boolean evidenceValid(InventoryValidationBudget.Allowance allowance) { return !closed && source.valid(allowance); }
+		@Override public InventoryValidationBudget.Cost evidenceValidationCost() { return source.evidenceValidationCost(); }
+		@Override public InventoryValidationBudget.Cost stepValidationCost(int slots) {
+			return snapshot != null ? source.evidenceValidationCost() : source.evidenceValidationCost().plus(source.readValidationCost(slots));
+		}
 		@Override public void releaseCapturedData() { releaseRetained(); }
 		@Override public int displayBytes() {
 			InventorySnapshot captured = snapshot;
@@ -393,10 +442,13 @@ public final class InventorySourceAccess implements SourceAccess {
 		 * that reservation only when it is a valid subset of the bound.
 		 */
 		@Override public Preparation prepareSnapshot(RetainedMemoryLedger memory) {
-			return prepareSnapshot(memory, new nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance(discoveryValidationCost()));
+			return prepareSnapshot(memory, new InventoryValidationBudget.Allowance(discoveryValidationCost()), true);
 		}
 		@Override public Preparation prepareSnapshot(RetainedMemoryLedger memory,
 			nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance discovery) {
+			return prepareSnapshot(memory, discovery, false);
+		}
+		private Preparation prepareSnapshot(RetainedMemoryLedger memory, InventoryValidationBudget.Allowance discovery, boolean legacy) {
 			Objects.requireNonNull(memory, "memory");
 			Objects.requireNonNull(discovery, "discovery");
 			if (closed) return Preparation.UNAVAILABLE;
@@ -420,7 +472,7 @@ public final class InventorySourceAccess implements SourceAccess {
 					return Preparation.DEFERRED;
 				}
 				reserved = admission.get();
-				captured = plan.capture().orElse(null);
+				captured = (legacy ? plan.capture() : plan.capture(discovery)).orElse(null);
 				if (captured == null) return settleLiveRoute();
 				if (!source.valid(discovery)) return settle(Preparation.INVALID);
 				int slots = captured.slots();
@@ -474,20 +526,23 @@ public final class InventorySourceAccess implements SourceAccess {
 		}
 
 		@Override public StepOutcome step(CostLedger ledger) {
-			return stepOwned(ledger, null);
+			return stepOwned(ledger, null, null);
 		}
 		@Override public StepOutcome step(CostLedger ledger, InventoryCatalogAdmission admission) {
-			return stepOwned(ledger, Objects.requireNonNull(admission));
+			return stepOwned(ledger, Objects.requireNonNull(admission), null);
 		}
-		private StepOutcome stepOwned(CostLedger ledger, InventoryCatalogAdmission catalog) {
+		@Override public StepOutcome step(CostLedger ledger, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance validation) {
+			return stepOwned(ledger, admission, Objects.requireNonNull(validation));
+		}
+		private StepOutcome stepOwned(CostLedger ledger, @Nullable InventoryCatalogAdmission catalog, InventoryValidationBudget.@Nullable Allowance validation) {
 			if (closed || terminal) return new StepOutcome.Deferred();
 			if (preparation != null && preparation != Preparation.READY) {
 				terminal = true;
 				return terminalFailure(preparation);
 			}
-			if (snapshot != null) return snapshotStep(ledger, catalog);
+			if (snapshot != null) return snapshotStep(ledger, catalog, validation);
 			if (planDeferred) return new StepOutcome.Deferred();
-			return liveStep(ledger, catalog);
+			return liveStep(ledger, catalog, validation);
 		}
 
 		/** Terminal preparation failures become one explicit captured result, never a forever defer. */
@@ -504,7 +559,7 @@ public final class InventorySourceAccess implements SourceAccess {
 		}
 
 		/** Consumes retained snapshot data with the existing admission, revalidation and attempted-read charge. */
-		private StepOutcome snapshotStep(CostLedger ledger, InventoryCatalogAdmission catalog) {
+		private StepOutcome snapshotStep(CostLedger ledger, @Nullable InventoryCatalogAdmission catalog, InventoryValidationBudget.@Nullable Allowance validation) {
 			try {
 				int slots = snapshotSlots;
 				int allowance = slots == 0 ? 0
@@ -517,7 +572,7 @@ public final class InventorySourceAccess implements SourceAccess {
 				int used = 0;
 				try (var ticket = admission.get()) {
 					try {
-						if (!source.valid()) {
+						if (!(validation == null ? source.valid() : source.valid(validation))) {
 							terminal = true;
 							releaseRetained();
 							return snapshotCaptured(null, CaptureResult.Availability.INVALID, CaptureResult.Completeness.INCOMPLETE);
@@ -570,7 +625,7 @@ public final class InventorySourceAccess implements SourceAccess {
 				Optional.empty()));
 		}
 
-		private StepOutcome liveStep(CostLedger ledger, InventoryCatalogAdmission catalog) {
+		private StepOutcome liveStep(CostLedger ledger, @Nullable InventoryCatalogAdmission catalog, InventoryValidationBudget.@Nullable Allowance validation) {
 			int allowance = (int) Math.min(MAX_STEP, Math.min(ledger.remaining(PHYSICAL), Math.max(0, ledger.remaining(PROVIDER_WORK) / PROVIDER_CALL_WORK - 1)));
 			if (allowance == 0) return new StepOutcome.Deferred();
 			var admission = ledger.tryReserve(Map.of(PHYSICAL, (long) allowance, PROBES, 1L, PROVIDER_WORK, (allowance + 1L) * PROVIDER_CALL_WORK));
@@ -578,13 +633,14 @@ public final class InventorySourceAccess implements SourceAccess {
 			int used = 0;
 			try (var ticket = admission.get()) {
 				try {
-					if (!source.valid()) { terminal = true; return captured(null, CaptureResult.Availability.INVALID, CaptureResult.Completeness.INCOMPLETE); }
+					if (!(validation == null ? source.valid() : source.valid(validation))) { terminal = true; return captured(null, CaptureResult.Availability.INVALID, CaptureResult.Completeness.INCOMPLETE); }
 					if (expected < 0) { firstVersion = source.version(); expected = source.stableCursor() ? source.slots() : -1; }
 					Map<String, CaptureResult.OpaqueValue> page = new LinkedHashMap<>();
 					boolean complete;
 					if (!source.stableCursor()) {
 						used = allowance; // throwing enumeration may have traversed its whole grant
-						Page enumerated = catalog == null ? source.enumerate(allowance) : source.enumerate(allowance, catalog);
+						Page enumerated = validation != null ? source.enumerate(allowance, catalog, validation)
+							: catalog == null ? source.enumerate(allowance) : source.enumerate(allowance, catalog);
 						if (enumerated.slots().size() > allowance) throw new IllegalStateException("provider exceeded admitted enumeration");
 						used = enumerated.slots().size();
 						for (var item : enumerated.slots()) page.put(Integer.toString(cursor++), InventoryDomainCodec.encode(item));
@@ -599,7 +655,8 @@ public final class InventorySourceAccess implements SourceAccess {
 						}
 						while (cursor < Math.min(expected, MAX_SLOTS) && used < allowance) {
 							used++; // An attempted throwing read still consumes its admission.
-							var item = catalog == null ? source.read(cursor) : source.read(cursor, catalog);
+							var item = validation != null ? source.read(cursor, catalog, validation)
+								: catalog == null ? source.read(cursor) : source.read(cursor, catalog);
 							page.put(Integer.toString(cursor++), InventoryDomainCodec.encode(item));
 						}
 						complete = cursor == expected;
