@@ -544,7 +544,8 @@ class InventoryPublicationIntegrationTest {
 	static Endpoint negotiated(MarkerId marker, InventorySettings settings) {
 		var snapshot = new MarkerSnapshot(marker, InventoryBackendTest.A, InventoryRuntimeTest.TARGET, "entity_block", "attention", new nx.pingwheel.common.marker.MarkerAnchor(1, 2, 3), 0, 200);
 		var endpoint = new Endpoint(InventoryBackendTest.A, snapshot);
-		endpoint.client.accept(wire(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, settings.getTracking().getHeartbeatPeriods())).stamp(100, 1)));
+		endpoint.client.accept(wire(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(settings.getPreview().getPeriodTicks(),
+			settings.getTracking().getPeriodTicks(), settings.getTracking().getResyncMinPeriods(), settings.getTracking().getHeartbeatPeriods())).stamp(100, 1)));
 		endpoint.client.accept(wire(InventoryS2CPacket.policy(7, 100, 1, Set.of("entity_block")))); return endpoint;
 	}
 	@Test void publisherAndClientCloseUnchangedCutsAndRepairWithheldStreamEvenWhenPeriodicHeartbeatIsDisabled() {
@@ -616,19 +617,25 @@ class InventoryPublicationIntegrationTest {
 		}
 	}
 	@Test void missingMultipartApplicationPartDefersFutureChecksumThenRepairsCompletedGapWithoutPartialComparison() {
-		var settings = InventorySettings.serverDefaults(); settings.getTracking().setHeartbeatPeriods(16); var transport = new InventorySyncPublisherTest.Transport(); var marker = new MarkerId(1); var endpoint = negotiated(marker, settings);
-		try (var publisher = new InventorySyncPublisher(new RetainedMemoryLedger(16000000), transport)) {
-			var context = InventorySyncPublisherTest.context("tracking/1", 1); publisher.advance(0, settings); publisher.register(context, InventorySyncPublisherTest.route(marker, "target"));
-			InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(1, 2, 0)); publisher.drain(); transport.sent.forEach(p -> endpoint.client.accept(wire(p))); transport.sent.clear();
-			publisher.advance(3, settings); InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(2, 2, 550)); publisher.drain();
-			var parts = transport.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM).toList(); assertEquals(2, parts.size());
-			var retainedPart = parts.getFirst(); int[] applied = {0};
-			for (var packet : transport.sent) if (packet.kind() != InventoryS2CPacket.Kind.STREAM || applied[0]++ == 0) endpoint.client.accept(wire(packet));
-			transport.sent.clear(); assertEquals(1, endpoint.client.tracking(marker).watermark()); assertTrue(endpoint.repairs().isEmpty(), "the future completed digest cannot compare the partial live projection");
-			endpoint.tickTo(0, 15); assertEquals(1, endpoint.repairs().size(), "completed but unapplied gap repairs after the negotiated interval");
-			endpoint.client.accept(wire(parts.getLast())); assertEquals(2, endpoint.client.tracking(marker).watermark()); int repairs = endpoint.repairs().size();
-			endpoint.tickTo(15, 35); assertEquals(repairs, endpoint.repairs().size(), "receiving the missing admitted part clears the gap");
-			endpoint.client.accept(wire(retainedPart)); assertEquals(2, endpoint.client.tracking(marker).watermark());
+		for (int resyncPeriods : new int[] {0, 5}) {
+			var settings = InventorySettings.serverDefaults(); settings.getTracking().setHeartbeatPeriods(16);
+			settings.getTracking().setPeriodTicks(3); settings.getTracking().setResyncMinPeriods(resyncPeriods);
+			var transport = new InventorySyncPublisherTest.Transport(); var marker = new MarkerId(1); var endpoint = negotiated(marker, settings);
+			try (var publisher = new InventorySyncPublisher(new RetainedMemoryLedger(16000000), transport)) {
+				var context = InventorySyncPublisherTest.context("tracking/1", 1); publisher.advance(0, settings); publisher.register(context, InventorySyncPublisherTest.route(marker, "target"));
+				InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(1, 2, 0)); publisher.drain(); transport.sent.forEach(p -> endpoint.client.accept(wire(p))); transport.sent.clear();
+				publisher.advance(3, settings); InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(2, 2, 550)); publisher.drain();
+				var parts = transport.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM).toList(); assertEquals(2, parts.size());
+				var retainedPart = parts.getFirst(); int[] applied = {0};
+				for (var packet : transport.sent) if (packet.kind() != InventoryS2CPacket.Kind.STREAM || applied[0]++ == 0) endpoint.client.accept(wire(packet));
+				transport.sent.clear(); assertEquals(1, endpoint.client.tracking(marker).watermark()); assertTrue(endpoint.repairs().isEmpty(), "the future completed digest cannot compare the partial live projection");
+				int deadline = resyncPeriods == 0 ? 9 : 15;
+				endpoint.tickTo(0, deadline - 1); assertTrue(endpoint.repairs().isEmpty(), "the real multipart gap retains its independent waiting window");
+				endpoint.tickTo(deadline - 1, deadline); assertEquals(1, endpoint.repairs().size(), "completed but unapplied gap repairs at the waiting boundary");
+				endpoint.client.accept(wire(parts.getLast())); assertEquals(2, endpoint.client.tracking(marker).watermark()); int repairs = endpoint.repairs().size();
+				endpoint.tickTo(deadline, 35); assertEquals(repairs, endpoint.repairs().size(), "receiving the missing admitted part clears the gap");
+				endpoint.client.accept(wire(retainedPart)); assertEquals(2, endpoint.client.tracking(marker).watermark());
+			}
 		}
 	}
 	@Test void failedRecoveryFenceTransmissionBlocksAllBaselinePartsUntilSameFenceCanBeSent() {

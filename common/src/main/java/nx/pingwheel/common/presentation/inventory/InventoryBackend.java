@@ -1372,12 +1372,13 @@ public final class InventoryBackend implements AutoCloseable {
 		lease.recipients.clear(); syncRecipients(lease);
 	}
 	private void resync(UUID player, MarkerId marker) {
-		Tracking lease = tracking.get(marker); if (lease == null || lease.marker.expiresAtTick() <= tick) return;
-		Recipient old = lease.recipients.get(player); if (old == null || tick < old.resyncAt) return;
+		@Nullable Tracking lease = tracking.get(marker); if (lease == null || lease.marker.expiresAtTick() <= tick) return;
+		int resyncPeriods = settings.getTracking().getResyncMinPeriods();
+		@Nullable Recipient old = lease.recipients.get(player); if (old == null || resyncPeriods > 0 && tick < old.resyncAt) return;
 		if (publisher.pending(old.context)) return; // admitted fragment work is serviceable; never restart it
-		long next = tick + (long) settings.getTracking().getResyncMinPeriods() * settings.getTracking().getPeriodTicks();
+		long next = tick + (long) resyncPeriods * settings.getTracking().getPeriodTicks();
 		publisher.cancel(old.context); lease.recipients.remove(player); addRecipient(lease, player, null);
-		Recipient replacement = lease.recipients.get(player); if (replacement != null) replacement.resyncAt = next;
+		@Nullable Recipient replacement = lease.recipients.get(player); if (replacement != null) replacement.resyncAt = next;
 	}
 	/**
 	 * Request-scoped RESYNC ingress: an unknown, already-closed or stale request
@@ -1387,8 +1388,9 @@ public final class InventoryBackend implements AutoCloseable {
 	 * pending publication are serviceable.
 	 */
 	private void resyncPreview(Session session, long request) {
-		Preview preview = session.previews.get(request); if (preview == null || tick < preview.resyncAt) return;
-		preview.resyncAt = tick + (long) settings.getTracking().getResyncMinPeriods() * settings.getTracking().getPeriodTicks();
+		int resyncPeriods = settings.getTracking().getResyncMinPeriods();
+		@Nullable Preview preview = session.previews.get(request); if (preview == null || resyncPeriods > 0 && tick < preview.resyncAt) return;
+		preview.resyncAt = tick + (long) resyncPeriods * settings.getTracking().getPeriodTicks();
 		preview.repairScheduled = true;
 	}
 	/**

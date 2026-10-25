@@ -191,7 +191,7 @@ class PendingContentChatAcceptedStoresTest {
 				new PresentationField(PresentationBasic.MAX_HEALTH, PresentationField.Kind.NUMBER, true, 0, "Max"))), Map.of(BASIC, 1))));
 			assertTrue(presentation.reset(PresentationS2CPacket.reset(81, 1, mask())));
 			inventory.presentationReset(81, 1);
-			inventory.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(10, 20, 3, 0)).stamp(81, 1));
+			inventory.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(10, 10, 3, 0)).stamp(81, 1));
 			inventory.accept(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
 			controller = new PendingContentChatController(4, id -> {
 				ClientMarker marker = markers.marker(id).orElse(null);

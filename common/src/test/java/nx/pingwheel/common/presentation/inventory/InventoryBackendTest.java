@@ -330,23 +330,23 @@ class InventoryBackendTest {
 			assertEquals(0, f.backend.runtime().memory().reserved());
 		}
 	}
-	@Test void helloAndLiveRefreshKeepPositiveIntMaxResyncPeriodsExactInTheExistingSession() {
-		for (int periods : new int[] {72_001, Integer.MAX_VALUE}) try (Fixture f = new Fixture()) {
+	@Test void helloAndLiveRefreshKeepZeroAndMaximumResyncPeriodsExactInTheExistingSession() {
+		for (int periods : new int[] {0, 10}) try (Fixture f = new Fixture()) {
 			f.settings.getTracking().setResyncMinPeriods(periods); f.hello(A);
 			long epoch = f.host.epoch(A);
 			var offered = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OFFER).reduce((a, b) -> b).orElseThrow();
 			assertEquals(periods, InventoryPublicationIntegrationTest.wire(offered).offer().resyncMinPeriods());
-			int replacement = periods == Integer.MAX_VALUE ? 72_001 : Integer.MAX_VALUE;
+			int replacement = periods == 0 ? 10 : 0;
 			f.settings.getTracking().setResyncMinPeriods(replacement); assertDoesNotThrow(() -> f.backend.tick(1, f.settings));
 			assertEquals(epoch, f.host.epoch(A));
 			var refreshed = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OFFER).reduce((a, b) -> b).orElseThrow();
 			assertEquals(replacement, InventoryPublicationIntegrationTest.wire(refreshed).offer().resyncMinPeriods());
 		}
 	}
-	@Test void actualResyncWithIntMaxPeriodsTimesMaxTrackingPeriodRejectsImmediateRepeatWithoutOverflow() {
+	@Test void positiveResyncCooldownRejectsJustBeforeItsDeadlineAndAcceptsAtTheDeadline() {
 		try (Fixture f = new Fixture()) {
-			f.host.expiry = Long.MAX_VALUE; f.settings.getTracking().setPeriodTicks(72_000);
-			f.settings.getTracking().setResyncMinPeriods(Integer.MAX_VALUE); f.open(); f.backend.handle(A, f.select(1), 1, f.settings); f.backend.tick(2, f.settings);
+			f.host.expiry = Long.MAX_VALUE; f.settings.getTracking().setPeriodTicks(10);
+			f.settings.getTracking().setResyncMinPeriods(10); f.open(); f.backend.handle(A, f.select(1), 1, f.settings); f.backend.tick(2, f.settings);
 			var marker = f.host.store.allMarkers().getFirst();
 			var resync = InventoryC2SPacket.resync(f.host.epoch(A), 0, marker.id()).stamp(100, 1);
 			int start = f.host.packets.size(); f.backend.handle(A, resync, 3, f.settings); f.backend.tick(3, f.settings);
@@ -354,13 +354,51 @@ class InventoryBackendTest {
 				.filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId())).findFirst().orElseThrow();
 			start = f.host.packets.size(); f.backend.handle(A, resync, 4, f.settings); f.backend.tick(4, f.settings);
 			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT
-				|| p.kind() == InventoryS2CPacket.Kind.STATUS && p.status() == InventoryS2CPacket.Status.UPDATING && p.baselineId() != replacement.baselineId()), "the long product must not wrap to an already elapsed cooldown");
-			long deadline = 3L + (long) Integer.MAX_VALUE * 72_000;
+				|| p.kind() == InventoryS2CPacket.Kind.STATUS && p.status() == InventoryS2CPacket.Status.UPDATING && p.baselineId() != replacement.baselineId()), "an immediate repeat must not restart the baseline");
+			long deadline = 103L;
 			f.backend.handle(A, resync, deadline - 1, f.settings); f.backend.tick(deadline - 1, f.settings);
 			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT).allMatch(p -> p.baselineId() == replacement.baselineId()));
 			start = f.host.packets.size(); f.backend.handle(A, resync, deadline, f.settings); f.backend.tick(deadline, f.settings);
 			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && p.baselineId() != replacement.baselineId()));
 			assertEquals(Long.MAX_VALUE, marker.expiresAtTick());
+		}
+	}
+	@Test void zeroResyncSkipsAnOldDeadlineAndAllowsSameTickRepairsWithoutBypassingPendingBaselineWork() {
+		class BlockingHost extends Host {
+			boolean blocked;
+			final List<Long> attempts = new ArrayList<>();
+			@Override public void send(UUID player, InventoryS2CPacket packet) {
+				if (player.equals(A) && packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT) {
+					attempts.add(packet.baselineId());
+					if (blocked) throw new IllegalStateException("admitted baseline backpressure");
+				}
+				super.send(player, packet);
+			}
+		}
+		var host = new BlockingHost(); var settings = InventorySettings.serverDefaults(); var reads = new AtomicInteger();
+		settings.getTracking().setResyncMinPeriods(5); settings.getTracking().setPeriodTicks(3);
+		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1)), 16_000_000), 1)) {
+			backend.handle(A, InventoryC2SPacket.hello(), 0, settings);
+			backend.handle(A, InventoryC2SPacket.open(host.epoch(A), 100, 1, 1, InventoryRuntimeTest.TARGET, BlockFace.NORTH), 0, settings); backend.tick(0, settings);
+			var preview = host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
+			backend.handle(A, InventoryC2SPacket.select(host.epoch(A), 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "danger"), 1, settings);
+			backend.tick(2, settings);
+			var marker = host.store.allMarkers().getFirst();
+			var repair = InventoryC2SPacket.resync(host.epoch(A), 0, marker.id()).stamp(100, 1);
+			host.blocked = true;
+			backend.handle(A, repair, 3, settings); backend.tick(3, settings);
+			long admitted = host.attempts.getLast();
+			settings.getTracking().setResyncMinPeriods(0);
+			backend.handle(A, repair, 3, settings); backend.handle(A, repair, 3, settings); backend.tick(3, settings);
+			assertEquals(admitted, host.attempts.getLast(), "zero removes only the time guard; pending baseline work still coalesces");
+			host.blocked = false; backend.tick(3, settings);
+			assertEquals(admitted, host.attempts.getLast(), "the admitted baseline resumes instead of restarting");
+			backend.handle(A, repair, 3, settings); backend.tick(3, settings);
+			long replacement = host.attempts.getLast();
+			assertNotEquals(admitted, replacement, "zero immediately ignores the old tick-eighteen deadline");
+			backend.handle(A, repair, 3, settings); backend.tick(3, settings);
+			assertNotEquals(replacement, host.attempts.getLast(), "another same-tick repair is allowed after pending work completes");
+			assertEquals(1, host.store.size()); assertEquals(0, backend.runtime().memory().reserved());
 		}
 	}
 	@Test void advertisedOfferCarriesTheEffectiveSizePairAndPreviewFramesStayWithinIt() {
@@ -408,6 +446,30 @@ class InventoryBackendTest {
 			f.backend.tick(20, f.settings);
 			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()),
 				"unknown and already-closed request ids are ignored without allocating a repair");
+		}
+	}
+	@Test void zeroPreviewResyncSkipsAnOldDeadlineAndKeepsTheExistingRequestCoalescing() {
+		try (Fixture f = new Fixture()) {
+			f.settings.getTracking().setResyncMinPeriods(5); f.settings.getTracking().setPeriodTicks(3);
+			f.open(); var original = f.preview();
+			var repair = InventoryC2SPacket.resync(f.host.epoch(A), 1).stamp(100, 1);
+			f.backend.handle(A, repair, 1, f.settings); f.backend.tick(1, f.settings);
+			long first = f.preview().watermark(); assertTrue(first > original.watermark());
+			f.backend.handle(A, repair, 1, f.settings); f.backend.tick(1, f.settings);
+			assertEquals(first, f.preview().watermark(), "positive cooldown rejects another request before tick sixteen");
+			f.settings.getTracking().setResyncMinPeriods(0);
+			int start = f.host.packets.size();
+			f.backend.handle(A, repair, 1, f.settings); f.backend.handle(A, repair, 1, f.settings);
+			f.backend.tick(1, f.settings);
+			assertEquals(1, f.host.packets.subList(start, f.host.packets.size()).stream()
+				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).count(),
+				"multiple waiting intents still use the existing single scheduled repair");
+			long second = f.preview().watermark(); assertTrue(second > first, "zero ignores the old deadline immediately");
+			f.backend.handle(A, repair, 1, f.settings); f.backend.tick(1, f.settings);
+			assertTrue(f.preview().watermark() > second, "a completed replay permits another same-tick repair");
+			assertEquals(original.baselineId(), f.preview().baselineId());
+			assertEquals(original.entries().getFirst().key(), f.preview().entries().getFirst().key());
+			assertEquals(1, f.reads.get(), "repair does not recapture"); assertEquals(0, f.host.store.size());
 		}
 	}
 	@Test void scheduledRequestRepairReplaysInvalidWithoutProbingOrRepublishingClearedReferences() {
@@ -487,6 +549,7 @@ class InventoryBackendTest {
 			}
 		}
 		var host = new BlockingHost(); var settings = InventorySettings.serverDefaults(); var reads = new AtomicInteger();
+		settings.getTracking().setResyncMinPeriods(0);
 		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1)), 16_000_000), 1)) {
 			backend.handle(A, InventoryC2SPacket.hello(), 0, settings);
 			long epoch = host.epoch(A);
@@ -494,6 +557,7 @@ class InventoryBackendTest {
 			backend.tick(0, settings);
 			assertTrue(host.packets.stream().noneMatch(p -> !p.entries().isEmpty()), "the first admitted preview part is not delivered");
 			int readsBefore = reads.get();
+			backend.handle(A, InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), 1, settings);
 			backend.handle(A, InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), 1, settings);
 			int start = host.packets.size();
 			backend.tick(1, settings);

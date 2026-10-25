@@ -66,7 +66,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	 * Server-selected periods plus the effective display and frame byte budgets
 	 * within the shared inventory settings ranges. An explicit heartbeat zero
 	 * disables the periodic heartbeat; preview and tracking use the shared
-	 * period range, and resynchronization stays within its positive minimum.
+	 * period range, and zero resynchronization periods disable the cooldown check.
 	 * The budget pair must be an exact legal size-scale pair that keeps the
 	 * fixed metadata reserve.
 	 */
@@ -82,6 +82,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 		public Offer {
 			if (periodOutOfRange(previewPeriodTicks) || periodOutOfRange(trackingPeriodTicks)
 				|| resyncMinPeriods < InventoryLimits.MIN_RESYNC_PERIODS
+				|| resyncMinPeriods > InventoryLimits.MAX_RESYNC_PERIODS
 				|| heartbeatPeriods < InventoryLimits.MIN_HEARTBEAT_PERIODS
 				|| heartbeatPeriods > InventoryLimits.MAX_HEARTBEAT_PERIODS) {
 				throw new IllegalArgumentException("inventory offer periods");

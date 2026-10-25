@@ -475,7 +475,7 @@ class ClientPingRuntimeContentReceiptTest {
    runtime.onPresentationPacket(PresentationS2CPacket.offer(81, Map.of(BASIC, PresentationBasic.fields(),
     EXTRA, new ExtraAdapter().fields()), Map.of(BASIC, 1, EXTRA, 1)));
    reset(1, BASIC_FIELDS);
-   runtime.onInventoryPacket(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(10, 20, 3, 0)).stamp(81, 1));
+   runtime.onInventoryPacket(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(10, 10, 3, 0)).stamp(81, 1));
    runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
    assertTrue(presentation.ready()); assertTrue(inventory.ready()); sent.clear();
   }

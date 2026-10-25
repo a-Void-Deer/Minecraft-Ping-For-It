@@ -2,6 +2,8 @@ package nx.pingwheel.common.screen;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -14,10 +16,11 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@NotNullByDefault
 class BudgetDelayLocalizationTest {
-	private static final List<String> LOCALES = List.of("de_de", "en_us", "es_ar", "fr_fr", "pl_pl", "tr_tr", "zh_cn", "zh_tw");
+	private static final @Unmodifiable List<String> LOCALES = List.of("de_de", "en_us", "es_ar", "fr_fr", "pl_pl", "tr_tr", "zh_cn", "zh_tw");
 	private static final String MESSAGE = "message.pingforit.budget_delay";
-	private static final Set<String> KEYS = Set.of(
+	private static final @Unmodifiable Set<String> KEYS = Set.of(
 		"settings.pingforit.budget_delay_notifications_enabled",
 		"settings.pingforit.budget_delay_notifications_enabled.tooltip",
 		"settings.pingforit.group.monitoring",
@@ -43,6 +46,16 @@ class BudgetDelayLocalizationTest {
 	}
 
 	@Test
+	void monitoringToggleUsesScopeAndBothToggleEffectsWithoutNumericFormatting() throws IOException {
+		for (String locale : LOCALES) {
+			var root = read(locale);
+			String tooltip = requireString(root, locale, "settings.pingforit.budget_delay_notifications_enabled.tooltip");
+			assertEquals(3, tooltip.split("\n", -1).length, locale);
+			assertEquals(List.of(), signature(tooltip), locale);
+		}
+	}
+
+	@Test
 	void aggregateVariantLabelAndLegacyAliasAreLiteralAndEqualInEveryLocale() throws IOException {
 		for (String locale : LOCALES) {
 			JsonObject root = read(locale);
@@ -54,7 +67,7 @@ class BudgetDelayLocalizationTest {
 		}
 	}
 
-	private static List<String> signature(String value) {
+	private static @Unmodifiable List<String> signature(String value) {
 		var matcher = PLACEHOLDER.matcher(value);
 		var arguments = new ArrayList<String>();
 		int implicitIndex = 0;

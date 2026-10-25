@@ -20,6 +20,7 @@ import nx.pingwheel.common.network.InventoryS2CPacket.Entry;
 import nx.pingwheel.common.network.InventoryS2CPacket.Status;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /** Server-thread preview sessions. World access and packet transport are supplied by the host. */
 public final class InventoryPreviewServer {
@@ -110,9 +111,9 @@ public final class InventoryPreviewServer {
 			case CLOSE -> close(session, packet.requestId());
 			case RESYNC -> {
 				if (packet.markerId() != null) return;
-				Request request = session.requests.get(packet.requestId());
+				@Nullable Request request = session.requests.get(packet.requestId());
 				long cooldown = (long) settings.getTracking().getPeriodTicks() * settings.getTracking().getResyncMinPeriods();
-				if (request != null && (request.lastResync == Long.MIN_VALUE || tick - request.lastResync >= cooldown)) {
+				if (request != null && (cooldown == 0 || request.lastResync == Long.MIN_VALUE || tick - request.lastResync >= cooldown)) {
 					request.lastResync = tick;
 					// An admitted sweep keeps its progress. A completed request may replay its terminal status.
 					request.statusPending = true;

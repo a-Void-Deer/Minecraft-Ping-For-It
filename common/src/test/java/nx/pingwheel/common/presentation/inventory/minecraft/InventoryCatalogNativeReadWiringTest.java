@@ -855,7 +855,8 @@ class InventoryCatalogNativeReadWiringTest {
 			var f = new NativeClient(); var nativeSource = new LargeNative(2, false);
 			var stack = new ItemStack(Items.STONE); stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal("x".repeat(1800)));
 			for (int slot = 0; slot < 2; slot++) nativeSource.resident.setItem(slot, stack);
-			f.settings.getTracking().setPeriodTicks(1000);
+			// The assertions end at tick nine, before a new sweep becomes due at tick twelve.
+			f.settings.getTracking().setPeriodTicks(10);
 			try (var backend = new InventoryBackend(f.host, nativeSource.runtime(f.settings), 1)) {
 				f.open(backend); f.tick(backend, 0);
 				if (tracking) { f.select(backend, 1, "minecraft:stone"); f.tick(backend, 2); }

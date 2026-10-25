@@ -82,16 +82,19 @@ class InventoryConfigValuesTest {
 	@Test
 	void currentConcurrentNestedEditsSurviveAnOlderDraftAndPermissionDenial() {
 		var baseline = InventoryConfigValues.defaults();
-		var current = baseline.with(Field.PREVIEW_MAX_SLOTS_SERVER, Value.limit(true, 5000));
+		var current = baseline.with(Field.PREVIEW_MAX_SLOTS_SERVER, Value.limit(true, 513))
+			.with(Field.PENDING_MEMORY_MIB, Value.limit(true, 65));
 		var snapshot = new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 23, current);
 		var update = new ServerConfigUpdate(Field.PREVIEW_PERIOD_TICKS.mask() | ServerConfigUpdate.RATE_LIMIT,
-			ChannelMode.GLOBAL, false, 0, 9, 7, baseline.with(Field.PREVIEW_PERIOD_TICKS, Value.scalar(17)));
+			ChannelMode.GLOBAL, false, 0, 9, 7, baseline.with(Field.PREVIEW_PERIOD_TICKS, Value.scalar(7)));
 		var denied = ServerConfigUpdateService.apply(false, snapshot, update);
 		assertFalse(denied.applied());
 		assertEquals(current, denied.snapshot().inventory());
 		var applied = ServerConfigUpdateService.apply(true, snapshot, update).snapshot();
-		assertEquals(Value.limit(true, 5000), applied.inventory().value(Field.PREVIEW_MAX_SLOTS_SERVER));
-		assertEquals(Value.scalar(17), applied.inventory().value(Field.PREVIEW_PERIOD_TICKS));
+		assertEquals(Value.limit(true, 513), applied.inventory().value(Field.PREVIEW_MAX_SLOTS_SERVER));
+		assertEquals(Value.limit(true, 65), applied.inventory().value(Field.PENDING_MEMORY_MIB));
+		assertEquals(4294967296L, applied.inventory().toSettings().pendingMemoryBytes());
+		assertEquals(Value.scalar(7), applied.inventory().value(Field.PREVIEW_PERIOD_TICKS));
 		assertEquals(9, applied.rateLimit());
 	}
 
@@ -104,10 +107,12 @@ class InventoryConfigValuesTest {
 		persisted.setPreview(null);
 		assertNull(InventoryConfigValues.from(persisted));
 		assertFalse(Field.PREVIEW_CLIENT_BYTE_MULTIPLIER.isSafe(new Value(false, new BigDecimal("4.25"))));
-		assertFalse(Field.PENDING_MEMORY_MIB.isSafe(Value.limit(true, 16)));
+		assertTrue(Field.PENDING_MEMORY_MIB.isSafe(Value.limit(true, 17)));
+		assertFalse(Field.PREVIEW_PERIOD_TICKS.isSafe(Value.limit(true, 7)));
 		assertTrue(Field.TRACKING_HEARTBEAT_PERIODS.isSafe(Value.scalar(0)));
 		assertFalse(Field.TRACKING_GRACE_PERIODS.isSafe(Value.scalar(0)));
-		assertTrue(Field.TRACKING_RESYNC_MIN_PERIODS.isSafe(Value.scalar(Integer.MAX_VALUE)));
+		assertTrue(Field.TRACKING_RESYNC_MIN_PERIODS.isSafe(Value.scalar(0)));
+		assertFalse(Field.TRACKING_RESYNC_MIN_PERIODS.isSafe(Value.scalar(Integer.MAX_VALUE)));
 		assertFalse(new ServerConfigSnapshot(true, null, true, 0, 0, 7).isSafe());
 	}
 
@@ -210,6 +215,7 @@ class InventoryConfigValuesTest {
 		Value current = values.value(field);
 		if (field.isSizeScale()) return new Value(false, field.sizeScale().next(current.value()));
 		return field.isMultiplier() ? new Value(true, field.grid().next(current.value()))
-			: new Value(field.supportsUnlimited(), current.value().add(BigDecimal.ONE));
+			: new Value(field.supportsUnlimited(), current.value().intValueExact() == field.maximum()
+				? BigDecimal.valueOf(field.minimum()) : current.value().add(BigDecimal.ONE));
 	}
 }

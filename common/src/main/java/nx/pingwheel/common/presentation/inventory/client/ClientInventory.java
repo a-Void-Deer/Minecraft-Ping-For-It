@@ -23,6 +23,7 @@ import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * One client connection's inventory preview and tracking session.
@@ -326,8 +327,8 @@ public final class ClientInventory {
 		for (TrackingState state : tracking.values()) {
 			compareCompletion(state);
 			compareHeartbeat(state);
-			if (state.completionSince >= 0 && ticks - state.completionSince >= unknownWindowTicks()
-				|| state.heartbeatGapSince >= 0 && ticks - state.heartbeatGapSince >= unknownWindowTicks())
+			if (state.completionSince >= 0 && ticks - state.completionSince >= waitingWindowTicks()
+				|| state.heartbeatGapSince >= 0 && ticks - state.heartbeatGapSince >= waitingWindowTicks())
 				scheduleRepair(state);
 		}
 	}
@@ -1278,10 +1279,10 @@ public final class ClientInventory {
 	private void scheduleRepair(TrackingState state) {
 		if (!offered)
 			return;
-		long window = unknownWindowTicks();
-		if (ticks < state.nextRepairTick)
+		long cooldown = repairCooldownTicks();
+		if (cooldown > 0 && ticks < state.nextRepairTick)
 			return;
-		state.nextRepairTick = ticks + Math.max(1L, window);
+		state.nextRepairTick = ticks + cooldown;
 		send(InventoryC2SPacket.resync(epoch, 0, state.markerId).stamp(presentationEpoch, presentationView));
 		repairRequests++;
 	}
@@ -1312,7 +1313,7 @@ public final class ClientInventory {
 	}
 
 	private void expireUnknownSessions() {
-		long window = unknownWindowTicks();
+		long window = waitingWindowTicks();
 		var iterator = unknown.entrySet().iterator();
 		while (iterator.hasNext()) {
 			Map.Entry<UnknownKey, UnknownSession> entry = iterator.next();
@@ -1410,11 +1411,19 @@ public final class ClientInventory {
 		return builder.checksum();
 	}
 
-	private long unknownWindowTicks() {
-		InventoryS2CPacket.Offer current = offer;
+	private long repairCooldownTicks() {
+		InventoryS2CPacket.@Nullable Offer current = offer;
 		if (current == null)
 			return FALLBACK_UNKNOWN_WINDOW_TICKS;
-		return Math.max(1L, (long) current.resyncMinPeriods() * current.trackingPeriodTicks());
+		return (long) current.resyncMinPeriods() * current.trackingPeriodTicks();
+	}
+
+	/** Unknown baselines and completed-data gaps wait independently of repair throttling. */
+	private long waitingWindowTicks() {
+		InventoryS2CPacket.@Nullable Offer current = offer;
+		if (current == null)
+			return FALLBACK_UNKNOWN_WINDOW_TICKS;
+		return Math.max(Math.max(3L * current.trackingPeriodTicks(), 8L), repairCooldownTicks());
 	}
 
 	private static Map<String, InventoryClientStore.Value> valuesOf(List<InventoryS2CPacket.Entry> entries) {

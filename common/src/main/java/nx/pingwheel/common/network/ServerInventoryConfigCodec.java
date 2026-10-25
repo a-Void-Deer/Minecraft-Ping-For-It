@@ -4,11 +4,12 @@ import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.config.InventoryConfigValues.Field;
 import nx.pingwheel.common.config.InventoryConfigValues.Value;
+import org.jetbrains.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.util.EnumMap;
 
-/** Fixed-shape v3 administration payload. No strings, defaults or mutable config objects cross it. */
+/** Fixed-shape v4 administration payload, including the pending-memory mode byte. */
 final class ServerInventoryConfigCodec {
 	private ServerInventoryConfigCodec() {}
 
@@ -36,7 +37,7 @@ final class ServerInventoryConfigCodec {
 		return new InventoryConfigValues(values);
 	}
 
-	static void write(FriendlyByteBuf buf, InventoryConfigValues inventory) {
+	static void write(FriendlyByteBuf buf, @Nullable InventoryConfigValues inventory) {
 		if (inventory == null || !inventory.isSafe()) throw new IllegalArgumentException("unsafe inventory settings");
 		for (Field field : Field.values()) {
 			Value value = inventory.value(field);

@@ -6,8 +6,9 @@ import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.config.InventoryConfigValues.Field;
 import nx.pingwheel.common.config.InventoryConfigValues.Value;
-import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.config.InventorySizeScale;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.util.EnumMap;
@@ -18,6 +19,7 @@ import java.util.Optional;
  * Permission changes, authoritative snapshots, dirty tracking, and the
  * update-plan preconditions live here rather than in Screen callbacks.
  */
+@NotNullByDefault
 public final class ServerSettingsModel {
 	private static final long NO_PENDING_REQUEST = -1L;
 	private static long requestIdSequence;
@@ -28,8 +30,8 @@ public final class ServerSettingsModel {
 	private boolean expanded;
 	private boolean loading;
 	private long pendingRequestId = NO_PENDING_REQUEST;
-	private ServerConfigSnapshot authoritative;
-	private ChannelMode defaultChannelMode;
+	private @Nullable ServerConfigSnapshot authoritative;
+	private @Nullable ChannelMode defaultChannelMode;
 	private boolean playerTrackingEnabled;
 	private boolean budgetDelayNotificationsEnabled;
 	private String msToRegenerate = "";
@@ -37,7 +39,8 @@ public final class ServerSettingsModel {
 	private String syncDuration = "";
 	private final EnumMap<Field, String> inventoryText = new EnumMap<>(Field.class);
 	private final EnumMap<Field, Boolean> inventoryUnlimited = new EnumMap<>(Field.class);
-	private SizeAdjustment sizeAdjustment;
+	private final EnumMap<Field, InventoryPerformanceScale> inventoryScales = new EnumMap<>(Field.class);
+	private @Nullable SizeAdjustment sizeAdjustment;
 	private int dirtyFields;
 
 	public ServerSettingsModel(boolean clientPermission) {
@@ -94,11 +97,11 @@ public final class ServerSettingsModel {
 		return dirtyFields != 0;
 	}
 
-	public ServerConfigSnapshot authoritative() {
+	public @Nullable ServerConfigSnapshot authoritative() {
 		return authoritative;
 	}
 
-	public ChannelMode defaultChannelMode() {
+	public @Nullable ChannelMode defaultChannelMode() {
 		return defaultChannelMode;
 	}
 
@@ -130,6 +133,38 @@ public final class ServerSettingsModel {
 		return inventoryUnlimited.getOrDefault(field, false);
 	}
 
+	/** Stops live for the authoritative snapshot session, including its original off-grid finite value. */
+	InventoryPerformanceScale inventoryScale(Field field) {
+		InventoryPerformanceScale scale = inventoryScales.computeIfAbsent(field, InventoryPerformanceScale::forField);
+		if (authoritative != null) scale = scale.including(authoritative.inventory().value(field));
+		var current = inventoryDraftValue(field);
+		if (current.isPresent()) scale = scale.including(current.orElseThrow());
+		inventoryScales.put(field, scale);
+		return scale;
+	}
+
+	int inventoryPosition(Field field) {
+		var scale = inventoryScale(field);
+		Value value = inventoryDraftValue(field).orElseGet(() -> authoritative != null
+			? authoritative.inventory().value(field) : new Value(false, scale.finiteValues().getFirst()));
+		return scale.positionOf(value);
+	}
+
+	/** One finite selection changes mode and value atomically; unlimited preserves the retained finite value. */
+	void selectInventoryPosition(Field field, int position) {
+		if (!canEdit() || field.isSizeScale()) return;
+		selectInventoryPosition(field, inventoryScale(field), position);
+	}
+
+	/** A widget submits against its immutable stop list, not a later rebuilt index mapping. */
+	void selectInventoryPosition(Field field, InventoryPerformanceScale scale, int position) {
+		if (!canEdit() || field.isSizeScale() || !scale.belongsTo(field)) return;
+		boolean unlimited = scale.isUnlimited(position);
+		if (!unlimited) inventoryText.put(field, scale.finiteValueAt(position).toPlainString());
+		inventoryUnlimited.put(field, unlimited);
+		recomputeDirtyFields();
+	}
+
 	/**
 	 * Records a draft text edit. A valid size-scale value is applied through the
 	 * frame-priority pair rule instead of being stored raw; malformed or
@@ -159,6 +194,7 @@ public final class ServerSettingsModel {
 	}
 
 	/** The most recent frame-priority display adjustment, or null when none is shown. */
+	@NotNullByDefault
 	public record SizeAdjustment(BigDecimal displayMultiplier, BigDecimal frameMultiplier) {
 	}
 
@@ -224,7 +260,7 @@ public final class ServerSettingsModel {
 	}
 
 	/** The current frame-priority adjustment notice, or null when none is shown. */
-	public SizeAdjustment sizeAdjustment() {
+	public @Nullable SizeAdjustment sizeAdjustment() {
 		return sizeAdjustment;
 	}
 
@@ -242,21 +278,19 @@ public final class ServerSettingsModel {
 		return field.sizeScale().defaultMultiplier();
 	}
 
-	/** Native step buttons use the confirmed piecewise grids without floating-point rounding. */
+	/** Legacy text-model seam: step to the adjacent finite stop without changing unlimited mode. */
 	public void stepInventoryValue(Field field, boolean forward) {
 		if (!canEdit()) return;
 		var parsed = inventoryDraftValue(field);
 		if (parsed.isEmpty()) return;
 		BigDecimal value = parsed.orElseThrow().value();
-		if (field.isMultiplier()) {
-			value = forward ? field.grid().next(value) : field.grid().previous(value);
-		} else if (field.isSizeScale()) {
+		if (field.isSizeScale()) {
 			value = forward ? field.sizeScale().next(value) : field.sizeScale().previous(value);
 		} else {
-			int current = value.intValueExact();
-			int step = field == Field.PENDING_MEMORY_MIB
-				? InventorySettings.pendingMemoryStepMiB(forward ? current : Math.max(field.minimum(), current - 1)) : 1;
-			value = BigDecimal.valueOf(Math.clamp((long) current + (forward ? step : -step), field.minimum(), field.maximum()));
+			var scale = inventoryScale(field);
+			int current = scale.positionOf(new Value(false, value));
+			int next = Math.clamp(current + (forward ? 1 : -1), 0, scale.finiteValues().size() - 1);
+			value = scale.finiteValueAt(next);
 		}
 		setInventoryText(field, value.toPlainString());
 	}
@@ -304,7 +338,7 @@ public final class ServerSettingsModel {
 	 * authoritative view instead of being discarded; for a locally privileged
 	 * requester it is also recorded as a denial.
 	 */
-	public boolean applySnapshot(long requestId, ServerConfigSnapshot snapshot) {
+	public boolean applySnapshot(long requestId, @Nullable ServerConfigSnapshot snapshot) {
 		if (snapshot == null
 			|| !snapshot.isSafe()
 			|| requestId <= 0L
@@ -321,6 +355,7 @@ public final class ServerSettingsModel {
 		expanded = true;
 		dirtyFields = 0;
 		authoritative = snapshot;
+		inventoryScales.clear();
 		authoritativeAccessDenied = !snapshot.canEdit() && clientPermission;
 		permissionRevokedAfterDenial = false;
 		copyAuthoritativeToDraft();
@@ -531,6 +566,7 @@ public final class ServerSettingsModel {
 		syncDuration = "";
 		inventoryText.clear();
 		inventoryUnlimited.clear();
+		inventoryScales.clear();
 		sizeAdjustment = null;
 	}
 
@@ -573,7 +609,7 @@ public final class ServerSettingsModel {
 			.orElse(false);
 	}
 
-	private static Optional<Integer> parseNonNegative(String value) {
+	private static Optional<Integer> parseNonNegative(@Nullable String value) {
 		if (value == null || value.isEmpty()) {
 			return Optional.empty();
 		}

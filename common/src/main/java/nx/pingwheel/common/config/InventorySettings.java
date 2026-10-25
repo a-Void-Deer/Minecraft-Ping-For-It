@@ -4,6 +4,7 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.math.BigDecimal;
@@ -19,14 +20,14 @@ import java.math.BigDecimal;
  * frame budget above the display budget plus its fixed metadata reserve.
  *
  * <p>There is no tracking-duration setting here: the tracking deadline is the
- * Ping's own marker lifetime. Periods, resynchronization cooldown, heartbeat
- * and pending memory have no unlimited mode.
+ * Ping's own marker lifetime. Periods, resynchronization cooldown and heartbeat
+ * have no unlimited mode. Pending memory retains a finite ledger in either mode.
  *
  * <p>JSON shape:
  * <pre>
  * "inventory": {
  *   "physicalSlotsPerTick": {"unlimited": false, "value": 1024},
- *   "pendingMemoryMiB": 64,
+ *   "pendingMemoryMiB": {"unlimited": false, "value": 64},
  *   "displayByteMultiplier": 1,
  *   "frameByteMultiplier": 1,
  *   "preview": {
@@ -42,7 +43,7 @@ import java.math.BigDecimal;
  *     "periodTicks": 3,
  *     "maxVariantsPerTarget": {"unlimited": false, "value": 8},
  *     "maxSlotsPerTarget": {"unlimited": false, "value": 512},
- *     "maxSlotsServer": {"unlimited": false, "value": 4096},
+ *     "maxSlotsServer": {"unlimited": false, "value": 1024},
  *     "streamByteMultiplier": {"unlimited": false, "value": 1},
  *     "snapshotByteMultiplier": {"unlimited": false, "value": 1},
  *     "globalByteMultiplier": {"unlimited": false, "value": 1},
@@ -57,18 +58,19 @@ import java.math.BigDecimal;
 @Setter
 @ToString
 @EqualsAndHashCode
+@NotNullByDefault
 public final class InventorySettings {
 
 	/** Shared physical scan allowance, finite or explicit unlimited. */
-	private IntLimit physicalSlotsPerTick = IntLimit.finite(InventoryLimits.DEFAULT_PHYSICAL_SLOTS_PER_TICK);
-	/** Single finite server-wide pending-memory bound for preview and tracking together, MiB. */
-	private int pendingMemoryMiB = InventoryLimits.DEFAULT_PENDING_MEMORY_MIB;
+	private @Nullable IntLimit physicalSlotsPerTick = IntLimit.finite(InventoryLimits.DEFAULT_PHYSICAL_SLOTS_PER_TICK);
+	/** Single server-wide memory cap, with a finite internal guard in unlimited mode, MiB. */
+	private @Nullable IntLimit pendingMemoryMiB = IntLimit.finite(InventoryLimits.DEFAULT_PENDING_MEMORY_MIB);
 	/** Finite display budget multiplier on the display size scale; no unlimited mode. */
-	private BigDecimal displayByteMultiplier = BigDecimal.ONE;
+	private @Nullable BigDecimal displayByteMultiplier = BigDecimal.ONE;
 	/** Finite frame budget multiplier on the frame size scale; no unlimited mode. */
-	private BigDecimal frameByteMultiplier = BigDecimal.ONE;
-	private Preview preview = new Preview();
-	private Tracking tracking = new Tracking();
+	private @Nullable BigDecimal frameByteMultiplier = BigDecimal.ONE;
+	private @Nullable Preview preview = new Preview();
+	private @Nullable Tracking tracking = new Tracking();
 
 	public static InventorySettings serverDefaults() {
 		return new InventorySettings();
@@ -76,16 +78,14 @@ public final class InventorySettings {
 
 	/**
 	 * Clamps every finite value, normalizes each multiplier onto its grid and
-	 * allocates missing nested objects. Values stay in memory until a caller
-	 * saves; no migration step or version change is needed for an additive
-	 * object with defaults.
+	 * allocates missing nested objects. Validation itself does not persist;
+	 * ConfigHandler owns legacy shape normalization and guarded writeback.
 	 */
 	public void validate() {
-		physicalSlotsPerTick = validatedLimit(physicalSlotsPerTick, InventoryLimits.DEFAULT_PHYSICAL_SLOTS_PER_TICK);
-		pendingMemoryMiB = Math.clamp(
-			pendingMemoryMiB,
-			InventoryLimits.MIN_PENDING_MEMORY_MIB,
-			InventoryLimits.MAX_PENDING_MEMORY_MIB);
+		physicalSlotsPerTick = validatedLimit(physicalSlotsPerTick, InventoryLimits.DEFAULT_PHYSICAL_SLOTS_PER_TICK,
+			InventoryConfigValues.Field.PHYSICAL_SLOTS_PER_TICK);
+		pendingMemoryMiB = validatedLimit(pendingMemoryMiB, InventoryLimits.DEFAULT_PENDING_MEMORY_MIB,
+			InventoryConfigValues.Field.PENDING_MEMORY_MIB);
 		var sizePair = InventorySizeScale.reconcile(displayByteMultiplier, frameByteMultiplier);
 		displayByteMultiplier = sizePair.displayMultiplier();
 		frameByteMultiplier = sizePair.frameMultiplier();
@@ -101,7 +101,20 @@ public final class InventorySettings {
 	}
 
 	public long pendingMemoryBytes() {
-		return pendingMemoryMiB * 1024L * 1024L;
+		return pendingMemoryMiB.effective(InventoryLimits.INTERNAL_PENDING_MEMORY_MIB_GUARD) * 1024L * 1024L;
+	}
+
+	public @Nullable IntLimit getPendingMemoryMiB() {
+		return pendingMemoryMiB;
+	}
+
+	public void setPendingMemoryMiB(@Nullable IntLimit pendingMemoryMiB) {
+		this.pendingMemoryMiB = pendingMemoryMiB;
+	}
+
+	/** Source-compatible finite assignment; it deliberately exits unlimited mode. */
+	public void setPendingMemoryMiB(int pendingMemoryMiB) {
+		this.pendingMemoryMiB = IntLimit.finite(pendingMemoryMiB);
 	}
 
 	/** Effective display byte budget: the exact display size scale applied to its base. */
@@ -193,19 +206,19 @@ public final class InventorySettings {
 
 	/** UI helper: the confirmed pending-memory step in MiB at the given value. */
 	public static int pendingMemoryStepMiB(int current) {
-		if (current < 32) return 1;
-		if (current < 128) return 2;
-		return 4;
+		if (current < 64) return 4;
+		if (current < 256) return 8;
+		return 16;
 	}
 
-	static IntLimit validatedLimit(IntLimit limit, int defaultValue) {
-		if (limit == null) return IntLimit.finite(defaultValue);
+	static IntLimit validatedLimit(@Nullable IntLimit limit, int defaultValue, InventoryConfigValues.Field field) {
+		if (limit == null) limit = IntLimit.finite(defaultValue);
 		limit.restoreMissingValue(defaultValue);
-		limit.validate();
+		limit.setValue(Math.clamp(limit.getValue(), field.minimum(), field.maximum()));
 		return limit;
 	}
 
-	static ByteMultiplier validatedMultiplier(ByteMultiplier multiplier, ByteMultiplierGrid grid) {
+	static ByteMultiplier validatedMultiplier(@Nullable ByteMultiplier multiplier, ByteMultiplierGrid grid) {
 		if (multiplier == null) return ByteMultiplier.one();
 		multiplier.validate(grid);
 		return multiplier;
@@ -218,21 +231,24 @@ public final class InventorySettings {
 	public static final class Preview {
 
 		private int periodTicks = 5;
-		private IntLimit maxVariantsPerClientPeriod = IntLimit.finite(32);
+		private @Nullable IntLimit maxVariantsPerClientPeriod = IntLimit.finite(32);
 		private @Nullable IntLimit maxSlotsPerClient = IntLimit.finite(256);
-		private IntLimit maxSlotsServer = IntLimit.finite(1024);
-		private IntLimit maxTargetsPerClient = IntLimit.finite(2);
+		private @Nullable IntLimit maxSlotsServer = IntLimit.finite(1024);
+		private @Nullable IntLimit maxTargetsPerClient = IntLimit.finite(2);
 		/** Preview per-client period bytes on the client grid; independent of every other multiplier. */
-		private ByteMultiplier clientByteMultiplier = ByteMultiplier.one();
+		private @Nullable ByteMultiplier clientByteMultiplier = ByteMultiplier.one();
 		/** Preview global period bytes on the global grid; independent of every other multiplier. */
-		private ByteMultiplier globalByteMultiplier = ByteMultiplier.one();
+		private @Nullable ByteMultiplier globalByteMultiplier = ByteMultiplier.one();
 
 		void validate() {
 			periodTicks = Math.clamp(periodTicks, InventoryLimits.MIN_PERIOD_TICKS, InventoryLimits.MAX_PERIOD_TICKS);
-			maxVariantsPerClientPeriod = validatedLimit(maxVariantsPerClientPeriod, 32);
-			maxSlotsPerClient = validatedLimit(maxSlotsPerClient, 256);
-			maxSlotsServer = validatedLimit(maxSlotsServer, 1024);
-			maxTargetsPerClient = validatedLimit(maxTargetsPerClient, 2);
+			maxVariantsPerClientPeriod = validatedLimit(maxVariantsPerClientPeriod, 32,
+				InventoryConfigValues.Field.PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD);
+			maxSlotsPerClient = validatedLimit(maxSlotsPerClient, 256,
+				InventoryConfigValues.Field.PREVIEW_MAX_SLOTS_PER_CLIENT);
+			maxSlotsServer = validatedLimit(maxSlotsServer, 1024, InventoryConfigValues.Field.PREVIEW_MAX_SLOTS_SERVER);
+			maxTargetsPerClient = validatedLimit(maxTargetsPerClient, 2,
+				InventoryConfigValues.Field.PREVIEW_MAX_TARGETS_PER_CLIENT);
 			clientByteMultiplier = validatedMultiplier(clientByteMultiplier, ByteMultiplierGrid.CLIENT);
 			globalByteMultiplier = validatedMultiplier(globalByteMultiplier, ByteMultiplierGrid.GLOBAL);
 		}
@@ -261,16 +277,16 @@ public final class InventorySettings {
 	public static final class Tracking {
 
 		private int periodTicks = 3;
-		private IntLimit maxVariantsPerTarget = IntLimit.finite(8);
-		private IntLimit maxSlotsPerTarget = IntLimit.finite(512);
-		private IntLimit maxSlotsServer = IntLimit.finite(4096);
+		private @Nullable IntLimit maxVariantsPerTarget = IntLimit.finite(8);
+		private @Nullable IntLimit maxSlotsPerTarget = IntLimit.finite(512);
+		private @Nullable IntLimit maxSlotsServer = IntLimit.finite(1024);
 		/** Tracking stream bytes per client+target period on the client grid. */
-		private ByteMultiplier streamByteMultiplier = ByteMultiplier.one();
+		private @Nullable ByteMultiplier streamByteMultiplier = ByteMultiplier.one();
 		/** Tracking snapshot bytes per fragment and per client period on the client grid. */
-		private ByteMultiplier snapshotByteMultiplier = ByteMultiplier.one();
+		private @Nullable ByteMultiplier snapshotByteMultiplier = ByteMultiplier.one();
 		/** Tracking global period bytes on the global grid. */
-		private ByteMultiplier globalByteMultiplier = ByteMultiplier.one();
-		/** Positive resynchronization cooldown in periods; no unlimited mode. */
+		private @Nullable ByteMultiplier globalByteMultiplier = ByteMultiplier.one();
+		/** Resynchronization cooldown in periods; zero skips the check, no unlimited mode. */
 		private int resyncMinPeriods = 5;
 		/** Periodic heartbeat cadence; zero is the explicit disabled value, not unlimited. */
 		private int heartbeatPeriods = 16;
@@ -279,15 +295,16 @@ public final class InventorySettings {
 
 		void validate() {
 			periodTicks = Math.clamp(periodTicks, InventoryLimits.MIN_PERIOD_TICKS, InventoryLimits.MAX_PERIOD_TICKS);
-			maxVariantsPerTarget = validatedLimit(maxVariantsPerTarget, 8);
-			maxSlotsPerTarget = validatedLimit(maxSlotsPerTarget, 512);
-			maxSlotsServer = validatedLimit(maxSlotsServer, 4096);
+			maxVariantsPerTarget = validatedLimit(maxVariantsPerTarget, 8,
+				InventoryConfigValues.Field.TRACKING_MAX_VARIANTS_PER_TARGET);
+			maxSlotsPerTarget = validatedLimit(maxSlotsPerTarget, 512,
+				InventoryConfigValues.Field.TRACKING_MAX_SLOTS_PER_TARGET);
+			maxSlotsServer = validatedLimit(maxSlotsServer, 1024, InventoryConfigValues.Field.TRACKING_MAX_SLOTS_SERVER);
 			streamByteMultiplier = validatedMultiplier(streamByteMultiplier, ByteMultiplierGrid.CLIENT);
 			snapshotByteMultiplier = validatedMultiplier(snapshotByteMultiplier, ByteMultiplierGrid.CLIENT);
 			globalByteMultiplier = validatedMultiplier(globalByteMultiplier, ByteMultiplierGrid.GLOBAL);
-			if (resyncMinPeriods < InventoryLimits.MIN_RESYNC_PERIODS) {
-				resyncMinPeriods = InventoryLimits.MIN_RESYNC_PERIODS;
-			}
+			resyncMinPeriods = Math.clamp(resyncMinPeriods,
+				InventoryLimits.MIN_RESYNC_PERIODS, InventoryLimits.MAX_RESYNC_PERIODS);
 			heartbeatPeriods = Math.clamp(
 				heartbeatPeriods,
 				InventoryLimits.MIN_HEARTBEAT_PERIODS,
@@ -307,7 +324,7 @@ public final class InventorySettings {
 		}
 
 		public int effectiveMaxSlotsServer() {
-			return maxSlotsServer.effective(InventoryLimits.INTERNAL_COUNT_LIMIT_GUARD);
+			return maxSlotsServer.effective(InventoryLimits.INTERNAL_TRACKING_SERVER_SLOT_GUARD);
 		}
 
 		/** False only for the explicit zero heartbeat value; other repair paths stay active. */

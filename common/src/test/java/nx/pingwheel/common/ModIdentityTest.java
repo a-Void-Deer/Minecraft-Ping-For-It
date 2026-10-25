@@ -69,15 +69,15 @@ class ModIdentityTest {
 			"pingforit-c2s:marker-remove",
 			"pingforit-c2s:ping-location",
 			"pingforit-c2s:update-channel",
-			"pingforit-c2s:server-config-request-v3",
-			"pingforit-c2s:server-config-update-v3",
+			"pingforit-c2s:server-config-request-v4",
+			"pingforit-c2s:server-config-update-v4",
 			"pingforit-c2s:server-presentation-policy-v1",
 			"pingforit-s2c:marker-created",
 			"pingforit-s2c:marker-removed",
 			"pingforit-s2c:marker-rejected",
 			"pingforit-s2c:marker-winner-changed",
 			"pingforit-s2c:rate-limit-policy",
-			"pingforit-s2c:server-config-snapshot-v3",
+			"pingforit-s2c:server-config-snapshot-v4",
 			"pingforit-s2c:server-presentation-policy-v1",
 			"pingforit-s2c:ping-location"
 		), Set.of(
