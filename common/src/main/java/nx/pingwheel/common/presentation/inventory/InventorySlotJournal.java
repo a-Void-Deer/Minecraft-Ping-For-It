@@ -70,6 +70,17 @@ public final class InventorySlotJournal implements AutoCloseable {
 	public long appendRetainedGrowthUpperBound() { return appendGrowth(false); }
 	/** Cumulative allocation also pays old/new directory overlap; temporary arrays are not retained twice. */
 	public long appendAllocationUpperBound() { return appendGrowth(true); }
+	/** Pure safe batch bound including old/new directory overlap and possibly all-new definitions. */
+	public long batchAllocationUpperBound(int slots) {
+		requireOpen();
+		if (slots < 0 || slots > InventorySourceAccess.MAX_STEP || slots > InventorySourceAccess.MAX_SLOTS - endSlot()) throw new IllegalArgumentException("journal batch bound");
+		int addedChunks = (length + slots + CHUNK_SLOTS - 1) / CHUNK_SLOTS - chunkCount;
+		int nextDefinitions = Math.min(MAX_DEFINITIONS, definitionCount + slots);
+		long bytes = addedChunks * CHUNK_BYTES + (nextDefinitions - definitionCount) * DEFINITION_BYTES;
+		for (int capacity = chunks.length; capacity < chunkCount + addedChunks; capacity *= 2) bytes += arrayBytes(capacity * 2, 8);
+		for (int capacity = definitions.length; capacity < nextDefinitions; capacity *= 2) bytes += arrayBytes(capacity * 2, 8);
+		return bytes;
+	}
 	private long appendGrowth(boolean allocation) {
 		requireOpen();
 		if (endSlot() == InventorySourceAccess.MAX_SLOTS) return 0;

@@ -231,7 +231,7 @@ class InventoryMinecraftSourcesTest {
 			for (int attempt = 0; attempt < visibleSlots + 2 * variants + 1 && completed == null; attempt++, now += period) {
 				backend.tick(now, settings);
 				completed = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.completeScan()
-					&& p.entries().isEmpty() && p.status() == InventoryS2CPacket.Status.READY).findFirst().orElse(null);
+					&& p.entries().isEmpty() && p.status() == InventoryS2CPacket.Status.UNCERTAIN).findFirst().orElse(null);
 			}
 			assertNotNull(completed, "the bounded 54-slot observation and its earlier partial cuts must finish");
 			var first = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
@@ -245,7 +245,7 @@ class InventoryMinecraftSourcesTest {
 			backend.tick(now, settings);
 			var cut = host.sent.subList(replayStart, host.sent.size()).stream()
 				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
-			assertTrue(cut.completeScan()); assertEquals(InventoryS2CPacket.Status.READY, cut.status());
+			assertTrue(cut.completeScan()); assertEquals(InventoryS2CPacket.Status.UNCERTAIN, cut.status());
 			assertEquals(completed.baselineId(), cut.baselineId()); assertEquals(completed.statusRevision(), cut.statusRevision());
 			assertTrue(cut.watermark() > completed.watermark()); assertEquals(variants, cut.partCount()); assertEquals(0, cut.partIndex());
 			java.util.function.Predicate<InventoryS2CPacket> belongsToCut = p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()
@@ -280,7 +280,7 @@ class InventoryMinecraftSourcesTest {
 			for (int attempt = 0; attempt < visibleSlots + 2 * variants + 1 && completed == null; attempt++, now += period) {
 				backend.tick(now, settings);
 				completed = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.completeScan()
-					&& p.entries().isEmpty() && p.status() == InventoryS2CPacket.Status.READY).findFirst().orElse(null);
+					&& p.entries().isEmpty() && p.status() == InventoryS2CPacket.Status.UNCERTAIN).findFirst().orElse(null);
 			}
 			assertNotNull(completed, "ordinary mutation starts only after the bounded 54-slot observation completes");
 			var first = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
@@ -293,7 +293,7 @@ class InventoryMinecraftSourcesTest {
 			backend.tick(now, settings);
 			var cut = host.sent.subList(replayStart, host.sent.size()).stream()
 				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
-			assertTrue(cut.completeScan()); assertEquals(InventoryS2CPacket.Status.READY, cut.status());
+			assertTrue(cut.completeScan()); assertEquals(InventoryS2CPacket.Status.UNCERTAIN, cut.status());
 			assertEquals(completed.baselineId(), cut.baselineId()); assertEquals(completed.statusRevision(), cut.statusRevision());
 			assertTrue(cut.watermark() > completed.watermark()); assertEquals(variants, cut.partCount()); assertEquals(0, cut.partIndex());
 			java.util.function.Predicate<InventoryS2CPacket> belongsToCut = p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()
@@ -306,11 +306,11 @@ class InventoryMinecraftSourcesTest {
 			var parts = host.sent.stream().filter(belongsToCut).toList();
 			assertEquals(cut.partCount(), parts.size(), "this immutable complete cut finishes once instead of restarting each period");
 			assertEquals(java.util.stream.IntStream.range(0, cut.partCount()).boxed().toList(), parts.stream().map(InventoryS2CPacket::partIndex).sorted().toList());
-			assertTrue(parts.stream().allMatch(p -> p.completeScan() && p.status() == InventoryS2CPacket.Status.READY && p.checksum() == cut.checksum()));
+			assertTrue(parts.stream().allMatch(p -> p.completeScan() && p.status() == InventoryS2CPacket.Status.UNCERTAIN && p.checksum() == cut.checksum()));
 			assertTrue(host.sent.subList(replayStart, host.sent.size()).stream().filter(p -> !p.entries().isEmpty()).allMatch(belongsToCut), "ordinary mutation creates no replacement cut or new baseline/state");
 			assertTrue(host.sent.subList(replayStart, host.sent.size()).stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.entries().isEmpty()
 				&& p.baselineId() == cut.baselineId() && p.statusRevision() == cut.statusRevision() && p.watermark() == cut.watermark()
-				&& p.completeScan() && p.status() == InventoryS2CPacket.Status.READY && p.checksum() == cut.checksum()), "the completed cut reaches its matching delivery barrier");
+				&& p.completeScan() && p.status() == InventoryS2CPacket.Status.UNCERTAIN && p.checksum() == cut.checksum()), "the completed cut reaches its matching delivery barrier");
 			assertEquals(variants, parts.stream().flatMap(p -> p.entries().stream()).count());
 			assertEquals(variants, parts.stream().flatMap(p -> p.entries().stream()).map(InventoryS2CPacket.Entry::key).distinct().count());
 			assertEquals(variants, parts.stream().flatMap(p -> p.entries().stream()).map(InventoryS2CPacket.Entry::itemId).distinct().count());

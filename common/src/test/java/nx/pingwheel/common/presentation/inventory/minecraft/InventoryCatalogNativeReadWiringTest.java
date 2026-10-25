@@ -32,6 +32,17 @@ import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
 import nx.pingwheel.common.presentation.inventory.InventorySelection;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
+import nx.pingwheel.common.presentation.inventory.InventoryStep;
+import nx.pingwheel.common.presentation.inventory.InventoryBackend;
+import nx.pingwheel.common.network.InventoryC2SPacket;
+import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.presentation.source.SyncPublisher;
+import nx.pingwheel.common.presentation.source.CostLedger;
+import nx.pingwheel.common.presentation.source.SourceAccess;
+import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
+import nx.pingwheel.common.config.IntLimit;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -39,7 +50,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** UNRUN. Actual native source and lazy observation path, with the unchanged default memory cap. */
+/** Actual native source, freezer and shared runtime, with the unchanged default memory cap. */
 class InventoryCatalogNativeReadWiringTest {
 	@Test void indexedReadAndExactWitnessAcquireMetadataBeforeGetterAndFreezeBeforeProviderPostcheck() {
 		for (boolean external : new boolean[] {false, true}) for (boolean witness : new boolean[] {false, true})
@@ -169,7 +180,8 @@ class InventoryCatalogNativeReadWiringTest {
 			}
 			assertNotNull(last); assertEquals(slots, observed.size()); assertEquals(slots, world.reads());
 			assertEquals(CaptureResult.Completeness.COMPLETE, last.result().completeness());
-			assertEquals(CaptureResult.Consistency.VERIFIED, last.result().consistency()); assertFalse(observed.getFirst().aggregateRequired());
+			assertEquals(CaptureResult.Consistency.EVENTUAL, last.result().consistency()); assertFalse(observed.getFirst().aggregateRequired());
+			assertEquals(InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, last.inventorySweepEvidence());
 			preview.retainCompleted(); assertEquals(Optional.of(true), runtime.probe(preview), "publication evidence stays admitted under the unchanged default memory cap");
 			var chosen = observed.getFirst();
 			var selection = new InventorySelection(chosen.key(), chosen.key().itemId(), chosen.label(), chosen.displayJson(), false, "danger");
@@ -183,17 +195,17 @@ class InventoryCatalogNativeReadWiringTest {
 		}
 	}
 
-	@Test void nativeLazySnapshotCannotUseCaptureScratchAfterItCloses() {
+	@Test void nativePreparationDoesNotReadAndEveryStepAcquiresNewScratch() {
 		var settings = InventorySettings.serverDefaults(); var world = new World(); world.add(BlockPos.ZERO, Blocks.CHEST.defaultBlockState());
 		try (var runtime = new InventoryRuntime((request, cap) -> Optional.of(source(world, request, cap)), settings.pendingMemoryBytes())) {
 			runtime.advance(0, settings); var consumer = runtime.attach(input(), new InventoryRuntime.PreviewSubject(input().readOwner())).orElseThrow();
 			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(consumer));
-			assertEquals(27, world.reads()); assertEquals(0, runtime.memory().reserved());
+			assertEquals(0, world.reads()); assertEquals(0, runtime.memory().reserved());
 			runtime.memory().setCap(runtime.memory().retained() + InventoryItemBudget.workspaceUpperBound(4096) - 1);
-			assertTrue(runtime.step(consumer, 1).isEmpty()); assertEquals(27, world.reads()); assertEquals(0, runtime.memory().reserved());
+			assertTrue(runtime.step(consumer, 1).isEmpty()); assertEquals(0, world.reads()); assertEquals(0, runtime.memory().reserved());
 			runtime.memory().setCap(settings.pendingMemoryBytes());
 			var value = runtime.step(consumer, 1).orElseThrow().slots().getFirst();
-			assertEquals(3, value.count()); assertFalse(value.aggregateRequired()); assertEquals(27, world.reads());
+			assertEquals(3, value.count()); assertFalse(value.aggregateRequired()); assertEquals(1, world.reads());
 		}
 	}
 
@@ -251,5 +263,274 @@ class InventoryCatalogNativeReadWiringTest {
 			assertEquals(List.of(2, 0, 2), order); assertEquals(amount, ((CompoundTag) snapshot.payload(0)).getLong("amount"));
 			assertTrue(grant.attemptedWork() > 0);
 		}
+	}
+
+	@NotNullByDefault
+	private static final class LargeNative {
+		static final long LARGE_AMOUNT = 9007199254740993L;
+		final int slots;
+		final net.minecraft.world.SimpleContainer resident;
+		final List<Integer> visibleReads = new ArrayList<>(), physicalReads = new ArrayList<>();
+		final World world = new World();
+		boolean valid = true, throwsOnRead;
+		LargeNative(int slots, boolean diverse) {
+			this.slots = slots; resident = new net.minecraft.world.SimpleContainer(slots);
+			world.add(BlockPos.ZERO, Blocks.CHEST.defaultBlockState());
+			for (int index = 0; index < slots; index++) {
+				var stack = new ItemStack(Items.STONE);
+				if (diverse) stack.set(net.minecraft.core.component.DataComponents.CUSTOM_MODEL_DATA, new net.minecraft.world.item.component.CustomModelData(index));
+				resident.setItem(index, stack);
+			}
+			if (!diverse && slots > 1) resident.setItem(slots - 2, ItemStack.EMPTY); // visible slot 1 is blank
+		}
+		InventorySourceAccess.Source source(InventorySourceInput input, int ceiling) {
+			var access = new IPlatformInventoryService.Access() {
+				@Override public Optional<String> alias() { return Optional.of("test:large-native"); }
+				@Override public boolean valid() { return LargeNative.this.valid; }
+				@Override public int slots() { return slots; }
+				@Override public boolean stableCursor() { return true; }
+				@Override public java.util.OptionalLong version() { return java.util.OptionalLong.empty(); }
+				@Override public IPlatformInventoryService.Entry read(int index) { throw new AssertionError("compatibility getter"); }
+				@Override public boolean visit(int limit, java.util.function.Consumer<IPlatformInventoryService.Entry> visitor) { throw new AssertionError("indexed source"); }
+				@Override public boolean supportsDetachedSlotCapture() { throw new AssertionError("native mode must precede snapshot-plan discovery"); }
+				@Override public boolean consumeResident(int index, IPlatformInventoryService.ResidentVisitor visitor) {
+					visibleReads.add(index); physicalReads.add(slots - index - 1);
+					if (throwsOnRead) throw new IllegalStateException("getter failed");
+					ItemStack stack = resident.getItem(slots - index - 1);
+					return visitor.visit(new IPlatformInventoryService.ResidentEntry(stack.isEmpty() ? null : new InventoryResidentItem.Stack(stack), stack.isEmpty() ? 0 : index == 0 ? LARGE_AMOUNT : stack.getCount()));
+				}
+			};
+			// Fixed native Vault layout profile; native reads still enter the real resident freezer and catalogue.
+			var layout = new InventorySnapshotLayout("test:large-native", "north", BlockPos.ZERO, List.of(
+				new InventorySnapshotLayout.Member(BlockPos.ZERO, "create:item_vault", "create:item_vault", "member", List.of(
+					new InventorySnapshotLayout.Segment("Items", "minecraft:items", slots, java.util.stream.IntStream.range(0, slots).boxed().toList())))));
+			var view = new InventoryMinecraftSources.View("test:large-native", List.of(), List.of(), access, layout, false);
+			return new InventoryMinecraftSources.Source(input, view, () -> true, () -> view,
+				entry -> { throw new AssertionError("compatibility codec"); }, world, null, ceiling, ignored -> {}, ignored -> InventoryReprojectionSummary.EMPTY);
+		}
+		InventoryRuntime runtime(InventorySettings settings) {
+			return new InventoryRuntime(new InventoryRuntime.SourceResolver() {
+				@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int ceiling) { throw new AssertionError("missing allowance"); }
+				@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int ceiling, InventoryValidationBudget.Allowance allowance) {
+					return Optional.of(source(input, ceiling));
+				}
+			}, settings.pendingMemoryBytes());
+		}
+	}
+	private static InventorySourceAccess.InventoryHandle open(LargeNative fixture) {
+		var input = input(); var source = fixture.source(input, 4096); var access = new InventorySourceAccess(input, ignored -> Optional.of(source));
+		var scope = new SourceAccess.ReadScope(input.viewKey(), java.util.Set.of("pingforit:inventory.items"));
+		var resolved = (SourceAccess.ResolveResult.Available) access.resolve(nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources.detached(input.target()), scope, ledger(0, 1));
+		return (InventorySourceAccess.InventoryHandle) ((SourceAccess.OpenResult.Started) access.open(resolved.descriptor(), scope, ledger(0, 0))).handle();
+	}
+	private static CostLedger ledger(int slots, int probes) {
+		return new CostLedger(Map.of(InventorySourceAccess.PHYSICAL, (long) slots, InventorySourceAccess.PROBES, (long) probes,
+			InventorySourceAccess.PROVIDER_WORK, (slots + probes) * InventorySourceAccess.PROVIDER_CALL_WORK));
+	}
+	@Test void nativeTypedAndLegacyStepsShareOneCursorEmptyNeedsMetadataAndFailuresPayAttempts() {
+		for (boolean empty : new boolean[] {false, true}) {
+			var fixture = new LargeNative(empty ? 0 : 4, false);
+			try (var handle = open(fixture)) {
+				assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(new RetainedMemoryLedger(16 * 1024 * 1024)));
+				assertTrue(fixture.visibleReads.isEmpty());
+				var catalog = new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(4096), 10 * InventoryCatalogAdmission.workUpperBound(4096));
+				var refused = ledger(0, 0); assertInstanceOf(InventoryStep.Outcome.Deferred.class, handle.stepInventory(refused, catalog)); assertTrue(fixture.visibleReads.isEmpty());
+				var admitted = ledger(empty ? 0 : 1, 1);
+				var first = ((InventoryStep.Outcome.Captured) handle.stepInventory(admitted, catalog)).step();
+				assertEquals(empty ? 0 : 1, admitted.used(InventorySourceAccess.PHYSICAL)); assertEquals(1, admitted.used(InventorySourceAccess.PROBES));
+				assertEquals(empty ? CaptureResult.Completeness.COMPLETE : CaptureResult.Completeness.CONTINUE, first.metadata().completeness());
+				assertEquals(CaptureResult.Consistency.EVENTUAL, first.metadata().consistency()); assertEquals(InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, first.evidence());
+				if (!empty) {
+					var next = (SourceAccess.StepOutcome.Captured) handle.step(ledger(1, 1), catalog); assertEquals(2, next.result().coverage().scanned()); assertEquals(List.of(0, 1), fixture.visibleReads);
+					fixture.throwsOnRead = true; var failing = ledger(2, 1);
+					var failure = ((InventoryStep.Outcome.Captured) handle.stepInventory(failing, catalog)).step();
+					assertEquals(CaptureResult.Availability.UNAVAILABLE, failure.metadata().availability()); assertTrue(failure.slots().isEmpty()); assertEquals(1, failing.used(InventorySourceAccess.PHYSICAL));
+				}
+			}
+		}
+	}
+	@Test void nativeHardSlotBoundCannotReadBeyond4096() {
+		var fixture = new LargeNative(4096, false); int reads = 0;
+		try (var handle = open(fixture)) {
+			var memory = new RetainedMemoryLedger(16 * 1024 * 1024); assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(memory));
+			InventoryStep.@Nullable Outcome last = null;
+			for (int page = 0; page < 64; page++) {
+				var admission = new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(4096), 64 * InventoryCatalogAdmission.workUpperBound(4096));
+				var budget = ledger(64, 1); last = handle.stepInventory(budget, admission); reads += Math.toIntExact(budget.used(InventorySourceAccess.PHYSICAL));
+			}
+			assertEquals(4096, reads); assertEquals(4096, fixture.visibleReads.size());
+			assertEquals(CaptureResult.Completeness.COMPLETE, ((InventoryStep.Outcome.Captured) last).step().metadata().completeness());
+			assertInstanceOf(InventoryStep.Outcome.Deferred.class, handle.stepInventory(ledger(64, 1), new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(4096), InventoryCatalogAdmission.workUpperBound(4096))));
+			assertEquals(4096, fixture.visibleReads.size()); assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+		}
+	}
+	@Test void nativeReplacementHandoffKeepsSlowPeerPaidPrefixAndEvidenceUntilAccepted() {
+		var settings = InventorySettings.serverDefaults(); var fixture = new LargeNative(4, false); var runtime = fixture.runtime(settings);
+		try (runtime) {
+			runtime.advance(0, settings); var subject = new InventoryRuntime.TrackingSubject(TargetKey.from(input().target()));
+			var fast = runtime.attach(input(), subject).orElseThrow(); var slow = runtime.attach(input(), subject).orElseThrow();
+			runtime.prepare(fast); runtime.prepare(slow);
+			var original = runtime.step(fast).orElseThrow(); fast.retainCompleted(); assertEquals(original, runtime.step(slow).orElseThrow()); slow.retainCompleted();
+			fast.restart(); slow.restart(); fixture.resident.setItem(0, new ItemStack(Items.GOLD_INGOT, 9)); runtime.advance(3, settings);
+			var replacement = runtime.step(fast).orElseThrow(); assertEquals(9, replacement.slots().getLast().count()); fast.retainCompleted(); fast.restart();
+			assertEquals(8, fixture.visibleReads.size()); assertEquals(Optional.of(true), runtime.probe(slow));
+			assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(fast), "slow predecessor must finish its successor before another replacement forks");
+			runtime.advance(6, settings); assertEquals(replacement, runtime.step(slow).orElseThrow()); slow.retainCompleted(); slow.restart();
+			assertEquals(8, fixture.visibleReads.size(), "slow peer consumes the paid successor journal without a getter replay");
+			assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(fast).orElseThrow().result().completeness()); assertEquals(12, fixture.visibleReads.size());
+			assertEquals(0, runtime.memory().reserved()); fast.close(); slow.close();
+		}
+		assertEquals(0, runtime.memory().retained());
+	}
+	@Test void nativeTighteningRefreshesUniqueJournalDefinitionAndCapRefusalDoesNotAdvance() {
+		var settings = InventorySettings.serverDefaults(); var fixture = new LargeNative(90, false);
+		var stack = new ItemStack(Items.STONE); stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal("x".repeat(1800)));
+		for (int slot = 0; slot < 90; slot++) fixture.resident.setItem(slot, stack);
+		var runtime = fixture.runtime(settings);
+		try (runtime) {
+			runtime.advance(0, settings); var fast = runtime.attach(input(), new InventoryRuntime.PreviewSubject(input().readOwner())).orElseThrow();
+			var slow = runtime.attach(input(), new InventoryRuntime.PreviewSubject(new UUID(83, 2))).orElseThrow(); runtime.prepare(fast); runtime.prepare(slow);
+			var first = runtime.step(fast, 32).orElseThrow(); assertEquals(32, fixture.visibleReads.size());
+			runtime.memory().setCap(runtime.memory().retained()); assertTrue(runtime.step(fast, 1).isEmpty()); assertEquals(32, fixture.visibleReads.size());
+			assertEquals(InventoryRuntime.ReprojectionStatus.DEFERRED, runtime.reprojectDisplays(fast, 1024).status());
+			runtime.memory().setCap(settings.pendingMemoryBytes());
+			assertEquals(InventoryRuntime.ReprojectionStatus.COMPLETED, runtime.reprojectDisplays(fast, 1024).status()); assertEquals(32, fixture.visibleReads.size());
+			var replay = runtime.step(slow, 32).orElseThrow(); assertEquals(32, fixture.visibleReads.size());
+			assertEquals(first.slots().getFirst().key(), replay.slots().getFirst().key()); assertEquals(first.slots().getFirst().count(), replay.slots().getFirst().count());
+			assertTrue(replay.slots().stream().allMatch(item -> item.displayJson() == null || item.displayJson().getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 1024));
+			fixture.valid = false; assertEquals(Optional.of(false), runtime.probe(fast)); assertTrue(fast.invalidated()); assertTrue(slow.invalidated());
+			assertEquals(0, runtime.memory().reserved());
+		}
+		assertEquals(0, runtime.memory().retained());
+	}
+	@Test void nativeEmptyFaceCompletesUnderExhaustedPhysicalAndLogicalAllowanceWithMetadataOnly() {
+		var settings = InventorySettings.serverDefaults(); settings.setPhysicalSlotsPerTick(IntLimit.finite(1)); settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
+		var full = new LargeNative(1, false); var empty = new LargeNative(0, false); var runtime = new InventoryRuntime((request, cap) -> Optional.of(
+			(request.face() == BlockFace.NORTH ? full : empty).source(request, cap)), settings.pendingMemoryBytes());
+		try (runtime) {
+			runtime.advance(0, settings); var subject = new InventoryRuntime.PreviewSubject(input().readOwner());
+			runtime.step(runtime.attach(input(), subject).orElseThrow()).orElseThrow(); assertEquals(1, full.visibleReads.size());
+			var otherFace = new InventorySourceInput(input().target(), input().readOwner(), BlockFace.SOUTH);
+			var result = runtime.step(runtime.attach(otherFace, subject).orElseThrow()).orElseThrow();
+			assertEquals(CaptureResult.Completeness.COMPLETE, result.result().completeness()); assertEquals(0, result.result().coverage().expected().orElseThrow());
+			assertEquals(InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, result.inventorySweepEvidence()); assertTrue(empty.visibleReads.isEmpty()); assertEquals(0, runtime.memory().reserved());
+		}
+		assertEquals(0, runtime.memory().retained());
+	}
+
+	@ParameterizedTest @ValueSource(ints = {540, 900})
+	void largeNativeSweepSharesPhysicalPrefixButPaysEachConsumerAndSeesUnreadMutation(int slots) {
+		var fixture = new LargeNative(slots, false); var settings = InventorySettings.serverDefaults();
+		settings.setPhysicalSlotsPerTick(IntLimit.finite(7)); settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(11));
+		var runtime = fixture.runtime(settings);
+		try (runtime) {
+			runtime.advance(0, settings);
+			var fast = runtime.attach(input(), new InventoryRuntime.PreviewSubject(input().readOwner())).orElseThrow();
+			var slow = runtime.attach(input(), new InventoryRuntime.PreviewSubject(new UUID(83, 2))).orElseThrow();
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(fast));
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(slow)); assertTrue(fixture.visibleReads.isEmpty());
+			var first = runtime.step(fast).orElseThrow(); assertEquals(7, first.slots().size()); assertEquals(LargeNative.LARGE_AMOUNT, first.slots().getFirst().count()); assertNull(first.slots().get(1));
+			assertEquals(CaptureResult.Completeness.CONTINUE, first.result().completeness());
+			fixture.resident.setItem(slots - 1, new ItemStack(Items.DIAMOND)); // retained earlier slot must stay stone
+			fixture.resident.setItem(slots - 8, new ItemStack(Items.GOLD_INGOT, 9)); // next unread visible slot 7
+			var fastItems = new ArrayList<InventoryDomainCodec.@Nullable Item>(first.slots());
+			var slowItems = new ArrayList<InventoryDomainCodec.@Nullable Item>();
+			long tick = 0; InventoryRuntime.@Nullable Observation last = first;
+			for (; tick < 900 && (fastItems.size() < slots || slowItems.size() < slots); tick++) {
+				runtime.advance(tick, settings); int before = fixture.visibleReads.size();
+				if (fastItems.size() < slots) { var step = runtime.step(fast); if (step.isPresent()) { last = step.get(); fastItems.addAll(last.slots()); } }
+				if (tick % 2 == 0 && slowItems.size() < slots) runtime.step(slow).ifPresent(step -> slowItems.addAll(step.slots()));
+				assertTrue(fixture.visibleReads.size() - before <= 7, "actual getters exceeded the shared tick grant");
+				assertEquals(0, runtime.memory().reserved());
+			}
+			assertEquals(slots, fastItems.size()); assertEquals(fastItems, slowItems); assertEquals(slots, fixture.visibleReads.size());
+			assertEquals("minecraft:stone", fastItems.getFirst().key().itemId()); assertEquals("minecraft:gold_ingot", fastItems.get(7).key().itemId()); assertEquals(9, fastItems.get(7).count());
+			assertEquals(java.util.stream.IntStream.range(0, slots).boxed().toList(), fixture.visibleReads);
+			assertEquals(java.util.stream.IntStream.range(0, slots).map(index -> slots - index - 1).boxed().toList(), fixture.physicalReads, "visible witnesses use the provider's absolute indexed mapping");
+			assertEquals(CaptureResult.Completeness.COMPLETE, last.result().completeness()); assertEquals(CaptureResult.Consistency.EVENTUAL, last.result().consistency());
+			assertEquals(InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, last.inventorySweepEvidence());
+			assertTrue(runtime.memory().retained() < 2 * 1024 * 1024, "duplicates must refund definition admission");
+			fast.retainCompleted(); slow.retainCompleted();
+			runtime.advance(++tick, settings);
+			var chosen = fastItems.get(7); var selection = new InventorySelection(chosen.key(), chosen.key().itemId(), chosen.label(), chosen.displayJson(), false, "danger");
+			assertTrue(runtime.selectionPresent(input(), selection, 7)); assertEquals(slots + 1, fixture.visibleReads.size());
+			var tracking = runtime.attach(input(), new InventoryRuntime.TrackingSubject(TargetKey.from(input().target()))).orElseThrow();
+			int tracked = 0;
+			for (int calls = 0; calls < 300 && tracked < slots; calls++) {
+				runtime.advance(++tick, settings); var step = runtime.step(tracking);
+				if (step.isPresent()) { if (tracked == 0) assertEquals("minecraft:diamond", step.get().slots().getFirst().key().itemId()); tracked += step.get().slots().size(); }
+			}
+			assertEquals(slots, tracked); assertEquals(2 * slots + 1, fixture.visibleReads.size(), "tracking must start a distinct fresh physical round");
+			fast.close(); slow.close(); tracking.close();
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+
+	@Test void nativeCapacityIsExplicitIncompleteAndThrowingGetterRemainsCharged() {
+		for (boolean throwing : new boolean[] {false, true}) {
+			var settings = InventorySettings.serverDefaults(); var fixture = new LargeNative(300, true); fixture.throwsOnRead = throwing;
+			var runtime = fixture.runtime(settings);
+			try (runtime) {
+				runtime.advance(0, settings); var consumer = runtime.attach(input(), new InventoryRuntime.PreviewSubject(input().readOwner())).orElseThrow();
+				InventoryRuntime.@Nullable Observation last = null;
+				for (int tick = 0; tick < 40; tick++) {
+					runtime.advance(tick, settings); var result = runtime.step(consumer);
+					if (result.isPresent()) { last = result.get(); if (last.result().completeness() != CaptureResult.Completeness.CONTINUE) break; }
+					assertEquals(0, runtime.memory().reserved());
+				}
+				assertNotNull(last); assertEquals(CaptureResult.Completeness.INCOMPLETE, last.result().completeness());
+				assertEquals(throwing ? CaptureResult.Availability.UNAVAILABLE : CaptureResult.Availability.READABLE, last.result().availability());
+				assertEquals(throwing ? 1 : 257, fixture.visibleReads.size()); assertEquals(0, runtime.memory().reserved());
+			}
+			assertEquals(0, runtime.memory().retained());
+		}
+	}
+
+	@NotNullByDefault
+	private static final class BackendHost implements InventoryBackend.Host {
+		final List<InventoryS2CPacket> packets = new ArrayList<>();
+		final nx.pingwheel.common.marker.ServerMarkerStore store = new nx.pingwheel.common.marker.ServerMarkerStore(new nx.pingwheel.common.marker.MarkerIdSource());
+		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.of(new InventoryBackend.Policy(100, 1, java.util.Set.of("entity_block"))); }
+		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) { return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention")); }
+		@Override public boolean annotationAllowed(InventorySourceInput input, String type) { return true; }
+		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
+			var type = nx.pingwheel.common.domain.TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
+			var rejected = admission.prepare(frozen.target(), type.id(), List.of(player));
+			if (rejected != null) return new InventoryBackend.Created(null, rejected);
+			return new InventoryBackend.Created(store.create(player, frozen.target(), type, type.defaultPingType(), new nx.pingwheel.common.marker.MarkerAnchor(0, 0, 0), 1, 300, List.of(player)).marker(), null);
+		}
+		@Override public boolean knows(UUID player, nx.pingwheel.common.domain.MarkerId marker) { return store.allMarkers().stream().anyMatch(value -> value.id().equals(marker)); }
+		@Override public boolean authorized(SyncPublisher.Context context) { return true; }
+		@Override public int encodedBytes(InventoryS2CPacket packet) {
+			var buffer = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+			try { packet.write(buffer); return buffer.readableBytes(); } finally { buffer.release(); }
+		}
+		@Override public void send(UUID player, InventoryS2CPacket packet) { packets.add(packet); }
+	}
+
+	@ParameterizedTest @ValueSource(ints = {540, 900})
+	void backendLargeNativePreviewFinishesWithinReferenceLifetimeWithoutFalseReady(int slots) {
+		var settings = InventorySettings.serverDefaults(); var fixture = new LargeNative(slots, false);
+		var host = new BackendHost(); var runtime = fixture.runtime(settings);
+		try (var backend = new InventoryBackend(host, runtime, 1)) {
+			UUID player = input().readOwner(); backend.handle(player, InventoryC2SPacket.hello(), 0, settings);
+			long epoch = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).findFirst().orElseThrow().epoch();
+			backend.handle(player, InventoryC2SPacket.open(epoch, 100, 1, 1, input().target(), BlockFace.NORTH), 0, settings);
+			int tick = 0;
+			for (; tick < 80 && fixture.visibleReads.size() < slots; tick++) { backend.tick(tick, settings); assertEquals(0, runtime.memory().reserved()); }
+			assertTrue(tick < 80, "native preview must complete before its existing reference deadline");
+			assertEquals(slots, fixture.visibleReads.size());
+			for (int flush = 0; flush < 5; flush++) backend.tick(tick++, settings);
+			var last = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW && !packet.entries().isEmpty()).reduce((a, b) -> b).orElseThrow();
+			assertEquals(LargeNative.LARGE_AMOUNT + slots - 2, last.entries().getFirst().count());
+			assertTrue(host.packets.stream().noneMatch(packet -> packet.status() == InventoryS2CPacket.Status.READY), "phase 4 retains EVENTUAL publication policy until scoped phase 5");
+			assertEquals(slots, fixture.visibleReads.size(), "publication must not replay source getters");
+			backend.handle(player, InventoryC2SPacket.select(epoch, 100, 1, 1, 1, last.baselineId(), last.statusRevision(), last.entries().getFirst().key(), "danger"), tick++, settings);
+			assertEquals(1, host.store.size()); assertEquals(slots + 1, fixture.visibleReads.size(), "SELECT must acquire a fresh live absolute-slot witness");
+			fixture.resident.setItem(slots - 1, new ItemStack(Items.GOLD_INGOT));
+			for (int calls = 0; calls < 50 && fixture.visibleReads.size() < 2 * slots + 1; calls++) { backend.tick(tick++, settings); assertEquals(0, runtime.memory().reserved()); }
+			assertEquals(2 * slots + 1, fixture.visibleReads.size(), "new tracking reads a separate complete native round");
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 	}
 }

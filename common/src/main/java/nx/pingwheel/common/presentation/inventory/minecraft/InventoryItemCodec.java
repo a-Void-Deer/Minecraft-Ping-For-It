@@ -339,6 +339,8 @@ public final class InventoryItemCodec {
 			@Nullable Encoded retained = displays.get(Objects.requireNonNull(key));
 			return retained == null ? null : retained.display();
 		}
+		/** Borrowed stable first cell for compact journals; no per-slot Encoded wrapper. */
+		public @Nullable Encoded retainedEncoded(InventoryScanner.Key key) { return displays.get(Objects.requireNonNull(key)); }
 
 		/**
 		 * O(1) settlement metadata. Shared journal definitions must not charge
@@ -347,6 +349,12 @@ public final class InventoryItemCodec {
 		 * charge until every journal has refreshed or released them on tightening.
 		 */
 		public long modeledRetainedBytes() { return canonicalCost + projectionCost + indexCost + ambiguityCost; }
+		public static long initialModeledBytes() { return BASE_MODELED_BYTES; }
+		/** No catalogue allocation or registry lookup is needed to admit the first native read. */
+		public static long firstReadGrowthUpperBound(int displayBytes) {
+			return 3 * TABLE_BYTES + 3 * NODE_BYTES + 40L + MAX_CANONICAL_BYTES + textCost(64)
+				+ definitionCost(256, 262, requireDisplayBytes(displayBytes)) + textCost(64);
+		}
 		/** Allocates one fixed four-long metadata record; use the scalar total on hot settlement paths. */
 		public RetainedCost retainedCost() { return new RetainedCost(canonicalCost, projectionCost, indexCost, ambiguityCost); }
 

@@ -997,11 +997,6 @@ public final class InventoryBackend implements AutoCloseable {
 		if (lease.completed != null && !lease.invalid) publishTracking(lease, replacement);
 		return true;
 	}
-	/** Domain encode buffers/copies and UTF validation, distinct from native root W. */
-	private long previewSlotWorkspace(int displayBytes) {
-		long displayCap = Math.clamp(displayBytes, 1L, InventoryDomainCodec.MAX_DISPLAY_BYTES);
-		return checkedAdd(checkedMultiply(checkedAdd(displayCap, InventoryDomainCodec.MAX_BYTES - InventoryDomainCodec.MAX_DISPLAY_BYTES), 8L), 2048L);
-	}
 	private void samplePreview(UUID player, Preview preview) {
 		InventorySourceAccess.Preparation preparation = runtime.prepare(preview.consumer);
 		if (preparation == InventorySourceAccess.Preparation.DEFERRED) return;
@@ -1030,12 +1025,10 @@ public final class InventoryBackend implements AutoCloseable {
 		// Backend owns detached count/total/reference display versions, not A1's
 		// canonical native arrays. Their bounded keys/indexes live in the slab.
 		long entryBytes = checkedMultiply(3L, checkedAdd(checkedMultiply(2L, cap), 4096L));
-		long runtimePerSlot = checkedAdd(previewSlotWorkspace(cap), checkedMultiply(2L,
-			checkedAdd(checkedMultiply(3L, InventoryItemBudget.retainedUpperBound(cap)), 4096L)));
-		long scratch = checkedAdd(InventoryItemBudget.workspaceUpperBound(cap), 409600L);
 		long previousBytes = previewRetainedBytes(preview);
-		int slotBound = (int) Math.min(InventorySourceAccess.MAX_STEP, Math.max(0,
-			(runtime.memory().remaining() - scratch - previousBytes) / checkedAdd(entryBytes, runtimePerSlot)));
+		int slotBound = InventorySourceAccess.MAX_STEP;
+		while (slotBound > 0 && checkedAdd(previousBytes, checkedAdd(checkedMultiply(slotBound, entryBytes),
+			runtime.stepMemoryUpperBound(preview.consumer, slotBound))) > runtime.memory().remaining()) slotBound--;
 		if (slotBound == 0) { previewDelay(preview, preview.samplingDelay, "sampling", Reason.MEMORY.bit()); return; }
 		var held = runtime.memory().tryReserve(checkedAdd(previousBytes, checkedMultiply(slotBound, entryBytes)));
 		if (held.isEmpty()) { previewDelay(preview, preview.samplingDelay, "sampling", Reason.MEMORY.bit()); return; }
