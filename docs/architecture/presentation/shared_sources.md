@@ -155,9 +155,12 @@ The three result states are independent. Availability
 judged from evidence: a completed detached capture that was atomic by
 construction is verified-snapshot even when no source version exists, while a
 complete sweep that is neither snapshot-atomic nor backed by a stable version
-keeps its eventual quality. Decoding the snapshot later, across ticks or
-periods, does not downgrade its verification, and a missing version never
-does. A defer caused by an exhausted budget is a scheduling result, not an
+keeps its eventual quality. A domain may carry separate scoped acceptance
+evidence without changing this generic consistency; inventory's native sweep
+and ready/uncertain policy are owned by
+[inventory status presentation](inventory.md#status-presentation). Decoding the
+snapshot later, across ticks or periods, does not downgrade its verification,
+and a missing version never does. A defer caused by an exhausted budget is a scheduling result, not an
 invalid source.
 
 Coverage describes the truth of the whole sweep, not progress inside one page.
@@ -168,10 +171,11 @@ or collection value of zero is publishable under its domain's validity and
 quality rules; it is not equivalent to a zero inferred from absence. A domain
 may derive zero from absence only when a complete, usable scan validly proves
 the key missing under that domain's rules. A complete sweep that is
-neither snapshot-atomic nor backed by a stable version keeps its uncertain
-quality. Evidence that is unknown, incomplete or unavailable never synthesizes
-zero, even when it would display as grey. An unknown consistency state only
-means consistent-version metadata is missing; it does not mean the data or
+neither snapshot-atomic nor backed by a stable version keeps its eventual
+consistency; display quality remains domain policy. Evidence that is unknown,
+incomplete or unavailable never synthesizes zero, even when it would display as
+grey. An unknown consistency state only means consistent-version metadata is
+missing; it does not mean the data or
 coverage is unknown, and atomicity is not a prerequisite for producing an
 observed zero.
 
@@ -220,8 +224,8 @@ route are owned by
 
 Units are owned by code. A domain defines its charging unit and the logical
 progress its consumers record; no shared unit conversion is defined.
-Inventory's slot unit and its distinction between parse charging and fixed-work
-capture, copy and freeze are owned by
+Inventory's live-slot and detached-decode charging, and its explicit-adapter
+fixed-work capture exception, are owned by
 [inventory](inventory.md#budgets-queues-and-memory).
 
 Four ledgers stay separate — shared scan work, logical progress, wire bytes,

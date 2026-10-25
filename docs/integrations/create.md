@@ -255,7 +255,14 @@ identity is a canonical controller alias, and the captured layout keeps each
 member's position, controller/member role, and its own inventory segments so
 per-member slot boundaries and variants stay distinct. Unlike the summary, it
 reads each verified member's local inventory rather than the controller's
-combined item-handler capability. Snapshot capture, recovery, budget and
+combined item-handler capability. The immutable layout descriptor and absolute
+slot prefix indices are reused, while validation compares the current structure
+in place: every member's loaded state, scope and controller relation, and every
+local slot boundary, still pass their dynamic gates. Redistributing local slot
+counts invalidates the layout even if the combined total is unchanged. This
+stable indexed mapping is not a content-version guarantee; no Create wrapper
+version is assumed to certify unchanged contents. Native incremental reads,
+explicit snapshot capture, recovery, budget and
 variant semantics remain owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md).
 

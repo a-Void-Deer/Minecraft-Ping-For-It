@@ -151,6 +151,8 @@ suite; no live server, notification, heap/TPS or soak result follows from these 
   here and in the [inventory foundation](inventory.md#inventory-preview-and-tracking-foundation),
   and the production runtime, source-wrapper and publisher seams
   exercise snapshot preparation, capture and cross-period decode, allocation,
+  native cross-tick physical reads and compact replay under the scoped
+  [inventory evidence inventory](inventory.md#native-incremental-sweep-coverage),
   shared scan-work and logical sharing, retained lifetime, invalidation and
   recovery through recording providers and transports. They do not establish
   live world or optional-provider behavior, real transport, GPU or multiplayer

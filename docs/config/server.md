@@ -113,10 +113,11 @@ is owned by
 
 The `inventory` object persists the shared scan-work allowance, the single
 pending-memory bound, the separate preview and tracking budgets, and the two
-finite display/frame size scalars. The existing `physicalSlotsPerTick` key is
-retained: supported detached snapshot capture and copying do not consume its
-slot allowance; decoding and parsing the captured snapshot are charged, while
-unsupported live fallback is charged by the slots it reads. The source-specific
+finite display/frame size scalars. The existing `physicalSlotsPerTick` key
+bounds actual live slot reads and their item processing on native incremental
+routes, not just a decode after whole-inventory capture. Explicit adapter
+snapshots retain the separate fixed-work capture/copy exception and charge their
+consuming decode/parse slots. The source-specific
 accounting contract is owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md)
 and [shared source capture and sync](../architecture/presentation/shared_sources.md).
@@ -140,7 +141,7 @@ array or an unbounded work loop.
 
 | Member | JSON form | Meaning |
 | --- | --- | --- |
-| `physicalSlotsPerTick` | limit object | Shared scan-work allowance per tick: snapshot decode/parsing and unsupported live slot reads consume it; supported detached snapshot capture and copying do not. Unlimited removes only the configurable cap; finite work and memory guards and both logical quotas remain in force. |
+| `physicalSlotsPerTick` | limit object | Shared slot-scan allowance per tick for live reads/item processing and detached decode/parsing, with the explicit-adapter capture exception defined by the [inventory budget contract](../architecture/presentation/inventory.md#budgets-queues-and-memory). Unlimited removes only the configurable cap; finite work and memory guards and both logical quotas remain in force. |
 | `pendingMemoryMiB` | number, MiB | Single finite server-wide pending-memory bound covering preview and tracking together. It is not a per-queue bound and has no unlimited mode. |
 | `displayByteMultiplier` | number, multiplier | Finite scalar scaling one item's serialized display payload from its existing display base. It has no unlimited mode and is not one of the five send-byte multipliers. |
 | `frameByteMultiplier` | number, multiplier | Finite scalar scaling the whole encoded inventory S2C frame from its existing frame base. It has no unlimited mode and is not one of the five send-byte multipliers. |
