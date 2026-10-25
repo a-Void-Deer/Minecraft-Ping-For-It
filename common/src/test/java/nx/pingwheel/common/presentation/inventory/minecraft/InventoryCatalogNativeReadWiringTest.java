@@ -769,6 +769,87 @@ class InventoryCatalogNativeReadWiringTest {
 		}
 	}
 
+	@ParameterizedTest @ValueSource(booleans = {false, true})
+	void nativeTrailingEmptySlotsRequireCumulativeCompletionEvenWhenEarlierAggregateQualityIsUnchanged(boolean aggregate) {
+		for (boolean lateBeforeCompletion : new boolean[] {false, true}) {
+			var f = new NativeClient(); var nativeSource = new LargeNative(3, false);
+			for (int slot = 0; slot < 3; slot++) nativeSource.resident.setItem(slot, ItemStack.EMPTY);
+			var stack = new ItemStack(Items.STONE);
+			if (aggregate) {
+				var payload = new CompoundTag(); payload.putString("data", "\u0800".repeat(23000));
+				stack.set(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.of(payload));
+			}
+			nativeSource.resident.setItem(2, stack);
+			f.settings.getPreview().setPeriodTicks(1); f.settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
+			var runtime = nativeSource.runtime(f.settings);
+			try (var backend = new InventoryBackend(f.host, runtime, 1)) {
+				f.open(backend); backend.tick(0, f.settings);
+				var early = f.since(f.cursor).stream().filter(packet -> !packet.entries().isEmpty()).findFirst().orElseThrow();
+				f.cursor = f.host.packets.size(); // transport handoff succeeded, but the recipient has not applied this frame
+				assertEquals(aggregate, early.entries().getFirst().fallback()); assertFalse(early.completeScan());
+				f.tick(backend, 1);
+				assertEquals(InventoryS2CPacket.Status.UPDATING, f.client.preview(1).status()); assertFalse(f.client.preview(1).completeScan());
+				assertTrue(f.client.preview(1).entries().isEmpty());
+				backend.tick(2, f.settings); @Unmodifiable List<InventoryS2CPacket> completion = f.since(f.cursor); f.cursor = f.host.packets.size();
+				assertEquals(1, completion.stream().flatMap(packet -> packet.entries().stream()).count(), "a COMPLETE cut must repeat unchanged earlier rows, not just the last sparse delta");
+				assertTrue(completion.stream().allMatch(InventoryS2CPacket::completeScan));
+				assertTrue(completion.stream().allMatch(packet -> packet.watermark() > early.watermark()));
+				if (lateBeforeCompletion) { f.client.accept(early); assertFalse(f.client.preview(1).completeScan()); }
+				completion.forEach(f.client::accept);
+				var complete = f.client.preview(1); assertTrue(complete.completeScan()); assertEquals(InventoryS2CPacket.Status.READY, complete.status());
+				assertEquals(1, complete.entries().size()); assertEquals(LargeNative.LARGE_AMOUNT, complete.entries().getFirst().count());
+				assertEquals(aggregate ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : InventoryS2CPacket.Status.READY, complete.entries().getFirst().quality());
+				f.client.accept(early); assertEquals(complete, f.client.preview(1), "late earlier absolute data cannot overwrite the completed count or quality");
+				long offers = f.host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).count();
+				f.repair(backend, 3, false); f.tick(backend, 3);
+				var repaired = f.client.preview(1); assertTrue(repaired.completeScan()); assertEquals(complete.entries(), repaired.entries());
+				assertEquals(complete.baselineId(), repaired.baselineId()); assertTrue(repaired.watermark() > complete.watermark());
+				assertEquals(3, nativeSource.visibleReads.size()); assertEquals(offers, f.host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).count());
+				nativeSource.valid = false; f.tick(backend, 4);
+				assertEquals(InventoryS2CPacket.Status.INVALID, f.client.preview(1).status()); assertFalse(f.client.preview(1).completeScan());
+				var invalid = f.client.preview(1);
+				f.client.accept(early); completion.forEach(f.client::accept);
+				assertEquals(invalid, f.client.preview(1), "old frames cannot cross the invalidation fence");
+				f.repair(backend, 5, false); f.tick(backend, 5);
+				assertEquals(InventoryS2CPacket.Status.INVALID, f.client.preview(1).status()); assertEquals(invalid.entries(), f.client.preview(1).entries());
+			}
+			assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void nativeCumulativeCompletionCannotUsePriorAggregatePartAndLateExactReferenceRemainsRetired() {
+		var f = new NativeClient(); var nativeSource = new LargeNative(5, false);
+		for (int slot = 0; slot < 5; slot++) nativeSource.resident.setItem(slot, ItemStack.EMPTY);
+		nativeSource.resident.setItem(4, new ItemStack(Items.STONE));
+		var refused = new ItemStack(Items.STONE); var payload = new CompoundTag(); payload.putString("data", "\u0800".repeat(23000));
+		refused.set(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.of(payload));
+		nativeSource.resident.setItem(3, refused); nativeSource.resident.setItem(2, new ItemStack(Items.GOLD_INGOT, 9));
+		f.settings.getPreview().setPeriodTicks(1); f.settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
+		var runtime = nativeSource.runtime(f.settings);
+		try (var backend = new InventoryBackend(f.host, runtime, 1)) {
+			f.open(backend); f.tick(backend, 0);
+			var exact = f.host.packets.stream().filter(packet -> !packet.entries().isEmpty()).findFirst().orElseThrow();
+			backend.tick(1, f.settings);
+			var aggregate = f.since(f.cursor).stream().filter(packet -> !packet.entries().isEmpty()).findFirst().orElseThrow(); f.cursor = f.host.packets.size();
+			assertTrue(aggregate.entries().getFirst().fallback()); assertFalse(aggregate.completeScan());
+			f.tick(backend, 2); f.tick(backend, 3); backend.tick(4, f.settings);
+			@Unmodifiable List<InventoryS2CPacket> finalCut = f.since(f.cursor); f.cursor = f.host.packets.size();
+			assertEquals(2, finalCut.size()); assertTrue(finalCut.stream().allMatch(packet -> packet.completeScan() && packet.partCount() == 2));
+			var held = finalCut.stream().filter(packet -> packet.entries().getFirst().fallback()).findFirst().orElseThrow();
+			finalCut.stream().filter(packet -> packet != held).forEach(f.client::accept);
+			f.client.accept(aggregate); f.client.accept(exact);
+			assertFalse(f.client.preview(1).completeScan(), "an older aggregate part cannot satisfy the newer cumulative cut's missing index");
+			f.client.accept(held); var complete = f.client.preview(1); assertTrue(complete.completeScan()); assertEquals(2, complete.entries().size());
+			assertEquals(LargeNative.LARGE_AMOUNT + 1, complete.entries().stream().filter(ClientInventory.EntryView::fallback).findFirst().orElseThrow().count());
+			f.client.accept(exact); f.client.accept(aggregate); assertEquals(complete, f.client.preview(1));
+			backend.handle(input().readOwner(), InventoryC2SPacket.select(f.epoch, 100, 1, 1, 1, exact.baselineId(), exact.statusRevision(), exact.entries().getFirst().key(), "danger"), 5, f.settings);
+			assertEquals(0, f.host.store.size()); assertEquals(5, nativeSource.visibleReads.size(), "a retired exact reference cannot authorize a live witness");
+			f.repair(backend, 6, false); f.tick(backend, 6);
+			assertTrue(f.client.preview(1).completeScan()); assertEquals(complete.entries(), f.client.preview(1).entries()); assertEquals(5, nativeSource.visibleReads.size());
+			f.client.accept(exact); assertEquals(complete.entries(), f.client.preview(1).entries());
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+
 	@Test void nativeRetainedEvidenceSurvivesDisplayRebaselineWithoutRescanningOrRestoringStrippedDetail() {
 		for (boolean tracking : new boolean[] {false, true}) {
 			var f = new NativeClient(); var nativeSource = new LargeNative(2, false);

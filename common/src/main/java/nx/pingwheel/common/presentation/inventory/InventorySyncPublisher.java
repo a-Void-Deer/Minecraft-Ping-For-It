@@ -27,6 +27,7 @@ import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /** Actual bounded dedicated publication. Queued cuts remain immutable until fully transmitted. */
 public final class InventorySyncPublisher implements SyncPublisher, AutoCloseable {
@@ -328,7 +329,12 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		long queue = values.stream().mapToLong(InventorySyncPublisher::cost).sum();
 		boolean tracking = state.route.markerId() != null;
 		long pendingCost = values.stream().mapToLong(e -> state.pending.containsKey(e.key()) ? cost(state.pending.get(e.key())) : 0).sum();
-		if (state.restageLatest) {
+		// A completed preview certifies receipt of the cumulative projection, not
+		// just this delta. Earlier transport handoffs are not acknowledgements.
+		// Reuse owned immutable entries, but charge every repeated key to the queue
+		// and every final part to the normal wire budget and client part barrier.
+		boolean cumulative = state.restageLatest || !tracking && result.completeness() == CaptureResult.Completeness.COMPLETE;
+		if (cumulative) {
 			// The cancelled immutable cut may contain older versions than offered.
 			// Repend the latest offered values, including keys absent from this delta.
 			pendingCost = state.pending.values().stream().mapToLong(InventorySyncPublisher::cost).sum();
@@ -353,7 +359,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		// grant. Do not clear/repend in place: allocation failure must leave latest
 		// offers, pending queue accounting and retirement dirty state retryable.
 		var offered = new LinkedHashMap<>(state.offered);
-		var pending = new LinkedHashMap<>(state.restageLatest ? state.offered : state.pending);
+		var pending = new LinkedHashMap<>(cumulative ? state.offered : state.pending);
 		for (var value : values) {
 			if (!value.replaceGroup()) continue;
 			offered.values().removeIf(old -> old.itemId().equals(value.itemId()) && !old.key().equals(value.key()));
@@ -475,6 +481,11 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		State state = states.get(key(context));
 		if (state == null || !state.context.equals(context)) return;
 		withdraw(state);
+		// The caller cancelled the data barrier too. Retained offered values are
+		// not evidence of recipient delivery and cannot become an empty completion.
+		if (state.route.markerId() == null && state.complete) {
+			state.complete = false; state.control = false; state.controlDelay.cancel();
+		}
 	}
 	/**
 	 * True while this context's control frame (a marker fence or a completion
@@ -589,15 +600,31 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		if (state.route.markerId() == null) {
 			long cap = settings.previewClientPeriodBytes();
 			long capacity = cap - Math.min(cap, 128 + cap / 16);
-			var iterator = state.pending.values().iterator();
-			while (iterator.hasNext()) {
-				var entry = iterator.next();
-				long bytes;
-				try { bytes = packet(state, false, List.of(entry), 0, 1).encodedSize(displayBytes, frameBytes); }
-				catch (IllegalArgumentException oversized) { bytes = Long.MAX_VALUE; }
-				if (bytes <= capacity) continue;
-				previewQueued -= cost(entry); iterator.remove();
-				state.deliveryIncomplete = true; state.complete = false; state.status = InventoryS2CPacket.Status.INCOMPLETE; state.control = true;
+			// Measure actual multipart framing, including indexes >=128. A drop
+			// changes READY to the longer INCOMPLETE status, requiring one recheck.
+			// Within each pass, original indexes/count conservatively bound the
+			// final reindexed widths: removing keys can only shrink those VarInts.
+			// At most two passes, rather than rescanning displays after every drop.
+			for (int pass = 0; pass < 2 && !state.pending.isEmpty(); pass++) {
+				boolean removed = false, complete = state.complete;
+				InventoryS2CPacket.Status status = state.status;
+				int parts = state.pending.size(), index = 0;
+				var iterator = state.pending.values().iterator();
+				while (iterator.hasNext()) {
+					var entry = iterator.next();
+					long bytes;
+					try {
+						// Checksum has fixed wire width; do not sort/hash the projection
+						// for each candidate measurement. Actual parts get its real digest.
+						bytes = InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, state.route.epoch(), state.route.requestId(), null,
+							state.context.baseline(), state.context.stateFence(), state.offeredWatermark, index++, parts,
+							complete, status, 0, List.of(entry)).stamp(state.route.presentationEpoch(), state.route.view()).encodedSize(displayBytes, frameBytes);
+					} catch (IllegalArgumentException oversized) { bytes = Long.MAX_VALUE; }
+					if (bytes <= capacity) continue;
+					previewQueued -= cost(entry); iterator.remove(); removed = true;
+					state.deliveryIncomplete = true; state.complete = false; state.status = InventoryS2CPacket.Status.INCOMPLETE; state.control = true;
+				}
+				if (!removed || status == InventoryS2CPacket.Status.INCOMPLETE) break;
 			}
 		}
 		if (state.pending.isEmpty()) { state.batchDelay.cancel(); state.dataDelay.cancel(); return; }
@@ -736,7 +763,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		if (entry.displayJson() != null && textBytes(entry.displayJson()) > displayBytes) return false;
 		return FRAME_FIXED_BYTES + (long) ENTRY_FIXED_BYTES + entryTextBytes(entry) <= frameBytes;
 	}
-	private static boolean sameValue(InventoryS2CPacket.Entry a, InventoryS2CPacket.Entry b) {
+	private static boolean sameValue(InventoryS2CPacket.@Nullable Entry a, InventoryS2CPacket.Entry b) {
 		return a != null && a.count() == b.count() && a.fallback() == b.fallback() && a.quality() == b.quality() && a.itemId().equals(b.itemId())
 			&& a.label().equals(b.label()) && java.util.Objects.equals(a.displayJson(), b.displayJson()) && java.util.Objects.equals(a.itemPingType(), b.itemPingType());
 	}
