@@ -333,11 +333,11 @@ public final class InventoryBackend implements AutoCloseable {
 	}
 	private void endCycle(Module module, long cycle) {
 		if (sink == BudgetDelaySink.NONE) return;
-		try { sink.endCycle(module, cycle, System.nanoTime()); }
+		try { sink.endCycle(module, cycle, tick); }
 		catch (RuntimeException | LinkageError ignored) { /* diagnostic isolation */ }
 	}
 	private void delay(InventoryBudgetDelayState stage, Module module, long id, String name, int reasons) {
-		stage.observe(sink, module == Module.INVENTORY_PREVIEW ? previewCycle : trackingCycle, System.nanoTime(), reasons,
+		stage.observe(sink, module == Module.INVENTORY_PREVIEW ? previewCycle : trackingCycle, tick, reasons,
 			() -> new WorkItem(module.name() + "/" + id + "/" + name, "Inventory " + id + " " + name), Quantity::unknown);
 	}
 	private void previewDelay(Preview preview, InventoryBudgetDelayState stage, String name, int reasons) {
@@ -366,7 +366,7 @@ public final class InventoryBackend implements AutoCloseable {
 			}
 		}
 		DelayState state = delayed ? DelayState.DELAYED : eligible ? DelayState.HEALTHY : live ? DelayState.NEUTRAL : DelayState.IDLE;
-		try { sink.state(module, module == Module.INVENTORY_PREVIEW ? previewCycle : trackingCycle, System.nanoTime(), state); }
+		try { sink.state(module, module == Module.INVENTORY_PREVIEW ? previewCycle : trackingCycle, tick, state); }
 		catch (RuntimeException | LinkageError ignored) { /* diagnostic isolation */ }
 	}
 	public void handle(UUID player, InventoryC2SPacket packet, long now, InventorySettings settings) {

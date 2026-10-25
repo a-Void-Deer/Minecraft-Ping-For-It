@@ -53,7 +53,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Actual native source, freezer and shared runtime, with the unchanged default memory cap. */
+/** Actual native source, freezer and shared runtime under the default memory cap. */
 class InventoryCatalogNativeReadWiringTest {
 	@Test void indexedReadAndExactWitnessAcquireMetadataBeforeGetterAndFreezeBeforeProviderPostcheck() {
 		for (boolean external : new boolean[] {false, true}) for (boolean witness : new boolean[] {false, true})
@@ -166,7 +166,7 @@ class InventoryCatalogNativeReadWiringTest {
 			world.add(BlockPos.ZERO, state);
 			world.add(BlockPos.ZERO.relative(ChestBlock.getConnectedDirection(state)), state.setValue(ChestBlock.TYPE, ChestType.RIGHT));
 		}
-		var settings = InventorySettings.serverDefaults(); assertEquals(16, settings.getPendingMemoryMiB());
+		var settings = InventorySettings.serverDefaults();
 		var input = input();
 		try (var runtime = new InventoryRuntime(new InventoryRuntime.SourceResolver() {
 			@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput request) { return InventoryMinecraftSources.resolutionValidationCost(request); }
@@ -185,7 +185,7 @@ class InventoryCatalogNativeReadWiringTest {
 			assertEquals(CaptureResult.Completeness.COMPLETE, last.result().completeness());
 			assertEquals(CaptureResult.Consistency.EVENTUAL, last.result().consistency()); assertFalse(observed.getFirst().aggregateRequired());
 			assertEquals(InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, last.inventorySweepEvidence());
-			preview.retainCompleted(); assertEquals(Optional.of(true), runtime.probe(preview), "publication evidence stays admitted under the unchanged default memory cap");
+			preview.retainCompleted(); assertEquals(Optional.of(true), runtime.probe(preview), "publication evidence stays admitted under the default memory cap");
 			var chosen = observed.getFirst();
 			var selection = new InventorySelection(chosen.key(), chosen.key().itemId(), chosen.label(), chosen.displayJson(), false, "danger");
 			assertTrue(runtime.selectionPresent(input, selection, 0)); assertEquals(slots + 1, world.reads(), "SELECT is a live witness, never the captured count");

@@ -14,6 +14,7 @@ import nx.pingwheel.common.config.IntLimit;
 import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.presentation.budget.BudgetDelayMonitor;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayEvent;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayState;
@@ -28,30 +29,39 @@ import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Nullable;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Production producer seams; typed diagnostics only, with no Minecraft startup. */
 class InventoryBudgetDelayIntegrationTest {
 
 	static final class RecordingSink implements BudgetDelaySink {
-		record Event(Module module, long cycleId, WorkItem item, boolean firstItemObservation,
+		record Event(Module module, long cycleId, long serverTick, WorkItem item, boolean firstItemObservation,
 			int newReasonBits, Quantity quantity) {
 			boolean hasReason(Reason reason) { return (newReasonBits & reason.bit()) != 0; }
 		}
-		record StateCall(Module module, long cycleId, DelayState state) {}
-		record EndCall(Module module, long cycleId) {}
+		record StateCall(Module module, long cycleId, long serverTick, DelayState state) {}
+		record EndCall(Module module, long cycleId, long serverTick) {}
+		final BudgetDelaySink delegate;
+		RecordingSink() { this(BudgetDelaySink.NONE); }
+		RecordingSink(BudgetDelaySink delegate) { this.delegate = delegate; }
 		final List<Event> events = new ArrayList<>();
 		final List<StateCall> states = new ArrayList<>();
 		final List<EndCall> ends = new ArrayList<>();
 		@Override public void observe(DelayEvent event) {
-			events.add(new Event(event.module(), event.cycleId(), event.item(), event.firstItemObservation(), event.newReasonBits(), event.quantity()));
+			events.add(new Event(event.module(), event.cycleId(), event.serverTick(), event.item(), event.firstItemObservation(), event.newReasonBits(), event.quantity()));
+			delegate.observe(event);
 		}
-		@Override public void state(Module module, long cycleId, long nowNanos, DelayState state) { states.add(new StateCall(module, cycleId, state)); }
-		@Override public void endCycle(Module module, long cycleId, long nowNanos) { ends.add(new EndCall(module, cycleId)); }
+		@Override public void state(Module module, long cycleId, long serverTick, DelayState state) {
+			states.add(new StateCall(module, cycleId, serverTick, state)); delegate.state(module, cycleId, serverTick, state);
+		}
+		@Override public void endCycle(Module module, long cycleId, long serverTick) {
+			ends.add(new EndCall(module, cycleId, serverTick)); delegate.endCycle(module, cycleId, serverTick);
+		}
 		boolean sawReason(Module module, Reason reason) { return events.stream().anyMatch(event -> event.module() == module && event.hasReason(reason)); }
 		long endCount(Module module, long cycleId) { return ends.stream().filter(call -> call.module() == module && call.cycleId() == cycleId).count(); }
-		DelayState lastState(Module module, long cycleId) {
-			DelayState last = null;
+		@Nullable DelayState lastState(Module module, long cycleId) {
+			@Nullable DelayState last = null;
 			for (StateCall call : states) if (call.module() == module && call.cycleId() == cycleId) last = call.state();
 			return last;
 		}
@@ -61,8 +71,8 @@ class InventoryBudgetDelayIntegrationTest {
 		ThrowingSink(boolean linkage) { this.linkage = linkage; }
 		private void fail() { if (linkage) throw new LinkageError("monitoring failure"); throw new IllegalStateException("monitoring failure"); }
 		@Override public void observe(DelayEvent event) { fail(); }
-		@Override public void state(Module module, long cycleId, long nowNanos, DelayState state) { fail(); }
-		@Override public void endCycle(Module module, long cycleId, long nowNanos) { fail(); }
+		@Override public void state(Module module, long cycleId, long serverTick, DelayState state) { fail(); }
+		@Override public void endCycle(Module module, long cycleId, long serverTick) { fail(); }
 	}
 	private record ScriptResult(int reads, List<Integer> readSlots, List<InventoryS2CPacket.Kind> kinds,
 		long retained, long reserved, long previewPeriod, long trackingPeriod) {}
@@ -133,14 +143,15 @@ class InventoryBudgetDelayIntegrationTest {
 		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
 		var owner = new UUID(41, 1); var reads = new AtomicInteger();
 		try (var runtime = runtime((input, cap) -> Optional.of(blankInclusiveSource(input, reads)), settings, sink)) {
-			runtime.advance(0, settings);
+			runtime.advance(1000, settings);
 			var consumer = runtime.attach(InventoryRuntimeTest.input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
 			var first = runtime.step(consumer).orElseThrow(); assertEquals(1, first.slots().size()); assertEquals(3, first.result().coverage().expected().orElseThrow());
 			int before = sink.events.size(); assertTrue(runtime.step(consumer).isEmpty());
 			assertTrue(sink.sawReason(Module.INVENTORY_PREVIEW, Reason.PHYSICAL_SLOTS));
+			assertTrue(sink.events.stream().allMatch(event -> event.cycleId() == 0 && event.serverTick() == 1000));
 			assertTrue(sink.events.subList(before, sink.events.size()).stream().noneMatch(event -> event.quantity().known() && event.quantity().unit() == Unit.LOGICAL_SLOT));
-			runtime.advance(1, settings); var blank = runtime.step(consumer).orElseThrow(); assertEquals(1, blank.slots().size()); assertNull(blank.slots().getFirst());
-			runtime.advance(2, settings); assertEquals(3, runtime.step(consumer).orElseThrow().slots().getFirst().count()); assertEquals(3, reads.get());
+			runtime.advance(1001, settings); var blank = runtime.step(consumer).orElseThrow(); assertEquals(1, blank.slots().size()); assertNull(blank.slots().getFirst());
+			runtime.advance(1002, settings); assertEquals(3, runtime.step(consumer).orElseThrow().slots().getFirst().count()); assertEquals(3, reads.get());
 		}
 	}
 	@Test void logicalRefusalReportsKnownBlankInclusiveRemainderAndRestoresWithoutRereads() {
@@ -280,6 +291,34 @@ class InventoryBudgetDelayIntegrationTest {
 			assertEquals(1, sink.endCount(Module.INVENTORY_PREVIEW, cycle)); assertTrue(sink.events.stream().anyMatch(event -> event.cycleId() == cycle && event.hasReason(Reason.LOGICAL_CLIENT_OR_TARGET)));
 		}
 	}
+	@Test void backendUsesServerTicksWithinOneAccountingPeriodAndIngressCannotAccelerateNotice() {
+		var notices = new ArrayList<Set<Module>>(); var warnings = new ArrayList<BudgetDelayMonitor.CycleSummary>();
+		var monitor = new BudgetDelayMonitor(warnings::add, modules -> { notices.add(Set.copyOf(modules)); return true; });
+		var sink = new RecordingSink(monitor); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(100, 100);
+		settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1)); var reads = new AtomicInteger();
+		var runtime = runtime((input, cap) -> Optional.of(blankInclusiveSource(input, reads)), settings, sink);
+		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
+			helloOpen(backend, host, settings); monitor.finishTick(0, true);
+			backend.tick(1, settings); monitor.finishTick(1, true);
+			var refusal = sink.events.stream().filter(event -> event.hasReason(Reason.LOGICAL_CLIENT_OR_TARGET)).findFirst().orElseThrow();
+			assertEquals(0, refusal.serverTick()); assertEquals(0, refusal.cycleId());
+			for (int repeat = 0; repeat < 30; repeat++) {
+				backend.handle(InventoryBackendTest.A, null, 1, settings); backend.tick(1, settings); monitor.finishTick(1, true);
+			}
+			assertTrue(notices.isEmpty());
+			backend.tick(19, settings); monitor.finishTick(19, true); assertTrue(notices.isEmpty());
+			monitor.finishTick(20, true); assertTrue(notices.isEmpty(), "late flush cannot age consumed evidence");
+			backend.tick(20, settings); monitor.finishTick(20, true);
+			assertEquals(List.of(Set.of(Module.INVENTORY_PREVIEW)), notices);
+			assertEquals(0, runtime.previewPeriodId(), "notification threshold counts ticks, not accounting periods");
+			assertEquals(20, sink.states.get(sink.states.size() - 2).serverTick());
+			assertEquals(1, reads.get(), "repeated ingress and delayed ticks do not refund the logical period budget");
+			assertTrue(warnings.isEmpty(), "WARN still waits for accounting-cycle closure");
+			backend.tick(100, settings); monitor.finishTick(100, true);
+			assertEquals(1, warnings.size()); assertEquals(0, warnings.getFirst().cycleId());
+			assertEquals(100, sink.ends.getFirst().serverTick());
+		}
+	}
 	@Test void invalidityRemovesOutstandingPreviewDelayBeforeCycleClose() {
 		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 20);
 		settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1)); boolean[] sourceValidity = {true}; var reads = new AtomicInteger();
@@ -349,8 +388,8 @@ class InventoryBudgetDelayIntegrationTest {
 		var settings = explicitSettings(20, 20); settings.setPhysicalSlotsPerTick(IntLimit.finite(1)); var reads = new AtomicInteger();
 		BudgetDelaySink fatal = new BudgetDelaySink() {
 			@Override public void observe(DelayEvent event) { throw new OutOfMemoryError("diagnostic fatal failure"); }
-			@Override public void state(Module module, long cycleId, long nowNanos, DelayState state) {}
-			@Override public void endCycle(Module module, long cycleId, long nowNanos) {}
+			@Override public void state(Module module, long cycleId, long serverTick, DelayState state) {}
+			@Override public void endCycle(Module module, long cycleId, long serverTick) {}
 		};
 		try (var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2)), settings, fatal)) {
 			runtime.advance(0, settings); var owner = new UUID(41, 14);
@@ -431,12 +470,13 @@ class InventoryBudgetDelayIntegrationTest {
 	@Test void publisherWorkAndPublicationMemoryRefusalsDeduplicateAndResolve() {
 		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); var memory = new RetainedMemoryLedger(16_000_000); var transport = new InventorySyncPublisherTest.Transport();
 		try (var publisher = new InventorySyncPublisher(memory, transport, sink)) {
-			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("preview/1", 1);
+			publisher.advance(37, settings); var context = InventorySyncPublisherTest.context("preview/1", 1);
 			assertTrue(publisher.register(context, InventorySyncPublisherTest.route(null, "target"))); var capture = InventorySyncPublisherTest.capture(1, 1, 64);
 			assertInstanceOf(SyncPublisher.Outcome.Deferred.class, offer(publisher, context, capture, 0));
 			assertInstanceOf(SyncPublisher.Outcome.Deferred.class, offer(publisher, context, capture, 0));
 			memory.setCap(memory.retained()); assertInstanceOf(SyncPublisher.Outcome.Deferred.class, offer(publisher, context, capture, 1));
 			assertEquals(1, firstObservationCount(sink, Module.INVENTORY_PREVIEW, Reason.PUBLICATION_WORK)); assertEquals(1, reasonEventCount(sink, Module.INVENTORY_PREVIEW, Reason.MEMORY));
+			assertTrue(sink.events.stream().allMatch(event -> event.cycleId() == 0 && event.serverTick() == 37), "publisher uses its advanced server tick, not its accounting period");
 			assertTrue(publisher.delayed(Module.INVENTORY_PREVIEW)); memory.setCap(16_000_000); assertInstanceOf(SyncPublisher.Outcome.Accepted.class, offer(publisher, context, capture, 1));
 			publisher.drain(); assertFalse(publisher.delayed(Module.INVENTORY_PREVIEW)); assertFalse(transport.sent.isEmpty()); assertTrue(sink.states.isEmpty() && sink.ends.isEmpty());
 		}
@@ -644,6 +684,7 @@ class InventoryBudgetDelayIntegrationTest {
 					else assertEquals(0, ((Map<?, ?>) field(((Map<?, ?>) field(backend, "sessions")).get(InventoryBackendTest.A), "previews")).size());
 				} else {
 					assertTrue(sink.events.stream().anyMatch(event -> event.module() == module && event.hasReason(Reason.MEMORY) && event.item().identity().endsWith("/projection")));
+					assertTrue(sink.events.stream().filter(event -> event.item().identity().endsWith("/projection")).allMatch(event -> event.serverTick() == 3), "ingress-first backend reprojection uses the current server tick");
 					assertEquals(DelayState.DELAYED, sink.lastState(module, tracking ? runtime.trackingPeriodId() : runtime.previewPeriodId()));
 				}
 				assertEquals(beforeReads, reads.get());

@@ -4,6 +4,7 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+import org.jetbrains.annotations.Nullable;
 
 import java.math.BigDecimal;
 
@@ -25,13 +26,13 @@ import java.math.BigDecimal;
  * <pre>
  * "inventory": {
  *   "physicalSlotsPerTick": {"unlimited": false, "value": 1024},
- *   "pendingMemoryMiB": 16,
+ *   "pendingMemoryMiB": 64,
  *   "displayByteMultiplier": 1,
  *   "frameByteMultiplier": 1,
  *   "preview": {
  *     "periodTicks": 5,
  *     "maxVariantsPerClientPeriod": {"unlimited": false, "value": 32},
- *     "maxSlotsPerClient": {"unlimited": false, "value": 128},
+ *     "maxSlotsPerClient": {"unlimited": false, "value": 256},
  *     "maxSlotsServer": {"unlimited": false, "value": 1024},
  *     "maxTargetsPerClient": {"unlimited": false, "value": 2},
  *     "clientByteMultiplier": {"unlimited": false, "value": 1},
@@ -218,7 +219,7 @@ public final class InventorySettings {
 
 		private int periodTicks = 5;
 		private IntLimit maxVariantsPerClientPeriod = IntLimit.finite(32);
-		private IntLimit maxSlotsPerClient = IntLimit.finite(128);
+		private @Nullable IntLimit maxSlotsPerClient = IntLimit.finite(256);
 		private IntLimit maxSlotsServer = IntLimit.finite(1024);
 		private IntLimit maxTargetsPerClient = IntLimit.finite(2);
 		/** Preview per-client period bytes on the client grid; independent of every other multiplier. */
@@ -229,7 +230,7 @@ public final class InventorySettings {
 		void validate() {
 			periodTicks = Math.clamp(periodTicks, InventoryLimits.MIN_PERIOD_TICKS, InventoryLimits.MAX_PERIOD_TICKS);
 			maxVariantsPerClientPeriod = validatedLimit(maxVariantsPerClientPeriod, 32);
-			maxSlotsPerClient = validatedLimit(maxSlotsPerClient, 128);
+			maxSlotsPerClient = validatedLimit(maxSlotsPerClient, 256);
 			maxSlotsServer = validatedLimit(maxSlotsServer, 1024);
 			maxTargetsPerClient = validatedLimit(maxTargetsPerClient, 2);
 			clientByteMultiplier = validatedMultiplier(clientByteMultiplier, ByteMultiplierGrid.CLIENT);

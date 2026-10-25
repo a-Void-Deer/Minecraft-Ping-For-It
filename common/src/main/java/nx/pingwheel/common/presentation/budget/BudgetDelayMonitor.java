@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.jetbrains.annotations.Nullable;
 
 /** Server-thread monitor with fixed counters and one bounded open buffer per module. */
 public final class BudgetDelayMonitor implements BudgetDelaySink {
@@ -41,8 +42,8 @@ public final class BudgetDelayMonitor implements BudgetDelaySink {
 		}
 	}
 
-	private static final long STREAK_NANOS = 10_000_000_000L;
-	private static final long COOLDOWN_NANOS = 300_000_000_000L;
+	private static final long STREAK_TICKS = 20;
+	private static final long COOLDOWN_TICKS = 200;
 	private static final Reason[] REASONS = Reason.values();
 	private static final Unit[] UNITS = Unit.values();
 	private final ModuleState[] modules = new ModuleState[Module.values().length];
@@ -57,12 +58,12 @@ public final class BudgetDelayMonitor implements BudgetDelaySink {
 		for (int i = 0; i < modules.length; i++) modules[i] = new ModuleState();
 	}
 
-	@Override public void observe(DelayEvent event) {
+	@Override public void observe(@Nullable DelayEvent event) {
 		if (event == null) return;
 		ModuleState state = modules[event.module().ordinal()];
 		if (!state.accept(event.cycleId())) return;
 		state.observedDelay = true;
-		state.startStreak(event.nowNanos());
+		state.startStreak(event.serverTick());
 		if (event.firstItemObservation()) {
 			state.work.add(1);
 			if (state.samples.size() < 10) state.samples.add(event.item());
@@ -73,24 +74,24 @@ public final class BudgetDelayMonitor implements BudgetDelaySink {
 			if ((event.newReasonBits() & reason.bit()) != 0) state.reasons.add(reason.ordinal(), 1);
 	}
 
-	@Override public void state(Module module, long cycleId, long nowNanos, DelayState finalState) {
+	@Override public void state(@Nullable Module module, long cycleId, long serverTick, @Nullable DelayState finalState) {
 		if (module == null || finalState == null) return;
 		ModuleState state = modules[module.ordinal()];
 		if (!state.accept(cycleId)) return;
 		state.finalState = finalState;
 		state.freshState = true;
 		if (finalState == DelayState.DELAYED) {
-			state.startStreak(nowNanos);
-			state.delayedEvidenceAt = nowNanos;
+			state.startStreak(serverTick);
+			state.delayedEvidenceAt = serverTick;
 		}
 		else if (finalState == DelayState.HEALTHY || finalState == DelayState.IDLE) state.started = false;
 	}
 
-	@Override public void endCycle(Module module, long cycleId, long nowNanos) {
+	@Override public void endCycle(@Nullable Module module, long cycleId, long serverTick) {
 		if (module == null) return;
 		ModuleState state = modules[module.ordinal()];
 		if (!state.open || state.cycleId != cycleId) return;
-		CycleSummary summary = state.observedDelay ? state.summary(module) : null;
+		@Nullable CycleSummary summary = state.observedDelay ? state.summary(module) : null;
 		state.closed = true;
 		state.lastClosed = cycleId;
 		state.open = false;
@@ -102,20 +103,20 @@ public final class BudgetDelayMonitor implements BudgetDelaySink {
 	}
 
 	/** Consumes final producer evidence once; time alone is never fresh evidence. */
-	public void finishTick(long nowNanos, boolean notificationsEnabled) {
+	public void finishTick(long serverTick, boolean notificationsEnabled) {
 		EnumSet<Module> qualified = EnumSet.noneOf(Module.class);
 		for (Module module : Module.values()) {
 			ModuleState state = modules[module.ordinal()];
 			if (state.freshState && state.finalState == DelayState.DELAYED && state.started
-				&& state.delayedEvidenceAt - state.startedAt >= STREAK_NANOS) qualified.add(module);
+				&& state.delayedEvidenceAt - state.startedAt >= STREAK_TICKS) qualified.add(module);
 			state.freshState = false;
 		}
 		if (!notificationsEnabled || qualified.isEmpty()
-			|| delivered && nowNanos - deliveredAt < COOLDOWN_NANOS) return;
+			|| delivered && serverTick - deliveredAt < COOLDOWN_TICKS) return;
 		try {
 			if (notices.notify(Collections.unmodifiableSet(qualified))) {
 				delivered = true;
-				deliveredAt = nowNanos;
+				deliveredAt = serverTick;
 			}
 		} catch (RuntimeException | LinkageError ignored) { /* Failed handoffs consume no cooldown. */ }
 	}
@@ -170,8 +171,8 @@ public final class BudgetDelayMonitor implements BudgetDelaySink {
 			cycleId = cycle;
 			return true;
 		}
-		void startStreak(long now) {
-			if (!started) { started = true; startedAt = now; }
+		void startStreak(long serverTick) {
+			if (!started) { started = true; startedAt = serverTick; }
 		}
 		CycleSummary summary(Module module) {
 			EnumMap<Reason, Count> reasonCounts = new EnumMap<>(Reason.class);

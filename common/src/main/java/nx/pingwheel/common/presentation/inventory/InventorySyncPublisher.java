@@ -135,7 +135,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	long periodId(Module module) { return module == Module.INVENTORY_PREVIEW ? previewClock.period() : trackingClock.period(); }
 	private void delay(State state, InventoryBudgetDelayState stage, int reasons, String name, Unit unit, long amount) {
 		if (!state.monitored) return; // generic negotiation/result controls have no module work identity
-		stage.observe(sink, cycle(state), System.nanoTime(), reasons,
+		stage.observe(sink, cycle(state), tick, reasons,
 			() -> new WorkItem("recipient/" + state.context.recipient() + "/" + state.context.baseline() + "/" + name,
 				"Inventory " + (state.route.markerId() == null ? "request " + state.route.requestId() : "marker " + state.route.markerId().value()) + " " + name),
 			() -> unit == Unit.UNKNOWN ? Quantity.unknown() : Quantity.of(unit, amount));

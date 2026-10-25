@@ -41,7 +41,7 @@ public final class InventoryLimits {
 	public static final int MIN_FINITE_LIMIT = 1;
 
 	/** Default server-wide pending-memory bound in MiB; finite only. */
-	public static final int DEFAULT_PENDING_MEMORY_MIB = 16;
+	public static final int DEFAULT_PENDING_MEMORY_MIB = 64;
 	public static final int MIN_PENDING_MEMORY_MIB = 1;
 	public static final int MAX_PENDING_MEMORY_MIB = 512;
 

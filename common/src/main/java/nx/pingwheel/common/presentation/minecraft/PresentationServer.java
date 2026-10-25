@@ -437,7 +437,6 @@ public final class PresentationServer {
 					packet -> send(player, packet), InventoryServer.tracksInventory(marker.id()), effectiveInventoryTypes(player, session));
 			});
 		PresentationAdapter.CaptureBudget work = new PresentationAdapter.CaptureBudget(MAX_CAPTURE_WORK_PER_TICK);
-		long now = BudgetDelayMonitoring.nowNanos();
 		PresentationFairSampler.Result sampled = sampler.tick(store, LEASES, registry, settings(), tick, work,
 			MAX_CAPTURES_PER_TICK, (marker, adapter) -> demanded(server, marker, adapter),
 			(marker, demand) -> basic(server, marker, demand), marker -> ownerName(server, null, marker), lease -> {
@@ -445,9 +444,9 @@ public final class PresentationServer {
 				Session session = SESSIONS.get(recipient); ServerPlayer player = server.getPlayerList().getPlayer(recipient);
 				if (player != null && session != null && session.ready) publish(player, session, lease);
 			}
-		}, delaySink, now);
-		if (previews != null) previews.drain(tick, work, MAX_CAPTURES_PER_TICK - sampled.captures(), tick, now);
-		finishPresentationCycle(delaySink, tick, now, sampled.state(), previews);
+		}, delaySink);
+		if (previews != null) previews.drain(tick, work, MAX_CAPTURES_PER_TICK - sampled.captures());
+		finishPresentationCycle(delaySink, tick, tick, sampled.state(), previews);
 	}
 
 	@FunctionalInterface interface LeaseCapture {
@@ -473,13 +472,13 @@ public final class PresentationServer {
 			return BudgetDelaySink.DelayState.HEALTHY;
 		return second;
 	}
-	static void finishPresentationCycle(BudgetDelaySink sink, long cycle, long now,
-		BudgetDelaySink.DelayState sampled, PresentationPreviewServer previews) {
+	static void finishPresentationCycle(@org.jetbrains.annotations.Nullable BudgetDelaySink sink, long cycle, long serverTick,
+		BudgetDelaySink.DelayState sampled, @org.jetbrains.annotations.Nullable PresentationPreviewServer previews) {
 		if (sink == null) sink = BudgetDelaySink.NONE;
 		BudgetDelaySink.DelayState state = previews == null ? sampled : combineState(sampled, previews.delayState());
-		try { sink.state(BudgetDelaySink.Module.PRESENTATION, cycle, now, state); }
+		try { sink.state(BudgetDelaySink.Module.PRESENTATION, cycle, serverTick, state); }
 		catch (RuntimeException | LinkageError ignored) {}
-		try { sink.endCycle(BudgetDelaySink.Module.PRESENTATION, cycle, now); }
+		try { sink.endCycle(BudgetDelaySink.Module.PRESENTATION, cycle, serverTick); }
 		catch (RuntimeException | LinkageError ignored) {}
 	}
 

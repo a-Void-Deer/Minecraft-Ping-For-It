@@ -4,7 +4,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
-import java.util.function.LongSupplier;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -27,13 +26,11 @@ import nx.pingwheel.common.presentation.budget.BudgetDelaySink.WorkItem;
 /** One monitoring lifetime per authoritative server identity, independent of config refreshes. */
 public final class BudgetDelayMonitoring {
 
-	private static final Coordinator<MinecraftServer> COORDINATOR = new Coordinator<>(
-		System::nanoTime, new MinecraftPort());
+	private static final Coordinator<MinecraftServer> COORDINATOR = new Coordinator<>(new MinecraftPort());
 
 	private BudgetDelayMonitoring() {}
 
 	public static BudgetDelaySink sink(MinecraftServer server) { return COORDINATOR.sink(server); }
-	public static long nowNanos() { return COORDINATOR.nowNanos(); }
 	public static void finishTick(MinecraftServer server) { COORDINATOR.finishTick(server); }
 	public static void reset() { COORDINATOR.reset(); }
 	public static void stopped(MinecraftServer server) { COORDINATOR.stopped(server); }
@@ -111,6 +108,7 @@ public final class BudgetDelayMonitoring {
 		void sendSystemMessage(Set<Module> modules);
 	}
 	interface ServerPort<S> {
+		long serverTick(S server);
 		boolean notificationsEnabled(S server);
 		boolean dedicated(S server);
 		@Nullable UUID hostId(S server);
@@ -119,26 +117,22 @@ public final class BudgetDelayMonitoring {
 
 	/** Pure identity/authority/config/clock ports; no Minecraft or platform initialization in tests. */
 	static final class Coordinator<S> {
-		private final LongSupplier clock;
 		private final Consumer<CycleSummary> warnings;
 		private final ServerPort<S> port;
 		private @Nullable S active;
 		private @Nullable Lifetime lifetime;
 
-		Coordinator(LongSupplier clock, ServerPort<S> port) {
-			this.clock = Objects.requireNonNull(clock);
+		Coordinator(ServerPort<S> port) {
 			this.warnings = BudgetDelayMonitoring::reportSummary;
 			this.port = Objects.requireNonNull(port);
 		}
 
-		Coordinator(LongSupplier clock, Consumer<String> warnings, ServerPort<S> port) {
-			this.clock = Objects.requireNonNull(clock);
+		Coordinator(Consumer<String> warnings, ServerPort<S> port) {
 			Objects.requireNonNull(warnings);
 			this.warnings = summary -> warnings.accept(formatSummary(summary));
 			this.port = Objects.requireNonNull(port);
 		}
-		long nowNanos() { return clock.getAsLong(); }
-		BudgetDelaySink sink(S server) {
+		BudgetDelaySink sink(@Nullable S server) {
 			if (server == null) return BudgetDelaySink.NONE;
 			try {
 				if (active != server) {
@@ -149,14 +143,14 @@ public final class BudgetDelayMonitoring {
 				return lifetime;
 			} catch (RuntimeException | LinkageError ignored) { return BudgetDelaySink.NONE; }
 		}
-		void finishTick(S server) {
+		void finishTick(@Nullable S server) {
 			if (server == null || active != server || lifetime == null) return;
 			boolean enabled = false;
 			try { enabled = port.notificationsEnabled(server); }
 			catch (RuntimeException | LinkageError ignored) {
 				Diagnostics.warn("budget/notice-config", "administrator", () -> "notification setting unavailable; accounting remains active", ignored);
 			}
-			try { lifetime.monitor.finishTick(nowNanos(), enabled); }
+			try { lifetime.monitor.finishTick(port.serverTick(server), enabled); }
 			catch (RuntimeException | LinkageError ignored) { /* Diagnostics cannot break the server tick. */ }
 		}
 		void reset() {
@@ -195,22 +189,23 @@ public final class BudgetDelayMonitoring {
 		final BudgetDelayMonitor monitor;
 		boolean active = true;
 		Lifetime(BudgetDelayMonitor monitor) { this.monitor = monitor; }
-		@Override public void observe(DelayEvent event) {
+		@Override public void observe(@Nullable DelayEvent event) {
 			if (!active) return;
 			try { monitor.observe(event); } catch (RuntimeException | LinkageError ignored) {}
 		}
-		@Override public void state(Module module, long cycle, long now, DelayState state) {
+		@Override public void state(@Nullable Module module, long cycle, long serverTick, @Nullable DelayState state) {
 			if (!active) return;
-			try { monitor.state(module, cycle, now, state); } catch (RuntimeException | LinkageError ignored) {}
+			try { monitor.state(module, cycle, serverTick, state); } catch (RuntimeException | LinkageError ignored) {}
 		}
-		@Override public void endCycle(Module module, long cycle, long now) {
+		@Override public void endCycle(@Nullable Module module, long cycle, long serverTick) {
 			if (!active) return;
-			try { monitor.endCycle(module, cycle, now); } catch (RuntimeException | LinkageError ignored) {}
+			try { monitor.endCycle(module, cycle, serverTick); } catch (RuntimeException | LinkageError ignored) {}
 		}
 		void close() { active = false; monitor.reset(); }
 	}
 
 	private static final class MinecraftPort implements ServerPort<MinecraftServer> {
+		@Override public long serverTick(MinecraftServer server) { return server.getTickCount(); }
 		@Override public boolean notificationsEnabled(MinecraftServer server) {
 			return ServerConfig.HANDLER.getConfig().isBudgetDelayNotificationsEnabled();
 		}

@@ -296,7 +296,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			? Quantity.of(Unit.LOGICAL_SLOT, Math.max(0, round.last.coverage().expected().getAsLong() - consumer.cursor)) : Quantity.unknown();
 	}
 	private void delay(Consumer consumer, InventoryBudgetDelayState stage, int reasons, String name) {
-		stage.observe(sink, cycle(consumer), System.nanoTime(), reasons,
+		stage.observe(sink, cycle(consumer), tick, reasons,
 			() -> new WorkItem("consumer/" + consumer.diagnosticId + "/" + name, "Inventory consumer " + consumer.diagnosticId + " " + name),
 			() -> stage == consumer.logicalDelay ? logicalQuantity(consumer) : Quantity.unknown());
 	}
@@ -308,7 +308,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			round.physicalModule = module(consumer);
 			round.physicalDelay = new InventoryBudgetDelayState(round.physicalModule);
 		}
-		round.physicalDelay.observe(sink, cycle(round.physicalModule), System.nanoTime(), reasons,
+		round.physicalDelay.observe(sink, cycle(round.physicalModule), tick, reasons,
 			() -> new WorkItem("round/" + round.sequence + "/physical", "Inventory round " + round.sequence + " physical capture/decode"),
 			() -> requestedSlots < 0 || round.last == null || round.last.coverage().expected().isEmpty()
 				? Quantity.unknown() : Quantity.of(Unit.PHYSICAL_SLOT, Math.max(0, round.last.coverage().expected().getAsLong() - round.size())));

@@ -18,10 +18,9 @@ import nx.pingwheel.common.presentation.budget.BudgetDelaySink.WorkItem;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Oracles use the confirmed real-time boundaries, not monitor constants. */
+/** Oracles use the confirmed server-tick boundaries, not monitor constants. */
 class BudgetDelayMonitorTest {
 
-	private static final long SECOND = 1_000_000_000L;
 	private static final Module PRESENTATION = Module.PRESENTATION;
 
 	private static final class Fixture {
@@ -48,28 +47,39 @@ class BudgetDelayMonitorTest {
 	@Test void thresholdAtZeroOriginNeedsNewDelayedTickAndWarnsEveryClosedCycle() {
 		Fixture f = new Fixture();
 		f.tick(PRESENTATION, 0, 0, true);
-		f.tick(PRESENTATION, 1, 10 * SECOND - 1, true);
+		f.tick(PRESENTATION, 1, 19, true);
 		assertEquals(2, f.warnings.size(), "WARN is per closed budget cycle, not throttled");
 		assertTrue(f.notices.isEmpty());
-		f.monitor.finishTick(10 * SECOND, true);
+		f.monitor.finishTick(20, true);
 		assertTrue(f.notices.isEmpty(), "elapsed time alone is not a delayed tick");
-		f.tick(PRESENTATION, 2, 10 * SECOND, true);
+		f.tick(PRESENTATION, 2, 20, true);
 		assertEquals(List.of(Set.of(PRESENTATION)), f.notices);
-		f.monitor.finishTick(400 * SECOND, true);
+		f.monitor.finishTick(400, true);
 		assertEquals(1, f.notices.size(), "an old state is consumed at the final tick flush");
 	}
 
-	@Test void actualObservationStartsBeforeFinalStateAndNanoTimeMayCrossSignedWrap() {
+	@Test void actualObservationStartsBeforeFinalStateAtNonzeroServerTick() {
 		Fixture f = new Fixture();
-		long origin = Long.MAX_VALUE - 5 * SECOND;
+		long origin = 1234;
 		f.monitor.observe(event(PRESENTATION, 0, origin, "job", true, Reason.CAPTURE_COUNT.bit(), Quantity.unknown()));
-		f.monitor.state(PRESENTATION, 0, origin + 2 * SECOND, DelayState.DELAYED);
-		f.monitor.finishTick(origin + 2 * SECOND, true);
-		f.monitor.state(PRESENTATION, 0, origin + 10 * SECOND - 1, DelayState.DELAYED);
-		f.monitor.finishTick(origin + 10 * SECOND - 1, true);
+		f.monitor.state(PRESENTATION, 0, origin + 2, DelayState.DELAYED);
+		f.monitor.finishTick(origin + 2, true);
+		f.monitor.state(PRESENTATION, 0, origin + 19, DelayState.DELAYED);
+		f.monitor.finishTick(origin + 19, true);
 		assertTrue(f.notices.isEmpty());
-		f.monitor.state(PRESENTATION, 0, origin + 10 * SECOND, DelayState.DELAYED);
-		f.monitor.finishTick(origin + 10 * SECOND, true);
+		f.monitor.state(PRESENTATION, 0, origin + 20, DelayState.DELAYED);
+		f.monitor.finishTick(origin + 20, true);
+		assertEquals(1, f.notices.size());
+	}
+
+	@Test void repeatedIngressAndAccountingCyclesInOneServerTickCannotAdvanceTheStreak() {
+		Fixture f = new Fixture();
+		for (int cycle = 0; cycle < 100; cycle++) f.tick(PRESENTATION, cycle, 1234, true);
+		assertEquals(100, f.warnings.size(), "cycle diagnostics are independent of elapsed server ticks");
+		assertTrue(f.notices.isEmpty());
+		f.tick(PRESENTATION, 100, 1253, true);
+		assertTrue(f.notices.isEmpty());
+		f.tick(PRESENTATION, 101, 1254, true);
 		assertEquals(1, f.notices.size());
 	}
 
@@ -77,23 +87,23 @@ class BudgetDelayMonitorTest {
 		Fixture f = new Fixture();
 		f.monitor.observe(event(PRESENTATION, 0, 0, "job", true, Reason.MEMORY.bit(), Quantity.unknown()));
 		f.monitor.state(PRESENTATION, 0, 0, DelayState.DELAYED);
-		f.monitor.finishTick(10 * SECOND, true);
+		f.monitor.finishTick(20, true);
 		assertTrue(f.notices.isEmpty(), "no later actual delayed tick occurred before the first flush");
-		f.monitor.state(PRESENTATION, 0, 10 * SECOND, DelayState.DELAYED);
-		f.monitor.finishTick(10 * SECOND, true);
+		f.monitor.state(PRESENTATION, 0, 20, DelayState.DELAYED);
+		f.monitor.finishTick(20, true);
 		assertEquals(1, f.notices.size());
 	}
 
-	@Test void deliveredAtZeroConsumesGlobalCooldownAtExactFiveMinuteBoundary() {
+	@Test void deliveredAtZeroConsumesGlobalCooldownAtExactTwoHundredTickBoundary() {
 		Fixture f = new Fixture();
-		f.tick(PRESENTATION, 0, -10 * SECOND, true);
+		f.tick(PRESENTATION, 0, -20, true);
 		f.tick(PRESENTATION, 1, 0, true);
 		assertEquals(1, f.notices.size());
-		f.tick(Module.INVENTORY_PREVIEW, 0, SECOND, true);
-		f.tick(Module.INVENTORY_PREVIEW, 1, 11 * SECOND, true);
-		f.tick(Module.INVENTORY_PREVIEW, 2, 300 * SECOND - 1, true);
+		f.tick(Module.INVENTORY_PREVIEW, 0, 1, true);
+		f.tick(Module.INVENTORY_PREVIEW, 1, 21, true);
+		f.tick(Module.INVENTORY_PREVIEW, 2, 199, true);
 		assertEquals(1, f.notices.size(), "another module shares the delivered cooldown");
-		f.tick(Module.INVENTORY_PREVIEW, 3, 300 * SECOND, true);
+		f.tick(Module.INVENTORY_PREVIEW, 3, 200, true);
 		assertEquals(List.of(Set.of(PRESENTATION), Set.of(Module.INVENTORY_PREVIEW)), f.notices);
 	}
 
@@ -106,24 +116,24 @@ class BudgetDelayMonitorTest {
 		});
 		for (Module module : Module.values()) monitor.state(module, 0, 0, DelayState.DELAYED);
 		monitor.finishTick(0, true);
-		for (Module module : Module.values()) monitor.state(module, 0, 10 * SECOND, DelayState.DELAYED);
-		monitor.finishTick(10 * SECOND, true);
+		for (Module module : Module.values()) monitor.state(module, 0, 20, DelayState.DELAYED);
+		monitor.finishTick(20, true);
 		assertEquals(List.of(Set.of(PRESENTATION, Module.INVENTORY_PREVIEW, Module.INVENTORY_TRACKING)), notices);
 	}
 
 	@Test void disabledNoticesKeepWarnAndStreakAndReenableDoesNotRefundDeliveredCooldown() {
 		Fixture f = new Fixture();
 		f.tick(PRESENTATION, 0, 0, false);
-		f.tick(PRESENTATION, 1, 10 * SECOND, false);
+		f.tick(PRESENTATION, 1, 20, false);
 		assertEquals(2, f.warnings.size());
 		assertTrue(f.notices.isEmpty());
-		f.tick(PRESENTATION, 2, 11 * SECOND, true);
+		f.tick(PRESENTATION, 2, 21, true);
 		assertEquals(1, f.notices.size(), "reenable uses the existing delayed streak");
-		f.tick(PRESENTATION, 3, 20 * SECOND, false);
-		f.tick(PRESENTATION, 4, 21 * SECOND, true);
-		f.tick(PRESENTATION, 5, 311 * SECOND - 1, true);
+		f.tick(PRESENTATION, 3, 40, false);
+		f.tick(PRESENTATION, 4, 41, true);
+		f.tick(PRESENTATION, 5, 220, true);
 		assertEquals(1, f.notices.size());
-		f.tick(PRESENTATION, 6, 311 * SECOND, true);
+		f.tick(PRESENTATION, 6, 221, true);
 		assertEquals(2, f.notices.size());
 		assertEquals(7, f.warnings.size());
 	}
@@ -132,29 +142,29 @@ class BudgetDelayMonitorTest {
 		Fixture f = new Fixture();
 		f.delivered = false;
 		f.tick(PRESENTATION, 0, 0, true);
-		f.tick(PRESENTATION, 1, 10 * SECOND, true);
+		f.tick(PRESENTATION, 1, 20, true);
 		assertEquals(1, f.notices.size());
-		f.monitor.finishTick(11 * SECOND, true);
+		f.monitor.finishTick(21, true);
 		assertEquals(1, f.notices.size());
 		f.delivered = true;
-		f.tick(PRESENTATION, 2, 11 * SECOND, true);
+		f.tick(PRESENTATION, 2, 21, true);
 		assertEquals(2, f.notices.size(), "failed dispatch consumed no cooldown");
-		f.tick(PRESENTATION, 3, 12 * SECOND, true);
+		f.tick(PRESENTATION, 3, 22, true);
 		assertEquals(2, f.notices.size());
 	}
 
 	@Test void neutralNeitherCreatesNorDispatchesButPreservesAnActualStreak() {
 		Fixture f = new Fixture();
 		f.monitor.state(PRESENTATION, 0, 0, DelayState.NEUTRAL);
-		f.monitor.finishTick(20 * SECOND, true);
-		f.monitor.endCycle(PRESENTATION, 0, 20 * SECOND);
-		f.tick(PRESENTATION, 1, 20 * SECOND, true);
+		f.monitor.finishTick(40, true);
+		f.monitor.endCycle(PRESENTATION, 0, 40);
+		f.tick(PRESENTATION, 1, 40, true);
 		assertTrue(f.notices.isEmpty(), "neutral did not start at zero");
-		f.monitor.state(PRESENTATION, 2, 30 * SECOND, DelayState.NEUTRAL);
-		f.monitor.finishTick(30 * SECOND, true);
-		f.monitor.endCycle(PRESENTATION, 2, 30 * SECOND);
+		f.monitor.state(PRESENTATION, 2, 60, DelayState.NEUTRAL);
+		f.monitor.finishTick(60, true);
+		f.monitor.endCycle(PRESENTATION, 2, 60);
 		assertTrue(f.notices.isEmpty(), "neutral does not dispatch an old delayed state");
-		f.tick(PRESENTATION, 3, 31 * SECOND, true);
+		f.tick(PRESENTATION, 3, 61, true);
 		assertEquals(1, f.notices.size(), "neutral did not erase actual continuous delay");
 	}
 
@@ -162,14 +172,14 @@ class BudgetDelayMonitorTest {
 		for (DelayState cleared : List.of(DelayState.HEALTHY, DelayState.IDLE)) {
 			Fixture f = new Fixture();
 			f.monitor.observe(event(PRESENTATION, 0, 0, "job", true, Reason.MEMORY.bit(), Quantity.unknown()));
-			f.monitor.state(PRESENTATION, 0, 9 * SECOND, cleared);
-			f.monitor.endCycle(PRESENTATION, 0, 9 * SECOND);
-			f.monitor.finishTick(9 * SECOND, true);
+			f.monitor.state(PRESENTATION, 0, 19, cleared);
+			f.monitor.endCycle(PRESENTATION, 0, 19);
+			f.monitor.finishTick(19, true);
 			assertEquals(1, f.warnings.size());
-			f.tick(PRESENTATION, 1, 10 * SECOND, true);
-			f.tick(PRESENTATION, 2, 20 * SECOND - 1, true);
+			f.tick(PRESENTATION, 1, 20, true);
+			f.tick(PRESENTATION, 2, 39, true);
 			assertTrue(f.notices.isEmpty(), cleared + " must restart the streak");
-			f.tick(PRESENTATION, 3, 20 * SECOND, true);
+			f.tick(PRESENTATION, 3, 40, true);
 			assertEquals(1, f.notices.size());
 		}
 	}
@@ -177,15 +187,15 @@ class BudgetDelayMonitorTest {
 	@Test void resetDiscardsOpenBuffersStreakAndCooldownAndAcceptsReusedCycleIds() {
 		Fixture f = new Fixture();
 		f.tick(PRESENTATION, 0, 0, true);
-		f.tick(PRESENTATION, 1, 10 * SECOND, true);
-		f.monitor.observe(event(Module.INVENTORY_TRACKING, 80, 11 * SECOND, "old", true, Reason.MEMORY.bit(), Quantity.unknown()));
+		f.tick(PRESENTATION, 1, 20, true);
+		f.monitor.observe(event(Module.INVENTORY_TRACKING, 80, 21, "old", true, Reason.MEMORY.bit(), Quantity.unknown()));
 		f.monitor.reset();
-		f.monitor.endCycle(Module.INVENTORY_TRACKING, 80, 12 * SECOND);
+		f.monitor.endCycle(Module.INVENTORY_TRACKING, 80, 22);
 		assertEquals(2, f.warnings.size(), "reset drops old-world open observations");
-		f.tick(PRESENTATION, 0, 12 * SECOND, true);
-		f.tick(PRESENTATION, 1, 22 * SECOND - 1, true);
+		f.tick(PRESENTATION, 0, 22, true);
+		f.tick(PRESENTATION, 1, 41, true);
 		assertEquals(1, f.notices.size());
-		f.tick(PRESENTATION, 2, 22 * SECOND, true);
+		f.tick(PRESENTATION, 2, 42, true);
 		assertEquals(2, f.notices.size(), "new lifetime has no old delivered cooldown");
 	}
 
@@ -255,15 +265,15 @@ class BudgetDelayMonitorTest {
 		f.monitor.endCycle(PRESENTATION, 4, 0);
 		f.monitor.observe(event(PRESENTATION, 4, 1, "closed", true, Reason.MEMORY.bit(), Quantity.unknown()));
 		f.monitor.state(PRESENTATION, 4, 1, DelayState.IDLE);
-		f.tick(PRESENTATION, 5, 10 * SECOND, true);
+		f.tick(PRESENTATION, 5, 20, true);
 		assertEquals(2, f.warnings.size());
 		assertEquals(4, f.warnings.getFirst().cycleId());
 		assertEquals(1, f.warnings.getFirst().observedWorkItems().amount());
 		assertEquals(1, f.notices.size(), "stale healthy/idle reports do not reset a current streak");
-		f.monitor.state(PRESENTATION, 5, 310 * SECOND, DelayState.DELAYED);
-		f.monitor.finishTick(310 * SECOND, true);
+		f.monitor.state(PRESENTATION, 5, 220, DelayState.DELAYED);
+		f.monitor.finishTick(220, true);
 		assertEquals(1, f.notices.size(), "closed-cycle delayed state cannot create fresh notice evidence");
-		f.monitor.endCycle(Module.INVENTORY_PREVIEW, 100, 10 * SECOND);
+		f.monitor.endCycle(Module.INVENTORY_PREVIEW, 100, 20);
 		assertEquals(2, f.warnings.size(), "skipped/unopened empty periods manufacture no WARN");
 	}
 
@@ -278,10 +288,10 @@ class BudgetDelayMonitorTest {
 			monitor.state(PRESENTATION, 0, 0, DelayState.DELAYED);
 			assertDoesNotThrow(() -> monitor.endCycle(PRESENTATION, 0, 0));
 			monitor.finishTick(0, true);
-			monitor.state(PRESENTATION, 1, 10 * SECOND, DelayState.DELAYED);
-			assertDoesNotThrow(() -> monitor.finishTick(10 * SECOND, true));
-			monitor.state(PRESENTATION, 1, 11 * SECOND, DelayState.DELAYED);
-			monitor.finishTick(11 * SECOND, true);
+			monitor.state(PRESENTATION, 1, 20, DelayState.DELAYED);
+			assertDoesNotThrow(() -> monitor.finishTick(20, true));
+			monitor.state(PRESENTATION, 1, 21, DelayState.DELAYED);
+			monitor.finishTick(21, true);
 			assertEquals(2, attempts[0]);
 		}
 		OutOfMemoryError fatal = new OutOfMemoryError("test resource failure");
@@ -290,8 +300,8 @@ class BudgetDelayMonitorTest {
 		monitor.state(PRESENTATION, 0, 0, DelayState.DELAYED);
 		assertSame(fatal, assertThrows(OutOfMemoryError.class, () -> monitor.endCycle(PRESENTATION, 0, 0)));
 		monitor.finishTick(0, true);
-		monitor.state(PRESENTATION, 1, 10 * SECOND, DelayState.DELAYED);
-		assertSame(fatal, assertThrows(OutOfMemoryError.class, () -> monitor.finishTick(10 * SECOND, true)));
+		monitor.state(PRESENTATION, 1, 20, DelayState.DELAYED);
+		assertSame(fatal, assertThrows(OutOfMemoryError.class, () -> monitor.finishTick(20, true)));
 	}
 
 	private static void failWith(Throwable failure) {

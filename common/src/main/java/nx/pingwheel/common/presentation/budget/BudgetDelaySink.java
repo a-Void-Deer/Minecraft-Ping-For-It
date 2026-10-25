@@ -1,19 +1,21 @@
 package nx.pingwheel.common.presentation.budget;
 
 import java.util.Objects;
+import org.jetbrains.annotations.Nullable;
 
 /** Detached, bounded diagnostics. Producers own per-cycle work/reason deduplication. */
 public interface BudgetDelaySink {
 
 	BudgetDelaySink NONE = new BudgetDelaySink() {
-		@Override public void observe(DelayEvent event) {}
-		@Override public void state(Module module, long cycleId, long nowNanos, DelayState state) {}
-		@Override public void endCycle(Module module, long cycleId, long nowNanos) {}
+		@Override public void observe(@Nullable DelayEvent event) {}
+		@Override public void state(@Nullable Module module, long cycleId, long serverTick, @Nullable DelayState state) {}
+		@Override public void endCycle(@Nullable Module module, long cycleId, long serverTick) {}
 	};
 
-	void observe(DelayEvent event);
-	void state(Module module, long cycleId, long nowNanos, DelayState state);
-	void endCycle(Module module, long cycleId, long nowNanos);
+	void observe(@Nullable DelayEvent event);
+	/** The accounting cycle is independent of the authoritative server tick. */
+	void state(@Nullable Module module, long cycleId, long serverTick, @Nullable DelayState state);
+	void endCycle(@Nullable Module module, long cycleId, long serverTick);
 
 	public enum Module { PRESENTATION, INVENTORY_PREVIEW, INVENTORY_TRACKING }
 	public enum DelayState { DELAYED, HEALTHY, IDLE, NEUTRAL }
@@ -65,7 +67,7 @@ public interface BudgetDelaySink {
 		public static Quantity of(Unit unit, long amount) { return new Quantity(unit, amount, true); }
 	}
 
-	public record DelayEvent(Module module, long cycleId, long nowNanos, WorkItem item,
+	public record DelayEvent(Module module, long cycleId, long serverTick, WorkItem item,
 		boolean firstItemObservation, int newReasonBits, Quantity quantity) {
 		public DelayEvent {
 			Objects.requireNonNull(module, "module");

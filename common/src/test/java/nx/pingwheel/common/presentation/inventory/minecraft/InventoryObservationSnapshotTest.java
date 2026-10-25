@@ -52,9 +52,10 @@ class InventoryObservationSnapshotTest {
 	void highOldCeilingUsesOnlyOwnedInputsAndCompletesThroughActualHandleWithoutRecapture(boolean occupied) {
 		var layout = chestLayout(); int oldCap = 96 * 1024;
 		var settings = InventorySettings.serverDefaults();
+		settings.setPendingMemoryMiB(16);
 		settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(24));
 		settings.setFrameByteMultiplier(java.math.BigDecimal.valueOf(4)); settings.validate();
-		assertEquals(oldCap, settings.effectiveDisplayBytes()); assertEquals(16, settings.getPendingMemoryMiB());
+		assertEquals(oldCap, settings.effectiveDisplayBytes());
 		var reads = new AtomicInteger(); var captures = new AtomicInteger(); var validations = new AtomicInteger(); var slotParses = new AtomicInteger();
 		long amount = 9007199254740993L;
 		var stack = new ItemStack(Items.STONE);

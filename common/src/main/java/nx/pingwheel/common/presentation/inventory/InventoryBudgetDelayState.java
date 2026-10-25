@@ -2,6 +2,7 @@ package nx.pingwheel.common.presentation.inventory;
 
 import java.util.Objects;
 import java.util.function.Supplier;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayEvent;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Module;
@@ -58,8 +59,8 @@ final class InventoryBudgetDelayState {
 	 * <p>State is committed before diagnostic construction and sink invocation so
 	 * fail-soft monitoring cannot cause a producer to retry or lose progress.</p>
 	 */
-	boolean observe(BudgetDelaySink sink, long cycleId, long nowNanos, int reasons,
-		Supplier<WorkItem> item, Supplier<Quantity> quantity) {
+	boolean observe(@Nullable BudgetDelaySink sink, long cycleId, long serverTick, int reasons,
+		@Nullable Supplier<WorkItem> item, @Nullable Supplier<Quantity> quantity) {
 		if (reasons == 0) return false;
 		markEligible(cycleId);
 		outstanding = true;
@@ -70,8 +71,8 @@ final class InventoryBudgetDelayState {
 		reasonMask |= newReasons;
 		if (sink == null || sink == BudgetDelaySink.NONE) return true;
 		try {
-			sink.observe(new DelayEvent(module, cycleId, nowNanos, item.get(),
-				firstObservation, newReasons, quantity.get()));
+			sink.observe(new DelayEvent(module, cycleId, serverTick, Objects.requireNonNull(item).get(),
+				firstObservation, newReasons, Objects.requireNonNull(quantity).get()));
 		}
 		catch (RuntimeException | LinkageError ignored) {
 			// Diagnostics must not change producer scheduling or publication.
