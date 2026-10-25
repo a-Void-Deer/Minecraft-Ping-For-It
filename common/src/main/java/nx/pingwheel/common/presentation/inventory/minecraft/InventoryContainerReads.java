@@ -85,19 +85,19 @@ public final class InventoryContainerReads {
 		requireScope(value, admitted, scratch.scopeActive, 0, scratch.scopeNodes);
 	}
 	/** Compose only full native CompoundContainer delegates, never discover members or widen a sided child. */
-	public static List<Integer> scopedSlots(Container value, Predicate<Container> admitted, Function<Container, List<Integer>> local) {
+	public static @org.jetbrains.annotations.Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> scopedSlots(Container value, Predicate<Container> admitted, Function<Container, List<Integer>> local) {
 		return scopedSlots(value, admitted, local, new Scratch());
 	}
 	/** Same composition through caller-reused finite scratch. */
-	public static List<Integer> scopedSlots(Container value, Predicate<Container> admitted, Function<Container, List<Integer>> local, Scratch scratch) {
+	public static @org.jetbrains.annotations.Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> scopedSlots(Container value, Predicate<Container> admitted, Function<Container, List<Integer>> local, Scratch scratch) {
 		requireScope(value, admitted, scratch);
-		List<Integer> known = local.apply(value);
+		@org.jetbrains.annotations.Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> known = local.apply(value);
 		if (known != null || !(value instanceof CompoundContainer) || !audited(value, admitted, scratch)) return known;
 		return fullCompound(value, admitted, local, 0);
 	}
-	private static List<Integer> fullCompound(Container value, Predicate<Container> admitted, Function<Container, List<Integer>> local, int depth) {
+	private static @org.jetbrains.annotations.Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> fullCompound(Container value, Predicate<Container> admitted, Function<Container, List<Integer>> local, int depth) {
 		if (depth >= 16) throw new IllegalStateException("container wrapper bound");
-		List<Integer> known = local.apply(value);
+		@org.jetbrains.annotations.Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> known = local.apply(value);
 		if (known != null) {
 			int size = value.getContainerSize();
 			if (known.size() != size) return null;
@@ -112,7 +112,15 @@ public final class InventoryContainerReads {
 		int size = value.getContainerSize();
 		if (size < 0 || size > nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS)
 			throw new IllegalStateException("compound slot bound");
-		return java.util.stream.IntStream.range(0, size).boxed().toList();
+		return new FullSlotRange(size);
+	}
+	/** A composed full mapping is a range, not a second retained list of boxed slot indices. */
+	@org.jetbrains.annotations.NotNullByDefault
+	private static final class FullSlotRange extends java.util.AbstractList<Integer> implements java.util.RandomAccess {
+		private final int size;
+		FullSlotRange(int size) { this.size = size; }
+		@Override public Integer get(int index) { return java.util.Objects.checkIndex(index, size); }
+		@Override public int size() { return size; }
 	}
 	private static void requireScope(Container value, Predicate<Container> admitted, Container[] active, int depth, int[] nodes) {
 		if (value == null || depth == active.length || ++nodes[0] > 32) throw new IllegalStateException("container wrapper bound");

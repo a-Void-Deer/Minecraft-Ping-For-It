@@ -1104,7 +1104,8 @@ class InventoryRuntimeTest {
 			assertEquals(before + 1, validations.get(), "identical scan/completed references are validated only once");
 			long retainedPages = runtime.memory().retained(); a.restart(); b.restart();
 			assertTrue(runtime.memory().retained() < retainedPages, "last scanner drops pages while both evidence references stay charged");
-			assertEquals(2L * 4096 + 1024 + 4096 + 262144 + 32768, runtime.memory().retained(), "one bounded evidence lease plus paid target quota and two consumers");
+			long fixed = 4096 + 256L * (2 * 80 + 44) + 2 * (40 + 512 * 8) + InventorySlotJournal.initialRetainedBytes();
+			assertEquals(2L * 4096 + 1024 + fixed, runtime.memory().retained(), "one bounded evidence lease plus paid target quota and two consumers; no guessed provider payload slab");
 			assertEquals(0, closes.get()); assertEquals(1, snapshotCloses.get(), "last scanner releases detached snapshot memory, but not its source evidence");
 			assertTrue(runtime.step(a).isPresent()); a.retainCompleted(); assertEquals(4, reads.get(), "restart creates a fresh sweep even in the same tick");
 			assertEquals(0, closes.get(), "the slow peer still owns the old completed evidence");

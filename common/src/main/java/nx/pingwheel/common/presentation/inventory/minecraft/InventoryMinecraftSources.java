@@ -549,10 +549,12 @@ public final class InventoryMinecraftSources {
 		private final java.util.function.IntConsumer tightenDisplay;
 		private final IntFunction<InventoryReprojectionSummary> compatibilityReprojectionSummary;
 		private int displayBytes;
-		private IPlatformInventoryService.Access liveAccess;
+		private IPlatformInventoryService.@Nullable Access liveAccess;
+		private int operationDepth;
 		private InventoryItemCodec.@Nullable Catalog residentCatalog;
 		private InventoryValidationBudget.@Nullable Allowance validation;
 		private final InventoryValidationBudget.Cost validationViewCost;
+		private final long sourceRetainedBytes;
 		private boolean closed;
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec) {
@@ -592,7 +594,9 @@ public final class InventoryMinecraftSources {
 			originalSlots = original.access == null ? original.slots.size() : original.access.slots();
 			originalStableCursor = original.access == null || original.access.stableCursor();
 			liveAccess = original.access;
+			sourceRetainedBytes = InventorySourceRetention.source(original);
 		}
+		@Override public long sourceRetainedBytes() { return sourceRetainedBytes; }
 		@Override public int displayBytes() { return displayBytes; }
 		@Override public InventorySourceAccess.ReadMode readMode() {
 			return world != null && originalStableCursor && testSnapshotCapture == null ? InventorySourceAccess.ReadMode.NATIVE_INCREMENTAL : InventorySourceAccess.ReadMode.ADAPTER;
@@ -636,7 +640,7 @@ public final class InventoryMinecraftSources {
 					|| current.discoverItems != original.discoverItems) return false;
 				if ((current.access == null) != (original.access == null) || current.access != null && (!current.access.valid()
 					|| current.access.slots() != originalSlots || current.access.stableCursor() != originalStableCursor)) return false;
-				liveAccess = current.access;
+				if (operationDepth != 0) liveAccess = current.access;
 				return true;
 			} catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
 			catch (RuntimeException | LinkageError unavailable) {
@@ -680,6 +684,9 @@ public final class InventoryMinecraftSources {
 		// Reacquired capabilities do not prove stable-version ownership; conservatively eventual.
 		@Override public OptionalLong version() { return OptionalLong.empty(); }
 		@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
+			return Objects.requireNonNull(withLiveAccess(this::snapshotPlanCurrent));
+		}
+		private Optional<InventorySourceAccess.SnapshotPlan> snapshotPlanCurrent() {
 			InventorySnapshotLayout layout = original.snapshotLayout;
 			if (layout == null) {
 				var grant = validation == null ? new InventoryValidationBudget.Allowance(discoveryValidationCost()) : validation;
@@ -720,6 +727,7 @@ public final class InventoryMinecraftSources {
 					var allowance = Objects.requireNonNull(grant);
 					long beforeAllocation = allowance.attemptedAllocationBytes(), beforeWork = allowance.attemptedWorkUnits();
 					InventoryValidationBudget.@Nullable Allowance previous = validation; validation = allowance;
+					operationDepth++;
 					try {
 						allowance.debit(InventoryValidationBudget.bookkeeping());
 						allowance.debit(InventoryValidationBudget.fixed(layout));
@@ -731,6 +739,7 @@ public final class InventoryMinecraftSources {
 					} finally {
 						attemptedAllocation = allowance.attemptedAllocationBytes() - beforeAllocation;
 						attemptedWork = allowance.attemptedWorkUnits() - beforeWork; validation = previous;
+						if (--operationDepth == 0) liveAccess = original.access;
 					}
 				}
 			});
@@ -751,6 +760,11 @@ public final class InventoryMinecraftSources {
 			// wrapper remains topology evidence, never a stale capture content port.
 			return new View(original.identity, original.entities, original.slots, liveAccess, original.snapshotLayout, original.discoverItems);
 		}
+		private <T> @Nullable T withLiveAccess(Supplier<@Nullable T> operation) {
+			operationDepth++;
+			try { return operation.get(); }
+			finally { if (--operationDepth == 0) liveAccess = original.access; }
+		}
 		@Override public InventoryDomainCodec.Item read(int slot) {
 			return readOwned(slot, null);
 		}
@@ -758,6 +772,9 @@ public final class InventoryMinecraftSources {
 			return readOwned(slot, Objects.requireNonNull(admission));
 		}
 		private @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item readOwned(int slot, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
+			return withLiveAccess(() -> readCurrent(slot, admission));
+		}
+		private InventoryDomainCodec.@Nullable Item readCurrent(int slot, @Nullable InventoryCatalogAdmission admission) {
 			if (!valid()) throw new InventorySourceUnavailableException("inventory view changed");
 			admitRead(1);
 			if (world == null) {
@@ -778,6 +795,9 @@ public final class InventoryMinecraftSources {
 			return enumerateOwned(limit, Objects.requireNonNull(admission));
 		}
 		private InventorySourceAccess.Page enumerateOwned(int limit, InventoryCatalogAdmission admission) {
+			return Objects.requireNonNull(withLiveAccess(() -> enumerateCurrent(limit, admission)));
+		}
+		private InventorySourceAccess.Page enumerateCurrent(int limit, @Nullable InventoryCatalogAdmission admission) {
 			var progress = world == null ? null : new CursorlessProgress();
 			try {
 				if (!valid()) throw new InventorySourceUnavailableException("inventory view changed");
@@ -802,6 +822,9 @@ public final class InventoryMinecraftSources {
 			return matchesSelectionOwned(slot, selection, Objects.requireNonNull(admission));
 		}
 		private boolean matchesSelectionOwned(int slot, InventorySelection selection, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
+			return Objects.requireNonNull(withLiveAccess(() -> matchesSelectionCurrent(slot, selection, admission)));
+		}
+		private boolean matchesSelectionCurrent(int slot, InventorySelection selection, @Nullable InventoryCatalogAdmission admission) {
 			if (world == null) return matches(readOwned(slot, admission), selection);
 			if (!valid()) return false;
 			admitRead(1);
@@ -817,6 +840,9 @@ public final class InventoryMinecraftSources {
 			return observeSelectionOwned(limit, selection, Objects.requireNonNull(admission));
 		}
 		private InventorySourceAccess.SelectionWitness observeSelectionOwned(int limit, InventorySelection selection, InventoryCatalogAdmission admission) {
+			return Objects.requireNonNull(withLiveAccess(() -> observeSelectionCurrent(limit, selection, admission)));
+		}
+		private InventorySourceAccess.SelectionWitness observeSelectionCurrent(int limit, InventorySelection selection, @Nullable InventoryCatalogAdmission admission) {
 			if (world == null) {
 				if (limit < 0) throw new IllegalArgumentException("negative observation limit");
 				var page = enumerateOwned(limit, admission);
@@ -1174,6 +1200,7 @@ public final class InventoryMinecraftSources {
 		private InventoryItemCodec.@Nullable Catalog residentCatalog;
 		private InventoryValidationBudget.@Nullable Allowance validation;
 		private final InventoryValidationBudget.Cost validationViewCost;
+		private final long sourceRetainedBytes;
 
 		ExternalSource(InventorySourceInput input, ExternalBinding first, ExternalBindingResolver bindings,
 			BooleanSupplier onThread, Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec, View view,
@@ -1200,8 +1227,10 @@ public final class InventoryMinecraftSources {
 			this.displayBytes = requireDisplayBytes(displayBytes);
 			this.tightenDisplay = Objects.requireNonNull(tightenDisplay, "tightenDisplay");
 			this.compatibilityReprojectionSummary = Objects.requireNonNull(reprojectionSummary, "reprojectionSummary");
+			this.sourceRetainedBytes = InventorySourceRetention.external(view, descriptor);
 			requireMembers(new Current(first, view));
 		}
+		@Override public long sourceRetainedBytes() { return sourceRetainedBytes; }
 		@Override public int displayBytes() { return displayBytes; }
 		@Override public InventorySourceAccess.ReadMode readMode() {
 			return stableCursor ? InventorySourceAccess.ReadMode.NATIVE_INCREMENTAL : InventorySourceAccess.ReadMode.ADAPTER;

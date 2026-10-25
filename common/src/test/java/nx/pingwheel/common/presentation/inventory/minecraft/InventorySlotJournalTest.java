@@ -147,4 +147,25 @@ class InventorySlotJournalTest {
 			assertEquals(catalog.modeledRetainedBytes(), catalog.retainedCost().totalBytes());
 		}
 	}
+	@Test void certifiedReplayAllocationIsIndependentOfDisplayLength() {
+		var bean = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
+		assertTrue(bean.isThreadAllocatedMemorySupported()); bean.setThreadAllocatedMemoryEnabled(true);
+		long thread = Thread.currentThread().threadId();
+		var catalog = new InventoryItemCodec.Catalog(trap(HolderLookup.Provider.class), 256, 262144, 131072,
+			trap(InventoryResidentAccess.class), trap(InventoryItemNativeAccess.class));
+		String json = "{\"id\":\"test:value\",\"components\":{\"minecraft:custom_data\":{\"text\":\"" + "x".repeat(24000) + "\"}}}";
+		var value = catalog.intern(item("test:value", json, new byte[] {1}), grant());
+		try (var journal = new InventorySlotJournal()) {
+			journal.append(0, value, Long.MAX_VALUE);
+			// Retain each result in an externally observable array so scalar replacement cannot
+			// hide Item allocation. The old path additionally allocates a >=24KB UTF8 array each time.
+			var reads = new nx.pingwheel.common.presentation.inventory.InventoryDomainCodec.Item[512];
+			for (int warm = 0; warm < 10000; warm++) reads[warm & 511] = journal.read(0);
+			long before = bean.getThreadAllocatedBytes(thread);
+			for (int index = 0; index < reads.length; index++) reads[index] = journal.read(0);
+			long allocated = bean.getThreadAllocatedBytes(thread) - before;
+			assertTrue(allocated < 512 * 256L, "replay must allocate only fixed cells, not display-sized validation buffers: " + allocated);
+			for (var read : reads) { assertEquals(Long.MAX_VALUE, read.count()); assertSame(value.display().displayJson(), read.displayJson()); }
+		}
+	}
 }

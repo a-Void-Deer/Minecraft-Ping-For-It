@@ -107,6 +107,8 @@ public final class InventorySourceAccess implements SourceAccess {
 	 * the source offers no usable snapshot support.
 	 */
 	public interface InventoryHandle extends SourceAccess.Handle {
+		/** Cached source-owned metadata, excluding catalogues and detached captures; no callbacks or lazy allocation. */
+		default long sourceRetainedBytes() { return 0; }
 		default ReadMode readMode() { return ReadMode.ADAPTER; }
 		default InventoryItemCodec.@Nullable Catalog nativeCatalog() { return null; }
 		default long nativeCatalogGrowthUpperBound() { return 0; }
@@ -152,6 +154,8 @@ public final class InventorySourceAccess implements SourceAccess {
 	}
 
 	public interface Source extends AutoCloseable {
+		/** Pure cached ownership cost, bounded by the admitted resolution workspace and held until close. */
+		default long sourceRetainedBytes() { return 0; }
 		default ReadMode readMode() { return ReadMode.ADAPTER; }
 		/** Borrowed metadata only: never creates a catalogue or performs a provider callback. */
 		default InventoryItemCodec.@Nullable Catalog nativeCatalog() { return null; }
@@ -418,6 +422,7 @@ public final class InventorySourceAccess implements SourceAccess {
 			this.input = input; this.descriptor = descriptor; this.scope = scope; this.source = source;
 		}
 		@Override public Descriptor descriptor() { return descriptor; }
+		@Override public long sourceRetainedBytes() { return source.sourceRetainedBytes(); }
 		@Override public ReadMode readMode() { return source.readMode(); }
 		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return source.nativeCatalog(); }
 		@Override public long nativeCatalogGrowthUpperBound() { return source.nativeCatalogGrowthUpperBound(); }

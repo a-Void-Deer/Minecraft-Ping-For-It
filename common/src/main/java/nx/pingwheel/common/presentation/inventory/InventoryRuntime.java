@@ -37,7 +37,12 @@ public final class InventoryRuntime implements AutoCloseable {
 	private static final int MAX_CONSUMERS = 256, MAX_ROUNDS = 32;
 	private static final int MAX_RETAINED_ROUNDS = MAX_ROUNDS * 2; // bounded replacement headroom for completed evidence leases
 	private static final long CONSUMER_MEMORY = 4096;
-	private static final long ROUND_MEMORY = 4096 + 262144 + 32768; // provider catalog and bounded logical subject history
+	// Fixed round/handle/projection state; <=256 paid-map and tightened-set nodes
+	// (object40+five refs), paid boxed progress(object40+int4), two <=512-ref hash
+	// tables, and initial journal directories. Keys/subjects are borrowed. Source
+	// metadata, catalogue payloads and journal growth are not hidden in this slab.
+	private static final long ROUND_MEMORY = 4096 + MAX_CONSUMERS * (2L * (40 + 5 * 8) + 40 + 4)
+		+ 2L * (40 + 2 * MAX_CONSUMERS * 8) + InventorySlotJournal.initialRetainedBytes();
 	private static final int REPROJECT_BATCH = 64; // bounded retained-metadata walk per tightening call
 	private static final long PAGE_FIXED_BYTES = 4096L, PAGE_WORKSPACE_FIXED = 8192L;
 	// Bounded metadata/hash/index operations per copied entry, separate from the OLD parser.
@@ -527,6 +532,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		AdmittedSource(InventorySourceAccess.Source delegate) { this(delegate, true); }
 		AdmittedSource(InventorySourceAccess.Source delegate, boolean ownsDelegate) { this.delegate = delegate; this.ownsDelegate = ownsDelegate; }
 		@Override public SourceKey key() { return delegate.key(); }
+		@Override public long sourceRetainedBytes() { return delegate.sourceRetainedBytes(); }
 		@Override public InventorySourceAccess.ReadMode readMode() { return delegate.readMode(); }
 		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return delegate.nativeCatalog(); }
 		@Override public long nativeCatalogGrowthUpperBound() { return delegate.nativeCatalogGrowthUpperBound(); }
@@ -791,7 +797,9 @@ public final class InventoryRuntime implements AutoCloseable {
 			boolean canCreate = handoff == null && scanningRounds < MAX_ROUNDS && retainedRounds < retainedLimit;
 			if (!canCreate && handoff == null && rounds.values().stream().noneMatch(round -> round.key.readScope().equals(consumer.input.viewKey())
 				&& shareable(consumer, round))) { delay(consumer, consumer.admissionDelay, Reason.ROUND_CAPACITY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
-			var retained = memory.tryReserve(authorityWorkspaceBytes());
+			var resolutionCost = resolver.resolutionValidationCost(consumer.input);
+			long resolutionWorkspace = Math.max(InventoryItemBudget.workspaceUpperBound(effectiveDisplayCap()), resolutionCost.workspaceBytes());
+			var retained = memory.tryReserve(checkedAdd(ROUND_MEMORY, resolutionWorkspace));
 			if (retained.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.MEMORY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
 			boolean ownsReservation = true;
 			SourceAccess.Handle openedHandle = null;
@@ -800,7 +808,7 @@ public final class InventoryRuntime implements AutoCloseable {
 				AdmittedSource[] resolvedSource = new AdmittedSource[1];
 				var access = sourceAccess(consumer.input, displayCap, source -> resolvedSource[0] = new AdmittedSource(source));
 				var scope = new SourceAccess.ReadScope(consumer.input.viewKey(), Set.of("pingforit:inventory.items"));
-				var resolution = validation(resolver.resolutionValidationCost(consumer.input), allowance, authorityWorkspaceBytes());
+				var resolution = validation(resolutionCost, allowance, resolutionWorkspace);
 				if (resolution.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
 				SourceAccess.ResolveResult resolved;
 				try (var operation = resolution.get()) {
@@ -822,6 +830,11 @@ public final class InventoryRuntime implements AutoCloseable {
 					return InventorySourceAccess.Preparation.UNAVAILABLE;
 				}
 				openedHandle = started.handle();
+				long sourceBytes = resolvedSource[0].sourceRetainedBytes();
+				// The outer resolution reservation is still held: transfer its owned metadata
+				// into the round/binding ticket before releasing scratch. Catalogue growth is separate.
+				if (sourceBytes < 0 || sourceBytes > resolutionWorkspace)
+					throw new IllegalStateException("source retention exceeds resolution admission");
 				// Aliased hit positions still resolve their canonical key before joining a pinned handoff.
 				if (handoff != null && !handoff.key.equals(available.descriptor().key())) {
 					retire(consumer.completedRound, unavailable(scope.viewKey()));
@@ -845,7 +858,7 @@ public final class InventoryRuntime implements AutoCloseable {
 						retire(consumer.completedRound, unavailable(scope.viewKey()));
 						return InventorySourceAccess.Preparation.UNAVAILABLE; // canonical view topology changed, not admission pressure
 					}
-					retained.get().commit(ROUND_MEMORY);
+					retained.get().commit(checkedAdd(ROUND_MEMORY, resolvedSource[0].sourceRetainedBytes()));
 					round = new Round(available.descriptor().key(), consumer.input, (InventorySourceAccess.InventoryHandle) started.handle(), resolvedSource[0], retained.get(), tick, ++roundSequence, consumer.subject instanceof TrackingSubject, displayCap);
 					retainedRounds++;
 					scanningRounds++;
@@ -883,7 +896,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		RetainedMemoryLedger.Ticket ticket) {
 		if (!(consumer.input.target() instanceof nx.pingwheel.common.domain.Target.ExternalBlockTarget)
 			|| consumer.bindingEvidence != null || consumer.input.sameBinding(round.input)) return false;
-		ticket.commit(ROUND_MEMORY);
+		ticket.commit(checkedAdd(ROUND_MEMORY, handle.sourceRetainedBytes()));
 		consumer.bindingEvidence = handle; consumer.bindingMemory = ticket;
 		return true;
 	}
@@ -1240,7 +1253,7 @@ public final class InventoryRuntime implements AutoCloseable {
 					InventoryItemCodec.@Nullable Catalog catalog = round.handle.nativeCatalog();
 					for (InventoryDomainCodec.@Nullable Item item : result.slots()) {
 						InventoryItemCodec.@Nullable Encoded encoded = item == null ? null : java.util.Objects.requireNonNull(java.util.Objects.requireNonNull(catalog).retainedEncoded(item.key()));
-						journal.append(journal.endSlot(), encoded, item == null ? 0 : item.count());
+						journal.append(journal.endSlot(), encoded, item == null ? 0 : item.count(), item);
 					}
 				}
 			}
@@ -1561,6 +1574,12 @@ public final class InventoryRuntime implements AutoCloseable {
 		@Nullable InventorySlotJournal journal = round.journal;
 		InventoryItemCodec.@Nullable Catalog catalog = round.handle.nativeCatalog();
 		if (journal != null && !claimDetachedItemWork(reprojectionCopyWork(journal.definitionCount()))) return Reason.PUBLICATION_WORK.bit();
+		// A changed definition is certified once after reprojection, never on replay.
+		// Account its validation scan/UTF8 scratch independently of the catalogue parser.
+		var refresh = memory.tryReserve(journal == null ? 0 : journal.refreshWorkspaceUpperBound());
+		if (refresh.isEmpty()) return Reason.MEMORY.bit();
+		try (var held = refresh.get()) {
+		if (journal != null && !claimDetachedItemWork(journal.refreshWorkUpperBound())) return Reason.PUBLICATION_WORK.bit();
 		int refusal = tightenSource(round, ceiling, () -> {
 			if (journal != null && catalog != null) {
 				// The fixed round slab owns <=256 reference/key-set bookkeeping; no second parser is run.
@@ -1582,6 +1601,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			round.nativeMemory = replacement.get();
 		}
 		return 0;
+		}
 	}
 	/** The source can retain live compatibility/resident and detached snapshot catalogues. */
 	private int tightenSource(Round round, int ceiling) {

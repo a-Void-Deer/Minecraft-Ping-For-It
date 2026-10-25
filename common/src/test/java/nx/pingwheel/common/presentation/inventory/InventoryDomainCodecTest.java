@@ -89,6 +89,13 @@ class InventoryDomainCodecTest {
 		assertThrows(IllegalArgumentException.class, () -> new InventoryDomainCodec.Item(
 			new InventoryScanner.Key("minecraft:stone", ""), 1, "stone", null, false));
 	}
+	@Test void publicConstructionStillValidatesUntrustedMetadataAndCounts() {
+		var key = new InventoryScanner.Key("minecraft:stone", "digest");
+		assertThrows(IllegalArgumentException.class, () -> new InventoryDomainCodec.Item(key, -1, "stone", null, false));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryDomainCodec.Item(key, 1, "界".repeat(342), null, false));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryDomainCodec.Item(key, 1, "stone", "界".repeat(43691), false));
+		assertThrows(NullPointerException.class, () -> new InventoryDomainCodec.Item(key, 1, null, null, false));
+	}
 
 	private static CaptureResult.OpaqueValue value(byte[] bytes) {
 		return CaptureResult.OpaqueValue.forCodec(InventoryDomainCodec.CODEC, bytes);

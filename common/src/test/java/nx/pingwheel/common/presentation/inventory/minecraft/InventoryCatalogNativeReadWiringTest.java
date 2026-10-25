@@ -267,6 +267,121 @@ class InventoryCatalogNativeReadWiringTest {
 			assertTrue(grant.attemptedWork() > 0);
 		}
 	}
+	@NotNullByDefault
+	private static class HugeChest extends ChestBlockEntity implements BaseContainerLockAccessor {
+		int reads;
+		boolean fail;
+		HugeChest() { super(BlockPos.ZERO, Blocks.CHEST.defaultBlockState()); }
+		@Override public int getContainerSize() { return 4096; }
+		@Override public ItemStack getItem(int slot) { reads++; if (fail) throw new IllegalStateException("failed getter"); return ItemStack.EMPTY; }
+		@Override public LockCode pingforit$inventoryLock() { return LockCode.NO_LOCK; }
+	}
+	@NotNullByDefault
+	private static final class HugeWorld implements InventoryMinecraftSources.SourceWorld {
+		final HugeChest container = new HugeChest();
+		@Override public boolean isLoaded(BlockPos pos) { return pos.equals(BlockPos.ZERO); }
+		@Override public BlockState blockState(BlockPos pos) { return Blocks.CHEST.defaultBlockState(); }
+		@Override public BlockEntity blockEntity(BlockPos pos) { return container; }
+		@Override public boolean onServerThread() { return true; }
+		@Override public ItemStack heldKey() { return ItemStack.EMPTY; }
+		@Override public HolderLookup.Provider registries() { return RegistryAccess.EMPTY; }
+		@Override public boolean audited(net.minecraft.world.Container container) { return container == this.container; }
+	}
+	@Test void real4096OrdinaryBuilderTransfersSlotMappingAndSourceOwnershipAndReleasesOnFailureAndClose() {
+		for (boolean failure : new boolean[] {false, true}) {
+			var settings = InventorySettings.serverDefaults(); var world = new HugeWorld(); world.container.fail = failure;
+			long[] sourceBytes = {0}; int[] resolves = {0};
+			var runtime = new InventoryRuntime(new InventoryRuntime.SourceResolver() {
+				@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput request) { return InventoryMinecraftSources.resolutionValidationCost(request); }
+				@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput request, int cap) { throw new AssertionError("missing resolution allowance"); }
+				@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput request, int cap, InventoryValidationBudget.Allowance allowance) {
+					allowance.debit(resolutionValidationCost(request)); resolves[0]++;
+					var view = InventoryMinecraftSources.view(world, request, (pos, face) -> Optional.empty());
+					assertEquals(4096, view.slots().size()); assertEquals(4096, view.snapshotLayout().members().getFirst().segments().getFirst().visibleSlots().size());
+					var source = new InventoryMinecraftSources.Source(request, view, () -> true,
+						() -> InventoryMinecraftSources.view(world, request, (pos, face) -> Optional.empty()),
+						entry -> { throw new AssertionError("no compatibility conversion"); }, world, null, cap, ignored -> {}, ignored -> InventoryReprojectionSummary.EMPTY);
+					sourceBytes[0] = source.sourceRetainedBytes(); assertNull(source.nativeCatalog());
+					return Optional.of(source);
+				}
+			}, settings.pendingMemoryBytes());
+			try (runtime) {
+				runtime.advance(0, settings); var consumer = runtime.attach(input(), new InventoryRuntime.PreviewSubject(input().readOwner())).orElseThrow();
+				// Independent baseline: fixed Round/handle state4096, 256 map/set nodes
+				// and boxed progress values, two512-reference directories,
+				// journal object160 + index short[512] + Chunk[4] + Definition[8].
+				long baseline = 4096 + 256L * (2 * 80 + 44) + 2 * (40 + 512 * 8) + 160 + 40 + 512 * 2 + 40 + 4 * 8 + 40 + 8 * 8;
+				long admission = baseline + Math.max(InventoryItemBudget.workspaceUpperBound(4096), InventoryMinecraftSources.resolutionValidationCost(input()).workspaceBytes());
+				runtime.memory().setCap(runtime.memory().retained() + admission - 1);
+				assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(consumer));
+				assertEquals(0, resolves[0]); assertEquals(0, world.container.reads); assertEquals(0, runtime.memory().reserved());
+				runtime.memory().setCap(runtime.memory().retained() + admission);
+				assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(consumer), "resolution fits exactly; subsequent validity needs separate scratch");
+				assertEquals(0, world.container.reads); assertEquals(1, resolves[0]); assertEquals(0, runtime.memory().reserved());
+				// Independently derive the unavoidable ordinary graph: Slot(40+8+4)*n,
+				// two list/backing pairs, and uncached Integer(40+4) for indices128..4095.
+				long minimum = 4096L * 52 + 2 * (80 + 4096L * 8) + (4096L - 128) * 44;
+				assertTrue(sourceBytes[0] >= minimum); assertEquals(4096 + baseline + sourceBytes[0], runtime.memory().retained());
+				runtime.memory().setCap(settings.pendingMemoryBytes());
+				assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(consumer));
+				var result = runtime.step(consumer, 1).orElseThrow();
+				assertEquals(failure ? CaptureResult.Availability.UNAVAILABLE : CaptureResult.Availability.READABLE, result.result().availability());
+				assertEquals(1, world.container.reads); assertEquals(0, runtime.memory().reserved());
+				if (!failure) {
+					assertNull(result.slots().getFirst());
+					assertTrue(runtime.memory().retained() >= 4096 + baseline + sourceBytes[0]);
+					consumer.restart();
+				}
+				consumer.close();
+			}
+			assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void laterTickLargeDisplayJournalReplayNeedsOnlyFixedScratchAndWorkAndRetriesWithoutCursorLoss() throws Exception {
+		var settings = InventorySettings.serverDefaults(); settings.setDisplayByteMultiplier(new java.math.BigDecimal("32")); settings.setFrameByteMultiplier(new java.math.BigDecimal("16"));
+		var fixture = new LargeNative(1, false);
+		var stack = new ItemStack(Items.STONE);
+		stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal("x".repeat(21000)));
+		stack.set(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.of(new CompoundTag()));
+		fixture.resident.setItem(0, stack);
+		var runtime = fixture.runtime(settings);
+		try (runtime) {
+			runtime.advance(0, settings);
+			var fast = runtime.attach(input(), new InventoryRuntime.PreviewSubject(input().readOwner())).orElseThrow();
+			var slow = runtime.attach(input(), new InventoryRuntime.PreviewSubject(new UUID(83, 9))).orElseThrow();
+			var later = runtime.attach(input(), new InventoryRuntime.PreviewSubject(new UUID(83, 10))).orElseThrow();
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(fast));
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(slow));
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(later));
+			var first = runtime.step(fast, 1).orElseThrow().slots().getFirst();
+			assertTrue(first.displayJson().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 20 * 1024);
+			runtime.advance(1, settings);
+			// A new subject first owns its 1024B logical record. Refusal then retains
+			// that record but never advances the slot cursor or calls the source again.
+			runtime.memory().setCap(runtime.memory().retained() + 1024 + 8447);
+			assertTrue(runtime.step(slow, 1).isEmpty()); assertEquals(1, fixture.visibleReads.size());
+			runtime.memory().setCap(runtime.memory().retained() + 8448);
+			var physical = InventoryRuntime.class.getDeclaredField("physical"); physical.setAccessible(true);
+			var work = new CostLedger.Counter("inventory/item_work", CostLedger.Unit.WORK);
+			physical.set(runtime, new CostLedger(Map.of(work, 6143L)));
+			assertTrue(runtime.step(slow, 1).isEmpty()); assertEquals(0, runtime.memory().reserved());
+			physical.set(runtime, new CostLedger(Map.of(work, 6144L)));
+			var replay = runtime.step(slow, 1).orElseThrow();
+			assertEquals(List.of(first), replay.slots()); assertSame(first.displayJson(), replay.slots().getFirst().displayJson());
+			assertEquals(1, fixture.visibleReads.size()); assertEquals(0, runtime.memory().reserved());
+			assertEquals(0, ((CostLedger) physical.get(runtime)).remaining(work));
+			runtime.advance(2, settings);
+			runtime.memory().setCap(settings.pendingMemoryBytes());
+			assertEquals(InventoryRuntime.ReprojectionStatus.COMPLETED, runtime.reprojectDisplays(fast, 1024).status());
+			var tightened = runtime.step(later, 1).orElseThrow().slots().getFirst();
+			assertEquals(first.key(), tightened.key()); assertEquals(first.count(), tightened.count());
+			assertNotEquals(first.displayJson(), tightened.displayJson());
+			assertTrue(tightened.displayJson() == null || tightened.displayJson().getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 1024);
+			assertTrue(first.displayJson().contains("x".repeat(21000)), "old immutable cells cannot alias refreshed metadata");
+			assertEquals(1, fixture.visibleReads.size());
+		}
+		assertEquals(0, runtime.memory().retained());
+	}
 
 	@NotNullByDefault
 	private static final class LargeNative {

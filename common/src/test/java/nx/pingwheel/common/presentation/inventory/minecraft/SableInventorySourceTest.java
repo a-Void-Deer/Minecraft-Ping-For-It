@@ -279,7 +279,7 @@ class SableInventorySourceTest {
 				assertTrue(cb.invalidated()); assertTrue(duplicate.invalidated()); assertFalse(ca.invalidated());
 				assertEquals(Optional.of(true), runtime.probe(ca), "alias input failure cannot retire the origin's completed evidence");
 				assertTrue(runtime.memory().retained() < retained, "only failed alias evidence is released");
-				assertTrue(runtime.memory().retained() > 300_000, "origin evidence stays retained");
+				assertTrue(runtime.memory().retained() > 3L * 4096 + 2L * 1024, "origin evidence stays charged beyond the three consumers and two paid target subjects");
 				assertEquals(0, runtime.memory().reserved()); assertEquals(2, fixture.capabilityReads.get());
 				ca.restart(); assertTrue(runtime.step(ca, 1).isEmpty(), "invalidation does not refund the origin's paid target quota");
 				fixture.tick = settings.getTracking().getPeriodTicks(); runtime.advance(fixture.tick, settings);

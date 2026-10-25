@@ -19,7 +19,7 @@ public final class InventorySlotJournal implements AutoCloseable {
 	public static final int CHUNK_SLOTS = 32;
 	private static final int MAX_DEFINITIONS = InventoryItemCodec.DEFAULT_MAX_ENTRIES;
 	private static final int INDEX_CAPACITY = 512;
-	private static final long METADATA_BYTES = 160, DEFINITION_BYTES = 72;
+	private static final long METADATA_BYTES = 160, DEFINITION_BYTES = 72 + 80; // definition plus one certified Item, no copied strings
 	private static final long CHUNK_BYTES = 72 + arrayBytes(CHUNK_SLOTS, 8) + arrayBytes(CHUNK_SLOTS, 2);
 	private final int firstSlot;
 	private short @Nullable [] index = new short[INDEX_CAPACITY]; // zero = no definition; otherwise ordinal + 1
@@ -39,7 +39,14 @@ public final class InventorySlotJournal implements AutoCloseable {
 	public static final class Definition {
 		private final InventoryScanner.Key key;
 		private InventoryItemCodec.Display display;
-		private Definition(InventoryItemCodec.Encoded encoded) { key = encoded.key(); display = encoded.display(); }
+		private InventoryDomainCodec.Item certified;
+		private Definition(InventoryItemCodec.Encoded encoded, InventoryDomainCodec.@Nullable Item observed) {
+			key = encoded.key(); display = encoded.display();
+			certified = observed == null ? certify(display) : observed;
+		}
+		private InventoryDomainCodec.Item certify(InventoryItemCodec.Display projection) {
+			return new InventoryDomainCodec.Item(key, 0, projection.label(), projection.displayJson(), projection.aggregateRequired());
+		}
 		public InventoryScanner.Key key() { return key; }
 		public InventoryItemCodec.Display display() { return display; }
 	}
@@ -102,6 +109,10 @@ public final class InventorySlotJournal implements AutoCloseable {
 
 	/** An empty slot requires a null definition and zero amount; a zero-count nonempty observation stays distinct. */
 	public void append(int absoluteSlot, @Nullable InventoryItemCodec.Encoded encoded, long amount) {
+		append(absoluteSlot, encoded, amount, null);
+	}
+	/** Native reads already validated this exact immutable catalogue projection under their item grant. */
+	void append(int absoluteSlot, @Nullable InventoryItemCodec.Encoded encoded, long amount, InventoryDomainCodec.@Nullable Item observed) {
 		requireOpen();
 		if (absoluteSlot != endSlot() || absoluteSlot >= InventorySourceAccess.MAX_SLOTS || amount < 0 || (encoded == null && amount != 0))
 			throw new IllegalArgumentException("journal append bounds");
@@ -111,6 +122,9 @@ public final class InventorySlotJournal implements AutoCloseable {
 		if (newDefinition && definitionCount == MAX_DEFINITIONS) throw new CapacityException();
 		if (newDefinition && (encoded.display().aggregateRequired() != encoded.key().componentsKey().isEmpty()
 			|| !encoded.display().itemId().equals(encoded.key().itemId()))) throw new IllegalArgumentException("journal identity mode");
+		if (newDefinition && observed != null && (observed.key() != encoded.key() || observed.label() != encoded.display().label()
+			|| observed.displayJson() != encoded.display().displayJson() || observed.aggregateRequired() != encoded.display().aggregateRequired()))
+			throw new IllegalArgumentException("journal certified projection mismatch");
 		if (length % CHUNK_SLOTS == 0) {
 			if (chunkCount == chunks.length) chunks = Arrays.copyOf(chunks, chunks.length * 2);
 			chunks[chunkCount++] = new Chunk();
@@ -118,7 +132,7 @@ public final class InventorySlotJournal implements AutoCloseable {
 		if (newDefinition) {
 			if (definitionCount == definitions.length) definitions = Arrays.copyOf(definitions, definitions.length * 2);
 			ordinal = definitionCount;
-			definitions[definitionCount++] = new Definition(Objects.requireNonNull(encoded));
+			definitions[definitionCount++] = new Definition(Objects.requireNonNull(encoded), observed);
 			index[bucket] = (short) (ordinal + 1);
 		}
 		Chunk chunk = Objects.requireNonNull(chunks[length / CHUNK_SLOTS]);
@@ -143,8 +157,24 @@ public final class InventorySlotJournal implements AutoCloseable {
 	public @Nullable InventoryDomainCodec.Item read(int absoluteSlot) {
 		int ordinal = definitionOrdinal(absoluteSlot);
 		if (ordinal < 0) return null;
-		Definition value = definition(ordinal); InventoryItemCodec.Display display = value.display;
-		return new InventoryDomainCodec.Item(value.key, amount(absoluteSlot), display.label(), display.displayJson(), display.aggregateRequired());
+		return definition(ordinal).certified.withCount(amount(absoluteSlot));
+	}
+	/** No text traversal; pays new certified cells and one sequential UTF8 conversion at refresh, not replay. */
+	public long refreshWorkspaceUpperBound() {
+		requireOpen(); long maximum = 1024;
+		for (int ordinal = 0; ordinal < definitionCount; ordinal++) {
+			@Nullable String json = definition(ordinal).display.displayJson();
+			if (json != null) maximum = Math.max(maximum, 6L * json.length()); // encoder buffer plus final trimmed array
+		}
+		return 4096 + maximum + definitionCount * 80L;
+	}
+	public long refreshWorkUpperBound() {
+		requireOpen(); long work = 4096;
+		for (int ordinal = 0; ordinal < definitionCount; ordinal++) {
+			var display = definition(ordinal).display;
+			work += 2048 + 8L * display.label().length() + (display.displayJson() == null ? 0 : 8L * display.displayJson().length());
+		}
+		return work;
 	}
 
 	/**
@@ -158,10 +188,12 @@ public final class InventorySlotJournal implements AutoCloseable {
 			Definition definition = definition(ordinal);
 			InventoryItemCodec.Display next = Objects.requireNonNull(catalog.retainedDisplay(definition.key), "journal catalogue definition missing");
 			InventoryItemCodec.Display old = definition.display;
+			if (next == old) continue;
 			if (old.displayJson() == null || InventoryDisplayWriter.isDefaultIcon(old.itemId(), old.displayJson())) continue;
 			if (next.displayJson() != null && next.displayJson().length() > old.displayJson().length())
 				throw new IllegalArgumentException("journal projection expansion");
-			definition.display = next;
+			InventoryDomainCodec.Item certified = definition.certify(next); // refresh validation under the catalogue tightening grant
+			definition.display = next; definition.certified = certified;
 		}
 	}
 
