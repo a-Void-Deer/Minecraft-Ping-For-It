@@ -43,6 +43,9 @@ import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.config.IntLimit;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -272,7 +275,8 @@ class InventoryCatalogNativeReadWiringTest {
 		final net.minecraft.world.SimpleContainer resident;
 		final List<Integer> visibleReads = new ArrayList<>(), physicalReads = new ArrayList<>();
 		final World world = new World();
-		boolean valid = true, throwsOnRead;
+		boolean valid = true, throwsOnRead, adapter;
+		long firstAmount = LARGE_AMOUNT;
 		LargeNative(int slots, boolean diverse) {
 			this.slots = slots; resident = new net.minecraft.world.SimpleContainer(slots);
 			world.add(BlockPos.ZERO, Blocks.CHEST.defaultBlockState());
@@ -297,7 +301,7 @@ class InventoryCatalogNativeReadWiringTest {
 					visibleReads.add(index); physicalReads.add(slots - index - 1);
 					if (throwsOnRead) throw new IllegalStateException("getter failed");
 					ItemStack stack = resident.getItem(slots - index - 1);
-					return visitor.visit(new IPlatformInventoryService.ResidentEntry(stack.isEmpty() ? null : new InventoryResidentItem.Stack(stack), stack.isEmpty() ? 0 : index == 0 ? LARGE_AMOUNT : stack.getCount()));
+					return visitor.visit(new IPlatformInventoryService.ResidentEntry(stack.isEmpty() ? null : new InventoryResidentItem.Stack(stack), stack.isEmpty() ? 0 : index == 0 ? firstAmount : stack.getCount()));
 				}
 			};
 			// Fixed native Vault layout profile; native reads still enter the real resident freezer and catalogue.
@@ -312,7 +316,19 @@ class InventoryCatalogNativeReadWiringTest {
 			return new InventoryRuntime(new InventoryRuntime.SourceResolver() {
 				@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int ceiling) { throw new AssertionError("missing allowance"); }
 				@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int ceiling, InventoryValidationBudget.Allowance allowance) {
-					return Optional.of(source(input, ceiling));
+					var nativeSource = source(input, ceiling);
+					if (!adapter) return Optional.of(nativeSource);
+					// A replacement generic live adapter has no native sweep evidence, even at the same physical source key.
+					return Optional.of(new InventorySourceAccess.Source() {
+						@Override public nx.pingwheel.common.presentation.source.SourceKey key() { return nativeSource.key(); }
+						@Override public boolean valid() { return nativeSource.valid(); }
+						@Override public boolean stableCursor() { return true; }
+						@Override public int slots() { return slots; }
+						@Override public InventoryDomainCodec.@Nullable Item read(int slot) { return nativeSource.read(slot); }
+						@Override public int displayBytes() { return ceiling; }
+						@Override public InventoryReprojectionSummary reprojectionSummary(int cap) { return InventoryReprojectionSummary.EMPTY; }
+						@Override public void close() { nativeSource.close(); }
+					});
 				}
 			}, settings.pendingMemoryBytes());
 		}
@@ -490,46 +506,269 @@ class InventoryCatalogNativeReadWiringTest {
 	private static final class BackendHost implements InventoryBackend.Host {
 		final List<InventoryS2CPacket> packets = new ArrayList<>();
 		final nx.pingwheel.common.marker.ServerMarkerStore store = new nx.pingwheel.common.marker.ServerMarkerStore(new nx.pingwheel.common.marker.MarkerIdSource());
-		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.of(new InventoryBackend.Policy(100, 1, java.util.Set.of("entity_block"))); }
+		boolean blockData, permitted = true;
+		long expiry = 300;
+		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.of(new InventoryBackend.Policy(100, permitted ? 1 : 2, permitted ? java.util.Set.of("entity_block") : java.util.Set.of())); }
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) { return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention")); }
 		@Override public boolean annotationAllowed(InventorySourceInput input, String type) { return true; }
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			var type = nx.pingwheel.common.domain.TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
 			var rejected = admission.prepare(frozen.target(), type.id(), List.of(player));
 			if (rejected != null) return new InventoryBackend.Created(null, rejected);
-			return new InventoryBackend.Created(store.create(player, frozen.target(), type, type.defaultPingType(), new nx.pingwheel.common.marker.MarkerAnchor(0, 0, 0), 1, 300, List.of(player)).marker(), null);
+			return new InventoryBackend.Created(store.create(player, frozen.target(), type, type.defaultPingType(), new nx.pingwheel.common.marker.MarkerAnchor(0, 0, 0), 1, expiry, List.of(player)).marker(), null);
 		}
 		@Override public boolean knows(UUID player, nx.pingwheel.common.domain.MarkerId marker) { return store.allMarkers().stream().anyMatch(value -> value.id().equals(marker)); }
 		@Override public boolean authorized(SyncPublisher.Context context) { return true; }
+		@Override public Optional<InventoryRuntime.DisplayReprojector> displayReprojector() {
+			return Optional.of((display, cap) -> InventoryItemCodec.reproject(display, RegistryAccess.EMPTY, cap));
+		}
 		@Override public int encodedBytes(InventoryS2CPacket packet) {
 			var buffer = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
 			try { packet.write(buffer); return buffer.readableBytes(); } finally { buffer.release(); }
 		}
-		@Override public void send(UUID player, InventoryS2CPacket packet) { packets.add(packet); }
+		@Override public void send(UUID player, InventoryS2CPacket packet) {
+			if (blockData && !packet.entries().isEmpty()) throw new IllegalStateException("withheld native data");
+			var buffer = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+			try {
+				packet.write(buffer); var decoded = InventoryS2CPacket.readSafe(buffer);
+				assertFalse(decoded.isCorrupt()); assertFalse(buffer.isReadable()); packets.add(decoded);
+			} finally { buffer.release(); }
+		}
+	}
+
+	@NotNullByDefault
+	private static final class NativeClient {
+		final BackendHost host = new BackendHost();
+		final List<nx.pingwheel.common.network.IPacket> requests = new ArrayList<>();
+		final ClientInventory client = new ClientInventory(requests::add);
+		final InventorySettings settings = InventorySettings.serverDefaults();
+		int cursor;
+		long epoch;
+		void open(InventoryBackend backend) {
+			client.presentationReset(100, 1);
+			backend.handle(input().readOwner(), InventoryC2SPacket.hello(), 0, settings); drain();
+			epoch = host.packets.getFirst().epoch();
+			client.open(input().target(), BlockFace.NORTH, "entity_block");
+			backend.handle(input().readOwner(), (InventoryC2SPacket) requests.getLast(), 0, settings); drain();
+		}
+		void drain() { for (; cursor < host.packets.size(); cursor++) client.accept(host.packets.get(cursor)); }
+		void tick(InventoryBackend backend, int tick) { backend.tick(tick, settings); drain(); assertEquals(0, backend.runtime().memory().reserved()); }
+		void select(InventoryBackend backend, int tick, String id) {
+			var preview = client.preview(1);
+			var chosen = preview.entries().stream().filter(entry -> entry.itemId().equals(id)).findFirst().orElseThrow();
+			backend.handle(input().readOwner(), InventoryC2SPacket.select(epoch, 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), chosen.key(), "danger"), tick, settings);
+			assertEquals(1, host.store.size()); client.markerCreated(MarkerSnapshot.from(host.store.allMarkers().getFirst())); drain();
+			backend.handle(input().readOwner(), InventoryC2SPacket.close(epoch, 1).stamp(100, 1), tick, settings); drain();
+		}
+		void repair(InventoryBackend backend, int tick, boolean tracking) {
+			backend.handle(input().readOwner(), tracking ? InventoryC2SPacket.resync(epoch, 0, host.store.allMarkers().getFirst().id()).stamp(100, 1)
+				: InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), tick, settings);
+		}
+		@Unmodifiable List<InventoryS2CPacket> since(int start) { return List.copyOf(host.packets.subList(start, host.packets.size())); }
+	}
+
+	@Test void nativeEncodedMixedTickPreviewFreshTrackingZeroAndCompletionPlusPeriodCadence() {
+		var f = new NativeClient(); var nativeSource = new LargeNative(8, false);
+		f.settings.getPreview().setPeriodTicks(1); f.settings.setPhysicalSlotsPerTick(IntLimit.finite(2));
+		var runtime = nativeSource.runtime(f.settings);
+		try (var backend = new InventoryBackend(f.host, runtime, 1)) {
+			f.open(backend); f.tick(backend, 0);
+			assertEquals(InventoryS2CPacket.Status.UPDATING, f.client.preview(1).status()); assertFalse(f.client.preview(1).completeScan());
+			assertEquals(LargeNative.LARGE_AMOUNT, f.client.preview(1).entries().getFirst().count());
+			nativeSource.firstAmount += 100; // Already-read slot stays at its old amount in this sweep.
+			nativeSource.resident.setItem(5, new ItemStack(Items.GOLD_INGOT, 9)); // Unread visible slot 2 observes this later tick.
+			for (int tick = 1; tick <= 3; tick++) f.tick(backend, tick);
+			var preview = f.client.preview(1); assertTrue(preview.completeScan()); assertEquals(InventoryS2CPacket.Status.READY, preview.status());
+			assertEquals(LargeNative.LARGE_AMOUNT + 5, preview.entries().stream().filter(entry -> entry.itemId().equals("minecraft:stone")).findFirst().orElseThrow().count());
+			assertEquals(9, preview.entries().stream().filter(entry -> entry.itemId().equals("minecraft:gold_ingot")).findFirst().orElseThrow().count());
+			assertTrue(preview.entries().stream().allMatch(entry -> entry.quality() == InventoryS2CPacket.Status.READY));
+			f.repair(backend, 4, false); f.tick(backend, 4);
+			assertEquals(InventoryS2CPacket.Status.READY, f.client.preview(1).status()); assertEquals(8, nativeSource.visibleReads.size(), "corrective replay uses retained sweep evidence");
+			f.select(backend, 5, "minecraft:stone"); assertEquals(9, nativeSource.visibleReads.size(), "SELECT witnesses live once");
+			nativeSource.firstAmount += 100;
+			var marker = f.host.store.allMarkers().getFirst();
+			for (int tick = 6; tick <= 8; tick++) {
+				f.tick(backend, tick); assertTrue(f.client.tracking(marker.id()).entries().isEmpty(), "first tracking never publishes preview or partial totals");
+			}
+			f.tick(backend, 9);
+			var tracked = f.client.tracking(marker.id()); assertTrue(tracked.complete()); assertFalse(tracked.grey());
+			assertEquals(InventoryS2CPacket.Status.READY, tracked.status()); assertEquals(1, tracked.entries().size());
+			assertEquals(LargeNative.LARGE_AMOUNT + 205, tracked.entries().getFirst().count()); assertEquals(InventoryS2CPacket.Status.READY, tracked.entries().getFirst().quality());
+			assertEquals(17, nativeSource.visibleReads.size());
+			f.repair(backend, 10, true); f.tick(backend, 10); f.tick(backend, 11);
+			assertEquals(17, nativeSource.visibleReads.size(), "next physical sweep starts at completion plus existing period, not at a global period boundary");
+			assertEquals(InventoryS2CPacket.Status.READY, f.client.tracking(marker.id()).status());
+			assertNotEquals(tracked.baselineId(), f.client.tracking(marker.id()).baselineId(), "RESYNC rebaselines retained evidence, not the source");
+			for (int slot = 0; slot < 8; slot++) nativeSource.resident.setItem(slot, new ItemStack(Items.GOLD_INGOT, 2));
+			for (int tick = 12; tick <= 14; tick++) {
+				f.tick(backend, tick); assertEquals(tracked.entries().getFirst().count(), f.client.tracking(marker.id()).entries().getFirst().count(), "last completed count stays while replacement is partial");
+			}
+			f.tick(backend, 15); var absent = f.client.tracking(marker.id());
+			assertTrue(absent.complete()); assertFalse(absent.grey()); assertEquals(0, absent.entries().getFirst().count());
+			assertEquals("minecraft:stone", absent.entries().getFirst().itemId()); assertEquals(1, absent.entries().size(), "unselected gold is never copied into tracking");
+			assertEquals(InventoryS2CPacket.Status.READY, absent.entries().getFirst().quality());
+			int reads = nativeSource.visibleReads.size(); f.tick(backend, 300); f.tick(backend, 330);
+			assertEquals(reads, nativeSource.visibleReads.size()); assertEquals(300, marker.expiresAtTick()); assertFalse(backend.tracksInventory(marker.id()));
+		}
+		assertEquals(0, runtime.memory().retained());
+	}
+
+	@Test void nativeEncodedEmptyViewIsReadyAndCompleteWithoutAGetter() {
+		var f = new NativeClient(); var nativeSource = new LargeNative(0, false); var runtime = nativeSource.runtime(f.settings);
+		try (var backend = new InventoryBackend(f.host, runtime, 1)) {
+			f.open(backend); f.tick(backend, 0);
+			assertEquals(InventoryS2CPacket.Status.READY, f.client.preview(1).status()); assertTrue(f.client.preview(1).completeScan()); assertTrue(f.client.preview(1).entries().isEmpty());
+			f.repair(backend, 1, false); f.tick(backend, 1);
+			assertEquals(InventoryS2CPacket.Status.READY, f.client.preview(1).status()); assertTrue(f.client.preview(1).completeScan()); assertTrue(nativeSource.visibleReads.isEmpty());
+		}
+		assertEquals(0, runtime.memory().retained());
+	}
+
+	@Test void nativePartialCorrectiveReplayStaysUpdatingWithoutRestartingThePhysicalCursor() {
+		var f = new NativeClient(); var nativeSource = new LargeNative(4, false);
+		f.settings.setPhysicalSlotsPerTick(IntLimit.finite(1)); f.settings.getPreview().setPeriodTicks(1);
+		try (var backend = new InventoryBackend(f.host, nativeSource.runtime(f.settings), 1)) {
+			f.open(backend); f.tick(backend, 0); long baseline = f.client.preview(1).baselineId();
+			f.repair(backend, 1, false); f.tick(backend, 1);
+			assertEquals(InventoryS2CPacket.Status.UPDATING, f.client.preview(1).status()); assertFalse(f.client.preview(1).completeScan());
+			assertEquals(baseline, f.client.preview(1).baselineId()); assertEquals(List.of(0, 1), nativeSource.visibleReads);
+			f.tick(backend, 2); f.tick(backend, 3);
+			assertEquals(InventoryS2CPacket.Status.READY, f.client.preview(1).status()); assertTrue(f.client.preview(1).completeScan());
+			assertEquals(List.of(0, 1, 2, 3), nativeSource.visibleReads);
+		}
+	}
+
+	@Test void nativeReadyCompletionStillWaitsForEveryEncodedPreviewPartAtTheClient() {
+		var f = new NativeClient(); var nativeSource = new LargeNative(3, false);
+		nativeSource.resident.setItem(0, new ItemStack(Items.GOLD_INGOT, 9));
+		try (var backend = new InventoryBackend(f.host, nativeSource.runtime(f.settings), 1)) {
+			f.open(backend); backend.tick(0, f.settings); var held = new ArrayList<InventoryS2CPacket>();
+			for (; f.cursor < f.host.packets.size(); f.cursor++) {
+				var packet = f.host.packets.get(f.cursor);
+				if (packet.entries().stream().anyMatch(entry -> entry.itemId().equals("minecraft:gold_ingot"))) held.add(packet);
+				else f.client.accept(packet);
+			}
+			assertEquals(1, held.size()); assertFalse(f.client.preview(1).completeScan(), "sender completion/control is not receipt of a withheld part");
+			held.forEach(f.client::accept); assertTrue(f.client.preview(1).completeScan());
+			assertEquals(InventoryS2CPacket.Status.READY, f.client.preview(1).status()); assertEquals(2, f.client.preview(1).entries().size());
+		}
+	}
+
+	@Test void nativeRetainedEvidenceSurvivesDisplayRebaselineWithoutRescanningOrRestoringStrippedDetail() {
+		for (boolean tracking : new boolean[] {false, true}) {
+			var f = new NativeClient(); var nativeSource = new LargeNative(2, false);
+			var stack = new ItemStack(Items.STONE); stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal("x".repeat(1800)));
+			for (int slot = 0; slot < 2; slot++) nativeSource.resident.setItem(slot, stack);
+			f.settings.getTracking().setPeriodTicks(1000);
+			try (var backend = new InventoryBackend(f.host, nativeSource.runtime(f.settings), 1)) {
+				f.open(backend); f.tick(backend, 0);
+				if (tracking) { f.select(backend, 1, "minecraft:stone"); f.tick(backend, 2); }
+				var marker = tracking ? Optional.of(f.host.store.allMarkers().getFirst().id()) : Optional.<nx.pingwheel.common.domain.MarkerId>empty();
+				long oldBaseline = marker.isPresent() ? f.client.tracking(marker.get()).baselineId() : f.client.preview(1).baselineId();
+				int reads = nativeSource.visibleReads.size();
+				f.settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(.25));
+				for (int tick = 3; tick <= 8; tick++) f.tick(backend, tick);
+				var entries = marker.isPresent() ? f.client.tracking(marker.get()).entries() : f.client.preview(1).entries();
+				assertEquals(1, entries.size()); assertEquals(LargeNative.LARGE_AMOUNT + 1, entries.getFirst().count());
+				assertEquals(InventoryS2CPacket.Status.READY, entries.getFirst().quality());
+				assertTrue(entries.getFirst().displayJson() == null || entries.getFirst().displayJson().getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 1024);
+				assertEquals(InventoryS2CPacket.Status.READY, marker.isPresent() ? f.client.tracking(marker.get()).status() : f.client.preview(1).status());
+				assertNotEquals(oldBaseline, marker.isPresent() ? f.client.tracking(marker.get()).baselineId() : f.client.preview(1).baselineId());
+				assertEquals(reads, nativeSource.visibleReads.size(), "size rebaseline retains scoped native evidence without another getter");
+				f.settings.setDisplayByteMultiplier(java.math.BigDecimal.ONE); f.tick(backend, 9);
+				assertEquals(entries, marker.isPresent() ? f.client.tracking(marker.get()).entries() : f.client.preview(1).entries(), "a raised cap cannot resurrect retained display detail");
+			}
+		}
+	}
+
+	@Test void nativeEncodedAggregateKeepsComponentTooLongQualityThroughCompletionSelectionAndResync() {
+		var f = new NativeClient(); var nativeSource = new LargeNative(2, false);
+		nativeSource.resident.setItem(0, new ItemStack(Items.STONE));
+		var rejected = new ItemStack(Items.STONE); var payload = new CompoundTag(); payload.putString("data", "\u0800".repeat(23000));
+		rejected.set(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.of(payload)); nativeSource.resident.setItem(1, rejected);
+		try (var backend = new InventoryBackend(f.host, nativeSource.runtime(f.settings), 1)) {
+			f.open(backend); f.tick(backend, 0); var preview = f.client.preview(1);
+			assertTrue(preview.completeScan()); assertEquals(InventoryS2CPacket.Status.READY, preview.status()); assertEquals(1, preview.entries().size());
+			assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, preview.entries().getFirst().quality()); assertTrue(preview.entries().getFirst().fallback());
+			assertEquals(LargeNative.LARGE_AMOUNT + 1, preview.entries().getFirst().count());
+			f.select(backend, 1, "minecraft:stone"); f.tick(backend, 2); var marker = f.host.store.allMarkers().getFirst().id();
+			assertEquals(InventoryS2CPacket.Status.READY, f.client.tracking(marker).status()); assertTrue(f.client.tracking(marker).complete());
+			assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, f.client.tracking(marker).entries().getFirst().quality());
+			f.repair(backend, 3, true); f.tick(backend, 3);
+			assertEquals(LargeNative.LARGE_AMOUNT + 1, f.client.tracking(marker).entries().getFirst().count());
+			assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, f.client.tracking(marker).entries().getFirst().quality());
+		}
+	}
+
+	@Test void nativeEncodedFailureAndCategoryCapacityCannotManufactureTrackingZero() {
+		for (boolean throwing : new boolean[] {false, true}) {
+			var f = new NativeClient(); var nativeSource = new LargeNative(300, false); var runtime = nativeSource.runtime(f.settings);
+			try (var backend = new InventoryBackend(f.host, runtime, 1)) {
+				f.open(backend); int tick = 0;
+				for (; tick < 70 && !f.client.preview(1).completeScan(); tick++) f.tick(backend, tick);
+				assertTrue(f.client.preview(1).completeScan()); f.select(backend, tick++, "minecraft:stone");
+				var marker = f.host.store.allMarkers().getFirst();
+				for (int slot = 0; slot < 300; slot++) {
+					var stack = new ItemStack(Items.GOLD_INGOT); stack.set(net.minecraft.core.component.DataComponents.CUSTOM_MODEL_DATA, new net.minecraft.world.item.component.CustomModelData(slot));
+					nativeSource.resident.setItem(slot, stack);
+				}
+				nativeSource.throwsOnRead = throwing;
+				for (int end = tick + 65; tick < end; tick++) f.tick(backend, tick);
+				var view = f.client.tracking(marker.id()); assertFalse(view.complete()); assertTrue(view.entries().isEmpty());
+				assertEquals(throwing ? InventoryS2CPacket.Status.INVALID : InventoryS2CPacket.Status.INCOMPLETE, view.status());
+				assertTrue(f.host.packets.stream().filter(packet -> marker.id().equals(packet.markerId())).allMatch(packet -> packet.entries().isEmpty()), "no zero or partial count after failed/incomplete native sweeps");
+			}
+			assertEquals(0, runtime.memory().retained());
+		}
+	}
+
+	@Test void nativeQueuedReadyIsWithdrawnOnInvalidityOrPermissionRevocationAndGenericRecoveryStaysUncertain() {
+		for (boolean revoke : new boolean[] {false, true}) {
+			var f = new NativeClient(); var nativeSource = new LargeNative(4, false); var runtime = nativeSource.runtime(f.settings);
+			try (var backend = new InventoryBackend(f.host, runtime, 1)) {
+				f.open(backend); f.tick(backend, 0); f.select(backend, 1, "minecraft:stone");
+				var marker = f.host.store.allMarkers().getFirst(); f.host.blockData = true; f.tick(backend, 2);
+				assertTrue(f.client.tracking(marker.id()).entries().isEmpty()); int start = f.host.packets.size();
+				if (revoke) f.host.permitted = false; else nativeSource.valid = false;
+				f.host.blockData = false; f.tick(backend, 3);
+				assertTrue(f.since(start).stream().allMatch(packet -> packet.entries().isEmpty()), "no queued READY count crosses the new fence");
+				if (!revoke) {
+					assertEquals(InventoryS2CPacket.Status.INVALID, f.client.tracking(marker.id()).status());
+					nativeSource.valid = true; nativeSource.adapter = true;
+					for (int slot = 0; slot < 4; slot++) nativeSource.resident.setItem(slot, ItemStack.EMPTY);
+					for (int tick = 6; tick <= 9; tick++) f.tick(backend, tick);
+					var recovered = f.client.tracking(marker.id()); assertTrue(recovered.complete(), () -> recovered + " packets=" + f.since(start));
+					assertEquals(0, recovered.entries().getFirst().count()); assertEquals(InventoryS2CPacket.Status.UNCERTAIN, recovered.status());
+					assertEquals(InventoryS2CPacket.Status.UNCERTAIN, recovered.entries().getFirst().quality());
+					f.repair(backend, 10, true); f.tick(backend, 10); assertEquals(InventoryS2CPacket.Status.UNCERTAIN, f.client.tracking(marker.id()).status());
+				}
+			}
+			assertEquals(0, runtime.memory().retained());
+		}
 	}
 
 	@ParameterizedTest @ValueSource(ints = {540, 900})
-	void backendLargeNativePreviewFinishesWithinReferenceLifetimeWithoutFalseReady(int slots) {
-		var settings = InventorySettings.serverDefaults(); var fixture = new LargeNative(slots, false);
-		var host = new BackendHost(); var runtime = fixture.runtime(settings);
-		try (var backend = new InventoryBackend(host, runtime, 1)) {
-			UUID player = input().readOwner(); backend.handle(player, InventoryC2SPacket.hello(), 0, settings);
-			long epoch = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).findFirst().orElseThrow().epoch();
-			backend.handle(player, InventoryC2SPacket.open(epoch, 100, 1, 1, input().target(), BlockFace.NORTH), 0, settings);
+	void backendLargeNativePreviewFinishesReadyWithinReferenceLifetime(int slots) {
+		var f = new NativeClient(); var fixture = new LargeNative(slots, false); var runtime = fixture.runtime(f.settings);
+		try (var backend = new InventoryBackend(f.host, runtime, 1)) {
+			f.open(backend);
 			int tick = 0;
-			for (; tick < 80 && fixture.visibleReads.size() < slots; tick++) { backend.tick(tick, settings); assertEquals(0, runtime.memory().reserved()); }
+			for (; tick < 80 && !f.client.preview(1).completeScan(); tick++) f.tick(backend, tick);
 			assertTrue(tick < 80, "native preview must complete before its existing reference deadline");
 			assertEquals(slots, fixture.visibleReads.size());
-			for (int flush = 0; flush < 5; flush++) backend.tick(tick++, settings);
-			var last = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW && !packet.entries().isEmpty()).reduce((a, b) -> b).orElseThrow();
-			assertEquals(LargeNative.LARGE_AMOUNT + slots - 2, last.entries().getFirst().count());
-			assertTrue(host.packets.stream().noneMatch(packet -> packet.status() == InventoryS2CPacket.Status.READY), "phase 4 retains EVENTUAL publication policy until scoped phase 5");
+			var preview = f.client.preview(1); assertEquals(InventoryS2CPacket.Status.READY, preview.status());
+			assertEquals(LargeNative.LARGE_AMOUNT + slots - 2, preview.entries().getFirst().count());
+			assertEquals(InventoryS2CPacket.Status.READY, preview.entries().getFirst().quality());
 			assertEquals(slots, fixture.visibleReads.size(), "publication must not replay source getters");
-			backend.handle(player, InventoryC2SPacket.select(epoch, 100, 1, 1, 1, last.baselineId(), last.statusRevision(), last.entries().getFirst().key(), "danger"), tick++, settings);
-			assertEquals(1, host.store.size()); assertEquals(slots + 1, fixture.visibleReads.size(), "SELECT must acquire a fresh live absolute-slot witness");
+			f.select(backend, tick++, "minecraft:stone");
+			assertEquals(slots + 1, fixture.visibleReads.size(), "SELECT must acquire a fresh live absolute-slot witness");
 			fixture.resident.setItem(slots - 1, new ItemStack(Items.GOLD_INGOT));
-			for (int calls = 0; calls < 50 && fixture.visibleReads.size() < 2 * slots + 1; calls++) { backend.tick(tick++, settings); assertEquals(0, runtime.memory().reserved()); }
+			var marker = f.host.store.allMarkers().getFirst().id();
+			for (int calls = 0; calls < 50 && !f.client.tracking(marker).complete(); calls++) f.tick(backend, tick++);
 			assertEquals(2 * slots + 1, fixture.visibleReads.size(), "new tracking reads a separate complete native round");
+			var tracked = f.client.tracking(marker); assertTrue(tracked.complete()); assertEquals(InventoryS2CPacket.Status.READY, tracked.status());
+			assertEquals(1, tracked.entries().size()); assertEquals(slots - 2, tracked.entries().getFirst().count());
+			assertEquals(InventoryS2CPacket.Status.READY, tracked.entries().getFirst().quality());
 		}
 		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 	}

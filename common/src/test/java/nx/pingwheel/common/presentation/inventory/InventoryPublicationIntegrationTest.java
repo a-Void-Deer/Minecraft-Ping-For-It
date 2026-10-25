@@ -25,6 +25,48 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Replays the production publisher's ordered wire frames, not hand-ordered status/data fixtures. */
 class InventoryPublicationIntegrationTest {
+	@Test void genericEventualEmptyAndAbsentZeroStayUncertainWhileExplicitAtomicAdapterKeepsReady() {
+		for (boolean atomic : new boolean[] {false, true}) {
+			var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
+			var reads = new java.util.concurrent.atomic.AtomicInteger(); boolean[] empty = {false};
+			try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1) {
+				@Override public InventoryDomainCodec.@org.jetbrains.annotations.Nullable Item read(int slot) {
+					reads.incrementAndGet(); return empty[0] ? null : InventoryRuntimeTest.item(7);
+				}
+				@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
+					if (!atomic) return Optional.empty();
+					return Optional.of(new InventorySourceAccess.SnapshotPlan() {
+						@Override public long memoryUpperBoundBytes() { return 4096; }
+						@Override public Optional<InventorySourceAccess.InventorySnapshot> capture() {
+							boolean capturedEmpty = empty[0];
+							return Optional.of(new InventoryRuntimeTest.Snapshot() {
+								@Override public int slots() { return 1; }
+								@Override public InventoryDomainCodec.@org.jetbrains.annotations.Nullable Item read(int slot) { return capturedEmpty ? null : InventoryRuntimeTest.item(7); }
+								@Override public long retainedBytes() { return 128; }
+								@Override public InventorySourceAccess.SnapshotEvidence evidence() { return InventorySourceAccess.SnapshotEvidence.ATOMIC_DETACHED; }
+							});
+						}
+					});
+				}
+			}), settings.pendingMemoryBytes()), 1)) {
+				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings); long epoch = host.epoch(InventoryBackendTest.A);
+				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.open(epoch, 100, 1, 1, InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH), 0, settings);
+				backend.tick(0, settings); var preview = host.packets.stream().filter(packet -> !packet.entries().isEmpty()).findFirst().orElseThrow();
+				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.select(epoch, 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "danger"), 1, settings);
+				var marker = host.store.allMarkers().getFirst(); var endpoint = new Endpoint(InventoryBackendTest.A, MarkerSnapshot.from(marker));
+				empty[0] = true; backend.tick(2, settings); endpoint.drain(host);
+				var expected = atomic ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN;
+				var tracked = endpoint.client.tracking(marker.id()); assertTrue(tracked.complete()); assertEquals(expected, tracked.status());
+				assertEquals(0, tracked.entries().getFirst().count()); assertEquals(expected, tracked.entries().getFirst().quality());
+				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.open(epoch, 100, 1, 2, InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH), 3, settings); backend.tick(3, settings);
+				var emptyPreview = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW && packet.requestId() == 2).reduce((a, b) -> b).orElseThrow();
+				assertEquals(expected, emptyPreview.status()); assertTrue(emptyPreview.completeScan()); assertTrue(emptyPreview.entries().isEmpty());
+				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.resync(epoch, 0, marker.id()).stamp(100, 1), 4, settings); backend.tick(4, settings); endpoint.drain(host);
+				assertEquals(expected, endpoint.client.tracking(marker.id()).status()); assertEquals(expected, endpoint.client.tracking(marker.id()).entries().getFirst().quality());
+			}
+		}
+	}
+
 	@Test void actualCanonicalRefusalRetiresExactSelectionAndKeepsTheAuthoritativeLongGroupTotal() {
 		net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
 		var catalog = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Catalog(net.minecraft.core.RegistryAccess.EMPTY);

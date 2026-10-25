@@ -271,6 +271,10 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			&& watermark <= state.offeredWatermark && !state.retirementPending && !state.rebaselineRequired;
 	}
 	@Override public Outcome publish(CaptureResult result, AuthorizedProjection projection, Context context, CostLedger ledger) {
+		return publish(result, InventoryStep.SweepEvidence.NONE, projection, context, ledger);
+	}
+	/** Inventory evidence belongs to this observation, never to the route or a preceding publication. */
+	public Outcome publish(CaptureResult result, InventoryStep.SweepEvidence evidence, AuthorizedProjection projection, Context context, CostLedger ledger) {
 		State state = states.get(key(context));
 		if (state == null || !state.context.equals(context) || !transport.authorized(context)) return new Outcome.Rejected();
 		if (result.availability() != CaptureResult.Availability.READABLE) {
@@ -306,8 +310,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			long revision = result.coverage().watermark();
 			boolean aggregate = item.stripped();
 			var value = new InventoryS2CPacket.Entry(entry.getKey(), item.key().itemId(), item.label(), item.displayJson(), item.count(), revision,
-				aggregate, aggregate ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : result.consistency() == CaptureResult.Consistency.VERIFIED
-					? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN,
+				aggregate, aggregate ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : quantityStatus(result, evidence),
 				aggregate ? revision : 0, aggregate, state.route.itemPingType());
 			if (!sameValue(state.offered.get(value.key()), value)) values.add(value);
 		}
@@ -376,7 +379,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		state.offeredWatermark = Math.max(state.offeredWatermark, result.coverage().watermark());
 		state.retirementPending = false;
 		state.complete = !state.deliveryIncomplete && state.retiringGroups.isEmpty() && result.completeness() == CaptureResult.Completeness.COMPLETE;
-		state.status = state.complete ? result.consistency() == CaptureResult.Consistency.VERIFIED ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN
+		state.status = state.complete ? quantityStatus(result, evidence)
 			: state.deliveryIncomplete || !state.retiringGroups.isEmpty() || result.completeness() == CaptureResult.Completeness.INCOMPLETE ? InventoryS2CPacket.Status.INCOMPLETE : InventoryS2CPacket.Status.UPDATING;
 		state.control = true;
 		state.publicationDelay.progress(cycle(state));
@@ -388,6 +391,17 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			}
 		}
 		}
+	}
+	private static InventoryS2CPacket.Status quantityStatus(CaptureResult result, InventoryStep.SweepEvidence evidence) {
+		// A stable-slot sweep is an accepted mixed-tick inventory count, not an atomic snapshot or a fabricated source version.
+		boolean stableSweep = evidence == InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP
+			&& result.availability() == CaptureResult.Availability.READABLE
+			&& result.completeness() == CaptureResult.Completeness.COMPLETE
+			&& result.consistency() == CaptureResult.Consistency.EVENTUAL
+			&& result.coverage().expected().isPresent()
+			&& result.coverage().scanned() == result.coverage().expected().getAsLong();
+		return result.consistency() == CaptureResult.Consistency.VERIFIED || stableSweep
+			? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN;
 	}
 	private static Outcome rejectPublication(State state) {
 		state.publicationDelay.cancel();
@@ -540,6 +554,10 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 						if (state.route.markerId() == null) previewQueued -= cost(entry); else trackingQueued -= cost(entry);
 					}
 					state.deliveredWatermark = state.admittedWatermark;
+					// Every preview part already carries this cut's status/completion.
+					// A redundant empty 0/1 control could impersonate a withheld data
+					// index zero at the client and falsely close its multipart barrier.
+					if (state.route.markerId() == null && state.admittedWatermark == state.offeredWatermark) state.control = false;
 					state.admitted = List.of(); state.part = 0; state.baseline = false;
 					if (state.batchMemory != null) { state.batchMemory.close(); state.batchMemory = null; }
 					releaseUnretainedEntries(state);

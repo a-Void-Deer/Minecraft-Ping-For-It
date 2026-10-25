@@ -32,6 +32,7 @@ import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
+import org.jetbrains.annotations.Nullable;
 
 /** Server-thread coordinator: request authority, shared capture and marker-owned tracking. */
 public final class InventoryBackend implements AutoCloseable {
@@ -187,7 +188,7 @@ public final class InventoryBackend implements AutoCloseable {
 		boolean metadataChanged, rebaselineNeeded, fencePending, republishPending;
 		long revision, attempted;
 		boolean terminal;
-		CaptureResult last;
+		@Nullable PublicationObservation last;
 		long checkedTick = -1;
 		/** Request-scoped RESYNC: cooldown stamp, one coalesced intent, one-time reset marker. */
 		long resyncAt;
@@ -222,7 +223,7 @@ public final class InventoryBackend implements AutoCloseable {
 		long count, total, completedCount, completedTotal, revision, state = 1, nextSweep;
 		boolean completedFolded;
 		boolean folded, invalid, scanning = true, audienceDemand;
-		CaptureResult completed;
+		@Nullable PublicationObservation completed;
 		long checkedTick = -1;
 		Tracking(ServerMarker marker, InventorySourceInput input, InventorySelection selection,
 			InventoryRuntime.Consumer consumer, RetainedMemoryLedger.Ticket memory, int displayCeiling) {
@@ -238,6 +239,9 @@ public final class InventoryBackend implements AutoCloseable {
 			}
 		}
 	}
+	/** Retained publication metadata stays paired with its own sweep evidence through repair and reprojection. */
+	@org.jetbrains.annotations.NotNullByDefault
+	private record PublicationObservation(CaptureResult result, InventoryStep.SweepEvidence evidence) {}
 	private final Host host;
 	private final InventoryRuntime runtime;
 	private final InventorySyncPublisher publisher;
@@ -1007,7 +1011,7 @@ public final class InventoryBackend implements AutoCloseable {
 			if (result.availability() != CaptureResult.Availability.READABLE) {
 				invalidatePreview(sessions.get(player), preview); return;
 			}
-			preview.last = result; preview.terminal = true; preview.revision++;
+			preview.last = new PublicationObservation(result, observation.get().inventorySweepEvidence()); preview.terminal = true; preview.revision++;
 			preview.samplingDelay.cancel(); preview.consumer.stopMonitoringScan();
 			publisher.status(preview.context, InventoryS2CPacket.Status.INCOMPLETE);
 			publishPreview(preview);
@@ -1093,8 +1097,9 @@ public final class InventoryBackend implements AutoCloseable {
 			preview.entries.forEach(RetainedMemoryLedger.Ticket::close); preview.entries.clear();
 			if (preview.metadataMemory != null) { preview.metadataMemory.close(); preview.metadataMemory = null; }
 			if (actual > 0) { preview.entries.add(reservation); retained = true; }
-			preview.last = preview.terminal ? new CaptureResult(result.payload(), result.coverage(), result.availability(),
-				CaptureResult.Completeness.INCOMPLETE, result.consistency(), result.sourceVersion(), result.nextCursor()) : result;
+			preview.last = new PublicationObservation(preview.terminal ? new CaptureResult(result.payload(), result.coverage(), result.availability(),
+				CaptureResult.Completeness.INCOMPLETE, result.consistency(), result.sourceVersion(), result.nextCursor()) : result,
+				observation.get().inventorySweepEvidence());
 			preview.revision++;
 			publishPreview(preview);
 			preview.terminal |= result.completeness() != CaptureResult.Completeness.CONTINUE;
@@ -1226,7 +1231,7 @@ public final class InventoryBackend implements AutoCloseable {
 			for (Recipient recipient : lease.recipients.values()) publisher.status(recipient.context, InventoryS2CPacket.Status.INCOMPLETE); return;
 		}
 		lease.consumer.retainCompleted();
-		lease.revision++; lease.completed = result;
+		lease.revision++; lease.completed = new PublicationObservation(result, observed.get().inventorySweepEvidence());
 		lease.completedCount = lease.count; lease.completedTotal = lease.total; lease.completedFolded = lease.folded;
 		for (Recipient recipient : List.copyOf(lease.recipients.values())) publishTracking(lease, recipient);
 	}
@@ -1281,7 +1286,8 @@ public final class InventoryBackend implements AutoCloseable {
 	private static long trackingStagingBytes(String label, String presentation) {
 		return checkedAdd(4096L, checkedAdd(utf8Bytes(label), utf8Bytes(presentation)));
 	}
-	private SyncPublisher.Outcome publish(SyncPublisher.Context context, Map<String, InventoryDomainCodec.Item> items, CaptureResult result, long revision) {
+	private SyncPublisher.Outcome publish(SyncPublisher.Context context, Map<String, InventoryDomainCodec.Item> items, PublicationObservation observation, long revision) {
+		CaptureResult result = observation.result();
 		// Measured per-item encode workspace at the effective display ceiling, not an absolute-frame mirror.
 		long upper = 8192L;
 		for (var item : items.values()) {
@@ -1297,7 +1303,7 @@ public final class InventoryBackend implements AutoCloseable {
 		CaptureResult publication = new CaptureResult(Optional.of(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, payload)),
 			new CaptureResult.Coverage(result.coverage().demandStamp(), revision, result.coverage().scanned(), result.coverage().expected()),
 			CaptureResult.Availability.READABLE, result.completeness(), result.consistency(), result.sourceVersion(), Optional.empty());
-		return publisher.publish(publication, new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, payload.keySet()), context,
+		return publisher.publish(publication, observation.evidence(), new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, payload.keySet()), context,
 			new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L)));
 		}
 	}

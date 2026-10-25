@@ -44,6 +44,57 @@ class InventorySyncPublisherTest {
 			new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, payload.entries().keySet()), context,
 			new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L))));
 	}
+	@Test void scopedSweepEvidenceControlsBothEntryQualityAndCompletionWithoutChangingGenericPublication() {
+		for (var evidence : InventoryStep.SweepEvidence.values()) for (var consistency : CaptureResult.Consistency.values())
+			for (var completeness : CaptureResult.Completeness.values()) for (boolean knownCoverage : new boolean[] {false, true})
+				for (int entries : new int[] {0, 1}) {
+			var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+			try (var publisher = new InventorySyncPublisher(memory, transport)) {
+				publisher.advance(0, settings); var context = context("preview/1", 1);
+				assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null)));
+				var source = capture(1, entries, 0);
+				var result = new CaptureResult(source.payload(), new CaptureResult.Coverage("inventory", 1, entries,
+					knownCoverage ? OptionalLong.of(entries) : OptionalLong.empty()), source.availability(), completeness, consistency, Optional.empty(), Optional.empty());
+				var projection = new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE,
+					((CaptureResult.OpaqueKeyedFragment) result.payload().orElseThrow()).entries().keySet());
+				var ledger = new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L));
+				assertInstanceOf(SyncPublisher.Outcome.Accepted.class, evidence == InventoryStep.SweepEvidence.NONE
+					? publisher.publish(result, projection, context, ledger) : publisher.publish(result, evidence, projection, context, ledger));
+				publisher.drain();
+				boolean normal = consistency == CaptureResult.Consistency.VERIFIED || consistency == CaptureResult.Consistency.EVENTUAL
+					&& evidence == InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP && completeness == CaptureResult.Completeness.COMPLETE && knownCoverage;
+				var quality = normal ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN;
+				assertTrue(transport.sent.stream().flatMap(packet -> packet.entries().stream()).allMatch(entry -> entry.quality() == quality));
+				assertEquals(completeness == CaptureResult.Completeness.COMPLETE ? quality : completeness == CaptureResult.Completeness.INCOMPLETE
+					? InventoryS2CPacket.Status.INCOMPLETE : InventoryS2CPacket.Status.UPDATING, transport.sent.getLast().status());
+				assertEquals(completeness == CaptureResult.Completeness.COMPLETE, transport.sent.getLast().completeScan());
+			}
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+		}
+	}
+	@Test void evidenceCannotPromoteShortCoverageOrStickToLaterGenericVersionsAndAggregateQualityWins() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("preview/1", 1);
+			publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null));
+			for (int revision = 1; revision <= 4; revision++) {
+				var source = capture(revision, 1, 0);
+				var payload = revision == 4 ? Optional.<CaptureResult.CapturePayload>of(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, Map.of("k0",
+					InventoryDomainCodec.encode(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", ""), 9, "stone", null, true))))) : source.payload();
+				var result = new CaptureResult(payload, new CaptureResult.Coverage("inventory", revision, 1, OptionalLong.of(revision == 1 ? 2 : 1)),
+					source.availability(), source.completeness(), source.consistency(), source.sourceVersion(), source.nextCursor());
+				var projection = new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, Set.of("k0"));
+				var ledger = new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L));
+				assertInstanceOf(SyncPublisher.Outcome.Accepted.class, revision == 3 ? publisher.publish(result, projection, context, ledger)
+					: publisher.publish(result, InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, projection, context, ledger));
+				publisher.drain(); var sent = transport.sent.getLast();
+				assertEquals(revision == 2 || revision == 4 ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN, sent.status());
+				var entry = transport.sent.stream().flatMap(packet -> packet.entries().stream()).reduce((a, b) -> b).orElseThrow();
+				assertEquals(revision == 4 ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : revision == 2 ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN, entry.quality());
+			}
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
 	@Test void immutableBaselineSurvivesMoreThanFivePeriodsAndRecipientRepairIsIsolated() {
 		InventorySettings settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25)));
 		Transport transport = new Transport(); RetainedMemoryLedger memory = new RetainedMemoryLedger(16000000);
