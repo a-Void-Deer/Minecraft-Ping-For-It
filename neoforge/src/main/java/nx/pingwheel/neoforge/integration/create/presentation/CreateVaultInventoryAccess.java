@@ -232,6 +232,12 @@ public final class CreateVaultInventoryAccess {
 				expected.controller, members);
 		}
 		@Override public Optional<String> alias() { return Optional.of(alias); }
+		/** Local handlers are validated here, not through generic Container scope evidence. */
+		@Override public IPlatformInventoryService.Access scopedResidents(
+			java.util.function.Supplier<? extends IPlatformInventoryService.ResidentScope> factory) {
+			java.util.Objects.requireNonNull(factory, "factory");
+			return this;
+		}
 		@Override public boolean valid() {
 			try { return matches(world, original, expected, frozenLayout); }
 			catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {

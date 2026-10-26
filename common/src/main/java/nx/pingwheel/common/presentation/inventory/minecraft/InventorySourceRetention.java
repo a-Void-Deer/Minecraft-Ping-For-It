@@ -46,6 +46,8 @@ final class InventorySourceRetention {
 			int members = view.snapshotLayout() == null ? 1 : view.snapshotLayout().members().size();
 			// Reacquired accesses are operation-local and paid by validation scratch.
 			// The access and source share this one layout DTO; provider() excludes it.
+			// Scope is a conservative bound even when a provider declines the factory.
+			// The synchronous factory never escapes into retained source ownership.
 			bytes += scope(members) + provider(view.snapshotLayout());
 		}
 		return bytes;

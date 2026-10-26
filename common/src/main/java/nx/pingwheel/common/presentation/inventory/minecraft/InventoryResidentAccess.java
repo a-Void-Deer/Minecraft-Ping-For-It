@@ -119,9 +119,21 @@ public interface InventoryResidentAccess {
 		return ((InventoryEnchantmentsAccessor) (Object) value).pingforit$showInTooltip();
 	}
 	InventoryResidentAccess MIXIN = new InventoryResidentAccess() {};
-	/** No production service overrides this. Headless tests install the exact-field port. */
+	/**
+	 * Resolve once per defining class loader, lazily on the first request using
+	 * ServiceLoader's default thread context class loader and first-provider order.
+	 * Later context-loader changes do not replace the port. No production service
+	 * overrides the Mixin fallback; headless tests install the exact-field port.
+	 * Discovery failures propagate rather than selecting an empty fallback.
+	 */
 	static InventoryResidentAccess load() {
-		return java.util.ServiceLoader.load(InventoryResidentAccess.class).findFirst().orElse(MIXIN);
+		return DefaultAccess.INSTANCE;
+	}
+	@org.jetbrains.annotations.NotNullByDefault
+	final class DefaultAccess {
+		private static final InventoryResidentAccess INSTANCE =
+			java.util.ServiceLoader.load(InventoryResidentAccess.class).findFirst().orElse(MIXIN);
+		private DefaultAccess() {}
 	}
 
 	default DataComponentMap prototype(PatchedDataComponentMap map) {

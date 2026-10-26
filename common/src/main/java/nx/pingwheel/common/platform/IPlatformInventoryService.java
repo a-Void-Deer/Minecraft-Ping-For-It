@@ -147,6 +147,16 @@ public interface IPlatformInventoryService {
 		/** Source-owned evidence over an already resolved member set; never discovery. */
 		default Access scopedResidents(ResidentScope scope) { Objects.requireNonNull(scope); return this; }
 		/**
+		 * Construct fresh source-owned evidence only when this provider consumes it.
+		 * The compatibility default invokes the factory once and dispatches through
+		 * the existing overload, including unknown implementations' overrides.
+		 * A provider owning its complete resident validation may decline the factory;
+		 * it must not retain it or weaken the caller's authority/member prechecks.
+		 */
+		default Access scopedResidents(java.util.function.Supplier<? extends ResidentScope> factory) {
+			return scopedResidents(Objects.requireNonNull(factory, "factory").get());
+		}
+		/**
 		 * Synchronous member guard for this operation's reacquired access. Native
 		 * providers override to guard inside composite reads and cursorless iteration.
 		 * The default preserves metadata and indexed reads; cursorless enumeration
@@ -311,6 +321,9 @@ public interface IPlatformInventoryService {
 			requireMember(); return more;
 		}
 		@Override public Access scopedResidents(ResidentScope scope) { return checked(() -> delegate.scopedResidents(scope)).guardedBy(memberGate); }
+		@Override public Access scopedResidents(java.util.function.Supplier<? extends ResidentScope> factory) {
+			return checked(() -> delegate.scopedResidents(factory)).guardedBy(memberGate);
+		}
 		@Override public boolean supportsDetachedSlotCapture() { return checked(delegate::supportsDetachedSlotCapture); }
 		@Override public ResidentVisit observeResident(int limit, ResidentVisitor visitor) {
 			if (limit < 0) throw new IllegalArgumentException("negative observation limit");

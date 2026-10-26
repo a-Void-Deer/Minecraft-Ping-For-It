@@ -174,6 +174,9 @@ public final class InventoryValidationBudget {
 		Cost dto = vanilla || vault ? changedLayoutCopy(attemptedMembers, attemptedMembers) : layoutCopy(layout);
 		Cost cost = dto.overlap(fixed(layout))
 			.overlap(owned(n * (O + 2 * R) + 8 * list(attemptedMembers), n + 8 * attemptedMembers));
+		// Retain the conservative scope/scratch bound for every provider. The
+		// short-lived scope supplier fits fixed()'s existing closure/wrapper reserve,
+		// including providers that build the scope; declining it does not narrow admission.
 		if (vault) return cost.overlap(vaultLayout(81)).overlap(vaultValidation(m).times(4));
 		return vanilla ? cost : cost.overlap(classification(1, true).times(4))
 			.overlap(changedLayoutCopy(81, 81)).overlap(vaultLayout(81)).overlap(vaultValidation(81).times(4));

@@ -375,15 +375,21 @@ public final class InventoryMinecraftSources {
 		}
 		String accessIdentity = access.alias().orElse(identity);
 		InventorySnapshotLayout layout = providerLayout(input, pos, access, physical::contains, false, expected, enforceShape);
-		InventorySnapshotLayout admittedLayout = layout;
+		@Nullable InventorySnapshotLayout admittedLayout = layout;
 		List<BlockEntity> admittedMembers = layout == null ? List.copyOf(entities) : precheckMembers(layout, world, physical.memberGate());
-		var admittedBlocks = new net.minecraft.world.level.block.Block[admittedMembers.size()];
-		for (int index = 0; index < admittedBlocks.length; index++) admittedBlocks[index] = admittedMembers.get(index).getBlockState().getBlock();
-		access = access.scopedResidents(new IPlatformInventoryService.ResidentScope() {
+		// Member/owner prechecks above remain eager. Only the optional resident
+		// evidence and its private scratch/mapping caches belong to this factory.
+		access = access.scopedResidents(() -> new IPlatformInventoryService.ResidentScope() {
+			private final net.minecraft.world.level.block.Block @org.jetbrains.annotations.Unmodifiable [] admittedBlocks = admittedBlocks();
 			private final InventoryContainerReads.Scratch scopeScratch = new InventoryContainerReads.Scratch();
-			private final Container[] mappedContainers = new Container[32];
-			private final List<?>[] mappedSlots = new List<?>[32];
+			private final @Nullable Container[] mappedContainers = new Container[32];
+			private final @Nullable @org.jetbrains.annotations.Unmodifiable List<?>[] mappedSlots = new List<?>[32];
 			private int mappedCount;
+			private net.minecraft.world.level.block.Block @org.jetbrains.annotations.Unmodifiable [] admittedBlocks() {
+				var blocks = new net.minecraft.world.level.block.Block[admittedMembers.size()];
+				for (int index = 0; index < blocks.length; index++) blocks[index] = admittedMembers.get(index).getBlockState().getBlock();
+				return blocks;
+			}
 			@Override public Direction face() { return face; }
 			@Override public boolean valid() {
 				try {
@@ -424,19 +430,19 @@ public final class InventoryMinecraftSources {
 			@Override public boolean audited(Container container) {
 				return InventoryContainerReads.audited(container, this::allows, scopeScratch);
 			}
-			@Override public List<Integer> slots(Container container) {
+			@Override public @Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> slots(Container container) {
 				if (!valid() || admittedLayout == null) return null;
 				InventoryContainerReads.requireScope(container, this::allows, scopeScratch);
 				for (int index = 0; index < mappedCount; index++) if (mappedContainers[index] == container) {
-					@SuppressWarnings("unchecked") var mapping = (List<Integer>) mappedSlots[index];
+					@SuppressWarnings("unchecked") @Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> mapping = (List<Integer>) mappedSlots[index];
 					return mapping; // immutable frozen witness, never rebuild/box all slots per read
 				}
-				var mapping = InventoryContainerReads.scopedSlots(container, this::allows, this::localSlots, scopeScratch);
+				@Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> mapping = InventoryContainerReads.scopedSlots(container, this::allows, this::localSlots, scopeScratch);
 				if (mappedCount == mappedContainers.length) throw new IllegalStateException("inventory wrapper mapping bound");
 				mappedContainers[mappedCount] = container; mappedSlots[mappedCount++] = mapping;
 				return mapping;
 			}
-			private List<Integer> localSlots(Container container) {
+			private @Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> localSlots(Container container) {
 				for (int i = 0; i < admittedMembers.size(); i++) if (admittedMembers.get(i) == container) {
 					var segments = admittedLayout.members().get(i).segments();
 					return segments.size() == 1 ? segments.getFirst().visibleSlots() : null;

@@ -151,6 +151,38 @@ class CreateVaultInventoryAccessTest {
 		assertFalse(access.valid(), "a final all-member relation change must still reject publication");
 	}
 	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
+	@Test void segmentedAccessDeclinesUnusedScopeButStillChecksLiveMembers() {
+		World world = World.pair(); var allowed = new java.util.HashSet<>(world.members.keySet());
+		var access = CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH, allowed::contains).orElseThrow();
+		assertSame(access, access.scopedResidents(() -> { throw new AssertionError("Vault does not consume Container scope"); }));
+		assertTrue(access.valid());
+		var guarded = access.guardedBy(() -> allowed.contains(BlockPos.ZERO));
+		guarded.scopedResidents(() -> { throw new AssertionError("guard must forward the lazy overload"); });
+		allowed.remove(new BlockPos(1, 0, 0));
+		assertFalse(access.valid());
+		assertThrows(InventorySourceUnavailableException.class, () -> access.consumeResident(0, entry -> { fail("revoked member"); return true; }));
+	}
+	@Test void nativeLocalReusesDiscoveredPortAndKeepsExplicitInjectionAndBackingChecks() throws ReflectiveOperationException {
+		var discovered = nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess.load();
+		long before = nx.pingwheel.common.presentation.inventory.client.ClientDisplayFoodTestPorts.constructions;
+		var method = CreateVaultInventoryAccess.class.getDeclaredMethod("nativeLocal", IItemHandler.class); method.setAccessible(true);
+		var handler = new net.neoforged.neoforge.items.ItemStackHandler(1);
+		for (int request = 0; request < 8; request++) {
+			assertTrue((Boolean) method.invoke(null, handler));
+			new nx.pingwheel.common.presentation.inventory.minecraft.InventoryContainerReads.Scratch();
+			assertSame(discovered, nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess.load());
+		}
+		assertEquals(before, nx.pingwheel.common.presentation.inventory.client.ClientDisplayFoodTestPorts.constructions);
+		var reads = new java.util.concurrent.atomic.AtomicInteger();
+		var raw = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess() {
+			@Override public List<?> nonNullList(net.minecraft.core.NonNullList<?> value) { reads.incrementAndGet(); return RAW.nonNullList(value); }
+		};
+		assertTrue(CreateVaultInventoryAccess.nativeLocal(handler, raw)); assertEquals(1, reads.get());
+		var stacks = net.neoforged.neoforge.items.ItemStackHandler.class.getDeclaredField("stacks"); stacks.setAccessible(true);
+		stacks.set(handler, null);
+		assertFalse((Boolean) method.invoke(null, handler), "class-stable ownership cannot cache mutable storage validation");
+		assertEquals(before, nx.pingwheel.common.presentation.inventory.client.ClientDisplayFoodTestPorts.constructions);
+	}
 	static class Handler implements IItemHandler {
 		final ItemStack[] stacks;
 		Handler(int slots) { stacks = new ItemStack[slots]; java.util.Arrays.fill(stacks, ItemStack.EMPTY); }
