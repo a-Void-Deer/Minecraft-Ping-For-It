@@ -12,6 +12,8 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket.Status;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.render.InventoryTrackingRenderer;
+import nx.pingwheel.common.render.SpatialInventoryView;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
@@ -25,6 +27,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real writer/reader deliveries; bootstrap is presentation, never capture evidence. */
 @NotNullByDefault
 class InventoryBootstrapPublicationTest {
+	@org.junit.jupiter.api.BeforeAll static void bootstrapMinecraft() {
+		net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+	}
 	private static final long LONG_COUNT = 9_007_199_254_740_993L;
 	private static final MarkerId MARKER = new MarkerId(1);
 	private static final SyncPublisher.AuthorizedProjection SELECTED = new SyncPublisher.AuthorizedProjection(
@@ -282,6 +287,125 @@ class InventoryBootstrapPublicationTest {
 				.forEach(p -> f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(p)));
 			assertTrue(f.view().complete()); assertEquals(2, f.view().watermark()); assertEquals(Status.READY, f.view().status());
 			assertTrue(f.endpoint.repairs().isEmpty());
+		}
+	}
+
+	@Test void actualCompletionControlsKeepExactAndAggregateSeedVisiblyUpdatingUntilFreshDataArrives() {
+		for (boolean aggregate : new boolean[] {false, true}) for (boolean nativeSweep : new boolean[] {false, true})
+			try (var f = new Fixture()) {
+			f.bootstrap(1, Status.UPDATING, aggregate); var seed = f.drain();
+			f.publisher.advance(3, f.settings);
+			assertInstanceOf(SyncPublisher.Outcome.Accepted.class, f.publisher.publish(complete(2, 19, aggregate),
+				nativeSweep ? InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP : InventoryStep.SweepEvidence.NONE, SELECTED, f.context, work()));
+			f.publisher.drain(); var fresh = List.copyOf(f.transport.sent); f.transport.sent.clear();
+			assertTrue(fresh.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.STATUS
+				&& p.status() == (nativeSweep ? Status.READY : Status.UNCERTAIN)));
+			fresh.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STATUS)
+				.forEach(p -> f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(p)));
+			assertProvisionalLine(f.view(), Status.UPDATING, LONG_COUNT, aggregate);
+			fresh.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM)
+				.forEach(p -> f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(p)));
+			assertTrue(f.view().complete()); assertEquals(19, f.view().entries().getFirst().count());
+			assertEquals(nativeSweep ? Status.READY : Status.UNCERTAIN, f.view().status());
+			seed.forEach(p -> f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(p)));
+			assertEquals(nativeSweep ? Status.READY : Status.UNCERTAIN, f.view().status());
+			f.endpoint.tickTo(0, 90);
+			assertTrue(f.endpoint.repairs().isEmpty(), "accepted controls still close normally after full data receipt");
+		}
+	}
+
+	private static void assertProvisionalLine(ClientInventory.Tracking view, Status status, long count, boolean aggregate) {
+		assertFalse(view.complete()); assertEquals(status, view.status());
+		var line = InventoryTrackingRenderer.lines(view).getFirst();
+		assertEquals(count, line.count());
+		assertEquals(SpatialInventoryView.Status.fromName(status.name()).translationKey(), line.statusKey());
+		assertEquals(aggregate ? SpatialInventoryView.Status.COMPONENT_TOO_LONG.translationKey() : null, line.qualifierKey());
+		assertEquals(aggregate || status != Status.UPDATING, line.grey());
+	}
+
+	@Test void completionControlsAndReorderedMultipartDataPreserveSeedAndFailureDisplayUntilTheFullFreshCut() {
+		for (boolean aggregate : new boolean[] {false, true}) for (Status failure : List.of(Status.UPDATING, Status.INCOMPLETE, Status.INVALID))
+			try (var f = new Fixture()) {
+			f.bootstrap(1, Status.UPDATING, aggregate); var seed = f.drain();
+			long revision = 1;
+			if (failure == Status.INCOMPLETE) { f.publisher.status(f.context, failure); f.drain(); }
+			if (failure == Status.INVALID) {
+				f.publisher.rebase(f.context, 2);
+				f.context = new SyncPublisher.Context(f.context.consumerId(), f.context.recipient(), "100/1", 2, 1);
+				f.publisher.status(f.context, failure); f.drain(); revision = 3;
+			}
+			for (Status completed : List.of(Status.READY, Status.UNCERTAIN))
+				f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.status(7, 0, MARKER, 1, revision,
+					3, completed, 0).stamp(100, 1)));
+			assertProvisionalLine(f.view(), failure, LONG_COUNT, aggregate);
+			var item = new InventoryS2CPacket.Entry("selected", "minecraft:stone", "stone", null, 19, 2,
+				aggregate, aggregate ? Status.COMPONENT_TOO_LONG : Status.READY, aggregate ? 2 : 0, aggregate, "danger");
+			for (int index : new int[] {1, 0}) {
+				f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM,
+					7, 0, MARKER, 1, revision, 3, index, 3, true, Status.READY, 0,
+					index == 1 ? List.of(item) : List.of()).stamp(100, 1)));
+				assertProvisionalLine(f.view(), failure, LONG_COUNT, aggregate);
+			}
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM,
+				7, 0, MARKER, 1, revision, 3, 2, 3, true, Status.READY, 0, List.of()).stamp(100, 1)));
+			assertTrue(f.view().complete()); assertEquals(Status.READY, f.view().status());
+			assertEquals(19, InventoryTrackingRenderer.lines(f.view()).getFirst().count());
+			seed.forEach(p -> f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(p)));
+			assertEquals(Status.READY, f.view().status()); assertEquals(19, f.view().entries().getFirst().count());
+		}
+	}
+
+	@Test void failureAfterEarlyCompletionControlStaysVisibleAndCompletedControlsStillRefreshWithoutEntryResends() {
+		try (var f = new Fixture()) {
+			f.bootstrap(1, Status.UPDATING, false); f.drain(); f.publisher.advance(3, f.settings);
+			assertInstanceOf(SyncPublisher.Outcome.Accepted.class, f.publisher.publish(complete(2, 19, false),
+				InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, SELECTED, f.context, work()));
+			f.publisher.drain(); var fresh = List.copyOf(f.transport.sent); f.transport.sent.clear();
+			var completed = fresh.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STATUS && p.status() == Status.READY).findFirst().orElseThrow();
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(completed));
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.status(7, 0, MARKER, 1, 1,
+				completed.watermark(), Status.INCOMPLETE, 0).stamp(100, 1)));
+			assertProvisionalLine(f.view(), Status.INCOMPLETE, LONG_COUNT, false);
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(completed));
+			assertProvisionalLine(f.view(), Status.INCOMPLETE, LONG_COUNT, false);
+			fresh.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM)
+				.forEach(p -> f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(p)));
+			assertTrue(f.view().complete()); assertEquals(Status.READY, f.view().status());
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.status(7, 0, MARKER, 1, 1,
+				completed.watermark(), Status.UNCERTAIN, completed.checksum()).stamp(100, 1)));
+			assertTrue(f.view().complete()); assertEquals(Status.UNCERTAIN, f.view().status());
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(completed));
+			assertEquals(Status.READY, f.view().status()); assertEquals(19, f.view().entries().getFirst().count());
+			assertTrue(f.endpoint.repairs().isEmpty());
+		}
+	}
+
+	@Test void loweringDisplayCapStripsTheClosedProvisionalProjectionWithoutResurrectionOnIncrease() {
+		try (var f = new Fixture()) {
+			String display = "x".repeat(2048);
+			assertInstanceOf(SyncPublisher.Outcome.Accepted.class, f.publisher.publishBootstrap(payload(LONG_COUNT, false, display),
+				1, Status.UPDATING, SELECTED, f.context, work())); f.drain();
+			assertEquals(display, f.view().entries().getFirst().displayJson());
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.offer(7,
+				new InventoryS2CPacket.Offer(5, 3, 5, 16, 1024, 8192)).stamp(100, 1)));
+			assertNull(f.view().entries().getFirst().displayJson());
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.offer(7,
+				new InventoryS2CPacket.Offer(5, 3, 5, 16)).stamp(100, 1)));
+			assertNull(f.view().entries().getFirst().displayJson()); assertEquals(LONG_COUNT, f.view().entries().getFirst().count());
+			assertFalse(f.view().complete()); assertEquals(Status.UPDATING, f.view().status());
+		}
+	}
+
+	@Test void failureDuringFirstMultipartDeliveryRetainsTheSeedInsteadOfItsPartiallyAppliedReplacement() {
+		for (Status failure : List.of(Status.INCOMPLETE, Status.INVALID)) try (var f = new Fixture()) {
+			f.bootstrap(1, Status.UPDATING, false); f.drain();
+			var item = new InventoryS2CPacket.Entry("selected", "minecraft:stone", "stone", null, 19, 2, false, Status.READY);
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM,
+				7, 0, MARKER, 1, 1, 2, 0, 2, true, Status.READY, 0, List.of(item)).stamp(100, 1)));
+			assertProvisionalLine(f.view(), Status.UPDATING, LONG_COUNT, false);
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.status(7, 0, MARKER, 1,
+				failure == Status.INVALID ? 2 : 1, 2, failure, 0).stamp(100, 1)));
+			assertProvisionalLine(f.view(), failure, LONG_COUNT, false);
 		}
 	}
 

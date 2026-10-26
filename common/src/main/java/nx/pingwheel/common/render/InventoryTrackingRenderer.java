@@ -10,8 +10,10 @@ import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.NotNullByDefault;
 
 /** Paint-only dedicated inventory annotations, alongside—not in—the SECTION provider. */
+@NotNullByDefault
 public final class InventoryTrackingRenderer {
 	private InventoryTrackingRenderer() {}
 	public record Line(String label, @Nullable Long count, @Nullable String pingType, @Nullable String statusKey,
@@ -39,17 +41,51 @@ public final class InventoryTrackingRenderer {
 		}
 		return List.copyOf(result);
 	}
-	/** Reserve lifecycle/identity text before shortening the item name, never the reverse. */
+	/** Shorten descriptive fields only; the localized quantity is an indivisible semantic field. */
 	static Component text(Line line) {
-		Component text = Component.literal(line.label());
-		if (line.count() != null) text = text.copy().append(" x" + line.count());
-		if (line.pingType() != null && PingTypeCatalog.builtIn().findById(line.pingType()).isPresent())
-			text = Component.translatable("presentation.pingforit.type." + line.pingType() + ".phrase", text);
-		String suffix = line.statusKey() == null ? "" : " — " + Component.translatable(line.statusKey()).getString();
-		if (line.qualifierKey() != null) suffix += " — " + Component.translatable(line.qualifierKey()).getString();
-		suffix = suffix.substring(0, Math.min(64, suffix.length()));
-		String body = text.getString();
-		return Component.literal(body.substring(0, Math.min(Math.max(0, 64 - suffix.length()), body.length())) + suffix);
+		String lifecycle = line.statusKey() == null ? "" : Component.translatable(line.statusKey()).getString();
+		String qualifier = line.qualifierKey() == null ? "" : Component.translatable(line.qualifierKey()).getString();
+		String name = shorten(line.label(), 64);
+		// Resolve grammar with a placeholder, so annotations may put the item
+		// before or after their phrase without treating any count digits as prose.
+		String slot = "\u0001";
+		String template = line.pingType() != null && PingTypeCatalog.builtIn().findById(line.pingType()).isPresent()
+			? Component.translatable("presentation.pingforit.type." + line.pingType() + ".phrase", slot).getString() : slot;
+		String[] phrase = template.split(slot, -1);
+		int copies = phrase.length - 1;
+		if (copies == 0) { phrase = new String[] {"", ""}; copies = 1; }
+		String suffix = suffix(lifecycle, qualifier);
+		String item = itemCount(name, line.count());
+		int phraseLength = String.join("", phrase).length();
+		while (phraseLength + copies * item.length() + suffix.length() > 64 && !name.isEmpty()) {
+			name = shorten(name, name.length() - 1);
+			item = itemCount(name, line.count());
+		}
+		// Very long translations spend their remaining space on lifecycle and
+		// identity labels before annotation wording. Never substring the item/count.
+		int phraseBudget = Math.max(0, 64 - copies * item.length() - suffix.length());
+		for (int i = 0; i < phrase.length; i++) {
+			phrase[i] = shorten(phrase[i], phraseBudget);
+			phraseBudget -= phrase[i].length();
+		}
+		int labelBudget = Math.max(0, 64 - copies * item.length() - String.join("", phrase).length());
+		if (suffix.length() > labelBudget) {
+			int labels = Math.max(0, labelBudget - (lifecycle.isEmpty() ? 0 : 3) - (qualifier.isEmpty() ? 0 : 3));
+			int lifecycleBudget = Math.min(lifecycle.length(), Math.max(0, labels - (qualifier.isEmpty() ? 0 : 1)));
+			qualifier = shorten(qualifier, labels - lifecycleBudget);
+			lifecycle = shorten(lifecycle, lifecycleBudget);
+			suffix = suffix(lifecycle, qualifier);
+		}
+		return Component.literal(String.join(item, phrase) + suffix);
+	}
+	private static String itemCount(String name, @Nullable Long count) {
+		return count == null ? name : Component.translatableWithFallback("presentation.pingforit.format.item_count", "%s × %s", name, Long.toString(count)).getString();
+	}
+	private static String suffix(String lifecycle, String qualifier) {
+		return (lifecycle.isEmpty() ? "" : " — " + lifecycle) + (qualifier.isEmpty() ? "" : " — " + qualifier);
+	}
+	private static String shorten(String text, int limit) {
+		return text.length() <= limit ? text : limit <= 0 ? "" : text.substring(0, limit - 1) + "…";
 	}
 	public static void draw(GuiGraphics graphics, List<MarkerLines> markers) {
 		DrawContext context = new DrawContext(graphics);

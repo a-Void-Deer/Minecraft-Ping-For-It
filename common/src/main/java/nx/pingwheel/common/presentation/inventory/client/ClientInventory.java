@@ -469,22 +469,35 @@ public final class ClientInventory {
 	 * their last metadata; an invalidated channel reports {@code grey} while
 	 * keeping those values.
 	 */
-	public Tracking tracking(MarkerId markerId) {
+	public Tracking tracking(@Nullable MarkerId markerId) {
 		if (markerId == null)
 			return Tracking.empty(null);
-		TrackingState state = tracking.get(markerId);
+		@Nullable TrackingState state = tracking.get(markerId);
 		if (state == null)
 			return Tracking.empty(markerId);
 		List<EntryView> entries = new ArrayList<>(state.metadata.size());
 		Map<String, InventoryClientStore.Value> committed = store.values(state.channel);
 		for (EntryView view : state.metadata.values()) {
-			InventoryClientStore.Value value = committed.get(view.key());
+			InventoryClientStore.@Nullable Value value = committed.get(view.key());
 			entries.add(value == null ? view
 				: new EntryView(view.key(), view.itemId(), view.label(), view.displayJson(), value.count(),
 					view.fallback(), view.quality(), view.itemPingType()));
 		}
 		boolean history = !state.sourceComplete && !state.historical.isEmpty();
-		return new Tracking(markerId, !state.sourceComplete && state.historicalFailure != null ? state.historicalFailure : state.status,
+		if (!state.sourceComplete && state.committed && !state.closedEntries.isEmpty()) {
+			// Fresh fragments may already be applied per key. The provisional
+			// display still belongs to the last closed seed, not that partial cut.
+			entries = state.closedEntries.values().stream().map(ClientInventory::viewOf).toList();
+		}
+		// Keep accepted wire status for control/digest processing. A completion
+		// control cannot present the retained seed as fresh before its data cut closes.
+		InventoryS2CPacket.Status displayStatus = state.status;
+		if (!state.sourceComplete) {
+			if (state.historicalFailure != null) displayStatus = state.historicalFailure;
+			else if (displayStatus == InventoryS2CPacket.Status.READY || displayStatus == InventoryS2CPacket.Status.UNCERTAIN)
+				displayStatus = InventoryS2CPacket.Status.UPDATING;
+		}
+		return new Tracking(markerId, displayStatus,
 			store.isInvalid(state.channel) || history || isPreviewTerminalFailure(state.status), state.sourceComplete,
 			store.baselineId(state.channel), state.statusRevision, state.watermark, history ? state.historical : List.copyOf(entries));
 	}
@@ -611,6 +624,14 @@ public final class ClientInventory {
 			}
 			if (stripOversizedDisplays(state.metadata, displayBytes))
 				capFencedStates++;
+			for (var closed : state.closedEntries.entrySet()) {
+				var entry = closed.getValue();
+				if (entry.displayJson() != null && entry.displayJson().getBytes(StandardCharsets.UTF_8).length > displayBytes) {
+					closed.setValue(new InventoryS2CPacket.Entry(entry.key(), entry.itemId(), entry.label(), null,
+						entry.count(), entry.itemRevision(), entry.fallback(), entry.quality(), entry.groupRevision(), entry.replaceGroup(), entry.itemPingType()));
+					capFencedStates++;
+				}
+			}
 			if (!state.historical.isEmpty()) {
 				Map<String, EntryView> history = new LinkedHashMap<>();
 				for (var entry : state.historical) history.put(entry.key(), entry);
@@ -1264,6 +1285,9 @@ public final class ClientInventory {
 		if (state.completionWatermark < 0 || !state.committed || !state.closedCut || store.assembling(state.channel)) return;
 		if (state.completionWatermark < state.watermark) { clearCompletion(state); return; }
 		for (long watermark : state.batches.keySet()) if (watermark <= state.completionWatermark) return;
+		// Before the first scan, a future control must wait for its data even
+		// when its checksum differs from the seed. The waiting window owns repair.
+		if (!state.sourceComplete && state.completionWatermark > state.watermark) return;
 		if (state.committedChecksum != state.completionChecksum) {
 			scheduleRepair(state); // compare the closed projection only, never partially applied live entries
 			return;
@@ -1445,7 +1469,9 @@ public final class ClientInventory {
 		state.watermark = 0L;
 	}
 	private static void retainHistory(TrackingState state) {
-		if (!state.metadata.isEmpty()) state.historical = List.copyOf(state.metadata.values());
+		if (!state.sourceComplete && state.committed && !state.closedEntries.isEmpty())
+			state.historical = state.closedEntries.values().stream().map(ClientInventory::viewOf).toList();
+		else if (!state.metadata.isEmpty()) state.historical = List.copyOf(state.metadata.values());
 		if (isPreviewTerminalFailure(state.status)) state.historicalFailure = state.status;
 	}
 
