@@ -343,7 +343,7 @@
   ,"settings.pingforit.group.monitoring": "Surveillance"
   ,"settings.pingforit.budget_delay_notifications_enabled": "Notifications de retard lié aux budgets"
   ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Avis aux administrateurs pour les attentes de ressources persistantes.\nDésactivé : moins de messages ; les retards passent plus facilement inaperçus.\nActivé : indique les tâches en attente et aide à choisir le budget à ajuster."
-  ,"message.pingforit.budget_delay": "Retards persistants liés aux budgets pour %s. Vérifiez les budgets de performances ou les listes noires du serveur."
+  ,"message.pingforit.budget_delay": "[ping for it] Retards persistants liés aux budgets pour %s. Vérifiez les budgets de performances ou les listes noires du serveur."
   ,"message.pingforit.budget_delay.module.presentation": "présentation des informations"
   ,"message.pingforit.budget_delay.module.inventory_preview": "aperçu de l'inventaire"
   ,"message.pingforit.budget_delay.module.inventory_tracking": "suivi de l'inventaire"

@@ -42,8 +42,8 @@ public final class BudgetDelayMonitor implements BudgetDelaySink {
 		}
 	}
 
-	private static final long STREAK_TICKS = 20;
-	private static final long COOLDOWN_TICKS = 200;
+	private static final long STREAK_TICKS = 60;
+	private static final long COOLDOWN_TICKS = 600;
 	private static final Reason[] REASONS = Reason.values();
 	private static final Unit[] UNITS = Unit.values();
 	private final ModuleState[] modules = new ModuleState[Module.values().length];

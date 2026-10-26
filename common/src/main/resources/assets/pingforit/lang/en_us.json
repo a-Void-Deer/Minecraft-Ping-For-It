@@ -349,7 +349,7 @@
   ,"settings.pingforit.group.monitoring": "Monitoring"
   ,"settings.pingforit.budget_delay_notifications_enabled": "Budget Delay Notifications"
   ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Administrator notices for sustained resource delays.\nOff: fewer chat messages; delays are easier to miss.\nOn: shows which work is waiting, helping you choose a budget to adjust."
-  ,"message.pingforit.budget_delay": "Sustained budget delays in %s. Review server performance budgets or blacklists."
+  ,"message.pingforit.budget_delay": "[ping for it] Sustained budget delays in %s. Review server performance budgets or blacklists."
   ,"message.pingforit.budget_delay.module.presentation": "presentation"
   ,"message.pingforit.budget_delay.module.inventory_preview": "inventory preview"
   ,"message.pingforit.budget_delay.module.inventory_tracking": "inventory tracking"

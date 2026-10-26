@@ -338,7 +338,7 @@
   ,"settings.pingforit.group.monitoring": "İzleme"
   ,"settings.pingforit.budget_delay_notifications_enabled": "Bütçe gecikmesi bildirimleri"
   ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Uzayan kaynak beklemeleri için yönetici bildirimleri.\nKapalı: daha az sohbet mesajı; gecikmeler gözden kaçabilir.\nAçık: bekleyen işleri göstererek ayarlanacak bütçeyi seçmeye yardımcı olur."
-  ,"message.pingforit.budget_delay": "%s için sürekli bütçe gecikmeleri var. Sunucunun performans bütçelerini veya kara listelerini gözden geçirin."
+  ,"message.pingforit.budget_delay": "[ping for it] %s için sürekli bütçe gecikmeleri var. Sunucunun performans bütçelerini veya kara listelerini gözden geçirin."
   ,"message.pingforit.budget_delay.module.presentation": "bilgi sunumu"
   ,"message.pingforit.budget_delay.module.inventory_preview": "envanter önizlemesi"
   ,"message.pingforit.budget_delay.module.inventory_tracking": "envanter takibi"

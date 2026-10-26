@@ -338,7 +338,7 @@
   ,"settings.pingforit.group.monitoring": "Monitorowanie"
   ,"settings.pingforit.budget_delay_notifications_enabled": "Powiadomienia o opóźnieniach budżetowych"
   ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Powiadomienia administratora o długim oczekiwaniu na zasoby.\nWyłączone: mniej wiadomości; łatwiej przeoczyć opóźnienia.\nWłączone: wskazuje oczekujące zadania i pomaga wybrać budżet do zmiany."
-  ,"message.pingforit.budget_delay": "Utrzymujące się opóźnienia budżetowe w modułach: %s. Sprawdź budżety wydajności lub czarne listy serwera."
+  ,"message.pingforit.budget_delay": "[ping for it] Utrzymujące się opóźnienia budżetowe w modułach: %s. Sprawdź budżety wydajności lub czarne listy serwera."
   ,"message.pingforit.budget_delay.module.presentation": "prezentacja informacji"
   ,"message.pingforit.budget_delay.module.inventory_preview": "podgląd ekwipunku"
   ,"message.pingforit.budget_delay.module.inventory_tracking": "śledzenie ekwipunku"

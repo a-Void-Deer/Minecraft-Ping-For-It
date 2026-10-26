@@ -346,7 +346,7 @@
   ,"settings.pingforit.group.monitoring": "监控"
   ,"settings.pingforit.budget_delay_notifications_enabled": "预算延迟通知"
   ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "管理员接收的持续资源等待通知。\n关闭：减少聊天消息；持续等待更容易被忽略。\n开启：提示哪些工作正在等待，帮助选择要调整的预算。"
-  ,"message.pingforit.budget_delay": "%s 持续受到预算限制而延迟。请检查服务器性能预算或黑名单设置。"
+  ,"message.pingforit.budget_delay": "[ping for it] %s 持续受到预算限制而延迟。请检查服务器性能预算或黑名单设置。"
   ,"message.pingforit.budget_delay.module.presentation": "信息展示"
   ,"message.pingforit.budget_delay.module.inventory_preview": "物品栏预览"
   ,"message.pingforit.budget_delay.module.inventory_tracking": "物品栏追踪"

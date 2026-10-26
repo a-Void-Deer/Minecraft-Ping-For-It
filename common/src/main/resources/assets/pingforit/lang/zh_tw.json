@@ -340,7 +340,7 @@
   ,"settings.pingforit.group.monitoring": "監控"
   ,"settings.pingforit.budget_delay_notifications_enabled": "預算延遲通知"
   ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "管理員接收的持續資源等待通知。\n關閉：減少聊天訊息；持續等待更容易被忽略。\n開啟：提示哪些工作正在等待，協助選擇要調整的預算。"
-  ,"message.pingforit.budget_delay": "%s 持續受到預算限制而延遲。請檢查伺服器效能預算或黑名單設定。"
+  ,"message.pingforit.budget_delay": "[ping for it] %s 持續受到預算限制而延遲。請檢查伺服器效能預算或黑名單設定。"
   ,"message.pingforit.budget_delay.module.presentation": "資訊呈現"
   ,"message.pingforit.budget_delay.module.inventory_preview": "物品欄預覽"
   ,"message.pingforit.budget_delay.module.inventory_tracking": "物品欄追蹤"
