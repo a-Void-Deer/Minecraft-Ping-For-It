@@ -16,6 +16,7 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.*;
 import nx.pingwheel.common.network.*;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -72,15 +73,17 @@ class InventoryBackendTest {
 		void open() { hello(A); hello(B); backend.handle(A, InventoryC2SPacket.open(host.epoch(A), 100, 1, 1, InventoryRuntimeTest.TARGET, BlockFace.NORTH), 0, settings); backend.tick(0, settings); }
 		@Override public void close() { backend.close(); }
 	}
-	@Test void immediateSingleSelectionCreatesOnceAndInitialTrackingDoesNotReusePreviewCount() {
+	@Test void immediateSingleSelectionSeedsPreviewCountAndFreshTrackingDoesNotReuseIt() {
 		try (Fixture f = new Fixture()) {
 			f.open(); var packet = f.select(1); f.backend.handle(A, packet, 1, f.settings);
 			assertEquals(1, f.host.store.size()); var marker = f.host.store.allMarkers().getFirst();
 			assertEquals("attention", marker.pingType().id()); assertTrue(marker.properties().isEmpty());
-			assertTrue(f.host.packets.stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT));
+			@Unmodifiable List<InventoryS2CPacket> seeds = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT).toList();
+			assertEquals(2, seeds.size()); assertTrue(seeds.stream().allMatch(p -> !p.completeScan()
+				&& p.status() == InventoryS2CPacket.Status.UPDATING && p.entries().getFirst().count() == 7));
 			f.backend.handle(A, packet, 1, f.settings); f.backend.handle(A, f.select(2), 1, f.settings); assertEquals(1, f.host.store.size());
 			f.amount = 0; f.backend.tick(2, f.settings);
-			var snapshots = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT).toList();
+			@Unmodifiable List<InventoryS2CPacket> snapshots = f.host.packets.stream().filter(p -> p.markerId() != null && p.completeScan() && !p.entries().isEmpty()).toList();
 			assertEquals(2, snapshots.size(), "owner's read shared to both authorized frozen audience members");
 			assertTrue(snapshots.stream().flatMap(p -> p.entries().stream()).allMatch(e -> e.count() == 0 && "danger".equals(e.itemPingType())));
 			f.backend.handle(A, InventoryC2SPacket.close(f.host.epoch(A), 1).stamp(100, 1), 2, f.settings);
@@ -222,14 +225,14 @@ class InventoryBackendTest {
 			assertEquals(epoch, f.host.epoch(A)); assertEquals(80, f.host.store.allMarkers().getFirst().expiresAtTick());
 		}
 	}
-	@Test void staleSelectedItemIsRejectedAtOneBoundedWitnessWithoutCreatingOrLaterRetrying() {
+	@Test void itemAbsenceDoesNotVetoAValidReferenceOrReadContentsDuringCreate() {
 		try (Fixture f = new Fixture()) {
 			f.open(); var selection = f.select(1); f.amount = 0; int reads = f.reads.get();
-			f.backend.handle(A, selection, 1, f.settings); assertEquals(0, f.host.store.size());
-			assertEquals(reads + 1, f.reads.get(), "immediate indexed witness, not unbounded inventory sweep");
+			f.backend.handle(A, selection, 1, f.settings); assertEquals(1, f.host.store.size());
+			assertEquals(reads, f.reads.get(), "metadata evidence only, no optional getter or fallback search");
 			f.amount = 9; f.backend.handle(A, selection, 2, f.settings); f.backend.tick(5, f.settings);
-			assertEquals(0, f.host.store.size(), "failed release is replayed, never automatically retried");
-			assertEquals(InventoryS2CPacket.Kind.REJECT, f.host.packets.stream().filter(p -> p.commitId() == 1).findFirst().orElseThrow().kind());
+			assertEquals(1, f.host.store.size(), "accepted create is replayed, never repeated");
+			assertEquals(InventoryS2CPacket.Kind.SELECTED, f.host.packets.stream().filter(p -> p.commitId() == 1).findFirst().orElseThrow().kind());
 		}
 	}
 	@Test void refusedResultEnqueueRetriesTheRecordedOutcomeOnceWithoutRepeatingSelection() {
@@ -298,7 +301,7 @@ class InventoryBackendTest {
 		}
 		try (Fixture f = new Fixture()) {
 			f.open(); f.backend.handle(A, f.select(1), 1, f.settings); f.itemId = "minecraft:dirt"; f.amount = 31; f.backend.tick(2, f.settings);
-			assertTrue(f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT).flatMap(p -> p.entries().stream()).allMatch(e -> e.count() == 0));
+			assertTrue(f.host.packets.stream().filter(p -> p.markerId() != null && p.completeScan()).flatMap(p -> p.entries().stream()).allMatch(e -> e.count() == 0));
 			assertEquals(1, f.host.store.size());
 		}
 	}
@@ -361,6 +364,56 @@ class InventoryBackendTest {
 			start = f.host.packets.size(); f.backend.handle(A, resync, deadline, f.settings); f.backend.tick(deadline, f.settings);
 			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && p.baselineId() != replacement.baselineId()));
 			assertEquals(Long.MAX_VALUE, marker.expiresAtTick());
+		}
+	}
+	@Test void retainedCurrentExactCountNotLastClientFrameDefinesDetachedSeedAndMissingReferenceIsNotZero() throws Exception {
+		for (boolean missing : List.of(false, true)) try (Fixture f = new Fixture()) {
+			f.open(); var packet = f.select(1); Object preview = retainedPreview(f.backend);
+			@SuppressWarnings("unchecked")
+			var counts = (Map<InventoryScanner.Key, InventoryDomainCodec.Item>) field(preview, "counts");
+			var key = counts.keySet().iterator().next();
+			if (missing) counts.clear();
+			else counts.put(key, new InventoryDomainCodec.Item(key, 9007199254740993L, "stone", null, false));
+			int reads = f.reads.get(); f.backend.handle(A, packet, 1, f.settings); assertEquals(reads, f.reads.get());
+			assertEquals(missing ? 0 : 1, f.host.store.size());
+			if (!missing) {
+				var seed = f.host.packets.stream().filter(p -> p.markerId() != null && !p.entries().isEmpty()).findFirst().orElseThrow();
+				assertEquals(9007199254740993L, seed.entries().getFirst().count()); assertFalse(seed.completeScan());
+				Object lease = ((Map<?, ?>) field(f.backend, "tracking")).values().iterator().next();
+				assertNull(field(lease, "completed")); assertEquals(0L, field(lease, "count")); assertEquals(0L, field(lease, "total"));
+				assertNull(field(field(lease, "consumer"), "completedRound")); assertEquals(0, field(field(lease, "consumer"), "cursor"));
+				f.backend.handle(A, InventoryC2SPacket.close(f.host.epoch(A), 1).stamp(100, 1), 1, f.settings);
+				assertNull(field(field(lease, "consumer"), "round"), "seed owns no preview round or journal");
+			}
+		}
+	}
+	@Test void previewTokensAreOwnerBaselineStateAndCurrentEvidenceScopedEvenBeforeTickInvalidation() throws Exception {
+		for (String refusal : List.of("owner", "baseline", "state", "forged", "invalid", "retired")) try (Fixture f = new Fixture()) {
+			f.open(); var cut = f.preview(); var token = cut.entries().getFirst().key();
+			if (refusal.equals("invalid")) f.valid = false;
+			if (refusal.equals("retired")) {
+				@SuppressWarnings("unchecked") var retired = (Set<String>) field(retainedPreview(f.backend), "retired"); retired.add(token);
+			}
+			UUID sender = refusal.equals("owner") ? B : A;
+			var request = InventoryC2SPacket.select(f.host.epoch(sender), 100, 1, 1, 1,
+				cut.baselineId() + (refusal.equals("baseline") ? 1 : 0), cut.statusRevision() + (refusal.equals("state") ? 1 : 0),
+				refusal.equals("forged") ? "forged" : token, "danger");
+			int reads = f.reads.get(); f.backend.handle(sender, request, 1, f.settings);
+			assertEquals(0, f.host.store.size(), refusal); assertEquals(reads, f.reads.get(), refusal); assertEquals(0, f.backend.runtime().memory().reserved());
+		}
+	}
+	@Test void aggregateBootstrapUsesCurrentFoldedKeyCountRatherThanIdTotalOrExactDisplay() throws Exception {
+		try (Fixture f = new Fixture()) {
+			f.stripped = true; f.open(); var packet = f.select(1); Object preview = retainedPreview(f.backend);
+			@SuppressWarnings("unchecked") var counts = (Map<InventoryScanner.Key, InventoryDomainCodec.Item>) field(preview, "counts");
+			@SuppressWarnings("unchecked") var totals = (Map<String, InventoryDomainCodec.Item>) field(preview, "totals");
+			var key = new InventoryScanner.Key("minecraft:stone", "");
+			counts.put(key, new InventoryDomainCodec.Item(key, 9007199254740993L, "stone", null, true));
+			totals.put(key.itemId(), new InventoryDomainCodec.Item(key, 99, "stone", null, true));
+			int reads = f.reads.get(); f.backend.handle(A, packet, 1, f.settings); assertEquals(1, f.host.store.size()); assertEquals(reads, f.reads.get());
+			var seed = f.host.packets.stream().filter(p -> p.markerId() != null && !p.entries().isEmpty()).findFirst().orElseThrow();
+			assertEquals(9007199254740993L, seed.entries().getFirst().count()); assertTrue(seed.entries().getFirst().fallback());
+			assertNotNull(seed.entries().getFirst().displayJson()); assertFalse(seed.completeScan());
 		}
 	}
 	@Test void zeroResyncSkipsAnOldDeadlineAndAllowsSameTickRepairsWithoutBypassingPendingBaselineWork() {
@@ -865,7 +918,7 @@ class InventoryBackendTest {
 			Object selection = field(lease, "selection");
 			String json = "{\"id\":\"minecraft:stone\",\"components\":{\"minecraft:custom_data\":{\"text\":\"" + "x".repeat(5000) + "\"}}}";
 			field(lease, "selectionPresentation", new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Display("minecraft:stone", "stone", json, false));
-			field(lease, "revision", 2L);
+			field(lease, "revision", (long) field(lease, "revision") + 1);
 			var publish = InventoryBackend.class.getDeclaredMethod("publishTracking", lease.getClass(), recipient.getClass()); publish.setAccessible(true);
 			var publisher = (InventorySyncPublisher) field(f.backend, "publisher");
 			var context = (SyncPublisher.Context) field(recipient, "context");

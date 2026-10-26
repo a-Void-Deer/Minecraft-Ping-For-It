@@ -35,6 +35,7 @@ import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -42,8 +43,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * C2b handoff coverage: the production {@link InventoryBackend} plus the real
  * {@link MarkerCreationService} dedicated admission run over a provider-shaped
  * external fixture. The fixture mirrors the provider's candidate-locator and
- * committed-current-point resolution so the committed input binding, live
- * witness, annotation tags and tracking baseline are exercised end to end.
+ * committed-current-point resolution so the committed input binding, preview
+ * evidence, annotation tags and tracking baseline are exercised end to end.
  */
 class SableInventoryHandoffTest {
 	private static final UUID A = new UUID(1, 1), B = new UUID(2, 2);
@@ -121,7 +122,7 @@ class SableInventoryHandoffTest {
 			backend.handle(A, selectPacket(requestId, commitId, pingType), now, settings);
 		}
 		InventoryS2CPacket snapshot(MarkerId marker) {
-			return host.packets.stream().filter(p -> marker.equals(p.markerId()) && p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && !p.entries().isEmpty())
+			return host.packets.stream().filter(p -> marker.equals(p.markerId()) && p.completeScan() && !p.entries().isEmpty())
 				.reduce((a, b) -> b).orElseThrow();
 		}
 		@Override public void close() { backend.close(); }
@@ -314,7 +315,7 @@ class SableInventoryHandoffTest {
 		}
 	}
 
-	@Test void validSelectionMaterializesOnceBindsCurrentPhysicalRootWitnessesAndStoresCommittedTrackingWithFreshCount() {
+	@Test void validSelectionMaterializesOnceBindsCurrentPhysicalRootAndSeedsCommittedTrackingBeforeFreshCount() {
 		try (var f = new Fixture()) {
 			Route route = f.route("a", "sublevel-a", 1, 2, 3, "minecraft:chest", 7);
 			f.open(1, f.candidate("a")); f.tick(0);
@@ -330,7 +331,9 @@ class SableInventoryHandoffTest {
 			assertTrue(marker.target() instanceof Target.ExternalBlockTarget external && external.isCommitted());
 			assertEquals("attention", marker.pingType().id());
 			assertTrue(marker.properties().isEmpty());
-			assertEquals(reads + 1, route.reads.get(), "exactly one live witness read, never the preview snapshot");
+			assertEquals(reads, route.reads.get(), "binding and current evidence perform no content getter");
+			var seed = f.host.packets.stream().filter(p -> marker.id().equals(p.markerId()) && !p.entries().isEmpty()).findFirst().orElseThrow();
+			assertFalse(seed.completeScan()); assertEquals(InventoryS2CPacket.Status.UPDATING, seed.status()); assertEquals(7, seed.entries().getFirst().count());
 			assertNotNull(f.host.boundInput);
 			assertEquals(A, f.host.boundInput.readOwner());
 			assertEquals(BlockFace.NORTH, f.host.boundInput.face());
@@ -475,10 +478,10 @@ class SableInventoryHandoffTest {
 			assertEquals(1, f.host.store.size());
 			var marker = f.host.store.allMarkers().getFirst();
 			assertEquals(f.stableId(b), ((Target.ExternalBlockTarget) marker.target()).stableTargetId());
-			assertEquals(2, b.reads.get(), "the matching request performs exactly one fresh live witness");
+			assertEquals(1, b.reads.get(), "the matching request validates preview evidence without reading contents");
 			f.tick(3);
 			assertEquals(11, f.snapshot(marker.id()).entries().getFirst().count());
-			assertEquals(3, b.reads.get(), "tracking reads afresh rather than reusing the preview or witness");
+			assertEquals(2, b.reads.get(), "tracking reads afresh rather than continuing the preview");
 			assertEquals(1, a.reads.get(), "the first request remains an independent retained preview");
 			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SELECTED
 				&& p.requestId() == 2 && p.commitId() == 2 && marker.id().equals(p.markerId())));
@@ -502,16 +505,17 @@ class SableInventoryHandoffTest {
 		}
 	}
 
-	@Test void invalidSourceBeforeFirstTrackingPublicationPublishesNoQuantityAndRecoveryStartsFreshBaseline() {
+	@Test void invalidSourceAfterSeedPublishesNoNewQuantityAndRecoveryStartsFreshBaseline() {
 		try (var f = new Fixture()) {
 			Route route = f.route("a", "sublevel-a", 1, 2, 3, "minecraft:chest", 7);
 			f.open(1, f.candidate("a")); f.tick(0);
 			route.count = 11;
 			f.select(1, 1, "request", 1);
 			var marker = f.host.store.allMarkers().getFirst();
+			int start = f.host.packets.size();
 			route.active = false;
 			f.tick(2);
-			var frames = f.host.packets.stream().filter(p -> marker.id().equals(p.markerId())).toList();
+			@Unmodifiable List<InventoryS2CPacket> frames = f.host.packets.subList(start, f.host.packets.size()).stream().filter(p -> marker.id().equals(p.markerId())).toList();
 			assertTrue(frames.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.STATUS && p.status() == InventoryS2CPacket.Status.INVALID));
 			assertTrue(frames.stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT || p.kind() == InventoryS2CPacket.Kind.STREAM),
 				"an invalid source publishes no quantity before its first tracking baseline");

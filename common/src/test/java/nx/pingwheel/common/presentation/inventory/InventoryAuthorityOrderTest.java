@@ -107,11 +107,11 @@ class InventoryAuthorityOrderTest {
 			assertEquals(MarkerRejectReason.TARGET_GONE, f.reject()); assertEquals(List.of("rate", "channel", "audience", "target"), f.host.events); assertEquals(before, f.reads.get()); assertEquals(0, f.host.store.size());
 		}
 	}
-	@Test void sourceWitnessAndAnnotationAreInsideProductionDedicatedAdmissionAndBeforeStorage() {
+	@Test void committedValidationPreviewEvidenceAndAnnotationPrecedeStorageWithoutAContentWitness() {
 		try (var f = new Fixture()) {
 			int before = f.reads.get(); f.backend.handle(InventoryBackendTest.A, f.selected, 1, f.settings);
-			assertEquals(List.of("rate", "channel", "audience", "target", "classification", "dedicated", "source", "read-safety", "source", "read-safety", "witness", "annotation", "stored", "basic"), f.host.events);
-			assertEquals(before + 1, f.reads.get(), "one immediate witness, not a queued create or unbounded sweep"); assertEquals(1, f.host.store.size()); assertEquals(0, f.backend.runtime().memory().reserved());
+			assertEquals(List.of("rate", "channel", "audience", "target", "classification", "dedicated", "source", "read-safety", "read-safety", "annotation", "stored", "basic", "source", "read-safety"), f.host.events);
+			assertEquals(before, f.reads.get(), "immediate metadata authority, not a content witness or queued create"); assertEquals(1, f.host.store.size()); assertEquals(0, f.backend.runtime().memory().reserved());
 		}
 		try (var f = new Fixture()) { f.host.readable = false; assertEquals(MarkerRejectReason.INVALID_REQUEST, f.reject()); assertFalse(f.host.events.contains("witness")); assertFalse(f.host.events.contains("annotation")); assertEquals(0, f.host.store.size()); }
 		try (var f = new Fixture()) { f.host.annotation = false; assertEquals(MarkerRejectReason.INVALID_PING_TYPE, f.reject()); assertEquals(0, f.host.store.size()); assertEquals(0, f.backend.runtime().memory().reserved()); }
@@ -127,7 +127,7 @@ class InventoryAuthorityOrderTest {
 			assertEquals(marker.id(), outcome.markerId());
 			assertEquals(1, f.host.store.size());
 			assertTrue(f.backend.tracksInventory(marker.id()), "the tracking sidecar survives the failed publication");
-			assertEquals(before + 1, f.reads.get(), "publication adds no source capture");
+			assertEquals(before, f.reads.get(), "publication and create add no content getter");
 			int events = f.host.events.size();
 			f.backend.handle(InventoryBackendTest.A, f.selected, 1, f.settings);
 			assertEquals(1, f.host.store.size(), "a replayed outcome never re-creates the marker");

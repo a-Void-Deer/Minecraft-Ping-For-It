@@ -562,7 +562,7 @@ class InventoryReconfigurationTest {
 			var marker = f.host.store.allMarkers().getFirst();
 			f.tick();
 			var snapshot = f.host.packets.stream()
-				.filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId()))
+				.filter(p -> p.completeScan() && !p.entries().isEmpty() && marker.id().equals(p.markerId()))
 				.reduce((a, b) -> b).orElseThrow();
 			assertEquals(5, snapshot.entries().getFirst().count());
 			assertFalse(snapshot.entries().getFirst().fallback());
@@ -640,7 +640,7 @@ class InventoryReconfigurationTest {
 			var marker = f.host.store.allMarkers().getFirst();
 			f.tick();
 			var snapshot = f.host.packets.stream()
-				.filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId()))
+				.filter(p -> p.completeScan() && !p.entries().isEmpty() && marker.id().equals(p.markerId()))
 				.reduce((a, b) -> b).orElseThrow();
 			assertFalse(snapshot.entries().getFirst().fallback(), "the installed tracking keeps its exact selected identity");
 			assertEquals(1, snapshot.entries().getFirst().count());

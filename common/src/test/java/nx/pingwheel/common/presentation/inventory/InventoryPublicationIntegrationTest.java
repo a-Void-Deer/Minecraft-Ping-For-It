@@ -168,14 +168,14 @@ class InventoryPublicationIntegrationTest {
 				var marker = host.store.allMarkers().getFirst(); var endpoint = new Endpoint(InventoryBackendTest.A, MarkerSnapshot.from(marker));
 				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.close(epoch, 1).stamp(100, 1), 1, settings);
 				phase[0] = 1; int start = host.packets.size(); backend.tick(2, settings); endpoint.drain(host);
-				var fence = host.packets.subList(start, host.packets.size()).stream().filter(packet -> marker.id().equals(packet.markerId())).findFirst().orElseThrow();
+				var fence = host.packets.stream().filter(packet -> marker.id().equals(packet.markerId()) && packet.kind() == InventoryS2CPacket.Kind.STATUS).findFirst().orElseThrow();
 				assertEquals(InventoryS2CPacket.Status.UPDATING, fence.status()); assertEquals(0, fence.watermark());
 				assertFalse(endpoint.client.tracking(marker.id()).complete());
 				host.refuseFailureControl = false;
 				for (int tick : new int[] {3, 5, 8}) {
 					int before = host.packets.size(); backend.tick(tick, settings); endpoint.drain(host);
 					assertEquals(InventoryS2CPacket.Status.INCOMPLETE, endpoint.client.tracking(marker.id()).status());
-					assertFalse(endpoint.client.tracking(marker.id()).complete()); assertTrue(endpoint.client.tracking(marker.id()).entries().isEmpty());
+					assertFalse(endpoint.client.tracking(marker.id()).complete()); assertEquals(7, endpoint.client.tracking(marker.id()).entries().getFirst().count());
 					assertTrue(host.packets.subList(before, host.packets.size()).stream().anyMatch(packet -> marker.id().equals(packet.markerId()) && packet.status() == InventoryS2CPacket.Status.INCOMPLETE));
 				}
 				assertTrue(host.packets.subList(start, host.packets.size()).stream().filter(packet -> marker.id().equals(packet.markerId()))
@@ -183,7 +183,7 @@ class InventoryPublicationIntegrationTest {
 				phase[0] = 2; backend.tick(11, settings); endpoint.drain(host);
 				var recovered = endpoint.client.tracking(marker.id()); assertTrue(recovered.complete()); assertEquals(1, recovered.entries().size());
 				assertTrue(recovered.entries().getFirst().fallback()); assertEquals(13, recovered.entries().getFirst().count());
-				assertEquals(fence.baselineId(), recovered.baselineId()); assertEquals(fence.statusRevision(), recovered.statusRevision());
+				assertTrue(recovered.baselineId() > fence.baselineId()); assertEquals(fence.statusRevision(), recovered.statusRevision());
 				assertEquals(1, host.store.size()); assertEquals(80, marker.expiresAtTick());
 			}
 		}
@@ -285,7 +285,7 @@ class InventoryPublicationIntegrationTest {
 			refusePublication[0] = false; backend.tick(3, settings);
 			var aggregate = host.packets.stream().filter(packet -> packet.entries().stream().anyMatch(InventoryS2CPacket.Entry::fallback)).reduce((a, b) -> b).orElseThrow();
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.select(epoch, 100, 1, 2, 1, aggregate.baselineId(), aggregate.statusRevision(), aggregate.entries().getFirst().key(), "danger"), 4, settings);
-			assertEquals(1, host.store.size()); assertEquals(before + 1, reads.get());
+			assertEquals(1, host.store.size()); assertEquals(before, reads.get());
 		}
 	}
 	@Test void identityRefusalInEveryDiscoveryOrderAndPageWidthCountsEachLongSlotOnceAndRejectsLateExactFrames() {
@@ -363,7 +363,7 @@ class InventoryPublicationIntegrationTest {
 			var aggregate = host.packets.stream().filter(packet -> packet.entries().stream().anyMatch(InventoryS2CPacket.Entry::fallback)).reduce((a, b) -> b).orElseThrow();
 			var fresh = InventoryC2SPacket.select(epoch, 100, 1, 2, 1, aggregate.baselineId(), aggregate.statusRevision(), aggregate.entries().getFirst().key(), "danger");
 			backend.handle(InventoryBackendTest.A, fresh, 4, settings); backend.handle(InventoryBackendTest.A, fresh, 4, settings);
-			assertEquals(1, host.store.size()); assertEquals(before + 1, reads.get(), "fresh aggregate witnesses once and creates once");
+			assertEquals(1, host.store.size()); assertEquals(before, reads.get(), "fresh aggregate creates once with metadata validation only");
 		}
 	}
 
@@ -443,7 +443,7 @@ class InventoryPublicationIntegrationTest {
 			var marker = f.host.store.allMarkers().getFirst(); var a = new Endpoint(InventoryBackendTest.A, MarkerSnapshot.from(marker)); var b = new Endpoint(InventoryBackendTest.B, MarkerSnapshot.from(marker));
 			f.backend.tick(2, f.settings); a.drain(f.host); b.drain(f.host); count(a.client, marker.id(), 7); count(b.client, marker.id(), 7);
 			f.amount = 8; f.backend.tick(5, f.settings); a.drain(f.host); b.drain(f.host);
-			var oldStreams = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM).toList(); assertEquals(2, oldStreams.size());
+			@org.jetbrains.annotations.Unmodifiable List<InventoryS2CPacket> oldStreams = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM).toList(); assertEquals(4, oldStreams.size());
 			long baselineA = a.client.tracking(marker.id()).baselineId(), baselineB = b.client.tracking(marker.id()).baselineId();
 			f.valid = false; f.backend.tick(6, f.settings); a.drain(f.host); b.drain(f.host);
 			assertTrue(a.client.tracking(marker.id()).grey()); assertEquals(8, a.client.tracking(marker.id()).entries().getFirst().count()); assertTrue(b.client.tracking(marker.id()).grey());

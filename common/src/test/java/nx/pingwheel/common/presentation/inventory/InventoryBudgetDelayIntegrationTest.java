@@ -643,6 +643,10 @@ class InventoryBudgetDelayIntegrationTest {
 	private static void reconfigurationEligibilitySequence(boolean tracking, boolean cancel, boolean revoke) {
 		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10);
 		settings.setDisplayByteMultiplier(BigDecimal.valueOf(2));
+		// The selected seed uses the initial snapshot; its 6 KiB complete
+		// replacement is a stream. Keep this fixture's pre-reprojection phase
+		// serviceable so it measures eligibility, not unrelated wire pressure.
+		settings.getTracking().setStreamByteMultiplier(ByteMultiplier.finite(BigDecimal.valueOf(4)));
 		settings.getPreview().getClientByteMultiplier().setUnlimited(true); settings.getPreview().getGlobalByteMultiplier().setUnlimited(true);
 		if (tracking) host.expiry = cancel && !revoke ? 3 : 80;
 		host.projector = (display, cap) -> new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Display(

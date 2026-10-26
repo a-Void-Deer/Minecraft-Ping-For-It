@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Cross-state backend proof that preview rows, the live select witness and the
+ * Cross-state backend proof that preview rows, the selected seed and the
  * first tracking capture all use the same opaque exact-key identity. The
  * fixture supplies already-frozen exact keys; it does not exercise the native
  * item freezer that produces those keys.
@@ -65,7 +65,7 @@ class InventoryPatchIdentityFlowTest {
 
 	@ParameterizedTest
 	@ValueSource(ints = {0, 1})
-	void distinctPatchKeysOfOneItemStaySeparateThroughLiveWitnessAndTracking(int selectedIndex) {
+	void distinctPatchKeysOfOneItemStaySeparateThroughSelectedSeedAndTracking(int selectedIndex) {
 		try (Fixture f = new Fixture()) {
 			f.state.items.add(item(STONE, EMPTY_EXPLICIT_PATCH, 2, EMPTY_DISPLAY));
 			f.state.items.add(item(STONE, EXPLICIT_REMOVAL_PATCH, 3, REMOVAL_DISPLAY));
@@ -85,8 +85,10 @@ class InventoryPatchIdentityFlowTest {
 			f.backend.handle(A, f.select(selected.key(), 1), 1, f.settings);
 			assertEquals(InventoryS2CPacket.Kind.SELECTED, f.selected(1).kind());
 			assertEquals(1, f.host.store.size());
-			assertEquals(List.of(selectedIndex), f.state.reads,
-				"the live witness reads the selected variant's own slot, never another row of the same item ID");
+			assertTrue(f.state.reads.isEmpty(), "selection reads metadata, not the old witness slot");
+			assertEquals(selected.count(), f.host.packets.stream().filter(packet -> packet.markerId() != null
+				&& !packet.entries().isEmpty()).findFirst().orElseThrow().entries().getFirst().count(),
+				"bootstrap uses the exact key, never the same-ID total");
 
 			ServerMarker marker = f.marker();
 			f.state.items.set(0, item(STONE, EMPTY_EXPLICIT_PATCH, 4, EMPTY_DISPLAY));
@@ -122,7 +124,7 @@ class InventoryPatchIdentityFlowTest {
 				"the last display form changes the display but not the exact row");
 			assertFalse(row.fallback());
 
-			// The live witness sees a display form different from the retained preview row.
+			// Current contents may have a different display from the retained selected row.
 			f.state.items.set(0, item(STONE, EMPTY_EXPLICIT_PATCH, 5, DECORATED_DISPLAY));
 			f.state.items.set(1, item(STONE, EMPTY_EXPLICIT_PATCH, 6, EMPTY_DISPLAY));
 			f.state.items.set(2, item(STONE, EMPTY_EXPLICIT_PATCH, 7, null));
@@ -131,7 +133,7 @@ class InventoryPatchIdentityFlowTest {
 			InventoryS2CPacket result = f.selected(1);
 			assertEquals(InventoryS2CPacket.Kind.SELECTED, result.kind(),
 				() -> "display-only variation changed selection: " + result.rejection());
-			assertEquals(List.of(0), f.state.reads, "the live witness still uses the retained exact key's slot");
+			assertTrue(f.state.reads.isEmpty(), "display forms do not require a live item witness");
 			assertEquals(1, f.host.store.size());
 
 			ServerMarker marker = f.marker();
@@ -377,7 +379,7 @@ class InventoryPatchIdentityFlowTest {
 			List<InventoryS2CPacket.Entry> entries = new ArrayList<>();
 			for (int index = 0; index < host.packets.size(); index++) {
 				InventoryS2CPacket packet = host.packets.get(index);
-				if (host.recipients.get(index).equals(recipient) && packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT
+				if (host.recipients.get(index).equals(recipient) && packet.completeScan() && !packet.entries().isEmpty()
 					&& marker.id().equals(packet.markerId())) {
 					assertTrue(packet.completeScan(), "tracking snapshot cut must be complete");
 					entries.addAll(packet.entries());
