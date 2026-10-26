@@ -503,7 +503,10 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		// An admitted provisional frame is immutable. Do not send its obsolete
 		// UPDATING lifecycle after failure. A caller may explicitly restage the
 		// retained seed as INCOMPLETE at a newer publication revision.
-		if (state.bootstrap && status == InventoryS2CPacket.Status.INCOMPLETE) { withdraw(state); state.complete = false; }
+		if (status == InventoryS2CPacket.Status.INCOMPLETE && (state.bootstrap
+			|| state.route.markerId() != null && state.admitted.stream().anyMatch(packet -> !packet.completeScan()))) {
+			withdraw(state); state.complete = false;
+		}
 		state.status = status; state.control = true;
 	}
 	public boolean pending(Context context) {

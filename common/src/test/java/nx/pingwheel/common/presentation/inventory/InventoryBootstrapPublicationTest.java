@@ -302,4 +302,30 @@ class InventoryBootstrapPublicationTest {
 			assertEquals(Status.INCOMPLETE, f.view().status()); assertEquals(LONG_COUNT, f.view().entries().getFirst().count()); assertFalse(f.view().complete());
 		}
 	}
+
+	@Test void lateIncompleteSeedControlsCannotDowngradeNewerCompletedStatusWhileGenericZeroWatermarkFailureStillWorks() {
+		try (var f = new Fixture()) {
+			f.bootstrap(1, Status.INCOMPLETE, true); var seed = f.drain();
+			assertInstanceOf(SyncPublisher.Outcome.Accepted.class, f.publisher.publish(complete(2, LONG_COUNT, true),
+				InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, SELECTED, f.context, work())); f.drain();
+			seed.forEach(p -> f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(p)));
+			assertTrue(f.view().complete()); assertEquals(Status.READY, f.view().status());
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.status(7, 0, MARKER, 1, 1, 0,
+				Status.INCOMPLETE, 0).stamp(100, 1)));
+			assertEquals(Status.INCOMPLETE, f.view().status()); assertTrue(f.view().grey());
+		}
+	}
+
+	@Test void failureWithdrawsAnOldAdmittedSeedEvenAfterAFreshReplacementWasOffered() {
+		try (var f = new Fixture()) {
+			f.bootstrap(1, Status.UPDATING, false);
+			f.publisher.gateData(f.context.recipient()); f.drain(); f.publisher.releaseData(f.context.recipient());
+			f.transport.failNextSend = true; f.drain(); assertTrue(f.publisher.pending(f.context));
+			assertInstanceOf(SyncPublisher.Outcome.Accepted.class, f.publisher.publish(complete(2, LONG_COUNT, false),
+				InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, SELECTED, f.context, work()));
+			f.publisher.status(f.context, Status.INCOMPLETE); f.publisher.advance(3, f.settings);
+			var failure = f.drain(); assertTrue(failure.stream().allMatch(p -> p.entries().isEmpty()));
+			assertFalse(f.publisher.pending(f.context)); assertEquals(Status.INCOMPLETE, f.view().status()); assertFalse(f.view().complete());
+		}
+	}
 }

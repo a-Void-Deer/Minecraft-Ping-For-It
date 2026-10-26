@@ -1209,7 +1209,8 @@ public final class ClientInventory {
 			return;
 		}
 		if (packet.statusRevision() == state.statusRevision && packet.baselineId() == state.baselineId
-			&& (store.isInvalid(state.channel) || !isPreviewTerminalFailure(status) && packet.watermark() < state.watermark
+			&& (store.isInvalid(state.channel) || packet.watermark() < state.watermark
+				&& (packet.watermark() > 0 || !isPreviewTerminalFailure(status))
 				|| status == InventoryS2CPacket.Status.UPDATING && (state.sourceComplete || state.failureWatermark >= 0))) {
 			fencedPackets++;
 			return;
