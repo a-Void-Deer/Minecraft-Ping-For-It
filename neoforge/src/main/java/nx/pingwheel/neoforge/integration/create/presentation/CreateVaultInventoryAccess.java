@@ -16,11 +16,13 @@ import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotSchemas;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /** Lazy tested-shape Vault access; never asks Create to initialize its combined capability. */
 public final class CreateVaultInventoryAccess {
 	private static final String TYPE = "com.simibubi.create.content.logistics.vault.ItemVaultBlockEntity";
+	private static final net.minecraft.resources.ResourceLocation VAULT_ID = net.minecraft.resources.ResourceLocation.parse("create:item_vault");
 	private CreateVaultInventoryAccess() {}
 	public static boolean recognizes(BlockEntity entity) { return entity != null && TYPE.equals(entity.getClass().getName()); }
 	public static Optional<IPlatformInventoryService.Access> find(ServerLevel level, BlockPos original, Direction face) {
@@ -41,10 +43,16 @@ public final class CreateVaultInventoryAccess {
 	interface World {
 		String dimension();
 		Member loaded(BlockPos pos) throws ReflectiveOperationException;
+		/** The current find route's compatibility gate, not a cached admission decision. */
+		default boolean currentRoute() { return true; }
 	}
 	interface Member {
 		String blockId();
 		default String blockEntityId() { return "create:item_vault"; }
+		default boolean vaultBlock() { return "create:item_vault".equals(blockId()); }
+		default boolean matchesIdentity(InventorySnapshotLayout.Member frozen) {
+			return frozen.blockId().equals(blockId()) && frozen.blockEntityId().equals(blockEntityId());
+		}
 		BlockPos controller() throws ReflectiveOperationException;
 		boolean isController() throws ReflectiveOperationException;
 		int width() throws ReflectiveOperationException;
@@ -59,6 +67,7 @@ public final class CreateVaultInventoryAccess {
 			if (pos == null || !memberGate.test(pos)) throw new InventorySourceUnavailableException("Vault member outside the read scope");
 		}
 		@Override public String dimension() { return delegate.dimension(); }
+		@Override public boolean currentRoute() { return delegate.currentRoute(); }
 		@Override public Member loaded(BlockPos pos) throws ReflectiveOperationException {
 			require(pos);
 			return new GatedMember(this, pos.immutable(), delegate.loaded(pos));
@@ -67,6 +76,8 @@ public final class CreateVaultInventoryAccess {
 	private record GatedMember(GatedWorld world, BlockPos pos, Member delegate) implements Member {
 		@Override public String blockId() { world.require(pos); return delegate.blockId(); }
 		@Override public String blockEntityId() { world.require(pos); return delegate.blockEntityId(); }
+		@Override public boolean vaultBlock() { world.require(pos); return delegate.vaultBlock(); }
+		@Override public boolean matchesIdentity(InventorySnapshotLayout.Member frozen) { world.require(pos); return delegate.matchesIdentity(frozen); }
 		@Override public BlockPos controller() throws ReflectiveOperationException { world.require(pos); return delegate.controller(); }
 		@Override public boolean isController() throws ReflectiveOperationException { world.require(pos); return delegate.isController(); }
 		@Override public int width() throws ReflectiveOperationException { world.require(pos); return delegate.width(); }
@@ -138,6 +149,7 @@ public final class CreateVaultInventoryAccess {
 	}
 	private record MinecraftWorld(ServerLevel level) implements World {
 		@Override public String dimension() { return level.dimension().location().toString(); }
+		@Override public boolean currentRoute() { return CreatePresentationAvailability.available(); }
 		@Override public Member loaded(BlockPos pos) {
 			if (!level.isLoaded(pos)) throw new InventorySourceUnavailableException("Vault member unloaded");
 			BlockEntity entity = level.getBlockEntity(pos);
@@ -148,6 +160,11 @@ public final class CreateVaultInventoryAccess {
 	private record MinecraftMember(BlockEntity entity) implements Member {
 		@Override public String blockId() { return BuiltInRegistries.BLOCK.getKey(entity.getBlockState().getBlock()).toString(); }
 		@Override public String blockEntityId() { return BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).toString(); }
+		@Override public boolean vaultBlock() { return VAULT_ID.equals(BuiltInRegistries.BLOCK.getKey(entity.getBlockState().getBlock())); }
+		@Override public boolean matchesIdentity(InventorySnapshotLayout.Member frozen) {
+			return "create:item_vault".equals(frozen.blockId()) && "create:item_vault".equals(frozen.blockEntityId())
+				&& vaultBlock() && VAULT_ID.equals(BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()));
+		}
 		@Override public BlockPos controller() throws ReflectiveOperationException { return (BlockPos) call(entity, "getController"); }
 		@Override public boolean isController() throws ReflectiveOperationException { return (Boolean) call(entity, "isController"); }
 		@Override public int width() throws ReflectiveOperationException { return (Integer) call(entity, "getWidth"); }
@@ -194,24 +211,26 @@ public final class CreateVaultInventoryAccess {
 		if (!expected.controller.equals(part.controller())) return false;
 		Member master = world.loaded(expected.controller);
 		if (!master.isController() || !expected.controller.equals(master.controller())
-			|| !"create:item_vault".equals(master.blockId()) || master.width() != expected.width
+			|| !master.vaultBlock() || master.width() != expected.width
 			|| master.length() != expected.length || master.axis() != expected.axis) return false;
 		// All members pass their live relation/membership gates before any local handler is acquired.
 		for (int index = 0; index < expected.members.size(); index++) {
 			Member member = world.loaded(expected.members.get(index));
-			if (!frozenLayout.members().get(index).blockId().equals(member.blockId())
-				|| !frozenLayout.members().get(index).blockEntityId().equals(member.blockEntityId()) || !expected.controller.equals(member.controller())
+			if (!member.matchesIdentity(frozenLayout.members().get(index)) || !expected.controller.equals(member.controller())
 				|| member.axis() != expected.axis) return false;
 		}
-		for (int index = 0; index < expected.members.size(); index++)
-			if (world.loaded(expected.members.get(index)).local().getSlots() != expected.slotCounts.get(index)) return false;
+		for (int index = 0; index < expected.members.size(); index++) {
+			Member member = world.loaded(expected.members.get(index));
+			if (member.local().getSlots() != expected.slotCounts.get(index)) return false;
+		}
 		return true;
 	}
-	private static final class Segmented implements IPlatformInventoryService.Access {
+	private static final class Segmented implements IPlatformInventoryService.InPlaceRevalidatingAccess {
 		final World world; final BlockPos original; final Layout expected;
 		final String alias;
 		final InventorySnapshotLayout frozenLayout;
 		final int @org.jetbrains.annotations.Unmodifiable [] offsets;
+		private final InventoryValidationBudget.Cost currentValidationCost, nativeReadCost;
 		Segmented(World world, BlockPos original, Layout expected) throws ReflectiveOperationException {
 			this.world = world; this.original = original; this.expected = expected;
 			alias = world.dimension() + "|vault|" + expected.controller.toShortString() + "|create:item_vault";
@@ -230,6 +249,10 @@ public final class CreateVaultInventoryAccess {
 			offsets[expected.members.size()] = absolute;
 			frozenLayout = new InventorySnapshotLayout(alias, "axis=" + expected.axis.name() + ";width=" + expected.width + ";length=" + expected.length,
 				expected.controller, members);
+			// Source retains the original valid() check and performs this independent
+			// current route/layout check after its own live owner/member preflight.
+			currentValidationCost = InventoryValidationBudget.vaultValidation(expected.members.size()).times(2);
+			nativeReadCost = InventoryValidationBudget.nativeRead(frozenLayout, true, true);
 		}
 		@Override public Optional<String> alias() { return Optional.of(alias); }
 		/** Local handlers are validated here, not through generic Container scope evidence. */
@@ -255,6 +278,16 @@ public final class CreateVaultInventoryAccess {
 			while (low < high) { int middle = (low + high) >>> 1; if (offsets[middle + 1] <= slot) low = middle + 1; else high = middle; }
 			return low;
 		}
+		@Override public boolean revalidateCurrent(InventorySnapshotLayout originalLayout) {
+			if (originalLayout != frozenLayout && !frozenLayout.equals(originalLayout)) return false;
+			try { return world.currentRoute() && matches(world, original, expected, frozenLayout); }
+			catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+				failure("inventory-vault-revalidate", world, original, () -> "expected=" + expected, unavailable);
+				return false;
+			}
+		}
+		@Override public InventoryValidationBudget.Cost currentValidationCost() { return currentValidationCost; }
+		@Override public InventoryValidationBudget.Cost nativeReadCost() { return nativeReadCost; }
 		@Override public boolean stableCursor() { return true; }
 		@Override public OptionalLong version() { return OptionalLong.empty(); }
 		@Override public boolean supportsDetachedSlotCapture() {
@@ -278,7 +311,10 @@ public final class CreateVaultInventoryAccess {
 				int count = expected.slotCounts.get(index);
 				BlockPos position = expected.members.get(index);
 				Member member = world.loaded(position); IItemHandler live = member.local();
-				member.auditedLocal(live); // classify before getter; false is LIVE/EXTERNAL_TRUST, not atomic
+				boolean audited = member.auditedLocal(live); // classify before getter; unknown getters remain LIVE/EXTERNAL_TRUST
+				IItemHandler backing = live instanceof GatedHandler gated ? gated.delegate() : live;
+				if (!audited && backing instanceof ItemStackHandler && localOwnership.get(backing.getClass()))
+					throw new InventorySourceUnavailableException("Vault native local backing changed");
 				if (live.getSlots() != count) throw new InventorySourceUnavailableException("Vault local mapping changed");
 				requireMembersHeld(); // the final local metadata callback cannot authorize a now-revoked sibling
 				var stack = live.getStackInSlot(local);

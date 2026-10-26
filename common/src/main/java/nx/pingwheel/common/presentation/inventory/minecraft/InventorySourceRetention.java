@@ -35,20 +35,31 @@ final class InventorySourceRetention {
 		// Fixed bridge wrappers/closures are bounded independently of borrowed provider internals.
 		long bytes = 16 * (O + 8 * R);
 		if (layout != null && layout.members().stream().anyMatch(member -> member.blockId().equals("create:item_vault")))
-			bytes += O + 5 * R + 3 * 4 + 2 * list(members) + members * (O + 12 + O + 4) + array(members + 1, 4);
+			// Positions are shared with the one snapshot DTO, not owned a second time.
+			bytes += O + 5 * R + 3 * 4 + 2 * list(members) + members * (O + 4) + array(members + 1, 4);
 		return bytes;
 	}
 	static long source(InventoryMinecraftSources.View view) {
 		// Source, world/read closures, codec shell, validation profile, key/identity and fixed field state.
 		long bytes = 16 * (O + 8 * R) + text(view.identity()) + layout(view.snapshotLayout())
 			+ list(view.entities().size()) + list(view.slots().size()) + view.slots().size() * (O + R + 4);
+		if (view.snapshotLayout() != null && view.identity() == view.snapshotLayout().layoutId()) bytes -= text(view.identity());
+		// Cached per-page cost records (0..MAX_STEP), native profile, and their reference directory.
+		bytes += array(nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_STEP + 1L, R)
+			+ (nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_STEP + 3L) * (O + 3 * 8);
 		if (view.access() != null) {
 			int members = view.snapshotLayout() == null ? 1 : view.snapshotLayout().members().size();
 			// Reacquired accesses are operation-local and paid by validation scratch.
 			// The access and source share this one layout DTO; provider() excludes it.
-			// Scope is a conservative bound even when a provider declines the factory.
-			// The synchronous factory never escapes into retained source ownership.
-			bytes += scope(members) + provider(view.snapshotLayout());
+			// Generic accesses keep the conservative lazy-scope bound. Explicit
+			// in-place providers instead retain member evidence, never that scope.
+			boolean inPlace = view.access() instanceof nx.pingwheel.common.platform.IPlatformInventoryService.InPlaceRevalidatingAccess
+				&& !view.providerMembers().isEmpty();
+			// ResourceLocation parsing owns its two bounded text parts. Root and
+			// members reference borrowed world entities; only the reference lists count.
+			long registryKey = O + 2 * R + 4 * O + 2 * 256L;
+			bytes += (inPlace ? list(members) + 2 * array(members, R) + (2L * members + 1) * registryKey : scope(members))
+				+ provider(view.snapshotLayout());
 		}
 		return bytes;
 	}

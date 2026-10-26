@@ -17,6 +17,7 @@ import net.minecraft.world.Container;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /**
@@ -276,6 +277,24 @@ public interface IPlatformInventoryService {
 			boolean complete = visit(limit, entries::add);
 			return new Budgeted(entries, complete);
 		}
+	}
+
+	/**
+	 * Explicit opt-in for a provider that can revalidate its already admitted
+	 * route against a frozen layout without constructing a replacement view.
+	 * In addition to valid(), revalidation must freshly verify the current
+	 * provider route (including compatibility gates), original alias, ordered
+	 * membership and local boundaries. It must not discover a new mapping or read
+	 * contents. The owning source still checks current world/root/member identity
+	 * and owner read authority. Neither stableCursor nor a matching slot count
+	 * grants this capability; decorators deliberately do not inherit it.
+	 */
+	interface InPlaceRevalidatingAccess extends Access {
+		boolean revalidateCurrent(InventorySnapshotLayout originalLayout);
+		/** Pure cached bounds for valid() plus revalidateCurrent(), excluding source-owned world checks. */
+		InventoryValidationBudget.Cost currentValidationCost();
+		/** Pure cached bound for consumeResident(), not whole-snapshot capability discovery. */
+		InventoryValidationBudget.Cost nativeReadCost();
 	}
 	interface ResidentScope {
 		Direction face();

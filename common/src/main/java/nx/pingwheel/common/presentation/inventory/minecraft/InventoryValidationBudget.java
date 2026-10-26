@@ -109,6 +109,19 @@ public final class InventoryValidationBudget {
 		long wrappers = (2 + 2 * members) * (2 * O + 4 * R) + members * (O + 3 * R);
 		return reflection().times(6 + 3 * members).overlap(owned(wrappers, 8 + 9 * members));
 	}
+	/** Frozen ordinary member identities: fresh registry, loaded, owner and read gates, no DTO or mapping rebuild. */
+	public static Cost currentMembers(java.util.List<net.minecraft.world.level.block.entity.BlockEntity> members) {
+		long lockable = members.stream().filter(member -> member instanceof net.minecraft.world.level.block.entity.BaseContainerBlockEntity).count();
+		// The original root is checked separately and may occur anywhere in the ordered member list.
+		return owned(8 * (O + 4 * R), 16L * (members.size() + 1)).overlap(locks(lockable == 0 ? 0 : lockable + 1));
+	}
+	/** Native consumeResident: pre/post topology, one cold local classification, and two all-member held gates. No supportsDetachedSlotCapture audit. */
+	public static Cost nativeRead(@org.jetbrains.annotations.Nullable InventorySnapshotLayout layout, boolean provider, boolean vault) {
+		if (layout == null) return classification(1, true);
+		if (vault) return vaultValidation(layout.members().size()).times(2).plus(localClassification(1))
+			.plus(owned((2L * layout.members().size() + 1) * (2 * O + 4 * R), 3L * layout.members().size() + 2));
+		return read(layout, provider, false);
+	}
 	/** Pure pre-resolution profile; selection is by the detached registry ID, never by an unadmitted world getter. */
 	public static Cost resolution(String blockId) {
 		boolean chest = blockId.equals("minecraft:chest") || blockId.equals("minecraft:trapped_chest");
@@ -207,7 +220,7 @@ public final class InventoryValidationBudget {
 			.plus(owned(m * (3 * O + 7 * R), 2 * m)); // loaded member + gated local in the classification loop
 		return classification(provider ? 1 : m, provider);
 	}
-	/** Both the pre-read capability classification and the resident reader's own validation. */
+	/** Explicit capture only: the all-member supportsDetachedSlotCapture audit plus the resident read. */
 	public static Cost read(InventorySnapshotLayout layout, boolean provider, boolean vault) {
 		Cost cost = supported(layout, provider, vault);
 		if (vault) return cost.plus(vaultValidation(layout.members().size()).times(2)).plus(localClassification(1))

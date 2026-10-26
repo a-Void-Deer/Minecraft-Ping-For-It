@@ -78,10 +78,16 @@ public final class InventoryMinecraftSources {
 		}
 	}
 	private record Slot(Container container, int index) {}
-	record View(String identity, List<BlockEntity> entities, List<Slot> slots, IPlatformInventoryService.Access access,
-		InventorySnapshotLayout snapshotLayout, boolean discoverItems) {
-		View(String identity, List<BlockEntity> entities, List<Slot> slots, IPlatformInventoryService.Access access) {
-			this(identity, entities, slots, access, null, false);
+	record View(String identity, @org.jetbrains.annotations.Unmodifiable List<BlockEntity> entities,
+		@org.jetbrains.annotations.Unmodifiable List<Slot> slots, IPlatformInventoryService.@Nullable Access access,
+		@Nullable InventorySnapshotLayout snapshotLayout, boolean discoverItems,
+		@org.jetbrains.annotations.Unmodifiable List<BlockEntity> providerMembers) {
+		View(String identity, List<BlockEntity> entities, List<Slot> slots, IPlatformInventoryService.@Nullable Access access) {
+			this(identity, entities, slots, access, null, false, List.of());
+		}
+		View(String identity, List<BlockEntity> entities, List<Slot> slots, IPlatformInventoryService.@Nullable Access access,
+			@Nullable InventorySnapshotLayout snapshotLayout, boolean discoverItems) {
+			this(identity, entities, slots, access, snapshotLayout, discoverItems, List.of());
 		}
 	}
 
@@ -451,7 +457,9 @@ public final class InventoryMinecraftSources {
 			}
 		});
 		if (layout != null && visibleSlots(layout) != access.slots()) throw new InventorySourceUnavailableException("provider layout changed scoped slot witness");
-		return new View(accessIdentity, List.copyOf(entities), List.of(), access, layout, false);
+		return new View(accessIdentity, List.copyOf(entities), List.of(), access, layout, false,
+			access instanceof IPlatformInventoryService.InPlaceRevalidatingAccess && input.target() instanceof Target.BlockTarget
+				? List.copyOf(admittedMembers) : List.of());
 	}
 
 	/**
@@ -548,8 +556,8 @@ public final class InventoryMinecraftSources {
 		private final java.util.function.BooleanSupplier onThread;
 		private final java.util.function.Supplier<View> liveView;
 		private final java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec;
-		private final SourceWorld world;
-		private final Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture;
+		private final @Nullable SourceWorld world;
+		private final @Nullable Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture;
 		private final int originalSlots;
 		private final boolean originalStableCursor;
 		private final java.util.function.IntConsumer tightenDisplay;
@@ -560,6 +568,12 @@ public final class InventoryMinecraftSources {
 		private InventoryItemCodec.@Nullable Catalog residentCatalog;
 		private InventoryValidationBudget.@Nullable Allowance validation;
 		private final InventoryValidationBudget.Cost validationViewCost;
+		private final InventoryValidationBudget.Cost nativeReadCost;
+		private final InventoryValidationBudget.Cost @org.jetbrains.annotations.Unmodifiable [] readCosts;
+		private final IPlatformInventoryService.@Nullable InPlaceRevalidatingAccess inPlaceAccess;
+		private final @Nullable BlockPos rootPosition;
+		private final @Nullable ResourceLocation rootBlock;
+		private final ResourceLocation @org.jetbrains.annotations.Unmodifiable [] memberBlocks, memberTypes;
 		private final long sourceRetainedBytes;
 		private boolean closed;
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
@@ -568,20 +582,20 @@ public final class InventoryMinecraftSources {
 		}
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
-			Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture) {
+			@Nullable Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture) {
 			this(input, original, onThread, liveView, codec, (SourceWorld) null, testSnapshotCapture);
 		}
 		/** Test seam: the production view and capture algorithms over injected server-thread world facts. */
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
-			SourceWorld world, Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture) {
+			@Nullable SourceWorld world, @Nullable Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture) {
 			this(input, original, onThread, liveView, codec, world, testSnapshotCapture,
 				InventoryItemCodec.MAX_DISPLAY_BYTES, ignored -> {}, ignored -> InventoryReprojectionSummary.EMPTY);
 		}
 		/** Legacy trusted hook: opaque mutating callbacks need an explicit summary before Runtime can tighten them. */
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
-			SourceWorld world, Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture,
+			@Nullable SourceWorld world, @Nullable Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture,
 			int displayBytes, java.util.function.IntConsumer tightenDisplay) {
 			this(input, original, onThread, liveView, codec, world, testSnapshotCapture, displayBytes, tightenDisplay,
 				ignored -> InventoryReprojectionSummary.UNKNOWN);
@@ -589,16 +603,38 @@ public final class InventoryMinecraftSources {
 		/** Production seam: a pure cached summary accompanies the caller-owned compatibility catalogue hook. */
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
-			SourceWorld world, Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture,
+			@Nullable SourceWorld world, @Nullable Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture,
 			int displayBytes, java.util.function.IntConsumer tightenDisplay, IntFunction<InventoryReprojectionSummary> reprojectionSummary) {
 			this.input = input; this.original = original; this.onThread = onThread; this.liveView = liveView; this.codec = codec;
 			this.world = world; this.testSnapshotCapture = testSnapshotCapture;
-			this.validationViewCost = InventoryValidationBudget.viewValidation(original.snapshotLayout, vault(original.snapshotLayout), lockMembers(original.snapshotLayout));
+			this.inPlaceAccess = world != null && input.target() instanceof Target.BlockTarget && original.snapshotLayout != null
+				&& original.providerMembers.size() == original.snapshotLayout.members().size() && !original.entities.isEmpty()
+				&& original.access instanceof IPlatformInventoryService.InPlaceRevalidatingAccess capable ? capable : null;
+			@Nullable var target = input.ordinaryTarget().orElse(null);
+			rootPosition = inPlaceAccess == null || target == null ? null : new BlockPos(target.x(), target.y(), target.z());
+			rootBlock = inPlaceAccess == null ? null : ResourceLocation.parse(input.ordinaryTarget().orElseThrow().blockRegistryId());
+			memberBlocks = new ResourceLocation[inPlaceAccess == null ? 0 : original.providerMembers.size()];
+			memberTypes = new ResourceLocation[memberBlocks.length];
+			for (int index = 0; index < memberBlocks.length; index++) {
+				var member = original.snapshotLayout.members().get(index);
+				memberBlocks[index] = ResourceLocation.parse(member.blockId());
+				memberTypes[index] = ResourceLocation.parse(member.blockEntityId());
+			}
+			this.validationViewCost = inPlaceAccess == null
+				? InventoryValidationBudget.viewValidation(original.snapshotLayout, vault(original.snapshotLayout), lockMembers(original.snapshotLayout))
+				: inPlaceAccess.currentValidationCost().plus(InventoryValidationBudget.currentMembers(original.providerMembers));
+			this.nativeReadCost = inPlaceAccess == null
+				? original.snapshotLayout == null ? InventoryValidationBudget.classification(1, true).times(4)
+					: InventoryValidationBudget.nativeRead(original.snapshotLayout, original.access != null, vault(original.snapshotLayout))
+				: inPlaceAccess.nativeReadCost();
 			this.displayBytes = requireDisplayBytes(displayBytes);
 			this.tightenDisplay = Objects.requireNonNull(tightenDisplay, "tightenDisplay");
 			this.compatibilityReprojectionSummary = Objects.requireNonNull(reprojectionSummary, "reprojectionSummary");
 			originalSlots = original.access == null ? original.slots.size() : original.access.slots();
 			originalStableCursor = original.access == null || original.access.stableCursor();
+			readCosts = new InventoryValidationBudget.Cost[InventorySourceAccess.MAX_STEP + 1];
+			for (int count = 0; count < readCosts.length; count++) readCosts[count] = validationViewCost
+				.times(originalStableCursor ? 2L * count : count + 2L).plus(nativeReadCost.times(count));
 			liveAccess = original.access;
 			sourceRetainedBytes = InventorySourceRetention.source(original);
 		}
@@ -632,9 +668,12 @@ public final class InventoryMinecraftSources {
 		@Override public SourceKey key() { return new SourceKey(original.access == null ? "minecraft" : "pingforit", "block_inventory", original.identity, input.viewKey()); }
 		@Override public boolean valid() {
 			if (closed || !onThread.getAsBoolean()) return false;
-			if (validationViewCost != null)
-				(validation == null ? new InventoryValidationBudget.Allowance(validationViewCost) : validation).debit(validationViewCost);
+			(validation == null ? new InventoryValidationBudget.Allowance(validationViewCost) : validation).debit(validationViewCost);
 			try {
+				// The provider's old frozen evidence and its current route are independent
+				// checks. A refusal never falls through to an unreserved rebuild.
+				if (inPlaceAccess != null) return inPlaceAccess.valid() && currentMembersValid()
+					&& inPlaceAccess.revalidateCurrent(original.snapshotLayout);
 				// A freshly reacquired wrapper validates its *new* topology. Validate
 				// the admitted access's frozen evidence first, without object-identity equality.
 				if (original.access != null && (!original.access.valid() || original.access.slots() != originalSlots
@@ -660,10 +699,9 @@ public final class InventoryMinecraftSources {
 		}
 		@Override public InventoryValidationBudget.Cost evidenceValidationCost() { return validationViewCost; }
 		@Override public InventoryValidationBudget.Cost readValidationCost(int slots) {
-			// Indexed reads: two validity boundaries per item. Cursorless: entry, per delivered view, final boundary.
-			var views = validationViewCost.times(originalStableCursor ? 2L * slots : slots + 2L);
-			return views.plus(original.snapshotLayout == null ? InventoryValidationBudget.classification(1, true).times(4L * slots)
-				: InventoryValidationBudget.read(original.snapshotLayout, original.access != null, vault(original.snapshotLayout)).times(slots));
+			if (slots < 0 || slots > InventorySourceAccess.MAX_SLOTS) throw new IllegalArgumentException("read validation slot bound");
+			return slots < readCosts.length ? readCosts[slots] : validationViewCost.times(originalStableCursor ? 2L * slots : slots + 2L)
+				.plus(nativeReadCost.times(slots));
 		}
 		private <T> @Nullable T admitted(InventoryValidationBudget.Allowance allowance, Supplier<@Nullable T> operation) {
 			InventoryValidationBudget.@Nullable Allowance previous = validation; validation = Objects.requireNonNull(allowance);
@@ -682,8 +720,7 @@ public final class InventoryMinecraftSources {
 			return Objects.requireNonNull(admitted(allowance, () -> observeSelectionOwned(limit, selection, admission)));
 		}
 		private void admitRead(int slots) {
-			if (validation != null) validation.debit(original.snapshotLayout == null ? InventoryValidationBudget.classification(1, true).times(4L * slots)
-				: InventoryValidationBudget.read(original.snapshotLayout, original.access != null, vault(original.snapshotLayout)).times(slots));
+			if (validation != null) validation.debit(slots == 1 ? nativeReadCost : nativeReadCost.times(slots));
 		}
 		@Override public boolean stableCursor() { return originalStableCursor; }
 		@Override public int slots() { return originalSlots; }
@@ -764,17 +801,34 @@ public final class InventoryMinecraftSources {
 		private View currentView() {
 			// valid() has just reacquired this operation's capability. The original
 			// wrapper remains topology evidence, never a stale capture content port.
-			return new View(original.identity, original.entities, original.slots, liveAccess, original.snapshotLayout, original.discoverItems);
+			return inPlaceAccess != null ? original : new View(original.identity, original.entities, original.slots, liveAccess,
+				original.snapshotLayout, original.discoverItems);
+		}
+		private boolean currentMembersValid() {
+			if (world == null || rootPosition == null || !world.onServerThread() || !world.isLoaded(rootPosition)
+				|| world.blockEntity(rootPosition) != original.entities.getFirst()) return false;
+			if (!BuiltInRegistries.BLOCK.getKey(world.blockState(rootPosition).getBlock()).equals(rootBlock)) return false;
+			check(original.entities.getFirst(), world.heldKey());
+			for (int index = 0; index < original.providerMembers.size(); index++) {
+				var member = original.snapshotLayout.members().get(index);
+				BlockPos position = member.position();
+				if (!world.isLoaded(position) || !BuiltInRegistries.BLOCK.getKey(world.blockState(position).getBlock()).equals(memberBlocks[index])) return false;
+				@Nullable BlockEntity entity = world.blockEntity(position);
+				if (entity == null || entity != original.providerMembers.get(index)
+					|| !BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).equals(memberTypes[index])) return false;
+				check(entity, world.heldKey());
+			}
+			return true;
 		}
 		private <T> @Nullable T withLiveAccess(Supplier<@Nullable T> operation) {
 			operationDepth++;
 			try { return operation.get(); }
 			finally { if (--operationDepth == 0) liveAccess = original.access; }
 		}
-		@Override public InventoryDomainCodec.Item read(int slot) {
+		@Override public InventoryDomainCodec.@Nullable Item read(int slot) {
 			return readOwned(slot, null);
 		}
-		@Override public InventoryDomainCodec.Item read(int slot, InventoryCatalogAdmission admission) {
+		@Override public InventoryDomainCodec.@Nullable Item read(int slot, InventoryCatalogAdmission admission) {
 			return readOwned(slot, Objects.requireNonNull(admission));
 		}
 		private @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item readOwned(int slot, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
@@ -1285,7 +1339,7 @@ public final class InventoryMinecraftSources {
 		}
 		private InventoryValidationBudget.Cost readCost(int count) {
 			return (layout == null ? InventoryValidationBudget.classification(1, true)
-				: InventoryValidationBudget.read(layout, capability, vault(layout))).times(4L * count);
+				: InventoryValidationBudget.nativeRead(layout, capability, vault(layout))).times(4L * count);
 		}
 		private <T> @Nullable T admitted(InventoryValidationBudget.Allowance allowance, Supplier<@Nullable T> operation) {
 			InventoryValidationBudget.@Nullable Allowance previous = validation; validation = Objects.requireNonNull(allowance);

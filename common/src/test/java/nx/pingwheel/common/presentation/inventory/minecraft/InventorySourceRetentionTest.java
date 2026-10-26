@@ -32,9 +32,9 @@ class InventorySourceRetentionTest {
 		assertTrue(InventorySourceRetention.layout(ordinary) >= 2 * memberFloor);
 		var vault = layout("create:item_vault", 81);
 		long auxiliary = InventorySourceRetention.provider(vault) - InventorySourceRetention.provider(ordinary);
-		// Layout record, member and count lists/backings, detached positions,
-		// boxed per-member counts, and int prefix offsets. No second snapshot DTO.
-		long vaultFloor = 92 + 2 * (80 + 81 * 8) + 81 * (52 + 44) + 40 + 82 * 4;
+		// Layout record, member and count reference lists, boxed per-member counts,
+		// and int offsets. Positions are borrowed from the one paid snapshot DTO.
+		long vaultFloor = 92 + 2 * (80 + 81 * 8) + 81 * 44 + 40 + 82 * 4;
 		assertEquals(vaultFloor, auxiliary);
 		var view = new InventoryMinecraftSources.View("test:alias", List.of(), List.of(), null, vault, false);
 		var target = Target.ExternalBlockTarget.candidate("minecraft:overworld", "sable", "create:item_vault", "locator", true);
