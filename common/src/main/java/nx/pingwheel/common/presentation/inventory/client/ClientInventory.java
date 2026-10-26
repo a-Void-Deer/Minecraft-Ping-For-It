@@ -171,7 +171,8 @@ public final class ClientInventory {
 		/** Transport installation does not certify a completed source scan. */
 		boolean sourceComplete;
 		long failureWatermark = -1;
-		@Unmodifiable List<EntryView> historical = List.of();
+		/** Null means no retained closed cut; an empty list is a closed empty projection. */
+		@Nullable @Unmodifiable List<EntryView> historical;
 		InventoryS2CPacket.@Nullable Status historicalFailure;
 		boolean closedCut;
 
@@ -483,8 +484,8 @@ public final class ClientInventory {
 				: new EntryView(view.key(), view.itemId(), view.label(), view.displayJson(), value.count(),
 					view.fallback(), view.quality(), view.itemPingType()));
 		}
-		boolean history = !state.sourceComplete && !state.historical.isEmpty();
-		if (!state.sourceComplete && state.committed && !state.closedEntries.isEmpty()) {
+		boolean history = !state.sourceComplete && state.historical != null;
+		if (!state.sourceComplete && state.committed && state.closedCut) {
 			// Fresh fragments may already be applied per key. The provisional
 			// display still belongs to the last closed seed, not that partial cut.
 			entries = state.closedEntries.values().stream().map(ClientInventory::viewOf).toList();
@@ -632,7 +633,7 @@ public final class ClientInventory {
 					capFencedStates++;
 				}
 			}
-			if (!state.historical.isEmpty()) {
+			if (state.historical != null && !state.historical.isEmpty()) {
 				Map<String, EntryView> history = new LinkedHashMap<>();
 				for (var entry : state.historical) history.put(entry.key(), entry);
 				if (stripOversizedDisplays(history, displayBytes)) { state.historical = List.copyOf(history.values()); capFencedStates++; }
@@ -1043,7 +1044,7 @@ public final class ClientInventory {
 		state.watermark = batch.watermark;
 		state.status = batch.status();
 		state.sourceComplete |= batch.sourceComplete();
-		if (state.sourceComplete) { state.historical = List.of(); state.historicalFailure = null; state.failureWatermark = -1; }
+		if (state.sourceComplete) { state.historical = null; state.historicalFailure = null; state.failureWatermark = -1; }
 		state.committed = true;
 		state.closedCut = true;
 		state.committedChecksum = computeChecksum(state);
@@ -1123,7 +1124,7 @@ public final class ClientInventory {
 				state.watermark = first.watermark;
 				state.status = first.status();
 				state.sourceComplete |= first.sourceComplete();
-				if (state.sourceComplete) { state.historical = List.of(); state.historicalFailure = null; state.failureWatermark = -1; }
+				if (state.sourceComplete) { state.historical = null; state.historicalFailure = null; state.failureWatermark = -1; }
 			}
 			state.batches.remove(first.watermark);
 			state.batchBytes -= first.bytes;
@@ -1469,9 +1470,10 @@ public final class ClientInventory {
 		state.watermark = 0L;
 	}
 	private static void retainHistory(TrackingState state) {
-		if (!state.sourceComplete && state.committed && !state.closedEntries.isEmpty())
+		// Only a received closed cut can replace history. Metadata may contain
+		// unfinished per-key updates even after invalidation clears the cut.
+		if (state.committed && state.closedCut)
 			state.historical = state.closedEntries.values().stream().map(ClientInventory::viewOf).toList();
-		else if (!state.metadata.isEmpty()) state.historical = List.copyOf(state.metadata.values());
 		if (isPreviewTerminalFailure(state.status)) state.historicalFailure = state.status;
 	}
 

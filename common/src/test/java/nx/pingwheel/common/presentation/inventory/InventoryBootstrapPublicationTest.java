@@ -406,6 +406,90 @@ class InventoryBootstrapPublicationTest {
 			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.status(7, 0, MARKER, 1,
 				failure == Status.INVALID ? 2 : 1, 2, failure, 0).stamp(100, 1)));
 			assertProvisionalLine(f.view(), failure, LONG_COUNT, false);
+			if (failure == Status.INVALID) {
+				var invalid = InventoryS2CPacket.status(7, 0, MARKER, 1, 2, 2, Status.INVALID, 0).stamp(100, 1);
+				f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(invalid));
+				assertProvisionalLine(f.view(), Status.INVALID, LONG_COUNT, false);
+				f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.status(7, 0, MARKER, 2,
+					3, 0, Status.UPDATING, 0).stamp(100, 1)));
+				assertProvisionalLine(f.view(), Status.INVALID, LONG_COUNT, false);
+				var recovery = InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, MARKER, 2, 3,
+					3, 0, 2, true, Status.UNCERTAIN, 0, List.of(item)).stamp(100, 1);
+				f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(recovery));
+				assertProvisionalLine(f.view(), Status.INVALID, LONG_COUNT, false);
+				f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM,
+					7, 0, MARKER, 2, 3, 3, 1, 2, true, Status.UNCERTAIN, 0, List.of()).stamp(100, 1)));
+				assertTrue(f.view().complete()); assertEquals(Status.UNCERTAIN, f.view().status());
+				assertEquals(19, f.view().entries().getFirst().count());
+				f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(invalid));
+				assertTrue(f.view().complete()); assertEquals(19, f.view().entries().getFirst().count());
+			}
+		}
+	}
+
+	@Test void actualPublisherMultipartHistorySurvivesInvalidationAndRecoveryWithoutExposingAnUnclosedKey() {
+		try (var f = new Fixture()) {
+			f.bootstrap(1, Status.UPDATING, false); f.drain(); f.publisher.advance(3, f.settings);
+			var selected = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "exact"), 19, "stone", null, false);
+			var second = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:dirt", "exact"), 1, "dirt", null, false);
+			var projection = new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, Set.of("selected", "second"));
+			assertInstanceOf(SyncPublisher.Outcome.Accepted.class, f.publisher.publish(InventorySyncPublisherTest.entries(2,
+				Map.of("selected", selected, "second", second)), InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, projection, f.context, work()));
+			f.publisher.drain(); var fresh = List.copyOf(f.transport.sent); f.transport.sent.clear();
+			var parts = fresh.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM).toList();
+			assertEquals(2, parts.size()); assertTrue(parts.stream().allMatch(p -> p.partCount() == 2));
+			var first = parts.stream().filter(p -> p.entries().stream().anyMatch(e -> e.key().equals("second"))).findFirst().orElseThrow();
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(first));
+			assertProvisionalLine(f.view(), Status.UPDATING, LONG_COUNT, false); assertEquals(1, f.view().entries().size());
+			f.publisher.rebase(f.context, 2); f.context = new SyncPublisher.Context(f.context.consumerId(), f.context.recipient(), "100/1", 2, 1);
+			f.publisher.status(f.context, Status.INVALID); var invalid = f.drain();
+			invalid.forEach(p -> f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(p)));
+			assertProvisionalLine(f.view(), Status.INVALID, LONG_COUNT, false); assertEquals(1, f.view().entries().size());
+			f.publisher.rebase(f.context, 3); f.context = new SyncPublisher.Context(f.context.consumerId(), f.context.recipient(), "100/1", 3, 1);
+			f.publisher.status(f.context, Status.UPDATING); f.drain();
+			assertProvisionalLine(f.view(), Status.INVALID, LONG_COUNT, false); assertEquals(1, f.view().entries().size());
+			assertInstanceOf(SyncPublisher.Outcome.Accepted.class, f.publisher.publish(InventorySyncPublisherTest.entries(3,
+				Map.of("selected", selected, "second", second)), InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, projection, f.context, work()));
+			f.publisher.advance(6, f.settings); f.publisher.drain(); var recovery = List.copyOf(f.transport.sent); f.transport.sent.clear();
+			var data = recovery.stream().filter(p -> !p.entries().isEmpty()).toList();
+			assertEquals(2, data.size()); assertTrue(data.stream().allMatch(p -> p.partCount() == 2));
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(data.getFirst()));
+			assertProvisionalLine(f.view(), Status.INVALID, LONG_COUNT, false); assertEquals(1, f.view().entries().size());
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(data.getLast()));
+			assertTrue(f.view().complete()); assertEquals(Status.READY, f.view().status());
+			assertEquals(Map.of("selected", 19L, "second", 1L), f.view().entries().stream().collect(java.util.stream.Collectors.toMap(ClientInventory.EntryView::key, ClientInventory.EntryView::count)));
+			fresh.forEach(p -> f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(p)));
+			assertTrue(f.view().complete()); assertEquals(19, f.view().entries().stream().filter(e -> e.key().equals("selected")).findFirst().orElseThrow().count());
+			f.endpoint.client.markerRemoved(MARKER); assertTrue(f.view().entries().isEmpty());
+		}
+	}
+
+	@Test void closedEmptyAndCompletedHistoryCannotAcquireDisjointUnclosedRecoveryEntries() {
+		for (int initial : new int[] {-1, 0, 1, 2}) try (var f = new Fixture()) {
+			var closed = new InventoryS2CPacket.Entry("selected", "minecraft:stone", "stone", null, LONG_COUNT, 1, false, Status.READY);
+			if (initial == 2) {
+				assertInstanceOf(SyncPublisher.Outcome.Accepted.class, f.publisher.publishBootstrap(payload(0, false, null), 1,
+					Status.UPDATING, SELECTED, f.context, work())); f.drain();
+			} else if (initial >= 0) f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT,
+				7, 0, MARKER, 1, 1, 1, 0, 1, true, Status.READY, 0, initial == 0 ? List.of() : List.of(closed)).stamp(100, 1)));
+			var partial = new InventoryS2CPacket.Entry("unclosed", "minecraft:dirt", "dirt", null, 19, 2, false, Status.READY);
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.data(initial < 0 ? InventoryS2CPacket.Kind.SNAPSHOT : InventoryS2CPacket.Kind.STREAM,
+				7, 0, MARKER, 1, 1, 2, 0, 2, true, Status.READY, 0, List.of(partial)).stamp(100, 1)));
+			var invalid = InventoryS2CPacket.status(7, 0, MARKER, 1, 2, 2, Status.INVALID, 0).stamp(100, 1);
+			for (int replay = 0; replay < 2; replay++) {
+				f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(invalid));
+				assertEquals(initial > 0 ? List.of("selected") : List.of(), f.view().entries().stream().map(ClientInventory.EntryView::key).toList());
+				if (initial > 0) assertEquals(initial == 2 ? 0 : LONG_COUNT, f.view().entries().getFirst().count());
+			}
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.status(7, 0, MARKER, 2, 3, 0, Status.UPDATING, 0).stamp(100, 1)));
+			assertEquals(initial > 0 ? List.of("selected") : List.of(), f.view().entries().stream().map(ClientInventory.EntryView::key).toList());
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT,
+				7, 0, MARKER, 2, 3, 3, 0, 1, true, Status.READY, 0, List.of(partial)).stamp(100, 1)));
+			assertTrue(f.view().complete()); assertEquals(List.of("unclosed"), f.view().entries().stream().map(ClientInventory.EntryView::key).toList());
+			assertEquals(19, f.view().entries().getFirst().count());
+			f.endpoint.client.accept(InventoryPublicationIntegrationTest.wire(invalid));
+			assertTrue(f.view().complete()); assertEquals(List.of("unclosed"), f.view().entries().stream().map(ClientInventory.EntryView::key).toList());
+			f.endpoint.client.reset(); assertTrue(f.view().entries().isEmpty());
 		}
 	}
 
