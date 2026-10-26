@@ -78,6 +78,9 @@ class InventoryBackendTest {
 			f.open(); var packet = f.select(1); f.backend.handle(A, packet, 1, f.settings);
 			assertEquals(1, f.host.store.size()); var marker = f.host.store.allMarkers().getFirst();
 			assertEquals("attention", marker.pingType().id()); assertTrue(marker.properties().isEmpty());
+			assertTrue(f.host.packets.stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT), "SELECT only drains terminal controls");
+			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SELECTED && marker.id().equals(p.markerId())));
+			InventoryPublicationTicks.withoutScanSlots(f.backend, 1, f.settings);
 			@Unmodifiable List<InventoryS2CPacket> seeds = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT).toList();
 			assertEquals(2, seeds.size()); assertTrue(seeds.stream().allMatch(p -> !p.completeScan()
 				&& p.status() == InventoryS2CPacket.Status.UPDATING && p.entries().getFirst().count() == 7));
@@ -377,13 +380,14 @@ class InventoryBackendTest {
 			int reads = f.reads.get(); f.backend.handle(A, packet, 1, f.settings); assertEquals(reads, f.reads.get());
 			assertEquals(missing ? 0 : 1, f.host.store.size());
 			if (!missing) {
-				var seed = f.host.packets.stream().filter(p -> p.markerId() != null && !p.entries().isEmpty()).findFirst().orElseThrow();
-				assertEquals(9007199254740993L, seed.entries().getFirst().count()); assertFalse(seed.completeScan());
 				Object lease = ((Map<?, ?>) field(f.backend, "tracking")).values().iterator().next();
 				assertNull(field(lease, "completed")); assertEquals(0L, field(lease, "count")); assertEquals(0L, field(lease, "total"));
 				assertNull(field(field(lease, "consumer"), "completedRound")); assertEquals(0, field(field(lease, "consumer"), "cursor"));
 				f.backend.handle(A, InventoryC2SPacket.close(f.host.epoch(A), 1).stamp(100, 1), 1, f.settings);
 				assertNull(field(field(lease, "consumer"), "round"), "seed owns no preview round or journal");
+				InventoryPublicationTicks.withoutScanSlots(f.backend, 1, f.settings);
+				var seed = f.host.packets.stream().filter(p -> p.markerId() != null && !p.entries().isEmpty()).findFirst().orElseThrow();
+				assertEquals(9007199254740993L, seed.entries().getFirst().count()); assertFalse(seed.completeScan());
 			}
 		}
 	}
@@ -411,6 +415,7 @@ class InventoryBackendTest {
 			counts.put(key, new InventoryDomainCodec.Item(key, 9007199254740993L, "stone", null, true));
 			totals.put(key.itemId(), new InventoryDomainCodec.Item(key, 99, "stone", null, true));
 			int reads = f.reads.get(); f.backend.handle(A, packet, 1, f.settings); assertEquals(1, f.host.store.size()); assertEquals(reads, f.reads.get());
+			InventoryPublicationTicks.withoutScanSlots(f.backend, 1, f.settings);
 			var seed = f.host.packets.stream().filter(p -> p.markerId() != null && !p.entries().isEmpty()).findFirst().orElseThrow();
 			assertEquals(9007199254740993L, seed.entries().getFirst().count()); assertTrue(seed.entries().getFirst().fallback());
 			assertNotNull(seed.entries().getFirst().displayJson()); assertFalse(seed.completeScan());

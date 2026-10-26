@@ -86,6 +86,8 @@ class InventoryPatchIdentityFlowTest {
 			assertEquals(InventoryS2CPacket.Kind.SELECTED, f.selected(1).kind());
 			assertEquals(1, f.host.store.size());
 			assertTrue(f.state.reads.isEmpty(), "selection reads metadata, not the old witness slot");
+			InventoryPublicationTicks.withoutScanSlots(f.backend, 1, f.settings);
+			assertTrue(f.state.reads.isEmpty(), "a budgeted publication tick revalidates metadata without a slot grant");
 			assertEquals(selected.count(), f.host.packets.stream().filter(packet -> packet.markerId() != null
 				&& !packet.entries().isEmpty()).findFirst().orElseThrow().entries().getFirst().count(),
 				"bootstrap uses the exact key, never the same-ID total");

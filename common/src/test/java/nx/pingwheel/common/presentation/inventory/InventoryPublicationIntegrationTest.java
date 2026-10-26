@@ -167,7 +167,8 @@ class InventoryPublicationIntegrationTest {
 				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.select(epoch, 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "danger"), 1, settings);
 				var marker = host.store.allMarkers().getFirst(); var endpoint = new Endpoint(InventoryBackendTest.A, MarkerSnapshot.from(marker));
 				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.close(epoch, 1).stamp(100, 1), 1, settings);
-				phase[0] = 1; int start = host.packets.size(); backend.tick(2, settings); endpoint.drain(host);
+				phase[0] = 1; InventoryPublicationTicks.withoutScanSlots(backend, 1, settings);
+				int start = host.packets.size(); backend.tick(2, settings); endpoint.drain(host);
 				var fence = host.packets.stream().filter(packet -> marker.id().equals(packet.markerId()) && packet.kind() == InventoryS2CPacket.Kind.STATUS).findFirst().orElseThrow();
 				assertEquals(InventoryS2CPacket.Status.UPDATING, fence.status()); assertEquals(0, fence.watermark());
 				assertFalse(endpoint.client.tracking(marker.id()).complete());
@@ -440,6 +441,7 @@ class InventoryPublicationIntegrationTest {
 	@Test void smallRecoveryFencePrecedesSnapshotAndEachRecipientReplacesGreyBaselineWithoutOldStreamResurrection() {
 		try (var f = new InventoryBackendTest.Fixture()) {
 			f.open(); f.backend.handle(InventoryBackendTest.A, f.select(1), 1, f.settings);
+			InventoryPublicationTicks.withoutScanSlots(f.backend, 1, f.settings);
 			var marker = f.host.store.allMarkers().getFirst(); var a = new Endpoint(InventoryBackendTest.A, MarkerSnapshot.from(marker)); var b = new Endpoint(InventoryBackendTest.B, MarkerSnapshot.from(marker));
 			f.backend.tick(2, f.settings); a.drain(f.host); b.drain(f.host); count(a.client, marker.id(), 7); count(b.client, marker.id(), 7);
 			f.amount = 8; f.backend.tick(5, f.settings); a.drain(f.host); b.drain(f.host);

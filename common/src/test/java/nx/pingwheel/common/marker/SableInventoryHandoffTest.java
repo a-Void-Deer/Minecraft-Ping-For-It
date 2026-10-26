@@ -28,6 +28,7 @@ import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.PresentationPropertyPingTypes;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.presentation.inventory.InventoryDomainCodec;
+import nx.pingwheel.common.presentation.inventory.InventoryPublicationTicks;
 import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
 import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
 import nx.pingwheel.common.presentation.inventory.InventoryScanner;
@@ -332,6 +333,8 @@ class SableInventoryHandoffTest {
 			assertEquals("attention", marker.pingType().id());
 			assertTrue(marker.properties().isEmpty());
 			assertEquals(reads, route.reads.get(), "binding and current evidence perform no content getter");
+			InventoryPublicationTicks.withoutScanSlots(f.backend, 1, f.settings);
+			assertEquals(reads, route.reads.get(), "seed delivery needs a budgeted metadata probe, not a content getter");
 			var seed = f.host.packets.stream().filter(p -> marker.id().equals(p.markerId()) && !p.entries().isEmpty()).findFirst().orElseThrow();
 			assertFalse(seed.completeScan()); assertEquals(InventoryS2CPacket.Status.UPDATING, seed.status()); assertEquals(7, seed.entries().getFirst().count());
 			assertNotNull(f.host.boundInput);

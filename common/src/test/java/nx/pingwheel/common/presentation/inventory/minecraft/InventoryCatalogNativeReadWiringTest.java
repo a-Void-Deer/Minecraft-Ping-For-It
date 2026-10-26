@@ -34,6 +34,7 @@ import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
 import nx.pingwheel.common.presentation.inventory.InventoryStep;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
+import nx.pingwheel.common.presentation.inventory.InventoryPublicationTicks;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
@@ -128,11 +129,25 @@ class InventoryCatalogNativeReadWiringTest {
 	}
 
 	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
+	@NotNullByDefault
 	private static final class Chest extends ChestBlockEntity implements BaseContainerLockAccessor {
+		private static final java.lang.reflect.Field NATIVE_LOCK = nativeLock();
 		int reads;
-		LockCode lock = LockCode.NO_LOCK;
 		Chest(BlockPos position, BlockState state) { super(position, state); setItem(0, new ItemStack(Items.STONE, 3)); }
-		@Override public LockCode pingforit$inventoryLock() { return lock; }
+		private static java.lang.reflect.Field nativeLock() {
+			try {
+				var field = net.minecraft.world.level.block.entity.BaseContainerBlockEntity.class.getDeclaredField("lockKey");
+				field.setAccessible(true); return field;
+			} catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+		}
+		void setLockCode(String key) {
+			try { NATIVE_LOCK.set(this, new LockCode(key)); }
+			catch (IllegalAccessException failure) { throw new AssertionError(failure); }
+		}
+		@Override public LockCode pingforit$inventoryLock() {
+			try { return (LockCode) NATIVE_LOCK.get(this); }
+			catch (IllegalAccessException failure) { throw new AssertionError(failure); }
+		}
 		@Override public ItemStack getItem(int slot) { reads++; return super.getItem(slot); }
 	}
 	private static final class World implements InventoryMinecraftSources.SourceWorld {
@@ -622,6 +637,8 @@ class InventoryCatalogNativeReadWiringTest {
 	private static final class BackendHost implements InventoryBackend.Host {
 		final List<InventoryS2CPacket> packets = new ArrayList<>();
 		final List<UUID> deliveries = new ArrayList<>();
+		final List<nx.pingwheel.common.domain.MarkerId> created = new ArrayList<>();
+		@Nullable InventoryBackend backend;
 		final nx.pingwheel.common.marker.ServerMarkerStore store = new nx.pingwheel.common.marker.ServerMarkerStore(new nx.pingwheel.common.marker.MarkerIdSource());
 		final java.util.Set<UUID> delayedBasic = new java.util.HashSet<>();
 		@Unmodifiable List<UUID> audience = List.of(input().readOwner());
@@ -639,6 +656,11 @@ class InventoryCatalogNativeReadWiringTest {
 		@Override public boolean knows(UUID player, nx.pingwheel.common.domain.MarkerId marker) { return !delayedBasic.contains(player)
 			&& store.allMarkers().stream().anyMatch(value -> value.id().equals(marker) && value.recipients().contains(player)); }
 		@Override public boolean authorized(SyncPublisher.Context context) { return true; }
+		@Override public void publishCreated(InventoryBackend.Created outcome) {
+			assertNotNull(backend); assertTrue(backend.tracksInventory(outcome.marker().id()), "sidecar precedes Basic publication");
+			assertFalse(created.contains(outcome.marker().id()), "Basic is emitted once per committed marker");
+			created.add(outcome.marker().id());
+		}
 		@Override public Optional<InventoryRuntime.DisplayReprojector> displayReprojector() {
 			return Optional.of((display, cap) -> InventoryItemCodec.reproject(display, RegistryAccess.EMPTY, cap));
 		}
@@ -647,6 +669,7 @@ class InventoryCatalogNativeReadWiringTest {
 			try { packet.write(buffer); return buffer.readableBytes(); } finally { buffer.release(); }
 		}
 		@Override public void send(UUID player, InventoryS2CPacket packet) {
+			if (packet.markerId() != null && !packet.entries().isEmpty()) assertTrue(created.contains(packet.markerId()), "Basic precedes every quantity");
 			if (blockData && !packet.entries().isEmpty()) throw new IllegalStateException("withheld native data");
 			var buffer = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
 			try {
@@ -665,6 +688,7 @@ class InventoryCatalogNativeReadWiringTest {
 		int cursor;
 		long epoch;
 		void open(InventoryBackend backend) {
+			host.backend = backend;
 			client.presentationReset(100, 1);
 			backend.handle(input().readOwner(), InventoryC2SPacket.hello(), 0, settings); drain();
 			epoch = host.packets.getFirst().epoch();
@@ -679,12 +703,121 @@ class InventoryCatalogNativeReadWiringTest {
 			backend.handle(input().readOwner(), InventoryC2SPacket.select(epoch, 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), chosen.key(), "danger"), tick, settings);
 			assertEquals(1, host.store.size()); client.markerCreated(MarkerSnapshot.from(host.store.allMarkers().getFirst())); drain();
 			backend.handle(input().readOwner(), InventoryC2SPacket.close(epoch, 1).stamp(100, 1), tick, settings); drain();
+			// SELECT commits and answers synchronously; data waits for a normal
+			// tick. Spend only scan slots so this fixture can inspect the seed
+			// independently of a small source completing in that same tick.
+			InventoryPublicationTicks.withoutScanSlots(backend, tick, settings); drain();
 		}
 		void repair(InventoryBackend backend, int tick, boolean tracking) {
 			backend.handle(input().readOwner(), tracking ? InventoryC2SPacket.resync(epoch, 0, host.store.allMarkers().getFirst().id()).stamp(100, 1)
 				: InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), tick, settings);
 		}
 		@Unmodifiable List<InventoryS2CPacket> since(int start) { return List.copyOf(host.packets.subList(start, host.packets.size())); }
+	}
+
+	@ParameterizedTest @ValueSource(strings = {"unknown", "duplicate", "other"})
+	void sameTickSelectionCannotDrainQueuedChestSeedAfterActualOwnerLockRevocation(String ingress) {
+		var f = new NativeClient(); var world = new World();
+		world.add(BlockPos.ZERO, Blocks.CHEST.defaultBlockState());
+		var otherPosition = new BlockPos(2, 0, 0); world.add(otherPosition, Blocks.CHEST.defaultBlockState());
+		var otherTarget = new Target.BlockTarget("minecraft:overworld", 2, 0, 0, "minecraft:chest");
+		f.host.expiry = 50; f.settings.getTracking().setResyncMinPeriods(0);
+		var runtime = new InventoryRuntime((request, cap) -> Optional.of(source(world, request, cap)), f.settings.pendingMemoryBytes());
+		try (var backend = new InventoryBackend(f.host, runtime, 1)) {
+			f.open(backend);
+			backend.handle(input().readOwner(), InventoryC2SPacket.open(f.epoch, 100, 1, 2, otherTarget, BlockFace.NORTH), 0, f.settings);
+			f.tick(backend, 0);
+			var preview = f.client.preview(1);
+			var other = f.host.packets.stream().filter(p -> p.requestId() == 2 && !p.entries().isEmpty()).findFirst().orElseThrow();
+			assertEquals(3, preview.entries().getFirst().count()); assertEquals(3, other.entries().getFirst().count());
+			var selected = InventoryC2SPacket.select(f.epoch, 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "danger");
+			f.host.blockData = true; int reads = world.reads();
+			backend.handle(input().readOwner(), selected, 1, f.settings);
+			var marker = f.host.store.allMarkers().getFirst(); f.client.markerCreated(MarkerSnapshot.from(marker)); f.drain();
+			assertEquals(1, f.host.created.size()); assertTrue(backend.tracksInventory(marker.id()));
+			assertEquals(reads, world.reads(), "creation remains synchronous with no item witness");
+			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SELECTED && p.commitId() == 1), "terminal result does not wait for seed transport");
+			InventoryPublicationTicks.withoutScanSlots(backend, 1, f.settings); f.drain();
+			assertTrue(f.client.tracking(marker.id()).entries().isEmpty(), "transport really withheld the queued seed");
+			var chest = world.chests.get(BlockPos.ZERO); int lockedReads = chest.reads; chest.setLockCode("secret");
+			assertFalse(chest.pingforit$inventoryLock().unlocksWith(world.heldKey()), "actual native lock denies the sampling owner's held key");
+			assertFalse(InventoryReadSafety.readable(chest, world.heldKey()));
+			var next = switch (ingress) {
+				case "duplicate" -> selected;
+				case "other" -> InventoryC2SPacket.select(f.epoch, 100, 1, 2, 2, other.baselineId(), other.statusRevision(), other.entries().getFirst().key(), "danger");
+				default -> InventoryC2SPacket.select(f.epoch, 100, 1, 2, 99, preview.baselineId(), preview.statusRevision(), "unknown", "danger");
+			};
+			int start = f.host.packets.size(); f.host.blockData = false;
+			backend.handle(input().readOwner(), next, 1, f.settings); f.drain();
+			assertTrue(f.since(start).stream().noneMatch(p -> !p.entries().isEmpty()), "same-tick ingress must not flush any queued quantities");
+			assertTrue(f.client.tracking(marker.id()).entries().isEmpty()); assertEquals(reads, world.reads());
+			assertTrue(f.since(start).stream().anyMatch(p -> p.commitId() == next.commitId()
+				&& p.kind() == (ingress.equals("unknown") ? InventoryS2CPacket.Kind.REJECT : InventoryS2CPacket.Kind.SELECTED)), "correlated terminal controls remain immediate");
+			assertEquals(ingress.equals("other") ? 2 : 1, f.host.created.size());
+			f.tick(backend, 2);
+			assertEquals(InventoryS2CPacket.Status.INVALID, f.client.tracking(marker.id()).status(), "the next ordinary budgeted probe detects the lock");
+			assertTrue(f.since(start).stream().filter(p -> marker.id().equals(p.markerId())).allMatch(p -> p.entries().isEmpty()));
+			assertEquals(lockedReads, chest.reads, "the revoked lock is detected without a content getter");
+			for (var value : f.host.store.allMarkers()) if (!value.id().equals(marker.id())) backend.remove(value.id());
+			backend.handle(input().readOwner(), InventoryC2SPacket.close(f.epoch, 1).stamp(100, 1), 2, f.settings);
+			backend.handle(input().readOwner(), InventoryC2SPacket.close(f.epoch, 2).stamp(100, 1), 2, f.settings);
+			f.settings.setPhysicalSlotsPerTick(IntLimit.finite(1)); chest.setLockCode(""); chest.clearContent();
+			f.repair(backend, 3, true); f.tick(backend, 3);
+			for (int tick = 5; tick <= 7; tick++) f.tick(backend, tick);
+			assertTrue(f.since(start).stream().filter(p -> marker.id().equals(p.markerId())).allMatch(p -> p.entries().isEmpty()), "invalidity permanently retires the seed through repair and partial recovery");
+			for (int tick = 8; tick < 50 && !f.client.tracking(marker.id()).complete(); tick++) f.tick(backend, tick);
+			assertTrue(f.client.tracking(marker.id()).complete()); assertEquals(0, f.client.tracking(marker.id()).entries().getFirst().count());
+			assertTrue(f.since(start).stream().filter(p -> marker.id().equals(p.markerId()) && !p.entries().isEmpty()).allMatch(p -> p.completeScan() && p.entries().getFirst().count() == 0));
+			int finalReads = world.reads(); f.tick(backend, 50); f.tick(backend, 80);
+			assertEquals(finalReads, world.reads()); assertFalse(backend.tracksInventory(marker.id())); assertEquals(50, marker.expiresAtTick());
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+
+	@ParameterizedTest @ValueSource(booleans = {false, true})
+	void queuedSeedWaitsForBudgetedTickWithoutStarvationOrSameTickProviderAuthorityReuse(boolean revoke) {
+		var f = new NativeClient(); var fixture = new LargeNative(4, false);
+		f.settings.setPhysicalSlotsPerTick(IntLimit.finite(1)); var runtime = fixture.runtime(f.settings);
+		try (var backend = new InventoryBackend(f.host, runtime, 1)) {
+			f.open(backend); f.tick(backend, 0); f.host.blockData = true; f.select(backend, 1, "minecraft:stone");
+			var marker = f.host.store.allMarkers().getFirst(); assertTrue(f.client.tracking(marker.id()).entries().isEmpty());
+			assertEquals(1, f.host.created.size()); assertEquals(1, fixture.visibleReads.size());
+			fixture.valid = !revoke; f.host.blockData = false; int start = f.host.packets.size();
+			var unknown = InventoryC2SPacket.select(f.epoch, 100, 1, 2, 99, 1, 1, "unknown", "danger");
+			backend.handle(input().readOwner(), unknown, 1, f.settings); f.drain();
+			assertTrue(f.since(start).stream().noneMatch(p -> !p.entries().isEmpty()), "selection does not reuse an earlier ingress/tick authority approval");
+			assertTrue(f.since(start).stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.REJECT && p.commitId() == 2));
+			f.tick(backend, 2);
+			var view = f.client.tracking(marker.id());
+			if (revoke) { assertEquals(InventoryS2CPacket.Status.INVALID, view.status()); assertTrue(view.entries().isEmpty()); assertEquals(1, fixture.visibleReads.size()); }
+			else {
+				assertEquals(LargeNative.LARGE_AMOUNT, view.entries().getFirst().count()); assertFalse(view.complete()); assertFalse(view.grey());
+				assertEquals(InventoryS2CPacket.Status.UPDATING, view.status()); assertEquals(2, fixture.visibleReads.size());
+				for (int tick = 3; tick <= 5; tick++) f.tick(backend, tick);
+				assertTrue(f.client.tracking(marker.id()).complete()); assertEquals(LargeNative.LARGE_AMOUNT + 2, f.client.tracking(marker.id()).entries().getFirst().count());
+			}
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+
+	@Test void unchangedChestAuthorityDeliversQueuedSeedOnNextBudgetedTickWithoutDelayingCreationOrOutcome() {
+		var f = new NativeClient(); var world = new World(); world.add(BlockPos.ZERO, Blocks.CHEST.defaultBlockState());
+		var runtime = new InventoryRuntime((request, cap) -> Optional.of(source(world, request, cap)), f.settings.pendingMemoryBytes());
+		try (var backend = new InventoryBackend(f.host, runtime, 1)) {
+			f.open(backend); f.tick(backend, 0); f.host.blockData = true; f.select(backend, 1, "minecraft:stone");
+			var marker = f.host.store.allMarkers().getFirst(); assertEquals(1, f.host.created.size()); assertEquals(27, world.reads());
+			assertTrue(f.client.tracking(marker.id()).entries().isEmpty());
+			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SELECTED && marker.id().equals(p.markerId())));
+			f.host.blockData = false; int start = f.host.packets.size();
+			backend.handle(input().readOwner(), InventoryC2SPacket.select(f.epoch, 100, 1, 2, 99, 1, 1, "unknown", "danger"), 1, f.settings); f.drain();
+			assertTrue(f.since(start).stream().noneMatch(p -> !p.entries().isEmpty()));
+			InventoryPublicationTicks.withoutScanSlots(backend, 2, f.settings); f.drain();
+			var seed = f.client.tracking(marker.id()); assertEquals(3, seed.entries().getFirst().count()); assertFalse(seed.complete()); assertFalse(seed.grey());
+			assertEquals(InventoryS2CPacket.Status.UPDATING, seed.status()); assertEquals(27, world.reads());
+			f.tick(backend, 3); assertTrue(f.client.tracking(marker.id()).complete()); assertEquals(3, f.client.tracking(marker.id()).entries().getFirst().count());
+			assertEquals(54, world.reads()); assertEquals(1, f.host.created.size()); assertEquals(1, f.host.store.size());
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 	}
 
 	@ParameterizedTest @ValueSource(ints = {0, 7, 12})
@@ -761,7 +894,7 @@ class InventoryCatalogNativeReadWiringTest {
 			assertEquals(InventoryS2CPacket.Status.UPDATING, delayed.status()); assertNotEquals(first.baselineId(), delayed.baselineId());
 			@Nullable String stripped = first.entries().getFirst().displayJson(); assertTrue(stripped == null || stripped.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 1024);
 			f.settings.setDisplayByteMultiplier(java.math.BigDecimal.ONE); f.tick(backend, 5);
-			assertEquals(stripped, f.client.tracking(marker.id()).entries().getFirst().displayJson()); assertEquals(6, fixture.visibleReads.size());
+			assertEquals(stripped, f.client.tracking(marker.id()).entries().getFirst().displayJson()); assertEquals(5, fixture.visibleReads.size(), "the seed-only tick spent tick one's shared scan allowance");
 			backend.disconnect(other); backend.disconnect(input().readOwner());
 			assertFalse(backend.tracksInventory(marker.id()));
 		}
@@ -861,7 +994,7 @@ class InventoryCatalogNativeReadWiringTest {
 				if (change.equals("mapping")) {
 					world.states.put(BlockPos.ZERO, Blocks.CHEST.defaultBlockState()); world.states.put(partner, Blocks.CHEST.defaultBlockState());
 					world.chests.get(BlockPos.ZERO).setItem(0, new ItemStack(Items.STONE, 6)); // current view has the same total, different mapping
-				} else if (change.equals("lock")) world.chests.get(BlockPos.ZERO).lock = new LockCode("secret");
+				} else if (change.equals("lock")) world.chests.get(BlockPos.ZERO).setLockCode("secret");
 				else world.states.clear();
 				int reads = world.reads();
 				backend.handle(input().readOwner(), InventoryC2SPacket.select(f.epoch, 100, 1, 1, 1, cut.baselineId(), cut.statusRevision(), cut.entries().getFirst().key(), "danger"), 5, f.settings);

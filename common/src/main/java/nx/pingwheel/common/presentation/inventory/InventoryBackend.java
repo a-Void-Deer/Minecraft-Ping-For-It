@@ -510,9 +510,9 @@ public final class InventoryBackend implements AutoCloseable {
 		CommitResult committed = new CommitResult(result);
 		session.commits.put(packet.commitId(), committed);
 		enqueueResult(player, session, committed);
-		// The committed Basic notification and current owner probe precede seed
-		// data. This uses the ordinary publisher queues, memory and wire budgets.
-		publisher.drain();
+		// Only the normal tick revalidates every queued source before draining
+		// item data. An ingress callback can follow a same-tick authority change;
+		// its selection outcome must not flush unrelated, previously checked data.
 	}
 	private void enqueueResult(UUID player, Session session, CommitResult result) {
 		if (!result.pending || result.queued || session.policy == null) return;
