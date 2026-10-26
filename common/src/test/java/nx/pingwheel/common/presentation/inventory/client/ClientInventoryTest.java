@@ -1059,7 +1059,7 @@ class ClientInventoryTest {
 	}
 
 	@Test
-	void invalidStatusRetainsGreyValuesAndNewerBaselineClears() {
+	void invalidStatusRetainsGreyHistoryUntilNewBaselineCompletes() {
 		commitTwoEntries();
 
 		session.accept(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, REVISION + 1L, WATERMARK,
@@ -1073,8 +1073,14 @@ class ClientInventoryTest {
 			InventoryS2CPacket.Status.READY, 0L));
 
 		ClientInventory.Tracking recovered = session.tracking(markerId);
-		assertFalse(recovered.grey());
-		assertTrue(recovered.entries().isEmpty(), "a recovered baseline clears old values");
+		assertTrue(recovered.grey());
+		assertFalse(recovered.complete());
+		assertEquals(InventoryS2CPacket.Status.INVALID, recovered.status());
+		assertEquals(2, recovered.entries().size(), "history is separate from the cleared transport baseline");
+		session.accept(data(InventoryS2CPacket.Kind.SNAPSHOT, 9L, REVISION + 2L, 0, 1, WATERMARK + 1,
+			List.of(entry("a", 0, 9))));
+		assertTrue(session.tracking(markerId).complete()); assertFalse(session.tracking(markerId).grey());
+		assertEquals(0, session.tracking(markerId).entries().getFirst().count());
 	}
 
 	@Test

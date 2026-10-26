@@ -9,6 +9,7 @@ import net.minecraft.network.chat.FormattedText;
 import net.minecraft.util.FormattedCharSequence;
 
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Nullable;
 
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.network.InventoryS2CPacket.Status;
@@ -18,7 +19,7 @@ import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
 import static org.junit.jupiter.api.Assertions.*;
 
 class InventoryTrackingRendererTest {
-	private static ClientInventory.EntryView entry(String label, long count, boolean fallback, Status quality) {
+	private static ClientInventory.EntryView entry(String label, long count, boolean fallback, @Nullable Status quality) {
 		return new ClientInventory.EntryView("opaque:" + label, "minecraft:stone", label, null, count, fallback, quality, "request");
 	}
 	@Test void onlyReceivedTrackingDataSuppliesBoundedItemLinesAndNeverSynthesizesZero() {
@@ -37,8 +38,28 @@ class InventoryTrackingRendererTest {
 			var lines = InventoryTrackingRenderer.lines(projection);
 			assertEquals(7L, lines.getFirst().count()); assertTrue(lines.getFirst().grey());
 			assertEquals(SpatialInventoryView.Status.fromName(status.name()).translationKey(), lines.getFirst().statusKey());
-			assertEquals(SpatialInventoryView.Status.COMPONENT_TOO_LONG.translationKey(), lines.get(1).statusKey()); assertTrue(lines.get(1).grey());
+			assertEquals(SpatialInventoryView.Status.fromName(status.name()).translationKey(), lines.get(1).statusKey());
+			assertEquals(SpatialInventoryView.Status.COMPONENT_TOO_LONG.translationKey(), lines.get(1).qualifierKey()); assertTrue(lines.get(1).grey());
 		}
+	}
+	@Test void lifecycleAndAggregateQualifierStayIndependentAndVisibleEvenWithALongName() throws IOException {
+		String updating = SpatialInventoryView.Status.UPDATING.translationKey();
+		String aggregate = SpatialInventoryView.Status.COMPONENT_TOO_LONG.translationKey();
+		withLanguage(Map.of(updating, "Updating", aggregate, "All variants"), () -> {
+			for (Status status : List.of(Status.UPDATING, Status.INCOMPLETE, Status.INVALID, Status.READY)) {
+				var tracking = new ClientInventory.Tracking(new MarkerId(1), status, status == Status.INVALID,
+					status == Status.READY, 1, 1, 1, List.of(entry("X".repeat(100), 9_007_199_254_740_993L, false, status),
+					entry("X".repeat(100), 9_007_199_254_740_993L, true, Status.COMPONENT_TOO_LONG)));
+				var lines = InventoryTrackingRenderer.lines(tracking);
+				assertEquals(SpatialInventoryView.Status.fromName(status.name()).translationKey(), lines.getFirst().statusKey());
+				assertEquals(status != Status.UPDATING && status != Status.READY, lines.getFirst().grey());
+				assertEquals(aggregate, lines.get(1).qualifierKey()); assertTrue(lines.get(1).grey());
+				if (status == Status.UPDATING) {
+					String text = InventoryTrackingRenderer.text(lines.get(1)).getString();
+					assertTrue(text.contains("Updating")); assertTrue(text.contains("All variants")); assertTrue(text.length() <= 64);
+				}
+			}
+		});
 	}
 	@Test void trackingAnnotationResolvesTheSharedLocalizedNamePolicyNotTheRawLabel() throws IOException {
 		withLanguage(Map.of("item.minecraft.stone", "Stone", "item.minecraft.gunpowder", "Gunpowder"), () -> {

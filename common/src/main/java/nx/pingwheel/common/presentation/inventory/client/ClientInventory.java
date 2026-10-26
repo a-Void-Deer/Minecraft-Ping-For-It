@@ -24,6 +24,7 @@ import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * One client connection's inventory preview and tracking session.
@@ -167,6 +168,11 @@ public final class ClientInventory {
 		long closedBatchBytes;
 		long completionWatermark = -1, completionChecksum, completionSince = -1, heartbeatGapSince = -1;
 		boolean committed;
+		/** Transport installation does not certify a completed source scan. */
+		boolean sourceComplete;
+		long failureWatermark = -1;
+		@Unmodifiable List<EntryView> historical = List.of();
+		InventoryS2CPacket.@Nullable Status historicalFailure;
 		boolean closedCut;
 
 		TrackingState(MarkerId markerId, InventoryClientStore.Channel channel) {
@@ -216,6 +222,9 @@ public final class ClientInventory {
 
 		InventoryS2CPacket.Status status() {
 			return parts.get(totalParts - 1).status();
+		}
+		boolean sourceComplete() {
+			return complete() && parts.values().stream().anyMatch(InventoryS2CPacket::completeScan);
 		}
 	}
 
@@ -474,8 +483,10 @@ public final class ClientInventory {
 				: new EntryView(view.key(), view.itemId(), view.label(), view.displayJson(), value.count(),
 					view.fallback(), view.quality(), view.itemPingType()));
 		}
-		return new Tracking(markerId, state.status, store.isInvalid(state.channel), state.committed,
-			store.baselineId(state.channel), state.statusRevision, state.watermark, List.copyOf(entries));
+		boolean history = !state.sourceComplete && !state.historical.isEmpty();
+		return new Tracking(markerId, !state.sourceComplete && state.historicalFailure != null ? state.historicalFailure : state.status,
+			store.isInvalid(state.channel) || history || isPreviewTerminalFailure(state.status), state.sourceComplete,
+			store.baselineId(state.channel), state.statusRevision, state.watermark, history ? state.historical : List.copyOf(entries));
 	}
 
 	public Stats stats() {
@@ -600,6 +611,11 @@ public final class ClientInventory {
 			}
 			if (stripOversizedDisplays(state.metadata, displayBytes))
 				capFencedStates++;
+			if (!state.historical.isEmpty()) {
+				Map<String, EntryView> history = new LinkedHashMap<>();
+				for (var entry : state.historical) history.put(entry.key(), entry);
+				if (stripOversizedDisplays(history, displayBytes)) { state.historical = List.copyOf(history.values()); capFencedStates++; }
+			}
 		}
 		var sessions = unknown.entrySet().iterator();
 		while (sessions.hasNext()) {
@@ -824,6 +840,11 @@ public final class ClientInventory {
 			scheduleRepair(state);
 			return;
 		}
+		if (!packet.completeScan() && (state.sourceComplete || state.historicalFailure == InventoryS2CPacket.Status.INVALID
+			|| packet.status() == InventoryS2CPacket.Status.UPDATING && state.failureWatermark >= 0)) {
+			fencedPackets++;
+			return;
+		}
 		if (state.committed && packet.baselineId() == store.baselineId(state.channel)
 			&& packet.statusRevision() == state.statusRevision && !store.assembling(state.channel)) {
 			applyUpdates(state, packet);
@@ -841,7 +862,7 @@ public final class ClientInventory {
 	}
 
 	private void assemble(TrackingState state, InventoryS2CPacket packet) {
-		TrackingBatch batch = state.pending;
+		@Nullable TrackingBatch batch = state.pending;
 		boolean sameIdentity = batch != null && batch.baselineId == packet.baselineId()
 			&& batch.statusRevision == packet.statusRevision();
 		if (sameIdentity && batch.watermark != packet.watermark()
@@ -980,6 +1001,10 @@ public final class ClientInventory {
 	}
 
 	private void commitTracking(TrackingState state, TrackingBatch batch) {
+		if (state.baselineId != batch.baselineId || state.statusRevision != batch.statusRevision) {
+			retainHistory(state);
+			state.sourceComplete = false;
+		}
 		state.metadata.clear();
 		state.groups.clear();
 		for (InventoryS2CPacket.Entry entry : batch.entries.values())
@@ -996,6 +1021,8 @@ public final class ClientInventory {
 		state.statusRevision = batch.statusRevision;
 		state.watermark = batch.watermark;
 		state.status = batch.status();
+		state.sourceComplete |= batch.sourceComplete();
+		if (state.sourceComplete) { state.historical = List.of(); state.historicalFailure = null; state.failureWatermark = -1; }
 		state.committed = true;
 		state.closedCut = true;
 		state.committedChecksum = computeChecksum(state);
@@ -1074,6 +1101,8 @@ public final class ClientInventory {
 			if (first.watermark > state.watermark) {
 				state.watermark = first.watermark;
 				state.status = first.status();
+				state.sourceComplete |= first.sourceComplete();
+				if (state.sourceComplete) { state.historical = List.of(); state.historicalFailure = null; state.failureWatermark = -1; }
 			}
 			state.batches.remove(first.watermark);
 			state.batchBytes -= first.bytes;
@@ -1139,6 +1168,9 @@ public final class ClientInventory {
 			return;
 		}
 		state.status = InventoryS2CPacket.Status.INVALID;
+		retainHistory(state);
+		state.historicalFailure = InventoryS2CPacket.Status.INVALID;
+		state.sourceComplete = false;
 		state.statusRevision = Math.max(state.statusRevision, statusRevision);
 		state.pending = null;
 		clearCuts(state);
@@ -1176,6 +1208,12 @@ public final class ClientInventory {
 			invalidateTracking(state, packet.statusRevision());
 			return;
 		}
+		if (packet.statusRevision() == state.statusRevision && packet.baselineId() == state.baselineId
+			&& (store.isInvalid(state.channel) || !isPreviewTerminalFailure(status) && packet.watermark() < state.watermark
+				|| status == InventoryS2CPacket.Status.UPDATING && (state.sourceComplete || state.failureWatermark >= 0))) {
+			fencedPackets++;
+			return;
+		}
 		boolean rebase = !state.committed
 			|| state.pending != null
 			|| packet.statusRevision() > state.statusRevision
@@ -1190,7 +1228,7 @@ public final class ClientInventory {
 				boundRejects++;
 				return;
 			}
-			TrackingBatch pending = keepAssembly ? state.pending : null;
+			@Nullable TrackingBatch pending = keepAssembly ? state.pending : null;
 			Map<Long, Long> heartbeats = keepAssembly ? new LinkedHashMap<>(state.heartbeats) : Map.of();
 			long completionWatermark = state.completionWatermark, completionChecksum = state.completionChecksum, completionSince = state.completionSince;
 			clearTrackingState(state);
@@ -1202,6 +1240,10 @@ public final class ClientInventory {
 			retireUnknownBefore(state.markerId, packet.baselineId(), packet.statusRevision(), false);
 		}
 		state.status = status == null ? state.status : status;
+		if (isPreviewTerminalFailure(state.status)) {
+			state.failureWatermark = Math.max(state.failureWatermark, Math.max(state.watermark, packet.watermark()));
+			if (!state.sourceComplete) { retainHistory(state); state.historicalFailure = state.status; }
+		}
 		state.baselineId = packet.baselineId();
 		state.statusRevision = packet.statusRevision();
 		if (state.committed)
@@ -1225,9 +1267,17 @@ public final class ClientInventory {
 			scheduleRepair(state); // compare the closed projection only, never partially applied live entries
 			return;
 		}
+		// An equal aggregate digest can describe both seed and fresh totals. Do not
+		// retire the first fresh delivery's range on checksum equality alone.
+		if (!state.sourceComplete) {
+			if (state.completionWatermark == state.watermark) clearCompletion(state);
+			return;
+		}
 		// A matching completed control can close unchanged observations without
 		// inventing empty STREAM parts. The permanent closed watermark still owns replay retirement.
 		state.watermark = state.completionWatermark;
+		// Only a received complete-scan data barrier establishes the first scan.
+		// A matching STATUS alone may advance an unchanged, already complete cut.
 		clearCompletion(state);
 		compareHeartbeat(state);
 	}
@@ -1384,12 +1434,18 @@ public final class ClientInventory {
 	}
 
 	private static void clearTrackingState(TrackingState state) {
+		retainHistory(state);
 		state.metadata.clear();
 		state.pending = null;
 		clearCuts(state);
 		state.committed = false;
+		state.sourceComplete = false;
 		state.committedChecksum = 0L;
 		state.watermark = 0L;
+	}
+	private static void retainHistory(TrackingState state) {
+		if (!state.metadata.isEmpty()) state.historical = List.copyOf(state.metadata.values());
+		if (isPreviewTerminalFailure(state.status)) state.historicalFailure = state.status;
 	}
 
 	private static void clearCuts(TrackingState state) {
