@@ -1,25 +1,26 @@
 package nx.pingwheel.common.presentation.inventory.minecraft;
 
+import org.jetbrains.annotations.Nullable;
+
 /**
  * Scalar E1–E5 event accumulator. One instance per freezer, no vector/row objects
  * per event. Children, DFU results and DynamicOps outputs are separate events.
  * All totals are cumulative allocations, including discarded growth/reset arrays.
  */
 final class InventoryEncodingCost {
+	private static final int MAX_KEYS = 258;
+	private static final int MAX_BUCKETS = 1024;
 	private final InventoryItemBudget budget;
 	private long bytes, chars, refs, objects, work;
 	private boolean json;
-	private final String[] mapKeys;
-	private final int[] hash, next, heads, counts;
-	private final boolean[] tree;
+	private @Nullable String @Nullable [] mapKeys;
+	private int @Nullable [] hash, next, heads, counts;
+	private boolean @Nullable [] tree;
 	private int keyCount;
 	private int longestKey;
 
 	InventoryEncodingCost(InventoryItemBudget budget) {
 		this.budget = budget;
-		budget.allocate(4L * (2 * 258 + 2 * 1024) + 1024, 0, 258, 6);
-		mapKeys = new String[258]; hash = new int[258]; next = new int[258];
-		heads = new int[1024]; counts = new int[1024]; tree = new boolean[1024];
 	}
 	void reset(boolean json) { bytes = chars = refs = objects = work = 0; this.json = json; }
 	boolean json() { return json; }
@@ -245,7 +246,12 @@ final class InventoryEncodingCost {
 	void beginKeys() { keyCount = 0; longestKey = 0; }
 	int keyCount() { return keyCount; }
 	void mapKey(String key) {
-		if (keyCount == mapKeys.length) throw new InventoryItemBudget.RootLimitException("owned map cardinality");
+		if (keyCount == MAX_KEYS) throw new InventoryItemBudget.RootLimitException("owned map cardinality");
+		if (mapKeys == null) {
+			// Planner scratch is a direct debit, NOT a native output event.
+			budget.allocate(0, 0, MAX_KEYS, 1);
+			mapKeys = new String[MAX_KEYS];
+		}
 		budget.work(key.length() + 4L); mapKeys[keyCount++] = key; longestKey = Math.max(longestKey, key.length());
 	}
 	void ownedKeyMap() {
@@ -257,6 +263,13 @@ final class InventoryEncodingCost {
 			w(256L * n + 512L * n * (n + 1) / 2 + keyWork(n, max) + 8 * units);
 		} else {
 			ownedMapShell(n); v(16, 0, 6, 3); w(512);
+			if (n != 0 && hash == null) {
+				// JSON needs keys only; an empty map needs neither group. Once
+				// used, retain the original fixed simulator arrays for this root.
+				budget.allocate(4L * (2 * MAX_KEYS + 2 * MAX_BUCKETS) + MAX_BUCKETS, 0, 0, 5);
+				hash = new int[MAX_KEYS]; next = new int[MAX_KEYS];
+				heads = new int[MAX_BUCKETS]; counts = new int[MAX_BUCKETS]; tree = new boolean[MAX_BUCKETS];
+			}
 			int capacity = 0;
 			for (int i = 0; i < n; i++) {
 				budget.work(mapKeys[i].length() + 8L);
@@ -282,7 +295,7 @@ final class InventoryEncodingCost {
 		for (int i = 0; i < n; i++) mapKeys[i] = null;
 	}
 	private int resizeMap(int old, int capacity, int size) {
-		if (capacity > heads.length) throw new InventoryItemBudget.RootLimitException("owned map capacity");
+		if (capacity > MAX_BUCKETS) throw new InventoryItemBudget.RootLimitException("owned map capacity");
 		budget.work(8L * capacity + 12L * size);
 		// Preserve old tree membership on each node while rebuilding bucket lists.
 		for (int i = 0; i < size; i++) if (old != 0 && tree[hash[i] & (old - 1)]) next[i] = -2; else next[i] = -1;

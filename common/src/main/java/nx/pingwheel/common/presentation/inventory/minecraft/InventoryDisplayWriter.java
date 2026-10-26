@@ -515,20 +515,34 @@ public final class InventoryDisplayWriter {
 	@NotNullByDefault
 	private static final class Output {
 		private final @Nullable InventoryItemBudget budget;
-		private final char[] buffer;
+		private final int cap;
+		private char[] buffer;
 		private final char[] digits;
 		private int length, bytes;
 		private boolean high;
-		Output(int cap) { this(cap, null); }
+		// Retained-input reprojection keeps its old fixed independent envelope.
+		Output(int cap) { this(cap, null, cap); }
 		Output(int cap, @Nullable InventoryItemBudget budget) {
-			this.budget = budget; allocate(budget, 12, cap + 20L, 3, 3);
-			buffer = new char[cap]; digits = new char[20];
+			this(cap, budget, Math.min(256, cap));
+		}
+		Output(int cap, @Nullable InventoryItemBudget budget, int initial) {
+			this.budget = budget; this.cap = cap;
+			allocate(budget, 16, initial + 20L, 3, 3);
+			buffer = new char[initial]; digits = new char[20];
 		}
 		void reset() { length = 0; bytes = 0; high = false; }
 		boolean unit(char c) {
 			work(budget, 1);
 			int extra = c < 0x80 ? 1 : c < 0x800 ? 2 : Character.isLowSurrogate(c) && high ? 3 : Character.isSurrogate(c) ? 1 : 3;
-			if (length == buffer.length || bytes + extra > buffer.length) return false;
+			if (length == cap || bytes + extra > cap) return false;
+			if (length == buffer.length) {
+				work(budget, 32L + length); // growth control and written-unit copy
+				int capacity = (int) Math.min(cap, 2L * buffer.length);
+				allocate(budget, 0, capacity, 0, 1);
+				char[] grown = new char[capacity];
+				System.arraycopy(buffer, 0, grown, 0, length);
+				buffer = grown;
+			}
 			buffer[length++] = c; bytes += extra; high = Character.isHighSurrogate(c);
 			return true;
 		}

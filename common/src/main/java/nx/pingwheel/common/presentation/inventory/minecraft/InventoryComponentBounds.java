@@ -29,6 +29,7 @@ import net.minecraft.nbt.LongTag;
 import net.minecraft.nbt.ShortTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Read-only resident-shape admission primitives, not permission to invoke a
@@ -59,7 +60,7 @@ final class InventoryComponentBounds {
 	private long nativeWork;
 	private long residentMapWork;
 	private long residentListCells;
-	private InventoryEncodingCost persistentEncoding;
+	private @Nullable InventoryEncodingCost persistentEncoding;
 
 	InventoryComponentBounds(InventoryItemBudget budget, InventoryResidentAccess raw) {
 		this.budget = budget;

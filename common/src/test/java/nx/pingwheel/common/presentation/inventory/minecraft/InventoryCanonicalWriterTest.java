@@ -7,8 +7,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import net.minecraft.nbt.*;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.NotNullByDefault;
 import static org.junit.jupiter.api.Assertions.*;
 
+@NotNullByDefault
 class InventoryCanonicalWriterTest {
 	@Test void fixedWriterMatchesIndependentDataOutputForAllTagKindsAndUtfReplacement() throws Exception {
 		var root = new CompoundTag();
@@ -29,6 +31,59 @@ class InventoryCanonicalWriterTest {
 				() -> InventoryItemCodec.canonicalTag(StringTag.valueOf("a".repeat(65536)), budget));
 			assertTrue(budget.attemptedWork() >= 65536);
 			assertTrue(budget.rootAllocatedBytes() < 66000);
+		} finally { budget.end(); }
+	}
+
+	@Test void geometricBoundariesAndExactLogicalMaximumMatchTheIndependentStream() throws Exception {
+		for (int size : new int[] {0, 250, 251, 252, 506, 507, 508, 1018, 1019, 1020, 65530, 65531}) {
+			var tag = StringTag.valueOf("a".repeat(size));
+			var bytes = new ByteArrayOutputStream(); var output = new DataOutputStream(bytes);
+			original(tag, output); output.flush();
+			var budget = InventoryItemBudget.root(1024); budget.begin(1024);
+			try {
+				assertArrayEquals(bytes.toByteArray(), InventoryCanonicalWriter.write(tag, budget));
+				assertTrue(budget.rootAllocatedBytes() <= InventoryItemBudget.workspaceUpperBound(1024));
+			} finally { budget.end(); }
+		}
+		var budget = InventoryItemBudget.root(1024); budget.begin(1024);
+		try {
+			assertThrows(InventoryItemCodec.IdentityUnavailableException.class,
+				() -> InventoryCanonicalWriter.write(StringTag.valueOf("a".repeat(65532)), budget));
+			assertTrue(budget.rootAllocatedBytes() < 1024, "one byte over the logical limit refuses before a large allocation");
+		} finally { budget.end(); }
+	}
+
+	@Test void cumulativeGrowthAndCopyWorkMustBeAdmittedAndNeverRefundOnFailure() {
+		// A list of short strings forces incremental prefix growth, unlike a
+		// single large reservation which can skip intermediate capacities.
+		var list = new ListTag();
+		for (int i = 0; i < 200; i++) list.add(StringTag.valueOf("x".repeat(100)));
+		var full = InventoryItemBudget.root(1024); full.begin(1024);
+		long work, allocated;
+		try {
+			assertEquals(21006, InventoryCanonicalWriter.write(list, full).length);
+			work = full.attemptedWork(); allocated = full.rootAllocatedBytes();
+			assertTrue(allocated > 2L * 21006, "discarded growth arrays and exact final output all remain charged");
+		} finally { full.end(); }
+		var tight = InventoryItemBudget.capture(1024, 2, 1_000_000, work - 1); tight.begin(1024);
+		assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> InventoryCanonicalWriter.write(list, tight));
+		long paid = tight.attemptedWork();
+		assertTrue(paid > 21006); assertEquals(allocated, tight.rootAllocatedBytes(), "even the final allocation before copy refusal stays paid");
+		tight.end(); tight.begin(1024); assertEquals(paid, tight.attemptedWork()); tight.end();
+		var exact = InventoryItemBudget.capture(1024, 1, 1_000_000, work); exact.begin(1024);
+		try { assertEquals(21006, InventoryCanonicalWriter.write(list, exact).length); assertEquals(work, exact.attemptedWork()); }
+		finally { exact.end(); }
+	}
+
+	@Test void growthArrayAllocationIsAdmittedInFullBeforePublishingIt() {
+		var budget = InventoryItemBudget.root(1024); budget.begin(1024);
+		try {
+			budget.allocate(2L * 1024 * 1024 - 1024, 0, 0, 0);
+			long before = budget.rootAllocatedBytes();
+			assertThrows(InventoryItemBudget.RootLimitException.class,
+				() -> InventoryCanonicalWriter.write(StringTag.valueOf("a".repeat(1000)), budget));
+			assertTrue(budget.rootAllocatedBytes() - before < 1024,
+				"an over-budget full growth array cannot be replaced by a delta debit");
 		} finally { budget.end(); }
 	}
 
