@@ -11,7 +11,7 @@ package nx.pingwheel.common.config;
 public final class InventoryLimits {
 
 	/** Default shared physical scan allowance in slots per tick. */
-	public static final int DEFAULT_PHYSICAL_SLOTS_PER_TICK = 1024;
+	public static final int DEFAULT_PHYSICAL_SLOTS_PER_TICK = 256;
 
 	/**
 	 * Finite hard guard used when the physical scan cap is in explicit
