@@ -122,27 +122,25 @@ accounting contract is owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md)
 and [shared source capture and sync](../architecture/presentation/shared_sources.md).
 Every cap is either a positive finite value or an explicit unlimited mode;
-periods, resynchronization cooldown, pending memory and heartbeat have no
-unlimited mode, and the two display/frame size scalars are finite-only. There
-is no tracking-duration member: the tracking deadline follows the Ping's own
-marker lifetime, owned by
+periods, resynchronization cooldown and heartbeat have no unlimited mode, and
+the two display/frame size scalars are finite-only. There is no tracking-duration
+member: the tracking deadline follows the Ping's own marker lifetime, owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md).
 
-A finite cap is always positive; zero is not a disable sentinel, except for the
-heartbeat member where zero is the explicit
-"periodic heartbeat disabled" value and other repair and status paths remain
-active.
+A finite cap is always positive; zero is not a cap-disable sentinel. The
+resynchronization cooldown and heartbeat members each have their own zero
+meaning as catalogued below.
 
 An unlimited cap or multiplier is persisted explicitly as
 `{"unlimited": true, "value": <finite number>}`. The finite value is retained
-for the UI toggle, and the consuming runtime substitutes its own finite guard
+when changing modes, and the consuming runtime substitutes its own finite guard
 instead of treating unlimited as a numeric sentinel, an overflow, an unbounded
 array or an unbounded work loop.
 
 | Member | JSON form | Meaning |
 | --- | --- | --- |
 | `physicalSlotsPerTick` | limit object | Shared slot-scan allowance per tick for live reads/item processing and detached decode/parsing, with the explicit-adapter capture exception defined by the [inventory budget contract](../architecture/presentation/inventory.md#budgets-queues-and-memory). Unlimited removes only the configurable cap; finite work and memory guards and both logical quotas remain in force. |
-| `pendingMemoryMiB` | number, MiB | Single finite server-wide pending-memory bound covering preview and tracking together. It is not a per-queue bound and has no unlimited mode. |
+| `pendingMemoryMiB` | limit object, MiB | Single server-wide pending-memory bound covering preview and tracking together. It is not a per-queue bound. |
 | `displayByteMultiplier` | number, multiplier | Finite scalar scaling one item's serialized display payload from its existing display base. It has no unlimited mode and is not one of the five send-byte multipliers. |
 | `frameByteMultiplier` | number, multiplier | Finite scalar scaling the whole encoded inventory S2C frame from its existing frame base. It has no unlimited mode and is not one of the five send-byte multipliers. |
 | `preview` | object | Preview accounting; the members below. |
@@ -151,17 +149,17 @@ array or an unbounded work loop.
 | `preview.maxSlotsPerClient` | limit object | Per-client slot quota. |
 | `preview.maxSlotsServer` | limit object | Server-wide preview slot quota. |
 | `preview.maxTargetsPerClient` | limit object | Simultaneous preview targets per client. |
-| `preview.clientByteMultiplier` | multiplier object | Preview per-client period byte allowance on the client multiplier grid. |
-| `preview.globalByteMultiplier` | multiplier object | Preview global period byte allowance on the global multiplier grid. |
+| `preview.clientByteMultiplier` | multiplier object | Preview per-client period byte allowance. |
+| `preview.globalByteMultiplier` | multiplier object | Preview global period byte allowance. |
 | `tracking` | object | Tracking accounting; the members below. |
 | `tracking.periodTicks` | number, ticks | Tracking accounting period. |
-| `tracking.maxVariantsPerTarget` | limit object | Per-target variant-category quota. |
+| `tracking.maxVariantsPerTarget` | limit object | Per-target active selected variant-category quota, with selection-set semantics owned by [inventory](../architecture/presentation/inventory.md#budgets-queues-and-memory). |
 | `tracking.maxSlotsPerTarget` | limit object | Per-target tracking slot quota. |
 | `tracking.maxSlotsServer` | limit object | Server-wide tracking slot quota. |
-| `tracking.streamByteMultiplier` | multiplier object | Tracking stream byte allowance per client+target period on the client multiplier grid. |
-| `tracking.snapshotByteMultiplier` | multiplier object | Tracking snapshot byte allowance on the client multiplier grid; it bounds both one fragment and the client period total across all targets. |
-| `tracking.globalByteMultiplier` | multiplier object | Tracking global period byte allowance on the global multiplier grid. |
-| `tracking.resyncMinPeriods` | number, periods | Bounded abnormal-resynchronization cooldown; it is also the negotiated interval that bounds the unknown-baseline stream buffer. Positive and with no unlimited mode; buffer semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md#tracking). |
+| `tracking.streamByteMultiplier` | multiplier object | Tracking stream byte allowance per client+target period. |
+| `tracking.snapshotByteMultiplier` | multiplier object | Tracking snapshot byte allowance; it bounds both one fragment and the client period total across all targets. |
+| `tracking.globalByteMultiplier` | multiplier object | Tracking global period byte allowance. |
+| `tracking.resyncMinPeriods` | number, periods | Bounded abnormal-resynchronization cooldown, with `0` disabling its cooldown check and no unlimited mode. Client waiting-window and repair semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md#tracking). |
 | `tracking.heartbeatPeriods` | number, periods | Periodic checksum heartbeat cadence. `0` disables only the periodic heartbeat and is not an unlimited value; other repair and status paths remain active. |
 | `tracking.gracePeriods` | number, periods | Rolling smoothing window for global wire accounting, measured in accounting periods. It is independent of the resynchronization cooldown and the unknown-baseline stream buffer window; accounting behavior is owned by [inventory preview and tracking](../architecture/presentation/inventory.md#budgets-queues-and-memory). |
 
@@ -177,19 +175,22 @@ display/frame size scalars are not multiplier objects: each is a finite plain
 number with no unlimited mode, normalized on its own code-defined grid.
 
 Missing nested objects and missing members receive model defaults. Finite
-values are clamped into their confirmed ranges; multipliers are normalized
-onto their quantized piecewise grids with exact arithmetic so no off-grid value
-or byte drift is persisted. Out-of-range persisted values clamp without
-resetting unrelated fields, and the additive object needs no version migration.
+values are clamped into their field-specific validated ranges. An in-range
+integer retains its exact value even between slider adjustment stops; these
+integer step sizes constrain only UI adjustment. The five send-byte multipliers
+retain their exact piecewise grids and normalize onto them with exact arithmetic.
+Out-of-range persisted values clamp without resetting unrelated fields. A legacy
+integer `pendingMemoryMiB` scalar is accepted as a finite limit through the narrowly
+scoped [shape normalization](../architecture/config/revisioning.md#same-version-shape-normalization).
 
 The two display/frame size scalars form a validated pair. On load both are
-normalized onto their code-defined grids with the frame taking priority: the
-display value is lowered to the greatest compatible display-grid value whose
-payload plus the reserved metadata space fits the frame, and the frame is never
-raised to resolve a conflict. A missing or null scalar uses its model default,
-unrelated members are preserved, and the additive members trigger no file
-migration. An oversized display payload keeps its bounded degradation fallback
-as an anti-abuse behavior owned by
+normalized onto their code-defined grids with the frame taking priority: an
+incompatible display value is lowered to the greatest compatible display-grid
+value whose payload plus the reserved metadata space fits the frame, and the
+frame is never raised to resolve a conflict. A missing or null scalar uses its model default,
+unrelated members are preserved, and an already legal grid-aligned pair is
+retained exactly. An oversized display payload keeps its bounded degradation
+fallback as an anti-abuse behavior owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md#item-variants-and-component-fallback),
 and raising either size ceiling does not raise period throughput or the memory
 budgets. A remote update that selects either scalar is validated against the
@@ -244,7 +245,7 @@ Illustrative partial document; the values are examples, not defaults.
   },
   "inventory": {
     "physicalSlotsPerTick": {"unlimited": false, "value": 512},
-    "pendingMemoryMiB": 8,
+    "pendingMemoryMiB": {"unlimited": false, "value": 96},
     "displayByteMultiplier": 0.75,
     "frameByteMultiplier": 1.25,
     "preview": {

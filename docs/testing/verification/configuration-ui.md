@@ -53,13 +53,15 @@ two multiplier grids normalize piecewise values, the five byte multipliers
 stay independent and control only their own scope, the snapshot fragment and
 per-client period scopes stay equal, unlimited byte multipliers stay finite,
 the step helpers cross boundaries and saturate, pending-memory steps follow the
-piecewise grid, and independent defaults do not alias. The two finite size
-leaves normalize on their own exact quarter-multiplier grids and repair a
+piecewise stops, and independent defaults do not alias. The two finite size
+leaves have exact byte/quanta conversion and repair a
 conflicting pair downward with frame priority and the reserved metadata
 headroom while never raising the frame, and they remain independent of the five
 send-byte multipliers; `InventorySizeScaleTest` covers the ordered legal
 positions and their exact byte and quanta conversion, half-up normalization,
 pair legality, frame-priority reconcile and ordered position stepping.
+For the Performance controls' coverage, see
+[Server performance contract verification](#server-performance-contract-verification).
 `SpatialSelectorSettingsTest` covers the spatial-selector settings snapshot and
 bounds. A missing, explicit-null or fresh-file center deadzone initializes the
 current confirmed default while representative valid saved deadzone values,
@@ -239,7 +241,7 @@ rejection beside an invalid inventory size pair. The independent raw packet
 fixtures cover the final strict boolean, shorter superseded shapes, truncation,
 invalid boolean bytes, trailing bytes and unknown mask bits. The
 [transaction](../../architecture/config/changing-server-config.md) and
-[wire](../../architecture/network/protocol.md#server-configuration-routes-server-config-request-v3-server-config-update-v3-server-config-snapshot-v3)
+[wire](../../architecture/network/protocol.md#server-configuration-routes-server-config-request-v4-server-config-update-v4-server-config-snapshot-v4)
 owners retain the exact field selection and grammar. These model and packet seams
 do not establish the live settings UI, permission changes over a connection,
 actual packet exchange, or persistence behavior in a running client/server
@@ -253,17 +255,20 @@ selected pair is accepted only when both leaves are present and legal, and an
 invalid merged pair rejects atomically without touching unselected leaves; an invalid leaf
 rejects the whole mixed update and unsafe snapshots fail closed without
 defaulting; each leaf converts to and from its persisted member without
-aliasing; missing, null, off-grid, and unexpected-unlimited values are unsafe
-without substitution; and unsafe current or missing updates never report an
-applied transaction. `ServerInventoryConfigPacketsTest` covers the strict v3
-administration wire: the v3 request, update, and snapshot routes; every leaf
-and explicit unlimited finite value round-tripping; the two finite size leaves
+aliasing; missing, null, out-of-range, off-grid decimal and unsupported-unlimited
+values are unsafe without substitution; and unsafe current or missing updates never report an
+applied transaction. `ServerInventoryConfigPacketsTest` has established strict
+administration codec seams: every leaf and explicit unlimited finite value
+round-tripping; the two finite size leaves
 carrying one exact quarter-multiplier quanta value with no unlimited flag and
 every legal grid value exact on the wire; truncation, old-prefix, and trailing
 data rejecting without throwing; an invalid encoded leaf or malformed mode
-rejecting the whole packet; and off-grid, zero and overflowing quanta, unknown
+rejecting the whole packet; and invalid zero or overflowing quanta, unknown
 masks, missing inventory, nonpositive caps, and out-of-range scalars failing
-closed without clamping. `ServerConfigVarNumbersTest`
+closed without clamping. The refreshed version-four, memory mode, revised-bound
+and literal non-step integer fixtures are inventoried
+[below](#server-performance-contract-verification).
+`ServerConfigVarNumbersTest`
 covers canonical integer and positive correlation boundaries, truncation,
 overflow, signed-width and noncanonical encodings, malformed update/snapshot
 numbers failing closed before service mutation or view publication, and legal
@@ -291,6 +296,59 @@ catalogued by
 [server configuration](../../config/server.md#persisted-fields). These are headless
 model and wire seams: no `ServerCore` or live administration path exercises
 them.
+
+## Server performance contract verification
+
+The [UI](../../UI/settings-screen.md#server-performance-category),
+[configuration](../../config/server.md#inventory-policy-object),
+[revisioning](../../architecture/config/revisioning.md#same-version-shape-normalization)
+and [wire](../../architecture/network/protocol.md#server-configuration-routes-server-config-request-v4-server-config-update-v4-server-config-snapshot-v4)
+contracts have passing automated evidence in the
+[combined-tree run](build-checks.md#server-performance-combined-tree-run):
+
+- `InventoryPerformanceOptionTest` constructs the actual replacement-slider
+  factory headlessly for every replaced leaf. Construction invokes no edit
+  callback; keyboard edits select only the owning leaf and revert exactly.
+  Additional cases exercise click/drag callback endpoints, exact one-stop arrow
+  movement, focus-loss exit, read-only input and stale-widget input after
+  permission revocation. The snapshot's extra integer stop survives rebuilds,
+  model navigation and mode changes for clean revert; disconnect and a fresh
+  accepted snapshot replace session extras, while a stale response does not.
+  Unlimited-tail entry retains the finite value and its left neighbor selects
+  the maximum finite value. Label construction distinguishes the two zero
+  sentinels. These are native widget callback and model seams, not in-game input.
+- `InventoryPerformanceScaleTest` exercises ordered piecewise joints,
+  endpoints, linear stops, exact multiplier decimals, distinct zero and
+  unlimited stops, and immutable extra integer stops that refuse illegal
+  values.
+- `InventoryConfigRangeTest` checks both bounds for every integer leaf: files
+  clamp without a shape rewrite, strict administration rejects a mixed invalid
+  update atomically, and endpoints and in-range non-step integers survive
+  parsing, persisted load and detached settings conversion exactly.
+- `PendingMemoryMigrationTest` exercises supported same-version and older
+  scalar normalization, clamped finite persistence, missing/null defaulting,
+  explicit unlimited round trips, and refusal to extend scalar acceptance to
+  another limit field. Guarded normalization and failed-write retry preserve
+  root and nested inventory unknown data, including nulls; external replacement
+  reload and future-version save/reset protection are exercised. The unknown
+  preservation evidence is specific to guarded normalization/writeback, not a
+  general ordinary-save guarantee.
+- `ServerInventoryConfigPacketsTest`, `ServerConfigVarNumbersTest` and
+  `ModIdentityTest` exercise the version-four IDs, leaf round trips, strict
+  field bounds, exact decimal quanta, canonical numbers and independent raw
+  fixtures for the memory mode byte, retained finite value and fixed ordering.
+  Superseded scalar payloads, malformed modes, truncation and trailing bytes
+  reject without publication or mutation. Source inspection confirms that all
+  three loaders register through those packet constants; their builds compile
+  that wiring, but these checks are not running-loader or old-peer fallback
+  tests.
+  Inventory `OFFER` value-bound evidence is owned by
+  [inventory verification](inventory.md#resynchronization-and-budget-policy-verification).
+- Localization fixtures passed across all eight bundled locales; detailed
+  coverage is inventoried under
+  [Settings-screen navigation, catalog, layout and localization](#settings-screen-navigation-catalog-layout-and-localization).
+
+Live verification limits remain under [Known automated gaps](#known-automated-gaps).
 
 ## Settings-screen navigation, catalog, layout and localization
 
@@ -398,16 +456,20 @@ screen evidence:
   full-translation guarantee, and does not
   render or assemble screen labels;
 - `InventorySettingsLocalizationTest` covers the eight bundled locale files,
-  the inventory settings label and tooltip key set, the performance category
-  entrance, the inventory group headings, the shared inventory range
-  placeholder, and the two size sliders' physical-KiB labels and adjustment
-  notice with their placeholder rules; it does not render or assemble screen
-  labels;
+  the inventory settings label/tooltip key alignment and placeholder rules, the
+  performance category entrance, the inventory group headings, the shared
+  name/value label,
+  three nonblank tooltip lines with localized decrease/increase prefixes,
+  distinct zero labels, removal of obsolete control resources, and the two size
+  sliders' physical-KiB labels and adjustment notice; it does not render or
+  assemble screen labels or establish translation semantic accuracy or live
+  tooltip readability;
 - `BudgetDelayLocalizationTest` covers the monitoring setting, subgroup,
   administrator-message and module keys across the bundled locales, their
   nonblank values and placeholder signatures, and the aggregate-status key's
-  compatibility alias; it does not deliver system messages, switch a live locale
-  or render settings controls;
+  compatibility alias, plus the toggle tooltip's three-line nonnumeric structure;
+  it does not certify translation semantic accuracy, deliver system messages,
+  switch a live locale or render settings controls;
 - `SpatialInventoryLocalizationTest` covers the eight bundled locale files, the
   renderer-referenced inventory keys, every inventory status label as a
   non-formatted literal, and inventory key-set alignment across locales; it
@@ -447,6 +509,13 @@ seams rather than native widget containers, mouse dispatch, or live focus lists.
 
 ## Known automated gaps
 
+- the server Performance factory, model, handler, codec and localization seams
+  [passed the combined-tree run](#server-performance-contract-verification), but
+  do not establish a complete live settings screen's mouse dispatch, resizing,
+  assembled localized tooltip layout, translation quality or remote persistence
+  session; native widget callbacks are exercised headlessly, not by gameplay.
+  Live scenarios remain in the
+  [manual matrix](manual-integration.md#settings-and-server-performance);
 - the client inventory-cap sliders' live input, assembled localized labels and
   tooltips, and screen-close persistence are not established by their option
   mapping, codec, catalog, resource or filesystem-handler fixtures; pending

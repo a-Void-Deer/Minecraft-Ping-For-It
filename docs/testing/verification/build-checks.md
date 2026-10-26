@@ -38,8 +38,9 @@ for their identified inputs, not independent package-content or shipped-namespac
 validation. Separately exercised named-host Mixin probes use their own captured
 compiled inputs. Package-content and namespace audits and live validation require
 distinct evidence; neither automated builds nor isolated probes substitute for
-them. Exact commands, counts and execution history belong in the change's
-external evidence report, not this coverage inventory.
+them. Full logs, input manifests, artifact hashes and detailed execution history
+belong in the change's external evidence report; a scoped run summary below does
+not replace that record.
 
 | Module or artifact scope | Task | Purpose |
 | --- | --- | --- |
@@ -49,3 +50,40 @@ external evidence report, not this coverage inventory.
 | `neoforge` test source set | `:neoforge:test` | Runs the NeoForge JUnit Platform tests, including NeoForge-specific resolver coverage. |
 | Affected loader source set | `:fabric:build`, `:forge:build`, or `:neoforge:build` | Builds the affected Fabric, Forge, or NeoForge source set and its loader jar. |
 | All shippable loader artifacts | `verifyModIdentity` | Depends on all three loader `build` tasks, then inspects the expected Fabric, Forge, and NeoForge jars in their loader `build/libs` directories for fork identity. |
+
+## Server Performance combined-tree run
+
+The server Performance and version-four administration change has a recorded
+combined-tree run on 2026-10-26. Its tested source inputs correspond to commit
+`acf707aa25e5d99bbcf0d96fb881bb18a1a11ce4`. The run used JDK 21, PowerShell and
+UTF-8 with separate stdout/stderr files:
+
+```powershell
+.\gradlew.bat --no-daemon build verifyModIdentity
+```
+
+It exited zero with `BUILD SUCCESSFUL` in 4m 23s: 56 tasks, 38 executed and 18
+up-to-date. All four module test tasks executed, and all 475 JUnit XML reports
+were fresh:
+
+| Module | Suites | Tests | Failed / errors / skipped |
+| --- | --- | --- | --- |
+| Common | 438 | 4732 | 0 / 0 / 0 |
+| Fabric | 5 | 24 | 0 / 0 / 0 |
+| Forge | 5 | 26 | 0 / 0 / 0 |
+| NeoForge | 27 | 174 | 0 / 0 / 0 |
+| Total | 475 | 4956 | 0 / 0 / 0 |
+
+Main compilation, Javadoc generation, the configured checks and all three
+loader builds completed; all three shippable loader jars were rebuilt and
+`verifyModIdentity` passed. Before/after manifests matched for all 1168 source
+inputs and 71 documentation files during the run. The captured stderr contains
+deprecation notes and Javadoc warnings, so this is not a warning-free claim.
+
+The exercised seams and their limitations are inventoried in
+[configuration verification](configuration-ui.md#server-performance-contract-verification)
+and [inventory verification](inventory.md#resynchronization-and-budget-policy-verification).
+The run does not establish live loader registration, native screen rendering,
+multiplayer transport, performance measurements or completion of UI review.
+Live scenarios remain in the
+[manual matrix](manual-integration.md#settings-and-server-performance).

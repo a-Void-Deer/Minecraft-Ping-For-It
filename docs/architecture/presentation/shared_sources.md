@@ -382,8 +382,10 @@ monitoring performs no capture, provider or world read. Recoverable notice
 failures cannot change accounting, cadence, publication or authority; fatal
 resource failures are not swallowed.
 
-Continuous delay is evaluated from fresh server-tick evidence with monotonic
-real time, not TPS or game ticks. Outstanding resource-blocked work remains
+Continuous delay is evaluated from fresh final delayed evidence in authoritative
+server ticks, not monotonic or wall-clock real time. Low TPS lengthens its
+real-time duration; repeated requests or observations in the same server tick
+do not advance delay duration. Outstanding resource-blocked work remains
 delayed until progress clears its limiting resource, cancellation, expiry or
 revocation; a not-yet-due content capture does not hide separately delayed
 publication or control work. A healthy eligible opportunity without outstanding
@@ -396,10 +398,11 @@ work is not counted as observed delay either.
 When continuous evidenced delay reaches the notification threshold, messages
 are enabled and the global cooldown permits, the server sends one consolidated
 administrator notice for the currently qualified modules to eligible recipients.
-A global cooldown follows a successfully delivered notice,
-not separate cooldowns per module or recipient. Neither an attempt without an
+A global server-tick cooldown starts only after successful delivery to at least
+one eligible recipient, not separately per module or recipient. Its real-time
+duration likewise varies with tick speed. Neither an attempt without an
 eligible recipient nor a failed handoff consumes delivered-notice cooldown, and
-elapsed time without another observed delayed tick cannot trigger a notice. The
+elapsed ticks without fresh final delayed evidence cannot trigger a notice. The
 server-owned switch is catalogued by
 [server configuration](../../config/server.md#persisted-fields): disabling
 messages leaves WARN, accounting and delay evidence active. Live setting changes

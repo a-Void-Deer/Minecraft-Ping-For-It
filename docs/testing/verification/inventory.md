@@ -34,11 +34,10 @@ frame rejected on the version-one route; the
 version-one `OPEN` grammar round-trips a native block or an
 uncommitted external candidate with its exact locator, classification and face,
 and rejects a committed external, entity or location target, a wrong protocol
-version, overlong or non-canonical fields, and trailing bytes; an offer's
-positive period values round-trip at their upper bounds
-including `72001` and `Integer.MAX_VALUE`, while zero, out-of-range, and raw
-overlong or noncanonical period encodings are rejected without defaults; the
-offer's effective display and frame budgets round-trip as an exact legal pair,
+version, overlong or non-canonical fields, and trailing bytes. `OFFER` period
+coverage is inventoried under
+[Resynchronization and budget policy verification](#resynchronization-and-budget-policy-verification).
+The offer's effective display and frame budgets round-trip as an exact legal pair,
 while off-grid budgets and a pair without the reserved metadata headroom are
 rejected without defaults, and an effective write rejects a display beyond the
 configured cap and an illegal pair; the whole frame budget includes its header
@@ -214,8 +213,8 @@ assembly or the gap timer; a later shared retirement withdraws an earlier
 checked terminal preview before the publisher drains, a cached tracking
 publication defers with zero provider calls and resumes the same baseline when
 budget returns, a tracking restart keeps published completed evidence until a
-fresh accepted result and invalidity fences real frames, and positive `HELLO`
-periods round-trip exactly including their upper bounds. Request-scoped repair
+fresh accepted result and invalidity fences real frames, and legal `HELLO`
+periods round-trip exactly. Request-scoped repair
 tests withhold an earlier encoded preview part, then restore the cumulative
 retained rows at a newer watermark without recapture, renegotiation or a marker;
 cooldown coalescing, waiting for admitted parts, truthful updating/invalid/empty
@@ -235,10 +234,10 @@ audience; identity aggregation is scoped to each observation, and a recipient's
 resync remains isolated from peers; a stale selected item is rejected at one
 bounded witness without an automatic retry; a
 failed prepared create releases its sidecar reservations; an invalid
-preview releases its physical round so unrelated work can progress; positive
-resync periods at the integer maximum stay exact in an existing session; and an
-actual resync at those periods rejects an immediate repeat without overflow. A
-superseded oversized preview selection during a pending cap reconciliation is
+preview releases its physical round so unrelated work can progress. Cooldown
+coverage is inventoried under
+[Resynchronization and budget policy verification](#resynchronization-and-budget-policy-verification).
+A superseded oversized preview selection during a pending cap reconciliation is
 answered with the recorded bounded `REJECT` without consuming the fresh preview
 attempt, so the fresh reference after rebaseline still creates from the same
 preview. Actual identity-refusal fixtures retain the last completed all-ID total
@@ -1245,8 +1244,60 @@ installations, delayed transport, GUI rows, tracking HUD and GPU behavior remain
 outside that source evidence. Live scenarios remain in the
 [manual matrix](manual-integration.md#inventory).
 
+## Resynchronization and budget policy verification
+
+The revised
+[resynchronization](../../architecture/presentation/inventory.md#tracking) and
+[budget policy](../../architecture/presentation/inventory.md#budgets-queues-and-memory)
+contracts have passing headless evidence in the
+[combined-tree run](build-checks.md#server-performance-combined-tree-run):
+
+- `InventoryS2CPacketTest` round-trips legal periods and zero cooldown in the
+  unchanged `OFFER` shape and rejects out-of-range, overlong or noncanonical
+  encodings without defaults. Configuration and
+  strict administration-wire evidence is inventoried in
+  [configuration verification](configuration-ui.md#server-performance-contract-verification).
+- `InventoryBackendTest` exercises positive cooldown refusing repair just before
+  its deadline and accepting it at the deadline, zero and maximum cooldown
+  negotiation/live refresh, and positive-to-zero changes for
+  preview and tracked-Ping repair. An old deadline cannot block zero, and
+  completed repair can run again in the same tick; pending requests still
+  coalesce and an admitted blocked baseline resumes rather than restarts.
+  `InventoryPreviewServerTest` separately exercises same-tick zero repair
+  without recapture and an admitted sweep continuing through resync.
+- `ClientInventoryTest` exercises the same positive-to-zero deadline bypass and
+  same-tick repair behavior. Unknown-baseline expiry, incomplete completion
+  gaps and future-heartbeat gaps wait through the tick before expiry and request
+  repair at the boundary, with separate cases for each dominant term of the
+  common waiting window (8-, 9- and 15-tick windows). A short positive retry
+  cooldown is independent of the waiting floor; an admitted serviceable multipart
+  baseline remains completable
+  beyond that window. These are finite deterministic scenarios, not a live-load
+  starvation guarantee.
+- `InventoryMemoryBudgetIntegrationTest` drives the production runtime ledger
+  with a simulated 3 GiB retained ticket under the 4 GiB unlimited guard, beyond
+  signed-int byte range. Unlimited mode retains its saved finite value, admits
+  up to its finite guard and refuses one byte more. Lowering the cap updates the
+  existing ledger without deleting
+  live charges: preview and tracking defer before resolver, validation or read
+  callbacks, and releasing the ticket lets both share one physical read without
+  raising the cap. Cleanup releases retained/reserved costs. The large tickets
+  model accounting only; no correspondingly large data is allocated or measured.
+- `InventorySettingsTest` checks that the separate server-wide tracking-slot
+  unlimited guard does not widen the other count guards and that memory mode
+  conversion retains its finite value.
+
+Earlier test/build records on this page retain their original input scope; the
+linked combined-tree run supplies evidence for these revised seams. Live timing
+and multiplayer repair remain pending in the
+[manual matrix](manual-integration.md#inventory).
+
 ## Known automated gaps
 
+- the revised timing and memory-admission seams
+  [passed the combined-tree run](#resynchronization-and-budget-policy-verification),
+  but active selected-variant capacity across period boundaries has no dedicated
+  regression; simulated large memory tickets do not measure actual heap usage;
 - the inventory preview-foundation, production runtime and publication tests
   cover per-client/target logical progress, explicit snapshot preparation/capture
   and cross-period decode, native cross-tick reads and journal replay, accepted
@@ -1303,9 +1354,10 @@ outside that source evidence. Live scenarios remain in the
   the production seam, and explicit detached double-chest capture, native
   cross-period preview,
   same-alias layout-change, restart/retirement and evidence-admission seams are
-  covered by the tests above. The unknown-baseline window has a headless
-  expiry/delete/RESYNC seam but no per-tick no-early-expiry proof or live
-  roundtrip; the publisher's cross-target period accounting is headless for
+  covered by the tests above. The unknown-baseline window has headless
+  before/at-boundary expiry and RESYNC evidence for each dominant waiting term,
+  not a live roundtrip; the publisher's cross-target period accounting is headless
+  for
   SNAPSHOT bytes only; the zero-heartbeat publication seam exercises watermark
   and repair without asserting the absence of a periodic HEARTBEAT. A maximum
   legal display value through the production server identity catalogue and its

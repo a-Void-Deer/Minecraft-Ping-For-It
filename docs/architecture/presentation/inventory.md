@@ -24,8 +24,9 @@ provider-confirmed external preview and tracking, item-choice create and native
 input/HUD seams are owned by
 [testing and verification](../../testing/verification/inventory.md). Wire routes
 and message families are owned by
-[network protocol](../network/protocol.md); persisted keys, bounds and defaults
-are owned by the configuration topics. Marker lifetime remains owned by
+[network protocol](../network/protocol.md); persisted keys and formats are owned
+by the configuration topics.
+Marker lifetime remains owned by
 [marker lifecycle](../authority/marker_lifecycle.md), target identity by
 [target model](../identity/target_model.md), and mod-specific providers by
 [Create integration](../../integrations/create.md).
@@ -203,8 +204,8 @@ state fence, opaque entry keys and selection references, with a strictly newer
 publication watermark. It is not a new capture, a new `OPEN`, a repeated
 selection, or an `OFFER` renegotiation, and creates no marker or tracking state.
 
-The negotiated tracking-period resynchronization cooldown applies per open
-request, and repeated repairs coalesce into bounded waiting work. Repair does
+The resynchronization cooldown defined under [Tracking](#tracking) applies per
+open request, and repeated repairs coalesce into bounded waiting work. Repair does
 not restart an admitted publication, its completion controls, or the original
 scan cursor; the initial scan may continue while replay waits. Current
 authorization, source validity, size-cap reconciliation, pending admitted
@@ -277,16 +278,21 @@ A periodic heartbeat carries only checksum and watermark information and never
 resends state. A positive heartbeat value selects the periodic cadence within
 the configured range, while an explicit zero disables the periodic heartbeat;
 zero is its own value, not an unlimited sentinel, and does not disable other
-repair or status messages. Abnormal resynchronization uses a bounded retry
-cooldown; the initial push for a new Ping is exempt from that cooldown but is not
-exempt from the byte budget.
+repair or status messages. Abnormal resynchronization uses the negotiated retry
+cooldown measured in tracking periods. A value of zero skips the cooldown check
+on the client and server, including an old deadline retained from a positive
+setting. Zero adds no minimum or same-tick repair limiter. Existing coalescing,
+publication fences and work, queue, memory and byte budgets still apply. The
+initial push for a new Ping is exempt from the cooldown but not the byte budget.
 
-A stream whose baseline is unknown is buffered only for the negotiated
-resynchronization interval, measured in tracking periods; no independent
-timeout setting is introduced. If the baseline is not obtained within that
-interval, the stream is dropped and resynchronization is scheduled after a
-cooldown. That interval governs only the unknown-baseline buffer: an admitted,
-stable, serviceable fragment baseline may continue beyond it and complete.
+Client waiting is separate from repair throttling. The common waiting window is
+`max(3 * trackingPeriodTicks, 8 ticks, resyncMinPeriods * trackingPeriodTicks)`.
+It governs unknown-baseline streams, completed-data gaps and future-heartbeat
+gaps, so a zero cooldown does not make these waits expire immediately. If an
+unknown baseline is not obtained within the window, its buffered stream is
+dropped and repair is scheduled subject to the cooldown. No independent timeout
+setting is introduced. The waiting window does not expire an admitted,
+stable, serviceable fragment baseline, which may continue beyond it and complete.
 Repeated requests for such a baseline must coalesce, resume, or reuse work
 rather than blindly restarting, and no new timeout value is invented.
 Scheduling must prevent unbounded restart or starvation against a stable,
@@ -299,7 +305,7 @@ as one atomic batch. Checksums are computed over the recipient's authorized
 selected projection, its identity mode, and explicit zeros; offered and
 delivered or transmitted watermarks are distinct, and a checksum must not
 compare partial fragments with a future state. A gap or mismatch schedules a
-throttled snapshot repair. Writing an update into the send queue is not proof
+snapshot repair under the cooldown and waiting rules above. Writing an update into the send queue is not proof
 that the client applied it, and a mismatch alone does not justify a TCP-loss
 conclusion.
 
@@ -595,13 +601,19 @@ tracking, and neither is multiplied per recipient. The server-authoritative
 per-client and global send-byte multipliers scale the byte allowances; they are
 server settings, not a client display scale or UI preference.
 
+The tracking variant quota bounds the distinct active selected variant
+categories across Pings for the same target. Repeated selections of one category
+share that category's quota claim. It is a selection-set capacity, not a fresh
+variant allowance each tracking period; preview variant discovery retains its
+per-client period quota.
+
 Two finite server ceilings are separate from the five period send-byte
 multipliers, from the queue bounds and from pending memory: one bounds the
 serialized per-item display value, and one bounds the whole inventory S2C
 frame. The effective pair keeps the reserved metadata headroom. A persisted
 pair conflict is repaired on load with frame priority, while a conflicting
-merged remote pair is rejected atomically; the persisted grids, defaults,
-bounds, and the repair, merge and UI workflow are owned by
+merged remote pair is rejected atomically; the persisted form and the repair,
+merge and UI workflow are owned by
 [server configuration](../../config/server.md#inventory-policy-object),
 [changing server configuration](../../architecture/config/changing-server-config.md),
 and the
@@ -664,10 +676,13 @@ the finite internal work and memory guard and both logical quotas survive, and
 unlimited is never implemented as a sentinel, integer overflow, unbounded array,
 or unbounded work loop.
 
-Pending memory is a single finite server-wide bound covering preview and
-tracking together, configurable to a finite hard cap; it is not a per-queue
-bound, and every finite derived queue enforces its own bound separately. The
-unlimited mode for byte budgets still uses a finite structure and memory guard.
+Pending memory is one server-wide bound covering preview and tracking together,
+with a finite configurable value or explicit unlimited mode. Unlimited mode uses
+a finite internal memory guard. It is not a per-queue bound, and every finite
+derived queue enforces its own bound separately. Count caps use their
+field-specific finite guards; the server-wide tracking-slot guard is independent
+of the other count guards. Unlimited byte budgets also retain finite structure
+and memory guards.
 The retained-cost model and the wire-byte ceiling are distinct. Dirty state,
 unsent values, snapshots and recipient progress cannot escape their ledger by
 not being encoded; shared data occupies one real memory cost while byte fan-out
