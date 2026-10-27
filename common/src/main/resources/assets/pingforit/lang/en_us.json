@@ -190,7 +190,7 @@
   ,"settings.pingforit.server_status.read_only": "Server settings are read-only for you. The current values are shown."
   ,"settings.pingforit.reset_all.server_draft_warning": "This also discards the unsaved server-settings draft."
   ,"settings.pingforit.open_client_config": "Save, Close & Open Client Config..."
-  ,"settings.pingforit.open_client_config.tooltip": "Save local settings and send any valid ordinary-server draft, then close Settings and open the complete client file.\nIf saving or validation fails, the file is not opened.\nExternal edits require a client restart; reopening Settings does not reload the file."
+  ,"settings.pingforit.open_client_config.tooltip": "Save local settings and send any valid ordinary-server draft, then close Settings and open the complete client file.\nIf saving or validation fails, the file is not opened.\nExternal edits take effect only after restarting the client; reopening Settings does not reload the file."
 	,"settings.pingforit.category.server_presentation": "Server Presentation"
 	,"settings.pingforit.category.server_presentation.button": "Server Presentation..."
   ,"settings.pingforit.presentation.server.title": "Server Policy"

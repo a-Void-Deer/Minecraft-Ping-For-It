@@ -1,5 +1,7 @@
 package nx.pingwheel.common.config;
 
+import java.util.Locale;
+
 public enum ChannelMode {
 	AUTO, DISABLED, GLOBAL, TEAM_ONLY;
 
@@ -15,6 +17,6 @@ public enum ChannelMode {
 
 	@Override
 	public String toString() {
-		return super.toString().toLowerCase();
+		return super.toString().toLowerCase(Locale.ROOT);
 	}
 }

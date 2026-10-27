@@ -189,7 +189,7 @@
   ,"settings.pingforit.server_status.read_only": "Servereinstellungen sind für dich schreibgeschützt. Die aktuellen Werte werden angezeigt."
   ,"settings.pingforit.reset_all.server_draft_warning": "Dadurch wird auch der ungespeicherte Serverentwurf verworfen."
   ,"settings.pingforit.open_client_config": "Speichern, schließen & Client-Konfiguration öffnen..."
-  ,"settings.pingforit.open_client_config.tooltip": "Lokale Einstellungen speichern und einen gültigen Entwurf gewöhnlicher Servereinstellungen senden, dann die Einstellungen schließen und die vollständige Client-Datei öffnen.\nSchlägt das Speichern oder die Validierung fehl, wird die Datei nicht geöffnet.\nExterne Änderungen erfordern einen Client-Neustart; erneutes Öffnen der Einstellungen lädt die Datei nicht neu."
+  ,"settings.pingforit.open_client_config.tooltip": "Lokale Einstellungen speichern und einen gültigen Entwurf gewöhnlicher Servereinstellungen senden, dann die Einstellungen schließen und die vollständige Client-Datei öffnen.\nSchlägt das Speichern oder die Validierung fehl, wird die Datei nicht geöffnet.\nExterne Änderungen erfordern einen Neustart des Clients; erneutes Öffnen der Einstellungen lädt die Datei nicht neu."
 	,"settings.pingforit.category.server_presentation": "Serverdarstellung"
 	,"settings.pingforit.category.server_presentation.button": "Serverdarstellung..."
   ,"settings.pingforit.presentation.server.title": "Serverrichtlinie"

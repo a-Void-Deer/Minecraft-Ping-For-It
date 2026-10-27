@@ -6,6 +6,10 @@ import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.ComponentPath;
+import net.minecraft.client.gui.navigation.FocusNavigationEvent;
+import net.minecraft.client.gui.components.TabButton;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.Tooltip;
@@ -44,10 +48,13 @@ import nx.pingwheel.common.presentation.client.PresentationFieldCatalog;
 import nx.pingwheel.common.presentation.client.ServerPresentationPolicyState;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.screen.SettingsCategoryCatalog.Setting;
+import nx.pingwheel.common.screen.SettingsCategoryCatalog.Row;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Page;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Scope;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.lang.ref.WeakReference;
 import java.math.BigDecimal;
@@ -59,8 +66,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.BiFunction;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.function.ToIntFunction;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
@@ -70,7 +79,7 @@ import static nx.pingwheel.common.Global.warnException;
 
 public class SettingsScreen extends OptionsSubScreen {
 	private static final long NO_REQUEST = -1L;
-	private static WeakReference<SettingsScreen> currentSettingsScreen = new WeakReference<>(null);
+	private static WeakReference<@Nullable SettingsScreen> currentSettingsScreen = new WeakReference<>(null);
 
 	private final ClientConfig config;
 	private final ServerSettingsModel serverSettings = new ServerSettingsModel(false);
@@ -80,18 +89,17 @@ public class SettingsScreen extends OptionsSubScreen {
 	private final TabManager tabManager;
 	private final DeferredActionCoordinator inputActions = new DeferredActionCoordinator();
 
-	private Screen parent;
-	private SettingsOptionsList settingsList;
-	private TabNavigationBar scopeTabBar;
-	private Button primaryButton;
-	private Button resetAllButton;
-	private EditBox channelTextField;
-	private EditBox serverMsToRegenerateField;
-	private EditBox serverRateLimitField;
-	private EditBox serverSyncDurationField;
-	private SettingsTitleWidget pageTitle;
-	private StringWidget serverStatusWidget;
-	private AbstractWidget pendingHalfWidth;
+	private @Nullable Screen parent;
+	private @Nullable SettingsOptionsList settingsList;
+	private @Nullable TabNavigationBar scopeTabBar;
+	private @Nullable Button primaryButton;
+	private @Nullable Button resetAllButton;
+	private @Nullable EditBox channelTextField;
+	private @Nullable EditBox serverMsToRegenerateField;
+	private @Nullable EditBox serverRateLimitField;
+	private @Nullable EditBox serverSyncDurationField;
+	private @Nullable SettingsTitleWidget pageTitle;
+	private @Nullable StringWidget serverStatusWidget;
 	private boolean serverRequestDeferred;
 	private boolean tabBarRegistered;
 	private boolean syncingScopeTab;
@@ -109,18 +117,19 @@ public class SettingsScreen extends OptionsSubScreen {
 	private final Map<PresentationSelectorDraftModel.Slot, PresentationSelectorEditBox> presentationSelectorFields =
 		new HashMap<>();
 	private String selectedPresentationTargetType = PresentationSettings.TARGET_TYPE_IDS.get(0);
-	private ServerPresentationPolicyState presentationPolicyState;
-	private Operation presentationPendingOperation;
-	private String presentationPendingTargetType;
-	private MutableComponent presentationGeneralFeedback;
+	private @Nullable ServerPresentationPolicyState presentationPolicyState;
+	private @Nullable Operation presentationPendingOperation;
+	private @Nullable String presentationPendingTargetType;
+	private @Nullable MutableComponent presentationGeneralFeedback;
 	private final Map<String, MutableComponent> presentationWhitelistFeedback = new HashMap<>();
-	private StringWidget presentationGeneralFeedbackWidget;
+	private @Nullable StringWidget presentationGeneralFeedbackWidget;
 	private final Set<String> presentationAdvancedExpanded = new HashSet<>();
 	private final Map<String, MutableComponent> presentationQuickFeedback = new HashMap<>();
-	private PresentationQuickAction presentationPendingQuickAction;
+	private @Nullable PresentationQuickAction presentationPendingQuickAction;
 	private long presentationCatalogStamp = -1L;
 
 	/** One quick field-id rule toggle waiting for its correlated server response. */
+	@NotNullByDefault
 	private record PresentationQuickAction(String panelKey) {
 	}
 
@@ -136,7 +145,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	/** Notifies the live settings session even when a confirmation screen is on top. */
 	public static void notifyServerDisconnected() {
-		final SettingsScreen screen = currentSettingsScreen.get();
+		final @Nullable SettingsScreen screen = currentSettingsScreen.get();
 		if (screen != null) {
 			screen.onServerDisconnected();
 		}
@@ -144,19 +153,25 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	/** Routes a delayed response to the latest live settings session. */
 	public static void notifyServerConfigSnapshot(long requestId, ServerConfigSnapshot snapshot) {
-		final SettingsScreen screen = currentSettingsScreen.get();
+		final @Nullable SettingsScreen screen = currentSettingsScreen.get();
 		if (screen != null) {
 			screen.onServerConfigSnapshot(requestId, snapshot);
 		}
 	}
 
 	public SettingsScreen() {
+		this(ClientConfig.HANDLER.getConfig(), null);
+	}
+
+	/** Builds the same option factories without loading a persisted client session. */
+	SettingsScreen(ClientConfig config, @Nullable Screen parent) {
 		super(null, null, LanguageUtils.settings("title").get());
-		this.config = ClientConfig.HANDLER.getConfig();
+		this.config = config;
+		this.parent = parent;
 		this.tabManager = new NavigationTabManager(this::addRenderableWidget, this::removeWidget);
 	}
 
-	public SettingsScreen(Screen parent) {
+	public SettingsScreen(@Nullable Screen parent) {
 		this();
 		this.parent = parent;
 	}
@@ -176,7 +191,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.pageTitle.setMessage(this.currentPageTitle());
 		this.addRenderableOnly(this.pageTitle);
 
-		this.settingsList = new SettingsOptionsList(this.minecraft, this.width, this);
+		this.settingsList = new SettingsOptionsList(this.minecraft, this.width, this,
+			this.font::width, this::truncatedLabel);
 		this.list = this.settingsList;
 		this.addRenderableWidget(this.settingsList);
 
@@ -185,6 +201,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			ignored -> this.openResetConfirmation())
 			.bounds(0, 0, SettingsScreenLayout.RESET_BUTTON_WIDTH, SettingsScreenLayout.RESET_BUTTON_HEIGHT)
 			.build();
+		this.resetAllButton.setTooltip(Tooltip.create(LanguageUtils.settings("reset_all.tooltip").get()));
 		this.addRenderableWidget(this.resetAllButton);
 
 		this.primaryButton = Button.builder(this.primaryButtonText(), ignored -> this.onPrimaryButton())
@@ -306,6 +323,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		if (this.scopeTabBar != null) {
 			this.scopeTabBar.setWidth(this.width);
 			this.scopeTabBar.arrangeElements();
+			this.clampScopeTabs();
 		}
 
 		final int titleY = navigation.isOverview()
@@ -325,17 +343,28 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.layout.getHeaderHeight(),
 			navigation.isLeaf()));
 
+		final var screenLayout = this.getScreenLayout();
 		this.settingsList.updateSizeAndPosition(
 			this.width,
-			Math.max(0, this.height - this.layout.getHeaderHeight() - this.layout.getFooterHeight()),
-			this.layout.getHeaderHeight());
+			screenLayout.listBottom() - screenLayout.listTop(),
+			screenLayout.listTop());
+		if (!this.settingsList.hasUsableViewport() && this.getFocused() == this.settingsList) {
+			this.setFocused((GuiEventListener) null);
+			this.setDragging(false);
+		}
 		this.tabManager.setTabArea(new ScreenRectangle(
 			0,
-			this.layout.getHeaderHeight(),
+			screenLayout.listTop(),
 			this.width,
-			Math.max(0, this.height - this.layout.getHeaderHeight() - this.layout.getFooterHeight())));
+			screenLayout.listBottom() - screenLayout.listTop()));
 
-		final var screenLayout = this.getScreenLayout();
+		this.primaryButton.setWidth(SettingsScreenLayout.buttonWidthFor(this.width, SettingsScreenLayout.PRIMARY_BUTTON_WIDTH));
+		this.resetAllButton.setWidth(SettingsScreenLayout.buttonWidthFor(this.width, SettingsScreenLayout.RESET_BUTTON_WIDTH));
+		this.primaryButton.visible = this.primaryButton.getWidth() > 0
+			&& screenLayout.footerBottom() - screenLayout.footerTop() >= this.primaryButton.getHeight();
+		this.resetAllButton.visible = this.resetAllButton.visible && this.resetAllButton.getWidth() > 0
+			&& screenLayout.footerBottom() - screenLayout.footerTop() >= this.resetAllButton.getHeight();
+		this.resetAllButton.active = this.resetAllButton.visible;
 		this.primaryButton.setPosition(screenLayout.doneX(), screenLayout.doneY());
 		this.resetAllButton.setPosition(screenLayout.resetX(), screenLayout.resetY());
 	}
@@ -344,7 +373,9 @@ public class SettingsScreen extends OptionsSubScreen {
 	public void resize(net.minecraft.client.Minecraft minecraft, int width, int height) {
 		this.saveCurrentViewState();
 		super.resize(minecraft, width, height);
-		this.restoreCurrentViewState();
+		if (this.getFocused() == null || this.getFocused() == this.settingsList) {
+			this.restoreCurrentViewState();
+		}
 	}
 
 	private void createScopeTabs() {
@@ -356,10 +387,37 @@ public class SettingsScreen extends OptionsSubScreen {
 			.build();
 		this.scopeTabBar.setWidth(this.width);
 		this.scopeTabBar.arrangeElements();
+		this.clampScopeTabs();
+		for (GuiEventListener child : this.scopeTabBar.children()) {
+			if (child instanceof TabButton button && button.tab() instanceof ScopeTab tab) {
+				button.setTooltip(Tooltip.create(LanguageUtils.settings("scope")
+					.path(tab.scope == Scope.CLIENT ? "client" : "server", "tooltip").get()));
+			}
+		}
 
 		this.syncingScopeTab = true;
 		this.tabManager.setCurrentTab(this.scopeTabs.get(navigation.scope()), false);
 		this.syncingScopeTab = false;
+	}
+
+	/** Vanilla's tab layout can calculate negative widths below its side margins. */
+	private void clampScopeTabs() {
+		if (this.scopeTabBar == null) return;
+		int safeWidth = Math.max(0, this.width);
+		int count = this.scopeTabBar.children().size();
+		int index = 0;
+		for (GuiEventListener child : this.scopeTabBar.children()) {
+			if (child instanceof TabButton button) {
+				if (safeWidth < 32) {
+					int left = safeWidth * index / count;
+					int right = safeWidth * (index + 1) / count;
+					button.setWidth(right - left);
+					button.setX(left);
+				}
+				button.visible = button.getWidth() > 0;
+			}
+			index++;
+		}
 	}
 
 	private void selectScopeFromTab(Scope scope) {
@@ -443,7 +501,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.presentationGeneralFeedbackWidget = null;
 		this.presentationSlotFeedbackWidgets.clear();
 		this.presentationSelectorFields.clear();
-		this.pendingHalfWidth = null;
 		if (navigation.scope() == Scope.SERVER
 			&& navigation.current() != Page.SERVER_PRESENTATION
 			&& !this.serverRequestDeferred) {
@@ -455,7 +512,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		} else {
 			this.addCategoryPage(navigation.current().category().orElseThrow());
 		}
-		this.flushPendingHalfWidthRow();
 
 		this.updateChrome();
 		this.repositionElements();
@@ -492,6 +548,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 		this.pageTitle.setMessage(this.currentPageTitle());
 		this.primaryButton.setMessage(this.primaryButtonText());
+		this.primaryButton.setTooltip(Tooltip.create(LanguageUtils.settings("navigation")
+			.path(overview ? "done" : "back", "tooltip").get()));
 		this.resetAllButton.visible = overview && navigation.scope() == Scope.CLIENT;
 		this.resetAllButton.active = this.resetAllButton.visible;
 	}
@@ -501,169 +559,140 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.addServerStatus();
 		}
 
-		final var categories = SettingsNavigationModel.categories(scope);
-		for (int index = 0; index < categories.size(); index++) {
-			final Category category = categories.get(index);
-			final var button = Button.builder(
-				LanguageUtils.settings("category").path(category.id(), "button").get(),
-				ignored -> this.openCategory(category))
-				.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
-				.build();
-			if (index == categories.size() - 1 && categories.size() % 2 != 0) {
-				this.addFullWidth(category.id(), button);
+		final @Unmodifiable List<Category> categories = SettingsNavigationModel.categories(scope);
+		for (int index = 0; index < categories.size(); index += 2) {
+			Category category = categories.get(index);
+			Button button = this.createCategoryButton(category);
+			if (index + 1 < categories.size()) {
+				Category right = categories.get(index + 1);
+				this.addPair(category.id(), button, right.id(), this.createCategoryButton(right));
 			} else {
-				this.addHalfWidth(category.id(), button);
+				this.addFullWidth(category.id(), button);
 			}
 		}
 	}
 
+	private Button createCategoryButton(Category category) {
+		final var button = Button.builder(
+				LanguageUtils.settings("category").path(category.id(), "button").get(),
+				ignored -> this.openCategory(category))
+				.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
+				.build();
+		button.setTooltip(Tooltip.create(Component.translatable(SettingsCategoryCatalog.categoryTooltipKey(category))));
+		return button;
+	}
+
 	private void addCategoryPage(Category category) {
-		if (category == Category.SERVER_PRESENTATION) {
-			this.addPresentationPage(category);
-			return;
-		}
-		if (category.scope() == Scope.SERVER) {
+		if (category.scope() == Scope.SERVER && category != Category.SERVER_PRESENTATION) {
 			this.addServerStatus();
 			if (!serverSettings.canView()) {
 				return;
 			}
 		}
 
-		if (category == Category.MARKER_DISPLAY) {
-			this.addSubgroup("marker_display");
-		} else if (category == Category.INPUT_INTERACTION) {
-			this.addSubgroup("input_timing");
-		} else if (category == Category.GEOMETRY_CONFIG) {
-			this.addSubgroup("geometry");
-		} else if (category == Category.CHANNEL_PLAYERS) {
-			this.addSubgroup("channel_players");
-		} else if (category == Category.SEND_RATE) {
-			this.addSubgroup("send_rate");
-		} else if (category == Category.MARKER_DURATION) {
-			this.addSubgroup("marker_duration");
-		} else if (category == Category.CLIENT_PERFORMANCE) {
-			this.addSubgroup("wheel_options");
+		for (var section : SettingsCategoryCatalog.sections(category)) {
+			var heading = this.addHeading(Component.translatable(section.headingKey()));
+			if (category == Category.SERVER_PRESENTATION) {
+				heading.setTooltip(Tooltip.create(LanguageUtils.settings("presentation.server.tooltip").get()));
+			}
+			for (Row row : section.rows()) this.addSettingRow(row);
 		}
-
-		for (Setting setting : SettingsCategoryCatalog.settings(category)) {
-			if (setting == Setting.SPATIAL_DEADZONE) this.addSubgroup("spatial_selector");
-			if (setting == Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED) this.addSubgroup("monitoring");
-			if (setting == Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK) this.addSubgroup("inventory_shared");
-			if (setting == Setting.INVENTORY_PREVIEW_PERIOD_TICKS) this.addSubgroup("inventory_preview");
-			if (setting == Setting.INVENTORY_TRACKING_PERIOD_TICKS) this.addSubgroup("inventory_tracking");
-			this.addSetting(category, setting);
-		}
-		this.flushPendingHalfWidthRow();
-		if (category.scope() == Scope.SERVER && this.serverValidationMessage != null) {
+		if (category.scope() == Scope.SERVER && category != Category.SERVER_PRESENTATION && this.serverValidationMessage != null) {
 			this.addFullWidth("server_validation", this.createServerValidationLabel());
 		}
 	}
 
-	private void addSetting(Category category, Setting setting) {
-		if (setting.inventoryField() != null) {
-			this.addServerInventoryRow(setting);
+	private void addSettingRow(Row row) {
+		if (row.settings().size() == 2) {
+			Setting left = row.settings().getFirst();
+			Setting right = row.settings().getLast();
+			this.addPair(left.id(), this.createSettingWidget(left), right.id(), this.createSettingWidget(right));
 			return;
 		}
+		Setting setting = row.settings().getFirst();
 		switch (setting) {
-			case PING_DISTANCE -> this.addOption(setting, this.getPingDistanceOption(), false);
-			case MARKER_DISPLAY_DURATION -> this.addOption(setting, this.getMarkerDisplayDurationOption(), true);
-			case PING_SIZE -> this.addOption(setting, this.getPingSizeOption(), false);
-			case ITEM_ICON_VISIBLE -> this.addOption(setting, this.getItemIconsVisibleOption(), false);
-			case DIRECTION_INDICATOR_VISIBLE -> this.addOption(setting, this.getDirectionIndicatorVisibleOption(), false);
-			case PLAYER_INFO_MODE -> this.addOption(setting, this.getPlayerInfoModeOption(), false);
-			case TEAM_COLOR_MODE -> this.addOption(setting, this.getTeamColorModeOption(), false);
-			case MARK_TRANSPARENT_BLOCKS -> this.addOption(setting, this.getMarkTransparentBlocksOption(), true);
-			case MARK_BLACKLISTED_TARGETS -> this.addOption(setting, this.getMarkBlacklistedTargetsOption(), true);
-			case MARK_FLUIDS -> this.addOption(setting, this.getMarkFluidsOption(), false);
-			case SPATIAL_ROOT_DISTANCE -> this.addOption(setting, this.getSpatialRootDistanceOption(), false);
-			case SPATIAL_SUBMENU_RADIUS_SCALE -> this.addOption(setting, this.getSpatialSubmenuRadiusScaleOption(), false);
-			case SPATIAL_INVENTORY_MAX_WIDTH_FRACTION -> this.addOption(setting, this.getSpatialInventoryMaxWidthFractionOption(), false);
-			case SPATIAL_INVENTORY_MAX_HEIGHT_FRACTION -> this.addOption(setting, this.getSpatialInventoryMaxHeightFractionOption(), false);
-			case WHEEL_OPACITY -> this.addOption(setting, this.getWheelOpacityOption(), false);
-			case WHEEL_TARGET_OPACITY -> this.addOption(setting, this.getWheelTargetOpacityOption(), false);
-			case WHEEL_TARGET_FONT_SIZE -> this.addOption(setting, this.getWheelTargetFontSizeOption(), false);
-			case WHEEL_OPTION_FONT_SIZE -> this.addOption(setting, this.getWheelOptionFontSizeOption(), false);
-			case SPATIAL_SHOW_TRAIL -> this.addOption(setting, this.getSpatialShowTrailOption(), false);
-			case SPATIAL_TRAIL_LENGTH -> this.addOption(setting, this.getSpatialTrailLengthOption(), false);
-			case SPATIAL_TRAIL_OPACITY -> this.addOption(setting, this.getSpatialTrailOpacityOption(), false);
-			case SPATIAL_REDUCE_MOTION -> this.addOption(setting, this.getSpatialReduceMotionOption(), false);
-			case WHEEL_HOLD_MILLIS -> this.addOption(setting, this.getWheelHoldMillisOption(), false);
-			case SPATIAL_GESTURE_SKIP_HOLD_ENABLED -> this.addOption(setting, this.getGestureSkipHoldEnabledOption(), true);
-			case SPATIAL_GESTURE_SKIP_HOLD_MILLIS -> this.addOption(setting, this.getGestureSkipHoldMillisOption(), false);
-			case LONG_PRESS_COMPATIBILITY_MODE -> this.addOption(setting, this.getLongPressCompatibilityModeOption(), true);
-			case LONG_PRESS_COMPATIBILITY_SLICE_MILLIS -> this.addOption(setting, this.getLongPressCompatibilitySliceMillisOption(), true);
-			case CANCEL_HALF_CONE_ANGLE_DEGREES -> this.addOption(setting, this.getCancelHalfConeAngleDegreesOption(), true);
-			case DOUBLE_CLICK_DANGER_WINDOW -> this.addOption(setting, this.getDoubleClickDangerWindowMsOption(), true);
-			case DOUBLE_CLICK_DANGER_ANGLE -> this.addOption(setting, this.getDoubleClickDangerAngleDegreesOption(), true);
-			case SPATIAL_DEADZONE -> this.addOption(setting, this.getSpatialDeadzoneOption(), false);
-			case SPATIAL_STROKE -> this.addOption(setting, this.getSpatialStrokeOption(), false);
-			case SPATIAL_DWELL_MILLIS -> this.addOption(setting, this.getSpatialDwellOption(), false);
-			case SPATIAL_HOVER_ENABLED -> this.addOption(setting, this.getSpatialHoverEnabledOption(), true);
-			case SPATIAL_HOVER_MILLIS -> this.addOption(setting, this.getSpatialHoverMillisOption(), false);
-			case SPATIAL_CONTENT_INTENT_ENABLED -> this.addOption(setting, this.getSpatialContentIntentEnabledOption(), false);
-			case SPATIAL_INVENTORY_SELECTION_STAY_OPEN_ENABLED -> this.addOption(setting, this.getSpatialInventorySelectionStayOpenEnabledOption(), false);
-			case PRECISE_CAPTURE_PERIOD_TICKS -> this.addOption(setting, this.getPreciseCapturePeriodTicksOption(), false);
 			case CHANNEL -> this.addChannelRow();
-			case PING_VOLUME -> this.addOption(setting, this.getPingVolumeOption(), false);
-			case CONFIGURATION_NOTICE_SIZE -> this.addOption(setting, this.getConfigurationNoticeSizeOption(), true);
-			case ENTITY_BLOCK_RENDER_MODE -> this.addOption(setting, this.getEntityBlockRenderModeOption(), true);
-			case OPEN_CLIENT_CONFIG -> {
-				this.addSubgroup("client_config_file");
-				this.addOpenClientConfigButton();
+			case MS_TO_REGENERATE, RATE_LIMIT, SYNC_DURATION -> this.addServerIntegerRow(setting);
+			case PRESENTATION_SERVER_POLICY -> this.addPresentationServerPanel();
+			default -> {
+				this.addFullWidth(setting.id(), this.createSettingWidget(setting));
+				if (setting == Setting.INVENTORY_FRAME_BYTE_MULTIPLIER) this.addSizeAdjustmentNotice();
 			}
-			case DEFAULT_CHANNEL_MODE -> this.addServerChannelModeButton();
-			case PLAYER_TRACKING_ENABLED -> this.addServerPlayerTrackingButton();
-			case BUDGET_DELAY_NOTIFICATIONS_ENABLED -> this.addServerBudgetDelayNotificationsButton();
-			case MS_TO_REGENERATE -> this.addServerIntegerRow(setting);
-			case RATE_LIMIT -> this.addServerIntegerRow(setting);
-			case SYNC_DURATION -> this.addServerIntegerRow(setting);
 		}
 	}
 
-	private void addOption(Setting setting, OptionInstance<?> option, boolean fullWidth) {
-		final int width = fullWidth ? SettingsScreenLayout.LARGE_WIDGET_WIDTH : SettingsScreenLayout.SMALL_WIDGET_WIDTH;
-		final AbstractWidget widget = option.createButton(Game.options, 0, 0, width);
+	private AbstractWidget createSettingWidget(Setting setting) {
+		if (setting.inventoryField() != null) {
+			return this.createServerInventoryWidget(setting);
+		}
+		if (setting == Setting.OPEN_CLIENT_CONFIG) return this.createOpenClientConfigButton();
+		if (setting == Setting.DEFAULT_CHANNEL_MODE) return this.createServerChannelModeButton();
+		if (setting == Setting.PLAYER_TRACKING_ENABLED) return this.createServerPlayerTrackingButton();
+		if (setting == Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED) return this.createServerBudgetDelayNotificationsButton();
+		final OptionInstance<?> option = switch (setting) {
+			case PING_DISTANCE -> this.getPingDistanceOption();
+			case MARKER_DISPLAY_DURATION -> this.getMarkerDisplayDurationOption();
+			case PING_SIZE -> this.getPingSizeOption();
+			case ITEM_ICON_VISIBLE -> this.getItemIconsVisibleOption();
+			case DIRECTION_INDICATOR_VISIBLE -> this.getDirectionIndicatorVisibleOption();
+			case PLAYER_INFO_MODE -> this.getPlayerInfoModeOption();
+			case TEAM_COLOR_MODE -> this.getTeamColorModeOption();
+			case MARK_TRANSPARENT_BLOCKS -> this.getMarkTransparentBlocksOption();
+			case MARK_BLACKLISTED_TARGETS -> this.getMarkBlacklistedTargetsOption();
+			case MARK_FLUIDS -> this.getMarkFluidsOption();
+			case SPATIAL_ROOT_DISTANCE -> this.getSpatialRootDistanceOption();
+			case SPATIAL_SUBMENU_RADIUS_SCALE -> this.getSpatialSubmenuRadiusScaleOption();
+			case SPATIAL_INVENTORY_MAX_WIDTH_FRACTION -> this.getSpatialInventoryMaxWidthFractionOption();
+			case SPATIAL_INVENTORY_MAX_HEIGHT_FRACTION -> this.getSpatialInventoryMaxHeightFractionOption();
+			case WHEEL_OPACITY -> this.getWheelOpacityOption();
+			case WHEEL_TARGET_OPACITY -> this.getWheelTargetOpacityOption();
+			case WHEEL_TARGET_FONT_SIZE -> this.getWheelTargetFontSizeOption();
+			case WHEEL_OPTION_FONT_SIZE -> this.getWheelOptionFontSizeOption();
+			case SPATIAL_SHOW_TRAIL -> this.getSpatialShowTrailOption();
+			case SPATIAL_TRAIL_LENGTH -> this.getSpatialTrailLengthOption();
+			case SPATIAL_TRAIL_OPACITY -> this.getSpatialTrailOpacityOption();
+			case SPATIAL_REDUCE_MOTION -> this.getSpatialReduceMotionOption();
+			case WHEEL_HOLD_MILLIS -> this.getWheelHoldMillisOption();
+			case SPATIAL_GESTURE_SKIP_HOLD_ENABLED -> this.getGestureSkipHoldEnabledOption();
+			case SPATIAL_GESTURE_SKIP_HOLD_MILLIS -> this.getGestureSkipHoldMillisOption();
+			case LONG_PRESS_COMPATIBILITY_MODE -> this.getLongPressCompatibilityModeOption();
+			case LONG_PRESS_COMPATIBILITY_SLICE_MILLIS -> this.getLongPressCompatibilitySliceMillisOption();
+			case CANCEL_HALF_CONE_ANGLE_DEGREES -> this.getCancelHalfConeAngleDegreesOption();
+			case DOUBLE_CLICK_DANGER_WINDOW -> this.getDoubleClickDangerWindowMsOption();
+			case DOUBLE_CLICK_DANGER_ANGLE -> this.getDoubleClickDangerAngleDegreesOption();
+			case SPATIAL_DEADZONE -> this.getSpatialDeadzoneOption();
+			case SPATIAL_STROKE -> this.getSpatialStrokeOption();
+			case SPATIAL_DWELL_MILLIS -> this.getSpatialDwellOption();
+			case SPATIAL_HOVER_ENABLED -> this.getSpatialHoverEnabledOption();
+			case SPATIAL_HOVER_MILLIS -> this.getSpatialHoverMillisOption();
+			case SPATIAL_CONTENT_INTENT_ENABLED -> this.getSpatialContentIntentEnabledOption();
+			case SPATIAL_INVENTORY_SELECTION_STAY_OPEN_ENABLED -> this.getSpatialInventorySelectionStayOpenEnabledOption();
+			case PRECISE_CAPTURE_PERIOD_TICKS -> this.getPreciseCapturePeriodTicksOption();
+			case PING_VOLUME -> this.getPingVolumeOption();
+			case CONFIGURATION_NOTICE_SIZE -> this.getConfigurationNoticeSizeOption();
+			case ENTITY_BLOCK_RENDER_MODE -> this.getEntityBlockRenderModeOption();
+			default -> throw new IllegalArgumentException("setting needs a dedicated row adapter: " + setting);
+		};
+		final AbstractWidget widget = option.createButton(Game.options, 0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH);
 		if (setting == Setting.SPATIAL_GESTURE_SKIP_HOLD_ENABLED || setting == Setting.SPATIAL_GESTURE_SKIP_HOLD_MILLIS)
 			widget.active = !config.isLongPressCompatibilityMode();
 		if (setting == Setting.DOUBLE_CLICK_DANGER_ANGLE && config.isLongPressCompatibilityMode())
 			widget.active = false;
-		if (fullWidth) {
-			this.addFullWidth(setting.id(), widget);
-		} else {
-			this.addHalfWidth(setting.id(), widget);
-		}
+		return widget;
 	}
 
-	private void addHalfWidth(String key, AbstractWidget widget) {
-		this.keyedWidgets.put(key, widget);
-		if (this.pendingHalfWidth == null) {
-			this.pendingHalfWidth = widget;
-		} else {
-			this.settingsList.addSmall(this.pendingHalfWidth, widget);
-			this.pendingHalfWidth = null;
-		}
+	private void addPair(String leftKey, AbstractWidget left, String rightKey, AbstractWidget right) {
+		this.keyedWidgets.put(leftKey, left);
+		this.keyedWidgets.put(rightKey, right);
+		this.settingsList.addSmall(left, right);
 	}
 
 	private void addFullWidth(String key, AbstractWidget widget) {
-		this.flushPendingHalfWidthRow();
-		widget.setWidth(SettingsScreenLayout.LARGE_WIDGET_WIDTH);
 		this.keyedWidgets.put(key, widget);
 		this.settingsList.addSmall(widget, null);
 	}
 
-	private void flushPendingHalfWidthRow() {
-		if (this.pendingHalfWidth != null) {
-			this.settingsList.addSmall(this.pendingHalfWidth, null);
-			this.pendingHalfWidth = null;
-		}
-	}
-
-	private void addSubgroup(String key) {
-		this.addHeading(LanguageUtils.settings("group").path(key).get());
-	}
-
-	private void addHeading(MutableComponent text) {
-		this.flushPendingHalfWidthRow();
+	private StringWidget addHeading(MutableComponent text) {
 		final var heading = new StringWidget(
 			0,
 			0,
@@ -672,19 +701,17 @@ public class SettingsScreen extends OptionsSubScreen {
 			text.withStyle(ChatFormatting.BOLD),
 			this.font).alignLeft();
 		heading.active = false;
+		if (this.font.width(text) > SettingsScreenLayout.contentFor(this.width).width()) {
+			heading.setTooltip(Tooltip.create(text));
+		}
 		this.settingsList.addSmall(heading, null);
-	}
-
-	private void addPresentationPage(Category category) {
-		SettingsCategoryCatalog.presentationSections(category);
-		this.addHeading(LanguageUtils.settings("presentation").path("server", "title").get());
-		this.addPresentationServerPanel();
+		return heading;
 	}
 
 	/**
 	 * Renders only fields advertised by the accepted server offer.
 	 */
-	private void addPresentationFieldCatalog(String panelKey, PresentationPolicy policy) {
+	private void addPresentationFieldCatalog(String panelKey, @Nullable PresentationPolicy policy) {
 		final PresentationFieldCatalog catalog = this.acceptedCatalog();
 
 		if (catalog.isEmpty()) {
@@ -713,7 +740,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private void addPresentationFieldRow(
 		String panelKey,
-		PresentationPolicy policy,
+		@Nullable PresentationPolicy policy,
 		PresentationFieldCatalog.Entry entry
 	) {
 		final String fieldId = entry.field().id();
@@ -723,21 +750,19 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		// The tooltip owns the complete name, outcome, and rule detail; the row
 		// itself truncates like every other long settings label.
-		final String fullText = this.friendlyFieldName(entry).getString()
-			+ ": " + this.outcomeText(outcome.effective()).getString();
-		final String display = this.font.plainSubstrByWidth(
-			fullText,
-			SettingsScreenLayout.LARGE_WIDGET_WIDTH - 8);
+		final MutableComponent fullText = LanguageUtils.settings("format.name_value").get(
+			this.friendlyFieldName(entry), this.outcomeText(outcome.effective()));
 		final var label = new StringWidget(
 			0,
 			0,
 			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
-			Component.literal(display.length() < fullText.length() ? display + "..." : display),
+			fullText,
 			this.font).alignLeft();
 		label.active = false;
 		label.setTooltip(Tooltip.create(this.fieldTooltip(entry, outcome)));
 		this.addFullWidth(key + "_label", label);
+		this.settingsList.truncateLabel(label, fullText);
 
 		final boolean editable = PresentationFieldOutcome.canEditServerPolicy(this.presentationPolicyState);
 		final String fieldTargetType = selectedPresentationTargetType;
@@ -750,7 +775,6 @@ public class SettingsScreen extends OptionsSubScreen {
 			.build();
 		allow.active = editable;
 		allow.setTooltip(Tooltip.create(this.fieldRuleTooltip(true, outcome)));
-		this.addHalfWidth(key + "_allow", allow);
 
 		final Button block = Button.builder(
 			this.fieldRuleButtonText(false, outcome.blockOn()),
@@ -760,7 +784,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			.build();
 		block.active = editable;
 		block.setTooltip(Tooltip.create(this.fieldRuleTooltip(false, outcome)));
-		this.addHalfWidth(key + "_block", block);
+		this.addPair(key + "_allow", allow, key + "_block", block);
 	}
 
 	private void toggleServerFieldRule(String type, String panelKey, String fieldId, boolean white, boolean on) {
@@ -831,13 +855,37 @@ public class SettingsScreen extends OptionsSubScreen {
 			.append(text.path("field", "now").get(this.outcomeText(outcome.effective())));
 		if (!outcome.matchingWhite().isEmpty()) {
 			tooltip.append("\n").append(text.path("field", "matching_white")
-				.get(Component.literal(String.join(", ", outcome.matchingWhite()))));
+				.get(this.selectorListText(outcome.matchingWhite())));
 		}
 		if (!outcome.matchingBlack().isEmpty()) {
 			tooltip.append("\n").append(text.path("field", "matching_black")
-				.get(Component.literal(String.join(", ", outcome.matchingBlack()))));
+				.get(this.selectorListText(outcome.matchingBlack())));
 		}
 		return tooltip;
+	}
+
+	private MutableComponent selectorListText(@Unmodifiable List<String> selectors) {
+		MutableComponent text = Component.empty();
+		for (int index = 0; index < selectors.size(); index++) {
+			if (index > 0) text.append(LanguageUtils.settings("presentation.selector_separator").get());
+			text.append(Component.literal(selectors.get(index)));
+		}
+		return text;
+	}
+
+	/** Reserves the localized truncation wrapper before trimming the visible argument. */
+	private Component truncatedLabel(Component text, int availableWidth) {
+		int width = Math.max(0, availableWidth);
+		if (this.font.width(text) <= width) return text;
+		int suffixWidth = this.font.width(LanguageUtils.settings("format.truncated").get(Component.empty()));
+		if (suffixWidth > width) return Component.empty();
+		var visible = this.font.substrByWidth(text, width - suffixWidth);
+		MutableComponent argument = Component.empty();
+		visible.visit((style, part) -> {
+			argument.append(Component.literal(part).withStyle(style));
+			return java.util.Optional.empty();
+		}, net.minecraft.network.chat.Style.EMPTY);
+		return LanguageUtils.settings("format.truncated").get(argument);
 	}
 
 	private Component fieldDefaultText(PresentationFieldCatalog.Entry entry) {
@@ -866,8 +914,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void addPresentationQuickFeedbackRow(String panelKey) {
-		this.flushPendingHalfWidthRow();
-		final MutableComponent error = this.presentationQuickFeedback.get(panelKey);
+		final @Nullable MutableComponent error = this.presentationQuickFeedback.get(panelKey);
 		final MutableComponent message = error == null ? Component.empty()
 			: error.copy().withStyle(ChatFormatting.RED);
 		final var row = new StringWidget(
@@ -881,7 +928,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addFullWidth(panelKey + "_quick_feedback", row);
 	}
 
-	private void setPresentationQuickFeedback(String panelKey, PresentationSelectorDraftModel.Feedback feedback) {
+	private void setPresentationQuickFeedback(String panelKey, PresentationSelectorDraftModel.@Nullable Feedback feedback) {
 		if (feedback == null) {
 			this.presentationQuickFeedback.remove(panelKey);
 		} else {
@@ -889,15 +936,15 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 	}
 
-	private void addPresentationAdvancedToggle(String panelKey, PresentationPolicy policy) {
+	private void addPresentationAdvancedToggle(String panelKey, @Nullable PresentationPolicy policy) {
 		final boolean expanded = this.presentationAdvancedExpanded.contains(panelKey);
-		final MutableComponent label = LanguageUtils.settings("presentation")
+		final MutableComponent actionLabel = LanguageUtils.settings("presentation")
 			.path("advanced", expanded ? "hide" : "show").get().copy();
-		if (policy != null) {
-			label.append(" (").append(LanguageUtils.settings("presentation").path("advanced", "counts").get(
+		final MutableComponent label = policy == null ? actionLabel
+			: LanguageUtils.settings("presentation.advanced.with_counts").get(actionLabel,
+				LanguageUtils.settings("presentation").path("advanced", "counts").get(
 				Component.literal(Integer.toString(policy.white().size())),
-				Component.literal(Integer.toString(policy.black().size())))).append(")");
-		}
+				Component.literal(Integer.toString(policy.black().size()))));
 		final var button = Button.builder(label, ignored -> {
 			if (!this.presentationAdvancedExpanded.remove(panelKey)) {
 				this.presentationAdvancedExpanded.add(panelKey);
@@ -906,18 +953,19 @@ public class SettingsScreen extends OptionsSubScreen {
 		})
 			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
+		button.setTooltip(Tooltip.create(LanguageUtils.settings("presentation.advanced.tooltip").get()));
 		this.addFullWidth(panelKey + "_advanced", button);
 	}
 
 	private PresentationFieldCatalog acceptedCatalog() {
-		final var runtime = CommonClient.INSTANCE.getPingRuntime();
-		final var presentation = runtime == null ? null : runtime.presentation();
+		final @Nullable var runtime = CommonClient.INSTANCE.getPingRuntime();
+		final @Nullable var presentation = runtime == null ? null : runtime.presentation();
 		return presentation == null ? PresentationFieldCatalog.empty() : presentation.acceptedCatalog();
 	}
 
 	private boolean serverCatalogOffered() {
-		final var runtime = CommonClient.INSTANCE.getPingRuntime();
-		final var presentation = runtime == null ? null : runtime.presentation();
+		final @Nullable var runtime = CommonClient.INSTANCE.getPingRuntime();
+		final @Nullable var presentation = runtime == null ? null : runtime.presentation();
 		return presentation != null && presentation.catalogOffered();
 	}
 
@@ -938,8 +986,8 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private long presentationCatalogStamp() {
-		final var runtime = CommonClient.INSTANCE.getPingRuntime();
-		final var presentation = runtime == null ? null : runtime.presentation();
+		final @Nullable var runtime = CommonClient.INSTANCE.getPingRuntime();
+		final @Nullable var presentation = runtime == null ? null : runtime.presentation();
 		return presentation == null ? 0L : 1L + presentation.catalogRevision();
 	}
 
@@ -961,6 +1009,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			narration);
 		field.setMaxLength(PresentationSelectorListModel.MAX_SELECTOR_LENGTH);
 		field.setHint(narration);
+		field.setTooltip(Tooltip.create(LanguageUtils.settings("presentation.selector.tooltip").get()));
 		field.setValue(this.presentationDrafts.draft(slot));
 		this.presentationSelectorFields.put(slot, field);
 		field.setResponder(text -> {
@@ -971,21 +1020,15 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private StringWidget createPresentationSelectorLabel(String selector) {
-		final String display = this.font.plainSubstrByWidth(
-			selector,
-			SettingsScreenLayout.SMALL_WIDGET_WIDTH - 8);
-		final boolean truncated = display.length() < selector.length();
 		final var label = new StringWidget(
 			0,
 			0,
 			SettingsScreenLayout.SMALL_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
-			Component.literal(truncated ? display + "..." : display),
+			Component.literal(selector),
 			this.font).alignLeft();
 		label.active = false;
-		if (truncated) {
-			label.setTooltip(Tooltip.create(Component.literal(selector)));
-		}
+		label.setTooltip(Tooltip.create(Component.literal(selector)));
 		return label;
 	}
 
@@ -1040,7 +1083,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private void addPresentationServerPanel() {
 		this.addPresentationServerStatusRows();
-		final var state = this.presentationPolicyState;
+		final @Nullable var state = this.presentationPolicyState;
 		final var typeButton = Button.builder(
 			LanguageUtils.settings("presentation").path("target_type", selectedPresentationTargetType).get(),
 			ignored -> {
@@ -1051,6 +1094,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			})
 			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
+		typeButton.setTooltip(Tooltip.create(LanguageUtils.settings("presentation.target_type.tooltip").get()));
 		this.addFullWidth("presentation_target_type", typeButton);
 		this.addHeading(LanguageUtils.settings("presentation").path("fields", "title").get());
 		this.addPresentationFieldCatalog(
@@ -1067,6 +1111,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		refresh.active = state != null
 			&& state.isConnected()
 			&& state.pendingRequestId() == ServerPresentationPolicyState.NO_PENDING_REQUEST;
+		refresh.setTooltip(Tooltip.create(LanguageUtils.settings("presentation.refresh.tooltip").get()));
 		this.addFullWidth("presentation_server_refresh", refresh);
 
 		String panelKey = "server_" + selectedPresentationTargetType;
@@ -1092,6 +1137,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
 		whitelistOnlyButton.active = this.canMutateServerPresentation();
+		whitelistOnlyButton.setTooltip(Tooltip.create(LanguageUtils.settings("presentation.whitelist_only.tooltip").get()));
 		this.addFullWidth(panelKey + "_whitelist_only", whitelistOnlyButton);
 	}
 
@@ -1100,14 +1146,14 @@ public class SettingsScreen extends OptionsSubScreen {
 		final PresentationSelectorDraftModel.Slot slot = PresentationSelectorDraftModel.Slot.server(selectedPresentationTargetType, white);
 		this.addHeading(LanguageUtils.settings("presentation").path(white ? "white" : "black").get());
 
-		final var state = this.presentationPolicyState;
+		final @Nullable var state = this.presentationPolicyState;
 		if (!this.isPresentationPolicyKnown()) {
 			// An unknown route is not an empty authoritative list; a known list
 			// stays visible through pending and error states, labelled above.
 			this.addPresentationServerUnavailableRow(listKey);
 		} else {
 			final var rules = state.rulesFor(selectedPresentationTargetType);
-			final List<String> selectors = PresentationSelectorListModel.copyOf(
+			final @Unmodifiable List<String> selectors = PresentationSelectorListModel.copyOf(
 				white ? rules.white() : rules.black());
 			if (selectors.isEmpty()) {
 				this.addPresentationEmptyRow(listKey);
@@ -1115,7 +1161,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 			final boolean editable = this.canMutateServerPresentation();
 			for (String selector : selectors) {
-				this.addHalfWidth(listKey + "_label_" + selector, this.createPresentationSelectorLabel(selector));
+				final var label = this.createPresentationSelectorLabel(selector);
 				final String mutationTargetType = selectedPresentationTargetType;
 				final var remove = Button.builder(
 					LanguageUtils.settings("presentation").path("remove").get(),
@@ -1123,7 +1169,9 @@ public class SettingsScreen extends OptionsSubScreen {
 					.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 					.build();
 				remove.active = editable;
-				this.addHalfWidth(listKey + "_remove_" + selector, remove);
+				remove.setTooltip(Tooltip.create(LanguageUtils.settings("presentation.remove.tooltip").get()));
+				this.addPair(listKey + "_label_" + selector, label, listKey + "_remove_" + selector, remove);
+				this.settingsList.truncateLabel(label, Component.literal(selector));
 			}
 		}
 
@@ -1141,13 +1189,12 @@ public class SettingsScreen extends OptionsSubScreen {
 			.bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
 		add.active = editable;
-		this.addHalfWidth(listKey + "_field", field);
-		this.addHalfWidth(listKey + "_add", add);
+		add.setTooltip(Tooltip.create(LanguageUtils.settings("presentation.add.tooltip").get()));
+		this.addPair(listKey + "_field", field, listKey + "_add", add);
 		this.addPresentationSlotFeedbackRow(listKey, slot);
 	}
 
 	private void addPresentationServerStatusRows() {
-		this.flushPendingHalfWidthRow();
 		final var status = new StringWidget(
 			0,
 			0,
@@ -1158,7 +1205,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		status.active = false;
 		this.settingsList.addSmall(status, null);
 
-		final MutableComponent permission = this.presentationServerPermissionText();
+		final @Nullable MutableComponent permission = this.presentationServerPermissionText();
 		if (permission != null) {
 			final var permissionRow = new StringWidget(
 				0,
@@ -1185,7 +1232,6 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void addPresentationSlotFeedbackRow(String key, PresentationSelectorDraftModel.Slot slot) {
-		this.flushPendingHalfWidthRow();
 		final var row = new StringWidget(
 			0,
 			0,
@@ -1199,7 +1245,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private MutableComponent presentationGeneralFeedbackText() {
-		final MutableComponent message = this.presentationGeneralFeedback == null
+		final @Nullable MutableComponent message = this.presentationGeneralFeedback == null
 			? this.presentationWhitelistFeedback.get(selectedPresentationTargetType)
 			: this.presentationGeneralFeedback;
 		return message == null
@@ -1207,14 +1253,14 @@ public class SettingsScreen extends OptionsSubScreen {
 			: message.copy().withStyle(ChatFormatting.RED);
 	}
 
-	private void setPresentationGeneralFeedback(MutableComponent message) {
+	private void setPresentationGeneralFeedback(@Nullable MutableComponent message) {
 		this.presentationGeneralFeedback = message;
 		if (this.presentationGeneralFeedbackWidget != null) {
 			this.presentationGeneralFeedbackWidget.setMessage(this.presentationGeneralFeedbackText());
 		}
 	}
 
-	private void setPresentationWhitelistFeedback(String type, MutableComponent message) {
+	private void setPresentationWhitelistFeedback(String type, @Nullable MutableComponent message) {
 		if (message == null) this.presentationWhitelistFeedback.remove(type);
 		else this.presentationWhitelistFeedback.put(type, message);
 		if (this.presentationGeneralFeedbackWidget != null) {
@@ -1235,10 +1281,10 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private void setPresentationSlotFeedback(
 		PresentationSelectorDraftModel.Slot slot,
-		PresentationSelectorDraftModel.Feedback feedback
+		PresentationSelectorDraftModel.@Nullable Feedback feedback
 	) {
 		this.presentationDrafts.setFeedback(slot, feedback);
-		final StringWidget widget = this.presentationSlotFeedbackWidgets.get(slot);
+		final @Nullable StringWidget widget = this.presentationSlotFeedbackWidgets.get(slot);
 		if (widget != null) {
 			widget.setMessage(this.presentationSlotFeedbackText(slot));
 		}
@@ -1283,6 +1329,10 @@ public class SettingsScreen extends OptionsSubScreen {
 	 * every other widget keeps the existing focus behavior.
 	 */
 	private boolean canRestoreFocus(AbstractWidget target) {
+		if (this.settingsList == null || !this.settingsList.hasUsableViewport()
+			|| !target.visible || !target.active || target.getWidth() <= 0 || target.getHeight() <= 0) {
+			return false;
+		}
 		for (PresentationSelectorEditBox field : this.presentationSelectorFields.values()) {
 			if (field == target) {
 				return field.active;
@@ -1321,7 +1371,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		};
 	}
 
-	private MutableComponent presentationServerPermissionText() {
+	private @Nullable MutableComponent presentationServerPermissionText() {
 		final var state = this.presentationPolicyState;
 		if (state == null || !state.isReady()) {
 			return null;
@@ -1336,10 +1386,8 @@ public class SettingsScreen extends OptionsSubScreen {
 			// Never present a value the server has not confirmed yet.
 			return label;
 		}
-		return Component.empty()
-			.append(label)
-			.append(": ")
-			.append(LanguageUtils.settings("presentation").path("field",
+		return LanguageUtils.settings("format.name_value").get(label,
+			LanguageUtils.settings("presentation").path("field",
 				state.rulesFor(selectedPresentationTargetType).whitelistOnly() ? "on" : "off").get());
 	}
 
@@ -1348,7 +1396,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	/** Maps a correlated wire status to the compact feedback the UI shows. */
-	private PresentationSelectorDraftModel.Feedback feedbackForStatus(Status status) {
+	private PresentationSelectorDraftModel.@Nullable Feedback feedbackForStatus(@Nullable Status status) {
 		if (status == null) {
 			return PresentationSelectorDraftModel.Feedback.ERROR;
 		}
@@ -1572,16 +1620,16 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void addChannelRow() {
-		this.addSubgroup("channel");
 		final var label = new StringWidget(
 			0,
 			0,
-			SettingsScreenLayout.SMALL_WIDGET_WIDTH,
+			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
 			LanguageUtils.settings("channel").get(),
 			this.font).alignLeft();
 		label.active = false;
 		label.setTooltip(Tooltip.create(LanguageUtils.settings("channel.tooltip").get()));
+		this.settingsList.addSmall(label, null);
 
 		this.channelTextField = new EditBox(
 			this.font,
@@ -1595,30 +1643,29 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.channelTextField.setHint(this.getChannelPlaceholder());
 		this.channelTextField.setTooltip(Tooltip.create(LanguageUtils.settings("channel.tooltip").get()));
 		this.channelTextField.setResponder(config::setChannel);
-		this.keyedWidgets.put(Setting.CHANNEL.id(), this.channelTextField);
-		this.settingsList.addSmall(label, this.channelTextField);
+		this.addFullWidth(Setting.CHANNEL.id(), this.channelTextField);
 	}
 
-	private void addOpenClientConfigButton() {
+	private Button createOpenClientConfigButton() {
 		final Button button = Button.builder(
 			LanguageUtils.settings("open_client_config").get(),
 			ignored -> this.openClientConfig())
 			.bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT)
 			.build();
 		button.setTooltip(Tooltip.create(LanguageUtils.settings("open_client_config").path("tooltip").get()));
-		this.addFullWidth(Setting.OPEN_CLIENT_CONFIG.id(), button);
+		return button;
 	}
 
-	private void addServerChannelModeButton() {
+	private Button createServerChannelModeButton() {
 		final var button = this.createServerValueButton(
 			"default_channel_mode",
 			() -> LanguageUtils.of("value", this.serverSettings.defaultChannelMode().toString()).get(),
 			this.serverSettings::cycleDefaultChannelMode);
 		button.active = this.serverSettings.canEdit();
-		this.addFullWidth(Setting.DEFAULT_CHANNEL_MODE.id(), button);
+		return button;
 	}
 
-	private void addServerPlayerTrackingButton() {
+	private Button createServerPlayerTrackingButton() {
 		final var button = this.createServerValueButton(
 			"player_tracking_enabled",
 			() -> LanguageUtils.of(
@@ -1626,17 +1673,17 @@ public class SettingsScreen extends OptionsSubScreen {
 				this.serverSettings.playerTrackingEnabled() ? "enabled" : "disabled").get(),
 			this.serverSettings::togglePlayerTracking);
 		button.active = this.serverSettings.canEdit();
-		this.addFullWidth(Setting.PLAYER_TRACKING_ENABLED.id(), button);
+		return button;
 	}
 
-	private void addServerBudgetDelayNotificationsButton() {
+	private Button createServerBudgetDelayNotificationsButton() {
 		final var button = this.createServerValueButton(
 			Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED.id(),
 			() -> LanguageUtils.of("value",
 				this.serverSettings.budgetDelayNotificationsEnabled() ? "enabled" : "disabled").get(),
 			this.serverSettings::toggleBudgetDelayNotifications);
 		button.active = this.serverSettings.canEdit();
-		this.addFullWidth(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED.id(), button);
+		return button;
 	}
 
 	private void addServerIntegerRow(Setting setting) {
@@ -1684,15 +1731,14 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 	}
 
-	private void addServerInventoryRow(Setting setting) {
+	private AbstractWidget createServerInventoryWidget(Setting setting) {
 		final Field inventoryField = java.util.Objects.requireNonNull(setting.inventoryField());
 		if (inventoryField.isSizeScale()) {
-			this.addServerSizeScaleSlider(setting);
-			return;
+			return this.createServerSizeScaleSlider(setting);
 		}
 		final var slider = InventoryPerformanceOption.slider(LanguageUtils.settings(setting.id()),
 			inventoryField, this.serverSettings, () -> this.serverValidationMessage = null);
-		this.addFullWidth(setting.id(), slider);
+		return slider;
 	}
 
 	/**
@@ -1700,8 +1746,8 @@ public class SettingsScreen extends OptionsSubScreen {
 	 * sizes. The display maximum follows the current frame draft; the model
 	 * reconciles a lowering frame edit atomically and records the inline notice.
 	 */
-	private void addServerSizeScaleSlider(Setting setting) {
-		final Field field = setting.inventoryField();
+	private AbstractWidget createServerSizeScaleSlider(Setting setting) {
+		final Field field = java.util.Objects.requireNonNull(setting.inventoryField());
 		final InventorySizeScale scale = field.sizeScale();
 		final IntSupplier maximumPosition = field == Field.DISPLAY_BYTE_MULTIPLIER
 			? this.serverSettings::maximumDisplayPosition
@@ -1715,10 +1761,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			value -> this.onSizeScaleSliderChanged(field, value),
 			this.sizeSliderAdjustment);
 		slider.active = this.serverSettings.canEdit();
-		this.addFullWidth(setting.id(), slider);
-		if (field == Field.FRAME_BYTE_MULTIPLIER) {
-			this.addSizeAdjustmentNotice();
-		}
+		return slider;
 	}
 
 	private void onSizeScaleSliderChanged(Field field, BigDecimal value) {
@@ -1731,11 +1774,10 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	/** The polite inline notice that explains a frame-priority display reduction. */
 	private void addSizeAdjustmentNotice() {
-		final var adjustment = this.serverSettings.sizeAdjustment();
+		final @Nullable var adjustment = this.serverSettings.sizeAdjustment();
 		if (adjustment == null) {
 			return;
 		}
-		this.flushPendingHalfWidthRow();
 		final var notice = new StringWidget(
 			0,
 			0,
@@ -1750,7 +1792,6 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void addServerStatus() {
-		this.flushPendingHalfWidthRow();
 		this.serverStatusWidget = new StringWidget(
 			0,
 			0,
@@ -1813,10 +1854,15 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void saveCurrentViewState() {
-		this.saveCurrentViewState(this.currentFocusKey());
+		@Nullable String key = this.currentFocusKey();
+		if (key == null && this.settingsList != null && !this.settingsList.hasUsableViewport()
+			&& (this.getFocused() == null || this.getFocused() == this.settingsList)) {
+			key = navigation.focusKey();
+		}
+		this.saveCurrentViewState(key);
 	}
 
-	private void saveCurrentViewState(String focusKey) {
+	private void saveCurrentViewState(@Nullable String focusKey) {
 		if (this.settingsList == null) {
 			return;
 		}
@@ -1825,9 +1871,9 @@ public class SettingsScreen extends OptionsSubScreen {
 			focusKey);
 	}
 
-	private String currentFocusKey() {
-		final SettingsOptionsList list = this.settingsList;
-		final Supplier<AbstractWidget> listFocusedWidget = list == null ? null : list::focusedWidget;
+	private @Nullable String currentFocusKey() {
+		final @Nullable SettingsOptionsList list = this.settingsList;
+		final @Nullable Supplier<@Nullable AbstractWidget> listFocusedWidget = list == null ? null : list::focusedWidget;
 		return resolveFocusKey(this.getFocused(), list, listFocusedWidget, this.keyedWidgets);
 	}
 
@@ -1836,15 +1882,15 @@ public class SettingsScreen extends OptionsSubScreen {
 	 * during the permission update in init; the list child is only requested from
 	 * a present list.
 	 */
-	static String resolveFocusKey(
-		GuiEventListener focused,
-		GuiEventListener list,
-		Supplier<AbstractWidget> listFocusedWidget,
+	static @Nullable String resolveFocusKey(
+		@Nullable GuiEventListener focused,
+		@Nullable GuiEventListener list,
+		@Nullable Supplier<@Nullable AbstractWidget> listFocusedWidget,
 		Map<String, AbstractWidget> keyedWidgets
 	) {
-		GuiEventListener resolved = focused;
+		@Nullable GuiEventListener resolved = focused;
 		if (list != null && resolved == list) {
-			resolved = listFocusedWidget.get();
+			resolved = java.util.Objects.requireNonNull(listFocusedWidget).get();
 		}
 		for (var entry : keyedWidgets.entrySet()) {
 			if (entry.getValue() == resolved || entry.getValue().isFocused()) {
@@ -1856,8 +1902,11 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private void restoreCurrentViewState() {
 		this.settingsList.setClampedScrollAmount(navigation.scrollAmount());
-		final AbstractWidget target = this.keyedWidgets.get(navigation.focusKey());
+		final @Nullable AbstractWidget target = this.keyedWidgets.get(navigation.focusKey());
 		if (target == null || !this.canRestoreFocus(target)) {
+			return;
+		}
+		if (this.getFocused() == this.settingsList && this.settingsList.focusedWidget() == target) {
 			return;
 		}
 		this.clearFocus();
@@ -1876,13 +1925,13 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 		if (navigation.isOverview() && this.scopeTabBar != null) {
 			this.setInitialFocus(this.scopeTabBar);
-		} else if (this.settingsList != null) {
+		} else if (this.settingsList != null && this.settingsList.hasUsableViewport()) {
 			this.setInitialFocus(this.settingsList);
 		}
 	}
 
 	private void focusFirstInvalidServerField(int invalidMask) {
-		final AbstractWidget target;
+		final @Nullable AbstractWidget target;
 		if ((invalidMask & ServerConfigUpdate.MS_TO_REGENERATE) != 0) {
 			target = this.serverMsToRegenerateField;
 		} else if ((invalidMask & ServerConfigUpdate.RATE_LIMIT) != 0) {
@@ -1890,7 +1939,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		} else if ((invalidMask & ServerConfigUpdate.SYNC_DURATION) != 0) {
 			target = this.serverSyncDurationField;
 		} else {
-			final Setting invalid = SettingsCategoryCatalog.firstInvalidInventorySetting(invalidMask);
+			final @Nullable Setting invalid = SettingsCategoryCatalog.firstInvalidInventorySetting(invalidMask);
 			target = invalid == null ? null : this.keyedWidgets.get(invalid.id());
 		}
 		if (target != null) {
@@ -2135,6 +2184,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			value -> value == 0
 				? text.get(CommonComponents.OPTION_OFF)
 				: text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			() -> text.path("tooltip").get(),
 			config::getPingVolume,
 			config::setPingVolume);
 	}
@@ -2142,11 +2192,8 @@ public class SettingsScreen extends OptionsSubScreen {
 	private OptionInstance<Integer> getPingDistanceOption() {
 		final var text = LanguageUtils.settings("ping_distance");
 		return OptionUtils.ofInt(text.getKey(), 0, MAX_PING_DISTANCE, 16,
-			value -> {
-				if (value == 0) return text.get(LanguageUtils.VALUE_HIDDEN);
-				if (value >= MAX_PING_DISTANCE) return text.get(LanguageUtils.VALUE_INFINITE);
-				return text.get(LanguageUtils.UNIT_METERS.get(value));
-			},
+			value -> text.get(LanguageUtils.UNIT_METERS.get(value)),
+			() -> text.path("tooltip").get(),
 			config::getPingDistance,
 			config::setPingDistance);
 	}
@@ -2167,36 +2214,44 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private OptionInstance<Boolean> getItemIconsVisibleOption() {
 		return OptionUtils.ofBool(LanguageUtils.settings("item_icon_visible").getKey(),
-			config::isItemIconVisible, config::setItemIconVisible);
+			config::isItemIconVisible, config::setItemIconVisible,
+			() -> LanguageUtils.settings("item_icon_visible.tooltip").get());
 	}
 
 	private OptionInstance<Boolean> getMarkTransparentBlocksOption() {
 		return OptionUtils.ofBool(LanguageUtils.settings("mark_transparent_blocks").getKey(),
-			config::isMarkTransparentBlocks, config::setMarkTransparentBlocks);
+			config::isMarkTransparentBlocks, config::setMarkTransparentBlocks,
+			() -> LanguageUtils.settings("mark_transparent_blocks.tooltip").get());
 	}
 
 	private OptionInstance<Boolean> getMarkBlacklistedTargetsOption() {
 		return OptionUtils.ofBool(LanguageUtils.settings("mark_blacklisted_targets").getKey(),
-			config::isMarkBlacklistedTargets, config::setMarkBlacklistedTargets);
+			config::isMarkBlacklistedTargets, config::setMarkBlacklistedTargets,
+			() -> LanguageUtils.settings("mark_blacklisted_targets.tooltip").get());
 	}
 
 	private OptionInstance<Boolean> getMarkFluidsOption() {
 		return OptionUtils.ofBool(LanguageUtils.settings("mark_fluids").getKey(),
-			config::isMarkFluids, config::setMarkFluids);
+			config::isMarkFluids, config::setMarkFluids,
+			() -> LanguageUtils.settings("mark_fluids.tooltip").get());
 	}
 
 	private OptionInstance<Boolean> getDirectionIndicatorVisibleOption() {
 		return OptionUtils.ofBool(LanguageUtils.settings("direction_indicator_visible").getKey(),
-			config::isDirectionIndicatorVisible, config::setDirectionIndicatorVisible);
+			config::isDirectionIndicatorVisible, config::setDirectionIndicatorVisible,
+			() -> LanguageUtils.settings("direction_indicator_visible.tooltip").get());
 	}
 
-	private OptionInstance<PlayerInfoMode> getPlayerInfoModeOption() {
+	OptionInstance<PlayerInfoMode> getPlayerInfoModeOption() {
+		final var text = LanguageUtils.settings("player_info_mode");
 		return OptionUtils.ofEnum(
-			LanguageUtils.settings("player_info_mode").getKey(),
+			text.getKey(),
 			PlayerInfoMode.class,
 			mode -> LanguageUtils.of("value", mode.toString()).get(),
 			mode -> {
-				if (mode != PlayerInfoMode.HOLD) return Component.empty();
+				if (mode != PlayerInfoMode.HOLD) {
+					return text.path(mode.toString(), "tooltip").get();
+				}
 				final var keyPlayerListTitle = Component.translatable(Game.options.keyPlayerList.getName());
 				final var keyPlayerListName = Game.options.keyPlayerList.getTranslatedKeyMessage();
 				return LanguageUtils.settings("player_info_mode").path("hold", "tooltip")
@@ -2206,12 +2261,13 @@ public class SettingsScreen extends OptionsSubScreen {
 			config::setPlayerInfoMode);
 	}
 
-	private OptionInstance<TeamColorMode> getTeamColorModeOption() {
+	OptionInstance<TeamColorMode> getTeamColorModeOption() {
+		final var text = LanguageUtils.settings("team_color_mode");
 		return OptionUtils.ofEnum(
-			LanguageUtils.settings("team_color_mode").getKey(),
+			text.getKey(),
 			TeamColorMode.class,
 			mode -> LanguageUtils.of("value", mode.toString()).get(),
-			mode -> Component.empty(),
+			mode -> text.path(mode.toString(), "tooltip").get(),
 			config::getTeamColorMode,
 			config::setTeamColorMode);
 	}
@@ -2223,6 +2279,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			MAX_CONFIGURATION_NOTICE_SIZE,
 			CONFIGURATION_NOTICE_SIZE_STEP,
 			value -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			() -> text.path("tooltip").get(),
 			config::getConfigurationNoticeSize,
 			config::setConfigurationNoticeSize);
 	}
@@ -2231,6 +2288,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		final var text = LanguageUtils.settings("ping_size");
 		return OptionUtils.ofInt(text.getKey(), 40, 300, 10,
 			value -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			() -> text.path("tooltip").get(),
 			config::getPingSize,
 			config::setPingSize);
 	}
@@ -2242,6 +2300,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			MAX_WHEEL_HOLD_MILLIS,
 			WHEEL_HOLD_MILLIS_STEP,
 			value -> text.get(LanguageUtils.UNIT_MILLISECONDS.get(value)),
+			() -> text.path("tooltip").get(),
 			config::getWheelHoldMillis,
 			config::setWheelHoldMillis);
 	}
@@ -2279,7 +2338,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		SpatialSelectorSettings selector = config.getSpatialSelector();
 		final var text = LanguageUtils.settings("spatial_selector").path("submenu_radius_scale");
 		return OptionUtils.ofDecimal(text.getKey(), MIN_SUBMENU_RADIUS_SCALE, MAX_SUBMENU_RADIUS_SCALE, SUBMENU_RADIUS_SCALE_STEP,
-			value -> text.get(Component.literal(value.stripTrailingZeros().toPlainString() + "×")),
+			value -> text.get(LanguageUtils.UNIT_MULTIPLIER.get(OptionUtils.formatDecimal(value))),
 			() -> text.path("tooltip").get(), selector::getSubmenuRadiusScale, selector::setSubmenuRadiusScale);
 	}
 
@@ -2288,7 +2347,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		final var text = LanguageUtils.settings("spatial_selector").path("inventory_max_width_fraction");
 		return OptionUtils.ofDecimal(text.getKey(), MIN_INVENTORY_MAX_WIDTH_FRACTION, MAX_INVENTORY_MAX_WIDTH_FRACTION,
 			INVENTORY_MAX_WIDTH_FRACTION_STEP,
-			value -> text.get(Component.literal(value.stripTrailingZeros().toPlainString() + "×")),
+			value -> text.get(LanguageUtils.UNIT_MULTIPLIER.get(OptionUtils.formatDecimal(value))),
 			() -> text.path("tooltip").get(), selector::getInventoryMaxWidthFraction, selector::setInventoryMaxWidthFraction);
 	}
 
@@ -2297,7 +2356,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		final var text = LanguageUtils.settings("spatial_selector").path("inventory_max_height_fraction");
 		return OptionUtils.ofDecimal(text.getKey(), MIN_INVENTORY_MAX_HEIGHT_FRACTION, MAX_INVENTORY_MAX_HEIGHT_FRACTION,
 			INVENTORY_MAX_HEIGHT_FRACTION_STEP,
-			value -> text.get(Component.literal(value.stripTrailingZeros().toPlainString() + "×")),
+			value -> text.get(LanguageUtils.UNIT_MULTIPLIER.get(OptionUtils.formatDecimal(value))),
 			() -> text.path("tooltip").get(), selector::getInventoryMaxHeightFraction, selector::setInventoryMaxHeightFraction);
 	}
 
@@ -2420,6 +2479,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			value -> value == 0
 				? text.get(CommonComponents.OPTION_OFF)
 				: text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			() -> text.path("tooltip").get(),
 			config::getWheelOpacity,
 			config::setWheelOpacity);
 	}
@@ -2429,6 +2489,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		return OptionUtils.ofInt(text.getKey(), MIN_WHEEL_TARGET_OPACITY, MAX_WHEEL_TARGET_OPACITY,
 			WHEEL_TARGET_OPACITY_STEP,
 			value -> value == 0 ? text.get(CommonComponents.OPTION_OFF) : text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			() -> text.path("tooltip").get(),
 			config::getWheelTargetOpacity,
 			config::setWheelTargetOpacity);
 	}
@@ -2437,6 +2498,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		final var text = LanguageUtils.settings("wheel_font_size");
 		return OptionUtils.ofInt(text.getKey(), MIN_WHEEL_FONT_SIZE, MAX_WHEEL_FONT_SIZE, WHEEL_FONT_SIZE_STEP,
 			value -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			() -> text.path("tooltip").get(),
 			config::getWheelFontSize,
 			config::setWheelFontSize);
 	}
@@ -2448,6 +2510,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			MAX_WHEEL_TARGET_FONT_SIZE,
 			WHEEL_TARGET_FONT_SIZE_STEP,
 			value -> text.get(LanguageUtils.UNIT_PERCENT.get(value)),
+			() -> text.path("tooltip").get(),
 			config::getWheelTargetFontSize,
 			config::setWheelTargetFontSize);
 	}
@@ -2459,6 +2522,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			MAX_CANCEL_HALF_CONE_ANGLE_DEGREES,
 			CANCEL_HALF_CONE_ANGLE_DEGREES_STEP,
 			value -> text.get(LanguageUtils.UNIT_DEGREES.get(value)),
+			() -> text.path("tooltip").get(),
 			config::getCancelHalfConeAngleDegrees,
 			config::setCancelHalfConeAngleDegrees);
 	}
@@ -2499,7 +2563,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			() -> text.path("tooltip").get());
 	}
 
-	private OptionInstance<EntityBlockRenderMode> getEntityBlockRenderModeOption() {
+	OptionInstance<EntityBlockRenderMode> getEntityBlockRenderModeOption() {
 		final var text = LanguageUtils.settings("entity_block_render_mode");
 		return OptionUtils.ofEnum(text.getKey(),
 			EntityBlockRenderMode.class,
@@ -2566,9 +2630,10 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private MutableComponent serverRowText(Component label, Component value) {
-		return Component.empty().append(label).append(": ").append(value);
+		return LanguageUtils.settings("format.name_value").get(label, value);
 	}
 
+	@NotNullByDefault
 	private final class NavigationTabManager extends TabManager {
 		private NavigationTabManager(Consumer<AbstractWidget> addWidget, Consumer<AbstractWidget> removeWidget) {
 			super(addWidget, removeWidget);
@@ -2584,6 +2649,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 	}
 
+	@NotNullByDefault
 	static final class ScopeTab implements Tab {
 		private final Scope scope;
 
@@ -2608,17 +2674,234 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 	}
 
-	private static final class SettingsOptionsList extends OptionsList {
-		private SettingsOptionsList(net.minecraft.client.Minecraft minecraft, int width, SettingsScreen screen) {
+	@NotNullByDefault
+	static final class SettingsOptionsList extends OptionsList {
+		private final List<@Unmodifiable List<AbstractWidget>> declaredRows = new ArrayList<>();
+		private final Map<AbstractWidget, Component> fullLabels = new HashMap<>();
+		private final ToIntFunction<Component> measure;
+		private final BiFunction<Component, Integer, Component> truncate;
+		private final OptionsSubScreen screen;
+
+		SettingsOptionsList(net.minecraft.client.Minecraft minecraft, int width, OptionsSubScreen screen,
+			ToIntFunction<Component> measure, BiFunction<Component, Integer, Component> truncate) {
 			super(minecraft, width, screen);
+			this.measure = measure;
+			this.truncate = truncate;
+			this.screen = screen;
+		}
+
+		void truncateLabel(AbstractWidget widget, Component fullText) {
+			this.fullLabels.put(widget, fullText);
+			widget.setMessage(this.truncate.apply(fullText, Math.max(0, widget.getWidth() - 8)));
+		}
+
+		private int textWidth(AbstractWidget widget) {
+			return this.measure.applyAsInt(this.fullLabels.getOrDefault(widget, widget.getMessage()));
+		}
+
+		@Override
+		public int getRowWidth() {
+			return SettingsScreenLayout.contentFor(this.getWidth()).width();
+		}
+
+		@Override
+		public int getRowLeft() {
+			return this.getX() + SettingsScreenLayout.contentFor(this.getWidth()).left();
+		}
+
+		@Override
+		protected int getScrollbarPosition() {
+			return this.getX() + SettingsScreenLayout.contentFor(this.getWidth()).scrollbarX();
+		}
+
+		@Override
+		protected boolean scrollbarVisible() {
+			return this.hasUsableViewport() && super.scrollbarVisible();
+		}
+
+		@Override
+		public void addSmall(AbstractWidget left, @Nullable AbstractWidget right) {
+			@Unmodifiable List<AbstractWidget> row = right == null ? List.of(left) : List.of(left, right);
+			this.declaredRows.add(row);
+			for (var physical : SettingsRowWidgets.rowsFor(SettingsScreenLayout.contentFor(this.getWidth()), List.of(row), this::textWidth)) {
+				super.addSmall(physical.getFirst(), physical.size() == 2 ? physical.getLast() : null);
+				this.positionEntry(this.children().size() - 1);
+			}
+		}
+
+		@Override
+		public void updateSizeAndPosition(int width, int height, int top) {
+			final @Nullable AbstractWidget focused = this.focusedWidget();
+			final @Nullable OptionsList.Entry focusedEntry = this.getFocused();
+			double scroll = this.getScrollAmount();
+			boolean dragging = this.isDragging();
+			boolean childDragging = focusedEntry != null && focusedEntry.isDragging();
+			var existing = new HashMap<List<? extends GuiEventListener>, OptionsList.Entry>();
+			for (var entry : this.children()) existing.put(entry.children(), entry);
+			super.updateSizeAndPosition(width, height, top);
+			var physicalRows = SettingsRowWidgets.rowsFor(SettingsScreenLayout.contentFor(width), this.declaredRows, this::textWidth);
+			// The old entry containers are disposable, but never blur or recreate a
+			// usable child: text/caret, slider adjustment, and callbacks stay intact.
+			super.setFocused((GuiEventListener) null);
+			this.clearEntries();
+			for (var row : physicalRows) {
+				@Nullable OptionsList.Entry retained = existing.get(row);
+				this.addEntry(retained != null ? retained : OptionsList.Entry.small(
+					row.getFirst(), row.size() == 2 ? row.getLast() : null, this.screen));
+			}
+			this.positionEntries();
+			if (this.hasUsableViewport()) {
+				if (focused != null && focused.visible && focused.active) this.focusWidget(focused);
+				this.setDragging(dragging);
+				final @Nullable OptionsList.Entry restored = this.getFocused();
+				if (restored != null) restored.setDragging(childDragging);
+			} else {
+				this.suspendInput();
+			}
+			this.setClampedScrollAmount(scroll);
+		}
+
+		boolean hasUsableViewport() {
+			return this.getRowWidth() > 8 && this.getHeight() >= SettingsScreenLayout.ROW_HEIGHT;
+		}
+
+		/** Hidden native sliders still accept keys; the container must fence dispatch. */
+		private void suspendInput() {
+			for (var entry : this.children()) {
+				entry.setFocused((GuiEventListener) null);
+				entry.setDragging(false);
+				for (var child : entry.children()) child.setFocused(false);
+			}
+			super.setFocused((GuiEventListener) null);
+			this.setDragging(false);
+			this.updateScrollingState(0, 0, -1);
+		}
+
+		private boolean acceptsInput() {
+			if (this.hasUsableViewport()) return true;
+			this.suspendInput();
+			return false;
+		}
+
+		private boolean acceptsFocusedInput() {
+			if (!this.acceptsInput()) return false;
+			@Nullable AbstractWidget focused = this.focusedWidget();
+			return focused != null && focused.visible && focused.active && focused.getWidth() > 0;
+		}
+
+		@Override
+		public void setFocused(@Nullable GuiEventListener focused) {
+			if (focused != null && !this.hasUsableViewport()) {
+				this.suspendInput();
+				return;
+			}
+			super.setFocused(focused);
+		}
+
+		@Override
+		public @Nullable ComponentPath getCurrentFocusPath() {
+			return this.acceptsInput() ? super.getCurrentFocusPath() : null;
+		}
+
+		@Override
+		public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+			return this.acceptsFocusedInput() && super.keyPressed(keyCode, scanCode, modifiers);
+		}
+
+		@Override
+		public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+			return this.acceptsFocusedInput() && super.keyReleased(keyCode, scanCode, modifiers);
+		}
+
+		@Override
+		public boolean charTyped(char character, int modifiers) {
+			return this.acceptsFocusedInput() && super.charTyped(character, modifiers);
+		}
+
+		@Override
+		public boolean mouseClicked(double mouseX, double mouseY, int button) {
+			return this.acceptsInput() && super.mouseClicked(mouseX, mouseY, button);
+		}
+
+		@Override
+		public boolean mouseReleased(double mouseX, double mouseY, int button) {
+			return this.acceptsInput() && super.mouseReleased(mouseX, mouseY, button);
+		}
+
+		@Override
+		public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+			return this.acceptsInput() && super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+		}
+
+		@Override
+		public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+			return this.acceptsInput() && super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+		}
+
+		@Override
+		public @Nullable ComponentPath nextFocusPath(FocusNavigationEvent event) {
+			return this.acceptsInput() ? super.nextFocusPath(event) : null;
+		}
+
+		@Override
+		public void setClampedScrollAmount(double amount) {
+			super.setClampedScrollAmount(amount);
+			this.positionEntries();
+		}
+
+		private void positionEntries() {
+			for (int index = 0; index < this.children().size(); index++) this.positionEntry(index);
+		}
+
+		private void positionEntry(int index) {
+			var content = SettingsScreenLayout.contentFor(this.getWidth());
+			var absolute = new SettingsScreenLayout.Content(this.getX() + content.left(), content.width(),
+				this.getX() + content.scrollbarX());
+			SettingsRowWidgets.position(absolute, this.getRowTop(index), this.getEntry(index).children().stream()
+				.map(AbstractWidget.class::cast).toList());
+			if (!this.hasUsableViewport()) {
+				for (var child : this.getEntry(index).children()) ((AbstractWidget) child).visible = false;
+			}
+			for (var child : this.getEntry(index).children()) {
+				var widget = (AbstractWidget) child;
+				@Nullable Component fullText = this.fullLabels.get(widget);
+				if (fullText != null) widget.setMessage(this.truncate.apply(fullText, Math.max(0, widget.getWidth() - 8)));
+			}
+		}
+
+		/**
+		 * Native OptionsList.Entry.render hardcodes 310-wide, 160-offset positions.
+		 * Keep its native entry children, input, focus, scrolling and narration, but
+		 * render their native widgets at the same responsive bounds used for hits.
+		 */
+		@Override
+		protected void renderItem(GuiGraphics graphics, int mouseX, int mouseY, float partialTick,
+			int index, int rowLeft, int top, int rowWidth, int rowHeight) {
+			if (this.getRowWidth() == 0) return;
+			this.positionEntry(index);
+			var entry = this.getEntry(index);
+			entry.renderBack(graphics, index, top, rowLeft, rowWidth, rowHeight, mouseX, mouseY,
+				entry == this.getHovered(), partialTick);
+			// ContainerObjectSelectionList does not paint selected-row backgrounds.
+			for (GuiEventListener child : entry.children()) {
+				((AbstractWidget) child).render(graphics, mouseX, mouseY, partialTick);
+			}
+		}
+
+		@Override
+		public boolean isMouseOver(double mouseX, double mouseY) {
+			return this.hasUsableViewport() && super.isMouseOver(mouseX, mouseY);
 		}
 
 		private void resetEntries() {
+			this.suspendInput();
+			this.declaredRows.clear();
+			this.fullLabels.clear();
 			this.clearEntries();
 		}
 
-		private AbstractWidget focusedWidget() {
-			final GuiEventListener focusedEntry = this.getFocused();
+		private @Nullable AbstractWidget focusedWidget() {
+			final @Nullable GuiEventListener focusedEntry = this.getFocused();
 			if (focusedEntry instanceof OptionsList.Entry entry && entry.getFocused() instanceof AbstractWidget widget) {
 				return widget;
 			}
@@ -2630,9 +2913,10 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 
 		private void focusWidget(AbstractWidget widget, boolean reveal) {
+			if (!this.hasUsableViewport() || !widget.visible || !widget.active || widget.getWidth() <= 0) return;
 			SettingsListFocus.focus(this.children(), entry -> entry.children().contains(widget),
 				entry -> {
-					entry.setFocused(widget);
+					if (entry.getFocused() != widget) entry.setFocused(widget);
 					this.setFocused(entry);
 				}, this::ensureVisible, reveal);
 		}

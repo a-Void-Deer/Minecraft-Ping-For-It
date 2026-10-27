@@ -10,6 +10,10 @@ import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import nx.pingwheel.common.resource.LanguageUtils;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Non-interactive fixed-header title rendering a plain-text breadcrumb at a
@@ -20,39 +24,36 @@ import net.minecraft.network.chat.MutableComponent;
  * scaled row per wrapped line.  Measurement is injected so wrap and height
  * rules stay testable without a live font.
  */
+@NotNullByDefault
 final class SettingsTitleWidget extends AbstractWidget {
 	static final float TEXT_SCALE = 1.25F;
 	static final int LINE_GAP = 2;
-	static final String SEGMENT_SEPARATOR = " -> ";
-
 	private static final int HORIZONTAL_MARGIN = 4;
 	private static final int TITLE_TEXT_COLOR = 0xFFFFFF;
 	private static final int FALLBACK_LINE_HEIGHT = 9;
 
-	private final Font font;
-	private List<String> lines = List.of();
+	private final @Nullable Font font;
+	private @Unmodifiable List<String> lines = List.of();
 	private int lineHeight = scaledLineHeight(FALLBACK_LINE_HEIGHT);
 
-	SettingsTitleWidget(Font font) {
+	SettingsTitleWidget(@Nullable Font font) {
 		super(0, 0, 0, 0, Component.empty());
 		this.font = font;
 	}
 
 	/**
 	 * Composes the localized breadcrumb from semantic segments.  A null scope
-	 * means the root page and returns the base segment unchanged; the separator
-	 * is neutral and never translated.
+	 * means the root page and returns the base segment unchanged. Localized
+	 * wrappers keep the semantic segments independently styled.
 	 */
-	static MutableComponent composeTitle(MutableComponent base, Component scope, Component category) {
+	static MutableComponent composeTitle(MutableComponent base, @Nullable Component scope, @Nullable Component category) {
 		if (scope == null) {
 			return base;
 		}
 
-		final MutableComponent title = Component.empty().append(base).append(SEGMENT_SEPARATOR).append(scope);
-		if (category != null) {
-			title.append(SEGMENT_SEPARATOR).append(category);
-		}
-		return title;
+		return category == null
+			? LanguageUtils.settings("title.scope").get(base, scope)
+			: LanguageUtils.settings("title.breadcrumb").get(base, scope, category);
 	}
 
 	/**
@@ -105,7 +106,7 @@ final class SettingsTitleWidget extends AbstractWidget {
 	 * Greedy word wrap that falls back to code-point wrapping for a word wider
 	 * than the line, keeping long German compounds and space-less CJK readable.
 	 */
-	static List<String> wrapLines(String text, int maxWidth, ToIntFunction<String> measure) {
+	static @Unmodifiable List<String> wrapLines(String text, int maxWidth, ToIntFunction<String> measure) {
 		final List<String> lines = new ArrayList<>();
 		final int limit = Math.max(1, maxWidth);
 		StringBuilder current = new StringBuilder();

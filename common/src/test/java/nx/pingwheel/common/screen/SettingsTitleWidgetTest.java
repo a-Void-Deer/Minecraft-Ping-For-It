@@ -1,21 +1,30 @@
 package nx.pingwheel.common.screen;
 
 import java.util.List;
+import java.util.Map;
 import java.util.function.ToIntFunction;
 
+import net.minecraft.ChatFormatting;
+import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentContents;
+import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.util.FormattedCharSequence;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Scope;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@NotNullByDefault
 class SettingsTitleWidgetTest {
 	private static final int FONT_LINE_HEIGHT = 9;
 	private static final ToIntFunction<String> SIX_PIXELS_PER_CHARACTER = text -> text.length() * 6;
@@ -28,15 +37,45 @@ class SettingsTitleWidgetTest {
 	}
 
 	@Test
-	void leafTitleJoinsBaseScopeAndCategoryWithTheNeutralSeparator() {
+	void scopeTitleUsesTheTwoSegmentFormatWithBothComponentsAsArguments() {
+		MutableComponent base = Component.literal("Ping For It Configuration")
+			.withStyle(ChatFormatting.GOLD);
+		MutableComponent scope = Component.literal("Server").withStyle(ChatFormatting.GRAY);
+
+		Component title = SettingsTitleWidget.composeTitle(base, scope, null);
+
+		assertTitleArguments(title, "settings.pingforit.title.scope", base, scope);
+	}
+
+	@Test
+	void leafTitleUsesTheBreadcrumbFormatWithAllComponentsAsArguments() {
+		MutableComponent base = Component.literal("Ping For It Configuration")
+			.withStyle(ChatFormatting.GOLD);
+		MutableComponent scope = Component.literal("Server").withStyle(ChatFormatting.GRAY);
+		MutableComponent category = Component.literal("Send Rate").withStyle(ChatFormatting.AQUA);
+
+		Component title = SettingsTitleWidget.composeTitle(base, scope, category);
+
+		assertTitleArguments(title, "settings.pingforit.title.breadcrumb", base, scope, category);
+	}
+
+	@Test
+	void localeFormatControlsSeparatorAndArgumentOrder() {
 		MutableComponent base = Component.literal("Ping For It Configuration");
+		MutableComponent scope = Component.literal("Server");
+		MutableComponent category = Component.literal("Send Rate");
+		Map<String, String> translations = Map.of(
+			"settings.pingforit.title.breadcrumb", "%3$s | %1$s | %2$s",
+			"settings.pingforit.title.scope", "%2$s | %1$s");
 
-		Component title = SettingsTitleWidget.composeTitle(
-			base,
-			Component.literal("Server"),
-			Component.literal("Send Rate"));
-
-		assertEquals("Ping For It Configuration -> Server -> Send Rate", title.getString());
+		withLanguage(translations, () -> {
+			assertEquals(
+				"Send Rate | Ping For It Configuration | Server",
+				SettingsTitleWidget.composeTitle(base, scope, category).getString());
+			assertEquals(
+				"Server | Ping For It Configuration",
+				SettingsTitleWidget.composeTitle(base, scope, null).getString());
+		});
 	}
 
 	@Test
@@ -147,11 +186,75 @@ class SettingsTitleWidgetTest {
 		assertTranslatableKey("settings.pingforit.server_settings", serverTab.getTabTitle());
 	}
 
+	private static void assertTitleArguments(Component title, String expectedKey, Component... expected) {
+		TranslatableContents contents = assertTranslatable(title, expectedKey);
+		Object[] actual = contents.getArgs();
+		assertEquals(
+			expected.length,
+			actual.length,
+			"the localized title must keep every semantic segment as a format argument");
+		for (int index = 0; index < expected.length; index++) {
+			assertInstanceOf(
+				Component.class,
+				actual[index],
+				"format argument " + index + " must remain a component instead of flattened text");
+			assertEquals(
+				expected[index],
+				actual[index],
+				"format argument " + index + " must keep the semantic segment style and hierarchy");
+		}
+	}
+
 	private static void assertTranslatableKey(String expectedKey, Component title) {
+		assertTranslatable(title, expectedKey);
+	}
+
+	private static TranslatableContents assertTranslatable(Component title, String expectedKey) {
 		ComponentContents contents = title.getContents();
 		assertTrue(
 			contents instanceof TranslatableContents,
-			() -> "expected a translatable tab title, got: " + contents);
-		assertEquals(expectedKey, ((TranslatableContents) contents).getKey());
+			() -> "expected a translatable component, got: " + contents);
+		TranslatableContents translatable = (TranslatableContents) contents;
+		assertEquals(expectedKey, translatable.getKey());
+		return translatable;
+	}
+
+	private static void withLanguage(Map<String, String> translations, Runnable body) {
+		Language previous = Language.getInstance();
+		Language.inject(new MapLanguage(translations));
+		try {
+			body.run();
+		} finally {
+			Language.inject(previous);
+		}
+	}
+
+	@NotNullByDefault
+	private static final class MapLanguage extends Language {
+		private final @Unmodifiable Map<String, String> translations;
+
+		private MapLanguage(Map<String, String> translations) {
+			this.translations = Map.copyOf(translations);
+		}
+
+		@Override
+		public String getOrDefault(String key, String fallback) {
+			return this.translations.getOrDefault(key, fallback);
+		}
+
+		@Override
+		public boolean has(String key) {
+			return this.translations.containsKey(key);
+		}
+
+		@Override
+		public boolean isDefaultRightToLeft() {
+			return false;
+		}
+
+		@Override
+		public FormattedCharSequence getVisualOrder(FormattedText text) {
+			return FormattedCharSequence.EMPTY;
+		}
 	}
 }

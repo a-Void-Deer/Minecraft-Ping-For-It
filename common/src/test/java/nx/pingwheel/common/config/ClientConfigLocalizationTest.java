@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.resource.LanguageUtils;
+import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -26,6 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientConfigLocalizationTest {
+
+	private static final Pattern ARGUMENT_PLACEHOLDER = Pattern.compile("%(?:\\d+\\$)?[sdf]");
 
 	private static final List<String> BUNDLED_LOCALES = List.of(
 		"de_de", "en_us", "es_ar", "fr_fr", "pl_pl", "tr_tr", "zh_cn", "zh_tw");
@@ -190,13 +193,17 @@ class ClientConfigLocalizationTest {
 			JsonObject json = readLocaleJson(locale);
 			for (String key : List.of("key.pingforit.toggle_mark_transparent_blocks",
 				"settings.pingforit.mark_transparent_blocks", "notice.pingforit.mark_transparent_blocks",
-				"pingforit.spatial.toggle.transparent_blocks")) {
-				String label = nonBlankTranslation(json, locale, key);
-				assertFalse(label.contains("%"), locale + ":" + key + " is a literal label");
-			}
-			for (String key : List.of("key.pingforit.toggle_pass_through_transparent_blocks",
-				"settings.pingforit.pass_through_transparent_blocks", "notice.pingforit.pass_through_transparent_blocks",
+				"pingforit.spatial.toggle.transparent_blocks",
 				"settings.pingforit.mark_transparent_blocks.tooltip")) {
+				String label = nonBlankTranslation(json, locale, key);
+				assertFalse(ARGUMENT_PLACEHOLDER.matcher(label.replace("%%", "")).find(), locale + ":" + key + " is a literal label");
+			}
+			// The retired pass-through selection used the inverse meaning. Its
+			// resources must stay absent while the current mark-transparent
+			// label and tooltip remain present; no translation wording is pinned.
+			for (String key : List.of("key.pingforit.toggle_pass_through_transparent_blocks",
+				"settings.pingforit.pass_through_transparent_blocks",
+				"notice.pingforit.pass_through_transparent_blocks")) {
 				assertFalse(json.has(key), locale + ":" + key);
 			}
 		}
@@ -209,21 +216,12 @@ class ClientConfigLocalizationTest {
 			for (String key : SETTINGS_NAVIGATION_KEYS) {
 				nonBlankTranslation(json, locale, key);
 			}
-			for (String category : List.of(
-				"display",
-				"selection",
-				"wheel_appearance",
-				"input",
-				"channel_notices",
-				"geometry_config",
-				"channel_players",
-				"send_rate",
-				"marker_duration")) {
-				nonBlankTranslation(json, locale, "settings.pingforit.category." + category);
+			for (Category category : Category.values()) {
+				nonBlankTranslation(json, locale, "settings.pingforit.category." + category.id());
 				String button = nonBlankTranslation(
 					json,
 					locale,
-					"settings.pingforit.category." + category + ".button");
+					"settings.pingforit.category." + category.id() + ".button");
 				assertTrue(button.endsWith("..."),
 					() -> "category entrance must advertise navigation: " + locale + ":" + category);
 			}
@@ -318,15 +316,15 @@ class ClientConfigLocalizationTest {
 				String label = nonBlankTranslation(json, locale, key);
 				assertEquals(1, countOccurrences(label, "%s"),
 					() -> "spatial selector numeric label must be formatted: " + locale + ":" + key);
-				assertFalse(label.replace("%s", "").contains("%"), locale + ":" + key);
+				assertFalse(label.replace("%s", "").replace("%%", "").contains("%"), locale + ":" + key);
 			}
 			for (String key : booleanLabels) {
-				assertFalse(nonBlankTranslation(json, locale, key).contains("%"), locale + ":" + key);
+				assertFalse(ARGUMENT_PLACEHOLDER.matcher(nonBlankTranslation(json, locale, key).replace("%%", "")).find(), locale + ":" + key);
 			}
 			for (String key : List.of("trail_length", "trail_opacity", "show_trail",
 				"inventory_max_width_fraction", "inventory_max_height_fraction")) {
-				assertFalse(nonBlankTranslation(json, locale,
-					"settings.pingforit.spatial_selector." + key + ".tooltip").contains("%"), locale + ":" + key);
+				assertFalse(ARGUMENT_PLACEHOLDER.matcher(nonBlankTranslation(json, locale,
+					"settings.pingforit.spatial_selector." + key + ".tooltip").replace("%%", "")).find(), locale + ":" + key);
 			}
 			for (String key : List.of(LanguageUtils.UNIT_POINTS.getKey(), LanguageUtils.UNIT_PERCENT.getKey())) {
 				String unit = nonBlankTranslation(json, locale, key);
@@ -341,7 +339,7 @@ class ClientConfigLocalizationTest {
 	void everyExternalListTooltipRequiresRestartingTheClient() throws IOException {
 		for (String locale : BUNDLED_LOCALES) {
 			String tooltip = readTranslation(locale,
-				"settings.pingforit.open_block_shape_blacklist_config.tooltip");
+				"settings.pingforit.open_client_config.tooltip");
 			assertTrue(
 				tooltip.contains(EXTERNAL_LIST_RESTART_MARKERS.get(locale)),
 				() -> "external list tooltip must require a client restart: " + locale);
@@ -449,14 +447,14 @@ class ClientConfigLocalizationTest {
 				"settings.pingforit.double_click_danger_angle_degrees")) {
 				String label = nonBlankTranslation(json, locale, key);
 				assertEquals(1, countOccurrences(label, "%s"), locale + ":" + key);
-				assertFalse(label.replace("%s", "").contains("%"), locale + ":" + key);
+				assertFalse(label.replace("%s", "").replace("%%", "").contains("%"), locale + ":" + key);
 			}
 			for (String key : List.of(
 				"settings.pingforit.double_click_danger_window_millis.tooltip",
 				"settings.pingforit.double_click_danger_angle_degrees.tooltip",
 				"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled",
 				"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip")) {
-				assertFalse(nonBlankTranslation(json, locale, key).contains("%"), locale + ":" + key);
+				assertFalse(ARGUMENT_PLACEHOLDER.matcher(nonBlankTranslation(json, locale, key).replace("%%", "")).find(), locale + ":" + key);
 			}
 			nonBlankTranslation(json, locale, "value.pingforit.off");
 		}

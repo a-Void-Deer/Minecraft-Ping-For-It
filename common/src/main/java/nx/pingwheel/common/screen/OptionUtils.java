@@ -5,6 +5,8 @@ import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -13,6 +15,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+@NotNullByDefault
 public class OptionUtils {
 	private OptionUtils() {}
 
@@ -20,7 +23,7 @@ public class OptionUtils {
 		return ofInt(key, min, max, step, formatter, null, getter, setter);
 	}
 
-	public static OptionInstance<Integer> ofInt(String key, int min, int max, int step, Function<Integer, Component> formatter, Supplier<Component> tooltipSupplier, Supplier<Integer> getter, Consumer<Integer> setter) {
+	public static OptionInstance<Integer> ofInt(String key, int min, int max, int step, Function<Integer, Component> formatter, @Nullable Supplier<Component> tooltipSupplier, Supplier<Integer> getter, Consumer<Integer> setter) {
 		return new OptionInstance<>(
 			key,
 			tooltipSupplier == null
@@ -36,12 +39,17 @@ public class OptionUtils {
 	}
 
 	public static OptionInstance<Float> ofFloat(String key, float min, float max, float step, Function<Float, Component> formatter, Supplier<Float> getter, Consumer<Float> setter) {
+		return ofFloat(key, min, max, step, formatter, null, getter, setter);
+	}
+
+	public static OptionInstance<Float> ofFloat(String key, float min, float max, float step, Function<Float, Component> formatter,
+		@Nullable Supplier<Component> tooltipSupplier, Supplier<Float> getter, Consumer<Float> setter) {
 		var iMin = (int) (min / step);
 		var iMax = (int) (max / step);
 
 		return new OptionInstance<>(
 			key,
-			OptionInstance.noTooltip(),
+			tooltipSupplier == null ? OptionInstance.noTooltip() : value -> Tooltip.create(tooltipSupplier.get()),
 			(optionText, value) -> formatter.apply(getter.get()),
 			(new OptionInstance.IntRange(iMin, iMax))
 				.xmap((value) -> value * step, (value) -> (int) (value / step)),
@@ -57,7 +65,7 @@ public class OptionUtils {
 
 	/** A decimal preference on an exact slider grid, without float rounding in persistence. */
 	public static OptionInstance<BigDecimal> ofDecimal(String key, BigDecimal min, BigDecimal max,
-		BigDecimal step, Function<BigDecimal, Component> formatter, Supplier<Component> tooltipSupplier,
+		BigDecimal step, Function<BigDecimal, Component> formatter, @Nullable Supplier<Component> tooltipSupplier,
 		Supplier<BigDecimal> getter, Consumer<BigDecimal> setter) {
 		int minimumIndex = min.divide(step).intValueExact();
 		int maximumIndex = max.divide(step).intValueExact();
@@ -89,7 +97,7 @@ public class OptionUtils {
 		return Component.translatable(settingKey, rendered);
 	}
 
-	public static OptionInstance<Boolean> ofBool(String key, Supplier<Boolean> getter, Consumer<Boolean> setter, Supplier<Component> tooltipSupplier) {
+	public static OptionInstance<Boolean> ofBool(String key, Supplier<Boolean> getter, Consumer<Boolean> setter, @Nullable Supplier<Component> tooltipSupplier) {
 		return OptionInstance.createBoolean(
 			key,
 			tooltipSupplier == null

@@ -1,6 +1,9 @@
 package nx.pingwheel.common.screen;
 
+import org.jetbrains.annotations.NotNullByDefault;
+
 /** Screen-space layout for the scrolling settings page and its fixed footer. */
+@NotNullByDefault
 public record SettingsScreenLayout(
 	int listTop,
 	int listBottom,
@@ -23,8 +26,40 @@ public record SettingsScreenLayout(
 	public static final int LARGE_WIDGET_WIDTH = 310;
 	public static final int ROW_HEIGHT = 20;
 	public static final int TITLE_BOTTOM_MARGIN = 4;
+	public static final int COLUMN_GAP = 10;
+	public static final int CONTENT_SIDE_SPACE = 12;
+	public static final int WIDGET_TEXT_PADDING = 4;
+	private static final int SCROLLBAR_WIDTH = 6;
+	private static final int SCROLLBAR_GAP = 4;
 
 	private static final int RESET_TOP_MARGIN = 2;
+
+	/** Shared geometry for native widget bounds, list hit testing, and its scrollbar. */
+	@NotNullByDefault
+	public record Content(int left, int width, int scrollbarX) {
+		public int halfWidth() {
+			return Math.max(0, (width - COLUMN_GAP) / 2);
+		}
+
+		public boolean fitsPair(int leftTextWidth, int rightTextWidth) {
+			return width == LARGE_WIDGET_WIDTH
+				&& leftTextWidth <= halfWidth() - WIDGET_TEXT_PADDING
+				&& rightTextWidth <= halfWidth() - WIDGET_TEXT_PADDING;
+		}
+	}
+
+	public static Content contentFor(int screenWidth) {
+		int safeWidth = Math.max(0, screenWidth);
+		int contentWidth = Math.min(LARGE_WIDGET_WIDTH, Math.max(0, safeWidth - CONTENT_SIDE_SPACE * 2));
+		contentWidth -= contentWidth % 2;
+		int left = safeWidth / 2 - contentWidth / 2;
+		int scrollbar = Math.min(left + contentWidth + SCROLLBAR_GAP, Math.max(0, safeWidth - SCROLLBAR_WIDTH));
+		return new Content(left, contentWidth, scrollbar);
+	}
+
+	public static int buttonWidthFor(int screenWidth, int requestedWidth) {
+		return Math.min(Math.max(0, screenWidth), Math.max(0, requestedWidth));
+	}
 
 	/**
 	 * Reserves enough fixed-header height for the measured title block, keeping
@@ -66,12 +101,12 @@ public record SettingsScreenLayout(
 		final int footerBottom = safeScreenHeight;
 		final int listTop = safeHeaderHeight;
 		final int listBottom = Math.max(listTop, footerTop);
-		final int resetX = Math.max(0, (safeScreenWidth - RESET_BUTTON_WIDTH) / 2);
+		final int resetX = (safeScreenWidth - buttonWidthFor(safeScreenWidth, RESET_BUTTON_WIDTH)) / 2;
 		final int resetY = clamp(
 			footerTop + RESET_TOP_MARGIN,
 			footerTop,
 			Math.max(footerTop, footerBottom - RESET_BUTTON_HEIGHT));
-		final int doneX = Math.max(0, (safeScreenWidth - PRIMARY_BUTTON_WIDTH) / 2);
+		final int doneX = (safeScreenWidth - buttonWidthFor(safeScreenWidth, PRIMARY_BUTTON_WIDTH)) / 2;
 		final int doneY = clamp(
 			footerTop + Math.max(0, (safeFooterHeight - PRIMARY_BUTTON_HEIGHT) / 2),
 			footerTop,
