@@ -146,13 +146,13 @@ class InventorySettingsTest {
 		settings.getTracking().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.125")));
 		settings.validate();
 
-		assertEquals(1024, settings.previewClientPeriodBytes());
-		assertEquals(4096, settings.previewGlobalPeriodBytes());
+		assertEquals(InventoryLimits.PREVIEW_CLIENT_BASE_BYTES / 4L, settings.previewClientPeriodBytes());
+		assertEquals(InventoryLimits.PREVIEW_GLOBAL_BASE_BYTES / 8L, settings.previewGlobalPeriodBytes());
 		assertEquals(4 * settings.previewGlobalPeriodBytes(), settings.previewQueueBytes());
-		assertEquals(512, settings.trackingStreamPeriodBytesPerClientTarget());
-		assertEquals(4096, settings.trackingSnapshotFragmentBytes());
+		assertEquals(InventoryLimits.TRACKING_STREAM_BASE_BYTES / 4L, settings.trackingStreamPeriodBytesPerClientTarget());
+		assertEquals(InventoryLimits.TRACKING_SNAPSHOT_BASE_BYTES / 4L, settings.trackingSnapshotFragmentBytes());
 		assertEquals(settings.trackingSnapshotFragmentBytes(), settings.trackingSnapshotClientPeriodBytes());
-		assertEquals(2048, settings.trackingGlobalPeriodBytes());
+		assertEquals(InventoryLimits.TRACKING_GLOBAL_BASE_BYTES / 8L, settings.trackingGlobalPeriodBytes());
 		assertEquals(8 * settings.trackingGlobalPeriodBytes(), settings.trackingRollingQueueBytes());
 	}
 
@@ -173,7 +173,7 @@ class InventorySettingsTest {
 
 		settings.getPreview().getClientByteMultiplier().setValue(new BigDecimal("1"));
 		settings.validate();
-		assertEquals(4096, settings.previewClientPeriodBytes());
+		assertEquals(InventoryLimits.PREVIEW_CLIENT_BASE_BYTES, settings.previewClientPeriodBytes());
 		assertEquals(previewGlobal, settings.previewGlobalPeriodBytes());
 		assertEquals(4 * previewGlobal, settings.previewQueueBytes());
 		assertEquals(stream, settings.trackingStreamPeriodBytesPerClientTarget());
@@ -182,15 +182,15 @@ class InventorySettingsTest {
 
 		settings.getTracking().getStreamByteMultiplier().setValue(new BigDecimal("0.25"));
 		settings.validate();
-		assertEquals(512, settings.trackingStreamPeriodBytesPerClientTarget());
+		assertEquals(InventoryLimits.TRACKING_STREAM_BASE_BYTES / 4L, settings.trackingStreamPeriodBytesPerClientTarget());
 		assertEquals(snapshot, settings.trackingSnapshotFragmentBytes());
 		assertEquals(trackingGlobal, settings.trackingGlobalPeriodBytes());
 
 		settings.getPreview().getGlobalByteMultiplier().setValue(new BigDecimal("2"));
 		settings.validate();
-		assertEquals(65536, settings.previewGlobalPeriodBytes());
+		assertEquals(2L * InventoryLimits.PREVIEW_GLOBAL_BASE_BYTES, settings.previewGlobalPeriodBytes());
 		assertEquals(trackingGlobal, settings.trackingGlobalPeriodBytes());
-		assertEquals(512, settings.trackingStreamPeriodBytesPerClientTarget());
+		assertEquals(InventoryLimits.TRACKING_STREAM_BASE_BYTES / 4L, settings.trackingStreamPeriodBytesPerClientTarget());
 		assertEquals(snapshot, settings.trackingSnapshotFragmentBytes());
 	}
 
@@ -200,13 +200,13 @@ class InventorySettingsTest {
 		settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(new BigDecimal("4")));
 		settings.validate();
 
-		assertEquals(65536, settings.trackingSnapshotFragmentBytes());
+		assertEquals(4L * InventoryLimits.TRACKING_SNAPSHOT_BASE_BYTES, settings.trackingSnapshotFragmentBytes());
 		assertEquals(settings.trackingSnapshotFragmentBytes(), settings.trackingSnapshotClientPeriodBytes());
 
 		settings.getTracking().getSnapshotByteMultiplier().setValue(new BigDecimal("0.5"));
 		settings.validate();
 
-		assertEquals(8192, settings.trackingSnapshotFragmentBytes());
+		assertEquals(InventoryLimits.TRACKING_SNAPSHOT_BASE_BYTES / 2L, settings.trackingSnapshotFragmentBytes());
 		assertEquals(settings.trackingSnapshotFragmentBytes(), settings.trackingSnapshotClientPeriodBytes());
 	}
 
@@ -223,8 +223,10 @@ class InventorySettingsTest {
 		assertEquals(0, new BigDecimal("2").compareTo(settings.getPreview().getClientByteMultiplier().getValue()));
 		long budget = settings.previewClientPeriodBytes();
 		assertTrue(budget > 0 && budget < Long.MAX_VALUE, "unlimited byte budget must stay finite");
-		assertNotEquals(8192, budget);
-		assertEquals(2048, settings.trackingStreamPeriodBytesPerClientTarget());
+		assertNotEquals(2L * InventoryLimits.PREVIEW_CLIENT_BASE_BYTES, budget);
+		assertEquals(InventoryLimits.TRACKING_STREAM_BASE_BYTES, settings.trackingStreamPeriodBytesPerClientTarget());
+		previewClient.setUnlimited(false);
+		assertEquals(2L * InventoryLimits.PREVIEW_CLIENT_BASE_BYTES, settings.previewClientPeriodBytes());
 	}
 
 	@Test
@@ -311,8 +313,10 @@ class InventorySettingsTest {
 
 		assertEquals(0, new BigDecimal("7.5").compareTo(settings.getDisplayByteMultiplier()));
 		assertEquals(0, BigDecimal.ONE.compareTo(settings.getFrameByteMultiplier()));
-		assertEquals(30720, settings.effectiveDisplayBytes());
-		assertEquals(32768, settings.effectiveFrameBytes());
+		assertEquals(InventoryLimits.DISPLAY_BASE_BYTES * 15L / 2L, settings.effectiveDisplayBytes());
+		assertEquals(InventoryLimits.FRAME_BASE_BYTES, settings.effectiveFrameBytes());
+		assertTrue(settings.effectiveDisplayBytes() + InventoryLimits.FRAME_METADATA_RESERVE_BYTES
+			<= settings.effectiveFrameBytes());
 		assertEquals(67, settings.getPendingMemoryMiB().getValue());
 	}
 
@@ -331,8 +335,10 @@ class InventorySettingsTest {
 		settings.validate();
 		assertEquals(0, new BigDecimal("1.5").compareTo(settings.getDisplayByteMultiplier()));
 		assertEquals(0, new BigDecimal("0.25").compareTo(settings.getFrameByteMultiplier()));
-		assertEquals(6144, settings.effectiveDisplayBytes());
-		assertEquals(8192, settings.effectiveFrameBytes());
+		assertEquals(InventoryLimits.DISPLAY_BASE_BYTES * 3L / 2L, settings.effectiveDisplayBytes());
+		assertEquals(InventoryLimits.FRAME_BASE_BYTES / 4L, settings.effectiveFrameBytes());
+		assertTrue(settings.effectiveDisplayBytes() + InventoryLimits.FRAME_METADATA_RESERVE_BYTES
+			<= settings.effectiveFrameBytes());
 	}
 
 	@Test

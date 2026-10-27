@@ -15,7 +15,10 @@ class InventoryConfigValuesTest {
 	@ParameterizedTest
 	@EnumSource(Field.class)
 	void eachLeafMergePreservesEveryUnselectedCurrentValue(Field selected) {
-		var current = InventoryConfigValues.defaults();
+		// Leave room for either size leaf's replacement without changing its unselected partner.
+		var current = InventoryConfigValues.defaults()
+			.with(Field.DISPLAY_BYTE_MULTIPLIER, new Value(false, new BigDecimal("2")))
+			.with(Field.FRAME_BYTE_MULTIPLIER, new Value(false, new BigDecimal("2")));
 		var replacement = current;
 		for (Field field : Field.values()) replacement = replacement.with(field, different(current, field));
 		var snapshot = new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 23, current);
@@ -93,7 +96,9 @@ class InventoryConfigValuesTest {
 		var applied = ServerConfigUpdateService.apply(true, snapshot, update).snapshot();
 		assertEquals(Value.limit(true, 513), applied.inventory().value(Field.PREVIEW_MAX_SLOTS_SERVER));
 		assertEquals(Value.limit(true, 65), applied.inventory().value(Field.PENDING_MEMORY_MIB));
-		assertEquals(4294967296L, applied.inventory().toSettings().pendingMemoryBytes());
+		assertEquals(InventoryLimits.INTERNAL_PENDING_MEMORY_MIB_GUARD * 1024L * 1024L,
+			applied.inventory().toSettings().pendingMemoryBytes(),
+			"unlimited pending memory uses the finite internal guard instead of the retained 65 MiB");
 		assertEquals(Value.scalar(7), applied.inventory().value(Field.PREVIEW_PERIOD_TICKS));
 		assertEquals(9, applied.rateLimit());
 	}
@@ -132,9 +137,6 @@ class InventoryConfigValuesTest {
 
 	@Test
 	void sizeScaleLeavesAreFiniteExactScalarsAndUnlimitedIsRejected() {
-		var defaults = InventoryConfigValues.defaults();
-		assertEquals(new Value(false, BigDecimal.ONE), defaults.value(Field.DISPLAY_BYTE_MULTIPLIER));
-		assertEquals(new Value(false, BigDecimal.ONE), defaults.value(Field.FRAME_BYTE_MULTIPLIER));
 		assertFalse(Field.DISPLAY_BYTE_MULTIPLIER.supportsUnlimited());
 		assertFalse(Field.FRAME_BYTE_MULTIPLIER.supportsUnlimited());
 		assertFalse(Field.DISPLAY_BYTE_MULTIPLIER.isSafe(new Value(true, BigDecimal.ONE)));
@@ -149,12 +151,21 @@ class InventoryConfigValuesTest {
 
 	@Test
 	void pairCompatibilityRequiresBothLeavesAndTheFrameMetadataReserve() {
-		assertTrue(InventoryConfigValues.defaults().isSizePairCompatible());
-		var largeDisplay = InventoryConfigValues.defaults()
-			.with(Field.DISPLAY_BYTE_MULTIPLIER, new Value(false, new BigDecimal("32")));
-		assertFalse(largeDisplay.isSizePairCompatible());
-		assertTrue(largeDisplay.with(Field.FRAME_BYTE_MULTIPLIER, new Value(false, new BigDecimal("4.25")))
-			.isSizePairCompatible());
+		var legalPair = InventoryConfigValues.defaults()
+			.with(Field.DISPLAY_BYTE_MULTIPLIER, new Value(false, new BigDecimal("2")))
+			.with(Field.FRAME_BYTE_MULTIPLIER, new Value(false, new BigDecimal("4.25")));
+		assertTrue(legalPair.isSizePairCompatible());
+		assertFalse(legalPair.with(Field.DISPLAY_BYTE_MULTIPLIER, null).isSizePairCompatible());
+		assertFalse(legalPair.with(Field.FRAME_BYTE_MULTIPLIER, null).isSizePairCompatible());
+
+		// A 32x display budget is 128 KiB; the 2 KiB metadata reserve does not fit
+		// in a 4x (128 KiB) frame, while the next quarter-multiplier step does.
+		var largestDisplay = legalPair
+			.with(Field.DISPLAY_BYTE_MULTIPLIER, new Value(false, new BigDecimal("32")))
+			.with(Field.FRAME_BYTE_MULTIPLIER, new Value(false, new BigDecimal("4")));
+		assertFalse(largestDisplay.isSizePairCompatible());
+		assertTrue(largestDisplay.with(Field.FRAME_BYTE_MULTIPLIER,
+			new Value(false, new BigDecimal("4.25"))).isSizePairCompatible());
 	}
 
 	@Test

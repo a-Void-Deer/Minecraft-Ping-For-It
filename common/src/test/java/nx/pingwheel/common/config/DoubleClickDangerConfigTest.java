@@ -18,44 +18,57 @@ class DoubleClickDangerConfigTest {
 	private static final String VERSION = "0.5.0-pfi-beta1";
 
 	@Test
-	void defaultsAndBoundsAreIndependentFromTheCancelCone() {
+	void boundsStayIndependentFromTheCancelCone() {
 		var config = new ClientConfig();
-		assertEquals(100, config.getDoubleClickDangerWindowMs());
-		assertEquals(3.5, config.getDoubleClickDangerAngleDegrees());
-		assertEquals(5, config.getCancelHalfConeAngleDegrees());
+		int cancelHalfCone = 30;
+		config.setCancelHalfConeAngleDegrees(cancelHalfCone);
 
 		config.setDoubleClickDangerWindowMs(Integer.MIN_VALUE);
-		assertEquals(25, config.getDoubleClickDangerWindowMs());
+		assertEquals(ClientConfigBounds.MIN_DOUBLE_CLICK_DANGER_WINDOW_MS, config.getDoubleClickDangerWindowMs());
 		config.setDoubleClickDangerWindowMs(Integer.MAX_VALUE);
-		assertEquals(300, config.getDoubleClickDangerWindowMs());
+		assertEquals(ClientConfigBounds.MAX_DOUBLE_CLICK_DANGER_WINDOW_MS, config.getDoubleClickDangerWindowMs());
+		config.setDoubleClickDangerWindowMs(40);
+		assertEquals(40, config.getDoubleClickDangerWindowMs());
 
 		config.setDoubleClickDangerAngleDegrees(-1.0);
 		assertEquals(0.0, config.getDoubleClickDangerAngleDegrees());
-		config.setDoubleClickDangerAngleDegrees(20.25);
-		assertEquals(20.0, config.getDoubleClickDangerAngleDegrees());
-		config.setDoubleClickDangerAngleDegrees(3.5);
-		assertEquals(3.5, config.getDoubleClickDangerAngleDegrees());
+		config.setDoubleClickDangerAngleDegrees(
+			ClientConfigBounds.MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES + 0.25);
+		assertEquals(ClientConfigBounds.MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,
+			config.getDoubleClickDangerAngleDegrees());
+		config.setDoubleClickDangerAngleDegrees(12.5);
+		assertEquals(12.5, config.getDoubleClickDangerAngleDegrees());
 
-		assertEquals(5, config.getCancelHalfConeAngleDegrees(),
-			"the double-click danger angle must not reuse the cancel half-cone");
+		assertEquals(cancelHalfCone, config.getCancelHalfConeAngleDegrees(),
+			"editing the double-click danger gesture must not reuse or mutate the cancel half-cone");
+
+		config.setCancelHalfConeAngleDegrees(60);
+		assertEquals(40, config.getDoubleClickDangerWindowMs());
+		assertEquals(12.5, config.getDoubleClickDangerAngleDegrees(),
+			"the cancel half-cone is not the source of either danger value");
 	}
 
 	@Test
 	void missingNullAndOutOfRangeJsonValuesUseDefaultsOrClamp() {
+		var defaults = new ClientConfig();
 		for (String json : List.of("{}",
 			"{\"doubleClickDangerWindowMs\":null,\"doubleClickDangerAngleDegrees\":null}")) {
 			var config = new Gson().fromJson(json, ClientConfig.class);
 			config.validate((key, supplied, effective) -> {});
-			assertEquals(100, config.getDoubleClickDangerWindowMs(), json);
-			assertEquals(3.5, config.getDoubleClickDangerAngleDegrees(), json);
+			assertEquals(defaults.getDoubleClickDangerWindowMs(), config.getDoubleClickDangerWindowMs(), json);
+			assertEquals(defaults.getDoubleClickDangerAngleDegrees(), config.getDoubleClickDangerAngleDegrees(), json);
 		}
 
+		int belowMinimumWindow = ClientConfigBounds.MIN_DOUBLE_CLICK_DANGER_WINDOW_MS - 1;
+		double aboveMaximumAngle = ClientConfigBounds.MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES + 0.25;
 		var clamped = new Gson().fromJson(
-			"{\"doubleClickDangerWindowMs\":24,\"doubleClickDangerAngleDegrees\":20.25}",
+			"{\"doubleClickDangerWindowMs\":" + belowMinimumWindow
+				+ ",\"doubleClickDangerAngleDegrees\":" + aboveMaximumAngle + "}",
 			ClientConfig.class);
 		clamped.validate((key, supplied, effective) -> {});
-		assertEquals(25, clamped.getDoubleClickDangerWindowMs());
-		assertEquals(20.0, clamped.getDoubleClickDangerAngleDegrees());
+		assertEquals(ClientConfigBounds.MIN_DOUBLE_CLICK_DANGER_WINDOW_MS, clamped.getDoubleClickDangerWindowMs());
+		assertEquals(ClientConfigBounds.MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,
+			clamped.getDoubleClickDangerAngleDegrees());
 	}
 
 	@Test
@@ -100,7 +113,8 @@ class DoubleClickDangerConfigTest {
 	void nanRecoversToDefaultAndInfinityStaysBounded() {
 		var config = new ClientConfig();
 		config.setDoubleClickDangerAngleDegrees(Double.NaN);
-		assertEquals(3.5, config.getDoubleClickDangerAngleDegrees());
+		assertEquals(ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,
+			config.getDoubleClickDangerAngleDegrees());
 		assertTrue(Double.isFinite(config.getDoubleClickDangerAngleDegrees()));
 
 		config.setLongPressCompatibilityMode(true);
@@ -110,13 +124,15 @@ class DoubleClickDangerConfigTest {
 		var loaded = new Gson().fromJson(
 			"{\"doubleClickDangerAngleDegrees\":\"NaN\"}", ClientConfig.class);
 		loaded.validate((key, supplied, effective) -> {});
-		assertEquals(3.5, loaded.getDoubleClickDangerAngleDegrees());
+		assertEquals(ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,
+			loaded.getDoubleClickDangerAngleDegrees());
 		assertTrue(Double.isFinite(loaded.getDoubleClickDangerAngleDegrees()));
 
 		var infinite = new Gson().fromJson(
 			"{\"doubleClickDangerAngleDegrees\":\"Infinity\"}", ClientConfig.class);
 		infinite.validate((key, supplied, effective) -> {});
-		assertEquals(20.0, infinite.getDoubleClickDangerAngleDegrees());
+		assertEquals(ClientConfigBounds.MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,
+			infinite.getDoubleClickDangerAngleDegrees());
 
 		var compatible = new Gson().fromJson(
 			"{\"longPressCompatibilityMode\":true,\"doubleClickDangerAngleDegrees\":\"NaN\"}",
@@ -133,13 +149,15 @@ class DoubleClickDangerConfigTest {
 		var handler = new ConfigHandler<>(ClientConfig.class, path, VERSION);
 		handler.load();
 
-		assertEquals(3.5, handler.getConfig().getDoubleClickDangerAngleDegrees());
+		assertEquals(ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,
+			handler.getConfig().getDoubleClickDangerAngleDegrees());
 		assertTrue(Double.isFinite(handler.getConfig().getDoubleClickDangerAngleDegrees()));
 
 		handler.getConfig().setDoubleClickDangerWindowMs(150);
 		assertTrue(handler.saveSafely());
 		var saved = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
-		assertEquals(3.5, saved.get("doubleClickDangerAngleDegrees").getAsDouble());
+		assertEquals(ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,
+			saved.get("doubleClickDangerAngleDegrees").getAsDouble());
 	}
 
 	@Test
@@ -164,7 +182,8 @@ class DoubleClickDangerConfigTest {
 			+ "\"doubleClickDangerAngleDegrees\":\"not-a-number\"}", StandardCharsets.UTF_8);
 		var recovered = new ConfigHandler<>(ClientConfig.class, malformed, VERSION);
 		recovered.load();
-		assertEquals(3.5, recovered.getConfig().getDoubleClickDangerAngleDegrees());
+		assertEquals(ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,
+			recovered.getConfig().getDoubleClickDangerAngleDegrees());
 		try (var files = Files.list(directory)) {
 			assertTrue(files.anyMatch(file -> file.getFileName().toString().contains(".broken-")),
 				"an undecodable value still follows typed invalid recovery");

@@ -2,6 +2,8 @@ package nx.pingwheel.common.config;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonParser;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -10,43 +12,63 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@NotNullByDefault
 class GestureSkipHoldConfigTest {
 	private static final String VERSION = "0.5.0-pfi-beta1";
 
-	@Test void freshMissingAndNullPreferencesAreOptInWithSeventyFiveMillis() {
+	@Test void missingAndNullPreferencesStayOptInAndUseTheFreshModelWait() {
+		var fresh = new SpatialSelectorSettings();
+		assertFalse(fresh.isGestureSkipHoldEnabled());
 		for (String json : List.of("{}", "{\"gestureSkipHoldEnabled\":null,\"gestureSkipHoldMillis\":null}")) {
 			var selector = new Gson().fromJson(json, SpatialSelectorSettings.class);
 			selector.validate();
-			assertFalse(selector.isGestureSkipHoldEnabled()); assertEquals(75, selector.getGestureSkipHoldMillis());
-			assertFalse(selector.snapshot().gestureSkipHoldEnabled()); assertEquals(75, selector.snapshot().gestureSkipHoldMillis());
+			assertFalse(selector.isGestureSkipHoldEnabled());
+			assertEquals(fresh.getGestureSkipHoldMillis(), selector.getGestureSkipHoldMillis());
+			assertFalse(selector.snapshot().gestureSkipHoldEnabled());
+			assertEquals(fresh.snapshot().gestureSkipHoldMillis(), selector.snapshot().gestureSkipHoldMillis());
 		}
 		var config = new ClientConfig(); assertFalse(config.isGestureSkipHoldEnabled());
-		assertEquals(75, config.getSpatialSelector().getGestureSkipHoldMillis());
+		assertEquals(fresh.getGestureSkipHoldMillis(), config.getSpatialSelector().getGestureSkipHoldMillis());
 	}
 
-	@Test void continuousTimeClampsAtTwentyFiveAndTwoHundredAndFreezesWithThePreference() {
-		for (int value : List.of(Integer.MIN_VALUE, 24, 25, 26, 74, 75, 76, 199, 200, 201, Integer.MAX_VALUE)) {
+	@Test void continuousTimeClampsAtBothBoundsAndFreezesWithThePreference() {
+		int minimum = SpatialSelectorSettings.MIN_GESTURE_SKIP_HOLD_MILLIS;
+		int maximum = SpatialSelectorSettings.MAX_GESTURE_SKIP_HOLD_MILLIS;
+		int interior = minimum + (maximum - minimum) / 2;
+		@Unmodifiable Map<Integer, Integer> boundaries = Map.of(
+			Integer.MIN_VALUE, minimum,
+			minimum - 1, minimum,
+			minimum, minimum,
+			interior, interior,
+			maximum, maximum,
+			maximum + 1, maximum,
+			Integer.MAX_VALUE, maximum);
+		for (var boundary : boundaries.entrySet()) {
+			int value = boundary.getKey();
+			int expected = boundary.getValue();
 			var selector = new Gson().fromJson("{\"gestureSkipHoldEnabled\":true,\"gestureSkipHoldMillis\":" + value + "}",
 				SpatialSelectorSettings.class);
-			int expected = Math.clamp(value, 25, 200);
 			var frozen = selector.snapshot(); selector.validate();
 			assertEquals(expected, selector.getGestureSkipHoldMillis()); assertEquals(expected, frozen.gestureSkipHoldMillis());
 			assertTrue(frozen.gestureSkipHoldEnabled());
-			selector.setGestureSkipHoldMillis(150); selector.setGestureSkipHoldEnabled(false);
+			selector.setGestureSkipHoldMillis(expected == minimum ? maximum : minimum); selector.setGestureSkipHoldEnabled(false);
 			assertEquals(expected, frozen.gestureSkipHoldMillis()); assertTrue(frozen.gestureSkipHoldEnabled());
 			selector.setGestureSkipHoldMillis(value); assertEquals(expected, selector.getGestureSkipHoldMillis());
 		}
 	}
 
 	@Test void previousSnapshotConstructorsKeepTheShortcutDisabled() {
+		var fresh = new SpatialSelectorSettings().snapshot();
 		var prior = new SpatialSelectorSettings.Snapshot(24, 50, 180, 55,
 			false, 500, true, false, 1, new java.math.BigDecimal("1.5"), 130, 50, true);
-		assertTrue(prior.contentIntentEnabled()); assertFalse(prior.gestureSkipHoldEnabled()); assertEquals(75, prior.gestureSkipHoldMillis());
+		assertTrue(prior.contentIntentEnabled()); assertFalse(prior.gestureSkipHoldEnabled());
+		assertEquals(fresh.gestureSkipHoldMillis(), prior.gestureSkipHoldMillis());
 		var older = new SpatialSelectorSettings.Snapshot(24, 50, 180, 55, false, 500, true, false);
-		assertFalse(older.gestureSkipHoldEnabled()); assertEquals(75, older.gestureSkipHoldMillis());
+		assertFalse(older.gestureSkipHoldEnabled()); assertEquals(fresh.gestureSkipHoldMillis(), older.gestureSkipHoldMillis());
 	}
 
 	@Test void compatibilityClearsTheOriginalChoiceAndNeverRestoresIt() {

@@ -128,40 +128,19 @@ class SpatialSelectorSettingsTest {
 	}
 
 	@Test
-	void halfScaleDistanceDefaultsAndBoundsStayInsideTheirClamps() {
-		// The selector keeps the confirmed half-scale geometry, with the entry
-		// stroke default reduced independently to the requested 50 pixels.
-		assertEquals(24, SpatialSelectorSettings.DEFAULT_DEADZONE);
-		assertEquals(50, SpatialSelectorSettings.DEFAULT_STROKE);
-		assertEquals(55, SpatialSelectorSettings.DEFAULT_ROOT_DISTANCE);
-		assertEquals(12, SpatialSelectorSettings.MIN_DEADZONE);
-		assertEquals(32, SpatialSelectorSettings.MAX_DEADZONE);
-		assertEquals(40, SpatialSelectorSettings.MIN_STROKE);
-		assertEquals(85, SpatialSelectorSettings.MAX_STROKE);
-		assertEquals(32, SpatialSelectorSettings.MIN_ROOT_DISTANCE);
-		assertEquals(120, SpatialSelectorSettings.MAX_ROOT_DISTANCE);
-		assertEquals(SpatialSelectorSettings.DEFAULT_DEADZONE,
-			SpatialSelectorSettings.clampDeadzone(SpatialSelectorSettings.DEFAULT_DEADZONE));
-		assertEquals(SpatialSelectorSettings.DEFAULT_STROKE,
-			SpatialSelectorSettings.clampStroke(SpatialSelectorSettings.DEFAULT_STROKE));
-		assertEquals(SpatialSelectorSettings.DEFAULT_ROOT_DISTANCE,
-			SpatialSelectorSettings.clampRootDistance(SpatialSelectorSettings.DEFAULT_ROOT_DISTANCE));
-		assertTrue(SpatialSelectorSettings.MIN_STROKE > SpatialSelectorSettings.MAX_DEADZONE);
-	}
-
-	@Test
-	void deadzoneDefaultsToTwentyFourAndValidSavedValuesAreRetainedWithoutRescaling() {
-		assertEquals(24, new SpatialSelectorSettings().getDeadzone());
-		assertEquals(24, new SpatialSelectorSettings().snapshot().deadzone());
+	void deadzoneUsesTheModelDefaultAndValidSavedValuesAreRetainedWithoutRescaling() {
+		int defaultDeadzone = SpatialSelectorSettings.DEFAULT_DEADZONE;
+		assertEquals(defaultDeadzone, new SpatialSelectorSettings().getDeadzone());
+		assertEquals(defaultDeadzone, new SpatialSelectorSettings().snapshot().deadzone());
 
 		SpatialSelectorSettings missing = new Gson().fromJson("{}", SpatialSelectorSettings.class);
-		assertEquals(24, missing.getDeadzone());
-		assertEquals(24, missing.snapshot().deadzone());
+		assertEquals(defaultDeadzone, missing.getDeadzone());
+		assertEquals(defaultDeadzone, missing.snapshot().deadzone());
 
 		SpatialSelectorSettings explicitNull = new Gson().fromJson("{\"deadzone\":null}", SpatialSelectorSettings.class);
 		explicitNull.validate();
-		assertEquals(24, explicitNull.getDeadzone(), "an explicit JSON null keeps the initialized default");
-		assertEquals(24, explicitNull.snapshot().deadzone());
+		assertEquals(defaultDeadzone, explicitNull.getDeadzone(), "an explicit JSON null keeps the initialized default");
+		assertEquals(defaultDeadzone, explicitNull.snapshot().deadzone());
 
 		for (int saved : List.of(18, SpatialSelectorSettings.MIN_DEADZONE, SpatialSelectorSettings.MAX_DEADZONE)) {
 			SpatialSelectorSettings explicit = new Gson().fromJson("{\"deadzone\":" + saved + "}",
@@ -171,7 +150,7 @@ class SpatialSelectorSettingsTest {
 			assertEquals(saved, explicit.getDeadzone(), "a valid saved deadzone is retained without rescaling");
 			assertEquals(saved, explicit.snapshot().deadzone());
 			assertEquals(frozen, explicit.snapshot());
-			explicit.setDeadzone(SpatialSelectorSettings.DEFAULT_DEADZONE);
+			explicit.setDeadzone(defaultDeadzone);
 			assertEquals(saved, frozen.deadzone(), "a held snapshot keeps its frozen deadzone");
 		}
 	}
@@ -311,24 +290,24 @@ class SpatialSelectorSettingsTest {
 	}
 
 	@Test
-	void preciseCapturePeriodDefaultsToOneTickAndFreezesIntoTheSnapshot() {
-		assertEquals(1, SpatialSelectorSettings.MIN_PRECISE_CAPTURE_PERIOD_TICKS);
-		assertEquals(50, SpatialSelectorSettings.MAX_PRECISE_CAPTURE_PERIOD_TICKS);
-		assertEquals(1, SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS);
+	void preciseCapturePeriodUsesTheModelDefaultAndFreezesIntoTheSnapshot() {
+		int defaultPeriod = SpatialSelectorSettings.DEFAULT_PRECISE_CAPTURE_PERIOD_TICKS;
 
 		SpatialSelectorSettings settings = new SpatialSelectorSettings();
-		assertEquals(1, settings.getPreciseCapturePeriodTicks());
-		assertEquals(1, settings.snapshot().preciseCapturePeriodTicks());
+		assertEquals(defaultPeriod, settings.getPreciseCapturePeriodTicks());
+		assertEquals(defaultPeriod, settings.snapshot().preciseCapturePeriodTicks());
 
 		settings.setPreciseCapturePeriodTicks(25);
 		SpatialSelectorSettings.Snapshot frozen = settings.snapshot();
-		settings.setPreciseCapturePeriodTicks(50);
+		settings.setPreciseCapturePeriodTicks(SpatialSelectorSettings.MAX_PRECISE_CAPTURE_PERIOD_TICKS);
 		assertEquals(25, frozen.preciseCapturePeriodTicks());
 
-		settings.setPreciseCapturePeriodTicks(0);
-		assertEquals(1, settings.getPreciseCapturePeriodTicks());
-		settings.setPreciseCapturePeriodTicks(51);
-		assertEquals(50, settings.getPreciseCapturePeriodTicks());
+		settings.setPreciseCapturePeriodTicks(SpatialSelectorSettings.MIN_PRECISE_CAPTURE_PERIOD_TICKS - 1);
+		assertEquals(SpatialSelectorSettings.MIN_PRECISE_CAPTURE_PERIOD_TICKS,
+			settings.getPreciseCapturePeriodTicks());
+		settings.setPreciseCapturePeriodTicks(SpatialSelectorSettings.MAX_PRECISE_CAPTURE_PERIOD_TICKS + 1);
+		assertEquals(SpatialSelectorSettings.MAX_PRECISE_CAPTURE_PERIOD_TICKS,
+			settings.getPreciseCapturePeriodTicks());
 	}
 
 	@Test

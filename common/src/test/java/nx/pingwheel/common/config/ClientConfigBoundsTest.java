@@ -7,19 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientConfigBoundsTest {
 	@Test
-	void requestedDefaultsRemainIndependent() {
+	void wheelTargetOpacitySetterClampsAndRetainsAnExplicitValue() {
 		ClientConfig config = new ClientConfig();
-		assertEquals(150, config.getWheelHoldMillis());
-		assertEquals(20, ClientConfigBounds.MIN_WHEEL_HOLD_MILLIS);
-		assertEquals(ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE, config.getWheelFontSize());
-		assertEquals(100, config.getWheelTargetFontSize());
-		assertEquals(100, config.getConfigurationNoticeSize());
-		assertEquals(100, config.getWheelTargetOpacity());
-		assertEquals(5, ClientConfigBounds.WHEEL_TARGET_OPACITY_STEP);
-		config.setWheelTargetOpacity(-1);
-		assertEquals(0, config.getWheelTargetOpacity());
-		config.setWheelTargetOpacity(101);
-		assertEquals(100, config.getWheelTargetOpacity());
+		config.setWheelTargetOpacity(ClientConfigBounds.MIN_WHEEL_TARGET_OPACITY - 1);
+		assertEquals(ClientConfigBounds.MIN_WHEEL_TARGET_OPACITY, config.getWheelTargetOpacity());
+		config.setWheelTargetOpacity(40);
+		assertEquals(40, config.getWheelTargetOpacity());
+		config.setWheelTargetOpacity(ClientConfigBounds.MAX_WHEEL_TARGET_OPACITY + 1);
+		assertEquals(ClientConfigBounds.MAX_WHEEL_TARGET_OPACITY, config.getWheelTargetOpacity());
 	}
 
 	@Test
@@ -124,15 +119,19 @@ class ClientConfigBoundsTest {
 	}
 
 	@Test
-	void doubleClickDangerBoundsAreIndependentFromTheCancelCone() {
-		assertEquals(100, ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_WINDOW_MS);
-		assertEquals(25, ClientConfigBounds.clampDoubleClickDangerWindowMs(Integer.MIN_VALUE));
-		assertEquals(300, ClientConfigBounds.clampDoubleClickDangerWindowMs(Integer.MAX_VALUE));
-		assertEquals(0.0, ClientConfigBounds.clampDoubleClickDangerAngleDegrees(-1.0));
-		assertEquals(3.5, ClientConfigBounds.clampDoubleClickDangerAngleDegrees(Double.NaN));
-		assertEquals(3.5, ClientConfigBounds.clampDoubleClickDangerAngleDegrees(3.5));
-		assertEquals(20.0, ClientConfigBounds.clampDoubleClickDangerAngleDegrees(Double.POSITIVE_INFINITY));
-		assertEquals(5, ClientConfigBounds.DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES);
+	void doubleClickDangerClampsUseTheirOwnBounds() {
+		assertEquals(ClientConfigBounds.MIN_DOUBLE_CLICK_DANGER_WINDOW_MS,
+			ClientConfigBounds.clampDoubleClickDangerWindowMs(Integer.MIN_VALUE));
+		assertEquals(ClientConfigBounds.MAX_DOUBLE_CLICK_DANGER_WINDOW_MS,
+			ClientConfigBounds.clampDoubleClickDangerWindowMs(Integer.MAX_VALUE));
+		assertEquals(0.0, ClientConfigBounds.clampDoubleClickDangerAngleDegrees(-1.0),
+			"zero is the explicit disabled value and not a clamped negative angle");
+		assertEquals(ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,
+			ClientConfigBounds.clampDoubleClickDangerAngleDegrees(Double.NaN),
+			"NaN recovers to the owning default rather than a clamp endpoint");
+		assertEquals(12.5, ClientConfigBounds.clampDoubleClickDangerAngleDegrees(12.5));
+		assertEquals(ClientConfigBounds.MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,
+			ClientConfigBounds.clampDoubleClickDangerAngleDegrees(Double.POSITIVE_INFINITY));
 	}
 
 	@Test

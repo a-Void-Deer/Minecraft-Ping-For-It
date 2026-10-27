@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.config.SpatialSelectorSettings;
@@ -17,6 +18,7 @@ import nx.pingwheel.common.render.SpatialInventoryView.Status;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@NotNullByDefault
 class NativeSelectorInputTest {
 	private static final class Sink implements NativeSelectorInput.Sink {
 		final List<SpatialController.Point> moves = new ArrayList<>();
@@ -26,6 +28,14 @@ class NativeSelectorInputTest {
 	}
 	private static NativeSelectorInput.Frame frame(int width, int guiWidth, boolean focused, boolean grabbed) {
 		return new NativeSelectorInput.Frame(7, width, 800, guiWidth, 400, focused, grabbed);
+	}
+	private static SpatialSelectorSettings navigationPreferences() {
+		var preferences = new SpatialSelectorSettings();
+		// Only establish the branch-entry geometry and timing used by these scenarios.
+		preferences.setDeadzone(18);
+		preferences.setStroke(50);
+		preferences.setDwellMillis(120);
+		return preferences;
 	}
 
 	@Test void nativeOwnershipGatesMovementAndEveryScrollWithoutChangingVanillaCapture() {
@@ -89,42 +99,49 @@ class NativeSelectorInputTest {
 				new SpatialSelectorSession.InventoryRow<>("b", "b", 2L, "minecraft:stone", Status.READY, "opaque:b"),
 				new SpatialSelectorSession.InventoryRow<>("c", "c", 1L, "minecraft:stone", Status.READY, "opaque:c")),
 			List.of(attention), attention);
-		var preferences = new SpatialSelectorSettings();
+		var preferences = navigationPreferences();
 		var session = new SpatialSelectorSession<>(target, Map.of(), preferences.snapshot(), fence,
 			(ignored, requestedFence) -> new SpatialSelectorSession.ContentProjection<>(fence, 1, false, Status.READY, List.of(), preview),
 			new SpatialSelectorSession.ListGeometry(3, 180, 17, 20, 19, 85));
-		session.open(0); session.moveGui(100, -100, 1); session.tick(181);
-		session.moveGui(100, 0, 182); session.tick(362);
+		session.open(0);
+		long contentMoveAt = 1L;
+		session.moveGui(100, -100, contentMoveAt);
+		long contentEnteredAt = contentMoveAt + preferences.getDwellMillis();
+		session.tick(contentEnteredAt);
+		long inventoryMoveAt = contentEnteredAt + 1L;
+		session.moveGui(100, 0, inventoryMoveAt);
+		long inventoryEnteredAt = inventoryMoveAt + preferences.getDwellMillis();
+		session.tick(inventoryEnteredAt);
 		assertTrue(session.snapshot().inventory().open());
 		double axis = session.snapshot().radial().pointer().x();
-		session.constrainPointer(new SpatialController.Viewport(600, 81, -axis, -0.5), 363);
+		session.constrainPointer(new SpatialController.Viewport(600, 81, -axis, -0.5), inventoryEnteredAt + 1L);
 		var pointer = session.snapshot().radial().pointer(); var trail = session.snapshot().radial().trail();
 		var owned = frame(1200, 600, true, false);
 		var input = new NativeSelectorInput(session); input.open();
-		input.onMove(7, 100, 100, owned, 364); // prime, not input
-		input.onMove(8, 100, 10000, owned, 365); // foreign window, not a new baseline
-		input.onMove(7, 100, 138, owned, 366); // 38 window px = 19 GUI px, below the absolute first-row boundary
+		input.onMove(7, 100, 100, owned, inventoryEnteredAt + 2L); // prime, not input
+		input.onMove(8, 100, 10000, owned, inventoryEnteredAt + 3L); // foreign window, not a new baseline
+		input.onMove(7, 100, 138, owned, inventoryEnteredAt + 4L); // 38 window px = 19 GUI px, below the absolute first-row boundary
 		assertEquals("a", session.snapshot().inventory().selectedKey());
-		input.onMove(7, 100, 140, owned, 367);
+		input.onMove(7, 100, 140, owned, inventoryEnteredAt + 5L);
 		assertEquals("b", session.snapshot().inventory().selectedKey());
 		var rescaled = new NativeSelectorInput.Frame(7, 1200, 800, 300, 200, true, false);
-		input.onMove(7, -4000, -4000, rescaled, 368);
+		input.onMove(7, -4000, -4000, rescaled, inventoryEnteredAt + 6L);
 		assertEquals("b", session.snapshot().inventory().selectedKey(), "scale handoff cannot synthesize reverse travel");
-		input.onMove(7, -4000, -3840, rescaled, 369); // 160 window px = 40 GUI px
+		input.onMove(7, -4000, -3840, rescaled, inventoryEnteredAt + 7L); // 160 window px = 40 GUI px
 		assertEquals("c", session.snapshot().inventory().selectedKey());
 		var unowned = new NativeSelectorInput.Frame(7, 1200, 800, 300, 200, true, false, false);
-		assertFalse(input.onMove(7, 5000, 5000, unowned, 370));
-		input.onMove(7, 2000, 2000, rescaled, 371);
+		assertFalse(input.onMove(7, 5000, 5000, unowned, inventoryEnteredAt + 8L));
+		input.onMove(7, 2000, 2000, rescaled, inventoryEnteredAt + 9L);
 		assertEquals("c", session.snapshot().inventory().selectedKey());
-		input.onMove(7, 2000, 1840, rescaled, 372);
+		input.onMove(7, 2000, 1840, rescaled, inventoryEnteredAt + 10L);
 		assertEquals("b", session.snapshot().inventory().selectedKey(), "native reversal moves immediately from the endpoint");
 		input.synchronize(new NativeSelectorInput.Frame(7, 1200, 800, 300, 200, false, false));
-		input.onMove(7, -1000, -1000, rescaled, 373);
+		input.onMove(7, -1000, -1000, rescaled, inventoryEnteredAt + 11L);
 		assertEquals("b", session.snapshot().inventory().selectedKey(), "focus handoff primes without travel");
 		assertEquals(pointer.x(), session.snapshot().radial().pointer().x());
 		assertEquals(pointer.y() + 20, session.snapshot().radial().pointer().y());
 		assertEquals(trail, session.snapshot().radial().trail());
-		var intent = assertInstanceOf(SelectorIntent.SelectInventory.class, session.releaseIntent(374));
+		var intent = assertInstanceOf(SelectorIntent.SelectInventory.class, session.releaseIntent(inventoryEnteredAt + 12L));
 		assertEquals("opaque:b", intent.reference());
 	}
 
@@ -138,34 +155,37 @@ class NativeSelectorInputTest {
 		var preview = new SpatialSelectorSession.InventoryPreview<String>("inventory", Status.READY,
 			List.of(new SpatialSelectorSession.InventoryRow<>("a", "a", 3L, "minecraft:stone", Status.READY, "opaque:a")),
 			List.of(attention), attention);
-		var preferences = new SpatialSelectorSettings();
-		preferences.setDeadzone(18); // explicit geometry and timing, not an accidental default
-		preferences.setStroke(50);
-		preferences.setDwellMillis(180);
+		var preferences = navigationPreferences();
 		preferences.setHoverEnabled(false);
 		var session = new SpatialSelectorSession<String>(target, Map.of(), preferences.snapshot(), fence,
 			(ignored, requestedFence) -> new SpatialSelectorSession.ContentProjection<>(fence, 1, false, Status.READY,
 				List.of(), preview),
 			new SpatialSelectorSession.ListGeometry(3, 180, 17, 20, 19, 85));
-		session.open(0); session.moveGui(200, -200, 1); session.tick(181);
+		session.open(0);
+		long contentMoveAt = 1L;
+		session.moveGui(200, -200, contentMoveAt);
+		long contentEnteredAt = contentMoveAt + preferences.getDwellMillis();
+		session.tick(contentEnteredAt);
 		assertEquals(2, session.snapshot().radial().menus().size(), "helper precondition: content entered");
 
 		var owned = new NativeSelectorInput.Frame(7, 1200, 800, 600, 400, true, false);
 		var input = new NativeSelectorInput(session);
 		input.open();
 		input.prime(600, 400, owned); // priming the cursor warp contributes no travel
+		long nativeMoveAt = contentEnteredAt + 1L;
 		for (int windowPixel = 1; windowPixel <= 96; windowPixel++) {
-			input.onMove(7, 600 - windowPixel, 400 + windowPixel, owned, 182L + windowPixel); // each axis advances half a GUI pixel
+			input.onMove(7, 600 - windowPixel, 400 + windowPixel, owned, nativeMoveAt + windowPixel); // each axis advances half a GUI pixel
 		}
 		assertEquals(2, session.snapshot().radial().menus().size(), "96 diagonal samples remain below the net return distance");
-		input.onMove(7, 503, 497, owned, 279L);
+		long returnedAt = nativeMoveAt + 97L;
+		input.onMove(7, 503, 497, owned, returnedAt);
 
 		var returned = session.snapshot().radial();
 		assertEquals(1, returned.menus().size(), "fractional native samples accumulate into one return");
 		assertEquals(151.5, returned.pointer().x(), 1e-9, "the first diagonal sample crossing the net return distance returns");
 		assertEquals(-151.5, returned.pointer().y(), 1e-9);
 		for (int windowPixel = 1; windowPixel <= 40; windowPixel++) {
-			input.onMove(7, 503 - windowPixel, 497 + windowPixel, owned, 279L + windowPixel);
+			input.onMove(7, 503 - windowPixel, 497 + windowPixel, owned, returnedAt + windowPixel);
 		}
 		assertEquals(1, session.snapshot().radial().menus().size(), "further reverse samples cannot pop another level");
 	}
@@ -181,12 +201,19 @@ class NativeSelectorInputTest {
 			List.of(new SpatialSelectorSession.InventoryRow<>("a", "a", 3L, "minecraft:stone", Status.READY, "opaque:a"),
 				new SpatialSelectorSession.InventoryRow<>("b", "b", 2L, "minecraft:stone", Status.READY, "opaque:b")),
 			List.of(attention), attention);
-		var preferences = new SpatialSelectorSettings();
+		var preferences = navigationPreferences();
 		var session = new SpatialSelectorSession<>(target, Map.of(), preferences.snapshot(), fence,
 			(ignored, requestedFence) -> new SpatialSelectorSession.ContentProjection<>(fence, 1, false, Status.READY, List.of(), preview),
 			new SpatialSelectorSession.ListGeometry(3, 180, 17, 20, 19, 85));
-		session.open(0); session.moveGui(100, -100, 1); session.tick(181);
-		session.moveGui(100, 0, 182); session.tick(362);
+		session.open(0);
+		long contentMoveAt = 1L;
+		session.moveGui(100, -100, contentMoveAt);
+		long contentEnteredAt = contentMoveAt + preferences.getDwellMillis();
+		session.tick(contentEnteredAt);
+		long inventoryMoveAt = contentEnteredAt + 1L;
+		session.moveGui(100, 0, inventoryMoveAt);
+		long inventoryEnteredAt = inventoryMoveAt + preferences.getDwellMillis();
+		session.tick(inventoryEnteredAt);
 		assertTrue(session.snapshot().inventory().open());
 		var before = session.snapshot().radial();
 
@@ -194,7 +221,7 @@ class NativeSelectorInputTest {
 		var input = new NativeSelectorInput(session);
 		input.open(); input.prime(600, 400, owned);
 		for (int sample = 0; sample < 2000; sample++) {
-			input.onMove(7, 600 + (sample % 2 == 0 ? 2 : 0), 400, owned, 400L + sample);
+			input.onMove(7, 600 + (sample % 2 == 0 ? 2 : 0), 400, owned, inventoryEnteredAt + 1L + sample);
 			assertEquals(before.pointer().x() + (sample % 2 == 0 ? 1 : 0), session.snapshot().radial().pointer().x());
 		}
 

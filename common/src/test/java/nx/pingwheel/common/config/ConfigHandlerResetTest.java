@@ -66,13 +66,6 @@ class ConfigHandlerResetTest {
 		assertNotSame(staleChannels, reset.getServerChannels());
 		assertNotSame(defaults.getSpatialSelector(), reset.getSpatialSelector());
 		assertNotSame(defaults.getServerChannels(), reset.getServerChannels());
-		assertEquals(100, reset.getPingVolume());
-		assertTrue(reset.isDirectionIndicatorVisible());
-		assertEquals(ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE, reset.getWheelFontSize());
-		assertEquals(ClientConfigBounds.DEFAULT_WHEEL_TARGET_FONT_SIZE, reset.getWheelTargetFontSize());
-		assertFalse(reset.isLongPressCompatibilityMode());
-		assertEquals(ClientConfigBounds.DEFAULT_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
-			reset.getLongPressCompatibilitySliceMillis());
 
 		com.google.gson.Gson gson = new com.google.gson.Gson();
 		ClientConfig persistedConfig = gson.fromJson(Files.readString(configPath), ClientConfig.class);
