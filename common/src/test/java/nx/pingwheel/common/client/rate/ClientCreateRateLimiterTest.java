@@ -10,9 +10,9 @@ import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 class ClientCreateRateLimiterTest {
 
 	@Test
-	void defaultAllowsExactlyFiveImmediateCreates() {
+	void explicitFiveTokenPolicyAllowsExactlyFiveImmediateCreates() {
 		ManualTime time = new ManualTime();
-		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time);
+		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(5, 1000));
 
 		for (int i = 0; i < 5; i++) {
 			assertTrue(limiter.tryAcquire());
@@ -24,7 +24,7 @@ class ClientCreateRateLimiterTest {
 	@Test
 	void refillUsesExactBoundaryAndPreservesRemainder() {
 		ManualTime time = new ManualTime();
-		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time);
+		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(5, 1000));
 
 		for (int i = 0; i < 5; i++) {
 			assertTrue(limiter.tryAcquire());
@@ -43,7 +43,7 @@ class ClientCreateRateLimiterTest {
 	@Test
 	void refillCapsAtTheConfiguredLimit() {
 		ManualTime time = new ManualTime();
-		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time);
+		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(5, 1000));
 
 		for (int i = 0; i < 5; i++) {
 			assertTrue(limiter.tryAcquire());
@@ -85,7 +85,7 @@ class ClientCreateRateLimiterTest {
 	@Test
 	void rollbackClampsElapsedToZero() {
 		ManualTime time = new ManualTime();
-		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time);
+		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(5, 1000));
 
 		for (int i = 0; i < 5; i++) {
 			assertTrue(limiter.tryAcquire());
@@ -102,7 +102,7 @@ class ClientCreateRateLimiterTest {
 	@Test
 	void equalPolicyUpdatePreservesTheExistingBucket() {
 		ManualTime time = new ManualTime();
-		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time);
+		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(5, 1000));
 
 		for (int i = 0; i < 5; i++) {
 			assertTrue(limiter.tryAcquire());
@@ -114,7 +114,7 @@ class ClientCreateRateLimiterTest {
 	@Test
 	void changedPolicyRetainsTimestampHistory() {
 		ManualTime time = new ManualTime();
-		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time);
+		ClientCreateRateLimiter limiter = new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(5, 1000));
 
 		assertTrue(limiter.tryAcquire());
 		assertTrue(limiter.tryAcquire());
@@ -128,14 +128,14 @@ class ClientCreateRateLimiterTest {
 	@Test
 	void aFreshLimiterStartsWithAFullBucket() {
 		ManualTime time = new ManualTime();
-		ClientCreateRateLimiter exhausted = new ClientCreateRateLimiter(time);
+		ClientCreateRateLimiter exhausted = new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(5, 1000));
 
 		for (int i = 0; i < 5; i++) {
 			assertTrue(exhausted.tryAcquire());
 		}
 		assertFalse(exhausted.tryAcquire());
 
-		ClientCreateRateLimiter fresh = new ClientCreateRateLimiter(time);
+		ClientCreateRateLimiter fresh = new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(5, 1000));
 		assertTrue(fresh.tryAcquire());
 	}
 

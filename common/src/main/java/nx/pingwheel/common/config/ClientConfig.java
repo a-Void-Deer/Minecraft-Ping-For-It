@@ -10,6 +10,8 @@ import nx.pingwheel.common.client.outline.BlockDisplayWhitelist;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.HashMap;
 import java.util.List;
@@ -23,39 +25,39 @@ import static nx.pingwheel.common.Global.LOGGER;
 @ToString
 @EqualsAndHashCode
 public class ClientConfig implements IConfig {
-	int pingVolume = 100;
-	int pingDistance = 2048;
-	boolean itemIconVisible = true;
-	boolean directionIndicatorVisible = true;
-	boolean markTransparentBlocks = true;
-	boolean markBlacklistedTargets = false;
-	boolean markFluids = false;
-	PlayerInfoMode playerInfoMode = PlayerInfoMode.HOLD;
-	TeamColorMode teamColorMode = TeamColorMode.FULL;
-	EntityBlockRenderMode entityBlockRenderMode = EntityBlockRenderMode.ALL;
+	int pingVolume = ConfigDefaults.Client.PING_VOLUME;
+	int pingDistance = ConfigDefaults.Client.PING_DISTANCE;
+	boolean itemIconVisible = ConfigDefaults.Client.ITEM_ICON_VISIBLE;
+	boolean directionIndicatorVisible = ConfigDefaults.Client.DIRECTION_INDICATOR_VISIBLE;
+	boolean markTransparentBlocks = ConfigDefaults.Client.MARK_TRANSPARENT_BLOCKS;
+	boolean markBlacklistedTargets = ConfigDefaults.Client.MARK_BLACKLISTED_TARGETS;
+	boolean markFluids = ConfigDefaults.Client.MARK_FLUIDS;
+	@Nullable PlayerInfoMode playerInfoMode = ConfigDefaults.Client.PLAYER_INFO_MODE;
+	@Nullable TeamColorMode teamColorMode = ConfigDefaults.Client.TEAM_COLOR_MODE;
+	@Nullable EntityBlockRenderMode entityBlockRenderMode = ConfigDefaults.Client.ENTITY_BLOCK_RENDER_MODE;
 	/** Client-local spatial gesture and appearance preferences; additive with defaults. */
-	SpatialSelectorSettings spatialSelector = new SpatialSelectorSettings();
-	int pingSize = 100;
-	int configurationNoticeSize = ClientConfigBounds.DEFAULT_CONFIGURATION_NOTICE_SIZE;
-	int wheelHoldMillis = ClientConfigBounds.DEFAULT_WHEEL_HOLD_MILLIS;
-	boolean longPressCompatibilityMode = false;
-	int longPressCompatibilitySliceMillis = ClientConfigBounds.DEFAULT_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS;
-	int cancelHalfConeAngleDegrees = ClientConfigBounds.DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES;
+	@Nullable SpatialSelectorSettings spatialSelector = new SpatialSelectorSettings();
+	int pingSize = ConfigDefaults.Client.PING_SIZE;
+	int configurationNoticeSize = ConfigDefaults.Client.CONFIGURATION_NOTICE_SIZE;
+	int wheelHoldMillis = ConfigDefaults.Client.WHEEL_HOLD_MILLIS;
+	boolean longPressCompatibilityMode = ConfigDefaults.Client.LONG_PRESS_COMPATIBILITY_MODE;
+	int longPressCompatibilitySliceMillis = ConfigDefaults.Client.LONG_PRESS_COMPATIBILITY_SLICE_MILLIS;
+	int cancelHalfConeAngleDegrees = ConfigDefaults.Client.CANCEL_HALF_CONE_ANGLE_DEGREES;
 	/** Adjacent-press window for deriving the double-click danger angle. */
-	int doubleClickDangerWindowMs = ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_WINDOW_MS;
+	int doubleClickDangerWindowMs = ConfigDefaults.Client.DOUBLE_CLICK_DANGER_WINDOW_MS;
 	/** Zero disables double-click danger; compatibility mode clears it to zero. */
-	double doubleClickDangerAngleDegrees = ClientConfigBounds.DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES;
-	int wheelOpacity = ClientConfigBounds.DEFAULT_WHEEL_OPACITY;
-	int wheelTargetOpacity = ClientConfigBounds.DEFAULT_WHEEL_TARGET_OPACITY;
+	double doubleClickDangerAngleDegrees = ConfigDefaults.Client.DOUBLE_CLICK_DANGER_ANGLE_DEGREES;
+	int wheelOpacity = ConfigDefaults.Client.WHEEL_OPACITY;
+	int wheelTargetOpacity = ConfigDefaults.Client.WHEEL_TARGET_OPACITY;
 	/** Kept as wheelFontSize in JSON: this is the radial option-label value. */
-	int wheelFontSize = ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE;
-	int wheelTargetFontSize = ClientConfigBounds.DEFAULT_WHEEL_TARGET_FONT_SIZE;
+	int wheelFontSize = ConfigDefaults.Client.WHEEL_FONT_SIZE;
+	int wheelTargetFontSize = ConfigDefaults.Client.WHEEL_TARGET_FONT_SIZE;
 	/** Zero means that each marker uses its frozen server-side duration. */
-	int markerDisplayDuration = ClientConfigBounds.DEFAULT_MARKER_DISPLAY_DURATION;
+	int markerDisplayDuration = ConfigDefaults.Client.MARKER_DISPLAY_DURATION;
 	@Setter(AccessLevel.NONE)
-	List<String> blockDisplayWhitelist = List.of("*:*");
+	@Nullable List<@Nullable String> blockDisplayWhitelist = ConfigDefaults.Client.BLOCK_DISPLAY_WHITELIST;
 	@Setter(AccessLevel.NONE)
-	List<String> blockShapeBlacklist = List.of();
+	@Nullable List<@Nullable String> blockShapeBlacklist = ConfigDefaults.Client.BLOCK_SHAPE_BLACKLIST;
 
 	@ToString.Exclude
 	@EqualsAndHashCode.Exclude
@@ -64,30 +66,30 @@ public class ClientConfig implements IConfig {
 	private transient BlockDisplayPolicy blockDisplayPolicy = BlockDisplayPolicy.defaults();
 
 	@ToString.Exclude
-	String channel = "";
+	@Nullable String channel = ConfigDefaults.Client.CHANNEL;
 	@ToString.Exclude
-	Map<String, String> serverChannels = new HashMap<>();
+	@Nullable Map<String, @Nullable String> serverChannels = new HashMap<>(ConfigDefaults.Client.SERVER_CHANNELS);
 
 	// hidden from the settings screen
-	int raycastDistance = 1024;
-	int safeZoneLeft = 5;
-	int safeZoneRight = 5;
-	int safeZoneTop = 5;
-	int safeZoneBottom = 60;
+	int raycastDistance = ConfigDefaults.Client.RAYCAST_DISTANCE;
+	int safeZoneLeft = ConfigDefaults.Client.SAFE_ZONE_LEFT;
+	int safeZoneRight = ConfigDefaults.Client.SAFE_ZONE_RIGHT;
+	int safeZoneTop = ConfigDefaults.Client.SAFE_ZONE_TOP;
+	int safeZoneBottom = ConfigDefaults.Client.SAFE_ZONE_BOTTOM;
 
 	public static final int TPS = 20;
 	public static final int MAX_PING_DISTANCE = 2048;
 	public static final int MAX_CHANNEL_LENGTH = 128;
 
-	public String getChannel() {
+	public @Nullable String getChannel() {
 		final var ip = GameContext.getCurrentServerIp();
 
-		if (ip.isPresent()) return serverChannels.getOrDefault(ip.get(), "");
+		if (ip.isPresent()) return serverChannels.getOrDefault(ip.get(), ConfigDefaults.Client.CHANNEL);
 
 		return channel;
 	}
 
-	public void setChannel(String newChannel) {
+	public void setChannel(@Nullable String newChannel) {
 		final var ip = GameContext.getCurrentServerIp();
 
 		if (ip.isPresent()) {
@@ -166,7 +168,7 @@ public class ClientConfig implements IConfig {
 	 * Updates the live local setting immediately. This setter intentionally has
 	 * no network or reconnect side effect.
 	 */
-	public void setEntityBlockRenderMode(EntityBlockRenderMode mode) {
+	public void setEntityBlockRenderMode(@Nullable EntityBlockRenderMode mode) {
 		this.entityBlockRenderMode = EntityBlockRenderMode.effective(mode);
 	}
 
@@ -208,15 +210,15 @@ public class ClientConfig implements IConfig {
 		this.wheelTargetOpacity = ClientConfigBounds.clampWheelTargetOpacity(wheelTargetOpacity);
 	}
 
-	public void setBlockDisplayWhitelist(List<String> entries) {
-		List<String> copy = validatedEntries(entries, "blockDisplayWhitelist");
+	public void setBlockDisplayWhitelist(@Nullable List<@Nullable String> entries) {
+		@Unmodifiable List<String> copy = validatedEntries(entries, "blockDisplayWhitelist");
 		BlockDisplayPolicy nextPolicy = BlockDisplayPolicy.compile(copy, blockShapeBlacklist);
 		blockDisplayWhitelist = copy;
 		blockDisplayPolicy = nextPolicy;
 	}
 
-	public void setBlockShapeBlacklist(List<String> entries) {
-		List<String> copy = validatedEntries(entries, "blockShapeBlacklist");
+	public void setBlockShapeBlacklist(@Nullable List<@Nullable String> entries) {
+		@Unmodifiable List<String> copy = validatedEntries(entries, "blockShapeBlacklist");
 		BlockDisplayPolicy nextPolicy = BlockDisplayPolicy.compile(blockDisplayWhitelist, copy);
 		blockShapeBlacklist = copy;
 		blockDisplayPolicy = nextPolicy;
@@ -226,7 +228,7 @@ public class ClientConfig implements IConfig {
 		return blockDisplayPolicy;
 	}
 
-	private static List<String> validatedEntries(List<String> entries, String fieldName) {
+	private static @Unmodifiable List<String> validatedEntries(@Nullable List<@Nullable String> entries, String fieldName) {
 		BlockDisplayWhitelist.validateEntries(entries, fieldName);
 		return List.copyOf(entries);
 	}
@@ -334,8 +336,8 @@ public class ClientConfig implements IConfig {
 			}
 		}
 
-		List<String> validatedWhitelist = validatedEntries(blockDisplayWhitelist, "blockDisplayWhitelist");
-		List<String> validatedBlacklist = validatedEntries(blockShapeBlacklist, "blockShapeBlacklist");
+		@Unmodifiable List<String> validatedWhitelist = validatedEntries(blockDisplayWhitelist, "blockDisplayWhitelist");
+		@Unmodifiable List<String> validatedBlacklist = validatedEntries(blockShapeBlacklist, "blockShapeBlacklist");
 		blockDisplayWhitelist = validatedWhitelist;
 		blockShapeBlacklist = validatedBlacklist;
 		blockDisplayPolicy = BlockDisplayPolicy.compile(validatedWhitelist, validatedBlacklist);

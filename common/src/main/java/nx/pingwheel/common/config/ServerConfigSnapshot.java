@@ -1,5 +1,7 @@
 package nx.pingwheel.common.config;
 
+import org.jetbrains.annotations.Nullable;
+
 /**
  * The small, server-authoritative view of the settings that are editable from
  * the client settings screen.  Ping distance deliberately remains a JSON-only
@@ -8,22 +10,22 @@ package nx.pingwheel.common.config;
  */
 public record ServerConfigSnapshot(
 	boolean canEdit,
-	ChannelMode defaultChannelMode,
+	@Nullable ChannelMode defaultChannelMode,
 	boolean playerTrackingEnabled,
 	int msToRegenerate,
 	int rateLimit,
 	int syncDuration,
-	InventoryConfigValues inventory,
+	@Nullable InventoryConfigValues inventory,
 	boolean budgetDelayNotificationsEnabled
 ) {
 	public ServerConfigSnapshot(
 		boolean canEdit,
-		ChannelMode defaultChannelMode,
+		@Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled,
 		int msToRegenerate,
 		int rateLimit) {
 		this(canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
-			ServerConfigBounds.DEFAULT_SYNC_DURATION);
+			ConfigDefaults.Server.SYNC_DURATION);
 	}
 
 	/** Source-compatible constructor; old Java callers get independent inventory defaults. */
@@ -40,10 +42,10 @@ public record ServerConfigSnapshot(
 
 	/** Source-compatible constructor; existing Java callers enable administrator notices. */
 	public ServerConfigSnapshot(
-		boolean canEdit, ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
-		int msToRegenerate, int rateLimit, int syncDuration, InventoryConfigValues inventory) {
+		boolean canEdit, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory) {
 		this(canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
-			syncDuration, inventory, true);
+			syncDuration, inventory, ConfigDefaults.Server.BUDGET_DELAY_NOTIFICATIONS_ENABLED);
 	}
 
 	public static ServerConfigSnapshot from(ServerConfig config, boolean canEdit) {

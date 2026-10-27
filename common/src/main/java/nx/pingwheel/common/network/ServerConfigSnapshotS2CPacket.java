@@ -3,10 +3,12 @@ package nx.pingwheel.common.network;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.ConfigDefaults;
 import nx.pingwheel.common.config.ServerConfigBounds;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.InventoryConfigValues;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import static nx.pingwheel.common.Global.S2C_NAMESPACE;
 
@@ -15,12 +17,12 @@ public record ServerConfigSnapshotS2CPacket(
 	/** The positive request id echoed by the server. */
 	long requestId,
 	boolean canEdit,
-	ChannelMode defaultChannelMode,
+	@Nullable ChannelMode defaultChannelMode,
 	boolean playerTrackingEnabled,
 	int msToRegenerate,
 	int rateLimit,
 	int syncDuration,
-	InventoryConfigValues inventory,
+	@Nullable InventoryConfigValues inventory,
 	boolean budgetDelayNotificationsEnabled
 ) implements IPacket {
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
@@ -32,12 +34,12 @@ public record ServerConfigSnapshotS2CPacket(
 	public ServerConfigSnapshotS2CPacket(
 		long requestId,
 		boolean canEdit,
-		ChannelMode defaultChannelMode,
+		@Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled,
 		int msToRegenerate,
 		int rateLimit) {
 		this(requestId, canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
-			ServerConfigBounds.DEFAULT_SYNC_DURATION);
+			ConfigDefaults.Server.SYNC_DURATION);
 	}
 
 	/** Source compatibility only; v4 wire snapshots always contain inventory. */
@@ -48,11 +50,11 @@ public record ServerConfigSnapshotS2CPacket(
 	}
 
 	/** Source compatibility only; the complete v4 wire shape includes the notice flag. */
-	public ServerConfigSnapshotS2CPacket(long requestId, boolean canEdit, ChannelMode defaultChannelMode,
+	public ServerConfigSnapshotS2CPacket(long requestId, boolean canEdit, @Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration,
-		InventoryConfigValues inventory) {
+		@Nullable InventoryConfigValues inventory) {
 		this(requestId, canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
-			syncDuration, inventory, true);
+			syncDuration, inventory, ConfigDefaults.Server.BUDGET_DELAY_NOTIFICATIONS_ENABLED);
 	}
 
 	/** Invalid values are used only by safe-decoding fallback. */

@@ -1,5 +1,7 @@
 package nx.pingwheel.common.client.rate;
 
+import nx.pingwheel.common.config.ConfigDefaults;
+
 /**
  * The client-side policy used to limit marker-create packets.
  *
@@ -9,7 +11,8 @@ package nx.pingwheel.common.client.rate;
  */
 public record ClientRateLimitPolicy(int rateLimit, int msToRegenerate) {
 
-	public static final ClientRateLimitPolicy DEFAULT = new ClientRateLimitPolicy(5, 1000);
+	public static final ClientRateLimitPolicy DEFAULT = new ClientRateLimitPolicy(
+		ConfigDefaults.Server.RATE_LIMIT, ConfigDefaults.Server.MS_TO_REGENERATE);
 
 	public ClientRateLimitPolicy {
 		if (rateLimit < 0) {

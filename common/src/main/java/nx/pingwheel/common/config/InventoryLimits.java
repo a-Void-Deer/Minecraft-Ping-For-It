@@ -11,7 +11,7 @@ package nx.pingwheel.common.config;
 public final class InventoryLimits {
 
 	/** Default shared physical scan allowance in slots per tick. */
-	public static final int DEFAULT_PHYSICAL_SLOTS_PER_TICK = 256;
+	public static final int DEFAULT_PHYSICAL_SLOTS_PER_TICK = ConfigDefaults.Inventory.PHYSICAL_SLOTS_PER_TICK;
 
 	/**
 	 * Finite hard guard used when the physical scan cap is in explicit
@@ -47,7 +47,7 @@ public final class InventoryLimits {
 	public static final int MAX_TRACKING_SLOTS_SERVER = 16384;
 
 	/** Default server-wide pending-memory bound in MiB; explicit unlimited stays finite. */
-	public static final int DEFAULT_PENDING_MEMORY_MIB = 64;
+	public static final int DEFAULT_PENDING_MEMORY_MIB = ConfigDefaults.Inventory.PENDING_MEMORY_MIB;
 	public static final int MIN_PENDING_MEMORY_MIB = 16;
 	public static final int MAX_PENDING_MEMORY_MIB = 1024;
 	public static final int INTERNAL_PENDING_MEMORY_MIB_GUARD = 4096;

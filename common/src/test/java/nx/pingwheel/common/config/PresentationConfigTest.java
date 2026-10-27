@@ -6,6 +6,7 @@ import nx.pingwheel.common.presentation.PresentationField;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.List;
 import java.util.Map;
@@ -60,6 +61,38 @@ class PresentationConfigTest {
 		assertFalse(reloaded.getPresentation().policyFor("block").allows("create:gear", true));
 		assertTrue(reloaded.getPresentation().policyFor("block").allows("minecraft:basic", true));
 		assertTrue(reloaded.getPresentation().policyFor("entity").allows("minecraft:basic", true));
+	}
+
+	@Test
+	void defaultRuleSetsAndDetachedViewsDoNotShareMutablePolicyState() {
+		PresentationSettings first = PresentationSettings.serverDefaults();
+		PresentationSettings second = PresentationSettings.serverDefaults();
+		PresentationSettings untouched = PresentationSettings.serverDefaults();
+		PresentationSettings.RuleSet supplied = first.rulesFor("block");
+		supplied.setWhitelistOnly(true);
+		supplied.setWhite(List.of("minecraft:chosen"));
+		supplied.setChildBlack(List.of());
+		assertEquals(untouched, first, "a detached rule view must not edit its source");
+		first.setRules("block", supplied);
+		supplied.setWhite(List.of("minecraft:stale"));
+		supplied.setWhitelistOnly(false);
+		assertTrue(first.policyFor("block").allows("minecraft:chosen", false));
+		assertFalse(first.policyFor("block").allows("minecraft:stale", true));
+		assertFalse(first.policyFor("block").allows("minecraft:other", true));
+		assertTrue(first.policyFor("entity").allows("minecraft:other", true));
+		assertFalse(first.policyFor("entity").allows("minecraft:other", false));
+		assertEquals(untouched, second);
+		assertEquals(untouched, PresentationSettings.serverDefaults());
+		assertFalse(second.policyFor("block").allows("minecraft:chosen", false));
+		assertTrue(second.policyFor("block").allows("minecraft:other", true));
+
+		@Unmodifiable Map<String, PresentationSettings.RuleSet> detached = first.targetTypes();
+		detached.get("block").setWhite(List.of("minecraft:other"));
+		detached.get("entity").setWhitelistOnly(true);
+		assertTrue(first.policyFor("block").allows("minecraft:chosen", false));
+		assertFalse(first.policyFor("block").allows("minecraft:other", true));
+		assertTrue(first.policyFor("entity").allows("minecraft:other", true));
+		assertFalse(second.rulesFor("block").getChildBlack().isEmpty(), "an opt-out must stay scoped");
 	}
 
 	@Test

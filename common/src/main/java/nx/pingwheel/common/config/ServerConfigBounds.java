@@ -23,7 +23,7 @@ public final class ServerConfigBounds {
 	public static final int MAX_PING_DURATION = 3600;
 
 	/** The default synchronized marker duration, in seconds. */
-	public static final int DEFAULT_SYNC_DURATION = 7;
+	public static final int DEFAULT_SYNC_DURATION = ConfigDefaults.Server.SYNC_DURATION;
 
 	/**
 	 * The smallest supported server-authoritative ping distance, in blocks.

@@ -1,6 +1,9 @@
 package nx.pingwheel.common.config;
 
+import nx.pingwheel.common.presentation.PresentationSettings;
+
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,6 +40,14 @@ class ConfigHandlerResetTest {
 		Path configPath = tempDir.resolve("client.json");
 		ConfigHandler<ClientConfig> handler = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
 		ClientConfig changed = handler.getConfig();
+		SpatialSelectorSettings staleSelector = changed.getSpatialSelector();
+		var staleChannels = changed.getServerChannels();
+		staleSelector.setDeadzone(SpatialSelectorSettings.MIN_DEADZONE);
+		staleChannels.put("first.example:25565", "team-a");
+		ClientConfig independent = new ClientConfig();
+		assertFalse(independent.getServerChannels().containsKey("first.example:25565"));
+		assertNotSame(staleSelector, independent.getSpatialSelector());
+		assertNotSame(staleChannels, independent.getServerChannels());
 		changed.setPingVolume(1);
 		changed.setDirectionIndicatorVisible(false);
 		changed.setWheelFontSize(450);
@@ -51,6 +62,10 @@ class ConfigHandlerResetTest {
 		assertNotSame(changed, reset);
 		ClientConfig defaults = new ClientConfig();
 		assertEquals(defaults, reset);
+		assertNotSame(staleSelector, reset.getSpatialSelector());
+		assertNotSame(staleChannels, reset.getServerChannels());
+		assertNotSame(defaults.getSpatialSelector(), reset.getSpatialSelector());
+		assertNotSame(defaults.getServerChannels(), reset.getServerChannels());
 		assertEquals(100, reset.getPingVolume());
 		assertTrue(reset.isDirectionIndicatorVisible());
 		assertEquals(ClientConfigBounds.DEFAULT_WHEEL_FONT_SIZE, reset.getWheelFontSize());
@@ -66,9 +81,48 @@ class ConfigHandlerResetTest {
 		// A stale settings screen may still hold the pre-reset object. Saving the
 		// handler after such a mutation must not write that object back.
 		changed.setPingVolume(2);
+		staleSelector.setDeadzone(SpatialSelectorSettings.MAX_DEADZONE);
+		staleChannels.put("stale.example:25565", "stale-channel");
 		handler.save();
 		persistedConfig = gson.fromJson(Files.readString(configPath), ClientConfig.class);
 		assertEquals(defaults, persistedConfig);
+
+		// The reset map must remain writable for the next remembered server channel.
+		reset.getServerChannels().put("next.example:25565", "next-channel");
+		reset.getSpatialSelector().setDeadzone(SpatialSelectorSettings.MAX_DEADZONE);
+		assertEquals(defaults, independent);
+		handler.save();
+		ConfigHandler<ClientConfig> reloaded = new ConfigHandler<>(ClientConfig.class, configPath, CURRENT_VERSION);
+		reloaded.load();
+		assertEquals(reset, reloaded.getConfig());
+		assertEquals("next-channel", reloaded.getConfig().getServerChannels().get("next.example:25565"));
+		assertFalse(reloaded.getConfig().getServerChannels().containsKey("stale.example:25565"));
+	}
+
+	@Test
+	void serverResetDetachesInventoryAndPresentationFromStaleEditors(@TempDir Path tempDir) throws IOException {
+		Path configPath = tempDir.resolve("server.json");
+		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		ServerConfig stale = handler.getConfig();
+		var staleInventory = stale.getInventory();
+		var stalePresentation = stale.getPresentation();
+		staleInventory.getTracking().getStreamByteMultiplier().setUnlimited(true);
+		stalePresentation.setRules("block", PresentationSettings.RuleSet.denyAll());
+		assertTrue(handler.saveSafely());
+
+		handler.resetToDefaults();
+		ServerConfig fresh = new ServerConfig();
+		assertEquals(fresh, handler.getConfig());
+		assertNotSame(staleInventory, handler.getConfig().getInventory());
+		assertNotSame(stalePresentation, handler.getConfig().getPresentation());
+		staleInventory.getPreview().getMaxSlotsPerClient().setValue(73);
+		staleInventory.getTracking().getSnapshotByteMultiplier().setValue(new BigDecimal("2.5"));
+		stalePresentation.setScanBudget(0);
+		assertTrue(handler.saveSafely());
+		ConfigHandler<ServerConfig> reloaded = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+		reloaded.load();
+		assertEquals(fresh, reloaded.getConfig());
+		assertTrue(reloaded.getConfig().getPresentation().policyFor("block").allows("minecraft:basic", true));
 	}
 
 	@Test

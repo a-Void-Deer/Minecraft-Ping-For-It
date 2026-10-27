@@ -12,8 +12,11 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 
+import nx.pingwheel.common.config.ConfigDefaults;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Server-side presentation policy: one independent field-selector rule set per
@@ -38,9 +41,8 @@ public final class PresentationSettings {
 	 * complete so its RPM formatting still receives both entries; an explicit
 	 * empty persisted list opts a target type out of these defaults.
 	 */
-	public static final List<PresentationPropertyRef> DEFAULT_CHILD_BLACK = List.of(
-		new PresentationPropertyRef("create:presentation", "create:kinetic.speed", List.of("effective_rpm")),
-		new PresentationPropertyRef("create:presentation", "create:kinetic.speed", List.of("theoretical_rpm")));
+	public static final @Unmodifiable List<PresentationPropertyRef> DEFAULT_CHILD_BLACK =
+		ConfigDefaults.Presentation.RuleSet.CHILD_BLACK;
 
 	private static final int MAX_SELECTORS = 128;
 	private static final int MAX_OVERRIDES = 128;
@@ -48,10 +50,12 @@ public final class PresentationSettings {
 	private static final int MAX_INTERVAL_TICKS = 72000;
 
 	private Map<String, RuleSet> targetTypes = new LinkedHashMap<>();
-	private int minUpdateIntervalTicks = 10;
-	private int scanBudget = 256;
-	private Map<String, Integer> permissionLevels = Map.of();
-	private Map<String, Integer> updateIntervals = Map.of();
+	private int minUpdateIntervalTicks = ConfigDefaults.Presentation.MIN_UPDATE_INTERVAL_TICKS;
+	private int scanBudget = ConfigDefaults.Presentation.SCAN_BUDGET;
+	private @Nullable @Unmodifiable Map<@Nullable String, @Nullable Integer> permissionLevels =
+		ConfigDefaults.Presentation.PERMISSION_LEVELS;
+	private @Nullable @Unmodifiable Map<@Nullable String, @Nullable Integer> updateIntervals =
+		ConfigDefaults.Presentation.UPDATE_INTERVALS;
 
 	private transient boolean invalid;
 
@@ -309,17 +313,18 @@ public final class PresentationSettings {
 	 * detached validated copy.
 	 */
 	public static final class RuleSet {
-		private List<String> white = List.of();
-		private List<String> black = List.of();
-		private boolean whitelistOnly;
-		private List<PresentationPropertyRef> childBlack = DEFAULT_CHILD_BLACK;
+		private @Nullable @Unmodifiable List<@Nullable String> white = ConfigDefaults.Presentation.RuleSet.WHITE;
+		private @Nullable @Unmodifiable List<@Nullable String> black = ConfigDefaults.Presentation.RuleSet.BLACK;
+		private boolean whitelistOnly = ConfigDefaults.Presentation.RuleSet.WHITELIST_ONLY;
+		private @Nullable @Unmodifiable List<@Nullable PresentationPropertyRef> childBlack = DEFAULT_CHILD_BLACK;
 
 		private transient boolean invalid;
 
 		public RuleSet() {}
 
-		public RuleSet(List<String> white, List<String> black, boolean whitelistOnly) {
-			this(white, black, whitelistOnly, DEFAULT_CHILD_BLACK);
+		public RuleSet(@Nullable List<@Nullable String> white, @Nullable List<@Nullable String> black,
+			boolean whitelistOnly) {
+			this(white, black, whitelistOnly, ConfigDefaults.Presentation.RuleSet.CHILD_BLACK);
 		}
 
 		public RuleSet(List<String> white, List<String> black, boolean whitelistOnly,

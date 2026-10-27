@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -366,11 +367,13 @@ class ConfigPresentationMigrationTest {
 		assertTrue(persisted.getAsJsonObject("presentation").getAsJsonObject("targetTypes").size() == 5);
 	}
 
-	@Test
-	void malformedPresentationObjectFailsClosedWithoutResettingTheConfig(@TempDir Path tempDir) throws IOException {
+	@ParameterizedTest
+	@ValueSource(strings = {"[]", "null"})
+	void malformedPresentationObjectFailsClosedWithoutResettingTheConfig(String malformed, @TempDir Path tempDir)
+		throws IOException {
 		Path configPath = tempDir.resolve("server.json");
 		Files.writeString(configPath,
-			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"presentation\":[],\"rateLimit\":3}\n",
+			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"presentation\":" + malformed + ",\"rateLimit\":3}\n",
 			StandardCharsets.UTF_8);
 
 		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);

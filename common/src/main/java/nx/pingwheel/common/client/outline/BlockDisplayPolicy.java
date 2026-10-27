@@ -6,6 +6,7 @@ import java.util.Objects;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
+import nx.pingwheel.common.config.ConfigDefaults;
 
 import static nx.pingwheel.common.client.outline.BlockModelOutlineRoute.TARGET_TYPE_BLOCK;
 import static nx.pingwheel.common.client.outline.BlockModelOutlineRoute.TARGET_TYPE_ENTITY_BLOCK;
@@ -40,7 +41,7 @@ public final class BlockDisplayPolicy {
 	 * The default policy used before a client file is loaded.
 	 */
 	public static BlockDisplayPolicy defaults() {
-		return compile(BlockDisplayWhitelist.DEFAULT_ENTRIES, List.of());
+		return compile(ConfigDefaults.Client.BLOCK_DISPLAY_WHITELIST, ConfigDefaults.Client.BLOCK_SHAPE_BLACKLIST);
 	}
 
 	public List<String> whitelistEntries() {

@@ -1,5 +1,7 @@
 package nx.pingwheel.common.config;
 
+import org.jetbrains.annotations.Nullable;
+
 import java.util.Optional;
 
 /**
@@ -9,12 +11,12 @@ import java.util.Optional;
  */
 public record ServerConfigUpdate(
 	int changedFields,
-	ChannelMode defaultChannelMode,
+	@Nullable ChannelMode defaultChannelMode,
 	boolean playerTrackingEnabled,
 	int msToRegenerate,
 	int rateLimit,
 	int syncDuration,
-	InventoryConfigValues inventory,
+	@Nullable InventoryConfigValues inventory,
 	boolean budgetDelayNotificationsEnabled
 ) {
 	public static final int DEFAULT_CHANNEL_MODE = 1;
@@ -55,12 +57,12 @@ public record ServerConfigUpdate(
 
 	public ServerConfigUpdate(
 		int changedFields,
-		ChannelMode defaultChannelMode,
+		@Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled,
 		int msToRegenerate,
 		int rateLimit) {
 		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
-			ServerConfigBounds.DEFAULT_SYNC_DURATION);
+			ConfigDefaults.Server.SYNC_DURATION);
 	}
 
 	/** Source-compatible constructor for callers selecting the original five fields. */
@@ -73,10 +75,10 @@ public record ServerConfigUpdate(
 
 	/** Source-compatible constructor; existing Java callers enable administrator notices. */
 	public ServerConfigUpdate(
-		int changedFields, ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
-		int msToRegenerate, int rateLimit, int syncDuration, InventoryConfigValues inventory) {
+		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory) {
 		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
-			syncDuration, inventory, true);
+			syncDuration, inventory, ConfigDefaults.Server.BUDGET_DELAY_NOTIFICATIONS_ENABLED);
 	}
 
 	public boolean isValid() {
@@ -91,12 +93,12 @@ public record ServerConfigUpdate(
 
 	public static Optional<ServerConfigUpdate> validated(
 		int changedFields,
-		ChannelMode defaultChannelMode,
+		@Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled,
 		int msToRegenerate,
 		int rateLimit) {
 		return validated(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
-			ServerConfigBounds.DEFAULT_SYNC_DURATION);
+			ConfigDefaults.Server.SYNC_DURATION);
 	}
 
 	public static Optional<ServerConfigUpdate> validated(
@@ -111,10 +113,10 @@ public record ServerConfigUpdate(
 	}
 
 	public static Optional<ServerConfigUpdate> validated(
-		int changedFields, ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
-		int msToRegenerate, int rateLimit, int syncDuration, InventoryConfigValues inventory) {
+		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory) {
 		return validated(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate,
-			rateLimit, syncDuration, inventory, true);
+			rateLimit, syncDuration, inventory, ConfigDefaults.Server.BUDGET_DELAY_NOTIFICATIONS_ENABLED);
 	}
 
 	public static Optional<ServerConfigUpdate> validated(

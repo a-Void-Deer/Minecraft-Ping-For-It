@@ -1,5 +1,7 @@
 package nx.pingwheel.common.config;
 
+import org.jetbrains.annotations.Nullable;
+
 import java.util.Locale;
 
 /**
@@ -18,7 +20,7 @@ public enum EntityBlockRenderMode {
 	 * Unknown values are returned as {@code null} so client-config validation
 	 * can recover them to {@link #COMPATIBLE}.
 	 */
-	public static EntityBlockRenderMode get(String name) {
+	public static @Nullable EntityBlockRenderMode get(@Nullable String name) {
 		if (name == null) {
 			return null;
 		}
@@ -35,8 +37,8 @@ public enum EntityBlockRenderMode {
 	/**
 	 * Returns the safe runtime value for a possibly old or malformed config.
 	 */
-	public static EntityBlockRenderMode effective(EntityBlockRenderMode mode) {
-		return mode == null ? COMPATIBLE : mode;
+	public static EntityBlockRenderMode effective(@Nullable EntityBlockRenderMode mode) {
+		return mode == null ? ConfigDefaults.Client.RECOVERY_ENTITY_BLOCK_RENDER_MODE : mode;
 	}
 
 	@Override

@@ -1,12 +1,16 @@
 package nx.pingwheel.common.config;
 
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.math.BigDecimal;
+import java.util.List;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -315,11 +319,12 @@ class InventorySettingsTest {
 	@Test
 	void sizePairNormalizationDefaultsNullsAndNeverRaisesTheFrame() {
 		InventorySettings settings = InventorySettings.serverDefaults();
+		InventorySettings fresh = InventorySettings.serverDefaults();
 		settings.setDisplayByteMultiplier(null);
 		settings.setFrameByteMultiplier(null);
 		settings.validate();
-		assertEquals(0, BigDecimal.ONE.compareTo(settings.getDisplayByteMultiplier()));
-		assertEquals(0, BigDecimal.ONE.compareTo(settings.getFrameByteMultiplier()));
+		assertEquals(0, fresh.getDisplayByteMultiplier().compareTo(settings.getDisplayByteMultiplier()));
+		assertEquals(0, fresh.getFrameByteMultiplier().compareTo(settings.getFrameByteMultiplier()));
 
 		settings.setDisplayByteMultiplier(new BigDecimal("9999"));
 		settings.setFrameByteMultiplier(new BigDecimal("0.25"));
@@ -334,9 +339,54 @@ class InventorySettingsTest {
 	void independentDefaultsDoNotAliasNestedState() {
 		InventorySettings first = InventorySettings.serverDefaults();
 		InventorySettings second = InventorySettings.serverDefaults();
+		InventorySettings untouched = InventorySettings.serverDefaults();
+		assertNotSame(first.getPreview(), second.getPreview());
+		assertNotSame(first.getTracking(), second.getTracking());
+		@Unmodifiable List<Function<InventorySettings, IntLimit>> caps = List.of(
+			InventorySettings::getPhysicalSlotsPerTick, InventorySettings::getPendingMemoryMiB,
+			settings -> settings.getPreview().getMaxVariantsPerClientPeriod(),
+			settings -> settings.getPreview().getMaxSlotsPerClient(),
+			settings -> settings.getPreview().getMaxSlotsServer(),
+			settings -> settings.getPreview().getMaxTargetsPerClient(),
+			settings -> settings.getTracking().getMaxVariantsPerTarget(),
+			settings -> settings.getTracking().getMaxSlotsPerTarget(),
+			settings -> settings.getTracking().getMaxSlotsServer());
+		for (int index = 0; index < caps.size(); index++) {
+			IntLimit changed = caps.get(index).apply(first);
+			assertNotSame(changed, caps.get(index).apply(second));
+			for (int other = index + 1; other < caps.size(); other++) {
+				assertNotSame(changed, caps.get(other).apply(first), "each cap needs its own mutable limit");
+			}
+			changed.setUnlimited(!changed.isUnlimited());
+			changed.setValue(73);
+		}
+		@Unmodifiable List<Function<InventorySettings, ByteMultiplier>> multipliers = List.of(
+			settings -> settings.getPreview().getClientByteMultiplier(),
+			settings -> settings.getPreview().getGlobalByteMultiplier(),
+			settings -> settings.getTracking().getStreamByteMultiplier(),
+			settings -> settings.getTracking().getSnapshotByteMultiplier(),
+			settings -> settings.getTracking().getGlobalByteMultiplier());
+		for (int index = 0; index < multipliers.size(); index++) {
+			ByteMultiplier changed = multipliers.get(index).apply(first);
+			assertNotSame(changed, multipliers.get(index).apply(second));
+			for (int other = index + 1; other < multipliers.size(); other++) {
+				assertNotSame(changed, multipliers.get(other).apply(first), "each scope needs its own mutable multiplier");
+			}
+			changed.setValue(new BigDecimal("2.5"));
+			changed.setUnlimited(!changed.isUnlimited());
+		}
+		first.validate();
+		assertNotEquals(untouched, first);
+		assertEquals(untouched, second, "mutating one factory result must not change another");
+		assertEquals(untouched, InventorySettings.serverDefaults(), "later construction must not inherit edits");
 
-		first.getPreview().getMaxSlotsPerClient().setValue(5);
-
-		assertNotEquals(5, second.getPreview().getMaxSlotsPerClient().getValue());
+		first.setPhysicalSlotsPerTick(null);
+		first.setPendingMemoryMiB((IntLimit) null);
+		first.setPreview(null);
+		first.setTracking(null);
+		first.validate();
+		assertEquals(untouched, first, "restored nested defaults must agree with fresh construction");
+		assertNotSame(first.getPreview(), second.getPreview());
+		assertNotSame(first.getTracking().getSnapshotByteMultiplier(), second.getTracking().getSnapshotByteMultiplier());
 	}
 }

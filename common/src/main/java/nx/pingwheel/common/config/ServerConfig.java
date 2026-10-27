@@ -7,25 +7,26 @@ import lombok.Setter;
 import lombok.ToString;
 import nx.pingwheel.common.core.ServerCore;
 import nx.pingwheel.common.presentation.PresentationSettings;
+import org.jetbrains.annotations.Nullable;
 
 @Getter
 @Setter
 @ToString
 @EqualsAndHashCode
 public class ServerConfig implements IConfig {
-	ChannelMode defaultChannelMode = ChannelMode.AUTO;
-	boolean playerTrackingEnabled = true;
-	int msToRegenerate = 1000;
-	int rateLimit = 5;
+	@Nullable ChannelMode defaultChannelMode = ConfigDefaults.Server.DEFAULT_CHANNEL_MODE;
+	boolean playerTrackingEnabled = ConfigDefaults.Server.PLAYER_TRACKING_ENABLED;
+	int msToRegenerate = ConfigDefaults.Server.MS_TO_REGENERATE;
+	int rateLimit = ConfigDefaults.Server.RATE_LIMIT;
 	@SerializedName("syncDuration")
-	int syncDuration = ServerConfigBounds.DEFAULT_SYNC_DURATION;
-	int pingDistance = 2048;
+	int syncDuration = ConfigDefaults.Server.SYNC_DURATION;
+	int pingDistance = ConfigDefaults.Server.PING_DISTANCE;
 	/** Server-authoritative Basic/extension allow lists, sampling limits and permissions. */
 	PresentationSettings presentation = PresentationSettings.serverDefaults();
 	/** Server-authoritative inventory preview/tracking budgets; additive object with defaults. */
 	InventorySettings inventory = InventorySettings.serverDefaults();
 	/** Controls administrator budget-delay messages only; WARN diagnostics remain enabled. */
-	boolean budgetDelayNotificationsEnabled = true;
+	boolean budgetDelayNotificationsEnabled = ConfigDefaults.Server.BUDGET_DELAY_NOTIFICATIONS_ENABLED;
 
 	public PresentationSettings getPresentation() {
 		return presentation;
@@ -38,11 +39,11 @@ public class ServerConfig implements IConfig {
 		if (inventory == null) inventory = InventorySettings.serverDefaults();
 		inventory.validate();
 		if (defaultChannelMode == null) {
-			defaultChannelMode = ChannelMode.AUTO;
+			defaultChannelMode = ConfigDefaults.Server.DEFAULT_CHANNEL_MODE;
 		}
 
 		if (msToRegenerate < 0) {
-			msToRegenerate = 1000;
+			msToRegenerate = ConfigDefaults.Server.MS_TO_REGENERATE;
 		}
 
 		if (rateLimit < 0) {

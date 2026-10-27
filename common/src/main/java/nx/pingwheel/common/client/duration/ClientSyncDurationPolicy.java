@@ -1,5 +1,6 @@
 package nx.pingwheel.common.client.duration;
 
+import nx.pingwheel.common.config.ConfigDefaults;
 import nx.pingwheel.common.config.ServerConfigBounds;
 
 /**
@@ -10,7 +11,7 @@ import nx.pingwheel.common.config.ServerConfigBounds;
  */
 public record ClientSyncDurationPolicy(int syncDuration) {
 	public static final ClientSyncDurationPolicy DEFAULT =
-		new ClientSyncDurationPolicy(ServerConfigBounds.DEFAULT_SYNC_DURATION);
+		new ClientSyncDurationPolicy(ConfigDefaults.Server.SYNC_DURATION);
 
 	public boolean isValid() {
 		return syncDuration >= ServerConfigBounds.MIN_PING_DURATION

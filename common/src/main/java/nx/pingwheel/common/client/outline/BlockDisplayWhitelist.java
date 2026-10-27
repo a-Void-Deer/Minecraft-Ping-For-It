@@ -9,8 +9,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 
+import nx.pingwheel.common.config.ConfigDefaults;
 import nx.pingwheel.common.config.ConfigValidationException;
 import nx.pingwheel.common.resolve.BlockEntityClassification;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * An immutable matcher for one client block glow list.
@@ -43,7 +45,7 @@ public final class BlockDisplayWhitelist {
 	 * The default entries, in declaration order. The global wildcard keeps the
 	 * historical vanilla behavior while allowing all registered namespaces.
 	 */
-	public static final List<String> DEFAULT_ENTRIES = List.of("*:*");
+	public static final @Unmodifiable List<String> DEFAULT_ENTRIES = ConfigDefaults.Client.BLOCK_DISPLAY_WHITELIST;
 
 	private final List<String> rawEntries;
 	private final List<BlockDisplayWhitelistEntry> parsedEntries;

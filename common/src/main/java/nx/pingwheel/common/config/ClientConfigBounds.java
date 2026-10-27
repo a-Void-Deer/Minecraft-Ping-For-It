@@ -9,17 +9,17 @@ package nx.pingwheel.common.config;
  */
 public final class ClientConfigBounds {
 
-	public static final int DEFAULT_WHEEL_HOLD_MILLIS = 150;
+	public static final int DEFAULT_WHEEL_HOLD_MILLIS = ConfigDefaults.Client.WHEEL_HOLD_MILLIS;
 	public static final int MIN_WHEEL_HOLD_MILLIS = 20;
 	public static final int MAX_WHEEL_HOLD_MILLIS = 2000;
 	public static final int WHEEL_HOLD_MILLIS_STEP = 10;
 
-	public static final int DEFAULT_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS = 20;
+	public static final int DEFAULT_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS = ConfigDefaults.Client.LONG_PRESS_COMPATIBILITY_SLICE_MILLIS;
 	public static final int MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS = 10;
 	public static final int MAX_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS = 500;
 	public static final int LONG_PRESS_COMPATIBILITY_SLICE_MILLIS_STEP = 5;
 
-	public static final int DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES = 5;
+	public static final int DEFAULT_CANCEL_HALF_CONE_ANGLE_DEGREES = ConfigDefaults.Client.CANCEL_HALF_CONE_ANGLE_DEGREES;
 	public static final int MIN_CANCEL_HALF_CONE_ANGLE_DEGREES = 1;
 	public static final int MAX_CANCEL_HALF_CONE_ANGLE_DEGREES = 90;
 	public static final int CANCEL_HALF_CONE_ANGLE_DEGREES_STEP = 1;
@@ -28,12 +28,12 @@ public final class ClientConfigBounds {
 	 * Adjacent-press window and danger angle derived from active mouse input.
 	 * They are independent from the own-marker cancel half-cone.
 	 */
-	public static final int DEFAULT_DOUBLE_CLICK_DANGER_WINDOW_MS = 100;
+	public static final int DEFAULT_DOUBLE_CLICK_DANGER_WINDOW_MS = ConfigDefaults.Client.DOUBLE_CLICK_DANGER_WINDOW_MS;
 	public static final int MIN_DOUBLE_CLICK_DANGER_WINDOW_MS = 25;
 	public static final int MAX_DOUBLE_CLICK_DANGER_WINDOW_MS = 300;
 	public static final int DOUBLE_CLICK_DANGER_WINDOW_MS_STEP = 5;
 
-	public static final double DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES = 3.5;
+	public static final double DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES = ConfigDefaults.Client.DOUBLE_CLICK_DANGER_ANGLE_DEGREES;
 	public static final double MIN_DOUBLE_CLICK_DANGER_ANGLE_DEGREES = 0.0;
 	public static final double MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES = 20.0;
 	public static final double DOUBLE_CLICK_DANGER_ANGLE_DEGREES_STEP = 0.5;
@@ -49,34 +49,34 @@ public final class ClientConfigBounds {
 	public static final int WHEEL_OUTER_RADIUS_STEP = 1;
 	public static final int MIN_WHEEL_ANNULUS_THICKNESS = 8;
 
-	public static final int DEFAULT_WHEEL_OPACITY = 75;
+	public static final int DEFAULT_WHEEL_OPACITY = ConfigDefaults.Client.WHEEL_OPACITY;
 	public static final int MIN_WHEEL_OPACITY = 0;
 	public static final int MAX_WHEEL_OPACITY = 100;
 	public static final int WHEEL_OPACITY_STEP = 5;
-	public static final int DEFAULT_WHEEL_TARGET_OPACITY = 100;
+	public static final int DEFAULT_WHEEL_TARGET_OPACITY = ConfigDefaults.Client.WHEEL_TARGET_OPACITY;
 	public static final int MIN_WHEEL_TARGET_OPACITY = 0;
 	public static final int MAX_WHEEL_TARGET_OPACITY = 100;
 	public static final int WHEEL_TARGET_OPACITY_STEP = 5;
 
-	public static final int DEFAULT_WHEEL_FONT_SIZE = 200;
+	public static final int DEFAULT_WHEEL_FONT_SIZE = ConfigDefaults.Client.WHEEL_FONT_SIZE;
 	public static final int MIN_WHEEL_FONT_SIZE = 10;
 	public static final int MAX_WHEEL_FONT_SIZE = 1000;
 	public static final int WHEEL_FONT_SIZE_STEP = 10;
 
 	/** The target-name setting uses the same shared font bounds as option labels. */
-	public static final int DEFAULT_WHEEL_TARGET_FONT_SIZE = 100;
+	public static final int DEFAULT_WHEEL_TARGET_FONT_SIZE = ConfigDefaults.Client.WHEEL_TARGET_FONT_SIZE;
 	public static final int MIN_WHEEL_TARGET_FONT_SIZE = MIN_WHEEL_FONT_SIZE;
 	public static final int MAX_WHEEL_TARGET_FONT_SIZE = MAX_WHEEL_FONT_SIZE;
 	public static final int WHEEL_TARGET_FONT_SIZE_STEP = WHEEL_FONT_SIZE_STEP;
 
-	public static final int DEFAULT_CONFIGURATION_NOTICE_SIZE = 100;
+	public static final int DEFAULT_CONFIGURATION_NOTICE_SIZE = ConfigDefaults.Client.CONFIGURATION_NOTICE_SIZE;
 	public static final int MIN_CONFIGURATION_NOTICE_SIZE = 0;
 	public static final int MAX_CONFIGURATION_NOTICE_SIZE = 1000;
 	public static final int CONFIGURATION_NOTICE_SIZE_STEP = 10;
 
 	/** Zero is the explicit persisted value for using the server duration. */
 	public static final int FOLLOW_SERVER_MARKER_DISPLAY_DURATION = 0;
-	public static final int DEFAULT_MARKER_DISPLAY_DURATION = FOLLOW_SERVER_MARKER_DISPLAY_DURATION;
+	public static final int DEFAULT_MARKER_DISPLAY_DURATION = ConfigDefaults.Client.MARKER_DISPLAY_DURATION;
 	public static final int MIN_MARKER_DISPLAY_DURATION = ServerConfigBounds.MIN_PING_DURATION;
 	public static final int MAX_MARKER_DISPLAY_DURATION = ServerConfigBounds.MAX_PING_DURATION;
 	public static final int MARKER_DISPLAY_DURATION_STEP = 1;
@@ -130,7 +130,7 @@ public final class ClientConfigBounds {
 
 	/** Zero is the explicit disabled value; NaN recovers to the default like other clamps. */
 	public static double clampDoubleClickDangerAngleDegrees(double value) {
-		if (Double.isNaN(value)) return DEFAULT_DOUBLE_CLICK_DANGER_ANGLE_DEGREES;
+		if (Double.isNaN(value)) return ConfigDefaults.Client.DOUBLE_CLICK_DANGER_ANGLE_DEGREES;
 		return Math.clamp(
 			value,
 			MIN_DOUBLE_CLICK_DANGER_ANGLE_DEGREES,

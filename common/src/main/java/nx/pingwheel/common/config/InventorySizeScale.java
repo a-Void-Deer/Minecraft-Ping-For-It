@@ -29,7 +29,7 @@ import java.util.List;
  * {@link #valueAt(int)} address the ordered legal values.
  *
  * <p>Normalization uses exact {@link BigDecimal} arithmetic only: a missing or
- * null value gains the 1x default, out-of-range finite values clamp to the
+ * null value gains the owning scale's default, out-of-range finite values clamp to the
  * endpoints, and any other value snaps to the nearest legal value with half-up
  * tie breaking, matching the established exact-grid convention.
  */
@@ -63,8 +63,13 @@ public enum InventorySizeScale {
 
 	public BigDecimal minimumMultiplier() { return minimumMultiplier; }
 	public BigDecimal maximumMultiplier() { return maximumMultiplier; }
-	/** Missing or null persisted values gain the 1x default. */
-	public BigDecimal defaultMultiplier() { return BigDecimal.ONE; }
+	/** Missing or null persisted values gain their independently owned scale default. */
+	public BigDecimal defaultMultiplier() {
+		return switch (this) {
+			case DISPLAY -> ConfigDefaults.Inventory.DISPLAY_BYTE_MULTIPLIER;
+			case FRAME -> ConfigDefaults.Inventory.FRAME_BYTE_MULTIPLIER;
+		};
+	}
 	public int baseBytes() { return baseBytes; }
 
 	/** Immutable ordered legal values, ascending; UI slider positions are these indices. */

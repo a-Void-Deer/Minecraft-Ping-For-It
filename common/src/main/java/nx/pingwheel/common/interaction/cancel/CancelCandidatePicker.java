@@ -5,6 +5,8 @@ import java.util.Optional;
 import java.util.function.IntSupplier;
 
 import nx.pingwheel.common.config.ClientConfigBounds;
+import nx.pingwheel.common.config.ConfigDefaults;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Deterministically selects the marker to cancel from a
@@ -39,9 +41,9 @@ public final class CancelCandidatePicker {
 	/**
 	 * The default cancellation cone half-angle, in degrees.
 	 */
-	public static final double DEFAULT_HALF_CONE_ANGLE_DEGREES = 5.0;
+	public static final double DEFAULT_HALF_CONE_ANGLE_DEGREES = ConfigDefaults.Client.CANCEL_HALF_CONE_ANGLE_DEGREES;
 
-	private final IntSupplier configuredHalfConeAngleSupplier;
+	private final @Nullable IntSupplier configuredHalfConeAngleSupplier;
 	private final double halfConeAngleDegrees;
 	private final double cosHalfConeAngle;
 	private final double inclusiveCosThreshold;
@@ -110,7 +112,7 @@ public final class CancelCandidatePicker {
 
 		double invLookLength = 1.0 / Math.sqrt(context.lookDirection().lengthSquared());
 
-		CancelMarkerCandidate best = null;
+		@Nullable CancelMarkerCandidate best = null;
 		double bestDistanceSquared = Double.POSITIVE_INFINITY;
 
 		for (CancelMarkerCandidate candidate : context.candidates()) {

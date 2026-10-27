@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.function.Function;
+import java.util.function.ToLongFunction;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -215,6 +216,128 @@ class InventorySettingsPersistenceTest {
 		namedCap("tracking.maxSlotsServer",
 			settings -> settings.getTracking().getMaxSlotsServer(),
 			"tracking", "maxSlotsServer"));
+
+	/** Explicit byte bases and grid minima are arithmetic fixtures, not default tuning snapshots. */
+	private record MultiplierPath(String group, String key, BigDecimal explicitValue, long baseBytes,
+		BigDecimal minimum, Function<InventorySettings, ByteMultiplier> read,
+		ToLongFunction<InventorySettings> bytes) {
+		@Override
+		public String toString() { return group + "." + key; }
+	}
+
+	private static final @Unmodifiable List<MultiplierPath> MULTIPLIERS = List.of(
+		new MultiplierPath("preview", "clientByteMultiplier", new BigDecimal("0.5"), 4096,
+			new BigDecimal("0.25"), settings -> settings.getPreview().getClientByteMultiplier(),
+			InventorySettings::previewClientPeriodBytes),
+		new MultiplierPath("preview", "globalByteMultiplier", new BigDecimal("2"), 32768,
+			new BigDecimal("0.125"), settings -> settings.getPreview().getGlobalByteMultiplier(),
+			InventorySettings::previewGlobalPeriodBytes),
+		new MultiplierPath("tracking", "streamByteMultiplier", new BigDecimal("0.25"), 2048,
+			new BigDecimal("0.25"), settings -> settings.getTracking().getStreamByteMultiplier(),
+			InventorySettings::trackingStreamPeriodBytesPerClientTarget),
+		new MultiplierPath("tracking", "snapshotByteMultiplier", new BigDecimal("4"), 16384,
+			new BigDecimal("0.25"), settings -> settings.getTracking().getSnapshotByteMultiplier(),
+			InventorySettings::trackingSnapshotFragmentBytes),
+		new MultiplierPath("tracking", "globalByteMultiplier", new BigDecimal("0.125"), 16384,
+			new BigDecimal("0.125"), settings -> settings.getTracking().getGlobalByteMultiplier(),
+			InventorySettings::trackingGlobalPeriodBytes));
+
+	private static Stream<MultiplierPath> inventoryMultipliers() { return MULTIPLIERS.stream(); }
+
+	private static JsonObject explicitMultiplierInventory() {
+		JsonObject inventory = new JsonObject();
+		inventory.add("preview", new JsonObject());
+		inventory.add("tracking", new JsonObject());
+		for (MultiplierPath field : MULTIPLIERS) {
+			JsonObject multiplier = new JsonObject();
+			multiplier.addProperty("value", field.explicitValue());
+			inventory.getAsJsonObject(field.group()).add(field.key(), multiplier);
+		}
+		inventory.getAsJsonObject("preview").add("maxSlotsPerClient", limitShape(false, 67));
+		return inventory;
+	}
+
+	@ParameterizedTest(name = "{0} restores omitted values without rewriting or changing siblings")
+	@MethodSource("inventoryMultipliers")
+	void multiplierMissingShapesRestoreOwningDefaultsAndOnlyMaterializeOnARealSave(
+		MultiplierPath field, @TempDir Path tempDir) throws IOException {
+		// Whole-member omission, null object, empty object, missing value, null value,
+		// and unlimited without a value take distinct Gson/validation routes.
+		for (String shape : List.of("absent", "null", "{}", "{\"unlimited\":false}",
+			"{\"value\":null}", "{\"unlimited\":true}")) {
+			JsonObject inventory = explicitMultiplierInventory();
+			JsonObject group = inventory.getAsJsonObject(field.group());
+			if (shape.equals("absent")) group.remove(field.key());
+			else group.add(field.key(), JsonParser.parseString(shape));
+			Path configPath = tempDir.resolve("server.json");
+			byte[] original = serverFile(inventory).getBytes(StandardCharsets.UTF_8);
+			ConfigHandler<ServerConfig> handler = loadServer(configPath, original);
+			InventorySettings loaded = handler.getConfig().getInventory();
+			BigDecimal expected = field.read().apply(InventorySettings.serverDefaults()).getValue();
+			ByteMultiplier restored = field.read().apply(loaded);
+			boolean unlimited = shape.equals("{\"unlimited\":true}");
+			assertEquals(unlimited, restored.isUnlimited(), shape);
+			assertEquals(0, expected.compareTo(restored.getValue()), shape);
+			if (!unlimited) {
+				assertEquals(expected.multiply(BigDecimal.valueOf(field.baseBytes())).longValueExact(),
+					field.bytes().applyAsLong(loaded), shape);
+			}
+			assertMultiplierSiblings(field, loaded);
+			assertEquals(3, handler.getConfig().getRateLimit());
+			assertArrayEquals(original, Files.readAllBytes(configPath), shape);
+			assertTrue(handler.saveSafely());
+			assertArrayEquals(original, Files.readAllBytes(configPath), "untouched save: " + shape);
+
+			if (shape.equals("absent") || unlimited) {
+				handler.getConfig().setRateLimit(9);
+				assertTrue(handler.saveSafely());
+				JsonObject persisted = readRoot(configPath).getAsJsonObject("inventory")
+					.getAsJsonObject(field.group()).getAsJsonObject(field.key());
+				assertEquals(unlimited, persisted.get("unlimited").getAsBoolean());
+				assertEquals(0, expected.compareTo(persisted.get("value").getAsBigDecimal()));
+				ConfigHandler<ServerConfig> reloaded =
+					new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+				reloaded.load();
+				assertEquals(restored, field.read().apply(reloaded.getConfig().getInventory()));
+				assertMultiplierSiblings(field, reloaded.getConfig().getInventory());
+				assertEquals(9, reloaded.getConfig().getRateLimit());
+			}
+		}
+		assertFalse(hasBrokenBackup(tempDir));
+	}
+
+	@ParameterizedTest(name = "{0} explicit zero and negative values clamp rather than default")
+	@MethodSource("inventoryMultipliers")
+	void explicitNonPositiveMultipliersClampWithoutReplacingOtherFields(
+		MultiplierPath field, @TempDir Path tempDir) throws IOException {
+		for (int value : new int[] {0, -7}) {
+			JsonObject inventory = explicitMultiplierInventory();
+			inventory.getAsJsonObject(field.group()).getAsJsonObject(field.key()).addProperty("value", value);
+			Path configPath = tempDir.resolve("server.json");
+			byte[] original = serverFile(inventory).getBytes(StandardCharsets.UTF_8);
+			ConfigHandler<ServerConfig> handler = loadServer(configPath, original);
+			InventorySettings loaded = handler.getConfig().getInventory();
+			assertEquals(0, field.minimum().compareTo(field.read().apply(loaded).getValue()));
+			assertFalse(field.read().apply(loaded).isUnlimited());
+			assertEquals(field.minimum().multiply(BigDecimal.valueOf(field.baseBytes())).longValueExact(),
+				field.bytes().applyAsLong(loaded));
+			assertMultiplierSiblings(field, loaded);
+			assertArrayEquals(original, Files.readAllBytes(configPath));
+		}
+		assertFalse(hasBrokenBackup(tempDir));
+	}
+
+	private static void assertMultiplierSiblings(MultiplierPath selected, InventorySettings loaded) {
+		assertEquals(67, loaded.getPreview().getMaxSlotsPerClient().getValue());
+		for (MultiplierPath sibling : MULTIPLIERS) {
+			if (sibling.equals(selected)) continue;
+			ByteMultiplier actual = sibling.read().apply(loaded);
+			assertFalse(actual.isUnlimited(), sibling.toString());
+			assertEquals(0, sibling.explicitValue().compareTo(actual.getValue()), sibling.toString());
+			assertEquals(sibling.explicitValue().multiply(BigDecimal.valueOf(sibling.baseBytes())).longValueExact(),
+				sibling.bytes().applyAsLong(loaded), sibling.toString());
+		}
+	}
 
 	private static Stream<Arguments> inventoryLimits() {
 		return INVENTORY_LIMITS.stream().map(cap -> Arguments.of(cap.name(), cap.cap()));
@@ -419,10 +542,11 @@ class InventorySettingsPersistenceTest {
 		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
 		handler.load();
 		InventorySettings loaded = handler.getConfig().getInventory();
-		assertEquals(0, BigDecimal.ONE.compareTo(loaded.getDisplayByteMultiplier()));
-		assertEquals(0, BigDecimal.ONE.compareTo(loaded.getFrameByteMultiplier()));
-		assertEquals(4096, loaded.effectiveDisplayBytes());
-		assertEquals(32768, loaded.effectiveFrameBytes());
+		InventorySettings fresh = InventorySettings.serverDefaults();
+		assertEquals(0, fresh.getDisplayByteMultiplier().compareTo(loaded.getDisplayByteMultiplier()));
+		assertEquals(0, fresh.getFrameByteMultiplier().compareTo(loaded.getFrameByteMultiplier()));
+		assertEquals(fresh.effectiveDisplayBytes(), loaded.effectiveDisplayBytes());
+		assertEquals(fresh.effectiveFrameBytes(), loaded.effectiveFrameBytes());
 		assertArrayEquals(original, Files.readAllBytes(configPath));
 
 		loaded.setDisplayByteMultiplier(new BigDecimal("2.5"));
@@ -466,8 +590,11 @@ class InventorySettingsPersistenceTest {
 			StandardCharsets.UTF_8);
 		ConfigHandler<ServerConfig> nullHandler = new ConfigHandler<>(ServerConfig.class, nullPath, CURRENT_VERSION);
 		nullHandler.load();
-		assertEquals(0, BigDecimal.ONE.compareTo(nullHandler.getConfig().getInventory().getDisplayByteMultiplier()));
-		assertEquals(0, BigDecimal.ONE.compareTo(nullHandler.getConfig().getInventory().getFrameByteMultiplier()));
+		InventorySettings fresh = InventorySettings.serverDefaults();
+		assertEquals(0, fresh.getDisplayByteMultiplier()
+			.compareTo(nullHandler.getConfig().getInventory().getDisplayByteMultiplier()));
+		assertEquals(0, fresh.getFrameByteMultiplier()
+			.compareTo(nullHandler.getConfig().getInventory().getFrameByteMultiplier()));
 	}
 
 	@Test
@@ -481,8 +608,11 @@ class InventorySettingsPersistenceTest {
 		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
 		handler.load();
 
-		assertEquals(0, BigDecimal.ONE.compareTo(handler.getConfig().getInventory().getDisplayByteMultiplier()));
-		assertEquals(0, BigDecimal.ONE.compareTo(handler.getConfig().getInventory().getFrameByteMultiplier()));
+		InventorySettings fresh = InventorySettings.serverDefaults();
+		assertEquals(0, fresh.getDisplayByteMultiplier()
+			.compareTo(handler.getConfig().getInventory().getDisplayByteMultiplier()));
+		assertEquals(0, fresh.getFrameByteMultiplier()
+			.compareTo(handler.getConfig().getInventory().getFrameByteMultiplier()));
 		assertFalse(hasBrokenBackup(tempDir));
 	}
 
