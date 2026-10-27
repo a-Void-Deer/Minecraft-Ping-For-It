@@ -1170,21 +1170,8 @@ empty/absence-zero observations as uncertain, while explicit atomic adapter
 snapshots retain ready status through resync. No generic `CaptureResult`
 consistency or wire schema is upgraded by these fixtures.
 
-The native incremental-sweep implementation's recorded full check/build run used
-Java 21, PowerShell, UTF-8, no explicit timeout and redirected stdout/stderr. It completed
-with `BUILD SUCCESSFUL` for:
-
-```powershell
-.\gradlew.bat --no-daemon --console=plain :common:check :fabric:build :forge:build :neoforge:build verifyModIdentity
-```
-
-Its JUnit XML reports record Common 4620, Fabric 24, Forge 26 and NeoForge 174
-tests, 4844 total, with zero failures, errors or skips. That is historical
-evidence for that implementation's inputs, not the later bootstrap tree; the
-[bootstrap run](build-checks.md#preview-seeded-tracking-combined-tree-run)
-records its separate results, including known failures. This documentation
-update inspected existing reports and logs; it did not rerun Gradle.
-Build/artifact evidence limits remain owned by [build checks](build-checks.md).
+Automated execution results and build/artifact evidence limits are owned by
+[build checks](build-checks.md#automated-verification-results).
 Installed Create, live-world updates, multiplayer transport, TPS, GC and heap/elapsed-time
 performance remain pending in the [manual matrix](manual-integration.md#inventory).
 
@@ -1255,14 +1242,14 @@ threshold; cumulative adaptive-growth costs are part of the guarded contract.
 
 ### Recorded allocation comparison
 
-The saved baseline uses production `188ae241` with harness `a8d36f89`; subsequent
-stages are `095238f8` (resident discovery/lazy scopes), `1d0886b1` (Vault current
-validation/cost profiles) and final `ea0339d2` (on-demand processing scratch).
-SHA-256 and historical Git-blob comparisons confirm that the three harness/support
-files from `a8d36f89` are unchanged at every measured stage. The final source/build
-manifest is tied to the [final combined-tree run](build-checks.md#vault-tracking-performance-combined-tree-run).
+The saved measurements compare four conditions: baseline, resident discovery
+with lazy scopes, Vault current validation with cached cost profiles, and
+on-demand processing scratch. SHA-256 and Git-blob comparisons confirm that the
+three harness/support files are identical across all four conditions. Input
+provenance belongs to the external evidence listed below; these are recorded
+measurements, not a fresh measurement of the current code.
 
-All stages used JDK `21.0.12.1+1-LTS`, three warmup operations and five measured
+All conditions used JDK `21.0.12.1+1-LTS`, three warmup operations and five measured
 samples per workload. `ThreadMXBean` measures current-thread allocated bytes,
 not retained memory, total JVM heap or an allocation rate. Each sample uses a
 fresh runtime/consumer over preconstructed native residents. The measured full
@@ -1273,13 +1260,13 @@ idle probe. Counters are collected separately from timed samples.
 
 Median allocated bytes for the same prepared 900-slot sweep:
 
-| Contents | Baseline | Resident/lazy scope | Vault validation | Final scratch | Reduction from baseline |
+| Contents | Baseline | Resident/lazy scope | Vault validation | On-demand scratch | Reduction from baseline |
 | --- | --- | --- | --- | --- | --- |
 | Empty | 186928368 | 96408264 | 709136 | 621392 | 99.67% |
 | Repeated | 304761648 | 214241712 | 118464184 | 5688272 | 98.13% |
 | Mixed | 305988176 | 215468072 | 119692104 | 17140424 | 94.40% |
 
-Final full-sweep distributions in allocated bytes:
+On-demand scratch full-sweep distributions in allocated bytes:
 
 | Contents | Minimum | Median | Maximum |
 | --- | --- | --- | --- |
@@ -1287,9 +1274,10 @@ Final full-sweep distributions in allocated bytes:
 | Repeated | 5688272 | 5688272 | 5689160 |
 | Mixed | 17140424 | 17140424 | 17150024 |
 
-Final second-page medians are 25688/203544/612360 bytes for empty/repeated/mixed.
-The final idle probe is 4512/4640/4640 bytes minimum/median/maximum for empty,
-and 4512/4512/4512 for repeated and mixed, with no getter. Raw five-sample byte
+On-demand scratch second-page medians are 25688/203544/612360 bytes for
+empty/repeated/mixed. The idle probe under that condition is 4512/4640/4640 bytes
+minimum/median/maximum for empty, and 4512/4512/4512 for repeated and mixed, with
+no getter. Raw five-sample byte
 and elapsed-time vectors, all workloads' distributions and the four-stage table
 remain in the external `vault-perf-*-manifest.txt`, `vault-perf-p4-final.xml`,
 `vault-perf-p4-final.measurements.log`, `vault-perf-p4-four-stage-comparison.csv`
@@ -1302,10 +1290,10 @@ Direct adapter-loaded checks change from 1002877 to 584036, and common-loaded
 checks from 420670 to 84134. Full structure checks inferred from controller-check
 counts minus factory calls on the stable successful path change from 7287 to
 5458. Successful factory calls imply segmented/layout/descriptor construction in
-that path; constructors are not directly probed. The final scratch stage leaves
-all validation/getter counters equal to the preceding Vault stage. Reuse eliminates
-reconstruction, not all per-slot member checks; validation still scales with slots
-and members.
+that path; constructors are not directly probed. The on-demand scratch condition
+has the same validation/getter counters as the Vault validation condition. Reuse
+eliminates reconstruction, not all per-slot member checks; validation still
+scales with slots and members.
 
 The directly inspected feedback copy `feedback_log/pingforit.server.json`
 contains a physical allowance of 32 slots/tick, tracking period 4, target/server
@@ -1394,10 +1382,9 @@ headless source-to-encoded-client and publication coverage:
   Encoded-publisher receipt gating and exactly-once chat coverage are owned by
   [presentation verification](presentation.md#content-receipt-chat-and-pending-completion).
 
-Results and known baseline failures are recorded in the
-[combined-tree run](build-checks.md#preview-seeded-tracking-combined-tree-run).
-This phase inspected the existing command manifest, logs and JUnit XML rather
-than running Gradle. These runs do not establish live Create/Refined Storage
+Execution results are recorded in the
+[automated verification results](build-checks.md#automated-verification-results).
+These headless tests and builds do not establish live Create/Refined Storage
 behavior, the cause of the reported 900-slot Vault import/export failure,
 live multiplayer, GPU rendering
 or performance. Those remain [manual scenarios](manual-integration.md#inventory).
@@ -1475,7 +1462,7 @@ The revised
 [resynchronization](../../architecture/presentation/inventory.md#tracking) and
 [budget policy](../../architecture/presentation/inventory.md#budgets-queues-and-memory)
 contracts have passing headless evidence in the
-[combined-tree run](build-checks.md#server-performance-combined-tree-run):
+[automated verification results](build-checks.md#automated-verification-results):
 
 - `InventoryS2CPacketTest` round-trips legal periods and zero cooldown in the
   unchanged `OFFER` shape and rejects out-of-range, overlong or noncanonical
@@ -1512,17 +1499,17 @@ contracts have passing headless evidence in the
   unlimited guard does not widen the other count guards and that memory mode
   conversion retains its finite value.
 
-Earlier test/build records on this page retain their original input scope; the
-linked combined-tree run supplies evidence for these revised seams. Live timing
-and multiplayer repair remain pending in the
+Execution scope is recorded in the
+[automated verification results](build-checks.md#automated-verification-results).
+Live timing and multiplayer repair remain pending in the
 [manual matrix](manual-integration.md#inventory).
 
 ## Known automated gaps
 
-- the [final performance run](build-checks.md#vault-tracking-performance-combined-tree-run)
-  is not fully green: notification-timing failures also reproduce on the
-  unmodified baseline. Focused bootstrap coverage does not resolve that mismatch
-  or prove that all reported installed-container selection failures are fixed;
+- reported installed-container selection failures lack live reproduction or
+  confirmation of resolution; passing headless tests and builds do not close
+  those incidents. Pending scenarios are listed in the
+  [manual inventory matrix](manual-integration.md#inventory);
 - the revised timing and memory-admission seams
   [passed the combined-tree run](#resynchronization-and-budget-policy-verification),
   but active selected-variant capacity across period boundaries has no dedicated
@@ -1544,13 +1531,13 @@ and multiplayer repair remain pending in the
   direct log-event assertions. Test appenders do not establish production
   file-appender delivery or low-frequency behavior in a prolonged live soak;
 - default-cap capture, preview-seeded selection and fresh tracking have headless native
-  seam evidence. Previously recorded independent review of the audited native
-  fast path establishes the composed root/native/Catalog/caller allocation and
-  work bounds for its reviewed inputs within the versioned static source-event
-  model and finite guards. That review must not be extended to later scratch
-  edits by inference; the final scratch-stage reviewer results are not recorded
-  by this documentation update. Its closed
-  component certificates do not certify the generic external-trusted codec route.
+  seam evidence. Independent review of the audited native fast path establishes
+  the composed root/native/Catalog/caller allocation and work bounds only for
+  its reviewed inputs within the versioned static source-event model and finite
+  guards. Separate independent review results for the on-demand scratch changes
+  are not recorded; the composed-bound review does not establish them by
+  inference. The closed component certificates do not certify the generic
+  external-trusted codec route.
   Cursorless attempted-prefix, symbolic lock-certificate and native JSON
   stack-boundary tests exercise those finite seams, not whole-JVM certification.
   Reviewed composition assumes caller-backed grants, fresh lazy-read scratch and

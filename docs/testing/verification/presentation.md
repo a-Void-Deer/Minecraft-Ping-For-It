@@ -243,7 +243,11 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
   selectors never granting access, whitelist-only and arbitrary-position
   wildcards independent of permissions, effective sampling limits and
   fingerprints, and the replaceable permission provider's vanilla default and
-  fail-closed behavior;
+  fail-closed behavior. Its rule-isolation fixture checks independent fresh
+  settings, supplied rules being detached on assignment, individual and
+  map-returned rule views not mutating their source, and a child-default opt-out
+  not affecting another fresh settings instance. These isolation cases are
+  source-reviewed automated coverage, with no passing run recorded here;
 - `PresentationChildBlackPolicyTest` covers the persisted child deny list:
   every fresh target type denying exactly the two nested Create kinetic RPM
   references by default while their root and sibling record keys stay
@@ -268,13 +272,14 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
   durable global denial, malformed interval shapes not resetting the config,
   older-version migration composing with the shape copy, obsolete client keys
   removed while unknown data is preserved, future-version files never
-  rewritten, a malformed presentation object failing closed without
-  resetting unrelated config, an absent child deny member gaining the semantic
+  rewritten, explicit null and array-shaped presentation inputs failing closed
+  without resetting unrelated config, an absent child deny member gaining the semantic
   Create RPM defaults without a migration, normalization write, or reset while
   an explicit empty member opts out across reloads, each malformed child deny
   member durably denying only its own target type, a custom child reference
   surviving reload and normalization instead of stacking on the defaults, and
-  reset restoring the semantic child defaults;
+  reset restoring the semantic child defaults. The explicit-null and array-input
+  cases are source-reviewed automated coverage, with no passing run recorded here;
 - `ServerPresentationPolicyServiceTest` covers the version-one policy rule-view
   service:
   read-all disclosing every target type in catalog order, missing settings or an

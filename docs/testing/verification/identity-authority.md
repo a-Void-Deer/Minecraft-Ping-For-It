@@ -103,6 +103,15 @@ dropping throttled committed creates without queueing or dispatch tracking,
 client coverage does not close the server and end-to-end policy
 [gaps](#known-automated-gaps).
 
+`ClientRateLimitPolicyTest` covers the initial courtesy fallback matching a
+fresh validated server configuration, an explicitly applied policy replacing
+that fallback, and a fresh limiter retaining the fallback independently of the
+edited server object. These are source-reviewed automated fixtures, with no
+passing run recorded here; they do not exercise server publication, reconnect,
+live configuration changes, or real dedicated-server initialization. Narrow
+isolated server-default initialization coverage is inventoried under
+[configuration verification](configuration-ui.md#configuration-recovery-and-selection-grammar).
+
 ## Known automated gaps
 
 - the complete `ServerCore` operation ordering and channel/admission matrix in

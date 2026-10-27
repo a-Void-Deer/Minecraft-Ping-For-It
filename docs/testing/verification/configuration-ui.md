@@ -14,6 +14,24 @@ The current suite covers:
 - config-version marker, precedence, migration, client/server recovery, and
   future-version preservation seams.
 
+`ConfigHandlerResetTest` also covers independent client selector objects and
+mutable remembered-channel maps, reset replacing both, stale references being
+unable to affect a later save, and post-reset edits surviving save and reload.
+Its server reset fixture checks detached inventory and presentation state:
+editing pre-reset references cannot replace the fresh defaults on save/reload.
+These reset-isolation cases are source-reviewed automated coverage, with no
+passing run recorded here; they do not exercise live settings editors.
+
+`ConfigDefaultsIsolationTest` covers active server-default initialization in a
+fresh isolated classloader with client/presentation default groups, platform
+services, configuration models/handlers and selected optional integrations
+unavailable. Project helpers are child-loaded; explicit denial probes and a
+`ModContext` probe exercise direct and transitive platform denial. The initialized
+server channel-mode enum remains usable through name/value lookup without
+pinning its selected default. This is source-reviewed isolated-initialization
+coverage, with no passing run recorded here; it does not establish game startup,
+loader-specific dedicated-server initialization or multiplayer behavior.
+
 `ConfigHandlerDiagnosticsTest` covers filesystem-backed load-validation,
 backup, save and recovery-reset failures. Warning reports retain long original
 message tails and root causes within the diagnostic bound, without an attached
@@ -49,14 +67,19 @@ recovery contracts remain owned by
 explicit unlimited caps keep their finite value and use the caller-owned finite
 guard, finite caps clamp to positive instead of a disable sentinel, confirmed
 finite boundaries clamp, zero heartbeat disables only the periodic cadence, the
-two multiplier grids normalize piecewise values, the five byte multipliers
-stay independent and control only their own scope, the snapshot fragment and
+two multiplier grids normalize piecewise values, byte budgets scale their own
+scope's base and queues follow their corresponding global allowances, the five
+byte multipliers stay independent and control only their own scope, the snapshot fragment and
 per-client period scopes stay equal, unlimited byte multipliers stay finite,
 the step helpers cross boundaries and saturate, pending-memory steps follow the
-piecewise stops, and independent defaults do not alias. The two finite size
-leaves have exact byte/quanta conversion and repair a
-conflicting pair downward with frame priority and the reserved metadata
-headroom while never raising the frame, and they remain independent of the five
+piecewise stops, and independent defaults do not alias. The isolation fixture
+exercises all nine caps and five send-byte multipliers within and across fresh
+settings, checks that later construction cannot inherit mutations, and restores
+null nested objects to values equivalent to fresh construction without aliasing.
+These isolation cases are source-reviewed automated coverage, with no passing
+run recorded here. The two finite size leaves have exact byte/quanta conversion
+and repair a conflicting pair downward with frame priority and the reserved
+metadata headroom while never raising the frame, and they remain independent of the five
 send-byte multipliers; `InventorySizeScaleTest` covers the ordered legal
 positions and their exact byte and quanta conversion, half-up normalization,
 pair legality, frame-priority reconcile and ordered position stepping.
@@ -83,9 +106,7 @@ the submenu radius scale and precise capture period, raw-JSON validation and a
 frozen snapshot clamp every value without resetting boolean choices, a frozen
 session snapshot never follows later config edits, root distance and gesture
 preferences stay independent in both mutation directions, and fresh defaults do
-not alias another client's mutable preferences. The suite also contains literal
-tuning assertions for spatial distance defaults and bounds and the Precise
-capture period; these do not establish a half-scale relationship.
+not alias another client's mutable preferences.
 `SpatialSelectorMigrationTest` contains filesystem-backed cases for the obsolete
 preference catalogued by
 [client configuration](../../config/client.md#obsolete-keys): fresh output omits
@@ -144,6 +165,24 @@ model and persistence seams only: no server-administration path, remote change
 route, settings-widget interaction, scheduler consumption or full client
 selector runtime is exercised.
 
+`ByteMultiplierDefaultsTest` covers owning-field fallback substitution with
+distinct non-unit values on both grids: missing objects, empty objects and null
+values restore the supplied fallback; explicit values take precedence;
+validation is idempotent and retains unlimited mode. Byte calculation leaves
+missing values unmaterialized and explicit values unnormalized, while unlimited
+mode returns the caller's guard before consulting the grid. The compatibility
+APIs retain their finite one-times meaning.
+`InventorySettingsPersistenceTest` exercises all five send-byte multiplier
+fields through filesystem-backed load: omitted or null objects, empty objects,
+missing or null values, and unlimited mode without a value restore each owning
+field's default without changing explicit siblings. Same-version load and
+untouched save preserve the original bytes; omitted and unlimited-without-value
+cases materialize the restored value on a real save and retain it after reload.
+Explicit zero and negative values clamp to their grid minimum while sibling
+multipliers and caps retain their values. These multiplier cases are
+source-reviewed automated coverage, with no passing run recorded here; they do
+not exercise scheduler consumption or live administration.
+
 The inventory-panel fraction fixtures in `SpatialSelectorSettingsTest` check
 missing and individually null members against model initialization without
 changing the other dimension, a safe snapshot leaving a raw null member
@@ -167,9 +206,13 @@ selector-layout evidence. The preference contract remains owned by
 [client configuration](../../config/client.md#spatial-selector-interaction).
 
 `GestureSkipHoldConfigTest` covers fresh, missing and null shortcut preferences
-defaulting to opt-in disabled, minimum-wait clamping through setters,
-validation and snapshot construction, frozen preference/wait values, and older
-snapshot constructor forms leaving the shortcut disabled. It exercises
+staying opt-in disabled, missing/null waits and older snapshot constructor waits
+matching a fresh model, and minimum-wait clamping through setters, validation
+and snapshot construction. Explicit input/expected pairs check integer extremes
+and just-outside values saturating to the corresponding bound, with both
+endpoints and an interior value retained. Held snapshots keep their preference
+and wait after live edits; older constructor forms keep the shortcut disabled.
+It exercises
 compatibility clearing an enabled preference without later restoring it,
 preventing re-enablement while compatibility is active, and retaining the
 configured wait. Filesystem-backed cases cover explicit round-trip values,
@@ -189,8 +232,9 @@ The two press preferences and the stay-open choice have source-reviewed model,
 handler, codec, catalog and resource coverage. None of it is a recorded run.
 
 `DoubleClickDangerConfigTest` covers the two press preferences as model and
-handler seams: defaults and bounds independent from the cancel half-cone;
-missing, null and out-of-range JSON values defaulting or clamping; compatibility
+handler seams: explicit window and angle values remaining independent of the
+cancel half-cone in both mutation directions; missing and null JSON values using
+model-default fallback and out-of-range values clamping; compatibility
 clearing the angle and rejecting non-zero until disabled; validation and update
 enforcing the same zero; NaN recovering to the default while infinity clamps;
 string NaN loading as a finite default; filesystem-backed same-version
@@ -203,7 +247,7 @@ recovery for an undecodable value (defaults plus a broken-file backup), with a
 failed backup installing the protection that declines angle writes.
 
 `ClientConfigBoundsTest` exercises direct window and angle clamps, including NaN
-and positive infinity, and also contains literal default assertions.
+and positive infinity.
 `SpatialSelectorSettingsTest` covers the inventory stay-open choice defaulting
 closed, missing and null
 members staying closed, the live setter affecting the next snapshot, and a held
@@ -304,7 +348,7 @@ The [UI](../../UI/settings-screen.md#server-performance-category),
 [revisioning](../../architecture/config/revisioning.md#same-version-shape-normalization)
 and [wire](../../architecture/network/protocol.md#server-configuration-routes-server-config-request-v4-server-config-update-v4-server-config-snapshot-v4)
 contracts have passing automated evidence in the
-[combined-tree run](build-checks.md#server-performance-combined-tree-run):
+[combined-tree run](build-checks.md#automated-verification-results):
 
 - `InventoryPerformanceOptionTest` constructs the actual replacement-slider
   factory headlessly for every replaced leaf. Construction invokes no edit

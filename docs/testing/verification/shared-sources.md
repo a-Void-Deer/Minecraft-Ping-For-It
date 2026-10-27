@@ -116,6 +116,9 @@ cooldown. `BudgetDelayMonitorTest` checks just-before and exact server-tick
 notification-threshold and global delivered-notice cooldown boundaries, zero and
 nonzero streak origins, repeated same-tick ingress or accounting cycles not
 advancing the streak, and a late first flush not qualifying stale evidence.
+Boundary input times come from the corresponding implementation timing sources;
+threshold, cooldown and fresh-evidence outcomes remain independent contract
+expectations.
 They also cover disabled messages preserving diagnostics and evidence,
 failed or recipient-less notice retry, permission and authoritative-host
 eligibility, live flag reads, server-lifetime replacement/stop, recoverable
@@ -138,17 +141,16 @@ preview duplicate suppression, retained repair still observing its new work,
 revoked or expired reprojection doing no delayed work, and heartbeat progress
 not resolving independently refused completion control.
 `InventoryBudgetDelayIntegrationTest` also combines the real backend with the
-monitor: a fresh delayed server tick can qualify a notice within one accounting
-period, repeated same-tick ingress does not accelerate it or refund the logical
-period budget, and WARN waits for accounting-cycle closure. Presentation and
+monitor: fresh delayed evidence qualifies a server-tick notice across accounting
+periods independently of WARN at real accounting-cycle closure. Repeated
+same-tick ingress neither accelerates the streak nor refunds the spent physical
+allowance, and skipped periods emit no synthetic WARN. Presentation and
 property-preview producer cases are inventoried under
 [presentation snapshot negotiation, policy and adapters](presentation.md#presentation-snapshot-negotiation-policy-and-adapters)
 and [target content preview](presentation.md#target-content-preview).
-The earlier focused run passed the complete inventory monitoring integration
-suite. The [final combined-tree run](build-checks.md#vault-tracking-performance-combined-tree-run)
-records the later known notification-timing failures; coverage inventory is not
-an all-green claim. No live server, notification, heap/TPS or soak result follows
-from these seams.
+The complete Common suite passed in the recorded
+[automated verification results](build-checks.md#automated-verification-results).
+No live server, notification, heap/TPS or soak result follows from these seams.
 
 ## Known automated gaps
 
