@@ -140,7 +140,7 @@ array or an unbounded work loop.
 | Member | JSON form | Meaning |
 | --- | --- | --- |
 | `physicalSlotsPerTick` | limit object | Shared slot-scan allowance per tick for live reads/item processing and detached decode/parsing, with the explicit-adapter capture exception defined by the [inventory budget contract](../architecture/presentation/inventory.md#budgets-queues-and-memory). Unlimited removes only the configurable cap; finite work and memory guards and both logical quotas remain in force. |
-| `pendingMemoryMiB` | limit object, MiB | Single server-wide pending-memory bound covering preview and tracking together. It is not a per-queue bound. |
+| `pendingMemoryMiB` | limit object, MiB | Single server-wide pending-memory bound covering preview and tracking together. It is a retained/reserved-memory cost bound, not an allocation-rate limit per second or a per-queue bound; accounting is owned by [shared sources](../architecture/presentation/shared_sources.md#cost-accounting). |
 | `displayByteMultiplier` | number, multiplier | Finite scalar scaling one item's serialized display payload from its existing display base. It has no unlimited mode and is not one of the five send-byte multipliers. |
 | `frameByteMultiplier` | number, multiplier | Finite scalar scaling the whole encoded inventory S2C frame from its existing frame base. It has no unlimited mode and is not one of the five send-byte multipliers. |
 | `preview` | object | Preview accounting; the members below. |

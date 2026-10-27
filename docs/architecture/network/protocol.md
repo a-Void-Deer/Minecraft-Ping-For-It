@@ -148,6 +148,14 @@ trailing bytes are rejected. Status values are `UPDATING`, `READY`,
 `UNCERTAIN`, `INCOMPLETE`, `UNAVAILABLE`, `INVALID`, `EXPIRED` and
 `COMPONENT_TOO_LONG`.
 
+`completeScan` describes source-scan completion, not receipt of all
+`partIndex`/`partCount` fragments. A marker-scoped selected-preview bootstrap
+uses the existing quantity-bearing data frames with `completeScan=false`; its
+fully installed transport baseline is still source-incomplete. The first
+source-completion barrier, bootstrap eligibility, history and quality are owned
+by [inventory tracking](../presentation/inventory.md#tracking); this adds no
+field, status value or wire version.
+
 Byte accounting on this route counts the whole encoded inventory frame —
 including its header, kind and entry framing — and excludes compression and the
 underlying Minecraft transport. The frame has a fixed absolute decode ceiling

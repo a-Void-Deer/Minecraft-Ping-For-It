@@ -90,6 +90,15 @@ generation, or modify the world. When a consumer leaves, only its own demand is
 removed; the handle is released when the source becomes invalid or the last
 consumer leaves.
 
+An explicit provider capability may revalidate an already admitted route and
+frozen layout in place instead of constructing a replacement view. It must check
+the current route, original alias, ordered membership and local boundaries,
+without discovering a new mapping or reading contents. The source still performs
+its own current identity and authority checks and retains the original access's
+validity check. A stable cursor, equal total slot count or generic decorator does
+not grant this capability; other providers retain full re-resolution. Layout
+reuse freezes addressing, not permission, availability or content.
+
 A conservative bridge for adapters that expose no resumable or version
 capability may only perform one-shot bounded calls. It must not invent
 continuations, stable versions, or cross-Ping identity. In that bridge a `null`
@@ -206,6 +215,13 @@ they run, including workspace and internal allocations and traversal of audited
 native or provider calls. Output-size measurement after a call is not a bound on
 that call's work or allocation.
 
+Lazy scratch and adaptive buffers obey the same boundary. Every replacement
+array's full allocation and initialization, growth control and written-prefix
+copy are admitted before allocation or copying; charging only the capacity delta
+is insufficient. Discarded attempts remain paid. Cumulative allocation is
+separate from peak simultaneous workspace, and reset or storage reuse refunds
+neither attempted work nor allocation.
+
 These guarantees cover the pipeline's owned processing and explicitly audited
 call graphs, not pre-existing resident world storage, unrelated game work, total
 JVM heap, GC or wall-clock time. Memory charges are a conservative cost model,
@@ -302,7 +318,10 @@ heartbeat and watermark cadence.
 
 The domain policy owns what may be published. A preview may allow partial data.
 Inventory tracking publishes a normal valid quantity update only after a
-complete scan, as owned by [inventory](inventory.md). Control information —
+complete scan; its narrow
+[selected-preview bootstrap](inventory.md#selected-preview-bootstrap) is retained
+presentation, not partial tracking capture or invented completion evidence.
+Control information —
 source invalidation, hard stop, and the corresponding status and fence — is
 independent of item quotas, takes priority, is charged to total bytes, and must
 not generate valid quantities or fake zeros. Recovered valid data still follows

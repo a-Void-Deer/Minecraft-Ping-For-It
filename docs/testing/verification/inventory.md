@@ -154,7 +154,7 @@ a tighter ceiling mid-pass restarts the walk from the first retained slot, the
 still-referenced encoded page stays charged until its round is released, and
 closing a consumer during a deferred pass leaves no workspace and rejects
 later work. Additional admission tests cover refusal before resolver, lock,
-witness or content callbacks; mapped exact and aggregate witnesses; charged
+witness or content callbacks; mapped exact and aggregate witness helpers; charged
 cursorless blank visits and throwing attempts; attempted capture work remaining
 paid without spending decode-slot allowance; and discovery grants propagated
 through plan lookup and validity checks with attempted-prefix settlement on
@@ -162,7 +162,7 @@ defer or exception. Retained-input reprojection tests refuse before parsing,
 preserve the cursor and exact long count, release temporary workspace, and retry
 after work returns. These synthetic admission seams do not prove ordinary
 native-container serviceability by themselves. Separate native-read wiring tests
-exercise complete single- and double-chest preview, a live selection witness and
+exercise complete single- and double-chest preview, a direct live-witness helper and
 fresh tracking under unchanged default memory, with exact read counts and no
 outstanding reservations. Lazy-consumption tests refuse a read without fresh
 scratch after capture scratch has closed; caller-wiring tests cover shared
@@ -189,8 +189,8 @@ close is idempotent and releases snapshot, source and retained memory even
 when cleanup throws, with fatal errors propagated without stranding resources.
 `InventoryAuthorityOrderTest` covers the production
 admission order before any source read: rate and channel reject first,
-authoritative target-gone precedes source admission, and the witness and
-annotation steps sit inside production dedicated admission before storage with
+authoritative target-gone precedes source admission, and source evidence and
+annotation checks sit inside production dedicated admission before storage with
 no leaked reservation. It also covers the committed lifecycle around that
 order: the tracking sidecar is installed before the first initial publication
 even with no section intents, a committed publication failure cannot retry,
@@ -225,15 +225,16 @@ encoded data into the real client without resurrecting exact variants. Queue
 refusal with repeated request repair and an independently refused publisher-work
 grant exercise separate contention seams, not live packet loss.
 `InventoryBackendTest` exercises the production
-backend orchestration headlessly: one bounded preview selection creates once
-and the first tracking observation reuses neither the preview snapshot nor its
-count; invalidation, recovery and hard expiry leave marker lifetime untouched
+backend orchestration headlessly: one bounded preview selection creates once,
+seeds the selected retained preview count, and starts a fresh tracking observation
+whose accumulators reuse neither the preview snapshot nor its count;
+invalidation, recovery and hard expiry leave marker lifetime untouched
 and stop probing after the deadline; revoked views purge recipient item queues
 while allowing current-view negotiation controls and preserving the frozen
 audience; identity aggregation is scoped to each observation, and a recipient's
-resync remains isolated from peers; a stale selected item is rejected at one
-bounded witness without an automatic retry; a
-failed prepared create releases its sidecar reservations; an invalid
+resync remains isolated from peers; item absence does not veto an otherwise
+valid reference or add a creation-time getter, and selection replay creates
+only once; a failed prepared create releases its sidecar reservations; an invalid
 preview releases its physical round so unrelated work can progress. Cooldown
 coverage is inventoried under
 [Resynchronization and budget policy verification](#resynchronization-and-budget-policy-verification).
@@ -246,12 +247,12 @@ current offer and a recorded selection outcome after capacity or transport
 returns, without repeating selection or marker creation, and fence old-view or
 disconnected outcomes. Aggregate-display work-refusal cases keep retirement and
 the retained count retryable before constructing the bounded display. Current-view
-control and aggregate-witness cases pass in the recorded focused run; they remain
+control and aggregate-selection cases pass in the recorded focused run; they remain
 headless authority and recording-transport evidence.
-`InventoryPatchIdentityFlowTest` adds backend assertions across preview, live
-selection witness and the first fresh tracking capture: two exact keys of one
-item ID remain separate rows and selecting either witnesses its own slot and
-tracks only its count. One key with decorated, ID-only or unavailable display
+`InventoryPatchIdentityFlowTest` adds backend assertions across preview,
+selected-value bootstrap and the first fresh tracking capture: two exact keys of
+one item ID remain separate rows and selecting either performs no item getter
+and tracks only its count. One key with decorated, ID-only or unavailable display
 forms remains one selectable row with summed authoritative counts; display
 variation does not change selection meaning. Supplying the raw exact key
 instead of the request-scoped opaque reference is rejected. The fixture assembles
@@ -303,7 +304,7 @@ cases; these are bounded recording-transport seams.
 production source wrapper with a recording platform view: a same-alias topology
 change invalidates before the cursor continues, a fresh observation recovers
 all slots, explicit snapshot-plan discovery stays lazy without capturing or saving NBT
-and without replacing the live selection witness, an aggregate alias
+and without replacing the direct live-witness helper, an aggregate alias
 without an explicit member layout keeps the live route, a completed
 double-chest preview withdraws its cross-period encoded batch when the original
 hit half becomes a legal single, normal content changes after a completed native
@@ -397,14 +398,14 @@ rotation invalidates before the cursor continues, and a fresh handle recovers
 the complete twelve-slot sum. `SableInventoryHandoffTest` covers the production
 preview-to-tracking handoff with recording transports: a candidate preview is
 request-scoped without allocating a marker key or provider reference, a valid
-selection materializes once, binds the current physical root, witnesses the
-live item and stores committed tracking with a fresh count, a wrong sub-level,
-root, registry or inactive source rejects before the witness with a single
+selection materializes once, binds the current physical root, seeds committed
+tracking without a content getter and then scans for a fresh count; a wrong sub-level,
+root, registry or inactive source rejects before item data with a single
 release and no store, a tampered owner or face binding rejects before
-validation, witness or annotation, same-registry candidates do not cross-bind
+validation, preview evidence or annotation, same-registry candidates do not cross-bind
 across requests, a selection replay resends the stored result without a second
-materialization, witness or reference, and an invalid source before the first
-tracking publication publishes no quantity while recovery starts a fresh
+materialization, getter or reference, and invalidity after the seed publishes no
+new quantity while recovery starts a fresh
 baseline. `InventoryPresentationTest`,
 `DedicatedDeliveryBoundaryTest` and `ClientDedicatedDeliveryTest` cover the
 dedicated-delivery boundary: the inventory adapter is negotiated and
@@ -954,7 +955,7 @@ catalogue guard after a successful freeze does not falsely report an identity
 aggregate. The real-Catalog refusal case in
 `InventoryPublicationIntegrationTest` additionally drives the production
 backend's preview fold: the authoritative long group total survives and the
-retired exact selection is rejected before a new witness or marker creation.
+retired exact selection is rejected before a content read or marker creation.
 That case uses a recording packet host, not client replay or live transport.
 
 `InventoryGenericComponentCompatibilityTest` checks that a codec error retains
@@ -1021,8 +1022,14 @@ coverage and logging-deployment limitations are owned by
 `InventoryTrackingRendererTest`
 projects received tracking data into bounded renderer lines: only received tracking data supplies bounded item lines, explicit zero
 is retained, unknown or invalid counts are never synthesized as zero, status
-and grey state stay explicit, and the tracking annotation resolves the shared
-localized name policy rather than the raw label.
+and grey state stay explicit, lifecycle labels and the All variants qualifier
+remain independent even with a long item name, and the tracking annotation
+resolves the shared localized name policy rather than the raw label. Resource
+fixtures for all eight bundled locales preserve full decimal quantities for
+zero, `9007199254740993` and `Long.MAX_VALUE`, with long names, lifecycle labels
+and the aggregate qualifier inside the line bound. Reversed quantity/annotation
+grammar and oversized descriptive phrases have separate controls. These are
+CPU text/projection assertions, not HUD or GPU validation.
 
 Across this foundation, the
 [inventory list interaction](interaction.md#inventory-list-gestures-and-navigation)
@@ -1067,7 +1074,7 @@ recording world/provider ports. It covers:
   prefix without getters, reverse visible/physical mapping, blank slots and
   authoritative `9007199254740993` amounts;
 - an already-read slot retaining its earlier observation while an unread slot
-  supplies a later value, a fresh live absolute-slot witness, and a distinct
+  supplies a later value, a direct live absolute-slot witness helper, and a distinct
   complete first tracking round;
 - replacement handoff and retained completed evidence for a slow peer, memory
   refusal without cursor advance, unique-definition display tightening without
@@ -1086,7 +1093,8 @@ live large-container or total-heap measurements.
 
 Its backend/client cases pass production-encoded frames through the real client
 session. They exercise updating partial preview followed by ready completion,
-completed empty views, complete-only first tracking and absence-derived zero,
+completed empty views, provisional selected display followed by a complete
+fresh tracking result and absence-derived zero,
 retained old totals during replacement, completion-plus-period scheduling and
 hard expiry. Corrective replay and tracking resync preserve scoped sweep
 evidence without recapture; delayed parts still gate client completion, and
@@ -1095,8 +1103,8 @@ detail. Actual identity refusal retains aggregate quality through selection and
 resync; getter/capacity failures publish no tracking zero; invalidity or permission
 revocation withdraws queued ready data. Recovery through a generic eventual
 adapter stays uncertain. Default-settings 540/900-slot backend fixtures finish
-preview within their bounded reference lifetime, then witness live and complete
-a fresh tracking sweep. These deterministic tick assertions are not throughput
+preview within their bounded reference lifetime, select without a getter and
+complete a fresh tracking sweep. These deterministic tick assertions are not throughput
 or elapsed-time benchmarks.
 
 Trailing-empty-slot cases withhold an earlier encoded exact or aggregate row,
@@ -1162,8 +1170,8 @@ empty/absence-zero observations as uncertain, while explicit atomic adapter
 snapshots retain ready status through resync. No generic `CaptureResult`
 consistency or wire schema is upgraded by these fixtures.
 
-The final recorded implementation-phase full check/build run used Java 21,
-PowerShell, UTF-8, no explicit timeout and redirected stdout/stderr. It completed
+The native incremental-sweep implementation's recorded full check/build run used
+Java 21, PowerShell, UTF-8, no explicit timeout and redirected stdout/stderr. It completed
 with `BUILD SUCCESSFUL` for:
 
 ```powershell
@@ -1171,11 +1179,228 @@ with `BUILD SUCCESSFUL` for:
 ```
 
 Its JUnit XML reports record Common 4620, Fabric 24, Forge 26 and NeoForge 174
-tests, 4844 total, with zero failures, errors or skips. This documentation update
-inspected the existing reports and successful log; it did not rerun Gradle.
+tests, 4844 total, with zero failures, errors or skips. That is historical
+evidence for that implementation's inputs, not the later bootstrap tree; the
+[bootstrap run](build-checks.md#preview-seeded-tracking-combined-tree-run)
+records its separate results, including known failures. This documentation
+update inspected existing reports and logs; it did not rerun Gradle.
 Build/artifact evidence limits remain owned by [build checks](build-checks.md).
 Installed Create, live-world updates, multiplayer transport, TPS, GC and heap/elapsed-time
 performance remain pending in the [manual matrix](manual-integration.md#inventory).
+
+## Vault tracking performance evidence
+
+### Deterministic construction, authority and scratch coverage
+
+The earlier flat 900-slot native fixture does not model per-member Vault
+validation and reconstruction. `CreateVaultTrackingPerformanceTest` instead
+drives the real NeoForge segmented provider, common view/source validation,
+native resident freezer, catalogue and shared runtime journal over a legal
+3×3×5 shape: 45 members with 20 local slots each. The slot count represents
+Create's default per-member capacity, not evidence of the user's actual
+`vaultCapacity` setting or Vault shape. World/member ports and block entities are
+headless stand-ins, and resident field access uses a test service instead of
+production Mixins.
+
+Its deterministic assertions cover empty, repeated stone and three mixed explicit
+patch variants, native persistent-codec identity partitions, authoritative totals
+beyond signed-int range, actual physical-ledger charges, no getter during
+preparation or idle evidence checks, same-total local-boundary invalidation before
+tail reads, and zero retained/reserved charges after close. A full sweep reads
+900 slots in 29 pages with exactly one completion, only on the last page, and at
+most 32 physical visits per reading tick. Pages are not network publications.
+
+`InventoryResidentDiscoveryTest` uses isolated defining/context class loaders to
+check first-request discovery, one service across independent requests/scratch,
+first-context rather than defining-loader resources, absent-service Mixin
+fallback, no rediscovery after context changes, and visible initialization
+failure. `PlatformInventoryScopeFactoryTest` and
+`InventoryResidentScopeFactoryTest` check legacy-overload dispatch, one supplier
+invocation for a consuming access, zero invocations when declined, fresh guarded
+delegation, frozen face and dynamic authority, and source member prechecks even
+when no optional scope is constructed.
+
+`InventoryInPlaceSourceContractTest`, `VaultCurrentSourceValidationTest` and
+`VaultInPlaceAccessContractTest` add current route/root/member identity, registry,
+owner/key/lock/loot/removal/load and topology cases. They cover same-shape local
+replacement reading current contents, unsafe native backing refusal before the
+getter, callback-time revocation, immediate freeze before metadata mutation,
+invalidation and fresh-source recovery, shared-peer lifetime and memory release.
+Generic capability replacement still requires rerouting, decorators cannot grant
+the opt-in, and external bindings resolve per operation. Zero/one-short validation
+grants refuse before callbacks or cursor advance; exact native grants admit the
+local audit without a whole-capture audit, and failed attempts remain paid.
+Cached page profiles cover step sizes 0 through 64 as source metadata, not item
+observations or validity results.
+Source-owned profiles/member keys are included in the retained model; retention
+tests check shared-layout/Vault auxiliary charges and callback-free cached cost
+queries. These are finite admission and lifecycle oracles, not heap-retention
+measurements.
+
+`InventoryCanonicalWriterTest` keeps the independent all-tag, sorted-key and
+malformed-UTF byte oracle and adds geometric growth, exact logical-cap/one-over
+refusal, full replacement allocation and cumulative-copy admission.
+`InventoryDisplayWriterTest` checks exact UTF-8 caps across growth, escaped and
+surrogate boundaries, reset after a failed larger ladder pass, retained
+no-rehydration, and work/allocation refusal without a size-terminal exception.
+`InventoryEncodingCostOracleTest` checks empty/JSON/NBT lazy scratch schedules,
+direct scratch debits separate from native event vectors, first-allocation
+refusal, map cardinality, collision-tree splitting and alternating resets.
+`InventoryScratchAllocationTest` covers zero-effect laziness, first-array refusal
+before cure callbacks, ordered ranges across phases/nested planning, and multiple
+native effect families against the persistent-patch oracle. Existing native,
+explicit/default, mutation, cycle/DAG, external-codec and collision fixtures remain
+unrelaxed. These tests do not claim identical acceptance at every processing-budget
+threshold; cumulative adaptive-growth costs are part of the guarded contract.
+
+### Recorded allocation comparison
+
+The saved baseline uses production `188ae241` with harness `a8d36f89`; subsequent
+stages are `095238f8` (resident discovery/lazy scopes), `1d0886b1` (Vault current
+validation/cost profiles) and final `ea0339d2` (on-demand processing scratch).
+SHA-256 and historical Git-blob comparisons confirm that the three harness/support
+files from `a8d36f89` are unchanged at every measured stage. The final source/build
+manifest is tied to the [final combined-tree run](build-checks.md#vault-tracking-performance-combined-tree-run).
+
+All stages used JDK `21.0.12.1+1-LTS`, three warmup operations and five measured
+samples per workload. `ThreadMXBean` measures current-thread allocated bytes,
+not retained memory, total JVM heap or an allocation rate. Each sample uses a
+fresh runtime/consumer over preconstructed native residents. The measured full
+sweep starts after preparation, includes tick advances, page replay and retained
+ledger work, and excludes setup/close. Separate workloads measure fresh-runtime
+admission (not JVM cold start), the second 32-slot page and a completed-evidence
+idle probe. Counters are collected separately from timed samples.
+
+Median allocated bytes for the same prepared 900-slot sweep:
+
+| Contents | Baseline | Resident/lazy scope | Vault validation | Final scratch | Reduction from baseline |
+| --- | --- | --- | --- | --- | --- |
+| Empty | 186928368 | 96408264 | 709136 | 621392 | 99.67% |
+| Repeated | 304761648 | 214241712 | 118464184 | 5688272 | 98.13% |
+| Mixed | 305988176 | 215468072 | 119692104 | 17140424 | 94.40% |
+
+Final full-sweep distributions in allocated bytes:
+
+| Contents | Minimum | Median | Maximum |
+| --- | --- | --- | --- |
+| Empty | 621392 | 621392 | 659584 |
+| Repeated | 5688272 | 5688272 | 5689160 |
+| Mixed | 17140424 | 17140424 | 17150024 |
+
+Final second-page medians are 25688/203544/612360 bytes for empty/repeated/mixed.
+The final idle probe is 4512/4640/4640 bytes minimum/median/maximum for empty,
+and 4512/4512/4512 for repeated and mixed, with no getter. Raw five-sample byte
+and elapsed-time vectors, all workloads' distributions and the four-stage table
+remain in the external `vault-perf-*-manifest.txt`, `vault-perf-p4-final.xml`,
+`vault-perf-p4-final.measurements.log`, `vault-perf-p4-four-stage-comparison.csv`
+and fairness-hash evidence. Elapsed observations include JVM/GC variance and are
+not CPU time, game-tick duration or live throughput guarantees.
+
+For each prepared full sweep, common view/provider-factory calls change from
+1829/1829 to 0/0, and warm resident-service constructions from 2729 to zero.
+Direct adapter-loaded checks change from 1002877 to 584036, and common-loaded
+checks from 420670 to 84134. Full structure checks inferred from controller-check
+counts minus factory calls on the stable successful path change from 7287 to
+5458. Successful factory calls imply segmented/layout/descriptor construction in
+that path; constructors are not directly probed. The final scratch stage leaves
+all validation/getter counters equal to the preceding Vault stage. Reuse eliminates
+reconstruction, not all per-slot member checks; validation still scales with slots
+and members.
+
+The directly inspected feedback copy `feedback_log/pingforit.server.json`
+contains a physical allowance of 32 slots/tick, tracking period 4, target/server
+logical allowances 256/2048, pending memory 256 MiB, and display/frame multipliers
+4; the fixture explicitly reproduces those relevant settings. This ignored
+feedback copy is not automatically loaded as the server configuration, and the
+live active configuration is unknown. At 32 physical slots/tick, 900 visits need
+at least 29 reading-eligible ticks; that allowance does not cap all source-validity
+checks at 32 or prevent idle probes between sweeps. The pending-memory setting is
+not an MB/s allocation throttle, as defined by the
+[configuration owner](../../config/server.md#inventory-policy-object).
+
+The benchmark does not exercise real Create `MinecraftMember` reflection,
+`ServerLevel`/`ServerPlayer` lookups, Mixin/service/bootstrap wiring, backend
+selection, marker creation, publisher, network or a fully populated installed-mod
+registry/provider workload. The reported live 1100 MB/s allocation and 30% CPU
+case was not independently reproduced, and these results neither convert to
+those units nor prove the incident solved. Installed Create/Refined Storage with
+simultaneous import/export, paired real profiling and the remaining
+[manual inventory scenarios](manual-integration.md#inventory) remain pending.
+
+## Preview-seeded tracking coverage
+
+The [handoff and bootstrap contract](../../architecture/presentation/inventory.md#selected-preview-bootstrap)
+and [D0014](../../decisions/D0014-preview-seeded-inventory-tracking.md) have
+headless source-to-encoded-client and publication coverage:
+
+- `InventoryCatalogNativeReadWiringTest` clears the old observed slot before
+  `SELECT`, creates immediately with no additional item getter, then explicitly
+  replaces the seed with a fresh positive, equal or absent/zero result. Its
+  540/900-slot partial-preview cases preserve exact long quantities after preview
+  close while a new sweep starts at slot zero, without an old round or seeded
+  accumulator. Separate cases retain one selected value rather than the native
+  preview catalogue and release unselected payloads on close.
+- Its queued-publication regressions change an actual native chest lock after
+  withholding the seed, then deliver unknown, duplicate and other-valid-preview
+  selections in the same tick. Marker/sidecar, Basic and correlated outcomes
+  stay synchronous, no selection drains queued quantities, and the next normal
+  budgeted tick detects revocation without a content getter. A provider-backed
+  long-count case exercises the same boundary; unchanged-provider and native
+  chest controls progress on the next eligible tick. These tests pass production
+  bytes into the client, then cover seed retirement, fresh zero recovery and
+  expiry without a live world or loader launch.
+- `InventoryBackendTest` distinguishes the current retained exact-key count
+  from the last delivered row, and the current folded-key count from another
+  all-ID subtotal. Missing counts, forged/retired tokens, owner, baseline, state
+  and current-invalidity failures reject without a content read. The patch-flow,
+  authority-order and `SableInventoryHandoffTest` fixtures cover distinct exact
+  identities, current binding, rollback and one materialization/store/outcome
+  under replay. Sable alias/revocation fixtures remain scoped to recording
+  providers, not a live sub-level.
+- Native backend/client cases cover Basic-before-seed delivery, independent
+  recipient baselines without recipient previews, current owner lock/layout
+  checks, display-cap repair without recapture or restored detail, first-scan
+  incomplete history through retry and repair, permanent seed retirement on
+  invalidity through recovery, exact-to-aggregate retirement without a false
+  subtotal, and hard expiry before completion. Complete accepted native results
+  remain ready; generic eventual recovery remains uncertain.
+- `InventoryBootstrapPublicationTest` passes real writer/reader frames into the
+  client session. It separates installed seed baselines from source completion,
+  exercises long exact and aggregate seeds, equal-count explicit replacement,
+  missing/reordered data parts, matching early controls, heartbeat stability,
+  send/memory refusal and release, obsolete queued updating withdrawal, grey
+  incomplete/invalid history through rebase, and recipient isolation. An
+  admitted old seed is withdrawn even if a fresh result was offered before the
+  failure; late incomplete controls cannot downgrade a newer completed result.
+  Actual publisher `READY`/`UNCERTAIN` controls delivered before fresh data leave
+  exact and aggregate seeds visibly updating. Reverse multipart delivery keeps
+  the closed seed, incomplete/invalid history survives early controls and rebase,
+  and failure during first delivery retains the seed rather than a partially
+  applied replacement. Future checksums wait for data; completed controls still
+  refresh an already complete view. Cap reduction strips the closed provisional
+  display and a later increase cannot restore it.
+  The actual publisher's two-entry multipart regression withholds the selected
+  replacement while delivering a different fresh key, then repeats invalidation
+  and recovery controls: only the prior closed seed remains visible until all
+  recovery parts arrive. Direct cases distinguish no history, closed empty,
+  completed and zero-count seed projections; none can acquire an unclosed
+  recovery key through duplicate invalidation or rebase. Reset/removal cleanup
+  and stale invalidation after complete recovery have controls. The two-entry
+  case exercises the supported publication/client contract, not a live
+  single-selected-item incident.
+  Generic partial tracking captures, preview routes and multi-key bootstraps are
+  refused by the narrow publication path.
+- Tracking text projection is inventoried [above](#tracking-projection).
+  Encoded-publisher receipt gating and exactly-once chat coverage are owned by
+  [presentation verification](presentation.md#content-receipt-chat-and-pending-completion).
+
+Results and known baseline failures are recorded in the
+[combined-tree run](build-checks.md#preview-seeded-tracking-combined-tree-run).
+This phase inspected the existing command manifest, logs and JUnit XML rather
+than running Gradle. These runs do not establish live Create/Refined Storage
+behavior, the cause of the reported 900-slot Vault import/export failure,
+live multiplayer, GPU rendering
+or performance. Those remain [manual scenarios](manual-integration.md#inventory).
 
 ## Patch-only identity and display verification pending
 
@@ -1294,6 +1519,10 @@ and multiplayer repair remain pending in the
 
 ## Known automated gaps
 
+- the [final performance run](build-checks.md#vault-tracking-performance-combined-tree-run)
+  is not fully green: notification-timing failures also reproduce on the
+  unmodified baseline. Focused bootstrap coverage does not resolve that mismatch
+  or prove that all reported installed-container selection failures are fixed;
 - the revised timing and memory-admission seams
   [passed the combined-tree run](#resynchronization-and-budget-policy-verification),
   but active selected-variant capacity across period boundaries has no dedicated
@@ -1314,10 +1543,13 @@ and multiplayer repair remain pending in the
   count-overflow case, broker and legacy preview-server branches lack
   direct log-event assertions. Test appenders do not establish production
   file-appender delivery or low-frequency behavior in a prolonged live soak;
-- default-cap capture, live selection and fresh tracking have headless native
-  seam evidence. For the audited native fast path, independent review establishes
-  the composed root/native/Catalog/caller allocation and work bounds within the
-  versioned static source-event model and reviewed finite guards. Its closed
+- default-cap capture, preview-seeded selection and fresh tracking have headless native
+  seam evidence. Previously recorded independent review of the audited native
+  fast path establishes the composed root/native/Catalog/caller allocation and
+  work bounds for its reviewed inputs within the versioned static source-event
+  model and finite guards. That review must not be extended to later scratch
+  edits by inference; the final scratch-stage reviewer results are not recorded
+  by this documentation update. Its closed
   component certificates do not certify the generic external-trusted codec route.
   Cursorless attempted-prefix, symbolic lock-certificate and native JSON
   stack-boundary tests exercise those finite seams, not whole-JVM certification.
@@ -1400,6 +1632,6 @@ and multiplayer repair remain pending in the
   remains manual/integration evidence;
 - the provider-confirmed external inventory source against a live Sable runtime
   and world: live membership and sub-level checks, a real provider layout or
-  capability, member-gate revocation between operations, a live item witness
+  capability, member-gate revocation between operations, getter-free selection
   and the preview-to-tracking handoff, and inventory reads on the three
   supported loaders;

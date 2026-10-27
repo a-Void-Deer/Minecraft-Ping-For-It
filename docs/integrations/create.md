@@ -261,7 +261,25 @@ in place: every member's loaded state, scope and controller relation, and every
 local slot boundary, still pass their dynamic gates. Redistributing local slot
 counts invalidates the layout even if the combined total is unchanged. This
 stable indexed mapping is not a content-version guarantee; no Create wrapper
-version is assumed to certify unchanged contents. Native incremental reads,
+version is assumed to certify unchanged contents.
+
+The ordinary-block source explicitly opts into
+[in-place revalidation](../architecture/presentation/shared_sources.md#source-access).
+Each source validity check retains the original access check, checks the current
+root and ordered members' loaded state, registry and object identity, and fresh
+owner/lock/loot authority, then checks the current tested-version route and Vault
+topology. A replacement root or member invalidates the old observation even with
+the same registry and total slots. A same-layout local-handler replacement is
+read fresh, with native ownership classification before the getter and existing
+resident pre/post and held-member gates intact; synchronous detachment still
+precedes later metadata callbacks. No successful validity result or content is
+cached. Generic capability sources retain full rerouting, and provider-confirmed
+external bindings still resolve their current scope per operation rather than
+using this ordinary-source shortcut.
+
+Vault access owns its local resident validation and declines the optional generic
+resident-scope factory, avoiding unused scope scratch without bypassing the
+common source's eager member/owner prechecks. Native incremental reads,
 explicit snapshot capture, recovery, budget and
 variant semantics remain owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md).

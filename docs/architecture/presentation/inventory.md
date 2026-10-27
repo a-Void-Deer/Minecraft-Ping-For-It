@@ -17,7 +17,13 @@ identity and processing boundary, and the size-only default-icon exception, are
 explained by
 [D0012](../../decisions/D0012-explicit-patch-identity-and-display.md). The native
 read-cost and mixed-time accuracy boundary is explained by
-[D0013](../../decisions/D0013-native-incremental-inventory-sweeps.md).
+[D0013](../../decisions/D0013-native-incremental-inventory-sweeps.md). The
+preview-seeded initial display and separation of selection intent from current
+item presence are explained by
+[D0014](../../decisions/D0014-preview-seeded-inventory-tracking.md). The rationale
+for metadata reuse and bounded on-demand scratch, rather than validity or content
+caches, is recorded in
+[D0015](../../decisions/D0015-inventory-metadata-reuse-and-scratch.md).
 
 Coverage scope and pending runtime evidence for the ordinary-block and
 provider-confirmed external preview and tracking, item-choice create and native
@@ -76,8 +82,13 @@ Recovery probing and polling are allowed before the hard deadline. Recovery
 keeps the existing Ping ID, advances the inventory status revision, and
 establishes a new inventory snapshot identity with a clean baseline per
 Ping and recipient; the source is scanned afresh and old values and streams are
-invalidated rather than merged. A different block type is not a valid source
-while it occupies the position. If the original registry ID later returns while
+invalidated rather than merged. An initial preview seed is permanently retired
+on invalidity: queued seed data is withdrawn, and neither recovery nor repair
+can restore its publication eligibility. A quantity already received may remain
+as grey historical display through rebaseline, outside the new baseline's
+checksum and completion state, until a fresh complete scan replaces it. A
+different block type is not a valid source while it occupies the position. If
+the original registry ID later returns while
 the same Ping is still alive and before its hard deadline, the source may
 recover.
 
@@ -130,12 +141,15 @@ physical read bindings. An ordinary block must match its original identity
 exactly; an external candidate's current source and the committed source must
 resolve to the same provider, sub-level, physical root block and registry, so
 same-registry candidates and different hit roots cannot cross-bind. The
-selected item is then witnessed live against the authoritative source, the
-annotation is checked, and retained memory is admitted before the tracking
-lease is stored. Any failure releases the acquired reference and stores
-nothing. The tracking lease keeps the committed input; its first count comes
-from a fresh complete authoritative server-side observation, never the preview
-snapshot or a partial observation, and no preview Ping is invented. The
+owner's current read authority and the preview's original source/layout evidence
+are revalidated through metadata checks, the selection reference and annotation
+are checked, and retained memory is admitted before the tracking lease is
+stored. Any failure releases the acquired reference and stores nothing. No
+item-presence witness, additional item-content getter, fallback search or
+asynchronous selection deadline is part of this handoff. The tracking lease
+keeps the committed input and one detached selected value as the initial display
+seed under [Tracking](#tracking); it never retains the preview as a tracking
+observation, and no preview Ping is invented. The
 committed tracking association is installed after the marker is stored and
 before the created notification is published, so the recipient's atomic initial
 can project the inventory selection kind
@@ -148,11 +162,19 @@ never accumulated into a staged multi-item selection, and the selector release
 and stay-open timing that submits that selection is owned by
 [wheel](../picking/wheel.md#inventory-list).
 The create passes the existing marker-admission authority and gates owned by
-[target validation](../authority/target_validation.md), with the selected item
-reference validated safely and immediately against the authoritative source
-instead of trusted from preview data. That live witness is not authorized by
-the preview snapshot or by any capture observation, and captured data never
-stands in for it. The new Ping's whole-marker type is the
+[target validation](../authority/target_validation.md). The server resolves the
+opaque reference only inside the sender's still-open request and its current
+baseline/state fences. A forged, missing, retired, cross-request or
+known-invalidated reference rejects; a missing retained count is not zero.
+An exact reference takes only its exact key's current server-retained count;
+an aggregate reference takes only the current folded key's count, never a
+different item-ID subtotal or a retired exact entry. The preview may still be
+partial, and the retained count may be newer than the last row delivered to the
+client. No client-screen quantity authorizes the seed. Current target, source,
+owner/face binding, read permission, annotation, rate, channel, audience,
+selection-capacity and memory gates still apply. Item absence at the old
+observed slot does not veto an otherwise valid selection: the new scan decides
+the subsequent count. The new Ping's whole-marker type is the
 frozen Target Type's default Ping Type; the chosen Ping Type travels as a
 separate item annotation rather than as the whole-marker type. The item
 annotation's eligible Ping Type set is the target's effective
@@ -164,8 +186,8 @@ client's item menu derives its eligible set from the accepted registry's actual
 tags, while the server decides the annotation's allowance from the actual
 provider-confirmed physical block and its live tags, so a client-expected
 registry or a merely claimed tag never authorizes the annotation. The
-annotation's quantity starts unknown, and its first authoritative count follows the
-complete-observation rules in [Tracking](#tracking).
+annotation initially displays the selected server-retained count as updating;
+the first complete tracking result follows the rules in [Tracking](#tracking).
 
 The first batch is sorted by count immediately rather than after the scan
 finishes. Newly discovered batches may reorder entries only before the user has
@@ -231,6 +253,70 @@ the selected keys; an incomplete scan must not claim a total for a selected
 key. The only full-ID exception is the component-fallback aggregate, whose
 permission and completeness rules are owned below.
 
+### Selected-preview bootstrap
+
+A successful single-item selection retains only its selected identity, bounded
+display and authoritative long count independently of the preview. Closing the
+preview releases its ownership of the catalogue, journal and unselected values
+without losing this seed. The seed is presentation history, not a
+`CaptureResult`, completed observation, native sweep evidence or tracking accumulator.
+
+The initial tracking publication carries that quantity with `UPDATING` and
+`completeScan=false`, even if the preview itself completed. An exact seed is not
+grey merely because it is updating; an aggregate keeps its independent All
+variants qualifier and grey identity quality. Publication follows the committed
+Basic notification and each recipient's current authorization and known-marker
+gate; a recipient needs no preview of its own. The owner's metadata/read gates
+are checked again after creation callbacks and before retained data sends.
+Marker storage, sidecar installation, Basic notification and the correlated
+selection outcome remain synchronous. Seed quantities wait for the next
+eligible normal publication tick and its current budgeted source validation;
+`SELECT` does not drain queued item data. An unknown, duplicate or other valid
+selection cannot release an older queued seed using an earlier same-tick
+authority approval. This adds no per-packet content getter or global authority
+refresh loop, and byte, queue or memory pressure may delay delivery further.
+Admission, replays and failures still create, materialize, rate-charge and store
+at most once under the existing correlated selection outcome; there is no
+pending-selection or cancellation state added by the bootstrap.
+
+Tracking starts at a fresh observation floor with zeroed accumulators. It cannot
+attach an older preview/shared round, continue the preview cursor or add the seed
+to a scan total. While this first scan is partial, the seed remains the displayed
+quantity, not its partial accumulator. The first complete usable scan explicitly
+supersedes the seed at a newer item revision, even when the counts are equal,
+including equal aggregates. If the selected item is absent it publishes zero;
+this does not delete the marker or change its lifetime. Completed native and
+generic results retain the quality rules in [Status presentation](#status-presentation).
+
+Transport installation of every part of a seed baseline is distinct from source
+completion. The first source-complete tracking state requires all parts of a
+complete-scan data cut; a matching checksum, heartbeat or status alone cannot
+certify it or bypass missing fresh parts. Late provisional data cannot downgrade
+an accepted completed cut.
+
+An accepted early `READY` or `UNCERTAIN` completion control remains control
+evidence, not the displayed quantity's quality. Until the first fresh data cut
+closes, the displayed count stays the last closed seed and its lifecycle stays
+updating, or preserves an existing incomplete/invalid failure. Partially applied
+fresh entries cannot replace that display or become its history if failure
+interrupts multipart delivery. A future completion checksum waits for its data
+before comparison, under the existing waiting and repair rules.
+
+Only an installed, closed projection can become historical display. Repeated
+invalidation or recovery-updating controls preserve that history when no newer
+cut has closed; they cannot adopt unfinished replacement metadata. A closed
+empty projection remains empty, distinct from having no received history.
+
+If the first readable scan ends `INCOMPLETE`, the received seed stays grey
+historical display. Obsolete queued updating cuts are withdrawn before retry
+admission; corrective repair may replay the retained seed only as incomplete,
+never restore updating or manufacture completion. Historical display does not
+itself enter a new baseline's digest or establish completion. `INVALID`
+instead permanently withdraws seed eligibility as owned by
+[source recovery](#source-identity-invalidation-and-recovery).
+
+### Completed scans and repair
+
 Tracking reuses the existing tracking period with no separate capture-cycle
 setting: the next sweep becomes due at completion of the current observation
 plus that period, not at an intervening global period boundary. An unfinished
@@ -259,8 +345,9 @@ observations or invalidate the source topology; unread native slots follow
 [incremental read semantics](#native-incremental-reads), while an explicit
 detached snapshot keeps its captured contents.
 
-Only a complete scan produces a normal valid quantity update. One logical batch
-may span several periods and may contain more entries than one fragment
+Apart from the selected-preview bootstrap above, only a complete scan produces
+a normal valid quantity update. One logical batch may span several periods and
+may contain more entries than one fragment
 carries; it must not rescan the inventory once per fragment. Stream updates are
 revisioned per item key, so a late item for one key is not discarded by a
 packet-global revision for another key. A key that has not been received stays
@@ -272,7 +359,7 @@ container is one such observation. For a face-scoped source, a complete,
 successful observation that finds no items is a valid empty observation of
 that view, not a claim that the whole source is empty outside the slots the
 frozen face exposes. Partial, unknown or incomplete observations never report
-zero.
+an absence-derived zero.
 
 A periodic heartbeat carries only checksum and watermark information and never
 resends state. A positive heartbeat value selects the periodic cadence within
@@ -486,15 +573,18 @@ observed exact entries, unselected variants and variants discovered later —
 belong to one aggregate, and the fold persists until a new snapshot. Replacement
 accounts for each source entry once, retires the old exact selection references,
 and fences old exact data and queued streams. A stale exact reference is
-rejected, never reinterpreted as an aggregate selection. An exact live witness
-requires its safe complete identity; an aggregate live witness requires the same
-item ID and a positive authoritative amount. This all-ID sweep remains subject
-to permissions, and an incomplete scan must not claim an aggregate total.
+rejected, never reinterpreted as an aggregate selection. Selection resolves the
+retained exact or folded key under the [handoff rules](#preview), without a live
+item-presence witness. This all-ID sweep remains subject to permissions, and an
+incomplete scan must not claim an aggregate total.
 Preview folding is scoped to the current preview request: closing that request
 ends the fold, and a reopened preview starts a fresh scan that may choose exact
 or folded presentation for the same item ID again. A valid handoff preserves
-the selected exact or aggregate meaning under the existing fresh tracking-capture
-rules; it does not retarget retired references.
+the selected exact or aggregate meaning under the [tracking rules](#tracking);
+it does not retarget retired references. If a fresh tracking scan folds a selected
+exact item ID, the queued exact seed is retired: its exact subtotal cannot be
+relabelled an all-variants quantity. Received history may stay grey, but only a
+complete usable all-ID scan can publish the replacement aggregate total.
 
 Sharing a physical observation does not share preview folds or selection
 references between requests. A fold changes the consumer's item-ID projection,
@@ -534,7 +624,8 @@ while an earlier slot retains its old amount in the same completed total. Moving
 the same items from an already-read slot into an unread slot can instead count
 them twice; completion does not certify that such movement did not occur.
 
-Preview may expose the paid prefix with updating status. Tracking totals,
+Preview may expose the paid prefix with updating status. A selected-preview
+bootstrap is the separate retained display policy above; fresh tracking totals,
 absence-derived zero and completion still require the complete usable sweep
 defined above. Completion quality is owned by [status presentation](#status-presentation).
 
@@ -689,12 +780,46 @@ not being encoded; shared data occupies one real memory cost while byte fan-out
 is charged per send; and the source cache, client assembly, and unknown streams
 each keep an independent finite engineering bound.
 
+The selected-preview seed and its bounded identity/display ownership have a
+retained charge independent of the preview. Its publication, repair, recipient
+indexes and historical client display obey the existing memory, queue and byte
+bounds; copying one selected value does not pin the preview source round or
+admit its unselected catalogue into tracking.
+
 Owned source metadata, including frozen views, member layouts and slot mappings,
 has a retained charge separate from fixed round state. Pre-resolution admission
 holds its construction workspace until that ownership transfers into the round
 or binding-evidence reservation. Retained-cost queries use cached metadata and
-perform no provider or world callback. Reacquired access wrappers remain local
-to the admitted operation rather than escaping its validation workspace.
+perform no provider or world callback. Each source's bounded page-cost directory
+is retained and charged with its handle; these profiles describe metadata work
+only, not contents or a cached permission decision. Reacquired access wrappers
+remain local to the admitted operation rather than escaping its validation
+workspace. An explicit in-place provider instead keeps its admitted layout,
+member-reference and registry-key evidence inside that same handle's retained
+charge, never in a global source cache.
+
+Native resident reads and explicit whole-capture capability audits have separate
+cost profiles. A native read pays its current local classification and actual
+source, resident pre/post and held-member gates without an unrelated all-member
+capture-support audit; explicit capture retains that audit. Initial discovery
+keeps its conservative reservation even when a provider declines optional scope
+scratch. Refused admission advances no cursor and invokes no guarded operation.
+
+Item processing keeps effect-copy descriptors and encoding-planner scratch local
+to one root, allocating each group only when used. Descriptor ranges preserve
+append order across identity, display and nested planning, without retaining
+effects across roots. Canonical identity and fresh-display writers start with
+small storage and grow only inside their existing logical hard caps under the
+[shared pre-allocation rule](shared_sources.md#cost-accounting). Display ladder
+reset retains storage but clears length, byte and surrogate state. Retained-input
+display reprojection keeps fixed storage under its separate existing envelope;
+it does not replay a resident codec or rehydrate discarded display.
+
+Adaptive storage does not cache resident stacks, skip complete canonical encoding
+or digest-collision comparison, or change explicit-patch identity. Its cumulative
+growth cost can change acceptance of pathological inputs near a processing-budget
+threshold; universal acceptance equivalence at every threshold is not promised,
+and the phase budgets are not relaxed to force success.
 
 A native physical round retains one compact, chunked slot journal: each visited
 slot records an authoritative long amount and a definition index or an observed
@@ -762,6 +887,22 @@ item exemplar's stack count. Certification follows the concrete read graph and
 its helpers and delegates; compatible inherited or composed implementations may
 qualify, while an interface or registry namespace alone neither certifies nor
 excludes a provider. A wrapper never widens the underlying member or face scope.
+
+Default resident-access service discovery is lazy and fixed once per defining
+class loader. The first request uses ServiceLoader's thread-context class loader
+and first-provider order, with the Mixin port only when no provider is present;
+later context-loader changes do not hot-reload it. Discovery failures remain
+visible rather than selecting an empty fallback, and failed holder initialization
+is not retried. This process-local port retains no mutable world data, and explicit
+injected ports remain independent.
+
+Optional resident-scope evidence is supplied lazily after the source's eager
+member and owner prechecks. The compatibility path invokes the supplier once and
+dispatches through the existing scope overload, preserving legacy overrides.
+Guarded access rechecks its current gate around delegation and guards the returned
+access. A provider owning complete resident validation may decline the factory,
+but cannot retain it or postpone source authority checks; mod-specific use is
+owned by [Create](../../integrations/create.md#vault-inventory-provider).
 
 Existing unverified mod-provider live support remains available under explicit
 external trust in the provider's getter and lookup internals. Its admitted call
@@ -832,6 +973,17 @@ are distinct states with their own semantics. An inventory with no stable
 cursor that cannot finish enumerating within its admitted hard budget ends as
 incomplete, and preview and HUD present that incompleteness explicitly; a
 small container without a cursor may still complete within budget.
+
+Tracking lifecycle labels and identity qualifiers are independent: All variants
+must not hide updating, incomplete or invalid. Bounded HUD text reserves space
+for those indicators and preserves the entire decimal quantity as one localized
+field; shortening descriptive item names or annotation wording must not cut
+digits from the count. Localized quantity and annotation grammar may place the
+count or item on either side. Initial display and grey failure history follow
+the [bootstrap policy](#selected-preview-bootstrap).
+Provisional quantities do not complete an inventory chat receipt: the existing
+[content receipt policy](../rendering/names_chat.md#content-receipt-lifecycle)
+still requires a complete, usable ready result.
 
 A complete readable native stable-slot sweep with known coverage fully
 traversed is a normal `READY` result under the mixed-time boundary above. Its

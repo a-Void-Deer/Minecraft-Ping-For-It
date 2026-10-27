@@ -144,8 +144,11 @@ period budget, and WARN waits for accounting-cycle closure. Presentation and
 property-preview producer cases are inventoried under
 [presentation snapshot negotiation, policy and adapters](presentation.md#presentation-snapshot-negotiation-policy-and-adapters)
 and [target content preview](presentation.md#target-content-preview).
-The recorded focused run passes the complete inventory monitoring integration
-suite; no live server, notification, heap/TPS or soak result follows from these seams.
+The earlier focused run passed the complete inventory monitoring integration
+suite. The [final combined-tree run](build-checks.md#vault-tracking-performance-combined-tree-run)
+records the later known notification-timing failures; coverage inventory is not
+an all-green claim. No live server, notification, heap/TPS or soak result follows
+from these seams.
 
 ## Known automated gaps
 
