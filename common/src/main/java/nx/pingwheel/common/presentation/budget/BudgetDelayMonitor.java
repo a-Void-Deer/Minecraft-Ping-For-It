@@ -52,6 +52,11 @@ public final class BudgetDelayMonitor implements BudgetDelaySink {
 	private boolean delivered;
 	private long deliveredAt;
 
+	/** Continuous evidenced delay required before a notice can qualify, in server ticks. */
+	public static long notificationThresholdTicks() { return STREAK_TICKS; }
+	/** Global interval after a successful notice handoff, in server ticks. */
+	public static long notificationCooldownTicks() { return COOLDOWN_TICKS; }
+
 	public BudgetDelayMonitor(WarnSink warnings, NoticeSink notices) {
 		this.warnings = Objects.requireNonNull(warnings, "warnings");
 		this.notices = Objects.requireNonNull(notices, "notices");

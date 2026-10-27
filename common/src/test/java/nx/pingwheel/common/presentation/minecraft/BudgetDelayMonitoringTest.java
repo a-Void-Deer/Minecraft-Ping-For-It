@@ -10,6 +10,7 @@ import net.minecraft.network.chat.contents.TranslatableContents;
 import org.junit.jupiter.api.Test;
 import org.jetbrains.annotations.Nullable;
 
+import nx.pingwheel.common.presentation.budget.BudgetDelayMonitor;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
 import org.apache.logging.log4j.Level;
@@ -27,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class BudgetDelayMonitoringTest {
 
 	private static final Module PRESENTATION = Module.PRESENTATION;
+	private static final long THRESHOLD_TICKS = BudgetDelayMonitor.notificationThresholdTicks();
+	private static final long COOLDOWN_TICKS = BudgetDelayMonitor.notificationCooldownTicks();
 
 	@Test void productionDiagnosticsReportEveryAdjacentClosedCycleWithoutAnotherWindow() {
 		try (var capture = new PresentationDiagnosticCapture()) {
@@ -129,11 +132,12 @@ class BudgetDelayMonitoringTest {
 	@Test void dedicatedLevelTwoIsExcludedAndLevelThreeOrFourGetOneVanillaHandoff() {
 		Fixture f = new Fixture();
 		Server server = new Server();
+		long origin = 0, thresholdAt = origin + THRESHOLD_TICKS;
 		Player hostWithNoPermission = new Player(0), level2 = new Player(2), level3 = new Player(3), level4 = new Player(4);
 		server.host = hostWithNoPermission.id;
 		server.players.addAll(List.of(hostWithNoPermission, level2, level3, level4));
-		f.tick(server, 0, 0);
-		f.tick(server, 1, 20);
+		f.tick(server, 0, origin);
+		f.tick(server, 1, thresholdAt);
 		assertEquals(0, hostWithNoPermission.sends, "dedicated has no host exception");
 		assertEquals(0, level2.sends);
 		assertEquals(1, level3.sends);
@@ -146,18 +150,20 @@ class BudgetDelayMonitoringTest {
 	@Test void integratedAuthoritativeHostUuidQualifiesAndDuplicateEligibilitySendsOnce() {
 		Fixture f = new Fixture();
 		Server server = new Server();
+		long origin = 0, deliveredAt = origin + THRESHOLD_TICKS;
+		long cooldownEndsAt = deliveredAt + COOLDOWN_TICKS;
 		server.dedicated = false;
 		UUID hostId = UUID.randomUUID();
 		Player host = new Player(hostId, 0), unrelated = new Player(2), operator = new Player(3);
 		server.host = hostId;
 		server.players.addAll(List.of(host, unrelated, operator));
-		f.tick(server, 0, 0);
-		f.tick(server, 1, 20);
+		f.tick(server, 0, origin);
+		f.tick(server, 1, deliveredAt);
 		assertEquals(1, host.sends);
 		assertEquals(0, unrelated.sends);
 		assertEquals(1, operator.sends);
 		host.permission = 4;
-		f.tick(server, 2, 220);
+		f.tick(server, 2, cooldownEndsAt);
 		assertEquals(2, host.sends, "host plus permission is one OR predicate, not two sends");
 		assertEquals(2, operator.sends);
 		assertEquals(2, server.hostReads);
@@ -166,25 +172,27 @@ class BudgetDelayMonitoringTest {
 	@Test void liveConfigAndRepeatedActivationKeepSameLifetimeAndCooldown() {
 		Fixture f = new Fixture();
 		Server server = new Server();
+		long origin = 0, thresholdAt = origin + THRESHOLD_TICKS;
+		long deliveredAt = thresholdAt + 1, cooldownEndsAt = deliveredAt + COOLDOWN_TICKS;
 		Player operator = new Player(3);
 		server.players.add(operator);
 		server.enabled = false;
 		BudgetDelaySink first = f.coordinator.sink(server);
-		f.tick(server, 0, 0);
-		f.tick(server, 1, 20);
+		f.tick(server, 0, origin);
+		f.tick(server, 1, thresholdAt);
 		assertSame(first, f.coordinator.sink(server));
 		assertEquals(2, f.warnings.size());
 		assertEquals(0, server.recipientReads);
 		server.enabled = true;
-		f.tick(server, 2, 21);
+		f.tick(server, 2, deliveredAt);
 		assertEquals(1, operator.sends);
 		server.enabled = false;
-		f.tick(server, 3, 40);
+		f.tick(server, 3, deliveredAt + 1);
 		server.enabled = true;
-		f.tick(server, 4, 41);
-		f.tick(server, 5, 220);
+		f.tick(server, 4, deliveredAt + 2);
+		f.tick(server, 5, cooldownEndsAt - 1);
 		assertEquals(1, operator.sends);
-		f.tick(server, 6, 221);
+		f.tick(server, 6, cooldownEndsAt);
 		assertEquals(2, operator.sends);
 		assertSame(first, f.coordinator.sink(server));
 		assertEquals(7, server.flagReads, "notification flag is read live at each final flush");
@@ -193,32 +201,35 @@ class BudgetDelayMonitoringTest {
 	@Test void replacementStopAndExplicitResetInvalidateOldSinksWithoutFlushingOldWorld() {
 		Fixture f = new Fixture();
 		Server old = new Server(), replacement = new Server();
+		long oldOrigin = 0, replacementOrigin = 40;
+		long deliveredAt = replacementOrigin + THRESHOLD_TICKS;
+		long restartedAt = deliveredAt + 1, restartedThresholdAt = restartedAt + THRESHOLD_TICKS;
 		Player operator = new Player(3);
 		replacement.players.add(operator);
 		BudgetDelaySink oldSink = f.coordinator.sink(old);
-		oldSink.observe(event(PRESENTATION, 900, 0, "old world", Quantity.unknown(), Reason.MEMORY.bit()));
+		oldSink.observe(event(PRESENTATION, 900, oldOrigin, "old world", Quantity.unknown(), Reason.MEMORY.bit()));
 		BudgetDelaySink newSink = f.coordinator.sink(replacement);
 		assertNotSame(oldSink, newSink);
-		oldSink.endCycle(PRESENTATION, 900, 40);
-		oldSink.observe(event(PRESENTATION, 901, 40, "stale caller", Quantity.unknown(), Reason.MEMORY.bit()));
-		oldSink.endCycle(PRESENTATION, 901, 40);
+		oldSink.endCycle(PRESENTATION, 900, replacementOrigin);
+		oldSink.observe(event(PRESENTATION, 901, replacementOrigin, "stale caller", Quantity.unknown(), Reason.MEMORY.bit()));
+		oldSink.endCycle(PRESENTATION, 901, replacementOrigin);
 		f.coordinator.finishTick(old);
 		assertTrue(f.warnings.isEmpty());
 		assertEquals(0, old.flagReads);
-		f.tick(replacement, 0, 40);
+		f.tick(replacement, 0, replacementOrigin);
 		f.coordinator.stopped(old);
 		assertSame(newSink, f.coordinator.sink(replacement), "late stop for old server cannot reset a replacement");
-		f.tick(replacement, 1, 60);
+		f.tick(replacement, 1, deliveredAt);
 		assertEquals(1, operator.sends);
 		f.coordinator.stopped(replacement);
 		f.coordinator.finishTick(replacement);
 		BudgetDelaySink restarted = f.coordinator.sink(replacement);
 		assertNotSame(newSink, restarted);
-		newSink.observe(event(PRESENTATION, 2, 61, "stopped caller", Quantity.unknown(), Reason.MEMORY.bit()));
-		newSink.endCycle(PRESENTATION, 2, 61);
+		newSink.observe(event(PRESENTATION, 2, restartedAt, "stopped caller", Quantity.unknown(), Reason.MEMORY.bit()));
+		newSink.endCycle(PRESENTATION, 2, restartedAt);
 		assertEquals(2, f.warnings.size());
-		f.tick(replacement, 0, 61);
-		f.tick(replacement, 1, 81);
+		f.tick(replacement, 0, restartedAt);
+		f.tick(replacement, 1, restartedThresholdAt);
 		assertEquals(2, operator.sends, "stopped lifetime cooldown was discarded");
 		f.coordinator.reset();
 		assertNotSame(restarted, f.coordinator.sink(replacement));
@@ -228,19 +239,20 @@ class BudgetDelayMonitoringTest {
 	@Test void noRecipientAndFailedRecipientDoNotConsumeCooldownAndOtherRecipientsContinue() {
 		Fixture f = new Fixture();
 		Server server = new Server();
+		long origin = 0, thresholdAt = origin + THRESHOLD_TICKS;
 		Player ineligible = new Player(2), failed = new Player(3), successful = new Player(4);
 		server.players.add(ineligible);
-		f.tick(server, 0, 0);
-		f.tick(server, 1, 20);
+		f.tick(server, 0, origin);
+		f.tick(server, 1, thresholdAt);
 		failed.failure = new NoClassDefFoundError("send");
 		server.players.add(failed);
-		f.tick(server, 2, 21);
+		f.tick(server, 2, thresholdAt + 1);
 		assertEquals(1, failed.sends);
 		server.players.add(successful);
-		f.tick(server, 3, 22);
+		f.tick(server, 3, thresholdAt + 2);
 		assertEquals(2, failed.sends);
 		assertEquals(1, successful.sends, "one failed player cannot prevent the next eligible handoff");
-		f.tick(server, 4, 23);
+		f.tick(server, 4, thresholdAt + 3);
 		assertEquals(1, successful.sends, "successful recipient consumes the global cooldown");
 		assertEquals(0, ineligible.sends);
 	}
@@ -248,12 +260,14 @@ class BudgetDelayMonitoringTest {
 	@Test void consolidatedModulesHaveNoTargetDataAndRetainExactLocaleKeys() {
 		Fixture f = new Fixture();
 		Server server = new Server();
+		long origin = 0, thresholdAt = origin + THRESHOLD_TICKS;
 		Player operator = new Player(3);
 		server.players.add(operator);
 		BudgetDelaySink sink = f.coordinator.sink(server);
-		for (Module module : Module.values()) sink.state(module, 0, 0, DelayState.DELAYED);
+		server.tick = origin;
+		for (Module module : Module.values()) sink.state(module, 0, origin, DelayState.DELAYED);
 		f.coordinator.finishTick(server);
-		server.tick = 20;
+		server.tick = thresholdAt;
 		for (Module module : Module.values()) sink.state(module, 0, server.tick, DelayState.DELAYED);
 		f.coordinator.finishTick(server);
 		assertEquals(1, operator.sends);
@@ -272,14 +286,15 @@ class BudgetDelayMonitoringTest {
 	@Test void successfulHandoffStillConsumesCooldownIfLaterRecipientIterationFails() {
 		Fixture f = new Fixture();
 		Server server = new Server();
+		long origin = 0, deliveredAt = origin + THRESHOLD_TICKS;
 		Player operator = new Player(3);
 		server.players.add(operator);
 		server.failIterationAfterFirst = true;
-		f.tick(server, 0, 0);
-		assertDoesNotThrow(() -> f.tick(server, 1, 20));
+		f.tick(server, 0, origin);
+		assertDoesNotThrow(() -> f.tick(server, 1, deliveredAt));
 		assertEquals(1, operator.sends);
 		server.failIterationAfterFirst = false;
-		f.tick(server, 2, 21);
+		f.tick(server, 2, deliveredAt + 1);
 		assertEquals(1, operator.sends, "the earlier successful handoff must not be erased by an iteration failure");
 	}
 
@@ -327,32 +342,33 @@ class BudgetDelayMonitoringTest {
 	}
 
 	@Test void diagnosticsPortFailuresCannotBreakTickButFatalErrorsAreNotSwallowed() {
+		long origin = 0, thresholdAt = origin + THRESHOLD_TICKS;
 		for (Throwable failure : List.of(new IllegalStateException("port"), new NoClassDefFoundError("port"))) {
 			Fixture f = new Fixture();
 			Server server = new Server();
 			Player operator = new Player(3);
 			server.players.add(operator);
 			f.warningFailure = failure;
-			assertDoesNotThrow(() -> f.tick(server, 0, 0));
+			assertDoesNotThrow(() -> f.tick(server, 0, origin));
 			f.warningFailure = null;
 			server.flagFailure = failure;
-			assertDoesNotThrow(() -> f.tick(server, 1, 20));
+			assertDoesNotThrow(() -> f.tick(server, 1, thresholdAt));
 			assertEquals(0, operator.sends);
 			server.flagFailure = null;
 			server.recipientFailure = failure;
-			assertDoesNotThrow(() -> f.tick(server, 2, 21));
+			assertDoesNotThrow(() -> f.tick(server, 2, thresholdAt + 1));
 			server.recipientFailure = null;
 			f.clockFailure = failure;
-			assertDoesNotThrow(() -> f.tick(server, 3, 22));
+			assertDoesNotThrow(() -> f.tick(server, 3, thresholdAt + 2));
 			f.clockFailure = null;
-			f.tick(server, 4, 23);
+			f.tick(server, 4, thresholdAt + 3);
 			assertEquals(1, operator.sends, "no failed diagnostics port consumed a delivered cooldown");
 		}
 		OutOfMemoryError fatal = new OutOfMemoryError("test resource failure");
 		Fixture f = new Fixture();
 		Server server = new Server();
 		f.warningFailure = fatal;
-		assertSame(fatal, assertThrows(OutOfMemoryError.class, () -> f.tick(server, 0, 0)));
+		assertSame(fatal, assertThrows(OutOfMemoryError.class, () -> f.tick(server, 0, origin)));
 		f.warningFailure = null;
 		server.flagFailure = fatal;
 		assertSame(fatal, assertThrows(OutOfMemoryError.class, () -> f.coordinator.finishTick(server)));
@@ -360,6 +376,6 @@ class BudgetDelayMonitoringTest {
 		Player operator = new Player(3);
 		operator.failure = fatal;
 		server.players.add(operator);
-		assertSame(fatal, assertThrows(OutOfMemoryError.class, () -> f.tick(server, 1, 20)));
+		assertSame(fatal, assertThrows(OutOfMemoryError.class, () -> f.tick(server, 1, thresholdAt)));
 	}
 }

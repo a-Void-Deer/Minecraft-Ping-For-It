@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.LongStream;
 
 import nx.pingwheel.common.config.ByteMultiplier;
 import nx.pingwheel.common.config.IntLimit;
@@ -30,6 +31,7 @@ import nx.pingwheel.common.presentation.source.SyncPublisher;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import org.junit.jupiter.api.Test;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Production producer seams; typed diagnostics only, with no Minecraft startup. */
@@ -292,34 +294,45 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void backendUsesServerTicksAcrossAccountingPeriodsAndIngressCannotAccelerateNotice() {
+		long origin = 0, thresholdAt = origin + BudgetDelayMonitor.notificationThresholdTicks();
+		long beforeThresholdAt = thresholdAt - 1;
+		int periodTicks = 10;
+		long thresholdPeriod = (thresholdAt - origin) / periodTicks;
+		long closedAt = origin + (thresholdPeriod + 1) * periodTicks;
+		// Only observed periods can close a delayed buffer; skipped periods emit no WARN.
+		@Unmodifiable List<Long> observedPeriods = LongStream.of(origin, origin + 1, beforeThresholdAt, thresholdAt)
+			.map(at -> (at - origin) / periodTicks).distinct().boxed().toList();
 		var notices = new ArrayList<Set<Module>>(); var warnings = new ArrayList<BudgetDelayMonitor.CycleSummary>();
 		var monitor = new BudgetDelayMonitor(warnings::add, modules -> { notices.add(Set.copyOf(modules)); return true; });
-		var sink = new RecordingSink(monitor); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10);
-		// A forty-slot sweep under one physical visit per tick stays resource-delayed
-		// across period rollovers instead of a refilled logical quota resolving it.
+		var sink = new RecordingSink(monitor); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(periodTicks, periodTicks);
+		// The sweep outlasts the four observed ticks under one physical visit per tick;
+		// jumping across periods is not equivalent to scanning on every elapsed tick.
 		settings.setPhysicalSlotsPerTick(IntLimit.finite(1)); var reads = new AtomicInteger();
 		var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 40)), settings, sink);
 		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
-			helloOpen(backend, host, settings); monitor.finishTick(0, true);
-			backend.tick(1, settings); monitor.finishTick(1, true);
+			helloOpen(backend, host, settings); monitor.finishTick(origin, true);
+			backend.tick(origin + 1, settings); monitor.finishTick(origin + 1, true);
 			var refusal = sink.events.stream().filter(event -> event.hasReason(Reason.PHYSICAL_SLOTS)).findFirst().orElseThrow();
-			assertEquals(0, refusal.serverTick()); assertEquals(0, refusal.cycleId());
+			assertEquals(origin, refusal.serverTick()); assertEquals(0, refusal.cycleId());
 			for (int repeat = 0; repeat < 30; repeat++) {
-				backend.handle(InventoryBackendTest.A, null, 1, settings); backend.tick(1, settings); monitor.finishTick(1, true);
+				backend.handle(InventoryBackendTest.A, null, origin + 1, settings); backend.tick(origin + 1, settings); monitor.finishTick(origin + 1, true);
 			}
 			assertTrue(notices.isEmpty());
 			assertEquals(2, reads.get(), "same-tick ingress does not refund the spent physical allowance");
-			backend.tick(19, settings); monitor.finishTick(19, true); assertTrue(notices.isEmpty());
-			monitor.finishTick(20, true); assertTrue(notices.isEmpty(), "late flush cannot age consumed evidence");
-			backend.tick(20, settings); monitor.finishTick(20, true);
+			backend.tick(beforeThresholdAt, settings); monitor.finishTick(beforeThresholdAt, true); assertTrue(notices.isEmpty());
+			monitor.finishTick(thresholdAt, true); assertTrue(notices.isEmpty(), "late flush cannot age consumed evidence");
+			backend.tick(thresholdAt, settings); monitor.finishTick(thresholdAt, true);
 			assertEquals(List.of(Set.of(Module.INVENTORY_PREVIEW)), notices);
-			assertEquals(2, runtime.previewPeriodId(), "twenty elapsed ticks span only two accounting periods");
-			assertEquals(20, sink.states.get(sink.states.size() - 2).serverTick());
+			assertEquals(thresholdPeriod, runtime.previewPeriodId(), "accounting periods follow the explicit cadence, not notice qualification");
+			assertEquals(thresholdAt, sink.states.get(sink.states.size() - 2).serverTick());
 			assertEquals(4, reads.get(), "only the four distinct observed ticks admit physical visits");
-			assertEquals(2, warnings.size(), "WARN follows real cycle closures independently of the notice streak");
-			backend.tick(30, settings); monitor.finishTick(30, true);
-			assertEquals(3, warnings.size()); assertEquals(0, warnings.getFirst().cycleId());
-			assertEquals(19, sink.ends.getFirst().serverTick());
+			assertEquals(observedPeriods.subList(0, observedPeriods.size() - 1), warnings.stream().map(BudgetDelayMonitor.CycleSummary::cycleId).toList(),
+				"WARN follows real cycle closures independently of the notice streak");
+			backend.tick(closedAt, settings); monitor.finishTick(closedAt, true);
+			assertEquals(observedPeriods, warnings.stream().map(BudgetDelayMonitor.CycleSummary::cycleId).toList());
+			assertEquals(beforeThresholdAt, sink.ends.getFirst().serverTick());
+			assertEquals(1, sink.ends.stream().filter(call -> call.module() == Module.INVENTORY_PREVIEW
+				&& call.cycleId() == thresholdPeriod && call.serverTick() == closedAt).count());
 		}
 	}
 	@Test void invalidityRemovesOutstandingPreviewDelayBeforeCycleClose() {
